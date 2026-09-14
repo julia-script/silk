@@ -16,6 +16,10 @@ import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
 import { nativeCorpus, type NativeRun } from './support/corpus.js'
 import { base64AcceptanceSource } from './support/base64Acceptance.js'
+import { httpClientAcceptanceSource } from './support/httpClientAcceptance.js'
+import { httpClientPolicyAcceptanceSource } from './support/httpClientPolicyAcceptance.js'
+import { httpRequestAcceptanceSource } from './support/httpRequestAcceptance.js'
+import { httpNativeAdmissionAcceptanceSource } from './support/httpTransportAcceptance.js'
 import { bufferedByteIoWasmAcceptanceSource } from './support/bufferedByteIoAcceptance.js'
 import { httpHeadAcceptanceSource } from './support/httpHeadAcceptance.js'
 import { httpBodyAcceptanceSource } from './support/httpBodyAcceptance.js'
@@ -162,6 +166,14 @@ const selectedCorpus = shardedCorpus.filter(
   (program) => selectedNativeCases.size === 0 || selectedNativeCases.has(program.name),
 )
 const portableWasmCorpus = [
+  {
+    name: 'http-client-native-admission',
+    source: httpNativeAdmissionAcceptanceSource,
+    expected: 42,
+  },
+  { name: 'http-client', source: httpClientAcceptanceSource, expected: 0 },
+  { name: 'http-client-policy', source: httpClientPolicyAcceptanceSource, expected: 42 },
+  { name: 'http-client-request', source: httpRequestAcceptanceSource, expected: 0 },
   { name: 'http-values', source: httpValuesAcceptanceSource, expected: 0 },
   { name: 'http-head-parsing', source: httpHeadAcceptanceSource, expected: 42 },
   { name: 'http-body-framing', source: httpBodyAcceptanceSource, expected: 42 },

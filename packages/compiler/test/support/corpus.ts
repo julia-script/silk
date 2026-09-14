@@ -54,6 +54,13 @@ import { httpBodyAcceptanceSource } from './httpBodyAcceptance.js'
 import { httpContentAcceptanceSource } from './httpContentAcceptance.js'
 import { httpServerAcceptanceSource } from './httpServerAcceptance.js'
 import { base64AcceptanceSource } from './base64Acceptance.js'
+import { httpClientPolicyAcceptanceSource } from './httpClientPolicyAcceptance.js'
+import { httpRequestAcceptanceSource } from './httpRequestAcceptance.js'
+import { httpClientAcceptanceSource } from './httpClientAcceptance.js'
+import {
+  httpTransportAcceptanceSource,
+  httpNativeAdmissionAcceptanceSource,
+} from './httpTransportAcceptance.js'
 import { networkAddressResolutionCorpusProgram } from './networkAddressResolutionAcceptance.js'
 import { nativeListenerCorpusProgram } from './nativeListenerAcceptance.js'
 import { nativeSocketCorpusProgram } from './nativeSocketAcceptance.js'
@@ -6400,6 +6407,31 @@ export const nativeCorpus: ReadonlyArray<CorpusProgram> = [
   {
     name: 'http-server',
     source: httpServerAcceptanceSource,
+    expected: { _tag: 'Completes', result: 0 },
+  },
+  {
+    name: 'http-client',
+    source: httpClientAcceptanceSource,
+    expected: { _tag: 'Completes', result: 0 },
+  },
+  {
+    name: 'http-client-tls',
+    source: httpTransportAcceptanceSource,
+    expected: { _tag: 'Completes', result: 0 },
+  },
+  {
+    name: 'http-client-native-admission',
+    source: httpNativeAdmissionAcceptanceSource,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'http-client-policy',
+    source: httpClientPolicyAcceptanceSource,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'http-client-request',
+    source: httpRequestAcceptanceSource,
     expected: { _tag: 'Completes', result: 0 },
   },
   {

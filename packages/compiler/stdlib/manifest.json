@@ -270,6 +270,11 @@
     ]
   },
   {
+    "module": "silk/http_basic",
+    "path": "silk/http_basic.silk",
+    "namespace": "HttpBasic"
+  },
+  {
     "module": "silk/http_body",
     "path": "silk/http_body.silk",
     "namespace": "Decoder",
@@ -292,6 +297,16 @@
       "BodyComponent",
       "BodyLimitKind"
     ]
+  },
+  {
+    "module": "silk/http_client",
+    "path": "silk/http_client.silk",
+    "namespace": "Client"
+  },
+  {
+    "module": "silk/http_client_native",
+    "path": "silk/http_client_native.silk",
+    "namespace": "HttpClientNative"
   },
   {
     "module": "silk/http_content",
@@ -346,6 +361,16 @@
     "aliases": ["OwnedHeaders", "HeaderIterator", "MetadataIterator", "MetadataToken", "Limits"]
   },
   {
+    "module": "silk/http_origin",
+    "path": "silk/http_origin.silk",
+    "namespace": "Origin"
+  },
+  {
+    "module": "silk/http_request",
+    "path": "silk/http_request.silk",
+    "namespace": "HttpRequest"
+  },
+  {
     "module": "silk/http_server",
     "path": "silk/http_server.silk",
     "namespace": "Connection",
@@ -372,6 +397,11 @@
     "path": "silk/http_target.silk",
     "namespace": "RequestTarget",
     "aliases": ["HttpAuthority", "TargetForm"]
+  },
+  {
+    "module": "silk/http_transport",
+    "path": "silk/http_transport.silk",
+    "namespace": "HttpTransport"
   },
   {
     "module": "silk/https_identity",

@@ -1,0 +1,371 @@
+//! Rich HTTP byte transport adapters that retain the exact plain or authenticated TLS provider.
+//!
+//! # Details
+//!
+//! `plain` and `secured` borrow one concrete provider exclusively. The outer owner retains physical
+//! resource ownership. `close` terminally closes the logical lease without a flush or TLS shutdown.
+
+import silk.allocator {Allocator, OutOfMemoryError}
+import silk.byte_duplex {ByteDuplex, ByteIoError, ByteIoOperation, ReadTransfer}
+import silk.effect {Effect}
+import silk.monotonic_clock {MonotonicClock}
+import silk.option {Option}
+import silk.random {Random}
+import silk.result {Result}
+import silk.system_clock {Instant}
+import silk.tls_connection {OwnedConnection, ConnectionError}
+import silk.usize
+
+/// A transport failure with its original structured cause.
+pub union TransportError {
+  /// A failure from the plain byte provider.
+  Plain {
+    /// The original byte operation failure.
+    pub error: ByteIoError,
+  },
+  /// A failure from the authenticated TLS connection.
+  Secured {
+    /// The original TLS connection failure.
+    pub error: ConnectionError,
+  },
+}
+
+/// Partial HTTP byte transfers with unchanged absolute deadlines and rich failure causes.
+pub service HttpTransport {
+  /// Performs one provider read before canonical transfer-count validation.
+  unsafe effect fn readSomeRaw(output: &mut [u8], deadline: Option<Instant>) -> ReadTransfer ! TransportError | OutOfMemoryError ? &mut HttpTransport | &mut MonotonicClock | &mut Allocator | &mut Random
+  /// Performs one provider write before canonical transfer-count validation.
+  unsafe effect fn writeSomeRaw(input: &[u8], deadline: Option<Instant>) -> usize ! TransportError | OutOfMemoryError ? &mut HttpTransport | &mut MonotonicClock | &mut Allocator | &mut Random
+  /// Flushes accepted bytes to the provider boundary.
+  effect fn flush(deadline: Option<Instant>) -> () ! TransportError | OutOfMemoryError ? &mut HttpTransport | &mut MonotonicClock | &mut Allocator | &mut Random
+  /// Closes the logical lease without parking; repeated calls complete locally.
+  effect fn close() -> () ! TransportError ? &mut HttpTransport with Intrinsic.nonParking()
+}
+
+impl HttpTransport {
+  /// Reads one validated positive prefix or transport end; empty output completes locally.
+  pub effect fn readSome(output: &mut [u8], deadline: Option<Instant>) -> ReadTransfer
+  ! TransportError | OutOfMemoryError
+  ? &mut HttpTransport | &mut MonotonicClock | &mut Allocator | &mut Random {
+    if output.length == usize.ZERO {
+      return ReadTransfer.Data {count: usize.ZERO}
+    }
+    let limit = output.length
+    let transfer = run unsafe HttpTransport.readSomeRaw(move output, move deadline)
+    return match move transfer {
+      ReadTransfer.End => ReadTransfer.End
+      ReadTransfer.Data {count} => {
+        if count == usize.ZERO || count > limit {
+          run invalidTransfer(ByteIoOperation.Read, count, limit)
+        }
+        return ReadTransfer.Data {count: count}
+      }
+    }
+  }
+  /// Writes one validated positive prefix; empty input completes locally.
+  pub effect fn writeSome(input: &[u8], deadline: Option<Instant>) -> usize
+  ! TransportError | OutOfMemoryError
+  ? &mut HttpTransport | &mut MonotonicClock | &mut Allocator | &mut Random {
+    if input.length == usize.ZERO {
+      return usize.ZERO
+    }
+    let limit = input.length
+    let count = run unsafe HttpTransport.writeSomeRaw(move input, move deadline)
+    if count == usize.ZERO || count > limit {
+      run invalidTransfer(ByteIoOperation.Write, count, limit)
+    }
+    return count
+  }
+}
+
+effect fn invalidTransfer(operation: ByteIoOperation, count: usize, limit: usize) -> ()
+! TransportError
+? &mut HttpTransport {
+  let closed = run Effect.result(HttpTransport.close())
+  drop closed
+  fail TransportError.Plain {error: ByteDuplex.invalidTransferCount(move operation, count, limit)}
+}
+
+/// An exclusive borrowed plain byte provider with terminal close state.
+pub struct Plain<'provider, P> {
+  provider: &'provider mut P
+  terminal: bool
+}
+
+/// An exclusive borrowed authenticated TLS connection with terminal close state.
+pub struct Secured<'provider, P> {
+  provider: &'provider mut OwnedConnection<P>
+  terminal: bool
+}
+
+/// Borrows one exact plain provider without allocation or I/O.
+pub fn plain<'provider, P>(provider: &'provider mut P) -> Plain<'provider, P> {
+  return Plain<'provider, P> {provider: move provider, terminal: false}
+}
+
+/// Borrows one exact authenticated connection without allocation or I/O.
+pub fn secured<'provider, P>(provider: &'provider mut OwnedConnection<P>) -> Secured<'provider, P> {
+  return Secured<'provider, P> {provider: move provider, terminal: false}
+}
+
+impl<'provider, P> Plain<'provider, P> {
+  effect fn read(self: &mut Self, output: &mut [u8], deadline: Option<Instant>) -> ReadTransfer
+  ! TransportError | OutOfMemoryError
+  ? &mut MonotonicClock | &mut Allocator | &mut Random
+  where
+    &mut P provides &ByteDuplex from &mut ByteDuplex,
+    &mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock,
+    &mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock | &mut Allocator | &mut Random {
+    if self.terminal {
+      fail TransportError.Plain {error: ByteDuplex.closed(ByteIoOperation.Read)}
+    }
+    let attempted = run Effect.result(
+      ByteDuplex.readSome(move output, move deadline)
+        |> Effect.provideMut<ByteDuplex>(&mut self.provider.*),
+    )
+    return match move attempted {
+      Result<ReadTransfer, ByteIoError>.Success {value} => move value
+      Result<ReadTransfer, ByteIoError>.Failure {error} => {
+        fail TransportError.Plain {error: move error}
+      }
+    }
+  }
+  effect fn write(self: &mut Self, input: &[u8], deadline: Option<Instant>) -> usize
+  ! TransportError | OutOfMemoryError
+  ? &mut MonotonicClock | &mut Allocator | &mut Random
+  where
+    &mut P provides &ByteDuplex from &mut ByteDuplex,
+    &mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock,
+    &mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock | &mut Allocator | &mut Random {
+    if self.terminal {
+      fail TransportError.Plain {error: ByteDuplex.closed(ByteIoOperation.Write)}
+    }
+    let attempted = run Effect.result(
+      ByteDuplex.writeSome(move input, move deadline)
+        |> Effect.provideMut<ByteDuplex>(&mut self.provider.*),
+    )
+    return match move attempted {
+      Result<usize, ByteIoError>.Success {value} => move value
+      Result<usize, ByteIoError>.Failure {error} => {
+        fail TransportError.Plain {error: move error}
+      }
+    }
+  }
+  effect fn flushOutput(self: &mut Self, deadline: Option<Instant>) -> ()
+  ! TransportError | OutOfMemoryError
+  ? &mut MonotonicClock | &mut Allocator | &mut Random
+  where
+    &mut P provides &ByteDuplex from &mut ByteDuplex,
+    &mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock,
+    &mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock | &mut Allocator | &mut Random {
+    if self.terminal {
+      fail TransportError.Plain {error: ByteDuplex.closed(ByteIoOperation.Flush)}
+    }
+    let attempted = run Effect.result(
+      ByteDuplex.flush(move deadline)
+        |> Effect.provideMut<ByteDuplex>(&mut self.provider.*),
+    )
+    return match move attempted {
+      Result<(), ByteIoError>.Success {value} => move value
+      Result<(), ByteIoError>.Failure {error} => {
+        fail TransportError.Plain {error: move error}
+      }
+    }
+  }
+  effect fn closeLease(self: &mut Self) -> ()
+  ! TransportError
+  where &mut P provides &ByteDuplex from &mut ByteDuplex {
+    if self.terminal {
+      return ()
+    }
+    self.terminal = true
+    let attempted = run Effect.result(
+      ByteDuplex.close()
+        |> Effect.provideMut<ByteDuplex>(&mut self.provider.*),
+    )
+    return match move attempted {
+      Result<(), ByteIoError>.Success {value} => move value
+      Result<(), ByteIoError>.Failure {error} => {
+        fail TransportError.Plain {error: move error}
+      }
+    }
+  }
+}
+
+impl<'provider, P> HttpTransport for Plain<'provider, P> {
+  readSomeRaw: Plain.read
+  writeSomeRaw: Plain.write
+  flush: Plain.flushOutput
+  close: Plain.closeLease
+}
+
+impl<'provider, P> Secured<'provider, P> {
+  effect fn read(self: &mut Self, output: &mut [u8], deadline: Option<Instant>) -> ReadTransfer
+  ! TransportError | OutOfMemoryError
+  ? &mut MonotonicClock | &mut Allocator | &mut Random
+  where
+    &mut P provides &ByteDuplex from &mut ByteDuplex,
+    &mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock,
+    &mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock | &mut Allocator | &mut Random {
+    if self.terminal {
+      fail TransportError.Secured {
+        error: ConnectionError.Io {error: ByteDuplex.closed(ByteIoOperation.Read)},
+      }
+    }
+    let attempted = run Effect.result(
+      OwnedConnection.readSome(&mut self.provider.*, move output, move deadline),
+    )
+    return match move attempted {
+      Result<ReadTransfer, ConnectionError | OutOfMemoryError>.Success {value} => move value
+      Result<ReadTransfer, ConnectionError | OutOfMemoryError>.Failure {error} => match move error {
+        ConnectionError cause => {
+          fail TransportError.Secured {error: move cause}
+        }
+        OutOfMemoryError allocation => {
+          fail move allocation
+        }
+      }
+    }
+  }
+  effect fn write(self: &mut Self, input: &[u8], deadline: Option<Instant>) -> usize
+  ! TransportError | OutOfMemoryError
+  ? &mut MonotonicClock | &mut Allocator | &mut Random
+  where
+    &mut P provides &ByteDuplex from &mut ByteDuplex,
+    &mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock,
+    &mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock | &mut Allocator | &mut Random {
+    if self.terminal {
+      fail TransportError.Secured {
+        error: ConnectionError.Io {error: ByteDuplex.closed(ByteIoOperation.Write)},
+      }
+    }
+    let attempted = run Effect.result(
+      OwnedConnection.writeSome(&mut self.provider.*, move input, move deadline),
+    )
+    return match move attempted {
+      Result<usize, ConnectionError | OutOfMemoryError>.Success {value} => move value
+      Result<usize, ConnectionError | OutOfMemoryError>.Failure {error} => match move error {
+        ConnectionError cause => {
+          fail TransportError.Secured {error: move cause}
+        }
+        OutOfMemoryError allocation => {
+          fail move allocation
+        }
+      }
+    }
+  }
+  effect fn flushOutput(self: &mut Self, deadline: Option<Instant>) -> ()
+  ! TransportError | OutOfMemoryError
+  ? &mut MonotonicClock | &mut Allocator | &mut Random
+  where
+    &mut P provides &ByteDuplex from &mut ByteDuplex,
+    &mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock,
+    &mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock | &mut Allocator | &mut Random {
+    if self.terminal {
+      fail TransportError.Secured {
+        error: ConnectionError.Io {error: ByteDuplex.closed(ByteIoOperation.Flush)},
+      }
+    }
+    let attempted = run Effect.result(OwnedConnection.flush(&mut self.provider.*, move deadline))
+    return match move attempted {
+      Result<(), ConnectionError | OutOfMemoryError>.Success {value} => move value
+      Result<(), ConnectionError | OutOfMemoryError>.Failure {error} => match move error {
+        ConnectionError cause => {
+          fail TransportError.Secured {error: move cause}
+        }
+        OutOfMemoryError allocation => {
+          fail move allocation
+        }
+      }
+    }
+  }
+  effect fn closeLease(self: &mut Self) -> ()
+  ! TransportError
+  where &mut P provides &ByteDuplex from &mut ByteDuplex {
+    if self.terminal {
+      return ()
+    }
+    self.terminal = true
+    let attempted = run Effect.result(OwnedConnection.close(&mut self.provider.*))
+    return match move attempted {
+      Result<(), ConnectionError>.Success {value} => move value
+      Result<(), ConnectionError>.Failure {error} => {
+        fail TransportError.Secured {error: move error}
+      }
+    }
+  }
+}
+
+impl<'provider, P> HttpTransport for Secured<'provider, P> {
+  readSomeRaw: Secured.read
+  writeSomeRaw: Secured.write
+  flush: Secured.flushOutput
+  close: Secured.closeLease
+}
+
+/// An exclusive logical loan of one exact HTTP transport provider.
+pub struct Loan<'provider, P> {
+  provider: &'provider mut P
+  terminal: bool
+}
+
+/// Borrows one HTTP provider for a scoped owned client session without allocation.
+pub fn borrow<'provider, P>(provider: &'provider mut P) -> Loan<'provider, P> {
+  return Loan<'provider, P> {provider: move provider, terminal: false}
+}
+
+impl<'provider, P> Loan<'provider, P> {
+  effect fn read(self: &mut Self, output: &mut [u8], deadline: Option<Instant>) -> ReadTransfer
+  ! TransportError | OutOfMemoryError
+  ? &mut Allocator | &mut MonotonicClock | &mut Random
+  where
+    &mut P provides &HttpTransport from &mut HttpTransport,
+    &mut P provides &HttpTransport from &mut HttpTransport | &mut MonotonicClock | &mut Allocator | &mut Random {
+    if self.terminal {
+      fail TransportError.Plain {error: ByteDuplex.closed(ByteIoOperation.Read)}
+    }
+    return run HttpTransport.readSome(move output, move deadline)
+      |> Effect.provideMut<HttpTransport>(&mut self.provider.*)
+  }
+  effect fn write(self: &mut Self, input: &[u8], deadline: Option<Instant>) -> usize
+  ! TransportError | OutOfMemoryError
+  ? &mut Allocator | &mut MonotonicClock | &mut Random
+  where
+    &mut P provides &HttpTransport from &mut HttpTransport,
+    &mut P provides &HttpTransport from &mut HttpTransport | &mut MonotonicClock | &mut Allocator | &mut Random {
+    if self.terminal {
+      fail TransportError.Plain {error: ByteDuplex.closed(ByteIoOperation.Write)}
+    }
+    return run HttpTransport.writeSome(move input, move deadline)
+      |> Effect.provideMut<HttpTransport>(&mut self.provider.*)
+  }
+  effect fn flushOutput(self: &mut Self, deadline: Option<Instant>) -> ()
+  ! TransportError | OutOfMemoryError
+  ? &mut Allocator | &mut MonotonicClock | &mut Random
+  where
+    &mut P provides &HttpTransport from &mut HttpTransport,
+    &mut P provides &HttpTransport from &mut HttpTransport | &mut MonotonicClock | &mut Allocator | &mut Random {
+    if self.terminal {
+      fail TransportError.Plain {error: ByteDuplex.closed(ByteIoOperation.Flush)}
+    }
+    return run HttpTransport.flush(move deadline)
+      |> Effect.provideMut<HttpTransport>(&mut self.provider.*)
+  }
+  effect fn closeLease(self: &mut Self) -> ()
+  ! TransportError
+  where &mut P provides &HttpTransport from &mut HttpTransport {
+    if self.terminal {
+      return ()
+    }
+    self.terminal = true
+    return run HttpTransport.close()
+      |> Effect.provideMut<HttpTransport>(&mut self.provider.*)
+  }
+}
+
+impl<'provider, P> HttpTransport for Loan<'provider, P> {
+  readSomeRaw: Loan.read
+  writeSomeRaw: Loan.write
+  flush: Loan.flushOutput
+  close: Loan.closeLease
+}

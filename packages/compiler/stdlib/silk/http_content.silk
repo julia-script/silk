@@ -15,7 +15,7 @@
 //! This low-level actor treats the body supplied to each `withReader` invocation as the encoded
 //! representation described by the plan. It does not prove that those bytes came from the retained
 //! head and cannot prevent a copied head from being planned over already-decoded bytes. The affine
-//! response/body envelope tracked by JUL-23 owns that stronger provenance and decode-once contract.
+//! response/body envelope in `silk.http_client` owns that stronger provenance and decode-once contract.
 //! Cleanup is guaranteed for structured Effect exits, including interruption, but not for fatal
 //! traps that bypass Effect finalizers and Drop.
 
@@ -1044,8 +1044,7 @@ struct BufferedBodyStep {
   written: usize
 }
 
-struct Core<'head> {
-  head: ResponseHead<'head>
+struct Core {
   framing: Framing
   anomaly: Anomaly
   applied: AppliedPlan
@@ -1068,10 +1067,119 @@ struct Core<'head> {
   marker: u8
 }
 
+/// Owned framing and content state for a caller-owned wire transport.
+///
+/// # Details
+/// Planning consumes borrowed metadata, but the resulting decoder owns all runtime state. The
+/// caller retains input bytes not consumed by `step`, including the next HTTP message suffix.
+/// A higher-level response owner must bind the plan and those wire bytes to the same response.
+pub struct Decoder {
+  core: Core
+}
+
+/// One incremental wire-to-representation transition.
+pub struct DecodeProgress {
+  /// The exact wire prefix consumed from the supplied input.
+  pub consumed: usize
+  /// Provisional output and cumulative representation coordinates.
+  pub progress: ContentProgress
+  /// Whether another wire prefix is needed before the decoder can advance.
+  pub needsInput: bool
+}
+
+/// A content failure with its committed input prefix and owned runtime cause.
+pub struct DecodeFailure {
+  /// The exact wire prefix consumed before the failure.
+  pub consumed: usize
+  /// The original content, framing, or codec failure and output coordinates.
+  pub error: ContentError<'static>
+}
+
+impl Decoder {
+  /// Acquires the existing bounded framing and codec stack from one validated plan.
+  pub effect fn make<'head, 'method, 'names>(plan: CodingPlan<'head, 'method, 'names>) -> Decoder
+  ! ContentError<'head> | OutOfMemoryError
+  ? &mut Allocator {
+    let core = run acquireCore(move plan)
+    return Decoder {core: move core}
+  }
+  /// Advances without I/O, retaining exact consumed and written prefixes on failure.
+  ///
+  /// # Details
+  /// `endOfInput` promises no bytes follow the supplied input. Returned representation bytes
+  /// remain provisional until `completion` confirms framing, checksums and pending output.
+  /// Empty output completes locally without consuming input or changing a live decoder.
+  pub fn step(self: &mut Self, input: &[u8], output: &mut [u8], endOfInput: bool) -> Result<
+    DecodeProgress,
+    DecodeFailure,
+  > {
+    if self.core.phase == ReaderPhase.Failed || self.core.phase == ReaderPhase.Abandoned {
+      return Result.failResult<DecodeProgress, DecodeFailure>(DecodeFailure {
+        consumed: usize.ZERO, error: stateError(&self.core),
+      })
+    }
+    if output.length == usize.ZERO {
+      return Result.succeed<DecodeProgress, DecodeFailure>(DecodeProgress {
+        consumed: usize.ZERO, progress: contentProgress(&self.core, usize.ZERO), needsInput: false,
+      })
+    }
+    if endOfInput {
+      self.core.transportEnded = true
+    }
+    let advanced: Result<CoreProgress, CoreFailure<'static>> = advanceCore(
+      &mut self.core,
+      input,
+      move output,
+    )
+    return match move advanced {
+      Result<CoreProgress, CoreFailure<'static>>.Success {value} => Result.succeed<
+        DecodeProgress,
+        DecodeFailure,
+      >(
+        DecodeProgress {
+          consumed: value.consumed,
+          progress: contentProgress(&self.core, value.written),
+          needsInput: value.written == usize.ZERO && !value.terminal && !value.internalProgress,
+        },
+      )
+      Result<CoreProgress, CoreFailure<'static>>.Failure {error} => {
+        self.core.phase = ReaderPhase.Failed
+        return Result.failResult<DecodeProgress, DecodeFailure>(
+          DecodeFailure {consumed: error.consumed, error: move error.error},
+        )
+      }
+    }
+  }
+  /// Reports the current cumulative representation coordinates without advancing input.
+  pub fn progress(self: &Self) -> ContentProgress {
+    return contentProgress(&self.core, usize.ZERO)
+  }
+  /// Borrows successful framing and content completion from this owner.
+  pub fn completion<'owner>(self: &'owner Self) -> Result<
+    Option<ContentCompletion<'owner>>,
+    ContentError<'static>,
+  > {
+    return coreCompletion(&self.core)
+  }
+  /// Borrows trailers only after successful content and body completion.
+  pub fn trailers<'owner>(self: &'owner Self) -> Result<
+    Option<Trailers<'owner>>,
+    ContentError<'static>,
+  > {
+    return coreTrailers(&self.core)
+  }
+  /// Permanently abandons unfinished decoding without reading or draining the transport.
+  pub fn abandon(self: &mut Self) -> () {
+    abandonCore(&mut self.core)
+    return ()
+  }
+}
+
 /// One callback-scoped exclusive content reader.
 pub struct ContentReader<'reader, 'transport, 'head, P> {
   transport: &'reader mut BufferedDuplex<'transport, P>
-  core: Core<'head>
+  core: Core
+  head: ResponseHead<'head>
 }
 
 impl<'reader, 'transport, 'head, P> ContentReader<'reader, 'transport, 'head, P> {
@@ -1090,7 +1198,7 @@ impl<'reader, 'transport, 'head, P> ContentReader<'reader, 'transport, 'head, P>
     }
     return Result.succeed<RepresentationView<'owner, 'head>, ContentError<'head>>(
       RepresentationView<'owner, 'head> {
-        headValue: self.core.head,
+        headValue: self.head,
         appliedValue: self.core.applied,
         anomalyValue: self.core.anomaly,
         decodedAppliedValue: self.core.applied.decoderCount > usize.ZERO,
@@ -1104,47 +1212,14 @@ impl<'reader, 'transport, 'head, P> ContentReader<'reader, 'transport, 'head, P>
   pub fn completion<'owner>(
     self: &'owner Self,
   ) -> Result<Option<ContentCompletion<'owner>>, ContentError<'head>> {
-    if self.core.phase == ReaderPhase.Failed || self.core.phase == ReaderPhase.Abandoned {
-      return Result.failResult<Option<ContentCompletion<'owner>>, ContentError<'head>>(
-        stateError(&self.core),
-      )
-    }
-    if self.core.phase != ReaderPhase.Complete {
-      return Result.succeed<Option<ContentCompletion<'owner>>, ContentError<'head>>(
-        Option.none<ContentCompletion<'owner>>(),
-      )
-    }
-    let body = self.core.body.completion()
-    let kind = match move body {
-      Option.None => {
-        return Result.succeed<Option<ContentCompletion<'owner>>, ContentError<'head>>(
-          Option.none<ContentCompletion<'owner>>(),
-        )
-      }
-      Option.Some {value} => value.kind()
-    }
-    return Result.succeed<Option<ContentCompletion<'owner>>, ContentError<'head>>(
-      Option.some<ContentCompletion<'owner>>(ContentCompletion<'owner> {
-        kindValue: kind,
-        decodedValue: self.core.totalDecoded,
-        anomalyValue: self.core.anomaly,
-        reuseValue: completedReuse(self.core.framing, self.core.anomaly),
-        marker: &self.core.marker,
-      }),
-    )
+    return coreCompletion(&self.core)
   }
 
   /// Borrows trailers only through successful content and body completion.
   pub fn trailers<'owner>(
     self: &'owner Self,
   ) -> Result<Option<Trailers<'owner>>, ContentError<'head>> {
-    if self.core.phase == ReaderPhase.Failed || self.core.phase == ReaderPhase.Abandoned {
-      return Result.failResult<Option<Trailers<'owner>>, ContentError<'head>>(stateError(&self.core))
-    }
-    if self.core.phase != ReaderPhase.Complete {
-      return Result.succeed<Option<Trailers<'owner>>, ContentError<'head>>(Option.none<Trailers<'owner>>())
-    }
-    return Result.succeed<Option<Trailers<'owner>>, ContentError<'head>>(self.core.body.trailers())
+    return coreTrailers(&self.core)
   }
 
   /// Streams one provisional prefix with one unchanged absolute deadline.
@@ -1230,6 +1305,57 @@ impl<'reader, 'transport, 'head, P> ContentReader<'reader, 'transport, 'head, P>
 
 }
 
+fn coreCompletion<'owner, 'head>(core: &'owner Core) -> Result<
+  Option<ContentCompletion<'owner>>,
+  ContentError<'head>,
+> {
+  if core.phase == ReaderPhase.Failed || core.phase == ReaderPhase.Abandoned {
+    return Result.failResult<Option<ContentCompletion<'owner>>, ContentError<'head>>(
+      stateError(&core.*),
+    )
+  }
+  if core.phase != ReaderPhase.Complete {
+    return Result.succeed<Option<ContentCompletion<'owner>>, ContentError<'head>>(
+      Option.none<ContentCompletion<'owner>>(),
+    )
+  }
+  let body = core.body.completion()
+  let kind = match move body {
+    Option.None => {
+      return Result.succeed<Option<ContentCompletion<'owner>>, ContentError<'head>>(
+        Option.none<ContentCompletion<'owner>>(),
+      )
+    }
+    Option.Some {value} => value.kind()
+  }
+  return Result.succeed<Option<ContentCompletion<'owner>>, ContentError<'head>>(
+    Option.some<ContentCompletion<'owner>>(
+      ContentCompletion<'owner> {
+        kindValue: kind,
+        decodedValue: core.totalDecoded,
+        anomalyValue: core.anomaly,
+        reuseValue: completedReuse(core.framing, core.anomaly),
+        marker: &core.marker,
+      },
+    ),
+  )
+}
+
+fn coreTrailers<'owner, 'head>(core: &'owner Core) -> Result<
+  Option<Trailers<'owner>>,
+  ContentError<'head>,
+> {
+  if core.phase == ReaderPhase.Failed || core.phase == ReaderPhase.Abandoned {
+    return Result.failResult<Option<Trailers<'owner>>, ContentError<'head>>(stateError(&core.*))
+  }
+  if core.phase != ReaderPhase.Complete {
+    return Result.succeed<Option<Trailers<'owner>>, ContentError<'head>>(
+      Option.none<Trailers<'owner>>(),
+    )
+  }
+  return Result.succeed<Option<Trailers<'owner>>, ContentError<'head>>(core.body.trailers())
+}
+
 struct CoreProgress {
   consumed: usize
   written: usize
@@ -1243,7 +1369,7 @@ struct CoreFailure<'head> {
 }
 
 fn advanceCore<'head>(
-  core: &mut Core<'head>,
+  core: &mut Core,
   input: &[u8],
   output: &mut [u8],
 ) -> Result<CoreProgress, CoreFailure<'head>> {
@@ -1582,7 +1708,7 @@ fn zstdStatus(value: ZstdStatus) -> StageStatus {
 }
 
 fn commitFinal<'head>(
-  core: &mut Core<'head>,
+  core: &mut Core,
   stageIndex: usize,
   transition: StageTransition,
 ) -> Result<CoreProgress, CoreFailure<'head>> {
@@ -1623,7 +1749,7 @@ fn commitFinal<'head>(
 }
 
 fn commitIntermediate<'head>(
-  core: &mut Core<'head>,
+  core: &mut Core,
   stageIndex: usize,
   transition: StageTransition,
 ) -> Result<CoreProgress, CoreFailure<'head>> {
@@ -1661,7 +1787,7 @@ fn commitIntermediate<'head>(
 }
 
 fn advanceBodyDirect<'head>(
-  core: &mut Core<'head>,
+  core: &mut Core,
   input: &[u8],
   output: &mut [u8],
 ) -> Result<CoreProgress, CoreFailure<'head>> {
@@ -1684,7 +1810,7 @@ fn advanceBodyDirect<'head>(
 }
 
 fn commitBodyDirect<'head>(
-  core: &mut Core<'head>,
+  core: &mut Core,
   attempted: Result<BodyProgress, BodyError>,
   offered: usize,
   exhausted: ContentLimitKind,
@@ -1764,7 +1890,7 @@ fn bufferBodyResult(
 }
 
 fn advanceBodyStaged<'head>(
-  core: &mut Core<'head>,
+  core: &mut Core,
   input: &[u8],
 ) -> Result<CoreProgress, CoreFailure<'head>> {
   let remaining = remainingEncoded(&core.*)
@@ -1841,20 +1967,20 @@ fn cappedLength(remaining: u64, available: usize) -> usize {
   return available
 }
 
-fn remainingEncoded<'head>(core: &Core<'head>) -> u64 {
+fn remainingEncoded(core: &Core) -> u64 {
   return core.limits.maxEncoded - core.totalEncoded
 }
 
-fn remainingIntermediate<'head>(core: &Core<'head>) -> u64 {
+fn remainingIntermediate(core: &Core) -> u64 {
   return core.limits.maxIntermediate - core.totalIntermediate
 }
 
-fn remainingDecoded<'head>(core: &Core<'head>) -> u64 {
+fn remainingDecoded(core: &Core) -> u64 {
   return core.limits.maxDecoded - core.totalDecoded
 }
 
 fn contentLimitReason<'head>(
-  core: &Core<'head>,
+  core: &Core,
   kind: ContentLimitKind,
 ) -> ContentReason<'head> {
   let allowed = contentLimitAllowed(&core.*, kind)
@@ -1865,7 +1991,7 @@ fn contentLimitReason<'head>(
   return ContentReason<'head>.InvalidLimit {limit: kind, allowed: allowed, attempted: attempted}
 }
 
-fn contentLimitAllowed<'head>(core: &Core<'head>, kind: ContentLimitKind) -> u64 {
+fn contentLimitAllowed(core: &Core, kind: ContentLimitKind) -> u64 {
   return match move kind {
     ContentLimitKind.EncodedBytes => core.limits.maxEncoded
     ContentLimitKind.IntermediateBytes => core.limits.maxIntermediate
@@ -1911,7 +2037,7 @@ fn stageFailureReason<'head>(
   }
 }
 
-fn consumeStageInput<'head>(core: &mut Core<'head>, stage: usize, count: usize) -> () {
+fn consumeStageInput(core: &mut Core, stage: usize, count: usize) -> () {
   if stage == usize.ZERO { consumeEdge(&mut core.edge0, count) return () }
   if stage == usize.ONE { consumeEdge(&mut core.edge1, count) return () }
   if stage == 2 { consumeEdge(&mut core.edge2, count) return () }
@@ -1926,7 +2052,7 @@ fn consumeEdge(edge: &mut Edge, count: usize) -> () {
   return ()
 }
 
-fn setStageOutput<'head>(core: &mut Core<'head>, stage: usize, count: usize) -> () {
+fn setStageOutput(core: &mut Core, stage: usize, count: usize) -> () {
   if stage == usize.ZERO {
     core.edge1.start = usize.ZERO
     core.edge1.length = count
@@ -1942,7 +2068,7 @@ fn setStageOutput<'head>(core: &mut Core<'head>, stage: usize, count: usize) -> 
   return ()
 }
 
-fn finishStage<'head>(core: &mut Core<'head>, stage: usize) -> () {
+fn finishStage(core: &mut Core, stage: usize) -> () {
   if stage == usize.ZERO { markStageFinished(&mut core.stage0) return () }
   if stage == usize.ONE { markStageFinished(&mut core.stage1) return () }
   if stage == 2 { markStageFinished(&mut core.stage2) return () }
@@ -1950,7 +2076,7 @@ fn finishStage<'head>(core: &mut Core<'head>, stage: usize) -> () {
   return ()
 }
 
-fn stageWireIndex<'head>(core: &Core<'head>, stage: usize) -> usize {
+fn stageWireIndex(core: &Core, stage: usize) -> usize {
   if stage == usize.ZERO { return stagePosition(&core.stage0).wireIndex }
   if stage == usize.ONE { return stagePosition(&core.stage1).wireIndex }
   if stage == 2 { return stagePosition(&core.stage2).wireIndex }
@@ -1996,14 +2122,14 @@ fn stagePosition(stage: &Stage) -> CodingPosition {
   }
 }
 
-fn stageInputLength<'head>(core: &Core<'head>, stage: usize) -> usize {
+fn stageInputLength(core: &Core, stage: usize) -> usize {
   if stage == usize.ZERO { return core.edge0.length }
   if stage == usize.ONE { return core.edge1.length }
   if stage == 2 { return core.edge2.length }
   return core.edge3.length
 }
 
-fn stageInputFinal<'head>(core: &Core<'head>, stage: usize) -> bool {
+fn stageInputFinal(core: &Core, stage: usize) -> bool {
   if stage == usize.ZERO { return core.edge0.finalInput }
   if stage == usize.ONE { return core.edge1.finalInput }
   if stage == 2 { return core.edge2.finalInput }
@@ -2037,8 +2163,9 @@ pub effect fn withReader<
 ! E | ContentError<'head> | OutOfMemoryError
 ? CallbackRequirements | &mut Allocator
 where &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock {
+  let head = plan.headValue
   let core = run acquireCore(move plan)
-  let reader = ContentReader<'reader, 'transport, 'head, P> {transport: move body, core: move core}
+  let reader = ContentReader<'reader, 'transport, 'head, P> {transport: move body, core: move core, head: head}
   let use = effect fn(owned: &mut ContentReader<'reader, 'transport, 'head, P>) -> A
   ! E
   ? CallbackRequirements {
@@ -2053,10 +2180,9 @@ where &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut Monoton
 
 effect fn acquireCore<'head, 'method, 'names>(
   plan: CodingPlan<'head, 'method, 'names>,
-) -> Core<'head>
+) -> Core
 ! ContentError<'head> | OutOfMemoryError
 ? &mut Allocator {
-  let head = plan.headValue
   let framing = plan.framingValue
   let anomaly = plan.anomalyValue
   let applied = plan.applied()
@@ -2104,8 +2230,7 @@ effect fn acquireCore<'head, 'method, 'names>(
   let mut phase = ReaderPhase.Live
   if complete { phase = ReaderPhase.Complete }
   let limits = move plan.limits
-  return Core<'head> {
-      head: head,
+  return Core {
       framing: framing,
       anomaly: anomaly,
       applied: applied,
@@ -2129,7 +2254,7 @@ effect fn acquireCore<'head, 'method, 'names>(
   }
 }
 
-fn abandonCore<'head>(core: &mut Core<'head>) -> () {
+fn abandonCore(core: &mut Core) -> () {
   if core.phase == ReaderPhase.Live {
     core.body.abandon()
     core.phase = ReaderPhase.Abandoned
@@ -2246,7 +2371,7 @@ fn completedReuse(framing: Framing, anomaly: Anomaly) -> ReuseDisposition {
   return ReuseDisposition.Reusable
 }
 
-fn contentProgress<'head>(core: &Core<'head>, written: usize) -> ContentProgress {
+fn contentProgress(core: &Core, written: usize) -> ContentProgress {
   let mut state = ContentProgressState.Data
   if core.phase == ReaderPhase.Complete { state = ContentProgressState.End }
   return ContentProgress {
@@ -2258,7 +2383,7 @@ fn contentProgress<'head>(core: &Core<'head>, written: usize) -> ContentProgress
   }
 }
 
-fn stateError<'head>(core: &Core<'head>) -> ContentError<'head> {
+fn stateError<'head>(core: &Core) -> ContentError<'head> {
   return contentFailure(move core, usize.ZERO, ContentReason<'head>.InvalidState)
 }
 
@@ -2273,7 +2398,7 @@ fn contentError<'head>(reason: ContentReason<'head>) -> ContentError<'head> {
 }
 
 fn contentFailure<'head>(
-  core: &Core<'head>,
+  core: &Core,
   written: usize,
   reason: ContentReason<'head>,
 ) -> ContentError<'head> {

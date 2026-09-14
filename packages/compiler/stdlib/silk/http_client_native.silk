@@ -1,0 +1,983 @@
+//! Native connection acquisition for one HTTP origin and one serial client scope.
+//!
+//! # Details
+//!
+//! HTTPS authenticates the original origin with explicit trust. Absolute deadlines are unchanged
+//! through resolution, connection, and TLS authentication. Synchronous hostname resolution rejects
+//! an overall deadline before dispatch. Cleanup closes without a flush or TLS shutdown.
+
+import silk.allocator {Allocator, OutOfMemoryError}
+import silk.byte_duplex {ByteDuplex, ByteIoOperation, ReadTransfer}
+import silk.effect {Effect}
+import silk.http_client {Connection, ConnectionHandler, ClientError, Limits, withOwned}
+import silk.http_origin {Origin}
+import silk.http_transport as Transport {HttpTransport, TransportError}
+import silk.https_identity {HttpsIdentity, OriginHost, ReferenceIdentity, IdentityError}
+import silk.monotonic_clock {MonotonicClock}
+import silk.network_address {Host, DomainHost, Ipv4Address, Ipv6Address}
+import silk.option {Option}
+import silk.random {Random}
+import silk.resolver {Resolver, ResolveRequest, ResolvedEndpoints, ResolverError, FamilySelection}
+import silk.result {Result}
+import silk.system_clock {Instant, SystemClock}
+import silk.tls_client {AlpnProtocol, AlpnConfig, ClientConfig, ClientLimits, TlsError}
+import silk.tls_connection as Tls {OwnedConnection, ConnectionError, ConnectionOptions}
+import silk.trust_source {TrustSource}
+import silk.trust_snapshot {TrustLoadLimits, TrustSourceError, TrustSnapshot}
+import silk.slice {Slice}
+import silk.u64
+import silk.usize
+import silk.http {Version}
+
+/// The immutable transport route retained independently of the HTTP origin.
+pub struct NativeRoute {
+  bytes: [u8; 108]
+  length: usize
+  unix: bool
+}
+
+impl Copy for NativeRoute {}
+
+impl NativeRoute {
+  /// Returns whether this route uses an explicit Unix socket path.
+  pub fn isUnix(self: &Self) -> bool {
+    return self.unix
+  }
+  /// Borrows the exact owned Unix path, or an empty slice for direct TCP.
+  pub fn path<'a>(self: &'a Self) -> &'a [u8] {
+    return Slice.view<u8>(&self.bytes, usize.ZERO, self.length)
+  }
+}
+
+fn directRoute() -> NativeRoute {
+  return NativeRoute {
+    bytes: [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+    ],
+    length: usize.ZERO,
+    unix: false,
+  }
+}
+
+/// A native HTTP acquisition capability or option admission failure.
+pub union NativeClientError {
+  /// The selected target has no native HTTP acquisition implementation.
+  UnsupportedTarget,
+  /// The native polling interval or attempt count is outside its finite accepted range.
+  InvalidConnectOptions,
+  /// Synchronous hostname resolution cannot honor the supplied overall deadline.
+  UnsupportedDeadline,
+  /// Required HTTP/1.1 application protocol negotiation did not succeed.
+  AlpnMismatch {
+    /// The complete TLS connection failure.
+    pub error: ConnectionError,
+  },
+}
+
+/// The HTTP version policy for TLS application protocol negotiation.
+pub enum AlpnPolicy {
+  /// Offers only `http/1.1` and permits an absent selection.
+  OptionalHttp11,
+  /// Requires the peer to select `http/1.1`.
+  RequiredHttp11,
+  /// Sends no ALPN extension for an HTTP/1.0-only peer.
+  Http10,
+}
+
+/// Finite native acquisition and TLS authentication limits.
+pub struct Options {
+  /// Maximum number of resolved numeric addresses.
+  pub maximumAddresses: usize
+  /// Address family admitted by resolution.
+  pub family: FamilySelection
+  /// Whether the socket disables Nagle's algorithm.
+  pub noDelay: bool
+  /// Native readiness polling interval in nanoseconds.
+  pub pollIntervalNanoseconds: u64
+  /// Maximum native connection attempts.
+  pub maximumAttempts: usize
+  /// Absolute overall deadline on the active monotonic timeline.
+  pub deadline: Option<Instant>
+  /// Maximum TLS authentication duration in nanoseconds.
+  pub handshakeNanoseconds: u64
+  /// TLS protocol storage limits.
+  pub tls: ClientLimits
+  /// Explicit trust source load bounds.
+  pub trust: TrustLoadLimits
+  /// HTTP-only application protocol negotiation policy.
+  pub alpn: AlpnPolicy
+}
+
+impl Options {
+  /// Returns finite defaults with no overall deadline and optional HTTP/1.1 negotiation.
+  pub fn defaults() -> Options {
+    return Options {
+      maximumAddresses: 16,
+      family: FamilySelection.Any,
+      noDelay: false,
+      pollIntervalNanoseconds: u64.toU64(1000000),
+      maximumAttempts: 64,
+      deadline: Option.none<Instant>(),
+      handshakeNanoseconds: u64.toU64(30000000000),
+      tls: ClientLimits.defaults(),
+      trust: TrustLoadLimits.defaults(),
+      alpn: AlpnPolicy.OptionalHttp11,
+    }
+  }
+}
+
+static if (Intrinsic.targetOperatingSystem() == "darwin" && Intrinsic.targetArchitecture() == "aarch64" && Intrinsic.targetAbi() == "apple" && Intrinsic.profileText(
+  "libc",
+) == "system") || (Intrinsic.targetOperatingSystem() == "linux" && Intrinsic.targetAbi() == "gnu" && Intrinsic.profileText(
+  "libc",
+) == "gnu" && (Intrinsic.targetArchitecture() == "aarch64" || Intrinsic.targetArchitecture() == "x86_64")) {
+  import silk.native_resolver {NativeSystemResolver}
+  import silk.native_socket as Sockets {
+    Connection as NativeConnection,
+    ConnectOptions,
+    NativeSocketError,
+  }
+  union State {
+    Plain {connection: NativeConnection},
+    Secured {connection: OwnedConnection<NativeConnection>},
+  }
+  /// One affine native HTTP transport that owns its exact socket or TLS connection.
+  pub struct NativeTransport {
+    state: State
+    terminal: bool
+    routeValue: NativeRoute
+  }
+  /// Resolves and acquires one origin, then lends its serial HTTP connection to one handler.
+  ///
+  /// # Details
+  ///
+  /// HTTPS loads trust after socket acquisition under a nonparking release bracket. Host fields
+  /// never replace the origin identity. `Http10` disables ALPN; other policies offer only HTTP/1.1.
+  pub effect fn withConnection<A, E, ?R, H: ConnectionHandler<NativeTransport, A, E ? R>>(
+    origin: Origin,
+    options: Options,
+    limits: Limits,
+    handler: H,
+  ) -> A
+  ! E | ClientError | NativeClientError | ResolverError | NativeSocketError | ConnectionError | IdentityError | TrustSourceError | OutOfMemoryError
+  ? R | &mut Allocator | &mut MonotonicClock | &mut SystemClock | &mut Random | &mut TrustSource
+  where R in Without<R, HttpTransport> {
+    let transport = run acquire(origin, &options)
+    let version = match options.alpn {
+      AlpnPolicy.Http10 => Version.Http10
+      AlpnPolicy.OptionalHttp11 => Version.Http11
+      AlpnPolicy.RequiredHttp11 => Version.Http11
+    }
+    return run withOwned<NativeTransport, A, E, R, H>(
+      move transport,
+      origin,
+      version,
+      limits,
+      copyDeadline(&options.deadline),
+      move handler,
+    )
+  }
+  /// Connects an explicit Unix socket while retaining a separate HTTP and TLS authority.
+  ///
+  /// # Details
+  ///
+  /// The socket path selects only the transport. HTTPS authenticates `origin` with explicit trust.
+  pub effect fn withUnixConnection<A, E, ?R, H: ConnectionHandler<NativeTransport, A, E ? R>>(
+    path: &[u8],
+    origin: Origin,
+    options: Options,
+    limits: Limits,
+    handler: H,
+  ) -> A
+  ! E | ClientError | NativeClientError | NativeSocketError | ConnectionError | IdentityError | TrustSourceError | OutOfMemoryError
+  ? R | &mut Allocator | &mut MonotonicClock | &mut SystemClock | &mut Random | &mut TrustSource
+  where R in Without<R, HttpTransport> {
+    let connect = run connectOptions(&options)
+    let route = run unixRoute(path)
+    let socket = run Sockets.connectUnixOwned(path, connect, copyDeadline(&options.deadline))
+    let transport = run finishAcquisition(move socket, &origin, &options, route)
+    let version = match options.alpn {
+      AlpnPolicy.Http10 => Version.Http10
+      AlpnPolicy.OptionalHttp11 => Version.Http11
+      AlpnPolicy.RequiredHttp11 => Version.Http11
+    }
+    return run withOwned<NativeTransport, A, E, R, H>(
+      move transport,
+      origin,
+      version,
+      limits,
+      copyDeadline(&options.deadline),
+      move handler,
+    )
+  }
+  effect fn acquire(origin: Origin, options: &Options) -> NativeTransport
+  ! NativeClientError | ResolverError | NativeSocketError | ConnectionError | IdentityError | TrustSourceError | OutOfMemoryError
+  ? &mut Allocator | &mut MonotonicClock | &mut SystemClock | &mut Random | &mut TrustSource {
+    let admitted = preflight(&origin, options)
+    if let Result.Failure {error} = move admitted {
+      fail move error
+    }
+    let connect = run connectOptions(options)
+    let request: ResolveRequest = match move ResolveRequest.make(
+      Origin.host(&origin),
+      Origin.port(&origin),
+      options.family,
+      options.maximumAddresses,
+      copyDeadline(&options.deadline),
+    ) {
+      Result<ResolveRequest, ResolverError>.Success {value} => move value
+      Result<ResolveRequest, ResolverError>.Failure {error} => {
+        fail move error
+      }
+    }
+    let mut resolver = NativeSystemResolver.make()
+    let endpoints = run Resolver.resolve(&request)
+      |> Effect.provideMut<Resolver>(&mut resolver)
+    let socket = run Sockets.connectResolvedOwned(
+      ResolvedEndpoints.asSlice(&endpoints),
+      connect,
+      copyDeadline(&options.deadline),
+    )
+    return run finishAcquisition(move socket, &origin, options, directRoute())
+  }
+  effect fn unixRoute(path: &[u8]) -> NativeRoute ! NativeSocketError {
+    let mut limit: usize = 107
+    static if Intrinsic.targetOperatingSystem() == "darwin" {
+      limit = 103
+    }
+    if path.length > limit {
+      fail NativeSocketError.PathTooLong {length: path.length, limit: limit}
+    }
+    let mut route = directRoute()
+    route.unix = true
+    route.length = path.length
+    let mut index = usize.ZERO
+    while index < path.length {
+      route.bytes[index] = path[index]
+      index = index + usize.ONE
+    }
+    return route
+  }
+  effect fn connectOptions(options: &Options) -> ConnectOptions ! NativeClientError {
+    return match move ConnectOptions.make(
+      options.noDelay,
+      options.pollIntervalNanoseconds,
+      options.maximumAttempts,
+    ) {
+      Result.Success {value} => value
+      Result.Failure {error} => {
+        drop error
+        fail NativeClientError.InvalidConnectOptions
+      }
+    }
+  }
+  effect fn finishAcquisition(
+    socket: NativeConnection,
+    origin: &Origin,
+    options: &Options,
+    route: NativeRoute,
+  ) -> NativeTransport
+  ! NativeClientError | ConnectionError | IdentityError | TrustSourceError | OutOfMemoryError
+  ? &mut Allocator | &mut MonotonicClock | &mut SystemClock | &mut Random | &mut TrustSource {
+    if Origin.secure(origin) {
+      return run secure(move socket, origin, options, route)
+    }
+    return NativeTransport {
+      state: State.Plain {connection: move socket},
+      terminal: false,
+      routeValue: route,
+    }
+  }
+  struct AuthenticationLease {
+    socket: Option<NativeConnection>
+  }
+  effect fn secure(socket: NativeConnection, origin: &Origin, options: &Options, route: NativeRoute) -> NativeTransport
+  ! NativeClientError | ConnectionError | IdentityError | TrustSourceError | OutOfMemoryError
+  ? &mut Allocator | &mut MonotonicClock | &mut SystemClock | &mut Random | &mut TrustSource {
+    let lease = AuthenticationLease {socket: Option.some<NativeConnection>(move socket)}
+    let use = effect fn(owned: &mut AuthenticationLease) -> NativeTransport
+    ! NativeClientError | ConnectionError | IdentityError | TrustSourceError | OutOfMemoryError
+    ? &mut Allocator | &mut MonotonicClock | &mut SystemClock | &mut Random | &mut TrustSource {
+      let trust = run TrustSource.load(options.trust)
+      let host = Origin.host(origin)
+      let mut name: [u8; 253] = [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+      ]
+      let nameLength = copyDomain(&host, &mut name)
+      let nameBytes = Slice.view<u8>(&name, usize.ZERO, nameLength)
+      let protocols = [AlpnProtocol {bytes: b"http/1.1"}]
+      return run authenticatePrepared(
+        &mut owned.*,
+        &host,
+        nameBytes,
+        &protocols,
+        move trust,
+        options,
+        route,
+      )
+    }
+    let release = effect fn(owned: &mut AuthenticationLease) -> () {
+      match &mut owned.socket {
+        Option.Some {value} => {
+          let closed = run Effect.result(NativeConnection.close(&mut value))
+          drop closed
+        }
+        Option.None => {}
+      }
+      return ()
+    }
+    return run Effect.useReleaseNonParking(move lease, move use, move release)
+  }
+  effect fn authenticatePrepared<'a>(
+    owned: &mut AuthenticationLease,
+    host: &Host,
+    nameBytes: &'a [u8],
+    protocols: &'a [AlpnProtocol<'a>],
+    trust: TrustSnapshot,
+    options: &Options,
+    route: NativeRoute,
+  ) -> NativeTransport
+  ! NativeClientError | ConnectionError | IdentityError | OutOfMemoryError
+  ? &mut Allocator | &mut MonotonicClock | &mut SystemClock | &mut Random {
+    let reference: ReferenceIdentity<'a> = match move referenceFor(host, nameBytes) {
+      Result<ReferenceIdentity<'a>, IdentityError>.Success {value} => value
+      Result<ReferenceIdentity<'a>, IdentityError>.Failure {error} => {
+        fail move error
+      }
+    }
+    let alpn = selectAlpn(protocols, options.alpn)
+    let config = ClientConfig<'a> {reference: reference, alpn: alpn, limits: options.tls}
+    let stored = Intrinsic.replace(owned.socket, Option.none<NativeConnection>())
+    let provider = match move stored {
+      Option.Some {value} => move value
+      Option.None => unavailable<NativeConnection>()
+    }
+    let attempted = run Effect.result(
+      Tls.authenticateOwned<NativeConnection>(
+        move provider,
+        &config,
+        move trust,
+        ConnectionOptions {
+          handshakeTimeoutNanoseconds: options.handshakeNanoseconds,
+          externalDeadline: copyDeadline(&options.deadline),
+        },
+      ),
+    )
+    let connection = match move attempted {
+      Result<OwnedConnection<NativeConnection>, ConnectionError | OutOfMemoryError>.Success {value} => move value
+      Result<OwnedConnection<NativeConnection>, ConnectionError | OutOfMemoryError>.Failure {error} => match move error {
+        ConnectionError cause => {
+          if alpnMismatch(&cause) {
+            fail NativeClientError.AlpnMismatch {error: move cause}
+          }
+          fail move cause
+        }
+        OutOfMemoryError allocation => {
+          fail move allocation
+        }
+      }
+    }
+    return NativeTransport {
+      state: State.Secured {connection: move connection},
+      terminal: false,
+      routeValue: route,
+    }
+  }
+  fn alpnMismatch(error: &ConnectionError) -> bool {
+    return match & error.* {
+      ConnectionError.Tls {error: tlsError} => match & tlsError {
+        TlsError.NoApplicationProtocol => true
+        _ => false
+      }
+      _ => false
+    }
+  }
+  fn selectAlpn<'a>(protocols: &'a [AlpnProtocol<'a>], policy: AlpnPolicy) -> AlpnConfig<'a> {
+    return match policy {
+      AlpnPolicy.Http10 => AlpnConfig<'a>.Disabled
+      AlpnPolicy.OptionalHttp11 => AlpnConfig<'a>.Offered {protocols: protocols, required: false}
+      AlpnPolicy.RequiredHttp11 => AlpnConfig<'a>.Offered {protocols: protocols, required: true}
+    }
+  }
+  fn copyDomain(host: &Host, output: &mut [u8]) -> usize {
+    match & host.* {
+      Host.Domain {value} => {
+        let bytes = DomainHost.bytes(&value)
+        let mut index = usize.ZERO
+        while index < bytes.length {
+          output[index] = bytes[index]
+          index = index + usize.ONE
+        }
+        return bytes.length
+      }
+      Host.Ipv4 {value} => {
+        return usize.ZERO
+      }
+      Host.Ipv6 {value} => {
+        return usize.ZERO
+      }
+    }
+    return usize.ZERO
+  }
+  fn referenceFor<'host>(host: &Host, name: &'host [u8]) -> Result<
+    ReferenceIdentity<'host>,
+    IdentityError,
+  > {
+    let selected = match & host.* {
+      Host.Domain {value} => OriginHost<'host>.Dns {bytes: name}
+      Host.Ipv4 {value} => OriginHost<'host>.Ipv4 {bytes: Ipv4Address.octets(&value)}
+      Host.Ipv6 {value} => OriginHost<'host>.Ipv6 {bytes: Ipv6Address.octets(&value)}
+    }
+    return HttpsIdentity.reference(move selected)
+  }
+  fn copyDeadline(deadline: &Option<Instant>) -> Option<Instant> {
+    return match & deadline.* {
+      Option.None => Option.none<Instant>()
+      Option.Some {value} => Option.some<Instant>(
+        SystemClock.make(SystemClock.seconds(&value), SystemClock.nanoseconds(&value)),
+      )
+    }
+  }
+  fn unavailable<A>() -> A {
+    let invalid = 1 / 0
+    return unavailable<A>()
+  }
+  impl NativeTransport {
+    /// Returns owned immutable route metadata while leaving the transport exclusively inside its session.
+    pub fn route(self: &Self) -> NativeRoute {
+      return self.routeValue
+    }
+    effect fn read(self: &mut Self, output: &mut [u8], deadline: Option<Instant>) -> ReadTransfer
+    ! TransportError | OutOfMemoryError
+    ? &mut Allocator | &mut MonotonicClock | &mut Random {
+      if self.terminal {
+        fail TransportError.Plain {error: ByteDuplex.closed(ByteIoOperation.Read)}
+      }
+      return match &mut self.state {
+        State.Plain {connection} => {
+          let mut adapter = Transport.plain<NativeConnection>(&mut connection)
+          return run HttpTransport.readSome(move output, move deadline)
+            |> Effect.provideMut<HttpTransport>(&mut adapter)
+        }
+        State.Secured {connection} => {
+          let mut adapter = Transport.secured<NativeConnection>(&mut connection)
+          return run HttpTransport.readSome(move output, move deadline)
+            |> Effect.provideMut<HttpTransport>(&mut adapter)
+        }
+      }
+    }
+    effect fn write(self: &mut Self, input: &[u8], deadline: Option<Instant>) -> usize
+    ! TransportError | OutOfMemoryError
+    ? &mut Allocator | &mut MonotonicClock | &mut Random {
+      if self.terminal {
+        fail TransportError.Plain {error: ByteDuplex.closed(ByteIoOperation.Write)}
+      }
+      return match &mut self.state {
+        State.Plain {connection} => {
+          let mut adapter = Transport.plain<NativeConnection>(&mut connection)
+          return run HttpTransport.writeSome(move input, move deadline)
+            |> Effect.provideMut<HttpTransport>(&mut adapter)
+        }
+        State.Secured {connection} => {
+          let mut adapter = Transport.secured<NativeConnection>(&mut connection)
+          return run HttpTransport.writeSome(move input, move deadline)
+            |> Effect.provideMut<HttpTransport>(&mut adapter)
+        }
+      }
+    }
+    effect fn flushOutput(self: &mut Self, deadline: Option<Instant>) -> ()
+    ! TransportError | OutOfMemoryError
+    ? &mut Allocator | &mut MonotonicClock | &mut Random {
+      if self.terminal {
+        fail TransportError.Plain {error: ByteDuplex.closed(ByteIoOperation.Flush)}
+      }
+      return match &mut self.state {
+        State.Plain {connection} => {
+          let mut adapter = Transport.plain<NativeConnection>(&mut connection)
+          return run HttpTransport.flush(move deadline)
+            |> Effect.provideMut<HttpTransport>(&mut adapter)
+        }
+        State.Secured {connection} => {
+          let mut adapter = Transport.secured<NativeConnection>(&mut connection)
+          return run HttpTransport.flush(move deadline)
+            |> Effect.provideMut<HttpTransport>(&mut adapter)
+        }
+      }
+    }
+    effect fn closeLease(self: &mut Self) -> () ! TransportError {
+      if self.terminal {
+        return ()
+      }
+      self.terminal = true
+      return match &mut self.state {
+        State.Plain {connection} => {
+          let mut adapter = Transport.plain<NativeConnection>(&mut connection)
+          return run HttpTransport.close()
+            |> Effect.provideMut<HttpTransport>(&mut adapter)
+        }
+        State.Secured {connection} => {
+          let mut adapter = Transport.secured<NativeConnection>(&mut connection)
+          return run HttpTransport.close()
+            |> Effect.provideMut<HttpTransport>(&mut adapter)
+        }
+      }
+    }
+  }
+  impl HttpTransport for NativeTransport {
+    readSomeRaw: NativeTransport.read
+    writeSomeRaw: NativeTransport.write
+    flush: NativeTransport.flushOutput
+    close: NativeTransport.closeLease
+  }
+  /// Checks native TCP support and rejects a hostname deadline before resolver dispatch.
+  pub fn preflight(origin: &Origin, options: &Options) -> Result<(), NativeClientError> {
+    let host = Origin.host(origin)
+    match host {
+      Host.Domain {value} => {
+        if let Option.Some {value: deadline} = &options.deadline {
+          return Result.failResult<(), NativeClientError>(NativeClientError.UnsupportedDeadline)
+        }
+      }
+      Host.Ipv4 {value} => {}
+      Host.Ipv6 {value} => {}
+    }
+    return Result.succeed<(), NativeClientError>(())
+  }
+} else {
+  /// The unavailable native transport type for an unsupported target.
+  pub struct NativeTransport {}
+  impl NativeTransport {
+    /// Returns empty route metadata; this target cannot acquire a native connection.
+    pub fn route(self: &Self) -> NativeRoute {
+      return directRoute()
+    }
+  }
+  impl HttpTransport for NativeTransport {
+    /// Rejects reads because this target has no native connection.
+    effect fn readSomeRaw(self: &mut Self, output: &mut [u8], deadline: Option<Instant>) -> ReadTransfer
+    ! TransportError | OutOfMemoryError
+    ? &mut Allocator | &mut MonotonicClock | &mut Random {
+      drop output
+      drop deadline
+      fail TransportError.Plain {error: ByteDuplex.closed(ByteIoOperation.Read)}
+    }
+    /// Rejects writes because this target has no native connection.
+    effect fn writeSomeRaw(self: &mut Self, input: &[u8], deadline: Option<Instant>) -> usize
+    ! TransportError | OutOfMemoryError
+    ? &mut Allocator | &mut MonotonicClock | &mut Random {
+      drop input
+      drop deadline
+      fail TransportError.Plain {error: ByteDuplex.closed(ByteIoOperation.Write)}
+    }
+    /// Rejects flushing because this target has no native connection.
+    effect fn flush(self: &mut Self, deadline: Option<Instant>) -> ()
+    ! TransportError | OutOfMemoryError
+    ? &mut Allocator | &mut MonotonicClock | &mut Random {
+      drop deadline
+      fail TransportError.Plain {error: ByteDuplex.closed(ByteIoOperation.Flush)}
+    }
+    /// Completes locally because no native resource exists.
+    effect fn close(self: &mut Self) -> () ! TransportError {
+      return ()
+    }
+  }
+  /// Returns the typed unsupported-target result before allocation or provider dispatch.
+  pub fn preflight(origin: &Origin, options: &Options) -> Result<(), NativeClientError> {
+    drop origin
+    drop options
+    return Result.failResult<(), NativeClientError>(NativeClientError.UnsupportedTarget)
+  }
+  /// Rejects native HTTP acquisition before allocation or provider dispatch on this target.
+  pub effect fn withConnection<A, E, ?R, H: ConnectionHandler<NativeTransport, A, E ? R>>(
+    origin: Origin,
+    options: Options,
+    limits: Limits,
+    handler: H,
+  ) -> A ! E | NativeClientError ? R {
+    drop origin
+    drop options
+    drop limits
+    drop handler
+    fail NativeClientError.UnsupportedTarget
+  }
+  /// Rejects Unix HTTP acquisition before allocation or provider dispatch on this target.
+  pub effect fn withUnixConnection<A, E, ?R, H: ConnectionHandler<NativeTransport, A, E ? R>>(
+    path: &[u8],
+    origin: Origin,
+    options: Options,
+    limits: Limits,
+    handler: H,
+  ) -> A ! E | NativeClientError ? R {
+    drop path
+    drop origin
+    drop options
+    drop limits
+    drop handler
+    fail NativeClientError.UnsupportedTarget
+  }
+}
+
+/// Returns immutable native route metadata from an owned HTTP session without lending its transport mutably.
+pub fn route(connection: &Connection<NativeTransport>) -> NativeRoute {
+  let context = connection.transportContext()
+  return NativeTransport.route(&context.transport.*)
+}

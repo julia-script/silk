@@ -520,6 +520,10 @@ const applicationSecret = (id: string): Buffer => keyLogSecret(id, 'SERVER_TRAFF
 const clientApplicationSecret = (id: string): Buffer => keyLogSecret(id, 'CLIENT_TRAFFIC_SECRET_0')
 const postHandshakeRecord = (id: string, suite: Suite, body: Uint8Array, sequence = 1): Buffer =>
   protectRecord(body, 22, applicationSecret(id), suite, sequence)
+/** Encrypts an application record for the committed RSA peer's test-only traffic secret. */
+export const tlsClientRsaApplicationRecord = (plaintext: Uint8Array, sequence = 0): Uint8Array =>
+  protectRecord(plaintext, 23, applicationSecret('rsa-x25519'), 'chacha', sequence)
+
 export const tlsClientRsaApplicationWrite = protectRecord(
   Buffer.from('ping'),
   23,
@@ -2141,7 +2145,7 @@ fn policyFlight(id: i32) -> i32 {
 }
 
 fn policyFailure(id: i32) -> i32 {
-  if id == 4 { return 62 }
+  if id == 4 || id == 22 { return 62 }
   if id == 5 || id == 6 { return 53 }
   if id == 7 { return 51 }
   if id == 8 { return 54 }
@@ -2151,7 +2155,7 @@ fn policyFailure(id: i32) -> i32 {
   if id == 16 { return 44 }
   if id == 17 || id == 18 { return 56 }
   if id == 19 || id == 20 { return 45 }
-  if id == 22 || id == 23 || id == 24 { return 56 }
+  if id == 23 || id == 24 { return 56 }
   if id == 29 { return 52 }
   return 0
 }

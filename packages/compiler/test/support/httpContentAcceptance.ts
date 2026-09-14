@@ -30,6 +30,7 @@ import silk.http_content {
   ContentReason,
   ContentProgressState,
   ContentReader,
+  Decoder as ContentDecoder,
   EmptyEncodingPolicy,
   EnabledCodings,
   Limits,
@@ -2301,7 +2302,51 @@ effect fn portableProgram() -> i32 ! BufferError | OutOfMemoryError {
 
 effect fn failed<E>(error: E) -> i32 { drop error return 99 }
 
+effect fn ownedIncrementalCore() -> i32 ! OutOfMemoryError ? &mut Allocator {
+  let parsed = match move run parseResponse(b"HTTP/1.1 200 OK\\r\\nContent-Length: 1\\r\\n\\r\\n", headLimits()) {
+    Result.Failure {error} => { drop error return 401 }
+    Result.Success {value} => move value
+  }
+  let head = match move ResponseParser.head(&parsed.parser) {
+    Result.Failure {error} => { drop error return 402 }
+    Result.Success {value} => value
+  }
+  let context = match move ResponseContext.make(head, Method.get(), TrailerPolicy.defaultPolicy()) {
+    Result.Failure {error} => { drop error return 403 }
+    Result.Success {value} => move value
+  }
+  let plan = match move CodingPlan.make(move context, Mode.Raw, bodyLimits(), contentLimits()) {
+    Result.Failure {error} => { drop error return 404 }
+    Result.Success {value} => move value
+  }
+  let mut decoder = match move run Effect.result(ContentDecoder.make(move plan)) {
+    Result.Failure {error} => { drop error return 405 }
+    Result.Success {value} => move value
+  }
+  let mut empty: [u8; 0] = []
+  let untouched = match move ContentDecoder.step(&mut decoder, b"aNEXT", &mut empty, true) {
+    Result.Failure {error} => { drop error return 406 }
+    Result.Success {value} => move value
+  }
+  if untouched.consumed != usize.ZERO || untouched.progress.written != usize.ZERO || untouched.needsInput { return 407 }
+  let mut output: [u8; 1] = [0]
+  let read = match move ContentDecoder.step(&mut decoder, b"aNEXT", &mut output, true) {
+    Result.Failure {error} => { drop error return 408 }
+    Result.Success {value} => move value
+  }
+  if read.consumed != usize.ONE || read.progress.written != usize.ONE || output[0] != 97 { return 409 }
+  let completed = match move ContentDecoder.completion(&decoder) {
+    Result.Failure {error} => { drop error return 410 }
+    Result.Success {value} => move value
+  }
+  return match move completed { Option.None => 411 Option.Some {value} => 0 }
+}
+
 pub fn main() -> i32 {
+  let mut coreAllocator = Allocator.systemAllocatorProvider()
+  let core = run Effect.catchAll(ownedIncrementalCore(), failed)
+    |> Effect.provideMut<Allocator>(&mut coreAllocator)
+  if core != 0 { return core }
   static if Intrinsic.targetArchitecture() == "wasm32" {
     return run Effect.catchAll(portableProgram(), failed)
   }
