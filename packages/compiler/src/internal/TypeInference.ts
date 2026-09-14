@@ -105,8 +105,14 @@ interface InferenceContext {
   readonly invariant?: boolean
   readonly contravariant?: boolean
   readonly allowOpenGenericArguments: boolean
+  /** Generic identities this open inference boundary may bind; absence means every pattern binder. */
+  readonly inferableGenericArguments?: ReadonlySet<string>
   readonly conflicts?: Array<GenericArgumentConflict>
 }
+
+const mayBindGenericArgument = (parameter_: Parameter, context: InferenceContext): boolean =>
+  context.inferableGenericArguments === undefined ||
+  context.inferableGenericArguments.has(key(parameter_))
 
 const commitTrial = <A>(
   context: InferenceContext,
@@ -125,6 +131,8 @@ const bindGenericArgument = (
   context: InferenceContext,
 ): boolean => {
   const identity = key(parameter_)
+  if (!mayBindGenericArgument(parameter_, context))
+    return genericArgumentKey(parameterArgument(parameter_)) === genericArgumentKey(actual)
   const existing = inferred.get(identity)
   if (existing === undefined) {
     inferred.set(identity, actual)
@@ -279,10 +287,11 @@ const inferRequirementRowArgument = (
   if (substitutedPattern.row.expression._tag === 'Union') {
     const rowParameters = substitutedPattern.row.expression.operands.filter(
       (operand): operand is Extract<typeof operand, { readonly _tag: 'RowParameter' }> =>
-        operand._tag === 'RowParameter',
+        operand._tag === 'RowParameter' && mayBindGenericArgument(operand.parameter, context),
     )
     const fixed = substitutedPattern.row.expression.operands.filter(
-      (operand) => operand._tag !== 'RowParameter',
+      (operand) =>
+        operand._tag !== 'RowParameter' || !mayBindGenericArgument(operand.parameter, context),
     )
     const actualOperands =
       actual.row.expression._tag === 'Union'
@@ -1072,13 +1081,14 @@ export const inferOpenGenericArguments = (
   pattern: Type,
   actual: Type,
   inferred: Map<string, GenericArgument>,
+  inferableGenericArguments?: ReadonlySet<string>,
 ): OpenGenericInference => {
   const conflicts: Array<GenericArgumentConflict> = []
   const matches = inferType(
     pattern,
     actual,
     inferred,
-    Object.freeze({ allowOpenGenericArguments: true, conflicts }),
+    Object.freeze({ allowOpenGenericArguments: true, inferableGenericArguments, conflicts }),
   )
   return Object.freeze({ matches, conflicts: Object.freeze(conflicts) })
 }
