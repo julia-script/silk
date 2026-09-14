@@ -1388,7 +1388,7 @@ fn inputFor(scenario: i32) -> &'static [u8] {
     return b"HTTP/1.1 103 Early Hints\\r\\n\\r\\nHTTP/1.1 417 Rejected\\r\\nContent-Length: 0\\r\\n\\r\\n"
   }
   if scenario == 3 {
-    return b"HTTP/1.1 200 OK\\r\\nTransfer-Encoding: chunked\\r\\nTrailer: X-Done\\r\\n\\r\\n4\\r\\nWiki\\r\\n0\\r\\nX-Done: yes\\r\\n\\r\\n"
+    return b"HTTP/1.1 200 OK\\r\\nTransfer-Encoding: chunked\\r\\nTrailer: Content-Digest\\r\\n\\r\\n4\\r\\nWiki\\r\\n0\\r\\nContent-Digest: yes\\r\\n\\r\\n"
   }
   if scenario == 4 {
     return b"HTTP/1.1 200 Connected\\r\\nContent-Length: ignored\\r\\nTransfer-Encoding: ignored\\r\\n\\r\\nTUNN"
