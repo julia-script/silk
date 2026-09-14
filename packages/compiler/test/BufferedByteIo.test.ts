@@ -291,12 +291,15 @@ import silk.bytes { Bytes }`,
         )
       const sourceId = 'buffered-byte-io/reference-and-public-surface'
       const selected = AnalysisFixture.configuration(sourceId)
+      const composition = selected.composition
+      assert.isDefined(composition)
+      if (composition === undefined) return
       const snapshot = yield* Analysis.makeRealized({
         root: SourceFile.make(sourceId, encoder.encode(source)),
         configuration: {
           ...selected,
           composition: {
-            ...selected.composition,
+            ...composition,
             retention: [{ module: 'silk/buffered_output', declaration: 'checkedAggregateLength' }],
           },
         },
