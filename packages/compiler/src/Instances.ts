@@ -1463,11 +1463,12 @@ export const discover = (
   const recordedContexts = new Map<string, Map<string, WorkItem>>()
   // Histories are exact correlated sets. Only the non-history execution context determines
   // a queue bucket; a new canonical history root revisits that bucket's outgoing guards.
+  // Static text origins locate diagnostics, not specializations. Retain the first caller's
+  // provenance when the bucket grows, as for repeated calls with equal static values.
   const contextText = (item: WorkItem): string =>
     JSON.stringify([
       keyText(item.key),
       item.cleanupMeasure?.roots.map(Type.runtimeKey).sort() ?? null,
-      item.staticArgumentOrigins ?? null,
     ])
   const pending: Array<string> = []
   const schedule = (item: WorkItem): boolean => {
@@ -1478,7 +1479,7 @@ export const discover = (
         ? item.ancestors
         : AncestorHistory.union(histories, prior.ancestors, item.ancestors)
     if (prior?.ancestors === ancestors) return false
-    scheduledContexts.set(context, Object.freeze({ ...item, ancestors }))
+    scheduledContexts.set(context, Object.freeze({ ...(prior ?? item), ancestors }))
     if (!queuedContexts.has(context)) {
       queuedContexts.add(context)
       pending.push(context)

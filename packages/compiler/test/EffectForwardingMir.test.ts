@@ -56,7 +56,10 @@ struct First {}
 struct Second {}
 effect fn select(input: First | Second) -> i32 ? &mut Choice {
   return match move input {
-    First {} => { return run Choice.left() }
+    First {} => {
+      let operation = effect { return run Choice.left() }
+      return run operation
+    }
     Second {} => run Choice.right()
   }
 }

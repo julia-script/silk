@@ -1,6 +1,7 @@
 import { indexExits, loanEndOperations } from './CleanupEmission.js'
 import type { ExitIndex } from './CleanupEmission.js'
 import type * as CleanupPlan from './CleanupPlan.js'
+import * as Constraint from './Constraint.js'
 import type * as DeclarationFacts from './DeclarationFacts.js'
 import type * as DeclarationIndex from './DeclarationIndex.js'
 import type * as Hir from './Hir.js'
@@ -294,10 +295,18 @@ export class FunctionLowering {
   }
 
   semanticArgument(argument: Type.GenericArgument): Type.GenericArgument {
-    return Type.substituteGenericArgument(
-      argument,
-      this.substitution,
-      this.owner.specialization.compatibility,
+    return Type.specializeExecutableOwner(
+      Type.substituteGenericArgument(
+        argument,
+        this.substitution,
+        this.owner.specialization.compatibility,
+      ),
+      {
+        declaration: this.owner.key.declaration,
+        typeArguments: this.owner.key.typeArguments,
+        staticArgumentKeys: this.owner.key.staticArguments.map(StaticValue.key),
+      },
+      Constraint.specializeCallableSchemaExecutableOwner,
     )
   }
 

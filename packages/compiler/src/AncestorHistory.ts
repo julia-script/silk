@@ -28,9 +28,12 @@ const node = (
   const entries = [...branches].filter(([, child]) => child !== self.empty)
   if (entries.length === 0) return self.empty
   if (entries.length === 1 && entries[0]?.[0] === undefined) return entries[0]?.[1] ?? self.empty
-  entries.sort(([a], [b]) =>
-    a === b ? 0 : a === undefined ? -1 : b === undefined ? 1 : a < b ? -1 : 1,
-  )
+  entries.sort(([a], [b]) => {
+    if (a === b) return 0
+    if (a === undefined) return -1
+    if (b === undefined) return 1
+    return a < b ? -1 : 1
+  })
   const key = JSON.stringify([variable, entries.map(([value, child]) => [value ?? null, child.id])])
   const prior = self.nodes.get(key)
   if (prior !== undefined) return prior
@@ -46,14 +49,9 @@ export const union = (self: AncestorHistory, left: History, right: History): His
   const key = left.id < right.id ? `${left.id}:${right.id}` : `${right.id}:${left.id}`
   const cached = self.unions.get(key)
   if (cached !== undefined) return cached
-  const variable =
-    left.variable === undefined
-      ? right.variable
-      : right.variable === undefined
-        ? left.variable
-        : left.variable < right.variable
-          ? left.variable
-          : right.variable
+  let variable = left.variable
+  if (variable === undefined || (right.variable !== undefined && right.variable < variable))
+    variable = right.variable
   if (variable === undefined) return self.initial
   const a: ReadonlyMap<string | undefined, History> =
     left.variable === variable ? left.branches : new Map([[undefined, left]])

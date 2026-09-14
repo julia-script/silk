@@ -1675,3 +1675,38 @@ pub fn main() -> i32 {
     }
   }),
 )
+
+it.effect('retains a nonparking release that does not capture its generic sibling callback', () =>
+  Effect.gen(function* () {
+    const self = yield* AnalysisFixture.retainingMain(
+      'suspendability/uncaptured-callback',
+      encoder.encode(`import silk.effect {Effect}
+struct Box {value: i32}
+effect fn bracket<'env, A, E, ?R>(
+  resource: Box,
+  flag: bool,
+  callback: for<'scope> once fn<'env>(&'scope mut Box) -> once Effect<'scope & 'env; A ! E ? R>,
+) -> A ! E ? R {
+  let use = effect fn(owned: &mut Box) -> A ! E ? R {
+    return run callback(move owned)
+  }
+  let release = effect fn(owned: &mut Box) -> () {
+    if flag { owned.value = 0 }
+    return ()
+  }
+  return run Effect.useReleaseNonParking(move resource, move use, move release)
+}
+effect fn read(owned: &mut Box) -> i32 { return owned.value }
+pub fn main() -> i32 { return run bracket(Box {value: 42}, true, read) }
+`),
+      'wasm32-unknown-unknown',
+    )
+    assert.deepEqual(
+      Analysis.diagnostics(self).map((diagnostic) => diagnostic.code),
+      [],
+    )
+    const mir = Analysis.loweredMir(self)
+    assert.isTrue(mir.functions.some((fn) => fn.id.name === 'main'))
+    assert.deepEqual(MirVerification.verify(mir), [])
+  }),
+)

@@ -1,6 +1,7 @@
 import * as CAbi from './CAbi.js'
 import * as CleanupPlan from './CleanupPlan.js'
 import * as ConformanceProof from './ConformanceProof.js'
+import * as Constraint from './Constraint.js'
 import * as DeclarationFacts from './DeclarationFacts.js'
 import type * as DeclarationIndex from './DeclarationIndex.js'
 import type * as Elaboration from './Elaboration.js'
@@ -780,6 +781,17 @@ export const make = (operations: Operations) => {
     const expression = (value: Hir.Expression): void => {
       if (value._tag === 'EffectBlock') {
         statements(value.statements)
+        return
+      }
+      if (value._tag === 'Match') {
+        // Expression children flatten block arms and omit the Bind statements whose identities
+        // connect a later run or provider binding to its deferred Effect initializer.
+        expression(value.scrutinee)
+        for (const arm of value.arms) {
+          if (arm.guard !== undefined) expression(arm.guard)
+          if (arm.body._tag === 'Expression') expression(arm.body.expression)
+          else statements(arm.body.statements)
+        }
         return
       }
       for (const child of Hir.expressionChildren(value)) expression(child)
@@ -1632,8 +1644,18 @@ export const make = (operations: Operations) => {
   ): InstanceKey | undefined => {
     const target = targetFunction(context.results, expression.target)
     if (target === undefined) return undefined
+    // The frontend records lexical owners before hidden callback/Effect arguments exist.
+    // Close those owners over this exact discovered instance before retaining call arguments.
     const typeArguments = expression.typeArguments.map((argument) =>
-      Type.substituteGenericArgument(argument, context.substitution, context.compatibility),
+      Type.specializeExecutableOwner(
+        Type.substituteGenericArgument(argument, context.substitution, context.compatibility),
+        {
+          declaration: context.owner.declaration,
+          typeArguments: context.owner.typeArguments,
+          staticArgumentKeys: context.owner.staticArguments.map(StaticValue.key),
+        },
+        Constraint.specializeCallableSchemaExecutableOwner,
+      ),
     )
     const selected = TypeInference.selectedSubstitution(
       target.declaration.typeParameters.map((parameter) => parameter.type),
