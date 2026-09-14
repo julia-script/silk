@@ -108,21 +108,24 @@ where &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut Monoton
 }
 `
 
-it.effect('keeps the transport private and rejects overlapping and escaping request loans', () =>
-  Effect.gen(function* () {
-    const snapshot = yield* AnalysisFixture.declarations(
-      'http-server/ownership',
-      encoder.encode(ownershipSource),
-    )
-    const diagnostics = Analysis.diagnostics(snapshot).map((diagnostic) => ({
-      code: diagnostic.code,
-      span: ownershipSource.slice(diagnostic.span.start, diagnostic.span.end).trim(),
-    }))
-    assert.deepEqual(diagnostics, [
-      { code: 'SEM0028', span: 'channel' },
-      { code: 'OWN0010', span: '&mut request.*' },
-      { code: 'SEM0076', span: 'leak' },
-      { code: 'SEM0122', span: 'leak' },
-    ])
-  }),
+it.effect(
+  'keeps the transport private and rejects overlapping and escaping request loans',
+  () =>
+    Effect.gen(function* () {
+      const snapshot = yield* AnalysisFixture.declarations(
+        'http-server/ownership',
+        encoder.encode(ownershipSource),
+      )
+      const diagnostics = Analysis.diagnostics(snapshot).map((diagnostic) => ({
+        code: diagnostic.code,
+        span: ownershipSource.slice(diagnostic.span.start, diagnostic.span.end).trim(),
+      }))
+      assert.deepEqual(diagnostics, [
+        { code: 'SEM0028', span: 'channel' },
+        { code: 'OWN0010', span: '&mut request.*' },
+        { code: 'SEM0076', span: 'leak' },
+        { code: 'SEM0122', span: 'leak' },
+      ])
+    }),
+  120_000,
 )

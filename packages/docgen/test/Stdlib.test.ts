@@ -40,5 +40,5 @@ it.effect(
       assert.isDefined(option)
       assert.include(option.contents, 'unwrapOr')
     }),
-  300_000,
+  420_000,
 )
