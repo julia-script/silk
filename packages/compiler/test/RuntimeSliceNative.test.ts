@@ -2,6 +2,8 @@ import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
+import * as NativeFunction from '../src/NativeFunction.js'
+import * as MirLinearization from '../src/MirLinearization.js'
 import * as MirVerification from '../src/MirVerification.js'
 
 const ascii = (value: string): Uint8Array =>
@@ -81,18 +83,22 @@ it.effect('rebinds a whole slice descriptor without treating it as an indexed wr
   Effect.gen(function* () {
     const self = yield* AnalysisFixture.retainingMain(
       'runtime-slice-native/rebind',
-      ascii(`import silk.u8
-pub fn main() -> i32 {
+      ascii(`fn choose(flag: bool) -> u8 {
   let mut view: &[u8] = b"old"
-  view = b"new value"
-  return u8.toI32(view[1])
+  if flag { view = b"new value" }
+  if !flag { view = b"old again" }
+  return view[0]
+}
+pub fn main() -> i32 {
+  if choose(true) == 110 && choose(false) == 111 { return 42 }
+  return 0
 }`),
       'aarch64-apple-darwin',
     )
     assert.deepEqual(Analysis.diagnostics(self), [])
     const mir = Analysis.loweredMir(self)
     assert.deepEqual(MirVerification.verify(mir), [])
-    const main = mir.functions.find((fn) => fn.id.name === 'main')
+    const main = mir.functions.find((fn) => fn.id.name === 'choose')
     assert.ok(main)
     const operations = MirVerification.operations(main)
     assert.isTrue(
@@ -111,6 +117,9 @@ pub fn main() -> i32 {
           operation.rootType._tag === 'Slice',
       ),
     )
+    const mutable = NativeFunction.discoverRoots(main, MirLinearization.linearize(main)).mutable
+    const writes = operations.filter((operation) => operation._tag === 'WritePlace')
+    assert.isTrue(writes.every((write) => mutable.has(write.root.ordinal)))
     yield* Analysis.codegen(self, { mode: 'debug' })
   }),
 )

@@ -944,6 +944,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
     case 'WritePlace': {
       if (operation.rootType._tag === 'Slice' && operation.selectors.length === 0) {
         yield* NativeStorage.copyLocal(nativeStorage, operation.root, operation.source)
+        yield* NativeStorage.commitLocal(nativeStorage, operation.root)
         break
       }
       if (
