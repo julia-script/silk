@@ -4485,6 +4485,16 @@ const fieldSlice = (
 ): { readonly offset: number; readonly length: number } | undefined => {
   const [field, ...rest] = path
   if (field === undefined) return Object.freeze({ offset, length: node.laneCount })
+  if (node._tag === 'NominalUnionShape') {
+    const variant = node.variants.find(
+      (variant) =>
+        variant.shape._tag === 'ProductShape' &&
+        variant.shape.fields.some((candidate) =>
+          DeclarationFacts.sameFieldId(candidate.field, field),
+        ),
+    )
+    return variant === undefined ? undefined : fieldSlice(variant.shape, path, offset + 1)
+  }
   if (node._tag !== 'ProductShape') return undefined
   let fieldOffset = offset
   for (const candidate of node.fields) {
@@ -4549,6 +4559,60 @@ export const coverageMembers = (shape: CallingShape): ReadonlyArray<Match.Covera
         : [Match.structuralMember(member.member)],
     ),
   )
+}
+
+/** Resolves a pattern field path through canonical variant and aggregate owners. */
+export const coveragePath = (
+  layout: Plan,
+  root: Type.Type,
+  member: Match.CoverageIdentity,
+  path: ReadonlyArray<DeclarationFacts.FieldId>,
+):
+  | {
+      readonly type: Type.Type
+      readonly selectors: ReadonlyArray<
+        | { readonly _tag: 'Variant'; readonly ordinal: number }
+        | { readonly _tag: 'Field'; readonly field: DeclarationFacts.FieldId }
+      >
+    }
+  | undefined => {
+  let current = root
+  const selectors: Array<
+    | { readonly _tag: 'Variant'; readonly ordinal: number }
+    | { readonly _tag: 'Field'; readonly field: DeclarationFacts.FieldId }
+  > = []
+  if (Type.isUnion(current)) {
+    const selected = Match.sourceType(member)
+    const ordinal = current.members.findIndex(
+      (candidate) => Type.runtimeKey(candidate) === Type.runtimeKey(selected),
+    )
+    if (ordinal < 0) return undefined
+    selectors.push({ _tag: 'Variant', ordinal })
+    current = selected
+  }
+  for (const [ordinal, id] of path.entries()) {
+    const representation = entry(layout, current)?.representation
+    let field: Field | undefined
+    if (representation?._tag === 'NominalUnion') {
+      const variant = representation.variants.find(
+        (candidate) =>
+          (ordinal !== 0 ||
+            member._tag !== 'NominalUnionVariant' ||
+            candidate.ordinal === member.variantOrdinal) &&
+          candidate.fields.some((field) => DeclarationFacts.sameFieldId(field.id, id)),
+      )
+      field = variant?.fields.find((candidate) => DeclarationFacts.sameFieldId(candidate.id, id))
+      if (variant !== undefined) selectors.push({ _tag: 'Variant', ordinal: variant.ordinal })
+    } else if (representation?._tag === 'Aggregate') {
+      field = representation.fields.find((candidate) =>
+        DeclarationFacts.sameFieldId(candidate.id, id),
+      )
+    }
+    if (field === undefined) return undefined
+    selectors.push({ _tag: 'Field', field: id })
+    current = field.type
+  }
+  return { type: current, selectors }
 }
 
 /** Physical calling-lane slots for a field selected by one exact match coverage identity. */

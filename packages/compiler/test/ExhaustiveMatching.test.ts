@@ -825,7 +825,20 @@ fn own(input: Guard) -> i32 {
   }
   return match move guard.provider { Counter {value} => value Empty {} => 0 }
 }
+union Inner { Closed {operation: i32}, Open {operation: i32} }
+union Outer { Io {error: Inner}, Other }
+fn nested(input: &Outer) -> i32 {
+  return match &input.* {
+    Outer.Io {error: Inner.Closed {operation}} if false => 99
+    Outer.Io {error: Inner.Closed {operation}} => operation
+    Outer.Io {error: Inner.Open {operation}} => 0
+    Outer.Other => 0
+  }
+}
 pub fn main() -> i32 {
+  let nestedOwner = Outer.Io {error: Inner.Open {operation: 17}}
+  let nestedValue = nested(&nestedOwner)
+  drop nestedValue
   let mut guard = Guard {provider: Counter {value: 41}}
   update(&mut guard)
   let whole = readWhole(&guard.provider)
@@ -839,6 +852,28 @@ pub fn main() -> i32 {
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
     const program = Analysis.loweredMir(snapshot)
     assert.deepEqual(MirVerification.verify(program), [])
+    const nestedFn =
+      program.functions.find((candidate) => candidate.id.name === 'nested') ??
+      raise('expected nested MIR')
+    const nestedMatch =
+      MirVerification.operations(nestedFn).find((operation) => operation._tag === 'Match') ??
+      raise('expected nested match')
+    assert.deepEqual(
+      nestedMatch.arms.map((arm) => arm.tests?.length ?? 0),
+      [1, 1, 1, 0],
+    )
+    assert.deepEqual(nestedMatch.arms.at(-1)?.after, [])
+    const nestedBlocks = MirLinearization.linearize(nestedFn)
+    const nestedBranches = nestedBlocks.filter(
+      (block) =>
+        block.terminator._tag === 'MatchBranch' && (block.terminator.selectors?.length ?? 0) > 0,
+    )
+    assert.isTrue(nestedBranches.length > 0)
+    assert.isTrue(
+      nestedBranches.every((block) =>
+        block.operations.every((operation) => operation._tag !== 'BindMatch'),
+      ),
+    )
     const fn =
       program.functions.find((candidate) => candidate.id.name === 'update') ??
       raise('expected update MIR')

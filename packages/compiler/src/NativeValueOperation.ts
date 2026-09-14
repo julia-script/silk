@@ -56,25 +56,29 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
           Type.runtimeKey(operation.type.type) !== Type.runtimeKey(matched) ||
           operation.path.length > 0
         ) {
-          if (Type.isUnion(matched)) {
-            const memberType =
-              operation.member._tag === 'NominalUnionVariant'
-                ? operation.member.root
-                : operation.member.type
-            const ordinal = matched.members.findIndex(
-              (member) => Type.runtimeKey(member) === Type.runtimeKey(memberType),
-            )
-            if (ordinal < 0) throw new RangeError('Borrowed match lost its structural member')
-            selectors.push({ _tag: 'VariantSelector', ordinal, provenance: operation.provenance })
-          }
-          if (operation.member._tag === 'NominalUnionVariant' && operation.path.length > 0)
-            selectors.push({
-              _tag: 'VariantSelector',
-              ordinal: operation.member.variantOrdinal,
-              provenance: operation.provenance,
-            })
-          for (const field of operation.path)
-            selectors.push({ _tag: 'FieldSelector', field, provenance: operation.provenance })
+          const resolved = Layout.coveragePath(
+            context.program.layout,
+            matched,
+            operation.member,
+            operation.path,
+          )
+          if (resolved === undefined)
+            throw new RangeError('Borrowed match lost its canonical field path')
+          selectors.push(
+            ...resolved.selectors.map((selector): Mir.PlaceSelector =>
+              selector._tag === 'Variant'
+                ? {
+                    _tag: 'VariantSelector',
+                    ordinal: selector.ordinal,
+                    provenance: operation.provenance,
+                  }
+                : {
+                    _tag: 'FieldSelector',
+                    field: selector.field,
+                    provenance: operation.provenance,
+                  },
+            ),
+          )
         }
         const { address } = yield* NativePlaceAddress.resolve(
           context,

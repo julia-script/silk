@@ -34,6 +34,11 @@ ABI, or alter the owned TLS API to avoid the compiler defect.
 4. Prove field layout and binding representation through focused structural tests. Add mutation
    cases to existing native acceptance sources; use the already-required owned TLS native and Wasm
    programs for the publication failure. Temporary investigation binaries are removed.
+5. Preserve nested variant discrimination with the canonical field path. Check each inner variant
+   before binding its fields or evaluating the arm guard, and continue to later arms on mismatch.
+   Coverage must account for the remaining nested alternatives rather than treating one inner
+   variant as covering its entire outer variant. This repairs the existing recursive-pattern
+   contract exposed by the TLS error patterns; it adds no pattern syntax.
 
 ## Risks / Trade-offs
 

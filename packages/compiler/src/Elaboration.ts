@@ -533,6 +533,7 @@ export type MatchArmBodyFact =
     }
 
 export interface MatchArmFact {
+  readonly tests: ReadonlyArray<Match.PatternTest>
   readonly _tag: 'MatchArm'
   readonly id: Match.ArmId
   readonly pattern: PatternFact
@@ -559,6 +560,7 @@ export interface MatchExpressionFact {
 
 /** One statement-form pattern decision shared by irrefutable let and refutable if-let. */
 export interface PatternSelectionFact {
+  readonly tests: ReadonlyArray<Match.PatternTest>
   readonly _tag: 'PatternSelection'
   readonly id: Match.MatchId
   readonly arm: Match.ArmId

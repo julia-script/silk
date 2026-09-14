@@ -1,4 +1,4 @@
-import type * as DeclarationFacts from './DeclarationFacts.js'
+import * as DeclarationFacts from './DeclarationFacts.js'
 import * as Lifetime from './Lifetime.js'
 import * as RowAlgebra from './RowAlgebra.js'
 import type * as SourceSpan from './SourceSpan.js'
@@ -122,8 +122,17 @@ export const encodeIdentity = (self: CoverageIdentity): string => {
   return `${self.enum.module}.${self.enum.name}.${self.member.name}`
 }
 
+/** One nested nominal discriminant, addressed from the complete scrutinee. */
+export interface PatternTest {
+  readonly path: ReadonlyArray<DeclarationFacts.FieldId>
+  readonly member: CoverageIdentity
+  readonly domain: ReadonlyArray<CoverageIdentity>
+  readonly span: SourceSpan.SourceSpan
+}
+
 /** One source decision reduced to the facts that affect coverage. */
 export interface Decision {
+  readonly tests?: ReadonlyArray<PatternTest>
   readonly member?: CoverageIdentity
   readonly universal: boolean
   readonly guarded: boolean
@@ -143,12 +152,6 @@ export interface Coverage {
   readonly missing: ReadonlyArray<CoverageIdentity>
   readonly exhaustive: boolean
 }
-
-const contains = (
-  members: ReadonlyArray<CoverageIdentity>,
-  member: CoverageIdentity,
-  phase: IdentityPhase,
-): boolean => members.some((candidate) => selects(member, candidate, phase))
 
 /** Tests whether one authored pattern identity selects one canonical coverage leaf. */
 export const selects = (
@@ -187,32 +190,66 @@ export const cover = (
   decisions: ReadonlyArray<Decision>,
   phase: IdentityPhase = 'Semantic',
 ): Coverage => {
-  let remaining = Object.freeze([...initial])
+  type Constraint = {
+    readonly path: PatternTest['path']
+    readonly values: ReadonlyArray<CoverageIdentity>
+  }
+  type Row = ReadonlyArray<Constraint>
+  const samePath = (left: PatternTest['path'], right: PatternTest['path']) =>
+    left.length === right.length &&
+    left.every((field, ordinal) => {
+      const other = right.at(ordinal)
+      return other !== undefined && DeclarationFacts.sameFieldId(field, other)
+    })
+  const allowed = (row: Row, test: PatternTest) =>
+    row.find((constraint) => samePath(constraint.path, test.path))?.values ?? test.domain
+  const constrain = (row: Row, test: PatternTest, values: ReadonlyArray<CoverageIdentity>): Row => [
+    ...row.filter((constraint) => !samePath(constraint.path, test.path)),
+    { path: test.path, values },
+  ]
+  const intersects = (row: Row, tests: ReadonlyArray<PatternTest>) =>
+    tests.every((test) => allowed(row, test).some((value) => selects(test.member, value, phase)))
+  const subtract = (row: Row, tests: ReadonlyArray<PatternTest>): ReadonlyArray<Row> => {
+    const residual: Array<Row> = []
+    let matched = row
+    for (const test of tests) {
+      const values = allowed(matched, test)
+      const selected = values.filter((value) => selects(test.member, value, phase))
+      const other = values.filter((value) => !selects(test.member, value, phase))
+      if (other.length > 0) residual.push(constrain(matched, test, other))
+      if (selected.length === 0) return residual
+      matched = constrain(matched, test, selected)
+    }
+    return residual
+  }
+  let spaces = initial.map((member) => ({ member, rows: Array.of<Row>([]) }))
+  const remaining = () =>
+    Object.freeze(spaces.filter((space) => space.rows.length > 0).map((space) => space.member))
   const transitions: Array<CoverageTransition> = []
   for (const decision of decisions) {
-    const before = remaining
-    const reachable = decision.universal
-      ? before.length > 0
-      : decision.member !== undefined &&
-        contains(initial, decision.member, phase) &&
-        contains(before, decision.member, phase)
+    const before = remaining()
+    const tests = decision.tests ?? []
+    const selected = (member: CoverageIdentity) =>
+      decision.universal ||
+      (decision.member !== undefined && selects(decision.member, member, phase))
+    const reachable = spaces.some(
+      (space) => selected(space.member) && space.rows.some((row) => intersects(row, tests)),
+    )
     if (reachable && !decision.guarded) {
-      remaining = decision.universal
-        ? Object.freeze([])
-        : Object.freeze(
-            before.filter(
-              (candidate) =>
-                decision.member === undefined || !selects(decision.member, candidate, phase),
-            ),
-          )
+      spaces = spaces.map((space) =>
+        selected(space.member)
+          ? { member: space.member, rows: space.rows.flatMap((row) => subtract(row, tests)) }
+          : space,
+      )
     }
-    transitions.push(Object.freeze({ before, after: remaining, reachable }))
+    transitions.push(Object.freeze({ before, after: remaining(), reachable }))
   }
+  const missing = remaining()
   return Object.freeze({
     initial: Object.freeze([...initial]),
     transitions: Object.freeze(transitions),
-    missing: remaining,
-    exhaustive: remaining.length === 0,
+    missing,
+    exhaustive: missing.length === 0,
   })
 }
 

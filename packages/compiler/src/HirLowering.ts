@@ -201,6 +201,7 @@ export const hirPatternSelection = (
   const subject = hirExpression(selection.subject, undefined, options)
   return Object.freeze({
     id: selection.id,
+    tests: selection.tests,
     arm: selection.arm,
     access: selection.access,
     subject:
@@ -898,6 +899,7 @@ export const hirExpression = (
           }
           return Object.freeze({
             id: arm.id,
+            tests: arm.tests,
             ...(member === undefined ? {} : { member }),
             universal: arm.pattern._tag === 'UniversalPattern',
             bindings: Object.freeze(

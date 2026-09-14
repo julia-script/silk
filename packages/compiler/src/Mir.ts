@@ -1387,6 +1387,12 @@ export interface Execution {
 }
 
 export interface MatchArm {
+  readonly tests?: ReadonlyArray<
+    Match.PatternTest & {
+      readonly shape: Layout.CallingShape
+      readonly selectors: ReadonlyArray<PlaceSelector>
+    }
+  >
   readonly id: Match.ArmId
   readonly member?: Match.CoverageIdentity
   readonly universal: boolean

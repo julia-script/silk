@@ -2080,6 +2080,40 @@ function lowerShortCircuitExpression(
   return Object.freeze({ result: destination })
 }
 
+/** Retains checked nested discriminants before selected payload bindings. */
+export const lowerPatternTests = (
+  fn: FunctionLowering,
+  root: Type.Type,
+  member: Match.CoverageIdentity | undefined,
+  authoredTests: ReadonlyArray<Match.PatternTest>,
+  selectors: ReadonlyArray<Mir.PlaceSelector>,
+  specializeMember: (member: Match.CoverageIdentity) => Match.CoverageIdentity,
+): NonNullable<Mir.MatchArm['tests']> | undefined => {
+  const tests: Array<NonNullable<Mir.MatchArm['tests']>[number]> = []
+  for (const test of authoredTests) {
+    if (member === undefined) return undefined
+    const resolved = Layout.coveragePath(fn.layout, root, member, test.path)
+    const shape = resolved === undefined ? undefined : Layout.callingShape(fn.layout, resolved.type)
+    if (resolved === undefined || shape === undefined) return undefined
+    const provenance = authored(test.span)
+    tests.push({
+      ...test,
+      member: specializeMember(test.member),
+      domain: test.domain.map(specializeMember),
+      shape,
+      selectors: [
+        ...selectors,
+        ...resolved.selectors.map((selector): Mir.PlaceSelector =>
+          selector._tag === 'Variant'
+            ? { _tag: 'VariantSelector', ordinal: selector.ordinal, provenance }
+            : { _tag: 'FieldSelector', field: selector.field, provenance },
+        ),
+      ],
+    })
+  }
+  return tests
+}
+
 function lowerMatchExpression(
   fn: FunctionLowering,
   expression: Extract<Hir.Expression, { readonly _tag: 'Match' }>,
@@ -2179,6 +2213,11 @@ function lowerMatchExpression(
         ...(arm.member === undefined ? {} : { member: specializeMember(arm.member) }),
         universal: arm.universal,
         guarded: arm.guard !== undefined,
+        tests: (arm.tests ?? []).map((test) => ({
+          ...test,
+          member: specializeMember(test.member),
+          domain: test.domain.map(specializeMember),
+        })),
       }),
     ),
     'Runtime',
@@ -2197,6 +2236,15 @@ function lowerMatchExpression(
         arm.universal || (member !== undefined && Match.selects(member, candidate, 'Runtime')),
     )
     const executes = selectedMembers.length > 0
+    const tests = lowerPatternTests(
+      fn,
+      fn.semantic(expression.scrutinee.type),
+      member,
+      arm.tests ?? [],
+      selectors ?? [],
+      specializeMember,
+    )
+    if (tests === undefined) return undefined
     const before = transition.before
     const after = transition.after
     const bindings: Array<Mir.MatchBinding> = []
@@ -2270,7 +2318,14 @@ function lowerMatchExpression(
     if (guardExpression !== undefined && guardExecution === undefined) return undefined
     // Coverage records source syntax. Runtime selection also stops on a transferring guard,
     // since it produces no Boolean that could reject this candidate and reach the next arm.
-    if (guardExecution === undefined || guardExecution.result === undefined)
+    pendingMembers = pendingMembers.filter((candidate) =>
+      after.some((remaining) => Match.identityEquals(candidate, remaining, 'Runtime')),
+    )
+    if (
+      guardExecution !== undefined &&
+      guardExecution.result === undefined &&
+      (arm.tests?.length ?? 0) === 0
+    )
       pendingMembers = pendingMembers.filter((candidate) => !selectedMembers.includes(candidate))
     const guard =
       guardExecution === undefined ? undefined : Object.freeze({ execution: guardExecution })
@@ -2350,6 +2405,7 @@ function lowerMatchExpression(
     arms.push(
       Object.freeze({
         id: arm.id,
+        tests,
         ...(member === undefined ? {} : { member }),
         universal: arm.universal,
         before: Object.freeze(before),

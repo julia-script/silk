@@ -2499,6 +2499,33 @@ export const matchAccess = (node: SyntaxTree.Node): Match.Access => {
   return directToken(access, 'MutKeyword') === undefined ? 'Shared' : 'Exclusive'
 }
 
+export const patternTests = (
+  index: DeclarationIndex.Index,
+  pattern: PatternFact,
+  prefix: ReadonlyArray<DeclarationFacts.FieldId> = [],
+): ReadonlyArray<Match.PatternTest> => {
+  if (pattern._tag !== 'NominalPattern' && pattern._tag !== 'UnionVariantPattern') return []
+  return pattern.fields.flatMap((field) => {
+    if (field.state._tag !== 'Resolved' || field.nested === undefined) return []
+    const nested = field.nested
+    const path = [...prefix, field.state.field.id]
+    const test: ReadonlyArray<Match.PatternTest> =
+      nested._tag === 'UnionVariantPattern' &&
+      nested.coverage !== undefined &&
+      nested.member !== undefined
+        ? [
+            {
+              path,
+              member: nested.coverage,
+              domain: coverageMembersOf(index, nested.member),
+              span: nested.syntax.span,
+            },
+          ]
+        : []
+    return [...test, ...patternTests(index, nested, path)]
+  })
+}
+
 export const patternCoverage = (pattern: PatternFact): Match.CoverageIdentity | undefined => {
   if (pattern._tag === 'EnumMemberPattern') return pattern.coverage
   if (pattern._tag === 'UnionVariantPattern') return pattern.coverage
@@ -2577,15 +2604,21 @@ export const analyzeMatch = (
       scrutinee?.type,
     )
     diagnostics.push(...pattern.diagnostics)
-    return Object.freeze({ armNode, armId, pattern: pattern.fact })
+    return Object.freeze({
+      armNode,
+      armId,
+      pattern: pattern.fact,
+      tests: patternTests(resolution.index, pattern.fact),
+    })
   })
   const coverage = Match.cover(
     members ?? Object.freeze([]),
-    preliminary.map(({ armNode, pattern }) => {
+    preliminary.map(({ armNode, pattern, tests }) => {
       const member = patternCoverage(pattern)
       return Object.freeze({
         ...(member === undefined ? {} : { member }),
         universal: pattern._tag === 'UniversalPattern',
+        tests,
         guarded: directToken(armNode, 'IfKeyword') !== undefined,
       })
     }),
@@ -2712,7 +2745,10 @@ export const analyzeMatch = (
     )
     const executes = transition.reachable && selectedMembers.length > 0
     if (executes) executedArms.add(ordinal)
-    if (guard === undefined || !guardCompletes)
+    pendingMembers = pendingMembers.filter((candidate) =>
+      transition.after.some((remaining) => Match.identityEquals(candidate, remaining)),
+    )
+    if (!guardCompletes && patternTests(resolution.index, pattern).length === 0)
       pendingMembers = pendingMembers.filter((candidate) => !selectedMembers.includes(candidate))
     if (executes && guardCompletes)
       for (const ordinal of callableWrites ?? []) candidateWrites.add(ordinal)
@@ -2781,6 +2817,7 @@ export const analyzeMatch = (
       id: armId,
       pattern,
       bindings: pattern.bindings,
+      tests: patternTests(resolution.index, pattern),
       ...(guard === undefined ? {} : { guard: guard.fact }),
       body,
       before: transition.before,

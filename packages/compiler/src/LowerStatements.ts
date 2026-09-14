@@ -50,7 +50,7 @@ import * as Layout from './Layout.js'
 import type { DelayedEffectState } from './Lower.js'
 import { borrowKey, i32, patternKey, spanKey } from './Lower.js'
 import type {} from './LowerExpression.js'
-import { lowerExpression, lowerExecution } from './LowerExpression.js'
+import { lowerExpression, lowerExecution, lowerPatternTests } from './LowerExpression.js'
 import * as Match from './Match.js'
 import * as Mir from './Mir.js'
 import * as MovePath from './MovePath.js'
@@ -72,11 +72,9 @@ export const lowerPatternSelection = (
   const borrowed = selection.access === 'Shared' || selection.access === 'Exclusive'
   const place = borrowed ? lowerPlacePath(fn, selection.subject) : undefined
   if (place === 'Transferred') return place
-  const subject = borrowed
-    ? place === undefined
-      ? undefined
-      : { result: place.root }
-    : lowerExpression(fn, selection.subject)
+  let subject: LoweredExpression | undefined
+  if (borrowed) subject = place === undefined ? undefined : { result: place.root }
+  else subject = lowerExpression(fn, selection.subject)
   if (subject === 'Transferred') return subject
   const semanticSubject = fn.semantic(selection.subject.type)
   const subjectType = fn.type(selection.subject.type)
@@ -150,14 +148,27 @@ export const lowerPatternSelection = (
   }
   const [selectedResult, selectedOperations] = fn.capture(() => literal(true))
   if (selectedResult === undefined || selectedResult === 'Transferred') return selectedResult
-  const emptyCoverage: ReadonlyArray<Match.CoverageIdentity> = Object.freeze([])
-  const selectedAfter = selection.universal
-    ? emptyCoverage
-    : Object.freeze(
-        members.filter(
-          (candidate) => member === undefined || !Match.selects(member, candidate, 'Runtime'),
-        ),
-      )
+  const tests = lowerPatternTests(
+    fn,
+    semanticSubject,
+    member,
+    selection.tests ?? [],
+    place?.selectors ?? [],
+    specializeMember,
+  )
+  if (tests === undefined) return undefined
+  const selectedAfter = Match.cover(
+    members,
+    [
+      {
+        ...(member === undefined ? {} : { member }),
+        universal: selection.universal,
+        guarded: false,
+        tests,
+      },
+    ],
+    'Runtime',
+  ).missing
   const ownedArm = ownership?.arms.find(
     (candidate) => candidate.id.ordinal === selection.arm.ordinal,
   )
@@ -196,6 +207,7 @@ export const lowerPatternSelection = (
   if (selectedExecution === undefined) return undefined
   const selectedArm: Mir.MatchArm = Object.freeze({
     id: selection.arm,
+    tests,
     ...(member === undefined ? {} : { member }),
     universal: selection.universal,
     before: members,

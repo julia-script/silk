@@ -2220,6 +2220,16 @@ union ScalarChoice { Value {value: i32} }
 fn copyScalar(input: &ScalarChoice) -> ScalarChoice {
   return match &input.* { ScalarChoice.Value {value} => ScalarChoice.Value {value: value} }
 }
+union Inner { Closed {operation: i32}, Open {operation: i32} }
+union Outer { Io {error: Inner}, Other }
+fn nested(input: &Outer) -> i32 {
+  return match &input.* {
+    Outer.Io {error: Inner.Closed {operation}} if false => 99
+    Outer.Io {error: Inner.Closed {operation}} => operation
+    Outer.Io {error: Inner.Open {operation}} => 0
+    Outer.Other => 0
+  }
+}
 struct Choices { values: [Choice; 1] }
 interface Merge { operator + fn add(left: Self, right: Self) -> Self }
 fn add(left: Choice, right: Choice) -> Choice { return move left }
@@ -2241,6 +2251,9 @@ fn readSlice(values: &[Choice], index: usize) -> i32 {
   }
 }
 pub fn main() -> i32 {
+  let closed = Outer.Io {error: Inner.Closed {operation: 42}}
+  let open = Outer.Io {error: Inner.Open {operation: 17}}
+  if nested(&closed) != 42 || nested(&open) != 0 { return 2 }
   let original = ScalarChoice.Value {value: 42}
   let copied = copyScalar(&original)
   match move copied { ScalarChoice.Value {value} => { if value != 42 { return 1 } } }

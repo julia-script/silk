@@ -796,10 +796,16 @@ export const expandMatches = (
         ],
         jump(following, arm.provenance),
       )
+      const tests = arm.tests ?? []
+      const bindingEntry = tests.length === 0 ? entry : reserve()
+      const fallback =
+        arm.guard === undefined && tests.length === 0
+          ? undefined
+          : candidateEntry(member, candidates, ordinal + 1)
       if (arm.guard === undefined) {
-        lowerSequence(entry, origin, 'Normal', bindings, jump(selected, arm.provenance))
+        lowerSequence(bindingEntry, origin, 'Normal', bindings, jump(selected, arm.provenance))
       } else {
-        const fallback = candidateEntry(member, candidates, ordinal + 1)
+        if (fallback === undefined) throw new RangeError('Guarded pattern lost its fallback')
         const completedGuard: LinearTerminator =
           arm.guard.execution.result === undefined
             ? Object.freeze({
@@ -815,7 +821,27 @@ export const expandMatches = (
                 provenance: arm.provenance,
               })
         const guard = emitExecution(arm.guard.execution, [], completedGuard)
-        lowerSequence(entry, origin, 'Normal', bindings, jump(guard, arm.provenance))
+        lowerSequence(bindingEntry, origin, 'Normal', bindings, jump(guard, arm.provenance))
+      }
+      const testEntries = tests.map((_, ordinal) => (ordinal === 0 ? entry : reserve()))
+      for (const [ordinal, test] of tests.entries()) {
+        if (fallback === undefined) throw new RangeError('Nested pattern lost its fallback')
+        append({
+          id: testEntries.at(ordinal) ?? entry,
+          origin,
+          kind: 'Normal',
+          operations: [],
+          terminator: {
+            _tag: 'MatchBranch',
+            scrutinee: match.scrutinee,
+            selectors: test.selectors,
+            shape: test.shape,
+            member: test.member,
+            taken: testEntries.at(ordinal + 1) ?? bindingEntry,
+            otherwise: fallback,
+            provenance: { span: test.span, generated: false },
+          },
+        })
       }
       return entry
     }

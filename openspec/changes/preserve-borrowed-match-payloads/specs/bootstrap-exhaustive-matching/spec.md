@@ -30,3 +30,32 @@ suspension SHALL preserve its alias identity until the match loan ends.
 
 - **WHEN** an exclusive match lends its selected provider to an operation and the enclosing owner is moved after the arm
 - **THEN** the published owner contains the operation's mutations rather than the payload's pre-match state
+
+### Requirement: Variant patterns bind struct-like fields
+
+A named-field variant pattern SHALL bind, rename, nest, borrow, move, omit with `..`, and validate
+fields under the same rules as a nominal struct pattern. A unit variant SHALL bind no fields. Pattern
+selection SHALL retain the applied parent type and canonical variant identity without introducing a
+variant subtype. Nested variant patterns SHALL test every selected inner variant before binding
+its fields or evaluating the arm guard. An inner mismatch SHALL continue to the next source arm,
+and coverage SHALL retain the outer variant until all of its nested alternatives are covered.
+
+#### Scenario: Move fields from one selected variant
+
+- **WHEN** `Result<A, E>.Success { value }` matches a moved `Result<A, E>`
+- **THEN** `value` receives the specialized `A` payload and cleanup remains restricted to that selected variant
+
+#### Scenario: Reject an incomplete field pattern
+
+- **WHEN** a variant pattern omits a declared field without `..`
+- **THEN** analysis reports the same missing-field condition as struct destructuring and creates no executable arm
+
+#### Scenario: Distinguish nested variant alternatives
+
+- **WHEN** an outer `Io` variant contains an inner error with `Closed` and `Open` alternatives
+- **THEN** an `Io { error: Closed { operation } }` arm binds `operation` only for `Closed`, and `Open` remains available to a later arm
+
+#### Scenario: Exhaust all nested alternatives
+
+- **WHEN** unguarded arms cover every inner alternative of an outer variant and every other outer variant
+- **THEN** the match is exhaustive without a redundant whole-parent fallback

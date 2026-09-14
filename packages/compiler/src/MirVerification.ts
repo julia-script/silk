@@ -203,9 +203,16 @@ const structuredCfgPathsValid = <State>(
     const bound = semantics.enterArm?.(arm, incoming) ?? incoming
     const guarded = arm.guard === undefined ? bound : execution(arm.guard.execution, bound)
     const selected = execution(arm.selected.execution, guarded)
-    return arm.guard === undefined
-      ? selected
-      : semantics.merge(selected, matchCandidates(operation, candidates, ordinal + 1, guarded))
+    let completed =
+      arm.guard === undefined
+        ? selected
+        : semantics.merge(selected, matchCandidates(operation, candidates, ordinal + 1, guarded))
+    if ((arm.tests?.length ?? 0) > 0)
+      completed = semantics.merge(
+        completed,
+        matchCandidates(operation, candidates, ordinal + 1, incoming),
+      )
+    return completed
   }
   const transfer = (operation: Operation, incoming: ReadonlySet<State>): ReadonlySet<State> => {
     incoming = semantics.before?.(operation, incoming) ?? incoming
@@ -334,9 +341,12 @@ const selectableMatchArms = (operation: MatchOperation): ReadonlySet<number> => 
     for (const candidate of decision.candidates) {
       const arm = operation.arms.find((arm) => arm.id.ordinal === candidate.ordinal)
       if (arm === undefined) break
-      if (arm.guard !== undefined && arm.guard.execution.result === undefined) break
+      if (arm.guard !== undefined && arm.guard.execution.result === undefined) {
+        if ((arm.tests?.length ?? 0) === 0) break
+        continue
+      }
       selected.add(arm.id.ordinal)
-      if (arm.guard === undefined) break
+      if (arm.guard === undefined && (arm.tests?.length ?? 0) === 0) break
     }
   return selected
 }
@@ -1339,6 +1349,8 @@ const selectorLocals = (selectors: ReadonlyArray<PlaceSelector>): ReadonlyArray<
 
 const samePlaceSelector = (left: PlaceSelector, right: PlaceSelector): boolean => {
   if (left._tag !== right._tag) return false
+  if (left._tag === 'VariantSelector' && right._tag === 'VariantSelector')
+    return left.ordinal === right.ordinal
   if (left._tag === 'FieldSelector' && right._tag === 'FieldSelector')
     return DeclarationFacts.sameFieldId(left.field, right.field)
   if (left._tag === 'SliceElementSelector' && right._tag === 'SliceElementSelector')
@@ -1444,21 +1456,7 @@ const fieldPathType = (
   root: DeclarationFacts.SemanticType,
   path: ReadonlyArray<DeclarationFacts.FieldId>,
 ): DeclarationFacts.SemanticType | undefined => {
-  let current: DeclarationFacts.SemanticType | undefined = root
-  for (const selector of path) {
-    const entry: Layout.Entry | undefined = SilkType.isNominal(current)
-      ? Layout.entry(layout, current)
-      : undefined
-    const field: Layout.Field | undefined =
-      entry?.representation._tag === 'Aggregate'
-        ? entry.representation.fields.find((candidate) =>
-            DeclarationFacts.sameFieldId(candidate.id, selector),
-          )
-        : undefined
-    current = field?.type
-    if (current === undefined) return undefined
-  }
-  return current
+  return Layout.coveragePath(layout, root, Match.structuralMember(root), path)?.type
 }
 
 const coverageFieldPathType = (
@@ -1466,33 +1464,7 @@ const coverageFieldPathType = (
   member: Match.CoverageIdentity,
   path: ReadonlyArray<DeclarationFacts.FieldId>,
 ): DeclarationFacts.SemanticType | undefined => {
-  if (member._tag !== 'NominalUnionVariant')
-    return fieldPathType(layout, Match.sourceType(member), path)
-  let current: DeclarationFacts.SemanticType | undefined = member.type
-  let variant = Layout.entry(layout, member.type)?.representation
-  for (const [ordinal, selector] of path.entries()) {
-    let field: Layout.Field | undefined
-    if (ordinal === 0 && variant?._tag === 'NominalUnion') {
-      field = variant.variants
-        .find((candidate) => candidate.ordinal === member.variantOrdinal)
-        ?.fields.find((candidate) => DeclarationFacts.sameFieldId(candidate.id, selector))
-    } else if (SilkType.isNominal(current)) {
-      const representation: Layout.Representation | undefined = Layout.entry(
-        layout,
-        current,
-      )?.representation
-      field =
-        representation?._tag === 'Aggregate'
-          ? representation.fields.find((candidate) =>
-              DeclarationFacts.sameFieldId(candidate.id, selector),
-            )
-          : undefined
-    }
-    current = field?.type
-    variant = undefined
-    if (current === undefined) return undefined
-  }
-  return current
+  return Layout.coveragePath(layout, Match.sourceType(member), member, path)?.type
 }
 
 const sameMembers = (
@@ -5881,6 +5853,7 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
               ...(arm.member === undefined ? {} : { member: arm.member }),
               universal: arm.universal,
               guarded: arm.guard !== undefined,
+              tests: arm.tests ?? [],
             })),
             'Runtime',
           )
@@ -5948,18 +5921,110 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
           }
 
           for (const arm of operation.arms) {
-            for (const binding of arm.bindings) {
+            const pathProven = (
+              selectors: ReadonlyArray<PlaceSelector>,
+              tests: NonNullable<(typeof arm)['tests']>,
+            ): boolean => {
+              const prefix = operation.selectors?.length ?? 0
+              return selectors.every((selector, ordinal) => {
+                if (
+                  selector._tag !== 'VariantSelector' ||
+                  !selectors.slice(prefix, ordinal).some((part) => part._tag === 'FieldSelector')
+                )
+                  return true
+                return tests.some(
+                  (test) =>
+                    test.member._tag === 'NominalUnionVariant' &&
+                    test.member.variantOrdinal === selector.ordinal &&
+                    samePlaceSelectors(test.selectors, selectors.slice(0, ordinal)),
+                )
+              })
+            }
+            for (const [testOrdinal, test] of (arm.tests ?? []).entries()) {
+              const resolved =
+                arm.member === undefined
+                  ? undefined
+                  : Layout.coveragePath(
+                      self.layout,
+                      semanticType(operation.scrutineeType),
+                      arm.member,
+                      test.path,
+                    )
+              const planned =
+                resolved === undefined ? undefined : Layout.callingShape(self.layout, resolved.type)
+              const expected: ReadonlyArray<PlaceSelector> = [
+                ...(operation.selectors ?? []),
+                ...(resolved?.selectors ?? []).map((selector): PlaceSelector =>
+                  selector._tag === 'Variant'
+                    ? {
+                        _tag: 'VariantSelector',
+                        ordinal: selector.ordinal,
+                        provenance: operation.provenance,
+                      }
+                    : {
+                        _tag: 'FieldSelector',
+                        field: selector.field,
+                        provenance: operation.provenance,
+                      },
+                ),
+              ]
+              if (
+                planned === undefined ||
+                !callingShapeEquals(planned, test.shape) ||
+                !sameCoverage(Layout.coverageMembers(planned), test.domain) ||
+                !test.domain.some((member) => Match.selects(test.member, member, 'Runtime')) ||
+                !samePlaceSelectors(expected, test.selectors) ||
+                !pathProven(expected, (arm.tests ?? []).slice(0, testOrdinal))
+              ) {
+                violations.push(
+                  Object.freeze({
+                    _tag: 'Violation',
+                    rule: 'InvalidMatchDecision',
+                    function: fn.id,
+                    region: region.id,
+                    detail: 'nested pattern test disagrees with its canonical path or domain',
+                  }),
+                )
+              }
+            }
+            for (const binding of [...arm.bindings, ...arm.cleanupBindings]) {
               const localType = fn.localTypes.at(binding.destination.ordinal)
               const selected =
                 arm.member === undefined
                   ? fieldPathType(self.layout, semanticType(operation.scrutineeType), binding.path)
                   : coverageFieldPathType(self.layout, arm.member, binding.path)
+              const resolvedPath =
+                arm.member === undefined
+                  ? undefined
+                  : Layout.coveragePath(
+                      self.layout,
+                      semanticType(operation.scrutineeType),
+                      arm.member,
+                      binding.path,
+                    )
+              const bindingSelectors: ReadonlyArray<PlaceSelector> = [
+                ...(operation.selectors ?? []),
+                ...(resolvedPath?.selectors ?? []).map((selector): PlaceSelector =>
+                  selector._tag === 'Variant'
+                    ? {
+                        _tag: 'VariantSelector',
+                        ordinal: selector.ordinal,
+                        provenance: operation.provenance,
+                      }
+                    : {
+                        _tag: 'FieldSelector',
+                        field: selector.field,
+                        provenance: operation.provenance,
+                      },
+                ),
+              ]
               if (
+                !pathProven(bindingSelectors, arm.tests ?? []) ||
                 localType === undefined ||
                 selected === undefined ||
                 !sameRuntimeType(semanticType(localType), semanticType(binding.type)) ||
                 !sameRuntimeType(selected, semanticType(binding.type)) ||
-                binding.access !== operation.access
+                ('access' in binding && binding.access !== operation.access)
               ) {
                 violations.push(
                   Object.freeze({
@@ -6023,7 +6088,31 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
                           )
                         : coverageFieldPathType(self.layout, arm.member, entry.path)
                     const destinationType = fn.localTypes.at(entry.destination.ordinal)
+                    const path = Layout.coveragePath(
+                      self.layout,
+                      semanticType(operation.scrutineeType),
+                      arm.member ?? Match.structuralMember(semanticType(operation.scrutineeType)),
+                      entry.path,
+                    )
+                    const selectors: ReadonlyArray<PlaceSelector> = [
+                      ...(operation.selectors ?? []),
+                      ...(path?.selectors ?? []).map((selector): PlaceSelector =>
+                        selector._tag === 'Variant'
+                          ? {
+                              _tag: 'VariantSelector',
+                              ordinal: selector.ordinal,
+                              provenance: operation.provenance,
+                            }
+                          : {
+                              _tag: 'FieldSelector',
+                              field: selector.field,
+                              provenance: operation.provenance,
+                            },
+                      ),
+                    ]
                     return (
+                      path !== undefined &&
+                      pathProven(selectors, arm.tests ?? []) &&
                       selected !== undefined &&
                       destinationType !== undefined &&
                       SilkType.equals(semanticType(destinationType), entry.cleanup.type) &&
