@@ -1,7 +1,6 @@
 /** Portable client acceptance for owned reuse, staging, bounded reads, deadlines, and tunnels. */
 export const httpClientAcceptanceSource = `import silk.allocator {Allocator, OutOfMemoryError}
-import silk.byte_duplex {ByteDuplex, ByteIoError, ByteIoOperation, ReadTransfer}
-import silk.bytes {Bytes}
+import silk.byte_duplex {ByteIoError, ByteIoOperation, ReadTransfer}
 import silk.effect {Effect}
 import silk.http {Method, Version, Header}
 import silk.http_target {RequestTarget}
@@ -24,12 +23,6 @@ import silk.http_client {
 }
 import silk.http_client as Client
 import silk.http_transport {HttpTransport, TransportError}
-import silk.memory_byte_duplex {
-  MemoryByteDuplex,
-  MemoryReadEvent,
-  MemoryWriteEvent,
-  MemoryWriteAction,
-}
 import silk.monotonic_clock {MonotonicClock}
 import silk.random {Random}
 import silk.option {Option}
@@ -38,7 +31,6 @@ import silk.system_clock {Instant, SystemClock}
 import silk.uri {Uri}
 import silk.u64
 import silk.usize
-import silk.vector {Vector}
 
 struct FixedClock {
   mark: Instant
@@ -107,33 +99,6 @@ fn bodyLimits() -> BodyLimits {
   }
 }
 
-effect fn providerFor(inputBytes: &[u8], writeCount: usize) -> MemoryByteDuplex
-! OutOfMemoryError
-? &mut Allocator {
-  let input = run Bytes.copy(inputBytes)
-  let mut reads = Vector.make<MemoryReadEvent>()
-  run Vector.append(
-    &mut reads,
-    MemoryReadEvent.Data {readyAt: SystemClock.make(0, 0), bytes: move input},
-  )
-  run Vector.append(&mut reads, MemoryReadEvent.End {readyAt: SystemClock.make(0, 0)})
-  let mut writes = Vector.make<MemoryWriteEvent>()
-  let mut index = usize.ZERO
-  while index < writeCount {
-    run Vector.append(
-      &mut writes,
-      MemoryWriteEvent {
-        readyAt: SystemClock.make(0, 0),
-        action: MemoryWriteAction.Accept {count: 256},
-      },
-    )
-    index = index + usize.ONE
-  }
-  // Tiny buffers can produce one read per byte; retain writes, flushes, and lifecycle events too.
-  let auditCapacity = inputBytes.length + 2 * writeCount + 8
-  return run MemoryByteDuplex.make(move reads, move writes, 256, auditCapacity, Option.none<i32>())
-}
-
 fn limits() -> Limits {
   return Limits {
     head: headLimits(),
@@ -148,67 +113,156 @@ fn limits() -> Limits {
   }
 }
 
+// Only the fixed scripts used below are modeled; accepted bytes are counted, not retained.
 struct TestTransport {
-  failFlush: bool
-  expireAfterWrite: bool
-  memory: MemoryByteDuplex
+  scenario: i32
+  input: &'static [u8]
+  readOffset: usize
+  writeOrdinal: usize
+  accepted: usize
+  closed: bool
 }
 
+fn reached(now: &Instant, target: &Instant) -> bool {
+  if SystemClock.seconds(now) > SystemClock.seconds(target) {
+    return true
+  }
+  if SystemClock.seconds(now) < SystemClock.seconds(target) {
+    return false
+  }
+  return SystemClock.nanoseconds(now) >= SystemClock.nanoseconds(target)
+}
+
+effect fn checkTransportDeadline(deadline: &Option<Instant>, operation: ByteIoOperation) -> ()
+! TransportError
+? &mut MonotonicClock {
+  let now = run MonotonicClock.now()
+  if let Option<Instant>.Some {value} = &deadline.* {
+    if reached(&now, &value) {
+      fail TransportError.Plain {error: ByteIoError.Timeout {operation: move operation}}
+    }
+  }
+  return ()
+}
 
 impl HttpTransport for TestTransport {
   effect fn readSomeRaw(self: &mut Self, output: &mut [u8], deadline: Option<Instant>) -> ReadTransfer
   ! TransportError | OutOfMemoryError
   ? &mut MonotonicClock | &mut Allocator | &mut Random {
-    let result = run Effect.result(ByteDuplex.readSome(&mut output, move deadline))
-      |> Effect.provideMut<ByteDuplex>(&mut self.memory)
-    return match move result {
-      Result.Success {value} => move value
-      Result.Failure {error} => {
-        fail TransportError.Plain {error: move error}
-      }
+    if output.length == usize.ZERO {
+      return ReadTransfer.Data {count: usize.ZERO}
     }
+    if self.closed {
+      fail TransportError.Plain {error: ByteIoError.Closed {operation: ByteIoOperation.Read}}
+    }
+    run checkTransportDeadline(&deadline, ByteIoOperation.Read)
+    if self.scenario == 10 {
+      let ready = SystemClock.make(20, 0)
+      if let Option<Instant>.Some {value} = &deadline {
+        if reached(&ready, &value) {
+          run MonotonicClock.waitUntil(
+            SystemClock.make(SystemClock.seconds(&value), SystemClock.nanoseconds(&value)),
+          )
+          fail TransportError.Plain {error: ByteIoError.Timeout {operation: ByteIoOperation.Read}}
+        }
+      }
+      let now = run MonotonicClock.now()
+      if !reached(&now, &ready) {
+        run MonotonicClock.waitUntil(move ready)
+      }
+      return ReadTransfer.End
+    }
+    if self.readOffset == self.input.length {
+      return ReadTransfer.End
+    }
+    let mut count = self.input.length - self.readOffset
+    if count > output.length {
+      count = output.length
+    }
+    let mut index = usize.ZERO
+    while index < count {
+      output[index] = self.input[self.readOffset + index]
+      index = index + usize.ONE
+    }
+    self.readOffset = self.readOffset + count
+    return ReadTransfer.Data {count: count}
   }
   effect fn writeSomeRaw(self: &mut Self, input: &[u8], deadline: Option<Instant>) -> usize
   ! TransportError | OutOfMemoryError
   ? &mut MonotonicClock | &mut Allocator | &mut Random {
-    let result = run Effect.result(ByteDuplex.writeSome(input, move deadline))
-      |> Effect.provideMut<ByteDuplex>(&mut self.memory)
-    if self.expireAfterWrite {
-      run MonotonicClock.waitUntil(SystemClock.make(5, 0))
+    if input.length == usize.ZERO {
+      return usize.ZERO
     }
-    return match move result {
-      Result.Success {value} => value
-      Result.Failure {error} => {
-        fail TransportError.Plain {error: move error}
+    if self.closed {
+      fail TransportError.Plain {error: ByteIoError.Closed {operation: ByteIoOperation.Write}}
+    }
+    run checkTransportDeadline(&deadline, ByteIoOperation.Write)
+    let ordinal = self.writeOrdinal
+    self.writeOrdinal = ordinal + usize.ONE
+    let mut maximum: usize = 256
+    let mut exhausted = ordinal >= 16
+    let mut failed = false
+    if self.scenario == 9 {
+      if ordinal == usize.ONE {
+        maximum = 2
+      }
+      failed = ordinal == 2
+      exhausted = ordinal >= 3
+    } else if self.scenario == 10 {
+      exhausted = ordinal >= usize.ONE
+    } else if self.scenario == 18 {
+      maximum = 2
+      exhausted = ordinal >= usize.ONE
+    } else if self.scenario == 21 {
+      if ordinal == 2 {
+        maximum = 2
+      }
+      failed = ordinal == 3
+      exhausted = ordinal >= 4
+    }
+    if failed || exhausted {
+      self.closed = true
+      let mut code = 1
+      if failed {
+        code = 88
+      }
+      fail TransportError.Plain {
+        error: ByteIoError.Provider {operation: ByteIoOperation.Write, code: code},
       }
     }
+    let mut count = input.length
+    if count > maximum {
+      count = maximum
+    }
+    if count > 256 - self.accepted {
+      self.closed = true
+      fail TransportError.Plain {
+        error: ByteIoError.Provider {operation: ByteIoOperation.Write, code: 2},
+      }
+    }
+    self.accepted = self.accepted + count
+    if self.scenario == 18 {
+      run MonotonicClock.waitUntil(SystemClock.make(5, 0))
+    }
+    return count
   }
   effect fn flush(self: &mut Self, deadline: Option<Instant>) -> ()
   ! TransportError | OutOfMemoryError
   ? &mut MonotonicClock | &mut Allocator | &mut Random {
-    if self.failFlush {
+    if self.scenario == 19 || self.scenario == 20 {
       fail TransportError.Plain {
         error: ByteIoError.Provider {operation: ByteIoOperation.Flush, code: 93},
       }
     }
-    let result = run Effect.result(ByteDuplex.flush(move deadline))
-      |> Effect.provideMut<ByteDuplex>(&mut self.memory)
-    return match move result {
-      Result.Success {value} => value
-      Result.Failure {error} => {
-        fail TransportError.Plain {error: move error}
-      }
+    if self.closed {
+      fail TransportError.Plain {error: ByteIoError.Closed {operation: ByteIoOperation.Flush}}
     }
+    run checkTransportDeadline(&deadline, ByteIoOperation.Flush)
+    return ()
   }
   effect fn close(self: &mut Self) -> () ! TransportError {
-    let result = run Effect.result(ByteDuplex.close())
-      |> Effect.provideMut<ByteDuplex>(&mut self.memory)
-    return match move result {
-      Result.Success {value} => value
-      Result.Failure {error} => {
-        fail TransportError.Plain {error: move error}
-      }
-    }
+    self.closed = true
+    return ()
   }
 }
 
@@ -681,89 +735,6 @@ effect fn runOwned(transport: TestTransport, origin: Origin, scenario: i32, hand
   )
 }
 
-effect fn scenarioProvider(scenario: i32) -> MemoryByteDuplex ! OutOfMemoryError ? &mut Allocator {
-  if scenario == 21 {
-    let reads = Vector.make<MemoryReadEvent>()
-    let mut writes = Vector.make<MemoryWriteEvent>()
-    run Vector.append(
-      &mut writes,
-      MemoryWriteEvent {
-        readyAt: SystemClock.make(0, 0),
-        action: MemoryWriteAction.Accept {count: 256},
-      },
-    )
-    run Vector.append(
-      &mut writes,
-      MemoryWriteEvent {
-        readyAt: SystemClock.make(0, 0),
-        action: MemoryWriteAction.Accept {count: 256},
-      },
-    )
-    run Vector.append(
-      &mut writes,
-      MemoryWriteEvent {
-        readyAt: SystemClock.make(0, 0),
-        action: MemoryWriteAction.Accept {count: 2},
-      },
-    )
-    run Vector.append(
-      &mut writes,
-      MemoryWriteEvent {
-        readyAt: SystemClock.make(0, 0),
-        action: MemoryWriteAction.Failure {code: 88},
-      },
-    )
-    return run MemoryByteDuplex.make(move reads, move writes, 256, 32, Option.none<i32>())
-  }
-  if scenario == 18 {
-    let reads = Vector.make<MemoryReadEvent>()
-    let mut writes = Vector.make<MemoryWriteEvent>()
-    run Vector.append(
-      &mut writes,
-      MemoryWriteEvent {
-        readyAt: SystemClock.make(0, 0),
-        action: MemoryWriteAction.Accept {count: 2},
-      },
-    )
-    return run MemoryByteDuplex.make(move reads, move writes, 256, 32, Option.none<i32>())
-  }
-
-  if scenario == 10 {
-    let mut reads = Vector.make<MemoryReadEvent>()
-    run Vector.append(&mut reads, MemoryReadEvent.End {readyAt: SystemClock.make(20, 0)})
-    let mut writes = Vector.make<MemoryWriteEvent>()
-    run Vector.append(
-      &mut writes,
-      MemoryWriteEvent {
-        readyAt: SystemClock.make(0, 0),
-        action: MemoryWriteAction.Accept {count: 256},
-      },
-    )
-    return run MemoryByteDuplex.make(move reads, move writes, 256, 32, Option.none<i32>())
-  }
-  if scenario != 9 {
-    return run providerFor(inputFor(scenario), 16)
-  }
-  let reads = Vector.make<MemoryReadEvent>()
-  let mut writes = Vector.make<MemoryWriteEvent>()
-  run Vector.append(
-    &mut writes,
-    MemoryWriteEvent {
-      readyAt: SystemClock.make(0, 0),
-      action: MemoryWriteAction.Accept {count: 256},
-    },
-  )
-  run Vector.append(
-    &mut writes,
-    MemoryWriteEvent {readyAt: SystemClock.make(0, 0), action: MemoryWriteAction.Accept {count: 2}},
-  )
-  run Vector.append(
-    &mut writes,
-    MemoryWriteEvent {readyAt: SystemClock.make(0, 0), action: MemoryWriteAction.Failure {code: 88}},
-  )
-  return run MemoryByteDuplex.make(move reads, move writes, 256, 32, Option.none<i32>())
-}
-
 effect fn runCase(scenario: i32) -> i32 ! ClientError | RequestError | OutOfMemoryError {
   let mut allocator = Allocator.systemAllocatorProvider()
   let mut clock = FixedClock {mark: SystemClock.make(0, 0)}
@@ -828,12 +799,15 @@ effect fn runCase(scenario: i32) -> i32 ! ClientError | RequestError | OutOfMemo
     512,
   )
     |> Effect.provideMut<Allocator>(&mut allocator)
-  let memory = run scenarioProvider(scenario)
-    |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut input = inputFor(scenario)
+  if scenario == 9 || scenario == 10 || scenario == 18 || scenario == 21 { input = b"" }
   let adapter = TestTransport {
-    memory: move memory,
-    expireAfterWrite: scenario == 18,
-    failFlush: scenario == 19 || scenario == 20,
+    scenario: scenario,
+    input: input,
+    readOffset: usize.ZERO,
+    writeOrdinal: usize.ZERO,
+    accepted: usize.ZERO,
+    closed: false,
   }
   let handler = Handler {request: move request, scenario: scenario}
   let attempted = run Effect.result(runOwned(move adapter, origin, scenario, move handler))
