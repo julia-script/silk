@@ -3641,7 +3641,13 @@ const checkFunction = (
       const key = siteKey(site)
       state.bindings.set(key, mutable)
       state.order.push(mutable)
-      frame.push(key)
+      // Borrowed pattern bindings observe the owner's payload; only moved values own cleanup.
+      if (
+        pattern.access !== 'Shared' &&
+        pattern.access !== 'Exclusive' &&
+        pattern.access !== 'Place'
+      )
+        frame.push(key)
       live.set(key, MovePath.make())
       sites.push(site)
     }

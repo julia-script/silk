@@ -99,7 +99,7 @@ impl Sha1 {
   /// If the cumulative message bit length does not fit in `u64`, this operation traps before it
   /// absorbs bytes from this call.
   pub fn update(self: &mut Self, bytes: &[u8]) -> () {
-    let addedBits = u64.multiply(usize.toU64(bytes.length), 8)
+    let addedBits = usize.toU64(bytes.length) * 8
     let nextBitLength = u64.add(self.bitLength, addedBits)
     self.bitLength = nextBitLength
 

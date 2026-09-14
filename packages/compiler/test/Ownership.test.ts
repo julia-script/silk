@@ -514,6 +514,16 @@ it.effect(
 struct Token { value: i32 }
 impl Drop for Token { fn drop(self: &mut Token) -> () { return () } }
 struct Pair { left: Token right: Token }
+union Maybe { Some { token: Token }, None }
+struct Wrapped { maybe: Maybe }
+fn touch(token: &mut Token) -> i32 { return token.value }
+fn inspectBorrowed(owned: &mut Wrapped, early: bool) -> i32 {
+  if let Maybe.Some { token } = &owned.maybe {
+    if early { return token.value }
+  }
+  if let Maybe.Some { token } = &mut owned.maybe { let value = touch(&mut token) }
+  return 0
+}
 fn choose(flag: bool) -> i32 {
   let pair = Pair { left: Token { value: 1 }, right: Token { value: 2 } }
   if flag { let first = move pair.left }
@@ -531,12 +541,31 @@ fn repeat() -> i32 {
   }
   return index
 }
-pub fn main() -> i32 { return choose(true) + repeat() }
+pub fn main() -> i32 {
+  let mut owned = Wrapped { maybe: Maybe.Some { token: Token { value: 7 } } }
+  return inspectBorrowed(&mut owned, false) + inspectBorrowed(&mut owned, true) + choose(true) + repeat()
+}
 `),
       )
       assert.deepEqual(Analysis.diagnostics(snapshot), [])
       const program = Analysis.loweredMir(snapshot)
       assert.deepEqual(MirVerification.verify(program), [])
+      const borrowed =
+        program.functions.find((fn) => fn.id.name === 'inspectBorrowed') ??
+        unreachable('expected borrowed pattern function')
+      assert.isFalse(
+        MirVerification.operations(borrowed).some(
+          (operation) => operation._tag === 'Drop' && operation.cleanup._tag !== 'NoCleanup',
+        ),
+      )
+      const main =
+        program.functions.find((fn) => fn.id.name === 'main') ??
+        unreachable('expected owning caller')
+      assert.isTrue(
+        MirVerification.operations(main).some(
+          (operation) => operation._tag === 'Drop' && operation.cleanup._tag !== 'NoCleanup',
+        ),
+      )
       const operations = program.functions.flatMap((fn) => MirVerification.operations(fn))
       assert.isTrue(
         operations.some(

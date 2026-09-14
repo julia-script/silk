@@ -2,6 +2,9 @@ import { readFileSync } from 'node:fs'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
+import * as Frontend from '../src/Frontend.js'
+import * as SourceFile from '../src/SourceFile.js'
+import * as SourceResolver from '../src/SourceResolver.js'
 import * as AnalysisFixture from './support/AnalysisFixture.js'
 
 const encoder = new TextEncoder()
@@ -17,12 +20,13 @@ it.effect(
       const example = reference.match(/```silk\n([\s\S]*?)\n```/)?.[1]
       assert.isString(example)
       if (example === undefined) return
-      const snapshot = yield* AnalysisFixture.declarations(
-        'http-server/reference-example',
-        encoder.encode(example),
-      )
+      const sourceId = 'http-server/reference-example'
+      const snapshot = yield* Frontend.frontend({
+        root: SourceFile.make(sourceId, encoder.encode(example)),
+        configuration: AnalysisFixture.configuration(sourceId, 'x86_64-unknown-linux-gnu', []),
+      }).pipe(Effect.provide(SourceResolver.empty))
       assert.deepEqual(
-        Analysis.diagnostics(snapshot).map((diagnostic) => ({
+        snapshot.diagnostics.map((diagnostic) => ({
           code: diagnostic.code,
           message: diagnostic.message,
           sourceId: diagnostic.span.sourceId,
@@ -66,7 +70,10 @@ pub fn main() -> i32 { return 42 }`
   180_000,
 )
 
-const ownershipSource = `import silk.allocator {Allocator, OutOfMemoryError}
+const ownershipSource = `import silk.http_head {RequestParser}
+import silk.result {Result}
+import silk.websocket_upgrade {Limits as UpgradeLimits, inspect}
+import silk.allocator {Allocator, OutOfMemoryError}
 import silk.byte_duplex {ByteDuplex}
 import silk.http_server {Connection, Request, ServerError, readSome, withRequest}
 import silk.monotonic_clock {MonotonicClock}
@@ -106,10 +113,26 @@ where &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut Monoton
     move connection, Option.none<Instant>(), leak,
   )
 }
+
+fn retainOffer(mut parser: RequestParser) -> () {
+  let head = match move RequestParser.head(&parser) {
+    Result.Failure {error} => { drop error return () }
+    Result.Success {value} => value
+  }
+  let offer = match move inspect(&head, UpgradeLimits.default()) {
+    Result.Failure {error} => { drop error return () }
+    Result.Success {value} => value
+  }
+  drop head
+  let reset = RequestParser.reset(&mut parser)
+  drop reset
+  drop offer
+  return ()
+}
 `
 
 it.effect(
-  'keeps the transport private and rejects overlapping and escaping request loans',
+  'keeps transport and WebSocket offer loans exclusive and scoped',
   () =>
     Effect.gen(function* () {
       const snapshot = yield* AnalysisFixture.declarations(
@@ -125,6 +148,7 @@ it.effect(
         { code: 'OWN0010', span: '&mut request.*' },
         { code: 'SEM0076', span: 'leak' },
         { code: 'SEM0122', span: 'leak' },
+        { code: 'OWN0010', span: '&mut parser' },
       ])
     }),
   120_000,

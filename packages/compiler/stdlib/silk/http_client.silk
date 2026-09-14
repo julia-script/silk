@@ -1123,8 +1123,7 @@ pub effect fn trailers<'head, 'exchange, P>(exchange: &'head Exchange<'exchange,
         fail ClientError.InvalidState
       }
       Option.Some {value} => {
-        let decoders = Box.get<ContentDecoder>(&value)
-        return match move ContentDecoder.trailers(&decoders[0]) {
+        return match move contentBoxTrailers(&value) {
           Result.Failure {error} => {
             fail ClientError.Content {error: move error}
           }
@@ -1150,7 +1149,12 @@ pub effect fn finishResponse<'exchange, P>(exchange: &mut Exchange<'exchange, P>
   let mut complete = false
   if exchange.contentSelected {
     exchange.phaseValue = ExchangePhase.Aborted
-    complete = run contentComplete(&exchange.contentDecoder)
+    complete = match move contentComplete(&exchange.contentDecoder) {
+      Result.Success {value} => value
+      Result.Failure {error} => {
+        fail move error
+      }
+    }
     exchange.phaseValue = ExchangePhase.Response
   } else {
     complete = match & exchange.decoder {
@@ -1740,22 +1744,31 @@ where
   return unavailable<ContentProgress>()
 }
 
-effect fn contentComplete(decoder: &Option<Box<ContentDecoder>>) -> bool ! ClientError {
-  return match & decoder.* {
-    Option.None => false
-    Option.Some {value} => {
-      let decoders = Box.get<ContentDecoder>(&value)
-      return match move ContentDecoder.completion(&decoders[0]) {
-        Result.Failure {error} => {
-          fail ClientError.Content {error: move error}
-        }
-        Result.Success {value: evidence} => match move evidence {
-          Option.None => false
-          Option.Some {value: completion} => {
-            drop completion
-            return true
-          }
-        }
+fn contentComplete(decoder: &Option<Box<ContentDecoder>>) -> Result<bool, ClientError> {
+  let completed = match & decoder.* {
+    Option.None => {
+      return Result.succeed<bool, ClientError>(false)
+    }
+    Option.Some {value} => contentBoxComplete(&value)
+  }
+  return match move completed {
+    Result.Failure {error} => {
+      return Result.failResult<bool, ClientError>(ClientError.Content {error: move error})
+    }
+    Result.Success {value} => Result.succeed<bool, ClientError>(value)
+  }
+}
+
+fn contentBoxComplete(boxed: &Box<ContentDecoder>) -> Result<bool, ContentError<'static>> {
+  let decoders = Box.get<ContentDecoder>(boxed)
+  let completed = ContentDecoder.completion(&decoders[0])
+  return match move completed {
+    Result.Failure {error} => Result.failResult<bool, ContentError<'static>>(move error)
+    Result.Success {value: evidence} => match move evidence {
+      Option.None => Result.succeed<bool, ContentError<'static>>(false)
+      Option.Some {value} => {
+        drop value
+        return Result.succeed<bool, ContentError<'static>>(true)
       }
     }
   }
@@ -1773,4 +1786,12 @@ fn stepContentBox(boxed: &mut Box<ContentDecoder>, input: &[u8], output: &mut [u
 > {
   let mut decoders = Box.getMut<ContentDecoder>(move boxed)
   return ContentDecoder.step(&mut decoders[0], input, move output, ended)
+}
+
+fn contentBoxTrailers<'view>(boxed: &'view Box<ContentDecoder>) -> Result<
+  Option<Trailers<'view>>,
+  ContentError<'static>,
+> {
+  let decoders = Box.get<ContentDecoder>(boxed)
+  return ContentDecoder.trailers(&decoders[0])
 }

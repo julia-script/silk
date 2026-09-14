@@ -53,6 +53,7 @@ import { httpHeadAcceptanceSource } from './httpHeadAcceptance.js'
 import { httpBodyAcceptanceSource } from './httpBodyAcceptance.js'
 import { httpContentAcceptanceSource } from './httpContentAcceptance.js'
 import { httpServerAcceptanceSource } from './httpServerAcceptance.js'
+import { websocketUpgradeAcceptanceSource } from './websocketUpgradeAcceptance.js'
 import { base64AcceptanceSource } from './base64Acceptance.js'
 import { httpRequestAcceptanceSource } from './httpRequestAcceptance.js'
 import { httpClientAcceptanceSource } from './httpClientAcceptance.js'
@@ -6424,6 +6425,11 @@ export const nativeCorpus: ReadonlyArray<CorpusProgram> = [
   {
     name: 'http-client-request',
     source: httpRequestAcceptanceSource,
+    expected: { _tag: 'Completes', result: 0 },
+  },
+  {
+    name: 'websocket-upgrade',
+    source: websocketUpgradeAcceptanceSource,
     expected: { _tag: 'Completes', result: 0 },
   },
   {

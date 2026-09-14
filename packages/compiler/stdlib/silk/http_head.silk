@@ -1974,7 +1974,7 @@ fn writeUsize(output: &mut [u8], offset: usize, value: usize) -> () {
   let wide = usize.toU64(value)
   let mut index = usize.ZERO
   while index < 8 {
-    output[offset + index] = u64.toU8(u64.shiftRight(wide, usize.toU64(index * 8)))
+    output[offset + index] = u64.toU8(u64.bitAnd(u64.shiftRight(wide, usize.toU64(index * 8)), 255))
     index = index + usize.ONE
   }
   return ()

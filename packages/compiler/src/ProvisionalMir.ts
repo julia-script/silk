@@ -37,6 +37,10 @@ export type ExecutionKey =
     }
   | {
       readonly _tag: 'ProvidedEffectRunnerExecution'
+      readonly baseKind:
+        | 'EffectRunnerExecution'
+        | 'WitnessEffectRunnerExecution'
+        | 'BuiltinEffectRunnerExecution'
       readonly owner: Instances.InstanceKey
       readonly site: Hir.EffectSiteId
       readonly identity: string
@@ -122,9 +126,10 @@ const executionInstance = (key: ExecutionKey): Instances.InstanceKey => {
   }
   let cached = executionInstanceCache.get(key)
   if (cached === undefined) {
+    const kind = key._tag === 'ProvidedEffectRunnerExecution' ? key.baseKind : key._tag
     let siteKind = 'effect-site'
-    if (key._tag === 'WitnessEffectRunnerExecution') siteKind = 'witness-effect-site'
-    else if (key._tag === 'BuiltinEffectRunnerExecution') siteKind = 'builtin-effect-site'
+    if (kind === 'WitnessEffectRunnerExecution') siteKind = 'witness-effect-site'
+    else if (kind === 'BuiltinEffectRunnerExecution') siteKind = 'builtin-effect-site'
     cached = Object.freeze({
       _tag: 'InstanceKey',
       declaration: key.runner,
@@ -721,6 +726,7 @@ const runnerOf = (
       ? baseExecution
       : Object.freeze({
           _tag: 'ProvidedEffectRunnerExecution',
+          baseKind: executionKind,
           owner: environment.instance,
           site: environment.site,
           identity: providedIdentity,
@@ -1539,7 +1545,8 @@ const providedRunnersOf = (
 const witnessExecution = (
   expression: Extract<Hir.Expression, { readonly _tag: 'InterfaceOperationCall' | 'BuiltinCall' }>,
   context: BuildContext,
-): Execution | undefined => {
+  providedKey?: Extract<ExecutionKey, { readonly _tag: 'ProvidedEffectRunnerExecution' }>,
+): { readonly execution: Execution; readonly selectedRunner?: Runner } | undefined => {
   const site = expression.witnessEffectSite
   const bound =
     expression._tag === 'InterfaceOperationCall' ? expression : expression.interfaceOperation
@@ -1563,15 +1570,18 @@ const witnessExecution = (
     bound.contract,
     context.instance.substitution,
   )
-  const key: ExecutionKey = Object.freeze({
-    _tag: 'WitnessEffectRunnerExecution',
-    owner: context.instance.key,
-    site,
-    identity: Instances.effectIdentity(context.instance.key, site),
-    runner: Hir.effectRunnerId(context.instance.key.declaration, site),
-  })
+  const key: ExecutionKey =
+    providedKey ??
+    Object.freeze({
+      _tag: 'WitnessEffectRunnerExecution',
+      owner: context.instance.key,
+      site,
+      identity: Instances.effectIdentity(context.instance.key, site),
+      runner: Hir.effectRunnerId(context.instance.key.declaration, site),
+    })
   const regions: Array<Region> = []
   let classification: Classification = 'Unknown'
+  let selectedRunner: Runner | undefined
   if (selected === undefined) {
     const intrinsic = ConformanceProof.interfaceOperationIntrinsic(
       context.index,
@@ -1604,6 +1614,7 @@ const witnessExecution = (
         providers: context.ambientProviders,
       })
       if (runner.execution._tag === 'UnknownExecution') return undefined
+      selectedRunner = runner
       classification = runner.classification
       if (classification !== 'Synchronous') {
         const policy: CompletionPolicy = Object.freeze({
@@ -1642,10 +1653,13 @@ const witnessExecution = (
     }
   }
   return Object.freeze({
-    _tag: 'ProvisionalExecution',
-    key,
-    classification,
-    regions: Object.freeze(regions),
+    execution: Object.freeze({
+      _tag: 'ProvisionalExecution',
+      key,
+      classification,
+      regions: Object.freeze(regions),
+    }),
+    ...(selectedRunner === undefined ? {} : { selectedRunner }),
   })
 }
 
@@ -1727,7 +1741,11 @@ export const build = (
           expression.witnessEffectSite !== undefined
         ) {
           const execution = witnessExecution(expression, context)
-          if (execution !== undefined) executions.push(execution)
+          if (execution !== undefined) {
+            executions.push(execution.execution)
+            if (execution.selectedRunner?.execution._tag === 'ProvidedEffectRunnerExecution')
+              observedProvided.push(execution.selectedRunner)
+          }
           continue
         }
         if (expression._tag === 'BuiltinCall') {
@@ -1818,6 +1836,31 @@ export const build = (
       const owner = discovery.instances.find(
         (candidate) => Instances.keyText(candidate.key) === Instances.keyText(key.owner),
       )
+      // A witness adapter has no authored Effect block. Follow its selected implementation
+      // with the same lexical providers so nested service calls retain their transfer control.
+      if (owner !== undefined && key.baseKind === 'WitnessEffectRunnerExecution') {
+        const witness = witnessExpressionAt(owner, key.site)
+        if (witness === undefined) continue
+        const selected = witnessExecution(
+          witness,
+          {
+            discovery,
+            layout,
+            index,
+            instance: owner,
+            bindings: bindingsOf(owner.function),
+            effectClassifications,
+            ambientProviders: key.providers,
+          },
+          key,
+        )
+        if (selected === undefined) continue
+        represented.add(key.identity)
+        executions.push(selected.execution)
+        if (selected.selectedRunner?.execution._tag === 'ProvidedEffectRunnerExecution')
+          pendingProvided.push(selected.selectedRunner)
+        continue
+      }
       const body = owner?.function.statements
         .flatMap(Hir.statementExpressions)
         .flatMap(Hir.expressionTree)

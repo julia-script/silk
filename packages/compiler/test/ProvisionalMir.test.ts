@@ -469,3 +469,84 @@ pub fn main() -> i32 {
         }
     }),
   )
+
+it.effect('retains provider-specific parking through a generic interface handler', () =>
+  Effect.gen(function* () {
+    const self = yield* snapshot(`import silk.effect {Effect}
+import silk.execution {Execution}
+import silk.result {Result}
+struct ParkGuard {wake: Intrinsic.Wake}
+fn retainWake(wake: Intrinsic.Wake) -> ParkGuard { return ParkGuard {wake: move wake} }
+service Clock { effect fn wait() -> () ? &mut Clock }
+struct Fixed {}
+impl Clock for Fixed { effect fn wait(self: &mut Self) -> () { return () } }
+struct Parking {}
+impl Clock for Parking { effect fn wait(self: &mut Self) -> () { run Execution.park(retainWake) return () } }
+union Problem {Bad}
+service Io { effect fn flush() -> () ! Problem ? &mut Io | &mut Clock }
+effect fn flushIo() -> () ! Problem ? &mut Io | &mut Clock {
+ let result = run Effect.result(Io.flush())
+ match move result {
+  Result.Success {value} => { drop value return () }
+  Result.Failure {error} => { fail error }
+ }
+}
+struct Inner {}
+impl Io for Inner { effect fn flush(self: &mut Self) -> () ! Problem ? &mut Clock { return () } }
+struct Transport {mode: i32 inner: Inner}
+impl Transport {
+ effect fn flush(self: &mut Self) -> () ! Problem ? &mut Clock {
+  if self.mode == 4 { fail Problem.Bad }
+  if self.mode == 5 { run Clock.wait() }
+  return run flushIo() |> Effect.provideMut<Io>(&mut self.inner)
+ }
+}
+impl Io for Transport { flush: Transport.flush }
+effect fn useTransport() -> i32 ! Problem ? &mut Clock {
+ let mut transport = Transport {mode: 5, inner: Inner {}}
+ run flushIo() |> Effect.provideMut<Io>(&mut transport)
+ return 42
+}
+interface Handler { effect fn handle(self: Self) -> i32 ! Problem ? &mut Clock }
+struct HandlerValue {}
+impl Handler for HandlerValue { effect fn handle(self: Self) -> i32 ! Problem ? &mut Clock { drop self return run useTransport() } }
+effect fn withHandler<H: Handler>(handler: H) -> i32 ! Problem ? &mut Clock { return run Handler.handle(move handler) }
+effect fn all() -> i32 ! Problem {
+ let mut fixed = Fixed {}
+ let first = run withHandler(HandlerValue {}) |> Effect.provideMut<Clock>(&mut fixed)
+ let mut parking = Parking {}
+ return first + (run withHandler(HandlerValue {}) |> Effect.provideMut<Clock>(&mut parking))
+}
+effect fn recover(error: Problem) -> i32 { drop error return 199 }
+pub fn main() -> i32 { return run Effect.catchAll(all(), recover) }
+`)
+    assert.deepEqual(Analysis.diagnostics(self), [])
+    const provisional = available(self)
+    assert.deepEqual(ProvisionalMir.verify(provisional), [])
+    const program = Analysis.loweredMir(self)
+    assert.deepEqual(MirVerification.verify(program), [])
+    const flushes = program.functions.filter((fn) =>
+      fn.id.name.startsWith('Transport.flush$effect$'),
+    )
+    assert.lengthOf(flushes, 2)
+    for (const fn of flushes) {
+      const parking =
+        fn.effectRunner?.providers.some(
+          (provider) =>
+            Type.isNominal(provider.providerType) && provider.providerType.name === 'Parking',
+        ) ?? false
+      const execution = ProvisionalMir.executionOf(provisional, fn.instance)
+      assert.strictEqual(execution?.key._tag, 'ProvidedEffectRunnerExecution')
+      assert.strictEqual(execution?.classification, parking ? 'Suspendable' : 'Synchronous')
+      const wait =
+        MirVerification.operations(fn).find(
+          (operation) =>
+            operation._tag === 'RunEffectValue' && operation.runner.name.includes('.wait$effect$'),
+        ) ?? unreachable('expected the selected clock operation')
+      assert.strictEqual(
+        fn.suspension?.regions.some((region) => region.operation === wait) ?? false,
+        parking,
+      )
+    }
+  }),
+)
