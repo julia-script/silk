@@ -104,6 +104,44 @@ it.effect(
       assert.deepEqual(MirVerification.verify(left), [], SuspensionMir.summary(left))
       assert.strictEqual(MirEncoding.encode(left), MirEncoding.encode(right))
       assert.strictEqual(SuspensionMir.summary(left), SuspensionMir.summary(right))
+      // A conservative discovery result for a synchronous constructor must not acquire a
+      // transfer ABI merely because a separate retained runner originates suspension.
+      const constructor = left.functions.find((fn) => fn.id.name === 'program')
+      assert.isDefined(constructor)
+      if (constructor === undefined) return
+      assert.isUndefined(constructor.suspension)
+      const conservative = SuspensionMir.finalize(
+        left,
+        {
+          _tag: 'ProvisionalMirModule',
+          module: 'suspension-mir/main',
+          executions: [
+            {
+              _tag: 'ProvisionalExecution',
+              classification: 'Unknown',
+              regions: [],
+              key: {
+                _tag: 'InstanceExecution',
+                instance: constructor.instance,
+                functionOrdinal: 0,
+                identity: 'conservative-constructor',
+              },
+            },
+          ],
+        },
+        {
+          _tag: 'SuspensionOwnershipModule',
+          module: 'suspension-mir/main',
+          plans: [],
+          executionPackages: [],
+          violations: [],
+        },
+        first.index,
+      )
+      assert.isUndefined(conservative.functions.find((fn) => fn.id === constructor.id)?.suspension)
+      assert.isTrue(
+        suspensionRegions(conservative).some((region) => region._tag === 'SuspendEffectRegion'),
+      )
       const regions = suspensionRegions(left)
       assert.lengthOf(
         regions.filter((region) => region._tag === 'SuspendEffectRegion'),

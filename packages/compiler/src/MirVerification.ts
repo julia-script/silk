@@ -1,3 +1,4 @@
+import * as SuspensionMir from './SuspensionMir.js'
 import * as CoroutineFrame from './CoroutineFrame.js'
 import * as NativeAssembly from './NativeAssembly.js'
 import * as MirInitialization from './MirInitialization.js'
@@ -2677,152 +2678,6 @@ const loanViolations = (
   return Object.freeze(violations)
 }
 
-interface SuspensionCallTarget {
-  readonly declaration: DeclarationFacts.CanonicalId
-  readonly typeArguments: ReadonlyArray<SilkType.GenericArgument>
-  readonly staticArguments: ReadonlyArray<StaticValue.Value>
-}
-
-const suspensionCallTargets = (
-  operation: Operation,
-  fn: MirFunction,
-): ReadonlyArray<SuspensionCallTarget> => {
-  switch (operation._tag) {
-    case 'Call':
-    case 'RunEffect':
-      return [
-        Object.freeze({
-          declaration: operation.target,
-          typeArguments: operation.typeArguments,
-          staticArguments: operation.staticArguments ?? Object.freeze([]),
-        }),
-      ]
-    case 'RunEffectValue':
-    case 'RunStaticEffect':
-    case 'CatchEffect':
-      return [
-        Object.freeze({
-          declaration: operation.runner,
-          typeArguments: operation.runnerTypeArguments,
-          staticArguments: operation.runnerStaticArguments ?? Object.freeze([]),
-        }),
-        ...('cancellationFinalizer' in operation && operation.cancellationFinalizer !== undefined
-          ? [
-              Object.freeze({
-                declaration: operation.cancellationFinalizer.runner,
-                typeArguments: operation.cancellationFinalizer.runnerTypeArguments,
-                staticArguments:
-                  operation.cancellationFinalizer.runnerStaticArguments ?? Object.freeze([]),
-              }),
-            ]
-          : []),
-        ...('cancellationFinalizer' in operation &&
-        operation.cancellationFinalizer?._tag === 'ResourceCancellationFinalizer'
-          ? [
-              Object.freeze({
-                declaration: operation.cancellationFinalizer.releaseTarget,
-                typeArguments: operation.cancellationFinalizer.releaseTypeArguments,
-                staticArguments: Object.freeze([]),
-              }),
-            ]
-          : []),
-      ]
-    case 'RunEffectComposite':
-      return operation.alternatives.map((alternative) =>
-        Object.freeze({
-          declaration: alternative.runner,
-          typeArguments: alternative.runnerTypeArguments,
-          staticArguments: alternative.runnerStaticArguments ?? Object.freeze([]),
-        }),
-      )
-    case 'ApplyCallable': {
-      const type =
-        operation.callable === undefined ? undefined : fn.localTypes.at(operation.callable.ordinal)
-      const target = operation.target ?? (type?._tag === 'CallableValue' ? type.target : undefined)
-      return target?._tag === 'DeclarationCallableTarget'
-        ? [
-            Object.freeze({
-              declaration: target.declaration,
-              typeArguments: operation.typeArguments,
-              staticArguments: Object.freeze([]),
-            }),
-          ]
-        : []
-    }
-    default:
-      return []
-  }
-}
-
-const originReachableSuspensionFunctions = (self: Module): ReadonlySet<string> => {
-  const reachable = new Set(
-    self.functions
-      .filter((fn) =>
-        fn.suspension?.regions.some(
-          (region) =>
-            region._tag === 'SuspendEffectRegion' ||
-            (region._tag === 'RunSuspendableEffectRegion' &&
-              region.operation._tag === 'ExecutionPark'),
-        ),
-      )
-      .map((fn) => instanceText(fn.instance)),
-  )
-  const byDeclaration = new Map<string, Array<MirFunction>>()
-  for (const fn of self.functions) {
-    const declarationKey = `${fn.id.module}\u0000${fn.id.name}`
-    const bucket = byDeclaration.get(declarationKey)
-    if (bucket === undefined) byDeclaration.set(declarationKey, [fn])
-    else bucket.push(fn)
-  }
-  const pending = self.functions
-    .filter((fn) => !reachable.has(instanceText(fn.instance)))
-    .map((fn) => ({
-      key: instanceText(fn.instance),
-      targets: [
-        ...operations(fn).flatMap((operation) => suspensionCallTargets(operation, fn)),
-        ...(fn.suspension?.regions ?? []).flatMap((region) =>
-          region._tag === 'RunSuspendableEffectRegion' && region.runner.declaration !== undefined
-            ? [
-                {
-                  declaration: region.runner.declaration,
-                  typeArguments: region.runner.typeArguments,
-                  staticArguments: region.runner.instance?.staticArguments ?? Object.freeze([]),
-                },
-              ]
-            : [],
-        ),
-      ],
-    }))
-  let changed = true
-  while (changed) {
-    changed = false
-    for (let index = pending.length - 1; index >= 0; index -= 1) {
-      const entry = pending[index]
-      if (entry === undefined) continue
-      const reachesOrigin = entry.targets.some((target) =>
-        (
-          byDeclaration.get(`${target.declaration.module}\u0000${target.declaration.name}`) ?? []
-        ).some(
-          (candidate) =>
-            reachable.has(instanceText(candidate.instance)) &&
-            matchesInstance(
-              candidate,
-              target.declaration,
-              target.typeArguments,
-              target.staticArguments,
-            ),
-        ),
-      )
-      if (reachesOrigin) {
-        reachable.add(entry.key)
-        pending.splice(index, 1)
-        changed = true
-      }
-    }
-  }
-  return reachable
-}
-
 const suspensionTypes = (fn: MirFunction): ReadonlyArray<SilkType.Type> =>
   (fn.suspension?.regions ?? []).flatMap((region) => {
     const runner = region._tag === 'SuspendEffectRegion' ? region.deferred : region.runner
@@ -3565,13 +3420,12 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
       }),
     )
   }
-  const originReachable = originReachableSuspensionFunctions(self)
+  const originReachable = SuspensionMir.originReachableFunctions(self)
   const orphanRelay = self.functions
     .flatMap((fn) =>
       (fn.suspension?.regions ?? []).flatMap((region) => {
         if (
           region._tag !== 'RunSuspendableEffectRegion' ||
-          region.runner.classification === 'Unknown' ||
           // Parking originates an external transfer in this execution. Its suspension region
           // carries continuation state, but it does not call a separate child runner.
           region.operation._tag === 'ExecutionPark'
