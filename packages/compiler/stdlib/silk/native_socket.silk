@@ -42,39 +42,61 @@ import silk.usize
 
 /// The visible directional lifetime of one native connection.
 pub enum ConnectionPhase {
+  /// Native connection establishment has not completed.
   Connecting,
+  /// The descriptor is available for its permitted operations.
   Open,
+  /// The local write direction is closed; reads remain available.
   WriteClosed,
+  /// The descriptor is terminally closed.
   Closed,
 }
 
 /// The native boundary that produced a socket failure.
 pub enum NativeSocketOperation {
+  /// Native socket creation.
   Socket,
+  /// Native descriptor or socket-option setup.
   Configure,
+  /// Native outbound connection establishment.
   Connect,
+  /// Native local-address binding.
   Bind,
+  /// Native listener activation.
   Listen,
+  /// Native bound-address inspection.
   GetSocketName,
+  /// Native incoming connection acceptance.
   Accept,
+  /// Conversion of a returned native address.
   ConvertAddress,
+  /// Native zero-time readiness inspection.
   Poll,
+  /// Native socket error inspection.
   GetSocketOption,
+  /// Native input transfer.
   Read,
+  /// Native output transfer.
   Write,
+  /// Native write-direction shutdown.
   ShutdownWrite,
+  /// Native terminal descriptor release.
   Close,
 }
 
 /// The visible lifetime of one native listener.
 pub enum ListenerPhase {
+  /// The descriptor is available for its permitted operations.
   Open,
+  /// The descriptor is terminally closed.
   Closed,
 }
 
 /// The rejected ListenOptions field.
 pub enum ListenOptionsReason {
+  /// The kernel backlog is outside 1..65535.
   KernelBacklog,
+  /// The polling interval is outside 1..1,000,000,000 nanoseconds.
   PollInterval,
 }
 
@@ -88,15 +110,21 @@ pub struct ListenOptionsError {
 
 /// The rejected local pathname condition.
 pub enum InvalidBindReason {
+  /// The pathname contains no bytes.
   EmptyPath,
+  /// The pathname does not start with a slash.
   RelativePath,
+  /// The pathname contains a NUL byte.
   NulPath,
+  /// The pathname requests an unsupported abstract address.
   AbstractPath,
 }
 
 /// The rejected ConnectOptions field.
 pub enum ConnectOptionsReason {
+  /// The polling interval is outside 1..1,000,000,000 nanoseconds.
   PollInterval,
+  /// The connection attempt limit is outside 1..1024.
   MaxAttempts,
 }
 
@@ -110,20 +138,31 @@ pub struct ConnectOptionsError {
 
 /// The rejected endpoint or pathname condition.
 pub enum InvalidEndpointReason {
+  /// The endpoint list is empty.
   EmptyEndpoints,
+  /// The endpoint count exceeds the attempt limit.
   TooManyEndpoints,
+  /// The pathname contains no bytes.
   EmptyPath,
+  /// The pathname does not start with a slash.
   RelativePath,
+  /// The pathname contains a NUL byte.
   NulPath,
+  /// The pathname and its terminator exceed native address capacity.
   PathTooLong,
+  /// The pathname requests an unsupported abstract address.
   AbstractPath,
 }
 
 /// One nonrecursive failure retained when the attempt budget is exhausted.
 pub union AttemptFailure {
+  /// The peer refused the connection.
   ConnectionRefused,
+  /// The destination network is unreachable.
   NetworkUnreachable,
+  /// The requested address is unavailable.
   AddressUnavailable,
+  /// A native boundary failed with the retained operation and error number.
   NativeFailure {
     /// The native or byte-I/O operation that failed.
     pub operation: NativeSocketOperation,
@@ -134,13 +173,16 @@ pub union AttemptFailure {
 
 /// A native socket acquisition or explicit lifecycle failure.
 pub union NativeSocketError {
+  /// The admitted connection attempt budget is exhausted.
   AttemptsExhausted {
     /// The number of native connect attempts already made.
     pub attempted: usize,
     /// The failure from the final attempted candidate.
     pub last: AttemptFailure,
   },
+  /// The next positive wake time is not representable.
   TimeRangeError,
+  /// An endpoint list or Unix pathname failed admission.
   InvalidEndpoint {
     /// The input admission rule that failed.
     pub reason: InvalidEndpointReason,
@@ -149,40 +191,55 @@ pub union NativeSocketError {
     /// The admitted maximum for this input or transfer.
     pub limit: usize,
   },
+  /// A Unix bind pathname failed admission.
   InvalidBindAddress {
     /// The input admission rule that failed.
     pub reason: InvalidBindReason,
     /// The zero-based byte offset of the rejected pathname input.
     pub offset: usize,
   },
+  /// The pathname and its terminator exceed native address capacity.
   PathTooLong {
     /// The pathname or returned native address length in bytes.
     pub length: usize,
     /// The admitted maximum for this input or transfer.
     pub limit: usize,
   },
+  /// The requested local address is already in use.
   AddressInUse,
+  /// The returned native address has an invalid family or length.
   InvalidNativeAddress {
     /// The native address family, or -1 when the header is too short.
     pub family: i32,
     /// The pathname or returned native address length in bytes.
     pub length: usize,
   },
+  /// The returned peer uses an unsupported address form.
   UnsupportedPeerAddress {
     /// The native address family, or -1 when the header is too short.
     pub family: i32,
     /// The pathname or returned native address length in bytes.
     pub length: usize,
   },
+  /// The requested address family is unsupported.
   FamilyUnsupported,
+  /// The operating system denied the operation.
   PermissionDenied,
+  /// The peer refused the connection.
   ConnectionRefused,
+  /// The destination network is unreachable.
   NetworkUnreachable,
+  /// The requested address is unavailable.
   AddressUnavailable,
+  /// The operating system cannot supply the required resources.
   SystemResources,
+  /// The supplied absolute deadline has been reached.
   Timeout,
+  /// The descriptor is terminally closed.
   Closed,
+  /// The local write direction is closed; reads remain available.
   WriteClosed,
+  /// A native success reported an impossible transfer count.
   InvalidTransferCount {
     /// The native or byte-I/O operation that failed.
     pub operation: ByteIoOperation,
@@ -191,6 +248,7 @@ pub union NativeSocketError {
     /// The admitted maximum for this input or transfer.
     pub limit: usize,
   },
+  /// A native boundary failed with the retained operation and error number.
   NativeFailure {
     /// The native or byte-I/O operation that failed.
     pub operation: NativeSocketOperation,
@@ -224,10 +282,12 @@ pub struct UnixSocketPath {
 
 /// The actual local address owned by a published listener.
 pub union BoundAddress {
+  /// An owned numeric TCP endpoint.
   Tcp {
     /// The owned numeric address and port.
     pub endpoint: Endpoint,
   },
+  /// An owned Unix-domain address.
   Unix {
     /// The owned Unix pathname spelling.
     pub path: UnixSocketPath,
@@ -236,7 +296,9 @@ pub union BoundAddress {
 
 /// The peer identity returned for one accepted Unix connection.
 pub union UnixPeerAddress {
+  /// The peer has no bound pathname.
   Unnamed,
+  /// The peer has an owned pathname spelling.
   Pathname {
     /// The owned Unix pathname spelling.
     pub path: UnixSocketPath,
@@ -245,10 +307,12 @@ pub union UnixPeerAddress {
 
 /// The owned peer identity returned with one accepted connection.
 pub union PeerAddress {
+  /// An owned numeric TCP endpoint.
   Tcp {
     /// The owned numeric address and port.
     pub endpoint: Endpoint,
   },
+  /// An owned Unix-domain address.
   Unix {
     /// The accepted peer identity.
     pub peer: UnixPeerAddress,
@@ -301,8 +365,11 @@ impl ConnectOptions {
     }
   }
 
+  /// Reports whether outbound TCP disables Nagle buffering.
   pub fn noDelay(self: &Self) -> bool { return self.noDelayValue }
+  /// Returns the positive polling interval in nanoseconds.
   pub fn pollInterval(self: &Self) -> u64 { return self.pollIntervalNanoseconds }
+  /// Returns the maximum number of native connection attempts.
   pub fn maxAttempts(self: &Self) -> usize { return self.maxAttemptsValue }
 }
 
@@ -341,8 +408,11 @@ impl ListenOptions {
     }
   }
 
+  /// Returns the requested kernel backlog limit.
   pub fn kernelBacklog(self: &Self) -> usize { return self.kernelBacklogValue }
+  /// Reports whether listener creation enables SO_REUSEADDR.
   pub fn reuseAddress(self: &Self) -> bool { return self.reuseAddressValue }
+  /// Returns the positive polling interval in nanoseconds.
   pub fn pollInterval(self: &Self) -> u64 { return self.pollIntervalNanoseconds }
 }
 
@@ -574,6 +644,7 @@ struct AcceptedUsingOwner<C> {
 }
 
 impl Connection {
+  /// Returns the current descriptor lifecycle phase.
   pub fn phase(self: &Self) -> ConnectionPhase { return self.phaseValue }
 
   /// Explicitly closes this connection once. Scoped cleanup recovers this error.
@@ -596,7 +667,9 @@ impl Connection {
 }
 
 impl Listener {
+  /// Returns the current descriptor lifecycle phase.
   pub fn phase(self: &Self) -> ListenerPhase { return self.phaseValue }
+  /// Returns a copy of the actual local address recorded after listener creation.
   pub fn boundAddress(self: &Self) -> BoundAddress { return self.boundValue }
 
   /// Explicitly closes this listener once without unlinking a Unix pathname.
@@ -618,7 +691,9 @@ impl Listener {
 }
 
 impl Accepted {
+  /// Returns a copy of the independently owned accepted peer identity.
   pub fn peer(self: &Self) -> PeerAddress { return self.peerValue }
+  /// Returns the accepted connection lifecycle phase.
   pub fn connectionPhase(self: &Self) -> ConnectionPhase {
     return Connection.phase(&self.connection)
   }

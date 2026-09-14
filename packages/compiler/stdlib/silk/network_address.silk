@@ -26,65 +26,95 @@ import silk.writer {Writer, WriterError}
 
 /// The failed network-address admission rule.
 pub enum AddressReason {
+  /// The numeric address input is empty.
   Empty,
+  /// An input byte is not admitted in this position.
   InvalidCharacter,
+  /// An address component has invalid syntax.
   InvalidComponent,
+  /// An IPv4 component contains a prohibited leading zero.
   LeadingZero,
+  /// An address component exceeds its numeric range.
   ComponentOverflow,
+  /// The address has the wrong number of components.
   WrongComponentCount,
+  /// The IPv6 spelling contains multiple compression markers.
   MultipleCompression,
+  /// IPv6 compression does not omit any component.
   CompressionWithoutOmission,
 }
 
 /// The failed domain-host admission rule.
 pub enum HostReason {
+  /// The domain name is empty.
   EmptyName,
+  /// The domain name exceeds the admitted byte length.
   NameTooLong,
+  /// A domain label is empty.
   EmptyLabel,
+  /// A domain label exceeds the admitted byte length.
   LabelTooLong,
+  /// The domain contains a NUL byte.
   Nul,
+  /// The domain contains a non-ASCII byte.
   NonAscii,
+  /// An input byte is not admitted in this position.
   InvalidCharacter,
+  /// A domain label begins or ends with a hyphen.
   EdgeHyphen,
+  /// An encoded internationalized label is invalid.
   InvalidALabel,
+  /// The domain has a prohibited trailing dot.
   TrailingDot,
+  /// The final domain label is entirely numeric.
   NumericFinalLabel,
 }
 
 /// A URI host form outside the first network profile.
 pub enum UnsupportedHostForm {
+  /// The host uses unsupported IPvFuture syntax.
   IpvFuture,
+  /// The host contains an unsupported IPv6 zone identifier.
   ZoneIdentifier,
+  /// The host contains unsupported percent escapes.
   EscapedHost,
+  /// The host input contains URI user information.
   UserInfo,
+  /// The host input contains a port delimiter.
   PortDelimiter,
+  /// The host input contains a URI delimiter.
   UriDelimiter,
 }
 
 /// A typed value-construction or presentation failure.
 pub union AddressError {
+  /// Numeric address admission failed.
   InvalidAddress {
     /// The admission rule that rejected the supplied bytes.
     pub reason: AddressReason,
     /// The zero-based byte offset of the rejected input.
     pub offset: usize,
   },
+  /// Domain host admission failed.
   InvalidHost {
     /// The admission rule that rejected the supplied bytes.
     pub reason: HostReason,
     /// The zero-based byte offset of the rejected input.
     pub offset: usize,
   },
+  /// The supplied port is outside 0..65535.
   InvalidPort {
     /// The supplied port number outside the admitted 0..65535 range.
     pub value: usize,
   },
+  /// The input uses an unsupported host form.
   UnsupportedForm {
     /// The unsupported URI host form.
     pub form: UnsupportedHostForm,
     /// The zero-based byte offset of the rejected input.
     pub offset: usize,
   },
+  /// The supplied output cannot hold the complete formatted value.
   OutputTooSmall {
     /// The output capacity needed for the complete spelling.
     pub required: usize,
@@ -105,10 +135,12 @@ pub struct Ipv6Address {
 
 /// An owned numeric network address whose family remains explicit.
 pub union IpAddress {
+  /// An IPv4 address.
   V4 {
     /// The four network-order IPv4 octets.
     pub value: Ipv4Address,
   },
+  /// An IPv6 address.
   V6 {
     /// The sixteen network-order IPv6 octets.
     pub value: Ipv6Address,
@@ -134,14 +166,17 @@ pub struct DomainHost {
 
 /// A classified owned origin host.
 pub union Host {
+  /// A validated ASCII domain host.
   Domain {
     /// The validated ASCII domain in its original spelling.
     pub value: DomainHost,
   },
+  /// An owned IPv4 origin host.
   Ipv4 {
     /// The four network-order IPv4 octets.
     pub value: Ipv4Address,
   },
+  /// An owned IPv6 origin host.
   Ipv6 {
     /// The sixteen network-order IPv6 octets.
     pub value: Ipv6Address,

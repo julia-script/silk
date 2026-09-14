@@ -52,6 +52,7 @@ import { httpValuesAcceptanceSource } from './httpValuesAcceptance.js'
 import { httpHeadAcceptanceSource } from './httpHeadAcceptance.js'
 import { httpBodyAcceptanceSource } from './httpBodyAcceptance.js'
 import { httpContentAcceptanceSource } from './httpContentAcceptance.js'
+import { httpServerAcceptanceSource } from './httpServerAcceptance.js'
 import { base64AcceptanceSource } from './base64Acceptance.js'
 import { networkAddressResolutionCorpusProgram } from './networkAddressResolutionAcceptance.js'
 import { nativeListenerCorpusProgram } from './nativeListenerAcceptance.js'
@@ -6333,6 +6334,11 @@ export const nativeCorpus: ReadonlyArray<CorpusProgram> = [
   {
     name: 'http-content-decoding',
     source: httpContentAcceptanceSource,
+    expected: { _tag: 'Completes', result: 0 },
+  },
+  {
+    name: 'http-server',
+    source: httpServerAcceptanceSource,
     expected: { _tag: 'Completes', result: 0 },
   },
   {

@@ -346,6 +346,28 @@
     "aliases": ["OwnedHeaders", "HeaderIterator", "MetadataIterator", "MetadataToken", "Limits"]
   },
   {
+    "module": "silk/http_server",
+    "path": "silk/http_server.silk",
+    "namespace": "Connection",
+    "aliases": [
+      "Request",
+      "ResponseWriter",
+      "ConnectionHandler",
+      "Limits",
+      "BodyMode",
+      "ReusePolicy",
+      "ConnectionPhase",
+      "ServerLimitKind",
+      "ServerError",
+      "WriteProgress"
+    ]
+  },
+  {
+    "module": "silk/http_server_native",
+    "path": "silk/http_server_native.silk",
+    "namespace": "HttpServerNative"
+  },
+  {
     "module": "silk/http_target",
     "path": "silk/http_target.silk",
     "namespace": "RequestTarget",

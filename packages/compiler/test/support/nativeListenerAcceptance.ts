@@ -3,6 +3,13 @@ export const nativeListenerAcceptanceSource = `
 import silk.allocator {Allocator, OutOfMemoryError}
 import silk.byte_duplex {ByteDuplex, ByteIoError, ByteIoOperation, ReadTransfer}
 import silk.effect {Effect}
+import silk.buffered_input {BufferError}
+import silk.http {Header, ResponseHead, Status, Version}
+import silk.http_body {Limits as BodyLimits}
+import silk.http_head {Limits as HeadLimits}
+import silk.http_headers {Headers, Limits as ValueLimits}
+import silk.http_server {Connection as HttpConnection, ConnectionHandler, Limits as HttpLimits, Request, ServerError, reject, withRequest}
+import silk.http_server_native {serveNext}
 import silk.execution {Execution}
 import silk.i32
 import silk.i64
@@ -17,6 +24,9 @@ import silk.u16
 import silk.u64
 import silk.usize
 
+unsafe extern "C" fn silk_listener_connect_http(port: i32) -> i32
+unsafe extern "C" fn silk_listener_finish_http() -> i32
+unsafe extern "C" fn silk_listener_http_ownership() -> i32
 unsafe extern "C" fn silk_listener_connect_tcp(port: i32) -> i32
 unsafe extern "C" fn silk_listener_connect_unix(path: ?[*]const u8, length: usize) -> i32 with Intrinsic.foreign(noCapture: ("path",))
 unsafe extern "C" fn silk_listener_loopback_available() -> i32
@@ -104,6 +114,135 @@ fn loopbackV6() -> Endpoint {
     IpAddress.V6 {value: Ipv6Address.fromOctets([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1])},
     Port.fromU16(0),
   )
+}
+
+fn httpValueLimits() -> ValueLimits {
+  return ValueLimits {
+    maxMethodBytes: 32,
+    maxTargetBytes: 128,
+    maxNameBytes: 64,
+    maxValueBytes: 256,
+    maxFields: 12,
+    maxFieldBytes: 512,
+    maxOwnedBytes: 2048,
+  }
+}
+
+fn httpHeadLimits() -> HeadLimits {
+  return HeadLimits {
+    maxHeadBytes: 1024,
+    maxStartLineBytes: 256,
+    maxFieldLineBytes: 256,
+    maxOwnedBytes: 2048,
+    values: httpValueLimits(),
+  }
+}
+
+fn httpBodyLimits() -> BodyLimits {
+  return BodyLimits {
+    maxWireBytes: 1024,
+    maxPayloadBytes: 512,
+    maxChunkBytes: 64,
+    maxChunks: 8,
+    maxChunkLineBytes: 64,
+    maxExtensionBytes: 128,
+    maxTrailerBytes: 256,
+    maxTrailerFields: 4,
+    maxOwnedBytes: 2048,
+    trailerValues: httpValueLimits(),
+  }
+}
+
+fn httpLimits() -> HttpLimits {
+  return HttpLimits {
+    head: httpHeadLimits(),
+    body: httpBodyLimits(),
+    values: httpValueLimits(),
+    readCapacity: 128,
+    writeCapacity: 128,
+    maxRequestsPerConnection: usize.ONE,
+    maxInformationalResponses: 2,
+    maxDiscardWireBytes: u64.toU64(256),
+    shutdownDrainBytes: 16,
+  }
+}
+
+struct NativeHttpHandler {}
+
+effect<'call> fn respondHttp<'call, 'request: 'call, 'connection: 'request, 'transport: 'connection>(
+  request: &'call mut Request<'request, 'connection, 'transport, Connection>,
+) -> i32 ! ServerError | OutOfMemoryError ? &mut Allocator | &mut MonotonicClock {
+  let entries: [Header<'static>; 0] = []
+  let headers = match move Headers.make(&entries, httpValueLimits()) {
+    Result.Failure {error} => { fail ServerError.Value {error: move error} }
+    Result.Success {value} => value
+  }
+  let status = match move Status.fromCode(204) {
+    Result.Failure {error} => { fail ServerError.Value {error: move error} }
+    Result.Success {value} => value
+  }
+  let response = match move ResponseHead.make(
+    Version.Http11, status, Option.some<&'static [u8]>(b"No Content"), headers, httpValueLimits(),
+  ) {
+    Result.Failure {error} => { fail ServerError.Value {error: move error} }
+    Result.Success {value} => value
+  }
+  run reject(&mut request.*, &response, Option.none<Instant>())
+  return 42
+}
+
+impl ConnectionHandler<Connection, i32, ServerError | OutOfMemoryError
+  ? &mut Allocator | &mut MonotonicClock> for NativeHttpHandler {
+  effect<'call> fn handle<'call, 'connection: 'call, 'transport: 'connection>(
+    handler: Self,
+    connection: &'call mut HttpConnection<'connection, 'transport, Connection>,
+  ) -> i32 ! ServerError | OutOfMemoryError ? &mut Allocator | &mut MonotonicClock
+  where &'transport mut Connection provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock {
+    drop handler
+    let handled = run withRequest(&mut connection.*, Option.none<Instant>(), respondHttp)
+    return match move handled {
+      Option.None => 251
+      Option.Some {value} => value
+    }
+  }
+}
+
+effect fn serveHttp(listener: &mut Listener) -> i32
+! NativeSocketError | ServerError | BufferError | OutOfMemoryError
+? &mut Allocator | &mut MonotonicClock {
+  let bound = Listener.boundAddress(&listener.*)
+  let port = match move bound {
+    BoundAddress.Tcp {endpoint} => u16.toI32(Port.value(&Endpoint.port(&endpoint)))
+    _ => { return 252 }
+  }
+  if unsafe silk_listener_connect_http(port) != 42 { return 253 }
+  let served = run Effect.result(serveNext(
+    &mut listener.*, httpLimits(), Option.none<Instant>(), NativeHttpHandler {},
+  ))
+  let client = unsafe silk_listener_finish_http()
+  let code = match move served {
+    Result.Failure {error} => { drop error return 254 }
+    Result.Success {value} => value
+  }
+  if code != 42 { return code }
+  if client != 42 { return 255 }
+  if Listener.phase(&listener.*) != ListenerPhase.Open { return 256 }
+  return 42
+}
+
+effect fn httpCase(clock: &mut ImmediateClock) -> i32 ! NativeSocketError {
+  let listener = run listen(loopback(), ListenOptions.defaults())
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let outcome = run Effect.result(withListener(move listener, serveHttp)
+    |> Effect.provideMut<MonotonicClock>(&mut clock.*)
+    |> Effect.provideMut<Allocator>(&mut allocator))
+  let code = match move outcome {
+    Result.Failure {error} => { drop error return 257 }
+    Result.Success {value} => value
+  }
+  if code != 42 { return code }
+  if unsafe silk_listener_http_ownership() != 42 { return 258 }
+  return 42
 }
 
 effect fn transferTcp<'call>(view: &'call mut AcceptedView<'call>) -> i32
@@ -1174,6 +1313,8 @@ effect fn runCases() -> i32 ! NativeSocketError | ByteIoError | OutOfMemoryError
   if ListenOptions.pollInterval(&defaults) != 1000000 { return 55 }
   let mut clock = ImmediateClock {nowValue: SystemClock.make(0, 0), waits: usize.ZERO}
   if unsafe silk_listener_loopback_available() == 1 {
+    let http = run httpCase(&mut clock)
+    if http != 42 { return http }
     let tcp = run Effect.result(tcpCase(&mut clock))
     match move tcp {
       Result<i32, NativeSocketError | ByteIoError>.Failure {error} => { return 139 }
@@ -1226,6 +1367,7 @@ export const nativeListenerHelperSource = `
 #include <string.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
+#include <sys/time.h>
 #include <sys/syscall.h>
 #include <sys/un.h>
 #include <unistd.h>
@@ -1233,6 +1375,28 @@ export const nativeListenerHelperSource = `
 #include <dlfcn.h>
 #include <stdarg.h>
 #endif
+
+static int silk_listener_http_active = 0;
+static int silk_listener_http_accepted = -1;
+static int silk_listener_http_listener = -1;
+static int silk_listener_http_accepts = 0;
+static int silk_listener_http_accepted_closes = 0;
+static int silk_listener_http_listener_closes = 0;
+
+static int silk_listener_http_admitted(int listener, int accepted) {
+  if (silk_listener_http_active && accepted >= 0) {
+    silk_listener_http_listener = listener;
+    silk_listener_http_accepted = accepted;
+    silk_listener_http_accepts += 1;
+  }
+  return accepted;
+}
+
+static void silk_listener_http_closed(int fd) {
+  if (!silk_listener_http_active) return;
+  if (fd == silk_listener_http_accepted) silk_listener_http_accepted_closes += 1;
+  if (fd == silk_listener_http_listener) silk_listener_http_listener_closes += 1;
+}
 
 static int silk_listener_mode = 0;
 static int silk_listener_sockets = 0;
@@ -1446,7 +1610,8 @@ int setsockopt(int fd, int level, int option, const void *value, socklen_t lengt
 }
 
 int accept4(int fd, struct sockaddr *address, socklen_t *length, int flags) {
-  if (!silk_listener_scripted()) return (int)syscall(SYS_accept4, fd, address, length, flags);
+  if (!silk_listener_scripted()) return silk_listener_http_admitted(fd,
+    (int)syscall(SYS_accept4, fd, address, length, flags));
   silk_listener_accepts += 1;
   if (silk_listener_setup_order != 5) silk_listener_configuration_ok = 0;
   if (fd != 40 || address == NULL || length == NULL || *length != 128
@@ -1543,7 +1708,10 @@ int getsockopt(int fd, int level, int option, void *value, socklen_t *length) {
 }
 
 int close(int fd) {
-  if (!silk_listener_scripted()) return (int)syscall(SYS_close, fd);
+  if (!silk_listener_scripted()) {
+    silk_listener_http_closed(fd);
+    return (int)syscall(SYS_close, fd);
+  }
   silk_listener_closes += 1;
   if (fd == 40) silk_listener_closed_listener += 1;
   if (fd == 41) silk_listener_closed_accepted += 1;
@@ -1688,7 +1856,7 @@ int accept(int fd, struct sockaddr *address, socklen_t *length) {
   if (!silk_listener_darwin_scripted()) {
     static int (*real_accept)(int, struct sockaddr *, socklen_t *) = NULL;
     if (real_accept == NULL) real_accept = dlsym(RTLD_NEXT, "accept");
-    return real_accept(fd, address, length);
+    return silk_listener_http_admitted(fd, real_accept(fd, address, length));
   }
   silk_listener_accepts += 1;
   int expected_order = silk_listener_mode == 203 ? 6 : 5;
@@ -1727,6 +1895,7 @@ int silk_listener_close_nocancel(int fd) {
   if (!silk_listener_darwin_scripted()) {
     static int (*real_close)(int) = NULL;
     if (real_close == NULL) real_close = dlsym(RTLD_NEXT, "close");
+    silk_listener_http_closed(fd);
     return real_close(fd);
   }
   silk_listener_closes += 1;
@@ -1737,6 +1906,77 @@ int silk_listener_close_nocancel(int fd) {
 #endif
 
 static int silk_listener_client = -1;
+
+static int silk_listener_http_connect_failed(int result) {
+  if (silk_listener_client >= 0) (void)close(silk_listener_client);
+  silk_listener_client = -1;
+  silk_listener_http_active = 0;
+  return result;
+}
+
+int silk_listener_connect_http(int port) {
+  static const char request[] = "GET /native-admission HTTP/1.1\\r\\nHost: localhost\\r\\n\\r\\n";
+  struct sockaddr_in address;
+  memset(&address, 0, sizeof(address));
+  address.sin_family = AF_INET;
+  address.sin_port = htons((uint16_t)port);
+  address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+  silk_listener_http_active = 1;
+  silk_listener_http_accepted = -1;
+  silk_listener_http_listener = -1;
+  silk_listener_http_accepts = 0;
+  silk_listener_http_accepted_closes = 0;
+  silk_listener_http_listener_closes = 0;
+  silk_listener_client = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+  if (silk_listener_client < 0) return silk_listener_http_connect_failed(1);
+  struct timeval deadline = {.tv_sec = 5, .tv_usec = 0};
+  if (setsockopt(silk_listener_client, SOL_SOCKET, SO_RCVTIMEO, &deadline, sizeof(deadline)) != 0
+      || setsockopt(silk_listener_client, SOL_SOCKET, SO_SNDTIMEO, &deadline, sizeof(deadline)) != 0
+      || connect(silk_listener_client, (const struct sockaddr *)&address, sizeof(address)) != 0)
+    return silk_listener_http_connect_failed(2);
+  size_t sent = 0;
+  while (sent < sizeof(request) - 1) {
+    ssize_t count = write(silk_listener_client, request + sent, sizeof(request) - 1 - sent);
+    if (count < 0 && errno == EINTR) continue;
+    if (count <= 0) return silk_listener_http_connect_failed(3);
+    sent += (size_t)count;
+  }
+  if (shutdown(silk_listener_client, SHUT_WR) != 0) return silk_listener_http_connect_failed(4);
+  return 42;
+}
+
+int silk_listener_finish_http(void) {
+  static const char expected[] = "HTTP/1.1 204 No Content\\r\\nConnection: close\\r\\n\\r\\n";
+  unsigned char response[sizeof(expected)];
+  size_t used = 0;
+  int ended = 0;
+  while (used < sizeof(response)) {
+    ssize_t count = read(silk_listener_client, response + used, sizeof(response) - used);
+    if (count < 0 && errno == EINTR) continue;
+    if (count < 0) {
+      if (errno == ECONNRESET) ended = 1; /* Accepted-owner release is abortive. */
+      break;
+    }
+    if (count == 0) { ended = 1; break; }
+    used += (size_t)count;
+  }
+  int result = ended && used == sizeof(expected) - 1
+    && memcmp(response, expected, used) == 0
+    && silk_listener_http_accepts == 1
+    && silk_listener_http_accepted_closes == 1
+    && silk_listener_http_listener_closes == 0 ? 42 : 5;
+  if (silk_listener_client >= 0) (void)close(silk_listener_client);
+  silk_listener_client = -1;
+  return result;
+}
+
+int silk_listener_http_ownership(void) {
+  int result = silk_listener_http_accepts == 1 && silk_listener_http_accepted_closes == 1
+    && silk_listener_http_listener_closes == 1 ? 42 : 6;
+  silk_listener_http_active = 0;
+  return result;
+}
+
 
 static int silk_listener_copy_path(char *output, size_t capacity, const unsigned char *path, size_t length) {
   if (path == NULL || length == 0 || length >= capacity) return 0;

@@ -902,28 +902,45 @@ effect fn transferDestinationProvider() -> MemoryByteDuplex
   )
 }
 
-effect fn canceledPair(state: Shared<PairCancellationState>) -> bool
+effect fn canceledBuffered(state: Shared<PairCancellationState>, pair: bool) -> bool
 ! BufferError | OutOfMemoryError {
+  if pair {
+    let mut allocator = Allocator.systemAllocatorProvider()
+    let mut clock = FixedClock {}
+    let mut source = PairParkingDuplex {
+      state: Shared.clone(&state),
+      source: true,
+      shutdownMode: 0,
+    }
+    let mut destination = PairParkingDuplex {
+      state: move state,
+      source: false,
+      shutdownMode: 0,
+    }
+    return run withBufferedPairCapacity<bool, BufferError>(
+      &mut source,
+      2,
+      2,
+      &mut destination,
+      2,
+      2,
+      parkPair,
+    )
+      |> Effect.provideMut<MonotonicClock>(&mut clock)
+      |> Effect.provideMut<Allocator>(&mut allocator)
+  }
   let mut allocator = Allocator.systemAllocatorProvider()
-  let mut clock = FixedClock {}
-  let mut source = PairParkingDuplex {
-    state: Shared.clone(&state),
-    source: true,
-    shutdownMode: 0,
-  }
-  let mut destination = PairParkingDuplex {
+  let mut clock = ParkingClock {}
+  let mut provider = PairParkingDuplex {
     state: move state,
-    source: false,
-    shutdownMode: 0,
+    source: true,
+    shutdownMode: 2,
   }
-  return run withBufferedPairCapacity<bool, BufferError>(
-    &mut source,
+  return run withBufferedCapacity<bool, BufferError>(
+    &mut provider,
     2,
     2,
-    &mut destination,
-    2,
-    2,
-    parkPair,
+    parkShutdown,
   )
     |> Effect.provideMut<MonotonicClock>(&mut clock)
     |> Effect.provideMut<Allocator>(&mut allocator)
@@ -961,26 +978,8 @@ fn shutdownFailureResult(state: &mut PairCancellationState) -> bool {
   return state.deadlinesMatch
 }
 
-effect fn canceledShutdown(state: Shared<PairCancellationState>) -> bool
-! BufferError | OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorProvider()
-  let mut clock = ParkingClock {}
-  let mut provider = PairParkingDuplex {
-    state: move state,
-    source: true,
-    shutdownMode: 2,
-  }
-  return run withBufferedCapacity<bool, BufferError>(
-    &mut provider,
-    2,
-    2,
-    parkShutdown,
-  )
-    |> Effect.provideMut<MonotonicClock>(&mut clock)
-    |> Effect.provideMut<Allocator>(&mut allocator)
-}
 
-effect fn cancelSuspendedPair() -> i32 ! OutOfMemoryError {
+effect fn cancelSuspendedBuffered(pair: bool) -> i32 ! OutOfMemoryError {
   let mut allocator = Allocator.systemAllocatorProvider()
   let state = run Shared.make<PairCancellationState>(PairCancellationState {
     sourceCloses: usize.ZERO,
@@ -991,7 +990,7 @@ effect fn cancelSuspendedPair() -> i32 ! OutOfMemoryError {
     writeCalls: usize.ZERO,
     deadlinesMatch: true,
   }) |> Effect.provideMut<Allocator>(&mut allocator)
-  let body = Effect.catchAll(canceledPair(Shared.clone(&state)), pairCancellationFailed)
+  let body = Effect.catchAll(canceledBuffered(Shared.clone(&state), pair), pairCancellationFailed)
   let execution = run Execution.make(move body, (), pairCancellationReady)
     |> Effect.provideMut<Allocator>(&mut allocator)
   let mut result = 0
@@ -1002,31 +1001,7 @@ effect fn cancelSuspendedPair() -> i32 ! OutOfMemoryError {
     pairCancellationParked,
   )
   if result != 42 { drop state return result }
-  return Shared.withMut(&state, pairCancellationResult)
-}
-
-effect fn cancelSuspendedShutdown() -> i32 ! OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorProvider()
-  let state = run Shared.make<PairCancellationState>(PairCancellationState {
-    sourceCloses: usize.ZERO,
-    destinationCloses: usize.ZERO,
-    flushCalls: usize.ZERO,
-    shutdownCalls: usize.ZERO,
-    readCalls: usize.ZERO,
-    writeCalls: usize.ZERO,
-    deadlinesMatch: true,
-  }) |> Effect.provideMut<Allocator>(&mut allocator)
-  let body = Effect.catchAll(canceledShutdown(Shared.clone(&state)), pairCancellationFailed)
-  let execution = run Execution.make(move body, (), pairCancellationReady)
-    |> Effect.provideMut<Allocator>(&mut allocator)
-  let mut result = 0
-  run Execution.drive(
-    move execution,
-    &mut result,
-    pairCancellationComplete,
-    pairCancellationParked,
-  )
-  if result != 42 { drop state return result }
+  if pair { return Shared.withMut(&state, pairCancellationResult) }
   return Shared.withMut(&state, shutdownCancellationResult)
 }
 
@@ -1242,10 +1217,10 @@ effect fn program() -> i32 ! BufferError | OutOfMemoryError {
   if MemoryByteDuplex.closeAttempts(&destinationCloseSource) != usize.ONE { return 88 }
   if MemoryByteDuplex.closeAttempts(&destinationCloseFailure) != usize.ONE { return 89 }
 
-  let canceled = run cancelSuspendedPair()
+  let canceled = run cancelSuspendedBuffered(true)
   if canceled != 42 { return 90 }
 
-  let shutdownCanceled = run cancelSuspendedShutdown()
+  let shutdownCanceled = run cancelSuspendedBuffered(false)
   if shutdownCanceled != 42 { return 91 }
 
   let shutdownFailureState = run Shared.make<PairCancellationState>(PairCancellationState {
@@ -1486,14 +1461,13 @@ effect fn program() -> i32 ! BufferError | OutOfMemoryError {
   }
   drop sourceAudit
   let destinationAudit = MemoryByteDuplex.audit(&destination)
-  if destinationAudit.length != 7 ||
+  if destinationAudit.length != 6 ||
     destinationAudit[0].operation != ByteIoOperation.Write ||
-    destinationAudit[1].operation != ByteIoOperation.Flush ||
-    destinationAudit[2].operation != ByteIoOperation.Write ||
+    destinationAudit[1].operation != ByteIoOperation.Write ||
+    destinationAudit[2].operation != ByteIoOperation.Flush ||
     destinationAudit[3].operation != ByteIoOperation.Flush ||
-    destinationAudit[4].operation != ByteIoOperation.Flush ||
-    destinationAudit[5].operation != ByteIoOperation.ShutdownWrite ||
-    destinationAudit[6].operation != ByteIoOperation.Close {
+    destinationAudit[4].operation != ByteIoOperation.ShutdownWrite ||
+    destinationAudit[5].operation != ByteIoOperation.Close {
     drop destinationAudit
     return 26
   }

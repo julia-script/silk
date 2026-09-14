@@ -27,56 +27,78 @@ import silk.usize
 
 /// The admitted address families for one resolution.
 pub enum FamilySelection {
+  /// Accepts both IPv4 and IPv6 results.
   Any,
+  /// An IPv4 address.
   V4,
+  /// An IPv6 address.
   V6,
 }
 
 /// The failed request admission rule.
 pub enum ResolverInputReason {
+  /// The requested result limit is zero.
   ZeroResults,
+  /// The requested result limit exceeds 64.
   TooManyResults,
 }
 
 /// The native operation that produced a wrapped host failure.
 pub enum NativeResolverOperation {
+  /// Native getaddrinfo host resolution.
   GetAddrInfo,
 }
 
 /// The reason a successful native result chain was rejected.
 pub enum NativeResultReason {
+  /// A successful native lookup returned no result chain.
   NullChain,
+  /// A native result contains an unsupported address family.
   UnknownFamily,
+  /// A native result has no address pointer.
   NullAddress,
+  /// A native address is shorter than its family requires.
   ShortAddress,
 }
 
 /// A typed host-resolution failure.
 pub union ResolverError {
+  /// The resolution request failed pure admission.
   InvalidInput {
     /// The admission rule that rejected the request or native result.
     pub reason: ResolverInputReason,
     /// The rejected result-count limit.
     pub value: usize,
   },
+  /// The input uses an unsupported host form.
   UnsupportedForm,
+  /// The supplied absolute deadline has been reached.
   Timeout,
+  /// The selected provider cannot enforce the supplied deadline.
   DeadlineUnsupported,
+  /// No admitted address remains after selection.
   NoAddress,
+  /// The requested host name was not found.
   NameNotFound,
+  /// The host lookup reported a temporary failure.
   TemporaryFailure,
+  /// The requested address family is unsupported.
   FamilyUnsupported,
+  /// The operating system cannot supply the required resources.
   SystemResources,
+  /// The distinct endpoint count exceeds the requested result limit.
   LimitExceeded {
     /// The maximum number of distinct endpoints allowed in the result.
     pub maximum: usize,
   },
+  /// A successful native result failed validation.
   InvalidNativeResult {
     /// The admission rule that rejected the request or native result.
     pub reason: NativeResultReason,
     /// The zero-based native result-chain index.
     pub index: usize,
   },
+  /// A native boundary failed with the retained operation and error number.
   NativeFailure {
     /// The native operation that reported this failure.
     pub operation: NativeResolverOperation,
@@ -104,7 +126,9 @@ pub struct ResolvedEndpoints {
 
 /// Whether one candidate changed a result builder.
 pub enum Admission {
+  /// The candidate was appended to the owned result.
   Added,
+  /// An equal endpoint was already present.
   Duplicate,
 }
 

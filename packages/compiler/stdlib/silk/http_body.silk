@@ -31,20 +31,32 @@ const FOUR: usize = 4
 
 /// The selected body delimiter.
 pub union Framing {
+  /// The message has no payload bytes.
   Empty,
+  /// The payload has one exact declared length.
   Fixed {
     /// The exact payload byte count selected by Content-Length.
     pub length: u64,
   },
+  /// Chunk sizes and delimiters frame the payload.
   Chunked,
+  /// Transport end delimits the payload.
   CloseDelimited,
+  /// The bytes belong to a tunnel rather than an HTTP body.
   Tunnel,
 }
 
 impl Copy for Framing {}
 
 /// Receiving metadata that makes an otherwise empty response non-reusable.
-pub enum Anomaly { None, ProhibitedFraming, Http10TransferEncoding }
+pub enum Anomaly {
+  /// No framing anomaly was observed.
+  None,
+  /// An otherwise empty response contains prohibited framing metadata.
+  ProhibitedFraming,
+  /// An HTTP/1.0 message contains transfer-encoding metadata.
+  Http10TransferEncoding,
+}
 
 /// A borrowed framing selection.
 pub struct Selection<'head> {
@@ -55,7 +67,9 @@ pub struct Selection<'head> {
 }
 
 impl<'head> Selection<'head> {
+  /// Returns the selected payload delimiter.
   pub fn framing(self: &Self) -> Framing { return self.framingValue }
+  /// Returns metadata that prevents reuse of an otherwise empty response.
   pub fn anomaly(self: &Self) -> Anomaly { return self.anomalyValue }
 }
 
@@ -85,7 +99,17 @@ pub struct Limits {
 
 impl Copy for Limits {}
 
-pub enum ProgressState { NeedInput, NeedOutput, Complete, Tunnel }
+/// The next action required by one incremental body operation.
+pub enum ProgressState {
+  /// More input is required before progress can continue.
+  NeedInput,
+  /// More output capacity is required before progress can continue.
+  NeedOutput,
+  /// The complete framed body has been processed.
+  Complete,
+  /// The bytes belong to a tunnel rather than an HTTP body.
+  Tunnel,
+}
 
 /// Exact local and cumulative committed progress.
 pub struct Progress {
@@ -101,7 +125,15 @@ pub struct Progress {
   pub state: ProgressState
 }
 
-pub enum CompletionKind { Delimited, CloseDelimited, Tunnel }
+/// The established body-boundary disposition.
+pub enum CompletionKind {
+  /// The framing establishes an explicit body boundary.
+  Delimited,
+  /// Transport end delimits the payload.
+  CloseDelimited,
+  /// The bytes belong to a tunnel rather than an HTTP body.
+  Tunnel,
+}
 
 /// Opaque positive evidence borrowed from a completed owner.
 pub struct Completion<'owner> {
@@ -110,59 +142,102 @@ pub struct Completion<'owner> {
 }
 
 impl<'owner> Completion<'owner> {
+  /// Returns the established body completion disposition.
   pub fn kind(self: &Self) -> CompletionKind { return self.kindValue }
 }
 
+/// The framing component responsible for a body failure.
 pub enum BodyComponent {
+  /// Body framing selection.
   Selection,
+  /// Content-Length field admission.
   ContentLength,
+  /// Transfer-Encoding field admission.
   TransferEncoding,
+  /// Chunk size and extension syntax.
   ChunkLine,
+  /// Chunk payload bytes.
   ChunkPayload,
+  /// The delimiter following a chunk payload.
   ChunkDelimiter,
+  /// Trailer field name admission.
   TrailerName,
+  /// Trailer field value admission.
   TrailerValue,
+  /// Trailer name policy admission.
   TrailerPolicy,
+  /// Body decoder state.
   Decoder,
+  /// Body encoder state.
   Encoder,
+  /// Bounded body discard.
   Discard,
 }
 
+/// The finite budget exceeded by a body operation.
 pub enum BodyLimitKind {
+  /// The cumulative wire-byte budget.
   WireBytes,
+  /// The cumulative payload-byte budget.
   PayloadBytes,
+  /// The per-chunk payload-byte budget.
   ChunkBytes,
+  /// The nonempty chunk-count budget.
   Chunks,
+  /// The chunk-line byte budget.
   ChunkLineBytes,
+  /// The cumulative extension-byte budget.
   ExtensionBytes,
+  /// The trailer-section byte budget.
   TrailerBytes,
+  /// The trailer field-count budget.
   TrailerFields,
+  /// The per-field trailer name-byte budget.
   TrailerNameBytes,
+  /// The per-field trailer value-byte budget.
   TrailerValueBytes,
+  /// The combined trailer field-byte budget.
   TrailerFieldBytes,
+  /// The owned-storage byte budget.
   OwnedBytes,
 }
 
+/// The reason a body operation cannot continue.
 pub union BodyReason {
+  /// The supplied metadata does not admit the requested framing.
   InvalidFraming,
+  /// The supplied framing fields disagree.
   ConflictingFraming,
+  /// A transfer coding is outside the supported profile.
   UnsupportedTransferCoding,
+  /// The declared payload length is invalid.
   InvalidLength,
+  /// Size arithmetic exceeds the representable range.
   SizeOverflow,
+  /// Chunk framing syntax is invalid.
   ChunkSyntax,
+  /// Trailer syntax is invalid.
   TrailerSyntax,
+  /// Trailer name policy admission.
   TrailerPolicy,
+  /// Input ends before the framed body is complete.
   Truncated,
+  /// Finalization occurs before the declared payload length is supplied.
   FixedLengthUnderrun,
+  /// Payload input exceeds the declared length.
   FixedLengthOverrun,
+  /// Payload was supplied for empty framing.
   UnexpectedPayload,
+  /// The encoder cannot encode tunnel bytes as an HTTP body.
   UnsupportedTunnelEncoding,
+  /// Discard would exceed its caller-supplied limit.
   DiscardLimit {
     /// The admitted maximum for the rejected operation.
     pub allowed: u64,
     /// The count that would exceed the admitted maximum.
     pub attempted: u64,
   },
+  /// The operation would exceed a configured budget.
   LimitExceeded {
     /// The budget exceeded by this operation.
     pub limit: BodyLimitKind,
@@ -171,6 +246,7 @@ pub union BodyReason {
     /// The count that would exceed the admitted maximum.
     pub attempted: u64,
   },
+  /// The operation is not permitted in the current state.
   InvalidState,
 }
 
@@ -198,15 +274,19 @@ pub struct BodyError {
 
 /// An explicit trailer-name allowlist.
 pub union TrailerPolicy<'names> {
+  /// Applies the default forbidden-trailer policy.
   Default,
+  /// Restricts trailers to the supplied admitted field names.
   Explicit { names: &'names [string<'names>] },
 }
 
 impl<'names> Copy for TrailerPolicy<'names> {}
 
 impl<'names> TrailerPolicy<'names> {
+  /// Returns the default forbidden-trailer policy.
   pub fn defaultPolicy() -> TrailerPolicy<'names> { return TrailerPolicy<'names>.Default }
 
+  /// Validates an explicit trailer-name allowlist and borrows it without allocation.
   pub fn fromNames(
     names: &'names [string<'names>],
   ) -> Result<TrailerPolicy<'names>, BodyError> {
@@ -314,6 +394,7 @@ pub fn selectResponse<'value>(
   })
 }
 
+/// Validates request framing and trailer policy before payload encoding.
 pub fn validateOutgoingRequest<'value>(
   head: RequestHead<'value>,
   policy: TrailerPolicy,
@@ -321,6 +402,7 @@ pub fn validateOutgoingRequest<'value>(
   return selectRequest(head, policy)
 }
 
+/// Validates response framing, including status and request-method restrictions, before payload encoding.
 pub fn validateOutgoingResponse<'value>(
   head: ResponseHead<'value>,
   requestMethod: &Method,
@@ -2534,8 +2616,10 @@ pub struct Trailers<'owner> {
 }
 
 impl<'owner> Trailers<'owner> {
+  /// Returns the number of retained trailer fields.
   pub fn count(self: &Self) -> usize { return self.countValue }
 
+  /// Borrows an iterator over trailer fields in their retained order.
   pub fn fields(self: &'owner Self) -> TrailerIterator<'owner> {
     return TrailerIterator<'owner> {
       bytes: self.bytes,
@@ -2546,6 +2630,7 @@ impl<'owner> Trailers<'owner> {
     }
   }
 
+  /// Copies the trailer section into an independent owner under the supplied admission limits.
   pub effect fn copy(
     self: &'owner Self,
     limits: ValueLimits,
@@ -2619,6 +2704,7 @@ impl OwnedTrailers {
   }
 }
 
+/// An ordered iterator borrowing one retained trailer section.
 pub struct TrailerIterator<'owner> {
   bytes: &'owner [u8]
   records: &'owner [u8]
@@ -2628,6 +2714,7 @@ pub struct TrailerIterator<'owner> {
 }
 
 impl<'owner> TrailerIterator<'owner> {
+  /// Returns the next borrowed trailer field, or None after the final field.
   pub fn next(self: &mut Self) -> Option<Header<'owner>> {
     if self.index >= self.count { return Option.none<Header<'owner>>() }
     let record = readFieldRecord(self.records, self.index)
@@ -3113,6 +3200,7 @@ impl Encoder {
     ))
   }
 
+  /// Borrows positive completion evidence only after successful encoder finalization.
   pub fn completion<'owner>(self: &'owner Self) -> Option<Completion<'owner>> {
     if self.core.phase != EncoderPhase.Complete {
       return Option.none<Completion<'owner>>()
@@ -3123,6 +3211,7 @@ impl Encoder {
     })
   }
 
+  /// Makes an unfinished encoder unusable without emitting additional bytes.
   pub fn abandon(self: &mut Self) -> () {
     if self.core.phase != EncoderPhase.Complete { self.core.phase = EncoderPhase.Abandoned }
     return ()
