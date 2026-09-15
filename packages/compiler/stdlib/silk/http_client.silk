@@ -549,8 +549,8 @@ pub effect fn withExchange<'exchange, 'callback, P, A, E, ?R>(
   if PreparedRequest.version(request) != connection.version {
     fail ClientError.InvalidRequest
   }
-  let requestOrigin = PreparedRequest.origin(request)
-  if !Origin.equals(&connection.origin, &requestOrigin) {
+  let physicalPeer = PreparedRequest.physicalPeer(request)
+  if !Origin.equals(&connection.origin, &physicalPeer) {
     fail ClientError.InvalidRequest
   }
   if connection.requests >= connection.limits.maxRequests {

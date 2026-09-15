@@ -42,6 +42,18 @@ pub struct Origin {
 impl Copy for Origin {}
 
 impl Origin {
+  /// Checks a host, a nonzero port, and an explicit transport-security selection.
+  pub fn make(host: Host, port: Port, secure: bool) -> Result<Origin, OriginError> {
+    if Port.value(&port) == 0 {
+      return Result.failResult<Origin, OriginError>(OriginError.InvalidPort)
+    }
+    return Result.succeed<Origin, OriginError>(Origin {
+      hostValue: host,
+      portValue: port,
+      secureValue: secure,
+    })
+  }
+
   /// Checks an HTTP or HTTPS URI and copies its host and effective port without allocation.
   ///
   /// # Details
@@ -413,6 +425,39 @@ impl Origin {
         length = length + usize.ONE
         divisor = divisor / 10
       }
+    }
+    if output.length < length {
+      return Result.failResult<usize, OriginError>(OriginError.OutputTooSmall)
+    }
+    let mut index = usize.ZERO
+    while index < length {
+      output[index] = scratch[index]
+      index = index + usize.ONE
+    }
+    return Result.succeed<usize, OriginError>(length)
+  }
+  /// Writes the normalized authority with its effective port, including a default port.
+  ///
+  /// A capacity failure leaves `output` unchanged.
+  pub fn authorityWithPortInto(self: &Self, output: &mut [u8]) -> Result<usize, OriginError> {
+    let mut scratch: [u8; 261] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+    let hostLength = match move formatHost(&self.hostValue, &mut scratch) {
+      Result<usize, OriginError>.Failure {error} => {
+        return Result.failResult<usize, OriginError>(move error)
+      }
+      Result<usize, OriginError>.Success {value} => value
+    }
+    let port = u16.toUsize(Port.value(&self.portValue))
+    scratch[hostLength] = 58
+    let mut length = hostLength + usize.ONE
+    let mut divisor: usize = 10000
+    while divisor > usize.ONE && port / divisor == usize.ZERO {
+      divisor = divisor / 10
+    }
+    while divisor > usize.ZERO {
+      scratch[length] = usize.toU8((port / divisor) % 10) + 48
+      length = length + usize.ONE
+      divisor = divisor / 10
     }
     if output.length < length {
       return Result.failResult<usize, OriginError>(OriginError.OutputTooSmall)

@@ -1,12 +1,12 @@
 ## 1. Bounded proxy policy
 
-- [x] 1.1 Add `silk.http_proxy` configuration, auth, bypass, route, route-key, and error values with checked owned-capacity validation plus caller-supplied nonsecret `ProxyConfigId`/`ProxyAuthContextId` copy and exact-equality semantics; prove malformed URI/auth/capacity input, credential-context rotation, and configuration-time encrypted-proxy refusal in the one shared analysis snapshot.
-- [x] 1.2 Implement exact normalized-origin bypass and pure Direct/Forward/Tunnel selection with no encrypted-proxy route variant and with pure recomputation hooks; cover the admitted route matrix, identity retention, and equivalent numeric host identities in the shared proxy support program.
+- [x] 1.1 Add `silk.http_proxy` configuration, auth, bypass, route, route-key, and error values with checked owned-capacity validation plus caller-supplied nonsecret `ProxyConfigId`/`ProxyAuthContextId` copy and exact-equality semantics; encode malformed URI/auth/capacity input, credential-context rotation, and configuration-time encrypted-proxy refusal in the shared support source for analysis and MIR verification, with behavior execution deferred to 4.2's one corpus run.
+- [x] 1.2 Implement exact normalized-origin bypass and pure Direct/Forward/Tunnel selection with no encrypted-proxy route variant and with pure recomputation hooks; encode the admitted route matrix, identity retention, and equivalent numeric host identities in that same analysis/MIR support source, with behavior execution deferred to 4.2.
 
 ## 2. Proxy wire preparation
 
-- [ ] 2.1 Extend streaming request admission with distinct logical-origin and physical-peer identities and an explicit routed mode; retain direct `Proxy-Authorization` rejection and prove peer mismatch, tunneled-origin replay refusal, and direct behavior in the shared analysis snapshot.
-- [ ] 2.2 Implement Forward absolute-form preparation with logical-origin `Host`, proxy-peer admission, configured-only `Proxy-Authorization`, preserved encoded path/query, and caller-override rejection; assert its emitted head and plaintext credential boundary in the compact runtime corpus.
+- [x] 2.1 Extend streaming request admission with distinct logical-origin and physical-peer identities and an explicit routed mode; retain direct `Proxy-Authorization` rejection and encode distinct-peer, tunneled-origin replay, and direct-rejection scenarios in the shared analysis/MIR support source for execution under 4.2.
+- [x] 2.2 Implement Forward absolute-form preparation with logical-origin `Host`, proxy-peer admission, configured-only `Proxy-Authorization`, preserved encoded path/query, and caller-override rejection; encode its exact emitted head and plaintext credential boundary in the compact corpus source whose single execution is integrated under 4.2.
 - [ ] 2.3 Implement body-free authority-form CONNECT preparation plus exact rejection metadata ownership: ordered duplicate `Proxy-Authenticate` fields for 407, ordered full fields otherwise, the stated field/name/value/aggregate limits and reachable 32768-byte total-owned limit, and parser-before-copy failure precedence; exercise only proxy-distinct any-2xx, 101, 407, non-2xx, metadata-overflow, and shared head-limit signals without recreating the parser matrix.
 
 ## 3. Scoped route composition

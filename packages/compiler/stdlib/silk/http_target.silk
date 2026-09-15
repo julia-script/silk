@@ -328,6 +328,22 @@ impl<'text> RequestTarget<'text> {
     }
   }
 
+  /// Reports whether this target is absolute-form.
+  pub fn isAbsolute(self: &Self) -> bool {
+    return match & self.* {
+      RequestTarget.Absolute {uri} => true
+      _ => false
+    }
+  }
+
+  /// Reports whether this target is authority-form.
+  pub fn isAuthority(self: &Self) -> bool {
+    return match & self.* {
+      RequestTarget.Authority {authority} => true
+      _ => false
+    }
+  }
+
   /// Serializes origin- or absolute-form from a generic URI, deliberately omitting its fragment.
   pub fn fromUri(
     uri: &Uri,
@@ -369,6 +385,14 @@ impl<'text> RequestTarget<'text> {
           required = required - String.byteLength(value) - usize.ONE
         }
       }
+      if path.length == usize.ZERO {
+        required = match move usize.checkedAdd(required, usize.ONE) {
+          Option<usize>.None => {
+            return Result.failResult<usize, ValueError>(sizeFailure(ValueComponent.Target))
+          }
+          Option<usize>.Some {value: size} => size
+        }
+      }
     }
     if output.length < required {
       return Result.failResult<usize, ValueError>(outputFailure(
@@ -378,7 +402,38 @@ impl<'text> RequestTarget<'text> {
       ))
     }
     if form == TargetForm.Absolute {
-      let written = copyBytes(&mut output, usize.ZERO, Slice.view<u8>(source, usize.ZERO, required))
+      if path.length == usize.ZERO {
+        let serializedLength = required - usize.ONE
+        let mut prefixLength = serializedLength
+        match & query {
+          Option<string>.None => {}
+          Option<string>.Some {value} => {
+            prefixLength = serializedLength - String.byteLength(value) - usize.ONE
+          }
+        }
+        let mut cursor = copyBytes(
+          &mut output,
+          usize.ZERO,
+          Slice.view<u8>(source, usize.ZERO, prefixLength),
+        )
+        output[cursor] = 47
+        cursor = cursor + usize.ONE
+        let suffixLength = required - cursor
+        if suffixLength > usize.ZERO {
+          let copied = copyBytes(
+            &mut output,
+            cursor,
+            Slice.view<u8>(source, prefixLength, suffixLength),
+          )
+          drop copied
+        }
+        return Result.succeed<usize, ValueError>(required)
+      }
+      let written = copyBytes(
+        &mut output,
+        usize.ZERO,
+        Slice.view<u8>(source, usize.ZERO, required),
+      )
       drop written
       return Result.succeed<usize, ValueError>(required)
     }
