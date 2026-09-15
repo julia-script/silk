@@ -86,7 +86,7 @@ pub union PoolError {
   PoolClosed,
   /// The key is incompatible with the handle's frozen acquisition/security context.
   ContextMismatch,
-  /// Opening completed at or after its effective acquisition deadline, so the owner was discarded.
+  /// Opening could not begin or completed at or after its effective acquisition deadline.
   OpeningExpired,
 }
 
@@ -145,17 +145,14 @@ pub interface PoolKey<CopyError, ?CopyRequirements> {
   fn sameOrigin(left: &Self, right: &Self) -> bool
 }
 
-/// Immutable acquisition context retained beside, never inside, shared mutable state.
-pub interface PoolContext<
-  K,
-  P,
-  AcquisitionError,
-  CopyError,
-  ?AcquisitionRequirements,
-  ?CopyRequirements,
-> {
+/// Fallible bounded-copy contract for immutable context retained beside shared mutable state.
+pub interface PoolContextCopy<CopyError, ?CopyRequirements> {
   /// Fallibly copies all bounded context before a new Shared alias is published.
   effect fn copy(context: &Self) -> Self ! CopyError ? CopyRequirements
+}
+
+/// Immutable acquisition context retained beside, never inside, shared mutable state.
+pub interface PoolContext<K, P, AcquisitionError, ?AcquisitionRequirements> {
   /// Checks key compatibility without allocation, clock access, or transport contact.
   fn accepts(context: &Self, key: &K) -> bool
   /// Opens one complete HTTP owner under only the effective acquisition deadline.
@@ -174,8 +171,8 @@ pub interface PoolHandler<K, P, C, A, E, ?R> {
 
 /// Exact endpoint identity retained by the standard conservative key.
 pub union EndpointIdentity {
-  /// Direct network contact with one exact physical peer.
-  Direct { pub peer: Origin },
+  /// Direct network contact, conservatively partitioned by the original origin.
+  Direct,
   /// A sealed JUL-199 route, including mode, endpoint, original origin, and credential identity.
   Proxy { pub route: RouteKey },
   /// Direct Unix-domain contact with an exact owned pathname.
@@ -184,48 +181,28 @@ pub union EndpointIdentity {
 
 /// The standard conservative key used by direct native and proxy-aware pool contexts.
 ///
-/// Opaque context identities are paired with a `PoolContext.accepts` check. They partition
-/// provider representation, HTTP policy, TLS verification/trust/ALPN policy, and connector policy;
-/// the exact original origin and endpoint identity are retained independently.
+/// Provider representation, HTTP policy, TLS verification/trust/ALPN policy, and connector policy
+/// belong to the constructor-sealed [`PoolContext`]. This key retains only request-visible route
+/// identity; direct resolution results never establish equivalence.
 pub struct ConnectionKey {
   originalOrigin: Origin
   endpoint: EndpointIdentity
-  providerContext: u64
-  securityContext: u64
-  httpContext: u64
 }
 
 impl ConnectionKey {
-  /// Creates a direct network key without allocation.
-  pub fn direct(
-    originalOrigin: Origin,
-    peer: Origin,
-    providerContext: u64,
-    securityContext: u64,
-    httpContext: u64,
-  ) -> ConnectionKey {
+  /// Creates a direct network key from the normalized original origin without allocation.
+  pub fn direct(originalOrigin: Origin) -> ConnectionKey {
     return ConnectionKey {
       originalOrigin: originalOrigin,
-      endpoint: EndpointIdentity.Direct {peer: peer},
-      providerContext: providerContext,
-      securityContext: securityContext,
-      httpContext: httpContext,
+      endpoint: EndpointIdentity.Direct,
     }
   }
 
   /// Creates a proxy-aware key from the sealed JUL-199 route identity.
-  pub fn proxy(
-    route: RouteKey,
-    providerContext: u64,
-    securityContext: u64,
-    httpContext: u64,
-  ) -> ConnectionKey {
+  pub fn proxy(route: RouteKey) -> ConnectionKey {
     return ConnectionKey {
       originalOrigin: RouteKey.originalOrigin(&route),
       endpoint: EndpointIdentity.Proxy {route: route},
-      providerContext: providerContext,
-      securityContext: securityContext,
-      httpContext: httpContext,
     }
   }
 
@@ -233,17 +210,11 @@ impl ConnectionKey {
   pub effect fn unix(
     originalOrigin: Origin,
     path: &[u8],
-    providerContext: u64,
-    securityContext: u64,
-    httpContext: u64,
   ) -> ConnectionKey ! OutOfMemoryError ? &mut Allocator {
     let ownedPath = run Bytes.copy(path)
     return ConnectionKey {
       originalOrigin: originalOrigin,
       endpoint: EndpointIdentity.Unix {path: move ownedPath},
-      providerContext: providerContext,
-      securityContext: securityContext,
-      httpContext: httpContext,
     }
   }
 
@@ -265,8 +236,8 @@ fn bytesEqual(left: &Bytes, right: &Bytes) -> bool {
 
 fn endpointsEqual(left: &EndpointIdentity, right: &EndpointIdentity) -> bool {
   return match & left.* {
-    EndpointIdentity.Direct {peer} => match & right.* {
-      EndpointIdentity.Direct {peer: other} => Origin.equals(&peer, &other)
+    EndpointIdentity.Direct => match & right.* {
+      EndpointIdentity.Direct => true
       _ => false
     }
     EndpointIdentity.Proxy {route} => match & right.* {
@@ -284,7 +255,7 @@ effect fn copyEndpoint(value: &EndpointIdentity) -> EndpointIdentity
 ! OutOfMemoryError
 ? &mut Allocator {
   return match & value.* {
-    EndpointIdentity.Direct {peer} => EndpointIdentity.Direct {peer: peer}
+    EndpointIdentity.Direct => EndpointIdentity.Direct
     EndpointIdentity.Proxy {route} => EndpointIdentity.Proxy {route: route}
     EndpointIdentity.Unix {path} => EndpointIdentity.Unix {
       path: run Bytes.copy(Bytes.asSlice(&path)),
@@ -297,17 +268,11 @@ impl PoolKey<OutOfMemoryError ? &mut Allocator> for ConnectionKey {
     return ConnectionKey {
       originalOrigin: key.originalOrigin,
       endpoint: run copyEndpoint(&key.endpoint),
-      providerContext: key.providerContext,
-      securityContext: key.securityContext,
-      httpContext: key.httpContext,
     }
   }
 
   fn equals(left: &Self, right: &Self) -> bool {
     return Origin.equals(&left.originalOrigin, &right.originalOrigin)
-      && left.providerContext == right.providerContext
-      && left.securityContext == right.securityContext
-      && left.httpContext == right.httpContext
       && endpointsEqual(&left.endpoint, &right.endpoint)
   }
 
@@ -346,6 +311,7 @@ pub struct Pool<K, P, C> {
 pub struct Handle<K, P, C> {
   state: Shared<PoolState<K, P>>
   context: C
+  config: Config
 }
 
 impl<K, P, C> Pool<K, P, C> {
@@ -406,7 +372,7 @@ where &mut P provides &HttpTransport from &mut HttpTransport {
     Result.Success {value} => value
   }
   let state = run makeState<K, P>(admitted)
-  let handle = Handle<K, P, C> {state: move state, context: move context}
+  let handle = Handle<K, P, C> {state: move state, context: move context, config: admitted}
   let pool = Pool<K, P, C> {handleValue: move handle}
   let use = effect fn(owned: &mut Pool<K, P, C>) -> A ! E ? R {
     return run PoolHandler<K, P, C, A, E ? R>.handle(move handler, move owned)
@@ -421,22 +387,13 @@ where &mut P provides &HttpTransport from &mut HttpTransport {
 pub effect fn copyHandle<
   K,
   P,
-  AcquisitionError,
   CopyError,
-  ?AcquisitionRequirements,
   ?CopyRequirements,
-  C: PoolContext<K, P, AcquisitionError, CopyError, AcquisitionRequirements, CopyRequirements>,
+  C: PoolContextCopy<CopyError, CopyRequirements>,
 >(handle: &Handle<K, P, C>) -> Handle<K, P, C> ! CopyError ? CopyRequirements {
-  let context = run PoolContext<
-    K,
-    P,
-    AcquisitionError,
-    CopyError,
-    AcquisitionRequirements,
-    CopyRequirements,
-  >.copy(&handle.context)
+  let context = run PoolContextCopy<CopyError, CopyRequirements>.copy(&handle.context)
   let state = Shared.clone<PoolState<K, P>>(&handle.state)
-  return Handle<K, P, C> {state: move state, context: move context}
+  return Handle<K, P, C> {state: move state, context: move context, config: handle.config}
 }
 
 fn instantBefore(left: &Instant, right: &Instant) -> bool {
@@ -737,10 +694,12 @@ struct Checkout<K, P> {
   state: Shared<PoolState<K, P>>
   index: usize
   source: CheckoutSource
+  idleTimeoutNanoseconds: u64
   connection: Option<Connection<P>>
   victim: Option<Connection<P>>
   reusable: bool
   returnedAt: Option<Instant>
+  expiresAt: Option<Instant>
 }
 
 effect fn closeConnectionQuietly<P>(connection: &mut Connection<P>) -> ()
@@ -801,12 +760,12 @@ fn publish<K, P>(
   index: usize,
   connection: Connection<P>,
   returnedAt: Instant,
+  expiresAt: Instant,
 ) -> Option<Connection<P>> {
   if state.closed || state.config.maxIdle == usize.ZERO || state.sequenceExhausted {
     clearLease(state, index)
     return Option.some<Connection<P>>(move connection)
   }
-  let expiresAt = MonotonicClock.deadlineAfter(&returnedAt, state.config.idleTimeoutNanoseconds)
   let sequence = state.nextSequence
   if sequence == u64.MAX {
     state.sequenceExhausted = true
@@ -837,7 +796,7 @@ fn publish<K, P>(
         key: move key,
         connection: move connection,
         returnedAt: returnedAt,
-        expiresAt: move expiresAt,
+        expiresAt: expiresAt,
         sequence: sequence,
       }
     }
@@ -890,14 +849,19 @@ where &mut P provides &HttpTransport from &mut HttpTransport {
       checkout.returnedAt,
       Option.none<Instant>(),
     ) {
-      let expired = run drainExpired(&checkout.state, &returnedAt)
-      let toClose = Shared.withMut(
-        &checkout.state,
-        publish<K, P>(checkout.index, move connection, move returnedAt),
-      )
-      let mut pending = move toClose
-      run closeOptionQuietly(&mut pending)
-      return ()
+      if let Option.Some {value: expiresAt} = Intrinsic.replace(
+        checkout.expiresAt,
+        Option.none<Instant>(),
+      ) {
+        let expired = run drainExpired(&checkout.state, &returnedAt)
+        let toClose = Shared.withMut(
+          &checkout.state,
+          publish<K, P>(checkout.index, move connection, move returnedAt, move expiresAt),
+        )
+        let mut pending = move toClose
+        run closeOptionQuietly(&mut pending)
+        return ()
+      }
     }
   }
   Shared.withMut(&checkout.state, clearLease<K, P>(checkout.index))
@@ -912,18 +876,9 @@ effect fn checkoutUse<
   A,
   E,
   AcquisitionError,
-  ContextCopyError,
   ?AcquisitionRequirements,
-  ?ContextCopyRequirements,
   ?CallbackRequirements,
-  C: PoolContext<
-    K,
-    P,
-    AcquisitionError,
-    ContextCopyError,
-    AcquisitionRequirements,
-    ContextCopyRequirements,
-  >,
+  C: PoolContext<K, P, AcquisitionError, AcquisitionRequirements>,
   H: ConnectionHandler<P, A, E ? CallbackRequirements>,
 >(
   checkout: &mut Checkout<K, P>,
@@ -943,14 +898,11 @@ where
     Option.Some {value} => false
   }
   if needsConnection {
-    let acquired = run PoolContext<
-      K,
-      P,
-      AcquisitionError,
-      ContextCopyError,
-      AcquisitionRequirements,
-      ContextCopyRequirements,
-    >.acquire(context, key, copyDeadline(&deadline))
+    let acquired = run PoolContext<K, P, AcquisitionError, AcquisitionRequirements>.acquire(
+      context,
+      key,
+      copyDeadline(&deadline),
+    )
     checkout.connection = Option.some<Connection<P>>(move acquired)
     let afterOpening = run MonotonicClock.now()
     if deadlineExpired(&afterOpening, &deadline) {
@@ -967,8 +919,13 @@ where
   let eligibility = Client.reuseEligibility(connection)
   if eligibilityReusable(move eligibility) {
     let returnedAt = run MonotonicClock.now()
+    let expiresAt = MonotonicClock.deadlineAfter(
+      &returnedAt,
+      checkout.idleTimeoutNanoseconds,
+    )
     checkout.reusable = true
     checkout.returnedAt = Option.some<Instant>(move returnedAt)
+    checkout.expiresAt = Option.some<Instant>(move expiresAt)
   }
   return CheckoutResult<A> {value: move value, source: checkout.source}
 }
@@ -984,21 +941,12 @@ pub effect fn withConnection<
   A,
   E,
   KeyCopyError,
-  ContextCopyError,
   AcquisitionError,
   ?KeyCopyRequirements,
-  ?ContextCopyRequirements,
   ?AcquisitionRequirements,
   ?CallbackRequirements,
   K: PoolKey<KeyCopyError, KeyCopyRequirements>,
-  C: PoolContext<
-    K,
-    P,
-    AcquisitionError,
-    ContextCopyError,
-    AcquisitionRequirements,
-    ContextCopyRequirements,
-  >,
+  C: PoolContext<K, P, AcquisitionError, AcquisitionRequirements>,
   H: ConnectionHandler<P, A, E ? CallbackRequirements>,
 >(
   handle: &Handle<K, P, C>,
@@ -1012,19 +960,15 @@ pub effect fn withConnection<
 where
   &mut P provides &HttpTransport from &mut HttpTransport | &mut MonotonicClock | &mut Allocator | &mut Random,
   &mut P provides &HttpTransport from &mut HttpTransport {
-  if !PoolContext<
-    K,
-    P,
-    AcquisitionError,
-    ContextCopyError,
-    AcquisitionRequirements,
-    ContextCopyRequirements,
-  >.accepts(&handle.context, key) {
+  if !PoolContext<K, P, AcquisitionError, AcquisitionRequirements>.accepts(
+    &handle.context,
+    key,
+  ) {
     fail PoolError.ContextMismatch
   }
   let effective = earlierDeadline(&requestDeadline, &acquisitionDeadline)
   let now = run MonotonicClock.now()
-  if deadlineExpired(&now, &effective) { fail PoolError.PoolClosed }
+  if deadlineExpired(&now, &effective) { fail PoolError.OpeningExpired }
   let state = Shared.clone<PoolState<K, P>>(&handle.state)
   let mut keepTrying = true
   let mut copied = Option.some<K>(run PoolKey<KeyCopyError, KeyCopyRequirements>.copy(key))
@@ -1050,17 +994,18 @@ where
           state: move state,
           index: index,
           source: CheckoutSource.Reused,
+          idleTimeoutNanoseconds: handle.config.idleTimeoutNanoseconds,
           connection: Option.some<Connection<P>>(move connection),
           victim: Option.none<Connection<P>>(),
           reusable: false,
           returnedAt: Option.none<Instant>(),
+          expiresAt: Option.none<Instant>(),
         }
         let use = effect fn(resource: &mut Checkout<K, P>) -> CheckoutResult<A>
         ! E | AcquisitionError | PoolError
         ? AcquisitionRequirements | CallbackRequirements | &mut MonotonicClock {
           return run checkoutUse<
-            K, P, C, A, E, H, AcquisitionError, ContextCopyError,
-            AcquisitionRequirements, ContextCopyRequirements, CallbackRequirements,
+            K, P, A, E, AcquisitionError, AcquisitionRequirements, CallbackRequirements, C, H,
           >(resource, &handle.context, key, copyDeadline(&effective), move handler)
         }
         let release = effect fn(resource: &mut Checkout<K, P>) -> () {
@@ -1073,17 +1018,18 @@ where
           state: move state,
           index: index,
           source: CheckoutSource.Opened,
+          idleTimeoutNanoseconds: handle.config.idleTimeoutNanoseconds,
           connection: Option.none<Connection<P>>(),
           victim: move victim,
           reusable: false,
           returnedAt: Option.none<Instant>(),
+          expiresAt: Option.none<Instant>(),
         }
         let use = effect fn(resource: &mut Checkout<K, P>) -> CheckoutResult<A>
         ! E | AcquisitionError | PoolError
         ? AcquisitionRequirements | CallbackRequirements | &mut MonotonicClock {
           return run checkoutUse<
-            K, P, C, A, E, H, AcquisitionError, ContextCopyError,
-            AcquisitionRequirements, ContextCopyRequirements, CallbackRequirements,
+            K, P, A, E, AcquisitionError, AcquisitionRequirements, CallbackRequirements, C, H,
           >(resource, &handle.context, key, copyDeadline(&effective), move handler)
         }
         let release = effect fn(resource: &mut Checkout<K, P>) -> () {
@@ -1134,17 +1080,28 @@ pub effect fn close<K, P, C>(pool: &mut Pool<K, P, C>) -> () ! ClientError
 where &mut P provides &HttpTransport from &mut HttpTransport {
   Shared.withMut(&pool.handleValue.state, markClosed)
   let mut keepGoing = true
+  let mut firstError = Option.none<ClientError>()
   while keepGoing {
     let selected = Shared.withMut(&pool.handleValue.state, extractAnyIdle)
     match move selected {
       Option.None => { keepGoing = false }
       Option.Some {value} => {
         let mut owned = move value
-        run Client.close(&mut owned)
+        let attempted = run Effect.result(Client.close(&mut owned))
+        match move attempted {
+          Result<(), ClientError>.Success {value: closed} => { drop closed }
+          Result<(), ClientError>.Failure {error} => match & firstError {
+            Option.None => { firstError = Option.some<ClientError>(move error) }
+            Option.Some {value: earlier} => { drop error }
+          }
+        }
       }
     }
   }
-  return ()
+  return match move firstError {
+    Option.None => ()
+    Option.Some {value} => { fail move value }
+  }
 }
 
 effect fn closeQuietly<K, P, C>(pool: &mut Pool<K, P, C>) -> ()
