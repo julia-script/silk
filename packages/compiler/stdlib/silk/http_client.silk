@@ -27,6 +27,7 @@ import silk.http_body {
   Decoder,
   Encoder,
   BodyError,
+  BodyReason,
   Framing,
   Anomaly,
   Progress,
@@ -78,6 +79,9 @@ import silk.u64
 import silk.u8
 import silk.string {String}
 import silk.http {Header}
+
+const DEFAULT_DRAIN_WIRE_BYTES: u64 = 65536
+const MAX_DRAIN_WIRE_BYTES: u64 = 1048576
 
 /// The exclusive connection state.
 pub enum ConnectionPhase {
@@ -146,7 +150,7 @@ pub struct Limits {
   pub maxInformationalResponses: usize
   /// Maximum aggregate informational head wire bytes; use 65536 for the standard default.
   pub maxInformationalWireBytes: u64
-  /// Maximum wire bytes consumed by one explicit discard operation.
+  /// Maximum wire bytes consumed by one explicit discard or drain operation; at most 1048576.
   pub maxDiscardWireBytes: u64
 }
 
@@ -192,7 +196,7 @@ impl Limits {
       maxRequests: 128,
       maxInformationalResponses: 16,
       maxInformationalWireBytes: 65536,
-      maxDiscardWireBytes: 16777216,
+      maxDiscardWireBytes: DEFAULT_DRAIN_WIRE_BYTES,
     }
   }
 }
@@ -274,6 +278,25 @@ pub enum DiscardOutcome {
   CapReached,
 }
 
+/// Whether one owned connection can return to an idle pool.
+pub enum ReuseEligibility {
+  /// The connection has complete persistent boundaries and can return to an idle pool.
+  Eligible,
+  /// The connection is not ready after one complete reusable exchange.
+  NotReady,
+  /// The connection no longer owns armed physical close authority.
+  NotOwned,
+  /// The connection has reached its finite request-count limit.
+  RequestLimit,
+  /// The connection retains bytes after the complete response boundary.
+  RetainedInput {
+    /// The exact retained byte count.
+    pub bytes: usize,
+  },
+}
+
+impl Copy for ReuseEligibility {}
+
 /// Exact accepted payload and transport wire prefixes for one write call.
 pub struct WriteProgress {
   /// Payload prefix accepted by the framing encoder.
@@ -323,6 +346,27 @@ impl<P> Connection<P> {
   pub fn unread(self: &Self) -> usize {
     return self.end - self.start
   }
+}
+
+/// Returns whether an owned connection can return to an idle pool without resetting client state.
+///
+/// `Eligible` requires Ready phase, armed physical ownership, request-budget headroom, and no
+/// retained input. Other results identify the first failed condition without exposing counters.
+pub fn reuseEligibility<P>(connection: &Connection<P>) -> ReuseEligibility {
+  if connection.closeAuthority != CloseAuthority.Armed {
+    return ReuseEligibility.NotOwned
+  }
+  if connection.phaseValue != ConnectionPhase.Ready {
+    return ReuseEligibility.NotReady
+  }
+  if connection.requests >= connection.limits.maxRequests {
+    return ReuseEligibility.RequestLimit
+  }
+  let retained = connection.end - connection.start
+  if retained > usize.ZERO {
+    return ReuseEligibility.RetainedInput {bytes: retained}
+  }
+  return ReuseEligibility.Eligible
 }
 
 /// Shared inspection of retained route context without mutable transport authority.
@@ -1306,7 +1350,9 @@ where &mut P provides &HttpTransport from &mut HttpTransport {
   let use = effect fn(owned: &mut Acquisition<P>) -> Connection<P>
   ! ClientError | OutOfMemoryError
   ? &mut Allocator {
-    if limits.readCapacity == usize.ZERO || limits.writeCapacity == usize.ZERO {
+    if limits.readCapacity == usize.ZERO
+      || limits.writeCapacity == usize.ZERO
+      || limits.maxDiscardWireBytes > MAX_DRAIN_WIRE_BYTES {
       fail ClientError.InvalidLimits
     }
     let requestParser = match move run RequestParser.make(limits.head) {
@@ -2033,6 +2079,61 @@ where
   }
 }
 
+/// Drains and finishes the selected response under one finite aggregate wire-byte limit.
+///
+/// # When to use
+///
+/// Use this operation inside the live exchange when a response must complete before connection
+/// reuse. The standard client limit is 65536 bytes, and the maximum admitted limit is 1048576.
+///
+/// # Details
+///
+/// The operation uses the smaller caller limit and `Limits.maxDiscardWireBytes`. The limit counts
+/// payload, framing, and trailers. The finite deadline is clamped to the request deadline. If a
+/// content decoder was selected, the operation validates it before it calls [`finishResponse`].
+///
+/// # Gotchas
+///
+/// `CapReached` leaves the exchange incomplete. Timeout, malformed framing, read, allocation,
+/// transport, and content-decoder failures remain their original typed failures.
+pub effect fn drainAndFinishAtMost<'exchange, P>(
+  exchange: &mut Exchange<'exchange, P>,
+  maxWireBytes: u64,
+  deadline: Instant,
+) -> DiscardOutcome
+! ClientError | OutOfMemoryError
+? &mut MonotonicClock | &mut Allocator | &mut Random
+where
+  &mut P provides &HttpTransport from &mut HttpTransport | &mut MonotonicClock | &mut Allocator | &mut Random {
+  if maxWireBytes > MAX_DRAIN_WIRE_BYTES {
+    fail ClientError.InvalidLimits
+  }
+  let requestedDeadline = Option.some<Instant>(move deadline)
+  let selectedDeadline = clampDeadline(&requestedDeadline, &exchange.options.deadline)
+  let outcome = if exchange.contentSelected {
+    run drainSelectedContentAtMost(exchange, maxWireBytes, move selectedDeadline)
+  } else {
+    let attempted = run discardRemainingCore(exchange, maxWireBytes, move selectedDeadline)
+    match move attempted {
+      DiscardAttempt.Completed => DiscardOutcome.Completed
+      DiscardAttempt.CapReached {error} => {
+        drop error
+        DiscardOutcome.CapReached
+      }
+    }
+  }
+  return match move outcome {
+    DiscardOutcome.CapReached => {
+      exchange.reusable = false
+      DiscardOutcome.CapReached
+    }
+    DiscardOutcome.Completed => {
+      run finishResponse(exchange)
+      DiscardOutcome.Completed
+    }
+  }
+}
+
 /// Discards response framing under the smaller caller and client wire budget, without consuming a subsequent message.
 /// A deadline, limit, framing, or transport failure permanently removes reuse authority.
 pub effect fn discardRemaining<'exchange, P>(
@@ -2116,6 +2217,79 @@ where
     run fill(&mut exchange.connection.*, &deadline)
   }
   return DiscardAttempt.Completed
+}
+
+effect fn drainSelectedContentAtMost<'exchange, P>(
+  exchange: &mut Exchange<'exchange, P>,
+  maxWireBytes: u64,
+  deadline: Option<Instant>,
+) -> DiscardOutcome
+! ClientError | OutOfMemoryError
+? &mut MonotonicClock | &mut Allocator | &mut Random
+where
+  &mut P provides &HttpTransport from &mut HttpTransport | &mut MonotonicClock | &mut Allocator | &mut Random {
+  if exchange.phaseValue != ExchangePhase.Response || !exchange.contentSelected {
+    fail ClientError.InvalidState
+  }
+  exchange.phaseValue = ExchangePhase.Aborted
+  run checkDeadline(&deadline, false)
+  let mut budget = maxWireBytes
+  if budget > exchange.connection.limits.maxDiscardWireBytes {
+    budget = exchange.connection.limits.maxDiscardWireBytes
+  }
+  let absolute = match move u64.checkedAdd(exchange.responseWireTotal, budget) {
+    Option.None => {
+      fail ClientError.LimitExceeded
+    }
+    Option.Some {value} => value
+  }
+  while true {
+    run checkDeadline(&deadline, false)
+    let input = Bytes.asSlice(&exchange.connection.input)
+    let available = exchange.connection.end - exchange.connection.start
+    let remaining = absolute - exchange.responseWireTotal
+    let mut admitted = available
+    if usize.toU64(admitted) > remaining {
+      admitted = u64.toUsize(remaining)
+    }
+    let bytes = Slice.view<u8>(input, exchange.connection.start, admitted)
+    let output = Bytes.asMutSlice(&mut exchange.connection.scratch)
+    let stepped = match &mut exchange.contentDecoder {
+      Option.None => {
+        fail ClientError.InvalidState
+      }
+      Option.Some {value} => stepContentBox(
+        &mut value,
+        bytes,
+        &mut output,
+        exchange.connection.eof,
+      )
+    }
+    drop output
+    drop bytes
+    drop input
+    let progress = match move stepped {
+      Result.Failure {error} => {
+        exchange.connection.start = exchange.connection.start + error.consumed
+        exchange.responseWireTotal = exchange.responseWireTotal + usize.toU64(error.consumed)
+        fail ClientError.Content {error: move error.error}
+      }
+      Result.Success {value} => value
+    }
+    exchange.connection.start = exchange.connection.start + progress.consumed
+    exchange.responseWireTotal = exchange.responseWireTotal + usize.toU64(progress.consumed)
+    if progress.progress.state == ContentProgressState.End {
+      exchange.phaseValue = ExchangePhase.Response
+      return DiscardOutcome.Completed
+    }
+    if progress.needsInput {
+      if exchange.responseWireTotal == absolute {
+        return DiscardOutcome.CapReached
+      }
+      run fill(&mut exchange.connection.*, &deadline)
+    }
+  }
+  return DiscardOutcome.Completed
 }
 
 fn discardCapReached(error: &BodyError) -> bool {
@@ -2925,11 +3099,13 @@ where
     let progress = match move stepped {
       Result.Failure {error} => {
         exchange.connection.start = exchange.connection.start + error.consumed
+        exchange.responseWireTotal = exchange.responseWireTotal + usize.toU64(error.consumed)
         fail ClientError.Content {error: move error.error}
       }
       Result.Success {value} => value
     }
     exchange.connection.start = exchange.connection.start + progress.consumed
+    exchange.responseWireTotal = exchange.responseWireTotal + usize.toU64(progress.consumed)
     if progress.progress.written > usize.ZERO || progress.progress.state == ContentProgressState.End || output.length == usize.ZERO {
       exchange.phaseValue = ExchangePhase.Response
       return move progress.progress
