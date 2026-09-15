@@ -194,6 +194,8 @@ export const declare = Effect.fnUntraced(function* (
           )
         }
       }
+      const prefix = yield* optionalConstant(builder, owner, options.prefix, 'Function.declare')
+      const prologue = yield* optionalConstant(builder, owner, options.prologue, 'Function.declare')
       const index = state.globals.functions.descriptions.length
       const allocated = yield* GlobalState.allocate(
         state,
@@ -213,8 +215,8 @@ export const declare = Effect.fnUntraced(function* (
           callingConvention,
           attributes,
           garbageCollector: ByteString.coerceOrEmpty(options.garbageCollector),
-          prefix: yield* optionalConstant(builder, owner, options.prefix, 'Function.declare'),
-          prologue: yield* optionalConstant(builder, owner, options.prologue, 'Function.declare'),
+          prefix,
+          prologue,
           personality,
           addressSpace: options.addressSpace ?? AddrSpace.defaultAddrSpace,
           body: undefined,

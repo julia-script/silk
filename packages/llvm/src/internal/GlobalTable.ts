@@ -39,14 +39,20 @@ export const freeze = (
   readonly globals: ReadonlyArray<GlobalDescription.GlobalDescription>
   readonly globalHandles: ReadonlyArray<Global.Global>
   readonly variables: ReadonlyArray<GlobalDescription.VariableDescription>
+  readonly variableHandles: ReadonlyArray<Variable.Variable>
   readonly aliases: ReadonlyArray<GlobalDescription.AliasDescription>
+  readonly aliasHandles: ReadonlyArray<Alias.Alias>
   readonly functions: ReadonlyArray<GlobalDescription.FunctionDescription>
+  readonly functionHandles: ReadonlyArray<FunctionActor.Function>
   readonly attachments: ReadonlyArray<ReadonlyArray<MetadataDescription.Attachment>>
 } => ({
   globals: Table.freeze(table.entries).descriptions,
   globalHandles: Table.freeze(table.entries).handles,
   variables: Table.freeze(table.variables).descriptions,
+  variableHandles: Table.freeze(table.variables).handles,
   aliases: Table.freeze(table.aliases).descriptions,
+  aliasHandles: Table.freeze(table.aliases).handles,
   functions: Table.freeze(table.functions).descriptions,
+  functionHandles: Table.freeze(table.functions).handles,
   attachments: Object.freeze(table.attachments.map((a) => Object.freeze([...a]))),
 })

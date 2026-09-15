@@ -1,13 +1,16 @@
 import * as Effect from 'effect/Effect'
 import * as Result from 'effect/Result'
+import type * as Alias from '../Alias.js'
 import type * as Attribute from '../Attribute.js'
 import type * as Builder from '../Builder.js'
 import type * as ByteString from '../ByteString.js'
 import type * as Constant from '../Constant.js'
 import type * as DataLayout from '../DataLayout.js'
+import type * as FunctionActor from '../Function.js'
 import type * as Global from '../Global.js'
 import { invalidState, type LlvmError } from '../LlvmError.js'
 import type * as Type from '../Type.js'
+import type * as Variable from '../Variable.js'
 import type * as AttributeDescription from './AttributeDescription.js'
 import type * as ConstantDescription from './ConstantDescription.js'
 import type * as GlobalDescription from './GlobalDescription.js'
@@ -67,8 +70,11 @@ export interface Snapshot {
   readonly globals: ReadonlyArray<GlobalDescription.GlobalDescription>
   readonly globalHandles: ReadonlyArray<Global.Global>
   readonly variables: ReadonlyArray<GlobalDescription.VariableDescription>
+  readonly variableHandles: ReadonlyArray<Variable.Variable>
   readonly aliases: ReadonlyArray<GlobalDescription.AliasDescription>
+  readonly aliasHandles: ReadonlyArray<Alias.Alias>
   readonly functions: ReadonlyArray<GlobalDescription.FunctionDescription>
+  readonly functionHandles: ReadonlyArray<FunctionActor.Function>
   readonly metadata: ReadonlyArray<MetadataDescription.Entry>
   readonly namedMetadata: ReadonlyArray<MetadataDescription.Named>
   readonly globalMetadata: ReadonlyArray<ReadonlyArray<MetadataDescription.Attachment>>
@@ -142,8 +148,11 @@ export const snapshot = (
       globals: GlobalTable.freeze(state.value.globals).globals,
       globalHandles: GlobalTable.freeze(state.value.globals).globalHandles,
       variables: GlobalTable.freeze(state.value.globals).variables,
+      variableHandles: GlobalTable.freeze(state.value.globals).variableHandles,
       aliases: GlobalTable.freeze(state.value.globals).aliases,
+      aliasHandles: GlobalTable.freeze(state.value.globals).aliasHandles,
       functions: GlobalTable.freeze(state.value.globals).functions,
+      functionHandles: GlobalTable.freeze(state.value.globals).functionHandles,
       metadata: MetadataTable.freeze(state.value.metadata).descriptions,
       namedMetadata: MetadataTable.freeze(state.value.metadata).named,
       globalMetadata: GlobalTable.freeze(state.value.globals).attachments,

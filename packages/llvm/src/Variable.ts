@@ -205,6 +205,13 @@ export const make = Effect.fnUntraced(function* (
         options.initializer,
         'Variable.make',
       )
+      const debugExpressions = yield* debugExpressionIndices(
+        builder,
+        state,
+        owner,
+        options.debugExpressions,
+        'Variable.make',
+      )
       const index = state.globals.variables.descriptions.length
       const allocated = yield* GlobalState.allocate(
         state,
@@ -216,13 +223,6 @@ export const make = Effect.fnUntraced(function* (
         'Variable.make',
       )
       const handle = Handle.make('Variable', owner, index)
-      const debugExpressions = yield* debugExpressionIndices(
-        builder,
-        state,
-        owner,
-        options.debugExpressions,
-        'Variable.make',
-      )
       state.globals.variables.descriptions.push(
         Object.freeze({
           _tag: 'Variable',

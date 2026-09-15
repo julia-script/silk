@@ -6,6 +6,9 @@ import * as Builder from '../src/Builder.js'
 import * as Constant from '../src/Constant.js'
 import * as FunctionActor from '../src/Function.js'
 import * as Global from '../src/Global.js'
+import * as BuilderState from '../src/internal/BuilderState.js'
+import { LlvmError } from '../src/LlvmError.js'
+import * as Metadata from '../src/Metadata.js'
 import * as Type from '../src/Type.js'
 import * as Variable from '../src/Variable.js'
 
@@ -44,6 +47,66 @@ it.effect('rejects duplicate declarations without disturbing the original', () =
       yield* Global.lookup(builder, 'occupied'),
       yield* Variable.global(builder, original),
     )
+  }),
+)
+
+it.effect('keeps declaration state unchanged after foreign-handle rejection', () =>
+  Effect.gen(function* () {
+    const foreignBuilder = yield* Builder.make({ strip: false })
+    const foreignI32 = yield* Type.integer(foreignBuilder, 32)
+    const foreignConstant = yield* Constant.integerUnsigned(foreignBuilder, foreignI32, 1)
+    const foreignMetadata = yield* Metadata.tuple(foreignBuilder)
+    const builder = yield* Builder.make()
+    const i32 = yield* Type.integer(builder, 32)
+    const signature = yield* Type.functionType(builder, i32, [])
+
+    for (const option of ['prefix', 'prologue'] as const) {
+      const before = yield* BuilderState.snapshot(builder, 'Global.test')
+      const failure = yield* Effect.flip(
+        FunctionActor.declare(
+          builder,
+          option,
+          signature,
+          option === 'prefix' ? { prefix: foreignConstant } : { prologue: foreignConstant },
+        ),
+      )
+
+      assert.instanceOf(failure, LlvmError)
+      assert.strictEqual(failure.reason._tag, 'InvalidState')
+      assert.deepEqual(yield* BuilderState.snapshot(builder, 'Global.test'), before)
+      assert.isUndefined(yield* Global.lookup(builder, option))
+      const declared = yield* FunctionActor.declare(builder, option, signature)
+      assert.strictEqual(
+        yield* FunctionActor.declare(
+          builder,
+          option,
+          signature,
+          option === 'prefix' ? { prefix: foreignConstant } : { prologue: foreignConstant },
+        ),
+        declared,
+      )
+    }
+
+    const retained = yield* Builder.make({ strip: false })
+    const retainedI32 = yield* Type.integer(retained, 32)
+    const retainedBefore = yield* BuilderState.snapshot(retained, 'Global.test')
+    const retainedFailure = yield* Effect.flip(
+      Variable.make(retained, 'debug', retainedI32, {
+        debugExpressions: [foreignMetadata],
+      }),
+    )
+
+    assert.instanceOf(retainedFailure, LlvmError)
+    assert.strictEqual(retainedFailure.reason._tag, 'InvalidState')
+    assert.deepEqual(yield* BuilderState.snapshot(retained, 'Global.test'), retainedBefore)
+    assert.isUndefined(yield* Global.lookup(retained, 'debug'))
+    yield* Variable.make(retained, 'debug', retainedI32)
+
+    const stripped = yield* Builder.make()
+    const strippedI32 = yield* Type.integer(stripped, 32)
+    yield* Variable.make(stripped, 'debug', strippedI32, {
+      debugExpressions: [foreignMetadata],
+    })
   }),
 )
 
