@@ -95,6 +95,8 @@ pub enum LimitKind {
   Arithmetic,
 }
 
+impl Copy for LimitKind {}
+
 /// The externally visible lifecycle state of one session.
 pub enum State {
   /// The session accepts message, control, and peer Close events.
@@ -106,6 +108,8 @@ pub enum State {
   /// A preceding failure made all later frame operations unavailable.
   Failed,
 }
+
+impl Copy for State {}
 
 /// The public operation associated with a state or transport failure.
 pub enum Operation {
@@ -124,6 +128,8 @@ pub enum Operation {
   /// Pump peer frames until the close handshake completes.
   FinishClose,
 }
+
+impl Copy for Operation {}
 
 /// The peer frame rule that selected protocol Close code `1002`.
 pub enum ProtocolReason {
@@ -145,6 +151,8 @@ pub enum ProtocolReason {
   CloseCode,
 }
 
+impl Copy for ProtocolReason {}
+
 /// The text value that failed complete UTF-8 validation.
 pub enum Utf8Component {
   /// A Text message payload.
@@ -152,6 +160,8 @@ pub enum Utf8Component {
   /// A Close status reason.
   CloseReason,
 }
+
+impl Copy for Utf8Component {}
 
 /// The caller Close value rule that rejected construction.
 pub enum CloseDataReason {
@@ -161,6 +171,8 @@ pub enum CloseDataReason {
   ReasonTooLarge,
 }
 
+impl Copy for CloseDataReason {}
+
 /// The aggregate close-handshake budget that was exhausted.
 pub enum CloseLimitKind {
   /// The peer frame-count budget.
@@ -168,6 +180,8 @@ pub enum CloseLimitKind {
   /// The aggregate peer wire-byte budget.
   Bytes,
 }
+
+impl Copy for CloseLimitKind {}
 
 /// A copyable classification retained after the first terminal failure.
 pub enum Failure {
@@ -188,6 +202,8 @@ pub enum Failure {
   /// Buffered or terminal transport I/O failed.
   Transport,
 }
+
+impl Copy for Failure {}
 
 /// A typed WebSocket admission, frame, lifecycle, or transport failure.
 pub union WebSocketError {
