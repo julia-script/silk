@@ -309,6 +309,32 @@
     "namespace": "HttpClientNative"
   },
   {
+    "module": "silk/http_connection_pool",
+    "path": "silk/http_connection_pool.silk",
+    "namespace": "Pool",
+    "aliases": [
+      "Collection",
+      "Config",
+      "ConfigField",
+      "ConnectionKey",
+      "Counts",
+      "CheckoutResult",
+      "CheckoutSource",
+      "EndpointIdentity",
+      "Handle",
+      "PoolContext",
+      "PoolContextCopy",
+      "PoolError",
+      "PoolHandler",
+      "PoolKey"
+    ]
+  },
+  {
+    "module": "silk/http_connection_pool_native",
+    "path": "silk/http_connection_pool_native.silk",
+    "namespace": "PoolNative"
+  },
+  {
     "module": "silk/http_content",
     "path": "silk/http_content.silk",
     "namespace": "ContentReader",

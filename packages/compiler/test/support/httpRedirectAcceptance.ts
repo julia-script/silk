@@ -5,6 +5,60 @@ import {
   verifyProxyPolicy,
 } from './httpProxyAcceptance.js'
 
+const httpConnectionPoolPolicyImports = `import silk.http_connection_pool as Pool {
+  Config as PoolConfig,
+  ConnectionKey as PoolConnectionKey,
+  Counts as PoolCounts,
+  Handle as PoolHandle,
+}
+import silk.http_connection_pool_native as PoolNative {Context as NativePoolContext}
+import silk.http_client_native {NativeTransport}
+import silk.trust_snapshot {TrustSourceError}`
+
+const httpConnectionPoolPolicySupport = `fn poolCountsContract<P, C>(
+  handle: &PoolHandle<PoolConnectionKey, P, C>,
+) -> PoolCounts {
+  return Pool.counts<PoolConnectionKey, P, C>(handle)
+}
+
+fn poolCountsShape(counts: PoolCounts) -> bool {
+  return counts.total == counts.opening + counts.leased + counts.idle && !counts.closed
+}
+
+effect fn nativePoolCopyWitness(
+  handle: &PoolHandle<PoolConnectionKey, NativeTransport, NativePoolContext>,
+) -> PoolHandle<PoolConnectionKey, NativeTransport, NativePoolContext>
+! TrustSourceError | OutOfMemoryError
+? &mut Allocator {
+  return run PoolNative.copyHandle(handle)
+}
+
+fn poolDeclarationsWitness() -> bool {
+  let config = PoolConfig.defaults()
+  let origin = match move proxyCheckedOrigin("http://pool.example") {
+    Result.Failure {error} => {
+      drop error
+      return false
+    }
+    Result.Success {value} => value
+  }
+  let key = PoolConnectionKey.direct(origin)
+  let selected = PoolConnectionKey.origin(&key)
+  let counts = PoolCounts {
+    opening: usize.ZERO,
+    leased: usize.ZERO,
+    idle: usize.ZERO,
+    total: usize.ZERO,
+    closed: false,
+  }
+  return config.maxTotal == Pool.DEFAULT_MAX_TOTAL
+    && config.maxIdle == Pool.DEFAULT_MAX_IDLE
+    && config.maxPerOrigin == Pool.DEFAULT_MAX_PER_ORIGIN
+    && config.idleTimeoutNanoseconds == Pool.DEFAULT_IDLE_TIMEOUT_NANOSECONDS
+    && Origin.equals(&origin, &selected)
+    && poolCountsShape(counts)
+}`
+
 export const httpRedirectPolicyImports = `import silk.http_headers {
   Limits as RedirectHeaderLimits,
   OwnedHeaders,
@@ -1567,6 +1621,7 @@ effect fn recoverRedirectReplayContract(
 }
 
 pub fn main() -> i32 {
+  let poolWitness = poolDeclarationsWitness()
   let compileWitness = redirectPolicyCompileWitness()
   let mut allocator = Allocator.systemAllocatorProvider()
   let proxyWitness = run Effect.catchAll(
@@ -1666,7 +1721,7 @@ pub fn main() -> i32 {
     move replayContract,
     recoverRedirectReplayContract,
   )
-  if proxyWitness && redirectWitness && compileWitness == 0 && replayWitness == 17
+  if poolWitness && proxyWitness && redirectWitness && compileWitness == 0 && replayWitness == 17
     && emptyWitness == 17
     && bytesWitness == 17
     && oneShotWitness == 17
@@ -1676,8 +1731,10 @@ pub fn main() -> i32 {
 
 export const httpProxyRedirectPolicyAcceptanceSource = `${httpProxyPolicyCommonImports}
 ${httpProxyPolicyImports}
+${httpConnectionPoolPolicyImports}
 ${httpRedirectPolicyImports}
 ${httpProxyPolicySupport}
+${httpConnectionPoolPolicySupport}
 ${httpRedirectOperationSupport}
 ${httpRedirectOperationContractSupport}
 ${verifyProxyPolicy}

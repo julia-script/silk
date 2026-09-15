@@ -22,6 +22,8 @@ import silk.http_origin {Origin, OriginError}
 import silk.uri_reference {ParseError}
 import silk.slice {Slice}
 import silk.http_client_native {
+  acquireOwned,
+  acquireUnixOwned,
   NativeRedirectClient,
   NativeRouteProvider,
   Options,
@@ -29,6 +31,7 @@ import silk.http_client_native {
   preflight,
   preflightProxyRoute,
 }
+import silk.native_socket {NativeSocketError}
 import silk.http_redirect as Redirect {ResponseHandler}
 import silk.http_proxy {
   BypassPolicy,
@@ -466,6 +469,126 @@ fn nativeAdmissionChecks() -> i32 {
   return match move preflight(&dns, &options) {
     Result.Success {value} => 0
     Result.Failure {error} => 4
+  }
+}
+
+static if (Intrinsic.targetOperatingSystem() == "darwin" && Intrinsic.targetArchitecture() == "aarch64" && Intrinsic.targetAbi() == "apple" && Intrinsic.profileText(
+  "libc",
+) == "system") || (Intrinsic.targetOperatingSystem() == "linux" && Intrinsic.targetAbi() == "gnu" && Intrinsic.profileText(
+  "libc",
+) == "gnu" && (Intrinsic.targetArchitecture() == "aarch64" || Intrinsic.targetArchitecture() == "x86_64")) {
+  effect fn nativeOwnedAcquisitionChecks() -> i32
+  ? &mut Allocator | &mut MonotonicClock | &mut SystemClock | &mut Random {
+    let direct = nativeOrigin("http://127.0.0.1/")
+    let mut directOptions = Options.defaults()
+    directOptions.deadline = Option.some<Instant>(SystemClock.make(10, 0))
+    let directAttempt = run Effect.result(acquireOwned(
+      direct,
+      move directOptions,
+      ClientLimits.defaults(),
+      Option.none<TrustSnapshot>(),
+      Option.some<Instant>(SystemClock.make(0, 0)),
+    ))
+    match move directAttempt {
+      Result.Success {value} => {
+        drop value
+        return 1
+      }
+      Result.Failure {error} => match move error {
+        NativeSocketError cause => match move cause {
+          NativeSocketError.Timeout => {}
+          _ => { return 2 }
+        }
+        _ => { return 3 }
+      }
+    }
+
+    let unix = nativeOrigin("http://unix.invalid/")
+    let mut unixOptions = Options.defaults()
+    unixOptions.deadline = Option.some<Instant>(SystemClock.make(0, 0))
+    let unixAttempt = run Effect.result(acquireUnixOwned(
+      b"/tmp/silk-owned-acquisition",
+      unix,
+      move unixOptions,
+      ClientLimits.defaults(),
+      Option.none<TrustSnapshot>(),
+      Option.some<Instant>(SystemClock.make(10, 0)),
+    ))
+    match move unixAttempt {
+      Result.Success {value} => {
+        drop value
+        return 4
+      }
+      Result.Failure {error} => match move error {
+        NativeSocketError cause => match move cause {
+          NativeSocketError.Timeout => {}
+          _ => { return 5 }
+        }
+        _ => { return 6 }
+      }
+    }
+
+    let secure = nativeOrigin("https://127.0.0.1/")
+    let secureAttempt = run Effect.result(acquireOwned(
+      secure,
+      Options.defaults(),
+      ClientLimits.defaults(),
+      Option.none<TrustSnapshot>(),
+      Option.none<Instant>(),
+    ))
+    return match move secureAttempt {
+      Result.Success {value} => {
+        drop value
+        7
+      }
+      Result.Failure {error} => match move error {
+        NativeClientError cause => match move cause {
+          NativeClientError.TrustRequired => 0
+          _ => 8
+        }
+        _ => 9
+      }
+    }
+  }
+} else {
+  effect fn nativeOwnedAcquisitionChecks() -> i32 {
+    let direct = nativeOrigin("http://127.0.0.1/")
+    let attempted = run Effect.result(acquireOwned(
+      direct,
+      Options.defaults(),
+      ClientLimits.defaults(),
+      Option.none<TrustSnapshot>(),
+      Option.none<Instant>(),
+    ))
+    match move attempted {
+      Result.Success {value} => {
+        drop value
+        return 10
+      }
+      Result.Failure {error} => match move error {
+        NativeClientError.UnsupportedTarget => {}
+        _ => { return 11 }
+      }
+    }
+    let unix = nativeOrigin("http://unix.invalid/")
+    let unixAttempt = run Effect.result(acquireUnixOwned(
+      b"/tmp/silk-owned-acquisition",
+      unix,
+      Options.defaults(),
+      ClientLimits.defaults(),
+      Option.none<TrustSnapshot>(),
+      Option.none<Instant>(),
+    ))
+    return match move unixAttempt {
+      Result.Success {value} => {
+        drop value
+        12
+      }
+      Result.Failure {error} => match move error {
+        NativeClientError.UnsupportedTarget => 0
+        _ => 13
+      }
+    }
   }
 }
 
@@ -1104,6 +1227,17 @@ pub fn main() -> i32 {
     return 200 + admitted
   }
   let mut allocator = Allocator.systemAllocatorProvider()
+  let mut clock = BudgetClock {}
+  let mut wall = RedirectWallClock {}
+  let mut random = BudgetRandom {}
+  let ownedAdmitted = run nativeOwnedAcquisitionChecks()
+    |> Effect.provideMut<Random>(&mut random)
+    |> Effect.provideMut<SystemClock>(&mut wall)
+    |> Effect.provideMut<MonotonicClock>(&mut clock)
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  if ownedAdmitted != 0 {
+    return 250 + ownedAdmitted
+  }
   let proxyAdmitted = run nativeProxyAdmissionChecks()
     |> Effect.provideMut<Allocator>(&mut allocator)
   if proxyAdmitted != 0 {

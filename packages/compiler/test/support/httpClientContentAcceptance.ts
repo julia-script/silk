@@ -3,7 +3,7 @@ export const httpClientContentAcceptanceSource = `import silk.allocator {Allocat
 import silk.byte_duplex {ReadTransfer}
 import silk.effect {Effect}
 import silk.http {Header, Method, Version}
-import silk.http_content {ContentReason, ContentProgressState, Limits, Mode}
+import silk.http_content {ContentReason, Limits, Mode}
 import silk.http_headers {Headers, Limits as ValueLimits}
 import silk.inflate {Limits as InflateLimits}
 import silk.monotonic_clock {MonotonicClock}
@@ -21,7 +21,9 @@ import silk.http_client {
   Limits as ClientLimits,
   ClientError,
   ConnectionPhase,
+  DiscardOutcome,
   RequestOptions,
+  ReuseEligibility,
 }
 import silk.http_request as Request
 import silk.http_request {PreparedRequest, HeaderPolicy, BodyMode, RequestError}
@@ -155,13 +157,18 @@ impl ConnectionHandler<ClientContentTransport, i32, ClientError | OutOfMemoryErr
     if result != 0 {
       return result
     }
-    if corrupt && connection.phase() != ConnectionPhase.Closed {
-      return 412
+    let eligibility = Client.reuseEligibility(&connection.*)
+    return match move eligibility {
+      ReuseEligibility.Eligible => {
+        if corrupt || connection.phase() != ConnectionPhase.Ready { return 412 }
+        0
+      }
+      ReuseEligibility.NotReady => {
+        if !corrupt || connection.phase() != ConnectionPhase.Closed { return 413 }
+        0
+      }
+      _ => 418
     }
-    if !corrupt && connection.phase() != ConnectionPhase.Ready {
-      return 413
-    }
-    return 0
   }
 }
 
@@ -331,33 +338,21 @@ effect<'call> fn clientContentExchange<'call, 'exchange: 'call>(
       }
     }
   }
-  let expected = b"close"
-  let mut total = usize.ZERO
-  while true {
-    let attempted = run Effect.result(Client.readContentSome(&mut exchangeValue.*, &mut output))
-    let progress = match move attempted {
-      Result.Success {value} => move value
-      Result.Failure {error} => {
-        return run clientContentFailure(move error, status)
+  let attempted = run Effect.result(Client.drainAndFinishAtMost(
+    &mut exchangeValue.*,
+    u64.toU64(65536),
+    SystemClock.make(10, 0),
+  ))
+  return match move attempted {
+    Result.Success {value} => match move value {
+      DiscardOutcome.Completed => {
+        if status == 201 { return 118 }
+        0
       }
+      DiscardOutcome.CapReached => 119
     }
-    let mut index = usize.ZERO
-    while index < progress.written {
-      if total + index >= expected.length || output[index] != expected[total + index] {
-        return 117
-      }
-      index = index + usize.ONE
-    }
-    total = total + progress.written
-    if progress.state == ContentProgressState.End {
-      break
-    }
+    Result.Failure {error} => run clientContentFailure(move error, status)
   }
-  if status == 201 || total != 5 {
-    return 118
-  }
-  run Client.finishResponse(&mut exchangeValue.*)
-  return 0
 }
 
 effect fn clientContentFailure(error: ClientError | OutOfMemoryError, status: u16) -> i32

@@ -1,0 +1,1144 @@
+//! Bounded local HTTP/1 connection pooling with explicit ownership and deterministic eviction.
+//!
+//! # Details
+//!
+//! A pool preallocates every shared slot before publication. Shared callbacks only scan and move
+//! already-owned values; clock reads, connector calls, user callbacks, allocation, and physical
+//! close operations remain outside shared access. Capacity is fail-fast and local to one scheduler
+//! thread. There is no waiter queue, background expiry worker, request replay, HTTP/2 coalescing,
+//! or WebSocket pooling.
+
+import silk.allocator {Allocator, OutOfMemoryError}
+import silk.bytes {Bytes}
+import silk.effect {Effect}
+import silk.http_client as Client
+import silk.http_client {ClientError, Connection, ConnectionHandler, ReuseEligibility}
+import silk.http_origin {Origin}
+import silk.http_proxy {RouteKey}
+import silk.http_transport {HttpTransport}
+import silk.monotonic_clock {MonotonicClock}
+import silk.option {Option}
+import silk.random {Random}
+import silk.result {Result}
+import silk.shared {Shared}
+import silk.system_clock {Instant, SystemClock}
+import silk.u64
+import silk.u8
+import silk.usize
+import silk.vector {Vector}
+
+/// Default maximum number of opening, leased, and idle connections together.
+pub const DEFAULT_MAX_TOTAL: usize = 32
+/// Default maximum number of retained idle connections.
+pub const DEFAULT_MAX_IDLE: usize = 16
+/// Default maximum number of connections for one normalized original origin.
+pub const DEFAULT_MAX_PER_ORIGIN: usize = 8
+/// Default idle lifetime in nanoseconds.
+pub const DEFAULT_IDLE_TIMEOUT_NANOSECONDS: u64 = 30000000000
+/// Hard maximum total pool capacity.
+pub const MAX_TOTAL: usize = 1024
+
+/// Finite pool limits admitted before shared state is allocated.
+pub struct Config {
+  /// Maximum opening, leased, and idle count.
+  pub maxTotal: usize
+  /// Maximum retained idle count. Zero disables retention.
+  pub maxIdle: usize
+  /// Maximum count for one normalized original origin.
+  pub maxPerOrigin: usize
+  /// Positive idle lifetime on the pool's monotonic timeline.
+  pub idleTimeoutNanoseconds: u64
+}
+
+impl Copy for Config {}
+
+impl Config {
+  /// Returns the finite standard limits: 32 total, 16 idle, 8 per origin, and 30 seconds idle.
+  pub fn defaults() -> Config {
+    return Config {
+      maxTotal: DEFAULT_MAX_TOTAL,
+      maxIdle: DEFAULT_MAX_IDLE,
+      maxPerOrigin: DEFAULT_MAX_PER_ORIGIN,
+      idleTimeoutNanoseconds: DEFAULT_IDLE_TIMEOUT_NANOSECONDS,
+    }
+  }
+}
+
+/// The configuration field rejected before pool publication.
+pub enum ConfigField {
+  /// `maxTotal` is outside 1 through 1024.
+  MaxTotal,
+  /// `maxIdle` exceeds `maxTotal`.
+  MaxIdle,
+  /// `maxPerOrigin` is zero or exceeds `maxTotal`.
+  MaxPerOrigin,
+  /// The idle duration is zero.
+  IdleTimeout,
+}
+
+/// A pool admission, capacity, lifecycle, or checked-accounting failure.
+pub union PoolError {
+  /// Configuration was rejected before allocation or publication.
+  InvalidConfig { pub field: ConfigField },
+  /// No legal idle eviction can satisfy global and per-origin capacity.
+  PoolFull,
+  /// The root pool has closed; surviving handles cannot acquire or publish.
+  PoolClosed,
+  /// The key is incompatible with the handle's frozen acquisition/security context.
+  ContextMismatch,
+  /// Opening could not begin or completed at or after its effective acquisition deadline.
+  OpeningExpired,
+}
+
+impl Copy for ConfigField {}
+impl Copy for PoolError {}
+
+/// A synchronous snapshot of bounded shared accounting.
+pub struct Counts {
+  /// Connections whose capacity is reserved while opening.
+  pub opening: usize
+  /// Connections currently lent to callbacks.
+  pub leased: usize
+  /// Complete connections retained for later reuse.
+  pub idle: usize
+  /// `opening + leased + idle`.
+  pub total: usize
+  /// Whether root ownership has closed the pool.
+  pub closed: bool
+}
+
+impl Copy for Counts {}
+
+/// Result of explicit lazy expiry collection.
+pub struct Collection {
+  /// Number of expired idle owners physically closed by this call.
+  pub expired: usize
+}
+
+impl Copy for Collection {}
+
+/// Whether checkout selected an idle owner or opened a new one.
+pub enum CheckoutSource {
+  /// A compatible most-recently-returned idle owner was selected.
+  Reused,
+  /// Capacity was reserved and the immutable connector opened a new owner.
+  Opened,
+}
+
+impl Copy for CheckoutSource {}
+
+/// A successful callback value paired with its checkout source.
+pub struct CheckoutResult<A> {
+  /// The callback result.
+  pub value: A
+  /// How the exclusive owner was obtained.
+  pub source: CheckoutSource
+}
+
+/// Compile-time contract for an independently owned conservative connection key.
+pub interface PoolKey<CopyError, ?CopyRequirements> {
+  /// Copies the complete key before entering shared state.
+  effect fn copy(key: &Self) -> Self ! CopyError ? CopyRequirements
+  /// Reports exact route, provider, and security compatibility.
+  fn equals(left: &Self, right: &Self) -> bool
+  /// Reports normalized original-origin equality for the per-origin cap.
+  fn sameOrigin(left: &Self, right: &Self) -> bool
+}
+
+/// Fallible bounded-copy contract for immutable context retained beside shared mutable state.
+pub interface PoolContextCopy<CopyError, ?CopyRequirements> {
+  /// Fallibly copies all bounded context before a new Shared alias is published.
+  effect fn copy(context: &Self) -> Self ! CopyError ? CopyRequirements
+}
+
+/// Immutable acquisition context retained beside, never inside, shared mutable state.
+pub interface PoolContext<K, P, AcquisitionError, ?AcquisitionRequirements> {
+  /// Checks key compatibility without allocation, clock access, or transport contact.
+  fn accepts(context: &Self, key: &K) -> bool
+  /// Opens one complete HTTP owner under only the effective acquisition deadline.
+  effect fn acquire(
+    context: &Self,
+    key: &K,
+    deadline: Option<Instant>,
+  ) -> Connection<P> ! AcquisitionError ? AcquisitionRequirements
+}
+
+/// A higher-ranked root-pool callback whose pool borrow cannot escape.
+pub interface PoolHandler<K, P, C, A, E, ?R> {
+  /// Uses one root pool until success, failure, or structured cancellation closes it.
+  effect<'scope> fn handle<'scope>(handler: Self, pool: &'scope mut Pool<K, P, C>) -> A ! E ? R
+}
+
+/// Exact endpoint identity retained by the standard conservative key.
+pub union EndpointIdentity {
+  /// Direct network contact, conservatively partitioned by the original origin.
+  Direct,
+  /// A sealed JUL-199 route, including mode, endpoint, original origin, and credential identity.
+  Proxy { pub route: RouteKey },
+  /// Direct Unix-domain contact with an exact owned pathname.
+  Unix { path: Bytes },
+}
+
+/// The standard conservative key used by direct native and proxy-aware pool contexts.
+///
+/// Provider representation, HTTP policy, TLS verification/trust/ALPN policy, and connector policy
+/// belong to the constructor-sealed [`PoolContext`]. This key retains only request-visible route
+/// identity; direct resolution results never establish equivalence.
+pub struct ConnectionKey {
+  originalOrigin: Origin
+  endpoint: EndpointIdentity
+}
+
+impl ConnectionKey {
+  /// Creates a direct network key from the normalized original origin without allocation.
+  pub fn direct(originalOrigin: Origin) -> ConnectionKey {
+    return ConnectionKey {
+      originalOrigin: originalOrigin,
+      endpoint: EndpointIdentity.Direct,
+    }
+  }
+
+  /// Creates a proxy-aware key from the sealed JUL-199 route identity.
+  pub fn proxy(route: RouteKey) -> ConnectionKey {
+    return ConnectionKey {
+      originalOrigin: RouteKey.originalOrigin(&route),
+      endpoint: EndpointIdentity.Proxy {route: route},
+    }
+  }
+
+  /// Copies one exact Unix pathname into a conservative direct key.
+  pub effect fn unix(
+    originalOrigin: Origin,
+    path: &[u8],
+  ) -> ConnectionKey ! OutOfMemoryError ? &mut Allocator {
+    let ownedPath = run Bytes.copy(path)
+    return ConnectionKey {
+      originalOrigin: originalOrigin,
+      endpoint: EndpointIdentity.Unix {path: move ownedPath},
+    }
+  }
+
+  /// Returns the normalized original origin used for per-origin capacity.
+  pub fn origin(self: &Self) -> Origin { return self.originalOrigin }
+
+  /// Returns whether this key selects direct native contact for its original origin.
+  pub fn isDirect(self: &Self) -> bool {
+    return match & self.endpoint {
+      EndpointIdentity.Direct => true
+      _ => false
+    }
+  }
+
+  /// Returns whether this key selects the exact supplied Unix path for its original origin.
+  pub fn matchesUnixPath(self: &Self, path: &[u8]) -> bool {
+    return match & self.endpoint {
+      EndpointIdentity.Unix {path: stored} => bytesEqualSlice(&stored, path)
+      _ => false
+    }
+  }
+}
+
+fn bytesEqual(left: &Bytes, right: &Bytes) -> bool {
+  let a = Bytes.asSlice(left)
+  let b = Bytes.asSlice(right)
+  if a.length != b.length { return false }
+  let mut index = usize.ZERO
+  while index < a.length {
+    if a[index] != b[index] { return false }
+    index = index + usize.ONE
+  }
+  return true
+}
+
+fn bytesEqualSlice(left: &Bytes, right: &[u8]) -> bool {
+  let bytes = Bytes.asSlice(left)
+  if bytes.length != right.length { return false }
+  let mut index = usize.ZERO
+  while index < bytes.length {
+    if bytes[index] != right[index] { return false }
+    index = index + usize.ONE
+  }
+  return true
+}
+
+fn endpointsEqual(left: &EndpointIdentity, right: &EndpointIdentity) -> bool {
+  return match & left.* {
+    EndpointIdentity.Direct => match & right.* {
+      EndpointIdentity.Direct => true
+      _ => false
+    }
+    EndpointIdentity.Proxy {route} => match & right.* {
+      EndpointIdentity.Proxy {route: other} => RouteKey.equals(&route, &other)
+      _ => false
+    }
+    EndpointIdentity.Unix {path} => match & right.* {
+      EndpointIdentity.Unix {path: other} => bytesEqual(&path, &other)
+      _ => false
+    }
+  }
+}
+
+effect fn copyEndpoint(value: &EndpointIdentity) -> EndpointIdentity
+! OutOfMemoryError
+? &mut Allocator {
+  return match & value.* {
+    EndpointIdentity.Direct => EndpointIdentity.Direct
+    EndpointIdentity.Proxy {route} => EndpointIdentity.Proxy {route: route}
+    EndpointIdentity.Unix {path} => EndpointIdentity.Unix {
+      path: run Bytes.copy(Bytes.asSlice(&path)),
+    }
+  }
+}
+
+impl PoolKey<OutOfMemoryError ? &mut Allocator> for ConnectionKey {
+  effect fn copy(key: &Self) -> ConnectionKey ! OutOfMemoryError ? &mut Allocator {
+    return ConnectionKey {
+      originalOrigin: key.originalOrigin,
+      endpoint: run copyEndpoint(&key.endpoint),
+    }
+  }
+
+  fn equals(left: &Self, right: &Self) -> bool {
+    return Origin.equals(&left.originalOrigin, &right.originalOrigin)
+      && endpointsEqual(&left.endpoint, &right.endpoint)
+  }
+
+  fn sameOrigin(left: &Self, right: &Self) -> bool {
+    return Origin.equals(&left.originalOrigin, &right.originalOrigin)
+  }
+}
+
+union Slot<K, P> {
+  Vacant,
+  Opening {key: K},
+  Leased {key: K},
+  Idle {
+    key: K,
+    connection: Connection<P>,
+    returnedAt: Instant,
+    expiresAt: Instant,
+    sequence: u64,
+  },
+}
+
+struct PoolState<K, P> {
+  slots: Vector<Slot<K, P>>
+  config: Config
+  nextSequence: u64
+  sequenceExhausted: bool
+  closed: bool
+}
+
+/// The scoped root owner. Use [`withPool`] so closure runs on every structured exit.
+pub struct Pool<K, P, C> {
+  handleValue: Handle<K, P, C>
+}
+
+/// A fallibly copied local handle sharing only preallocated mutable slot state.
+pub struct Handle<K, P, C> {
+  state: Shared<PoolState<K, P>>
+  context: C
+  config: Config
+}
+
+impl<K, P, C> Pool<K, P, C> {
+  /// Borrows the root handle without publishing another Shared alias.
+  pub fn handle(self: &Self) -> &Handle<K, P, C> { return &self.handleValue }
+}
+
+fn validate(config: Config) -> Result<Config, PoolError> {
+  if config.maxTotal == usize.ZERO || config.maxTotal > MAX_TOTAL {
+    return Result.failResult<Config, PoolError>(PoolError.InvalidConfig {field: ConfigField.MaxTotal})
+  }
+  if config.maxIdle > config.maxTotal {
+    return Result.failResult<Config, PoolError>(PoolError.InvalidConfig {field: ConfigField.MaxIdle})
+  }
+  if config.maxPerOrigin == usize.ZERO || config.maxPerOrigin > config.maxTotal {
+    return Result.failResult<Config, PoolError>(PoolError.InvalidConfig {field: ConfigField.MaxPerOrigin})
+  }
+  if config.idleTimeoutNanoseconds == u64.MIN {
+    return Result.failResult<Config, PoolError>(PoolError.InvalidConfig {field: ConfigField.IdleTimeout})
+  }
+  return Result.succeed<Config, PoolError>(config)
+}
+
+effect fn makeState<K, P>(config: Config) -> Shared<PoolState<K, P>>
+! OutOfMemoryError
+? &mut Allocator {
+  let mut slots = Vector.make<Slot<K, P>>()
+  run Vector.reserveExact<Slot<K, P>>(&mut slots, config.maxTotal)
+  let mut index = usize.ZERO
+  while index < config.maxTotal {
+    run Vector.append<Slot<K, P>>(&mut slots, Slot<K, P>.Vacant)
+    index = index + usize.ONE
+  }
+  return run Shared.make<PoolState<K, P>>(PoolState {
+    slots: move slots,
+    config: config,
+    nextSequence: u64.MIN,
+    sequenceExhausted: false,
+    closed: false,
+  })
+}
+
+/// Constructs one finite pool, lends its root, and closes it on every structured exit.
+pub effect fn withPool<
+  K,
+  P,
+  C,
+  A,
+  E,
+  ?R,
+  H: PoolHandler<K, P, C, A, E ? R>,
+>(config: Config, context: C, handler: H) -> A
+! E | PoolError | OutOfMemoryError
+? R | &mut Allocator
+where &mut P provides &HttpTransport from &mut HttpTransport {
+  let admitted = match move validate(config) {
+    Result.Failure {error} => { fail move error }
+    Result.Success {value} => value
+  }
+  let state = run makeState<K, P>(admitted)
+  let handle = Handle<K, P, C> {state: move state, context: move context, config: admitted}
+  let pool = Pool<K, P, C> {handleValue: move handle}
+  let use = effect fn(owned: &mut Pool<K, P, C>) -> A ! E ? R {
+    return run PoolHandler<K, P, C, A, E ? R>.handle(move handler, move owned)
+  }
+  let release = effect fn(owned: &mut Pool<K, P, C>) -> () {
+    return run closeQuietly<K, P, C>(owned)
+  }
+  return run Effect.useReleaseNonParking(move pool, move use, move release)
+}
+
+/// Copies immutable context before cloning Shared state, so copy failure publishes no alias.
+pub effect fn copyHandle<
+  K,
+  P,
+  CopyError,
+  ?CopyRequirements,
+  C: PoolContextCopy<CopyError, CopyRequirements>,
+>(handle: &Handle<K, P, C>) -> Handle<K, P, C> ! CopyError ? CopyRequirements {
+  let context = run PoolContextCopy<CopyError, CopyRequirements>.copy(&handle.context)
+  let state = Shared.clone<PoolState<K, P>>(&handle.state)
+  return Handle<K, P, C> {state: move state, context: move context, config: handle.config}
+}
+
+fn instantBefore(left: &Instant, right: &Instant) -> bool {
+  let leftSeconds = SystemClock.seconds(left)
+  let rightSeconds = SystemClock.seconds(right)
+  if leftSeconds < rightSeconds { return true }
+  if leftSeconds > rightSeconds { return false }
+  return SystemClock.nanoseconds(left) < SystemClock.nanoseconds(right)
+}
+
+fn copyInstant(value: &Instant) -> Instant {
+  return SystemClock.make(SystemClock.seconds(value), SystemClock.nanoseconds(value))
+}
+
+fn copyDeadline(value: &Option<Instant>) -> Option<Instant> {
+  return match & value.* {
+    Option.None => Option.none<Instant>()
+    Option.Some {value: present} => Option.some<Instant>(copyInstant(&present))
+  }
+}
+
+fn earlierDeadline(left: &Option<Instant>, right: &Option<Instant>) -> Option<Instant> {
+  return match & left.* {
+    Option.None => copyDeadline(right)
+    Option.Some {value: a} => match & right.* {
+      Option.None => Option.some<Instant>(copyInstant(&a))
+      Option.Some {value: b} => {
+        if instantBefore(&a, &b) { return Option.some<Instant>(copyInstant(&a)) }
+        return Option.some<Instant>(copyInstant(&b))
+      }
+    }
+  }
+}
+
+fn deadlineExpired(now: &Instant, deadline: &Option<Instant>) -> bool {
+  return match & deadline.* {
+    Option.None => false
+    Option.Some {value} => !instantBefore(now, &value)
+  }
+}
+
+fn isExpired(now: &Instant, expiresAt: &Instant) -> bool {
+  return !instantBefore(now, expiresAt)
+}
+
+fn older(
+  leftReturnedAt: &Instant,
+  leftSequence: u64,
+  rightReturnedAt: &Instant,
+  rightSequence: u64,
+) -> bool {
+  if instantBefore(leftReturnedAt, rightReturnedAt) { return true }
+  if instantBefore(rightReturnedAt, leftReturnedAt) { return false }
+  return leftSequence < rightSequence
+}
+
+fn newer(
+  leftReturnedAt: &Instant,
+  leftSequence: u64,
+  rightReturnedAt: &Instant,
+  rightSequence: u64,
+) -> bool {
+  if instantBefore(rightReturnedAt, leftReturnedAt) { return true }
+  if instantBefore(leftReturnedAt, rightReturnedAt) { return false }
+  return leftSequence > rightSequence
+}
+
+fn countState<K, P>(state: &PoolState<K, P>) -> Counts {
+  let slots = Vector.asSlice<Slot<K, P>>(&state.slots)
+  let mut opening = usize.ZERO
+  let mut leased = usize.ZERO
+  let mut idle = usize.ZERO
+  let mut index = usize.ZERO
+  while index < slots.length {
+    match & slots[index] {
+      Slot.Vacant => {}
+      Slot.Opening {key} => { opening = opening + usize.ONE }
+      Slot.Leased {key} => { leased = leased + usize.ONE }
+      Slot.Idle {key, connection, returnedAt, expiresAt, sequence} => {
+        idle = idle + usize.ONE
+      }
+    }
+    index = index + usize.ONE
+  }
+  return Counts {
+    opening: opening,
+    leased: leased,
+    idle: idle,
+    total: opening + leased + idle,
+    closed: state.closed,
+  }
+}
+
+/// Inspects exact shared accounting without allocating or consulting the clock.
+pub fn counts<K, P, C>(handle: &Handle<K, P, C>) -> Counts {
+  return Shared.with(&handle.state, countState)
+}
+
+union Admission<P> {
+  Closed,
+  Full,
+  Expired {connection: Connection<P>},
+  Selected {index: usize, connection: Connection<P>},
+  Opening {index: usize, victim: Option<Connection<P>>},
+}
+
+fn replaceSlot<K, P>(slot: &mut Slot<K, P>, next: Slot<K, P>) -> Slot<K, P> {
+  return Intrinsic.replace(slot.*, move next)
+}
+
+fn firstExpired<K, P>(state: &mut PoolState<K, P>, now: &Instant) -> Option<Connection<P>> {
+  let mut slots = Vector.asMutSlice<Slot<K, P>>(&mut state.slots)
+  let mut index = usize.ZERO
+  while index < slots.length {
+    let expired = match & slots[index] {
+      Slot.Idle {key, connection, returnedAt, expiresAt, sequence} => isExpired(now, &expiresAt)
+      _ => false
+    }
+    if expired {
+      let previous = replaceSlot(&mut slots[index], Slot<K, P>.Vacant)
+      return match move previous {
+        Slot.Idle {key, connection, returnedAt, expiresAt, sequence} => {
+          drop key
+          return Option.some<Connection<P>>(move connection)
+        }
+        _ => unavailable<Connection<P>>()
+      }
+    }
+    index = index + usize.ONE
+  }
+  return Option.none<Connection<P>>()
+}
+
+fn reserveStep<
+  P,
+  KeyCopyError,
+  ?KeyCopyRequirements,
+  K: PoolKey<KeyCopyError, KeyCopyRequirements>,
+>(state: &mut PoolState<K, P>, key: K, now: Instant) -> Admission<P> {
+  if state.closed {
+    drop key
+    return Admission<P>.Closed
+  }
+  let expired = firstExpired(state, &now)
+  if let Option.Some {value} = move expired {
+    drop key
+    return Admission<P>.Expired {connection: move value}
+  }
+
+  let view = Vector.asSlice<Slot<K, P>>(&state.slots)
+  let mut selected = Option.none<usize>()
+  let mut selectedReturned = Option.none<Instant>()
+  let mut selectedSequence = u64.MIN
+  let mut total = usize.ZERO
+  let mut originTotal = usize.ZERO
+  let mut vacant = Option.none<usize>()
+  let mut oldestGlobal = Option.none<usize>()
+  let mut oldestGlobalReturned = Option.none<Instant>()
+  let mut oldestGlobalSequence = u64.MIN
+  let mut oldestOrigin = Option.none<usize>()
+  let mut oldestOriginReturned = Option.none<Instant>()
+  let mut oldestOriginSequence = u64.MIN
+  let mut index = usize.ZERO
+  while index < view.length {
+    match & view[index] {
+      Slot.Vacant => {
+        match & vacant {
+          Option.None => { vacant = Option.some<usize>(index) }
+          Option.Some {value} => {}
+        }
+      }
+      Slot.Opening {key: stored} => {
+        total = total + usize.ONE
+        if PoolKey<KeyCopyError, KeyCopyRequirements>.sameOrigin(&key, &stored) {
+          originTotal = originTotal + usize.ONE
+        }
+      }
+      Slot.Leased {key: stored} => {
+        total = total + usize.ONE
+        if PoolKey<KeyCopyError, KeyCopyRequirements>.sameOrigin(&key, &stored) {
+          originTotal = originTotal + usize.ONE
+        }
+      }
+      Slot.Idle {key: stored, connection, returnedAt, expiresAt, sequence} => {
+        total = total + usize.ONE
+        let sameOrigin = PoolKey<KeyCopyError, KeyCopyRequirements>.sameOrigin(&key, &stored)
+        if sameOrigin { originTotal = originTotal + usize.ONE }
+        if PoolKey<KeyCopyError, KeyCopyRequirements>.equals(&key, &stored) {
+          let choose = match & selectedReturned {
+            Option.None => true
+            Option.Some {value} => newer(&returnedAt, sequence, &value, selectedSequence)
+          }
+          if choose {
+            selected = Option.some<usize>(index)
+            selectedReturned = Option.some<Instant>(copyInstant(&returnedAt))
+            selectedSequence = sequence
+          }
+        }
+        let globalOlder = match & oldestGlobalReturned {
+          Option.None => true
+          Option.Some {value} => older(&returnedAt, sequence, &value, oldestGlobalSequence)
+        }
+        if globalOlder {
+          oldestGlobal = Option.some<usize>(index)
+          oldestGlobalReturned = Option.some<Instant>(copyInstant(&returnedAt))
+          oldestGlobalSequence = sequence
+        }
+        if sameOrigin {
+          let originOlder = match & oldestOriginReturned {
+            Option.None => true
+            Option.Some {value} => older(&returnedAt, sequence, &value, oldestOriginSequence)
+          }
+          if originOlder {
+            oldestOrigin = Option.some<usize>(index)
+            oldestOriginReturned = Option.some<Instant>(copyInstant(&returnedAt))
+            oldestOriginSequence = sequence
+          }
+        }
+      }
+    }
+    index = index + usize.ONE
+  }
+  drop view
+
+  if let Option.Some {value: selectedIndex} = move selected {
+    drop key
+    let mut slots = Vector.asMutSlice<Slot<K, P>>(&mut state.slots)
+    let previous = replaceSlot(&mut slots[selectedIndex], Slot<K, P>.Vacant)
+    return match move previous {
+      Slot.Idle {key: stored, connection, returnedAt, expiresAt, sequence} => {
+        slots[selectedIndex] = Slot<K, P>.Leased {key: move stored}
+        return Admission<P>.Selected {index: selectedIndex, connection: move connection}
+      }
+      _ => unavailable<Admission<P>>()
+    }
+  }
+
+  let mut destination = Option.none<usize>()
+  if originTotal >= state.config.maxPerOrigin {
+    destination = move oldestOrigin
+  } else if total < state.config.maxTotal {
+    destination = move vacant
+  } else {
+    destination = move oldestGlobal
+  }
+  let selectedDestination = match move destination {
+    Option.None => {
+      drop key
+      return Admission<P>.Full
+    }
+    Option.Some {value} => value
+  }
+  let mut slots = Vector.asMutSlice<Slot<K, P>>(&mut state.slots)
+  let previous = replaceSlot(&mut slots[selectedDestination], Slot<K, P>.Opening {key: move key})
+  let victim = match move previous {
+    Slot.Vacant => Option.none<Connection<P>>()
+    Slot.Idle {key: previousKey, connection, returnedAt, expiresAt, sequence} => {
+      drop previousKey
+      Option.some<Connection<P>>(move connection)
+    }
+    _ => unavailable<Option<Connection<P>>>()
+  }
+  return Admission<P>.Opening {index: selectedDestination, victim: move victim}
+}
+
+fn activate<K, P>(state: &mut PoolState<K, P>, index: usize) -> bool {
+  let mut slots = Vector.asMutSlice<Slot<K, P>>(&mut state.slots)
+  let previous = replaceSlot(&mut slots[index], Slot<K, P>.Vacant)
+  return match move previous {
+    Slot.Opening {key} => {
+      if state.closed {
+        drop key
+        return false
+      }
+      slots[index] = Slot<K, P>.Leased {key: move key}
+      return true
+    }
+    _ => unavailable<bool>()
+  }
+}
+
+fn clearLease<K, P>(state: &mut PoolState<K, P>, index: usize) -> () {
+  let mut slots = Vector.asMutSlice<Slot<K, P>>(&mut state.slots)
+  let previous = replaceSlot(&mut slots[index], Slot<K, P>.Vacant)
+  match move previous {
+    Slot.Vacant => {}
+    Slot.Opening {key} => { drop key }
+    Slot.Leased {key} => { drop key }
+    Slot.Idle {key, connection, returnedAt, expiresAt, sequence} => {
+      drop key
+      drop connection
+    }
+  }
+  return ()
+}
+
+struct Checkout<K, P> {
+  state: Shared<PoolState<K, P>>
+  index: usize
+  source: CheckoutSource
+  idleTimeoutNanoseconds: u64
+  connection: Option<Connection<P>>
+  victim: Option<Connection<P>>
+  reusable: bool
+  returnedAt: Option<Instant>
+  expiresAt: Option<Instant>
+}
+
+effect fn closeConnectionQuietly<P>(connection: &mut Connection<P>) -> ()
+where &mut P provides &HttpTransport from &mut HttpTransport {
+  let attempted = run Effect.result(Client.close(connection))
+  drop attempted
+  return ()
+}
+
+effect fn closeOptionQuietly<P>(selected: &mut Option<Connection<P>>) -> ()
+where &mut P provides &HttpTransport from &mut HttpTransport {
+  let previous = Intrinsic.replace(selected.*, Option.none<Connection<P>>())
+  if let Option.Some {value} = move previous {
+    let mut owned = move value
+    run closeConnectionQuietly(&mut owned)
+  }
+  return ()
+}
+
+fn eligibilityReusable(value: ReuseEligibility) -> bool {
+  return match move value {
+    ReuseEligibility.Eligible => true
+    _ => false
+  }
+}
+
+fn idleCount<K, P>(state: &PoolState<K, P>) -> usize {
+  return countState(state).idle
+}
+
+fn oldestIdleExcept<K, P>(state: &PoolState<K, P>, excluded: usize) -> Option<usize> {
+  let slots = Vector.asSlice<Slot<K, P>>(&state.slots)
+  let mut selected = Option.none<usize>()
+  let mut selectedAt = Option.none<Instant>()
+  let mut selectedSequence = u64.MIN
+  let mut index = usize.ZERO
+  while index < slots.length {
+    if index != excluded {
+      if let Slot.Idle {key, connection, returnedAt, expiresAt, sequence} = & slots[index] {
+        let choose = match & selectedAt {
+          Option.None => true
+          Option.Some {value} => older(&returnedAt, sequence, &value, selectedSequence)
+        }
+        if choose {
+          selected = Option.some<usize>(index)
+          selectedAt = Option.some<Instant>(copyInstant(&returnedAt))
+          selectedSequence = sequence
+        }
+      }
+    }
+    index = index + usize.ONE
+  }
+  return move selected
+}
+
+fn publish<K, P>(
+  state: &mut PoolState<K, P>,
+  index: usize,
+  connection: Connection<P>,
+  returnedAt: Instant,
+  expiresAt: Instant,
+) -> Option<Connection<P>> {
+  if state.closed || state.config.maxIdle == usize.ZERO || state.sequenceExhausted {
+    clearLease(state, index)
+    return Option.some<Connection<P>>(move connection)
+  }
+  let sequence = state.nextSequence
+  if sequence == u64.MAX {
+    state.sequenceExhausted = true
+  } else {
+    state.nextSequence = sequence + 1
+  }
+  let mut victimIndex = Option.none<usize>()
+  if idleCount(state) >= state.config.maxIdle {
+    victimIndex = oldestIdleExcept(state, index)
+  }
+  let mut victim = Option.none<Connection<P>>()
+  if let Option.Some {value} = move victimIndex {
+    let mut slots = Vector.asMutSlice<Slot<K, P>>(&mut state.slots)
+    let previous = replaceSlot(&mut slots[value], Slot<K, P>.Vacant)
+    victim = match move previous {
+      Slot.Idle {key, connection: evicted, returnedAt: oldAt, expiresAt: oldExpiry, sequence: oldSequence} => {
+        drop key
+        Option.some<Connection<P>>(move evicted)
+      }
+      _ => unavailable<Option<Connection<P>>>()
+    }
+  }
+  let mut slots = Vector.asMutSlice<Slot<K, P>>(&mut state.slots)
+  let previous = replaceSlot(&mut slots[index], Slot<K, P>.Vacant)
+  match move previous {
+    Slot.Leased {key} => {
+      slots[index] = Slot<K, P>.Idle {
+        key: move key,
+        connection: move connection,
+        returnedAt: returnedAt,
+        expiresAt: expiresAt,
+        sequence: sequence,
+      }
+    }
+    _ => unavailable<()>()
+  }
+  return move victim
+}
+
+fn extractExpiredStep<K, P>(state: &mut PoolState<K, P>, now: Instant) -> Option<Connection<P>> {
+  return firstExpired(state, &now)
+}
+
+effect fn drainExpired<K, P>(
+  state: &Shared<PoolState<K, P>>,
+  now: &Instant,
+) -> usize
+where &mut P provides &HttpTransport from &mut HttpTransport {
+  let mut count = usize.ZERO
+  let mut keepGoing = true
+  while keepGoing {
+    let selected = Shared.withMut(
+      state,
+      extractExpiredStep<K, P>(copyInstant(now)),
+    )
+    match move selected {
+      Option.None => { keepGoing = false }
+      Option.Some {value} => {
+        let mut owned = move value
+        run closeConnectionQuietly(&mut owned)
+        count = count + usize.ONE
+      }
+    }
+  }
+  return count
+}
+
+effect fn releaseCheckout<K, P>(checkout: &mut Checkout<K, P>) -> ()
+where &mut P provides &HttpTransport from &mut HttpTransport {
+  run closeOptionQuietly(&mut checkout.victim)
+  let selected = Intrinsic.replace(checkout.connection, Option.none<Connection<P>>())
+  let connection = match move selected {
+    Option.None => {
+      Shared.withMut(&checkout.state, clearLease<K, P>(checkout.index))
+      return ()
+    }
+    Option.Some {value} => move value
+  }
+  if checkout.reusable {
+    if let Option.Some {value: returnedAt} = Intrinsic.replace(
+      checkout.returnedAt,
+      Option.none<Instant>(),
+    ) {
+      if let Option.Some {value: expiresAt} = Intrinsic.replace(
+        checkout.expiresAt,
+        Option.none<Instant>(),
+      ) {
+        let expired = run drainExpired(&checkout.state, &returnedAt)
+        let toClose = Shared.withMut(
+          &checkout.state,
+          publish<K, P>(checkout.index, move connection, move returnedAt, move expiresAt),
+        )
+        let mut pending = move toClose
+        run closeOptionQuietly(&mut pending)
+        return ()
+      }
+    }
+  }
+  Shared.withMut(&checkout.state, clearLease<K, P>(checkout.index))
+  let mut discarded = move connection
+  run closeConnectionQuietly(&mut discarded)
+  return ()
+}
+
+effect fn checkoutUse<
+  K,
+  P,
+  A,
+  E,
+  AcquisitionError,
+  ?AcquisitionRequirements,
+  ?CallbackRequirements,
+  C: PoolContext<K, P, AcquisitionError, AcquisitionRequirements>,
+  H: ConnectionHandler<P, A, E ? CallbackRequirements>,
+>(
+  checkout: &mut Checkout<K, P>,
+  context: &C,
+  key: &K,
+  deadline: Option<Instant>,
+  handler: H,
+) -> CheckoutResult<A>
+! E | AcquisitionError | PoolError
+? AcquisitionRequirements | CallbackRequirements | &mut MonotonicClock
+where
+  &mut P provides &HttpTransport from &mut HttpTransport | &mut MonotonicClock | &mut Allocator | &mut Random,
+  &mut P provides &HttpTransport from &mut HttpTransport {
+  run closeOptionQuietly(&mut checkout.victim)
+  let needsConnection = match & checkout.connection {
+    Option.None => true
+    Option.Some {value} => false
+  }
+  if needsConnection {
+    let acquired = run PoolContext<K, P, AcquisitionError, AcquisitionRequirements>.acquire(
+      context,
+      key,
+      copyDeadline(&deadline),
+    )
+    checkout.connection = Option.some<Connection<P>>(move acquired)
+    let afterOpening = run MonotonicClock.now()
+    if deadlineExpired(&afterOpening, &deadline) {
+      fail PoolError.OpeningExpired
+    }
+    let active = Shared.withMut(&checkout.state, activate<K, P>(checkout.index))
+    if !active { fail PoolError.PoolClosed }
+  }
+  let connection = match &mut checkout.connection {
+    Option.None => unavailable<&mut Connection<P>>()
+    Option.Some {value} => &mut value
+  }
+  let value = run ConnectionHandler<P, A, E ? CallbackRequirements>.handle(move handler, move connection)
+  let eligibility = Client.reuseEligibility(connection)
+  if eligibilityReusable(move eligibility) {
+    let returnedAt = run MonotonicClock.now()
+    let expiresAt = MonotonicClock.deadlineAfter(
+      &returnedAt,
+      checkout.idleTimeoutNanoseconds,
+    )
+    checkout.reusable = true
+    checkout.returnedAt = Option.some<Instant>(move returnedAt)
+    checkout.expiresAt = Option.some<Instant>(move expiresAt)
+  }
+  return CheckoutResult<A> {value: move value, source: checkout.source}
+}
+
+/// Checks out exactly one owner, lends it to `handler`, and publishes it only when client-eligible.
+///
+/// Acquisition uses the earlier of `requestDeadline` and `acquisitionDeadline`; the connector must
+/// construct pooled owners without retaining that bound. The handler remains responsible for
+/// passing the unchanged request deadline to each HTTP exchange. Failures and cancellation close
+/// instead of replaying the request.
+pub effect fn withConnection<
+  P,
+  A,
+  E,
+  KeyCopyError,
+  AcquisitionError,
+  ?KeyCopyRequirements,
+  ?AcquisitionRequirements,
+  ?CallbackRequirements,
+  K: PoolKey<KeyCopyError, KeyCopyRequirements>,
+  C: PoolContext<K, P, AcquisitionError, AcquisitionRequirements>,
+  H: ConnectionHandler<P, A, E ? CallbackRequirements>,
+>(
+  handle: &Handle<K, P, C>,
+  key: &K,
+  requestDeadline: Option<Instant>,
+  acquisitionDeadline: Option<Instant>,
+  handler: H,
+) -> CheckoutResult<A>
+! E | KeyCopyError | AcquisitionError | PoolError
+? KeyCopyRequirements | AcquisitionRequirements | CallbackRequirements | &mut MonotonicClock
+where
+  &mut P provides &HttpTransport from &mut HttpTransport | &mut MonotonicClock | &mut Allocator | &mut Random,
+  &mut P provides &HttpTransport from &mut HttpTransport {
+  if !PoolContext<K, P, AcquisitionError, AcquisitionRequirements>.accepts(
+    &handle.context,
+    key,
+  ) {
+    fail PoolError.ContextMismatch
+  }
+  let effective = earlierDeadline(&requestDeadline, &acquisitionDeadline)
+  let now = run MonotonicClock.now()
+  if deadlineExpired(&now, &effective) { fail PoolError.OpeningExpired }
+  let state = Shared.clone<PoolState<K, P>>(&handle.state)
+  let mut keepTrying = true
+  let mut copied = Option.some<K>(run PoolKey<KeyCopyError, KeyCopyRequirements>.copy(key))
+  while keepTrying {
+    let ownedKey = match move Intrinsic.replace(copied, Option.none<K>()) {
+      Option.None => run PoolKey<KeyCopyError, KeyCopyRequirements>.copy(key)
+      Option.Some {value} => move value
+    }
+    let admitted = Shared.withMut(
+      &state,
+      reserveStep<K, P, KeyCopyError, KeyCopyRequirements>(move ownedKey, copyInstant(&now)),
+    )
+    match move admitted {
+      Admission.Closed => { fail PoolError.PoolClosed }
+      Admission.Full => { fail PoolError.PoolFull }
+      Admission.Expired {connection} => {
+        let mut expired = move connection
+        run closeConnectionQuietly(&mut expired)
+        copied = Option.some<K>(run PoolKey<KeyCopyError, KeyCopyRequirements>.copy(key))
+      }
+      Admission.Selected {index, connection} => {
+        let checkout = Checkout<K, P> {
+          state: move state,
+          index: index,
+          source: CheckoutSource.Reused,
+          idleTimeoutNanoseconds: handle.config.idleTimeoutNanoseconds,
+          connection: Option.some<Connection<P>>(move connection),
+          victim: Option.none<Connection<P>>(),
+          reusable: false,
+          returnedAt: Option.none<Instant>(),
+          expiresAt: Option.none<Instant>(),
+        }
+        let use = effect fn(resource: &mut Checkout<K, P>) -> CheckoutResult<A>
+        ! E | AcquisitionError | PoolError
+        ? AcquisitionRequirements | CallbackRequirements | &mut MonotonicClock {
+          return run checkoutUse<
+            K, P, A, E, AcquisitionError, AcquisitionRequirements, CallbackRequirements, C, H,
+          >(resource, &handle.context, key, copyDeadline(&effective), move handler)
+        }
+        let release = effect fn(resource: &mut Checkout<K, P>) -> () {
+          return run releaseCheckout(resource)
+        }
+        return run Effect.useReleaseNonParking(move checkout, move use, move release)
+      }
+      Admission.Opening {index, victim} => {
+        let checkout = Checkout<K, P> {
+          state: move state,
+          index: index,
+          source: CheckoutSource.Opened,
+          idleTimeoutNanoseconds: handle.config.idleTimeoutNanoseconds,
+          connection: Option.none<Connection<P>>(),
+          victim: move victim,
+          reusable: false,
+          returnedAt: Option.none<Instant>(),
+          expiresAt: Option.none<Instant>(),
+        }
+        let use = effect fn(resource: &mut Checkout<K, P>) -> CheckoutResult<A>
+        ! E | AcquisitionError | PoolError
+        ? AcquisitionRequirements | CallbackRequirements | &mut MonotonicClock {
+          return run checkoutUse<
+            K, P, A, E, AcquisitionError, AcquisitionRequirements, CallbackRequirements, C, H,
+          >(resource, &handle.context, key, copyDeadline(&effective), move handler)
+        }
+        let release = effect fn(resource: &mut Checkout<K, P>) -> () {
+          return run releaseCheckout(resource)
+        }
+        return run Effect.useReleaseNonParking(move checkout, move use, move release)
+      }
+    }
+  }
+  return unavailable<CheckoutResult<A>>()
+}
+
+/// Samples the monotonic clock once, lazily removes every expired idle owner, and closes outside Shared.
+pub effect fn collect<K, P, C>(handle: &Handle<K, P, C>) -> Collection
+? &mut MonotonicClock
+where &mut P provides &HttpTransport from &mut HttpTransport {
+  let now = run MonotonicClock.now()
+  let expired = run drainExpired(&handle.state, &now)
+  return Collection {expired: expired}
+}
+
+fn markClosed<K, P>(state: &mut PoolState<K, P>) -> () {
+  state.closed = true
+  return ()
+}
+
+fn extractAnyIdle<K, P>(state: &mut PoolState<K, P>) -> Option<Connection<P>> {
+  let mut slots = Vector.asMutSlice<Slot<K, P>>(&mut state.slots)
+  let mut index = usize.ZERO
+  while index < slots.length {
+    if let Slot.Idle {key, connection, returnedAt, expiresAt, sequence} = & slots[index] {
+      let previous = replaceSlot(&mut slots[index], Slot<K, P>.Vacant)
+      return match move previous {
+        Slot.Idle {key: ownedKey, connection: owned, returnedAt: at, expiresAt: expiry, sequence: order} => {
+          drop ownedKey
+          Option.some<Connection<P>>(move owned)
+        }
+        _ => unavailable<Option<Connection<P>>>()
+      }
+    }
+    index = index + usize.ONE
+  }
+  return Option.none<Connection<P>>()
+}
+
+/// Marks the pool closed idempotently and physically closes all currently idle owners outside Shared.
+pub effect fn close<K, P, C>(pool: &mut Pool<K, P, C>) -> () ! ClientError
+where &mut P provides &HttpTransport from &mut HttpTransport {
+  Shared.withMut(&pool.handleValue.state, markClosed)
+  let mut keepGoing = true
+  let mut firstError = Option.none<ClientError>()
+  while keepGoing {
+    let selected = Shared.withMut(&pool.handleValue.state, extractAnyIdle)
+    match move selected {
+      Option.None => { keepGoing = false }
+      Option.Some {value} => {
+        let mut owned = move value
+        let attempted = run Effect.result(Client.close(&mut owned))
+        match move attempted {
+          Result<(), ClientError>.Success {value: closed} => { drop closed }
+          Result<(), ClientError>.Failure {error} => match & firstError {
+            Option.None => { firstError = Option.some<ClientError>(move error) }
+            Option.Some {value: earlier} => { drop error }
+          }
+        }
+      }
+    }
+  }
+  return match move firstError {
+    Option.None => ()
+    Option.Some {value} => { fail move value }
+  }
+}
+
+effect fn closeQuietly<K, P, C>(pool: &mut Pool<K, P, C>) -> ()
+where &mut P provides &HttpTransport from &mut HttpTransport {
+  let attempted = run Effect.result(close(pool))
+  drop attempted
+  return ()
+}
+
+fn unavailable<T>() -> T {
+  let invalid = 1 / 0
+  return unavailable<T>()
+}
