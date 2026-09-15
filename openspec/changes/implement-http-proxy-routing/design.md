@@ -63,11 +63,14 @@ scratch.
 The target-neutral scoped shape is
 `withRoute(client, route, preparedTrust, deadline, handler)`. `client` is a scoped peer-acquisition
 adapter that accepts exactly one selected endpoint and the unchanged deadline and lends its owned
-plain `HttpTransport`; it does not select a route or perform TLS. `preparedTrust` is `None` for a
-Forward route or an insecure Direct route and is one caller-prepared owned `TrustSnapshot` for a
-secure Direct or Tunnel route. Invalid presence/absence fails before acquisition. The operation
-consumes `route` and `preparedTrust`, and invokes one higher-ranked handler with the existing
-callback-scoped HTTP connection; the connection cannot escape or be duplicated.
+plain transport with complete `HttpTransport` and `ByteDuplex` authority; it does not select a route
+or perform TLS. The adapter also carries the explicit HTTP limits, HTTP version/ALPN policy, TLS
+client limits, and finite handshake duration needed after acquisition. These values are never
+silently defaulted inside `withRoute`. `preparedTrust` is `None` for a Forward route or an insecure
+Direct route and is one caller-prepared owned `TrustSnapshot` for a secure Direct or Tunnel route.
+Invalid presence/absence fails before acquisition. The operation consumes `route` and
+`preparedTrust`, and invokes one higher-ranked handler with the existing callback-scoped HTTP
+connection; the connection cannot escape or be duplicated.
 
 For arbitrary handler success `A`, failure `E`, and requirements `R`, `withRoute` returns `A`, fails
 with exactly `E | ProxyError | ClientError | ConnectionError | IdentityError | OutOfMemoryError`
@@ -123,9 +126,11 @@ unreachable second rejection path.
 Both rejection errors own the final status code and reason bytes. `ProxyAuthenticationRequired`
 retains only every `Proxy-Authenticate` field in original order, including duplicates;
 `ProxyRejected` retains every response field in original order. Copying uses value limits of 100
-fields, 256 name bytes, 8192 value bytes, 32768 aggregate field bytes, and 65536 total owned bytes.
-Parser, head, and informational limits take precedence before a final head exists. For a complete
-final head, metadata overflow becomes `ProxyMetadataLimit` and allocation refusal remains
+fields, 256 name bytes, 8192 value bytes, 32768 aggregate field bytes, and 32768 total owned bytes.
+The total-owned bound intentionally includes field-record storage in addition to copied payload, so
+it remains reachable beneath the 32768-byte wire-head ceiling rather than specifying a dead error
+branch. Parser, head, and informational limits take precedence before a final head exists. For a
+complete final head, metadata overflow becomes `ProxyMetadataLimit` and allocation refusal remains
 `OutOfMemoryError`; either precedes the status-specific error, and cleanup failure never replaces
 it.
 
