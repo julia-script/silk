@@ -569,22 +569,6 @@ impl TestTransport {
       fail ByteIoError.Closed {operation: ByteIoOperation.Read}
     }
     run checkByteDeadline(&deadline, ByteIoOperation.Read)
-    if self.scenario == 10 {
-      let ready = SystemClock.make(20, 0)
-      if let Option<Instant>.Some {value} = &deadline {
-        if reached(&ready, &value) {
-          run MonotonicClock.waitUntil(
-            SystemClock.make(SystemClock.seconds(&value), SystemClock.nanoseconds(&value)),
-          )
-          fail ByteIoError.Timeout {operation: ByteIoOperation.Read}
-        }
-      }
-      let now = run MonotonicClock.now()
-      if !reached(&now, &ready) {
-        run MonotonicClock.waitUntil(move ready)
-      }
-      return ReadTransfer.End
-    }
     if self.readOffset == self.input.length {
       return ReadTransfer.End
     }
@@ -613,59 +597,19 @@ impl TestTransport {
       fail ByteIoError.Closed {operation: ByteIoOperation.Write}
     }
     run checkByteDeadline(&deadline, ByteIoOperation.Write)
-    let ordinal = self.writeOrdinal
-    self.writeOrdinal = ordinal + usize.ONE
-    let mut maximum: usize = 256
-    let mut exhausted = ordinal >= 16
-    let mut failed = false
-    if self.scenario == 9 {
-      if ordinal == usize.ONE {
-        maximum = 2
-      }
-      failed = ordinal == 2
-      exhausted = ordinal >= 3
-    } else if self.scenario == 10 {
-      exhausted = ordinal >= usize.ONE
-    } else if self.scenario == 18 {
-      maximum = 2
-      exhausted = ordinal >= usize.ONE
-    } else if self.scenario == 21 {
-      if ordinal == 2 {
-        maximum = 2
-      }
-      failed = ordinal == 3
-      exhausted = ordinal >= 4
-    }
-    if failed || exhausted {
-      self.closed = true
-      let mut code = 1
-      if failed {
-        code = 88
-      }
-      fail ByteIoError.Provider {operation: ByteIoOperation.Write, code: code}
-    }
-    let mut count = input.length
-    if count > maximum {
-      count = maximum
-    }
-    if count > 256 - self.accepted {
+    self.writeOrdinal = self.writeOrdinal + usize.ONE
+    if input.length > 256 - self.accepted {
       self.closed = true
       fail ByteIoError.Provider {operation: ByteIoOperation.Write, code: 2}
     }
-    self.accepted = self.accepted + count
-    if self.scenario == 18 {
-      run MonotonicClock.waitUntil(SystemClock.make(5, 0))
-    }
-    return count
+    self.accepted = self.accepted + input.length
+    return input.length
   }
 
   unsafe effect fn flushBytes(
     self: &mut Self,
     deadline: Option<Instant>,
   ) -> () ! ByteIoError ? &mut MonotonicClock {
-    if self.scenario == 19 || self.scenario == 20 {
-      fail ByteIoError.Provider {operation: ByteIoOperation.Flush, code: 93}
-    }
     if self.closed || self.writeShutdown {
       fail ByteIoError.Closed {operation: ByteIoOperation.Flush}
     }
