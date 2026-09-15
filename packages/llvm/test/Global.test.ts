@@ -56,11 +56,11 @@ it.effect('keeps declaration state unchanged after foreign-handle rejection', ()
     const foreignI32 = yield* Type.integer(foreignBuilder, 32)
     const foreignConstant = yield* Constant.integerUnsigned(foreignBuilder, foreignI32, 1)
     const foreignMetadata = yield* Metadata.tuple(foreignBuilder)
+    const builder = yield* Builder.make()
+    const i32 = yield* Type.integer(builder, 32)
+    const signature = yield* Type.functionType(builder, i32, [])
 
     for (const option of ['prefix', 'prologue'] as const) {
-      const builder = yield* Builder.make()
-      const i32 = yield* Type.integer(builder, 32)
-      const signature = yield* Type.functionType(builder, i32, [])
       const before = yield* BuilderState.snapshot(builder, 'Global.test')
       const failure = yield* Effect.flip(
         FunctionActor.declare(
@@ -75,7 +75,16 @@ it.effect('keeps declaration state unchanged after foreign-handle rejection', ()
       assert.strictEqual(failure.reason._tag, 'InvalidState')
       assert.deepEqual(yield* BuilderState.snapshot(builder, 'Global.test'), before)
       assert.isUndefined(yield* Global.lookup(builder, option))
-      yield* FunctionActor.declare(builder, option, signature)
+      const declared = yield* FunctionActor.declare(builder, option, signature)
+      assert.strictEqual(
+        yield* FunctionActor.declare(
+          builder,
+          option,
+          signature,
+          option === 'prefix' ? { prefix: foreignConstant } : { prologue: foreignConstant },
+        ),
+        declared,
+      )
     }
 
     const retained = yield* Builder.make({ strip: false })
