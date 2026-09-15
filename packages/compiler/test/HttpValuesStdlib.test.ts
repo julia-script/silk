@@ -295,7 +295,7 @@ pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
 )
 
 it.effect(
-  'compiles HTTP proxy and redirect policy witnesses and verifies their lowered MIR once',
+  'compiles HTTP pool, proxy, and redirect policy witnesses and verifies their lowered MIR once',
   () =>
     Effect.gen(function* () {
       // Keep the positive composite free of diagnostics so its one retained program can lower.
@@ -307,6 +307,21 @@ it.effect(
       assert.deepEqual(diagnosticSummary(snapshot), [])
       const mir = Analysis.loweredMir(snapshot)
       assert.deepEqual(MirVerification.verify(mir), [])
+      for (const operation of ['Config.defaults', 'ConnectionKey.direct', 'ConnectionKey.origin']) {
+        assert.isTrue(
+          mir.functions.some(
+            (fn) =>
+              fn.id.module === 'silk/http_connection_pool' && fn.id.name.startsWith(operation),
+          ),
+          `missing lowered pool declaration: ${operation}`,
+        )
+      }
+      for (const witness of ['poolDeclarationsWitness', 'poolCountsShape']) {
+        assert.isTrue(
+          mir.functions.some((fn) => fn.id.name.startsWith(witness)),
+          `missing lowered pool declaration witness: ${witness}`,
+        )
+      }
       for (const operation of [
         'withEmptyResponse',
         'withBytesResponse',
