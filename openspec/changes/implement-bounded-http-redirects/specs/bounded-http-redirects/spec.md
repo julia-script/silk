@@ -207,9 +207,10 @@ precise rather than being erased to an unknown channel. Failed Follow SHALL NOT 
 redirect response.
 
 The manifest, generated source table, public API documentation, and prescriptive reference SHALL
-expose the target-neutral actor. Structured analysis and static evaluation SHALL prove pure policy,
-URI, ownership, and error-row claims; one compact shared native corpus and one intended
-LLVM-to-Wasm leg SHALL prove the distinct runtime transitions. Wire expectations SHALL be derived
+expose the target-neutral actor. One positive structured-analysis snapshot SHALL prove compile,
+MIR, and error-row claims, and one consolidated frontend-negative snapshot SHALL prove ownership
+rejection. One compact shared native corpus and one intended LLVM-to-Wasm leg SHALL execute pure
+policy, URI, and distinct runtime-transition claims. Wire expectations SHALL be derived
 independently from the governing RFCs, and the reference SHALL record deliberate differences from
 the pinned Zig implementation. The capability SHALL NOT require a higher-level Stream dependency,
 new TLS/socket matrix, browser policy, stress benchmark, timing assertion, fresh-process check, or
