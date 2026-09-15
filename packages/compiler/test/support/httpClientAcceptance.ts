@@ -269,6 +269,9 @@ const boundaryHandler = `impl ConnectionHandler<TestTransport, i32, ClientError 
 const sourceFor = (
   scenarios: ReadonlyArray<Scenario>,
   handler: string,
+  routeImports = '',
+  routeSupport = '',
+  routeWitness = '',
 ): string => `import silk.allocator {Allocator, OutOfMemoryError}
 import silk.byte_duplex {ByteDuplex, ByteIoError, ByteIoOperation, ReadTransfer}
 import silk.effect {Effect}
@@ -302,6 +305,7 @@ import silk.system_clock {Instant, SystemClock}
 import silk.uri {Uri}
 import silk.u64
 import silk.usize
+${routeImports}
 
 struct FixedClock {
   mark: Instant
@@ -651,6 +655,8 @@ impl ByteDuplex for TestTransport {
   closeRaw: TestTransport.closeBytes
 }
 
+${routeSupport}
+
 struct CallbackFailure {
   code: i32
 }
@@ -855,6 +861,7 @@ effect fn runCase(scenario: i32) -> i32 ! ClientError | RequestError | OutOfMemo
     writeShutdown: false,
     closed: false,
   }
+${routeWitness}
   let handler = Handler {request: move request, scenario: scenario}
   let attempted = run Effect.result(runOwned(move adapter, origin, scenario, move handler))
     |> Effect.provideMut<Random>(&mut random)
@@ -1481,6 +1488,172 @@ pub fn main() -> i32 {
 }
 `
 
-export const httpClientAcceptanceSource = sourceFor(protocol, protocolHandler)
+const routeImports = `import silk.https_identity {IdentityError}
+import silk.http_client {
+  AcquiredRouteContext,
+  RouteClient,
+  RouteHandler,
+  RouteProtocol,
+  RouteSettings,
+  RouteTransport,
+}
+import silk.http_proxy {BypassPolicy, ProxyAuth, ProxyAuthContextId, ProxyConfig, ProxyConfigId, ProxyError, Route, selectRoute}
+import silk.tls_client {ClientLimits}
+import silk.tls_connection as Tls
+import silk.trust_snapshot {TrustSnapshot}
+`
+
+const routeSupport = `enum RouteAcquisitionError { Failed }
+
+struct ScriptedRouteClient {
+  provider: TestTransport
+  settingsValue: RouteSettings
+}
+
+impl<
+  A,
+  E,
+  ?R,
+  ?AcquisitionRequirements,
+  C: AcquiredRouteContext<TestTransport, A, E ? R>,
+> ScriptedRouteClient {
+  fn settings(self: &Self) -> RouteSettings {
+    return self.settingsValue
+  }
+
+  effect fn acquire(
+    client: Self,
+    peer: Origin,
+    deadline: Option<Instant>,
+    context: C,
+  ) -> A ! E | RouteAcquisitionError ? R | AcquisitionRequirements {
+    drop peer
+    drop deadline
+    let ScriptedRouteClient {provider, settingsValue} = move client
+    drop settingsValue
+    return run AcquiredRouteContext<TestTransport, A, E ? R>.use(move context, move provider)
+  }
+}
+
+impl<
+  A,
+  E,
+  ?R,
+  ?AcquisitionRequirements,
+  C: AcquiredRouteContext<TestTransport, A, E ? R>,
+> RouteClient<TestTransport, A, E, RouteAcquisitionError, R, AcquisitionRequirements, C>
+for ScriptedRouteClient {
+  settings: ScriptedRouteClient.settings
+  acquire: ScriptedRouteClient.acquire
+}
+
+struct RoutedNoop {}
+
+impl<'configuration> RoutedNoop {
+  effect<
+    'call,
+    'transport: 'call,
+    'provider: 'transport,
+    'tunnel: 'provider,
+  > fn handle<
+    'call,
+    'transport: 'call,
+    'provider: 'transport,
+    'tunnel: 'provider,
+  >(
+    handler: Self,
+    route: Route<'configuration>,
+    connection: &'call mut Connection<
+      RouteTransport<'transport, 'provider, 'tunnel, TestTransport>
+    >,
+  ) -> i32 {
+    drop handler
+    drop route
+    drop connection
+    return 0
+  }
+}
+
+impl<'configuration> RouteHandler<'configuration, TestTransport, i32, never ? never>
+for RoutedNoop {
+  handle: RoutedNoop.handle
+}
+
+effect fn typecheckRoute(transport: TestTransport) -> i32
+! ProxyError
+  | ClientError
+  | Tls.ConnectionError
+  | IdentityError
+  | RouteAcquisitionError
+  | OutOfMemoryError
+? &mut Allocator | &mut MonotonicClock | &mut SystemClock | &mut Random {
+  let empty: [Origin; 0] = []
+  let bypass = match move run BypassPolicy.copy(&empty) {
+    Result.Success {value} => move value
+    Result.Failure {error} => {
+      fail move error
+    }
+  }
+  let config = match move ProxyConfig.fromUri(
+    ProxyConfigId.make(99),
+    "http://proxy.example:3128",
+    ProxyAuth.none(ProxyAuthContextId.make(100)),
+    move bypass,
+    4096,
+  ) {
+    Result.Success {value} => move value
+    Result.Failure {error} => {
+      fail move error
+    }
+  }
+  let target = match move Uri.parse("http://origin.example/") {
+    Result.Success {value} => value
+    Result.Failure {error} => {
+      drop error
+      return 141
+    }
+  }
+  let origin = match move Origin.fromUri(&target) {
+    Result.Success {value} => value
+    Result.Failure {error} => {
+      drop error
+      return 142
+    }
+  }
+  let route = selectRoute(&config, origin)
+  let client = ScriptedRouteClient {
+    provider: move transport,
+    settingsValue: RouteSettings {
+      http: limits(),
+      request: valueLimits(),
+      maxRequestHeadBytes: 1024,
+      maxProxyCredentialBytes: 512,
+      protocol: RouteProtocol.OptionalHttp11,
+      tls: ClientLimits.defaults(),
+      handshakeDurationNanoseconds: u64.toU64(30000000000),
+    },
+  }
+  return run Client.withRoute(
+    move client,
+    route,
+    Option.none<TrustSnapshot>(),
+    Option.none<Instant>(),
+    RoutedNoop {},
+  )
+}
+`
+
+const routeWitness = `  // Compile-only witness: the runtime corpus does not select this scenario.
+  if scenario == -1 {
+    return run typecheckRoute(move adapter)
+  }`
+
+export const httpClientAcceptanceSource = sourceFor(
+  protocol,
+  protocolHandler,
+  routeImports,
+  routeSupport,
+  routeWitness,
+)
 export const httpClientBoundariesAcceptanceSource = sourceFor(boundaries, boundaryHandler)
 export const httpClientOutputFailuresAcceptanceSource = sourceFor(outputFailures, boundaryHandler)
