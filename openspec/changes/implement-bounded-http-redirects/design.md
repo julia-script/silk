@@ -208,14 +208,15 @@ the public effect signature instead of being converted to strings or `unknown`.
 
 ### Verification shares expensive compiler boundaries
 
-Add redirect declarations and policy assertions to one shared `Analysis` snapshot in the existing
-HTTP test worker. Use StaticEvaluation for transition, URI, header, history, and limit claims. Add one
-compact table-driven redirect source to the existing native acceptance corpus for the distinct
-writer/replay/cleanup/deadline signals, then reuse that exact source for one named LLVM-to-Wasm leg.
-Derive its wire expectations independently from RFC 9110/3986 and record the deliberate differences
-from the pinned Zig implementation alongside the fixture. The proxy/TLS suites already prove
-transport identity; redirect evidence asserts recomputation and emitted request bytes without
-another socket or certificate matrix.
+Add positive redirect compile/MIR and exact-row assertions to one shared realized `Analysis`
+snapshot in the existing HTTP worker. Consolidate intentional ownership failures in one additional
+frontend-only negative snapshot because a diagnostic-bearing source cannot produce MIR. Prove
+runtime-phase transition, URI, header, history, and limit behavior in the single shared redirect
+runtime corpus together with the distinct writer/replay/cleanup/deadline signals, then reuse that
+exact source for one named LLVM-to-Wasm leg. Derive its wire expectations independently from RFC
+9110/3986 and record the deliberate differences from the pinned Zig implementation alongside the
+fixture. The proxy/TLS suites already prove transport identity; redirect evidence asserts
+recomputation and emitted request bytes without another socket or certificate matrix.
 
 ## Risks / Trade-offs
 
