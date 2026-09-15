@@ -2566,8 +2566,8 @@ import silk.http_origin {OriginError}
 import silk.http_origin {OriginError as RedirectOriginError}
 import silk.http_headers {Limits as RedirectHeaderLimits, OwnedHeaders}
 import silk.http_redirect {
+  Attempt,
   AttemptClient,
-  AttemptHandler,
   AttemptRequest,
   BodyChunk,
   BodyDecision,
@@ -2809,12 +2809,11 @@ fn expectedRedirectDeadline(value: &Option<Instant>) -> bool {
   }
 }
 
-struct RedirectExchangeHandler<'request, 'policy, H> {
+struct RedirectExchangeHandler<'request, 'policy, A, HandlerError, ?HandlerRequirements> {
   request: &'request AttemptRequest<'policy>
   method: Method<'request>
   prepared: PreparedRequest
   options: RequestOptions
-  handler: H
 }
 
 impl<
@@ -2824,29 +2823,37 @@ impl<
   A,
   HandlerError,
   ?HandlerRequirements,
-  H: AttemptHandler<'policy, TestTransport, A, HandlerError ? HandlerRequirements>,
-> RedirectExchangeHandler<'request, 'policy, H> {
+> RedirectExchangeHandler<'request, 'policy, A, HandlerError, HandlerRequirements> {
   effect<'call> fn handle<'call>(
     bridge: Self,
     connection: &'call mut Connection<RouteTransport<'provider, 'provider, 'provider, TestTransport>>,
   ) -> A
   ! HandlerError | ClientError | OutOfMemoryError
-  ? HandlerRequirements | &mut Allocator | &mut MonotonicClock | &mut Random {
-    let RedirectExchangeHandler<'request, 'policy, H> {
+  ? HandlerRequirements
+    | &mut Attempt<'policy, TestTransport, A, HandlerError ? HandlerRequirements>
+    | &mut Allocator
+    | &mut MonotonicClock
+    | &mut Random {
+    let RedirectExchangeHandler<'request, 'policy, A, HandlerError, HandlerRequirements> {
       request,
       method,
       prepared,
       options,
-      handler,
     } = move bridge
     let use = effect<'exchangeCall, 'exchangeView: 'exchangeCall> fn(
       exchange: &'exchangeCall mut Exchange<
         'exchangeView,
         RouteTransport<'provider, 'provider, 'provider, TestTransport>
       >,
-    ) -> A ! HandlerError ? HandlerRequirements {
-      return run AttemptHandler<'policy, TestTransport, A, HandlerError ? HandlerRequirements>.handle(
-        move handler,
+    ) -> A
+    ! HandlerError
+    ? HandlerRequirements | &mut Attempt<
+      'policy,
+      TestTransport,
+      A,
+      HandlerError ? HandlerRequirements
+    > {
+      return run Attempt<'policy, TestTransport, A, HandlerError ? HandlerRequirements>.handle(
         request,
         method,
         move exchange,
@@ -2863,13 +2870,16 @@ impl<
   A,
   HandlerError,
   ?HandlerRequirements,
-  H: AttemptHandler<'policy, TestTransport, A, HandlerError ? HandlerRequirements>,
 > ConnectionHandler<
   RouteTransport<'provider, 'provider, 'provider, TestTransport>,
   A,
   HandlerError | ClientError | OutOfMemoryError
-    ? HandlerRequirements | &mut Allocator | &mut MonotonicClock | &mut Random,
-> for RedirectExchangeHandler<'request, 'policy, H> {
+    ? HandlerRequirements
+      | &mut Attempt<'policy, TestTransport, A, HandlerError ? HandlerRequirements>
+      | &mut Allocator
+      | &mut MonotonicClock
+      | &mut Random,
+> for RedirectExchangeHandler<'request, 'policy, A, HandlerError, HandlerRequirements> {
   handle: RedirectExchangeHandler.handle
 }
 
@@ -2880,7 +2890,6 @@ effect fn runRedirectProvider<
   A,
   HandlerError,
   ?HandlerRequirements,
-  H: AttemptHandler<'policy, TestTransport, A, HandlerError ? HandlerRequirements>,
 >(
   provider: &'provider mut TestTransport,
   origin: Origin,
@@ -2888,10 +2897,13 @@ effect fn runRedirectProvider<
   method: Method<'request>,
   prepared: PreparedRequest,
   deadline: Option<Instant>,
-  handler: H,
 ) -> A
 ! HandlerError | ClientError | OutOfMemoryError
-? HandlerRequirements | &mut Allocator | &mut MonotonicClock | &mut Random {
+? HandlerRequirements
+  | &mut Attempt<'policy, TestTransport, A, HandlerError ? HandlerRequirements>
+  | &mut Allocator
+  | &mut MonotonicClock
+  | &mut Random {
   let loan = Transport.borrow(move provider)
   let transport = RouteTransport<'provider, 'provider, 'provider, TestTransport>.Plain {
     provider: move loan,
@@ -2904,7 +2916,6 @@ effect fn runRedirectProvider<
       deadline: copyRedirectDeadline(&deadline),
       continuePolicy: ContinuePolicy.Disabled,
     },
-    handler: move handler,
   }
   let mut selectedLimits = limits()
   selectedLimits.readCapacity = usize.ONE
@@ -2930,16 +2941,18 @@ impl<
   A,
   HandlerError,
   ?HandlerRequirements,
-  H: AttemptHandler<'policy, TestTransport, A, HandlerError ? HandlerRequirements>,
 > RedirectScriptClient {
   effect fn withAttempt(
     client: &mut Self,
     request: AttemptRequest<'policy>,
     deadline: Option<Instant>,
-    handler: H,
   ) -> A
   ! HandlerError | OriginError | ValueError | RequestError | ClientError | OutOfMemoryError
-  ? HandlerRequirements | &mut Allocator | &mut MonotonicClock | &mut Random
+  ? HandlerRequirements
+    | &mut Attempt<'policy, TestTransport, A, HandlerError ? HandlerRequirements>
+    | &mut Allocator
+    | &mut MonotonicClock
+    | &mut Random
   where
     HandlerRequirements in Without<HandlerRequirements, ByteDuplex>,
     HandlerRequirements in Without<HandlerRequirements, HttpTransport> {
@@ -2997,7 +3010,11 @@ impl<
     }
     let use = effect fn(owned: &mut RedirectAttemptLease) -> A
     ! HandlerError | ClientError | OutOfMemoryError
-    ? HandlerRequirements | &mut Allocator | &mut MonotonicClock | &mut Random {
+    ? HandlerRequirements
+      | &mut Attempt<'policy, TestTransport, A, HandlerError ? HandlerRequirements>
+      | &mut Allocator
+      | &mut MonotonicClock
+      | &mut Random {
       return run runRedirectProvider(
         &mut owned.provider,
         origin,
@@ -3005,7 +3022,6 @@ impl<
         method,
         move prepared,
         move deadline,
-        move handler,
       )
     }
     let release = effect fn(owned: &mut RedirectAttemptLease) -> () {
@@ -3024,7 +3040,6 @@ impl<
   A,
   HandlerError,
   ?HandlerRequirements,
-  H: AttemptHandler<'policy, TestTransport, A, HandlerError ? HandlerRequirements>,
 > AttemptClient<
   'policy,
   TestTransport,
@@ -3033,7 +3048,6 @@ impl<
   OriginError | ValueError | RequestError | ClientError | OutOfMemoryError,
   HandlerRequirements,
   &mut Allocator | &mut MonotonicClock | &mut Random,
-  H,
 > for RedirectScriptClient {
   withAttempt: RedirectScriptClient.withAttempt
 }
@@ -3141,7 +3155,7 @@ impl RedirectFinal {
     'provider: 'transport,
     'tunnel: 'provider,
   >(
-    handler: Self,
+    handler: &mut Self,
     uri: Uri<'call>,
     hop: usize,
     exchange: &'call mut Exchange<'exchangeView, RouteTransport<

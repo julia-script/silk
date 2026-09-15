@@ -29,7 +29,7 @@ import silk.http_client {
 }
 import silk.http_origin {Origin, OriginError}
 import silk.http_proxy {ProxyError, Route, RouteMode}
-import silk.http_redirect {AttemptClient, AttemptHandler, AttemptRequest}
+import silk.http_redirect {Attempt, AttemptClient, AttemptRequest}
 import silk.http_request as Request {PreparedRequest, RequestError}
 import silk.http_transport as Transport {HttpTransport, TransportError}
 import silk.https_identity {HttpsIdentity, OriginHost, ReferenceIdentity, IdentityError}
@@ -1506,12 +1506,11 @@ fn redirectOptions(options: &Options, deadline: &Option<Instant>) -> Options {
   }
 }
 
-struct NativeRedirectRouteHandler<'request, 'policy, H> {
+struct NativeRedirectRouteHandler<'request, 'policy, A, HandlerError, ?HandlerRequirements> {
   request: &'request AttemptRequest<'policy>
   method: Method<'request>
   prepared: PreparedRequest
   options: RequestOptions
-  handler: H
 }
 
 impl<
@@ -1520,8 +1519,7 @@ impl<
   A,
   HandlerError,
   ?HandlerRequirements,
-  H: AttemptHandler<'policy, NativeRouteProvider, A, HandlerError ? HandlerRequirements>,
-> NativeRedirectRouteHandler<'request, 'policy, H> {
+> NativeRedirectRouteHandler<'request, 'policy, A, HandlerError, HandlerRequirements> {
   effect<
     'call,
     'transport: 'call,
@@ -1541,13 +1539,14 @@ impl<
     >,
   ) -> A
   ! HandlerError | ClientError | OutOfMemoryError
-  ? HandlerRequirements | &mut Allocator {
-    let NativeRedirectRouteHandler<'request, 'policy, H> {
+  ? HandlerRequirements
+    | &mut Attempt<'policy, NativeRouteProvider, A, HandlerError ? HandlerRequirements>
+    | &mut Allocator {
+    let NativeRedirectRouteHandler<'request, 'policy, A, HandlerError, HandlerRequirements> {
       request,
       method,
       prepared,
       options,
-      handler,
     } = move bridge
     drop route
     let use = effect<'exchangeCall, 'exchangeView: 'exchangeCall> fn(
@@ -1555,13 +1554,20 @@ impl<
         'exchangeView,
         RouteTransport<'transport, 'provider, 'tunnel, NativeRouteProvider>
       >,
-    ) -> A ! HandlerError ? HandlerRequirements {
-      return run AttemptHandler<
+    ) -> A
+    ! HandlerError
+    ? HandlerRequirements | &mut Attempt<
+      'policy,
+      NativeRouteProvider,
+      A,
+      HandlerError ? HandlerRequirements
+    > {
+      return run Attempt<
         'policy,
         NativeRouteProvider,
         A,
         HandlerError ? HandlerRequirements,
-      >.handle(move handler, request, method, move exchange)
+      >.handle(request, method, move exchange)
     }
     return run withExchange(move connection, &prepared, move options, move use)
   }
@@ -1574,14 +1580,15 @@ impl<
   A,
   HandlerError,
   ?HandlerRequirements,
-  H: AttemptHandler<'policy, NativeRouteProvider, A, HandlerError ? HandlerRequirements>,
 > RouteHandler<
   'configuration,
   NativeRouteProvider,
   A,
   HandlerError | ClientError | OutOfMemoryError
-  ? HandlerRequirements | &mut Allocator
-> for NativeRedirectRouteHandler<'request, 'policy, H> {
+  ? HandlerRequirements
+    | &mut Attempt<'policy, NativeRouteProvider, A, HandlerError ? HandlerRequirements>
+    | &mut Allocator
+> for NativeRedirectRouteHandler<'request, 'policy, A, HandlerError, HandlerRequirements> {
   handle: NativeRedirectRouteHandler.handle
 }
 
@@ -1598,13 +1605,11 @@ static if (Intrinsic.targetOperatingSystem() == "darwin" && Intrinsic.targetArch
     A,
     HandlerError,
     ?HandlerRequirements,
-    H: AttemptHandler<'policy, NativeRouteProvider, A, HandlerError ? HandlerRequirements>,
   > NativeRedirectClient<'configuration> {
     effect fn withAttempt(
       client: &mut Self,
       request: AttemptRequest<'policy>,
       deadline: Option<Instant>,
-      handler: H,
     ) -> A
     ! HandlerError
       | ProxyError
@@ -1620,6 +1625,7 @@ static if (Intrinsic.targetOperatingSystem() == "darwin" && Intrinsic.targetArch
       | TrustSourceError
       | OutOfMemoryError
     ? HandlerRequirements
+      | &mut Attempt<'policy, NativeRouteProvider, A, HandlerError ? HandlerRequirements>
       | &mut Allocator
       | &mut MonotonicClock
       | &mut SystemClock
@@ -1690,7 +1696,6 @@ static if (Intrinsic.targetOperatingSystem() == "darwin" && Intrinsic.targetArch
         method: method,
         prepared: move prepared,
         options: move requestOptions,
-        handler: move handler,
       }
       return run withProxyRoute(
         route,
@@ -1708,7 +1713,6 @@ static if (Intrinsic.targetOperatingSystem() == "darwin" && Intrinsic.targetArch
     A,
     HandlerError,
     ?HandlerRequirements,
-    H: AttemptHandler<'policy, NativeRouteProvider, A, HandlerError ? HandlerRequirements>,
   > AttemptClient<
     'policy,
     NativeRouteProvider,
@@ -1732,7 +1736,6 @@ static if (Intrinsic.targetOperatingSystem() == "darwin" && Intrinsic.targetArch
       | &mut SystemClock
       | &mut Random
       | &mut TrustSource,
-    H
   > for NativeRedirectClient<'configuration> {
     withAttempt: NativeRedirectClient.withAttempt
   }
@@ -1743,20 +1746,19 @@ static if (Intrinsic.targetOperatingSystem() == "darwin" && Intrinsic.targetArch
     A,
     HandlerError,
     ?HandlerRequirements,
-    H: AttemptHandler<'policy, NativeRouteProvider, A, HandlerError ? HandlerRequirements>,
   > NativeRedirectClient<'configuration> {
     effect fn withAttemptUnsupported(
       client: &mut Self,
       request: AttemptRequest<'policy>,
       deadline: Option<Instant>,
-      handler: H,
-    ) -> A ! HandlerError | NativeClientError ? HandlerRequirements
+    ) -> A
+    ! HandlerError | NativeClientError
+    ? HandlerRequirements | &mut Attempt<'policy, NativeRouteProvider, A, HandlerError ? HandlerRequirements>
     where HandlerRequirements in Without<HandlerRequirements, ByteDuplex>,
       HandlerRequirements in Without<HandlerRequirements, HttpTransport> {
       drop client
       drop request
       drop deadline
-      drop handler
       fail NativeClientError.UnsupportedTarget
     }
   }
@@ -1767,7 +1769,6 @@ static if (Intrinsic.targetOperatingSystem() == "darwin" && Intrinsic.targetArch
     A,
     HandlerError,
     ?HandlerRequirements,
-    H: AttemptHandler<'policy, NativeRouteProvider, A, HandlerError ? HandlerRequirements>,
   > AttemptClient<
     'policy,
     NativeRouteProvider,
@@ -1776,7 +1777,6 @@ static if (Intrinsic.targetOperatingSystem() == "darwin" && Intrinsic.targetArch
     NativeClientError,
     HandlerRequirements,
     never,
-    H
   > for NativeRedirectClient<'configuration> {
     withAttempt: NativeRedirectClient.withAttemptUnsupported
   }
