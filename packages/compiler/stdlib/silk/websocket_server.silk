@@ -1027,8 +1027,8 @@ effect fn readHeader<'channel, 'transport, P>(
 ? &mut MonotonicClock
 where &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock {
   match &closeRemaining {
-    Option.None => {}
-    Option.Some {value} => {
+    Option<usize>.None => {}
+    Option<usize>.Some {value} => {
       if value < 2 {
         fail WebSocketError.CloseLimitExceeded {kind: CloseLimitKind.Bytes, allowed: socket.limits.maxCloseBytes}
       }
@@ -1065,7 +1065,12 @@ where &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut Monoton
   if control && marker > 125 {
     fail WebSocketError.ProtocolError {reason: ProtocolReason.ControlTooLarge}
   }
-  let extended = if marker == 126 { 2 } else if marker == 127 { 8 } else { usize.ZERO }
+  let mut extended: usize = usize.ZERO
+  if marker == 126 {
+    extended = 2
+  } else if marker == 127 {
+    extended = 8
+  }
   let headerLength = 6 + extended
   run checkCloseRemaining(&socket.*, &closeRemaining, headerLength)
   if extended > usize.ZERO {
@@ -1082,11 +1087,8 @@ where &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut Monoton
   if marker == 127 && u8.bitAnd(socket.header[2], u8.toU8(128)) != 0 {
     fail WebSocketError.ProtocolError {reason: ProtocolReason.LengthHighBit}
   }
-  let length = if marker < 126 {
-    u8.toU64(marker)
-  } else {
-    decodeWide(&socket.header, 2, extended)
-  }
+  let mut length: u64 = u8.toU64(marker)
+  if marker >= 126 { length = decodeWide(&socket.header, 2, extended) }
   if marker == 126 && length < 126 {
     fail WebSocketError.ProtocolError {reason: ProtocolReason.NonMinimalLength}
   }
@@ -1099,15 +1101,12 @@ where &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut Monoton
   if opcodeIsClose(opcode) && length == 1 {
     fail WebSocketError.ProtocolError {reason: ProtocolReason.ClosePayloadLength}
   }
-  let payloadLength = if control {
-    u64.toUsize(length)
-  } else {
-    run boundedPayload(&socket.*, length, &capacity)
-  }
+  let mut payloadLength: usize = u64.toUsize(length)
+  if !control { payloadLength = run boundedPayload(&socket.*, length, &capacity) }
   let wireLength = match move usize.checkedAdd(headerLength, payloadLength) {
     Option.None => match &closeRemaining {
-      Option.None => { fail WebSocketError.InvalidLimits {kind: LimitKind.Arithmetic} }
-      Option.Some {value} => {
+      Option<usize>.None => { fail WebSocketError.InvalidLimits {kind: LimitKind.Arithmetic} }
+      Option<usize>.Some {value} => {
         drop value
         fail WebSocketError.CloseLimitExceeded {
           kind: CloseLimitKind.Bytes,
@@ -1169,8 +1168,8 @@ effect fn checkCloseRemaining<'channel, 'transport, P>(
   required: usize,
 ) -> () ! WebSocketError {
   match & remaining.* {
-    Option.None => { return () }
-    Option.Some {value} => {
+    Option<usize>.None => { return () }
+    Option<usize>.Some {value} => {
       if required > value {
         fail WebSocketError.CloseLimitExceeded {
           kind: CloseLimitKind.Bytes,
