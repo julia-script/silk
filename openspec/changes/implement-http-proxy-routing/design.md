@@ -34,25 +34,31 @@ compiler-known operation.
 
 ### One actor owns all proxy policy
 
-Add `silk.http_proxy` as the canonical owner of `ProxyConfig`, `ProxyAuth`, `BypassPolicy`, `Route`,
-route identity, proxy request policy, and proxy-specific failures. Configuration construction takes
-opaque `ProxyConfigId` and `ProxyAuthContextId` values made from caller-supplied nonsecret `u64`
-values. Both IDs are `Copy`, compare by exact value, and survive configuration/route copies
-unchanged. The caller must choose a new authentication-context ID whenever the credential or its
-authorization context changes; Silk never derives either ID from secret bytes.
+Add `silk.http_proxy` as the canonical owner of `ProxyConfig`, `ProxyAuth`, `BypassPolicy`, sealed
+`Route`, route identity, and proxy-specific failures. Configuration construction takes opaque
+`ProxyConfigId` and `ProxyAuthContextId` values made from caller-supplied nonsecret `u64` values.
+Both IDs are `Copy`, compare by exact value, and survive configuration/route copies unchanged. The
+caller must choose a new authentication-context ID whenever the credential or its authorization
+context changes; Silk never derives either ID from secret bytes.
 
-`http_request` remains the lower-level serializer. It gains one explicitly routed admission
-operation whose inputs include the logical origin, physical peer origin, Forward-versus-CONNECT
-mode, and proxy-policy-owned prepared credential. Its resulting `PreparedRequest` retains both
-origins: serialization and origin `Authorization`/`Host` validation use the logical origin, while
-`http_client.withExchange` admits it only on a connection for the physical peer. The existing
-direct `prepare` operation sets both origins equal and continues to reject caller
-`Proxy-Authorization`. Thus the generic direct path cannot acquire a proxy credential accidentally,
-and a routed request cannot be replayed on the authenticated origin connection inside a tunnel.
+Dependency flows from `http_request` to `http_proxy`, not the reverse. `http_request` exposes only
+route-derived `prepareForward(route, uri, ...)` and `prepareConnect(route, ...)` entry points and
+keeps the shared routed serializer private. There is no public raw-token routed serializer or
+caller-constructible physical-peer assertion. The sealed route supplies its selected mode,
+original logical origin, plain physical proxy peer, and configured credential authority. Forward
+requires an insecure logical origin and always emits the logical-origin `Host`; CONNECT requires a
+secure logical origin and constructs its authority target directly from that origin with the
+explicit effective port. The resulting `PreparedRequest` retains both origins: serialization and
+origin `Authorization`/`Host` validation use the logical origin, while `http_client.withExchange`
+admits it only on a connection for the route-derived physical peer. The existing direct `prepare`
+operation sets both origins equal and continues to reject caller `Proxy-Authorization`. Thus the
+generic direct path cannot forge proxy credentials, and a routed request cannot be replayed on the
+authenticated origin connection inside a tunnel.
 
-Alternative: serialize a second private request-head representation in `http_proxy`. Rejected
-because `PreparedRequest` is sealed and duplicating its admission/framing invariants would create a
-second HTTP request authority.
+Alternative: let `http_proxy` call a public low-level routed serializer with caller-supplied peer,
+mode, and token values. Rejected because that makes the route seal cosmetic and lets any caller
+forge configured-only credentials or origin-connection admission. A second private request-head
+representation in `http_proxy` is also rejected because it would duplicate framing invariants.
 
 ### Route selection is pure; route use is scoped
 
