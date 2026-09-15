@@ -360,6 +360,33 @@
     ]
   },
   {
+    "module": "silk/http_fetch",
+    "path": "silk/http_fetch.silk",
+    "namespace": "Fetch",
+    "aliases": [
+      "CollectedResponse",
+      "DestinationFailure",
+      "FetchClient",
+      "FetchError",
+      "FetchLimit",
+      "FetchOptions",
+      "FetchPhase",
+      "FetchReason",
+      "FetchRequest",
+      "FetchResult",
+      "PoolMode",
+      "ProxyMode",
+      "RepresentationMetadata",
+      "ResponseMetadata",
+      "Sink"
+    ]
+  },
+  {
+    "module": "silk/http_fetch_native",
+    "path": "silk/http_fetch_native.silk",
+    "namespace": "FetchNative"
+  },
+  {
     "module": "silk/http_head",
     "path": "silk/http_head.silk",
     "namespace": "RequestParser",
