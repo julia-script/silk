@@ -22,7 +22,7 @@ import silk.system_clock {Instant, SystemClock}
 import silk.u64
 import silk.usize
 import silk.slice {Slice}
-import silk.websocket_server as WebSocketServer {Event as SocketEvent, Limits as SocketLimits, ServerWebSocket, State as SocketState, WebSocketError}
+import silk.websocket_server as WebSocketServer {Event as SocketEvent, Limits as SocketLimits, PeerCloseData as SocketCloseData, ServerWebSocket, State as SocketState, WebSocketError}
 import silk.websocket_upgrade {Decision, DecisionHandler, DecisionReason, LimitKind, Limits, Offer, Outcome, UpgradeError, inspect, reject, rejectionStatus, withUpgrade}
 
 struct FixedClock {}
@@ -387,8 +387,8 @@ effect<'call> fn useSocket<'call, 'channel: 'call, 'transport: 'channel>(
   let closed = run WebSocketServer.readEvent(&mut socket.*, &mut output, deadline())
   match move closed {
     SocketEvent.PeerClose {data} => match move data {
-      WebSocketServer.PeerCloseData.Absent => { return 189 }
-      WebSocketServer.PeerCloseData.Present {code, reason} => {
+      SocketCloseData.Absent => { return 189 }
+      SocketCloseData.Present {code, reason} => {
         let bytes = reason.asSlice()
         let empty = bytes.length == usize.ZERO
         drop bytes
@@ -411,8 +411,8 @@ effect<'call> fn useChannel<'call, 'transport: 'call>(
     useSocket,
   ))
   return match move served {
-    Result.Success {value} => value
-    Result.Failure {error} => { drop error 193 }
+    Result<i32, WebSocketError>.Success {value} => value
+    Result<i32, WebSocketError>.Failure {error} => { drop error 193 }
   }
 }
 
