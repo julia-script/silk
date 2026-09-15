@@ -102,17 +102,26 @@ plaintext origin connection, or retry automatically.
 
 ### Requirement: Routed request admission separates logical origin from physical peer
 
-The streaming HTTP client SHALL expose one explicit routed-request admission path used by proxy
-policy. It SHALL accept distinct logical-origin and physical-peer origins plus an admitted Forward or
-CONNECT mode. Logical-origin validation SHALL govern the request target, `Host`, and origin
-`Authorization`; physical-peer identity SHALL govern which connection may send the prepared bytes.
-A prepared routed request SHALL fail client admission on any connection whose physical peer differs.
+`http_request` SHALL expose only route-derived Forward and CONNECT preparation entry points. Each
+SHALL require a sealed `Route` produced by proxy selection and SHALL derive its mode, logical origin,
+plain physical proxy peer, and configured proxy credential authority from that route. The shared
+routed serializer SHALL remain private. No public operation SHALL accept a raw proxy token, an
+unconstrained physical peer, or a caller-asserted routed mode.
+
+Logical-origin validation SHALL govern the request target, `Host`, and origin `Authorization`;
+route-derived physical-peer identity SHALL govern which connection may send the prepared bytes. A
+prepared routed request SHALL fail client admission on any connection whose physical peer differs.
+Forward preparation SHALL require an insecure logical origin and plain proxy peer. CONNECT
+preparation SHALL require a secure logical origin and plain proxy peer, and SHALL construct and bind
+the authority target to the logical origin's normalized host and explicit effective port rather
+than accepting a caller target.
 
 The existing direct request preparation path SHALL continue to set logical origin and physical peer
-to the same value and SHALL reject caller `Proxy-Authorization`. The routed path SHALL accept proxy
-credentials only as proxy-policy-owned prepared input, SHALL reject the same field in caller headers,
-and SHALL NOT make a routed request admissible on the origin-authenticated connection inside a
-tunnel.
+to the same value and SHALL reject caller `Proxy-Authorization`. Route-derived preparation SHALL
+accept proxy credentials only from the route's retained immutable configuration, SHALL reject the
+same field in caller headers, and SHALL NOT make a routed request admissible on the
+origin-authenticated connection inside a tunnel. Holding a route is the credential capability;
+route keys and diagnostics SHALL still expose no token bytes.
 
 #### Scenario: Admit one forward request on its proxy peer
 
@@ -124,7 +133,14 @@ tunnel.
 #### Scenario: Preserve direct credential rejection
 
 - **WHEN** ordinary direct preparation receives caller `Proxy-Authorization`
-- **THEN** it fails before output and exposes no route token or alternate direct preparation path
+- **THEN** it fails before output and exposes no raw-token routed serializer or alternate direct
+  preparation path
+
+#### Scenario: Reject forged route assertions
+
+- **WHEN** a caller has no selected route but supplies a token, secure physical peer, or mismatched
+  CONNECT authority
+- **THEN** no public request-preparation operation can admit those values as routed policy
 
 ### Requirement: Forward routes send one origin-bound absolute-form request
 
@@ -132,7 +148,8 @@ An HTTP Forward route SHALL connect to the proxy endpoint through routed request
 serialize the original URI as an
 absolute-form request target, excluding userinfo and fragment, writing `/` for an empty path, and
 preserving accepted encoded path and query spelling. `Host` SHALL identify the origin rather than
-the proxy. `Proxy-Authorization` SHALL be generated only from the selected proxy configuration;
+the proxy, including for HTTP/1.0, where an omit-Host policy SHALL be rejected or normalized to the
+logical-origin default. `Proxy-Authorization` SHALL be generated only from the selected proxy configuration;
 caller-supplied overrides or duplicate fields SHALL fail before output. Origin `Authorization`
 SHALL remain subject to origin policy and SHALL NOT be reused as proxy authentication.
 
@@ -156,8 +173,9 @@ protects its request target, headers, or proxy credentials.
 An HTTPS Tunnel route SHALL resolve and connect only the proxy endpoint, then send a body-free
 CONNECT request whose request target and `Host` contain the original origin host and explicit
 effective port, including brackets around IPv6 literals. CONNECT preparation SHALL NOT resolve the
-origin or include origin `Authorization`, Cookie, path, query, fragment, upload bytes, or another
-origin header.
+origin, accept a caller-supplied target, or include origin `Authorization`, Cookie, path, query,
+fragment, upload bytes, or another origin header. The constructed authority SHALL equal the route's
+logical origin by normalized host identity and effective port.
 
 CONNECT response handling SHALL reuse the shared incremental head contract. Each head SHALL be
 bounded to 32768 bytes and 100 fields; at most 8 informational responses and 65536 aggregate
