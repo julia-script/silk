@@ -42,7 +42,7 @@ import silk.http_redirect {
   AttemptHandler,
   AttemptRequest,
   BodyProducer,
-  HybridAttemptHandler,
+  HybridAttempt,
   HybridAttemptClient,
   HybridResponseHandler,
   Policy as RedirectPolicy,
@@ -437,13 +437,6 @@ pub interface FetchClient<
   AcquisitionError,
   ?HandlerRequirements,
   ?AcquisitionRequirements,
-  H: HybridAttemptHandler<
-    'policy,
-    RoutedP,
-    DirectP,
-    A,
-    HandlerError ? HandlerRequirements
-  >,
 > {
   /// Rebuilds and drives one scoped request under the selected acquisition modes.
   effect fn withAttempt(
@@ -453,8 +446,13 @@ pub interface FetchClient<
     poolMode: PoolMode,
     proxyMode: ProxyMode,
     deadline: Option<Instant>,
-    handler: H,
-  ) -> A ! HandlerError | AcquisitionError ? HandlerRequirements | AcquisitionRequirements where
+  ) -> A ! HandlerError | AcquisitionError ? HandlerRequirements | AcquisitionRequirements | &mut HybridAttempt<
+    'policy,
+    RoutedP,
+    DirectP,
+    A,
+    HandlerError ? HandlerRequirements
+  > where
     HandlerRequirements in Without<HandlerRequirements, ByteDuplex>,
     HandlerRequirements in Without<HandlerRequirements, HttpTransport>
 }
@@ -525,13 +523,6 @@ impl<
   AcquisitionError,
   ?HandlerRequirements,
   ?AcquisitionRequirements,
-  H: HybridAttemptHandler<
-    'policy,
-    RoutedP,
-    DirectP,
-    A,
-    HandlerError ? HandlerRequirements
-  >,
   C: FetchClient<
     'policy,
     RoutedP,
@@ -541,15 +532,19 @@ impl<
     AcquisitionError,
     HandlerRequirements,
     AcquisitionRequirements,
-    H,
   >,
 > FetchAttemptAdapter<'client, C> {
   effect fn withAttempt(
     self: &mut Self,
     request: AttemptRequest<'policy>,
     deadline: Option<Instant>,
-    handler: H,
-  ) -> A ! HandlerError | AcquisitionError ? HandlerRequirements | AcquisitionRequirements where
+  ) -> A ! HandlerError | AcquisitionError ? HandlerRequirements | AcquisitionRequirements | &mut HybridAttempt<
+    'policy,
+    RoutedP,
+    DirectP,
+    A,
+    HandlerError ? HandlerRequirements
+  > where
     HandlerRequirements in Without<HandlerRequirements, ByteDuplex>,
     HandlerRequirements in Without<HandlerRequirements, HttpTransport> {
     return run FetchClient<
@@ -561,7 +556,6 @@ impl<
       AcquisitionError,
       HandlerRequirements,
       AcquisitionRequirements,
-      H,
     >.withAttempt(
       &mut self.client.*,
       move request,
@@ -569,7 +563,6 @@ impl<
       self.poolMode,
       self.proxyMode,
       move deadline,
-      move handler,
     )
   }
 }
@@ -585,13 +578,6 @@ impl<
   AcquisitionError,
   ?HandlerRequirements,
   ?AcquisitionRequirements,
-  H: HybridAttemptHandler<
-    'policy,
-    RoutedP,
-    DirectP,
-    A,
-    HandlerError ? HandlerRequirements
-  >,
   C: FetchClient<
     'policy,
     RoutedP,
@@ -601,7 +587,6 @@ impl<
     AcquisitionError,
     HandlerRequirements,
     AcquisitionRequirements,
-    H,
   >,
 > HybridAttemptClient<
   'policy,
@@ -612,7 +597,6 @@ impl<
   AcquisitionError,
   HandlerRequirements,
   AcquisitionRequirements,
-  H,
 > for FetchAttemptAdapter<'client, C> {
   withAttempt: FetchAttemptAdapter.withAttempt
 }
@@ -1141,6 +1125,646 @@ impl<
   handleDirect: DeliveryResponseHandler.handleDirect
 }
 
+struct EmptyOperation<'fetch, C, D> {
+  fetch: &'fetch mut Fetch<C>
+  options: FetchOptions
+  destination: D
+}
+
+impl<
+  'fetch,
+  C,
+  D,
+  RoutedP,
+  DirectP,
+  A,
+  DestinationError,
+  AcquisitionError,
+  ?DestinationRequirements,
+  ?AcquisitionRequirements,
+  D: Destination<A, DestinationError ? DestinationRequirements>,
+> EmptyOperation<'fetch, C, D> {
+  effect<'call> fn handle<'call>(
+    operation: Self,
+    request: Redirect.Request<'call, 'call, 'call, 'call>,
+  ) -> A
+  ! RedirectError | FetchError | ValueError | BodyError | DestinationError | ClientError | OutOfMemoryError | AcquisitionError
+  ? DestinationRequirements | AcquisitionRequirements | &mut MonotonicClock | &mut Allocator | &mut Random
+  where
+    DestinationRequirements in Without<DestinationRequirements, ByteDuplex>,
+    DestinationRequirements in Without<DestinationRequirements, HttpTransport>,
+    AcquisitionRequirements in Without<AcquisitionRequirements, ByteDuplex>,
+    AcquisitionRequirements in Without<AcquisitionRequirements, HttpTransport> {
+    let EmptyOperation<'fetch, C, D> {fetch, options, destination} = move operation
+    let FetchOptions {
+      redirect,
+      content,
+      pool,
+      proxy,
+      deadline,
+      http,
+      contentLimits,
+      maxEncodedBodyBytes,
+      maxDeliveredBodyBytes,
+      maxOwnedMetadataBytes,
+      maxBufferedBytes,
+    } = move options
+    let mut adapter = FetchAttemptAdapter<'fetch, C> {
+      client: &mut fetch.client,
+      httpLimits: http,
+      poolMode: pool,
+      proxyMode: proxy,
+    }
+    let mut scratch: [u8; 0] = []
+    let response = DeliveryResponseHandler<D> {
+      destination: move destination,
+      content: content,
+      contentLimits: move contentLimits,
+      responseValueLimits: http.responseBody.trailerValues,
+      maxEncodedBodyBytes: maxEncodedBodyBytes,
+      maxDeliveredBodyBytes: maxDeliveredBodyBytes,
+      maxOwnedMetadataBytes: maxOwnedMetadataBytes,
+      maxBufferedBytes: maxBufferedBytes,
+    }
+    return run mapSwitching(Redirect.withEmptyHybridResponse(
+      &mut adapter,
+      move request,
+      &redirect,
+      copyDeadline(&deadline),
+      &mut scratch,
+      move response,
+    ))
+  }
+}
+
+impl<
+  'fetch,
+  C,
+  D,
+  RoutedP,
+  DirectP,
+  A,
+  DestinationError,
+  AcquisitionError,
+  ?DestinationRequirements,
+  ?AcquisitionRequirements,
+  D: Destination<A, DestinationError ? DestinationRequirements>,
+> SemanticRequestHandler<
+  A,
+  RedirectError | FetchError | ValueError | BodyError | DestinationError | ClientError | OutOfMemoryError | AcquisitionError
+  ? DestinationRequirements | AcquisitionRequirements | &mut MonotonicClock | &mut Allocator | &mut Random,
+> for EmptyOperation<'fetch, C, D> {
+  handle: EmptyOperation.handle
+}
+
+effect fn admit(options: &FetchOptions) -> () ! FetchError {
+  return match move FetchOptions.validate(options) {
+    Result.Success {value} => move value
+    Result.Failure {error} => {
+      fail move error
+    }
+  }
+}
+
+/// Executes a body-free request and sequentially offers the selected representation to `sink`.
+pub effect fn toSinkEmpty<
+  'fetch,
+  'uri,
+  'method,
+  'headers,
+  'policy,
+  C,
+  S,
+  RoutedP,
+  DirectP,
+  SinkError,
+  AcquisitionError,
+  ?SinkRequirements,
+  ?AcquisitionRequirements,
+  S: Sink<SinkError ? SinkRequirements>,
+>(
+  fetch: &'fetch mut Fetch<C>,
+  request: FetchRequest<'uri, 'method, 'headers, 'policy>,
+  options: FetchOptions,
+  sink: S,
+) -> FetchResult
+! RedirectError | FetchError | ValueError | BodyError | DestinationFailure<SinkError> | ClientError | OutOfMemoryError | AcquisitionError
+? SinkRequirements | AcquisitionRequirements | &mut MonotonicClock | &mut Allocator | &mut Random
+where
+  SinkRequirements in Without<SinkRequirements, ByteDuplex>,
+  SinkRequirements in Without<SinkRequirements, HttpTransport>,
+  AcquisitionRequirements in Without<AcquisitionRequirements, ByteDuplex>,
+  AcquisitionRequirements in Without<AcquisitionRequirements, HttpTransport> {
+  run admit(&options)
+  let operation = EmptyOperation<'fetch, C, SinkDestination<S>> {
+    fetch: move fetch,
+    options: move options,
+    destination: SinkDestination<S> {sink: move sink},
+  }
+  return run withSemanticRequest(move request, move operation)
+}
+
+/// Executes a body-free request and atomically publishes a bounded in-memory body.
+pub effect fn collectEmpty<
+  'fetch,
+  'uri,
+  'method,
+  'headers,
+  'policy,
+  C,
+  RoutedP,
+  DirectP,
+  AcquisitionError,
+  ?AcquisitionRequirements,
+>(
+  fetch: &'fetch mut Fetch<C>,
+  request: FetchRequest<'uri, 'method, 'headers, 'policy>,
+  options: FetchOptions,
+  maxBodyBytes: usize,
+) -> CollectedResponse
+! RedirectError | FetchError | ValueError | BodyError | ClientError | OutOfMemoryError | AcquisitionError
+? AcquisitionRequirements | &mut MonotonicClock | &mut Allocator | &mut Random
+where
+  AcquisitionRequirements in Without<AcquisitionRequirements, ByteDuplex>,
+  AcquisitionRequirements in Without<AcquisitionRequirements, HttpTransport> {
+  run admit(&options)
+  let operation = EmptyOperation<'fetch, C, CollectDestination> {
+    fetch: move fetch,
+    options: move options,
+    destination: CollectDestination {body: Bytes.make(), maximum: maxBodyBytes},
+  }
+  return run withSemanticRequest(move request, move operation)
+}
+
+/// Executes a body-free request and validates an explicitly bounded discarded representation.
+pub effect fn discardEmpty<
+  'fetch,
+  'uri,
+  'method,
+  'headers,
+  'policy,
+  C,
+  RoutedP,
+  DirectP,
+  AcquisitionError,
+  ?AcquisitionRequirements,
+>(
+  fetch: &'fetch mut Fetch<C>,
+  request: FetchRequest<'uri, 'method, 'headers, 'policy>,
+  options: FetchOptions,
+  maxDiscardBytes: u64,
+) -> FetchResult
+! RedirectError | FetchError | ValueError | BodyError | ClientError | OutOfMemoryError | AcquisitionError
+? AcquisitionRequirements | &mut MonotonicClock | &mut Allocator | &mut Random
+where
+  AcquisitionRequirements in Without<AcquisitionRequirements, ByteDuplex>,
+  AcquisitionRequirements in Without<AcquisitionRequirements, HttpTransport> {
+  run admit(&options)
+  let operation = EmptyOperation<'fetch, C, DiscardDestination> {
+    fetch: move fetch,
+    options: move options,
+    destination: DiscardDestination {maximum: maxDiscardBytes},
+  }
+  return run withSemanticRequest(move request, move operation)
+}
+
+struct BytesOperation<'fetch, 'bytes, C, D> {
+  fetch: &'fetch mut Fetch<C>
+  bytes: &'bytes [u8]
+  options: FetchOptions
+  destination: D
+}
+
+impl<
+  'fetch,
+  'bytes,
+  C,
+  D,
+  RoutedP,
+  DirectP,
+  A,
+  DestinationError,
+  AcquisitionError,
+  ?DestinationRequirements,
+  ?AcquisitionRequirements,
+  D: Destination<A, DestinationError ? DestinationRequirements>,
+> BytesOperation<'fetch, 'bytes, C, D> {
+  effect<'call> fn handle<'call>(
+    operation: Self,
+    request: Redirect.Request<'call, 'call, 'call, 'call>,
+  ) -> A
+  ! RedirectError | FetchError | ValueError | BodyError | DestinationError | ClientError | OutOfMemoryError | AcquisitionError
+  ? DestinationRequirements | AcquisitionRequirements | &mut MonotonicClock | &mut Allocator | &mut Random
+  where
+    DestinationRequirements in Without<DestinationRequirements, ByteDuplex>,
+    DestinationRequirements in Without<DestinationRequirements, HttpTransport>,
+    AcquisitionRequirements in Without<AcquisitionRequirements, ByteDuplex>,
+    AcquisitionRequirements in Without<AcquisitionRequirements, HttpTransport> {
+    let BytesOperation<'fetch, 'bytes, C, D> {fetch, bytes, options, destination} = move operation
+    let FetchOptions {
+      redirect,
+      content,
+      pool,
+      proxy,
+      deadline,
+      http,
+      contentLimits,
+      maxEncodedBodyBytes,
+      maxDeliveredBodyBytes,
+      maxOwnedMetadataBytes,
+      maxBufferedBytes,
+    } = move options
+    let mut adapter = FetchAttemptAdapter<'fetch, C> {
+      client: &mut fetch.client,
+      httpLimits: http,
+      poolMode: pool,
+      proxyMode: proxy,
+    }
+    let mut scratch = run Bytes.zeroed(http.writeCapacity)
+    let response = DeliveryResponseHandler<D> {
+      destination: move destination,
+      content: content,
+      contentLimits: move contentLimits,
+      responseValueLimits: http.responseBody.trailerValues,
+      maxEncodedBodyBytes: maxEncodedBodyBytes,
+      maxDeliveredBodyBytes: maxDeliveredBodyBytes,
+      maxOwnedMetadataBytes: maxOwnedMetadataBytes,
+      maxBufferedBytes: maxBufferedBytes,
+    }
+    return run mapSwitching(Redirect.withBytesHybridResponse(
+      &mut adapter,
+      move request,
+      &redirect,
+      bytes,
+      copyDeadline(&deadline),
+      Bytes.asMutSlice(&mut scratch),
+      move response,
+    ))
+  }
+}
+
+impl<
+  'fetch,
+  'bytes,
+  C,
+  D,
+  RoutedP,
+  DirectP,
+  A,
+  DestinationError,
+  AcquisitionError,
+  ?DestinationRequirements,
+  ?AcquisitionRequirements,
+  D: Destination<A, DestinationError ? DestinationRequirements>,
+> SemanticRequestHandler<
+  A,
+  RedirectError | FetchError | ValueError | BodyError | DestinationError | ClientError | OutOfMemoryError | AcquisitionError
+  ? DestinationRequirements | AcquisitionRequirements | &mut MonotonicClock | &mut Allocator | &mut Random,
+> for BytesOperation<'fetch, 'bytes, C, D> {
+  handle: BytesOperation.handle
+}
+
+/// Executes a repeatable byte-body request and sequentially offers the selected representation.
+pub effect fn toSinkBytes<
+  'fetch,
+  'uri,
+  'method,
+  'headers,
+  'policy,
+  'bytes,
+  C,
+  S,
+  RoutedP,
+  DirectP,
+  SinkError,
+  AcquisitionError,
+  ?SinkRequirements,
+  ?AcquisitionRequirements,
+  S: Sink<SinkError ? SinkRequirements>,
+>(
+  fetch: &'fetch mut Fetch<C>,
+  request: FetchRequest<'uri, 'method, 'headers, 'policy>,
+  bytes: &'bytes [u8],
+  options: FetchOptions,
+  sink: S,
+) -> FetchResult
+! RedirectError | FetchError | ValueError | BodyError | DestinationFailure<SinkError> | ClientError | OutOfMemoryError | AcquisitionError
+? SinkRequirements | AcquisitionRequirements | &mut MonotonicClock | &mut Allocator | &mut Random
+where
+  SinkRequirements in Without<SinkRequirements, ByteDuplex>,
+  SinkRequirements in Without<SinkRequirements, HttpTransport>,
+  AcquisitionRequirements in Without<AcquisitionRequirements, ByteDuplex>,
+  AcquisitionRequirements in Without<AcquisitionRequirements, HttpTransport> {
+  run admit(&options)
+  let operation = BytesOperation<'fetch, 'bytes, C, SinkDestination<S>> {
+    fetch: move fetch,
+    bytes: bytes,
+    options: move options,
+    destination: SinkDestination<S> {sink: move sink},
+  }
+  return run withSemanticRequest(move request, move operation)
+}
+
+/// Executes a repeatable byte-body request and atomically publishes a bounded body.
+pub effect fn collectBytes<
+  'fetch,
+  'uri,
+  'method,
+  'headers,
+  'policy,
+  'bytes,
+  C,
+  RoutedP,
+  DirectP,
+  AcquisitionError,
+  ?AcquisitionRequirements,
+>(
+  fetch: &'fetch mut Fetch<C>,
+  request: FetchRequest<'uri, 'method, 'headers, 'policy>,
+  bytes: &'bytes [u8],
+  options: FetchOptions,
+  maxBodyBytes: usize,
+) -> CollectedResponse
+! RedirectError | FetchError | ValueError | BodyError | ClientError | OutOfMemoryError | AcquisitionError
+? AcquisitionRequirements | &mut MonotonicClock | &mut Allocator | &mut Random
+where
+  AcquisitionRequirements in Without<AcquisitionRequirements, ByteDuplex>,
+  AcquisitionRequirements in Without<AcquisitionRequirements, HttpTransport> {
+  run admit(&options)
+  let operation = BytesOperation<'fetch, 'bytes, C, CollectDestination> {
+    fetch: move fetch,
+    bytes: bytes,
+    options: move options,
+    destination: CollectDestination {body: Bytes.make(), maximum: maxBodyBytes},
+  }
+  return run withSemanticRequest(move request, move operation)
+}
+
+/// Executes a repeatable byte-body request and validates bounded discarded content.
+pub effect fn discardBytes<
+  'fetch,
+  'uri,
+  'method,
+  'headers,
+  'policy,
+  'bytes,
+  C,
+  RoutedP,
+  DirectP,
+  AcquisitionError,
+  ?AcquisitionRequirements,
+>(
+  fetch: &'fetch mut Fetch<C>,
+  request: FetchRequest<'uri, 'method, 'headers, 'policy>,
+  bytes: &'bytes [u8],
+  options: FetchOptions,
+  maxDiscardBytes: u64,
+) -> FetchResult
+! RedirectError | FetchError | ValueError | BodyError | ClientError | OutOfMemoryError | AcquisitionError
+? AcquisitionRequirements | &mut MonotonicClock | &mut Allocator | &mut Random
+where
+  AcquisitionRequirements in Without<AcquisitionRequirements, ByteDuplex>,
+  AcquisitionRequirements in Without<AcquisitionRequirements, HttpTransport> {
+  run admit(&options)
+  let operation = BytesOperation<'fetch, 'bytes, C, DiscardDestination> {
+    fetch: move fetch,
+    bytes: bytes,
+    options: move options,
+    destination: DiscardDestination {maximum: maxDiscardBytes},
+  }
+  return run withSemanticRequest(move request, move operation)
+}
+
+struct OneShotOperation<'fetch, C, D, Producer> {
+  fetch: &'fetch mut Fetch<C>
+  producer: Producer
+  options: FetchOptions
+  destination: D
+}
+
+impl<
+  'fetch,
+  C,
+  D,
+  Producer,
+  RoutedP,
+  DirectP,
+  A,
+  ProducerError,
+  DestinationError,
+  AcquisitionError,
+  ?ProducerRequirements,
+  ?DestinationRequirements,
+  ?AcquisitionRequirements,
+  Producer: BodyProducer<ProducerError ? ProducerRequirements>,
+  D: Destination<A, DestinationError ? DestinationRequirements>,
+> OneShotOperation<'fetch, C, D, Producer> {
+  effect<'call> fn handle<'call>(
+    operation: Self,
+    request: Redirect.Request<'call, 'call, 'call, 'call>,
+  ) -> A
+  ! RedirectError | FetchError | ValueError | BodyError | ProducerError | DestinationError | ClientError | OutOfMemoryError | AcquisitionError
+  ? ProducerRequirements | DestinationRequirements | AcquisitionRequirements | &mut MonotonicClock | &mut Allocator | &mut Random
+  where
+    ProducerRequirements in Without<ProducerRequirements, ByteDuplex>,
+    ProducerRequirements in Without<ProducerRequirements, HttpTransport>,
+    DestinationRequirements in Without<DestinationRequirements, ByteDuplex>,
+    DestinationRequirements in Without<DestinationRequirements, HttpTransport>,
+    AcquisitionRequirements in Without<AcquisitionRequirements, ByteDuplex>,
+    AcquisitionRequirements in Without<AcquisitionRequirements, HttpTransport> {
+    let OneShotOperation<'fetch, C, D, Producer> {fetch, producer, options, destination} = move operation
+    let FetchOptions {
+      redirect,
+      content,
+      pool,
+      proxy,
+      deadline,
+      http,
+      contentLimits,
+      maxEncodedBodyBytes,
+      maxDeliveredBodyBytes,
+      maxOwnedMetadataBytes,
+      maxBufferedBytes,
+    } = move options
+    let mut adapter = FetchAttemptAdapter<'fetch, C> {
+      client: &mut fetch.client,
+      httpLimits: http,
+      poolMode: pool,
+      proxyMode: proxy,
+    }
+    let mut scratch = run Bytes.zeroed(http.writeCapacity)
+    let response = DeliveryResponseHandler<D> {
+      destination: move destination,
+      content: content,
+      contentLimits: move contentLimits,
+      responseValueLimits: http.responseBody.trailerValues,
+      maxEncodedBodyBytes: maxEncodedBodyBytes,
+      maxDeliveredBodyBytes: maxDeliveredBodyBytes,
+      maxOwnedMetadataBytes: maxOwnedMetadataBytes,
+      maxBufferedBytes: maxBufferedBytes,
+    }
+    return run mapSwitching(Redirect.withOneShotHybridResponse(
+      &mut adapter,
+      move request,
+      &redirect,
+      move producer,
+      copyDeadline(&deadline),
+      Bytes.asMutSlice(&mut scratch),
+      move response,
+    ))
+  }
+}
+
+impl<
+  'fetch,
+  C,
+  D,
+  Producer,
+  RoutedP,
+  DirectP,
+  A,
+  ProducerError,
+  DestinationError,
+  AcquisitionError,
+  ?ProducerRequirements,
+  ?DestinationRequirements,
+  ?AcquisitionRequirements,
+  Producer: BodyProducer<ProducerError ? ProducerRequirements>,
+  D: Destination<A, DestinationError ? DestinationRequirements>,
+> SemanticRequestHandler<
+  A,
+  RedirectError | FetchError | ValueError | BodyError | ProducerError | DestinationError | ClientError | OutOfMemoryError | AcquisitionError
+  ? ProducerRequirements | DestinationRequirements | AcquisitionRequirements | &mut MonotonicClock | &mut Allocator | &mut Random,
+> for OneShotOperation<'fetch, C, D, Producer> {
+  handle: OneShotOperation.handle
+}
+
+/// Executes an affine producer request and sequentially offers the selected representation.
+pub effect fn toSinkOneShot<
+  'fetch,
+  'uri,
+  'method,
+  'headers,
+  'policy,
+  C,
+  Producer,
+  S,
+  RoutedP,
+  DirectP,
+  ProducerError,
+  SinkError,
+  AcquisitionError,
+  ?ProducerRequirements,
+  ?SinkRequirements,
+  ?AcquisitionRequirements,
+  Producer: BodyProducer<ProducerError ? ProducerRequirements>,
+  S: Sink<SinkError ? SinkRequirements>,
+>(
+  fetch: &'fetch mut Fetch<C>,
+  request: FetchRequest<'uri, 'method, 'headers, 'policy>,
+  producer: Producer,
+  options: FetchOptions,
+  sink: S,
+) -> FetchResult
+! RedirectError | FetchError | ValueError | BodyError | ProducerError | DestinationFailure<SinkError> | ClientError | OutOfMemoryError | AcquisitionError
+? ProducerRequirements | SinkRequirements | AcquisitionRequirements | &mut MonotonicClock | &mut Allocator | &mut Random
+where
+  ProducerRequirements in Without<ProducerRequirements, ByteDuplex>,
+  ProducerRequirements in Without<ProducerRequirements, HttpTransport>,
+  SinkRequirements in Without<SinkRequirements, ByteDuplex>,
+  SinkRequirements in Without<SinkRequirements, HttpTransport>,
+  AcquisitionRequirements in Without<AcquisitionRequirements, ByteDuplex>,
+  AcquisitionRequirements in Without<AcquisitionRequirements, HttpTransport> {
+  run admit(&options)
+  let operation = OneShotOperation<'fetch, C, SinkDestination<S>, Producer> {
+    fetch: move fetch,
+    producer: move producer,
+    options: move options,
+    destination: SinkDestination<S> {sink: move sink},
+  }
+  return run withSemanticRequest(move request, move operation)
+}
+
+/// Executes an affine producer request and atomically publishes a bounded body.
+pub effect fn collectOneShot<
+  'fetch,
+  'uri,
+  'method,
+  'headers,
+  'policy,
+  C,
+  Producer,
+  RoutedP,
+  DirectP,
+  ProducerError,
+  AcquisitionError,
+  ?ProducerRequirements,
+  ?AcquisitionRequirements,
+  Producer: BodyProducer<ProducerError ? ProducerRequirements>,
+>(
+  fetch: &'fetch mut Fetch<C>,
+  request: FetchRequest<'uri, 'method, 'headers, 'policy>,
+  producer: Producer,
+  options: FetchOptions,
+  maxBodyBytes: usize,
+) -> CollectedResponse
+! RedirectError | FetchError | ValueError | BodyError | ProducerError | ClientError | OutOfMemoryError | AcquisitionError
+? ProducerRequirements | AcquisitionRequirements | &mut MonotonicClock | &mut Allocator | &mut Random
+where
+  ProducerRequirements in Without<ProducerRequirements, ByteDuplex>,
+  ProducerRequirements in Without<ProducerRequirements, HttpTransport>,
+  AcquisitionRequirements in Without<AcquisitionRequirements, ByteDuplex>,
+  AcquisitionRequirements in Without<AcquisitionRequirements, HttpTransport> {
+  run admit(&options)
+  let operation = OneShotOperation<'fetch, C, CollectDestination, Producer> {
+    fetch: move fetch,
+    producer: move producer,
+    options: move options,
+    destination: CollectDestination {body: Bytes.make(), maximum: maxBodyBytes},
+  }
+  return run withSemanticRequest(move request, move operation)
+}
+
+/// Executes an affine producer request and validates bounded discarded content.
+pub effect fn discardOneShot<
+  'fetch,
+  'uri,
+  'method,
+  'headers,
+  'policy,
+  C,
+  Producer,
+  RoutedP,
+  DirectP,
+  ProducerError,
+  AcquisitionError,
+  ?ProducerRequirements,
+  ?AcquisitionRequirements,
+  Producer: BodyProducer<ProducerError ? ProducerRequirements>,
+>(
+  fetch: &'fetch mut Fetch<C>,
+  request: FetchRequest<'uri, 'method, 'headers, 'policy>,
+  producer: Producer,
+  options: FetchOptions,
+  maxDiscardBytes: u64,
+) -> FetchResult
+! RedirectError | FetchError | ValueError | BodyError | ProducerError | ClientError | OutOfMemoryError | AcquisitionError
+? ProducerRequirements | AcquisitionRequirements | &mut MonotonicClock | &mut Allocator | &mut Random
+where
+  ProducerRequirements in Without<ProducerRequirements, ByteDuplex>,
+  ProducerRequirements in Without<ProducerRequirements, HttpTransport>,
+  AcquisitionRequirements in Without<AcquisitionRequirements, ByteDuplex>,
+  AcquisitionRequirements in Without<AcquisitionRequirements, HttpTransport> {
+  run admit(&options)
+  let operation = OneShotOperation<'fetch, C, DiscardDestination, Producer> {
+    fetch: move fetch,
+    producer: move producer,
+    options: move options,
+    destination: DiscardDestination {maximum: maxDiscardBytes},
+  }
+  return run withSemanticRequest(move request, move operation)
+}
+
 fn copyInstant(value: &Instant) -> Instant {
   return SystemClock.make(SystemClock.seconds(value), SystemClock.nanoseconds(value))
 }
@@ -1160,6 +1784,44 @@ fn fetchFailure(phase: FetchPhase, reason: FetchReason) -> FetchError {
     uri: Option.none<OwnedUri>(),
     deliveredBodyBytes: u64.MIN,
     offeredBodyBytes: usize.ZERO,
+  }
+}
+
+fn switchingFailure() -> FetchError {
+  let status = match move Status.fromCode(101) {
+    Result.Failure {error} => {
+      drop error
+      return unavailable<FetchError>()
+    }
+    Result.Success {value} => value
+  }
+  return FetchError {
+    phase: FetchPhase.Head,
+    reason: FetchReason.UnsupportedSwitchingResponse {status: status},
+    status: Option.some<Status>(status),
+    uri: Option.none<OwnedUri>(),
+    deliveredBodyBytes: u64.MIN,
+    offeredBodyBytes: usize.ZERO,
+  }
+}
+
+effect fn mapSwitching<'env, A, E, ?R>(
+  attempted: once Effect<'env; A ! E | ClientError ? R>,
+) -> A ! E | ClientError | FetchError ? R {
+  let outcome = run Effect.result(move attempted)
+  return match move outcome {
+    Result.Success {value} => move value
+    Result.Failure {error} => match move error {
+      ClientError.UnsupportedUpgrade => {
+        fail switchingFailure()
+      }
+      ClientError cause => {
+        fail move cause
+      }
+      _ => {
+        fail move error
+      }
+    }
   }
 }
 
