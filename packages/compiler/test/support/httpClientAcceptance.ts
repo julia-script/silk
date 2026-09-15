@@ -2582,7 +2582,6 @@ import silk.http_redirect {
   Policy as RedirectPolicy,
   Post301302Policy,
   PreviousResponsePolicy,
-  ProducerHandler,
   ReplayFactory,
   Request as RedirectRequest,
   ResponseHandler,
@@ -3085,8 +3084,8 @@ impl BodyProducer<RedirectSourceFailure ? never> for RedirectProducer {
 
 struct RedirectFactory { audit: Shared<RouteAudit> }
 
-impl<A, E, ?R, H: ProducerHandler<RedirectProducer, A, E ? R>> RedirectFactory {
-  effect fn withProducer(factory: &mut Self, handler: H) -> A ! E ? R {
+impl RedirectFactory {
+  effect fn acquire(factory: &mut Self) -> RedirectProducer {
     Shared.withMut<RouteAudit, ()>(&factory.audit, fn(state: &mut RouteAudit) -> () {
       state.factoryAcquires = state.factoryAcquires + usize.ONE
       return ()
@@ -3095,30 +3094,26 @@ impl<A, E, ?R, H: ProducerHandler<RedirectProducer, A, E ? R>> RedirectFactory {
       audit: Shared.clone<RouteAudit>(&factory.audit),
       offset: usize.ZERO,
     }
-    let use = effect fn(owned: &mut RedirectProducer) -> A ! E ? R {
-      return run ProducerHandler<RedirectProducer, A, E ? R>.handle(move handler, move owned)
-    }
-    let release = effect fn(owned: &mut RedirectProducer) -> () {
-      Shared.withMut<RouteAudit, ()>(&owned.audit, fn(state: &mut RouteAudit) -> () {
+    return move producer
+  }
+
+  fn release(factory: &mut Self, producer: &mut RedirectProducer) -> () {
+    drop factory
+    Shared.withMut<RouteAudit, ()>(&producer.audit, fn(state: &mut RouteAudit) -> () {
         state.factoryReleases = state.factoryReleases + usize.ONE
         return ()
-      })
-      return ()
-    }
-    return run Effect.useReleaseNonParking(move producer, move use, move release)
+    })
+    return ()
   }
 }
 
-impl<A, E, ?R, H: ProducerHandler<RedirectProducer, A, E ? R>> ReplayFactory<
+impl ReplayFactory<
   RedirectProducer,
-  A,
   never,
-  E,
   never,
-  R,
-  H,
 > for RedirectFactory {
-  withProducer: RedirectFactory.withProducer
+  acquire: RedirectFactory.acquire
+  release: RedirectFactory.release
 }
 
 struct RedirectParkGuard { wake: Intrinsic.Wake }

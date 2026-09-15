@@ -326,24 +326,16 @@ pub interface BodyProducer<E, ?R> {
   effect fn pull(producer: &mut Self, output: &mut [u8]) -> BodyChunk ! E ? R
 }
 
-/// A higher-ranked body-producer callback whose producer loan cannot escape.
-pub interface ProducerHandler<P, A, E, ?R> {
-  /// Uses one producer only inside its factory-owned scope.
-  effect<'call> fn handle<'call>(handler: Self, producer: &'call mut P) -> A ! E ? R
-}
-
 /// A reusable factory that lends one fresh scoped producer for each attempted request.
-pub interface ReplayFactory<
-  P,
-  A,
-  FactoryError,
-  ProducerError,
-  ?FactoryRequirements,
-  ?ProducerRequirements,
-  H: ProducerHandler<P, A, ProducerError ? ProducerRequirements>,
-> {
-  /// Acquires, lends, and releases one fresh producer while preserving both channel families.
-  effect fn withProducer(factory: &mut Self, handler: H) -> A ! FactoryError | ProducerError ? FactoryRequirements | ProducerRequirements
+///
+/// Redirect orchestration owns each acquired producer and brackets it through one complete
+/// attempt. `release` is infallible and non-suspending, so cleanup cannot replace the attempt's
+/// success or failure. Factory result and callback types remain outside this public contract.
+pub interface ReplayFactory<P, FactoryError, ?FactoryRequirements> {
+  /// Acquires one fresh owned producer for the next retained-body attempt.
+  effect fn acquire(factory: &mut Self) -> P ! FactoryError ? FactoryRequirements
+  /// Releases one acquired producer after success, failure, or structured cancellation.
+  fn release(factory: &mut Self, producer: &mut P) -> ()
 }
 
 /// One attempt's uniform producer authority after replay selection.
@@ -1982,58 +1974,6 @@ impl<
   applyRedirect: OneShotPlan.applyRedirect
 }
 
-struct ReplaySelectedHandler<BodyError, H, ?BodyRequirements> {
-  handler: H
-}
-
-impl<
-  P,
-  BodyError,
-  Producer,
-  A,
-  HandlerError,
-  ?BodyRequirements,
-  ?HandlerRequirements,
-  Producer: BodyProducer<BodyError ? BodyRequirements>,
-  H: SelectedAttempt<P, A, HandlerError ? HandlerRequirements | &mut SelectedBody<
-    BodyError,
-    BodyRequirements,
-  >>,
-> ReplaySelectedHandler<BodyError, H, BodyRequirements> {
-  effect fn handle<'call>(self: Self, producer: &'call mut Producer) -> A
-  ! HandlerError
-  ? HandlerRequirements {
-    let mode = BodyProducer<BodyError ? BodyRequirements>.mode(&producer)
-    let mut provider = ProducerSelected {producer: move producer}
-    return run SelectedAttempt<P, A, HandlerError ? HandlerRequirements | &mut SelectedBody<
-      BodyError,
-      BodyRequirements,
-    >>.handle(move self.handler, mode, true)
-      |> Effect.provideMut<SelectedBody<BodyError, BodyRequirements>>(&mut provider)
-  }
-}
-
-impl<
-  P,
-  BodyError,
-  Producer,
-  A,
-  HandlerError,
-  ?BodyRequirements,
-  ?HandlerRequirements,
-  Producer: BodyProducer<BodyError ? BodyRequirements>,
-  H: SelectedAttempt<P, A, HandlerError ? HandlerRequirements | &mut SelectedBody<
-    BodyError,
-    BodyRequirements,
-  >>,
-> ProducerHandler<Producer, A, HandlerError ? HandlerRequirements> for ReplaySelectedHandler<
-  BodyError,
-  H,
-  BodyRequirements,
-> {
-  handle: ReplaySelectedHandler.handle
-}
-
 struct ReplayPlan<Factory, Producer> {
   factory: Factory
   retained: bool
@@ -2057,28 +1997,35 @@ impl<
   >>,
   Factory: ReplayFactory<
     Producer,
-    A,
     FactoryError,
-    HandlerError,
     FactoryRequirements,
-    HandlerRequirements,
-    ReplaySelectedHandler<BodyError, H, BodyRequirements>,
   >,
 > ReplayPlan<Factory, Producer> {
   effect fn withSelected(plan: &mut Self, handler: H) -> A
   ! FactoryError | HandlerError
   ? FactoryRequirements | HandlerRequirements {
     if plan.retained {
-      let adapter = ReplaySelectedHandler<BodyError, H, BodyRequirements> {handler: move handler}
-      return run ReplayFactory<
+      let producer = run ReplayFactory<
         Producer,
-        A,
         FactoryError,
-        HandlerError,
         FactoryRequirements,
-        HandlerRequirements,
-        ReplaySelectedHandler<BodyError, H, BodyRequirements>,
-      >.withProducer(&mut plan.factory, move adapter)
+      >.acquire(&mut plan.factory)
+      let use = effect fn(owned: &mut Producer) -> A ! HandlerError ? HandlerRequirements {
+        let mode = BodyProducer<BodyError ? BodyRequirements>.mode(&owned)
+        let mut provider = ProducerSelected {producer: move owned}
+        return run SelectedAttempt<P, A, HandlerError ? HandlerRequirements | &mut SelectedBody<
+          BodyError,
+          BodyRequirements,
+        >>.handle(move handler, mode, true)
+          |> Effect.provideMut<SelectedBody<BodyError, BodyRequirements>>(&mut provider)
+      }
+      let release = effect fn(owned: &mut Producer) -> () {
+        return ReplayFactory<Producer, FactoryError, FactoryRequirements>.release(
+          &mut plan.factory,
+          owned,
+        )
+      }
+      return run Effect.useReleaseNonParking(move producer, move use, move release)
     }
     return run runEmptySelected(move handler)
   }
@@ -2108,12 +2055,8 @@ impl<
   >>,
   Factory: ReplayFactory<
     Producer,
-    A,
     FactoryError,
-    HandlerError,
     FactoryRequirements,
-    HandlerRequirements,
-    ReplaySelectedHandler<BodyError, H, BodyRequirements>,
   >,
 > SourcePlan<
   P,
@@ -2754,22 +2697,8 @@ pub effect fn withReplayResponse<
   >,
   Factory: ReplayFactory<
     Producer,
-    AttemptStep<'policy, 'scratch, A, H>,
     FactoryError,
-    RedirectError | ValueError | ProducerError | CallbackError | ClientError | OutOfMemoryError | AcquisitionError,
     FactoryRequirements,
-    ProducerRequirements | CallbackRequirements | AcquisitionRequirements | &mut AttemptDispatch<
-      'policy,
-      RedirectAttemptHandler<'policy, 'scratch, ProducerError, ProducerRequirements, H>,
-      AttemptStep<'policy, 'scratch, A, H>,
-      RedirectError | ValueError | ProducerError | CallbackError | ClientError | OutOfMemoryError | AcquisitionError
-      ? ProducerRequirements | CallbackRequirements | AcquisitionRequirements | &mut SelectedBody<ProducerError, ProducerRequirements> | &mut MonotonicClock | &mut Allocator | &mut Random
-    > | &mut MonotonicClock | &mut Allocator | &mut Random,
-    ReplaySelectedHandler<
-      ProducerError,
-      SelectedAttemptHandler<'policy, 'scratch, H>,
-      ProducerRequirements,
-    >,
   >,
 >(
   client: &'client mut C,
@@ -2849,22 +2778,8 @@ pub effect fn withReplayHybridResponse<
   >,
   Factory: ReplayFactory<
     Producer,
-    AttemptStep<'policy, 'scratch, A, H>,
     FactoryError,
-    RedirectError | ValueError | ProducerError | CallbackError | ClientError | OutOfMemoryError | AcquisitionError,
     FactoryRequirements,
-    ProducerRequirements | CallbackRequirements | AcquisitionRequirements | &mut AttemptDispatch<
-      'policy,
-      RedirectAttemptHandler<'policy, 'scratch, ProducerError, ProducerRequirements, H>,
-      AttemptStep<'policy, 'scratch, A, H>,
-      RedirectError | ValueError | ProducerError | CallbackError | ClientError | OutOfMemoryError | AcquisitionError
-      ? ProducerRequirements | CallbackRequirements | AcquisitionRequirements | &mut SelectedBody<ProducerError, ProducerRequirements> | &mut MonotonicClock | &mut Allocator | &mut Random
-    > | &mut MonotonicClock | &mut Allocator | &mut Random,
-    ReplaySelectedHandler<
-      ProducerError,
-      SelectedAttemptHandler<'policy, 'scratch, H>,
-      ProducerRequirements,
-    >,
   >,
 >(
   client: &'client mut C,
