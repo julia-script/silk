@@ -1,0 +1,383 @@
+//! Bounded one-shot HTTP delivery over redirects, content decoding, routing, and pooling.
+//!
+//! # When to use
+//!
+//! Use the `toSink*` operations for sequential external delivery, `collect*` for bounded atomic
+//! in-memory results, and `discard*` for explicit bounded validation without retaining a body.
+//! Select the suffix matching the request body's replay authority.
+//!
+//! # Details
+//!
+//! Fetch owns no transport policy. A [`FetchClient`] supplies routed or pooled attempts under one
+//! unchanged deadline, [`silk.http_redirect`] owns redirect and source authority, and
+//! [`silk.http_client`] owns response framing and content provenance. Every public destination is
+//! finite, and every completed result owns the metadata that outlives the live response.
+
+import silk.allocator {Allocator, OutOfMemoryError}
+import silk.byte_duplex {ByteDuplex}
+import silk.bytes {Bytes}
+import silk.effect {Effect}
+import silk.http {Header, Method, OwnedResponseHead, Status, ValueError, Version}
+import silk.http_body {OwnedTrailers}
+import silk.http_client as Client
+import silk.http_client {
+  ClientError,
+  ContinuePolicy,
+  Exchange,
+  RouteTransport,
+}
+import silk.http_content as Content
+import silk.http_content {AppliedPlan, ContentError}
+import silk.http_headers {Headers, Limits as HeaderLimits}
+import silk.http_redirect as Redirect
+import silk.http_redirect {
+  AttemptHandler,
+  AttemptRequest,
+  BodyProducer,
+  Policy as RedirectPolicy,
+  RedirectError,
+  ReplayFactory,
+  ResponseHandler,
+}
+import silk.http_request {HeaderPolicy}
+import silk.http_transport {HttpTransport}
+import silk.inflate {Limits as InflateLimits, MEMORY_BOUND as INFLATE_MEMORY_BOUND}
+import silk.monotonic_clock {MonotonicClock}
+import silk.option {Option}
+import silk.random {Random}
+import silk.result {Result}
+import silk.system_clock {Instant, SystemClock}
+import silk.u64
+import silk.uri {OwnedUri, Uri}
+import silk.usize
+import silk.zstd {ZstdLimits}
+
+/// Whether connection acquisition may use the compatible pool retained by the client context.
+pub enum PoolMode {
+  /// Uses a compatible context pool when present and otherwise opens a fresh connection.
+  UseContextPool,
+  /// Always opens a fresh connection and never checks out or publishes through a pool.
+  Fresh,
+}
+
+/// Whether acquisition uses configured routing or bypasses it for this operation.
+pub enum ProxyMode {
+  /// Recomputes only the explicit client-context proxy policy for every redirect origin.
+  InheritContext,
+  /// Uses direct routing without environment lookup.
+  Direct,
+}
+
+/// The one-shot operation phase associated with bounded fetch-owned context.
+pub enum FetchPhase {
+  /// Semantic URI admission or copying.
+  Uri,
+  /// Per-origin route selection.
+  Route,
+  /// Pool checkout, resolution, connection, or TLS acquisition.
+  Connect,
+  /// Request preparation or upload.
+  Request,
+  /// Redirect policy and intermediate-response handling.
+  Redirect,
+  /// Final response-head selection or copying.
+  Head,
+  /// Content selection, decoding, framing, or trailer validation.
+  Decode,
+  /// Sink, collection, or discard delivery.
+  Destination,
+  /// Explicit response completion and reuse decision.
+  Finish,
+}
+
+/// The independent finite fetch resource that rejected a value.
+pub enum FetchLimit {
+  /// Deframed representation input accepted by the content layer.
+  EncodedBodyBytes,
+  /// Representation bytes successfully accepted by the destination.
+  DeliveredBodyBytes,
+  /// URI, head, and trailer payload plus owned index storage.
+  OwnedMetadataBytes,
+  /// The positive scratch buffer used for response delivery.
+  BufferedBytes,
+  /// Bytes retained by a collection destination.
+  CollectionBytes,
+  /// Bytes validated by a discard destination.
+  DiscardBytes,
+}
+
+/// A fetch-owned admission, limit, or unsupported-response reason.
+pub union FetchReason {
+  /// One or more finite options are inconsistent or outside their admitted domain.
+  InvalidOptions,
+  /// Checked accounting cannot represent the required total.
+  SizeOverflow,
+  /// One independent finite resource would exceed its inclusive limit.
+  LimitExceeded {
+    /// The resource whose bound was reached.
+    pub limit: FetchLimit,
+    /// The inclusive admitted maximum.
+    pub allowed: u64,
+    /// The rejected cumulative value.
+    pub attempted: u64,
+  },
+  /// The final response would require transferring duplex protocol authority.
+  UnsupportedSwitchingResponse {
+    /// The final protocol-switching or successful CONNECT status.
+    pub status: Status,
+  },
+}
+
+/// Safe independently owned failure context added by the one-shot boundary.
+pub struct FetchError {
+  /// The operation phase that rejected the value or observed the failure.
+  pub phase: FetchPhase
+  /// The stable fetch-owned failure category.
+  pub reason: FetchReason
+  /// Final status when it is known without retaining the response owner.
+  pub status: Option<Status>
+  /// Independently copied current URI when bounded context is available.
+  pub uri: Option<OwnedUri>
+  /// Bytes accepted by the destination before the failing operation.
+  pub deliveredBodyBytes: u64
+  /// Current chunk length offered to a failing destination, otherwise zero.
+  pub offeredBodyBytes: usize
+}
+
+/// A typed sink failure paired with only fetch-known delivery progress.
+pub struct DestinationFailure<E> {
+  /// The original caller-defined sink failure.
+  pub error: E
+  /// Bounded destination context excluding claims about partial external effects.
+  pub context: FetchError
+}
+
+/// Representation policy selected from the final wire response.
+pub struct RepresentationMetadata {
+  /// The exact applied Raw or Decode plan and coding counts.
+  pub applied: AppliedPlan
+}
+
+impl Copy for RepresentationMetadata {}
+
+/// Immutable owned header-only metadata lent before each body chunk.
+pub struct ResponseMetadata {
+  /// The independently owned final URI.
+  pub finalUri: OwnedUri
+  /// The independently owned final status, reason, and ordered wire headers.
+  pub head: OwnedResponseHead
+  /// Content-plan provenance separate from unchanged wire headers.
+  pub representation: RepresentationMetadata
+  /// Counted URI and head payload plus owned index storage.
+  pub ownedBytes: usize
+}
+
+/// One verified completed response without retained body bytes.
+pub struct FetchResult {
+  /// Final owned header metadata.
+  pub metadata: ResponseMetadata
+  /// Final ordered trailers copied only after content completion.
+  pub trailers: Option<OwnedTrailers>
+  /// Number of redirects followed before this response.
+  pub redirectCount: usize
+  /// Deframed encoded representation bytes accepted by the content layer.
+  pub encodedBodyBytes: u64
+  /// Representation bytes successfully accepted by the destination.
+  pub deliveredBodyBytes: u64
+  /// URI, head, and trailer payload plus owned index storage.
+  pub ownedMetadataBytes: usize
+}
+
+/// One atomically published bounded in-memory response.
+pub struct CollectedResponse {
+  /// The verified completed response metadata and counters.
+  pub result: FetchResult
+  /// The complete selected representation body.
+  pub body: Bytes
+}
+
+union RequestHeaders<'headers> {
+  Empty,
+  Borrowed {headers: Headers<'headers>},
+}
+
+/// A semantic request whose body authority is supplied by one source-specific operation.
+pub struct FetchRequest<'uri, 'method, 'headers, 'policy> {
+  uriValue: Uri<'uri>
+  methodValue: Method<'method>
+  headersValue: RequestHeaders<'headers>
+  headerPolicyValue: HeaderPolicy<'policy>
+  versionValue: Version
+  continuePolicyValue: ContinuePolicy
+  limitsValue: HeaderLimits
+  maxHeadBytesValue: usize
+  maxCredentialBytesValue: usize
+}
+
+impl<'uri, 'method, 'headers, 'policy> FetchRequest<'uri, 'method, 'headers, 'policy> {
+  /// Constructs a semantic request while preserving its explicit method and ordered headers.
+  pub fn make(
+    uri: Uri<'uri>,
+    method: Method<'method>,
+    headers: Headers<'headers>,
+    headerPolicy: HeaderPolicy<'policy>,
+    version: Version,
+    continuePolicy: ContinuePolicy,
+    limits: HeaderLimits,
+    maxHeadBytes: usize,
+    maxCredentialBytes: usize,
+  ) -> Self {
+    return FetchRequest<'uri, 'method, 'headers, 'policy> {
+      uriValue: uri,
+      methodValue: method,
+      headersValue: RequestHeaders<'headers>.Borrowed {headers: headers},
+      headerPolicyValue: headerPolicy,
+      versionValue: version,
+      continuePolicyValue: move continuePolicy,
+      limitsValue: limits,
+      maxHeadBytesValue: maxHeadBytes,
+      maxCredentialBytesValue: maxCredentialBytes,
+    }
+  }
+}
+
+impl<'uri> FetchRequest<'uri, 'static, 'static, 'static> {
+  /// Constructs GET with empty caller headers and the standard request policy and limits.
+  pub fn get(uri: Uri<'uri>) -> Self {
+    let limits = Client.Limits.defaults().head.values
+    return FetchRequest<'uri, 'static, 'static, 'static> {
+      uriValue: uri,
+      methodValue: Method.get(),
+      headersValue: RequestHeaders<'static>.Empty,
+      headerPolicyValue: HeaderPolicy<'static>.defaults(),
+      versionValue: Version.Http11,
+      continuePolicyValue: ContinuePolicy.Disabled,
+      limitsValue: limits,
+      maxHeadBytesValue: 65536,
+      maxCredentialBytesValue: 8192,
+    }
+  }
+}
+
+/// Finite one-shot policies admitted before route selection or transport contact.
+pub struct FetchOptions {
+  /// Redirect policy, including Manual or Follow behavior and intermediate-response bounds.
+  pub redirect: RedirectPolicy
+  /// Raw or decoded representation selection.
+  pub content: Content.Mode
+  /// Compatible context-pool or forced-fresh acquisition.
+  pub pool: PoolMode
+  /// Explicit client-context routing or forced direct routing.
+  pub proxy: ProxyMode
+  /// One optional absolute operation deadline, never renewed between phases or hops.
+  pub deadline: Option<Instant>
+  /// Existing finite HTTP parser, framing, trailer, and transport-buffer limits.
+  pub http: Client.Limits
+  /// Existing finite content planning and codec limits.
+  pub contentLimits: Content.Limits
+  /// Additional inclusive encoded representation allowance.
+  pub maxEncodedBodyBytes: u64
+  /// Inclusive representation bytes accepted by any destination.
+  pub maxDeliveredBodyBytes: u64
+  /// Inclusive owned URI, head, and trailer payload-plus-index allowance.
+  pub maxOwnedMetadataBytes: usize
+  /// Positive per-read response delivery scratch capacity.
+  pub maxBufferedBytes: usize
+}
+
+impl FetchOptions {
+  /// Returns Manual, Raw, context-pool, inherited-route policy with finite standard limits.
+  pub fn defaults() -> FetchOptions {
+    let maxBody = u64.toU64(16777216)
+    return FetchOptions {
+      redirect: RedirectPolicy.defaults(),
+      content: Content.Mode.Raw,
+      pool: PoolMode.UseContextPool,
+      proxy: ProxyMode.InheritContext,
+      deadline: Option.none<Instant>(),
+      http: Client.Limits.defaults(),
+      contentLimits: Content.Limits {
+        maxEncoded: maxBody,
+        maxIntermediate: maxBody,
+        maxDecoded: maxBody,
+        maxOwned: 2097152,
+        maxDepth: 4,
+        intermediateCapacity: 16384,
+        inflate: InflateLimits {
+          maxInputBytes: maxBody,
+          maxOutputBytes: maxBody,
+          maxMembers: 1024,
+          maxHeaderBytes: 65536,
+          maxMemoryBytes: INFLATE_MEMORY_BOUND,
+        },
+        zstd: ZstdLimits.make(),
+      },
+      maxEncodedBodyBytes: maxBody,
+      maxDeliveredBodyBytes: maxBody,
+      maxOwnedMetadataBytes: 278528,
+      maxBufferedBytes: 16384,
+    }
+  }
+}
+
+/// An owned target-neutral facade around one explicit acquisition context.
+pub struct Fetch<C> {
+  client: C
+}
+
+impl<C> Fetch<C> {
+  /// Seals one caller-supplied client context into a fetch facade.
+  pub fn make(client: C) -> Fetch<C> { return Fetch<C> {client: move client} }
+}
+
+/// A sequential effectful destination whose metadata and current chunk loans cannot escape.
+pub interface Sink<E, ?R> {
+  /// Accepts the complete offered chunk before a later read or callback may begin.
+  effect<'call> fn write<'call>(
+    sink: &mut Self,
+    metadata: &'call ResponseMetadata,
+    chunk: &'call [u8],
+  ) -> () ! E ? R
+}
+
+/// Target-neutral routed or pooled acquisition for one current redirect attempt.
+///
+/// # Details
+///
+/// Implementations admit options before contact, recompute routes for the current request URI, and
+/// lend exactly one scoped exchange. `deadline` is the unchanged operation deadline. `Fresh` never
+/// consults a pool, and `Direct` never consults configured or ambient proxy policy.
+pub interface FetchClient<
+  'policy,
+  P,
+  A,
+  HandlerError,
+  AcquisitionError,
+  ?HandlerRequirements,
+  ?AcquisitionRequirements,
+  H: AttemptHandler<'policy, P, A, HandlerError ? HandlerRequirements>,
+> {
+  /// Rebuilds and drives one scoped request under the selected acquisition modes.
+  effect fn withAttempt(
+    client: &mut Self,
+    request: AttemptRequest<'policy>,
+    httpLimits: Client.Limits,
+    poolMode: PoolMode,
+    proxyMode: ProxyMode,
+    deadline: Option<Instant>,
+    handler: H,
+  ) -> A ! HandlerError | AcquisitionError ? HandlerRequirements | AcquisitionRequirements where
+    HandlerRequirements in Without<HandlerRequirements, ByteDuplex>,
+    HandlerRequirements in Without<HandlerRequirements, HttpTransport>
+}
+
+fn copyInstant(value: &Instant) -> Instant {
+  return SystemClock.make(SystemClock.seconds(value), SystemClock.nanoseconds(value))
+}
+
+fn copyDeadline(value: &Option<Instant>) -> Option<Instant> {
+  return match & value.* {
+    Option.None => Option.none<Instant>()
+    Option.Some {value: present} => Option.some<Instant>(copyInstant(&present))
+  }
+}
