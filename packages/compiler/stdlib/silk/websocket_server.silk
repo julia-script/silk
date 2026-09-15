@@ -1,0 +1,436 @@
+//! Bounded server WebSocket messages over one validated upgraded HTTP channel.
+//!
+//! # When to use
+//!
+//! Use [`withServer`] after `silk.websocket_upgrade.withUpgrade` accepts a request and lends its
+//! exact buffered channel.
+//!
+//! # Details
+//!
+//! The actor accepts final, unfragmented client frames with mandatory masking. It validates one
+//! complete event at a time and writes final unmasked server frames. The scoped session owns all
+//! frame ordering and closes the upgraded channel when its callback ends.
+//!
+//! # Gotchas
+//!
+//! This actor does not implement continuation frames, extensions, compression, a listener, or TLS
+//! server acquisition. Unsupported fragmentation closes with code `1003` when a finite deadline
+//! permits that response.
+
+import silk.buffered_duplex {BufferedDuplex}
+import silk.buffered_input {BufferError, FillOutcome}
+import silk.byte_duplex {ByteDuplex, ByteIoError}
+import silk.effect {Effect}
+import silk.monotonic_clock {MonotonicClock}
+import silk.option {Option}
+import silk.result {Result}
+import silk.slice {Slice}
+import silk.string {InvalidUtf8, String}
+import silk.system_clock {Instant, SystemClock}
+import silk.u8
+import silk.u16
+import silk.u64
+import silk.usize
+
+/// Finite message and close-handshake limits for one server session.
+pub struct Limits {
+  /// The maximum payload bytes in one Text or Binary frame.
+  pub maxMessageBytes: usize
+  /// The maximum peer frames accepted by one [`finishClose`] call.
+  pub maxCloseFrames: usize
+  /// The maximum aggregate peer frame bytes accepted by one [`finishClose`] call.
+  pub maxCloseBytes: usize
+}
+
+impl Copy for Limits {}
+
+impl Limits {
+  /// Returns limits for 65,536-byte messages, 32 close frames, and 65,536 close bytes.
+  pub fn defaults() -> Limits {
+    return Limits {
+      maxMessageBytes: 65536,
+      maxCloseFrames: 32,
+      maxCloseBytes: 65536,
+    }
+  }
+
+  /// Validates and returns finite positive session limits.
+  pub fn make(
+    maxMessageBytes: usize,
+    maxCloseFrames: usize,
+    maxCloseBytes: usize,
+  ) -> Result<Limits, WebSocketError> {
+    if maxMessageBytes == usize.ZERO {
+      return Result.failResult<Limits, WebSocketError>(
+        WebSocketError.InvalidLimits {kind: LimitKind.MessageBytes},
+      )
+    }
+    if maxCloseFrames == usize.ZERO {
+      return Result.failResult<Limits, WebSocketError>(
+        WebSocketError.InvalidLimits {kind: LimitKind.CloseFrames},
+      )
+    }
+    if maxCloseBytes == usize.ZERO {
+      return Result.failResult<Limits, WebSocketError>(
+        WebSocketError.InvalidLimits {kind: LimitKind.CloseBytes},
+      )
+    }
+    return Result.succeed<Limits, WebSocketError>(Limits {
+      maxMessageBytes: maxMessageBytes,
+      maxCloseFrames: maxCloseFrames,
+      maxCloseBytes: maxCloseBytes,
+    })
+  }
+}
+
+/// The finite limit or arithmetic rule that rejected session construction.
+pub enum LimitKind {
+  /// The message-byte limit is zero.
+  MessageBytes,
+  /// The close-frame limit is zero.
+  CloseFrames,
+  /// The close-byte limit is zero.
+  CloseBytes,
+  /// Checked size arithmetic cannot represent a required value.
+  Arithmetic,
+}
+
+/// The externally visible lifecycle state of one session.
+pub enum State {
+  /// The session accepts message, control, and peer Close events.
+  Open,
+  /// The server sent one Close and waits for the peer Close.
+  CloseSent,
+  /// The close handshake and terminal transport close completed.
+  Closed,
+  /// A preceding failure made all later frame operations unavailable.
+  Failed,
+}
+
+/// The public operation associated with a state or transport failure.
+pub enum Operation {
+  /// Read one peer event.
+  ReadEvent,
+  /// Write one Text frame.
+  WriteText,
+  /// Write one Binary frame.
+  WriteBinary,
+  /// Write one Ping frame.
+  WritePing,
+  /// Write one Pong frame.
+  WritePong,
+  /// Send the local Close frame.
+  SendClose,
+  /// Pump peer frames until the close handshake completes.
+  FinishClose,
+}
+
+/// The peer frame rule that selected protocol Close code `1002`.
+pub enum ProtocolReason {
+  /// A client frame does not contain the required mask.
+  MaskRequired,
+  /// One or more reserved bits are set.
+  Rsv,
+  /// The opcode is reserved by the selected profile.
+  ReservedOpcode,
+  /// An extended length uses a longer than necessary encoding.
+  NonMinimalLength,
+  /// A 64-bit payload length has its most significant bit set.
+  LengthHighBit,
+  /// A control frame payload exceeds 125 bytes.
+  ControlTooLarge,
+  /// A Close frame payload has exactly one byte.
+  ClosePayloadLength,
+  /// A peer Close frame contains a disallowed status code.
+  CloseCode,
+}
+
+/// The text value that failed complete UTF-8 validation.
+pub enum Utf8Component {
+  /// A Text message payload.
+  Text,
+  /// A Close status reason.
+  CloseReason,
+}
+
+/// The caller Close value rule that rejected construction.
+pub enum CloseDataReason {
+  /// The status code is not permitted for a server Close frame.
+  Code,
+  /// The UTF-8 reason contains more than 123 bytes.
+  ReasonTooLarge,
+}
+
+/// The aggregate close-handshake budget that was exhausted.
+pub enum CloseLimitKind {
+  /// The peer frame-count budget.
+  Frames,
+  /// The aggregate peer wire-byte budget.
+  Bytes,
+}
+
+/// A copyable classification retained after the first terminal failure.
+pub enum Failure {
+  /// Peer frame syntax violated the protocol.
+  Protocol,
+  /// A continuation or nonfinal frame requested unsupported fragmentation.
+  Fragmentation,
+  /// Text or a Close reason was not UTF-8.
+  Utf8,
+  /// A data payload exceeded the message policy.
+  MessageLimit,
+  /// A legal data payload exceeded caller storage.
+  BufferCapacity,
+  /// A close-handshake aggregate budget was exhausted.
+  CloseLimit,
+  /// The byte stream ended before a complete required frame.
+  Truncated,
+  /// Buffered or terminal transport I/O failed.
+  Transport,
+}
+
+/// A typed WebSocket admission, frame, lifecycle, or transport failure.
+pub union WebSocketError {
+  /// Session construction rejected a zero finite limit.
+  InvalidLimits {
+    /// The invalid public limit.
+    pub kind: LimitKind,
+  },
+  /// The operation is not available in the current lifecycle state.
+  InvalidState {
+    /// The rejected operation.
+    pub operation: Operation,
+    /// The state that rejected the operation.
+    pub state: State,
+  },
+  /// A preceding terminal failure prevents more frame I/O.
+  PreviousFailure {
+    /// The retained copyable classification of the first failure.
+    pub failure: Failure,
+  },
+  /// Caller storage cannot hold one otherwise legal complete data payload.
+  BufferTooSmall {
+    /// The complete required payload capacity.
+    pub required: usize,
+    /// The supplied output capacity.
+    pub capacity: usize,
+  },
+  /// A peer or caller data payload exceeds the message policy.
+  MessageTooLarge {
+    /// The rejected payload length before narrowing.
+    pub length: u64,
+    /// The configured message-byte limit.
+    pub allowed: usize,
+  },
+  /// The frame requests continuation or fragmentation outside this profile.
+  UnsupportedFragmentation,
+  /// Peer framing violates one exact RFC 6455 protocol rule.
+  ProtocolError {
+    /// The rule that rejected the frame.
+    pub reason: ProtocolReason,
+  },
+  /// Caller-supplied Close metadata is not valid for server output.
+  InvalidCloseData {
+    /// The rejected caller-data rule.
+    pub reason: CloseDataReason,
+  },
+  /// A complete peer or caller text value is not UTF-8.
+  InvalidUtf8 {
+    /// The text value that failed validation.
+    pub component: Utf8Component,
+  },
+  /// One aggregate close-handshake budget is exhausted.
+  CloseLimitExceeded {
+    /// The exhausted budget.
+    pub kind: CloseLimitKind,
+    /// The configured inclusive maximum.
+    pub allowed: usize,
+  },
+  /// The byte stream ended before a complete required frame.
+  Truncated,
+  /// Buffered frame I/O failed with exact accepted-prefix coordinates.
+  Buffer {
+    /// The frame operation that failed.
+    pub operation: Operation,
+    /// Bytes accepted from the complete frame before this buffered failure.
+    pub frameAccepted: usize,
+    /// The original buffered failure.
+    pub error: BufferError,
+  },
+  /// Terminal channel close failed after one frame operation.
+  Transport {
+    /// The frame operation that required terminal close.
+    pub operation: Operation,
+    /// The original byte-I/O failure.
+    pub error: ByteIoError,
+  },
+}
+
+/// An owned Ping or Pong payload with at most 125 bytes.
+pub struct ControlPayload {
+  bytes: [u8; 125]
+  length: usize
+}
+
+impl ControlPayload {
+  /// Borrows the complete copied control payload.
+  pub fn asSlice<'payload>(self: &'payload Self) -> &'payload [u8] {
+    return Slice.view<u8>(&self.bytes, usize.ZERO, self.length)
+  }
+}
+
+/// An owned validated Close reason with at most 123 UTF-8 bytes.
+pub struct CloseReason {
+  bytes: [u8; 123]
+  length: usize
+}
+
+impl CloseReason {
+  /// Borrows the complete copied UTF-8 reason bytes.
+  pub fn asSlice<'reason>(self: &'reason Self) -> &'reason [u8] {
+    return Slice.view<u8>(&self.bytes, usize.ZERO, self.length)
+  }
+}
+
+/// Owned validated status and reason data for one server Close frame.
+pub struct CloseData {
+  codeValue: u16
+  reasonValue: CloseReason
+}
+
+impl CloseData {
+  /// Validates and copies one server Close status and UTF-8 reason.
+  ///
+  /// The operation rejects client-only code `1010`, other disallowed codes, reasons above 123
+  /// bytes, and invalid UTF-8 before it publishes owned data.
+  pub fn make(code: u16, reason: &[u8]) -> Result<CloseData, WebSocketError> {
+    if !validCloseCode(code) || code == 1010 {
+      return Result.failResult<CloseData, WebSocketError>(WebSocketError.InvalidCloseData {
+        reason: CloseDataReason.Code,
+      })
+    }
+    if reason.length > 123 {
+      return Result.failResult<CloseData, WebSocketError>(WebSocketError.InvalidCloseData {
+        reason: CloseDataReason.ReasonTooLarge,
+      })
+    }
+    return match move String.fromUtf8(reason) {
+      Result<string, InvalidUtf8>.Failure {error} => {
+        drop error
+        Result.failResult<CloseData, WebSocketError>(WebSocketError.InvalidUtf8 {
+          component: Utf8Component.CloseReason,
+        })
+      }
+      Result<string, InvalidUtf8>.Success {value} => {
+        drop value
+        let mut bytes = emptyCloseReason()
+        copyBytes(&mut bytes, reason)
+        Result.succeed<CloseData, WebSocketError>(CloseData {
+          codeValue: code,
+          reasonValue: CloseReason {bytes: move bytes, length: reason.length},
+        })
+      }
+    }
+  }
+
+  /// Returns the validated status code.
+  pub fn code(self: &Self) -> u16 { return self.codeValue }
+
+  /// Borrows the owned validated reason.
+  pub fn reason<'data>(self: &'data Self) -> &'data CloseReason { return &self.reasonValue }
+}
+
+/// Owned peer Close metadata without a synthetic no-status code.
+pub union PeerCloseData {
+  /// The peer sent an empty Close payload.
+  Absent,
+  /// The peer sent one validated status and reason.
+  Present {
+    /// The exact peer status code.
+    pub code: u16,
+    /// The copied validated peer reason.
+    pub reason: CloseReason,
+  },
+}
+
+/// One completely validated peer frame event.
+pub union Event {
+  /// The caller output prefix contains one valid UTF-8 Text payload.
+  Text {
+    /// The initialized payload prefix length.
+    pub count: usize,
+  },
+  /// The caller output prefix contains one Binary payload.
+  Binary {
+    /// The initialized payload prefix length.
+    pub count: usize,
+  },
+  /// One Ping payload was copied after its automatic Pong flushed.
+  Ping {
+    /// The copied Ping payload.
+    pub payload: ControlPayload,
+  },
+  /// One Pong payload was copied without a hidden follow-up read.
+  Pong {
+    /// The copied Pong payload.
+    pub payload: ControlPayload,
+  },
+  /// The peer Close reply and terminal channel close completed.
+  PeerClose {
+    /// The exact copied peer Close metadata.
+    pub data: PeerCloseData,
+  },
+}
+
+/// One callback-scoped affine server WebSocket over the upgraded buffered channel.
+///
+/// Callers receive this value only through [`withServer`]. A returned event never retains a
+/// mutable borrow into this value.
+pub struct ServerWebSocket<'channel, 'transport, P> {
+  channel: &'channel mut BufferedDuplex<'transport, P>
+  limits: Limits
+  stateValue: State
+  failureValue: Option<Failure>
+  header: [u8; 14]
+  control: [u8; 125]
+}
+
+fn validCloseCode(code: u16) -> bool {
+  if code >= 3000 && code <= 4999 { return true }
+  if code >= 1000 && code <= 1003 { return true }
+  return code >= 1007 && code <= 1014
+}
+
+fn copyBytes(output: &mut [u8], input: &[u8]) -> () {
+  let mut index = usize.ZERO
+  while index < input.length {
+    output[index] = input[index]
+    index = index + usize.ONE
+  }
+  return ()
+}
+
+fn emptyHeader() -> [u8; 14] {
+  return [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+}
+
+fn emptyControl() -> [u8; 125] {
+  return [
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  ]
+}
+
+fn emptyCloseReason() -> [u8; 123] {
+  return [
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0,
+  ]
+}
