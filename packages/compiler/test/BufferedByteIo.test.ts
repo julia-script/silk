@@ -69,6 +69,13 @@ where &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut Monoton
   return run BufferedDuplex.shutdownWrite(&mut session.*, move deadline)
 }
 
+effect fn closeBuffered<'transport, 'call, P>(
+  session: &'call mut BufferedDuplex<'transport, P>,
+) -> () ! ByteIoError
+where &'transport mut P provides &ByteDuplex from &mut ByteDuplex {
+  return run BufferedDuplex.close(&mut session.*)
+}
+
 fn aliases(
   input: &BufferedInput,
   output: &BufferedOutput,
@@ -278,7 +285,7 @@ it.effect(
           'import silk.byte_duplex { ByteDuplex }',
           `import silk.buffered_output { BufferedOutput }
 import silk.buffered_transfer { BufferedTransfer, TransferOutcome }
-import silk.byte_duplex { ByteDuplex }
+import silk.byte_duplex { ByteDuplex, ByteIoError }
 import silk.bytes { Bytes }`,
         )
         .replace('pub fn main() -> i32 {', `${publicSurfaceProbe}\npub fn main() -> i32 {`)

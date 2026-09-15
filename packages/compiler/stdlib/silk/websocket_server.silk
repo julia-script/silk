@@ -1,0 +1,1895 @@
+//! Bounded server WebSocket messages over one validated upgraded HTTP channel.
+//!
+//! # When to use
+//!
+//! Use [`withServer`] after `silk.websocket_upgrade.withUpgrade` accepts a request and lends its
+//! exact buffered channel.
+//!
+//! # Details
+//!
+//! The actor accepts final, unfragmented client frames with mandatory masking. It validates one
+//! complete event at a time and writes final unmasked server frames. The scoped session owns all
+//! frame ordering and closes the upgraded channel when its callback ends.
+//!
+//! # Gotchas
+//!
+//! This actor does not implement continuation frames, extensions, compression, a listener, or TLS
+//! server acquisition. Unsupported fragmentation closes with code `1003` when a finite deadline
+//! permits that response.
+
+import silk.buffered_duplex {BufferedDuplex}
+import silk.buffered_input {BufferError, FillOutcome}
+import silk.byte_duplex {ByteDuplex, ByteIoError, ByteIoOperation}
+import silk.effect {Effect}
+import silk.monotonic_clock {MonotonicClock}
+import silk.option {Option}
+import silk.result {Result}
+import silk.slice {Slice}
+import silk.string {InvalidUtf8, String}
+import silk.system_clock {Instant, SystemClock}
+import silk.u8
+import silk.u16
+import silk.u64
+import silk.usize
+
+/// Finite message and close-handshake limits for one server session.
+pub struct Limits {
+  /// The maximum payload bytes in one Text or Binary frame.
+  pub maxMessageBytes: usize
+  /// The maximum peer frames accepted by one [`finishClose`] call.
+  pub maxCloseFrames: usize
+  /// The maximum aggregate peer frame bytes accepted by one [`finishClose`] call.
+  pub maxCloseBytes: usize
+}
+
+impl Copy for Limits {}
+
+impl Limits {
+  /// Returns limits for 65,536-byte messages, 32 close frames, and 65,536 close bytes.
+  pub fn defaults() -> Limits {
+    return Limits {
+      maxMessageBytes: 65536,
+      maxCloseFrames: 32,
+      maxCloseBytes: 65536,
+    }
+  }
+
+  /// Validates and returns finite positive session limits.
+  pub fn make(
+    maxMessageBytes: usize,
+    maxCloseFrames: usize,
+    maxCloseBytes: usize,
+  ) -> Result<Limits, WebSocketError> {
+    if maxMessageBytes == usize.ZERO {
+      return Result.failResult<Limits, WebSocketError>(
+        WebSocketError.InvalidLimits {kind: LimitKind.MessageBytes},
+      )
+    }
+    if maxCloseFrames == usize.ZERO {
+      return Result.failResult<Limits, WebSocketError>(
+        WebSocketError.InvalidLimits {kind: LimitKind.CloseFrames},
+      )
+    }
+    if maxCloseBytes == usize.ZERO {
+      return Result.failResult<Limits, WebSocketError>(
+        WebSocketError.InvalidLimits {kind: LimitKind.CloseBytes},
+      )
+    }
+    return Result.succeed<Limits, WebSocketError>(Limits {
+      maxMessageBytes: maxMessageBytes,
+      maxCloseFrames: maxCloseFrames,
+      maxCloseBytes: maxCloseBytes,
+    })
+  }
+}
+
+/// The finite limit or arithmetic rule that rejected session construction.
+pub enum LimitKind {
+  /// The message-byte limit is zero.
+  MessageBytes,
+  /// The close-frame limit is zero.
+  CloseFrames,
+  /// The close-byte limit is zero.
+  CloseBytes,
+  /// Checked size arithmetic cannot represent a required value.
+  Arithmetic,
+}
+
+/// The externally visible lifecycle state of one session.
+pub enum State {
+  /// The session accepts message, control, and peer Close events.
+  Open,
+  /// The server sent one Close and waits for the peer Close.
+  CloseSent,
+  /// The close handshake and terminal transport close completed.
+  Closed,
+  /// A preceding failure made all later frame operations unavailable.
+  Failed,
+}
+
+/// The public operation associated with a state or transport failure.
+pub enum Operation {
+  /// Read one peer event.
+  ReadEvent,
+  /// Write one Text frame.
+  WriteText,
+  /// Write one Binary frame.
+  WriteBinary,
+  /// Write one Ping frame.
+  WritePing,
+  /// Write one Pong frame.
+  WritePong,
+  /// Send the local Close frame.
+  SendClose,
+  /// Pump peer frames until the close handshake completes.
+  FinishClose,
+}
+
+/// The peer frame rule that selected protocol Close code `1002`.
+pub enum ProtocolReason {
+  /// A client frame does not contain the required mask.
+  MaskRequired,
+  /// One or more reserved bits are set.
+  Rsv,
+  /// The opcode is reserved by the selected profile.
+  ReservedOpcode,
+  /// An extended length uses a longer than necessary encoding.
+  NonMinimalLength,
+  /// A 64-bit payload length has its most significant bit set.
+  LengthHighBit,
+  /// A control frame payload exceeds 125 bytes.
+  ControlTooLarge,
+  /// A control frame clears FIN and therefore attempts illegal fragmentation.
+  ControlFragmented,
+  /// A Close frame payload has exactly one byte.
+  ClosePayloadLength,
+  /// A peer Close frame contains a disallowed status code.
+  CloseCode,
+}
+
+/// The text value that failed complete UTF-8 validation.
+pub enum Utf8Component {
+  /// A Text message payload.
+  Text,
+  /// A Close status reason.
+  CloseReason,
+}
+
+/// The caller Close value rule that rejected construction.
+pub enum CloseDataReason {
+  /// The status code is not permitted for a server Close frame.
+  Code,
+  /// The UTF-8 reason contains more than 123 bytes.
+  ReasonTooLarge,
+}
+
+/// The aggregate close-handshake budget that was exhausted.
+pub enum CloseLimitKind {
+  /// The peer frame-count budget.
+  Frames,
+  /// The aggregate peer wire-byte budget.
+  Bytes,
+}
+
+/// A copyable classification retained after the first terminal failure.
+pub enum Failure {
+  /// Peer frame syntax violated the protocol.
+  Protocol,
+  /// A continuation or nonfinal frame requested unsupported fragmentation.
+  Fragmentation,
+  /// Text or a Close reason was not UTF-8.
+  Utf8,
+  /// A data payload exceeded the message policy.
+  MessageLimit,
+  /// A legal data payload exceeded caller storage.
+  BufferCapacity,
+  /// A close-handshake aggregate budget was exhausted.
+  CloseLimit,
+  /// The byte stream ended before a complete required frame.
+  Truncated,
+  /// Buffered or terminal transport I/O failed.
+  Transport,
+}
+
+/// A typed WebSocket admission, frame, lifecycle, or transport failure.
+pub union WebSocketError {
+  /// Session construction rejected a zero finite limit.
+  InvalidLimits {
+    /// The invalid public limit.
+    pub kind: LimitKind,
+  },
+  /// The operation is not available in the current lifecycle state.
+  InvalidState {
+    /// The rejected operation.
+    pub operation: Operation,
+    /// The state that rejected the operation.
+    pub state: State,
+  },
+  /// A preceding terminal failure prevents more frame I/O.
+  PreviousFailure {
+    /// The retained copyable classification of the first failure.
+    pub failure: Failure,
+  },
+  /// Caller storage cannot hold one otherwise legal complete data payload.
+  BufferTooSmall {
+    /// The complete required payload capacity.
+    pub required: usize,
+    /// The supplied output capacity.
+    pub capacity: usize,
+  },
+  /// A peer or caller data payload exceeds the message policy.
+  MessageTooLarge {
+    /// The rejected payload length before narrowing.
+    pub length: u64,
+    /// The configured message-byte limit.
+    pub allowed: usize,
+  },
+  /// The frame requests continuation or fragmentation outside this profile.
+  UnsupportedFragmentation,
+  /// Peer framing violates one exact RFC 6455 protocol rule.
+  ProtocolError {
+    /// The rule that rejected the frame.
+    pub reason: ProtocolReason,
+  },
+  /// Caller-supplied Close metadata is not valid for server output.
+  InvalidCloseData {
+    /// The rejected caller-data rule.
+    pub reason: CloseDataReason,
+  },
+  /// A complete peer or caller text value is not UTF-8.
+  InvalidUtf8 {
+    /// The text value that failed validation.
+    pub component: Utf8Component,
+  },
+  /// One aggregate close-handshake budget is exhausted.
+  CloseLimitExceeded {
+    /// The exhausted budget.
+    pub kind: CloseLimitKind,
+    /// The configured inclusive maximum.
+    pub allowed: usize,
+  },
+  /// The byte stream ended before a complete required frame.
+  Truncated,
+  /// Buffered frame I/O failed with exact accepted-prefix coordinates.
+  Buffer {
+    /// The frame operation that failed.
+    pub operation: Operation,
+    /// Bytes accepted from the complete frame before this buffered failure.
+    pub frameAccepted: usize,
+    /// The original buffered failure.
+    pub error: BufferError,
+  },
+  /// Terminal channel close failed after one frame operation.
+  Transport {
+    /// The frame operation that required terminal close.
+    pub operation: Operation,
+    /// The original byte-I/O failure.
+    pub error: ByteIoError,
+  },
+}
+
+/// An owned Ping or Pong payload with at most 125 bytes.
+pub struct ControlPayload {
+  bytes: [u8; 125]
+  length: usize
+}
+
+impl ControlPayload {
+  /// Borrows the complete copied control payload.
+  pub fn asSlice<'payload>(self: &'payload Self) -> &'payload [u8] {
+    return Slice.view<u8>(&self.bytes, usize.ZERO, self.length)
+  }
+}
+
+/// An owned validated Close reason with at most 123 UTF-8 bytes.
+pub struct CloseReason {
+  bytes: [u8; 123]
+  length: usize
+}
+
+impl CloseReason {
+  /// Borrows the complete copied UTF-8 reason bytes.
+  pub fn asSlice<'reason>(self: &'reason Self) -> &'reason [u8] {
+    return Slice.view<u8>(&self.bytes, usize.ZERO, self.length)
+  }
+}
+
+/// Owned validated status and reason data for one server Close frame.
+pub struct CloseData {
+  codeValue: u16
+  reasonValue: CloseReason
+}
+
+impl CloseData {
+  /// Validates and copies one server Close status and UTF-8 reason.
+  ///
+  /// The operation rejects client-only code `1010`, other disallowed codes, reasons above 123
+  /// bytes, and invalid UTF-8 before it publishes owned data.
+  pub fn make(code: u16, reason: &[u8]) -> Result<CloseData, WebSocketError> {
+    if !validCloseCode(code) || code == 1010 {
+      return Result.failResult<CloseData, WebSocketError>(WebSocketError.InvalidCloseData {
+        reason: CloseDataReason.Code,
+      })
+    }
+    if reason.length > 123 {
+      return Result.failResult<CloseData, WebSocketError>(WebSocketError.InvalidCloseData {
+        reason: CloseDataReason.ReasonTooLarge,
+      })
+    }
+    let validated = String.fromUtf8(reason)
+    return match move validated {
+      Result<string, InvalidUtf8>.Failure {error} => {
+        drop error
+        return Result.failResult<CloseData, WebSocketError>(WebSocketError.InvalidUtf8 {
+          component: Utf8Component.CloseReason,
+        })
+      }
+      Result<string, InvalidUtf8>.Success {value} => {
+        drop value
+        let mut bytes = emptyCloseReason()
+        copyBytes(&mut bytes, reason)
+        return Result.succeed<CloseData, WebSocketError>(CloseData {
+          codeValue: code,
+          reasonValue: CloseReason {bytes: move bytes, length: reason.length},
+        })
+      }
+    }
+  }
+
+  /// Returns the validated status code.
+  pub fn code(self: &Self) -> u16 { return self.codeValue }
+
+  /// Borrows the owned validated reason.
+  pub fn reason<'data>(self: &'data Self) -> &'data CloseReason { return &self.reasonValue }
+}
+
+/// Owned peer Close metadata without a synthetic no-status code.
+pub union PeerCloseData {
+  /// The peer sent an empty Close payload.
+  Absent,
+  /// The peer sent one validated status and reason.
+  Present {
+    /// The exact peer status code.
+    pub code: u16,
+    /// The copied validated peer reason.
+    pub reason: CloseReason,
+  },
+}
+
+/// One completely validated peer frame event.
+pub union Event {
+  /// The caller output prefix contains one valid UTF-8 Text payload.
+  Text {
+    /// The initialized payload prefix length.
+    pub count: usize,
+  },
+  /// The caller output prefix contains one Binary payload.
+  Binary {
+    /// The initialized payload prefix length.
+    pub count: usize,
+  },
+  /// One Ping payload was copied after its automatic Pong flushed.
+  Ping {
+    /// The copied Ping payload.
+    pub payload: ControlPayload,
+  },
+  /// One Pong payload was copied without a hidden follow-up read.
+  Pong {
+    /// The copied Pong payload.
+    pub payload: ControlPayload,
+  },
+  /// The peer Close reply and terminal channel close completed.
+  PeerClose {
+    /// The exact copied peer Close metadata.
+    pub data: PeerCloseData,
+  },
+}
+
+/// One callback-scoped affine server WebSocket over the upgraded buffered channel.
+///
+/// Callers receive this value only through [`withServer`]. A returned event never retains a
+/// mutable borrow into this value.
+pub struct ServerWebSocket<'channel, 'transport, P> {
+  channel: &'channel mut BufferedDuplex<'transport, P>
+  limits: Limits
+  stateValue: State
+  failureValue: Failure
+  header: [u8; 14]
+  control: [u8; 125]
+}
+
+struct ServerLease<'channel, 'transport, P> {
+  channel: &'channel mut BufferedDuplex<'transport, P>
+  limits: Limits
+}
+
+enum Opcode {
+  Text,
+  Binary,
+  Close,
+  Ping,
+  Pong,
+}
+
+struct FrameHeader {
+  opcode: Opcode
+  payloadLength: usize
+  wireLength: usize
+  mask: [u8; 4]
+}
+
+impl Copy for FrameHeader {}
+
+/// Returns the current public lifecycle state without performing I/O.
+pub fn state<'channel, 'transport, P>(
+  socket: &ServerWebSocket<'channel, 'transport, P>,
+) -> State {
+  return socket.stateValue
+}
+
+/// Reads and validates exactly one peer event.
+///
+/// # Details
+///
+/// Text and Binary bytes are written directly into `output`. If this operation fails after it
+/// modifies a prefix, that prefix is unusable. Ping is published only after its identical Pong
+/// response flushes. Pong is returned without a hidden follow-up read.
+///
+/// # Gotchas
+///
+/// A legal data payload that exceeds `output` closes the session and returns `BufferTooSmall`
+/// without reading the payload. Fragmented messages are not supported.
+pub effect fn readEvent<'channel, 'transport, P>(
+  socket: &mut ServerWebSocket<'channel, 'transport, P>,
+  output: &mut [u8],
+  deadline: Option<Instant>,
+) -> Event
+! WebSocketError
+? &mut MonotonicClock
+where &'transport mut P provides &ByteDuplex from &mut ByteDuplex,
+  &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock {
+  run requireOpen(&socket.*, Operation.ReadEvent)
+  let attempted = run Effect.result(readEventCore(
+    &mut socket.*,
+    move output,
+    copyDeadline(&deadline),
+  ))
+  return match move attempted {
+    Result<Event, WebSocketError>.Success {value} => move value
+    Result<Event, WebSocketError>.Failure {error} => {
+      return run failTerminal(
+        &mut socket.*,
+        move error,
+        copyDeadline(&deadline),
+        Operation.ReadEvent,
+      )
+    }
+  }
+}
+
+/// Writes and flushes one final unmasked Text frame.
+pub effect fn writeText<'message, 'channel, 'transport, P>(
+  socket: &mut ServerWebSocket<'channel, 'transport, P>,
+  message: string<'message>,
+  deadline: Option<Instant>,
+) -> ()
+! WebSocketError
+? &mut MonotonicClock
+where &'transport mut P provides &ByteDuplex from &mut ByteDuplex,
+  &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock {
+  run requireOpen(&socket.*, Operation.WriteText)
+  let bytes = String.utf8Bytes(message)
+  let validated = run Effect.result(validateMessageLength(&socket.*, bytes.length))
+  match move validated {
+    Result<(), WebSocketError>.Success {value} => { drop value }
+    Result<(), WebSocketError>.Failure {error} => {
+      return run failTerminal(
+        &mut socket.*,
+        move error,
+        copyDeadline(&deadline),
+        Operation.WriteText,
+      )
+    }
+  }
+  return run writePublicFrame(&mut socket.*, 1, bytes, move deadline, Operation.WriteText)
+}
+
+/// Writes and flushes one final unmasked Binary frame.
+pub effect fn writeBinary<'message, 'channel, 'transport, P>(
+  socket: &mut ServerWebSocket<'channel, 'transport, P>,
+  message: &'message [u8],
+  deadline: Option<Instant>,
+) -> ()
+! WebSocketError
+? &mut MonotonicClock
+where &'transport mut P provides &ByteDuplex from &mut ByteDuplex,
+  &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock {
+  run requireOpen(&socket.*, Operation.WriteBinary)
+  let validated = run Effect.result(validateMessageLength(&socket.*, message.length))
+  match move validated {
+    Result<(), WebSocketError>.Success {value} => { drop value }
+    Result<(), WebSocketError>.Failure {error} => {
+      return run failTerminal(
+        &mut socket.*,
+        move error,
+        copyDeadline(&deadline),
+        Operation.WriteBinary,
+      )
+    }
+  }
+  return run writePublicFrame(&mut socket.*, 2, message, move deadline, Operation.WriteBinary)
+}
+
+/// Writes and flushes one final unmasked Ping frame with at most 125 payload bytes.
+pub effect fn writePing<'message, 'channel, 'transport, P>(
+  socket: &mut ServerWebSocket<'channel, 'transport, P>,
+  message: &'message [u8],
+  deadline: Option<Instant>,
+) -> ()
+! WebSocketError
+? &mut MonotonicClock
+where &'transport mut P provides &ByteDuplex from &mut ByteDuplex,
+  &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock {
+  run requireOpen(&socket.*, Operation.WritePing)
+  let validated = run Effect.result(validateControlLength(message.length))
+  match move validated {
+    Result<(), WebSocketError>.Success {value} => { drop value }
+    Result<(), WebSocketError>.Failure {error} => {
+      return run failTerminal(
+        &mut socket.*,
+        move error,
+        copyDeadline(&deadline),
+        Operation.WritePing,
+      )
+    }
+  }
+  return run writePublicFrame(&mut socket.*, 9, message, move deadline, Operation.WritePing)
+}
+
+/// Writes and flushes one final unmasked Pong frame with at most 125 payload bytes.
+pub effect fn writePong<'message, 'channel, 'transport, P>(
+  socket: &mut ServerWebSocket<'channel, 'transport, P>,
+  message: &'message [u8],
+  deadline: Option<Instant>,
+) -> ()
+! WebSocketError
+? &mut MonotonicClock
+where &'transport mut P provides &ByteDuplex from &mut ByteDuplex,
+  &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock {
+  run requireOpen(&socket.*, Operation.WritePong)
+  let validated = run Effect.result(validateControlLength(message.length))
+  match move validated {
+    Result<(), WebSocketError>.Success {value} => { drop value }
+    Result<(), WebSocketError>.Failure {error} => {
+      return run failTerminal(
+        &mut socket.*,
+        move error,
+        copyDeadline(&deadline),
+        Operation.WritePong,
+      )
+    }
+  }
+  return run writePublicFrame(&mut socket.*, 10, message, move deadline, Operation.WritePong)
+}
+
+/// Sends and flushes the local Close frame once.
+///
+/// # Details
+///
+/// `Open` sends the supplied validated status and reason, or an empty payload for `None`, then
+/// enters `CloseSent`. Repeated calls in `CloseSent` or `Closed` succeed locally without inspecting
+/// `data` or writing another byte.
+pub effect fn sendClose<'close, 'channel, 'transport, P>(
+  socket: &mut ServerWebSocket<'channel, 'transport, P>,
+  data: Option<&'close CloseData>,
+  deadline: Option<Instant>,
+) -> ()
+! WebSocketError
+? &mut MonotonicClock
+where &'transport mut P provides &ByteDuplex from &mut ByteDuplex,
+  &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock {
+  match socket.stateValue {
+    State.CloseSent => { return () }
+    State.Closed => { return () }
+    State.Failed => {
+      fail WebSocketError.PreviousFailure {failure: priorFailure(&socket.*)}
+    }
+    State.Open => {}
+  }
+  let mut length = usize.ZERO
+  match &data {
+    Option.None => {}
+    Option.Some {value} => {
+      socket.control[0] = u16.toU8(value.codeValue / 256)
+      socket.control[1] = u16.toU8(value.codeValue % 256)
+      let reason = value.reasonValue.asSlice()
+      let mut index = usize.ZERO
+      while index < reason.length {
+        socket.control[2 + index] = reason[index]
+        index = index + usize.ONE
+      }
+      length = 2 + reason.length
+    }
+  }
+  let copied = ownedControl(&socket.*, length)
+  let payload = copied.asSlice()
+  let written = run Effect.result(writePublicFrame(
+    &mut socket.*,
+    8,
+    payload,
+    move deadline,
+    Operation.SendClose,
+  ))
+  drop payload
+  match move written {
+    Result<(), WebSocketError>.Failure {error} => { fail move error }
+    Result<(), WebSocketError>.Success {value} => { drop value }
+  }
+  socket.stateValue = State.CloseSent
+  return ()
+}
+
+/// Pumps a bounded peer close handshake until a valid peer Close arrives.
+///
+/// # Details
+///
+/// The caller supplies one absolute deadline. The same mark is passed unchanged to every partial
+/// read, automatic Pong write, and flush and is checked before the first frame and between frames.
+/// Data frames are validated and discarded without publication; controls remain observable only
+/// through their required protocol effects.
+///
+/// # Gotchas
+///
+/// This operation is available only after [`sendClose`]. Both configured aggregate limits include
+/// complete inbound wire bytes: header, extended length, mask, and payload.
+pub effect fn finishClose<'channel, 'transport, P>(
+  socket: &mut ServerWebSocket<'channel, 'transport, P>,
+  deadline: Instant,
+) -> ()
+! WebSocketError
+? &mut MonotonicClock
+where &'transport mut P provides &ByteDuplex from &mut ByteDuplex,
+  &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock {
+  match socket.stateValue {
+    State.Open => {
+      fail WebSocketError.InvalidState {
+        operation: Operation.FinishClose,
+        state: State.Open,
+      }
+    }
+    State.Closed => { return () }
+    State.Failed => {
+      fail WebSocketError.PreviousFailure {failure: priorFailure(&socket.*)}
+    }
+    State.CloseSent => {}
+  }
+  let attempted = run Effect.result(finishCloseCore(
+    &mut socket.*,
+    copyInstant(&deadline),
+  ))
+  return match move attempted {
+    Result<(), WebSocketError>.Success {value} => move value
+    Result<(), WebSocketError>.Failure {error} => {
+      return run failTerminal(
+        &mut socket.*,
+        move error,
+        Option.some<Instant>(copyInstant(&deadline)),
+        Operation.FinishClose,
+      )
+    }
+  }
+}
+
+/// Lends one affine server WebSocket over the exact upgraded buffered channel.
+///
+/// # Details
+///
+/// Positive limits are validated before the session performs I/O. The higher-ranked callback
+/// cannot retain the session or a channel view. Terminal release runs after callback success,
+/// typed failure, or structured cancellation and never replaces the protected outcome.
+pub effect fn withServer<
+  'callback,
+  'channel,
+  'transport: 'channel,
+  A,
+  E,
+  ?R,
+  P,
+>(
+  channel: &'channel mut BufferedDuplex<'transport, P>,
+  limits: Limits,
+  use: for<'call, 'channelView: 'call, 'transportView: 'channelView> once fn<'callback>(
+    &'call mut ServerWebSocket<'channelView, 'transportView, P>,
+  ) -> once Effect<'call; A ! E ? R>,
+) -> A
+! E | WebSocketError
+? R | &mut MonotonicClock
+where &'transport mut P provides &ByteDuplex from &mut ByteDuplex,
+  &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock,
+  R in Without<R, ByteDuplex> {
+  let admitted = Limits.make(
+    limits.maxMessageBytes,
+    limits.maxCloseFrames,
+    limits.maxCloseBytes,
+  )
+  let checked = match move admitted {
+    Result<Limits, WebSocketError>.Failure {error} => { fail move error }
+    Result<Limits, WebSocketError>.Success {value} => move value
+  }
+  let lease = ServerLease<'channel, 'transport, P> {
+    channel: move channel,
+    limits: checked,
+  }
+  let useLease = effect fn(
+    owned: &mut ServerLease<'channel, 'transport, P>,
+  ) -> A ! E ? R {
+    let socketLimits = owned.limits
+    let channel = &mut owned.channel.*
+    let mut socket = ServerWebSocket {
+      channel: move channel,
+      limits: socketLimits,
+      stateValue: State.Open,
+      failureValue: Failure.Protocol,
+      header: emptyHeader(),
+      control: emptyControl(),
+    }
+    let socketView = &mut socket
+    return run use(move socketView)
+  }
+  let release = effect fn(
+    owned: &mut ServerLease<'channel, 'transport, P>,
+  ) -> () {
+    let closed = BufferedDuplex.close(&mut owned.channel.*)
+    return run Effect.catchAll(move closed, discardCloseFailure)
+  }
+  return run Effect.useReleaseNonParking(move lease, move useLease, move release)
+}
+
+struct Utf8State {
+  remaining: usize
+  minimum: u8
+  maximum: u8
+}
+
+effect fn finishCloseCore<'channel, 'transport, P>(
+  socket: &mut ServerWebSocket<'channel, 'transport, P>,
+  deadline: Instant,
+) -> ()
+! WebSocketError
+? &mut MonotonicClock
+where &'transport mut P provides &ByteDuplex from &mut ByteDuplex,
+  &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock {
+  let mut frames = usize.ZERO
+  let mut wireBytes = usize.ZERO
+  while true {
+    if frames >= socket.limits.maxCloseFrames {
+      fail WebSocketError.CloseLimitExceeded {
+        kind: CloseLimitKind.Frames,
+        allowed: socket.limits.maxCloseFrames,
+      }
+    }
+    if wireBytes >= socket.limits.maxCloseBytes {
+      fail WebSocketError.CloseLimitExceeded {
+        kind: CloseLimitKind.Bytes,
+        allowed: socket.limits.maxCloseBytes,
+      }
+    }
+    run checkFinishDeadline(&deadline)
+    let remaining = socket.limits.maxCloseBytes - wireBytes
+    let header = run readHeader(
+      &mut socket.*,
+      Option.none<usize>(),
+      Option.some<usize>(remaining),
+      Option.some<Instant>(copyInstant(&deadline)),
+      Operation.FinishClose,
+    )
+    frames = frames + usize.ONE
+    wireBytes = wireBytes + header.wireLength
+    match header.opcode {
+      Opcode.Text => {
+        run discardData(
+          &mut socket.*,
+          &header,
+          true,
+          Option.some<Instant>(copyInstant(&deadline)),
+        )
+      }
+      Opcode.Binary => {
+        run discardData(
+          &mut socket.*,
+          &header,
+          false,
+          Option.some<Instant>(copyInstant(&deadline)),
+        )
+      }
+      Opcode.Ping => {
+        run readControl(
+          &mut socket.*,
+          &header,
+          Option.some<Instant>(copyInstant(&deadline)),
+          Operation.FinishClose,
+        )
+        let copied = ownedControl(&socket.*, header.payloadLength)
+        let payload = copied.asSlice()
+        let written = run Effect.result(writeFrameRaw(
+          &mut socket.*,
+          10,
+          payload,
+          Option.some<Instant>(copyInstant(&deadline)),
+          Operation.FinishClose,
+        ))
+        drop payload
+        match move written {
+          Result<(), WebSocketError>.Failure {error} => { fail move error }
+          Result<(), WebSocketError>.Success {value} => { drop value }
+        }
+      }
+      Opcode.Pong => {
+        run readControl(
+          &mut socket.*,
+          &header,
+          Option.some<Instant>(copyInstant(&deadline)),
+          Operation.FinishClose,
+        )
+      }
+      Opcode.Close => {
+        run readControl(
+          &mut socket.*,
+          &header,
+          Option.some<Instant>(copyInstant(&deadline)),
+          Operation.FinishClose,
+        )
+        let data = run peerCloseData(&socket.*, header.payloadLength)
+        let closed = run completePeerClose(
+          &mut socket.*,
+          move data,
+          header.payloadLength,
+          false,
+          Option.some<Instant>(copyInstant(&deadline)),
+          Operation.FinishClose,
+          false,
+        )
+        drop closed
+        return ()
+      }
+    }
+  }
+  return ()
+}
+
+effect fn discardData<'channel, 'transport, P>(
+  socket: &mut ServerWebSocket<'channel, 'transport, P>,
+  header: &FrameHeader,
+  text: bool,
+  deadline: Option<Instant>,
+) -> ()
+! WebSocketError
+? &mut MonotonicClock
+where &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock {
+  let mut offset = usize.ZERO
+  let mut validation = utf8Start()
+  let headerLength = header.wireLength - header.payloadLength
+  while offset < header.payloadLength {
+    let count = minimum(125, header.payloadLength - offset)
+    run readInto(
+      &mut socket.channel.*,
+      &mut socket.control,
+      usize.ZERO,
+      count,
+      copyDeadline(&deadline),
+      Operation.FinishClose,
+      headerLength + offset,
+    )
+    unmask(&mut socket.control, count, &header.mask, offset)
+    if text {
+      let chunk = Slice.view<u8>(&socket.control, usize.ZERO, count)
+      run acceptUtf8(&mut validation, chunk)
+      drop chunk
+    }
+    offset = offset + count
+  }
+  if text && validation.remaining != usize.ZERO {
+    fail WebSocketError.InvalidUtf8 {component: Utf8Component.Text}
+  }
+  return ()
+}
+
+effect fn acceptUtf8(state: &mut Utf8State, bytes: &[u8]) -> () ! WebSocketError {
+  let mut index = usize.ZERO
+  while index < bytes.length {
+    if !acceptUtf8Byte(&mut state.*, bytes[index]) {
+      fail WebSocketError.InvalidUtf8 {component: Utf8Component.Text}
+    }
+    index = index + usize.ONE
+  }
+  return ()
+}
+
+fn acceptUtf8Byte(state: &mut Utf8State, byte: u8) -> bool {
+  if state.remaining == usize.ZERO {
+    if byte <= 127 { return true }
+    if byte >= 194 && byte <= 223 {
+      state.remaining = 1
+      state.minimum = 128
+      state.maximum = 191
+    } else if byte == 224 {
+      state.remaining = 2
+      state.minimum = 160
+      state.maximum = 191
+    } else if byte >= 225 && byte <= 236 {
+      state.remaining = 2
+      state.minimum = 128
+      state.maximum = 191
+    } else if byte == 237 {
+      state.remaining = 2
+      state.minimum = 128
+      state.maximum = 159
+    } else if byte >= 238 && byte <= 239 {
+      state.remaining = 2
+      state.minimum = 128
+      state.maximum = 191
+    } else if byte == 240 {
+      state.remaining = 3
+      state.minimum = 144
+      state.maximum = 191
+    } else if byte >= 241 && byte <= 243 {
+      state.remaining = 3
+      state.minimum = 128
+      state.maximum = 191
+    } else if byte == 244 {
+      state.remaining = 3
+      state.minimum = 128
+      state.maximum = 143
+    } else {
+      return false
+    }
+  } else {
+    if byte < state.minimum || byte > state.maximum { return false }
+    state.remaining = state.remaining - usize.ONE
+    state.minimum = 128
+    state.maximum = 191
+  }
+  return true
+}
+
+fn utf8Start() -> Utf8State {
+  return Utf8State {remaining: usize.ZERO, minimum: 128, maximum: 191}
+}
+
+effect fn checkFinishDeadline(deadline: &Instant) -> ()
+! WebSocketError
+? &mut MonotonicClock {
+  let now = run MonotonicClock.now()
+  if reached(&now, deadline) {
+    fail WebSocketError.Buffer {
+      operation: Operation.FinishClose,
+      frameAccepted: usize.ZERO,
+      error: BufferError.ReadFailed {
+        progress: usize.ZERO,
+        error: ByteDuplex.timeout(ByteIoOperation.Read),
+      },
+    }
+  }
+  return ()
+}
+
+effect fn readEventCore<'channel, 'transport, P>(
+  socket: &mut ServerWebSocket<'channel, 'transport, P>,
+  output: &mut [u8],
+  deadline: Option<Instant>,
+) -> Event
+! WebSocketError
+? &mut MonotonicClock
+where &'transport mut P provides &ByteDuplex from &mut ByteDuplex,
+  &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock {
+  let header = run readHeader(
+    &mut socket.*,
+    Option.some<usize>(output.length),
+    Option.none<usize>(),
+    copyDeadline(&deadline),
+    Operation.ReadEvent,
+  )
+  return match header.opcode {
+    Opcode.Text => {
+      run readPayload(
+        &mut socket.*,
+        move output,
+        header.payloadLength,
+        &header.mask,
+        header.wireLength - header.payloadLength,
+        move deadline,
+        Operation.ReadEvent,
+        true,
+      )
+      return Event.Text {count: header.payloadLength}
+    }
+    Opcode.Binary => {
+      run readPayload(
+        &mut socket.*,
+        move output,
+        header.payloadLength,
+        &header.mask,
+        header.wireLength - header.payloadLength,
+        move deadline,
+        Operation.ReadEvent,
+        false,
+      )
+      return Event.Binary {count: header.payloadLength}
+    }
+    Opcode.Ping => {
+      drop output
+      run readControl(
+        &mut socket.*,
+        &header,
+        copyDeadline(&deadline),
+        Operation.ReadEvent,
+      )
+      let payload = ownedControl(&socket.*, header.payloadLength)
+      let bytes = payload.asSlice()
+      let written = run Effect.result(writeFrameRaw(
+        &mut socket.*,
+        10,
+        bytes,
+        copyDeadline(&deadline),
+        Operation.ReadEvent,
+      ))
+      drop bytes
+      match move written {
+        Result<(), WebSocketError>.Failure {error} => { fail move error }
+        Result<(), WebSocketError>.Success {value} => { drop value }
+      }
+      return Event.Ping {payload: move payload}
+    }
+    Opcode.Pong => {
+      drop output
+      run readControl(&mut socket.*, &header, move deadline, Operation.ReadEvent)
+      return Event.Pong {payload: ownedControl(&socket.*, header.payloadLength)}
+    }
+    Opcode.Close => {
+      drop output
+      run readControl(
+        &mut socket.*,
+        &header,
+        copyDeadline(&deadline),
+        Operation.ReadEvent,
+      )
+      let normalize = closeCodeInControl(&socket.*, header.payloadLength) == 1010
+      let data = run peerCloseData(&socket.*, header.payloadLength)
+      let closed = run completePeerClose(
+        &mut socket.*,
+        move data,
+        header.payloadLength,
+        normalize,
+        move deadline,
+        Operation.ReadEvent,
+        true,
+      )
+      return Event.PeerClose {data: move closed}
+    }
+  }
+}
+
+effect fn readHeader<'channel, 'transport, P>(
+  socket: &mut ServerWebSocket<'channel, 'transport, P>,
+  capacity: Option<usize>,
+  closeRemaining: Option<usize>,
+  deadline: Option<Instant>,
+  operation: Operation,
+) -> FrameHeader
+! WebSocketError
+? &mut MonotonicClock
+where &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock {
+  match &closeRemaining {
+    Option<usize>.None => {}
+    Option<usize>.Some {value} => {
+      if value < 2 {
+        fail WebSocketError.CloseLimitExceeded {kind: CloseLimitKind.Bytes, allowed: socket.limits.maxCloseBytes}
+      }
+    }
+  }
+  run readInto(
+    &mut socket.channel.*,
+    &mut socket.header,
+    usize.ZERO,
+    2,
+    copyDeadline(&deadline),
+    operation,
+    usize.ZERO,
+  )
+  let first = socket.header[0]
+  let second = socket.header[1]
+  let finalFrame = u8.bitAnd(first, u8.toU8(128)) != 0
+  let code = u8.bitAnd(first, u8.toU8(15))
+  let opcode = run decodeOpcode(code)
+  let control = controlOpcode(opcode)
+  if !finalFrame {
+    if control {
+      fail WebSocketError.ProtocolError {reason: ProtocolReason.ControlFragmented}
+    }
+    fail WebSocketError.UnsupportedFragmentation
+  }
+  if u8.bitAnd(first, u8.toU8(112)) != 0 {
+    fail WebSocketError.ProtocolError {reason: ProtocolReason.Rsv}
+  }
+  if u8.bitAnd(second, u8.toU8(128)) == 0 {
+    fail WebSocketError.ProtocolError {reason: ProtocolReason.MaskRequired}
+  }
+  let marker = u8.bitAnd(second, u8.toU8(127))
+  if control && marker > 125 {
+    fail WebSocketError.ProtocolError {reason: ProtocolReason.ControlTooLarge}
+  }
+  let mut extended: usize = usize.ZERO
+  if marker == 126 {
+    extended = 2
+  } else if marker == 127 {
+    extended = 8
+  }
+  let headerLength = 6 + extended
+  run checkCloseRemaining(&socket.*, &closeRemaining, headerLength)
+  if extended > usize.ZERO {
+    run readInto(
+      &mut socket.channel.*,
+      &mut socket.header,
+      2,
+      extended,
+      copyDeadline(&deadline),
+      operation,
+      2,
+    )
+  }
+  if marker == 127 && u8.bitAnd(socket.header[2], u8.toU8(128)) != 0 {
+    fail WebSocketError.ProtocolError {reason: ProtocolReason.LengthHighBit}
+  }
+  let mut length: u64 = u8.toU64(marker)
+  if marker >= 126 { length = decodeWide(&socket.header, 2, extended) }
+  if marker == 126 && length < 126 {
+    fail WebSocketError.ProtocolError {reason: ProtocolReason.NonMinimalLength}
+  }
+  if marker == 127 && length <= 65535 {
+    fail WebSocketError.ProtocolError {reason: ProtocolReason.NonMinimalLength}
+  }
+  if control && length > 125 {
+    fail WebSocketError.ProtocolError {reason: ProtocolReason.ControlTooLarge}
+  }
+  if opcodeIsClose(opcode) && length == 1 {
+    fail WebSocketError.ProtocolError {reason: ProtocolReason.ClosePayloadLength}
+  }
+  let mut payloadLength = usize.ZERO
+  if control { payloadLength = u64.toUsize(length) }
+  if !control { payloadLength = run boundedPayload(&socket.*, length, &capacity) }
+  let wireLength = match move usize.checkedAdd(headerLength, payloadLength) {
+    Option.None => match &closeRemaining {
+      Option<usize>.None => { fail WebSocketError.InvalidLimits {kind: LimitKind.Arithmetic} }
+      Option<usize>.Some {value} => {
+        drop value
+        fail WebSocketError.CloseLimitExceeded {
+          kind: CloseLimitKind.Bytes,
+          allowed: socket.limits.maxCloseBytes,
+        }
+      }
+    }
+    Option.Some {value} => value
+  }
+  run checkCloseRemaining(&socket.*, &closeRemaining, wireLength)
+  run readInto(
+    &mut socket.channel.*,
+    &mut socket.header,
+    2 + extended,
+    4,
+    move deadline,
+    operation,
+    2 + extended,
+  )
+  return FrameHeader {
+    opcode: move opcode,
+    payloadLength: payloadLength,
+    wireLength: wireLength,
+    mask: [
+      socket.header[2 + extended],
+      socket.header[3 + extended],
+      socket.header[4 + extended],
+      socket.header[5 + extended],
+    ],
+  }
+}
+
+effect fn boundedPayload<'channel, 'transport, P>(
+  socket: &ServerWebSocket<'channel, 'transport, P>,
+  length: u64,
+  capacity: &Option<usize>,
+) -> usize ! WebSocketError {
+  if length > usize.toU64(socket.limits.maxMessageBytes) {
+    fail WebSocketError.MessageTooLarge {length: length, allowed: socket.limits.maxMessageBytes}
+  }
+  let narrowed = match move u64.checkedToUsize(length) {
+    Option.None => { fail WebSocketError.InvalidLimits {kind: LimitKind.Arithmetic} }
+    Option.Some {value} => value
+  }
+  match & capacity.* {
+    Option.None => {}
+    Option.Some {value} => {
+      if narrowed > value {
+        fail WebSocketError.BufferTooSmall {required: narrowed, capacity: value}
+      }
+    }
+  }
+  return narrowed
+}
+
+effect fn checkCloseRemaining<'channel, 'transport, P>(
+  socket: &ServerWebSocket<'channel, 'transport, P>,
+  remaining: &Option<usize>,
+  required: usize,
+) -> () ! WebSocketError {
+  match & remaining.* {
+    Option<usize>.None => { return () }
+    Option<usize>.Some {value} => {
+      if required > value {
+        fail WebSocketError.CloseLimitExceeded {
+          kind: CloseLimitKind.Bytes,
+          allowed: socket.limits.maxCloseBytes,
+        }
+      }
+    }
+  }
+  return ()
+}
+
+effect fn readInto<'transport, P>(
+  channel: &mut BufferedDuplex<'transport, P>,
+  output: &mut [u8],
+  offset: usize,
+  length: usize,
+  deadline: Option<Instant>,
+  operation: Operation,
+  prior: usize,
+) -> ()
+! WebSocketError
+? &mut MonotonicClock
+where &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock {
+  let mut copied = usize.ZERO
+  while copied < length {
+    let attempted = run Effect.result(BufferedDuplex.fill(
+      &mut channel.*,
+      usize.ONE,
+      copyDeadline(&deadline),
+    ))
+    let availableCount = match move attempted {
+      Result<FillOutcome, BufferError>.Failure {error} => {
+        let accepted = prior + copied + bufferProgress(&error)
+        fail WebSocketError.Buffer {
+          operation: operation,
+          frameAccepted: accepted,
+          error: move error,
+        }
+      }
+      Result<FillOutcome, BufferError>.Success {value} => match move value {
+        FillOutcome.Available {count} => count
+        FillOutcome.End {available} => available
+      }
+    }
+    if availableCount == usize.ZERO { fail WebSocketError.Truncated }
+    let available = BufferedDuplex.peek(&channel.*)
+    let count = minimum(available.length, length - copied)
+    let mut index = usize.ZERO
+    while index < count {
+      output[offset + copied + index] = available[index]
+      index = index + usize.ONE
+    }
+    drop available
+    let consumed = run Effect.result(BufferedDuplex.consume(&mut channel.*, count))
+    match move consumed {
+      Result<(), BufferError>.Failure {error} => {
+        fail WebSocketError.Buffer {
+          operation: operation,
+          frameAccepted: prior + copied,
+          error: move error,
+        }
+      }
+      Result<(), BufferError>.Success {value} => { drop value }
+    }
+    copied = copied + count
+  }
+  return ()
+}
+
+effect fn readPayload<'channel, 'transport, P>(
+  socket: &mut ServerWebSocket<'channel, 'transport, P>,
+  output: &mut [u8],
+  length: usize,
+  mask: &([u8; 4]),
+  headerLength: usize,
+  deadline: Option<Instant>,
+  operation: Operation,
+  text: bool,
+) -> ()
+! WebSocketError
+? &mut MonotonicClock
+where &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock {
+  let mut copied = usize.ZERO
+  let mut validation = utf8Start()
+  while copied < length {
+    let attempted = run Effect.result(BufferedDuplex.fill(
+      &mut socket.channel.*,
+      usize.ONE,
+      copyDeadline(&deadline),
+    ))
+    let availableCount = match move attempted {
+      Result<FillOutcome, BufferError>.Failure {error} => {
+        let accepted = headerLength + copied + bufferProgress(&error)
+        fail WebSocketError.Buffer {
+          operation: operation,
+          frameAccepted: accepted,
+          error: move error,
+        }
+      }
+      Result<FillOutcome, BufferError>.Success {value} => match move value {
+        FillOutcome.Available {count} => count
+        FillOutcome.End {available} => available
+      }
+    }
+    if availableCount == usize.ZERO { fail WebSocketError.Truncated }
+    let available = BufferedDuplex.peek(&socket.channel.*)
+    let count = minimum(available.length, length - copied)
+    let mut index = usize.ZERO
+    while index < count {
+      let byte = u8.bitXor(available[index], mask.*[(copied + index) % 4])
+      output[copied + index] = byte
+      if text && !acceptUtf8Byte(&mut validation, byte) {
+        drop available
+        fail WebSocketError.InvalidUtf8 {component: Utf8Component.Text}
+      }
+      index = index + usize.ONE
+    }
+    drop available
+    let consumed = run Effect.result(BufferedDuplex.consume(
+      &mut socket.channel.*,
+      count,
+    ))
+    match move consumed {
+      Result<(), BufferError>.Failure {error} => {
+        fail WebSocketError.Buffer {
+          operation: operation,
+          frameAccepted: headerLength + copied,
+          error: move error,
+        }
+      }
+      Result<(), BufferError>.Success {value} => { drop value }
+    }
+    copied = copied + count
+  }
+  if text && validation.remaining != usize.ZERO {
+    fail WebSocketError.InvalidUtf8 {component: Utf8Component.Text}
+  }
+  return ()
+}
+
+effect fn readControl<'channel, 'transport, P>(
+  socket: &mut ServerWebSocket<'channel, 'transport, P>,
+  header: &FrameHeader,
+  deadline: Option<Instant>,
+  operation: Operation,
+) -> ()
+! WebSocketError
+? &mut MonotonicClock
+where &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock {
+  run readInto(
+    &mut socket.channel.*,
+    &mut socket.control,
+    usize.ZERO,
+    header.payloadLength,
+    move deadline,
+    operation,
+    header.wireLength - header.payloadLength,
+  )
+  unmask(&mut socket.control, header.payloadLength, &header.mask, usize.ZERO)
+  return ()
+}
+
+fn ownedControl<'channel, 'transport, P>(
+  socket: &ServerWebSocket<'channel, 'transport, P>,
+  length: usize,
+) -> ControlPayload {
+  let mut bytes = emptyControl()
+  let payload = Slice.view<u8>(&socket.control, usize.ZERO, length)
+  copyBytes(&mut bytes, payload)
+  drop payload
+  return ControlPayload {bytes: move bytes, length: length}
+}
+
+effect fn peerCloseData<'channel, 'transport, P>(
+  socket: &ServerWebSocket<'channel, 'transport, P>,
+  length: usize,
+) -> PeerCloseData ! WebSocketError {
+  if length == usize.ZERO { return PeerCloseData.Absent }
+  let code = closeCodeInControl(socket, length)
+  if !validCloseCode(code) {
+    fail WebSocketError.ProtocolError {reason: ProtocolReason.CloseCode}
+  }
+  let reasonBytes = Slice.view<u8>(&socket.control, 2, length - 2)
+  let validated = String.fromUtf8(reasonBytes)
+  match move validated {
+    Result<string, InvalidUtf8>.Failure {error} => {
+      drop error
+      fail WebSocketError.InvalidUtf8 {component: Utf8Component.CloseReason}
+    }
+    Result<string, InvalidUtf8>.Success {value} => { drop value }
+  }
+  let mut copied = emptyCloseReason()
+  copyBytes(&mut copied, reasonBytes)
+  drop reasonBytes
+  return PeerCloseData.Present {
+    code: code,
+    reason: CloseReason {bytes: move copied, length: length - 2},
+  }
+}
+
+effect fn completePeerClose<'channel, 'transport, P>(
+  socket: &mut ServerWebSocket<'channel, 'transport, P>,
+  data: PeerCloseData,
+  payloadLength: usize,
+  normalize: bool,
+  deadline: Option<Instant>,
+  operation: Operation,
+  reply: bool,
+) -> PeerCloseData
+! WebSocketError
+? &mut MonotonicClock
+where &'transport mut P provides &ByteDuplex from &mut ByteDuplex,
+  &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock {
+  if reply {
+    if normalize {
+      let normalized: [u8; 2] = [3, 232]
+      run writeFrameRaw(
+        &mut socket.*,
+        8,
+        &normalized,
+        copyDeadline(&deadline),
+        operation,
+      )
+    } else {
+      let copied = ownedControl(&socket.*, payloadLength)
+      let payload = copied.asSlice()
+      let written = run Effect.result(writeFrameRaw(
+        &mut socket.*,
+        8,
+        payload,
+        copyDeadline(&deadline),
+        operation,
+      ))
+      drop payload
+      match move written {
+        Result<(), WebSocketError>.Failure {error} => { fail move error }
+        Result<(), WebSocketError>.Success {value} => { drop value }
+      }
+    }
+  }
+  let closed = run Effect.result(BufferedDuplex.close(&mut socket.channel.*))
+  match move closed {
+    Result<(), ByteIoError>.Failure {error} => {
+      fail WebSocketError.Transport {operation: operation, error: move error}
+    }
+    Result<(), ByteIoError>.Success {value} => { drop value }
+  }
+  socket.stateValue = State.Closed
+  return move data
+}
+
+effect fn writePublicFrame<'channel, 'transport, P>(
+  socket: &mut ServerWebSocket<'channel, 'transport, P>,
+  opcode: u8,
+  payload: &[u8],
+  deadline: Option<Instant>,
+  operation: Operation,
+) -> ()
+! WebSocketError
+? &mut MonotonicClock
+where &'transport mut P provides &ByteDuplex from &mut ByteDuplex,
+  &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock {
+  let attempted = run Effect.result(writeFrameRaw(
+    &mut socket.*,
+    opcode,
+    payload,
+    copyDeadline(&deadline),
+    operation,
+  ))
+  return match move attempted {
+    Result<(), WebSocketError>.Success {value} => move value
+    Result<(), WebSocketError>.Failure {error} => {
+      if arithmeticError(&error) { fail move error }
+      return run failTerminal(
+        &mut socket.*,
+        move error,
+        Option.none<Instant>(),
+        operation,
+      )
+    }
+  }
+}
+
+effect fn writeFrameRaw<'channel, 'transport, P>(
+  socket: &mut ServerWebSocket<'channel, 'transport, P>,
+  opcode: u8,
+  payload: &[u8],
+  deadline: Option<Instant>,
+  operation: Operation,
+) -> ()
+! WebSocketError
+? &mut MonotonicClock
+where &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock {
+  let headerLength = run encodeHeader(&mut socket.header, opcode, payload.length)
+  let frameLength = match move usize.checkedAdd(headerLength, payload.length) {
+    Option.None => { fail WebSocketError.InvalidLimits {kind: LimitKind.Arithmetic} }
+    Option.Some {value} => value
+  }
+  drop frameLength
+  let header = Slice.view<u8>(&socket.header, usize.ZERO, headerLength)
+  let headerWrite = run Effect.result(BufferedDuplex.writeAll(
+    &mut socket.channel.*,
+    header,
+    copyDeadline(&deadline),
+  ))
+  drop header
+  match move headerWrite {
+    Result<(), BufferError>.Failure {error} => {
+      fail WebSocketError.Buffer {
+        operation: operation,
+        frameAccepted: bufferProgress(&error),
+        error: move error,
+      }
+    }
+    Result<(), BufferError>.Success {value} => { drop value }
+  }
+  let payloadWrite = run Effect.result(BufferedDuplex.writeAll(
+    &mut socket.channel.*,
+    payload,
+    copyDeadline(&deadline),
+  ))
+  match move payloadWrite {
+    Result<(), BufferError>.Failure {error} => {
+      fail WebSocketError.Buffer {
+        operation: operation,
+        frameAccepted: headerLength + bufferProgress(&error),
+        error: move error,
+      }
+    }
+    Result<(), BufferError>.Success {value} => { drop value }
+  }
+  let flushed = run Effect.result(BufferedDuplex.flush(
+    &mut socket.channel.*,
+    move deadline,
+  ))
+  match move flushed {
+    Result<(), BufferError>.Failure {error} => {
+      fail WebSocketError.Buffer {
+        operation: operation,
+        frameAccepted: headerLength + payload.length,
+        error: move error,
+      }
+    }
+    Result<(), BufferError>.Success {value} => { drop value }
+  }
+  return ()
+}
+
+effect fn encodeHeader(output: &mut [u8], opcode: u8, length: usize) -> usize
+! WebSocketError {
+  output[0] = u8.bitOr(u8.toU8(128), opcode)
+  if length <= 125 {
+    output[1] = usize.toU8(length)
+    return 2
+  }
+  if length <= 65535 {
+    output[1] = 126
+    output[2] = usize.toU8(length / 256)
+    output[3] = usize.toU8(length % 256)
+    return 4
+  }
+  output[1] = 127
+  let wide = usize.toU64(length)
+  let mut index = usize.ZERO
+  while index < 8 {
+    let shift = usize.toU64((7 - index) * 8)
+    output[2 + index] = u64.toU8(u64.bitAnd(u64.shiftRight(wide, shift), 255))
+    index = index + usize.ONE
+  }
+  return 10
+}
+
+effect fn validateMessageLength<'channel, 'transport, P>(
+  socket: &ServerWebSocket<'channel, 'transport, P>,
+  length: usize,
+) -> () ! WebSocketError {
+  if length > socket.limits.maxMessageBytes {
+    fail WebSocketError.MessageTooLarge {
+      length: usize.toU64(length),
+      allowed: socket.limits.maxMessageBytes,
+    }
+  }
+  return ()
+}
+
+effect fn validateControlLength(length: usize) -> () ! WebSocketError {
+  if length > 125 {
+    fail WebSocketError.MessageTooLarge {length: usize.toU64(length), allowed: 125}
+  }
+  return ()
+}
+
+effect fn requireOpen<'channel, 'transport, P>(
+  socket: &ServerWebSocket<'channel, 'transport, P>,
+  operation: Operation,
+) -> () ! WebSocketError {
+  return match socket.stateValue {
+    State.Open => ()
+    State.CloseSent => {
+      fail WebSocketError.InvalidState {operation: operation, state: State.CloseSent}
+    }
+    State.Closed => {
+      fail WebSocketError.InvalidState {operation: operation, state: State.Closed}
+    }
+    State.Failed => {
+      fail WebSocketError.PreviousFailure {failure: priorFailure(socket)}
+    }
+  }
+}
+
+effect fn failTerminal<'channel, 'transport, P>(
+  socket: &mut ServerWebSocket<'channel, 'transport, P>,
+  error: WebSocketError,
+  deadline: Option<Instant>,
+  operation: Operation,
+) -> never
+! WebSocketError
+? &mut MonotonicClock
+where &'transport mut P provides &ByteDuplex from &mut ByteDuplex,
+  &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock {
+  let failure = failureClass(&error)
+  let closeCode = failureCloseCode(&error)
+  if socket.stateValue == State.Open {
+    match &deadline {
+      Option.None => {}
+      Option.Some {value} => {
+        let now = run MonotonicClock.now()
+        if !reached(&now, &value) {
+          match &closeCode {
+            Option.None => {}
+            Option.Some {value: code} => {
+              let payload: [u8; 2] = [
+                u16.toU8(code / 256),
+                u16.toU8(code % 256),
+              ]
+              let graceful = writeFrameRaw(
+                &mut socket.*,
+                8,
+                &payload,
+                Option.some<Instant>(copyInstant(&value)),
+                operation,
+              )
+              run Effect.catchAll(move graceful, discardWebSocketFailure)
+            }
+          }
+        }
+      }
+    }
+  }
+  socket.failureValue = failure
+  socket.stateValue = State.Failed
+  let closed = BufferedDuplex.close(&mut socket.channel.*)
+  run Effect.catchAll(move closed, discardCloseFailure)
+  fail move error
+}
+
+fn failureClass(error: &WebSocketError) -> Failure {
+  return match & error.* {
+    WebSocketError.InvalidLimits {kind} => Failure.MessageLimit
+    WebSocketError.InvalidState {operation, state} => Failure.Transport
+    WebSocketError.PreviousFailure {failure} => failure
+    WebSocketError.BufferTooSmall {required, capacity} => Failure.BufferCapacity
+    WebSocketError.MessageTooLarge {length, allowed} => Failure.MessageLimit
+    WebSocketError.UnsupportedFragmentation => Failure.Fragmentation
+    WebSocketError.ProtocolError {reason} => Failure.Protocol
+    WebSocketError.InvalidCloseData {reason} => Failure.Protocol
+    WebSocketError.InvalidUtf8 {component} => Failure.Utf8
+    WebSocketError.CloseLimitExceeded {kind, allowed} => Failure.CloseLimit
+    WebSocketError.Truncated => Failure.Truncated
+    WebSocketError.Buffer {operation, frameAccepted, error: cause} => Failure.Transport
+    WebSocketError.Transport {operation, error: cause} => Failure.Transport
+  }
+}
+
+fn failureCloseCode(error: &WebSocketError) -> Option<u16> {
+  return match & error.* {
+    WebSocketError.UnsupportedFragmentation => Option.some<u16>(1003)
+    WebSocketError.ProtocolError {reason} => Option.some<u16>(1002)
+    WebSocketError.InvalidUtf8 {component} => Option.some<u16>(1007)
+    WebSocketError.MessageTooLarge {length, allowed} => Option.some<u16>(1009)
+    WebSocketError.InvalidLimits {kind} => Option.none<u16>()
+    WebSocketError.InvalidState {operation, state} => Option.none<u16>()
+    WebSocketError.PreviousFailure {failure} => Option.none<u16>()
+    WebSocketError.BufferTooSmall {required, capacity} => Option.none<u16>()
+    WebSocketError.InvalidCloseData {reason} => Option.none<u16>()
+    WebSocketError.CloseLimitExceeded {kind, allowed} => Option.none<u16>()
+    WebSocketError.Truncated => Option.none<u16>()
+    WebSocketError.Buffer {operation, frameAccepted, error: cause} => Option.none<u16>()
+    WebSocketError.Transport {operation, error: cause} => Option.none<u16>()
+  }
+}
+
+fn priorFailure<'channel, 'transport, P>(
+  socket: &ServerWebSocket<'channel, 'transport, P>,
+) -> Failure {
+  return socket.failureValue
+}
+
+effect fn decodeOpcode(code: u8) -> Opcode ! WebSocketError {
+  if code == 0 { fail WebSocketError.UnsupportedFragmentation }
+  if code == 1 { return Opcode.Text }
+  if code == 2 { return Opcode.Binary }
+  if code == 8 { return Opcode.Close }
+  if code == 9 { return Opcode.Ping }
+  if code == 10 { return Opcode.Pong }
+  fail WebSocketError.ProtocolError {reason: ProtocolReason.ReservedOpcode}
+}
+
+fn controlOpcode(opcode: Opcode) -> bool {
+  return match opcode {
+    Opcode.Text => false
+    Opcode.Binary => false
+    Opcode.Close => true
+    Opcode.Ping => true
+    Opcode.Pong => true
+  }
+}
+
+fn opcodeIsClose(opcode: Opcode) -> bool {
+  return match opcode {
+    Opcode.Close => true
+    Opcode.Text => false
+    Opcode.Binary => false
+    Opcode.Ping => false
+    Opcode.Pong => false
+  }
+}
+
+fn decodeWide(bytes: &[u8], offset: usize, length: usize) -> u64 {
+  let mut value = u64.toU64(0)
+  let mut index = usize.ZERO
+  while index < length {
+    value = u64.bitOr(u64.shiftLeft(value, 8), u8.toU64(bytes[offset + index]))
+    index = index + usize.ONE
+  }
+  return value
+}
+
+fn unmask(
+  output: &mut [u8],
+  length: usize,
+  mask: &([u8; 4]),
+  offset: usize,
+) -> () {
+  let mut index = usize.ZERO
+  while index < length {
+    output[index] = u8.bitXor(output[index], mask.*[(offset + index) % 4])
+    index = index + usize.ONE
+  }
+  return ()
+}
+
+fn closeCodeInControl<'channel, 'transport, P>(
+  socket: &ServerWebSocket<'channel, 'transport, P>,
+  length: usize,
+) -> u16 {
+  if length < 2 { return u16.toU16(0) }
+  return u16.bitOr(
+    u16.shiftLeft(u8.toU16(socket.control[0]), 8),
+    u8.toU16(socket.control[1]),
+  )
+}
+
+fn bufferProgress(error: &BufferError) -> usize {
+  return match & error.* {
+    BufferError.InvalidCapacity {capacity} => usize.ZERO
+    BufferError.BufferTooSmall {requested, capacity} => usize.ZERO
+    BufferError.InvalidConsumption {requested, available} => usize.ZERO
+    BufferError.InvalidReadCount {count, limit} => usize.ZERO
+    BufferError.UnexpectedEnd {progress} => progress
+    BufferError.ReadFailed {progress, error: cause} => progress
+    BufferError.InputFailed {progress, error: cause} => progress
+    BufferError.WriteFailed {accepted, drained, error: cause} => accepted
+    BufferError.UnknownExternalTransfer {progress, error: cause} => progress
+    BufferError.LengthOverflow => usize.ZERO
+    BufferError.Terminal => usize.ZERO
+  }
+}
+
+fn arithmeticError(error: &WebSocketError) -> bool {
+  return match & error.* {
+    WebSocketError.InvalidLimits {kind} => true
+    WebSocketError.InvalidState {operation, state} => false
+    WebSocketError.PreviousFailure {failure} => false
+    WebSocketError.BufferTooSmall {required, capacity} => false
+    WebSocketError.MessageTooLarge {length, allowed} => false
+    WebSocketError.UnsupportedFragmentation => false
+    WebSocketError.ProtocolError {reason} => false
+    WebSocketError.InvalidCloseData {reason} => false
+    WebSocketError.InvalidUtf8 {component} => false
+    WebSocketError.CloseLimitExceeded {kind, allowed} => false
+    WebSocketError.Truncated => false
+    WebSocketError.Buffer {operation, frameAccepted, error: cause} => false
+    WebSocketError.Transport {operation, error: cause} => false
+  }
+}
+
+fn reached(now: &Instant, deadline: &Instant) -> bool {
+  let nowSeconds = SystemClock.seconds(now)
+  let deadlineSeconds = SystemClock.seconds(deadline)
+  if nowSeconds > deadlineSeconds { return true }
+  if nowSeconds < deadlineSeconds { return false }
+  return SystemClock.nanoseconds(now) >= SystemClock.nanoseconds(deadline)
+}
+
+fn minimum(left: usize, right: usize) -> usize {
+  if left < right { return left }
+  return right
+}
+
+fn copyInstant(value: &Instant) -> Instant {
+  return SystemClock.make(SystemClock.seconds(value), SystemClock.nanoseconds(value))
+}
+
+fn copyDeadline(value: &Option<Instant>) -> Option<Instant> {
+  return match & value.* {
+    Option.None => Option.none<Instant>()
+    Option.Some {value: present} => Option.some<Instant>(copyInstant(&present))
+  }
+}
+
+effect fn discardWebSocketFailure(error: WebSocketError) -> () {
+  drop error
+  return ()
+}
+
+effect fn discardCloseFailure(error: ByteIoError) -> () {
+  drop error
+  return ()
+}
+
+fn validCloseCode(code: u16) -> bool {
+  if code >= 3000 && code <= 4999 { return true }
+  if code >= 1000 && code <= 1003 { return true }
+  return code >= 1007 && code <= 1014
+}
+
+fn copyBytes(output: &mut [u8], input: &[u8]) -> () {
+  let mut index = usize.ZERO
+  while index < input.length {
+    output[index] = input[index]
+    index = index + usize.ONE
+  }
+  return ()
+}
+
+fn emptyHeader() -> [u8; 14] {
+  return [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+}
+
+fn emptyControl() -> [u8; 125] {
+  return [
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  ]
+}
+
+fn emptyCloseReason() -> [u8; 123] {
+  return [
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  ]
+}
