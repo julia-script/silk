@@ -2605,6 +2605,11 @@ const redirectHttpReadHook = `    if redirectConsumesDeadline(
       self.input.length,
     ) {
       run MonotonicClock.waitUntil(SystemClock.make(20, 7))
+    }
+    if redirectReadFails(&self.routeAudit) {
+      fail TransportError.Plain {
+        error: ByteIoError.Provider {operation: ByteIoOperation.Read, code: 232},
+      }
     }`
 const redirectHttpCloseHook = `    recordRedirectClose(
       &self.routeAudit,
@@ -2703,6 +2708,16 @@ fn redirectConsumesDeadline(
           && state.attempt == usize.ZERO
           && readOffset == inputLength
       },
+    )
+  }
+}
+
+fn redirectReadFails(audit: &Option<Shared<RouteAudit>>) -> bool {
+  return match &audit.* {
+    Option.None => false
+    Option.Some {value} => Shared.with<RouteAudit, bool>(
+      &value,
+      fn(state: &RouteAudit) -> bool { return state.scenario == 6 },
     )
   }
 }
@@ -3008,6 +3023,8 @@ impl<
 `
 
 const redirectProgramSupport = `${redirectSupport}
+struct RedirectSourceFailure { code: i32 }
+
 struct RedirectProducer {
   audit: Shared<RouteAudit>
   offset: usize
@@ -3018,11 +3035,16 @@ impl RedirectProducer {
     drop producer
     return BodyMode.KnownLength {length: u64.toU64(4)}
   }
-  effect fn pull(producer: &mut Self, output: &mut [u8]) -> BodyChunk {
-    Shared.withMut<RouteAudit, ()>(&producer.audit, fn(state: &mut RouteAudit) -> () {
+  effect fn pull(producer: &mut Self, output: &mut [u8]) -> BodyChunk
+  ! RedirectSourceFailure {
+    let selectedFailure = Shared.withMut<RouteAudit, bool>(
+      &producer.audit,
+      fn(state: &mut RouteAudit) -> bool {
       state.producerPulls = state.producerPulls + usize.ONE
-      return ()
-    })
+        return state.scenario == 5
+      },
+    )
+    if selectedFailure { fail RedirectSourceFailure {code: 902} }
     if producer.offset == 4 { return BodyChunk {length: usize.ZERO, end: true} }
     let bytes = b"DATA"
     let mut count = bytes.length - producer.offset
@@ -3037,7 +3059,7 @@ impl RedirectProducer {
   }
 }
 
-impl BodyProducer<never ? never> for RedirectProducer {
+impl BodyProducer<RedirectSourceFailure ? never> for RedirectProducer {
   mode: RedirectProducer.mode
   pull: RedirectProducer.pull
 }
@@ -3238,7 +3260,7 @@ fn oneShotAuditPassed(state: &RouteAudit) -> bool {
 }
 
 effect fn replayRedirectCase() -> i32
-! RedirectError | ValueError | OriginError | RequestError | ClientError | CallbackFailure | OutOfMemoryError
+! RedirectError | ValueError | OriginError | RequestError | ClientError | RedirectSourceFailure | CallbackFailure | OutOfMemoryError
 ? &mut Allocator | &mut MonotonicClock | &mut Random {
   let audit = run Shared.make<RouteAudit>(emptyRedirectAudit(0))
   let selectedPolicy = match move redirectPolicy() {
@@ -3277,7 +3299,7 @@ fn isReplayUnavailable(error: RedirectError) -> bool {
 }
 
 effect fn oneShotRedirectCase() -> i32
-! ValueError | OriginError | RequestError | ClientError | CallbackFailure | OutOfMemoryError
+! ValueError | OriginError | RequestError | ClientError | RedirectSourceFailure | CallbackFailure | OutOfMemoryError
 ? &mut Allocator | &mut MonotonicClock | &mut Random {
   let audit = run Shared.make<RouteAudit>(emptyRedirectAudit(1))
   let selectedPolicy = match move redirectPolicy() {
@@ -3314,6 +3336,7 @@ effect fn oneShotRedirectCase() -> i32
       ValueError cause => { fail move cause }
       RequestError cause => { fail move cause }
       ClientError cause => { fail move cause }
+      RedirectSourceFailure cause => { fail move cause }
       CallbackFailure cause => { fail move cause }
       OutOfMemoryError allocation => { fail move allocation }
     }
@@ -3332,6 +3355,7 @@ effect fn outcomeRedirect(
   | OriginError
   | RequestError
   | ClientError
+  | RedirectSourceFailure
   | CallbackFailure
   | OutOfMemoryError
 ? &mut Allocator | &mut MonotonicClock | &mut Random {
@@ -3369,7 +3393,7 @@ fn singleAttemptAuditPassed(state: &RouteAudit) -> bool {
 }
 
 effect fn typedFailureRedirectCase() -> i32
-! RedirectError | ValueError | OriginError | RequestError | ClientError | OutOfMemoryError
+! RedirectError | ValueError | OriginError | RequestError | ClientError | RedirectSourceFailure | OutOfMemoryError
 ? &mut Allocator | &mut MonotonicClock | &mut Random {
   let audit = run Shared.make<RouteAudit>(emptyRedirectAudit(3))
   let attempted = run Effect.result(outcomeRedirect(
@@ -3385,6 +3409,7 @@ effect fn typedFailureRedirectCase() -> i32
       ValueError cause => { fail move cause }
       RequestError cause => { fail move cause }
       ClientError cause => { fail move cause }
+      RedirectSourceFailure cause => { fail move cause }
       OutOfMemoryError allocation => { fail move allocation }
     }
   }
@@ -3415,7 +3440,7 @@ fn redirectTimedOut(error: ClientError) -> bool {
 }
 
 effect fn deadlineRedirectCase() -> i32
-! RedirectError | ValueError | OriginError | RequestError | ClientError | OutOfMemoryError
+! RedirectError | ValueError | OriginError | RequestError | ClientError | RedirectSourceFailure | OutOfMemoryError
 ? &mut Allocator | &mut MonotonicClock | &mut Random {
   let audit = run Shared.make<RouteAudit>(emptyRedirectAudit(2))
   let attempted = run Effect.result(outcomeRedirect(
@@ -3431,11 +3456,103 @@ effect fn deadlineRedirectCase() -> i32
       OriginError cause => { fail move cause }
       ValueError cause => { fail move cause }
       RequestError cause => { fail move cause }
+      RedirectSourceFailure cause => { fail move cause }
       OutOfMemoryError allocation => { fail move allocation }
     }
   }
   if !expired { return 250 }
   if !Shared.with<RouteAudit, bool>(&audit, deadlineAuditPassed) { return 251 }
+  return 0
+}
+
+fn failedAttemptAuditPassed(
+  state: &RouteAudit,
+  completeOutputs: usize,
+  producerPulls: usize,
+) -> bool {
+  return state.attempts == usize.ONE
+    && state.completeOutputs == completeOutputs
+    && state.closes == usize.ONE
+    && state.completedDrains == usize.ZERO
+    && state.cappedDrains == usize.ZERO
+    && state.deadlineValid
+    && state.factoryAcquires == usize.ONE
+    && state.factoryReleases == usize.ONE
+    && state.attemptReleases == usize.ONE
+    && state.producerPulls == producerPulls
+    && state.callbacks == usize.ZERO
+}
+
+effect fn sourceFailureRedirectCase() -> i32
+! RedirectError | ValueError | OriginError | RequestError | ClientError | CallbackFailure | OutOfMemoryError
+? &mut Allocator | &mut MonotonicClock | &mut Random {
+  let audit = run Shared.make<RouteAudit>(emptyRedirectAudit(5))
+  let attempted = run Effect.result(outcomeRedirect(
+    Shared.clone<RouteAudit>(&audit),
+    3,
+  ))
+  let preserved = match move attempted {
+    Result.Success {value} => { drop value false }
+    Result.Failure {error} => match move error {
+      RedirectSourceFailure cause => cause.code == 902
+      CallbackFailure cause => { drop cause false }
+      RedirectError cause => { fail move cause }
+      OriginError cause => { fail move cause }
+      ValueError cause => { fail move cause }
+      RequestError cause => { fail move cause }
+      ClientError cause => { fail move cause }
+      OutOfMemoryError allocation => { fail move allocation }
+    }
+  }
+  if !preserved { return 254 }
+  let released = Shared.with<RouteAudit, bool>(&audit, fn(state: &RouteAudit) -> bool {
+    return failedAttemptAuditPassed(state, usize.ZERO, usize.ONE)
+  })
+  if !released { return 255 }
+  return 0
+}
+
+fn redirectTransportReadFailed(error: ClientError) -> bool {
+  return match move error {
+    ClientError.Transport {error} => match move error {
+      TransportError.Plain {error: plain} => match move plain {
+        ByteIoError.Provider {operation, code} => {
+          operation == ByteIoOperation.Read && code == 232
+        }
+        _ => false
+      }
+      _ => false
+    }
+    _ => false
+  }
+}
+
+effect fn transportFailureRedirectCase() -> i32
+! RedirectError | ValueError | OriginError | RequestError | RedirectSourceFailure | CallbackFailure | OutOfMemoryError
+? &mut Allocator | &mut MonotonicClock | &mut Random {
+  let audit = run Shared.make<RouteAudit>(emptyRedirectAudit(6))
+  let attempted = run Effect.result(outcomeRedirect(
+    Shared.clone<RouteAudit>(&audit),
+    3,
+  ))
+  let preserved = match move attempted {
+    Result.Success {value} => { drop value false }
+    Result.Failure {error} => match move error {
+      ClientError cause => redirectTransportReadFailed(move cause)
+      CallbackFailure cause => { drop cause false }
+      RedirectError cause => { fail move cause }
+      OriginError cause => { fail move cause }
+      ValueError cause => { fail move cause }
+      RequestError cause => { fail move cause }
+      RedirectSourceFailure cause => { fail move cause }
+      OutOfMemoryError allocation => { fail move allocation }
+    }
+  }
+  if !preserved { return 256 }
+  let released = Shared.with<RouteAudit, bool>(&audit, fn(state: &RouteAudit) -> bool {
+    return failedAttemptAuditPassed(state, usize.ONE, usize.ONE)
+  })
+  if !released { return 257 }
   return 0
 }
 
@@ -3445,6 +3562,7 @@ effect fn canceledRedirectBody(audit: Shared<RouteAudit>) -> i32
   | OriginError
   | RequestError
   | ClientError
+  | RedirectSourceFailure
   | CallbackFailure
   | OutOfMemoryError {
   let mut allocator = Allocator.systemAllocatorProvider()
@@ -3498,11 +3616,11 @@ effect fn cancellationRedirectCase() -> i32 ! OutOfMemoryError {
 }
 
 effect fn redirectCases() -> i32
-! RedirectError | ValueError | OriginError | RequestError | ClientError | CallbackFailure | OutOfMemoryError {
+! RedirectError | ValueError | OriginError | RequestError | ClientError | RedirectSourceFailure | CallbackFailure | OutOfMemoryError {
   let mut allocator = Allocator.systemAllocatorProvider()
   let mut clock = FixedClock {mark: SystemClock.make(0, 0)}
   let mut random = FixedRandom {}
-  let cases: [i32; 4] = [0, 1, 3, 2]
+  let cases: [i32; 6] = [0, 1, 3, 5, 6, 2]
   let mut index = usize.ZERO
   while index < cases.length {
     let selected = if cases[index] == 0 {
@@ -3511,6 +3629,10 @@ effect fn redirectCases() -> i32
       oneShotRedirectCase()
     } else if cases[index] == 3 {
       typedFailureRedirectCase()
+    } else if cases[index] == 5 {
+      sourceFailureRedirectCase()
+    } else if cases[index] == 6 {
+      transportFailureRedirectCase()
     } else {
       deadlineRedirectCase()
     }
@@ -3531,6 +3653,7 @@ const redirectMain = `effect fn recoverRedirect(
     | OriginError
     | RequestError
     | ClientError
+    | RedirectSourceFailure
     | CallbackFailure
     | OutOfMemoryError,
 ) -> i32 {
