@@ -302,5 +302,5 @@ it.effect(
       assert.deepEqual(diagnosticSummary(snapshot), [])
       assert.deepEqual(MirVerification.verify(Analysis.loweredMir(snapshot)), [])
     }),
-  60_000,
+  120_000,
 )

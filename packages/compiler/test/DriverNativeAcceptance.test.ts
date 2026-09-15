@@ -166,7 +166,11 @@ const selectedCorpus = shardedCorpus.filter(
   (program) => selectedNativeCases.size === 0 || selectedNativeCases.has(program.name),
 )
 const portableWasmCorpus = [
-  { name: 'http-client', source: httpClientAcceptanceSource, expected: 0 },
+  {
+    name: 'http-proxy-routed-preparation-and-scripted-tunnel-portability',
+    source: httpClientAcceptanceSource,
+    expected: 0,
+  },
   { name: 'http-client-content', source: httpClientContentAcceptanceSource, expected: 0 },
   { name: 'http-client-request', source: httpRequestAcceptanceSource, expected: 0 },
   { name: 'http-values', source: httpValuesAcceptanceSource, expected: 0 },

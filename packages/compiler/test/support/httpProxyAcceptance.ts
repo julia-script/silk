@@ -1,9 +1,20 @@
-export const httpProxyPolicyAcceptanceSource = `import silk.allocator {Allocator, OutOfMemoryError}
-import silk.bytes {Bytes}
+const standaloneImports = `import silk.allocator {Allocator, OutOfMemoryError}
 import silk.effect {Effect}
-import silk.http {Header, Method, OwnedResponseHead, ResponseHead, Status, Version}
-import silk.http_headers {HeaderIterator, Headers, Limits}
-import silk.http_origin {Origin, OriginError}
+import silk.http {Header, Method, Version}
+import silk.http_headers {Headers}
+import silk.http_origin {Origin}
+import silk.http_request as Request
+import silk.http_request {BodyMode, HeaderPolicy, PreparedRequest, RequestError}
+import silk.http_target {RequestTarget}
+import silk.option {Option}
+import silk.result {Result}
+import silk.uri {Uri}
+import silk.usize`
+
+export const httpProxyPolicyImports = `import silk.bytes {Bytes}
+import silk.http {OwnedResponseHead, ResponseHead, Status}
+import silk.http_headers {HeaderIterator, Limits as ProxyValueLimits}
+import silk.http_origin {OriginError}
 import silk.http_proxy {
   BypassPolicy,
   ProxyAuth,
@@ -21,26 +32,17 @@ import silk.http_proxy {
   classifyConnect,
   selectRoute,
 }
-import silk.http_request as Request
 import silk.http_request {
   Authorization,
   BasicSecurity,
-  BodyMode,
   HeaderControl,
-  HeaderPolicy,
-  PreparedRequest,
-  RequestError,
   prepareConnect,
   prepareForward,
 }
-import silk.http_target {RequestTarget}
-import silk.option {Option}
-import silk.result {Result}
-import silk.uri {Uri}
 import silk.uri_reference {ParseError}
-import silk.usize
+`
 
-fn bytesEqual(left: &[u8], right: &[u8]) -> bool {
+export const httpProxyPolicySupport = `fn proxyBytesEqual(left: &[u8], right: &[u8]) -> bool {
   if left.length != right.length { return false }
   let mut index = usize.ZERO
   while index < left.length {
@@ -50,15 +52,15 @@ fn bytesEqual(left: &[u8], right: &[u8]) -> bool {
   return true
 }
 
-fn reasonEquals(head: &ResponseHead, expected: &[u8]) -> bool {
+fn proxyReasonEquals(head: &ResponseHead, expected: &[u8]) -> bool {
   return match move ResponseHead.reason(head) {
     Option.None => false
-    Option.Some {value} => bytesEqual(value, expected)
+    Option.Some {value} => proxyBytesEqual(value, expected)
   }
 }
 
-fn valueLimits() -> Limits {
-  return Limits {
+fn proxyValueLimits() -> ProxyValueLimits {
+  return ProxyValueLimits {
     maxMethodBytes: 32,
     maxTargetBytes: 256,
     maxNameBytes: 64,
@@ -69,8 +71,8 @@ fn valueLimits() -> Limits {
   }
 }
 
-fn connectInputLimits() -> Limits {
-  return Limits {
+fn proxyConnectInputLimits() -> ProxyValueLimits {
+  return ProxyValueLimits {
     maxMethodBytes: 32,
     maxTargetBytes: 512,
     maxNameBytes: 256,
@@ -81,7 +83,7 @@ fn connectInputLimits() -> Limits {
   }
 }
 
-effect fn filled(length: usize) -> Bytes ! OutOfMemoryError ? &mut Allocator {
+effect fn proxyFilled(length: usize) -> Bytes ! OutOfMemoryError ? &mut Allocator {
   let mut bytes = run Bytes.zeroed(length)
   let output = Bytes.asMutSlice(&mut bytes)
   let mut index = usize.ZERO
@@ -93,7 +95,7 @@ effect fn filled(length: usize) -> Bytes ! OutOfMemoryError ? &mut Allocator {
   return move bytes
 }
 
-fn checkedOrigin<'text>(text: string<'text>) -> Result<Origin, ProxyError> {
+fn proxyCheckedOrigin<'text>(text: string<'text>) -> Result<Origin, ProxyError> {
   let uri = match move Uri.parse(text) {
     Result<Uri<'text>, ParseError>.Failure {error} => {
       return Result.failResult<Origin, ProxyError>(ProxyError.Admission {error: ProxyAdmissionError {
@@ -114,11 +116,11 @@ fn checkedOrigin<'text>(text: string<'text>) -> Result<Origin, ProxyError> {
   }
 }
 
-fn modeIs<'configuration>(route: &Route<'configuration>, expected: RouteMode) -> bool {
+fn proxyModeIs<'configuration>(route: &Route<'configuration>, expected: RouteMode) -> bool {
   return Route.mode(route) == expected
 }
 
-fn isReason(error: ProxyError, expected: ProxyReason) -> bool {
+fn proxyIsReason(error: ProxyError, expected: ProxyReason) -> bool {
   let admission = match move error {
     ProxyError.Admission {error: admissionError} => admissionError
     _ => { return false }
@@ -140,7 +142,7 @@ fn isReason(error: ProxyError, expected: ProxyReason) -> bool {
   }
 }
 
-fn isOwnedCapacityFailure(error: ProxyError) -> bool {
+fn proxyIsOwnedCapacityFailure(error: ProxyError) -> bool {
   let admission = match move error {
     ProxyError.Admission {error: admissionError} => admissionError
     _ => { return false }
@@ -153,8 +155,10 @@ fn isOwnedCapacityFailure(error: ProxyError) -> bool {
   }
 }
 
-effect fn verify() -> bool ! OutOfMemoryError ? &mut Allocator {
-  let bypassOrigin = match move checkedOrigin("http://[2001:0db8::1]") {
+`
+
+export const verifyProxyPolicy = `effect fn verifyProxyPolicy() -> bool ! OutOfMemoryError ? &mut Allocator {
+  let bypassOrigin = match move proxyCheckedOrigin("http://[2001:0db8::1]") {
     Result<Origin, ProxyError>.Failure {error} => { return false }
     Result<Origin, ProxyError>.Success {value} => value
   }
@@ -183,50 +187,50 @@ effect fn verify() -> bool ! OutOfMemoryError ? &mut Allocator {
     Result<ProxyConfig, ProxyError>.Success {value} => value
   }
 
-  let numericEquivalent = match move checkedOrigin("http://[2001:db8::1]:80") {
+  let numericEquivalent = match move proxyCheckedOrigin("http://[2001:db8::1]:80") {
     Result<Origin, ProxyError>.Failure {error} => { return false }
     Result<Origin, ProxyError>.Success {value} => value
   }
   let direct = selectRoute(&config, numericEquivalent)
-  if !modeIs(&direct, RouteMode.Direct) { return false }
+  if !proxyModeIs(&direct, RouteMode.Direct) { return false }
   if !ProxyConfigId.equals(&Route.configId(&direct), &configId) { return false }
   if !ProxyAuthContextId.equals(&Route.authContextId(&direct), &authId) { return false }
 
-  let insecure = match move checkedOrigin("http://service.example") {
+  let insecure = match move proxyCheckedOrigin("http://service.example") {
     Result<Origin, ProxyError>.Failure {error} => { return false }
     Result<Origin, ProxyError>.Success {value} => value
   }
   let forward = selectRoute(&config, insecure)
-  if !modeIs(&forward, RouteMode.Forward) { return false }
-  let proxyOrigin = match move checkedOrigin("http://proxy.example:3128") {
+  if !proxyModeIs(&forward, RouteMode.Forward) { return false }
+  let proxyOrigin = match move proxyCheckedOrigin("http://proxy.example:3128") {
     Result<Origin, ProxyError>.Failure {error} => { return false }
     Result<Origin, ProxyError>.Success {value} => value
   }
   let equalEndpointRoute = selectRoute(&config, proxyOrigin)
-  if !modeIs(&equalEndpointRoute, RouteMode.Forward) { return false }
+  if !proxyModeIs(&equalEndpointRoute, RouteMode.Forward) { return false }
 
-  let secure = match move checkedOrigin("https://service.example") {
+  let secure = match move proxyCheckedOrigin("https://service.example") {
     Result<Origin, ProxyError>.Failure {error} => { return false }
     Result<Origin, ProxyError>.Success {value} => value
   }
   let tunnel = selectRoute(&config, secure)
-  if !modeIs(&tunnel, RouteMode.Tunnel) { return false }
+  if !proxyModeIs(&tunnel, RouteMode.Tunnel) { return false }
 
-  let differentScheme = match move checkedOrigin("https://[2001:db8::1]") {
+  let differentScheme = match move proxyCheckedOrigin("https://[2001:db8::1]") {
     Result<Origin, ProxyError>.Failure {error} => { return false }
     Result<Origin, ProxyError>.Success {value} => value
   }
   let schemeRoute = selectRoute(&config, differentScheme)
-  if !modeIs(&schemeRoute, RouteMode.Tunnel) { return false }
-  let differentPort = match move checkedOrigin("http://[2001:db8::1]:81") {
+  if !proxyModeIs(&schemeRoute, RouteMode.Tunnel) { return false }
+  let differentPort = match move proxyCheckedOrigin("http://[2001:db8::1]:81") {
     Result<Origin, ProxyError>.Failure {error} => { return false }
     Result<Origin, ProxyError>.Success {value} => value
   }
   let portRoute = selectRoute(&config, differentPort)
-  if !modeIs(&portRoute, RouteMode.Forward) { return false }
+  if !proxyModeIs(&portRoute, RouteMode.Forward) { return false }
 
   let recomputed = Route.recompute(&forward, secure)
-  if !modeIs(&recomputed, RouteMode.Tunnel) { return false }
+  if !proxyModeIs(&recomputed, RouteMode.Tunnel) { return false }
   if !ProxyAuthContextId.equals(&Route.authContextId(&recomputed), &authId) { return false }
   let copiedRoute = direct
   if !RouteKey.equals(&Route.key(&direct), &Route.key(&copiedRoute)) { return false }
@@ -241,7 +245,7 @@ effect fn verify() -> bool ! OutOfMemoryError ? &mut Allocator {
   }
   let selectedForward = selectRoute(&config, forwardOrigin)
   let emptyFields: [Header<'static>; 0] = []
-  let emptyHeaders = match move Headers.make(&emptyFields, valueLimits()) {
+  let emptyHeaders = match move Headers.make(&emptyFields, proxyValueLimits()) {
     Result.Failure {error} => { return false }
     Result.Success {value} => value
   }
@@ -255,14 +259,14 @@ effect fn verify() -> bool ! OutOfMemoryError ? &mut Allocator {
     &headerPolicy,
     BodyMode.Empty,
     false,
-    valueLimits(),
+    proxyValueLimits(),
     4096,
     128,
   )) {
     Result.Failure {error} => { return false }
     Result.Success {value} => value
   }
-  if !bytesEqual(
+  if !proxyBytesEqual(
     PreparedRequest.bytes(&forwarded),
     b"GET http://example.com/a?b HTTP/1.1\\r\\nProxy-Authorization: Basic QWxhZGRpbjpvcGVuIHNlc2FtZQ==\\r\\nHost: example.com\\r\\nUser-Agent: silk-http/1\\r\\nAccept: */*\\r\\n\\r\\n",
   ) {
@@ -270,21 +274,21 @@ effect fn verify() -> bool ! OutOfMemoryError ? &mut Allocator {
   }
   let ipv6Connect = match move run Effect.result(prepareConnect(
     &schemeRoute,
-    valueLimits(),
+    proxyValueLimits(),
     4096,
     128,
   )) {
     Result.Failure {error} => { return false }
     Result.Success {value} => value
   }
-  if !bytesEqual(
+  if !proxyBytesEqual(
     PreparedRequest.bytes(&ipv6Connect),
     b"CONNECT [2001:db8::1]:443 HTTP/1.1\\r\\nProxy-Authorization: Basic QWxhZGRpbjpvcGVuIHNlc2FtZQ==\\r\\nHost: [2001:db8::1]:443\\r\\nUser-Agent: silk-http/1\\r\\nAccept: */*\\r\\n\\r\\n",
   ) {
     return false
   }
   if !Origin.equals(&PreparedRequest.origin(&forwarded), &forwardOrigin) { return false }
-  let expectedProxyPeer = match move checkedOrigin("http://proxy.example:3128") {
+  let expectedProxyPeer = match move proxyCheckedOrigin("http://proxy.example:3128") {
     Result<Origin, ProxyError>.Failure {error} => { return false }
     Result<Origin, ProxyError>.Success {value} => value
   }
@@ -295,7 +299,7 @@ effect fn verify() -> bool ! OutOfMemoryError ? &mut Allocator {
 
   let tunnelAdmission = match move run Effect.result(prepareConnect(
     &tunnel,
-    valueLimits(),
+    proxyValueLimits(),
     4096,
     128,
   )) {
@@ -307,7 +311,7 @@ effect fn verify() -> bool ! OutOfMemoryError ? &mut Allocator {
   if Origin.equals(&PreparedRequest.origin(&tunnelAdmission), &PreparedRequest.physicalPeer(&tunnelAdmission)) {
     return false
   }
-  if !bytesEqual(
+  if !proxyBytesEqual(
     PreparedRequest.bytes(&tunnelAdmission),
     b"CONNECT service.example:443 HTTP/1.1\\r\\nProxy-Authorization: Basic QWxhZGRpbjpvcGVuIHNlc2FtZQ==\\r\\nHost: service.example:443\\r\\nUser-Agent: silk-http/1\\r\\nAccept: */*\\r\\n\\r\\n",
   ) {
@@ -323,7 +327,7 @@ effect fn verify() -> bool ! OutOfMemoryError ? &mut Allocator {
     successStatus,
     Option.none<&'static [u8]>(),
     emptyHeaders,
-    connectInputLimits(),
+    proxyConnectInputLimits(),
   ) {
     Result.Failure {error} => { return false }
     Result.Success {value} => value
@@ -333,20 +337,47 @@ effect fn verify() -> bool ! OutOfMemoryError ? &mut Allocator {
     Result.Success {value} => {}
   }
 
-  let challengeOne = match move Header.make("Proxy-Authenticate", b"Basic realm=one", connectInputLimits()) {
+  let upgradeFields: [Header<'static>; 0] = []
+  let upgradeHeaders = match move Headers.make(&upgradeFields, proxyConnectInputLimits()) {
     Result.Failure {error} => { return false }
     Result.Success {value} => value
   }
-  let unrelated = match move Header.make("X-Ignored", b"not retained", connectInputLimits()) {
+  let upgradeStatus = match move Status.fromCode(101) {
     Result.Failure {error} => { return false }
     Result.Success {value} => value
   }
-  let challengeTwo = match move Header.make("proxy-authenticate", b"Negotiate", connectInputLimits()) {
+  let upgradeHead = match move ResponseHead.make(
+    Version.Http11,
+    upgradeStatus,
+    Option.none<&'static [u8]>(),
+    upgradeHeaders,
+    proxyConnectInputLimits(),
+  ) {
+    Result.Failure {error} => { return false }
+    Result.Success {value} => value
+  }
+  match move run Effect.result(classifyConnect(&upgradeHead)) {
+    Result.Success {value} => { return false }
+    Result.Failure {error} => match move error {
+      ProxyError.InvalidConnectResponse => {}
+      _ => { return false }
+    }
+  }
+
+  let challengeOne = match move Header.make("Proxy-Authenticate", b"Basic realm=one", proxyConnectInputLimits()) {
+    Result.Failure {error} => { return false }
+    Result.Success {value} => value
+  }
+  let unrelated = match move Header.make("X-Ignored", b"not retained", proxyConnectInputLimits()) {
+    Result.Failure {error} => { return false }
+    Result.Success {value} => value
+  }
+  let challengeTwo = match move Header.make("proxy-authenticate", b"Negotiate", proxyConnectInputLimits()) {
     Result.Failure {error} => { return false }
     Result.Success {value} => value
   }
   let challengeFields = [challengeOne, unrelated, challengeTwo]
-  let challengeHeaders = match move Headers.make(&challengeFields, connectInputLimits()) {
+  let challengeHeaders = match move Headers.make(&challengeFields, proxyConnectInputLimits()) {
     Result.Failure {error} => { return false }
     Result.Success {value} => value
   }
@@ -359,7 +390,7 @@ effect fn verify() -> bool ! OutOfMemoryError ? &mut Allocator {
     authenticationStatus,
     Option.some<&'static [u8]>(b"Proxy Authentication Required"),
     challengeHeaders,
-    connectInputLimits(),
+    proxyConnectInputLimits(),
   ) {
     Result.Failure {error} => { return false }
     Result.Success {value} => value
@@ -370,7 +401,7 @@ effect fn verify() -> bool ! OutOfMemoryError ? &mut Allocator {
       ProxyError.ProxyAuthenticationRequired {response} => {
         let view = OwnedResponseHead.view(&response)
         let status = ResponseHead.status(&view)
-        if Status.code(&status) != 407 || !reasonEquals(&view, b"Proxy Authentication Required") {
+        if Status.code(&status) != 407 || !proxyReasonEquals(&view, b"Proxy Authentication Required") {
           return false
         }
         let fields = ResponseHead.headers(&view)
@@ -380,27 +411,27 @@ effect fn verify() -> bool ! OutOfMemoryError ? &mut Allocator {
           Option.None => { return false }
           Option.Some {value} => value
         }
-        if !bytesEqual(Header.value(&first), b"Basic realm=one") { return false }
+        if !proxyBytesEqual(Header.value(&first), b"Basic realm=one") { return false }
         let second = match move HeaderIterator.next(&mut selected) {
           Option.None => { return false }
           Option.Some {value} => value
         }
-        if !bytesEqual(Header.value(&second), b"Negotiate") { return false }
+        if !proxyBytesEqual(Header.value(&second), b"Negotiate") { return false }
       }
       _ => { return false }
     }
   }
 
-  let retainedOne = match move Header.make("Retry-After", b"5", connectInputLimits()) {
+  let retainedOne = match move Header.make("Retry-After", b"5", proxyConnectInputLimits()) {
     Result.Failure {error} => { return false }
     Result.Success {value} => value
   }
-  let retainedTwo = match move Header.make("X-Trace", b"later", connectInputLimits()) {
+  let retainedTwo = match move Header.make("X-Trace", b"later", proxyConnectInputLimits()) {
     Result.Failure {error} => { return false }
     Result.Success {value} => value
   }
   let rejectionFields = [retainedOne, retainedTwo]
-  let rejectionHeaders = match move Headers.make(&rejectionFields, connectInputLimits()) {
+  let rejectionHeaders = match move Headers.make(&rejectionFields, proxyConnectInputLimits()) {
     Result.Failure {error} => { return false }
     Result.Success {value} => value
   }
@@ -413,7 +444,7 @@ effect fn verify() -> bool ! OutOfMemoryError ? &mut Allocator {
     rejectionStatus,
     Option.some<&'static [u8]>(b"Bad Gateway"),
     rejectionHeaders,
-    connectInputLimits(),
+    proxyConnectInputLimits(),
   ) {
     Result.Failure {error} => { return false }
     Result.Success {value} => value
@@ -424,7 +455,7 @@ effect fn verify() -> bool ! OutOfMemoryError ? &mut Allocator {
       ProxyError.ProxyRejected {response} => {
         let view = OwnedResponseHead.view(&response)
         let status = ResponseHead.status(&view)
-        if Status.code(&status) != 502 || !reasonEquals(&view, b"Bad Gateway") { return false }
+        if Status.code(&status) != 502 || !proxyReasonEquals(&view, b"Bad Gateway") { return false }
         let fields = ResponseHead.headers(&view)
         if Headers.count(&fields) != 2 { return false }
         let mut ordered = Headers.iter(&fields)
@@ -432,39 +463,41 @@ effect fn verify() -> bool ! OutOfMemoryError ? &mut Allocator {
           Option.None => { return false }
           Option.Some {value} => value
         }
-        if Header.name(&first) != "Retry-After" { return false }
+        if Header.name(&first) != "Retry-After"
+          || !proxyBytesEqual(Header.value(&first), b"5") { return false }
         let second = match move HeaderIterator.next(&mut ordered) {
           Option.None => { return false }
           Option.Some {value} => value
         }
-        if Header.name(&second) != "X-Trace" { return false }
+        if Header.name(&second) != "X-Trace"
+          || !proxyBytesEqual(Header.value(&second), b"later") { return false }
       }
       _ => { return false }
     }
   }
 
-  let largeOne = run filled(8160)
-  let largeTwo = run filled(8160)
-  let largeThree = run filled(8160)
-  let largeFour = run filled(8160)
-  let overflowOne = match move Header.make("A", Bytes.asSlice(&largeOne), connectInputLimits()) {
+  let largeOne = run proxyFilled(8160)
+  let largeTwo = run proxyFilled(8160)
+  let largeThree = run proxyFilled(8160)
+  let largeFour = run proxyFilled(8160)
+  let overflowOne = match move Header.make("A", Bytes.asSlice(&largeOne), proxyConnectInputLimits()) {
     Result.Failure {error} => { return false }
     Result.Success {value} => value
   }
-  let overflowTwo = match move Header.make("B", Bytes.asSlice(&largeTwo), connectInputLimits()) {
+  let overflowTwo = match move Header.make("B", Bytes.asSlice(&largeTwo), proxyConnectInputLimits()) {
     Result.Failure {error} => { return false }
     Result.Success {value} => value
   }
-  let overflowThree = match move Header.make("C", Bytes.asSlice(&largeThree), connectInputLimits()) {
+  let overflowThree = match move Header.make("C", Bytes.asSlice(&largeThree), proxyConnectInputLimits()) {
     Result.Failure {error} => { return false }
     Result.Success {value} => value
   }
-  let overflowFour = match move Header.make("D", Bytes.asSlice(&largeFour), connectInputLimits()) {
+  let overflowFour = match move Header.make("D", Bytes.asSlice(&largeFour), proxyConnectInputLimits()) {
     Result.Failure {error} => { return false }
     Result.Success {value} => value
   }
   let overflowFields = [overflowOne, overflowTwo, overflowThree, overflowFour]
-  let overflowHeaders = match move Headers.make(&overflowFields, connectInputLimits()) {
+  let overflowHeaders = match move Headers.make(&overflowFields, proxyConnectInputLimits()) {
     Result.Failure {error} => { return false }
     Result.Success {value} => value
   }
@@ -473,7 +506,7 @@ effect fn verify() -> bool ! OutOfMemoryError ? &mut Allocator {
     rejectionStatus,
     Option.none<&'static [u8]>(),
     overflowHeaders,
-    connectInputLimits(),
+    proxyConnectInputLimits(),
   ) {
     Result.Failure {error} => { return false }
     Result.Success {value} => value
@@ -503,26 +536,26 @@ effect fn verify() -> bool ! OutOfMemoryError ? &mut Allocator {
     &omittedHostPolicy,
     BodyMode.Empty,
     false,
-    valueLimits(),
+    proxyValueLimits(),
     4096,
     128,
   )) {
     Result.Failure {error} => { return false }
     Result.Success {value} => value
   }
-  if !bytesEqual(
+  if !proxyBytesEqual(
     PreparedRequest.bytes(&forwardedHttp10),
     b"GET http://example.com/a?b HTTP/1.0\\r\\nProxy-Authorization: Basic QWxhZGRpbjpvcGVuIHNlc2FtZQ==\\r\\nHost: example.com\\r\\n\\r\\n",
   ) {
     return false
   }
 
-  let proxyField = match move Header.make("Proxy-Authorization", b"Basic override", valueLimits()) {
+  let proxyField = match move Header.make("Proxy-Authorization", b"Basic override", proxyValueLimits()) {
     Result.Failure {error} => { return false }
     Result.Success {value} => value
   }
   let proxyFields = [proxyField]
-  let proxyHeaders = match move Headers.make(&proxyFields, valueLimits()) {
+  let proxyHeaders = match move Headers.make(&proxyFields, proxyValueLimits()) {
     Result.Failure {error} => { return false }
     Result.Success {value} => value
   }
@@ -539,7 +572,7 @@ effect fn verify() -> bool ! OutOfMemoryError ? &mut Allocator {
     &headerPolicy,
     BodyMode.Empty,
     false,
-    valueLimits(),
+    proxyValueLimits(),
     4096,
     128,
   ))
@@ -559,7 +592,7 @@ effect fn verify() -> bool ! OutOfMemoryError ? &mut Allocator {
     &headerPolicy,
     BodyMode.Empty,
     false,
-    valueLimits(),
+    proxyValueLimits(),
     4096,
     128,
   ))
@@ -585,7 +618,7 @@ effect fn verify() -> bool ! OutOfMemoryError ? &mut Allocator {
   ) {
     Result<ProxyConfig, ProxyError>.Success {value} => { return false }
     Result<ProxyConfig, ProxyError>.Failure {error} => {
-      if !isReason(move error, ProxyReason.UnsupportedProxyTransport) { return false }
+      if !proxyIsReason(move error, ProxyReason.UnsupportedProxyTransport) { return false }
     }
   }
 
@@ -602,14 +635,14 @@ effect fn verify() -> bool ! OutOfMemoryError ? &mut Allocator {
   ) {
     Result<ProxyConfig, ProxyError>.Success {value} => { return false }
     Result<ProxyConfig, ProxyError>.Failure {error} => {
-      if !isReason(move error, ProxyReason.InvalidProxyUri) { return false }
+      if !proxyIsReason(move error, ProxyReason.InvalidProxyUri) { return false }
     }
   }
 
   match move run ProxyAuth.preparedBasic(ProxyAuthContextId.make(24), b"not base64") {
     Result<ProxyAuth, ProxyError>.Success {value} => { return false }
     Result<ProxyAuth, ProxyError>.Failure {error} => {
-      if !isReason(move error, ProxyReason.InvalidAuthentication) { return false }
+      if !proxyIsReason(move error, ProxyReason.InvalidAuthentication) { return false }
     }
   }
 
@@ -626,7 +659,7 @@ effect fn verify() -> bool ! OutOfMemoryError ? &mut Allocator {
   ) {
     Result<ProxyConfig, ProxyError>.Success {value} => { return false }
     Result<ProxyConfig, ProxyError>.Failure {error} => {
-      if !isOwnedCapacityFailure(move error) { return false }
+      if !proxyIsOwnedCapacityFailure(move error) { return false }
     }
   }
 
@@ -648,14 +681,20 @@ effect fn verify() -> bool ! OutOfMemoryError ? &mut Allocator {
   let retainedRoute = Route.recompute(&forward, insecure)
   if !ProxyAuthContextId.equals(&Route.authContextId(&retainedRoute), &authId) { return false }
   return !RouteKey.equals(&Route.key(&forward), &Route.key(&rotatedRoute))
-}
+}`
 
-effect fn recover(error: OutOfMemoryError) -> bool { return false }
+const standaloneMain = `effect fn recover(error: OutOfMemoryError) -> bool { return false }
 
 pub fn main() -> i32 {
   let mut allocator = Allocator.systemAllocatorProvider()
-  let checked = verify() |> Effect.provideMut<Allocator>(&mut allocator)
+  let checked = verifyProxyPolicy() |> Effect.provideMut<Allocator>(&mut allocator)
   if run Effect.catchAll(checked, recover) { return 42 }
   return 0
 }
 `
+
+export const httpProxyPolicyAcceptanceSource = `${standaloneImports}
+${httpProxyPolicyImports}
+${httpProxyPolicySupport}
+${verifyProxyPolicy}
+${standaloneMain}`

@@ -4,6 +4,11 @@ import {
   tlsClientRsaWrongNameClientHello,
   tlsClientRsaWrongNameServerFlight,
 } from './tlsClientAcceptance.js'
+import {
+  httpProxyPolicyImports,
+  httpProxyPolicySupport,
+  verifyProxyPolicy,
+} from './httpProxyAcceptance.js'
 
 const silkBytes = (bytes: Uint8Array): string =>
   `b"${[...bytes].map((byte) => `\\x${byte.toString(16).padStart(2, '0')}`).join('')}"`
@@ -24,6 +29,7 @@ const protocol: ReadonlyArray<Scenario> = [
   { id: 11, callback: 'discardExchange' },
   { id: 17, callback: 'failExchange' },
   { id: 22, callback: 'routedWrongName' },
+  { id: 23, callback: 'exchange' },
 ]
 const boundaries: ReadonlyArray<Scenario> = [
   { id: 6, callback: 'receiveBoundaryExchange' },
@@ -286,6 +292,10 @@ const sourceFor = (
   routeHttpReadHook = '',
   routeHttpWriteHook = '',
   routeByteWriteHook = '',
+  routeByteReadHook = '',
+  routeByteFlushHook = '',
+  routeByteShutdownHook = '',
+  routeByteCloseHook = '',
 ): string => `import silk.allocator {Allocator, OutOfMemoryError}
 import silk.byte_duplex {ByteDuplex, ByteIoError, ByteIoOperation, ReadTransfer}
 import silk.effect {Effect}
@@ -605,6 +615,7 @@ impl TestTransport {
       index = index + usize.ONE
     }
     self.readOffset = self.readOffset + count
+${routeByteReadHook}
     return ReadTransfer.Data {count: count}
   }
 
@@ -640,6 +651,7 @@ ${routeByteWriteHook}
       fail ByteIoError.Closed {operation: ByteIoOperation.Flush}
     }
     run checkByteDeadline(&deadline, ByteIoOperation.Flush)
+${routeByteFlushHook}
     return ()
   }
 
@@ -654,6 +666,7 @@ ${routeByteWriteHook}
       return ()
     }
     run checkByteDeadline(&deadline, ByteIoOperation.ShutdownWrite)
+${routeByteShutdownHook}
     self.writeShutdown = true
     self.shutdownCount = self.shutdownCount + usize.ONE
     return ()
@@ -663,6 +676,7 @@ ${routeByteWriteHook}
     if self.closed {
       return ()
     }
+${routeByteCloseHook}
     self.closed = true
     self.closeCount = self.closeCount + usize.ONE
     return ()
@@ -1515,9 +1529,14 @@ const routedConnectHead = Buffer.from(
   'CONNECT wrong.example:443 HTTP/1.1\r\nProxy-Authorization: Basic dXNlcjpwYXNz\r\nHost: wrong.example:443\r\nUser-Agent: silk-http/1\r\nAccept: */*\r\n\r\n',
 )
 const routedServerInput = Buffer.concat([
-  Buffer.from('HTTP/1.1 200 Connection Established\r\n\r\n'),
+  Buffer.from('HTTP/1.1 299 Connection Established\r\n\r\n'),
   tlsClientRsaWrongNameServerFlight,
 ])
+const proxyLifecycleHead = Buffer.from('HTTP/1.1 204 Connection Established\r\n\r\n')
+const proxyLifecycleInput = Buffer.concat([proxyLifecycleHead, Buffer.from('MORE')])
+const proxyHeadLimitInput = Buffer.from(
+  `HTTP/1.1 407 Proxy Authentication Required\r\nProxy-Authenticate: Basic ${'a'.repeat(140)}\r\n\r\n`,
+)
 
 const routeTransportFields = `  routeAudit: Option<Shared<RouteAudit>>`
 const routeHttpReadHook = `    recordRouteConnectAccepted(
@@ -1531,12 +1550,20 @@ const routeHttpWriteHook = `    if !recordRouteOutput(&self.routeAudit, input) {
         error: ByteIoError.Provider {operation: ByteIoOperation.Write, code: 122},
       }
     }`
-const routeByteWriteHook = `    if !recordRouteTlsOutput(&self.routeAudit, input) {
+const routeByteWriteHook = `    if !recordRouteTlsOutput(&self.routeAudit, self.scenario, input) {
       self.closed = true
       fail ByteIoError.Provider {operation: ByteIoOperation.Write, code: 122}
     }`
+const routeByteReadHook = `    recordProxyConcreteRead(&self.routeAudit, self.scenario)`
+const routeByteFlushHook = `    recordProxyConcreteFlush(&self.routeAudit, self.scenario)`
+const routeByteShutdownHook = `    recordProxyConcreteShutdown(&self.routeAudit, self.scenario)`
+const routeByteCloseHook = `    if recordProxyConcreteClose(&self.routeAudit, self.scenario) {
+      fail ByteIoError.Provider {operation: ByteIoOperation.Close, code: 811}
+    }`
 
-const routeImports = `import silk.https_identity {IdentityError}
+const routeImports = `${httpProxyPolicyImports}
+import silk.https_identity {IdentityError}
+import silk.http_head {ParseLimitKind, ParseReason}
 import silk.http_client {
   AcquiredRouteContext,
   RouteClient,
@@ -1545,18 +1572,43 @@ import silk.http_client {
   RouteSettings,
   RouteTransport,
 }
-import silk.http_proxy {BypassPolicy, ProxyAuth, ProxyAuthContextId, ProxyConfig, ProxyConfigId, ProxyError, Route, selectRoute}
 import silk.shared {Shared}
 import silk.tls_client {CertificateIdentityFailure, ClientLimits, TlsError}
 import silk.tls_connection as Tls {ConnectionError}
 import silk.trust_snapshot {TrustLoadLimits, TrustSnapshot, TrustSourceError}
 `
 
-const routeSupport = `struct RouteAudit {
+const routeSupport = `${httpProxyPolicySupport}
+${verifyProxyPolicy}
+
+struct RouteAudit {
   output: [u8; 512]
   outputLength: usize
   connectAccepted: bool
   handlerCount: usize
+  publicationCount: usize
+  concreteReadCount: usize
+  concreteWriteCount: usize
+  concreteFlushCount: usize
+  concreteShutdownCount: usize
+  concreteCloseCount: usize
+  rejectedExchangeCallbackCount: usize
+}
+
+fn emptyRouteAudit() -> RouteAudit {
+  return RouteAudit {
+    output: [${Array.from({ length: 512 }, () => 0).join(', ')}],
+    outputLength: usize.ZERO,
+    connectAccepted: false,
+    handlerCount: usize.ZERO,
+    publicationCount: usize.ZERO,
+    concreteReadCount: usize.ZERO,
+    concreteWriteCount: usize.ZERO,
+    concreteFlushCount: usize.ZERO,
+    concreteShutdownCount: usize.ZERO,
+    concreteCloseCount: usize.ZERO,
+    rejectedExchangeCallbackCount: usize.ZERO,
+  }
 }
 
 fn appendRouteOutput(state: &mut RouteAudit, input: &[u8]) -> bool {
@@ -1579,12 +1631,67 @@ fn recordRouteOutput(audit: &Option<Shared<RouteAudit>>, input: &[u8]) -> bool {
   }
 }
 
-fn recordRouteTlsOutput(audit: &Option<Shared<RouteAudit>>, input: &[u8]) -> bool {
+fn recordRouteTlsOutput(
+  audit: &Option<Shared<RouteAudit>>,
+  scenario: i32,
+  input: &[u8],
+) -> bool {
   return match & audit.* {
     Option.None => true
     Option.Some {value} => Shared.withMut<RouteAudit, bool>(&value, fn(state: &mut RouteAudit) -> bool {
+      if scenario == 23 {
+        state.concreteWriteCount = state.concreteWriteCount + usize.ONE
+        return true
+      }
       if !state.connectAccepted { return false }
       return appendRouteOutput(state, input)
+    })
+  }
+}
+
+fn recordProxyConcreteRead(audit: &Option<Shared<RouteAudit>>, scenario: i32) -> () {
+  if scenario != 23 { return () }
+  match & audit.* {
+    Option.None => {}
+    Option.Some {value} => Shared.withMut<RouteAudit, ()>(&value, fn(state: &mut RouteAudit) -> () {
+      state.concreteReadCount = state.concreteReadCount + usize.ONE
+      return ()
+    })
+  }
+  return ()
+}
+
+fn recordProxyConcreteFlush(audit: &Option<Shared<RouteAudit>>, scenario: i32) -> () {
+  if scenario != 23 { return () }
+  match & audit.* {
+    Option.None => {}
+    Option.Some {value} => Shared.withMut<RouteAudit, ()>(&value, fn(state: &mut RouteAudit) -> () {
+      state.concreteFlushCount = state.concreteFlushCount + usize.ONE
+      return ()
+    })
+  }
+  return ()
+}
+
+fn recordProxyConcreteShutdown(audit: &Option<Shared<RouteAudit>>, scenario: i32) -> () {
+  if scenario != 23 { return () }
+  match & audit.* {
+    Option.None => {}
+    Option.Some {value} => Shared.withMut<RouteAudit, ()>(&value, fn(state: &mut RouteAudit) -> () {
+      state.concreteShutdownCount = state.concreteShutdownCount + usize.ONE
+      return ()
+    })
+  }
+  return ()
+}
+
+fn recordProxyConcreteClose(audit: &Option<Shared<RouteAudit>>, scenario: i32) -> bool {
+  if scenario != 23 { return false }
+  return match & audit.* {
+    Option.None => false
+    Option.Some {value} => Shared.withMut<RouteAudit, bool>(&value, fn(state: &mut RouteAudit) -> bool {
+      state.concreteCloseCount = state.concreteCloseCount + usize.ONE
+      return true
     })
   }
 }
@@ -1594,7 +1701,7 @@ fn recordRouteConnectAccepted(
   input: &[u8],
   readOffset: usize,
 ) -> () {
-  let head = b"HTTP/1.1 200 Connection Established\\r\\n\\r\\n"
+  let head = b"HTTP/1.1 299 Connection Established\\r\\n\\r\\n"
   if readOffset < head.length || !sameRouteBytes(input, usize.ZERO, head) { return () }
   match & audit.* {
     Option.None => {}
@@ -1771,14 +1878,461 @@ fn identityFailure(error: ConnectionError) -> bool {
   }
 }
 
+service ProxyLifecycle {
+  effect fn audit() -> Shared<RouteAudit> ? &ProxyLifecycle
+}
+
+struct SelectedProxyLifecycle { value: Shared<RouteAudit> }
+
+impl ProxyLifecycle for SelectedProxyLifecycle {
+  effect fn audit(self: &Self) -> Shared<RouteAudit> {
+    return Shared.clone<RouteAudit>(&self.value)
+  }
+}
+
+fn proxyInvalidRequest(error: ClientError) -> bool {
+  return match move error {
+    ClientError.InvalidRequest => true
+    _ => false
+  }
+}
+
+fn proxyInvalidState(error: ClientError) -> bool {
+  return match move error {
+    ClientError.InvalidState => true
+    _ => false
+  }
+}
+
+fn proxyLifecycleAuditPassed(state: &RouteAudit) -> bool {
+  return state.publicationCount == usize.ONE
+    && state.concreteReadCount == usize.ONE
+    && state.concreteWriteCount == usize.ONE
+    && state.concreteFlushCount == 2
+    && state.concreteShutdownCount == usize.ONE
+    && state.concreteCloseCount == usize.ONE
+    && state.rejectedExchangeCallbackCount == usize.ZERO
+}
+
+fn proxyNoOutputOrCallback(state: &RouteAudit) -> bool {
+  return state.outputLength == usize.ZERO
+    && state.rejectedExchangeCallbackCount == usize.ZERO
+}
+
+effect<'call> fn rejectedProxyExchange<'call, 'exchange: 'call>(
+  exchange: &'call mut Exchange<'exchange, TestTransport>,
+) -> i32 ? &ProxyLifecycle {
+  drop exchange
+  let audit = run ProxyLifecycle.audit()
+  Shared.withMut<RouteAudit, ()>(&audit, fn(state: &mut RouteAudit) -> () {
+    state.rejectedExchangeCallbackCount = state.rejectedExchangeCallbackCount + usize.ONE
+    return ()
+  })
+  return 161
+}
+
+effect<'call> fn unexpectedProxyPublication<'call, 'tunnel: 'call>(
+  channel: &'call mut TransferredTunnel<'tunnel, TestTransport>,
+) -> i32 ? &ProxyLifecycle {
+  drop channel
+  let audit = run ProxyLifecycle.audit()
+  Shared.withMut<RouteAudit, ()>(&audit, fn(state: &mut RouteAudit) -> () {
+    state.publicationCount = state.publicationCount + usize.ONE
+    return ()
+  })
+  return 162
+}
+
+effect<'call> fn exerciseProxyDuplex<'call, 'tunnel: 'call>(
+  channel: &'call mut TransferredTunnel<'tunnel, TestTransport>,
+) -> i32 ! CallbackFailure ? &ProxyLifecycle | &mut MonotonicClock {
+  let audit = run ProxyLifecycle.audit()
+  Shared.withMut<RouteAudit, ()>(&audit, fn(state: &mut RouteAudit) -> () {
+    state.publicationCount = state.publicationCount + usize.ONE
+    return ()
+  })
+
+  let writing = ByteDuplex.writeSome(b"PING", Option.none<Instant>())
+    |> Effect.provideMut<ByteDuplex>(&mut channel.*)
+  match move run Effect.result(move writing) {
+    Result.Failure {error} => { return 163 }
+    Result.Success {value} => {
+      if value != 4 { return 164 }
+    }
+  }
+  let flushing = ByteDuplex.flush(Option.none<Instant>())
+    |> Effect.provideMut<ByteDuplex>(&mut channel.*)
+  let flushed = run Effect.result(move flushing)
+  if let Result.Failure {error} = move flushed {
+    drop error
+    return 165
+  }
+  let shutdown = ByteDuplex.shutdownWrite(Option.none<Instant>())
+    |> Effect.provideMut<ByteDuplex>(&mut channel.*)
+  let shutDown = run Effect.result(move shutdown)
+  if let Result.Failure {error} = move shutDown {
+    drop error
+    return 166
+  }
+
+  let mut remaining: [u8; 4] = [0, 0, 0, 0]
+  let remainingRead = ByteDuplex.readSome(&mut remaining, Option.none<Instant>())
+    |> Effect.provideMut<ByteDuplex>(&mut channel.*)
+  match move run Effect.result(move remainingRead) {
+    Result.Failure {error} => { return 167 }
+    Result.Success {value} => match move value {
+      ReadTransfer.End => { return 168 }
+      ReadTransfer.Data {count} => {
+        if count != 4 || remaining[0] != 77 || remaining[3] != 69 { return 169 }
+      }
+    }
+  }
+  fail CallbackFailure {code: 811}
+}
+
+effect<'call> fn exerciseProxyTunnel<'call, 'tunnel: 'call>(
+  channel: &'call mut Tunnel<'tunnel, TestTransport>,
+) -> i32 ! ClientError | CallbackFailure ? &ProxyLifecycle | &mut MonotonicClock {
+  let first = run Effect.result(
+    Tunnel.transferByteDuplex(&mut channel.*, exerciseProxyDuplex),
+  )
+  let original = match move first {
+    Result.Success {value} => { return 173 }
+    Result.Failure {error} => match move error {
+      CallbackFailure cause => {
+        if cause.code != 811 { return 174 }
+        cause
+      }
+      ClientError cause => { return 175 }
+    }
+  }
+  let repeated = run Effect.result(
+    Tunnel.transferByteDuplex(&mut channel.*, unexpectedProxyPublication),
+  )
+  match move repeated {
+    Result.Success {value} => { return 176 }
+    Result.Failure {error} => {
+      if !proxyInvalidState(move error) { return 177 }
+    }
+  }
+  fail move original
+}
+
+effect<'call> fn exerciseProxyConnect<'call, 'exchange: 'call>(
+  exchange: &'call mut Exchange<'exchange, TestTransport>,
+) -> i32
+! ClientError | OutOfMemoryError | CallbackFailure
+? &ProxyLifecycle | &mut Allocator | &mut MonotonicClock | &mut Random {
+  run Client.send(&mut exchange.*)
+  let emptyEntries: [Header<'static>; 0] = []
+  let empty = match move Headers.make(&emptyEntries, valueLimits()) {
+    Result.Failure {error} => { return 178 }
+    Result.Success {value} => value
+  }
+  run Client.finishRequest(&mut exchange.*, &empty)
+  let status = run Client.receive(&mut exchange.*)
+  if status != 204 { return 179 }
+  return run Client.withTunnel(&mut exchange.*, exerciseProxyTunnel)
+}
+
+struct ProxyLifecycleHandler {
+  ordinary: PreparedRequest
+  connect: PreparedRequest
+  audit: Shared<RouteAudit>
+}
+
+impl ProxyLifecycleHandler {
+  effect<'call> fn handle<'call>(
+    handler: Self,
+    connection: &'call mut Connection<TestTransport>,
+  ) -> i32
+  ! ClientError | OutOfMemoryError | CallbackFailure
+  ? &mut Allocator | &mut MonotonicClock | &mut Random {
+    let ProxyLifecycleHandler {ordinary, connect, audit} = move handler
+    let selected = SelectedProxyLifecycle {value: Shared.clone<RouteAudit>(&audit)}
+    let rejected = Client.withExchange(
+      &mut connection.*,
+      &ordinary,
+      RequestOptions.defaults(),
+      rejectedProxyExchange,
+    ) |> Effect.provide<ProxyLifecycle>(&selected)
+    match move run Effect.result(move rejected) {
+      Result.Success {value} => { return 180 }
+      Result.Failure {error} => match move error {
+        ClientError cause => {
+          if !proxyInvalidRequest(move cause) { return 181 }
+        }
+        OutOfMemoryError allocation => { fail move allocation }
+      }
+    }
+    if !Shared.with<RouteAudit, bool>(&audit, proxyNoOutputOrCallback) { return 182 }
+    let connected = Client.withExchange(
+      &mut connection.*,
+      &connect,
+      RequestOptions.defaults(),
+      exerciseProxyConnect,
+    ) |> Effect.provide<ProxyLifecycle>(&selected)
+    return run move connected
+  }
+}
+
+impl ConnectionHandler<
+  TestTransport,
+  i32,
+  ClientError | OutOfMemoryError | CallbackFailure
+    ? &mut Allocator | &mut MonotonicClock | &mut Random,
+> for ProxyLifecycleHandler {
+  handle: ProxyLifecycleHandler.handle
+}
+
+fn proxyLifecycleInput() -> &'static [u8] {
+  return ${silkBytes(proxyLifecycleInput)}
+}
+
+fn proxyHeadLimitInput() -> &'static [u8] {
+  return ${silkBytes(proxyHeadLimitInput)}
+}
+
+fn proxyHeadFailure(error: ClientError) -> bool {
+  return match move error {
+    ClientError.Head {error} => match move error.reason {
+      ParseReason.LimitExceeded {limit, allowed, attempted} => {
+        return limit == ParseLimitKind.HeadBytes && allowed == 160 && attempted == 161
+      }
+      _ => false
+    }
+    _ => false
+  }
+}
+
+effect<'call> fn receiveProxyHeadLimit<'call, 'exchange: 'call>(
+  exchange: &'call mut Exchange<'exchange, TestTransport>,
+) -> bool
+! ClientError | OutOfMemoryError
+? &mut Allocator | &mut MonotonicClock | &mut Random {
+  run Client.send(&mut exchange.*)
+  let entries: [Header<'static>; 0] = []
+  let trailers = match move Headers.make(&entries, valueLimits()) {
+    Result.Success {value} => value
+    Result.Failure {error} => { return false }
+  }
+  run Client.finishRequest(&mut exchange.*, &trailers)
+  let status = run Client.receive(&mut exchange.*)
+  drop status
+  return false
+}
+
+struct ProxyHeadLimitHandler { request: PreparedRequest }
+
+impl ProxyHeadLimitHandler {
+  effect<'call> fn handle<'call>(
+    handler: Self,
+    connection: &'call mut Connection<TestTransport>,
+  ) -> bool
+  ! OutOfMemoryError
+  ? &mut Allocator | &mut MonotonicClock | &mut Random {
+    let attempted = run Effect.result(Client.withExchange(
+      &mut connection.*,
+      &handler.request,
+      RequestOptions.defaults(),
+      receiveProxyHeadLimit,
+    ))
+    return match move attempted {
+      Result.Success {value} => false
+      Result.Failure {error} => match move error {
+        ClientError cause => proxyHeadFailure(move cause)
+        OutOfMemoryError allocation => { fail move allocation }
+      }
+    }
+  }
+}
+
+impl ConnectionHandler<
+  TestTransport,
+  bool,
+  OutOfMemoryError ? &mut Allocator | &mut MonotonicClock | &mut Random,
+> for ProxyHeadLimitHandler {
+  handle: ProxyHeadLimitHandler.handle
+}
+
+effect fn verifyProxyHeadLimit(
+  request: PreparedRequest,
+  peer: Origin,
+) -> bool
+! OutOfMemoryError
+? &mut Allocator | &mut MonotonicClock | &mut Random {
+  let provider = TestTransport {
+    scenario: 23,
+    input: proxyHeadLimitInput(),
+    readOffset: usize.ZERO,
+    writeOrdinal: usize.ZERO,
+    accepted: usize.ZERO,
+    closeCount: usize.ZERO,
+    shutdownCount: usize.ZERO,
+    writeShutdown: false,
+    closed: false,
+    routeAudit: Option.none<Shared<RouteAudit>>(),
+  }
+  let mut selectedLimits = limits()
+  selectedLimits.head.maxHeadBytes = 160
+  let attempted = run Effect.result(Client.withOwned(
+    move provider,
+    peer,
+    Version.Http11,
+    move selectedLimits,
+    Option.none<Instant>(),
+    ProxyHeadLimitHandler {request: move request},
+  ))
+  return match move attempted {
+    Result.Success {value} => value
+    Result.Failure {error} => match move error {
+      OutOfMemoryError allocation => { fail move allocation }
+      ClientError cause => false
+    }
+  }
+}
+
+effect fn routedProxyLifecycle() -> i32 ! OutOfMemoryError {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let policyVerification = verifyProxyPolicy()
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  if !run move policyVerification { return 183 }
+  let audit = run Shared.make<RouteAudit>(emptyRouteAudit())
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let emptyOrigins: [Origin; 0] = []
+  let bypass = match move run BypassPolicy.copy(&emptyOrigins)
+    |> Effect.provideMut<Allocator>(&mut allocator) {
+    Result.Success {value} => move value
+    Result.Failure {error} => { return 184 }
+  }
+  let authentication = match move run ProxyAuth.preparedBasic(
+    ProxyAuthContextId.make(200),
+    b"dXNlcjpwYXNz",
+  ) |> Effect.provideMut<Allocator>(&mut allocator) {
+    Result.Success {value} => move value
+    Result.Failure {error} => { return 185 }
+  }
+  let config = match move ProxyConfig.fromUri(
+    ProxyConfigId.make(199),
+    "http://proxy.example:3128",
+    move authentication,
+    move bypass,
+    4096,
+  ) {
+    Result.Success {value} => move value
+    Result.Failure {error} => { return 186 }
+  }
+  let uri = match move Uri.parse("https://service.example/") {
+    Result.Success {value} => value
+    Result.Failure {error} => { return 187 }
+  }
+  let origin = match move Origin.fromUri(&uri) {
+    Result.Success {value} => value
+    Result.Failure {error} => { return 188 }
+  }
+
+  let mut clock = FixedClock {mark: SystemClock.make(0, 0)}
+  let mut random = RouteRandom {filled: usize.ZERO}
+  let headRoute = selectRoute(&config, origin)
+  let headRequest = match move run Effect.result(prepareConnect(
+    &headRoute,
+    valueLimits(),
+    1024,
+    512,
+  )) |> Effect.provideMut<Allocator>(&mut allocator) {
+    Result.Success {value} => move value
+    Result.Failure {error} => { return 189 }
+  }
+  let headPeer = match move Route.physicalPeer(&headRoute) {
+    Result.Success {value} => value
+    Result.Failure {error} => { return 190 }
+  }
+  let bounded = run verifyProxyHeadLimit(move headRequest, headPeer)
+    |> Effect.provideMut<Random>(&mut random)
+    |> Effect.provideMut<MonotonicClock>(&mut clock)
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  if !bounded { return 191 }
+
+  let route = selectRoute(&config, origin)
+  let connect = match move run Effect.result(prepareConnect(
+    &route,
+    valueLimits(),
+    1024,
+    512,
+  )) |> Effect.provideMut<Allocator>(&mut allocator) {
+    Result.Success {value} => move value
+    Result.Failure {error} => { return 192 }
+  }
+  let fields: [Header<'static>; 0] = []
+  let headers = match move Headers.make(&fields, valueLimits()) {
+    Result.Success {value} => value
+    Result.Failure {error} => { return 193 }
+  }
+  let policy = HeaderPolicy.defaults()
+  let ordinary = match move run Effect.result(Request.fromUri(
+    &uri,
+    Version.Http11,
+    Method.get(),
+    &headers,
+    &policy,
+    BodyMode.Empty,
+    false,
+    valueLimits(),
+    1024,
+    512,
+  )) |> Effect.provideMut<Allocator>(&mut allocator) {
+    Result.Success {value} => move value
+    Result.Failure {error} => { return 194 }
+  }
+  let peer = match move Route.physicalPeer(&route) {
+    Result.Success {value} => value
+    Result.Failure {error} => { return 195 }
+  }
+  let provider = TestTransport {
+    scenario: 23,
+    input: proxyLifecycleInput(),
+    readOffset: usize.ZERO,
+    writeOrdinal: usize.ZERO,
+    accepted: usize.ZERO,
+    closeCount: usize.ZERO,
+    shutdownCount: usize.ZERO,
+    writeShutdown: false,
+    closed: false,
+    routeAudit: Option.some<Shared<RouteAudit>>(Shared.clone<RouteAudit>(&audit)),
+  }
+  let mut selectedLimits = limits()
+  selectedLimits.readCapacity = ${proxyLifecycleHead.length}
+  let attempted = run Effect.result(Client.withOwned(
+    move provider,
+    peer,
+    Version.Http11,
+    move selectedLimits,
+    Option.none<Instant>(),
+    ProxyLifecycleHandler {
+      ordinary: move ordinary,
+      connect: move connect,
+      audit: Shared.clone<RouteAudit>(&audit),
+    },
+  ))
+    |> Effect.provideMut<Random>(&mut random)
+    |> Effect.provideMut<MonotonicClock>(&mut clock)
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let preserved = match move attempted {
+    Result.Success {value} => false
+    Result.Failure {error} => match move error {
+      CallbackFailure cause => cause.code == 811
+      _ => false
+    }
+  }
+  if !preserved { return 196 }
+  if !Shared.with<RouteAudit, bool>(&audit, proxyLifecycleAuditPassed) { return 197 }
+  return 0
+}
+
 effect fn routedWrongName() -> i32 ! OutOfMemoryError {
   let mut allocator = Allocator.systemAllocatorProvider()
-  let audit = run Shared.make<RouteAudit>(RouteAudit {
-    output: [${Array.from({ length: 512 }, () => 0).join(', ')}],
-    outputLength: usize.ZERO,
-    connectAccepted: false,
-    handlerCount: usize.ZERO,
-  }) |> Effect.provideMut<Allocator>(&mut allocator)
+  let audit = run Shared.make<RouteAudit>(emptyRouteAudit())
+    |> Effect.provideMut<Allocator>(&mut allocator)
   let provider = TestTransport {
     scenario: 22,
     input: routeInput(),
@@ -1940,6 +2494,10 @@ const routeWitness = `  // Compile-only witness: the runtime corpus does not sel
   if scenario == 22 {
     drop adapter
     return run routedWrongName()
+  }
+  if scenario == 23 {
+    drop adapter
+    return run routedProxyLifecycle()
   }`
 
 export const httpClientAcceptanceSource = sourceFor(
@@ -1952,6 +2510,10 @@ export const httpClientAcceptanceSource = sourceFor(
   routeHttpReadHook,
   routeHttpWriteHook,
   routeByteWriteHook,
+  routeByteReadHook,
+  routeByteFlushHook,
+  routeByteShutdownHook,
+  routeByteCloseHook,
 )
 export const httpClientBoundariesAcceptanceSource = sourceFor(boundaries, boundaryHandler)
 export const httpClientOutputFailuresAcceptanceSource = sourceFor(outputFailures, boundaryHandler)
