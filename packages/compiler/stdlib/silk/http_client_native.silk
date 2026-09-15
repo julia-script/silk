@@ -7,10 +7,23 @@
 //! an overall deadline before dispatch. Cleanup closes without a flush or TLS shutdown.
 
 import silk.allocator {Allocator, OutOfMemoryError}
-import silk.byte_duplex {ByteDuplex, ByteIoOperation, ReadTransfer}
+import silk.byte_duplex {ByteDuplex, ByteIoError, ByteIoOperation, ReadTransfer}
 import silk.effect {Effect}
-import silk.http_client {Connection, ConnectionHandler, ClientError, Limits, withOwned}
+import silk.http_client {
+  AcquiredRouteContext,
+  Connection,
+  ConnectionHandler,
+  ClientError,
+  Limits,
+  RouteClient,
+  RouteHandler,
+  RouteProtocol,
+  RouteSettings,
+  withOwned,
+  withRoute,
+}
 import silk.http_origin {Origin}
+import silk.http_proxy {ProxyError, Route, RouteMode}
 import silk.http_transport as Transport {HttpTransport, TransportError}
 import silk.https_identity {HttpsIdentity, OriginHost, ReferenceIdentity, IdentityError}
 import silk.monotonic_clock {MonotonicClock}
@@ -233,6 +246,39 @@ impl Options {
   }
 }
 
+fn proxyPeer<'configuration>(route: &Route<'configuration>) -> Result<Origin, ProxyError> {
+  if Route.mode(route) == RouteMode.Direct {
+    return Result.succeed<Origin, ProxyError>(Route.originalOrigin(route))
+  }
+  return match move Route.physicalPeer(route) {
+    Result.Success {value} => Result.succeed<Origin, ProxyError>(value)
+    Result.Failure {error} => {
+      drop error
+      Result.failResult<Origin, ProxyError>(ProxyError.invalidRoute())
+    }
+  }
+}
+
+fn proxyProtocol(policy: AlpnPolicy) -> RouteProtocol {
+  return match policy {
+    AlpnPolicy.Http10 => RouteProtocol.Http10
+    AlpnPolicy.OptionalHttp11 => RouteProtocol.OptionalHttp11
+    AlpnPolicy.RequiredHttp11 => RouteProtocol.RequiredHttp11
+  }
+}
+
+fn proxySettings(options: &Options, limits: Limits) -> RouteSettings {
+  return RouteSettings {
+    http: limits,
+    request: limits.head.values,
+    maxRequestHeadBytes: limits.head.maxHeadBytes,
+    maxProxyCredentialBytes: limits.head.values.maxValueBytes,
+    protocol: proxyProtocol(options.alpn),
+    tls: options.tls,
+    handshakeDurationNanoseconds: options.handshakeNanoseconds,
+  }
+}
+
 static if (Intrinsic.targetOperatingSystem() == "darwin" && Intrinsic.targetArchitecture() == "aarch64" && Intrinsic.targetAbi() == "apple" && Intrinsic.profileText(
   "libc",
 ) == "system") || (Intrinsic.targetOperatingSystem() == "linux" && Intrinsic.targetAbi() == "gnu" && Intrinsic.profileText(
@@ -253,6 +299,130 @@ static if (Intrinsic.targetOperatingSystem() == "darwin" && Intrinsic.targetArch
     state: State
     terminal: bool
     routeValue: NativeRoute
+  }
+  /// One affine plain native provider owned by a routed HTTP scope.
+  ///
+  /// # Details
+  ///
+  /// The provider retains the exact socket selected for the route's physical peer. HTTP and raw
+  /// byte authority share one terminal state so CONNECT transfer cannot duplicate ownership.
+  pub struct NativeRouteProvider {
+    connection: NativeConnection
+    terminal: bool
+  }
+
+  impl NativeRouteProvider {
+    effect fn readHttp(
+      self: &mut Self,
+      output: &mut [u8],
+      deadline: Option<Instant>,
+    ) -> ReadTransfer
+    ! TransportError | OutOfMemoryError
+    ? &mut Allocator | &mut MonotonicClock | &mut Random {
+      if self.terminal {
+        fail TransportError.Plain {error: ByteDuplex.closed(ByteIoOperation.Read)}
+      }
+      let mut transport = Transport.plain<NativeConnection>(&mut self.connection)
+      return run HttpTransport.readSome(move output, move deadline)
+        |> Effect.provideMut<HttpTransport>(&mut transport)
+    }
+
+    effect fn writeHttp(
+      self: &mut Self,
+      input: &[u8],
+      deadline: Option<Instant>,
+    ) -> usize
+    ! TransportError | OutOfMemoryError
+    ? &mut Allocator | &mut MonotonicClock | &mut Random {
+      if self.terminal {
+        fail TransportError.Plain {error: ByteDuplex.closed(ByteIoOperation.Write)}
+      }
+      let mut transport = Transport.plain<NativeConnection>(&mut self.connection)
+      return run HttpTransport.writeSome(move input, move deadline)
+        |> Effect.provideMut<HttpTransport>(&mut transport)
+    }
+
+    effect fn flushHttp(
+      self: &mut Self,
+      deadline: Option<Instant>,
+    ) -> ()
+    ! TransportError | OutOfMemoryError
+    ? &mut Allocator | &mut MonotonicClock | &mut Random {
+      if self.terminal {
+        fail TransportError.Plain {error: ByteDuplex.closed(ByteIoOperation.Flush)}
+      }
+      let mut transport = Transport.plain<NativeConnection>(&mut self.connection)
+      return run HttpTransport.flush(move deadline)
+        |> Effect.provideMut<HttpTransport>(&mut transport)
+    }
+
+    effect fn closeHttp(self: &mut Self) -> () ! TransportError {
+      if self.terminal { return () }
+      self.terminal = true
+      let mut transport = Transport.plain<NativeConnection>(&mut self.connection)
+      return run HttpTransport.close()
+        |> Effect.provideMut<HttpTransport>(&mut transport)
+    }
+
+    unsafe effect fn readBytes(
+      self: &mut Self,
+      output: &mut [u8],
+      deadline: Option<Instant>,
+    ) -> ReadTransfer ! ByteIoError ? &mut MonotonicClock {
+      if self.terminal { fail ByteDuplex.closed(ByteIoOperation.Read) }
+      return run unsafe ByteDuplex.readSomeRaw(move output, move deadline)
+        |> Effect.provideMut<ByteDuplex>(&mut self.connection)
+    }
+
+    unsafe effect fn writeBytes(
+      self: &mut Self,
+      input: &[u8],
+      deadline: Option<Instant>,
+    ) -> usize ! ByteIoError ? &mut MonotonicClock {
+      if self.terminal { fail ByteDuplex.closed(ByteIoOperation.Write) }
+      return run unsafe ByteDuplex.writeSomeRaw(move input, move deadline)
+        |> Effect.provideMut<ByteDuplex>(&mut self.connection)
+    }
+
+    unsafe effect fn flushBytes(
+      self: &mut Self,
+      deadline: Option<Instant>,
+    ) -> () ! ByteIoError ? &mut MonotonicClock {
+      if self.terminal { fail ByteDuplex.closed(ByteIoOperation.Flush) }
+      return run unsafe ByteDuplex.flushRaw(move deadline)
+        |> Effect.provideMut<ByteDuplex>(&mut self.connection)
+    }
+
+    unsafe effect fn shutdownBytes(
+      self: &mut Self,
+      deadline: Option<Instant>,
+    ) -> () ! ByteIoError ? &mut MonotonicClock {
+      if self.terminal { fail ByteDuplex.closed(ByteIoOperation.ShutdownWrite) }
+      return run unsafe ByteDuplex.shutdownWriteRaw(move deadline)
+        |> Effect.provideMut<ByteDuplex>(&mut self.connection)
+    }
+
+    unsafe effect fn closeBytes(self: &mut Self) -> () ! ByteIoError {
+      if self.terminal { return () }
+      self.terminal = true
+      return run unsafe ByteDuplex.closeRaw()
+        |> Effect.provideMut<ByteDuplex>(&mut self.connection)
+    }
+  }
+
+  impl HttpTransport for NativeRouteProvider {
+    readSomeRaw: NativeRouteProvider.readHttp
+    writeSomeRaw: NativeRouteProvider.writeHttp
+    flush: NativeRouteProvider.flushHttp
+    close: NativeRouteProvider.closeHttp
+  }
+
+  impl ByteDuplex for NativeRouteProvider {
+    readSomeRaw: NativeRouteProvider.readBytes
+    writeSomeRaw: NativeRouteProvider.writeBytes
+    flushRaw: NativeRouteProvider.flushBytes
+    shutdownWriteRaw: NativeRouteProvider.shutdownBytes
+    closeRaw: NativeRouteProvider.closeBytes
   }
   /// Resolves and acquires one origin, then lends its serial HTTP connection to one handler.
   ///
@@ -317,6 +487,137 @@ static if (Intrinsic.targetOperatingSystem() == "darwin" && Intrinsic.targetArch
       move handler,
     )
   }
+  struct NativeProxyClient {
+    options: Options
+    limits: Limits
+    expectedPeer: Origin
+  }
+
+  impl<
+    A,
+    E,
+    ?R,
+    C: AcquiredRouteContext<NativeRouteProvider, A, E ? R>,
+  > NativeProxyClient {
+    fn settings(client: &Self) -> RouteSettings {
+      return proxySettings(&client.options, client.limits)
+    }
+
+    effect fn acquire(
+      client: Self,
+      peer: Origin,
+      deadline: Option<Instant>,
+      context: C,
+    ) -> A
+    ! E | ProxyError | NativeClientError | ResolverError | NativeSocketError
+    ? R | &mut Allocator | &mut MonotonicClock {
+      let NativeProxyClient {options, limits, expectedPeer} = move client
+      drop limits
+      if !Origin.equals(&expectedPeer, &peer) {
+        fail ProxyError.invalidRoute()
+      }
+      let provider = run acquireRouteProvider(peer, &options, &deadline)
+      return run AcquiredRouteContext<NativeRouteProvider, A, E ? R>.use(
+        move context,
+        move provider,
+      )
+    }
+  }
+
+  impl<
+    A,
+    E,
+    ?R,
+    C: AcquiredRouteContext<NativeRouteProvider, A, E ? R>,
+  > RouteClient<
+    NativeRouteProvider,
+    A,
+    E,
+    ProxyError | NativeClientError | ResolverError | NativeSocketError,
+    R,
+    &mut Allocator | &mut MonotonicClock,
+    C
+  > for NativeProxyClient {
+    settings: NativeProxyClient.settings
+    acquire: NativeProxyClient.acquire
+  }
+
+  /// Resolves and connects only one sealed route's physical peer, then lends the final HTTP scope.
+  ///
+  /// # Details
+  ///
+  /// `options.deadline` is passed unchanged through native preflight, resolution, connection,
+  /// CONNECT, and TLS. `limits` supplies both the HTTP scope and generated CONNECT bounds. Secure
+  /// routes consume caller-prepared trust; no resolver fallback or alternate endpoint is selected.
+  pub effect fn withProxyRoute<
+    'configuration,
+    A,
+    E,
+    ?R,
+    H: RouteHandler<'configuration, NativeRouteProvider, A, E ? R>,
+  >(
+    route: Route<'configuration>,
+    options: Options,
+    limits: Limits,
+    preparedTrust: Option<TrustSnapshot>,
+    handler: H,
+  ) -> A
+  ! E | ProxyError | ClientError | NativeClientError | ResolverError | NativeSocketError | ConnectionError | IdentityError | OutOfMemoryError
+  ? R | &mut Allocator | &mut MonotonicClock | &mut SystemClock | &mut Random
+  where R in Without<R, ByteDuplex>,
+    R in Without<R, HttpTransport> {
+    let expectedPeer = match move proxyPeer(&route) {
+      Result.Success {value} => value
+      Result.Failure {error} => { fail move error }
+    }
+    let deadline = copyDeadline(&options.deadline)
+    let client = NativeProxyClient {
+      options: move options,
+      limits: limits,
+      expectedPeer: expectedPeer,
+    }
+    return run withRoute(
+      move client,
+      route,
+      move preparedTrust,
+      move deadline,
+      move handler,
+    )
+  }
+
+  effect fn acquireRouteProvider(
+    peer: Origin,
+    options: &Options,
+    deadline: &Option<Instant>,
+  ) -> NativeRouteProvider
+  ! NativeClientError | ResolverError | NativeSocketError
+  ? &mut Allocator | &mut MonotonicClock {
+    let admitted = preflightDeadline(&peer, deadline)
+    if let Result.Failure {error} = move admitted {
+      fail move error
+    }
+    let connect = run connectOptions(options)
+    let request: ResolveRequest = match move ResolveRequest.make(
+      Origin.host(&peer),
+      Origin.port(&peer),
+      options.family,
+      options.maximumAddresses,
+      copyDeadline(deadline),
+    ) {
+      Result.Success {value} => move value
+      Result.Failure {error} => { fail move error }
+    }
+    let mut resolver = NativeSystemResolver.make()
+    let endpoints = run Resolver.resolve(&request)
+      |> Effect.provideMut<Resolver>(&mut resolver)
+    let connection = run Sockets.connectResolvedOwned(
+      ResolvedEndpoints.asSlice(&endpoints),
+      connect,
+      copyDeadline(deadline),
+    )
+    return NativeRouteProvider {connection: move connection, terminal: false}
+  }
+
   effect fn acquire(origin: Origin, options: &Options) -> NativeTransport
   ! NativeClientError | ResolverError | NativeSocketError | ConnectionError | IdentityError | TrustSourceError | OutOfMemoryError
   ? &mut Allocator | &mut MonotonicClock | &mut SystemClock | &mut Random | &mut TrustSource {
@@ -888,12 +1189,14 @@ static if (Intrinsic.targetOperatingSystem() == "darwin" && Intrinsic.targetArch
     flush: NativeTransport.flushOutput
     close: NativeTransport.closeLease
   }
-  /// Checks native TCP support and rejects a hostname deadline before resolver dispatch.
-  pub fn preflight(origin: &Origin, options: &Options) -> Result<(), NativeClientError> {
+  fn preflightDeadline(
+    origin: &Origin,
+    deadline: &Option<Instant>,
+  ) -> Result<(), NativeClientError> {
     let host = Origin.host(origin)
     match host {
       Host.Domain {value} => {
-        if let Option.Some {value: deadline} = &options.deadline {
+        if let Option.Some {value: mark} = deadline {
           return Result.failResult<(), NativeClientError>(NativeClientError.UnsupportedDeadline)
         }
       }
@@ -902,9 +1205,42 @@ static if (Intrinsic.targetOperatingSystem() == "darwin" && Intrinsic.targetArch
     }
     return Result.succeed<(), NativeClientError>(())
   }
+
+  /// Checks native TCP support and rejects a hostname deadline before resolver dispatch.
+  pub fn preflight(origin: &Origin, options: &Options) -> Result<(), NativeClientError> {
+    return preflightDeadline(origin, &options.deadline)
+  }
+
+  /// Returns the exact route-selected native peer after target and deadline preflight.
+  ///
+  /// # Details
+  ///
+  /// Direct returns the original origin; Forward and Tunnel return the sealed plain proxy origin.
+  /// A finite deadline with either selected domain fails before synchronous resolver dispatch.
+  pub fn preflightProxyRoute<'configuration>(
+    route: &Route<'configuration>,
+    options: &Options,
+  ) -> Result<Origin, ProxyError | NativeClientError> {
+    let peer = match move proxyPeer(route) {
+      Result<Origin, ProxyError>.Success {value} => value
+      Result<Origin, ProxyError>.Failure {error} => {
+        return Result.failResult<Origin, ProxyError | NativeClientError>(move error)
+      }
+    }
+    return match move preflight(&peer, options) {
+      Result<(), NativeClientError>.Success {value} => {
+        Result.succeed<Origin, ProxyError | NativeClientError>(peer)
+      }
+      Result<(), NativeClientError>.Failure {error} => {
+        Result.failResult<Origin, ProxyError | NativeClientError>(move error)
+      }
+    }
+  }
 } else {
   /// The unavailable native transport type for an unsupported target.
   pub struct NativeTransport {}
+  /// The unavailable routed native provider type for an unsupported target.
+  pub struct NativeRouteProvider {}
   impl NativeTransport {
     /// Returns empty route metadata; this target cannot acquire a native connection.
     pub fn route(self: &Self) -> NativeRoute {
@@ -940,11 +1276,89 @@ static if (Intrinsic.targetOperatingSystem() == "darwin" && Intrinsic.targetArch
       return ()
     }
   }
+  impl HttpTransport for NativeRouteProvider {
+    /// Rejects reads because this target has no native connection.
+    effect fn readSomeRaw(self: &mut Self, output: &mut [u8], deadline: Option<Instant>) -> ReadTransfer
+    ! TransportError | OutOfMemoryError
+    ? &mut Allocator | &mut MonotonicClock | &mut Random {
+      drop output
+      drop deadline
+      fail TransportError.Plain {error: ByteDuplex.closed(ByteIoOperation.Read)}
+    }
+    /// Rejects writes because this target has no native connection.
+    effect fn writeSomeRaw(self: &mut Self, input: &[u8], deadline: Option<Instant>) -> usize
+    ! TransportError | OutOfMemoryError
+    ? &mut Allocator | &mut MonotonicClock | &mut Random {
+      drop input
+      drop deadline
+      fail TransportError.Plain {error: ByteDuplex.closed(ByteIoOperation.Write)}
+    }
+    /// Rejects flushing because this target has no native connection.
+    effect fn flush(self: &mut Self, deadline: Option<Instant>) -> ()
+    ! TransportError | OutOfMemoryError
+    ? &mut Allocator | &mut MonotonicClock | &mut Random {
+      drop deadline
+      fail TransportError.Plain {error: ByteDuplex.closed(ByteIoOperation.Flush)}
+    }
+    /// Completes locally because no native resource exists.
+    effect fn close(self: &mut Self) -> () ! TransportError { return () }
+  }
+  impl ByteDuplex for NativeRouteProvider {
+    /// Rejects reads because this target has no native connection.
+    unsafe effect fn readSomeRaw(
+      self: &mut Self,
+      output: &mut [u8],
+      deadline: Option<Instant>,
+    ) -> ReadTransfer ! ByteIoError ? &mut MonotonicClock {
+      drop output
+      drop deadline
+      fail ByteDuplex.closed(ByteIoOperation.Read)
+    }
+    /// Rejects writes because this target has no native connection.
+    unsafe effect fn writeSomeRaw(
+      self: &mut Self,
+      input: &[u8],
+      deadline: Option<Instant>,
+    ) -> usize ! ByteIoError ? &mut MonotonicClock {
+      drop input
+      drop deadline
+      fail ByteDuplex.closed(ByteIoOperation.Write)
+    }
+    /// Rejects flushing because this target has no native connection.
+    unsafe effect fn flushRaw(
+      self: &mut Self,
+      deadline: Option<Instant>,
+    ) -> () ! ByteIoError ? &mut MonotonicClock {
+      drop deadline
+      fail ByteDuplex.closed(ByteIoOperation.Flush)
+    }
+    /// Rejects write shutdown because this target has no native connection.
+    unsafe effect fn shutdownWriteRaw(
+      self: &mut Self,
+      deadline: Option<Instant>,
+    ) -> () ! ByteIoError ? &mut MonotonicClock {
+      drop deadline
+      fail ByteDuplex.closed(ByteIoOperation.ShutdownWrite)
+    }
+    /// Completes locally because no native resource exists.
+    unsafe effect fn closeRaw(self: &mut Self) -> () ! ByteIoError { return () }
+  }
   /// Returns the typed unsupported-target result before allocation or provider dispatch.
   pub fn preflight(origin: &Origin, options: &Options) -> Result<(), NativeClientError> {
     drop origin
     drop options
     return Result.failResult<(), NativeClientError>(NativeClientError.UnsupportedTarget)
+  }
+  /// Returns unsupported-target before route inspection or provider dispatch.
+  pub fn preflightProxyRoute<'configuration>(
+    route: &Route<'configuration>,
+    options: &Options,
+  ) -> Result<Origin, ProxyError | NativeClientError> {
+    drop route
+    drop options
+    return Result.failResult<Origin, ProxyError | NativeClientError>(
+      NativeClientError.UnsupportedTarget,
+    )
   }
   /// Rejects native HTTP acquisition before allocation or provider dispatch on this target.
   pub effect fn withConnection<A, E, ?R, H: ConnectionHandler<NativeTransport, A, E ? R>>(
@@ -971,6 +1385,29 @@ static if (Intrinsic.targetOperatingSystem() == "darwin" && Intrinsic.targetArch
     drop origin
     drop options
     drop limits
+    drop handler
+    fail NativeClientError.UnsupportedTarget
+  }
+  /// Rejects routed native acquisition before allocation or provider dispatch on this target.
+  pub effect fn withProxyRoute<
+    'configuration,
+    A,
+    E,
+    ?R,
+    H: RouteHandler<'configuration, NativeRouteProvider, A, E ? R>,
+  >(
+    route: Route<'configuration>,
+    options: Options,
+    limits: Limits,
+    preparedTrust: Option<TrustSnapshot>,
+    handler: H,
+  ) -> A ! E | NativeClientError ? R
+  where R in Without<R, ByteDuplex>,
+    R in Without<R, HttpTransport> {
+    drop route
+    drop options
+    drop limits
+    drop preparedTrust
     drop handler
     fail NativeClientError.UnsupportedTarget
   }
