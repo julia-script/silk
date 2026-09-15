@@ -413,11 +413,15 @@ impl<C> Fetch<C> {
 
 /// A sequential effectful destination whose metadata and current chunk loans cannot escape.
 pub interface Sink<E, ?R> {
-  /// Accepts the complete offered chunk before a later read or callback may begin.
+  /// Accepts the complete offered chunk under the unchanged operation deadline.
+  ///
+  /// `deadline` is the original absolute fetch deadline. `None` permits an unbounded wait. The
+  /// callback must return before Fetch reads or offers another chunk.
   effect<'call> fn write<'call>(
     sink: &mut Self,
     metadata: &'call ResponseMetadata,
     chunk: &'call [u8],
+    deadline: &'call Option<Instant>,
   ) -> () ! E ? R
 }
 
@@ -462,6 +466,7 @@ interface Destination<A, E, ?R> {
     destination: &mut Self,
     metadata: &'call ResponseMetadata,
     chunk: &'call [u8],
+    deadline: &'call Option<Instant>,
     deliveredBefore: u64,
   ) -> () ! E ? R
   fn publish(destination: Self, result: FetchResult) -> A
@@ -476,10 +481,11 @@ impl<S, SinkError, ?SinkRequirements, S: Sink<SinkError ? SinkRequirements>> Sin
     self: &mut Self,
     metadata: &'call ResponseMetadata,
     chunk: &'call [u8],
+    deadline: &'call Option<Instant>,
     deliveredBefore: u64,
   ) -> () ! DestinationFailure<SinkError> ? SinkRequirements {
     let attempted = run Effect.result(
-      Sink<SinkError ? SinkRequirements>.write(&mut self.sink, metadata, chunk),
+      Sink<SinkError ? SinkRequirements>.write(&mut self.sink, metadata, chunk, deadline),
     )
     return match move attempted {
       Result.Success {value} => move value
@@ -620,9 +626,11 @@ impl CollectDestination {
     self: &mut Self,
     metadata: &'call ResponseMetadata,
     chunk: &'call [u8],
+    deadline: &'call Option<Instant>,
     deliveredBefore: u64,
   ) -> () ! FetchError | OutOfMemoryError ? &mut Allocator {
     drop metadata
+    drop deadline
     let attempted = match move usize.checkedAdd(Bytes.length(&self.body), chunk.length) {
       Option.None => {
         fail fetchFailure(FetchPhase.Destination, FetchReason.SizeOverflow)
@@ -661,9 +669,11 @@ impl DiscardDestination {
     self: &mut Self,
     metadata: &'call ResponseMetadata,
     chunk: &'call [u8],
+    deadline: &'call Option<Instant>,
     deliveredBefore: u64,
   ) -> () ! FetchError {
     drop metadata
+    drop deadline
     let attempted = match move u64.checkedAdd(deliveredBefore, usize.toU64(chunk.length)) {
       Option.None => {
         fail fetchFailure(FetchPhase.Destination, FetchReason.SizeOverflow)
@@ -893,6 +903,7 @@ struct DeliveryResponseHandler<D> {
   maxDeliveredBodyBytes: u64
   maxOwnedMetadataBytes: usize
   maxBufferedBytes: usize
+  deadline: Option<Instant>
 }
 
 effect fn deliverResponse<
@@ -923,6 +934,7 @@ where
       maxDeliveredBodyBytes,
       maxOwnedMetadataBytes,
       maxBufferedBytes,
+      deadline,
     } = move handler
     let mut selectedDestination = move destination
     let head = run exchange.head()
@@ -1017,6 +1029,7 @@ where
           &mut selectedDestination,
           &metadata,
           chunk,
+          &deadline,
           delivered,
         )
         delivered = attempted
@@ -1185,6 +1198,7 @@ impl<
       maxDeliveredBodyBytes: maxDeliveredBodyBytes,
       maxOwnedMetadataBytes: maxOwnedMetadataBytes,
       maxBufferedBytes: maxBufferedBytes,
+      deadline: copyDeadline(&deadline),
     }
     return run mapSwitching(Redirect.withEmptyHybridResponse(
       &mut adapter,
@@ -1390,6 +1404,7 @@ impl<
       maxDeliveredBodyBytes: maxDeliveredBodyBytes,
       maxOwnedMetadataBytes: maxOwnedMetadataBytes,
       maxBufferedBytes: maxBufferedBytes,
+      deadline: copyDeadline(&deadline),
     }
     return run mapSwitching(Redirect.withBytesHybridResponse(
       &mut adapter,
@@ -1602,6 +1617,7 @@ impl<
       maxDeliveredBodyBytes: maxDeliveredBodyBytes,
       maxOwnedMetadataBytes: maxOwnedMetadataBytes,
       maxBufferedBytes: maxBufferedBytes,
+      deadline: copyDeadline(&deadline),
     }
     return run mapSwitching(Redirect.withOneShotHybridResponse(
       &mut adapter,
@@ -1838,6 +1854,7 @@ impl<
       maxDeliveredBodyBytes: maxDeliveredBodyBytes,
       maxOwnedMetadataBytes: maxOwnedMetadataBytes,
       maxBufferedBytes: maxBufferedBytes,
+      deadline: copyDeadline(&deadline),
     }
     return run mapSwitching(Redirect.withReplayHybridResponse(
       &mut adapter,
