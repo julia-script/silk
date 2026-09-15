@@ -1,0 +1,82 @@
+//! Native ownership context for one-shot HTTP fetch operations.
+//!
+//! # Details
+//!
+//! The context retains one immutable proxy policy through [`NativeRedirectClient`]. Fresh
+//! attempts therefore recompute the sealed route for every current URI before contact. An
+//! optional native pool handle is copied explicitly, sharing only its preallocated slot state and
+//! bounded immutable direct-route context.
+//!
+//! # Gotchas
+//!
+//! The delivered native pool accepts direct TCP and Unix keys only. A fetch adapter must reject a
+//! configured pool when proxy recomputation selects forwarding or tunneling; it must not silently
+//! bypass the selected proxy or publish proxy credentials to a direct pool.
+
+import silk.allocator {Allocator, OutOfMemoryError}
+import silk.http_client {Limits}
+import silk.http_client_native {NativeRedirectClient, NativeTransport, Options}
+import silk.http_connection_pool {ConnectionKey, Handle}
+import silk.http_connection_pool_native as NativePool
+import silk.http_proxy {Route}
+import silk.option {Option}
+import silk.trust_snapshot {TrustSourceError}
+
+/// An immutable native redirect client and optional compatible direct-pool capability.
+///
+/// # Details
+///
+/// [`make`] consumes all fresh-acquisition settings without allocation. [`makeWithPool`] first
+/// constructs that exact fresh context, then fallibly copies the supplied pool handle. A failed
+/// copy publishes no partially initialized context and leaves the source handle valid.
+pub struct Context<'configuration> {
+  freshValue: NativeRedirectClient<'configuration>
+  poolValue: Option<
+    Handle<ConnectionKey, NativeTransport, NativePool.Context>,
+  >
+}
+
+impl<'configuration> Context<'configuration> {
+  /// Owns one native fresh-acquisition context without a connection pool.
+  pub fn make(
+    route: Route<'configuration>,
+    options: Options,
+    limits: Limits,
+  ) -> Context<'configuration> {
+    return Context<'configuration> {
+      freshValue: NativeRedirectClient.make(route, move options, limits),
+      poolValue: Option.none<
+        Handle<ConnectionKey, NativeTransport, NativePool.Context>,
+      >(),
+    }
+  }
+
+  /// Owns one native fresh-acquisition context and a copied direct-pool capability.
+  ///
+  /// The copied handle retains the pool's already bounded immutable transport, HTTP, TLS, ALPN,
+  /// and trust context. Route compatibility remains a per-attempt pre-contact admission check.
+  pub effect fn makeWithPool(
+    route: Route<'configuration>,
+    options: Options,
+    limits: Limits,
+    pool: &Handle<ConnectionKey, NativeTransport, NativePool.Context>,
+  ) -> Context<'configuration>
+  ! TrustSourceError | OutOfMemoryError
+  ? &mut Allocator {
+    let copied = run NativePool.copyHandle(pool)
+    return Context<'configuration> {
+      freshValue: NativeRedirectClient.make(route, move options, limits),
+      poolValue: Option.some<
+        Handle<ConnectionKey, NativeTransport, NativePool.Context>,
+      >(move copied),
+    }
+  }
+
+  /// Returns whether this context owns an explicit direct native pool capability.
+  pub fn hasPool(self: &Self) -> bool {
+    return match & self.poolValue {
+      Option.None => false
+      Option.Some {value} => true
+    }
+  }
+}
