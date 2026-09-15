@@ -169,6 +169,12 @@ pub union FetchReason {
   InvalidOptions,
   /// The supplied HTTP connection limits failed their owning client's pre-contact admission.
   InvalidHttpOptions { pub error: ClientError },
+  /// HTTP value copying failed while Fetch owned the final-head boundary.
+  HttpValue { pub error: ValueError },
+  /// HTTP body or trailer validation failed after final-response selection.
+  HttpBody { pub error: BodyError },
+  /// The streaming client failed inside Fetch's final-response delivery boundary.
+  HttpClient { pub error: ClientError },
   /// Checked accounting cannot represent the required total.
   SizeOverflow,
   /// A caller-defined sink rejected the current offered chunk.
@@ -500,16 +506,16 @@ impl<S, SinkError, ?SinkRequirements, S: Sink<SinkError ? SinkRequirements>> Sin
     return match move attempted {
       Result.Success {value} => move value
       Result.Failure {error} => {
+        let context = metadataFailure(
+          FetchPhase.Destination,
+          FetchReason.DestinationRejected,
+          metadata,
+          deliveredBefore,
+          chunk.length,
+        )
         fail DestinationFailure<SinkError> {
           error: move error,
-          context: FetchError {
-            phase: FetchPhase.Destination,
-            reason: FetchReason.DestinationRejected,
-            status: Option.none<Status>(),
-            uri: Option.none<OwnedUri>(),
-            deliveredBodyBytes: deliveredBefore,
-            offeredBodyBytes: chunk.length,
-          },
+          context: move context,
         }
       }
     }
@@ -639,20 +645,28 @@ impl CollectDestination {
     deadline: &'call Option<Instant>,
     deliveredBefore: u64,
   ) -> () ! FetchError | OutOfMemoryError ? &mut Allocator {
-    drop metadata
     drop deadline
     let attempted = match move usize.checkedAdd(Bytes.length(&self.body), chunk.length) {
       Option.None => {
-        fail fetchFailure(FetchPhase.Destination, FetchReason.SizeOverflow)
+        fail metadataFailure(
+          FetchPhase.Destination,
+          FetchReason.SizeOverflow,
+          metadata,
+          deliveredBefore,
+          chunk.length,
+        )
       }
       Option.Some {value} => value
     }
     if attempted > self.maximum {
-      fail limitFailure(
+      fail metadataFailure(
         FetchPhase.Destination,
-        FetchLimit.CollectionBytes,
-        usize.toU64(self.maximum),
-        usize.toU64(attempted),
+        FetchReason.LimitExceeded {
+          limit: FetchLimit.CollectionBytes,
+          allowed: usize.toU64(self.maximum),
+          attempted: usize.toU64(attempted),
+        },
+        metadata,
         deliveredBefore,
         chunk.length,
       )
@@ -682,20 +696,28 @@ impl DiscardDestination {
     deadline: &'call Option<Instant>,
     deliveredBefore: u64,
   ) -> () ! FetchError {
-    drop metadata
     drop deadline
     let attempted = match move u64.checkedAdd(deliveredBefore, usize.toU64(chunk.length)) {
       Option.None => {
-        fail fetchFailure(FetchPhase.Destination, FetchReason.SizeOverflow)
+        fail metadataFailure(
+          FetchPhase.Destination,
+          FetchReason.SizeOverflow,
+          metadata,
+          deliveredBefore,
+          chunk.length,
+        )
       }
       Option.Some {value} => value
     }
     if attempted > self.maximum {
-      fail limitFailure(
+      fail metadataFailure(
         FetchPhase.Destination,
-        FetchLimit.DiscardBytes,
-        self.maximum,
-        attempted,
+        FetchReason.LimitExceeded {
+          limit: FetchLimit.DiscardBytes,
+          allowed: self.maximum,
+          attempted: attempted,
+        },
+        metadata,
         deliveredBefore,
         chunk.length,
       )
@@ -814,10 +836,10 @@ struct HeaderMetadata {
   ownedBytes: usize
 }
 
-fn checkedMetadataAdd(left: usize, right: usize) -> usize ! FetchError {
+fn checkedMetadataAdd(phase: FetchPhase, left: usize, right: usize) -> usize ! FetchError {
   return match move usize.checkedAdd(left, right) {
     Option.None => {
-      fail fetchFailure(FetchPhase.Head, FetchReason.SizeOverflow)
+      fail fetchFailure(phase, FetchReason.SizeOverflow)
     }
     Option.Some {value} => value
   }
@@ -841,8 +863,8 @@ effect fn copyHeaderMetadata<'uri, 'head>(
     Option.None => usize.ZERO
     Option.Some {value} => value.length
   }
-  let withHeaders = checkedMetadataAdd(uriBytes, headerBytes)
-  let total = checkedMetadataAdd(withHeaders, reasonBytes)
+  let withHeaders = checkedMetadataAdd(FetchPhase.Head, uriBytes, headerBytes)
+  let total = checkedMetadataAdd(FetchPhase.Head, withHeaders, reasonBytes)
   if total > maximum {
     fail limitFailure(
       FetchPhase.Head,
@@ -880,7 +902,7 @@ effect fn copyFinalTrailers<'trailers>(
         }
         Result.Success {value: bytes} => bytes
       }
-      let total = checkedMetadataAdd(metadataUsed, required)
+      let total = checkedMetadataAdd(FetchPhase.Decode, metadataUsed, required)
       if total > metadataMaximum {
         fail limitFailure(
           FetchPhase.Decode,
@@ -949,19 +971,44 @@ where
     let maxBufferedBytes = handler.maxBufferedBytes
     let deadline = copyDeadline(&handler.deadline)
     let mut selectedDestination = move destination
-    let head = run exchange.head()
-    let status = head.status()
-    if exchange.phase() == Client.ExchangePhase.Tunnel {
-      fail FetchError {
-        phase: FetchPhase.Head,
-        reason: FetchReason.UnsupportedSwitchingResponse {status: status},
-        status: Option.some<Status>(status),
-        uri: Option.none<OwnedUri>(),
-        deliveredBodyBytes: u64.MIN,
-        offeredBodyBytes: usize.ZERO,
+    let head = match move run Effect.result(exchange.head()) {
+      Result.Success {value} => value
+      Result.Failure {error} => {
+        fail fetchFailure(FetchPhase.Head, FetchReason.HttpClient {error: move error})
       }
     }
-    let copied = run copyHeaderMetadata(&uri, &head, responseValueLimits, maxOwnedMetadataBytes)
+    let status = head.status()
+    if exchange.phase() == Client.ExchangePhase.Tunnel {
+      fail run borrowedResponseFailure(
+        FetchPhase.Head,
+        FetchReason.UnsupportedSwitchingResponse {status: status},
+        Option.some<Status>(status),
+        &uri,
+        u64.MIN,
+        usize.ZERO,
+      )
+    }
+    let copied = match move run Effect.result(copyHeaderMetadata(
+      &uri,
+      &head,
+      responseValueLimits,
+      maxOwnedMetadataBytes,
+    )) {
+      Result.Success {value} => value
+      Result.Failure {error} => match move error {
+        FetchError cause => {
+          fail enrichResponseStatus(move cause, status)
+        }
+        ValueError cause => {
+          let contextual = fetchFailure(
+            FetchPhase.Head,
+            FetchReason.HttpValue {error: move cause},
+          )
+          fail enrichResponseStatus(move contextual, status)
+        }
+        OutOfMemoryError cause => { fail move cause }
+      }
+    }
     drop head
     let mut selectedContentLimits = move contentLimits
     if maxEncodedBodyBytes < selectedContentLimits.maxEncoded {
@@ -974,21 +1021,46 @@ where
       Result.Success {value} => value
       Result.Failure {error} => match move error {
         ClientError cause => {
-          fail move cause
+          fail ownedResponseFailure(
+            FetchPhase.Decode,
+            FetchReason.HttpClient {error: move cause},
+            Option.some<Status>(status),
+            move copied.uri,
+            u64.MIN,
+            usize.ZERO,
+          )
         }
         OutOfMemoryError cause => {
           fail move cause
         }
         ContentError cause => {
-          let owned = run ownContentError(move cause, copied.ownedBytes, maxOwnedMetadataBytes)
-          fail FetchError {
-            phase: FetchPhase.Decode,
-            reason: FetchReason.Content {error: move owned},
-            status: Option.some<Status>(status),
-            uri: Option.some<OwnedUri>(move copied.uri),
-            deliveredBodyBytes: u64.MIN,
-            offeredBodyBytes: usize.ZERO,
+          let owned = match move run Effect.result(ownContentError(
+            move cause,
+            copied.ownedBytes,
+            maxOwnedMetadataBytes,
+          )) {
+            Result.Success {value} => value
+            Result.Failure {error} => match move error {
+              FetchError nested => {
+                fail enrichResponseFailure(
+                  move nested,
+                  status,
+                  move copied.uri,
+                  u64.MIN,
+                  usize.ZERO,
+                )
+              }
+              OutOfMemoryError nested => { fail move nested }
+            }
           }
+          fail ownedResponseFailure(
+            FetchPhase.Decode,
+            FetchReason.Content {error: move owned},
+            Option.some<Status>(status),
+            move copied.uri,
+            u64.MIN,
+            usize.ZERO,
+          )
         }
       }
     }
@@ -1007,14 +1079,31 @@ where
     let mut encoded = u64.MIN
     while true {
       let output = Bytes.asMutSlice(&mut buffer)
-      let progress = run Client.readContentSome(exchange, move output)
+      let progress = match move run Effect.result(Client.readContentSome(exchange, move output)) {
+        Result.Success {value} => value
+        Result.Failure {error} => match move error {
+          ClientError cause => {
+            fail ownedMetadataFailure(
+              FetchPhase.Decode,
+              FetchReason.HttpClient {error: move cause},
+              move metadata,
+              delivered,
+              usize.ZERO,
+            )
+          }
+          OutOfMemoryError cause => { fail move cause }
+        }
+      }
       encoded = progress.totalEncoded
       if encoded > maxEncodedBodyBytes {
-        fail limitFailure(
+        fail ownedMetadataFailure(
           FetchPhase.Decode,
-          FetchLimit.EncodedBodyBytes,
-          maxEncodedBodyBytes,
-          encoded,
+          FetchReason.LimitExceeded {
+            limit: FetchLimit.EncodedBodyBytes,
+            allowed: maxEncodedBodyBytes,
+            attempted: encoded,
+          },
+          move metadata,
           delivered,
           progress.written,
         )
@@ -1022,16 +1111,25 @@ where
       if progress.written > usize.ZERO {
         let attempted = match move u64.checkedAdd(delivered, usize.toU64(progress.written)) {
           Option.None => {
-            fail fetchFailure(FetchPhase.Destination, FetchReason.SizeOverflow)
+            fail ownedMetadataFailure(
+              FetchPhase.Destination,
+              FetchReason.SizeOverflow,
+              move metadata,
+              delivered,
+              progress.written,
+            )
           }
           Option.Some {value} => value
         }
         if attempted > maxDeliveredBodyBytes {
-          fail limitFailure(
+          fail ownedMetadataFailure(
             FetchPhase.Destination,
-            FetchLimit.DeliveredBodyBytes,
-            maxDeliveredBodyBytes,
-            attempted,
+            FetchReason.LimitExceeded {
+              limit: FetchLimit.DeliveredBodyBytes,
+              allowed: maxDeliveredBodyBytes,
+              attempted: attempted,
+            },
+            move metadata,
             delivered,
             progress.written,
           )
@@ -1048,19 +1146,67 @@ where
       }
       if progress.state == ContentProgressState.End { break }
     }
-    let trailerView = run Client.trailers(exchange)
-    let trailers = run copyFinalTrailers(
+    let trailerView = match move run Effect.result(Client.trailers(exchange)) {
+      Result.Success {value} => value
+      Result.Failure {error} => {
+        fail ownedMetadataFailure(
+          FetchPhase.Decode,
+          FetchReason.HttpClient {error: move error},
+          move metadata,
+          delivered,
+          usize.ZERO,
+        )
+      }
+    }
+    let trailers = match move run Effect.result(copyFinalTrailers(
       move trailerView,
       responseValueLimits,
       metadata.ownedBytes,
       maxOwnedMetadataBytes,
-    )
+    )) {
+      Result.Success {value} => value
+      Result.Failure {error} => match move error {
+        FetchError cause => {
+          fail enrichMetadataFailure(move cause, move metadata, delivered, usize.ZERO)
+        }
+        BodyError cause => {
+          fail ownedMetadataFailure(
+            FetchPhase.Decode,
+            FetchReason.HttpBody {error: move cause},
+            move metadata,
+            delivered,
+            usize.ZERO,
+          )
+        }
+        OutOfMemoryError cause => { fail move cause }
+      }
+    }
     let trailerBytes = match & trailers {
       Option.None => usize.ZERO
       Option.Some {value} => OwnedTrailers.ownedBytes(&value)
     }
-    let totalMetadata = checkedMetadataAdd(metadata.ownedBytes, trailerBytes)
-    run Client.finishResponse(exchange)
+    let totalMetadata = match move run Effect.result(checkedMetadataAdd(
+      FetchPhase.Decode,
+      metadata.ownedBytes,
+      trailerBytes,
+    )) {
+      Result.Success {value} => value
+      Result.Failure {error} => {
+        fail enrichMetadataFailure(move error, move metadata, delivered, usize.ZERO)
+      }
+    }
+    match move run Effect.result(Client.finishResponse(exchange)) {
+      Result.Success {value} => { drop value }
+      Result.Failure {error} => {
+        fail ownedMetadataFailure(
+          FetchPhase.Finish,
+          FetchReason.HttpClient {error: move error},
+          move metadata,
+          delivered,
+          usize.ZERO,
+        )
+      }
+    }
     let result = FetchResult {
       metadata: ResponseMetadata {
         finalUri: move metadata.finalUri,
@@ -2322,6 +2468,149 @@ fn fetchFailure(phase: FetchPhase, reason: FetchReason) -> FetchError {
     deliveredBodyBytes: u64.MIN,
     offeredBodyBytes: usize.ZERO,
   }
+}
+
+fn ownedResponseFailure(
+  phase: FetchPhase,
+  reason: FetchReason,
+  status: Option<Status>,
+  uri: OwnedUri,
+  delivered: u64,
+  offered: usize,
+) -> FetchError {
+  return FetchError {
+    phase: phase,
+    reason: move reason,
+    status: move status,
+    uri: Option.some<OwnedUri>(move uri),
+    deliveredBodyBytes: delivered,
+    offeredBodyBytes: offered,
+  }
+}
+
+fn enrichResponseStatus(error: FetchError, status: Status) -> FetchError {
+  let FetchError {
+    phase,
+    reason,
+    status: priorStatus,
+    uri,
+    deliveredBodyBytes,
+    offeredBodyBytes,
+  } = move error
+  drop priorStatus
+  return FetchError {
+    phase: phase,
+    reason: move reason,
+    status: Option.some<Status>(status),
+    uri: move uri,
+    deliveredBodyBytes: deliveredBodyBytes,
+    offeredBodyBytes: offeredBodyBytes,
+  }
+}
+
+effect fn borrowedResponseFailure<'uri>(
+  phase: FetchPhase,
+  reason: FetchReason,
+  status: Option<Status>,
+  uri: &Uri<'uri>,
+  delivered: u64,
+  offered: usize,
+) -> FetchError ! OutOfMemoryError ? &mut Allocator {
+  return ownedResponseFailure(
+    phase,
+    move reason,
+    move status,
+    run Uri.copy(uri),
+    delivered,
+    offered,
+  )
+}
+
+fn metadataFailure(
+  phase: FetchPhase,
+  reason: FetchReason,
+  metadata: &ResponseMetadata,
+  delivered: u64,
+  offered: usize,
+) -> FetchError {
+  let head = metadata.head.view()
+  let status = head.status()
+  drop head
+  return FetchError {
+    phase: phase,
+    reason: move reason,
+    status: Option.some<Status>(status),
+    uri: Option.none<OwnedUri>(),
+    deliveredBodyBytes: delivered,
+    offeredBodyBytes: offered,
+  }
+}
+
+fn ownedMetadataFailure(
+  phase: FetchPhase,
+  reason: FetchReason,
+  metadata: ResponseMetadata,
+  delivered: u64,
+  offered: usize,
+) -> FetchError {
+  let ResponseMetadata {finalUri, head, representation, ownedBytes} = move metadata
+  let headView = head.view()
+  let status = headView.status()
+  drop headView
+  drop head
+  drop representation
+  drop ownedBytes
+  return ownedResponseFailure(
+    phase,
+    move reason,
+    Option.some<Status>(status),
+    move finalUri,
+    delivered,
+    offered,
+  )
+}
+
+fn enrichResponseFailure(
+  error: FetchError,
+  status: Status,
+  uri: OwnedUri,
+  delivered: u64,
+  offered: usize,
+) -> FetchError {
+  let FetchError {
+    phase,
+    reason,
+    status: priorStatus,
+    uri: priorUri,
+    deliveredBodyBytes,
+    offeredBodyBytes,
+  } = move error
+  drop priorStatus
+  drop priorUri
+  drop deliveredBodyBytes
+  drop offeredBodyBytes
+  return ownedResponseFailure(
+    phase,
+    move reason,
+    Option.some<Status>(status),
+    move uri,
+    delivered,
+    offered,
+  )
+}
+
+fn enrichMetadataFailure(
+  error: FetchError,
+  metadata: ResponseMetadata,
+  delivered: u64,
+  offered: usize,
+) -> FetchError {
+  let FetchError {phase, reason, status, uri, deliveredBodyBytes, offeredBodyBytes} = move error
+  drop status
+  drop uri
+  drop deliveredBodyBytes
+  drop offeredBodyBytes
+  return ownedMetadataFailure(phase, move reason, move metadata, delivered, offered)
 }
 
 fn contentOptionFailure(error: ContentError<'static>) -> FetchError {
