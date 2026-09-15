@@ -13,8 +13,10 @@
 
 import silk.allocator {Allocator, OutOfMemoryError}
 import silk.bytes {Bytes}
+import silk.effect {Effect}
 import silk.http {Header, Method, Status, ValueError, Version}
-import silk.http_client {ContinuePolicy}
+import silk.http_client {ClientError, ContinuePolicy, Exchange, ExchangePhase}
+import silk.http_client as Client
 import silk.http_headers {
   HeaderIterator,
   Headers,
@@ -25,8 +27,11 @@ import silk.http_headers {
 }
 import silk.http_origin {Origin, OriginError}
 import silk.http_request {Authorization, BodyMode, HeaderControl, HeaderPolicy}
+import silk.http_transport {HttpTransport}
 import silk.layout {Layout}
+import silk.monotonic_clock {MonotonicClock}
 import silk.option {Option}
+import silk.random {Random}
 import silk.result {Result}
 import silk.slice {Slice}
 import silk.string {String}
@@ -320,6 +325,293 @@ pub union BodySource<'bytes, OneShot, Factory> {
     /// Factory authority moved into redirect state.
     pub factory: Factory,
   },
+}
+
+/// One attempt's uniform producer authority after replay selection.
+///
+/// # Details
+///
+/// Empty and repeatable-byte attempts are implemented inside this actor. Producer variants lend
+/// the already-selected OneShot or factory producer without erasing either channel family.
+pub union AttemptBody<'bytes, 'oneShot, 'replay, OneShot, ReplayProducer> {
+  /// Completes one body-free attempt without consulting a producer.
+  Empty,
+  /// Reads one attempt from immutable caller bytes through a private cursor.
+  RepeatableBytes {bytes: &'bytes [u8], offset: usize},
+  /// Lends the affine producer consumed for this attempt.
+  OneShot {producer: &'oneShot mut OneShot},
+  /// Lends the fresh producer owned by the current replay-factory scope.
+  ReplayFactory {producer: &'replay mut ReplayProducer},
+}
+
+/// Whether the shared writer completed upload or received a final response before pulling bytes.
+pub union BodyWriteOutcome {
+  /// Upload framing finished and one final response is ready for body handling.
+  Completed {
+    /// Final response status.
+    pub status: u16,
+  },
+  /// Require100 received a final response before the first producer pull.
+  EarlyFinal {
+    /// Final response status.
+    pub status: u16,
+  },
+}
+
+impl<
+  'bytes,
+  'oneShot,
+  'replay,
+  OneShotError,
+  ReplayError,
+  ?OneShotRequirements,
+  ?ReplayRequirements,
+  OneShot: BodyProducer<OneShotError ? OneShotRequirements>,
+  ReplayProducer: BodyProducer<ReplayError ? ReplayRequirements>,
+> BodyProducer<OneShotError | ReplayError ? OneShotRequirements | ReplayRequirements> for AttemptBody<
+  'bytes,
+  'oneShot,
+  'replay,
+  OneShot,
+  ReplayProducer,
+> {
+  fn mode(producer: &Self) -> BodyMode {
+    return match & producer.* {
+      AttemptBody.Empty => BodyMode.Empty
+      AttemptBody.RepeatableBytes {bytes, offset} => {
+        drop offset
+        BodyMode.KnownLength {length: usize.toU64(bytes.length)}
+      }
+      AttemptBody.OneShot {producer} => BodyProducer<OneShotError ? OneShotRequirements>.mode(
+        &producer,
+      )
+      AttemptBody.ReplayFactory {producer} => {
+        BodyProducer<ReplayError ? ReplayRequirements>.mode(&producer)
+      }
+    }
+  }
+  effect fn pull(producer: &mut Self, output: &mut [u8]) -> BodyChunk
+  ! OneShotError | ReplayError
+  ? OneShotRequirements | ReplayRequirements {
+    return match &mut producer.* {
+      AttemptBody.Empty => BodyChunk {length: usize.ZERO, end: true}
+      AttemptBody.RepeatableBytes {bytes, offset} => {
+        let remaining = bytes.length - offset
+        let mut length = remaining
+        if output.length < length {
+          length = output.length
+        }
+        let mut index = usize.ZERO
+        while index < length {
+          output[index] = bytes[offset + index]
+          index = index + usize.ONE
+        }
+        offset = offset + length
+        BodyChunk {length: length, end: offset == bytes.length}
+      }
+      AttemptBody.OneShot {producer} => run BodyProducer<OneShotError ? OneShotRequirements>.pull(
+        &mut producer,
+        move output,
+      )
+      AttemptBody.ReplayFactory {producer} => run BodyProducer<ReplayError ? ReplayRequirements>.pull(
+        &mut producer,
+        move output,
+      )
+    }
+  }
+}
+
+fn bodyModesEqual(left: BodyMode, right: BodyMode) -> bool {
+  return match move left {
+    BodyMode.Empty => match move right {
+      BodyMode.Empty => true
+      _ => false
+    }
+    BodyMode.KnownLength {length} => match move right {
+      BodyMode.KnownLength {length: other} => length == other
+      _ => false
+    }
+    BodyMode.Chunked => match move right {
+      BodyMode.Chunked => true
+      _ => false
+    }
+  }
+}
+
+fn bodyContractFailure(hop: usize) -> RedirectError {
+  return failure(
+    RedirectComponent.Body,
+    RedirectReason.ReplayContractMismatch,
+    hop,
+    Option.none<Status>(),
+  )
+}
+
+fn attemptBodyMatches<
+  'bytes,
+  'oneShot,
+  'replay,
+  OneShotError,
+  ReplayError,
+  ?OneShotRequirements,
+  ?ReplayRequirements,
+  OneShot: BodyProducer<OneShotError ? OneShotRequirements>,
+  ReplayProducer: BodyProducer<ReplayError ? ReplayRequirements>,
+>(expected: BodyMode, body: &AttemptBody<'bytes, 'oneShot, 'replay, OneShot, ReplayProducer>) -> bool {
+  return match & body.* {
+    AttemptBody.Empty => bodyModesEqual(expected, BodyMode.Empty)
+    AttemptBody.RepeatableBytes {bytes, offset} => {
+      drop offset
+      bodyModesEqual(expected, BodyMode.KnownLength {length: usize.toU64(bytes.length)})
+    }
+    AttemptBody.OneShot {producer} => match move expected {
+      BodyMode.Empty => false
+      _ => bodyModesEqual(
+        expected,
+        BodyProducer<OneShotError ? OneShotRequirements>.mode(&producer),
+      )
+    }
+    AttemptBody.ReplayFactory {producer} => match move expected {
+      BodyMode.Empty => false
+      _ => bodyModesEqual(expected, BodyProducer<ReplayError ? ReplayRequirements>.mode(&producer))
+    }
+  }
+}
+
+/// Drives one admitted attempt from prepared head through the first final response.
+///
+/// # When to use
+///
+/// Use inside an attempt client's exchange callback after selecting one [`AttemptBody`].
+///
+/// # Details
+///
+/// The operation validates the selected and produced framing before sending the head. Require100
+/// informational responses are consumed until 100 permits upload or a final response returns
+/// `EarlyFinal`. Redirect bodies do not admit trailers, so non-empty `trailers` are rejected before
+/// the head is sent. Produced chunks must fit `scratch`; known-length excess is rejected before it
+/// can be written, and every completed upload finishes exactly once before receiving its final
+/// head. Empty attempts never inspect or pull a producer.
+///
+/// # Gotchas
+///
+/// `scratch` must be non-empty for KnownLength and Chunked bodies. A zero-length nonterminal pull
+/// is a producer contract failure. An early final consumes the enclosing attempt's OneShot
+/// authority even though this operation has not called `pull`.
+pub effect fn writeBody<
+  'bytes,
+  'oneShot,
+  'replay,
+  'exchange,
+  P,
+  OneShotError,
+  ReplayError,
+  ?OneShotRequirements,
+  ?ReplayRequirements,
+  OneShot: BodyProducer<OneShotError ? OneShotRequirements>,
+  ReplayProducer: BodyProducer<ReplayError ? ReplayRequirements>,
+>(
+  exchange: &mut Exchange<'exchange, P>,
+  expected: BodyMode,
+  body: AttemptBody<'bytes, 'oneShot, 'replay, OneShot, ReplayProducer>,
+  scratch: &mut [u8],
+  trailers: &Headers,
+  hop: usize,
+) -> BodyWriteOutcome
+! RedirectError | OneShotError | ReplayError | ClientError | OutOfMemoryError
+? OneShotRequirements | ReplayRequirements | &mut MonotonicClock | &mut Allocator | &mut Random
+where
+  &mut P provides &HttpTransport from &mut HttpTransport | &mut MonotonicClock | &mut Allocator | &mut Random {
+  if !attemptBodyMatches(expected, &body) {
+    fail bodyContractFailure(hop)
+  }
+  if Headers.count(trailers) != usize.ZERO {
+    fail bodyContractFailure(hop)
+  }
+  let empty = match move expected {
+    BodyMode.Empty => true
+    _ => false
+  }
+  if !empty && scratch.length == usize.ZERO {
+    fail bodyContractFailure(hop)
+  }
+
+  let mut selectedBody = move body
+  run Client.send(exchange)
+  while exchange.phase() == ExchangePhase.AwaitContinue {
+    let status = run Client.receive(exchange)
+    if status >= 200 {
+      if exchange.phase() != ExchangePhase.Response {
+        Client.abort(exchange)
+        fail ClientError.InvalidState
+      }
+      return BodyWriteOutcome.EarlyFinal {status: status}
+    }
+  }
+
+  let mut observed = u64.MIN
+  if !empty {
+    while true {
+      let pulled = run Effect.result(
+        BodyProducer<OneShotError | ReplayError ? OneShotRequirements | ReplayRequirements>.pull(
+          &mut selectedBody,
+          scratch,
+        ),
+      )
+      let chunk = match move pulled {
+        Result.Success {value} => move value
+        Result.Failure {error} => {
+          Client.abort(exchange)
+          fail move error
+        }
+      }
+      if chunk.length > scratch.length || (chunk.length == usize.ZERO && !chunk.end) {
+        Client.abort(exchange)
+        fail bodyContractFailure(hop)
+      }
+      let nextObserved = match move u64.checkedAdd(observed, usize.toU64(chunk.length)) {
+        Option.None => {
+          Client.abort(exchange)
+          fail bodyContractFailure(hop)
+        }
+        Option.Some {value} => value
+      }
+      if let BodyMode.KnownLength {length} = expected {
+        if nextObserved > length {
+          Client.abort(exchange)
+          fail bodyContractFailure(hop)
+        }
+      }
+
+      let input = Slice.view<u8>(scratch, usize.ZERO, chunk.length)
+      let mut consumed = usize.ZERO
+      while consumed < input.length {
+        let remaining = Slice.view<u8>(input, consumed, input.length - consumed)
+        let progress = run Client.writeSome(exchange, remaining)
+        consumed = consumed + progress.consumed
+        drop remaining
+      }
+      drop input
+      observed = nextObserved
+      if chunk.end {
+        break
+      }
+    }
+  }
+
+  if let BodyMode.KnownLength {length} = expected {
+    if observed != length {
+      Client.abort(exchange)
+      fail bodyContractFailure(hop)
+    }
+  }
+  run Client.finishRequest(exchange, trailers)
+  let status = run Client.receiveFinal(exchange)
+  if exchange.phase() != ExchangePhase.Response {
+    Client.abort(exchange)
+    fail ClientError.InvalidState
+  }
+  return BodyWriteOutcome.Completed {status: status}
 }
 
 /// Checks body replay authority before a retained-body attempt can contact its destination.
