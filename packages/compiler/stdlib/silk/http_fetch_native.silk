@@ -15,6 +15,7 @@
 
 import silk.allocator {Allocator, OutOfMemoryError}
 import silk.byte_duplex {ByteDuplex}
+import silk.effect {Effect}
 import silk.http_client as Client {
   ClientError,
   Connection,
@@ -37,8 +38,8 @@ import silk.http_connection_pool_native as NativePool
 import silk.http_fetch {FetchClient, PoolMode, ProxyMode}
 import silk.http_proxy {ProxyError, Route, RouteMode}
 import silk.http_redirect as Redirect {
+  Attempt,
   AttemptClient,
-  AttemptHandler,
   AttemptRequest,
   HybridAttempt,
 }
@@ -181,7 +182,7 @@ impl<
     'provider: 'transport,
     'tunnel: 'provider,
   >(
-    use: Self,
+    use: &mut Self,
     request: &'call AttemptRequest<'policy>,
     method: Method<'call>,
     exchange: &'call mut Exchange<
@@ -213,7 +214,7 @@ impl<
   A,
   HandlerError,
   ?HandlerRequirements,
-> AttemptHandler<
+> Attempt<
   'policy,
   NativeRouteProvider,
   A,
@@ -352,6 +353,7 @@ static if (Intrinsic.targetOperatingSystem() == "darwin" && Intrinsic.targetArch
   where HandlerRequirements in Without<HandlerRequirements, ByteDuplex>,
     HandlerRequirements in Without<HandlerRequirements, HttpTransport> {
     let mut fresh = NativeRedirectClient.make(route, move options, limits)
+    let mut attempt = RoutedAttemptUse {}
     return run AttemptClient<
       'policy,
       NativeRouteProvider,
@@ -381,8 +383,19 @@ static if (Intrinsic.targetOperatingSystem() == "darwin" && Intrinsic.targetArch
         | &mut SystemClock
         | &mut Random
         | &mut TrustSource,
-      RoutedAttemptUse,
-    >.withAttempt(&mut fresh, move request, move deadline, RoutedAttemptUse {})
+    >.withAttempt(&mut fresh, move request, move deadline)
+      |> Effect.provideMut<Attempt<
+        'policy,
+        NativeRouteProvider,
+        A,
+        HandlerError ? HandlerRequirements | &mut HybridAttempt<
+          'policy,
+          NativeRouteProvider,
+          NativeTransport,
+          A,
+          HandlerError ? HandlerRequirements
+        >
+      >>(&mut attempt)
   }
 
   effect fn withDirect<
