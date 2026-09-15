@@ -25,6 +25,7 @@ import {
   type OperandInput,
   phiEntries,
   switchEntries,
+  type SwitchEntry,
   valueEntries,
 } from './primitives.js'
 
@@ -174,8 +175,8 @@ export const resolveSwitch = (
   draft: Draft,
   value: FunctionBodyActor.Switch,
   operation: string,
-): Result.Result<number, LlvmError> =>
-  Result.map(localEntry(switchEntries, draft, value, operation, 'switch'), (entry) => entry.index)
+): Result.Result<SwitchEntry, LlvmError> =>
+  localEntry(switchEntries, draft, value, operation, 'switch')
 
 /** @internal */
 const resolveLocalValue = (
@@ -585,11 +586,12 @@ export const makePhiHandle = (
 export const makeSwitchHandle = (
   draft: Draft,
   instruction: FunctionBodyActor.Instruction,
+  block: number,
 ): Result.Result<FunctionBodyActor.Switch, LlvmError> =>
   Result.gen(function* () {
     const index = yield* resolveInstruction(draft, instruction, 'FunctionBody.switchTerminator')
     const handle = Handle.make('Switch', draft.owner, index)
-    switchEntries.set(handle, { owner: draft.owner, index })
+    switchEntries.set(handle, { owner: draft.owner, index, block })
     return handle
   })
 

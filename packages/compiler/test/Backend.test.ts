@@ -62,6 +62,59 @@ const emit = Effect.fnUntraced(function* (text: string, request: Backend.Codegen
 const golden = (name: string): string =>
   readFileSync(new URL(`./goldens/${name}`, import.meta.url), 'utf8')
 
+it.effect('reads match tags and proven variant fields without decoding unrelated payloads', () =>
+  Effect.gen(function* () {
+    const artifact = yield* emit(
+      `struct Span { start: i32 end: i32 }
+union Token {
+  First { span: Span },
+  Second { padding: i64, span: Span },
+  Third { span: Span, extra: i32 },
+}
+fn kind(token: Token) -> i32 {
+  return match move token {
+    Token.First { .. } => 1
+    Token.Second { .. } => 2
+    Token.Third { .. } => 3
+  }
+}
+fn start(token: Token) -> i32 {
+  return match move token {
+    Token.First { span: Span { start, .. } } => start
+    Token.Second { span: Span { start, .. }, .. } => start
+    Token.Third { span: Span { start, .. }, .. } => start
+  }
+}
+pub fn main() -> i32 {
+  return kind(Token.First { span: Span { start: 1, end: 2 } }) +
+    start(Token.Second { padding: 9, span: Span { start: 41, end: 42 } })
+}`,
+      { mode: 'release' },
+    )
+    for (const name of ['kind', 'start']) {
+      const body =
+        artifact.ir
+          .match(new RegExp(`define hidden [^\\n]+@silk_golden_program_${name}__[^]*?\\n}`))
+          ?.at(0) ?? unreachable(`expected ${name} definition`)
+      // Match tests branch on scalar tags. Decoding a union payload here would introduce
+      // additional switches across variants that the match has already distinguished.
+      let block = ''
+      for (const line of body.split('\n')) {
+        if (/^\S+:$/.test(line)) block = line.slice(0, -1)
+        // An incoming ABI payload may be stored once in entry. Match arms must not
+        // decode the union again to read its tag or a field whose variant is proven.
+        if (/^\s+switch /.test(line)) assert.strictEqual(block, 'entry')
+      }
+      assert.match(body, /icmp eq i32/)
+    }
+    const main =
+      artifact.ir.match(/define hidden [^\n]+@silk_golden_program_main__[^]*?\n}/)?.at(0) ??
+      unreachable('expected main definition')
+    // The constructors know their variant; only later ABI reads may need a dispatch.
+    assert.notMatch(main, /switch i32 %place\d+_store/)
+  }),
+)
+
 it.effect('uses addressable storage as the mutable local backing store', () =>
   Effect.gen(function* () {
     const snapshot = yield* AnalysisFixture.retainingMain(

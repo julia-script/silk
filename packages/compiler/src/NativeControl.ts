@@ -50,8 +50,17 @@ const discriminants = Effect.fnUntraced(function* (
   tag: string,
 ) {
   const type = context.entry.fn.localTypes.at(local.ordinal)
-  if (selectors.length === 0 && type !== undefined && !SilkType.isReference(Mir.semanticType(type)))
-    return (yield* read(context, local)).slice(0, count)
+  if (
+    selectors.length === 0 &&
+    type !== undefined &&
+    !SilkType.isReference(Mir.semanticType(type))
+  ) {
+    // Reading a tag must not expand the union's payload and dispatch over every variant.
+    const values: Array<Value.Input> = []
+    for (let ordinal = 0; ordinal < count; ordinal += 1)
+      values.push(yield* NativeStorage.readLane(context.storage, local, ordinal))
+    return values
+  }
   const resolved = yield* NativePlaceAddress.resolve(
     {
       ...context.cleanup,
