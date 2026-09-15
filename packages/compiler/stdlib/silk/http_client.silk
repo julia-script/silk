@@ -9,7 +9,7 @@ import silk.allocator {Allocator, OutOfMemoryError}
 import silk.bytes {Bytes}
 import silk.box {Box}
 import silk.layout {Layout}
-import silk.byte_duplex {ReadTransfer, ByteIoError}
+import silk.byte_duplex {ByteDuplex, ByteIoError, ByteIoOperation, ReadTransfer}
 import silk.tls_connection {ConnectionError}
 import silk.effect {Effect}
 import silk.http {Method, Status, Version}
@@ -287,8 +287,14 @@ pub struct Connection<P> {
   parserUsed: bool
   limits: Limits
   phaseValue: ConnectionPhase
-  physicallyClosed: bool
+  closeAuthority: CloseAuthority
   requests: usize
+}
+
+enum CloseAuthority {
+  Armed,
+  Transferred,
+  Closed,
 }
 
 impl<P> Connection<P> {
@@ -418,7 +424,7 @@ where &mut P provides &HttpTransport from &mut HttpTransport {
       parserUsed: false,
       limits: limits,
       phaseValue: ConnectionPhase.Ready,
-      physicallyClosed: false,
+      closeAuthority: CloseAuthority.Armed,
       requests: usize.ZERO,
     }
     return move connection
@@ -460,10 +466,10 @@ where
     return run ConnectionHandler<P, A, E ? R>.handle(move selected, &mut owned.connection)
   }
   let release = effect fn(owned: &mut ConnectionLease<P, H>) -> () {
-    if owned.connection.physicallyClosed {
+    if owned.connection.closeAuthority != CloseAuthority.Armed {
       return ()
     }
-    owned.connection.physicallyClosed = true
+    owned.connection.closeAuthority = CloseAuthority.Closed
     owned.connection.phaseValue = ConnectionPhase.Closed
     return run closeProvider<P>(&mut owned.connection.transport)
   }
@@ -499,10 +505,13 @@ where
 pub effect fn close<P>(connection: &mut Connection<P>) -> ()
 ! ClientError
 where &mut P provides &HttpTransport from &mut HttpTransport {
-  if connection.physicallyClosed {
+  if connection.closeAuthority == CloseAuthority.Closed {
     return ()
   }
-  connection.physicallyClosed = true
+  if connection.closeAuthority == CloseAuthority.Transferred {
+    return ()
+  }
+  connection.closeAuthority = CloseAuthority.Closed
   connection.phaseValue = ConnectionPhase.Closed
   let result = run Effect.result(HttpTransport.close())
     |> Effect.provideMut<HttpTransport>(&mut connection.transport)
@@ -1507,6 +1516,18 @@ pub struct Tunnel<'tunnel, P> {
   overallDeadline: Option<Instant>
 }
 
+/// One transferred tunnel that owns the connection's byte transport and retained input suffix.
+///
+/// # Details
+///
+/// Reads use the retained suffix before the provider. All deadlines are clamped to the exchange
+/// deadline. Complete close is terminal and attempts the concrete provider close at most one time.
+pub struct TransferredTunnel<'tunnel, P> {
+  connection: &'tunnel mut Connection<P>
+  overallDeadline: Option<Instant>
+  writeShutdown: bool
+}
+
 /// Hands successful CONNECT to one scoped tunnel callback and permanently consumes HTTP reuse authority.
 pub effect fn withTunnel<'tunnel, 'exchange: 'tunnel, 'callback, P, A, E, ?R>(
   exchange: &'tunnel mut Exchange<'exchange, P>,
@@ -1526,6 +1547,51 @@ pub effect fn withTunnel<'tunnel, 'exchange: 'tunnel, 'callback, P, A, E, ?R>(
 }
 
 impl<'tunnel, P> Tunnel<'tunnel, P> {
+  /// Transfers the exact tunnel provider and retained input suffix to one scoped byte duplex.
+  ///
+  /// # Details
+  ///
+  /// This operation allocates no memory. It constructs the complete duplex before the HTTP owner
+  /// transfers its physical close authority. The callback owns that authority until cleanup.
+  /// Cleanup closes the duplex after success, typed failure, or structured cancellation.
+  ///
+  /// # Gotchas
+  ///
+  /// An invalid or repeated transfer returns `InvalidState` and does not change close authority.
+  pub effect fn transferByteDuplex<'transfer, 'callback, A, E, ?CallbackRequirements>(
+    self: &'transfer mut Self,
+    callback: for<'call, 'duplexView: 'call> once fn<'callback>(
+      &'call mut TransferredTunnel<'duplexView, P>,
+    ) -> once Effect<'call; A ! E ? CallbackRequirements>,
+  ) -> A
+  ! E | ClientError
+  ? CallbackRequirements
+  where
+    &mut P provides &ByteDuplex from &mut ByteDuplex,
+    CallbackRequirements in Without<CallbackRequirements, ByteDuplex> {
+    if self.connection.closeAuthority != CloseAuthority.Armed {
+      fail ClientError.InvalidState
+    }
+    let deadline = copyDeadline(&self.overallDeadline)
+    let mut transferred = TransferredTunnel<'transfer, P> {
+      connection: &mut self.connection.*,
+      overallDeadline: move deadline,
+      writeShutdown: false,
+    }
+    transferred.connection.closeAuthority = CloseAuthority.Transferred
+    let use = effect fn(owned: &mut TransferredTunnel<'transfer, P>) -> A
+    ! E
+    ? CallbackRequirements {
+      return run callback(&mut owned.*)
+    }
+    let release = effect fn(owned: &mut TransferredTunnel<'transfer, P>) -> () {
+      let closed = ByteDuplex.close()
+        |> Effect.provideMut<ByteDuplex>(&mut owned.*)
+      return run Effect.catchAll(move closed, discardByteIoError)
+    }
+    return run Effect.useReleaseNonParking(move transferred, move use, move release)
+  }
+
   /// Reads the retained tunnel suffix before asking the underlying transport for more input.
   pub effect fn readSome(self: &mut Self, output: &mut [u8], requestedDeadline: Option<Instant>) -> ReadTransfer
   ! ClientError | OutOfMemoryError
@@ -1574,6 +1640,130 @@ impl<'tunnel, P> Tunnel<'tunnel, P> {
       }
     }
   }
+}
+
+impl<'tunnel, P> TransferredTunnel<'tunnel, P> {
+  unsafe effect fn read(
+    self: &mut Self,
+    output: &mut [u8],
+    requestedDeadline: Option<Instant>,
+  ) -> ReadTransfer
+  ! ByteIoError
+  ? &mut MonotonicClock
+  where &mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock {
+    if self.connection.closeAuthority != CloseAuthority.Transferred {
+      fail ByteDuplex.closed(ByteIoOperation.Read)
+    }
+    let deadline = clampDeadline(&requestedDeadline, &self.overallDeadline)
+    run checkByteDeadline(&deadline, ByteIoOperation.Read)
+    if output.length == usize.ZERO {
+      return ReadTransfer.Data {count: usize.ZERO}
+    }
+    if self.connection.start < self.connection.end {
+      let bytes = Bytes.asSlice(&self.connection.input)
+      let mut count = usize.ZERO
+      while count < output.length && self.connection.start + count < self.connection.end {
+        output[count] = bytes[self.connection.start + count]
+        count = count + usize.ONE
+      }
+      drop bytes
+      self.connection.start = self.connection.start + count
+      return ReadTransfer.Data {count: count}
+    }
+    return run unsafe ByteDuplex.readSomeRaw(move output, move deadline)
+      |> Effect.provideMut<ByteDuplex>(&mut self.connection.transport)
+  }
+
+  unsafe effect fn write(
+    self: &mut Self,
+    input: &[u8],
+    requestedDeadline: Option<Instant>,
+  ) -> usize
+  ! ByteIoError
+  ? &mut MonotonicClock
+  where &mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock {
+    if self.connection.closeAuthority != CloseAuthority.Transferred || self.writeShutdown {
+      fail ByteDuplex.closed(ByteIoOperation.Write)
+    }
+    let deadline = clampDeadline(&requestedDeadline, &self.overallDeadline)
+    run checkByteDeadline(&deadline, ByteIoOperation.Write)
+    return run unsafe ByteDuplex.writeSomeRaw(move input, move deadline)
+      |> Effect.provideMut<ByteDuplex>(&mut self.connection.transport)
+  }
+
+  unsafe effect fn flushOutput(
+    self: &mut Self,
+    requestedDeadline: Option<Instant>,
+  ) -> ()
+  ! ByteIoError
+  ? &mut MonotonicClock
+  where &mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock {
+    if self.connection.closeAuthority != CloseAuthority.Transferred {
+      fail ByteDuplex.closed(ByteIoOperation.Flush)
+    }
+    let deadline = clampDeadline(&requestedDeadline, &self.overallDeadline)
+    run checkByteDeadline(&deadline, ByteIoOperation.Flush)
+    return run unsafe ByteDuplex.flushRaw(move deadline)
+      |> Effect.provideMut<ByteDuplex>(&mut self.connection.transport)
+  }
+
+  unsafe effect fn shutdownOutput(
+    self: &mut Self,
+    requestedDeadline: Option<Instant>,
+  ) -> ()
+  ! ByteIoError
+  ? &mut MonotonicClock
+  where &mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock {
+    if self.connection.closeAuthority != CloseAuthority.Transferred {
+      fail ByteDuplex.closed(ByteIoOperation.ShutdownWrite)
+    }
+    if self.writeShutdown {
+      return ()
+    }
+    let deadline = clampDeadline(&requestedDeadline, &self.overallDeadline)
+    run checkByteDeadline(&deadline, ByteIoOperation.ShutdownWrite)
+    self.writeShutdown = true
+    return run unsafe ByteDuplex.shutdownWriteRaw(move deadline)
+      |> Effect.provideMut<ByteDuplex>(&mut self.connection.transport)
+  }
+
+  unsafe effect fn closeTransport(self: &mut Self) -> ()
+  ! ByteIoError
+  where &mut P provides &ByteDuplex from &mut ByteDuplex {
+    if self.connection.closeAuthority != CloseAuthority.Transferred {
+      return ()
+    }
+    self.connection.closeAuthority = CloseAuthority.Closed
+    self.connection.phaseValue = ConnectionPhase.Closed
+    return run unsafe ByteDuplex.closeRaw()
+      |> Effect.provideMut<ByteDuplex>(&mut self.connection.transport)
+  }
+}
+
+impl<'tunnel, P> ByteDuplex for TransferredTunnel<'tunnel, P> {
+  readSomeRaw: TransferredTunnel.read
+  writeSomeRaw: TransferredTunnel.write
+  flushRaw: TransferredTunnel.flushOutput
+  shutdownWriteRaw: TransferredTunnel.shutdownOutput
+  closeRaw: TransferredTunnel.closeTransport
+}
+
+effect fn checkByteDeadline(
+  deadline: &Option<Instant>,
+  operation: ByteIoOperation,
+) -> () ! ByteIoError ? &mut MonotonicClock {
+  let now = run MonotonicClock.now()
+  if let Option.Some {value: limit} = &deadline.* {
+    if !before(&now, &limit) {
+      fail ByteDuplex.timeout(move operation)
+    }
+  }
+  return ()
+}
+
+effect fn discardByteIoError(error: ByteIoError) -> () {
+  drop error
+  return ()
 }
 
 effect fn transportFailure(error: TransportError | OutOfMemoryError) -> never
