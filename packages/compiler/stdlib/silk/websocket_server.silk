@@ -95,8 +95,6 @@ pub enum LimitKind {
   Arithmetic,
 }
 
-impl Copy for LimitKind {}
-
 /// The externally visible lifecycle state of one session.
 pub enum State {
   /// The session accepts message, control, and peer Close events.
@@ -108,8 +106,6 @@ pub enum State {
   /// A preceding failure made all later frame operations unavailable.
   Failed,
 }
-
-impl Copy for State {}
 
 /// The public operation associated with a state or transport failure.
 pub enum Operation {
@@ -128,8 +124,6 @@ pub enum Operation {
   /// Pump peer frames until the close handshake completes.
   FinishClose,
 }
-
-impl Copy for Operation {}
 
 /// The peer frame rule that selected protocol Close code `1002`.
 pub enum ProtocolReason {
@@ -153,8 +147,6 @@ pub enum ProtocolReason {
   CloseCode,
 }
 
-impl Copy for ProtocolReason {}
-
 /// The text value that failed complete UTF-8 validation.
 pub enum Utf8Component {
   /// A Text message payload.
@@ -162,8 +154,6 @@ pub enum Utf8Component {
   /// A Close status reason.
   CloseReason,
 }
-
-impl Copy for Utf8Component {}
 
 /// The caller Close value rule that rejected construction.
 pub enum CloseDataReason {
@@ -173,8 +163,6 @@ pub enum CloseDataReason {
   ReasonTooLarge,
 }
 
-impl Copy for CloseDataReason {}
-
 /// The aggregate close-handshake budget that was exhausted.
 pub enum CloseLimitKind {
   /// The peer frame-count budget.
@@ -182,8 +170,6 @@ pub enum CloseLimitKind {
   /// The aggregate peer wire-byte budget.
   Bytes,
 }
-
-impl Copy for CloseLimitKind {}
 
 /// A copyable classification retained after the first terminal failure.
 pub enum Failure {
@@ -204,8 +190,6 @@ pub enum Failure {
   /// Buffered or terminal transport I/O failed.
   Transport,
 }
-
-impl Copy for Failure {}
 
 /// A typed WebSocket admission, frame, lifecycle, or transport failure.
 pub union WebSocketError {
@@ -332,10 +316,11 @@ impl CloseData {
         reason: CloseDataReason.ReasonTooLarge,
       })
     }
-    return match move String.fromUtf8(reason) {
+    let validated = String.fromUtf8(reason)
+    return match move validated {
       Result<string, InvalidUtf8>.Failure {error} => {
         drop error
-        Result.failResult<CloseData, WebSocketError>(WebSocketError.InvalidUtf8 {
+        return Result.failResult<CloseData, WebSocketError>(WebSocketError.InvalidUtf8 {
           component: Utf8Component.CloseReason,
         })
       }
@@ -343,7 +328,7 @@ impl CloseData {
         drop value
         let mut bytes = emptyCloseReason()
         copyBytes(&mut bytes, reason)
-        Result.succeed<CloseData, WebSocketError>(CloseData {
+        return Result.succeed<CloseData, WebSocketError>(CloseData {
           codeValue: code,
           reasonValue: CloseReason {bytes: move bytes, length: reason.length},
         })
@@ -420,8 +405,6 @@ enum Opcode {
   Ping,
   Pong,
 }
-
-impl Copy for Opcode {}
 
 struct FrameHeader {
   opcode: Opcode
@@ -929,7 +912,7 @@ where &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut Monoton
     copyDeadline(&deadline),
     Operation.ReadEvent,
   )
-  return match move header.opcode {
+  return match header.opcode {
     Opcode.Text => {
       run readPayload(
         socket,
@@ -948,7 +931,7 @@ where &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut Monoton
         }
         Result<string, InvalidUtf8>.Success {value} => { drop value }
       }
-      Event.Text {count: header.payloadLength}
+      return Event.Text {count: header.payloadLength}
     }
     Opcode.Binary => {
       run readPayload(
@@ -960,7 +943,7 @@ where &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut Monoton
         move deadline,
         Operation.ReadEvent,
       )
-      Event.Binary {count: header.payloadLength}
+      return Event.Binary {count: header.payloadLength}
     }
     Opcode.Ping => {
       run readControl(socket, &header, copyDeadline(&deadline), Operation.ReadEvent)
@@ -978,11 +961,11 @@ where &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut Monoton
         Result<(), WebSocketError>.Failure {error} => { fail move error }
         Result<(), WebSocketError>.Success {value} => { drop value }
       }
-      Event.Ping {payload: move payload}
+      return Event.Ping {payload: move payload}
     }
     Opcode.Pong => {
       run readControl(socket, &header, move deadline, Operation.ReadEvent)
-      Event.Pong {payload: ownedControl(socket, header.payloadLength)}
+      return Event.Pong {payload: ownedControl(socket, header.payloadLength)}
     }
     Opcode.Close => {
       run readControl(socket, &header, copyDeadline(&deadline), Operation.ReadEvent)
@@ -997,7 +980,7 @@ where &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut Monoton
         Operation.ReadEvent,
         true,
       )
-      Event.PeerClose {data: move closed}
+      return Event.PeerClose {data: move closed}
     }
   }
 }
@@ -1033,22 +1016,8 @@ where &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut Monoton
   let second = socket.header[1]
   let finalFrame = u8.bitAnd(first, u8.toU8(128)) != 0
   let code = u8.bitAnd(first, u8.toU8(15))
-  let opcode = if code == 0 {
-    fail WebSocketError.UnsupportedFragmentation
-  } else if code == 1 {
-    Opcode.Text
-  } else if code == 2 {
-    Opcode.Binary
-  } else if code == 8 {
-    Opcode.Close
-  } else if code == 9 {
-    Opcode.Ping
-  } else if code == 10 {
-    Opcode.Pong
-  } else {
-    fail WebSocketError.ProtocolError {reason: ProtocolReason.ReservedOpcode}
-  }
-  let control = controlOpcode(&opcode)
+  let opcode = run decodeOpcode(code)
+  let control = controlOpcode(opcode)
   if !finalFrame {
     if control {
       fail WebSocketError.ProtocolError {reason: ProtocolReason.ControlFragmented}
@@ -1096,7 +1065,7 @@ where &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut Monoton
   if control && length > 125 {
     fail WebSocketError.ProtocolError {reason: ProtocolReason.ControlTooLarge}
   }
-  if opcodeIsClose(&opcode) && length == 1 {
+  if opcodeIsClose(opcode) && length == 1 {
     fail WebSocketError.ProtocolError {reason: ProtocolReason.ClosePayloadLength}
   }
   let payloadLength = if control {
@@ -1592,7 +1561,17 @@ fn priorFailure<'channel, 'transport, P>(
   return socket.failureValue
 }
 
-fn controlOpcode(opcode: &Opcode) -> bool {
+effect fn decodeOpcode(code: u8) -> Opcode ! WebSocketError {
+  if code == 0 { fail WebSocketError.UnsupportedFragmentation }
+  if code == 1 { return Opcode.Text }
+  if code == 2 { return Opcode.Binary }
+  if code == 8 { return Opcode.Close }
+  if code == 9 { return Opcode.Ping }
+  if code == 10 { return Opcode.Pong }
+  fail WebSocketError.ProtocolError {reason: ProtocolReason.ReservedOpcode}
+}
+
+fn controlOpcode(opcode: Opcode) -> bool {
   return match opcode {
     Opcode.Text => false
     Opcode.Binary => false
@@ -1602,7 +1581,7 @@ fn controlOpcode(opcode: &Opcode) -> bool {
   }
 }
 
-fn opcodeIsClose(opcode: &Opcode) -> bool {
+fn opcodeIsClose(opcode: Opcode) -> bool {
   return match opcode {
     Opcode.Close => true
     Opcode.Text => false
@@ -1625,7 +1604,7 @@ fn decodeWide(bytes: &[u8], offset: usize, length: usize) -> u64 {
 fn unmask(output: &mut [u8], length: usize, mask: &([u8; 4]), offset: usize) -> () {
   let mut index = usize.ZERO
   while index < length {
-    output[index] = u8.bitXor(output[index], mask[(offset + index) % 4])
+    output[index] = u8.bitXor(output[index], mask.*[(offset + index) % 4])
     index = index + usize.ONE
   }
   return ()
@@ -1745,7 +1724,6 @@ fn emptyCloseReason() -> [u8; 123] {
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-    0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
   ]
 }
