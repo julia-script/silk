@@ -58,7 +58,10 @@ second HTTP request authority.
 
 `selectRoute` validates only immutable configuration/origin relationships and returns Direct,
 Forward, or Tunnel data. Bypass is decided before auth header material is copied into request
-scratch.
+scratch. Every route retains a borrow of the exact immutable `ProxyConfig` that selected it.
+`Route.recompute(newOrigin)` reapplies that same configuration's bypass and authentication policy;
+an explicit configuration replacement calls `selectRoute(newConfig, newOrigin)` instead of making
+the route receiver meaningless.
 
 The target-neutral scoped shape is
 `withRoute(client, route, preparedTrust, deadline, handler)`. `client` is a scoped peer-acquisition
@@ -140,7 +143,9 @@ Use `http_origin`/`network_address` equality for exact bypass and route identity
 `http_target` for lossless target construction, `base64` strict validation for prepared Basic
 tokens, and checked `usize` arithmetic before allocation. Route keys copy and compare the exact
 caller-supplied configuration/authentication IDs; their formatting and diagnostics expose neither
-the numeric ID payload nor credential bytes.
+the numeric ID payload nor credential bytes. The encoded token is capped at 4096 bytes, so strict
+standard-padded Base64 has a derived maximum decoded length of 3072 bytes. The validator allocates
+no decoded scratch and therefore exposes no separate scratch-limit failure that cannot occur.
 
 ### Verification shares expensive boundaries
 

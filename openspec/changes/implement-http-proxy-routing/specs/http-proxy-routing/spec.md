@@ -48,9 +48,10 @@ acquisition inputs.
 `ProxyAuth` SHALL be either `None` or an explicitly supplied nonempty prepared Basic token. A
 prepared token SHALL use the canonical strict standard-padded Base64 validator and SHALL reject
 noncanonical padding, an invalid alphabet, whitespace, controls, and nonzero pad bits before
-contact. Validation SHALL use no more than 3072 bytes of bounded scratch for the maximum admitted
-token and SHALL NOT reinterpret username or password character sets. Digest, NTLM, Negotiate,
-ambient credential discovery, and automatic 407 retry SHALL NOT be provided.
+contact. The 4096-byte encoded limit implies a maximum decoded length of 3072 bytes. Validation
+SHALL allocate no decoded scratch and SHALL expose no separate unreachable scratch-limit failure.
+It SHALL NOT reinterpret username or password character sets. Digest, NTLM, Negotiate, ambient
+credential discovery, and automatic 407 retry SHALL NOT be provided.
 
 The caller SHALL supply nonsecret `u64` payloads for opaque configuration and
 authentication-context identities. The identity values SHALL be `Copy`, SHALL preserve their exact
@@ -325,9 +326,11 @@ The capability SHALL expose stable route-key data containing proxy endpoint iden
 caller-supplied configuration/authentication identities, Forward versus Tunnel mode, original
 origin, and origin security context for later pooling. Copying a route/key SHALL preserve those IDs;
 equality SHALL compare them exactly without formatting or hashing credentials. It SHALL also expose
-pure route recomputation from a new origin
-so redirect policy can reapply bypass and credential selection. These hooks SHALL NOT implement
-pool storage, redirect following, retry, replay, or permanent proxy-capability caching.
+pure route recomputation from a new origin under the exact immutable configuration retained by the
+route, so redirect policy can reapply bypass and credential selection without silently switching
+configuration or credentials. Explicit configuration replacement SHALL call `selectRoute` with the
+new configuration. These hooks SHALL NOT implement pool storage, redirect following, retry, replay,
+or permanent proxy-capability caching.
 
 #### Scenario: Distinguish a proxy rejection from transport failure
 
@@ -338,8 +341,9 @@ pool storage, redirect following, retry, replay, or permanent proxy-capability c
 #### Scenario: Recompute without carrying authority credentials
 
 - **WHEN** a downstream redirect policy supplies a different origin to route recomputation
-- **THEN** bypass, proxy authentication selection, mode, and route identity are derived anew without
-  carrying origin credentials or an established tunnel flag from the previous origin
+- **THEN** the route's exact retained configuration reapplies bypass and proxy authentication
+  selection and derives mode and route identity anew without carrying origin credentials or an
+  established tunnel flag from the previous origin
 
 ### Requirement: Proxy delivery is portable, generated, and bounded
 
