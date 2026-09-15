@@ -16,7 +16,7 @@ that boundary without changing redirect policy.
 
 ## Policy and defaults
 
-`RedirectPolicy` uses these defaults:
+`Policy.defaults()` uses these defaults:
 
 | Policy                      | Default     |
 | --------------------------- | ----------- |
@@ -115,6 +115,11 @@ Accept-Language, User-Agent, configured safe custom fields, and content type/cod
 that a retained body needs. It then removes Authorization, Cookie, Proxy-Authorization, Origin,
 Referer, and every configured sensitive field. The removal has final precedence; an allowlist
 cannot retain those fields.
+
+The same cross-origin transition resets generated Host policy to the normalized destination
+default and removes generated authorization. Explicit User-Agent and Accept controls remain because
+they are in the fixed safe set. This policy rebuild prevents credentials or an initial explicit Host
+from reappearing when `silk.http_request` generates the next head.
 
 The operation does not derive credentials from Location user information. It does not apply a DNS
 suffix rule, cookie jar, or implicit referrer policy.
