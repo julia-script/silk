@@ -1,0 +1,842 @@
+//! Origin-bound HTTP request preparation with finite storage and explicit header policy.
+//!
+//! # Details
+//! `prepare` owns the serialized head before an exchange can send bytes. It generates framing
+//! fields and rejects conflicting fields. Credentials are explicit and never read from a URI.
+
+import silk.allocator {Allocator, OutOfMemoryError}
+import silk.bytes {Bytes}
+import silk.http {Header, Method, RequestHead, ValueError, Version}
+import silk.http_basic as Basic
+import silk.http_basic {BasicError}
+import silk.http_head as Head
+import silk.http_headers {HeaderIterator, Headers, Limits}
+import silk.http_origin {Origin, OriginError}
+import silk.http_target {RequestTarget, TargetForm}
+import silk.option {Option}
+import silk.result {Result}
+import silk.slice {Slice}
+import silk.string {String}
+import silk.u64
+import silk.u8
+import silk.uri {Uri}
+import silk.usize
+import silk.vector {Vector}
+
+/// The exact request payload delimiter.
+pub union BodyMode {
+  /// Sends no request payload.
+  Empty,
+  /// Sends exactly this many payload bytes.
+  KnownLength {
+    /// The exact payload length.
+    pub length: u64,
+  },
+  /// Sends HTTP/1.1 chunks and explicit trailers.
+  Chunked,
+}
+
+impl Copy for BodyMode {}
+
+/// A generated field policy that distinguishes omission from a default.
+pub union HeaderControl<'value> {
+  /// Generates the documented default value.
+  Default,
+  /// Deliberately omits the field when the protocol permits it.
+  Omit,
+  /// Uses one explicit validated value.
+  Value {
+    /// The caller-owned semantic field bytes.
+    pub value: &'value [u8],
+  },
+}
+
+impl<'value> Copy for HeaderControl<'value> {}
+
+/// One explicit authorization source.
+pub union Authorization<'value> {
+  /// Sends no generated authorization field.
+  Absent,
+  /// Sends one explicit validated field value.
+  Value {
+    /// The complete authorization field value.
+    pub value: &'value [u8],
+  },
+  /// Encodes caller-selected username and password bytes.
+  Basic {
+    /// Username bytes without colon or controls.
+    pub username: &'value [u8],
+    /// Password bytes without controls.
+    pub password: &'value [u8],
+  },
+}
+
+impl<'value> Copy for Authorization<'value> {}
+
+/// Explicit permission to send Basic credentials without TLS.
+pub enum BasicSecurity {
+  /// Rejects Basic credentials for a plaintext origin.
+  RequireTls,
+  /// Permits plaintext Basic without changing HTTPS authentication.
+  AllowInsecureBasic,
+}
+
+/// Policy for generated request fields and connection persistence.
+pub struct HeaderPolicy<'value> {
+  /// Defaults to the normalized origin authority; HTTP/1.1 cannot omit it.
+  pub host: HeaderControl<'value>
+  /// Defaults to `silk-http/1`.
+  pub userAgent: HeaderControl<'value>
+  /// Defaults to `*/*`.
+  pub accept: HeaderControl<'value>
+  /// One optional explicit authorization source.
+  pub authorization: Authorization<'value>
+  /// Requires TLS for Basic unless explicitly overridden.
+  pub basicSecurity: BasicSecurity
+  /// Permits HTTP/1.0 keep-alive; HTTP/1.1 uses normal persistence.
+  pub http10KeepAlive: bool
+}
+
+impl<'value> Copy for HeaderPolicy<'value> {}
+
+impl<'value> HeaderPolicy<'value> {
+  /// Returns generated defaults, absent authorization, and plaintext Basic rejection.
+  pub fn defaults() -> HeaderPolicy<'value> {
+    return HeaderPolicy<'value> {
+      host: HeaderControl<'value>.Default,
+      userAgent: HeaderControl<'value>.Default,
+      accept: HeaderControl<'value>.Default,
+      authorization: Authorization<'value>.Absent,
+      basicSecurity: BasicSecurity.RequireTls,
+      http10KeepAlive: false,
+    }
+  }
+}
+
+/// A precise preflight failure with no network side effects.
+pub union RequestError {
+  /// A shared HTTP value failed validation.
+  Value {
+    /// The original value failure.
+    pub error: ValueError,
+  },
+  /// An origin could not be constructed or serialized.
+  Origin {
+    /// The original origin failure.
+    pub error: OriginError,
+  },
+  /// Credentials failed strict Basic encoding.
+  Basic {
+    /// The credential failure, without credential bytes.
+    pub error: BasicError,
+  },
+  /// A caller field conflicts with generated policy.
+  ConflictingHeader,
+  /// The explicit Host differs from the connection origin.
+  ConflictingAuthority,
+  /// HTTP/1.1 cannot omit Host.
+  MissingHost,
+  /// The body or continue mode is unavailable for the selected version.
+  InvalidBodyMode,
+  /// More than one authorization source was supplied.
+  MultipleAuthorization,
+  /// Plaintext Basic lacks explicit permission.
+  InsecureBasic,
+  /// A direct request supplies proxy credentials.
+  ProxyAuthorization,
+  /// Credential bytes exceed the finite budget.
+  CredentialLimit,
+  /// Generated or copied fields exceed the configured finite count.
+  HeaderLimit,
+  /// A direct request uses an absolute target for another origin.
+  InvalidTarget,
+}
+
+/// One owned, origin-bound, preflighted head with unforgeable framing policy.
+pub struct PreparedRequest {
+  storage: Bytes
+  length: usize
+  originValue: Origin
+  versionValue: Version
+  bodyValue: BodyMode
+  continueValue: bool
+}
+
+impl PreparedRequest {
+  /// Borrows the serialized request head until this owner is dropped.
+  pub fn bytes<'a>(self: &'a Self) -> &'a [u8] {
+    return Slice.view<u8>(Bytes.asSlice(&self.storage), usize.ZERO, self.length)
+  }
+  /// Returns the immutable connection origin, including its security scheme.
+  pub fn origin(self: &Self) -> Origin {
+    return self.originValue
+  }
+  /// Returns the admitted HTTP version.
+  pub fn version(self: &Self) -> Version {
+    return self.versionValue
+  }
+  /// Returns the exact selected body delimiter.
+  pub fn bodyMode(self: &Self) -> BodyMode {
+    return self.bodyValue
+  }
+  /// Returns whether the head contains the generated 100-continue expectation.
+  pub fn require100(self: &Self) -> bool {
+    return self.continueValue
+  }
+}
+
+/// Validates and serializes one request before any transport operation.
+///
+/// # Details
+/// Caller fields preserve order. Host, User-Agent, Accept, framing, Expect, and Connection belong
+/// to policy and cannot also occur in `headers`. Output owns all borrowed input bytes.
+/// `maxHeadBytes` and `maxCredentialBytes` bound owned head and credential storage.
+pub effect fn prepare<'value>(
+  origin: &Origin,
+  version: Version,
+  method: Method<'value>,
+  target: RequestTarget<'value>,
+  headers: &Headers<'value>,
+  policy: &HeaderPolicy<'value>,
+  body: BodyMode,
+  require100: bool,
+  limits: Limits,
+  maxHeadBytes: usize,
+  maxCredentialBytes: usize,
+) -> PreparedRequest ! RequestError | OutOfMemoryError ? &mut Allocator {
+  if version == Version.Http10 {
+    if require100 {
+      fail RequestError.InvalidBodyMode
+    }
+    match body {
+      BodyMode.Chunked => {
+        fail RequestError.InvalidBodyMode
+      }
+      _ => {}
+    }
+  }
+  let targetText = RequestTarget.format(target)
+  let targetBytes = String.utf8Bytes(targetText)
+  if targetBytes.length > usize.ZERO && targetBytes[usize.ZERO] != 47 && targetText != "*" && Method.format(
+    &method,
+  ) != "CONNECT" {
+    let uri = match move Uri.parse(targetText) {
+      Result.Failure {error} => {
+        drop error
+        fail RequestError.InvalidTarget
+      }
+      Result.Success {value} => value
+    }
+    let other = match move Origin.fromUri(&uri) {
+      Result.Failure {error} => {
+        fail RequestError.Origin {error: error}
+      }
+      Result.Success {value} => value
+    }
+    if !Origin.equals(origin, &other) {
+      fail RequestError.InvalidTarget
+    }
+  }
+  let mut rawAuthorization = false
+  let mut iterator = Headers.iter(headers)
+  while true {
+    match move HeaderIterator.next(&mut iterator) {
+      Option.None => {
+        break
+      }
+      Option.Some {value} => {
+        let name = Header.name(&value)
+        if ascii(name, "proxy-authorization") {
+          fail RequestError.ProxyAuthorization
+        }
+        if ascii(name, "host") || ascii(name, "user-agent") || ascii(name, "accept") || ascii(
+          name,
+          "content-length",
+        ) || ascii(name, "transfer-encoding") || ascii(name, "expect") || ascii(name, "connection") {
+          fail RequestError.ConflictingHeader
+        }
+        if ascii(name, "authorization") {
+          if rawAuthorization {
+            fail RequestError.MultipleAuthorization
+          }
+          rawAuthorization = true
+          if Header.value(&value).length > maxCredentialBytes {
+            fail RequestError.CredentialLimit
+          }
+          run validateBasicTransport(origin, Header.value(&value), policy.basicSecurity)
+        }
+      }
+    }
+  }
+  let mut authorityStorage: [u8; 260] = [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+  ]
+  let authorityLength = match move Origin.authorityInto(origin, &mut authorityStorage) {
+    Result.Failure {error} => {
+      fail RequestError.Origin {error: error}
+    }
+    Result.Success {value} => value
+  }
+  let mut lengthStorage: [u8; 20] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+  let mut lengthStart: usize = 20
+  if let BodyMode.KnownLength {length} = body {
+    let mut remaining = length
+    while true {
+      lengthStart = lengthStart - usize.ONE
+      lengthStorage[lengthStart] = u64.toU8(remaining % u64.toU64(10)) + 48
+      remaining = remaining / u64.toU64(10)
+      if remaining == u64.MIN {
+        break
+      }
+    }
+  }
+  let mut credential = run Bytes.zeroed(maxCredentialBytes)
+  let mut credentialLength = usize.ZERO
+  let mut hasAuthorization = false
+  match policy.authorization {
+    Authorization.Absent => {}
+    Authorization.Value {value} => {
+      if rawAuthorization {
+        fail RequestError.MultipleAuthorization
+      }
+      if value.length > maxCredentialBytes {
+        fail RequestError.CredentialLimit
+      }
+      run validateBasicTransport(origin, value, policy.basicSecurity)
+      let output = Bytes.asMutSlice(&mut credential)
+      let mut index = usize.ZERO
+      while index < value.length {
+        output[index] = value[index]
+        index = index + usize.ONE
+      }
+      drop output
+      credentialLength = value.length
+      hasAuthorization = true
+    }
+    Authorization.Basic {username, password} => {
+      if rawAuthorization {
+        fail RequestError.MultipleAuthorization
+      }
+      if !Origin.secure(origin) && policy.basicSecurity != BasicSecurity.AllowInsecureBasic {
+        fail RequestError.InsecureBasic
+      }
+      let needed = match move Basic.encodedLength(username.length, password.length) {
+        Result.Failure {error} => {
+          fail RequestError.Basic {error: error}
+        }
+        Result.Success {value} => value
+      }
+      if needed > maxCredentialBytes {
+        fail RequestError.CredentialLimit
+      }
+      let mut scratch = run Bytes.zeroed(maxCredentialBytes)
+      let output = Bytes.asMutSlice(&mut credential)
+      let temporary = Bytes.asMutSlice(&mut scratch)
+      let encoded = Basic.encodeInto(username, password, &mut temporary, &mut output)
+      drop temporary
+      drop output
+      credentialLength = match move encoded {
+        Result.Failure {error} => {
+          fail RequestError.Basic {error: error}
+        }
+        Result.Success {value} => value
+      }
+      hasAuthorization = true
+    }
+  }
+  let mut entries = Vector.make<Header>()
+  let mut source = Headers.iter(headers)
+  while true {
+    match move HeaderIterator.next(&mut source) {
+      Option.None => {
+        break
+      }
+      Option.Some {value} => {
+        run append(&mut entries, Header.name(&value), Header.value(&value), limits)
+      }
+    }
+  }
+  match policy.host {
+    HeaderControl.Omit => {
+      if version == Version.Http11 {
+        fail RequestError.MissingHost
+      }
+    }
+    HeaderControl.Default => {
+      run append(
+        &mut entries,
+        "Host",
+        Slice.view<u8>(&authorityStorage, usize.ZERO, authorityLength),
+        limits,
+      )
+    }
+    HeaderControl.Value {value} => {
+      let text = match move String.fromUtf8(value) {
+        Result.Failure {error} => {
+          drop error
+          fail RequestError.ConflictingAuthority
+        }
+        Result.Success {value: text} => text
+      }
+      if !Origin.matchesAuthority(origin, text) {
+        fail RequestError.ConflictingAuthority
+      }
+      run append(&mut entries, "Host", value, limits)
+    }
+  }
+  run controlled(&mut entries, "User-Agent", policy.userAgent, b"silk-http/1", limits)
+  run controlled(&mut entries, "Accept", policy.accept, b"*/*", limits)
+  match body {
+    BodyMode.Empty => {}
+    BodyMode.KnownLength {length} => {
+      run append(
+        &mut entries,
+        "Content-Length",
+        Slice.view<u8>(&lengthStorage, lengthStart, 20 - lengthStart),
+        limits,
+      )
+    }
+    BodyMode.Chunked => {
+      run append(&mut entries, "Transfer-Encoding", b"chunked", limits)
+    }
+  }
+  if require100 {
+    run append(&mut entries, "Expect", b"100-continue", limits)
+  }
+  if version == Version.Http10 {
+    if policy.http10KeepAlive {
+      run append(&mut entries, "Connection", b"keep-alive", limits)
+    } else {
+      run append(&mut entries, "Connection", b"close", limits)
+    }
+  }
+  let authorization = Slice.view<u8>(Bytes.asSlice(&credential), usize.ZERO, credentialLength)
+  if hasAuthorization {
+    run append(&mut entries, "Authorization", authorization, limits)
+  }
+  let fields = match move Headers.make(Vector.asSlice<Header>(&entries), limits) {
+    Result.Failure {error} => {
+      fail RequestError.Value {error: move error}
+    }
+    Result.Success {value} => value
+  }
+  let head = match move RequestHead.make(version, method, target, fields) {
+    Result.Failure {error} => {
+      fail RequestError.Value {error: move error}
+    }
+    Result.Success {value} => value
+  }
+  let mut storage = run Bytes.zeroed(maxHeadBytes)
+  let output = Bytes.asMutSlice(&mut storage)
+  let length = match move Head.writeRequestInto(&head, &mut output, limits) {
+    Result.Failure {error} => {
+      fail RequestError.Value {error: move error}
+    }
+    Result.Success {value} => value
+  }
+  drop output
+  return PreparedRequest {
+    storage: move storage,
+    length: length,
+    originValue: origin.*,
+    versionValue: version,
+    bodyValue: body,
+    continueValue: require100,
+  }
+}
+
+/// Converts a validated URI to an origin-form request with query and no fragment.
+pub effect fn fromUri<'value>(
+  uri: &Uri<'value>,
+  version: Version,
+  method: Method<'value>,
+  headers: &Headers<'value>,
+  policy: &HeaderPolicy<'value>,
+  body: BodyMode,
+  require100: bool,
+  limits: Limits,
+  maxHeadBytes: usize,
+  maxCredentialBytes: usize,
+) -> PreparedRequest ! RequestError | OutOfMemoryError ? &mut Allocator {
+  let origin = match move Origin.fromUri(uri) {
+    Result.Failure {error} => {
+      fail RequestError.Origin {error: error}
+    }
+    Result.Success {value} => value
+  }
+  let mut targetStorage = run Bytes.zeroed(limits.maxTargetBytes)
+  let output = Bytes.asMutSlice(&mut targetStorage)
+  let count = match move RequestTarget.fromUri(uri, TargetForm.Origin, &mut output) {
+    Result.Failure {error} => {
+      fail RequestError.Value {error: move error}
+    }
+    Result.Success {value} => value
+  }
+  drop output
+  let bytes = Slice.view<u8>(Bytes.asSlice(&targetStorage), usize.ZERO, count)
+  let text = match move String.fromUtf8(bytes) {
+    Result.Failure {error} => {
+      drop error
+      fail RequestError.InvalidTarget
+    }
+    Result.Success {value} => value
+  }
+  let target = match move RequestTarget.parse(&method, text, limits.maxTargetBytes) {
+    Result.Failure {error} => {
+      fail RequestError.Value {error: move error}
+    }
+    Result.Success {value} => value
+  }
+  return run prepare(
+    &origin,
+    version,
+    method,
+    target,
+    headers,
+    policy,
+    body,
+    require100,
+    limits,
+    maxHeadBytes,
+    maxCredentialBytes,
+  )
+}
+
+effect fn append<'a>(
+  entries: &mut Vector<Header<'a>>,
+  name: string<'a>,
+  value: &'a [u8],
+  limits: Limits,
+) -> () ! RequestError | OutOfMemoryError ? &mut Allocator {
+  if Vector.length<Header<'a>>(&entries.*) >= limits.maxFields {
+    fail RequestError.HeaderLimit
+  }
+  let field = match move Header.make(name, value, limits) {
+    Result.Failure {error} => {
+      fail RequestError.Value {error: move error}
+    }
+    Result.Success {value: fieldValue} => fieldValue
+  }
+  let appended = run Vector.append<Header<'a>>(&mut entries.*, field)
+  return ()
+}
+
+effect fn controlled<'a>(
+  entries: &mut Vector<Header<'a>>,
+  name: string<'a>,
+  control: HeaderControl<'a>,
+  fallback: &'a [u8],
+  limits: Limits,
+) -> () ! RequestError | OutOfMemoryError ? &mut Allocator {
+  match control {
+    HeaderControl.Omit => {}
+    HeaderControl.Default => {
+      run append(&mut entries.*, name, fallback, limits)
+    }
+    HeaderControl.Value {value} => {
+      run append(&mut entries.*, name, value, limits)
+    }
+  }
+  return ()
+}
+
+effect fn validateBasicTransport(origin: &Origin, value: &[u8], security: BasicSecurity) -> ()
+! RequestError {
+  if value.length >= 6 {
+    let prefix = Slice.view<u8>(value, usize.ZERO, 6)
+    let text = match move String.fromUtf8(prefix) {
+      Result.Failure {error} => {
+        drop error
+        return ()
+      }
+      Result.Success {value: textValue} => textValue
+    }
+    if ascii(text, "Basic ") && !Origin.secure(origin) && security != BasicSecurity.AllowInsecureBasic {
+      fail RequestError.InsecureBasic
+    }
+  }
+  return ()
+}
+
+fn ascii(left: string, right: string) -> bool {
+  let a = String.utf8Bytes(left)
+  let b = String.utf8Bytes(right)
+  if a.length != b.length {
+    return false
+  }
+  let mut index = usize.ZERO
+  while index < a.length {
+    let mut x = a[index]
+    let mut y = b[index]
+    if x >= 65 && x <= 90 {
+      x = x + 32
+    }
+    if y >= 65 && y <= 90 {
+      y = y + 32
+    }
+    if x != y {
+      return false
+    }
+    index = index + usize.ONE
+  }
+  return true
+}

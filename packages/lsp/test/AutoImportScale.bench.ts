@@ -7,21 +7,18 @@ import { NodeServices } from '@effect/platform-node'
 import { assert, it } from '@effect/vitest'
 import * as Analysis from '@silklang/compiler/Analysis'
 import * as WorkspaceInventory from '@silklang/compiler/WorkspaceInventory'
-import * as Config from 'effect/Config'
 import * as Effect from 'effect/Effect'
+import * as Console from 'effect/Console'
 import * as Inspectable from 'effect/Inspectable'
 import * as Workspace from '../src/Workspace.js'
 import * as WorkspaceCatalog from '../src/WorkspaceCatalog.js'
 
 const encoder = new TextEncoder()
 
-it.effect(
+it.live(
   'keeps exact lookup header-only and reuses every unaffected module summary',
   () =>
     Effect.gen(function* () {
-      const measure = yield* Config.boolean('SILK_AUTO_IMPORT_MEASURE').pipe(
-        Config.withDefault(false),
-      )
       const root = mkdtempSync(join(tmpdir(), 'silk-auto-import-scale-'))
       const sourceRoot = join(root, 'src')
       mkdirSync(sourceRoot)
@@ -29,8 +26,8 @@ it.effect(
         join(root, 'silk.toml'),
         '[package]\nname = "scale"\nversion = "0.1.0"\nroot = "src/Main.silk"\n',
       )
-      const moduleCount = measure ? 200 : 4
-      const selectedOrdinal = measure ? 137 : 1
+      const moduleCount = 200
+      const selectedOrdinal = 137
       for (let ordinal = 0; ordinal < moduleCount; ordinal += 1)
         writeFileSync(
           join(sourceRoot, `Module${ordinal}.silk`),
@@ -75,7 +72,10 @@ it.effect(
         `pub fn revised${selectedOrdinal}() -> i32 { return ${selectedOrdinal} }`,
       )
       const revised = yield* WorkspaceCatalog.refresh({
-        configuration: { configuration: { profile: { target: 'aarch64-apple-darwin' } } },
+        configuration: {
+          application: document.module,
+          configuration: session.snapshot.configuration,
+        },
         sourceRoot,
         documents: [document],
         previous: inventory,
@@ -103,15 +103,14 @@ it.effect(
         moduleCount + 1 + revised.toolchain.size,
       )
       assert.isAtLeast(revised.observation.indexedDeclarations, moduleCount + 1)
-      if (measure)
-        process.stderr.write(
-          `${Inspectable.toStringUnknown({
-            modules: moduleCount + 1,
-            initial: inventory.observation,
-            incremental: revised.observation,
-            queryElapsedMs,
-          })}\n`,
-        )
+      yield* Console.log(
+        Inspectable.toStringUnknown({
+          modules: moduleCount + 1,
+          initial: inventory.observation,
+          incremental: revised.observation,
+          queryElapsedMs,
+        }),
+      )
     }).pipe(Effect.provide([SourceResolver.empty, NodeServices.layer])),
-  90_000,
+  300_000,
 )

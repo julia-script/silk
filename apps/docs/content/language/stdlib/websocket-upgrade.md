@@ -13,7 +13,7 @@ decision before output, flushes the switching response, then lends the existing 
 Origin is policy input, not authentication. Valid extension offers are declined; frames and
 compression are outside this module.
 
-Import as `WebSocketUpgrade` with `import silk.websocket_upgrade { WebSocketUpgrade }`.
+Import as `WebSocketUpgrade` with `import silk.websocket_upgrade as WebSocketUpgrade`.
 
 Public declarations: 14.
 

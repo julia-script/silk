@@ -23,6 +23,107 @@ import {
   storedEffectValueType,
 } from './ValueType.js'
 
+/** Selects one admitted runtime call edge in its lexical provider context. */
+export const selectCall = (
+  calls: ReadonlyArray<Instances.CallInstance>,
+  owner: Instances.InstanceKey,
+  span: SourceSpan.SourceSpan,
+  implementation?: DeclarationFacts.CanonicalId,
+  typeArguments?: ReadonlyArray<Type.GenericArgument>,
+  staticArguments?: ReadonlyArray<StaticValue.Value>,
+  providers: ReadonlyArray<Instances.CallProvider> = [],
+): Instances.CallInstance | undefined => {
+  const atSite = calls.filter(
+    (call) =>
+      Instances.keyText(call.owner) === Instances.keyText(owner) &&
+      call.span.sourceId === span.sourceId &&
+      call.span.start === span.start &&
+      call.span.end === span.end,
+  )
+  const exactProviders = atSite.filter((call) => Instances.callMatchesProviders(call, providers))
+  const usedRuntimeProviderFallback = exactProviders.length === 0
+  // Discovery coalesces proof-only lifetimes inside provider types as well as call arguments.
+  // Recover only already-admitted physical provider shapes; semantic selection stays exact.
+  const exact = usedRuntimeProviderFallback
+    ? atSite.filter((call) =>
+        (call.providers ?? []).every((expected) => {
+          const actual = providers.findLast(
+            (candidate) =>
+              expected.role === candidate.role &&
+              Type.equals(expected.capability, candidate.capability),
+          )
+          if (actual === undefined) return false
+          const expectedRuntime = Type.runtimeArgumentKeys([expected.providerType])
+          const actualRuntime = Type.runtimeArgumentKeys([actual.providerType])
+          return (
+            expectedRuntime.length === actualRuntime.length &&
+            expectedRuntime.every((argument, ordinal) => argument === actualRuntime.at(ordinal))
+          )
+        }),
+      )
+    : exactProviders
+  const selected =
+    implementation === undefined
+      ? exact
+      : exact.filter(
+          (call) =>
+            call.target.declaration.module === implementation.module &&
+            call.target.declaration.name === implementation.name,
+        )
+  const expected = typeArguments?.filter((argument) => !Type.isHiddenExecutableArgument(argument))
+  const exactSpecialized =
+    expected === undefined
+      ? selected
+      : selected.filter((call) => {
+          const actual = call.target.typeArguments.filter(
+            (argument) => !Type.isHiddenExecutableArgument(argument),
+          )
+          return (
+            actual.length === expected.length &&
+            actual.every((argument, ordinal) => {
+              const wanted = expected.at(ordinal)
+              return wanted !== undefined && Type.equalsGenericArgument(argument, wanted)
+            })
+          )
+        })
+  let usedRuntimeFallback = usedRuntimeProviderFallback
+  let specialized = exactSpecialized
+  if (expected !== undefined && exactSpecialized.length === 0) {
+    usedRuntimeFallback = true
+    // Runtime instance discovery deliberately coalesces proof-only caller lifetimes. If another
+    // proof context supplied the retained call shape, recover only its unique runtime-equivalent
+    // visible arguments so lowering also retains its hidden callable and Effect identities.
+    // Ambiguous physical targets remain unavailable.
+    const expectedRuntime = Type.runtimeArgumentKeys(expected)
+    specialized = selected.filter((call) => {
+      const actualRuntime = Type.runtimeArgumentKeys(
+        call.target.typeArguments.filter((argument) => !Type.isHiddenExecutableArgument(argument)),
+      )
+      return (
+        actualRuntime.length === expectedRuntime.length &&
+        actualRuntime.every((argument, ordinal) => argument === expectedRuntime.at(ordinal))
+      )
+    })
+  }
+  const staticallySpecialized =
+    staticArguments === undefined || staticArguments.length === 0
+      ? specialized
+      : specialized.filter(
+          (call) =>
+            call.target.staticArguments.length === staticArguments.length &&
+            call.target.staticArguments.every((argument, ordinal) => {
+              const wanted = staticArguments.at(ordinal)
+              return wanted !== undefined && StaticValue.equals(argument, wanted)
+            }),
+        )
+  if (staticallySpecialized.length === 1) return staticallySpecialized.at(0)
+  if (!usedRuntimeFallback || staticallySpecialized.length === 0) return undefined
+  const targets = new Map(
+    staticallySpecialized.map((call) => [Instances.keyText(call.target), call] as const),
+  )
+  return targets.size === 1 ? [...targets.values()].at(0) : undefined
+}
+
 export interface LoweringFailure {
   readonly boundary: 'Expression' | 'Statement'
   readonly construct: Hir.Expression['_tag'] | Hir.Statement['_tag']
@@ -317,75 +418,14 @@ export class FunctionLowering {
     staticArguments?: ReadonlyArray<StaticValue.Value>,
     providers: ReadonlyArray<ProvidedRequirement> = this.providedRequirements,
   ): Instances.CallInstance | undefined {
-    const exact = this.calls.filter(
-      (call) =>
-        Instances.keyText(call.owner) === Instances.keyText(this.owner.key) &&
-        call.span.sourceId === span.sourceId &&
-        call.span.start === span.start &&
-        call.span.end === span.end &&
-        Instances.callMatchesProviders(call, providers),
+    return selectCall(
+      this.calls,
+      this.owner.key,
+      span,
+      implementation,
+      typeArguments,
+      staticArguments,
+      providers,
     )
-    const selected =
-      implementation === undefined
-        ? exact
-        : exact.filter(
-            (call) =>
-              call.target.declaration.module === implementation.module &&
-              call.target.declaration.name === implementation.name,
-          )
-    const expected = typeArguments?.filter((argument) => !Type.isHiddenExecutableArgument(argument))
-    const exactSpecialized =
-      expected === undefined
-        ? selected
-        : selected.filter((call) => {
-            const actual = call.target.typeArguments.filter(
-              (argument) => !Type.isHiddenExecutableArgument(argument),
-            )
-            return (
-              actual.length === expected.length &&
-              actual.every((argument, ordinal) => {
-                const wanted = expected.at(ordinal)
-                return wanted !== undefined && Type.equalsGenericArgument(argument, wanted)
-              })
-            )
-          })
-    let usedRuntimeFallback = false
-    let specialized = exactSpecialized
-    if (expected !== undefined && exactSpecialized.length === 0) {
-      usedRuntimeFallback = true
-      // Runtime instance discovery deliberately coalesces proof-only caller lifetimes. If another
-      // proof context supplied the retained call shape, recover only its unique runtime-equivalent
-      // visible arguments so lowering also retains its hidden callable and Effect identities.
-      // Ambiguous physical targets remain unavailable.
-      const expectedRuntime = Type.runtimeArgumentKeys(expected)
-      specialized = selected.filter((call) => {
-        const actualRuntime = Type.runtimeArgumentKeys(
-          call.target.typeArguments.filter(
-            (argument) => !Type.isHiddenExecutableArgument(argument),
-          ),
-        )
-        return (
-          actualRuntime.length === expectedRuntime.length &&
-          actualRuntime.every((argument, ordinal) => argument === expectedRuntime.at(ordinal))
-        )
-      })
-    }
-    const staticallySpecialized =
-      staticArguments === undefined || staticArguments.length === 0
-        ? specialized
-        : specialized.filter(
-            (call) =>
-              call.target.staticArguments.length === staticArguments.length &&
-              call.target.staticArguments.every((argument, ordinal) => {
-                const wanted = staticArguments.at(ordinal)
-                return wanted !== undefined && StaticValue.equals(argument, wanted)
-              }),
-          )
-    if (staticallySpecialized.length === 1) return staticallySpecialized.at(0)
-    if (!usedRuntimeFallback || staticallySpecialized.length === 0) return undefined
-    const targets = new Map(
-      staticallySpecialized.map((call) => [Instances.keyText(call.target), call] as const),
-    )
-    return targets.size === 1 ? [...targets.values()].at(0) : undefined
   }
 }

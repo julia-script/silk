@@ -454,7 +454,7 @@ pub union TlsError {
   },
   /// Server Finished did not authenticate the transcript.
   Finished,
-  /// A server-selected suite, group, signature, or ALPN value is outside the selected profile.
+  /// A server-selected suite, group, signature, or extension shape is outside the selected profile.
   UnsupportedProfile,
   /// A finite resource budget was exceeded.
   LimitExceeded {
@@ -474,7 +474,7 @@ pub union TlsError {
   HandshakeTruncated,
   /// Transport input ended after authentication without peer `close_notify`.
   Truncated,
-  /// ALPN was required but the server selected no protocol.
+  /// The server omits a required ALPN selection or selects a protocol that was not offered.
   NoApplicationProtocol,
 }
 
@@ -2973,7 +2973,7 @@ fn handleEncryptedExtensions(client: &mut Client, messageLength: usize) -> Resul
       }
       sawServerName = true
     } else if kind == 16 {
-      if sawAlpn || !client.alpnEnabled || length < 3 {
+      if sawAlpn || length < 3 {
         return Result.failResult<(), TlsError>(TlsError.UnsupportedProfile)
       }
       let listLength = readU16Raw(&client.handshake, cursor)
@@ -2982,6 +2982,9 @@ fn handleEncryptedExtensions(client: &mut Client, messageLength: usize) -> Resul
         return Result.failResult<(), TlsError>(
           TlsError.ProtocolViolation {reason: ProtocolReason.Extension},
         )
+      }
+      if !client.alpnEnabled {
+        return Result.failResult<(), TlsError>(TlsError.NoApplicationProtocol)
       }
       let mut index = usize.ZERO
       let mut found = false
@@ -3004,7 +3007,7 @@ fn handleEncryptedExtensions(client: &mut Client, messageLength: usize) -> Resul
         index = index + usize.ONE
       }
       if !found {
-        return Result.failResult<(), TlsError>(TlsError.UnsupportedProfile)
+        return Result.failResult<(), TlsError>(TlsError.NoApplicationProtocol)
       }
       sawAlpn = true
     } else {

@@ -319,9 +319,13 @@ const primitiveNamespaces = new Set([
 
 const importStatement = (entry: ManifestEntry, module: Project.Module): string => {
   const path = module.name.replaceAll('/', '.')
-  return primitiveNamespaces.has(entry.namespace)
-    ? `import ${path}`
-    : `import ${path} { ${entry.namespace} }`
+  if (primitiveNamespaces.has(entry.namespace)) return `import ${path}`
+  const declaration = module.items.some(
+    (item) => item.visibility === 'Public' && item.name === entry.namespace,
+  )
+  return declaration
+    ? `import ${path} { ${entry.namespace} }`
+    : `import ${path} as ${entry.namespace}`
 }
 
 const renderModule = (

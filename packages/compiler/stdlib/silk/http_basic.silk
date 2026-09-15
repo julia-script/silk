@@ -1,0 +1,118 @@
+//! Explicit bounded HTTP Basic authorization from caller-encoded credential bytes.
+//!
+//! # Details
+//!
+//! The caller chooses the character encoding and supplies scratch and output buffers.
+//! Encoding validates both credentials and both capacities before it changes either buffer.
+//! The HTTP client controls origin binding and permission to send credentials over plain HTTP.
+
+import silk.base64 {Base64, Base64Error}
+import silk.result {Result}
+import silk.slice {Slice}
+import silk.usize
+
+/// A credential validation or capacity failure without credential contents.
+pub enum BasicError {
+  /// The username contains a colon, a control byte, or DEL.
+  InvalidUsername,
+  /// The password contains a control byte or DEL.
+  InvalidPassword,
+  /// The credential or encoded size cannot fit in usize.
+  SizeOverflow,
+  /// Scratch cannot hold the username, separator, and password.
+  ScratchTooSmall,
+  /// Output cannot hold the complete authorization value.
+  OutputTooSmall,
+}
+
+/// Returns the exact output length, including the six-byte `Basic ` prefix.
+pub fn encodedLength(usernameLength: usize, passwordLength: usize) -> Result<usize, BasicError> {
+  if usernameLength == usize.MAX || passwordLength > usize.MAX - usernameLength - usize.ONE {
+    return Result.failResult<usize, BasicError>(BasicError.SizeOverflow)
+  }
+  let rawLength = usernameLength + usize.ONE + passwordLength
+  let measured = Base64.encodedLength(rawLength)
+  let length = match move measured {
+    Result<usize, Base64Error>.Failure {error} => {
+      return Result.failResult<usize, BasicError>(BasicError.SizeOverflow)
+    }
+    Result<usize, Base64Error>.Success {value} => value
+  }
+  if length > usize.MAX - 6 {
+    return Result.failResult<usize, BasicError>(BasicError.SizeOverflow)
+  }
+  return Result.succeed<usize, BasicError>(length + 6)
+}
+
+/// Writes `Basic ` and padded Base64 of `username:password`, returning the complete byte count.
+///
+/// # Details
+///
+/// A colon in the username or a control byte or DEL in either credential fails before mutation.
+/// Non-ASCII bytes are accepted without character conversion. Failure leaves output and scratch unchanged.
+/// Scratch retains the combined credential after success; the caller controls its later use and erasure.
+pub fn encodeInto(username: &[u8], password: &[u8], scratch: &mut [u8], output: &mut [u8]) -> Result<
+  usize,
+  BasicError,
+> {
+  let mut index = usize.ZERO
+  while index < username.length {
+    let byte = username[index]
+    if byte < 32 || byte == 127 || byte == 58 {
+      return Result.failResult<usize, BasicError>(BasicError.InvalidUsername)
+    }
+    index = index + usize.ONE
+  }
+  index = usize.ZERO
+  while index < password.length {
+    let byte = password[index]
+    if byte < 32 || byte == 127 {
+      return Result.failResult<usize, BasicError>(BasicError.InvalidPassword)
+    }
+    index = index + usize.ONE
+  }
+  let measured = encodedLength(username.length, password.length)
+  let required = match move measured {
+    Result<usize, BasicError>.Failure {error} => {
+      return Result.failResult<usize, BasicError>(move error)
+    }
+    Result<usize, BasicError>.Success {value} => value
+  }
+  let rawLength = username.length + usize.ONE + password.length
+  if scratch.length < rawLength {
+    return Result.failResult<usize, BasicError>(BasicError.ScratchTooSmall)
+  }
+  if output.length < required {
+    return Result.failResult<usize, BasicError>(BasicError.OutputTooSmall)
+  }
+  index = usize.ZERO
+  while index < username.length {
+    scratch[index] = username[index]
+    index = index + usize.ONE
+  }
+  scratch[username.length] = 58
+  index = usize.ZERO
+  while index < password.length {
+    scratch[username.length + usize.ONE + index] = password[index]
+    index = index + usize.ONE
+  }
+  let encoded = Base64.encodeInto(&mut output, Slice.view<u8>(&scratch, usize.ZERO, rawLength))
+  match move encoded {
+    Result<usize, Base64Error>.Failure {error} => {
+      return Result.failResult<usize, BasicError>(BasicError.SizeOverflow)
+    }
+    Result<usize, Base64Error>.Success {value} => {}
+  }
+  index = required - 6
+  while index > usize.ZERO {
+    index = index - usize.ONE
+    output[index + 6] = output[index]
+  }
+  output[0] = 66
+  output[1] = 97
+  output[2] = 115
+  output[3] = 105
+  output[4] = 99
+  output[5] = 32
+  return Result.succeed<usize, BasicError>(required)
+}

@@ -55,6 +55,15 @@ import { httpContentAcceptanceSource } from './httpContentAcceptance.js'
 import { httpServerAcceptanceSource } from './httpServerAcceptance.js'
 import { websocketUpgradeAcceptanceSource } from './websocketUpgradeAcceptance.js'
 import { base64AcceptanceSource } from './base64Acceptance.js'
+import { httpRequestAcceptanceSource } from './httpRequestAcceptance.js'
+import { httpClientOwnershipAcceptanceSource } from './httpClientOwnershipAcceptance.js'
+import {
+  httpClientAcceptanceSource,
+  httpClientBoundariesAcceptanceSource,
+  httpClientOutputFailuresAcceptanceSource,
+} from './httpClientAcceptance.js'
+import { httpClientContentAcceptanceSource } from './httpClientContentAcceptance.js'
+import { httpTransportAcceptanceSource } from './httpTransportAcceptance.js'
 import { networkAddressResolutionCorpusProgram } from './networkAddressResolutionAcceptance.js'
 import { nativeListenerCorpusProgram } from './nativeListenerAcceptance.js'
 import { nativeSocketCorpusProgram } from './nativeSocketAcceptance.js'
@@ -6401,6 +6410,41 @@ export const nativeCorpus: ReadonlyArray<CorpusProgram> = [
   {
     name: 'http-server',
     source: httpServerAcceptanceSource,
+    expected: { _tag: 'Completes', result: 0 },
+  },
+  {
+    name: 'http-client',
+    source: httpClientAcceptanceSource,
+    expected: { _tag: 'Completes', result: 0 },
+  },
+  {
+    name: 'http-client-boundaries',
+    source: httpClientBoundariesAcceptanceSource,
+    expected: { _tag: 'Completes', result: 0 },
+  },
+  {
+    name: 'http-client-output-failures',
+    source: httpClientOutputFailuresAcceptanceSource,
+    expected: { _tag: 'Completes', result: 0 },
+  },
+  {
+    name: 'http-client-ownership',
+    source: httpClientOwnershipAcceptanceSource,
+    expected: { _tag: 'Completes', result: 0 },
+  },
+  {
+    name: 'http-client-content',
+    source: httpClientContentAcceptanceSource,
+    expected: { _tag: 'Completes', result: 0 },
+  },
+  {
+    name: 'http-client-tls',
+    source: httpTransportAcceptanceSource,
+    expected: { _tag: 'Completes', result: 0 },
+  },
+  {
+    name: 'http-client-request',
+    source: httpRequestAcceptanceSource,
     expected: { _tag: 'Completes', result: 0 },
   },
   {
