@@ -1,4 +1,4 @@
-const standaloneImports = `import silk.allocator {Allocator, OutOfMemoryError}
+export const httpProxyPolicyCommonImports = `import silk.allocator {Allocator, OutOfMemoryError}
 import silk.effect {Effect}
 import silk.http {Header, Method, Version}
 import silk.http_headers {Headers}
@@ -683,7 +683,7 @@ export const verifyProxyPolicy = `effect fn verifyProxyPolicy() -> bool ! OutOfM
   return !RouteKey.equals(&Route.key(&forward), &Route.key(&rotatedRoute))
 }`
 
-const standaloneMain = `effect fn recover(error: OutOfMemoryError) -> bool { return false }
+export const httpProxyPolicyStandaloneMain = `effect fn recover(error: OutOfMemoryError) -> bool { return false }
 
 pub fn main() -> i32 {
   let mut allocator = Allocator.systemAllocatorProvider()
@@ -693,8 +693,8 @@ pub fn main() -> i32 {
 }
 `
 
-export const httpProxyPolicyAcceptanceSource = `${standaloneImports}
+export const httpProxyPolicyAcceptanceSource = `${httpProxyPolicyCommonImports}
 ${httpProxyPolicyImports}
 ${httpProxyPolicySupport}
 ${verifyProxyPolicy}
-${standaloneMain}`
+${httpProxyPolicyStandaloneMain}`
