@@ -52,14 +52,16 @@ Repr-Digest, Trailer, and Expect and SHALL regenerate framing through the stream
 
 ### Requirement: Body replay never fabricates repeatability
 
-The redirect actor SHALL expose body sources for Empty, RepeatableBytes, affine OneShot, and
-ReplayFactory. RepeatableBytes SHALL borrow caller storage for the complete redirect operation.
-OneShot SHALL be consumed at most once and SHALL return ReplayUnavailable before a retained-body
-next-hop contact, even when an early response arrived before observed upload progress. Empty SHALL
-require no replay.
+The redirect actor SHALL expose distinct scoped operations for Empty, RepeatableBytes, affine
+OneShot, and ReplayFactory sources. Empty and RepeatableBytes SHALL require no producer, factory,
+source error, source requirement, or placeholder type witness. RepeatableBytes SHALL borrow caller
+storage for the complete redirect operation. OneShot SHALL expose only its producer's generic
+failure and requirement channels, SHALL be consumed at most once, and SHALL return
+ReplayUnavailable before a retained-body next-hop contact, even when an early response arrived
+before observed upload progress. Empty SHALL require no replay.
 
 ReplayFactory SHALL create a fresh scoped producer for every attempt, including the first, while
-preserving the factory's and producer's generic failures and requirements. Every produced source
+exposing only and preserving the factory's and producer's generic failures and requirements. Every produced source
 SHALL match the selected framing and declared length, and its observed bytes SHALL satisfy that
 length; a mismatch SHALL return ReplayContractMismatch. The library SHALL treat equivalent content
 as the caller's promise and SHALL NOT buffer or compare complete bodies, guess external offsets, or
@@ -70,6 +72,11 @@ undoing already accepted external effects.
 
 - **WHEN** a 307 follows an attempt using a OneShot body
 - **THEN** redirect handling returns ReplayUnavailable and emits no request to the next target
+
+#### Scenario: Body-free callers need no phantom source evidence
+
+- **WHEN** a caller selects Empty or RepeatableBytes redirect handling
+- **THEN** the call typechecks without a OneShot producer, replay factory, or placeholder witness
 
 #### Scenario: Factory creates one scoped producer per attempt
 

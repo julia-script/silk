@@ -1,7 +1,7 @@
 ## 1. Redirect values and replay contracts
 
 - [ ] 1.1 Add `silk.http_redirect` policy, request, status-policy, previous-response, bounded name-list, history-limit, error, and owned-context values with checked pre-I/O admission; encode defaults, overlap rejection, arithmetic overflow, and exact capacity boundaries in the shared HTTP analysis/static-evaluation source.
-- [ ] 1.2 Add generic `BodyProducer`, scoped replay-factory, and `BodySource` Empty/RepeatableBytes/OneShot/ReplayFactory contracts with precise error and requirement rows; encode affine escape/duplication rejection and factory/producer lifetime constraints in that same analysis snapshot.
+- [ ] 1.2 Add generic `BodyProducer`, scoped replay-factory, and source-specific Empty/RepeatableBytes/OneShot/ReplayFactory operation contracts with no phantom witnesses and precise relevant error/requirement rows; encode affine escape/duplication rejection, body-free call inference, and factory/producer lifetime constraints in that same analysis snapshot.
 - [ ] 1.3 Implement the shared body writer over existing exchange operations with exact framing, declared-length, observed-length, early-final, and dropped-body behavior; add factory-attempt/release and OneShot replay signals to the single redirect runtime corpus source.
 
 ## 2. Pure redirect transitions
@@ -15,7 +15,7 @@
 - [x] 3.1 Add the smallest `http_client` bounded-discard outcome that distinguishes Completed from CapReached while preserving malformed framing, read, deadline, allocation, and transport failures; encode wire-overhead cap versus malformed-framing behavior in the redirect corpus source.
 - [ ] 3.2 Add the higher-ranked target-neutral attempt-client/handler boundary that rebuilds each prepared request, drives one scoped exchange, and preserves generic callback/acquisition/source channels; encode nonescaping response/URI borrows and exact callback rows in the shared analysis snapshot.
 - [ ] 3.3 Implement proxy-aware attempt preparation and acquisition using `Route.recompute`, Forward absolute-form preparation, Direct/Tunnel origin-form preparation, original-origin TLS, and the unchanged deadline; encode proxy-to-bypass-to-proxy route signals and assert no disallowed contact or credential leakage without adding a TLS/socket matrix.
-- [ ] 3.4 Implement iterative `Redirect.withResponse` state ownership, final callback invocation, intermediate Close/Drain handling, and nested producer/attempt finalization; encode hop count, protected policy/source/callback/read/cancellation outcomes, total deadline, and exactly-one release counters in the one runtime corpus source.
+- [ ] 3.4 Implement one private service-backed iterative redirect engine plus public Empty/RepeatableBytes/OneShot/ReplayFactory response operations, final callback invocation, intermediate Close/Drain handling, and nested producer/attempt finalization; encode hop count, protected policy/source/callback/read/cancellation outcomes, total deadline, and exactly-one release counters in the one runtime corpus source.
 
 ## 4. Registration, documentation, and bounded evidence
 
