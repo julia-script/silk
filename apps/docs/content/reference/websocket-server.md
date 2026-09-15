@@ -177,7 +177,7 @@ returns the sticky failure in `Failed`. A simultaneous peer Close emits no secon
 | `PreviousFailure`               | A prior terminal failure; no new I/O occurs.                    |
 | `BufferTooSmall`                | Caller capacity cannot hold one otherwise legal message.        |
 | `MessageTooLarge`               | Peer data exceeds the configured message policy.                |
-| `UnsupportedFragmentation`      | FIN is clear or the opcode is Continuation.                      |
+| `UnsupportedFragmentation`      | Data FIN is clear or the opcode is Continuation.                 |
 | `ProtocolError`                 | Mask, RSV, opcode, length, control, or close syntax is invalid.  |
 | `InvalidCloseData`              | Caller-provided close code or reason length is invalid.          |
 | `InvalidUtf8`                   | Text or close-reason bytes are not complete UTF-8.               |

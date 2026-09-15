@@ -115,7 +115,7 @@ pub enum State { Open, CloseSent, Closed, Failed }
 pub enum Operation { ReadEvent, WriteText, WriteBinary, WritePing, WritePong, SendClose, FinishClose }
 pub enum ProtocolReason {
   MaskRequired, Rsv, ReservedOpcode, NonMinimalLength, LengthHighBit,
-  ControlTooLarge, ClosePayloadLength, CloseCode,
+  ControlTooLarge, ControlFragmented, ClosePayloadLength, CloseCode,
 }
 pub enum Utf8Component { Text, CloseReason }
 pub enum CloseDataReason { Code, ReasonTooLarge }

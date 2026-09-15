@@ -42,7 +42,7 @@ fixed close metadata. The public state query SHALL return exactly `Open`, `Close
 
 `readEvent(output: &mut [u8], deadline: Option<Instant>)` SHALL incrementally decode exactly one
 client frame. It SHALL require the mask bit, all RSV bits zero, and an opcode of Text (1), Binary
-(2), Close (8), Ping (9), or Pong (10). Continuation opcode zero or any FIN-zero frame SHALL return
+(2), Close (8), Ping (9), or Pong (10). Continuation opcode zero or any FIN-zero data frame SHALL return
 `UnsupportedFragmentation`, select close code 1003, and enter `Failed`. Reserved opcodes, nonzero
 RSV, missing masks, nonminimal 16-bit or 64-bit lengths, a set 64-bit high bit, fragmented controls,
 or control payloads above 125 bytes SHALL return `ProtocolError` with an exact `ProtocolReason`,
