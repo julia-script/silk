@@ -66,8 +66,8 @@ bounds. `Limits.defaults()` returns:
 | `maxCloseBytes`   |   65536 | Aggregate frame header, mask, and payload bytes consumed  |
 
 A zero field returns `InvalidLimits` with `LimitKind.MessageBytes`, `CloseFrames`, or
-`CloseBytes` before the channel is borrowed or any I/O occurs. Checked aggregate overflow is
-reported as `LimitKind.Arithmetic`.
+`CloseBytes` before the channel is borrowed or any I/O occurs. Close-handshake counter overflow is
+reported against the affected frame or byte budget as `CloseLimitExceeded`.
 
 The public `state(socket)` query returns exactly:
 
