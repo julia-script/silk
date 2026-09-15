@@ -282,6 +282,21 @@ fn unitResultCode(result: Result<(), BufferError>) -> usize {
   }
 }
 
+fn closeFailureMatches(result: Result<(), ByteIoError>, code: i32) -> bool {
+  return match move result {
+    Result<(), ByteIoError>.Success {value} => {
+      drop value
+      return false
+    }
+    Result<(), ByteIoError>.Failure {error} => match move error {
+      ByteIoError.Provider {operation, code: actual} => {
+        return operation == ByteIoOperation.Close && actual == code
+      }
+      _ => false
+    }
+  }
+}
+
 fn fillResultCode(result: Result<FillOutcome, BufferError>) -> usize {
   return match move result {
     Result<FillOutcome, BufferError>.Success {value} => { drop value return usize.ZERO }
@@ -570,6 +585,48 @@ where &'session mut P provides &ByteDuplex from &mut ByteDuplex | &mut Monotonic
   return 42
 }
 
+effect<'session> fn closeWithoutFlush<'session, P>(
+  session: &'session mut BufferedDuplex<'session, P>,
+) -> bool ! BufferError ? &mut MonotonicClock
+where &'session mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock,
+  &'session mut P provides &ByteDuplex from &mut ByteDuplex {
+  let retained = run BufferedDuplex.fill(
+    &mut session.*,
+    usize.ONE,
+    Option.none<Instant>(),
+  )
+  let available = match move retained {
+    FillOutcome.Available {count} => count
+    FillOutcome.End {available} => available
+  }
+  if available == usize.ZERO { return false }
+  let accepted = run BufferedDuplex.writeSome(
+    &mut session.*,
+    b"x",
+    Option.none<Instant>(),
+  )
+  if accepted != usize.ONE { return false }
+  let first = run Effect.result(BufferedDuplex.close(&mut session.*))
+  if !closeFailureMatches(move first, 93) { return false }
+  if BufferedDuplex.unread(&session.*) != usize.ZERO { return false }
+  if BufferedDuplex.pending(&session.*) != usize.ZERO { return false }
+  let hidden = BufferedDuplex.peek(&session.*)
+  let hiddenIsEmpty = hidden.length == usize.ZERO
+  drop hidden
+  if !hiddenIsEmpty { return false }
+  let repeated = run Effect.result(BufferedDuplex.close(&mut session.*))
+  return match move repeated {
+    Result<(), ByteIoError>.Success {value} => {
+      drop value
+      return true
+    }
+    Result<(), ByteIoError>.Failure {error} => {
+      drop error
+      return false
+    }
+  }
+}
+
 effect<'source & 'destination> fn abandonPair<'source, 'destination, SP, DP>(
   source: &'source mut BufferedDuplex<'source, SP>,
   destination: &'destination mut BufferedDuplex<'destination, DP>,
@@ -775,6 +832,23 @@ effect fn emptyProviderWithCloseFailure(closeFailure: Option<i32>) -> MemoryByte
     4,
     move closeFailure,
   )
+}
+
+effect fn closeFixtureProvider() -> MemoryByteDuplex
+! OutOfMemoryError
+? &mut Allocator {
+  let bytes = run Bytes.copy(&b"data")
+  let mut reads = Vector.make<MemoryReadEvent>()
+  run Vector.append<MemoryReadEvent>(&mut reads, MemoryReadEvent.Data {
+    readyAt: SystemClock.make(0, 0),
+    bytes: move bytes,
+  })
+  let mut writes = Vector.make<MemoryWriteEvent>()
+  run Vector.append<MemoryWriteEvent>(&mut writes, MemoryWriteEvent {
+    readyAt: SystemClock.make(0, 0),
+    action: MemoryWriteAction.Accept {count: usize.ONE},
+  })
+  return run MemoryByteDuplex.make(move reads, move writes, 4, 4, Option.some<i32>(93))
 }
 
 effect fn failingInputProvider() -> MemoryByteDuplex
@@ -1096,6 +1170,34 @@ effect fn program() -> i32 ! BufferError | OutOfMemoryError {
   let audit = MemoryByteDuplex.audit(&abandoned)
   if audit.length != usize.ONE { drop audit return 42 }
   drop audit
+
+  let mut terminal = run closeFixtureProvider()
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let terminalResult = run withBufferedCapacity<bool, BufferError>(
+    &mut terminal,
+    4,
+    4,
+    closeWithoutFlush,
+  )
+    |> Effect.provideMut<MonotonicClock>(&mut clock)
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  if !terminalResult { return 130 }
+  if MemoryByteDuplex.closeAttempts(&terminal) != 2 { return 131 }
+  if MemoryByteDuplex.phase(&terminal) != MemoryByteDuplexPhase.Closed { return 132 }
+  let abandonedOutput = MemoryByteDuplex.outbound(&terminal)
+  if abandonedOutput.length != usize.ZERO { drop abandonedOutput return 133 }
+  drop abandonedOutput
+  let terminalAudit = MemoryByteDuplex.audit(&terminal)
+  if terminalAudit.length != 2 { drop terminalAudit return 134 }
+  if terminalAudit[usize.ZERO].operation != ByteIoOperation.Read {
+    drop terminalAudit
+    return 135
+  }
+  if terminalAudit[usize.ONE].operation != ByteIoOperation.Close {
+    drop terminalAudit
+    return 136
+  }
+  drop terminalAudit
 
   let mut failingInput = run failingInputProvider()
     |> Effect.provideMut<Allocator>(&mut allocator)
