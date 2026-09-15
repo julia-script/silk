@@ -15,6 +15,14 @@ import silk.http_connection_pool_native as PoolNative {Context as NativePoolCont
 import silk.http_client_native {NativeTransport}
 import silk.trust_snapshot {TrustSourceError}`
 
+const httpFetchPolicyImports = `import silk.http_fetch as HttpFetch {
+  Fetch as FetchFacade,
+  FetchOptions,
+  FetchRequest,
+}
+import silk.http_fetch_native {Context as NativeFetchContext}
+import silk.trust_source {TrustSource}`
+
 const httpConnectionPoolPolicySupport = `fn poolCountsContract<P, C>(
   handle: &PoolHandle<PoolConnectionKey, P, C>,
 ) -> PoolCounts {
@@ -59,6 +67,60 @@ fn poolDeclarationsWitness() -> bool {
     && poolCountsShape(counts)
 }`
 
+const httpFetchPolicySupport = `pub effect fn nativeFetchSourceFamiliesWitness<
+  'configuration,
+  'emptyUri,
+  'bytesUri,
+  'oneShotUri,
+  'replayUri,
+>(
+  fetch: &mut FetchFacade<NativeFetchContext<'configuration>>,
+  emptyUri: Uri<'emptyUri>,
+  bytesUri: Uri<'bytesUri>,
+  oneShotUri: Uri<'oneShotUri>,
+  replayUri: Uri<'replayUri>,
+) -> ()
+? &mut Allocator
+  | &mut MonotonicClock
+  | &mut SystemClock
+  | &mut Random
+  | &mut TrustSource
+  | &mut RedirectProducerRequirement
+  | &mut RedirectFactoryRequirement {
+  let empty = run Effect.result(HttpFetch.discardEmpty(
+    fetch,
+    FetchRequest.get(emptyUri),
+    FetchOptions.defaults(),
+    u64.toU64(1),
+  ))
+  drop empty
+  let bytes = run Effect.result(HttpFetch.discardBytes(
+    fetch,
+    FetchRequest.get(bytesUri),
+    b"x",
+    FetchOptions.defaults(),
+    u64.toU64(1),
+  ))
+  drop bytes
+  let oneShot = run Effect.result(HttpFetch.discardOneShot(
+    fetch,
+    FetchRequest.get(oneShotUri),
+    RedirectProducer {offset: usize.ZERO},
+    FetchOptions.defaults(),
+    u64.toU64(1),
+  ))
+  drop oneShot
+  let replay = run Effect.result(HttpFetch.discardReplay(
+    fetch,
+    FetchRequest.get(replayUri),
+    RedirectFactory {},
+    FetchOptions.defaults(),
+    u64.toU64(1),
+  ))
+  drop replay
+  return ()
+}`
+
 export const httpRedirectPolicyImports = `import silk.http_headers {
   Limits as RedirectHeaderLimits,
   OwnedHeaders,
@@ -68,8 +130,8 @@ import silk.http {ValueError}
 import silk.http_client {ClientError, ContinuePolicy, Exchange, RouteTransport}
 import silk.http_transport {HttpTransport, TransportError}
 import silk.http_redirect {
+  Attempt,
   AttemptClient,
-  AttemptHandler,
   AttemptRequest,
   BodyChunk,
   BodyDecision,
@@ -84,7 +146,6 @@ import silk.http_redirect {
   Policy as RedirectPolicy,
   Post301302Policy,
   PreviousResponsePolicy,
-  ProducerHandler,
   ResponseHandler,
   RedirectComponent,
   RedirectContext,
@@ -237,23 +298,27 @@ impl<
   A,
   HandlerError,
   ?HandlerRequirements,
-  H: AttemptHandler<'policy, RedirectWitnessTransport, A, HandlerError ? HandlerRequirements>,
 > RedirectRejectingClient {
   effect fn withAttempt(
     client: &mut Self,
     request: AttemptRequest<'policy>,
     deadline: Option<Instant>,
-    handler: H,
   ) -> A
   ! HandlerError | RedirectAcquisitionFailure
-  ? HandlerRequirements | &mut RedirectAcquisitionRequirement
+  ? HandlerRequirements
+    | &mut RedirectAcquisitionRequirement
+    | &mut Attempt<
+      'policy,
+      RedirectWitnessTransport,
+      A,
+      HandlerError ? HandlerRequirements
+    >
   where
     HandlerRequirements in Without<HandlerRequirements, ByteDuplex>,
     HandlerRequirements in Without<HandlerRequirements, HttpTransport> {
     drop client
     drop request
     drop deadline
-    drop handler
     let accepted = run RedirectAcquisitionRequirement.accepted()
     drop accepted
     fail RedirectAcquisitionFailure.Rejected
@@ -265,7 +330,6 @@ impl<
   A,
   HandlerError,
   ?HandlerRequirements,
-  H: AttemptHandler<'policy, RedirectWitnessTransport, A, HandlerError ? HandlerRequirements>,
 > AttemptClient<
   'policy,
   RedirectWitnessTransport,
@@ -274,7 +338,6 @@ impl<
   RedirectAcquisitionFailure,
   HandlerRequirements,
   &mut RedirectAcquisitionRequirement,
-  H,
 > for RedirectRejectingClient {
   withAttempt: RedirectRejectingClient.withAttempt
 }
@@ -289,7 +352,7 @@ impl RedirectFinalUse {
     'provider: 'transport,
     'tunnel: 'provider,
   >(
-    handler: Self,
+    handler: &mut Self,
     uri: Uri<'call>,
     hop: usize,
     exchange: &'call mut Exchange<'exchangeView, RouteTransport<
@@ -343,62 +406,58 @@ impl BodyProducer<RedirectProducerFailure ? &mut RedirectProducerRequirement> fo
   }
 }
 
-struct RedirectProducerUse {}
-
-impl ProducerHandler<
-  RedirectProducer,
-  i32,
-  RedirectProducerFailure ? &mut RedirectProducerRequirement
-> for RedirectProducerUse {
-  effect<'call> fn handle<'call>(handler: Self, producer: &'call mut RedirectProducer) -> i32
-  ! RedirectProducerFailure
-  ? &mut RedirectProducerRequirement {
-    drop handler
-    let mut output: [u8; 1] = [0]
-    let chunk = run BodyProducer<
-      RedirectProducerFailure ? &mut RedirectProducerRequirement
-    >.pull(producer, &mut output)
-    if chunk.length == usize.ONE && chunk.end && output[usize.ZERO] == 120 { return 17 }
-    return -1
-  }
-}
-
 struct RedirectFactory {}
 
-impl<A, E, ?R, H: ProducerHandler<RedirectProducer, A, E ? R>> RedirectFactory {
-  effect fn withProducer(factory: &mut Self, handler: H) -> A
-  ! RedirectFactoryFailure | E
-  ? &mut RedirectFactoryRequirement | R {
+impl RedirectFactory {
+  effect fn acquire(factory: &mut Self) -> RedirectProducer
+  ! RedirectFactoryFailure
+  ? &mut RedirectFactoryRequirement {
     drop factory
-    let mut producer = RedirectProducer {offset: usize.ZERO}
-    return run ProducerHandler<RedirectProducer, A, E ? R>.handle(move handler, &mut producer)
+    return RedirectProducer {offset: usize.ZERO}
+  }
+
+  fn release(factory: &mut Self, producer: &mut RedirectProducer) -> () {
+    drop factory
+    drop producer
+    return ()
   }
 }
 
-impl<A, E, ?R, H: ProducerHandler<RedirectProducer, A, E ? R>> ReplayFactory<
+impl ReplayFactory<
   RedirectProducer,
-  A,
   RedirectFactoryFailure,
-  E,
   &mut RedirectFactoryRequirement,
-  R,
-  H,
 > for RedirectFactory {
-  withProducer: RedirectFactory.withProducer
+  acquire: RedirectFactory.acquire
+  release: RedirectFactory.release
 }
 
 pub effect fn redirectReplayRowWitness(factory: &mut RedirectFactory) -> i32
 ! RedirectFactoryFailure | RedirectProducerFailure
 ? &mut RedirectFactoryRequirement | &mut RedirectProducerRequirement {
-  return run ReplayFactory<
+  let producer = run ReplayFactory<
     RedirectProducer,
-    i32,
     RedirectFactoryFailure,
-    RedirectProducerFailure,
     &mut RedirectFactoryRequirement,
-    &mut RedirectProducerRequirement,
-    RedirectProducerUse,
-  >.withProducer(factory, RedirectProducerUse {})
+  >.acquire(factory)
+  let use = effect fn(owned: &mut RedirectProducer) -> i32
+  ! RedirectProducerFailure
+  ? &mut RedirectProducerRequirement {
+    let mut output: [u8; 1] = [0]
+    let chunk = run BodyProducer<
+      RedirectProducerFailure ? &mut RedirectProducerRequirement
+    >.pull(owned, &mut output)
+    if chunk.length == usize.ONE && chunk.end && output[usize.ZERO] == 120 { return 17 }
+    return -1
+  }
+  let release = effect fn(owned: &mut RedirectProducer) -> () {
+    return ReplayFactory<
+      RedirectProducer,
+      RedirectFactoryFailure,
+      &mut RedirectFactoryRequirement,
+    >.release(factory, owned)
+  }
+  return run Effect.useReleaseNonParking(move producer, move use, move release)
 }
 
 `
@@ -1342,20 +1401,19 @@ export const httpRedirectPolicySupport = `${httpRedirectOperationSupport}
 ${httpRedirectOperationContractSupport}
 ${httpRedirectBehaviorSupport}`
 
-export const httpRedirectAffineEscapeDiagnosticSource = `struct RedirectEscapingProducerUse {}
-
-impl ProducerHandler<
-  RedirectDiagnosticProducer,
-  &'static mut RedirectDiagnosticProducer,
-  never ? never
-> for RedirectEscapingProducerUse {
-  effect<'call> fn handle<'call>(
-    handler: Self,
+export const httpRedirectAffineEscapeDiagnosticSource = `effect fn redirectEscapingProducerUse(
+  producer: RedirectDiagnosticProducer,
+) -> &'static mut RedirectDiagnosticProducer {
+  let use = effect<'call> fn(
     producer: &'call mut RedirectDiagnosticProducer,
   ) -> &'static mut RedirectDiagnosticProducer {
-    drop handler
     return move producer
   }
+  let release = effect fn(producer: &mut RedirectDiagnosticProducer) -> () {
+    drop producer
+    return ()
+  }
+  return run Effect.useReleaseNonParking(move producer, move use, move release)
 }`
 
 export const httpRedirectResponseEscapeDiagnosticSource = `struct RedirectEscapedUri<'escape> {
@@ -1376,7 +1434,7 @@ impl ResponseHandler<
     'provider: 'transport,
     'tunnel: 'provider,
   >(
-    handler: Self,
+    handler: &mut Self,
     uri: Uri<'call>,
     hop: usize,
     exchange: &'call mut Exchange<'exchangeView, RouteTransport<
@@ -1427,7 +1485,7 @@ impl ResponseHandler<
     'provider: 'transport,
     'tunnel: 'provider,
   >(
-    handler: Self,
+    handler: &mut Self,
     uri: Uri<'call>,
     hop: usize,
     exchange: &'call mut Exchange<'exchangeView, RouteTransport<
@@ -1733,9 +1791,11 @@ export const httpProxyRedirectPolicyAcceptanceSource = `${httpProxyPolicyCommonI
 ${httpProxyPolicyImports}
 ${httpConnectionPoolPolicyImports}
 ${httpRedirectPolicyImports}
+${httpFetchPolicyImports}
 ${httpProxyPolicySupport}
 ${httpConnectionPoolPolicySupport}
 ${httpRedirectOperationSupport}
+${httpFetchPolicySupport}
 ${httpRedirectOperationContractSupport}
 ${verifyProxyPolicy}
 ${httpRedirectBehaviorSentinel}

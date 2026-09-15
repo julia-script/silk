@@ -23,6 +23,7 @@ import silk.http_head {
   ProgressState as HeadState,
   HeaderIterator,
 }
+import silk.http_head as Head
 import silk.http_body {
   Decoder,
   Encoder,
@@ -50,6 +51,7 @@ import silk.http_content {
   ContentProgressState,
   ResponseContext,
   CodingPlan,
+  AppliedPlan,
   Mode as ContentMode,
   Limits as ContentLimits,
   ReuseDisposition,
@@ -268,6 +270,29 @@ pub union ClientError {
   ContinueTimeout,
   /// Reports the overall absolute deadline expiring.
   Timeout,
+}
+
+/// Validates connection limits without allocation, transport contact, or parser construction.
+///
+/// # Details
+///
+/// Read and write capacities must be positive. The discard limit must not exceed 1,048,576 wire
+/// bytes. Head parser storage must have representable metadata and fit its owned-storage limit.
+/// Head storage failures retain the exact parser error in `ClientError.Head`.
+pub fn validateLimits(limits: &Limits) -> Result<(), ClientError> {
+  if limits.readCapacity == usize.ZERO
+    || limits.writeCapacity == usize.ZERO
+    || limits.maxDiscardWireBytes > MAX_DRAIN_WIRE_BYTES {
+    return Result.failResult<(), ClientError>(ClientError.InvalidLimits)
+  }
+  return match move Head.validateLimits(&limits.head) {
+    Result<(), ParseError>.Failure {error} => {
+      Result.failResult<(), ClientError>(ClientError.Head {error: move error})
+    }
+    Result<(), ParseError>.Success {value} => {
+      Result.succeed<(), ClientError>(move value)
+    }
+  }
 }
 
 /// The result of a bounded response-framing discard.
@@ -1350,11 +1375,8 @@ where &mut P provides &HttpTransport from &mut HttpTransport {
   let use = effect fn(owned: &mut Acquisition<P>) -> Connection<P>
   ! ClientError | OutOfMemoryError
   ? &mut Allocator {
-    if limits.readCapacity == usize.ZERO
-      || limits.writeCapacity == usize.ZERO
-      || limits.maxDiscardWireBytes > MAX_DRAIN_WIRE_BYTES {
-      fail ClientError.InvalidLimits
-    }
+    let valid = validateLimits(&limits)
+    if let Result<(), ClientError>.Failure {error} = move valid { fail move error }
     let requestParser = match move run RequestParser.make(limits.head) {
       Result.Failure {error} => {
         fail ClientError.Head {error: move error}
@@ -2968,11 +2990,12 @@ fn clampDeadline(first: &Option<Instant>, second: &Option<Instant>) -> Option<In
 
 /// Selects one content pipeline from this exchange's current head before a nonempty raw read or a discard.
 /// Planning errors borrow the head and must be handled before the exchange is used again.
+/// The returned copy records the applied representation policy without exposing the affine decoder.
 pub effect fn beginContent<'head, 'exchange: 'head, P>(
   exchange: &'head mut Exchange<'exchange, P>,
   mode: ContentMode,
   limits: ContentLimits,
-) -> ()
+) -> AppliedPlan
 ! ClientError | ContentError<'head> | OutOfMemoryError
 ? &mut Allocator | &mut MonotonicClock {
   if exchange.phaseValue != ExchangePhase.Response || exchange.bodySelected {
@@ -3042,6 +3065,7 @@ pub effect fn beginContent<'head, 'exchange: 'head, P>(
       totalDecoded: u64.MIN,
     }
   }
+  let applied = plan.applied()
   let decoder = run ContentDecoder.make(move plan)
   let boxed = run Box.make<ContentDecoder>(move decoder)
   run checkDeadline(&exchange.options.deadline, false)
@@ -3051,7 +3075,7 @@ pub effect fn beginContent<'head, 'exchange: 'head, P>(
   exchange.decoder = Option.none<Decoder>()
   exchange.contentDecoder = Option.some<Box<ContentDecoder>>(move boxed)
   exchange.phaseValue = ExchangePhase.Response
-  return ()
+  return applied
 }
 
 /// Reads content-decoded bytes through the same rich transport and absolute deadline as the exchange.

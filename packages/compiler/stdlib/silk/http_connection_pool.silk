@@ -346,6 +346,11 @@ impl<K, P, C> Pool<K, P, C> {
   pub fn handle(self: &Self) -> &Handle<K, P, C> { return &self.handleValue }
 }
 
+/// Borrows one handle's immutable acquisition context without exposing shared slot state.
+pub fn context<'handle, K, P, C>(handle: &'handle Handle<K, P, C>) -> &'handle C {
+  return &handle.context
+}
+
 fn validate(config: Config) -> Result<Config, PoolError> {
   if config.maxTotal == usize.ZERO || config.maxTotal > MAX_TOTAL {
     return Result.failResult<Config, PoolError>(PoolError.InvalidConfig {field: ConfigField.MaxTotal})
