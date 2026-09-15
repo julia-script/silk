@@ -61,7 +61,7 @@ import silk.uri {OwnedUri}
 import silk.uri_reference {ParseError as RedirectParseError}
 `
 
-export const httpRedirectPolicySupport = `enum RedirectFactoryFailure { Failed }
+const httpRedirectOperationSupport = `enum RedirectFactoryFailure { Failed }
 enum RedirectProducerFailure { Failed }
 enum RedirectCallbackFailure { Failed }
 enum RedirectAcquisitionFailure { Rejected }
@@ -347,7 +347,9 @@ pub effect fn redirectReplayRowWitness(factory: &mut RedirectFactory) -> i32
   >.withProducer(factory, RedirectProducerUse {})
 }
 
-fn redirectStatus(code: u16) -> Status {
+`
+
+const httpRedirectBehaviorSupport = `fn redirectStatus(code: u16) -> Status {
   return match move Status.fromCode(code) {
     Result.Failure {error} => {
       drop error
@@ -629,7 +631,9 @@ fn redirectFormattedIs(headers: &Headers, output: &mut [u8], expected: &[u8]) ->
   }
 }
 
-fn redirectOperationRequest<'headers>(
+`
+
+const httpRedirectOperationContractSupport = `fn redirectOperationRequest<'headers>(
   uri: Uri<'static>,
   headers: Headers<'headers>,
 ) -> RedirectRequest<'static, 'static, 'headers, 'static> {
@@ -792,7 +796,7 @@ pub effect fn redirectReplayContractWitness<
 }
 `
 
-export const redirectPolicyCompileWitness = `pub fn redirectPolicyCompileWitness() -> i32 {
+const redirectPolicyCompileWitness = `pub fn redirectPolicyCompileWitness() -> i32 {
   let defaults = RedirectPolicy.defaults()
   let limits = RedirectPolicy.historyLimits(&defaults)
   if RedirectPolicy.mode(&defaults) != RedirectMode.Manual
@@ -969,7 +973,7 @@ export const redirectPolicyCompileWitness = `pub fn redirectPolicyCompileWitness
   return 0
 }`
 
-export const verifyRedirectPolicy = `pub effect fn verifyRedirectPolicy() -> bool
+const verifyRedirectPolicy = `pub effect fn verifyRedirectPolicy() -> bool
 ! OutOfMemoryError | RedirectError | ValueError | RedirectParseError | RedirectOriginError
 ? &mut Allocator {
   let oneName = ["x-safe"]
@@ -1275,6 +1279,15 @@ export const verifyRedirectPolicy = `pub effect fn verifyRedirectPolicy() -> boo
   return true
 }`
 
+/** Pure redirect-policy and allocation-backed behavior checks shared by analysis and runtime. */
+export const httpRedirectBehaviorSentinel = `${httpRedirectBehaviorSupport}
+${redirectPolicyCompileWitness}
+${verifyRedirectPolicy}`
+
+export const httpRedirectPolicySupport = `${httpRedirectOperationSupport}
+${httpRedirectOperationContractSupport}
+${httpRedirectBehaviorSupport}`
+
 export const httpRedirectAffineEscapeDiagnosticSource = `struct RedirectEscapingProducerUse {}
 
 impl ProducerHandler<
@@ -1288,6 +1301,99 @@ impl ProducerHandler<
   ) -> &'static mut RedirectDiagnosticProducer {
     drop handler
     return move producer
+  }
+}`
+
+export const httpRedirectResponseEscapeDiagnosticSource = `struct RedirectEscapedUri<'escape> {
+  uri: Uri<'escape>
+}
+
+struct RedirectEscapingUriUse {}
+
+impl ResponseHandler<
+  RedirectWitnessTransport,
+  RedirectEscapedUri<'static>,
+  never ? never
+> for RedirectEscapingUriUse {
+  effect<'call> fn handle<
+    'call,
+    'exchangeView: 'call,
+    'transport: 'exchangeView,
+    'provider: 'transport,
+    'tunnel: 'provider,
+  >(
+    handler: Self,
+    uri: Uri<'call>,
+    hop: usize,
+    exchange: &'call mut Exchange<'exchangeView, RouteTransport<
+      'transport,
+      'provider,
+      'tunnel,
+      RedirectWitnessTransport,
+    >>,
+  ) -> RedirectEscapedUri<'static>
+  where
+    &mut RedirectWitnessTransport provides &HttpTransport from &mut HttpTransport | &mut MonotonicClock | &mut Allocator | &mut Random,
+    &mut RedirectWitnessTransport provides &HttpTransport from &mut HttpTransport,
+    &mut RedirectWitnessTransport provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock | &mut Allocator | &mut Random,
+    &mut RedirectWitnessTransport provides &ByteDuplex from &mut ByteDuplex {
+    drop handler
+    drop hop
+    drop exchange
+    return RedirectEscapedUri<'static> {uri: move uri}
+  }
+}
+
+struct RedirectEscapedExchange<
+  'escape,
+  'exchangeView: 'escape,
+  'transport: 'exchangeView,
+  'provider: 'transport,
+  'tunnel: 'provider,
+> {
+  exchange: &'escape mut Exchange<'exchangeView, RouteTransport<
+    'transport,
+    'provider,
+    'tunnel,
+    RedirectWitnessTransport,
+  >>
+}
+
+struct RedirectEscapingExchangeUse {}
+
+impl ResponseHandler<
+  RedirectWitnessTransport,
+  RedirectEscapedExchange<'static, 'static, 'static, 'static, 'static>,
+  never ? never
+> for RedirectEscapingExchangeUse {
+  effect<'call> fn handle<
+    'call,
+    'exchangeView: 'call,
+    'transport: 'exchangeView,
+    'provider: 'transport,
+    'tunnel: 'provider,
+  >(
+    handler: Self,
+    uri: Uri<'call>,
+    hop: usize,
+    exchange: &'call mut Exchange<'exchangeView, RouteTransport<
+      'transport,
+      'provider,
+      'tunnel,
+      RedirectWitnessTransport,
+    >>,
+  ) -> RedirectEscapedExchange<'static, 'static, 'static, 'static, 'static>
+  where
+    &mut RedirectWitnessTransport provides &HttpTransport from &mut HttpTransport | &mut MonotonicClock | &mut Allocator | &mut Random,
+    &mut RedirectWitnessTransport provides &HttpTransport from &mut HttpTransport,
+    &mut RedirectWitnessTransport provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock | &mut Allocator | &mut Random,
+    &mut RedirectWitnessTransport provides &ByteDuplex from &mut ByteDuplex {
+    drop handler
+    drop uri
+    drop hop
+    return RedirectEscapedExchange<'static, 'static, 'static, 'static, 'static> {
+      exchange: move exchange,
+    }
   }
 }`
 
@@ -1342,6 +1448,8 @@ ${httpRedirectPolicySupport}
 
 struct RedirectDiagnosticProducer {}
 
+${httpRedirectResponseEscapeDiagnosticSource}
+
 ${httpRedirectAffineEscapeDiagnosticSource}
 
 ${httpRedirectAffineDuplicationDiagnosticSource}
@@ -1349,9 +1457,9 @@ ${httpRedirectAffineDuplicationDiagnosticSource}
 pub fn main() -> i32 { return 42 }`
 
 export const httpRedirectPolicyFragments = `${httpRedirectPolicyImports}
-${httpRedirectPolicySupport}
-${redirectPolicyCompileWitness}
-${verifyRedirectPolicy}`
+${httpRedirectOperationSupport}
+${httpRedirectOperationContractSupport}
+${httpRedirectBehaviorSentinel}`
 
 export const httpProxyRedirectPolicyMain = `struct RedirectFactoryRequirementProvider {}
 struct RedirectProducerRequirementProvider {}
@@ -1570,8 +1678,8 @@ export const httpProxyRedirectPolicyAcceptanceSource = `${httpProxyPolicyCommonI
 ${httpProxyPolicyImports}
 ${httpRedirectPolicyImports}
 ${httpProxyPolicySupport}
-${httpRedirectPolicySupport}
+${httpRedirectOperationSupport}
+${httpRedirectOperationContractSupport}
 ${verifyProxyPolicy}
-${redirectPolicyCompileWitness}
-${verifyRedirectPolicy}
+${httpRedirectBehaviorSentinel}
 ${httpProxyRedirectPolicyMain}`

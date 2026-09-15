@@ -9,6 +9,7 @@ import {
   httpProxyPolicySupport,
   verifyProxyPolicy,
 } from './httpProxyAcceptance.js'
+import { httpRedirectBehaviorSentinel } from './httpRedirectAcceptance.js'
 
 const silkBytes = (bytes: Uint8Array): string =>
   `b"${[...bytes].map((byte) => `\\x${byte.toString(16).padStart(2, '0')}`).join('')}"`
@@ -2562,17 +2563,22 @@ const routeWitness = `  // Compile-only witness: the runtime corpus does not sel
 const redirectImports = `import silk.http {Status, ValueError}
 import silk.execution {Execution}
 import silk.http_origin {OriginError}
+import silk.http_origin {OriginError as RedirectOriginError}
+import silk.http_headers {Limits as RedirectHeaderLimits, OwnedHeaders}
 import silk.http_redirect {
   AttemptClient,
   AttemptHandler,
   AttemptRequest,
   BodyChunk,
+  BodyDecision,
   BodyProducer,
   CrossOriginPolicy,
   DowngradePolicy,
+  History,
   HistoryLimits,
   Mode as RedirectMode,
   NameList,
+  NameListLimits,
   Policy as RedirectPolicy,
   Post301302Policy,
   PreviousResponsePolicy,
@@ -2580,16 +2586,28 @@ import silk.http_redirect {
   ReplayFactory,
   Request as RedirectRequest,
   ResponseHandler,
+  RedirectComponent,
+  RedirectContext,
   RedirectError,
+  RedirectLimit,
   RedirectReason,
+  StatusDecision,
+  admitOrigin,
+  crossOriginHeaderPolicy,
+  resolveLocation,
+  sanitizeHeaders,
+  statusDecision,
+  transition,
   withOneShotResponse,
   withReplayResponse,
 }
-import silk.http_request {Authorization}
+import silk.http_request {Authorization, BasicSecurity, HeaderControl}
 import silk.http_client {RouteTransport}
 import silk.http_transport as Transport
 import silk.shared {Shared}
 import silk.string {String}
+import silk.uri {OwnedUri}
+import silk.uri_reference {ParseError as RedirectParseError}
 `
 
 const redirectTransportFields = `  routeAudit: Option<Shared<RouteAudit>>`
@@ -3022,7 +3040,8 @@ impl<
 }
 `
 
-const redirectProgramSupport = `${redirectSupport}
+const redirectProgramSupport = `${httpRedirectBehaviorSentinel}
+${redirectSupport}
 struct RedirectSourceFailure { code: i32 }
 
 struct RedirectProducer {
@@ -3178,14 +3197,6 @@ impl ResponseHandler<
     ? &mut Allocator | &mut MonotonicClock | &mut Random,
 > for RedirectFinal {
   handle: RedirectFinal.handle
-}
-
-effect fn redirectHeader(name: string<'static>, value: &'static [u8]) -> Header<'static>
-! ValueError {
-  return match move Header.make(name, value, valueLimits()) {
-    Result.Failure {error} => { fail move error }
-    Result.Success {value: header} => header
-  }
 }
 
 fn redirectUri() -> Uri<'static> {
@@ -3616,8 +3627,13 @@ effect fn cancellationRedirectCase() -> i32 ! OutOfMemoryError {
 }
 
 effect fn redirectCases() -> i32
-! RedirectError | ValueError | OriginError | RequestError | ClientError | RedirectSourceFailure | CallbackFailure | OutOfMemoryError {
+! RedirectError | ValueError | RedirectParseError | OriginError | RequestError | ClientError | RedirectSourceFailure | CallbackFailure | OutOfMemoryError {
   let mut allocator = Allocator.systemAllocatorProvider()
+  let compileWitness = redirectPolicyCompileWitness()
+  if compileWitness != 0 { return 254 }
+  let behaviorWitness = run verifyRedirectPolicy()
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  if !behaviorWitness { return 255 }
   let mut clock = FixedClock {mark: SystemClock.make(0, 0)}
   let mut random = FixedRandom {}
   let cases: [i32; 6] = [0, 1, 3, 5, 6, 2]
@@ -3650,6 +3666,7 @@ effect fn redirectCases() -> i32
 const redirectMain = `effect fn recoverRedirect(
   error: RedirectError
     | ValueError
+    | RedirectParseError
     | OriginError
     | RequestError
     | ClientError
