@@ -1,5 +1,7 @@
 export const httpProxyPolicyAcceptanceSource = `import silk.allocator {Allocator, OutOfMemoryError}
 import silk.effect {Effect}
+import silk.http {Header, Method, Version}
+import silk.http_headers {Headers, Limits}
 import silk.http_origin {Origin, OriginError}
 import silk.http_proxy {
   BypassPolicy,
@@ -14,11 +16,45 @@ import silk.http_proxy {
   Route,
   RouteKey,
   RouteMode,
+  prepareForward,
   selectRoute,
 }
+import silk.http_request as Request
+import silk.http_request {
+  BodyMode,
+  HeaderPolicy,
+  PreparedRequest,
+  RequestError,
+  RoutedMode,
+  RoutedProxyAuthorization,
+}
+import silk.http_target {RequestTarget}
 import silk.result {Result}
 import silk.uri {Uri}
 import silk.uri_reference {ParseError}
+import silk.usize
+
+fn bytesEqual(left: &[u8], right: &[u8]) -> bool {
+  if left.length != right.length { return false }
+  let mut index = usize.ZERO
+  while index < left.length {
+    if left[index] != right[index] { return false }
+    index = index + usize.ONE
+  }
+  return true
+}
+
+fn valueLimits() -> Limits {
+  return Limits {
+    maxMethodBytes: 32,
+    maxTargetBytes: 256,
+    maxNameBytes: 64,
+    maxValueBytes: 512,
+    maxFields: 16,
+    maxFieldBytes: 2048,
+    maxOwnedBytes: 4096,
+  }
+}
 
 fn checkedOrigin<'text>(text: string<'text>) -> Result<Origin, ProxyError> {
   let uri = match move Uri.parse(text) {
@@ -82,10 +118,17 @@ effect fn verify() -> bool ! OutOfMemoryError ? &mut Allocator {
   }
   let configId = ProxyConfigId.make(11)
   let authId = ProxyAuthContextId.make(21)
+  let authentication = match move run ProxyAuth.preparedBasic(
+    authId,
+    b"QWxhZGRpbjpvcGVuIHNlc2FtZQ==",
+  ) {
+    Result<ProxyAuth, ProxyError>.Failure {error} => { return false }
+    Result<ProxyAuth, ProxyError>.Success {value} => value
+  }
   let config = match move ProxyConfig.fromUri(
     configId,
     "http://proxy.example:3128",
-    ProxyAuth.none(authId),
+    move authentication,
     move bypass,
     65536,
   ) {
@@ -122,23 +165,154 @@ effect fn verify() -> bool ! OutOfMemoryError ? &mut Allocator {
   let tunnel = selectRoute(&config, secure)
   if !modeIs(&tunnel, RouteMode.Tunnel) { return false }
 
-  let differentScheme = match move checkedOrigin("https://127.0.0.1") {
+  let differentScheme = match move checkedOrigin("https://[2001:db8::1]") {
     Result<Origin, ProxyError>.Failure {error} => { return false }
     Result<Origin, ProxyError>.Success {value} => value
   }
   let schemeRoute = selectRoute(&config, differentScheme)
   if !modeIs(&schemeRoute, RouteMode.Tunnel) { return false }
-  let differentPort = match move checkedOrigin("http://127.0.0.1:81") {
+  let differentPort = match move checkedOrigin("http://[2001:db8::1]:81") {
     Result<Origin, ProxyError>.Failure {error} => { return false }
     Result<Origin, ProxyError>.Success {value} => value
   }
   let portRoute = selectRoute(&config, differentPort)
   if !modeIs(&portRoute, RouteMode.Forward) { return false }
 
-  let recomputed = Route.recompute(&forward, &config, secure)
+  let recomputed = Route.recompute(&forward, secure)
   if !modeIs(&recomputed, RouteMode.Tunnel) { return false }
+  if !ProxyAuthContextId.equals(&Route.authContextId(&recomputed), &authId) { return false }
   let copiedRoute = direct
   if !RouteKey.equals(&Route.key(&direct), &Route.key(&copiedRoute)) { return false }
+
+  let forwardUri = match move Uri.parse("http://example.com/a?b#discard") {
+    Result<Uri<'static>, ParseError>.Failure {error} => { return false }
+    Result<Uri<'static>, ParseError>.Success {value} => value
+  }
+  let forwardOrigin = match move Origin.fromUri(&forwardUri) {
+    Result<Origin, OriginError>.Failure {error} => { return false }
+    Result<Origin, OriginError>.Success {value} => value
+  }
+  let selectedForward = selectRoute(&config, forwardOrigin)
+  let emptyFields: [Header<'static>; 0] = []
+  let emptyHeaders = match move Headers.make(&emptyFields, valueLimits()) {
+    Result.Failure {error} => { return false }
+    Result.Success {value} => value
+  }
+  let headerPolicy = HeaderPolicy.defaults()
+  let forwarded = match move run Effect.result(prepareForward(
+    &selectedForward,
+    &forwardUri,
+    Version.Http11,
+    Method.get(),
+    &emptyHeaders,
+    &headerPolicy,
+    BodyMode.Empty,
+    false,
+    valueLimits(),
+    4096,
+    128,
+  )) {
+    Result.Failure {error} => { return false }
+    Result.Success {value} => value
+  }
+  if !bytesEqual(
+    PreparedRequest.bytes(&forwarded),
+    b"GET http://example.com/a?b HTTP/1.1\\r\\nProxy-Authorization: Basic QWxhZGRpbjpvcGVuIHNlc2FtZQ==\\r\\nHost: example.com\\r\\nUser-Agent: silk-http/1\\r\\nAccept: */*\\r\\n\\r\\n",
+  ) {
+    return false
+  }
+  if !Origin.equals(&PreparedRequest.origin(&forwarded), &forwardOrigin) { return false }
+  let expectedProxyPeer = match move checkedOrigin("http://proxy.example:3128") {
+    Result<Origin, ProxyError>.Failure {error} => { return false }
+    Result<Origin, ProxyError>.Success {value} => value
+  }
+  if !Origin.equals(&PreparedRequest.physicalPeer(&forwarded), &expectedProxyPeer) { return false }
+  if Origin.equals(&PreparedRequest.origin(&forwarded), &PreparedRequest.physicalPeer(&forwarded)) {
+    return false
+  }
+
+  let connectTarget = match move RequestTarget.parse(&Method.connect(), "service.example:443", 256) {
+    Result.Failure {error} => { return false }
+    Result.Success {value} => value
+  }
+  let tunnelAdmission = match move run Effect.result(Request.prepareRouted(
+    &secure,
+    &expectedProxyPeer,
+    RoutedMode.Connect,
+    RoutedProxyAuthorization<'static>.Absent,
+    Version.Http11,
+    Method.connect(),
+    connectTarget,
+    &emptyHeaders,
+    &headerPolicy,
+    BodyMode.Empty,
+    false,
+    valueLimits(),
+    4096,
+    128,
+  )) {
+    Result.Failure {error} => { return false }
+    Result.Success {value} => value
+  }
+  if !Origin.equals(&PreparedRequest.origin(&tunnelAdmission), &secure) { return false }
+  if !Origin.equals(&PreparedRequest.physicalPeer(&tunnelAdmission), &expectedProxyPeer) { return false }
+  if Origin.equals(&PreparedRequest.origin(&tunnelAdmission), &PreparedRequest.physicalPeer(&tunnelAdmission)) {
+    return false
+  }
+
+  let proxyField = match move Header.make("Proxy-Authorization", b"Basic override", valueLimits()) {
+    Result.Failure {error} => { return false }
+    Result.Success {value} => value
+  }
+  let proxyFields = [proxyField]
+  let proxyHeaders = match move Headers.make(&proxyFields, valueLimits()) {
+    Result.Failure {error} => { return false }
+    Result.Success {value} => value
+  }
+  let directTarget = match move RequestTarget.parse(&Method.get(), "/", 256) {
+    Result.Failure {error} => { return false }
+    Result.Success {value} => value
+  }
+  let rejectedDirect = run Effect.result(Request.prepare(
+    &forwardOrigin,
+    Version.Http11,
+    Method.get(),
+    directTarget,
+    &proxyHeaders,
+    &headerPolicy,
+    BodyMode.Empty,
+    false,
+    valueLimits(),
+    4096,
+    128,
+  ))
+  match move rejectedDirect {
+    Result.Failure {error} => match move error {
+      RequestError.ProxyAuthorization => {}
+      _ => { return false }
+    }
+    Result.Success {value} => { return false }
+  }
+  let rejectedOverride = run Effect.result(prepareForward(
+    &selectedForward,
+    &forwardUri,
+    Version.Http11,
+    Method.get(),
+    &proxyHeaders,
+    &headerPolicy,
+    BodyMode.Empty,
+    false,
+    valueLimits(),
+    4096,
+    128,
+  ))
+  match move rejectedOverride {
+    Result.Failure {error} => match move error {
+      RequestError.ProxyAuthorization => {}
+      _ => { return false }
+    }
+    Result.Success {value} => { return false }
+  }
 
   let emptyOrigins: [Origin; 0] = []
   let emptyForHttps = match move run BypassPolicy.copy(&emptyOrigins) {
@@ -214,6 +388,8 @@ effect fn verify() -> bool ! OutOfMemoryError ? &mut Allocator {
     Result<ProxyConfig, ProxyError>.Success {value} => value
   }
   let rotatedRoute = selectRoute(&rotated, insecure)
+  let retainedRoute = Route.recompute(&forward, insecure)
+  if !ProxyAuthContextId.equals(&Route.authContextId(&retainedRoute), &authId) { return false }
   return !RouteKey.equals(&Route.key(&forward), &Route.key(&rotatedRoute))
 }
 

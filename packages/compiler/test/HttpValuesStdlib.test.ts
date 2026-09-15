@@ -288,7 +288,7 @@ pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
 )
 
 it.effect(
-  'analyzes bounded HTTP proxy policy and its shared route matrix once',
+  'type-checks bounded HTTP proxy policy and verifies its lowered MIR once',
   () =>
     Effect.gen(function* () {
       const snapshot = yield* AnalysisFixture.retainingMain(

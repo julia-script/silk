@@ -7,11 +7,24 @@
 import silk.allocator {Allocator, OutOfMemoryError}
 import silk.base64 {Base64, Base64Error}
 import silk.bytes {Bytes}
+import silk.http {Method, Version}
+import silk.http_headers {Headers, Limits}
 import silk.http_origin {Origin, OriginError}
+import silk.http_request as Request
+import silk.http_request {
+  BodyMode,
+  HeaderPolicy,
+  PreparedRequest,
+  RequestError,
+  RoutedMode,
+  RoutedProxyAuthorization,
+}
+import silk.http_target {RequestTarget, TargetForm}
 import silk.layout {Layout}
 import silk.network_address {DomainHost, Host, Ipv4Address, Ipv6Address, Port}
 import silk.option {Option}
 import silk.result {Result}
+import silk.slice {Slice}
 import silk.string {String}
 import silk.uri {Uri}
 import silk.uri_reference {ParseError}
@@ -32,14 +45,14 @@ pub enum ProxyComponent {
   Bypass,
   /// The complete proxy configuration.
   Configuration,
+  /// A selected route used by the wrong operation or with a different origin.
+  Route,
 }
 
 /// A bounded proxy configuration resource.
 pub enum ProxyLimit {
   /// The maximum encoded authentication-token byte count.
   AuthenticationBytes,
-  /// The maximum decoded authentication-token byte count.
-  AuthenticationScratchBytes,
   /// The maximum exact-origin bypass-entry count.
   BypassOrigins,
   /// The maximum total owned configuration byte count.
@@ -67,6 +80,8 @@ pub union ProxyReason {
   },
   /// The proxy URI uses the unsupported `https` scheme.
   UnsupportedProxyTransport,
+  /// The selected route mode or original origin is incompatible with the requested operation.
+  InvalidRoute,
 }
 
 /// A typed proxy policy failure containing no identity payload or credential bytes.
@@ -129,21 +144,21 @@ pub union Route<'configuration> {
   /// A route that contacts an exact bypass origin directly.
   Direct {
     identity: RouteIdentity,
-    authentication: &'configuration ProxyAuth,
+    configuration: &'configuration ProxyConfig,
     /// The original origin that matched bypass policy.
     pub origin: Origin,
   },
   /// A route that sends plaintext HTTP through the proxy.
   Forward {
     identity: RouteIdentity,
-    authentication: &'configuration ProxyAuth,
+    configuration: &'configuration ProxyConfig,
     /// The original plaintext HTTP origin.
     pub origin: Origin,
   },
   /// A route that establishes a proxy tunnel for origin TLS.
   Tunnel {
     identity: RouteIdentity,
-    authentication: &'configuration ProxyAuth,
+    configuration: &'configuration ProxyConfig,
     /// The original HTTPS origin for TLS authentication.
     pub origin: Origin,
   },
@@ -258,19 +273,11 @@ impl ProxyAuth {
         token.length,
       ))
     }
-    let decodedLength = match move Base64.decodedLength(token) {
+    match move Base64.decodedLength(token) {
       Result<usize, Base64Error>.Failure {error} => {
         return Result.failResult<ProxyAuth, ProxyError>(failure(ProxyComponent.Authentication, ProxyReason.InvalidAuthentication))
       }
-      Result<usize, Base64Error>.Success {value} => value
-    }
-    if decodedLength > 3072 {
-      return Result.failResult<ProxyAuth, ProxyError>(limitFailure(
-        ProxyComponent.Authentication,
-        ProxyLimit.AuthenticationScratchBytes,
-        3072,
-        decodedLength,
-      ))
+      Result<usize, Base64Error>.Success {value} => { drop value }
     }
     let owned = run Bytes.copy(token)
     return Result.succeed<ProxyAuth, ProxyError>(ProxyAuth.Basic {
@@ -465,21 +472,150 @@ pub fn selectRoute<'configuration>(
   if BypassPolicy.contains(&configuration.bypassValue, &origin) {
     return Route.Direct {
       identity: identity,
-      authentication: &configuration.authenticationValue,
+      configuration: configuration,
       origin: origin,
     }
   }
   if Origin.secure(&origin) {
     return Route.Tunnel {
       identity: identity,
-      authentication: &configuration.authenticationValue,
+      configuration: configuration,
       origin: origin,
     }
   }
   return Route.Forward {
     identity: identity,
-    authentication: &configuration.authenticationValue,
+    configuration: configuration,
     origin: origin,
+  }
+}
+
+effect fn prepareSelectedForward<'value>(
+  configuration: &'value ProxyConfig,
+  originalOrigin: Origin,
+  uri: &Uri<'value>,
+  version: Version,
+  method: Method<'value>,
+  headers: &Headers<'value>,
+  policy: &HeaderPolicy<'value>,
+  body: BodyMode,
+  require100: bool,
+  limits: Limits,
+  maxHeadBytes: usize,
+  maxCredentialBytes: usize,
+) -> PreparedRequest ! ProxyError | RequestError | OutOfMemoryError ? &mut Allocator {
+  let logicalOrigin = match move Origin.fromUri(uri) {
+    Result<Origin, OriginError>.Failure {error} => {
+      fail failure(ProxyComponent.Route, ProxyReason.InvalidRoute)
+    }
+    Result<Origin, OriginError>.Success {value} => value
+  }
+  if !Origin.equals(&originalOrigin, &logicalOrigin) {
+    fail failure(ProxyComponent.Route, ProxyReason.InvalidRoute)
+  }
+  let physicalPeer = match move Origin.make(
+    configuration.proxyHostValue,
+    configuration.proxyPortValue,
+    false,
+  ) {
+    Result<Origin, OriginError>.Failure {error} => {
+      fail failure(ProxyComponent.Route, ProxyReason.InvalidRoute)
+    }
+    Result<Origin, OriginError>.Success {value} => value
+  }
+  let mut targetStorage = run Bytes.zeroed(limits.maxTargetBytes)
+  let output = Bytes.asMutSlice(&mut targetStorage)
+  let count = match move RequestTarget.fromUri(uri, TargetForm.Absolute, &mut output) {
+    Result.Failure {error} => {
+      fail RequestError.Value {error: move error}
+    }
+    Result.Success {value} => value
+  }
+  drop output
+  let bytes = Slice.view<u8>(Bytes.asSlice(&targetStorage), usize.ZERO, count)
+  let text = match move String.fromUtf8(bytes) {
+    Result.Failure {error} => {
+      drop error
+      fail RequestError.InvalidTarget
+    }
+    Result.Success {value} => value
+  }
+  let target = match move RequestTarget.parse(&method, text, limits.maxTargetBytes) {
+    Result.Failure {error} => {
+      fail RequestError.Value {error: move error}
+    }
+    Result.Success {value} => value
+  }
+  return match & configuration.authenticationValue {
+    ProxyAuth.None {contextIdValue} => run Request.prepareRouted(
+      &logicalOrigin,
+      &physicalPeer,
+      RoutedMode.Forward,
+      RoutedProxyAuthorization<'value>.Absent,
+      version,
+      method,
+      target,
+      headers,
+      policy,
+      body,
+      require100,
+      limits,
+      maxHeadBytes,
+      maxCredentialBytes,
+    )
+    ProxyAuth.Basic {contextIdValue, tokenValue} => run Request.prepareRouted(
+      &logicalOrigin,
+      &physicalPeer,
+      RoutedMode.Forward,
+      RoutedProxyAuthorization.BasicToken {value: Bytes.asSlice(&tokenValue)},
+      version,
+      method,
+      target,
+      headers,
+      policy,
+      body,
+      require100,
+      limits,
+      maxHeadBytes,
+      maxCredentialBytes,
+    )
+  }
+}
+
+/// Prepares one Forward route as an origin-bound absolute-form request for its plain proxy peer.
+///
+/// The selected configuration is the only source of `Proxy-Authorization`. The original URI
+/// spelling is preserved except that user information and fragments are excluded and an empty
+/// path becomes `/`.
+pub effect fn prepareForward<'configuration, 'value>(
+  route: &Route<'configuration>,
+  uri: &Uri<'value>,
+  version: Version,
+  method: Method<'value>,
+  headers: &Headers<'value>,
+  policy: &HeaderPolicy<'value>,
+  body: BodyMode,
+  require100: bool,
+  limits: Limits,
+  maxHeadBytes: usize,
+  maxCredentialBytes: usize,
+) -> PreparedRequest ! ProxyError | RequestError | OutOfMemoryError ? &mut Allocator {
+  return match & route.* {
+    Route.Forward {identity, configuration, origin} => run prepareSelectedForward(
+      configuration,
+      origin,
+      uri,
+      version,
+      method,
+      headers,
+      policy,
+      body,
+      require100,
+      limits,
+      maxHeadBytes,
+      maxCredentialBytes,
+    )
+    _ => { fail failure(ProxyComponent.Route, ProxyReason.InvalidRoute) }
   }
 }
 
@@ -487,70 +623,70 @@ impl<'configuration> Route<'configuration> {
   /// Returns the selected route mode.
   pub fn mode(self: &Self) -> RouteMode {
     return match & self.* {
-      Route.Direct {identity, authentication, origin} => RouteMode.Direct
-      Route.Forward {identity, authentication, origin} => RouteMode.Forward
-      Route.Tunnel {identity, authentication, origin} => RouteMode.Tunnel
+      Route.Direct {identity, configuration, origin} => RouteMode.Direct
+      Route.Forward {identity, configuration, origin} => RouteMode.Forward
+      Route.Tunnel {identity, configuration, origin} => RouteMode.Tunnel
     }
   }
   /// Returns the original origin that policy evaluated.
   pub fn originalOrigin(self: &Self) -> Origin {
     return match & self.* {
-      Route.Direct {identity, authentication, origin} => origin
-      Route.Forward {identity, authentication, origin} => origin
-      Route.Tunnel {identity, authentication, origin} => origin
+      Route.Direct {identity, configuration, origin} => origin
+      Route.Forward {identity, configuration, origin} => origin
+      Route.Tunnel {identity, configuration, origin} => origin
     }
   }
   /// Returns the proxy host retained when policy selected the route.
   pub fn proxyHost(self: &Self) -> Host {
     return match & self.* {
-      Route.Direct {identity, authentication, origin} => identity.proxyHost
-      Route.Forward {identity, authentication, origin} => identity.proxyHost
-      Route.Tunnel {identity, authentication, origin} => identity.proxyHost
+      Route.Direct {identity, configuration, origin} => identity.proxyHost
+      Route.Forward {identity, configuration, origin} => identity.proxyHost
+      Route.Tunnel {identity, configuration, origin} => identity.proxyHost
     }
   }
   /// Returns the proxy port retained when policy selected the route.
   pub fn proxyPort(self: &Self) -> Port {
     return match & self.* {
-      Route.Direct {identity, authentication, origin} => identity.proxyPort
-      Route.Forward {identity, authentication, origin} => identity.proxyPort
-      Route.Tunnel {identity, authentication, origin} => identity.proxyPort
+      Route.Direct {identity, configuration, origin} => identity.proxyPort
+      Route.Forward {identity, configuration, origin} => identity.proxyPort
+      Route.Tunnel {identity, configuration, origin} => identity.proxyPort
     }
   }
   /// Returns the configuration identity retained when policy selected the route.
   pub fn configId(self: &Self) -> ProxyConfigId {
     return match & self.* {
-      Route.Direct {identity, authentication, origin} => identity.configId
-      Route.Forward {identity, authentication, origin} => identity.configId
-      Route.Tunnel {identity, authentication, origin} => identity.configId
+      Route.Direct {identity, configuration, origin} => identity.configId
+      Route.Forward {identity, configuration, origin} => identity.configId
+      Route.Tunnel {identity, configuration, origin} => identity.configId
     }
   }
   /// Returns the authentication-context identity retained when policy selected the route.
   pub fn authContextId(self: &Self) -> ProxyAuthContextId {
     return match & self.* {
-      Route.Direct {identity, authentication, origin} => identity.authContextId
-      Route.Forward {identity, authentication, origin} => identity.authContextId
-      Route.Tunnel {identity, authentication, origin} => identity.authContextId
+      Route.Direct {identity, configuration, origin} => identity.authContextId
+      Route.Forward {identity, configuration, origin} => identity.authContextId
+      Route.Tunnel {identity, configuration, origin} => identity.authContextId
     }
   }
   /// Returns a stable key without reading or formatting authentication bytes.
   pub fn key(self: &Self) -> RouteKey {
     return RouteKey {
       identity: match & self.* {
-        Route.Direct {identity, authentication, origin} => identity
-        Route.Forward {identity, authentication, origin} => identity
-        Route.Tunnel {identity, authentication, origin} => identity
+        Route.Direct {identity, configuration, origin} => identity
+        Route.Forward {identity, configuration, origin} => identity
+        Route.Tunnel {identity, configuration, origin} => identity
       },
       originValue: Route.originalOrigin(self),
       modeValue: Route.mode(self),
     }
   }
   /// Recomputes policy for a new origin under the current immutable configuration.
-  pub fn recompute<'next>(
-    self: &Self,
-    configuration: &'next ProxyConfig,
-    origin: Origin,
-  ) -> Route<'next> {
-    return selectRoute(configuration, origin)
+  pub fn recompute(self: &Self, origin: Origin) -> Route<'configuration> {
+    return match & self.* {
+      Route.Direct {identity, configuration, origin: previous} => selectRoute(configuration, origin)
+      Route.Forward {identity, configuration, origin: previous} => selectRoute(configuration, origin)
+      Route.Tunnel {identity, configuration, origin: previous} => selectRoute(configuration, origin)
+    }
   }
 }
 
