@@ -109,8 +109,12 @@ pub fn main() -> i32 { return 42 }`
         '  pub fn fromUri(',
         '\n/// Validates Host cardinality',
       )
-      assert.lengthOf(fromUri.match(/usize\.checkedAdd/g) ?? [], 2)
-      assert.lengthOf(fromUri.match(/sizeFailure\(/g) ?? [], 2)
+      assert.lengthOf(fromUri.match(/usize\.checkedAdd/g) ?? [], 3)
+      assert.lengthOf(fromUri.match(/sizeFailure\(/g) ?? [], 3)
+      assert.include(
+        fromUri,
+        'if path.length == usize.ZERO {\n        required = match move usize.checkedAdd(required, usize.ONE)',
+      )
 
       assert.isFalse(
         Intrinsic.all().some((actor) =>

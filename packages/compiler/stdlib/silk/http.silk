@@ -570,6 +570,7 @@ impl<'value> RequestHead<'value> {
       }
     }
   }
+
 }
 
 /// An independently owned request head whose views borrow only this value.
@@ -711,6 +712,57 @@ impl<'value> ResponseHead<'value> {
       Result<usize, ValueError>.Success {value} => { drop value }
     }
     let headerCopy = run Headers.copy(&self.headerValues, limits)
+    return match move headerCopy {
+      Result<OwnedHeaders, ValueError>.Failure {error} => {
+        return Result.failResult<OwnedResponseHead, ValueError>(move error)
+      }
+      Result<OwnedHeaders, ValueError>.Success {value: headers} => {
+        let reason = match & self.reasonValue {
+          Option<&[u8]>.None => OwnedReason.None
+          Option<&[u8]>.Some {value} => OwnedReason.Some {bytes: run Bytes.copy(value)}
+        }
+        return Result.succeed<OwnedResponseHead, ValueError>(OwnedResponseHead {
+          versionValue: self.versionValue,
+          statusValue: self.statusValue,
+          reasonValue: move reason,
+          headerValues: move headers,
+        })
+      }
+    }
+  }
+
+  /// Copies the response status, reason, and only matching fields into independent storage.
+  ///
+  /// Matching is ASCII case-insensitive. Duplicate matches remain distinct and preserve wire order.
+  /// The total-owned limit covers copied reason bytes, field payload, and field records.
+  pub effect fn copyMatchingHeaders(
+    self: &Self,
+    name: string<'value>,
+    limits: Limits,
+  ) -> Result<OwnedResponseHead, ValueError> ! OutOfMemoryError ? &mut Allocator {
+    let reasonLength = match & self.reasonValue {
+      Option<&[u8]>.None => usize.ZERO
+      Option<&[u8]>.Some {value} => value.length
+    }
+    if reasonLength > limits.maxValueBytes {
+      return Result.failResult<OwnedResponseHead, ValueError>(limitFailure(
+        ValueComponent.ReasonPhrase,
+        LimitKind.ValueBytes,
+        limits.maxValueBytes,
+        reasonLength,
+      ))
+    }
+    if reasonLength > limits.maxOwnedBytes {
+      return Result.failResult<OwnedResponseHead, ValueError>(limitFailure(
+        ValueComponent.Headers,
+        LimitKind.OwnedBytes,
+        limits.maxOwnedBytes,
+        reasonLength,
+      ))
+    }
+    let mut headerLimits = limits
+    headerLimits.maxOwnedBytes = limits.maxOwnedBytes - reasonLength
+    let headerCopy = run Headers.copyMatching(&self.headerValues, name, headerLimits)
     return match move headerCopy {
       Result<OwnedHeaders, ValueError>.Failure {error} => {
         return Result.failResult<OwnedResponseHead, ValueError>(move error)
