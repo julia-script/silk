@@ -15,6 +15,14 @@ import silk.http_connection_pool_native as PoolNative {Context as NativePoolCont
 import silk.http_client_native {NativeTransport}
 import silk.trust_snapshot {TrustSourceError}`
 
+const httpFetchPolicyImports = `import silk.http_fetch as HttpFetch {
+  Fetch as FetchFacade,
+  FetchOptions,
+  FetchRequest,
+}
+import silk.http_fetch_native {Context as NativeFetchContext}
+import silk.trust_source {TrustSource}`
+
 const httpConnectionPoolPolicySupport = `fn poolCountsContract<P, C>(
   handle: &PoolHandle<PoolConnectionKey, P, C>,
 ) -> PoolCounts {
@@ -57,6 +65,60 @@ fn poolDeclarationsWitness() -> bool {
     && config.idleTimeoutNanoseconds == Pool.DEFAULT_IDLE_TIMEOUT_NANOSECONDS
     && Origin.equals(&origin, &selected)
     && poolCountsShape(counts)
+}`
+
+const httpFetchPolicySupport = `pub effect fn nativeFetchSourceFamiliesWitness<
+  'configuration,
+  'emptyUri,
+  'bytesUri,
+  'oneShotUri,
+  'replayUri,
+>(
+  fetch: &mut FetchFacade<NativeFetchContext<'configuration>>,
+  emptyUri: Uri<'emptyUri>,
+  bytesUri: Uri<'bytesUri>,
+  oneShotUri: Uri<'oneShotUri>,
+  replayUri: Uri<'replayUri>,
+) -> ()
+? &mut Allocator
+  | &mut MonotonicClock
+  | &mut SystemClock
+  | &mut Random
+  | &mut TrustSource
+  | &mut RedirectProducerRequirement
+  | &mut RedirectFactoryRequirement {
+  let empty = run Effect.result(HttpFetch.discardEmpty(
+    fetch,
+    FetchRequest.get(emptyUri),
+    FetchOptions.defaults(),
+    u64.toU64(1),
+  ))
+  drop empty
+  let bytes = run Effect.result(HttpFetch.discardBytes(
+    fetch,
+    FetchRequest.get(bytesUri),
+    b"x",
+    FetchOptions.defaults(),
+    u64.toU64(1),
+  ))
+  drop bytes
+  let oneShot = run Effect.result(HttpFetch.discardOneShot(
+    fetch,
+    FetchRequest.get(oneShotUri),
+    RedirectProducer {offset: usize.ZERO},
+    FetchOptions.defaults(),
+    u64.toU64(1),
+  ))
+  drop oneShot
+  let replay = run Effect.result(HttpFetch.discardReplay(
+    fetch,
+    FetchRequest.get(replayUri),
+    RedirectFactory {},
+    FetchOptions.defaults(),
+    u64.toU64(1),
+  ))
+  drop replay
+  return ()
 }`
 
 export const httpRedirectPolicyImports = `import silk.http_headers {
@@ -1729,9 +1791,11 @@ export const httpProxyRedirectPolicyAcceptanceSource = `${httpProxyPolicyCommonI
 ${httpProxyPolicyImports}
 ${httpConnectionPoolPolicyImports}
 ${httpRedirectPolicyImports}
+${httpFetchPolicyImports}
 ${httpProxyPolicySupport}
 ${httpConnectionPoolPolicySupport}
 ${httpRedirectOperationSupport}
+${httpFetchPolicySupport}
 ${httpRedirectOperationContractSupport}
 ${verifyProxyPolicy}
 ${httpRedirectBehaviorSentinel}
