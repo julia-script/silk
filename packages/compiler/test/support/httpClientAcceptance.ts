@@ -1483,6 +1483,7 @@ effect<'call> fn discardExchange<'call, 'exchange: 'call>(
   let attempted = run Effect.result(Client.discardRemainingAtMost(
     &mut exchangeValue.*,
     budget,
+    Option.none<Instant>(),
   ))
   return match move attempted {
     Result.Success {value} => match move value {

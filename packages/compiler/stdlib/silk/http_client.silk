@@ -2006,8 +2006,9 @@ union DiscardAttempt {
 /// # Details
 ///
 /// The operation uses the smaller caller limit and `Limits.maxDiscardWireBytes`. The limit
-/// includes payload and framing bytes. `Completed` permits a later [`finishResponse`] call.
-/// `CapReached` leaves the exchange incomplete and removes reuse authority.
+/// includes payload and framing bytes. Its explicit cleanup deadline is clamped to the exchange's
+/// unchanged operation deadline. `Completed` permits a later [`finishResponse`] call. `CapReached`
+/// leaves the exchange incomplete and removes reuse authority.
 ///
 /// # Gotchas
 ///
@@ -2015,12 +2016,14 @@ union DiscardAttempt {
 pub effect fn discardRemainingAtMost<'exchange, P>(
   exchange: &mut Exchange<'exchange, P>,
   maxWireBytes: u64,
+  deadline: Option<Instant>,
 ) -> DiscardOutcome
 ! ClientError | OutOfMemoryError
 ? &mut MonotonicClock | &mut Allocator | &mut Random
 where
   &mut P provides &HttpTransport from &mut HttpTransport | &mut MonotonicClock | &mut Allocator | &mut Random {
-  let attempted = run discardRemainingCore(exchange, maxWireBytes)
+  let selectedDeadline = clampDeadline(&deadline, &exchange.options.deadline)
+  let attempted = run discardRemainingCore(exchange, maxWireBytes, move selectedDeadline)
   return match move attempted {
     DiscardAttempt.Completed => DiscardOutcome.Completed
     DiscardAttempt.CapReached {error} => {
@@ -2040,7 +2043,8 @@ pub effect fn discardRemaining<'exchange, P>(
 ? &mut MonotonicClock | &mut Allocator | &mut Random
 where
   &mut P provides &HttpTransport from &mut HttpTransport | &mut MonotonicClock | &mut Allocator | &mut Random {
-  let attempted = run discardRemainingCore(exchange, maxWireBytes)
+  let selectedDeadline = copyDeadline(&exchange.options.deadline)
+  let attempted = run discardRemainingCore(exchange, maxWireBytes, move selectedDeadline)
   return match move attempted {
     DiscardAttempt.Completed => ()
     DiscardAttempt.CapReached {error} => {
@@ -2052,6 +2056,7 @@ where
 effect fn discardRemainingCore<'exchange, P>(
   exchange: &mut Exchange<'exchange, P>,
   maxWireBytes: u64,
+  deadline: Option<Instant>,
 ) -> DiscardAttempt
 ! ClientError | OutOfMemoryError
 ? &mut MonotonicClock | &mut Allocator | &mut Random
@@ -2065,7 +2070,7 @@ where
   }
   exchange.bodySelected = true
   exchange.phaseValue = ExchangePhase.Aborted
-  run checkDeadline(&exchange.options.deadline, false)
+  run checkDeadline(&deadline, false)
   let mut budget = maxWireBytes
   if budget > exchange.connection.limits.maxDiscardWireBytes {
     budget = exchange.connection.limits.maxDiscardWireBytes
@@ -2108,7 +2113,7 @@ where
       exchange.phaseValue = ExchangePhase.Response
       return DiscardAttempt.Completed
     }
-    run fill(&mut exchange.connection.*, &exchange.options.deadline)
+    run fill(&mut exchange.connection.*, &deadline)
   }
   return DiscardAttempt.Completed
 }
