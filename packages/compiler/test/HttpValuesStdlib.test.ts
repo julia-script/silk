@@ -322,6 +322,14 @@ it.effect(
           `missing lowered pool declaration witness: ${witness}`,
         )
       }
+      assert.isTrue(
+        mir.functions.some(
+          (fn) =>
+            fn.id.module === 'silk/http_connection_pool_native' &&
+            fn.id.name.startsWith('copyHandle$effect$'),
+        ),
+        'missing lowered native pool context copy witness',
+      )
       for (const operation of [
         'withEmptyResponse',
         'withBytesResponse',

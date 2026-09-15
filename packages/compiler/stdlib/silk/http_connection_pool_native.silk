@@ -1,0 +1,404 @@
+//! Native direct TCP, Unix, and HTTPS contexts for bounded HTTP connection pools.
+//!
+//! # When to use
+//!
+//! Use [`withDirectPool`] for direct TCP and HTTPS origins. Use [`withUnixPool`] when one exact
+//! Unix path supplies the physical transport for HTTP or HTTPS origins.
+//!
+//! # Details
+//!
+//! Each pool owns one immutable [`Context`]. Construction copies the prepared trust snapshot
+//! before pool publication. Each HTTPS opening receives another bounded copy before contact.
+//! Native acquisition gets the checkout deadline, but each published HTTP owner retains no
+//! acquisition or request deadline.
+//!
+//! # Gotchas
+//!
+//! These contexts reject proxy keys with `PoolError.ContextMismatch` before native contact. A
+//! later owned proxy transport seam must provide a different context.
+
+import silk.allocator {Allocator, OutOfMemoryError}
+import silk.http_client {ClientError, Connection, ConnectionHandler, Limits}
+import silk.http_client_native as Native {
+  NativeClientError,
+  NativeRoute,
+  NativeTransport,
+  Options,
+}
+import silk.http_connection_pool as Pool {
+  CheckoutResult,
+  Config,
+  ConnectionKey,
+  Handle,
+  PoolContext,
+  PoolContextCopy,
+  PoolError,
+  PoolHandler,
+}
+import silk.http_origin {Origin}
+import silk.http_transport {HttpTransport}
+import silk.https_identity {IdentityError}
+import silk.monotonic_clock {MonotonicClock}
+import silk.native_socket {NativeSocketError}
+import silk.option {Option}
+import silk.random {Random}
+import silk.resolver {ResolverError}
+import silk.result {Result}
+import silk.system_clock {Instant, SystemClock}
+import silk.tls_connection {ConnectionError}
+import silk.trust_snapshot {SnapshotLimits, TrustSourceError, TrustSnapshot}
+
+union ContextRoute {
+  Direct,
+  Unix {route: NativeRoute},
+}
+
+/// An immutable native provider, HTTP, route, TLS, ALPN, and prepared-trust context.
+///
+/// Construction is available only through [`withDirectPool`] and [`withUnixPool`]. The context
+/// accepts direct keys for its route and rejects all sealed proxy keys before native contact.
+pub struct Context {
+  routeValue: ContextRoute
+  optionsValue: Options
+  limitsValue: Limits
+  trustValue: Option<TrustSnapshot>
+}
+
+fn pooledOptions(value: &Options) -> Options {
+  return Options {
+    maximumAddresses: value.maximumAddresses,
+    family: value.family,
+    noDelay: value.noDelay,
+    pollIntervalNanoseconds: value.pollIntervalNanoseconds,
+    maximumAttempts: value.maximumAttempts,
+    deadline: Option.none<Instant>(),
+    handshakeNanoseconds: value.handshakeNanoseconds,
+    tls: value.tls,
+    trust: value.trust,
+    alpn: value.alpn,
+  }
+}
+
+effect fn copySnapshot(
+  snapshot: &TrustSnapshot,
+  limits: SnapshotLimits,
+) -> TrustSnapshot
+! TrustSourceError | OutOfMemoryError
+? &mut Allocator {
+  let copied = run TrustSnapshot.copy(snapshot, limits)
+  return match move copied {
+    Result<TrustSnapshot, TrustSourceError>.Success {value} => move value
+    Result<TrustSnapshot, TrustSourceError>.Failure {error} => { fail move error }
+  }
+}
+
+effect fn copyOptionalSnapshot(
+  snapshot: &Option<TrustSnapshot>,
+  limits: SnapshotLimits,
+) -> Option<TrustSnapshot>
+! TrustSourceError | OutOfMemoryError
+? &mut Allocator {
+  return match & snapshot.* {
+    Option.None => Option.none<TrustSnapshot>()
+    Option.Some {value} => Option.some<TrustSnapshot>(run copySnapshot(&value, limits))
+  }
+}
+
+effect fn copyBorrowedSnapshot(
+  snapshot: Option<&TrustSnapshot>,
+  limits: SnapshotLimits,
+) -> Option<TrustSnapshot>
+! TrustSourceError | OutOfMemoryError
+? &mut Allocator {
+  return match move snapshot {
+    Option.None => Option.none<TrustSnapshot>()
+    Option.Some {value} => Option.some<TrustSnapshot>(run copySnapshot(value, limits))
+  }
+}
+
+fn copyRoute(route: &ContextRoute) -> ContextRoute {
+  return match & route.* {
+    ContextRoute.Direct => ContextRoute.Direct
+    ContextRoute.Unix {route} => ContextRoute.Unix {route: route}
+  }
+}
+
+fn hasTrust(context: &Context) -> bool {
+  return match & context.trustValue {
+    Option.None => false
+    Option.Some {value} => true
+  }
+}
+
+impl Context {
+  effect fn copyContext(context: &Self) -> Context
+  ! TrustSourceError | OutOfMemoryError
+  ? &mut Allocator {
+    let route = copyRoute(&context.routeValue)
+    let trust = run copyOptionalSnapshot(
+      &context.trustValue,
+      context.optionsValue.trust.snapshot,
+    )
+    return Context {
+      routeValue: move route,
+      optionsValue: pooledOptions(&context.optionsValue),
+      limitsValue: context.limitsValue,
+      trustValue: move trust,
+    }
+  }
+
+  fn acceptsKey(context: &Self, key: &ConnectionKey) -> bool {
+    let origin = ConnectionKey.origin(key)
+    if Origin.secure(&origin) && !hasTrust(context) { return false }
+    return match & context.routeValue {
+      ContextRoute.Direct => ConnectionKey.isDirect(key)
+      ContextRoute.Unix {route} => {
+        ConnectionKey.matchesUnixPath(key, NativeRoute.path(&route))
+      }
+    }
+  }
+
+  effect fn acquire(
+    context: &Self,
+    key: &ConnectionKey,
+    deadline: Option<Instant>,
+  ) -> Connection<NativeTransport>
+  ! NativeClientError
+    | ClientError
+    | ResolverError
+    | NativeSocketError
+    | ConnectionError
+    | IdentityError
+    | TrustSourceError
+    | OutOfMemoryError
+  ? &mut Allocator | &mut MonotonicClock | &mut SystemClock | &mut Random {
+    let origin = ConnectionKey.origin(key)
+    let mut trust = Option.none<TrustSnapshot>()
+    if Origin.secure(&origin) {
+      trust = run copyOptionalSnapshot(
+        &context.trustValue,
+        context.optionsValue.trust.snapshot,
+      )
+    }
+    return match & context.routeValue {
+      ContextRoute.Direct => run Native.acquireOwned(
+        origin,
+        pooledOptions(&context.optionsValue),
+        context.limitsValue,
+        move trust,
+        move deadline,
+      )
+      ContextRoute.Unix {route} => run Native.acquireUnixOwned(
+        NativeRoute.path(&route),
+        origin,
+        pooledOptions(&context.optionsValue),
+        context.limitsValue,
+        move trust,
+        move deadline,
+      )
+    }
+  }
+}
+
+impl PoolContextCopy<
+  TrustSourceError | OutOfMemoryError,
+  &mut Allocator,
+> for Context {
+  copy: Context.copyContext
+}
+
+impl PoolContext<
+  ConnectionKey,
+  NativeTransport,
+  NativeClientError
+    | ClientError
+    | ResolverError
+    | NativeSocketError
+    | ConnectionError
+    | IdentityError
+    | TrustSourceError
+    | OutOfMemoryError,
+  &mut Allocator | &mut MonotonicClock | &mut SystemClock | &mut Random,
+> for Context {
+  accepts: Context.acceptsKey
+  acquire: Context.acquire
+}
+
+effect fn directContext(
+  options: Options,
+  limits: Limits,
+  preparedTrust: Option<&TrustSnapshot>,
+) -> Context
+! TrustSourceError | OutOfMemoryError
+? &mut Allocator {
+  let trust = run copyBorrowedSnapshot(preparedTrust, options.trust.snapshot)
+  return Context {
+    routeValue: ContextRoute.Direct,
+    optionsValue: pooledOptions(&options),
+    limitsValue: limits,
+    trustValue: move trust,
+  }
+}
+
+effect fn unixContext(
+  path: &[u8],
+  options: Options,
+  limits: Limits,
+  preparedTrust: Option<&TrustSnapshot>,
+) -> Context
+! NativeClientError | NativeSocketError | TrustSourceError | OutOfMemoryError
+? &mut Allocator {
+  let route = run Native.admitUnixRoute(path)
+  let trust = run copyBorrowedSnapshot(preparedTrust, options.trust.snapshot)
+  return Context {
+    routeValue: ContextRoute.Unix {route: move route},
+    optionsValue: pooledOptions(&options),
+    limitsValue: limits,
+    trustValue: move trust,
+  }
+}
+
+/// Constructs and lends a bounded pool for direct TCP and HTTPS origins.
+///
+/// # Details
+///
+/// Construction copies `preparedTrust` under `options.trust.snapshot` before pool publication.
+/// The context clears `options.deadline`; each checkout supplies its opening deadline separately.
+pub effect fn withDirectPool<
+  A,
+  E,
+  ?R,
+  H: PoolHandler<ConnectionKey, NativeTransport, Context, A, E ? R>,
+>(
+  config: Config,
+  options: Options,
+  limits: Limits,
+  preparedTrust: Option<&TrustSnapshot>,
+  handler: H,
+) -> A
+! E | PoolError | TrustSourceError | OutOfMemoryError
+? R | &mut Allocator {
+  let context = run directContext(move options, limits, preparedTrust)
+  return run Pool.withPool(config, move context, move handler)
+}
+
+/// Constructs and lends a bounded pool for one exact Unix path and HTTP or HTTPS origins.
+///
+/// # Details
+///
+/// Construction copies the path and `preparedTrust` before pool publication. TLS authenticates
+/// each original origin. The context clears `options.deadline` before any checkout.
+pub effect fn withUnixPool<
+  A,
+  E,
+  ?R,
+  H: PoolHandler<ConnectionKey, NativeTransport, Context, A, E ? R>,
+>(
+  config: Config,
+  path: &[u8],
+  options: Options,
+  limits: Limits,
+  preparedTrust: Option<&TrustSnapshot>,
+  handler: H,
+) -> A
+! E | PoolError | NativeClientError | NativeSocketError | TrustSourceError | OutOfMemoryError
+? R | &mut Allocator {
+  let context = run unixContext(path, move options, limits, preparedTrust)
+  return run Pool.withPool(config, move context, move handler)
+}
+
+/// Copies the complete native context before publishing another shared-state alias.
+///
+/// Trust or allocation failure leaves the source handle valid and publishes no new handle.
+pub effect fn copyHandle(
+  handle: &Handle<ConnectionKey, NativeTransport, Context>,
+) -> Handle<ConnectionKey, NativeTransport, Context>
+! TrustSourceError | OutOfMemoryError
+? &mut Allocator {
+  return run Pool.copyHandle(handle)
+}
+
+/// Checks out one direct origin and lends its exclusive connection to `handler`.
+///
+/// # Details
+///
+/// `requestDeadline` remains the request bound. `acquisitionDeadline` can only shorten opening.
+/// A Unix or proxy pool returns `PoolError.ContextMismatch` before native contact.
+pub effect fn withConnection<
+  A,
+  E,
+  ?R,
+  H: ConnectionHandler<NativeTransport, A, E ? R>,
+>(
+  handle: &Handle<ConnectionKey, NativeTransport, Context>,
+  origin: Origin,
+  requestDeadline: Option<Instant>,
+  acquisitionDeadline: Option<Instant>,
+  handler: H,
+) -> CheckoutResult<A>
+! E
+  | PoolError
+  | NativeClientError
+  | ClientError
+  | ResolverError
+  | NativeSocketError
+  | ConnectionError
+  | IdentityError
+  | TrustSourceError
+  | OutOfMemoryError
+? R | &mut Allocator | &mut MonotonicClock | &mut SystemClock | &mut Random
+where
+  &mut NativeTransport provides &HttpTransport from &mut HttpTransport | &mut MonotonicClock | &mut Allocator | &mut Random,
+  &mut NativeTransport provides &HttpTransport from &mut HttpTransport {
+  let key = ConnectionKey.direct(origin)
+  return run Pool.withConnection(
+    handle,
+    &key,
+    move requestDeadline,
+    move acquisitionDeadline,
+    move handler,
+  )
+}
+
+/// Checks out one origin through the pool's exact Unix path and lends its connection to `handler`.
+///
+/// # Details
+///
+/// The supplied path forms the conservative key. A different path returns
+/// `PoolError.ContextMismatch` before native contact. The request deadline remains unchanged.
+pub effect fn withUnixConnection<
+  A,
+  E,
+  ?R,
+  H: ConnectionHandler<NativeTransport, A, E ? R>,
+>(
+  handle: &Handle<ConnectionKey, NativeTransport, Context>,
+  path: &[u8],
+  origin: Origin,
+  requestDeadline: Option<Instant>,
+  acquisitionDeadline: Option<Instant>,
+  handler: H,
+) -> CheckoutResult<A>
+! E
+  | PoolError
+  | NativeClientError
+  | ClientError
+  | ResolverError
+  | NativeSocketError
+  | ConnectionError
+  | IdentityError
+  | TrustSourceError
+  | OutOfMemoryError
+? R | &mut Allocator | &mut MonotonicClock | &mut SystemClock | &mut Random
+where
+  &mut NativeTransport provides &HttpTransport from &mut HttpTransport | &mut MonotonicClock | &mut Allocator | &mut Random,
+  &mut NativeTransport provides &HttpTransport from &mut HttpTransport {
+  let key = run ConnectionKey.unix(origin, path)
+  return run Pool.withConnection(
+    handle,
+    &key,
+    move requestDeadline,
+    move acquisitionDeadline,
+    move handler,
+  )
+}

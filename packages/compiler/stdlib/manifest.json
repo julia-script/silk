@@ -330,6 +330,11 @@
     ]
   },
   {
+    "module": "silk/http_connection_pool_native",
+    "path": "silk/http_connection_pool_native.silk",
+    "namespace": "PoolNative"
+  },
+  {
     "module": "silk/http_content",
     "path": "silk/http_content.silk",
     "namespace": "ContentReader",
