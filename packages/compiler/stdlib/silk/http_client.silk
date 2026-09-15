@@ -266,6 +266,14 @@ pub union ClientError {
   Timeout,
 }
 
+/// The result of a bounded response-framing discard.
+pub enum DiscardOutcome {
+  /// The complete response boundary was reached within the limit.
+  Completed,
+  /// The next response-framing byte would exceed the limit.
+  CapReached,
+}
+
 /// Exact accepted payload and transport wire prefixes for one write call.
 pub struct WriteProgress {
   /// Payload prefix accepted by the framing encoder.
@@ -1984,12 +1992,72 @@ where
   return usize.ZERO
 }
 
+union DiscardAttempt {
+  Completed,
+  CapReached {error: BodyError},
+}
+
+/// Discards response framing up to one aggregate wire-byte limit and reports whether it completed.
+///
+/// # When to use
+///
+/// Use this operation when a caller can continue after the discard reaches its cap.
+///
+/// # Details
+///
+/// The operation uses the smaller caller limit and `Limits.maxDiscardWireBytes`. The limit
+/// includes payload and framing bytes. Its explicit cleanup deadline is clamped to the exchange's
+/// unchanged operation deadline. `Completed` permits a later [`finishResponse`] call. `CapReached`
+/// leaves the exchange incomplete and removes reuse authority.
+///
+/// # Gotchas
+///
+/// Malformed framing and read, deadline, allocation, or transport failures remain typed failures.
+pub effect fn discardRemainingAtMost<'exchange, P>(
+  exchange: &mut Exchange<'exchange, P>,
+  maxWireBytes: u64,
+  deadline: Option<Instant>,
+) -> DiscardOutcome
+! ClientError | OutOfMemoryError
+? &mut MonotonicClock | &mut Allocator | &mut Random
+where
+  &mut P provides &HttpTransport from &mut HttpTransport | &mut MonotonicClock | &mut Allocator | &mut Random {
+  let selectedDeadline = clampDeadline(&deadline, &exchange.options.deadline)
+  let attempted = run discardRemainingCore(exchange, maxWireBytes, move selectedDeadline)
+  return match move attempted {
+    DiscardAttempt.Completed => DiscardOutcome.Completed
+    DiscardAttempt.CapReached {error} => {
+      drop error
+      DiscardOutcome.CapReached
+    }
+  }
+}
+
 /// Discards response framing under the smaller caller and client wire budget, without consuming a subsequent message.
 /// A deadline, limit, framing, or transport failure permanently removes reuse authority.
 pub effect fn discardRemaining<'exchange, P>(
   exchange: &mut Exchange<'exchange, P>,
   maxWireBytes: u64,
 ) -> ()
+! ClientError | OutOfMemoryError
+? &mut MonotonicClock | &mut Allocator | &mut Random
+where
+  &mut P provides &HttpTransport from &mut HttpTransport | &mut MonotonicClock | &mut Allocator | &mut Random {
+  let selectedDeadline = copyDeadline(&exchange.options.deadline)
+  let attempted = run discardRemainingCore(exchange, maxWireBytes, move selectedDeadline)
+  return match move attempted {
+    DiscardAttempt.Completed => ()
+    DiscardAttempt.CapReached {error} => {
+      fail ClientError.Body {error: move error}
+    }
+  }
+}
+
+effect fn discardRemainingCore<'exchange, P>(
+  exchange: &mut Exchange<'exchange, P>,
+  maxWireBytes: u64,
+  deadline: Option<Instant>,
+) -> DiscardAttempt
 ! ClientError | OutOfMemoryError
 ? &mut MonotonicClock | &mut Allocator | &mut Random
 where
@@ -2002,7 +2070,7 @@ where
   }
   exchange.bodySelected = true
   exchange.phaseValue = ExchangePhase.Aborted
-  run checkDeadline(&exchange.options.deadline, false)
+  run checkDeadline(&deadline, false)
   let mut budget = maxWireBytes
   if budget > exchange.connection.limits.maxDiscardWireBytes {
     budget = exchange.connection.limits.maxDiscardWireBytes
@@ -2032,6 +2100,9 @@ where
       Result.Failure {error} => {
         exchange.connection.start = exchange.connection.start + error.consumed
         exchange.responseWireTotal = error.totalWire
+        if discardCapReached(&error) {
+          return DiscardAttempt.CapReached {error: move error}
+        }
         fail ClientError.Body {error: move error}
       }
       Result.Success {value} => value
@@ -2040,11 +2111,18 @@ where
     exchange.responseWireTotal = progress.totalWire
     if progress.state == ProgressState.Complete {
       exchange.phaseValue = ExchangePhase.Response
-      return ()
+      return DiscardAttempt.Completed
     }
-    run fill(&mut exchange.connection.*, &exchange.options.deadline)
+    run fill(&mut exchange.connection.*, &deadline)
   }
-  return ()
+  return DiscardAttempt.Completed
+}
+
+fn discardCapReached(error: &BodyError) -> bool {
+  return match error.reason {
+    BodyReason.DiscardLimit {allowed: _, attempted: _} => true
+    _ => false
+  }
 }
 
 /// Returns completed chunk trailers borrowed exclusively from the active exchange.

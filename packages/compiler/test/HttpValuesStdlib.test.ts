@@ -9,7 +9,10 @@ import * as SourceFile from '../src/SourceFile.js'
 import * as Stdlib from '../src/Stdlib.js'
 import * as Projections from './support/projections.js'
 import { httpValuesAcceptanceSource } from './support/httpValuesAcceptance.js'
-import { httpProxyPolicyAcceptanceSource } from './support/httpProxyAcceptance.js'
+import {
+  httpRedirectAffineDiagnosticSource,
+  httpProxyRedirectPolicyAcceptanceSource,
+} from './support/httpRedirectAcceptance.js'
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
@@ -292,15 +295,76 @@ pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
 )
 
 it.effect(
-  'type-checks bounded HTTP proxy policy and verifies its lowered MIR once',
+  'compiles HTTP proxy and redirect policy witnesses and verifies their lowered MIR once',
   () =>
     Effect.gen(function* () {
+      // Keep the positive composite free of diagnostics so its one retained program can lower.
+      // The focused frontend-only assertion below owns the intentional affine failures.
       const snapshot = yield* AnalysisFixture.retainingMain(
-        'http-proxy/policy',
-        ascii(httpProxyPolicyAcceptanceSource),
+        'http-proxy-redirect/policy',
+        ascii(httpProxyRedirectPolicyAcceptanceSource),
       )
       assert.deepEqual(diagnosticSummary(snapshot), [])
-      assert.deepEqual(MirVerification.verify(Analysis.loweredMir(snapshot)), [])
+      const mir = Analysis.loweredMir(snapshot)
+      assert.deepEqual(MirVerification.verify(mir), [])
+      for (const operation of [
+        'withEmptyResponse',
+        'withBytesResponse',
+        'withOneShotResponse',
+        'withReplayResponse',
+      ]) {
+        assert.isTrue(
+          mir.functions.some(
+            (fn) =>
+              fn.id.module === 'silk/http_redirect' &&
+              fn.id.name.startsWith(`${operation}$effect$`),
+          ),
+          `missing lowered redirect operation: ${operation}`,
+        )
+      }
+      for (const witness of [
+        'redirectEmptyContractWitness',
+        'redirectBytesContractWitness',
+        'redirectOneShotContractWitness',
+        'redirectReplayContractWitness',
+      ]) {
+        assert.isTrue(
+          mir.functions.some((fn) => fn.id.name.startsWith(`${witness}$effect$`)),
+          `missing lowered exact-row witness: ${witness}`,
+        )
+      }
+      assert.isTrue(
+        mir.functions.some((fn) => fn.id.name === 'redirectPolicyCompileWitness'),
+        'missing lowered redirect policy behavior sentinel',
+      )
+      assert.isTrue(
+        mir.functions.some((fn) => fn.id.name.startsWith('verifyRedirectPolicy$effect$')),
+        'missing lowered allocation-backed redirect behavior sentinel',
+      )
+    }),
+  120_000,
+)
+
+it.effect(
+  'rejects escaping response loans and escaping or duplicating scoped redirect producers',
+  () =>
+    Effect.gen(function* () {
+      const snapshot = yield* AnalysisFixture.frontend(
+        'http-redirect/affine-diagnostics',
+        ascii(httpRedirectAffineDiagnosticSource),
+      )
+      const diagnostics = Analysis.diagnostics(snapshot).map((diagnostic) => ({
+        code: diagnostic.code,
+        span: httpRedirectAffineDiagnosticSource
+          .slice(diagnostic.span.start, diagnostic.span.end)
+          .trim(),
+      }))
+      assert.deepEqual(diagnostics, [
+        { code: 'SEM0025', span: 'move uri' },
+        { code: 'SEM0025', span: 'move exchange' },
+        { code: 'SEM0025', span: 'move producer' },
+        { code: 'OWN0001', span: 'move producer' },
+      ])
     }),
   120_000,
 )

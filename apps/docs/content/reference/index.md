@@ -158,6 +158,7 @@ documentation remain separate from this reference.
 - [Streaming HTTP server](http-server.md) — bounded serial request handling, framed bodies, explicit response output, graceful shutdown, and scoped protocol handoff.
 - [Streaming HTTP client](http-client.md) — origin-bound request policy, owned sessions, staged exchanges, and authenticated native TLS transport.
 - [HTTP proxy routing](http-proxy-routing.md) — explicit bounded proxy policy, routed admission, CONNECT tunnel ownership, and original-origin TLS.
+- [HTTP redirects](http-redirects.md) — bounded redirect policy, replay sources, authority changes, scoped cleanup, and final response ownership.
 - [Network addresses and resolution](network-address-resolution.md) — owned IP/domain/endpoint values, bounded resolution, and synchronous native DNS limits.
 - [Native socket connections](native-socket-connections.md) — scoped nonblocking TCP and pathname-Unix ByteDuplex connections with bounded cooperative polling.
 - [P-256 key agreement](p256-key-agreement.md) — scalar ownership, SEC1 admission, explicit entropy and bounded arithmetic.

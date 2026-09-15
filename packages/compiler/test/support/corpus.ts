@@ -61,6 +61,7 @@ import {
   httpClientAcceptanceSource,
   httpClientBoundariesAcceptanceSource,
   httpClientOutputFailuresAcceptanceSource,
+  httpRedirectAcceptanceSource,
 } from './httpClientAcceptance.js'
 import { httpClientContentAcceptanceSource } from './httpClientContentAcceptance.js'
 import { httpTransportAcceptanceSource } from './httpTransportAcceptance.js'
@@ -6341,6 +6342,12 @@ const pressurePrograms: ReadonlyArray<CorpusProgram> = [
   },
 ]
 
+export const httpRedirectCorpusProgram = Object.freeze({
+  name: 'http-redirect',
+  source: httpRedirectAcceptanceSource,
+  expected: { _tag: 'Completes', result: 0 },
+} satisfies CorpusProgram)
+
 export const nativeCorpus: ReadonlyArray<CorpusProgram> = [
   {
     name: 'https-san-adapter',
@@ -6417,6 +6424,7 @@ export const nativeCorpus: ReadonlyArray<CorpusProgram> = [
     source: httpClientAcceptanceSource,
     expected: { _tag: 'Completes', result: 0 },
   },
+  httpRedirectCorpusProgram,
   {
     name: 'http-client-boundaries',
     source: httpClientBoundariesAcceptanceSource,

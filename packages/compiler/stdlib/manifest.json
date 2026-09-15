@@ -385,6 +385,11 @@
     ]
   },
   {
+    "module": "silk/http_redirect",
+    "path": "silk/http_redirect.silk",
+    "namespace": "Redirect"
+  },
+  {
     "module": "silk/http_request",
     "path": "silk/http_request.silk",
     "namespace": "HttpRequest"
