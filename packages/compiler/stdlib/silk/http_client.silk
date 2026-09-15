@@ -50,6 +50,7 @@ import silk.http_content {
   ContentProgressState,
   ResponseContext,
   CodingPlan,
+  AppliedPlan,
   Mode as ContentMode,
   Limits as ContentLimits,
   ReuseDisposition,
@@ -2968,11 +2969,12 @@ fn clampDeadline(first: &Option<Instant>, second: &Option<Instant>) -> Option<In
 
 /// Selects one content pipeline from this exchange's current head before a nonempty raw read or a discard.
 /// Planning errors borrow the head and must be handled before the exchange is used again.
+/// The returned copy records the applied representation policy without exposing the affine decoder.
 pub effect fn beginContent<'head, 'exchange: 'head, P>(
   exchange: &'head mut Exchange<'exchange, P>,
   mode: ContentMode,
   limits: ContentLimits,
-) -> ()
+) -> AppliedPlan
 ! ClientError | ContentError<'head> | OutOfMemoryError
 ? &mut Allocator | &mut MonotonicClock {
   if exchange.phaseValue != ExchangePhase.Response || exchange.bodySelected {
@@ -3042,6 +3044,7 @@ pub effect fn beginContent<'head, 'exchange: 'head, P>(
       totalDecoded: u64.MIN,
     }
   }
+  let applied = plan.applied()
   let decoder = run ContentDecoder.make(move plan)
   let boxed = run Box.make<ContentDecoder>(move decoder)
   run checkDeadline(&exchange.options.deadline, false)
@@ -3051,7 +3054,7 @@ pub effect fn beginContent<'head, 'exchange: 'head, P>(
   exchange.decoder = Option.none<Decoder>()
   exchange.contentDecoder = Option.some<Box<ContentDecoder>>(move boxed)
   exchange.phaseValue = ExchangePhase.Response
-  return ()
+  return applied
 }
 
 /// Reads content-decoded bytes through the same rich transport and absolute deadline as the exchange.
