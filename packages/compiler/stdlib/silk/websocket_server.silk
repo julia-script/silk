@@ -1103,7 +1103,16 @@ where &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut Monoton
     run boundedPayload(socket, length, &capacity)
   }
   let wireLength = match move usize.checkedAdd(headerLength, payloadLength) {
-    Option.None => { fail WebSocketError.InvalidLimits {kind: LimitKind.Arithmetic} }
+    Option.None => match & closeRemaining.* {
+      Option.None => { fail WebSocketError.InvalidLimits {kind: LimitKind.Arithmetic} }
+      Option.Some {value} => {
+        drop value
+        fail WebSocketError.CloseLimitExceeded {
+          kind: CloseLimitKind.Bytes,
+          allowed: socket.limits.maxCloseBytes,
+        }
+      }
+    }
     Option.Some {value} => value
   }
   run checkCloseRemaining(socket, &closeRemaining, wireLength)
