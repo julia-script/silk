@@ -366,6 +366,24 @@
     "namespace": "Origin"
   },
   {
+    "module": "silk/http_proxy",
+    "path": "silk/http_proxy.silk",
+    "namespace": "ProxyConfig",
+    "aliases": [
+      "ProxyAuth",
+      "ProxyAuthContextId",
+      "ProxyComponent",
+      "ProxyConfigId",
+      "ProxyError",
+      "ProxyLimit",
+      "ProxyReason",
+      "BypassPolicy",
+      "Route",
+      "RouteKey",
+      "RouteMode"
+    ]
+  },
+  {
     "module": "silk/http_request",
     "path": "silk/http_request.silk",
     "namespace": "HttpRequest"
