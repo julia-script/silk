@@ -12,10 +12,11 @@
 //! bytes. Network acquisition and exchange driving remain in `silk.http_client`.
 
 import silk.allocator {Allocator, OutOfMemoryError}
+import silk.byte_duplex {ByteDuplex}
 import silk.bytes {Bytes}
 import silk.effect {Effect}
 import silk.http {Header, Method, Status, ValueError, Version}
-import silk.http_client {ClientError, ContinuePolicy, Exchange, ExchangePhase}
+import silk.http_client {ClientError, ContinuePolicy, Exchange, ExchangePhase, RouteTransport}
 import silk.http_client as Client
 import silk.http_headers {
   HeaderIterator,
@@ -247,6 +248,36 @@ pub struct Request<'uri, 'method, 'headers, 'policy> {
   pub maxCredentialBytes: usize
 }
 
+/// Owned semantic state for rebuilding exactly one redirect attempt.
+///
+/// # Details
+///
+/// The attempt client borrows views from these owners only inside its higher-ranked handler call.
+/// It must rebuild a fresh prepared request after route selection rather than retaining serialized
+/// bytes from an earlier origin.
+pub struct AttemptRequest<'policy> {
+  /// Independently owned current URI, including fragment metadata outside the wire target.
+  pub uri: OwnedUri
+  /// Independently owned exact method spelling.
+  pub method: String
+  /// Independently owned ordered semantic fields before generated-field preparation.
+  pub headers: OwnedHeaders
+  /// Generated-field and origin-credential policy borrowing caller-owned bytes.
+  pub headerPolicy: HeaderPolicy<'policy>
+  /// HTTP version selected for this attempt.
+  pub version: Version
+  /// Upload expectation policy paired with the prepared request.
+  pub continuePolicy: ContinuePolicy
+  /// Shared method, target, field, and owned-header bounds used during preparation.
+  pub requestLimits: HeaderLimits
+  /// Maximum bytes in the newly owned serialized request head.
+  pub maxHeadBytes: usize
+  /// Maximum generated origin or proxy credential bytes in the request head.
+  pub maxCredentialBytes: usize
+  /// Exact body delimiter that orchestration validates against its source before acquisition.
+  pub bodyMode: BodyMode
+}
+
 /// Returns generated-field policy for a cross-origin attempt without origin credentials.
 ///
 /// # When to use
@@ -356,6 +387,78 @@ pub union BodyWriteOutcome {
     /// Final response status.
     pub status: u16,
   },
+}
+
+/// A higher-ranked callback for one rebuilt routed request and its scoped final transport.
+///
+/// # Details
+///
+/// The owned attempt is retained by its client and borrowed only for `handle`. Its validated method
+/// view, routed transport loans, and exchange share that fresh scope. Success, failure, and
+/// requirement channels pass through unchanged and cannot retain the fresh owner or exchange
+/// borrows in the returned value.
+pub interface AttemptHandler<'policy, P, A, E, ?R> {
+  /// Handles one live exchange after request preparation and connection acquisition complete.
+  effect<'call> fn handle<
+    'call,
+    'exchangeView: 'call,
+    'transport: 'exchangeView,
+    'provider: 'transport,
+    'tunnel: 'provider,
+  >(
+    handler: Self,
+    request: &'call AttemptRequest<'policy>,
+    method: Method<'call>,
+    exchange: &'call mut Exchange<'exchangeView, RouteTransport<'transport, 'provider, 'tunnel, P>>,
+  ) -> A ! E ? R where
+    &mut P provides &HttpTransport from &mut HttpTransport | &mut MonotonicClock | &mut Allocator | &mut Random,
+    &mut P provides &HttpTransport from &mut HttpTransport,
+    &mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock | &mut Allocator | &mut Random,
+    &mut P provides &ByteDuplex from &mut ByteDuplex
+}
+
+/// A routed HTTP acquisition boundary for one rebuilt redirect attempt.
+///
+/// # When to use
+///
+/// Implement this interface beside routed connection acquisition, then pass it to redirect
+/// orchestration without exposing sockets, TLS state, proxy credentials, or pooled leases.
+///
+/// # Details
+///
+/// `withAttempt` consumes and retains `request` through its complete bracket. It derives one
+/// validated method and the URI/header views from that owner, selects the current route, prepares a
+/// new origin- or absolute-form request, acquires its physical peer under the unchanged absolute
+/// deadline, and invokes exactly one `http_client.withExchange`. The same method view, a fresh
+/// request borrow, and the resulting exchange are lent only through [`AttemptHandler`], so redirect
+/// transition and sanitization do not copy semantic state or reparse the method. Handler and source
+/// errors remain direct. `AcquisitionError` directly carries preparation, route, acquisition, and
+/// exchange-admission failures without wrapping either channel family.
+///
+/// # Gotchas
+///
+/// The implementation must release its transport after handler success, typed failure, defect, or
+/// cancellation. It must not return the fresh request borrow, method view, transport loan, or
+/// exchange loan.
+pub interface AttemptClient<
+  'policy,
+  P,
+  A,
+  HandlerError,
+  AcquisitionError,
+  ?HandlerRequirements,
+  ?AcquisitionRequirements,
+  H: AttemptHandler<'policy, P, A, HandlerError ? HandlerRequirements>,
+> {
+  /// Rebuilds, acquires, and drives one scoped request while preserving both channel families.
+  effect fn withAttempt(
+    client: &mut Self,
+    request: AttemptRequest<'policy>,
+    deadline: Option<Instant>,
+    handler: H,
+  ) -> A ! HandlerError | AcquisitionError ? HandlerRequirements | AcquisitionRequirements where
+    HandlerRequirements in Without<HandlerRequirements, ByteDuplex>,
+    HandlerRequirements in Without<HandlerRequirements, HttpTransport>
 }
 
 impl<
