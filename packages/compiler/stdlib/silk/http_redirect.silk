@@ -15,9 +15,16 @@ import silk.allocator {Allocator, OutOfMemoryError}
 import silk.bytes {Bytes}
 import silk.http {Header, Method, Status, ValueError, Version}
 import silk.http_client {ContinuePolicy}
-import silk.http_headers {HeaderIterator, Headers, Limits as HeaderLimits, OwnedHeaders}
+import silk.http_headers {
+  HeaderIterator,
+  Headers,
+  Limits as HeaderLimits,
+  MetadataIterator,
+  MetadataToken,
+  OwnedHeaders,
+}
 import silk.http_origin {Origin, OriginError}
-import silk.http_request {BodyMode, HeaderPolicy}
+import silk.http_request {Authorization, BodyMode, HeaderControl, HeaderPolicy}
 import silk.layout {Layout}
 import silk.option {Option}
 import silk.result {Result}
@@ -27,7 +34,7 @@ import silk.system_clock {Instant}
 import silk.u64
 import silk.u8
 import silk.uri {OwnedUri, Uri}
-import silk.uri_reference {ParseError, UriReference}
+import silk.uri_reference {UriReference}
 import silk.usize
 import silk.vector {Vector}
 
@@ -100,7 +107,7 @@ pub struct HistoryLimits {
   pub maxHops: usize
   /// Maximum bytes in each raw or resolved URI serialization.
   pub maxUriBytes: usize
-  /// Maximum history payload plus index storage bytes.
+  /// Maximum serialized key bytes in the preallocated history arena.
   pub maxHistoryBytes: usize
 }
 
@@ -146,7 +153,7 @@ pub enum RedirectLimit {
   UriBytes,
   /// Method-aware history entries.
   HistoryEntries,
-  /// Aggregate history payload and index storage.
+  /// Aggregate serialized history-key bytes.
   HistoryBytes,
 }
 
@@ -235,6 +242,27 @@ pub struct Request<'uri, 'method, 'headers, 'policy> {
   pub maxCredentialBytes: usize
 }
 
+/// Returns generated-field policy for a cross-origin attempt without origin credentials.
+///
+/// # When to use
+///
+/// Use before request preparation after [`admitOrigin`] reports an origin change.
+///
+/// # Details
+///
+/// The result selects the next normalized origin for Host and removes generated Authorization.
+/// It preserves User-Agent, Accept, Basic security, and HTTP/1.0 persistence controls.
+pub fn crossOriginHeaderPolicy<'value>(policy: HeaderPolicy<'value>) -> HeaderPolicy<'value> {
+  return HeaderPolicy<'value> {
+    host: HeaderControl<'value>.Default,
+    userAgent: policy.userAgent,
+    accept: policy.accept,
+    authorization: Authorization<'value>.Absent,
+    basicSecurity: policy.basicSecurity,
+    http10KeepAlive: policy.http10KeepAlive,
+  }
+}
+
 /// The result of pulling one bounded producer chunk into caller storage.
 pub struct BodyChunk {
   /// Number of initialized bytes written at the start of caller storage.
@@ -294,7 +322,21 @@ pub union BodySource<'bytes, OneShot, Factory> {
   },
 }
 
-/// Checks whether a selected body transition can be served by the source before any next contact.
+/// Checks body replay authority before a retained-body attempt can contact its destination.
+///
+/// # When to use
+///
+/// Use after [`transition`] selects `Retain` and before route or connection acquisition.
+///
+/// # Details
+///
+/// Empty, repeatable-byte, and factory sources remain available for later attempts. A OneShot
+/// source is available only when `attemptedRequests` is zero. A `Drop` decision does not use a
+/// source.
+///
+/// # Gotchas
+///
+/// An early response does not restore OneShot authority after the first attempt starts.
 pub fn admitReplay<'bytes, OneShot, Factory>(
   source: &BodySource<'bytes, OneShot, Factory>,
   attemptedRequests: usize,
@@ -559,7 +601,13 @@ fn listsOverlap(left: &NameList, right: &NameList) -> bool {
 }
 
 impl Policy {
-  /// Returns Manual policy with finite defaults and empty owned name lists.
+  /// Returns Manual policy with the standard finite redirect limits and no admitted custom names.
+  ///
+  /// # Details
+  ///
+  /// The result permits 10 hops, 8192 URI bytes, and 90112 history bytes. It denies origin changes
+  /// and downgrades, preserves POST for 301 and 302, and closes intermediate responses. Both owned
+  /// name lists are empty.
   pub fn defaults() -> Policy {
     return Policy {
       modeValue: Mode.Manual,
@@ -572,7 +620,7 @@ impl Policy {
       sensitiveValue: NameList.empty(),
     }
   }
-  /// Admits an immutable policy, rejecting list overlap and history-capacity overflow before I/O.
+  /// Admits an immutable policy, rejecting list overlap and hop-count overflow before I/O.
   pub fn make(
     mode: Mode,
     history: HistoryLimits,
@@ -596,29 +644,7 @@ impl Policy {
       }
       Option.Some {value} => value
     }
-    let records = match move usize.checkedMultiply(Layout.of<HistoryKey>().bytes, entries) {
-      Option.None => {
-        return Result.failResult<Policy, RedirectError>(
-          failure(
-            RedirectComponent.History,
-            RedirectReason.SizeOverflow,
-            usize.ZERO,
-            Option.none<Status>(),
-          ),
-        )
-      }
-      Option.Some {value} => value
-    }
-    if records > history.maxHistoryBytes {
-      return Result.failResult<Policy, RedirectError>(
-        limitFailure(
-          RedirectComponent.History,
-          RedirectLimit.HistoryBytes,
-          history.maxHistoryBytes,
-          records,
-        ),
-      )
-    }
+    drop entries
     if listsOverlap(&safeCustom, &sensitive) {
       return Result.failResult<Policy, RedirectError>(
         failure(
@@ -868,7 +894,22 @@ fn originFailure(error: OriginError) -> RedirectReason {
   }
 }
 
-/// Extracts exactly one bounded `Location`, resolves it, applies HTTP fragment inheritance, and owns it.
+/// Returns one independently owned HTTP or HTTPS URI from the selected response `Location`.
+///
+/// # When to use
+///
+/// Use while the selected response head is live and before the next route is acquired.
+///
+/// # Details
+///
+/// The operation requires exactly one field and copies it under `maxUriBytes`. It applies RFC 3986
+/// resolution, rejects a resolved serialization above the same bound, and admits only HTTP or
+/// HTTPS origins with a host, effective port, and no user information. It inherits the current
+/// fragment only when the reference has no fragment.
+///
+/// # Gotchas
+///
+/// A present empty fragment replaces the current fragment. The operation does not change `current`.
 pub effect fn resolveLocation<'head>(
   current: &Uri,
   headers: &Headers<'head>,
@@ -1051,18 +1092,12 @@ pub fn admitOrigin(policy: &Policy, current: &Origin, next: &Origin, hop: usize,
   return Result.succeed<bool, RedirectError>(true)
 }
 
-struct HistoryKey {
-  method: String
-  origin: Origin
-  target: String
-}
-
-/// Bounded method-aware redirect-loop history with preallocated index capacity.
+/// Bounded method-aware redirect-loop history in one preallocated byte arena.
 pub struct History {
-  keys: Vector<HistoryKey>
+  arena: Bytes
   limits: HistoryLimits
   maxEntriesValue: usize
-  ownedBytesValue: usize
+  countValue: usize
 }
 
 fn targetLength(uri: &Uri) -> Result<usize, RedirectError> {
@@ -1102,22 +1137,25 @@ fn targetLength(uri: &Uri) -> Result<usize, RedirectError> {
   }
 }
 
-fn targetEqual(target: string, uri: &Uri) -> bool {
-  let targetBytes = String.utf8Bytes(target)
+fn targetRangeEqual(storage: &[u8], start: usize, end: usize, uri: &Uri) -> bool {
   let path = String.utf8Bytes(Uri.path(uri))
+  if end < start {
+    return false
+  }
+  let targetLength = end - start
   let mut cursor = usize.ZERO
   if path.length == usize.ZERO {
-    if targetBytes.length == usize.ZERO || targetBytes[usize.ZERO] != 47 {
+    if targetLength == usize.ZERO || storage[start] != 47 {
       return false
     }
     cursor = usize.ONE
   } else {
-    if targetBytes.length < path.length {
+    if targetLength < path.length {
       return false
     }
     let mut index = usize.ZERO
     while index < path.length {
-      if targetBytes[index] != path[index] {
+      if storage[start + index] != path[index] {
         return false
       }
       index = index + usize.ONE
@@ -1125,19 +1163,19 @@ fn targetEqual(target: string, uri: &Uri) -> bool {
     cursor = path.length
   }
   return match move Uri.query(uri) {
-    Option.None => cursor == targetBytes.length
+    Option.None => cursor == targetLength
     Option.Some {value} => {
       let query = String.utf8Bytes(value)
-      if cursor >= targetBytes.length || targetBytes[cursor] != 63 {
+      if cursor >= targetLength || storage[start + cursor] != 63 {
         return false
       }
       cursor = cursor + usize.ONE
-      if targetBytes.length - cursor != query.length {
+      if targetLength - cursor != query.length {
         return false
       }
       let mut index = usize.ZERO
       while index < query.length {
-        if targetBytes[cursor + index] != query[index] {
+        if storage[start + cursor + index] != query[index] {
           return false
         }
         index = index + usize.ONE
@@ -1164,8 +1202,363 @@ fn writeTarget(output: &mut Bytes, uri: &Uri) -> () ! OutOfMemoryError ? &mut Al
   return ()
 }
 
+fn authorityScratch() -> [u8; 261] {
+  return [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+  ]
+}
+
+fn delimiter(storage: &[u8], start: usize) -> usize {
+  let mut index = start
+  while index < storage.length && storage[index] != u8.toU8(0) {
+    index = index + usize.ONE
+  }
+  return index
+}
+
+fn rangeEqual(storage: &[u8], start: usize, end: usize, value: &[u8]) -> bool {
+  if end < start || end - start != value.length {
+    return false
+  }
+  let mut index = usize.ZERO
+  while index < value.length {
+    if storage[start + index] != value[index] {
+      return false
+    }
+    index = index + usize.ONE
+  }
+  return true
+}
+
+fn foldedRangeEqual(storage: &[u8], start: usize, end: usize, value: &[u8]) -> bool {
+  if end < start || end - start != value.length {
+    return false
+  }
+  let mut index = usize.ZERO
+  while index < value.length {
+    if folded(storage[start + index]) != folded(value[index]) {
+      return false
+    }
+    index = index + usize.ONE
+  }
+  return true
+}
+
+fn historyContains(arena: &[u8], method: &Method, origin: &Origin, authority: &[u8], uri: &Uri) -> bool {
+  let methodBytes = String.utf8Bytes(Method.format(method))
+  let mut secureMarker = u8.toU8(112)
+  if Origin.secure(origin) {
+    secureMarker = u8.toU8(115)
+  }
+  let mut cursor = usize.ZERO
+  while cursor < arena.length {
+    let methodEnd = delimiter(arena, cursor)
+    if methodEnd >= arena.length {
+      return false
+    }
+    let markerAt = methodEnd + usize.ONE
+    if markerAt >= arena.length {
+      return false
+    }
+    let authorityStart = markerAt + usize.ONE
+    let authorityEnd = delimiter(arena, authorityStart)
+    if authorityEnd >= arena.length {
+      return false
+    }
+    let targetStart = authorityEnd + usize.ONE
+    let targetEnd = delimiter(arena, targetStart)
+    if targetEnd >= arena.length {
+      return false
+    }
+    if rangeEqual(arena, cursor, methodEnd, methodBytes) && arena[markerAt] == secureMarker && foldedRangeEqual(
+      arena,
+      authorityStart,
+      authorityEnd,
+      authority,
+    ) && targetRangeEqual(arena, targetStart, targetEnd, uri) {
+      return true
+    }
+    cursor = targetEnd + usize.ONE
+  }
+  return false
+}
+
+fn historyAdd(left: usize, right: usize, hop: usize) -> Result<usize, RedirectError> {
+  return match move usize.checkedAdd(left, right) {
+    Option.None => Result.failResult<usize, RedirectError>(
+      failure(RedirectComponent.History, RedirectReason.SizeOverflow, hop, Option.none<Status>()),
+    )
+    Option.Some {value} => Result.succeed<usize, RedirectError>(value)
+  }
+}
+
 impl History {
-  /// Validates `maxHops + 1`, accounts index storage, and reserves all history records before I/O.
+  /// Checks `maxHops + 1` and reserves the complete history-byte budget before network I/O.
+  ///
+  /// # Details
+  ///
+  /// All later inserts use one arena. An insert can fail its exact byte limit without another
+  /// history allocation.
   pub effect fn make(limits: HistoryLimits) -> Result<History, RedirectError>
   ! OutOfMemoryError
   ? &mut Allocator {
@@ -1182,33 +1575,10 @@ impl History {
       }
       Option.Some {value} => value
     }
-    let records = match move usize.checkedMultiply(Layout.of<HistoryKey>().bytes, entries) {
-      Option.None => {
-        return Result.failResult<History, RedirectError>(
-          failure(
-            RedirectComponent.History,
-            RedirectReason.SizeOverflow,
-            usize.ZERO,
-            Option.none<Status>(),
-          ),
-        )
-      }
-      Option.Some {value} => value
-    }
-    if records > limits.maxHistoryBytes {
-      return Result.failResult<History, RedirectError>(
-        limitFailure(
-          RedirectComponent.History,
-          RedirectLimit.HistoryBytes,
-          limits.maxHistoryBytes,
-          records,
-        ),
-      )
-    }
-    let mut keys = Vector.make<HistoryKey>()
-    let reserved = run Vector.reserveExact<HistoryKey>(&mut keys, entries)
+    let mut arena = Bytes.make()
+    let reserved = run Bytes.reserveExact(&mut arena, limits.maxHistoryBytes)
     return Result.succeed<History, RedirectError>(
-      History {keys: move keys, limits: limits, maxEntriesValue: entries, ownedBytesValue: records},
+      History {arena: move arena, limits: limits, maxEntriesValue: entries, countValue: usize.ZERO},
     )
   }
   /// Checks and inserts one transformed method, normalized origin, and exact path/query key.
@@ -1216,28 +1586,39 @@ impl History {
     (),
     RedirectError,
   > ! OutOfMemoryError ? &mut Allocator {
-    let keyCount = Vector.length<HistoryKey>(&self.keys)
-    let keys = Vector.asSlice<HistoryKey>(&self.keys)
-    let mut index = usize.ZERO
-    while index < keys.length {
-      if String.view(&keys[index].method) == Method.format(&method) && Origin.equals(
-        &keys[index].origin,
-        &origin,
-      ) && targetEqual(String.view(&keys[index].target), uri) {
+    let selectedTargetLength = match move targetLength(uri) {
+      Result.Failure {error} => {
+        return Result.failResult<(), RedirectError>(move error)
+      }
+      Result.Success {value} => value
+    }
+    let mut authority = authorityScratch()
+    let authorityLength = match move Origin.authorityWithPortInto(&origin, &mut authority) {
+      Result.Failure {error} => {
         return Result.failResult<(), RedirectError>(
           failure(
             RedirectComponent.History,
-            RedirectReason.RedirectLoop,
-            keyCount - usize.ONE,
+            RedirectReason.SizeOverflow,
+            self.countValue,
             Option.none<Status>(),
           ),
         )
       }
-      index = index + usize.ONE
+      Result.Success {value} => value
     }
-    drop keys
-    if keyCount >= self.maxEntriesValue {
-      let attempted = match move usize.checkedAdd(keyCount, usize.ONE) {
+    let authorityBytes = Slice.view<u8>(&authority, usize.ZERO, authorityLength)
+    if historyContains(Bytes.asSlice(&self.arena), &method, &origin, authorityBytes, uri) {
+      return Result.failResult<(), RedirectError>(
+        failure(
+          RedirectComponent.History,
+          RedirectReason.RedirectLoop,
+          self.countValue - usize.ONE,
+          Option.none<Status>(),
+        ),
+      )
+    }
+    if self.countValue >= self.maxEntriesValue {
+      let attempted = match move usize.checkedAdd(self.countValue, usize.ONE) {
         Option.None => usize.MAX
         Option.Some {value} => value
       }
@@ -1250,40 +1631,33 @@ impl History {
         ),
       )
     }
-    let selectedTargetLength = match move targetLength(uri) {
+    let withMethod = match move historyAdd(
+      String.byteLength(Method.format(&method)),
+      authorityLength,
+      self.countValue,
+    ) {
       Result.Failure {error} => {
         return Result.failResult<(), RedirectError>(move error)
       }
       Result.Success {value} => value
     }
-    let payload = match move usize.checkedAdd(
-      String.byteLength(Method.format(&method)),
-      selectedTargetLength,
-    ) {
-      Option.None => {
-        return Result.failResult<(), RedirectError>(
-          failure(
-            RedirectComponent.History,
-            RedirectReason.SizeOverflow,
-            keyCount,
-            Option.none<Status>(),
-          ),
-        )
+    let withTarget = match move historyAdd(withMethod, selectedTargetLength, self.countValue) {
+      Result.Failure {error} => {
+        return Result.failResult<(), RedirectError>(move error)
       }
-      Option.Some {value} => value
+      Result.Success {value} => value
     }
-    let required = match move usize.checkedAdd(self.ownedBytesValue, payload) {
-      Option.None => {
-        return Result.failResult<(), RedirectError>(
-          failure(
-            RedirectComponent.History,
-            RedirectReason.SizeOverflow,
-            keyCount,
-            Option.none<Status>(),
-          ),
-        )
+    let entryBytes = match move historyAdd(withTarget, 4, self.countValue) {
+      Result.Failure {error} => {
+        return Result.failResult<(), RedirectError>(move error)
       }
-      Option.Some {value} => value
+      Result.Success {value} => value
+    }
+    let required = match move historyAdd(Bytes.length(&self.arena), entryBytes, self.countValue) {
+      Result.Failure {error} => {
+        return Result.failResult<(), RedirectError>(move error)
+      }
+      Result.Success {value} => value
     }
     if required > self.limits.maxHistoryBytes {
       return Result.failResult<(), RedirectError>(
@@ -1294,29 +1668,31 @@ impl History {
             allowed: self.limits.maxHistoryBytes,
             attempted: required,
           },
-          context: emptyContext(keyCount, Option.none<Status>()),
+          context: emptyContext(self.countValue, Option.none<Status>()),
         },
       )
     }
-    let ownedMethod = run String.copy(Method.format(&method))
-    let mut targetBytes = Bytes.make()
-    let reserved = run Bytes.reserveExact(&mut targetBytes, selectedTargetLength)
-    let wrote = run writeTarget(&mut targetBytes, uri)
-    let ownedTarget = unsafe String.fromBytesUnchecked(move targetBytes)
-    let appended = run Vector.append<HistoryKey>(
-      &mut self.keys,
-      HistoryKey {method: move ownedMethod, origin: origin, target: move ownedTarget},
-    )
-    self.ownedBytesValue = required
+    let wroteMethod = run Bytes.append(&mut self.arena, String.utf8Bytes(Method.format(&method)))
+    let wroteMethodEnd = run Bytes.append(&mut self.arena, b"\x00")
+    if Origin.secure(&origin) {
+      let wroteScheme = run Bytes.append(&mut self.arena, b"s")
+    } else {
+      let wroteScheme = run Bytes.append(&mut self.arena, b"p")
+    }
+    let wroteAuthority = run Bytes.append(&mut self.arena, authorityBytes)
+    let wroteAuthorityEnd = run Bytes.append(&mut self.arena, b"\x00")
+    let wroteTarget = run writeTarget(&mut self.arena, uri)
+    let wroteTargetEnd = run Bytes.append(&mut self.arena, b"\x00")
+    self.countValue = self.countValue + usize.ONE
     return Result.succeed<(), RedirectError>(())
   }
   /// Returns the number of stored method-aware keys.
   pub fn count(self: &Self) -> usize {
-    return Vector.length<HistoryKey>(&self.keys)
+    return self.countValue
   }
-  /// Returns accounted key payload plus preallocated index storage bytes.
+  /// Returns the initialized bytes used by stored keys in the preallocated history arena.
   pub fn ownedBytes(self: &Self) -> usize {
-    return self.ownedBytesValue
+    return Bytes.length(&self.arena)
   }
 }
 
@@ -1370,57 +1746,53 @@ fn denyLast(policy: &Policy, name: string) -> bool {
   ) || named(name, "referer") || NameList.contains(Policy.sensitive(policy), name)
 }
 
-fn connectionValueNames(value: &[u8], name: string) -> bool {
+fn collectConnectionNames<'value>(headers: &Headers<'value>) -> Result<
+  Vector<string<'value>>,
+  ValueError,
+> ! OutOfMemoryError ? &mut Allocator {
+  let mut names = Vector.make<string<'value>>()
+  let reserved = run Vector.reserveExact<string<'value>>(&mut names, Headers.count(headers))
+  let mut tokens = Headers.connectionTokens(headers)
+  while true {
+    let next = MetadataIterator.next(&mut tokens)
+    let selected = match move next {
+      Result.Failure {error} => {
+        return Result.failResult<Vector<string<'value>>, ValueError>(move error)
+      }
+      Result.Success {value} => value
+    }
+    match move selected {
+      Option.None => {
+        return Result.succeed<Vector<string<'value>>, ValueError>(move names)
+      }
+      Option.Some {value} => {
+        let name = unsafe String.fromUtf8Unchecked(MetadataToken.token(&value))
+        let appended = run Vector.append<string<'value>>(&mut names, name)
+      }
+    }
+  }
+}
+
+fn nominated(names: &[string], name: string) -> bool {
   let sought = String.utf8Bytes(name)
-  let mut start = usize.ZERO
-  while start < value.length {
-    while start < value.length && (value[start] == 9 || value[start] == 32 || value[start] == 44) {
-      start = start + usize.ONE
-    }
-    let mut end = start
-    while end < value.length && value[end] != 44 {
-      end = end + usize.ONE
-    }
-    let mut trimmed = end
-    while trimmed > start && (value[trimmed - usize.ONE] == 9 || value[trimmed - usize.ONE] == 32) {
-      trimmed = trimmed - usize.ONE
-    }
-    if trimmed > start && foldedEqual(Slice.view<u8>(value, start, trimmed - start), sought) {
+  let mut index = usize.ZERO
+  while index < names.length {
+    if foldedEqual(String.utf8Bytes(names[index]), sought) {
       return true
     }
-    if end == value.length {
-      return false
-    }
-    start = end + usize.ONE
+    index = index + usize.ONE
   }
   return false
 }
 
-fn nominated(headers: &Headers, name: string) -> bool {
-  let mut fields = Headers.getAll(headers, "connection")
-  while true {
-    let next = HeaderIterator.next(&mut fields)
-    match move next {
-      Option.None => {
-        return false
-      }
-      Option.Some {value} => {
-        if connectionValueNames(Header.value(&value), name) {
-          return true
-        }
-      }
-    }
-  }
-}
-
 fn keepHeader(
-  headers: &Headers,
+  connectionNames: &[string],
   policy: &Policy,
   name: string,
   crossOrigin: bool,
   body: BodyDecision,
 ) -> bool {
-  if alwaysRemoved(name) || nominated(headers, name) {
+  if alwaysRemoved(name) || nominated(connectionNames, name) {
     return false
   }
   if body == BodyDecision.Drop && droppedContent(name) {
@@ -1439,7 +1811,26 @@ fn keepHeader(
   return !denyLast(policy, name)
 }
 
-/// Rebuilds owned fields with hop-by-hop removal, body filtering, and cross-origin deny-last rules.
+/// Returns independently owned fields after redirect-specific removal and cross-origin filtering.
+///
+/// # When to use
+///
+/// Use before request preparation for each selected redirect attempt.
+///
+/// # Details
+///
+/// The operation removes Host, Connection, Keep-Alive, TE, Trailer, Transfer-Encoding, Upgrade,
+/// Proxy-Connection, Proxy-Authorization, framing fields, Expect, and Connection-nominated fields.
+/// A dropped body also removes content metadata and digests. Cross-origin filtering retains only
+/// Accept, Accept-Encoding, Accept-Language, User-Agent, configured safe names, and retained-body
+/// content type, encoding, and language. Authorization, Cookie, Proxy-Authorization, Origin,
+/// Referer, and configured sensitive names are then denied with final precedence.
+///
+/// # Gotchas
+///
+/// The result never contains Host, framing fields, Expect, or Proxy-Authorization. Request
+/// preparation must generate those fields from the next origin, body mode, and selected route. An
+/// invalid Connection token returns its original `ValueError` before output construction.
 pub effect fn sanitizeHeaders<'value>(
   headers: &Headers<'value>,
   policy: &Policy,
@@ -1447,6 +1838,13 @@ pub effect fn sanitizeHeaders<'value>(
   body: BodyDecision,
   limits: HeaderLimits,
 ) -> Result<OwnedHeaders, ValueError> ! OutOfMemoryError ? &mut Allocator {
+  let connectionNames = match move run collectConnectionNames(headers) {
+    Result.Failure {error} => {
+      return Result.failResult<OwnedHeaders, ValueError>(move error)
+    }
+    Result.Success {value} => value
+  }
+  let nominations = Vector.asSlice<string<'value>>(&connectionNames)
   let mut selected = Vector.make<Header<'value>>()
   let reserved = run Vector.reserveExact<Header<'value>>(&mut selected, Headers.count(headers))
   let mut iterator = Headers.iter(headers)
@@ -1457,7 +1855,7 @@ pub effect fn sanitizeHeaders<'value>(
         break
       }
       Option.Some {value} => {
-        if keepHeader(headers, policy, Header.name(&value), crossOrigin, body) {
+        if keepHeader(nominations, policy, Header.name(&value), crossOrigin, body) {
           let appended = run Vector.append<Header<'value>>(&mut selected, value)
         }
       }
