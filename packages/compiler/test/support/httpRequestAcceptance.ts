@@ -323,7 +323,7 @@ impl RedirectDeadlineResponse {
     'provider: 'transport,
     'tunnel: 'provider,
   >(
-    handler: Self,
+    handler: &mut Self,
     uri: Uri<'call>,
     hop: usize,
     exchange: &'call mut Exchange<

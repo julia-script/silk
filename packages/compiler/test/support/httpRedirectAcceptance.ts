@@ -68,8 +68,8 @@ import silk.http {ValueError}
 import silk.http_client {ClientError, ContinuePolicy, Exchange, RouteTransport}
 import silk.http_transport {HttpTransport, TransportError}
 import silk.http_redirect {
+  Attempt,
   AttemptClient,
-  AttemptHandler,
   AttemptRequest,
   BodyChunk,
   BodyDecision,
@@ -236,23 +236,27 @@ impl<
   A,
   HandlerError,
   ?HandlerRequirements,
-  H: AttemptHandler<'policy, RedirectWitnessTransport, A, HandlerError ? HandlerRequirements>,
 > RedirectRejectingClient {
   effect fn withAttempt(
     client: &mut Self,
     request: AttemptRequest<'policy>,
     deadline: Option<Instant>,
-    handler: H,
   ) -> A
   ! HandlerError | RedirectAcquisitionFailure
-  ? HandlerRequirements | &mut RedirectAcquisitionRequirement
+  ? HandlerRequirements
+    | &mut RedirectAcquisitionRequirement
+    | &mut Attempt<
+      'policy,
+      RedirectWitnessTransport,
+      A,
+      HandlerError ? HandlerRequirements
+    >
   where
     HandlerRequirements in Without<HandlerRequirements, ByteDuplex>,
     HandlerRequirements in Without<HandlerRequirements, HttpTransport> {
     drop client
     drop request
     drop deadline
-    drop handler
     let accepted = run RedirectAcquisitionRequirement.accepted()
     drop accepted
     fail RedirectAcquisitionFailure.Rejected
@@ -264,7 +268,6 @@ impl<
   A,
   HandlerError,
   ?HandlerRequirements,
-  H: AttemptHandler<'policy, RedirectWitnessTransport, A, HandlerError ? HandlerRequirements>,
 > AttemptClient<
   'policy,
   RedirectWitnessTransport,
@@ -273,7 +276,6 @@ impl<
   RedirectAcquisitionFailure,
   HandlerRequirements,
   &mut RedirectAcquisitionRequirement,
-  H,
 > for RedirectRejectingClient {
   withAttempt: RedirectRejectingClient.withAttempt
 }
@@ -288,7 +290,7 @@ impl RedirectFinalUse {
     'provider: 'transport,
     'tunnel: 'provider,
   >(
-    handler: Self,
+    handler: &mut Self,
     uri: Uri<'call>,
     hop: usize,
     exchange: &'call mut Exchange<'exchangeView, RouteTransport<
@@ -1370,7 +1372,7 @@ impl ResponseHandler<
     'provider: 'transport,
     'tunnel: 'provider,
   >(
-    handler: Self,
+    handler: &mut Self,
     uri: Uri<'call>,
     hop: usize,
     exchange: &'call mut Exchange<'exchangeView, RouteTransport<
@@ -1421,7 +1423,7 @@ impl ResponseHandler<
     'provider: 'transport,
     'tunnel: 'provider,
   >(
-    handler: Self,
+    handler: &mut Self,
     uri: Uri<'call>,
     hop: usize,
     exchange: &'call mut Exchange<'exchangeView, RouteTransport<
