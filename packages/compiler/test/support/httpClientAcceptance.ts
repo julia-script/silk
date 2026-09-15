@@ -300,6 +300,9 @@ const sourceFor = (
   routeByteFlushHook = '',
   routeByteShutdownHook = '',
   routeByteCloseHook = '',
+  extraSupport = '',
+  customMain = '',
+  routeHttpCloseHook = '',
 ): string => `import silk.allocator {Allocator, OutOfMemoryError}
 import silk.byte_duplex {ByteDuplex, ByteIoError, ByteIoOperation, ReadTransfer}
 import silk.effect {Effect}
@@ -576,6 +579,7 @@ ${routeHttpWriteHook}
     if self.closed {
       return ()
     }
+${routeHttpCloseHook}
     self.closed = true
     self.closeCount = self.closeCount + usize.ONE
     return ()
@@ -1551,6 +1555,8 @@ fn inputFor(scenario: i32) -> &'static [u8] {
   return b"HTTP/1.1 200 OK\\r\\nContent-Length: 4\\r\\n\\r\\nWikiHTTP/1.1 404 Not Found\\r\\nContent-Length: 4\\r\\n\\r\\nWiki"
 }
 
+${extraSupport}
+
 effect fn allCases() -> i32 ! ClientError | RequestError | OutOfMemoryError {
   let scenarios: [i32; ${scenarios.length}] = [${scenarios.map(({ id }) => id).join(', ')}]
   let mut index = usize.ZERO
@@ -1569,8 +1575,12 @@ effect fn recover(error: ClientError | RequestError | OutOfMemoryError) -> i32 {
   return 51
 }
 
-pub fn main() -> i32 {
+${
+  customMain.length > 0
+    ? customMain
+    : `pub fn main() -> i32 {
   return run Effect.catchAll(allCases(), recover)
+}`
 }
 `
 
@@ -2549,6 +2559,989 @@ const routeWitness = `  // Compile-only witness: the runtime corpus does not sel
     return run routedProxyLifecycle()
   }`
 
+const redirectImports = `import silk.http {Status, ValueError}
+import silk.execution {Execution}
+import silk.http_origin {OriginError}
+import silk.http_redirect {
+  AttemptClient,
+  AttemptHandler,
+  AttemptRequest,
+  BodyChunk,
+  BodyProducer,
+  CrossOriginPolicy,
+  DowngradePolicy,
+  HistoryLimits,
+  Mode as RedirectMode,
+  NameList,
+  Policy as RedirectPolicy,
+  Post301302Policy,
+  PreviousResponsePolicy,
+  ProducerHandler,
+  ReplayFactory,
+  Request as RedirectRequest,
+  ResponseHandler,
+  RedirectError,
+  RedirectReason,
+  withOneShotResponse,
+  withReplayResponse,
+}
+import silk.http_request {Authorization}
+import silk.http_client {RouteTransport}
+import silk.http_transport as Transport
+import silk.shared {Shared}
+import silk.string {String}
+`
+
+const redirectTransportFields = `  routeAudit: Option<Shared<RouteAudit>>`
+const redirectHttpWriteHook = `    if !recordRedirectOutput(&self.routeAudit, input) {
+      self.closed = true
+      fail TransportError.Plain {
+        error: ByteIoError.Provider {operation: ByteIoOperation.Write, code: 231},
+      }
+    }`
+const redirectHttpReadHook = `    if redirectConsumesDeadline(
+      &self.routeAudit,
+      self.readOffset,
+      self.input.length,
+    ) {
+      run MonotonicClock.waitUntil(SystemClock.make(20, 7))
+    }`
+const redirectHttpCloseHook = `    recordRedirectClose(
+      &self.routeAudit,
+      self.readOffset,
+      self.input.length,
+    )`
+
+const redirectHandler = `impl ConnectionHandler<TestTransport, i32, ClientError | OutOfMemoryError | CallbackFailure ? &mut Allocator | &mut MonotonicClock | &mut Random> for Handler {
+  effect<'call> fn handle<'call>(handler: Self, connection: &'call mut Connection<TestTransport>) -> i32
+  ! ClientError | OutOfMemoryError | CallbackFailure
+  ? &mut Allocator | &mut MonotonicClock | &mut Random {
+    drop handler
+    drop connection
+    return 0
+  }
+}`
+
+const redirectSupport = `struct RouteAudit {
+  scenario: i32
+  attempt: usize
+  attempts: usize
+  outputOffset: usize
+  completeOutputs: usize
+  closes: usize
+  completedDrains: usize
+  cappedDrains: usize
+  deadlineValid: bool
+  factoryAcquires: usize
+  factoryReleases: usize
+  attemptReleases: usize
+  producerPulls: usize
+  callbacks: usize
+}
+
+struct RedirectSelection {
+  scenario: i32
+  attempt: usize
+}
+
+fn emptyRedirectAudit(scenario: i32) -> RouteAudit {
+  return RouteAudit {
+    scenario: scenario,
+    attempt: usize.ZERO,
+    attempts: usize.ZERO,
+    outputOffset: usize.ZERO,
+    completeOutputs: usize.ZERO,
+    closes: usize.ZERO,
+    completedDrains: usize.ZERO,
+    cappedDrains: usize.ZERO,
+    deadlineValid: true,
+    factoryAcquires: usize.ZERO,
+    factoryReleases: usize.ZERO,
+    attemptReleases: usize.ZERO,
+    producerPulls: usize.ZERO,
+    callbacks: usize.ZERO,
+  }
+}
+
+fn redirectExpectedOutput(scenario: i32, attempt: usize) -> &'static [u8] {
+  if scenario >= 2 && attempt == usize.ZERO {
+    return b"POST /start HTTP/1.1\\r\\nHost: example.test\\r\\nUser-Agent: silk-http/1\\r\\nAccept: */*\\r\\nContent-Length: 4\\r\\nAuthorization: Bearer origin-secret\\r\\n\\r\\nDATA"
+  }
+  if attempt == usize.ZERO {
+    return b"POST /start HTTP/1.1\\r\\nCookie: session=secret\\r\\nContent-Type: text/plain\\r\\nHost: example.test\\r\\nUser-Agent: silk-http/1\\r\\nAccept: */*\\r\\nContent-Length: 4\\r\\nAuthorization: Bearer origin-secret\\r\\n\\r\\nDATA"
+  }
+  if scenario == 0 && attempt == usize.ONE {
+    return b"POST /middle HTTP/1.1\\r\\nCookie: session=secret\\r\\nContent-Type: text/plain\\r\\nHost: example.test\\r\\nUser-Agent: silk-http/1\\r\\nAccept: */*\\r\\nContent-Length: 4\\r\\nAuthorization: Bearer origin-secret\\r\\n\\r\\nDATA"
+  }
+  return b"GET /final HTTP/1.1\\r\\nHost: other.test\\r\\nUser-Agent: silk-http/1\\r\\nAccept: */*\\r\\n\\r\\n"
+}
+
+fn redirectInput(scenario: i32, attempt: usize) -> &'static [u8] {
+  if scenario == 3 || scenario == 4 {
+    return b"HTTP/1.1 200 OK\\r\\nContent-Length: 0\\r\\n\\r\\n"
+  }
+  if scenario == 1 || attempt == usize.ZERO {
+    return b"HTTP/1.1 307 Temporary Redirect\\r\\nLocation: /middle\\r\\nContent-Length: 1\\r\\n\\r\\nx"
+  }
+  if attempt == usize.ONE {
+    return b"HTTP/1.1 303 See Other\\r\\nLocation: http://other.test/final\\r\\nContent-Length: 5\\r\\n\\r\\nabcde"
+  }
+  return b"HTTP/1.1 200 OK\\r\\nContent-Length: 0\\r\\n\\r\\n"
+}
+
+fn redirectConsumesDeadline(
+  audit: &Option<Shared<RouteAudit>>,
+  readOffset: usize,
+  inputLength: usize,
+) -> bool {
+  return match &audit.* {
+    Option.None => false
+    Option.Some {value} => Shared.with<RouteAudit, bool>(
+      &value,
+      fn(state: &RouteAudit) -> bool {
+        return state.scenario == 2
+          && state.attempt == usize.ZERO
+          && readOffset == inputLength
+      },
+    )
+  }
+}
+
+fn sameRedirectBytes(actual: &[u8], offset: usize, expected: &[u8]) -> bool {
+  if offset > expected.length || actual.length > expected.length - offset { return false }
+  let mut index = usize.ZERO
+  while index < actual.length {
+    if actual[index] != expected[offset + index] { return false }
+    index = index + usize.ONE
+  }
+  return true
+}
+
+fn recordRedirectOutput(audit: &Option<Shared<RouteAudit>>, input: &[u8]) -> bool {
+  return match &audit.* {
+    Option.None => false
+    Option.Some {value} => Shared.withMut<RouteAudit, bool>(
+      &value,
+      fn(state: &mut RouteAudit) -> bool {
+        let expected = redirectExpectedOutput(state.scenario, state.attempt)
+        if !sameRedirectBytes(input, state.outputOffset, expected) { return false }
+        state.outputOffset = state.outputOffset + input.length
+        if state.outputOffset == expected.length {
+          state.completeOutputs = state.completeOutputs + usize.ONE
+        }
+        return true
+      },
+    )
+  }
+}
+
+fn recordRedirectClose(
+  audit: &Option<Shared<RouteAudit>>,
+  readOffset: usize,
+  inputLength: usize,
+) -> () {
+  match &audit.* {
+    Option.None => {}
+    Option.Some {value} => Shared.withMut<RouteAudit, ()>(
+      &value,
+      fn(state: &mut RouteAudit) -> () {
+        state.closes = state.closes + usize.ONE
+        if state.scenario == 0 && state.attempt == usize.ZERO && readOffset == inputLength {
+          state.completedDrains = state.completedDrains + usize.ONE
+        }
+        if state.scenario == 0 && state.attempt == usize.ONE && readOffset < inputLength {
+          state.cappedDrains = state.cappedDrains + usize.ONE
+        }
+        return ()
+      },
+    )
+  }
+  return ()
+}
+
+fn copyRedirectDeadline(value: &Option<Instant>) -> Option<Instant> {
+  return match &value.* {
+    Option.None => Option.none<Instant>()
+    Option.Some {value: present} => Option.some<Instant>(SystemClock.make(
+      SystemClock.seconds(&present),
+      SystemClock.nanoseconds(&present),
+    ))
+  }
+}
+
+fn expectedRedirectDeadline(value: &Option<Instant>) -> bool {
+  return match &value.* {
+    Option.None => false
+    Option.Some {value: present} => SystemClock.seconds(&present) == u64.toU64(20)
+      && SystemClock.nanoseconds(&present) == 7
+  }
+}
+
+struct RedirectExchangeHandler<'request, 'policy, H> {
+  request: &'request AttemptRequest<'policy>
+  method: Method<'request>
+  prepared: PreparedRequest
+  options: RequestOptions
+  handler: H
+}
+
+impl<
+  'request,
+  'policy,
+  'provider,
+  A,
+  HandlerError,
+  ?HandlerRequirements,
+  H: AttemptHandler<'policy, TestTransport, A, HandlerError ? HandlerRequirements>,
+> RedirectExchangeHandler<'request, 'policy, H> {
+  effect<'call> fn handle<'call>(
+    bridge: Self,
+    connection: &'call mut Connection<RouteTransport<'provider, 'provider, 'provider, TestTransport>>,
+  ) -> A
+  ! HandlerError | ClientError | OutOfMemoryError
+  ? HandlerRequirements | &mut Allocator | &mut MonotonicClock | &mut Random {
+    let RedirectExchangeHandler<'request, 'policy, H> {
+      request,
+      method,
+      prepared,
+      options,
+      handler,
+    } = move bridge
+    let use = effect<'exchangeCall, 'exchangeView: 'exchangeCall> fn(
+      exchange: &'exchangeCall mut Exchange<
+        'exchangeView,
+        RouteTransport<'provider, 'provider, 'provider, TestTransport>
+      >,
+    ) -> A ! HandlerError ? HandlerRequirements {
+      return run AttemptHandler<'policy, TestTransport, A, HandlerError ? HandlerRequirements>.handle(
+        move handler,
+        request,
+        method,
+        move exchange,
+      )
+    }
+    return run Client.withExchange(connection, &prepared, move options, move use)
+  }
+}
+
+impl<
+  'request,
+  'policy,
+  'provider,
+  A,
+  HandlerError,
+  ?HandlerRequirements,
+  H: AttemptHandler<'policy, TestTransport, A, HandlerError ? HandlerRequirements>,
+> ConnectionHandler<
+  RouteTransport<'provider, 'provider, 'provider, TestTransport>,
+  A,
+  HandlerError | ClientError | OutOfMemoryError
+    ? HandlerRequirements | &mut Allocator | &mut MonotonicClock | &mut Random,
+> for RedirectExchangeHandler<'request, 'policy, H> {
+  handle: RedirectExchangeHandler.handle
+}
+
+effect fn runRedirectProvider<
+  'provider,
+  'request,
+  'policy,
+  A,
+  HandlerError,
+  ?HandlerRequirements,
+  H: AttemptHandler<'policy, TestTransport, A, HandlerError ? HandlerRequirements>,
+>(
+  provider: &'provider mut TestTransport,
+  origin: Origin,
+  request: &'request AttemptRequest<'policy>,
+  method: Method<'request>,
+  prepared: PreparedRequest,
+  deadline: Option<Instant>,
+  handler: H,
+) -> A
+! HandlerError | ClientError | OutOfMemoryError
+? HandlerRequirements | &mut Allocator | &mut MonotonicClock | &mut Random {
+  let loan = Transport.borrow(move provider)
+  let transport = RouteTransport<'provider, 'provider, 'provider, TestTransport>.Plain {
+    provider: move loan,
+  }
+  let bridge = RedirectExchangeHandler {
+    request: request,
+    method: method,
+    prepared: move prepared,
+    options: RequestOptions {
+      deadline: copyRedirectDeadline(&deadline),
+      continuePolicy: ContinuePolicy.Disabled,
+    },
+    handler: move handler,
+  }
+  let mut selectedLimits = limits()
+  selectedLimits.readCapacity = usize.ONE
+  return run Client.withOwned(
+    move transport,
+    origin,
+    request.version,
+    move selectedLimits,
+    move deadline,
+    move bridge,
+  )
+}
+
+struct RedirectScriptClient { audit: Shared<RouteAudit> }
+
+struct RedirectAttemptLease {
+  provider: TestTransport
+  audit: Shared<RouteAudit>
+}
+
+impl<
+  'policy,
+  A,
+  HandlerError,
+  ?HandlerRequirements,
+  H: AttemptHandler<'policy, TestTransport, A, HandlerError ? HandlerRequirements>,
+> RedirectScriptClient {
+  effect fn withAttempt(
+    client: &mut Self,
+    request: AttemptRequest<'policy>,
+    deadline: Option<Instant>,
+    handler: H,
+  ) -> A
+  ! HandlerError | OriginError | ValueError | RequestError | ClientError | OutOfMemoryError
+  ? HandlerRequirements | &mut Allocator | &mut MonotonicClock | &mut Random
+  where
+    HandlerRequirements in Without<HandlerRequirements, ByteDuplex>,
+    HandlerRequirements in Without<HandlerRequirements, HttpTransport> {
+    let selected = Shared.withMut<RouteAudit, RedirectSelection>(
+      &client.audit,
+      fn(state: &mut RouteAudit) -> RedirectSelection {
+        let attempt = state.attempts
+        state.attempt = attempt
+        state.attempts = attempt + usize.ONE
+        state.outputOffset = usize.ZERO
+        if !expectedRedirectDeadline(&deadline) { state.deadlineValid = false }
+        return RedirectSelection {scenario: state.scenario, attempt: attempt}
+      },
+    )
+    let uri = request.uri.view()
+    let origin = match move Origin.fromUri(&uri) {
+      Result.Failure {error} => { fail move error }
+      Result.Success {value} => value
+    }
+    let method = match move Method.parse(
+      String.view(&request.method),
+      request.requestLimits.maxMethodBytes,
+    ) {
+      Result.Failure {error} => { fail move error }
+      Result.Success {value} => value
+    }
+    let fields = request.headers.view()
+    let prepared = run Request.fromUri(
+      &uri,
+      request.version,
+      method,
+      &fields,
+      &request.headerPolicy,
+      request.bodyMode,
+      false,
+      request.requestLimits,
+      request.maxHeadBytes,
+      request.maxCredentialBytes,
+    )
+    let provider = TestTransport {
+      scenario: 30,
+      input: redirectInput(selected.scenario, selected.attempt),
+      readOffset: usize.ZERO,
+      writeOrdinal: usize.ZERO,
+      accepted: usize.ZERO,
+      closeCount: usize.ZERO,
+      shutdownCount: usize.ZERO,
+      writeShutdown: false,
+      closed: false,
+      routeAudit: Option.some<Shared<RouteAudit>>(Shared.clone<RouteAudit>(&client.audit)),
+    }
+    let lease = RedirectAttemptLease {
+      provider: move provider,
+      audit: Shared.clone<RouteAudit>(&client.audit),
+    }
+    let use = effect fn(owned: &mut RedirectAttemptLease) -> A
+    ! HandlerError | ClientError | OutOfMemoryError
+    ? HandlerRequirements | &mut Allocator | &mut MonotonicClock | &mut Random {
+      return run runRedirectProvider(
+        &mut owned.provider,
+        origin,
+        &request,
+        method,
+        move prepared,
+        move deadline,
+        move handler,
+      )
+    }
+    let release = effect fn(owned: &mut RedirectAttemptLease) -> () {
+      Shared.withMut<RouteAudit, ()>(&owned.audit, fn(state: &mut RouteAudit) -> () {
+        state.attemptReleases = state.attemptReleases + usize.ONE
+        return ()
+      })
+      return ()
+    }
+    return run Effect.useReleaseNonParking(move lease, move use, move release)
+  }
+}
+
+impl<
+  'policy,
+  A,
+  HandlerError,
+  ?HandlerRequirements,
+  H: AttemptHandler<'policy, TestTransport, A, HandlerError ? HandlerRequirements>,
+> AttemptClient<
+  'policy,
+  TestTransport,
+  A,
+  HandlerError,
+  OriginError | ValueError | RequestError | ClientError | OutOfMemoryError,
+  HandlerRequirements,
+  &mut Allocator | &mut MonotonicClock | &mut Random,
+  H,
+> for RedirectScriptClient {
+  withAttempt: RedirectScriptClient.withAttempt
+}
+`
+
+const redirectProgramSupport = `${redirectSupport}
+struct RedirectProducer {
+  audit: Shared<RouteAudit>
+  offset: usize
+}
+
+impl RedirectProducer {
+  fn mode(producer: &Self) -> BodyMode {
+    drop producer
+    return BodyMode.KnownLength {length: u64.toU64(4)}
+  }
+  effect fn pull(producer: &mut Self, output: &mut [u8]) -> BodyChunk {
+    Shared.withMut<RouteAudit, ()>(&producer.audit, fn(state: &mut RouteAudit) -> () {
+      state.producerPulls = state.producerPulls + usize.ONE
+      return ()
+    })
+    if producer.offset == 4 { return BodyChunk {length: usize.ZERO, end: true} }
+    let bytes = b"DATA"
+    let mut count = bytes.length - producer.offset
+    if count > output.length { count = output.length }
+    let mut index = usize.ZERO
+    while index < count {
+      output[index] = bytes[producer.offset + index]
+      index = index + usize.ONE
+    }
+    producer.offset = producer.offset + count
+    return BodyChunk {length: count, end: producer.offset == bytes.length}
+  }
+}
+
+impl BodyProducer<never ? never> for RedirectProducer {
+  mode: RedirectProducer.mode
+  pull: RedirectProducer.pull
+}
+
+struct RedirectFactory { audit: Shared<RouteAudit> }
+
+impl<A, E, ?R, H: ProducerHandler<RedirectProducer, A, E ? R>> RedirectFactory {
+  effect fn withProducer(factory: &mut Self, handler: H) -> A ! E ? R {
+    Shared.withMut<RouteAudit, ()>(&factory.audit, fn(state: &mut RouteAudit) -> () {
+      state.factoryAcquires = state.factoryAcquires + usize.ONE
+      return ()
+    })
+    let producer = RedirectProducer {
+      audit: Shared.clone<RouteAudit>(&factory.audit),
+      offset: usize.ZERO,
+    }
+    let use = effect fn(owned: &mut RedirectProducer) -> A ! E ? R {
+      return run ProducerHandler<RedirectProducer, A, E ? R>.handle(move handler, move owned)
+    }
+    let release = effect fn(owned: &mut RedirectProducer) -> () {
+      Shared.withMut<RouteAudit, ()>(&owned.audit, fn(state: &mut RouteAudit) -> () {
+        state.factoryReleases = state.factoryReleases + usize.ONE
+        return ()
+      })
+      return ()
+    }
+    return run Effect.useReleaseNonParking(move producer, move use, move release)
+  }
+}
+
+impl<A, E, ?R, H: ProducerHandler<RedirectProducer, A, E ? R>> ReplayFactory<
+  RedirectProducer,
+  A,
+  never,
+  E,
+  never,
+  R,
+  H,
+> for RedirectFactory {
+  withProducer: RedirectFactory.withProducer
+}
+
+struct RedirectParkGuard { wake: Intrinsic.Wake }
+
+fn retainRedirectWake(wake: Intrinsic.Wake) -> RedirectParkGuard {
+  return RedirectParkGuard {wake: move wake}
+}
+
+struct RedirectFinal {
+  audit: Shared<RouteAudit>
+  outcome: i32
+}
+
+impl RedirectFinal {
+  effect<
+    'call,
+    'exchangeView: 'call,
+    'transport: 'exchangeView,
+    'provider: 'transport,
+    'tunnel: 'provider,
+  > fn handle<
+    'call,
+    'exchangeView: 'call,
+    'transport: 'exchangeView,
+    'provider: 'transport,
+    'tunnel: 'provider,
+  >(
+    handler: Self,
+    uri: Uri<'call>,
+    hop: usize,
+    exchange: &'call mut Exchange<'exchangeView, RouteTransport<
+      'transport,
+      'provider,
+      'tunnel,
+      TestTransport,
+    >>,
+  ) -> i32
+  ! ClientError | CallbackFailure | OutOfMemoryError
+  ? &mut Allocator | &mut MonotonicClock | &mut Random
+  where
+    &mut TestTransport provides &HttpTransport from &mut HttpTransport | &mut MonotonicClock | &mut Allocator | &mut Random,
+    &mut TestTransport provides &HttpTransport from &mut HttpTransport,
+    &mut TestTransport provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock | &mut Allocator | &mut Random,
+    &mut TestTransport provides &ByteDuplex from &mut ByteDuplex {
+    let head = run Exchange.head(&exchange.*)
+    let status = head.status()
+    let valid = Status.code(&status) == 200 && if handler.outcome == 0 {
+      hop == 2 && Uri.format(&uri) == "http://other.test/final"
+    } else {
+      hop == usize.ZERO && Uri.format(&uri) == "http://example.test/start"
+    }
+    drop head
+    if !valid { return 241 }
+    if handler.outcome == 0 {
+      run Client.finishResponse(&mut exchange.*)
+    }
+    Shared.withMut<RouteAudit, ()>(&handler.audit, fn(state: &mut RouteAudit) -> () {
+      state.callbacks = state.callbacks + usize.ONE
+      return ()
+    })
+    if handler.outcome == 1 {
+      fail CallbackFailure {code: 901}
+    }
+    if handler.outcome == 2 {
+      run Execution.park(retainRedirectWake)
+      return 247
+    }
+    return 0
+  }
+}
+
+impl ResponseHandler<
+  TestTransport,
+  i32,
+  ClientError | CallbackFailure | OutOfMemoryError
+    ? &mut Allocator | &mut MonotonicClock | &mut Random,
+> for RedirectFinal {
+  handle: RedirectFinal.handle
+}
+
+effect fn redirectHeader(name: string<'static>, value: &'static [u8]) -> Header<'static>
+! ValueError {
+  return match move Header.make(name, value, valueLimits()) {
+    Result.Failure {error} => { fail move error }
+    Result.Success {value: header} => header
+  }
+}
+
+fn redirectUri() -> Uri<'static> {
+  return match move Uri.parse("http://example.test/start") {
+    Result.Failure {error} => {
+      drop error
+      redirectUri()
+    }
+    Result.Success {value} => value
+  }
+}
+
+fn redirectRequest<'headers>(
+  uri: Uri<'static>,
+  headers: Headers<'headers>,
+) -> RedirectRequest<'static, 'static, 'headers, 'static> {
+  let mut policy = HeaderPolicy.defaults()
+  policy.authorization = Authorization.Value {value: b"Bearer origin-secret"}
+  return RedirectRequest<'static, 'static, 'headers, 'static> {
+    uri: uri,
+    method: Method.post(),
+    headers: headers,
+    headerPolicy: policy,
+    version: Version.Http11,
+    continuePolicy: ContinuePolicy.Disabled,
+    limits: valueLimits(),
+    maxHeadBytes: 512,
+    maxCredentialBytes: 128,
+  }
+}
+
+fn redirectPolicy() -> Result<RedirectPolicy, RedirectError> {
+  return RedirectPolicy.make(
+    RedirectMode.Follow,
+    HistoryLimits {maxHops: 3, maxUriBytes: 128, maxHistoryBytes: 1024},
+    CrossOriginPolicy.Allow,
+    DowngradePolicy.Deny,
+    Post301302Policy.Preserve,
+    PreviousResponsePolicy.Drain {
+      maxDiscardWireBytes: u64.toU64(4),
+      deadline: SystemClock.make(30, 0),
+    },
+    NameList.empty(),
+    NameList.empty(),
+  )
+}
+
+fn replayAuditPassed(state: &RouteAudit) -> bool {
+  return state.attempts == 3
+    && state.completeOutputs == 3
+    && state.closes == 3
+    && state.completedDrains == usize.ONE
+    && state.cappedDrains == usize.ONE
+    && state.deadlineValid
+    && state.factoryAcquires == 2
+    && state.factoryReleases == 2
+    && state.attemptReleases == 3
+    && state.producerPulls == 2
+    && state.callbacks == usize.ONE
+}
+
+fn oneShotAuditPassed(state: &RouteAudit) -> bool {
+  return state.attempts == usize.ONE
+    && state.completeOutputs == usize.ONE
+    && state.closes == usize.ONE
+    && state.deadlineValid
+    && state.factoryAcquires == usize.ZERO
+    && state.factoryReleases == usize.ZERO
+    && state.attemptReleases == usize.ONE
+    && state.producerPulls == usize.ONE
+    && state.callbacks == usize.ZERO
+}
+
+effect fn replayRedirectCase() -> i32
+! RedirectError | ValueError | OriginError | RequestError | ClientError | CallbackFailure | OutOfMemoryError
+? &mut Allocator | &mut MonotonicClock | &mut Random {
+  let audit = run Shared.make<RouteAudit>(emptyRedirectAudit(0))
+  let selectedPolicy = match move redirectPolicy() {
+    Result.Failure {error} => { fail move error }
+    Result.Success {value} => value
+  }
+  let mut client = RedirectScriptClient {audit: Shared.clone<RouteAudit>(&audit)}
+  let mut scratch: [u8; 8] = [0, 0, 0, 0, 0, 0, 0, 0]
+  let entries = [
+    run redirectHeader("Cookie", b"session=secret"),
+    run redirectHeader("Content-Type", b"text/plain"),
+  ]
+  let headers = match move Headers.make(&entries, valueLimits()) {
+    Result.Failure {error} => { fail move error }
+    Result.Success {value} => value
+  }
+  let result = run withReplayResponse(
+    &mut client,
+    redirectRequest(redirectUri(), headers),
+    &selectedPolicy,
+    RedirectFactory {audit: Shared.clone<RouteAudit>(&audit)},
+    Option.some<Instant>(SystemClock.make(20, 7)),
+    &mut scratch,
+    RedirectFinal {audit: Shared.clone<RouteAudit>(&audit), outcome: 0},
+  )
+  if result != 0 { return result }
+  if !Shared.with<RouteAudit, bool>(&audit, replayAuditPassed) { return 242 }
+  return 0
+}
+
+fn isReplayUnavailable(error: RedirectError) -> bool {
+  return match move error.reason {
+    RedirectReason.ReplayUnavailable => true
+    _ => false
+  }
+}
+
+effect fn oneShotRedirectCase() -> i32
+! ValueError | OriginError | RequestError | ClientError | CallbackFailure | OutOfMemoryError
+? &mut Allocator | &mut MonotonicClock | &mut Random {
+  let audit = run Shared.make<RouteAudit>(emptyRedirectAudit(1))
+  let selectedPolicy = match move redirectPolicy() {
+    Result.Failure {error} => { return 243 }
+    Result.Success {value} => value
+  }
+  let mut client = RedirectScriptClient {audit: Shared.clone<RouteAudit>(&audit)}
+  let mut scratch: [u8; 8] = [0, 0, 0, 0, 0, 0, 0, 0]
+  let entries = [
+    run redirectHeader("Cookie", b"session=secret"),
+    run redirectHeader("Content-Type", b"text/plain"),
+  ]
+  let headers = match move Headers.make(&entries, valueLimits()) {
+    Result.Failure {error} => { fail move error }
+    Result.Success {value} => value
+  }
+  let attempted = run Effect.result(withOneShotResponse(
+    &mut client,
+    redirectRequest(redirectUri(), headers),
+    &selectedPolicy,
+    RedirectProducer {audit: Shared.clone<RouteAudit>(&audit), offset: usize.ZERO},
+    Option.some<Instant>(SystemClock.make(20, 7)),
+    &mut scratch,
+    RedirectFinal {audit: Shared.clone<RouteAudit>(&audit), outcome: 0},
+  ))
+  let unavailable = match move attempted {
+    Result.Success {value} => {
+      drop value
+      false
+    }
+    Result.Failure {error} => match move error {
+      RedirectError cause => isReplayUnavailable(move cause)
+      OriginError cause => { fail move cause }
+      ValueError cause => { fail move cause }
+      RequestError cause => { fail move cause }
+      ClientError cause => { fail move cause }
+      CallbackFailure cause => { fail move cause }
+      OutOfMemoryError allocation => { fail move allocation }
+    }
+  }
+  if !unavailable { return 244 }
+  if !Shared.with<RouteAudit, bool>(&audit, oneShotAuditPassed) { return 245 }
+  return 0
+}
+
+effect fn outcomeRedirect(
+  audit: Shared<RouteAudit>,
+  outcome: i32,
+) -> i32
+! RedirectError
+  | ValueError
+  | OriginError
+  | RequestError
+  | ClientError
+  | CallbackFailure
+  | OutOfMemoryError
+? &mut Allocator | &mut MonotonicClock | &mut Random {
+  let selectedPolicy = match move redirectPolicy() {
+    Result.Failure {error} => { fail move error }
+    Result.Success {value} => value
+  }
+  let mut client = RedirectScriptClient {audit: Shared.clone<RouteAudit>(&audit)}
+  let mut scratch: [u8; 8] = [0, 0, 0, 0, 0, 0, 0, 0]
+  let entries: [Header<'static>; 0] = []
+  let headers = match move Headers.make(&entries, valueLimits()) {
+    Result.Failure {error} => { fail move error }
+    Result.Success {value} => value
+  }
+  return run withReplayResponse(
+    &mut client,
+    redirectRequest(redirectUri(), headers),
+    &selectedPolicy,
+    RedirectFactory {audit: Shared.clone<RouteAudit>(&audit)},
+    Option.some<Instant>(SystemClock.make(20, 7)),
+    &mut scratch,
+    RedirectFinal {audit: move audit, outcome: outcome},
+  )
+}
+
+fn singleAttemptAuditPassed(state: &RouteAudit) -> bool {
+  return state.attempts == usize.ONE
+    && state.completeOutputs == usize.ONE
+    && state.closes == usize.ONE
+    && state.factoryAcquires == usize.ONE
+    && state.factoryReleases == usize.ONE
+    && state.attemptReleases == usize.ONE
+    && state.producerPulls == usize.ONE
+    && state.callbacks == usize.ONE
+}
+
+effect fn typedFailureRedirectCase() -> i32
+! RedirectError | ValueError | OriginError | RequestError | ClientError | OutOfMemoryError
+? &mut Allocator | &mut MonotonicClock | &mut Random {
+  let audit = run Shared.make<RouteAudit>(emptyRedirectAudit(3))
+  let attempted = run Effect.result(outcomeRedirect(
+    Shared.clone<RouteAudit>(&audit),
+    1,
+  ))
+  let preserved = match move attempted {
+    Result.Success {value} => { drop value false }
+    Result.Failure {error} => match move error {
+      CallbackFailure cause => cause.code == 901
+      RedirectError cause => { fail move cause }
+      OriginError cause => { fail move cause }
+      ValueError cause => { fail move cause }
+      RequestError cause => { fail move cause }
+      ClientError cause => { fail move cause }
+      OutOfMemoryError allocation => { fail move allocation }
+    }
+  }
+  if !preserved { return 248 }
+  if !Shared.with<RouteAudit, bool>(&audit, singleAttemptAuditPassed) { return 249 }
+  return 0
+}
+
+fn deadlineAuditPassed(state: &RouteAudit) -> bool {
+  return state.attempts == 2
+    && state.completeOutputs == usize.ONE
+    && state.closes == 2
+    && state.completedDrains == usize.ZERO
+    && state.cappedDrains == usize.ZERO
+    && state.deadlineValid
+    && state.factoryAcquires == 2
+    && state.factoryReleases == 2
+    && state.attemptReleases == 2
+    && state.producerPulls == usize.ONE
+    && state.callbacks == usize.ZERO
+}
+
+fn redirectTimedOut(error: ClientError) -> bool {
+  return match move error {
+    ClientError.Timeout => true
+    _ => false
+  }
+}
+
+effect fn deadlineRedirectCase() -> i32
+! RedirectError | ValueError | OriginError | RequestError | ClientError | OutOfMemoryError
+? &mut Allocator | &mut MonotonicClock | &mut Random {
+  let audit = run Shared.make<RouteAudit>(emptyRedirectAudit(2))
+  let attempted = run Effect.result(outcomeRedirect(
+    Shared.clone<RouteAudit>(&audit),
+    3,
+  ))
+  let expired = match move attempted {
+    Result.Success {value} => { drop value false }
+    Result.Failure {error} => match move error {
+      ClientError cause => redirectTimedOut(move cause)
+      CallbackFailure cause => { drop cause false }
+      RedirectError cause => { fail move cause }
+      OriginError cause => { fail move cause }
+      ValueError cause => { fail move cause }
+      RequestError cause => { fail move cause }
+      OutOfMemoryError allocation => { fail move allocation }
+    }
+  }
+  if !expired { return 250 }
+  if !Shared.with<RouteAudit, bool>(&audit, deadlineAuditPassed) { return 251 }
+  return 0
+}
+
+effect fn canceledRedirectBody(audit: Shared<RouteAudit>) -> i32
+! RedirectError
+  | ValueError
+  | OriginError
+  | RequestError
+  | ClientError
+  | CallbackFailure
+  | OutOfMemoryError {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let mut clock = FixedClock {mark: SystemClock.make(0, 0)}
+  let mut random = FixedRandom {}
+  return run outcomeRedirect(move audit, 2)
+    |> Effect.provideMut<Random>(&mut random)
+    |> Effect.provideMut<MonotonicClock>(&mut clock)
+    |> Effect.provideMut<Allocator>(&mut allocator)
+}
+
+effect fn canceledRedirectFailed<E>(error: E) -> i32 {
+  drop error
+  return -1
+}
+
+fn redirectCancellationReady(state: &()) -> () { return () }
+
+fn redirectCancellationComplete(state: &mut i32, value: i32) -> () {
+  drop value
+  state.* = -2
+  return ()
+}
+
+fn redirectCancellationParked(state: &mut i32, execution: Intrinsic.Execution<i32>) -> () {
+  drop move execution
+  state.* = 42
+  return ()
+}
+
+effect fn cancellationRedirectCase() -> i32 ! OutOfMemoryError {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let audit = run Shared.make<RouteAudit>(emptyRedirectAudit(4))
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let body = Effect.catchAll(
+    canceledRedirectBody(Shared.clone<RouteAudit>(&audit)),
+    canceledRedirectFailed,
+  )
+  let execution = run Execution.make(move body, (), redirectCancellationReady)
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut outcome = 0
+  run Execution.drive(
+    move execution,
+    &mut outcome,
+    redirectCancellationComplete,
+    redirectCancellationParked,
+  )
+  if outcome != 42 { return 252 }
+  if !Shared.with<RouteAudit, bool>(&audit, singleAttemptAuditPassed) { return 253 }
+  return 0
+}
+
+effect fn redirectCases() -> i32
+! RedirectError | ValueError | OriginError | RequestError | ClientError | CallbackFailure | OutOfMemoryError {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let mut clock = FixedClock {mark: SystemClock.make(0, 0)}
+  let mut random = FixedRandom {}
+  let cases: [i32; 4] = [0, 1, 3, 2]
+  let mut index = usize.ZERO
+  while index < cases.length {
+    let selected = if cases[index] == 0 {
+      replayRedirectCase()
+    } else if cases[index] == 1 {
+      oneShotRedirectCase()
+    } else if cases[index] == 3 {
+      typedFailureRedirectCase()
+    } else {
+      deadlineRedirectCase()
+    }
+    let result = run move selected
+      |> Effect.provideMut<Random>(&mut random)
+      |> Effect.provideMut<MonotonicClock>(&mut clock)
+      |> Effect.provideMut<Allocator>(&mut allocator)
+    if result != 0 { return result }
+    index = index + usize.ONE
+  }
+  return run cancellationRedirectCase()
+}
+`
+
+const redirectMain = `effect fn recoverRedirect(
+  error: RedirectError
+    | ValueError
+    | OriginError
+    | RequestError
+    | ClientError
+    | CallbackFailure
+    | OutOfMemoryError,
+) -> i32 {
+  drop error
+  return 246
+}
+
+pub fn main() -> i32 {
+  return run Effect.catchAll(redirectCases(), recoverRedirect)
+}`
+
 export const httpClientAcceptanceSource = sourceFor(
   protocol,
   protocolHandler,
@@ -2566,3 +3559,22 @@ export const httpClientAcceptanceSource = sourceFor(
 )
 export const httpClientBoundariesAcceptanceSource = sourceFor(boundaries, boundaryHandler)
 export const httpClientOutputFailuresAcceptanceSource = sourceFor(outputFailures, boundaryHandler)
+
+/** One table-driven redirect program shared by native and LLVM-to-Wasm acceptance. */
+export const httpRedirectAcceptanceSource = sourceFor(
+  [],
+  redirectHandler,
+  redirectImports,
+  '',
+  '',
+  redirectTransportFields,
+  redirectHttpReadHook,
+  redirectHttpWriteHook,
+  '',
+  '',
+  '',
+  '',
+  redirectProgramSupport,
+  redirectMain,
+  redirectHttpCloseHook,
+)
