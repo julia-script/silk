@@ -61,9 +61,10 @@ what happens to each selected representation chunk.
 
 ### Sequential sink
 
-Each `toSink*` operation lends immutable `ResponseMetadata` and one borrowed current byte chunk to
-the sink. Calls are sequential. Fetch waits for one callback to succeed before reading or offering
-another chunk, and the chunk borrow cannot escape its callback.
+Each `toSink*` operation lends immutable `ResponseMetadata`, one borrowed current byte chunk, and
+the original absolute deadline to the sink. Calls are sequential. Fetch waits for one callback to
+succeed before reading or offering another chunk, and neither the chunk nor deadline borrow can
+escape its callback. `None` permits an unbounded sink wait.
 
 Sink success means the complete offered chunk was accepted. `deliveredBodyBytes` advances only
 after that success. On sink failure, the destination context reports the count accepted by earlier
