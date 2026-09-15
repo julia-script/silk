@@ -270,7 +270,7 @@ const sourceFor = (
   scenarios: ReadonlyArray<Scenario>,
   handler: string,
 ): string => `import silk.allocator {Allocator, OutOfMemoryError}
-import silk.byte_duplex {ByteIoError, ByteIoOperation, ReadTransfer}
+import silk.byte_duplex {ByteDuplex, ByteIoError, ByteIoOperation, ReadTransfer}
 import silk.effect {Effect}
 import silk.http {Method, Version, Header}
 import silk.http_target {RequestTarget}
@@ -290,6 +290,7 @@ import silk.http_client {
   RequestOptions,
   ContinuePolicy,
   Tunnel,
+  TransferredTunnel,
 }
 import silk.http_client as Client
 import silk.http_transport {HttpTransport, TransportError}
@@ -920,15 +921,29 @@ effect<'call> fn tunnelExchange<'call, 'exchange: 'call>(
 effect<'call> fn tunnel<'call, 'tunnel: 'call>(channel: &'call mut Tunnel<'tunnel, TestTransport>) -> i32
 ! ClientError | OutOfMemoryError
 ? &mut Allocator | &mut MonotonicClock | &mut Random {
+  return run Tunnel.transferByteDuplex(&mut channel.*, transferredTunnel)
+}
+
+effect<'call> fn transferredTunnel<'call, 'tunnel: 'call>(
+  channel: &'call mut TransferredTunnel<'tunnel, TestTransport>,
+) -> i32 ? &mut MonotonicClock {
   let mut output: [u8; 4] = [0, 0, 0, 0]
-  let transfer = run Tunnel.readSome(&mut channel.*, &mut output, Option.none<Instant>())
-  return match move transfer {
-    ReadTransfer.End => 78
-    ReadTransfer.Data {count} => {
-      if count == 4 && output[0] == 84 && output[3] == 78 {
-        return 0
+  let reading = ByteDuplex.readSome(&mut output, Option.none<Instant>())
+    |> Effect.provideMut<ByteDuplex>(&mut channel.*)
+  let attempted = run Effect.result(move reading)
+  return match move attempted {
+    Result.Failure {error} => {
+      drop error
+      return 78
+    }
+    Result.Success {value} => match move value {
+      ReadTransfer.End => 78
+      ReadTransfer.Data {count} => {
+        if count == 4 && output[0] == 84 && output[3] == 78 {
+          return 0
+        }
+        return 79
       }
-      return 79
     }
   }
 }
