@@ -167,6 +167,8 @@ pub struct FetchContentError {
 pub union FetchReason {
   /// One or more finite options are inconsistent or outside their admitted domain.
   InvalidOptions,
+  /// The supplied HTTP connection limits failed their owning client's pre-contact admission.
+  InvalidHttpOptions { pub error: ClientError },
   /// Checked accounting cannot represent the required total.
   SizeOverflow,
   /// A caller-defined sink rejected the current offered chunk.
@@ -384,17 +386,26 @@ impl FetchOptions {
 
   /// Checks local capacities and content configuration without allocation or provider access.
   pub fn validate(self: &Self) -> Result<(), FetchError> {
-    if self.maxBufferedBytes == usize.ZERO
-      || self.http.readCapacity == usize.ZERO
-      || self.http.writeCapacity == usize.ZERO
-      || self.contentLimits.maxDepth == usize.ZERO
-      || self.contentLimits.maxDepth > 4
-      || self.contentLimits.intermediateCapacity == usize.ZERO
-      || self.contentLimits.intermediateCapacity > 65536 {
+    if self.maxBufferedBytes == usize.ZERO {
       return Result.failResult<(), FetchError>(fetchFailure(
         FetchPhase.Destination,
         FetchReason.InvalidOptions,
       ))
+    }
+    if let Result<(), ClientError>.Failure {error} = move Client.validateLimits(&self.http) {
+      let phase = match & error {
+        ClientError.Head {error: _} => FetchPhase.Head
+        _ => FetchPhase.Connect
+      }
+      return Result.failResult<(), FetchError>(fetchFailure(
+        phase,
+        FetchReason.InvalidHttpOptions {error: move error},
+      ))
+    }
+    if let Result<(), ContentError<'static>>.Failure {error} = move Content.validateLimits(
+      &self.contentLimits,
+    ) {
+      return Result.failResult<(), FetchError>(contentOptionFailure(move error))
     }
     return Result.succeed<(), FetchError>(())
   }
@@ -2310,6 +2321,34 @@ fn fetchFailure(phase: FetchPhase, reason: FetchReason) -> FetchError {
     uri: Option.none<OwnedUri>(),
     deliveredBodyBytes: u64.MIN,
     offeredBodyBytes: usize.ZERO,
+  }
+}
+
+fn contentOptionFailure(error: ContentError<'static>) -> FetchError {
+  let ContentError<'static> {reason, written, totalEncoded, totalIntermediate, totalDecoded} =
+    move error
+  return match move reason {
+    ContentReason.InvalidLimit {limit, allowed, attempted} => FetchError {
+      phase: FetchPhase.Decode,
+      reason: FetchReason.Content {
+        error: FetchContentError {
+          reason: FetchContentReason.InvalidLimit {
+            limit: limit,
+            allowed: allowed,
+            attempted: attempted,
+          },
+          written: written,
+          totalEncoded: totalEncoded,
+          totalIntermediate: totalIntermediate,
+          totalDecoded: totalDecoded,
+        },
+      },
+      status: Option.none<Status>(),
+      uri: Option.none<OwnedUri>(),
+      deliveredBodyBytes: u64.MIN,
+      offeredBodyBytes: usize.ZERO,
+    }
+    _ => fetchFailure(FetchPhase.Decode, FetchReason.InvalidOptions)
   }
 }
 
