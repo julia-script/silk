@@ -398,6 +398,11 @@ pub struct ServerWebSocket<'channel, 'transport, P> {
   control: [u8; 125]
 }
 
+struct ServerLease<'channel, 'transport, P> {
+  channel: &'channel mut BufferedDuplex<'transport, P>
+  limits: Limits
+}
+
 enum Opcode {
   Text,
   Binary,
@@ -666,26 +671,30 @@ where &'transport mut P provides &ByteDuplex from &mut ByteDuplex,
     Result<Limits, WebSocketError>.Failure {error} => { fail move error }
     Result<Limits, WebSocketError>.Success {value} => move value
   }
-  let session = ServerWebSocket<'channel, 'transport, P> {
+  let lease = ServerLease<'channel, 'transport, P> {
     channel: move channel,
     limits: checked,
-    stateValue: State.Open,
-    failureValue: Failure.Protocol,
-    header: emptyHeader(),
-    control: emptyControl(),
   }
-  let useSession = effect fn(
-    socket: &mut ServerWebSocket<'channel, 'transport, P>,
+  let useLease = effect fn(
+    owned: &mut ServerLease<'channel, 'transport, P>,
   ) -> A ! E ? R {
-    return run use(&mut socket.*)
+    let mut socket = ServerWebSocket {
+      channel: &mut owned.channel.*,
+      limits: owned.limits,
+      stateValue: State.Open,
+      failureValue: Failure.Protocol,
+      header: emptyHeader(),
+      control: emptyControl(),
+    }
+    return run use(&mut socket)
   }
   let release = effect fn(
-    socket: &mut ServerWebSocket<'channel, 'transport, P>,
+    owned: &mut ServerLease<'channel, 'transport, P>,
   ) -> () {
-    let closed = socket.channel.close()
+    let closed = BufferedDuplex.close(&mut owned.channel.*)
     return run Effect.catchAll(move closed, discardCloseFailure)
   }
-  return run Effect.useReleaseNonParking(move session, move useSession, move release)
+  return run Effect.useReleaseNonParking(move lease, move useLease, move release)
 }
 
 struct Utf8State {
@@ -814,7 +823,7 @@ where &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut Monoton
   let headerLength = header.wireLength - header.payloadLength
   while offset < header.payloadLength {
     let count = minimum(125, header.payloadLength - offset)
-    run readInto(
+    let filled = run readInto(
       &mut socket.channel.*,
       &mut socket.control,
       usize.ZERO,
@@ -823,12 +832,13 @@ where &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut Monoton
       Operation.FinishClose,
       headerLength + offset,
     )
-    unmask(&mut socket.control, count, &header.mask, offset)
+    let unmasked = unmask(move filled, count, &header.mask, offset)
     if text {
-      let chunk = Slice.view<u8>(&socket.control, usize.ZERO, count)
+      let chunk = Slice.view<u8>(unmasked, usize.ZERO, count)
       run acceptUtf8(&mut validation, chunk)
       drop chunk
     }
+    drop unmasked
     offset = offset + count
   }
   if text && validation.remaining != usize.ZERO {
@@ -933,16 +943,15 @@ where &'transport mut P provides &ByteDuplex from &mut ByteDuplex,
   )
   return match header.opcode {
     Opcode.Text => {
-      run readPayload(
+      let payload = run readPayload(
         &mut socket.*,
-        &mut output.*,
+        move output,
         header.payloadLength,
         &header.mask,
         header.wireLength - header.payloadLength,
         move deadline,
         Operation.ReadEvent,
       )
-      let payload = Slice.view<u8>(output, usize.ZERO, header.payloadLength)
       let text = String.fromUtf8(payload)
       match move text {
         Result<string, InvalidUtf8>.Failure {error} => {
@@ -955,18 +964,20 @@ where &'transport mut P provides &ByteDuplex from &mut ByteDuplex,
       return Event.Text {count: header.payloadLength}
     }
     Opcode.Binary => {
-      run readPayload(
+      let payload = run readPayload(
         &mut socket.*,
-        &mut output.*,
+        move output,
         header.payloadLength,
         &header.mask,
         header.wireLength - header.payloadLength,
         move deadline,
         Operation.ReadEvent,
       )
+      drop payload
       return Event.Binary {count: header.payloadLength}
     }
     Opcode.Ping => {
+      drop output
       run readControl(
         &mut socket.*,
         &header,
@@ -990,10 +1001,12 @@ where &'transport mut P provides &ByteDuplex from &mut ByteDuplex,
       return Event.Ping {payload: move payload}
     }
     Opcode.Pong => {
+      drop output
       run readControl(&mut socket.*, &header, move deadline, Operation.ReadEvent)
       return Event.Pong {payload: ownedControl(&socket.*, header.payloadLength)}
     }
     Opcode.Close => {
+      drop output
       run readControl(
         &mut socket.*,
         &header,
@@ -1034,7 +1047,7 @@ where &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut Monoton
       }
     }
   }
-  run readInto(
+  let prefix = run readInto(
     &mut socket.channel.*,
     &mut socket.header,
     usize.ZERO,
@@ -1043,6 +1056,7 @@ where &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut Monoton
     operation,
     usize.ZERO,
   )
+  drop prefix
   let first = socket.header[0]
   let second = socket.header[1]
   let finalFrame = u8.bitAnd(first, u8.toU8(128)) != 0
@@ -1074,7 +1088,7 @@ where &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut Monoton
   let headerLength = 6 + extended
   run checkCloseRemaining(&socket.*, &closeRemaining, headerLength)
   if extended > usize.ZERO {
-    run readInto(
+    let extendedBytes = run readInto(
       &mut socket.channel.*,
       &mut socket.header,
       2,
@@ -1083,6 +1097,7 @@ where &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut Monoton
       operation,
       2,
     )
+    drop extendedBytes
   }
   if marker == 127 && u8.bitAnd(socket.header[2], u8.toU8(128)) != 0 {
     fail WebSocketError.ProtocolError {reason: ProtocolReason.LengthHighBit}
@@ -1117,7 +1132,7 @@ where &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut Monoton
     Option.Some {value} => value
   }
   run checkCloseRemaining(&socket.*, &closeRemaining, wireLength)
-  run readInto(
+  let maskBytes = run readInto(
     &mut socket.channel.*,
     &mut socket.header,
     2 + extended,
@@ -1126,6 +1141,7 @@ where &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut Monoton
     operation,
     2 + extended,
   )
+  drop maskBytes
   return FrameHeader {
     opcode: move opcode,
     payloadLength: payloadLength,
@@ -1181,15 +1197,15 @@ effect fn checkCloseRemaining<'channel, 'transport, P>(
   return ()
 }
 
-effect fn readInto<'transport, P>(
+effect fn readInto<'output, 'transport, P>(
   channel: &mut BufferedDuplex<'transport, P>,
-  output: &mut [u8],
+  output: &'output mut [u8],
   offset: usize,
   length: usize,
   deadline: Option<Instant>,
   operation: Operation,
   prior: usize,
-) -> ()
+) -> &'output mut [u8]
 ! WebSocketError
 ? &mut MonotonicClock
 where &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock {
@@ -1232,32 +1248,32 @@ where &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut Monoton
     }
     copied = copied + count
   }
-  return ()
+  return move output
 }
 
-effect fn readPayload<'channel, 'transport, P>(
+effect fn readPayload<'output, 'channel, 'transport, P>(
   socket: &mut ServerWebSocket<'channel, 'transport, P>,
-  output: &mut [u8],
+  output: &'output mut [u8],
   length: usize,
   mask: &([u8; 4]),
   headerLength: usize,
   deadline: Option<Instant>,
   operation: Operation,
-) -> ()
+) -> &'output [u8]
 ! WebSocketError
 ? &mut MonotonicClock
 where &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock {
-  run readInto(
+  let initialized = run readInto(
     &mut socket.channel.*,
-    &mut output.*,
+    move output,
     usize.ZERO,
     length,
     move deadline,
     operation,
     headerLength,
   )
-  unmask(&mut output.*, length, mask, usize.ZERO)
-  return ()
+  let unmasked = unmask(move initialized, length, mask, usize.ZERO)
+  return move unmasked
 }
 
 effect fn readControl<'channel, 'transport, P>(
@@ -1269,7 +1285,7 @@ effect fn readControl<'channel, 'transport, P>(
 ! WebSocketError
 ? &mut MonotonicClock
 where &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock {
-  run readInto(
+  let filled = run readInto(
     &mut socket.channel.*,
     &mut socket.control,
     usize.ZERO,
@@ -1278,7 +1294,8 @@ where &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut Monoton
     operation,
     header.wireLength - header.payloadLength,
   )
-  unmask(&mut socket.control, header.payloadLength, &header.mask, usize.ZERO)
+  let unmasked = unmask(move filled, header.payloadLength, &header.mask, usize.ZERO)
+  drop unmasked
   return ()
 }
 
@@ -1647,13 +1664,18 @@ fn decodeWide(bytes: &[u8], offset: usize, length: usize) -> u64 {
   return value
 }
 
-fn unmask(output: &mut [u8], length: usize, mask: &([u8; 4]), offset: usize) -> () {
+fn unmask<'output>(
+  output: &'output mut [u8],
+  length: usize,
+  mask: &([u8; 4]),
+  offset: usize,
+) -> &'output mut [u8] {
   let mut index = usize.ZERO
   while index < length {
     output[index] = u8.bitXor(output[index], mask.*[(offset + index) % 4])
     index = index + usize.ONE
   }
-  return ()
+  return move output
 }
 
 fn closeCodeInControl<'channel, 'transport, P>(
