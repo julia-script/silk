@@ -211,6 +211,50 @@ pub struct ParseError {
   pub fieldIndex: Option<usize>
 }
 
+/// Validates parser storage arithmetic and the owned-storage limit without allocation or input.
+///
+/// # Details
+///
+/// The required storage contains `maxHeadBytes` plus fixed field metadata for `maxFields`.
+/// Arithmetic overflow returns `SizeOverflow`. Excess storage returns the exact `OwnedBytes` limit.
+pub fn validateLimits(limits: &Limits) -> Result<(), ParseError> {
+  let metadata = match move usize.checkedMultiply(limits.values.maxFields, RECORD_BYTES) {
+    Option<usize>.None => {
+      return Result.failResult<(), ParseError>(parseError(
+        ParseReason.SizeOverflow,
+        ParseComponent.Parser,
+        usize.ZERO,
+        Option.none<usize>(),
+      ))
+    }
+    Option<usize>.Some {value} => value
+  }
+  let required = match move usize.checkedAdd(limits.maxHeadBytes, metadata) {
+    Option<usize>.None => {
+      return Result.failResult<(), ParseError>(parseError(
+        ParseReason.SizeOverflow,
+        ParseComponent.Parser,
+        usize.ZERO,
+        Option.none<usize>(),
+      ))
+    }
+    Option<usize>.Some {value} => value
+  }
+  if required > limits.maxOwnedBytes {
+    return Result.failResult<(), ParseError>(parseError(
+      ParseReason.LimitExceeded {
+        limit: ParseLimitKind.OwnedBytes,
+        allowed: limits.maxOwnedBytes,
+        attempted: required,
+      },
+      ParseComponent.Parser,
+      usize.ZERO,
+      Option.none<usize>(),
+    ))
+  }
+  return Result.succeed<(), ParseError>(())
+}
+
 enum HeadKind { Request, Response }
 
 enum Phase { StartLine, Fields }
@@ -750,40 +794,12 @@ pub fn writeResponseInto<'value>(
 effect fn makeCore(kind: HeadKind, limits: Limits) -> Result<ParserCore, ParseError>
 ! OutOfMemoryError
 ? &mut Allocator {
-  let metadata = match move usize.checkedMultiply(limits.values.maxFields, RECORD_BYTES) {
-    Option<usize>.None => {
-      return Result.failResult<ParserCore, ParseError>(parseError(
-        ParseReason.SizeOverflow,
-        ParseComponent.Parser,
-        usize.ZERO,
-        Option.none<usize>(),
-      ))
-    }
-    Option<usize>.Some {value} => value
+  let valid = validateLimits(&limits)
+  if let Result<(), ParseError>.Failure {error} = move valid {
+    return Result.failResult<ParserCore, ParseError>(move error)
   }
-  let required = match move usize.checkedAdd(limits.maxHeadBytes, metadata) {
-    Option<usize>.None => {
-      return Result.failResult<ParserCore, ParseError>(parseError(
-        ParseReason.SizeOverflow,
-        ParseComponent.Parser,
-        usize.ZERO,
-        Option.none<usize>(),
-      ))
-    }
-    Option<usize>.Some {value} => value
-  }
-  if required > limits.maxOwnedBytes {
-    return Result.failResult<ParserCore, ParseError>(parseError(
-      ParseReason.LimitExceeded {
-        limit: ParseLimitKind.OwnedBytes,
-        allowed: limits.maxOwnedBytes,
-        attempted: required,
-      },
-      ParseComponent.Parser,
-      usize.ZERO,
-      Option.none<usize>(),
-    ))
-  }
+  let metadata = limits.values.maxFields * RECORD_BYTES
+  let required = limits.maxHeadBytes + metadata
   let storage = run exactZeroed(required)
   return Result.succeed<ParserCore, ParseError>(ParserCore {
     kind: kind,
