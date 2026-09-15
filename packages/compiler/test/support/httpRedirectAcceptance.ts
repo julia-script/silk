@@ -10,7 +10,10 @@ const httpConnectionPoolPolicyImports = `import silk.http_connection_pool as Poo
   ConnectionKey as PoolConnectionKey,
   Counts as PoolCounts,
   Handle as PoolHandle,
-}`
+}
+import silk.http_connection_pool_native as PoolNative {Context as NativePoolContext}
+import silk.http_client_native {NativeTransport}
+import silk.trust_snapshot {TrustSourceError}`
 
 const httpConnectionPoolPolicySupport = `fn poolCountsContract<P, C>(
   handle: &PoolHandle<PoolConnectionKey, P, C>,
@@ -22,6 +25,14 @@ fn poolCountsShape(counts: PoolCounts) -> bool {
   return counts.total == counts.opening + counts.leased + counts.idle && !counts.closed
 }
 
+effect fn nativePoolCopyWitness(
+  handle: &PoolHandle<PoolConnectionKey, NativeTransport, NativePoolContext>,
+) -> PoolHandle<PoolConnectionKey, NativeTransport, NativePoolContext>
+! TrustSourceError | OutOfMemoryError
+? &mut Allocator {
+  return run PoolNative.copyHandle(handle)
+}
+
 fn poolDeclarationsWitness() -> bool {
   let config = PoolConfig.defaults()
   let origin = match move proxyCheckedOrigin("http://pool.example") {
@@ -31,13 +42,7 @@ fn poolDeclarationsWitness() -> bool {
     }
     Result.Success {value} => value
   }
-  let key = PoolConnectionKey.direct(
-    origin,
-    origin,
-    u64.toU64(1),
-    u64.toU64(2),
-    u64.toU64(3),
-  )
+  let key = PoolConnectionKey.direct(origin)
   let selected = PoolConnectionKey.origin(&key)
   let counts = PoolCounts {
     opening: usize.ZERO,

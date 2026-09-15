@@ -651,6 +651,13 @@ static if (Intrinsic.targetOperatingSystem() == "darwin" && Intrinsic.targetArch
     )
   }
 
+  /// Copies one Unix path into bounded native route metadata before transport contact.
+  ///
+  /// The target-specific native address capacity is checked before the returned route is published.
+  pub effect fn admitUnixRoute(path: &[u8]) -> NativeRoute ! NativeSocketError {
+    return run unixRoute(path)
+  }
+
   /// Acquires and publishes one complete Unix-routed HTTP or HTTPS connection owner.
   ///
   /// The Unix path selects only the physical transport. TLS still authenticates `origin`, and the
@@ -1349,6 +1356,11 @@ static if (Intrinsic.targetOperatingSystem() == "darwin" && Intrinsic.targetArch
     drop limits
     drop preparedTrust
     drop acquisitionDeadline
+    fail NativeClientError.UnsupportedTarget
+  }
+  /// Rejects Unix route admission before inspecting the path on an unsupported target.
+  pub effect fn admitUnixRoute(path: &[u8]) -> NativeRoute ! NativeClientError {
+    drop path
     fail NativeClientError.UnsupportedTarget
   }
   /// Rejects owned Unix HTTP acquisition before inspecting inputs on this target.

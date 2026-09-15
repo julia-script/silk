@@ -220,6 +220,22 @@ impl ConnectionKey {
 
   /// Returns the normalized original origin used for per-origin capacity.
   pub fn origin(self: &Self) -> Origin { return self.originalOrigin }
+
+  /// Returns whether this key selects direct native contact for its original origin.
+  pub fn isDirect(self: &Self) -> bool {
+    return match & self.endpoint {
+      EndpointIdentity.Direct => true
+      _ => false
+    }
+  }
+
+  /// Returns whether this key selects the exact supplied Unix path for its original origin.
+  pub fn matchesUnixPath(self: &Self, path: &[u8]) -> bool {
+    return match & self.endpoint {
+      EndpointIdentity.Unix {path: stored} => bytesEqualSlice(&stored, path)
+      _ => false
+    }
+  }
 }
 
 fn bytesEqual(left: &Bytes, right: &Bytes) -> bool {
@@ -229,6 +245,17 @@ fn bytesEqual(left: &Bytes, right: &Bytes) -> bool {
   let mut index = usize.ZERO
   while index < a.length {
     if a[index] != b[index] { return false }
+    index = index + usize.ONE
+  }
+  return true
+}
+
+fn bytesEqualSlice(left: &Bytes, right: &[u8]) -> bool {
+  let bytes = Bytes.asSlice(left)
+  if bytes.length != right.length { return false }
+  let mut index = usize.ZERO
+  while index < bytes.length {
+    if bytes[index] != right[index] { return false }
     index = index + usize.ONE
   }
   return true
