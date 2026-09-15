@@ -449,6 +449,88 @@ pub interface AttemptClient<
     HandlerRequirements in Without<HandlerRequirements, HttpTransport>
 }
 
+/// A higher-ranked callback for one routed or direct redirect attempt.
+///
+/// # Details
+///
+/// A routed client calls `handleRouted` with its final routed transport. A direct client calls
+/// `handleDirect` with its direct HTTP transport. Each operation lends the same owned request and
+/// validated method only for its exchange scope. Neither exchange form can escape in `A`.
+pub interface HybridAttemptHandler<
+  'policy,
+  RoutedP,
+  DirectP,
+  A,
+  E,
+  ?R,
+> {
+  /// Handles one routed exchange after route preparation and acquisition finish.
+  effect<'call> fn handleRouted<
+    'call,
+    'exchangeView: 'call,
+    'transport: 'exchangeView,
+    'provider: 'transport,
+    'tunnel: 'provider,
+  >(
+    handler: Self,
+    request: &'call AttemptRequest<'policy>,
+    method: Method<'call>,
+    exchange: &'call mut Exchange<
+      'exchangeView,
+      RouteTransport<'transport, 'provider, 'tunnel, RoutedP>
+    >,
+  ) -> A ! E ? R where
+    &mut RoutedP provides &HttpTransport from &mut HttpTransport | &mut MonotonicClock | &mut Allocator | &mut Random,
+    &mut RoutedP provides &HttpTransport from &mut HttpTransport,
+    &mut RoutedP provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock | &mut Allocator | &mut Random,
+    &mut RoutedP provides &ByteDuplex from &mut ByteDuplex
+
+  /// Handles one direct exchange after direct request preparation and acquisition finish.
+  effect<'call> fn handleDirect<'call, 'exchangeView: 'call>(
+    handler: Self,
+    request: &'call AttemptRequest<'policy>,
+    method: Method<'call>,
+    exchange: &'call mut Exchange<'exchangeView, DirectP>,
+  ) -> A ! E ? R where
+    &mut DirectP provides &HttpTransport from &mut HttpTransport | &mut MonotonicClock | &mut Allocator | &mut Random,
+    &mut DirectP provides &HttpTransport from &mut HttpTransport
+}
+
+/// A routed-or-direct acquisition boundary for one rebuilt redirect attempt.
+///
+/// # Details
+///
+/// The client selects one acquisition form before contact and calls exactly one handler operation.
+/// It preserves the unchanged deadline and both caller-defined channel families. The direct form
+/// does not require duplex authority because it cannot establish a CONNECT tunnel.
+pub interface HybridAttemptClient<
+  'policy,
+  RoutedP,
+  DirectP,
+  A,
+  HandlerError,
+  AcquisitionError,
+  ?HandlerRequirements,
+  ?AcquisitionRequirements,
+  H: HybridAttemptHandler<
+    'policy,
+    RoutedP,
+    DirectP,
+    A,
+    HandlerError ? HandlerRequirements
+  >,
+> {
+  /// Rebuilds, acquires, and drives one routed or direct scoped request.
+  effect fn withAttempt(
+    client: &mut Self,
+    request: AttemptRequest<'policy>,
+    deadline: Option<Instant>,
+    handler: H,
+  ) -> A ! HandlerError | AcquisitionError ? HandlerRequirements | AcquisitionRequirements where
+    HandlerRequirements in Without<HandlerRequirements, ByteDuplex>,
+    HandlerRequirements in Without<HandlerRequirements, HttpTransport>
+}
+
 /// A higher-ranked callback for the one final response selected by redirect orchestration.
 ///
 /// # When to use
@@ -478,6 +560,50 @@ pub interface ResponseHandler<P, A, E, ?R> {
     &mut P provides &HttpTransport from &mut HttpTransport,
     &mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock | &mut Allocator | &mut Random,
     &mut P provides &ByteDuplex from &mut ByteDuplex
+}
+
+/// A final-response callback that accepts either a routed or a direct exchange.
+///
+/// # When to use
+///
+/// Use with the four `with*HybridResponse` operations when one acquisition context can select a
+/// proxy-aware route or a direct pooled connection.
+///
+/// # Details
+///
+/// The acquisition client calls exactly one operation. Each operation lends the independently
+/// owned final URI and live exchange only for that call.
+pub interface HybridResponseHandler<RoutedP, DirectP, A, E, ?R> {
+  /// Handles exactly one final response on a routed transport.
+  effect<'call> fn handleRouted<
+    'call,
+    'exchangeView: 'call,
+    'transport: 'exchangeView,
+    'provider: 'transport,
+    'tunnel: 'provider,
+  >(
+    handler: Self,
+    uri: Uri<'call>,
+    hop: usize,
+    exchange: &'call mut Exchange<
+      'exchangeView,
+      RouteTransport<'transport, 'provider, 'tunnel, RoutedP>
+    >,
+  ) -> A ! E ? R where
+    &mut RoutedP provides &HttpTransport from &mut HttpTransport | &mut MonotonicClock | &mut Allocator | &mut Random,
+    &mut RoutedP provides &HttpTransport from &mut HttpTransport,
+    &mut RoutedP provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock | &mut Allocator | &mut Random,
+    &mut RoutedP provides &ByteDuplex from &mut ByteDuplex
+
+  /// Handles exactly one final response on a direct HTTP transport.
+  effect<'call> fn handleDirect<'call, 'exchangeView: 'call>(
+    handler: Self,
+    uri: Uri<'call>,
+    hop: usize,
+    exchange: &'call mut Exchange<'exchangeView, DirectP>,
+  ) -> A ! E ? R where
+    &mut DirectP provides &HttpTransport from &mut HttpTransport | &mut MonotonicClock | &mut Allocator | &mut Random,
+    &mut DirectP provides &HttpTransport from &mut HttpTransport
 }
 
 service SelectedBody<E, ?R> {
