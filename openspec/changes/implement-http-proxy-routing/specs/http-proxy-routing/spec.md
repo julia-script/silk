@@ -8,16 +8,20 @@ separate from the origin while safely composing CONNECT tunnels with origin-auth
 ### Requirement: Proxy configuration is explicit, immutable, and bounded
 
 Canonical ordinary-source `silk.http_proxy` SHALL expose owned `ProxyConfig`, `ProxyAuth`, and
-`BypassPolicy` values. Configuration construction SHALL copy and validate a proxy host and a port
-from 1 through 65535, at most 64 exact bypass origins, at most 4096 encoded authentication-token
-bytes, and an explicit `maxOwnedConfigBytes` covering copied hosts, credentials, entries, and index
-capacities. All size arithmetic SHALL be checked, and invalid syntax or insufficient capacity SHALL
-fail before resolution, connection, authentication generation, or wire output. Configuration SHALL
-NOT read environment variables, PAC files, system settings, or another ambient credential source.
+`BypassPolicy` values plus opaque `ProxyConfigId` and `ProxyAuthContextId` values. Programmatic
+configuration construction SHALL accept only a plain proxy host and port from 1 through 65535 and
+caller-supplied nonsecret configuration/authentication-context IDs. It SHALL copy and validate at
+most 64 exact bypass origins, at most 4096 encoded authentication-token bytes, and an explicit
+`maxOwnedConfigBytes` covering copied hosts, credentials, entries, and index capacities. All size
+arithmetic SHALL be checked, and invalid syntax or insufficient capacity SHALL fail before
+resolution, connection, authentication generation, or wire output. Configuration SHALL NOT read
+environment variables, PAC files, system settings, or another ambient credential source.
 
 An optional URI convenience constructor SHALL admit only a plain `http` authority with no
-userinfo, path beyond empty, query, or fragment. SOCKS, proxy chains, reverse proxies, and
-TLS-encrypted proxy endpoints SHALL remain unrepresented as successful configurations.
+userinfo, path beyond empty, query, or fragment. An `https` proxy URI SHALL return
+`UnsupportedProxyTransport` during construction. SOCKS, proxy chains, reverse proxies, and
+TLS-encrypted proxy endpoints SHALL remain unrepresented as successful configurations, routes, or
+acquisition inputs.
 
 #### Scenario: Reject capacity before contact
 
@@ -28,9 +32,16 @@ TLS-encrypted proxy endpoints SHALL remain unrepresented as successful configura
 
 #### Scenario: Parse only a plain proxy authority
 
-- **WHEN** the convenience constructor receives an `https` URI or a URI containing userinfo, path,
-  query, fragment, an empty host, or a port outside 1 through 65535
-- **THEN** it rejects the configuration rather than stripping components or selecting another route
+- **WHEN** the convenience constructor receives an `https` URI
+- **THEN** it returns `UnsupportedProxyTransport` before producing a configuration or performing any
+  resolution or connection work
+
+#### Scenario: Reject malformed plain proxy configuration
+
+- **WHEN** the convenience constructor receives userinfo, path, query, fragment, an empty host, or a
+  port outside 1 through 65535
+- **THEN** it returns the corresponding configuration failure rather than stripping components or
+  selecting another route
 
 ### Requirement: Prepared proxy authentication is canonical and secret-safe
 
@@ -41,10 +52,13 @@ contact. Validation SHALL use no more than 3072 bytes of bounded scratch for the
 token and SHALL NOT reinterpret username or password character sets. Digest, NTLM, Negotiate,
 ambient credential discovery, and automatic 407 retry SHALL NOT be provided.
 
-The configuration SHALL publish an opaque authentication-context identity suitable for route keys.
-Neither that identity nor typed diagnostics SHALL print, retain in diagnostic metadata, or derive a
-public hash from secret token bytes. Bypass selection SHALL occur before proxy credentials or a
-`Proxy-Authorization` field are produced.
+The caller SHALL supply nonsecret `u64` payloads for opaque configuration and
+authentication-context identities. The identity values SHALL be `Copy`, SHALL preserve their exact
+equality across configuration and route copies, and SHALL NOT be derived implicitly from proxy
+endpoint or secret bytes. The caller SHALL provide a different authentication-context identity when
+the credential or its authorization context changes. Formatting and typed diagnostics SHALL expose
+neither identity payloads nor secret token bytes. Bypass selection SHALL occur before proxy
+credentials are copied into request scratch or a `Proxy-Authorization` field is produced.
 
 #### Scenario: Reject a malformed prepared token
 
@@ -57,6 +71,12 @@ public hash from secret token bytes. Bypass selection SHALL occur before proxy c
 - **WHEN** an origin matches an exact bypass entry
 - **THEN** route selection returns a direct route without producing proxy authentication bytes
 
+#### Scenario: Keep identity stable without hashing credentials
+
+- **WHEN** a configuration and its selected route are copied
+- **THEN** their configuration/authentication identities compare exactly equal to the caller-supplied
+  originals without hashing, formatting, or inspecting the prepared token
+
 ### Requirement: Route selection implements the admitted matrix without fallback
 
 `selectRoute(config, origin)` SHALL be pure and SHALL return a direct route for an exact bypass
@@ -66,11 +86,11 @@ host identity, and effective port; it SHALL use equivalent canonical numeric-add
 SHALL NOT perform suffix, wildcard, CIDR, or DNS-result matching. Equal proxy and origin host text
 SHALL NOT implicitly bypass an explicitly configured proxy.
 
-A successful route SHALL retain immutable proxy host and port, opaque configuration and
-authentication-context identity, original origin, Forward or Tunnel mode, and origin security
-context. A requested TLS-encrypted proxy route SHALL return `UnsupportedProxyTransport` before DNS
-or connection acquisition. A proxy failure SHALL never select a direct route, plaintext origin
-connection, or retry automatically.
+A successful route SHALL retain immutable proxy host and port, opaque caller-supplied configuration
+and authentication-context identity, original origin, Forward or Tunnel mode, and origin security
+context. Because configuration admits only plain proxy endpoints, route selection and acquisition
+SHALL expose no encrypted-proxy variant. A proxy failure SHALL never select a direct route,
+plaintext origin connection, or retry automatically.
 
 #### Scenario: Select every admitted route
 
@@ -79,15 +99,36 @@ connection, or retry automatically.
 - **THEN** it returns respectively Forward, Tunnel, and Direct routes with the original origin and
   immutable route identity intact
 
-#### Scenario: Refuse an encrypted proxy before acquisition
+### Requirement: Routed request admission separates logical origin from physical peer
 
-- **WHEN** a route describes an HTTP or HTTPS origin through a TLS-encrypted proxy endpoint
-- **THEN** acquisition returns `UnsupportedProxyTransport` before resolver or connection dispatch
-  and does not fall back to a direct or plaintext origin route
+The streaming HTTP client SHALL expose one explicit routed-request admission path used by proxy
+policy. It SHALL accept distinct logical-origin and physical-peer origins plus an admitted Forward or
+CONNECT mode. Logical-origin validation SHALL govern the request target, `Host`, and origin
+`Authorization`; physical-peer identity SHALL govern which connection may send the prepared bytes.
+A prepared routed request SHALL fail client admission on any connection whose physical peer differs.
+
+The existing direct request preparation path SHALL continue to set logical origin and physical peer
+to the same value and SHALL reject caller `Proxy-Authorization`. The routed path SHALL accept proxy
+credentials only as proxy-policy-owned prepared input, SHALL reject the same field in caller headers,
+and SHALL NOT make a routed request admissible on the origin-authenticated connection inside a
+tunnel.
+
+#### Scenario: Admit one forward request on its proxy peer
+
+- **WHEN** proxy policy prepares an absolute-form request for logical origin `http://example.com`
+  and physical peer `http://proxy.example:8080`
+- **THEN** the client admits it only on that proxy-peer connection while `Host` and origin credential
+  checks remain bound to `example.com`
+
+#### Scenario: Preserve direct credential rejection
+
+- **WHEN** ordinary direct preparation receives caller `Proxy-Authorization`
+- **THEN** it fails before output and exposes no route token or alternate direct preparation path
 
 ### Requirement: Forward routes send one origin-bound absolute-form request
 
-An HTTP Forward route SHALL connect to the proxy endpoint and serialize the original URI as an
+An HTTP Forward route SHALL connect to the proxy endpoint through routed request admission and
+serialize the original URI as an
 absolute-form request target, excluding userinfo and fragment, writing `/` for an empty path, and
 preserving accepted encoded path and query spelling. `Host` SHALL identify the origin rather than
 the proxy. `Proxy-Authorization` SHALL be generated only from the selected proxy configuration;
@@ -121,10 +162,17 @@ CONNECT response handling SHALL reuse the shared incremental head contract. Each
 bounded to 32768 bytes and 100 fields; at most 8 informational responses and 65536 aggregate
 informational head bytes SHALL be accepted. Status 101 SHALL be an invalid transition. Any final
 status from 200 through 299 SHALL establish the tunnel immediately after the head terminator and
-SHALL ignore `Content-Length` and `Transfer-Encoding` on that successful response. A 407 response
-SHALL return `ProxyAuthenticationRequired` with bounded owned challenge metadata. Other non-2xx
-responses SHALL return `ProxyRejected` with bounded owned status and header metadata. A rejection
-SHALL close without unbounded body draining, retry, downgrade, or transient capability caching.
+SHALL ignore `Content-Length` and `Transfer-Encoding` on that successful response.
+
+A 407 response SHALL return `ProxyAuthenticationRequired` owning the status/reason and every
+`Proxy-Authenticate` field, including duplicates in original order. Other non-2xx responses SHALL
+return `ProxyRejected` owning the status/reason and every field in original order. Both copies SHALL
+use limits of 100 fields, 256 name bytes, 8192 value bytes, 32768 aggregate field bytes, and 65536
+total owned bytes. Parser/head/informational failures SHALL take precedence before a final head
+exists. After a complete final head, metadata overflow SHALL return `ProxyMetadataLimit` and
+allocation refusal SHALL remain `OutOfMemoryError`, each before the status-specific error. Cleanup
+failure SHALL NOT replace any protected outcome. A rejection SHALL close without unbounded body
+draining, retry, downgrade, or transient capability caching.
 
 #### Scenario: Enter a tunnel on non-200 success
 
@@ -136,8 +184,16 @@ SHALL close without unbounded body draining, retry, downgrade, or transient capa
 #### Scenario: Own bounded authentication challenges
 
 - **WHEN** the proxy returns 407 with challenge fields followed by an arbitrary response body
-- **THEN** the route returns `ProxyAuthenticationRequired` with bounded owned status/challenge
-  metadata, closes without draining the body, and performs no credential retry
+- **THEN** the route returns `ProxyAuthenticationRequired` with owned status/reason and all
+  `Proxy-Authenticate` duplicates in original order under the exact copy limits, closes without
+  draining the body, and performs no credential retry
+
+#### Scenario: Prefer owned metadata capacity failure
+
+- **WHEN** a complete non-2xx head passes parser limits but its selected owned metadata exceeds the
+  65536-byte copy bound
+- **THEN** the route returns `ProxyMetadataLimit`, preserves that failure through cleanup, and does
+  not publish a borrowed or partial rejection value
 
 #### Scenario: Reject invalid transitions and head limits
 
@@ -148,10 +204,19 @@ SHALL close without unbounded body draining, retry, downgrade, or transient capa
 
 ### Requirement: Tunnel ownership composes with original-origin TLS exactly once
 
-Successful CONNECT SHALL transfer the exact concrete transport authority and unread buffered suffix
-into one scoped byte-duplex tunnel. Reads SHALL serve the suffix before underlying transport input;
-writes and flushes SHALL forward unchanged. The HTTP exchange SHALL become permanently unusable and
-the tunnel SHALL NOT return to a forward-proxy pool.
+Successful CONNECT SHALL expose one single-use, allocation-free tunnel-transfer operation. An
+invalid or repeated transition SHALL fail while the HTTP owner remains armed. A valid transition
+SHALL construct a complete affine `ByteDuplex`, then atomically disarm the HTTP owner's physical
+close authority and publish the duplex, with no fallible or cancelable step between disarm and
+publication. The duplex SHALL own the exact concrete transport close authority and unread buffered
+suffix. Reads SHALL serve the suffix before underlying transport input; writes and flushes SHALL
+forward unchanged. Its complete close SHALL be terminal and idempotent and SHALL attempt the
+concrete close at most once.
+
+The transferred duplex SHALL retain the concrete provider's write-direction authority:
+`shutdownWrite` SHALL perform the canonical flush and forward directional shutdown exactly once
+without closing the read direction. The duplex SHALL remain live for terminal close. The HTTP
+exchange SHALL become permanently unusable and the tunnel SHALL NOT return to a forward-proxy pool.
 
 For an HTTPS origin, TLS authentication SHALL begin only after CONNECT succeeds, consume a prepared
 owned trust snapshot, and verify the original origin host and security context rather than the proxy
@@ -183,20 +248,46 @@ failure without replacing the protected outcome.
 - **WHEN** the route callback returns its own typed failure and terminal transport close also fails
 - **THEN** cleanup attempts physical close at most once and the callback failure remains observable
 
+#### Scenario: Keep the outer owner armed until publication
+
+- **WHEN** tunnel transfer is requested in an invalid state or a repeated transfer is attempted
+- **THEN** no duplex is published and the existing HTTP owner retains its close obligation
+
+#### Scenario: Preserve directional shutdown across transfer
+
+- **WHEN** the transferred tunnel duplex receives `shutdownWrite`
+- **THEN** it flushes, forwards the concrete provider's directional shutdown exactly once, preserves
+  the read direction, and remains available for one terminal close
+
 ### Requirement: One absolute deadline spans every route phase
 
-The route API SHALL accept one optional absolute monotonic deadline and pass it unchanged through
-proxy route acquisition, CONNECT, caller-owned trust preparation, tunnel TLS authentication, and
-the connected HTTP scope. TLS SHALL clamp its finite handshake duration against that external
-deadline without restarting elapsed time. Native synchronous hostname resolution with an overall
-deadline SHALL return its existing unsupported-deadline failure before dispatch; a numeric proxy
-route SHALL retain and use the absolute deadline.
+The caller SHALL establish the route's optional absolute deadline before loading one owned
+`TrustSnapshot`, finish that load before entering the route scope, and pass the same unchanged
+absolute mark with the snapshot. The route API SHALL consume that prepared snapshot for a secure
+Direct or Tunnel route and SHALL require no snapshot for a Forward or insecure Direct route;
+invalid presence/absence SHALL fail before acquisition. This feature does not make trust loading
+interruptible, but elapsed loading time counts against a finite absolute deadline because no fresh
+mark is created at route entry.
+
+The route API SHALL accept that one optional absolute monotonic deadline and pass it unchanged
+through proxy route acquisition, CONNECT, tunnel TLS authentication, and the connected HTTP scope.
+TLS SHALL clamp its finite handshake duration against that external deadline without restarting
+elapsed time. Native synchronous hostname resolution with an overall deadline SHALL return its
+existing unsupported-deadline failure before dispatch; a numeric proxy route SHALL retain and use
+the absolute deadline.
 
 #### Scenario: Do not restart after CONNECT
 
-- **WHEN** CONNECT and trust loading consume part of a finite route deadline
+- **WHEN** CONNECT consumes part of a finite route deadline after trust was prepared by the caller
 - **THEN** tunneled TLS receives the original absolute deadline and times out at that boundary rather
   than receiving a fresh duration
+
+#### Scenario: Count caller-owned trust preparation without claiming interruption
+
+- **WHEN** the caller establishes a finite absolute deadline, loads trust, and then enters a secure
+  route with the resulting owned snapshot and that same mark
+- **THEN** route acquisition consumes that snapshot, observes the elapsed loading time through the
+  unchanged mark, and makes no claim that the preceding trust load was deadline-interruptible
 
 #### Scenario: Reject a synchronous hostname deadline before dispatch
 
@@ -206,15 +297,18 @@ route SHALL retain and use the absolute deadline.
 
 ### Requirement: Errors and route hooks remain bounded and composable
 
-Proxy failures SHALL distinguish invalid configuration, unsupported proxy transport,
-authentication required, rejected CONNECT status, informational/head limits, and malformed proxy
-responses while preserving existing resolver, connection, parser, byte-I/O, allocation, TLS,
-identity, and trust failures. Proxy-owned status, headers, and challenges SHALL remain within stated
-limits and SHALL NOT borrow from a closed response head or retain credentials in diagnostics.
+Proxy failures SHALL distinguish invalid configuration, configuration-time unsupported proxy
+transport, authentication required, rejected CONNECT status, owned-metadata limits,
+informational/head limits, and malformed proxy responses while preserving existing resolver,
+connection, parser, byte-I/O, allocation, TLS, identity, and trust failures. Proxy-owned status,
+headers, and challenges SHALL obey the exact copy limits above and SHALL NOT borrow from a closed
+response head or retain credentials or identity payloads in diagnostics.
 
-The capability SHALL expose stable route-key data containing proxy endpoint identity, opaque
-configuration/authentication identity, Forward versus Tunnel mode, original origin, and origin
-security context for later pooling. It SHALL also expose pure route recomputation from a new origin
+The capability SHALL expose stable route-key data containing proxy endpoint identity, exact opaque
+caller-supplied configuration/authentication identities, Forward versus Tunnel mode, original
+origin, and origin security context for later pooling. Copying a route/key SHALL preserve those IDs;
+equality SHALL compare them exactly without formatting or hashing credentials. It SHALL also expose
+pure route recomputation from a new origin
 so redirect policy can reapply bypass and credential selection. These hooks SHALL NOT implement
 pool storage, redirect following, retry, replay, or permanent proxy-capability caching.
 
@@ -238,10 +332,14 @@ risk, limits, ownership, errors, deadlines, and exclusions. Scripted transports 
 the shared native and intended LLVM-to-Wasm engines. Physical native acquisition SHALL inherit the
 existing admitted socket targets and SHALL return a documented unsupported result elsewhere.
 
-Default verification SHALL reuse shared HTTP head and client fixtures and the existing native
-acceptance corpus. It SHALL use a small distinct composed-transition corpus rather than duplicate
-parser, TLS, or per-feature fresh-process suites, and SHALL include independent correctness and
-test-economics review.
+Default verification SHALL use exactly one shared `Analysis` snapshot for configuration, selection,
+routed preparation, and diagnostics; one compact shared runtime corpus program for distinct Forward,
+CONNECT, suffix, and close/callback signals; one already existing TLS fixture vector for the unique
+CONNECT-to-origin-TLS boundary; and structural native preflight assertions for endpoint choice and
+deadline refusal. Exactly one LLVM-to-Wasm leg SHALL prove the named ordinary-source
+routed-preparation-and-scripted-tunnel portability claim. Verification SHALL add no stress or timing
+suite, per-case compilation, fresh-process matrix, duplicate TLS matrix, or new standalone test
+worker.
 
 #### Scenario: Import the portable proxy policy
 
