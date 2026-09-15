@@ -61,13 +61,21 @@ The redirect request retains semantic URI, method, headers, header policy, HTTP 
 policy, and request limits. A `PreparedRequest` is not sufficient input because it contains emitted
 bytes and admission identity, not the state needed to build another hop.
 
-`BodySource` makes replay authority explicit:
+Four source-specific operations make replay authority explicit:
 
-- `Empty` has no producer and is replayable without content.
-- `RepeatableBytes` borrows immutable caller bytes for the complete operation.
-- `OneShot` moves one affine producer and permits one attempt.
-- `ReplayFactory` creates and releases one fresh scoped producer for every attempt, including the
-  first attempt.
+- `Redirect.withEmptyResponse` selects empty framing. It has neither a producer nor source error or
+  requirement rows.
+- `Redirect.withBytesResponse` borrows immutable caller bytes for the complete operation and
+  creates a zero-resource cursor for each retained-body attempt.
+- `Redirect.withOneShotResponse` moves one affine producer and exposes only that producer's error,
+  requirement, and conformance rows.
+- `Redirect.withReplayResponse` moves a replay factory and exposes only the factory and producer
+  error, requirement, and conformance rows. The factory creates and releases one fresh scoped
+  producer for every attempt, including the first attempt.
+
+Empty and borrowed-byte calls require no placeholder producer, replay factory, or phantom source
+witness. All four operations use the same private scoped iterative engine; the operation-specific
+surface changes only source ownership and the source channels present in its public contract.
 
 A retained-body redirect after OneShot returns `ReplayUnavailable` before the next contact. An
 early response does not restore OneShot authority. The producer can have external effects before
@@ -154,9 +162,11 @@ back to Direct and does not start a parallel attempt.
 
 ## Final response and errors
 
-`Redirect.withResponse` calls the final callback exactly once with the live final exchange, final
-owned URI, and redirect count. The callback can borrow those values only for its scope. Its success,
-failure, and requirements remain exact; the redirect actor does not wrap them as unknown values.
+`Redirect.withEmptyResponse`, `Redirect.withBytesResponse`, `Redirect.withOneShotResponse`, and
+`Redirect.withReplayResponse` each call the final callback exactly once with the live final
+exchange, final owned URI, and redirect count. The callback can borrow those values only for its
+scope. Its success, failure, and requirements remain exact; the redirect actor does not wrap them
+as unknown values.
 
 Redirect policy distinguishes LocationMissing, LocationAmbiguous, LocationInvalid,
 RedirectSchemeDenied, RedirectOriginDenied, DowngradeDenied, HopLimit, RedirectLoop,
