@@ -9,7 +9,7 @@ import * as SourceFile from '../src/SourceFile.js'
 import * as Stdlib from '../src/Stdlib.js'
 import * as Projections from './support/projections.js'
 import { httpValuesAcceptanceSource } from './support/httpValuesAcceptance.js'
-import { httpProxyPolicyAcceptanceSource } from './support/httpProxyAcceptance.js'
+import { httpProxyRedirectPolicyAcceptanceSource } from './support/httpRedirectAcceptance.js'
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
@@ -292,12 +292,14 @@ pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
 )
 
 it.effect(
-  'type-checks bounded HTTP proxy policy and verifies its lowered MIR once',
+  'compiles HTTP proxy and redirect policy witnesses and verifies their lowered MIR once',
   () =>
     Effect.gen(function* () {
+      // Ownership-negative declarations stay as exported fragments because any source error makes
+      // MIR globally unavailable; this snapshot retains the one positive composite program.
       const snapshot = yield* AnalysisFixture.retainingMain(
-        'http-proxy/policy',
-        ascii(httpProxyPolicyAcceptanceSource),
+        'http-proxy-redirect/policy',
+        ascii(httpProxyRedirectPolicyAcceptanceSource),
       )
       assert.deepEqual(diagnosticSummary(snapshot), [])
       assert.deepEqual(MirVerification.verify(Analysis.loweredMir(snapshot)), [])
