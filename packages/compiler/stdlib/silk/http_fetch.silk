@@ -39,7 +39,6 @@ import silk.http_content {
 import silk.http_headers {Headers, Limits as HeaderLimits}
 import silk.http_redirect as Redirect
 import silk.http_redirect {
-  AttemptHandler,
   AttemptRequest,
   BodyProducer,
   HybridAttempt,
@@ -895,7 +894,7 @@ effect fn copyFinalTrailers<'trailers>(
 }
 
 struct DeliveryResponseHandler<D> {
-  destination: D
+  destination: Option<D>
   content: Content.Mode
   contentLimits: Content.Limits
   responseValueLimits: HeaderLimits
@@ -915,7 +914,7 @@ effect fn deliverResponse<
   ?DestinationRequirements,
   D: Destination<A, DestinationError ? DestinationRequirements>,
 >(
-  handler: DeliveryResponseHandler<D>,
+  handler: &mut DeliveryResponseHandler<D>,
   uri: Uri<'call>,
   hop: usize,
   exchange: &'call mut Exchange<'exchangeView, P>,
@@ -925,17 +924,19 @@ effect fn deliverResponse<
 where
   &mut P provides &HttpTransport from &mut HttpTransport | &mut MonotonicClock | &mut Allocator | &mut Random,
   &mut P provides &HttpTransport from &mut HttpTransport {
-    let DeliveryResponseHandler<D> {
-      destination,
-      content,
-      contentLimits,
-      responseValueLimits,
-      maxEncodedBodyBytes,
-      maxDeliveredBodyBytes,
-      maxOwnedMetadataBytes,
-      maxBufferedBytes,
-      deadline,
-    } = move handler
+    let stored = Intrinsic.replace(handler.destination, Option.none<D>())
+    let destination = match move stored {
+      Option.Some {value} => move value
+      Option.None => unavailable<D>()
+    }
+    let content = handler.content
+    let contentLimits = handler.contentLimits
+    let responseValueLimits = handler.responseValueLimits
+    let maxEncodedBodyBytes = handler.maxEncodedBodyBytes
+    let maxDeliveredBodyBytes = handler.maxDeliveredBodyBytes
+    let maxOwnedMetadataBytes = handler.maxOwnedMetadataBytes
+    let maxBufferedBytes = handler.maxBufferedBytes
+    let deadline = copyDeadline(&handler.deadline)
     let mut selectedDestination = move destination
     let head = run exchange.head()
     let status = head.status()
@@ -1087,7 +1088,7 @@ impl<
     'provider: 'transport,
     'tunnel: 'provider,
   >(
-    handler: Self,
+    handler: &mut Self,
     uri: Uri<'call>,
     hop: usize,
     exchange: &'call mut Exchange<
@@ -1102,11 +1103,11 @@ impl<
     &mut RoutedP provides &HttpTransport from &mut HttpTransport,
     &mut RoutedP provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock | &mut Allocator | &mut Random,
     &mut RoutedP provides &ByteDuplex from &mut ByteDuplex {
-    return run deliverResponse(move handler, uri, hop, exchange)
+    return run deliverResponse(handler, uri, hop, exchange)
   }
 
   effect<'call> fn handleDirect<'call, 'exchangeView: 'call>(
-    handler: Self,
+    handler: &mut Self,
     uri: Uri<'call>,
     hop: usize,
     exchange: &'call mut Exchange<'exchangeView, DirectP>,
@@ -1116,7 +1117,7 @@ impl<
   where
     &mut DirectP provides &HttpTransport from &mut HttpTransport | &mut MonotonicClock | &mut Allocator | &mut Random,
     &mut DirectP provides &HttpTransport from &mut HttpTransport {
-    return run deliverResponse(move handler, uri, hop, exchange)
+    return run deliverResponse(handler, uri, hop, exchange)
   }
 }
 
@@ -1190,7 +1191,7 @@ impl<
     }
     let mut scratch: [u8; 0] = []
     let response = DeliveryResponseHandler<D> {
-      destination: move destination,
+      destination: Option.some<D>(move destination),
       content: content,
       contentLimits: move contentLimits,
       responseValueLimits: http.responseBody.trailerValues,
@@ -1396,7 +1397,7 @@ impl<
     }
     let mut scratch = run Bytes.zeroed(http.writeCapacity)
     let response = DeliveryResponseHandler<D> {
-      destination: move destination,
+      destination: Option.some<D>(move destination),
       content: content,
       contentLimits: move contentLimits,
       responseValueLimits: http.responseBody.trailerValues,
@@ -1609,7 +1610,7 @@ impl<
     }
     let mut scratch = run Bytes.zeroed(http.writeCapacity)
     let response = DeliveryResponseHandler<D> {
-      destination: move destination,
+      destination: Option.some<D>(move destination),
       content: content,
       contentLimits: move contentLimits,
       responseValueLimits: http.responseBody.trailerValues,
@@ -1846,7 +1847,7 @@ impl<
     }
     let mut scratch = run Bytes.zeroed(http.writeCapacity)
     let response = DeliveryResponseHandler<D> {
-      destination: move destination,
+      destination: Option.some<D>(move destination),
       content: content,
       contentLimits: move contentLimits,
       responseValueLimits: http.responseBody.trailerValues,
