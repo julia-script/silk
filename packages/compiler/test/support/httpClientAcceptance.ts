@@ -1,4 +1,13 @@
 /** Portable client acceptance for owned reuse, staging, bounded reads, deadlines, and tunnels. */
+import {
+  tlsClientRsaRootPem,
+  tlsClientRsaWrongNameClientHello,
+  tlsClientRsaWrongNameServerFlight,
+} from './tlsClientAcceptance.js'
+
+const silkBytes = (bytes: Uint8Array): string =>
+  `b"${[...bytes].map((byte) => `\\x${byte.toString(16).padStart(2, '0')}`).join('')}"`
+
 interface Scenario {
   readonly id: number
   readonly callback: string
@@ -14,6 +23,7 @@ const protocol: ReadonlyArray<Scenario> = [
   { id: 7, callback: 'upgradeExchange' },
   { id: 11, callback: 'discardExchange' },
   { id: 17, callback: 'failExchange' },
+  { id: 22, callback: 'routedWrongName' },
 ]
 const boundaries: ReadonlyArray<Scenario> = [
   { id: 6, callback: 'receiveBoundaryExchange' },
@@ -272,6 +282,10 @@ const sourceFor = (
   routeImports = '',
   routeSupport = '',
   routeWitness = '',
+  routeTransportFields = '',
+  routeHttpReadHook = '',
+  routeHttpWriteHook = '',
+  routeByteWriteHook = '',
 ): string => `import silk.allocator {Allocator, OutOfMemoryError}
 import silk.byte_duplex {ByteDuplex, ByteIoError, ByteIoOperation, ReadTransfer}
 import silk.effect {Effect}
@@ -399,6 +413,7 @@ struct TestTransport {
   shutdownCount: usize
   writeShutdown: bool
   closed: bool
+${routeTransportFields}
 }
 
 fn reached(now: &Instant, target: &Instant) -> bool {
@@ -463,6 +478,7 @@ impl HttpTransport for TestTransport {
       index = index + usize.ONE
     }
     self.readOffset = self.readOffset + count
+${routeHttpReadHook}
     return ReadTransfer.Data {count: count}
   }
   effect fn writeSomeRaw(self: &mut Self, input: &[u8], deadline: Option<Instant>) -> usize
@@ -475,6 +491,7 @@ impl HttpTransport for TestTransport {
       fail TransportError.Plain {error: ByteIoError.Closed {operation: ByteIoOperation.Write}}
     }
     run checkTransportDeadline(&deadline, ByteIoOperation.Write)
+${routeHttpWriteHook}
     let ordinal = self.writeOrdinal
     self.writeOrdinal = ordinal + usize.ONE
     let mut maximum: usize = 256
@@ -512,7 +529,9 @@ impl HttpTransport for TestTransport {
     if count > maximum {
       count = maximum
     }
-    if count > 256 - self.accepted {
+    let mut capacity = 256
+    if self.scenario == 22 { capacity = 512 }
+    if count > capacity - self.accepted {
       self.closed = true
       fail TransportError.Plain {
         error: ByteIoError.Provider {operation: ByteIoOperation.Write, code: 2},
@@ -601,8 +620,11 @@ impl TestTransport {
       fail ByteIoError.Closed {operation: ByteIoOperation.Write}
     }
     run checkByteDeadline(&deadline, ByteIoOperation.Write)
+${routeByteWriteHook}
     self.writeOrdinal = self.writeOrdinal + usize.ONE
-    if input.length > 256 - self.accepted {
+    let mut capacity = 256
+    if self.scenario == 22 { capacity = 512 }
+    if input.length > capacity - self.accepted {
       self.closed = true
       fail ByteIoError.Provider {operation: ByteIoOperation.Write, code: 2}
     }
@@ -860,6 +882,7 @@ effect fn runCase(scenario: i32) -> i32 ! ClientError | RequestError | OutOfMemo
     shutdownCount: usize.ZERO,
     writeShutdown: false,
     closed: false,
+${routeTransportFields.length > 0 ? '    routeAudit: Option.none<Shared<RouteAudit>>,' : ''}
   }
 ${routeWitness}
   let handler = Handler {request: move request, scenario: scenario}
@@ -1488,6 +1511,31 @@ pub fn main() -> i32 {
 }
 `
 
+const routedConnectHead = Buffer.from(
+  'CONNECT wrong.example:443 HTTP/1.1\r\nProxy-Authorization: Basic dXNlcjpwYXNz\r\nHost: wrong.example:443\r\nUser-Agent: silk-http/1\r\nAccept: */*\r\n\r\n',
+)
+const routedServerInput = Buffer.concat([
+  Buffer.from('HTTP/1.1 200 Connection Established\r\n\r\n'),
+  tlsClientRsaWrongNameServerFlight,
+])
+
+const routeTransportFields = `  routeAudit: Option<Shared<RouteAudit>>`
+const routeHttpReadHook = `    recordRouteConnectAccepted(
+      &self.routeAudit,
+      self.input,
+      self.readOffset,
+    )`
+const routeHttpWriteHook = `    if !recordRouteOutput(&self.routeAudit, input) {
+      self.closed = true
+      fail TransportError.Plain {
+        error: ByteIoError.Provider {operation: ByteIoOperation.Write, code: 122},
+      }
+    }`
+const routeByteWriteHook = `    if !recordRouteTlsOutput(&self.routeAudit, input) {
+      self.closed = true
+      fail ByteIoError.Provider {operation: ByteIoOperation.Write, code: 122}
+    }`
+
 const routeImports = `import silk.https_identity {IdentityError}
 import silk.http_client {
   AcquiredRouteContext,
@@ -1498,12 +1546,67 @@ import silk.http_client {
   RouteTransport,
 }
 import silk.http_proxy {BypassPolicy, ProxyAuth, ProxyAuthContextId, ProxyConfig, ProxyConfigId, ProxyError, Route, selectRoute}
-import silk.tls_client {ClientLimits}
-import silk.tls_connection as Tls
-import silk.trust_snapshot {TrustSnapshot}
+import silk.shared {Shared}
+import silk.tls_client {CertificateIdentityFailure, ClientLimits, TlsError}
+import silk.tls_connection as Tls {ConnectionError}
+import silk.trust_snapshot {TrustLoadLimits, TrustSnapshot, TrustSourceError}
 `
 
-const routeSupport = `enum RouteAcquisitionError { Failed }
+const routeSupport = `struct RouteAudit {
+  output: [u8; 512]
+  outputLength: usize
+  connectAccepted: bool
+  handlerCount: usize
+}
+
+fn appendRouteOutput(state: &mut RouteAudit, input: &[u8]) -> bool {
+  if input.length > 512 - state.outputLength { return false }
+  let mut index = usize.ZERO
+  while index < input.length {
+    state.output[state.outputLength + index] = input[index]
+    index = index + usize.ONE
+  }
+  state.outputLength = state.outputLength + input.length
+  return true
+}
+
+fn recordRouteOutput(audit: &Option<Shared<RouteAudit>>, input: &[u8]) -> bool {
+  return match & audit.* {
+    Option.None => true
+    Option.Some {value} => Shared.withMut<RouteAudit, bool>(&value, fn(state: &mut RouteAudit) -> bool {
+      return appendRouteOutput(state, input)
+    })
+  }
+}
+
+fn recordRouteTlsOutput(audit: &Option<Shared<RouteAudit>>, input: &[u8]) -> bool {
+  return match & audit.* {
+    Option.None => true
+    Option.Some {value} => Shared.withMut<RouteAudit, bool>(&value, fn(state: &mut RouteAudit) -> bool {
+      if !state.connectAccepted { return false }
+      return appendRouteOutput(state, input)
+    })
+  }
+}
+
+fn recordRouteConnectAccepted(
+  audit: &Option<Shared<RouteAudit>>,
+  input: &[u8],
+  readOffset: usize,
+) -> () {
+  let head = b"HTTP/1.1 200 Connection Established\\r\\n\\r\\n"
+  if readOffset < head.length || !sameRouteBytes(input, usize.ZERO, head) { return () }
+  match & audit.* {
+    Option.None => {}
+    Option.Some {value} => Shared.withMut<RouteAudit, ()>(&value, fn(state: &mut RouteAudit) -> () {
+      state.connectAccepted = true
+      return ()
+    })
+  }
+  return ()
+}
+
+enum RouteAcquisitionError { Failed }
 
 struct ScriptedRouteClient {
   provider: TestTransport
@@ -1547,7 +1650,7 @@ for ScriptedRouteClient {
   acquire: ScriptedRouteClient.acquire
 }
 
-struct RoutedNoop {}
+struct RoutedNoop { audit: Option<Shared<RouteAudit>> }
 
 impl<'configuration> RoutedNoop {
   effect<
@@ -1567,6 +1670,12 @@ impl<'configuration> RoutedNoop {
       RouteTransport<'transport, 'provider, 'tunnel, TestTransport>
     >,
   ) -> i32 {
+    if let Option.Some {value} = &handler.audit {
+      Shared.withMut<RouteAudit, ()>(&value, fn(state: &mut RouteAudit) -> () {
+        state.handlerCount = state.handlerCount + usize.ONE
+        return ()
+      })
+    }
     drop handler
     drop route
     drop connection
@@ -1577,6 +1686,187 @@ impl<'configuration> RoutedNoop {
 impl<'configuration> RouteHandler<'configuration, TestTransport, i32, never ? never>
 for RoutedNoop {
   handle: RoutedNoop.handle
+}
+
+struct RouteRandom { filled: usize }
+
+impl Random for RouteRandom {
+  effect fn fillBytes(self: &mut Self, output: &mut [u8]) -> () {
+    let mut index = usize.ZERO
+    while index < output.length {
+      output[index] = usize.toU8((self.filled + index + usize.ONE) % 251 + usize.ONE)
+      index = index + usize.ONE
+    }
+    self.filled = self.filled + output.length
+    return ()
+  }
+}
+
+struct RouteWallClock {}
+
+impl RouteWallClock {
+  effect fn now(self: &mut Self) -> Instant {
+    return SystemClock.make(1789156800, 123456789)
+  }
+
+  effect fn resolution(self: &mut Self) -> u64 {
+    return u64.toU64(1)
+  }
+}
+
+impl SystemClock for RouteWallClock {
+  now: RouteWallClock.now
+  getResolution: RouteWallClock.resolution
+}
+
+fn routeInput() -> &'static [u8] {
+  return ${silkBytes(routedServerInput)}
+}
+
+fn sameRouteBytes(actual: &[u8], offset: usize, expected: &[u8]) -> bool {
+  if expected.length > actual.length - offset { return false }
+  let mut index = usize.ZERO
+  while index < expected.length {
+    if actual[offset + index] != expected[index] { return false }
+    index = index + usize.ONE
+  }
+  return true
+}
+
+fn sameRouteHello(actual: &[u8], offset: usize, expected: &[u8]) -> bool {
+  if expected.length < 5 || offset + expected.length > actual.length { return false }
+  if actual[offset] != 22 || actual[offset + 1] != 3 || actual[offset + 2] != 3 {
+    return false
+  }
+  if u8.toUsize(actual[offset + 3]) * 256 + u8.toUsize(actual[offset + 4]) + 5
+    != expected.length { return false }
+  let mut index: usize = 5
+  while index < expected.length {
+    if actual[offset + index] != expected[index] { return false }
+    index = index + usize.ONE
+  }
+  return true
+}
+
+fn routedAuditPassed(state: &RouteAudit) -> bool {
+  let connect = ${silkBytes(routedConnectHead)}
+  let hello = ${silkBytes(tlsClientRsaWrongNameClientHello)}
+  let expected = connect.length + hello.length
+  return state.outputLength == expected
+    && sameRouteBytes(&state.output, usize.ZERO, connect)
+    && sameRouteHello(&state.output, connect.length, hello)
+    && state.connectAccepted
+    && state.handlerCount == usize.ZERO
+}
+
+fn identityFailure(error: ConnectionError) -> bool {
+  return match move error {
+    ConnectionError.Tls {error} => match move error {
+      TlsError.CertificateIdentity {
+        error: CertificateIdentityFailure.Match {error: IdentityError.NoMatch},
+      } => true
+      _ => false
+    }
+    _ => false
+  }
+}
+
+effect fn routedWrongName() -> i32 ! OutOfMemoryError {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let audit = run Shared.make<RouteAudit>(RouteAudit {
+    output: [${Array.from({ length: 512 }, () => 0).join(', ')}],
+    outputLength: usize.ZERO,
+    connectAccepted: false,
+    handlerCount: usize.ZERO,
+  }) |> Effect.provideMut<Allocator>(&mut allocator)
+  let provider = TestTransport {
+    scenario: 22,
+    input: routeInput(),
+    readOffset: usize.ZERO,
+    writeOrdinal: usize.ZERO,
+    accepted: usize.ZERO,
+    closeCount: usize.ZERO,
+    shutdownCount: usize.ZERO,
+    writeShutdown: false,
+    closed: false,
+    routeAudit: Option.some<Shared<RouteAudit>>(Shared.clone<RouteAudit>(&audit)),
+  }
+  let empty: [Origin; 0] = []
+  let bypass = match move run BypassPolicy.copy(&empty)
+    |> Effect.provideMut<Allocator>(&mut allocator) {
+    Result.Success {value} => move value
+    Result.Failure {error} => { return 151 }
+  }
+  let authentication = match move run ProxyAuth.preparedBasic(
+    ProxyAuthContextId.make(100),
+    b"dXNlcjpwYXNz",
+  ) |> Effect.provideMut<Allocator>(&mut allocator) {
+    Result.Success {value} => move value
+    Result.Failure {error} => { return 152 }
+  }
+  let config = match move ProxyConfig.fromUri(
+    ProxyConfigId.make(99),
+    "http://example.com",
+    move authentication,
+    move bypass,
+    4096,
+  ) {
+    Result.Success {value} => move value
+    Result.Failure {error} => { return 153 }
+  }
+  let target = match move Uri.parse("https://wrong.example/") {
+    Result.Success {value} => value
+    Result.Failure {error} => { return 154 }
+  }
+  let origin = match move Origin.fromUri(&target) {
+    Result.Success {value} => value
+    Result.Failure {error} => { return 155 }
+  }
+  let route = selectRoute(&config, origin)
+  let trustResult = run TrustSnapshot.fromPem(
+    ${silkBytes(tlsClientRsaRootPem)},
+    TrustLoadLimits.defaults(),
+  ) |> Effect.provideMut<Allocator>(&mut allocator)
+  let trust = match move trustResult {
+    Result<TrustSnapshot, TrustSourceError>.Success {value} => move value
+    Result<TrustSnapshot, TrustSourceError>.Failure {error} => { return 156 }
+  }
+  let client = ScriptedRouteClient {
+    provider: move provider,
+    settingsValue: RouteSettings {
+      http: limits(),
+      request: valueLimits(),
+      maxRequestHeadBytes: 1024,
+      maxProxyCredentialBytes: 512,
+      protocol: RouteProtocol.Http10,
+      tls: ClientLimits.defaults(),
+      handshakeDurationNanoseconds: u64.toU64(30000000000),
+    },
+  }
+  let mut wall = RouteWallClock {}
+  let mut clock = FixedClock {mark: SystemClock.make(0, 0)}
+  let mut random = RouteRandom {filled: usize.ZERO}
+  let attempted = run Effect.result(Client.withRoute(
+    move client,
+    route,
+    Option.some<TrustSnapshot>(move trust),
+    Option.none<Instant>(),
+    RoutedNoop {audit: Option.some<Shared<RouteAudit>>(Shared.clone<RouteAudit>(&audit))},
+  ))
+    |> Effect.provideMut<SystemClock>(&mut wall)
+    |> Effect.provideMut<Random>(&mut random)
+    |> Effect.provideMut<MonotonicClock>(&mut clock)
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let failedByIdentity = match move attempted {
+    Result<i32, ProxyError | ClientError | ConnectionError | IdentityError | RouteAcquisitionError | OutOfMemoryError>.Success {value} => false
+    Result<i32, ProxyError | ClientError | ConnectionError | IdentityError | RouteAcquisitionError | OutOfMemoryError>.Failure {error} => match move error {
+      ConnectionError cause => identityFailure(move cause)
+      _ => false
+    }
+  }
+  if !failedByIdentity { return 157 }
+  if !Shared.with<RouteAudit, bool>(&audit, routedAuditPassed) { return 158 }
+  return 0
 }
 
 effect fn typecheckRoute(transport: TestTransport) -> i32
@@ -1638,7 +1928,7 @@ effect fn typecheckRoute(transport: TestTransport) -> i32
     route,
     Option.none<TrustSnapshot>(),
     Option.none<Instant>(),
-    RoutedNoop {},
+    RoutedNoop {audit: Option.none<Shared<RouteAudit>>()},
   )
 }
 `
@@ -1646,6 +1936,10 @@ effect fn typecheckRoute(transport: TestTransport) -> i32
 const routeWitness = `  // Compile-only witness: the runtime corpus does not select this scenario.
   if scenario == -1 {
     return run typecheckRoute(move adapter)
+  }
+  if scenario == 22 {
+    drop adapter
+    return run routedWrongName()
   }`
 
 export const httpClientAcceptanceSource = sourceFor(
@@ -1654,6 +1948,10 @@ export const httpClientAcceptanceSource = sourceFor(
   routeImports,
   routeSupport,
   routeWitness,
+  routeTransportFields,
+  routeHttpReadHook,
+  routeHttpWriteHook,
+  routeByteWriteHook,
 )
 export const httpClientBoundariesAcceptanceSource = sourceFor(boundaries, boundaryHandler)
 export const httpClientOutputFailuresAcceptanceSource = sourceFor(outputFailures, boundaryHandler)
