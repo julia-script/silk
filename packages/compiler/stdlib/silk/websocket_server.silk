@@ -451,7 +451,7 @@ where &'transport mut P provides &ByteDuplex from &mut ByteDuplex,
   run requireOpen(&socket.*, Operation.ReadEvent)
   let attempted = run Effect.result(readEventCore(
     &mut socket.*,
-    &mut output.*,
+    move output,
     copyDeadline(&deadline),
   ))
   return match move attempted {
@@ -842,7 +842,7 @@ where &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut Monoton
       run acceptUtf8(&mut validation, chunk)
       drop chunk
     } else {
-      drop unmasked
+      drop move unmasked
     }
     offset = offset + count
   }
@@ -1216,7 +1216,11 @@ effect fn readInto<'output, 'transport, P>(
 where &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock {
   let mut copied = usize.ZERO
   while copied < length {
-    let attempted = run Effect.result(channel.fill(usize.ONE, copyDeadline(&deadline)))
+    let attempted = run Effect.result(BufferedDuplex.fill(
+      &mut channel.*,
+      usize.ONE,
+      copyDeadline(&deadline),
+    ))
     let availableCount = match move attempted {
       Result<FillOutcome, BufferError>.Failure {error} => {
         let accepted = prior + copied + bufferProgress(&error)
@@ -1232,7 +1236,7 @@ where &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut Monoton
       }
     }
     if availableCount == usize.ZERO { fail WebSocketError.Truncated }
-    let available = channel.peek()
+    let available = BufferedDuplex.peek(&channel.*)
     let count = minimum(available.length, length - copied)
     let mut index = usize.ZERO
     while index < count {
@@ -1240,7 +1244,7 @@ where &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut Monoton
       index = index + usize.ONE
     }
     drop available
-    let consumed = run Effect.result(channel.consume(count))
+    let consumed = run Effect.result(BufferedDuplex.consume(&mut channel.*, count))
     match move consumed {
       Result<(), BufferError>.Failure {error} => {
         fail WebSocketError.Buffer {
@@ -1300,7 +1304,7 @@ where &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut Monoton
     header.wireLength - header.payloadLength,
   )
   let unmasked = unmask(move filled, header.payloadLength, &header.mask, usize.ZERO)
-  drop unmasked
+  drop move unmasked
   return ()
 }
 
@@ -1382,7 +1386,7 @@ where &'transport mut P provides &ByteDuplex from &mut ByteDuplex,
       }
     }
   }
-  let closed = run Effect.result(socket.channel.close())
+  let closed = run Effect.result(BufferedDuplex.close(&mut socket.channel.*))
   match move closed {
     Result<(), ByteIoError>.Failure {error} => {
       fail WebSocketError.Transport {operation: operation, error: move error}
@@ -1442,7 +1446,11 @@ where &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut Monoton
   }
   drop frameLength
   let header = Slice.view<u8>(&socket.header, usize.ZERO, headerLength)
-  let headerWrite = run Effect.result(socket.channel.writeAll(header, copyDeadline(&deadline)))
+  let headerWrite = run Effect.result(BufferedDuplex.writeAll(
+    &mut socket.channel.*,
+    header,
+    copyDeadline(&deadline),
+  ))
   drop header
   match move headerWrite {
     Result<(), BufferError>.Failure {error} => {
@@ -1454,7 +1462,11 @@ where &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut Monoton
     }
     Result<(), BufferError>.Success {value} => { drop value }
   }
-  let payloadWrite = run Effect.result(socket.channel.writeAll(payload, copyDeadline(&deadline)))
+  let payloadWrite = run Effect.result(BufferedDuplex.writeAll(
+    &mut socket.channel.*,
+    payload,
+    copyDeadline(&deadline),
+  ))
   match move payloadWrite {
     Result<(), BufferError>.Failure {error} => {
       fail WebSocketError.Buffer {
@@ -1465,7 +1477,10 @@ where &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut Monoton
     }
     Result<(), BufferError>.Success {value} => { drop value }
   }
-  let flushed = run Effect.result(socket.channel.flush(move deadline))
+  let flushed = run Effect.result(BufferedDuplex.flush(
+    &mut socket.channel.*,
+    move deadline,
+  ))
   match move flushed {
     Result<(), BufferError>.Failure {error} => {
       fail WebSocketError.Buffer {
@@ -1582,7 +1597,7 @@ where &'transport mut P provides &ByteDuplex from &mut ByteDuplex,
   }
   socket.failureValue = failure
   socket.stateValue = State.Failed
-  let closed = socket.channel.close()
+  let closed = BufferedDuplex.close(&mut socket.channel.*)
   run Effect.catchAll(move closed, discardCloseFailure)
   fail move error
 }
