@@ -1765,6 +1765,264 @@ where
   return run withSemanticRequest(move request, move operation)
 }
 
+struct ReplayOperation<'fetch, C, D, Factory, Producer> {
+  fetch: &'fetch mut Fetch<C>
+  factory: Factory
+  options: FetchOptions
+  destination: D
+}
+
+impl<
+  'fetch,
+  C,
+  D,
+  Factory,
+  Producer,
+  RoutedP,
+  DirectP,
+  A,
+  FactoryError,
+  ProducerError,
+  DestinationError,
+  AcquisitionError,
+  ?FactoryRequirements,
+  ?ProducerRequirements,
+  ?DestinationRequirements,
+  ?AcquisitionRequirements,
+  Factory: ReplayFactory<Producer, FactoryError, FactoryRequirements>,
+  Producer: BodyProducer<ProducerError ? ProducerRequirements>,
+  D: Destination<A, DestinationError ? DestinationRequirements>,
+> ReplayOperation<'fetch, C, D, Factory, Producer> {
+  effect<'call> fn handle<'call>(
+    operation: Self,
+    request: Redirect.Request<'call, 'call, 'call, 'call>,
+  ) -> A
+  ! RedirectError | FetchError | ValueError | BodyError | FactoryError | ProducerError | DestinationError | ClientError | OutOfMemoryError | AcquisitionError
+  ? FactoryRequirements | ProducerRequirements | DestinationRequirements | AcquisitionRequirements | &mut MonotonicClock | &mut Allocator | &mut Random
+  where
+    FactoryRequirements in Without<FactoryRequirements, ByteDuplex>,
+    FactoryRequirements in Without<FactoryRequirements, HttpTransport>,
+    ProducerRequirements in Without<ProducerRequirements, ByteDuplex>,
+    ProducerRequirements in Without<ProducerRequirements, HttpTransport>,
+    DestinationRequirements in Without<DestinationRequirements, ByteDuplex>,
+    DestinationRequirements in Without<DestinationRequirements, HttpTransport>,
+    AcquisitionRequirements in Without<AcquisitionRequirements, ByteDuplex>,
+    AcquisitionRequirements in Without<AcquisitionRequirements, HttpTransport> {
+    let ReplayOperation<'fetch, C, D, Factory, Producer> {fetch, factory, options, destination} = move operation
+    let FetchOptions {
+      redirect,
+      content,
+      pool,
+      proxy,
+      deadline,
+      http,
+      contentLimits,
+      maxEncodedBodyBytes,
+      maxDeliveredBodyBytes,
+      maxOwnedMetadataBytes,
+      maxBufferedBytes,
+    } = move options
+    let mut adapter = FetchAttemptAdapter<'fetch, C> {
+      client: &mut fetch.client,
+      httpLimits: http,
+      poolMode: pool,
+      proxyMode: proxy,
+    }
+    let mut scratch = run Bytes.zeroed(http.writeCapacity)
+    let response = DeliveryResponseHandler<D> {
+      destination: move destination,
+      content: content,
+      contentLimits: move contentLimits,
+      responseValueLimits: http.responseBody.trailerValues,
+      maxEncodedBodyBytes: maxEncodedBodyBytes,
+      maxDeliveredBodyBytes: maxDeliveredBodyBytes,
+      maxOwnedMetadataBytes: maxOwnedMetadataBytes,
+      maxBufferedBytes: maxBufferedBytes,
+    }
+    return run mapSwitching(Redirect.withReplayHybridResponse(
+      &mut adapter,
+      move request,
+      &redirect,
+      move factory,
+      copyDeadline(&deadline),
+      Bytes.asMutSlice(&mut scratch),
+      move response,
+    ))
+  }
+}
+
+impl<
+  'fetch,
+  C,
+  D,
+  Factory,
+  Producer,
+  RoutedP,
+  DirectP,
+  A,
+  FactoryError,
+  ProducerError,
+  DestinationError,
+  AcquisitionError,
+  ?FactoryRequirements,
+  ?ProducerRequirements,
+  ?DestinationRequirements,
+  ?AcquisitionRequirements,
+  Factory: ReplayFactory<Producer, FactoryError, FactoryRequirements>,
+  Producer: BodyProducer<ProducerError ? ProducerRequirements>,
+  D: Destination<A, DestinationError ? DestinationRequirements>,
+> SemanticRequestHandler<
+  A,
+  RedirectError | FetchError | ValueError | BodyError | FactoryError | ProducerError | DestinationError | ClientError | OutOfMemoryError | AcquisitionError
+  ? FactoryRequirements | ProducerRequirements | DestinationRequirements | AcquisitionRequirements | &mut MonotonicClock | &mut Allocator | &mut Random,
+> for ReplayOperation<'fetch, C, D, Factory, Producer> {
+  handle: ReplayOperation.handle
+}
+
+/// Executes a replay-factory request and sequentially offers the selected representation.
+pub effect fn toSinkReplay<
+  'fetch,
+  'uri,
+  'method,
+  'headers,
+  'policy,
+  C,
+  Factory,
+  Producer,
+  S,
+  RoutedP,
+  DirectP,
+  FactoryError,
+  ProducerError,
+  SinkError,
+  AcquisitionError,
+  ?FactoryRequirements,
+  ?ProducerRequirements,
+  ?SinkRequirements,
+  ?AcquisitionRequirements,
+  Factory: ReplayFactory<Producer, FactoryError, FactoryRequirements>,
+  Producer: BodyProducer<ProducerError ? ProducerRequirements>,
+  S: Sink<SinkError ? SinkRequirements>,
+>(
+  fetch: &'fetch mut Fetch<C>,
+  request: FetchRequest<'uri, 'method, 'headers, 'policy>,
+  factory: Factory,
+  options: FetchOptions,
+  sink: S,
+) -> FetchResult
+! RedirectError | FetchError | ValueError | BodyError | FactoryError | ProducerError | DestinationFailure<SinkError> | ClientError | OutOfMemoryError | AcquisitionError
+? FactoryRequirements | ProducerRequirements | SinkRequirements | AcquisitionRequirements | &mut MonotonicClock | &mut Allocator | &mut Random
+where
+  FactoryRequirements in Without<FactoryRequirements, ByteDuplex>,
+  FactoryRequirements in Without<FactoryRequirements, HttpTransport>,
+  ProducerRequirements in Without<ProducerRequirements, ByteDuplex>,
+  ProducerRequirements in Without<ProducerRequirements, HttpTransport>,
+  SinkRequirements in Without<SinkRequirements, ByteDuplex>,
+  SinkRequirements in Without<SinkRequirements, HttpTransport>,
+  AcquisitionRequirements in Without<AcquisitionRequirements, ByteDuplex>,
+  AcquisitionRequirements in Without<AcquisitionRequirements, HttpTransport> {
+  run admit(&options)
+  let operation = ReplayOperation<'fetch, C, SinkDestination<S>, Factory, Producer> {
+    fetch: move fetch,
+    factory: move factory,
+    options: move options,
+    destination: SinkDestination<S> {sink: move sink},
+  }
+  return run withSemanticRequest(move request, move operation)
+}
+
+/// Executes a replay-factory request and atomically publishes a bounded body.
+pub effect fn collectReplay<
+  'fetch,
+  'uri,
+  'method,
+  'headers,
+  'policy,
+  C,
+  Factory,
+  Producer,
+  RoutedP,
+  DirectP,
+  FactoryError,
+  ProducerError,
+  AcquisitionError,
+  ?FactoryRequirements,
+  ?ProducerRequirements,
+  ?AcquisitionRequirements,
+  Factory: ReplayFactory<Producer, FactoryError, FactoryRequirements>,
+  Producer: BodyProducer<ProducerError ? ProducerRequirements>,
+>(
+  fetch: &'fetch mut Fetch<C>,
+  request: FetchRequest<'uri, 'method, 'headers, 'policy>,
+  factory: Factory,
+  options: FetchOptions,
+  maxBodyBytes: usize,
+) -> CollectedResponse
+! RedirectError | FetchError | ValueError | BodyError | FactoryError | ProducerError | ClientError | OutOfMemoryError | AcquisitionError
+? FactoryRequirements | ProducerRequirements | AcquisitionRequirements | &mut MonotonicClock | &mut Allocator | &mut Random
+where
+  FactoryRequirements in Without<FactoryRequirements, ByteDuplex>,
+  FactoryRequirements in Without<FactoryRequirements, HttpTransport>,
+  ProducerRequirements in Without<ProducerRequirements, ByteDuplex>,
+  ProducerRequirements in Without<ProducerRequirements, HttpTransport>,
+  AcquisitionRequirements in Without<AcquisitionRequirements, ByteDuplex>,
+  AcquisitionRequirements in Without<AcquisitionRequirements, HttpTransport> {
+  run admit(&options)
+  let operation = ReplayOperation<'fetch, C, CollectDestination, Factory, Producer> {
+    fetch: move fetch,
+    factory: move factory,
+    options: move options,
+    destination: CollectDestination {body: Bytes.make(), maximum: maxBodyBytes},
+  }
+  return run withSemanticRequest(move request, move operation)
+}
+
+/// Executes a replay-factory request and validates bounded discarded content.
+pub effect fn discardReplay<
+  'fetch,
+  'uri,
+  'method,
+  'headers,
+  'policy,
+  C,
+  Factory,
+  Producer,
+  RoutedP,
+  DirectP,
+  FactoryError,
+  ProducerError,
+  AcquisitionError,
+  ?FactoryRequirements,
+  ?ProducerRequirements,
+  ?AcquisitionRequirements,
+  Factory: ReplayFactory<Producer, FactoryError, FactoryRequirements>,
+  Producer: BodyProducer<ProducerError ? ProducerRequirements>,
+>(
+  fetch: &'fetch mut Fetch<C>,
+  request: FetchRequest<'uri, 'method, 'headers, 'policy>,
+  factory: Factory,
+  options: FetchOptions,
+  maxDiscardBytes: u64,
+) -> FetchResult
+! RedirectError | FetchError | ValueError | BodyError | FactoryError | ProducerError | ClientError | OutOfMemoryError | AcquisitionError
+? FactoryRequirements | ProducerRequirements | AcquisitionRequirements | &mut MonotonicClock | &mut Allocator | &mut Random
+where
+  FactoryRequirements in Without<FactoryRequirements, ByteDuplex>,
+  FactoryRequirements in Without<FactoryRequirements, HttpTransport>,
+  ProducerRequirements in Without<ProducerRequirements, ByteDuplex>,
+  ProducerRequirements in Without<ProducerRequirements, HttpTransport>,
+  AcquisitionRequirements in Without<AcquisitionRequirements, ByteDuplex>,
+  AcquisitionRequirements in Without<AcquisitionRequirements, HttpTransport> {
+  run admit(&options)
+  let operation = ReplayOperation<'fetch, C, DiscardDestination, Factory, Producer> {
+    fetch: move fetch,
+    factory: move factory,
+    options: move options,
+    destination: DiscardDestination {maximum: maxDiscardBytes},
+  }
+  return run withSemanticRequest(move request, move operation)
+}
+
 fn copyInstant(value: &Instant) -> Instant {
   return SystemClock.make(SystemClock.seconds(value), SystemClock.nanoseconds(value))
 }
