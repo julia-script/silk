@@ -1,4 +1,4 @@
-//! Bounded, replay-aware HTTP redirect policy and pure transition preparation.
+//! Bounded, replay-aware HTTP redirect policy and scoped attempt orchestration.
 //!
 //! # When to use
 //!
@@ -8,9 +8,10 @@
 //!
 //! # Details
 //!
-//! This actor owns policy names, bounded redirect history, and independently owned next-attempt
-//! state. Routed acquisition remains behind [`AttemptClient`]; final responses are lent only to a
-//! higher-ranked [`ResponseHandler`].
+//! This actor owns policy names, bounded redirect history, independently owned next-attempt state,
+//! replay-aware body writing, intermediate-response cleanup, and final callback dispatch. Routed
+//! acquisition remains behind [`AttemptClient`]; final responses are lent only to a higher-ranked
+//! [`ResponseHandler`].
 
 import silk.allocator {Allocator, OutOfMemoryError}
 import silk.byte_duplex {ByteDuplex}

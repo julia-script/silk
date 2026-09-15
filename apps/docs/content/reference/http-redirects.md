@@ -144,10 +144,12 @@ clamped to the operation deadline. The count includes chunk extensions and trail
 cap closes that connection and can continue to the next hop. Malformed framing, a read failure, or
 deadline expiry stops the redirect operation.
 
-The caller supplies one optional absolute deadline. Every attempt, producer wait, drain, CONNECT,
-TLS operation, and callback receives that same deadline. No hop receives a new duration. Success,
-typed failure, and structured cancellation release each active source, response, lease, and
-transport once without replacing the protected result.
+The caller supplies one optional absolute deadline. Every routed attempt, CONNECT, TLS operation,
+and intermediate drain reuses that same absolute deadline; no hop receives a new duration. A body
+producer, replay factory, or response callback can perform its own effects, but those interfaces do
+not receive the operation deadline automatically. Success, source or callback failure, transport
+failure, and structured cancellation release each active source, response, lease, and transport
+once without replacing the protected result.
 
 ## Proxy-aware attempts
 
@@ -162,18 +164,21 @@ back to Direct and does not start a parallel attempt.
 
 ## Final response and errors
 
-`Redirect.withEmptyResponse`, `Redirect.withBytesResponse`, `Redirect.withOneShotResponse`, and
-`Redirect.withReplayResponse` each call the final callback exactly once with the live final
-exchange, final owned URI, and redirect count. The callback can borrow those values only for its
-scope. Its success, failure, and requirements remain exact; the redirect actor does not wrap them
-as unknown values.
+When orchestration reaches a selected final response, `Redirect.withEmptyResponse`,
+`Redirect.withBytesResponse`, `Redirect.withOneShotResponse`, and `Redirect.withReplayResponse`
+call the final callback exactly once with the live final exchange, final owned URI, and redirect
+count. Policy, source, acquisition, or client failure before a final response does not invoke it.
+The callback can borrow those values only for its scope. Its success, failure, and requirements
+remain exact; the redirect actor does not wrap them as unknown values.
 
-Redirect policy distinguishes LocationMissing, LocationAmbiguous, LocationInvalid,
-RedirectSchemeDenied, RedirectOriginDenied, DowngradeDenied, HopLimit, RedirectLoop,
-ReplayUnavailable, ReplayContractMismatch, and LimitExceeded. Each policy failure owns only bounded
-hop, status, and URI context. Existing client, URI, allocation, source, acquisition, and callback
-failures remain separate channels. A failed Follow operation never returns the selected redirect
-response as success.
+Redirect policy distinguishes `InvalidPolicy` for inadmissible policy values, `NameListOverlap` for
+a name admitted as both safe and sensitive, `SizeOverflow` for checked storage arithmetic,
+`LimitExceeded` for inclusive finite bounds, `LocationMissing`, `LocationAmbiguous`,
+`LocationInvalid`, `RedirectSchemeDenied`, `RedirectOriginDenied`, `DowngradeDenied`, `HopLimit`,
+`RedirectLoop`, `ReplayUnavailable`, and `ReplayContractMismatch`. Each policy failure owns only
+bounded hop, status, and URI context. Existing client, URI, allocation, source, acquisition, and
+callback failures remain separate channels. A failed Follow operation never returns the selected
+redirect response as success.
 
 ## Standards and deliberate Zig differences
 
@@ -184,8 +189,9 @@ The request-transition and Location fixtures derive independently from
 native acceptance source records the expected emitted bytes and reuses that same source for one
 LLVM-to-Wasm leg.
 
-The pinned Zig client is comparison evidence, not fixture authority. Silk deliberately differs in
-these ways:
+The [Zig HTTP client at pinned revision
+`1bc89211`](https://codeberg.org/ziglang/zig/src/commit/1bc892110da738d6137b3f0b7e8e3a586ce09928/lib/std/http/Client.zig#L1205-L1278)
+is comparison evidence, not fixture authority. Silk deliberately differs in these ways:
 
 - 301 and 302 preserve POST by default; changing POST to GET requires explicit `ToGet` policy.
 - Cross-origin transitions and HTTPS-to-HTTP downgrade are denied by default.
@@ -195,9 +201,10 @@ these ways:
 - Intermediate draining is optional, finite, and wire-counted. Silk never starts an unbounded or
   background drain.
 
-The profile does not provide transport retry, concurrent attempts, permanent redirect caching,
-cookies, referrer policy, browser URL behavior, pooling, collection, or a dependency on the
-higher-level Stream actor.
+The profile does not provide transport retry, concurrent attempts, cookie, referrer, or permanent
+redirect cache policy, browser URL behavior, IDNA, pooling, a new content decoder, or a dependency
+on the higher-level Stream actor. It also introduces no compatibility alias, second prepared-request
+representation, or compiler-known redirect operation.
 
 The implementation lives in
 [`http_redirect.silk`](../../../../packages/compiler/stdlib/silk/http_redirect.silk), with narrow
