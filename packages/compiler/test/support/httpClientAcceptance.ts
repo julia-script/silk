@@ -30,6 +30,8 @@ const protocol: ReadonlyArray<Scenario> = [
   { id: 17, callback: 'failExchange' },
   { id: 22, callback: 'routedWrongName' },
   { id: 23, callback: 'exchange' },
+  { id: 24, callback: 'discardExchange' },
+  { id: 25, callback: 'discardExchange' },
 ]
 const boundaries: ReadonlyArray<Scenario> = [
   { id: 6, callback: 'receiveBoundaryExchange' },
@@ -172,16 +174,18 @@ const protocolHandler = `impl ConnectionHandler<TestTransport, i32, ClientError 
       }
       return 0
     }
-    if scenario == 11 {
-      let selectedOptions = RequestOptions.defaults()
+    if scenario == 11 || scenario == 24 || scenario == 25 {
       let result = run invokeExchange(
         &mut connection.*,
         &request,
-        move selectedOptions,
+        RequestOptions.defaults(),
         scenario,
       )
       if result != 0 {
         return result
+      }
+      if scenario != 11 && connection.phase() != ConnectionPhase.Closed {
+        return 18
       }
       return 0
     }
@@ -301,7 +305,7 @@ import silk.byte_duplex {ByteDuplex, ByteIoError, ByteIoOperation, ReadTransfer}
 import silk.effect {Effect}
 import silk.http {Method, Version, Header}
 import silk.http_target {RequestTarget}
-import silk.http_body {Limits as BodyLimits, Trailers}
+import silk.http_body {BodyComponent, BodyReason, Limits as BodyLimits, Trailers}
 import silk.http_head {Limits as HeadLimits}
 import silk.http_headers {Headers, Limits as ValueLimits}
 import silk.http_origin {Origin}
@@ -314,6 +318,7 @@ import silk.http_client {
   Limits,
   ClientError,
   ConnectionPhase,
+  DiscardOutcome,
   RequestOptions,
   ContinuePolicy,
   Tunnel,
@@ -1451,7 +1456,10 @@ effect<'call> fn partialExchange<'call, 'exchange: 'call>(
 
 effect<'call> fn discardExchange<'call, 'exchange: 'call>(
   exchangeValue: &'call mut Exchange<'exchange, TestTransport>,
-) -> i32 ! ClientError | OutOfMemoryError ? &mut Allocator | &mut MonotonicClock | &mut Random {
+) -> i32
+! ClientError | OutOfMemoryError
+? &Scenario | &mut Allocator | &mut MonotonicClock | &mut Random {
+  let scenario = run Scenario.selected()
   run Client.send(&mut exchangeValue.*)
   let trailerEntries: [Header<'static>; 0] = []
   let trailers = match move Headers.make(&trailerEntries, valueLimits()) {
@@ -1463,12 +1471,50 @@ effect<'call> fn discardExchange<'call, 'exchange: 'call>(
   }
   run Client.finishRequest(&mut exchangeValue.*, &trailers)
   let status = run Client.receive(&mut exchangeValue.*)
-  if status != 200 {
-    return 94
+  if scenario == 11 {
+    if status != 200 {
+      return 94
+    }
+    let outcome = run Client.discardRemainingAtMost(&mut exchangeValue.*, 4)
+    match move outcome {
+      DiscardOutcome.Completed => {}
+      DiscardOutcome.CapReached => { return 157 }
+    }
+    run Client.finishResponse(&mut exchangeValue.*)
+    return 0
   }
-  run Client.discardRemaining(&mut exchangeValue.*, 4)
-  run Client.finishResponse(&mut exchangeValue.*)
-  return 0
+  let budget = u64.toU64(4)
+  let attempted = run Effect.result(Client.discardRemainingAtMost(
+    &mut exchangeValue.*,
+    budget,
+  ))
+  return match move attempted {
+    Result.Success {value} => match move value {
+      DiscardOutcome.CapReached => {
+        if scenario == 24 { return 0 }
+        return 158
+      }
+      DiscardOutcome.Completed => 159
+    }
+    Result.Failure {error} => match move error {
+      ClientError cause => match move cause {
+        ClientError.Body {error: body} => match move body.reason {
+          BodyReason.ChunkSyntax => match move body.component {
+            BodyComponent.ChunkDelimiter => {
+              if scenario == 25 { return 0 }
+              return 160
+            }
+            _ => 161
+          }
+          _ => 162
+        }
+        _ => 163
+      }
+      OutOfMemoryError allocation => {
+        fail move allocation
+      }
+    }
+  }
 }
 
 
@@ -1498,6 +1544,12 @@ fn inputFor(scenario: i32) -> &'static [u8] {
   }
   if scenario == 7 {
     return b"HTTP/1.1 101 Switching\\r\\n\\r\\n"
+  }
+  if scenario == 24 {
+    return b"HTTP/1.1 200 OK\\r\\nTransfer-Encoding: chunked\\r\\n\\r\\n1\\r\\nx\\r\\n0\\r\\n\\r\\n"
+  }
+  if scenario == 25 {
+    return b"HTTP/1.1 200 OK\\r\\nTransfer-Encoding: chunked\\r\\n\\r\\n1\\r\\nxX"
   }
   return b"HTTP/1.1 200 OK\\r\\nContent-Length: 4\\r\\n\\r\\nWikiHTTP/1.1 404 Not Found\\r\\nContent-Length: 4\\r\\n\\r\\nWiki"
 }
