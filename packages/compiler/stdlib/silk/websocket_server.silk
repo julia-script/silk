@@ -827,7 +827,7 @@ where &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut Monoton
   let headerLength = header.wireLength - header.payloadLength
   while offset < header.payloadLength {
     let count = minimum(125, header.payloadLength - offset)
-    let filled = run readInto(
+    run readInto(
       &mut socket.channel.*,
       &mut socket.control,
       usize.ZERO,
@@ -836,13 +836,11 @@ where &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut Monoton
       Operation.FinishClose,
       headerLength + offset,
     )
-    let unmasked = unmask(move filled, count, &header.mask, offset)
+    unmask(&mut socket.control, count, &header.mask, offset)
     if text {
-      let chunk = Slice.view<u8>(move unmasked, usize.ZERO, count)
+      let chunk = Slice.view<u8>(&socket.control, usize.ZERO, count)
       run acceptUtf8(&mut validation, chunk)
       drop chunk
-    } else {
-      drop move unmasked
     }
     offset = offset + count
   }
@@ -855,58 +853,59 @@ where &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut Monoton
 effect fn acceptUtf8(state: &mut Utf8State, bytes: &[u8]) -> () ! WebSocketError {
   let mut index = usize.ZERO
   while index < bytes.length {
-    let byte = bytes[index]
-    if state.remaining == usize.ZERO {
-      if byte <= 127 {
-        index = index + usize.ONE
-        continue
-      }
-      if byte >= 194 && byte <= 223 {
-        state.remaining = 1
-        state.minimum = 128
-        state.maximum = 191
-      } else if byte == 224 {
-        state.remaining = 2
-        state.minimum = 160
-        state.maximum = 191
-      } else if byte >= 225 && byte <= 236 {
-        state.remaining = 2
-        state.minimum = 128
-        state.maximum = 191
-      } else if byte == 237 {
-        state.remaining = 2
-        state.minimum = 128
-        state.maximum = 159
-      } else if byte >= 238 && byte <= 239 {
-        state.remaining = 2
-        state.minimum = 128
-        state.maximum = 191
-      } else if byte == 240 {
-        state.remaining = 3
-        state.minimum = 144
-        state.maximum = 191
-      } else if byte >= 241 && byte <= 243 {
-        state.remaining = 3
-        state.minimum = 128
-        state.maximum = 191
-      } else if byte == 244 {
-        state.remaining = 3
-        state.minimum = 128
-        state.maximum = 143
-      } else {
-        fail WebSocketError.InvalidUtf8 {component: Utf8Component.Text}
-      }
-    } else {
-      if byte < state.minimum || byte > state.maximum {
-        fail WebSocketError.InvalidUtf8 {component: Utf8Component.Text}
-      }
-      state.remaining = state.remaining - usize.ONE
-      state.minimum = 128
-      state.maximum = 191
+    if !acceptUtf8Byte(&mut state.*, bytes[index]) {
+      fail WebSocketError.InvalidUtf8 {component: Utf8Component.Text}
     }
     index = index + usize.ONE
   }
   return ()
+}
+
+fn acceptUtf8Byte(state: &mut Utf8State, byte: u8) -> bool {
+  if state.remaining == usize.ZERO {
+    if byte <= 127 { return true }
+    if byte >= 194 && byte <= 223 {
+      state.remaining = 1
+      state.minimum = 128
+      state.maximum = 191
+    } else if byte == 224 {
+      state.remaining = 2
+      state.minimum = 160
+      state.maximum = 191
+    } else if byte >= 225 && byte <= 236 {
+      state.remaining = 2
+      state.minimum = 128
+      state.maximum = 191
+    } else if byte == 237 {
+      state.remaining = 2
+      state.minimum = 128
+      state.maximum = 159
+    } else if byte >= 238 && byte <= 239 {
+      state.remaining = 2
+      state.minimum = 128
+      state.maximum = 191
+    } else if byte == 240 {
+      state.remaining = 3
+      state.minimum = 144
+      state.maximum = 191
+    } else if byte >= 241 && byte <= 243 {
+      state.remaining = 3
+      state.minimum = 128
+      state.maximum = 191
+    } else if byte == 244 {
+      state.remaining = 3
+      state.minimum = 128
+      state.maximum = 143
+    } else {
+      return false
+    }
+  } else {
+    if byte < state.minimum || byte > state.maximum { return false }
+    state.remaining = state.remaining - usize.ONE
+    state.minimum = 128
+    state.maximum = 191
+  }
+  return true
 }
 
 fn utf8Start() -> Utf8State {
@@ -948,7 +947,7 @@ where &'transport mut P provides &ByteDuplex from &mut ByteDuplex,
   )
   return match header.opcode {
     Opcode.Text => {
-      let payload = run readPayload(
+      run readPayload(
         &mut socket.*,
         move output,
         header.payloadLength,
@@ -956,20 +955,12 @@ where &'transport mut P provides &ByteDuplex from &mut ByteDuplex,
         header.wireLength - header.payloadLength,
         move deadline,
         Operation.ReadEvent,
+        true,
       )
-      let text = String.fromUtf8(payload)
-      match move text {
-        Result<string, InvalidUtf8>.Failure {error} => {
-          drop error
-          fail WebSocketError.InvalidUtf8 {component: Utf8Component.Text}
-        }
-        Result<string, InvalidUtf8>.Success {value} => { drop value }
-      }
-      drop payload
       return Event.Text {count: header.payloadLength}
     }
     Opcode.Binary => {
-      let payload = run readPayload(
+      run readPayload(
         &mut socket.*,
         move output,
         header.payloadLength,
@@ -977,8 +968,8 @@ where &'transport mut P provides &ByteDuplex from &mut ByteDuplex,
         header.wireLength - header.payloadLength,
         move deadline,
         Operation.ReadEvent,
+        false,
       )
-      drop payload
       return Event.Binary {count: header.payloadLength}
     }
     Opcode.Ping => {
@@ -1052,7 +1043,7 @@ where &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut Monoton
       }
     }
   }
-  let prefix = run readInto(
+  run readInto(
     &mut socket.channel.*,
     &mut socket.header,
     usize.ZERO,
@@ -1061,7 +1052,6 @@ where &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut Monoton
     operation,
     usize.ZERO,
   )
-  drop prefix
   let first = socket.header[0]
   let second = socket.header[1]
   let finalFrame = u8.bitAnd(first, u8.toU8(128)) != 0
@@ -1093,7 +1083,7 @@ where &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut Monoton
   let headerLength = 6 + extended
   run checkCloseRemaining(&socket.*, &closeRemaining, headerLength)
   if extended > usize.ZERO {
-    let extendedBytes = run readInto(
+    run readInto(
       &mut socket.channel.*,
       &mut socket.header,
       2,
@@ -1102,7 +1092,6 @@ where &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut Monoton
       operation,
       2,
     )
-    drop extendedBytes
   }
   if marker == 127 && u8.bitAnd(socket.header[2], u8.toU8(128)) != 0 {
     fail WebSocketError.ProtocolError {reason: ProtocolReason.LengthHighBit}
@@ -1137,7 +1126,7 @@ where &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut Monoton
     Option.Some {value} => value
   }
   run checkCloseRemaining(&socket.*, &closeRemaining, wireLength)
-  let maskBytes = run readInto(
+  run readInto(
     &mut socket.channel.*,
     &mut socket.header,
     2 + extended,
@@ -1146,7 +1135,6 @@ where &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut Monoton
     operation,
     2 + extended,
   )
-  drop maskBytes
   return FrameHeader {
     opcode: move opcode,
     payloadLength: payloadLength,
@@ -1202,15 +1190,15 @@ effect fn checkCloseRemaining<'channel, 'transport, P>(
   return ()
 }
 
-effect fn readInto<'output, 'transport, P>(
+effect fn readInto<'transport, P>(
   channel: &mut BufferedDuplex<'transport, P>,
-  output: &'output mut [u8],
+  output: &mut [u8],
   offset: usize,
   length: usize,
   deadline: Option<Instant>,
   operation: Operation,
   prior: usize,
-) -> &'output mut [u8]
+) -> ()
 ! WebSocketError
 ? &mut MonotonicClock
 where &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock {
@@ -1257,32 +1245,78 @@ where &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut Monoton
     }
     copied = copied + count
   }
-  return move output
+  return ()
 }
 
-effect fn readPayload<'output, 'channel, 'transport, P>(
+effect fn readPayload<'channel, 'transport, P>(
   socket: &mut ServerWebSocket<'channel, 'transport, P>,
-  output: &'output mut [u8],
+  output: &mut [u8],
   length: usize,
   mask: &([u8; 4]),
   headerLength: usize,
   deadline: Option<Instant>,
   operation: Operation,
-) -> &'output [u8]
+  text: bool,
+) -> ()
 ! WebSocketError
 ? &mut MonotonicClock
 where &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock {
-  let initialized = run readInto(
-    &mut socket.channel.*,
-    move output,
-    usize.ZERO,
-    length,
-    move deadline,
-    operation,
-    headerLength,
-  )
-  let unmasked = unmask(move initialized, length, mask, usize.ZERO)
-  return Slice.view<u8>(move unmasked, usize.ZERO, length)
+  let mut copied = usize.ZERO
+  let mut validation = utf8Start()
+  while copied < length {
+    let attempted = run Effect.result(BufferedDuplex.fill(
+      &mut socket.channel.*,
+      usize.ONE,
+      copyDeadline(&deadline),
+    ))
+    let availableCount = match move attempted {
+      Result<FillOutcome, BufferError>.Failure {error} => {
+        let accepted = headerLength + copied + bufferProgress(&error)
+        fail WebSocketError.Buffer {
+          operation: operation,
+          frameAccepted: accepted,
+          error: move error,
+        }
+      }
+      Result<FillOutcome, BufferError>.Success {value} => match move value {
+        FillOutcome.Available {count} => count
+        FillOutcome.End {available} => available
+      }
+    }
+    if availableCount == usize.ZERO { fail WebSocketError.Truncated }
+    let available = BufferedDuplex.peek(&socket.channel.*)
+    let count = minimum(available.length, length - copied)
+    let mut index = usize.ZERO
+    while index < count {
+      let byte = u8.bitXor(available[index], mask.*[(copied + index) % 4])
+      output[copied + index] = byte
+      if text && !acceptUtf8Byte(&mut validation, byte) {
+        drop available
+        fail WebSocketError.InvalidUtf8 {component: Utf8Component.Text}
+      }
+      index = index + usize.ONE
+    }
+    drop available
+    let consumed = run Effect.result(BufferedDuplex.consume(
+      &mut socket.channel.*,
+      count,
+    ))
+    match move consumed {
+      Result<(), BufferError>.Failure {error} => {
+        fail WebSocketError.Buffer {
+          operation: operation,
+          frameAccepted: headerLength + copied,
+          error: move error,
+        }
+      }
+      Result<(), BufferError>.Success {value} => { drop value }
+    }
+    copied = copied + count
+  }
+  if text && validation.remaining != usize.ZERO {
+    fail WebSocketError.InvalidUtf8 {component: Utf8Component.Text}
+  }
+  return ()
 }
 
 effect fn readControl<'channel, 'transport, P>(
@@ -1294,7 +1328,7 @@ effect fn readControl<'channel, 'transport, P>(
 ! WebSocketError
 ? &mut MonotonicClock
 where &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock {
-  let filled = run readInto(
+  run readInto(
     &mut socket.channel.*,
     &mut socket.control,
     usize.ZERO,
@@ -1303,8 +1337,7 @@ where &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut Monoton
     operation,
     header.wireLength - header.payloadLength,
   )
-  let unmasked = unmask(move filled, header.payloadLength, &header.mask, usize.ZERO)
-  drop move unmasked
+  unmask(&mut socket.control, header.payloadLength, &header.mask, usize.ZERO)
   return ()
 }
 
@@ -1684,18 +1717,18 @@ fn decodeWide(bytes: &[u8], offset: usize, length: usize) -> u64 {
   return value
 }
 
-fn unmask<'output>(
-  output: &'output mut [u8],
+fn unmask(
+  output: &mut [u8],
   length: usize,
   mask: &([u8; 4]),
   offset: usize,
-) -> &'output mut [u8] {
+) -> () {
   let mut index = usize.ZERO
   while index < length {
     output[index] = u8.bitXor(output[index], mask.*[(offset + index) % 4])
     index = index + usize.ONE
   }
-  return move output
+  return ()
 }
 
 fn closeCodeInControl<'channel, 'transport, P>(
