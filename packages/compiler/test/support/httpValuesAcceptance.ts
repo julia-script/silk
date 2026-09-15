@@ -1096,11 +1096,11 @@ fn targets() -> bool {
           if count != 4 || !equal(&target, b"/?x=") { return false }
         }
       }
-      let mut absolute: [u8; 21] = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]
+      let mut absolute: [u8; 22] = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]
       match move RequestTarget.fromUri(&value, TargetForm.Absolute, &mut absolute) {
         Result<usize, ValueError>.Failure {error} => { return false }
         Result<usize, ValueError>.Success {value: count} => {
-          if count != 21 || !equal(&absolute, b"http://example.com?x=") { return false }
+          if count != 22 || !equal(&absolute, b"http://example.com/?x=") { return false }
         }
       }
       let mut small: [u8; 3] = [7,7,7]

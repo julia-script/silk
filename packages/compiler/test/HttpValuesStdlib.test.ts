@@ -9,6 +9,7 @@ import * as SourceFile from '../src/SourceFile.js'
 import * as Stdlib from '../src/Stdlib.js'
 import * as Projections from './support/projections.js'
 import { httpValuesAcceptanceSource } from './support/httpValuesAcceptance.js'
+import { httpProxyPolicyAcceptanceSource } from './support/httpProxyAcceptance.js'
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
@@ -108,8 +109,12 @@ pub fn main() -> i32 { return 42 }`
         '  pub fn fromUri(',
         '\n/// Validates Host cardinality',
       )
-      assert.lengthOf(fromUri.match(/usize\.checkedAdd/g) ?? [], 2)
-      assert.lengthOf(fromUri.match(/sizeFailure\(/g) ?? [], 2)
+      assert.lengthOf(fromUri.match(/usize\.checkedAdd/g) ?? [], 3)
+      assert.lengthOf(fromUri.match(/sizeFailure\(/g) ?? [], 3)
+      assert.include(
+        fromUri,
+        'if path.length == usize.ZERO {\n        required = match move usize.checkedAdd(required, usize.ONE)',
+      )
 
       assert.isFalse(
         Intrinsic.all().some((actor) =>
@@ -284,4 +289,18 @@ pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
       )
     }),
   60_000,
+)
+
+it.effect(
+  'type-checks bounded HTTP proxy policy and verifies its lowered MIR once',
+  () =>
+    Effect.gen(function* () {
+      const snapshot = yield* AnalysisFixture.retainingMain(
+        'http-proxy/policy',
+        ascii(httpProxyPolicyAcceptanceSource),
+      )
+      assert.deepEqual(diagnosticSummary(snapshot), [])
+      assert.deepEqual(MirVerification.verify(Analysis.loweredMir(snapshot)), [])
+    }),
+  120_000,
 )
