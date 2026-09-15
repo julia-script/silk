@@ -479,7 +479,18 @@ where &'transport mut P provides &ByteDuplex from &mut ByteDuplex,
   &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock {
   run requireOpen(&socket.*, Operation.WriteText)
   let bytes = String.utf8Bytes(message)
-  run validateMessageLength(&socket.*, bytes.length)
+  let validated = run Effect.result(validateMessageLength(&socket.*, bytes.length))
+  match move validated {
+    Result<(), WebSocketError>.Success {value} => { drop value }
+    Result<(), WebSocketError>.Failure {error} => {
+      return run failTerminal(
+        &mut socket.*,
+        move error,
+        copyDeadline(&deadline),
+        Operation.WriteText,
+      )
+    }
+  }
   return run writePublicFrame(&mut socket.*, 1, bytes, move deadline, Operation.WriteText)
 }
 
@@ -494,7 +505,18 @@ pub effect fn writeBinary<'message, 'channel, 'transport, P>(
 where &'transport mut P provides &ByteDuplex from &mut ByteDuplex,
   &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock {
   run requireOpen(&socket.*, Operation.WriteBinary)
-  run validateMessageLength(&socket.*, message.length)
+  let validated = run Effect.result(validateMessageLength(&socket.*, message.length))
+  match move validated {
+    Result<(), WebSocketError>.Success {value} => { drop value }
+    Result<(), WebSocketError>.Failure {error} => {
+      return run failTerminal(
+        &mut socket.*,
+        move error,
+        copyDeadline(&deadline),
+        Operation.WriteBinary,
+      )
+    }
+  }
   return run writePublicFrame(&mut socket.*, 2, message, move deadline, Operation.WriteBinary)
 }
 
@@ -509,7 +531,18 @@ pub effect fn writePing<'message, 'channel, 'transport, P>(
 where &'transport mut P provides &ByteDuplex from &mut ByteDuplex,
   &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock {
   run requireOpen(&socket.*, Operation.WritePing)
-  run validateControlLength(message.length)
+  let validated = run Effect.result(validateControlLength(message.length))
+  match move validated {
+    Result<(), WebSocketError>.Success {value} => { drop value }
+    Result<(), WebSocketError>.Failure {error} => {
+      return run failTerminal(
+        &mut socket.*,
+        move error,
+        copyDeadline(&deadline),
+        Operation.WritePing,
+      )
+    }
+  }
   return run writePublicFrame(&mut socket.*, 9, message, move deadline, Operation.WritePing)
 }
 
@@ -524,7 +557,18 @@ pub effect fn writePong<'message, 'channel, 'transport, P>(
 where &'transport mut P provides &ByteDuplex from &mut ByteDuplex,
   &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock {
   run requireOpen(&socket.*, Operation.WritePong)
-  run validateControlLength(message.length)
+  let validated = run Effect.result(validateControlLength(message.length))
+  match move validated {
+    Result<(), WebSocketError>.Success {value} => { drop value }
+    Result<(), WebSocketError>.Failure {error} => {
+      return run failTerminal(
+        &mut socket.*,
+        move error,
+        copyDeadline(&deadline),
+        Operation.WritePong,
+      )
+    }
+  }
   return run writePublicFrame(&mut socket.*, 10, message, move deadline, Operation.WritePong)
 }
 
@@ -718,7 +762,6 @@ where &'transport mut P provides &ByteDuplex from &mut ByteDuplex,
   let mut frames = usize.ZERO
   let mut wireBytes = usize.ZERO
   while true {
-    run checkFinishDeadline(&deadline)
     if frames >= socket.limits.maxCloseFrames {
       fail WebSocketError.CloseLimitExceeded {
         kind: CloseLimitKind.Frames,
@@ -731,6 +774,7 @@ where &'transport mut P provides &ByteDuplex from &mut ByteDuplex,
         allowed: socket.limits.maxCloseBytes,
       }
     }
+    run checkFinishDeadline(&deadline)
     let remaining = socket.limits.maxCloseBytes - wireBytes
     let header = run readHeader(
       &mut socket.*,
@@ -1110,7 +1154,8 @@ where &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut Monoton
   if opcodeIsClose(opcode) && length == 1 {
     fail WebSocketError.ProtocolError {reason: ProtocolReason.ClosePayloadLength}
   }
-  let mut payloadLength: usize = u64.toUsize(length)
+  let mut payloadLength = usize.ZERO
+  if control { payloadLength = u64.toUsize(length) }
   if !control { payloadLength = run boundedPayload(&socket.*, length, &capacity) }
   let wireLength = match move usize.checkedAdd(headerLength, payloadLength) {
     Option.None => match &closeRemaining {
