@@ -1,4 +1,4 @@
-const positiveCase = `  let runtime0 = run runtimeCase(b"\\nHost: example.test\\r\\nConnection: upgrade\\r\\nUpgrade: websocket\\r\\nSec-WebSocket-Version: 13\\r\\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\\r\\nOrigin: https://example.test\\r\\nSec-WebSocket-Protocol: ignored\\r\\nSec-WebSocket-Protocol: chat\\r\\nSec-WebSocket-Extensions: permessage-deflate\\r\\n\\r\\nXYZ", b"HTTP/1.1 101 Switching Protocols\\r\\nUpgrade: websocket\\r\\nSec-WebSocket-Accept: s3pPLMBiTxaQ9kYGzzhZRbK+xOo=\\r\\nSec-WebSocket-Protocol: chat\\r\\nSet-Cookie: a=1\\r\\nSet-Cookie: b=2\\r\\nConnection: upgrade\\r\\n\\r\\n", 0)
+const positiveCase = `  let runtime0 = run runtimeCase(b"\\nHost: example.test\\r\\nConnection: upgrade\\r\\nUpgrade: websocket\\r\\nSec-WebSocket-Version: 13\\r\\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\\r\\nOrigin: https://example.test\\r\\nSec-WebSocket-Protocol: ignored\\r\\nSec-WebSocket-Protocol: chat\\r\\nSec-WebSocket-Extensions: permessage-deflate\\r\\n\\r\\n\\x81\\x85\\x37\\xfa\\x21\\x3d\\x7f\\x9f\\x4d\\x51\\x58\\x89\\x82\\x01\\x02\\x03\\x04\\x49\\x6b\\x8a\\x82\\x09\\x0a\\x0b\\x0c\\x66\\x61\\x88\\x82\\x05\\x06\\x07\\x08\\x06\\xee", b"HTTP/1.1 101 Switching Protocols\\r\\nUpgrade: websocket\\r\\nSec-WebSocket-Accept: s3pPLMBiTxaQ9kYGzzhZRbK+xOo=\\r\\nSec-WebSocket-Protocol: chat\\r\\nSet-Cookie: a=1\\r\\nSet-Cookie: b=2\\r\\nConnection: upgrade\\r\\n\\r\\n\\x81\\x05Hello\\x8a\\x02Hi\\x88\\x02\\x03\\xe8", 0)
   if runtime0 != 0 { return runtime0 }`
 
 /** Consolidated WebSocket handshake validation and scoped portable duplex acceptance. */
@@ -22,6 +22,7 @@ import silk.system_clock {Instant, SystemClock}
 import silk.u64
 import silk.usize
 import silk.slice {Slice}
+import silk.websocket_server as WebSocketServer {Event as SocketEvent, Limits as SocketLimits, ServerWebSocket, State as SocketState, WebSocketError}
 import silk.websocket_upgrade {Decision, DecisionHandler, DecisionReason, LimitKind, Limits, Offer, Outcome, UpgradeError, inspect, reject, rejectionStatus, withUpgrade}
 
 struct FixedClock {}
@@ -250,6 +251,7 @@ impl ScriptedDuplex {
     drop mark return ()
   }
   unsafe effect fn close(self: &mut Self) -> () ! ByteIoError {
+    if self.closed { return () }
     self.closed = true self.closes = self.closes + usize.ONE return ()
   }
 }
@@ -283,7 +285,7 @@ impl UpgradeTransport {
     let valid = sameDeadline(&mark)
     let complete = equal(ScriptedDuplex.outbound(&self.inner), b"HTTP/1.1 101 Switching Protocols\\r\\nUpgrade: websocket\\r\\nSec-WebSocket-Accept: s3pPLMBiTxaQ9kYGzzhZRbK+xOo=\\r\\nSec-WebSocket-Protocol: chat\\r\\nSet-Cookie: a=1\\r\\nSet-Cookie: b=2\\r\\nConnection: upgrade\\r\\n\\r\\n")
     Shared.withMut(&self.state, fn(state: &mut TransportAudit) -> () {
-      state.complete = complete
+      if complete { state.complete = true }
       state.deadlines = state.deadlines && valid state.flushes = state.flushes + usize.ONE return ()
     })
     if self.mode == 4 { drop mark fail ByteDuplex.timeout(ByteIoOperation.Flush) }
@@ -294,6 +296,7 @@ impl UpgradeTransport {
     return run ByteDuplex.shutdownWrite(move mark) |> Effect.provideMut<ByteDuplex>(&mut self.inner)
   }
   unsafe effect fn close(self: &mut Self) -> () ! ByteIoError {
+    if self.inner.closed { return () }
     Shared.withMut(&self.state, fn(state: &mut TransportAudit) -> () { state.closes = state.closes + usize.ONE return () })
     return run ByteDuplex.close() |> Effect.provideMut<ByteDuplex>(&mut self.inner)
   }
@@ -349,15 +352,68 @@ impl<'config> DecisionHandler<UpgradeError | PolicyError ? &mut MonotonicClock> 
   }
 }
 
+effect<'call> fn useSocket<'call, 'channel: 'call, 'transport: 'channel>(
+  socket: &'call mut ServerWebSocket<'channel, 'transport, UpgradeTransport>,
+) -> i32 ! WebSocketError ? &mut MonotonicClock {
+  let mut output: [u8; 5] = [0, 0, 0, 0, 0]
+  let hello = run WebSocketServer.readEvent(&mut socket.*, &mut output, deadline())
+  match move hello {
+    SocketEvent.Text {count} => {
+      if count != 5 || !equal(&output, b"Hello") { return 183 }
+    }
+    _ => { return 184 }
+  }
+  run WebSocketServer.writeText(&mut socket.*, "Hello", deadline())
+  let ping = run WebSocketServer.readEvent(&mut socket.*, &mut output, deadline())
+  match move ping {
+    SocketEvent.Ping {payload} => {
+      let bytes = payload.asSlice()
+      let valid = equal(bytes, b"Hi")
+      drop bytes
+      if !valid { return 185 }
+    }
+    _ => { return 186 }
+  }
+  let pong = run WebSocketServer.readEvent(&mut socket.*, &mut output, deadline())
+  match move pong {
+    SocketEvent.Pong {payload} => {
+      let bytes = payload.asSlice()
+      let valid = equal(bytes, b"ok")
+      drop bytes
+      if !valid { return 187 }
+    }
+    _ => { return 188 }
+  }
+  let closed = run WebSocketServer.readEvent(&mut socket.*, &mut output, deadline())
+  match move closed {
+    SocketEvent.PeerClose {data} => match move data {
+      WebSocketServer.PeerCloseData.Absent => { return 189 }
+      WebSocketServer.PeerCloseData.Present {code, reason} => {
+        let bytes = reason.asSlice()
+        let empty = bytes.length == usize.ZERO
+        drop bytes
+        if code != 1000 || !empty { return 190 }
+      }
+    }
+    _ => { return 191 }
+  }
+  if WebSocketServer.state(&socket.*) != SocketState.Closed { return 192 }
+  return 42
+}
+
 effect<'call> fn useChannel<'call, 'transport: 'call>(
   channel: &'call mut BufferedDuplex<'transport, UpgradeTransport>,
-) -> i32 ? &mut HandoffAudit {
+) -> i32 ? &mut HandoffAudit | &mut MonotonicClock {
   if !(run HandoffAudit.observe()) { return 182 }
-  let suffix = BufferedDuplex.peek(&channel.*)
-  let valid = equal(suffix, b"XYZ")
-  drop suffix
-  if !valid { return 151 }
-  return 42
+  let served = run Effect.result(WebSocketServer.withServer(
+    move channel,
+    SocketLimits.defaults(),
+    useSocket,
+  ))
+  return match move served {
+    Result.Success {value} => value
+    Result.Failure {error} => { drop error 193 }
+  }
 }
 
 effect<'call> fn request<'call, 'request: 'call, 'connection: 'request, 'transport: 'connection>(
@@ -525,7 +581,7 @@ effect fn runtimeCase(input: &[u8], expected: &[u8], mode: i32) -> i32
   let flushes = transport.inner.flushes
   let failed = transport.inner.failed
   let writesAfterFailure = transport.inner.writesAfterFailure
-  if mode == 0 && flushes != usize.ONE { return 161 }
+  if mode == 0 && flushes != 4 { return 161 }
   if (mode == 2 || mode == 6 || mode == 7 || mode == 8 || mode == 12 || mode == 13) && flushes != usize.ZERO { return 162 }
   if mode == 3 && (!failed || writesAfterFailure != usize.ZERO || flushes != usize.ZERO) { return 163 }
   return 0
