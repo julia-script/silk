@@ -17,10 +17,10 @@ const protocol: ReadonlyArray<Scenario> = [
 ]
 const boundaries: ReadonlyArray<Scenario> = [
   { id: 6, callback: 'receiveBoundaryExchange' },
-  { id: 8, callback: 'timeoutExchange' },
+  { id: 8, callback: 'deadlineExchange' },
   { id: 10, callback: 'receiveBoundaryExchange' },
   { id: 12, callback: 'receiveBoundaryExchange' },
-  { id: 13, callback: 'expiredCompletedExchange' },
+  { id: 13, callback: 'deadlineExchange' },
 ]
 const outputFailures: ReadonlyArray<Scenario> = [
   { id: 9, callback: 'partialExchange' },
@@ -980,25 +980,94 @@ effect<'call> fn receiveBoundaryExchange<'call, 'exchange: 'call>(
   }
 }
 
-effect<'call> fn timeoutExchange<'call, 'exchange: 'call>(
+
+effect<'call> fn deadlineOperation<'call, 'exchange: 'call>(
   exchangeValue: &'call mut Exchange<'exchange, TestTransport>,
-) -> i32 ! ClientError | OutOfMemoryError ? &mut Allocator | &mut MonotonicClock | &mut Random {
-  let result = run Effect.result(Client.send(&mut exchangeValue.*))
-  return match move result {
-    Result.Success {value} => {
-      drop value
-      return 84
-    }
-    Result.Failure {error} => match move error {
-      ClientError cause => match move cause {
-        ClientError.Timeout => 0
-        _ => 85
-      }
-      OutOfMemoryError allocation => {
-        fail move allocation
-      }
-    }
+  stage: i32,
+  output: &mut [u8],
+) -> () ! ClientError | OutOfMemoryError ? &mut Allocator | &mut MonotonicClock | &mut Random {
+  if stage == 0 {
+    run Client.send(&mut exchangeValue.*)
+  } else if stage == 1 {
+    let count = run Client.readSome(&mut exchangeValue.*, move output)
+    drop count
+  } else {
+    run Client.finishResponse(&mut exchangeValue.*)
   }
+  return ()
+}
+
+effect<'call> fn deadlineExchange<'call, 'exchange: 'call>(
+  exchangeValue: &'call mut Exchange<'exchange, TestTransport>,
+) -> i32
+! ClientError | OutOfMemoryError
+? &Scenario | &mut Allocator | &mut MonotonicClock | &mut Random {
+  let scenario = run Scenario.selected()
+  let mut body: [u8; 4] = [0, 0, 0, 0]
+  let mut stage = 0
+  if scenario == 13 {
+    run Client.send(&mut exchangeValue.*)
+    let trailerEntries: [Header<'static>; 0] = []
+    let trailers = match move Headers.make(&trailerEntries, valueLimits()) {
+      Result.Failure {error} => {
+        drop error
+        return 23
+      }
+      Result.Success {value} => value
+    }
+    run Client.finishRequest(&mut exchangeValue.*, &trailers)
+    let status = run Client.receive(&mut exchangeValue.*)
+    if status != 200 {
+      return 97
+    }
+    let read = run Client.readSome(&mut exchangeValue.*, &mut body)
+    if read != 4 {
+      return 98
+    }
+    run MonotonicClock.waitUntil(SystemClock.make(10, 0))
+    stage = 1
+  }
+  while stage < 3 {
+    let result = run Effect.result(deadlineOperation(&mut exchangeValue.*, stage, &mut body))
+    match move result {
+      Result.Success {value} => {
+        drop value
+        if stage == 0 {
+          return 84
+        }
+        if stage == 1 {
+          return 99
+        }
+        return 101
+      }
+      Result.Failure {error} => match move error {
+        OutOfMemoryError allocation => {
+          fail move allocation
+        }
+        ClientError cause => {
+          let expected = match move cause {
+            ClientError.Timeout => stage == 0 || stage == 1
+            ClientError.InvalidState => stage == 2
+            _ => false
+          }
+          if !expected {
+            if stage == 0 {
+              return 85
+            }
+            if stage == 1 {
+              return 100
+            }
+            return 102
+          }
+        }
+      }
+    }
+    if stage == 0 {
+      return 0
+    }
+    stage = stage + 1
+  }
+  return 0
 }
 
 effect<'call> fn partialExchange<'call, 'exchange: 'call>(
@@ -1061,61 +1130,6 @@ effect<'call> fn discardExchange<'call, 'exchange: 'call>(
   return 0
 }
 
-effect<'call> fn expiredCompletedExchange<'call, 'exchange: 'call>(
-  exchangeValue: &'call mut Exchange<'exchange, TestTransport>,
-) -> i32 ! ClientError | OutOfMemoryError ? &mut Allocator | &mut MonotonicClock | &mut Random {
-  run Client.send(&mut exchangeValue.*)
-  let trailerEntries: [Header<'static>; 0] = []
-  let trailers = match move Headers.make(&trailerEntries, valueLimits()) {
-    Result.Failure {error} => {
-      drop error
-      return 23
-    }
-    Result.Success {value} => value
-  }
-  run Client.finishRequest(&mut exchangeValue.*, &trailers)
-  let status = run Client.receive(&mut exchangeValue.*)
-  if status != 200 {
-    return 97
-  }
-  let mut body: [u8; 4] = [0, 0, 0, 0]
-  let read = run Client.readSome(&mut exchangeValue.*, &mut body)
-  if read != 4 {
-    return 98
-  }
-  run MonotonicClock.waitUntil(SystemClock.make(10, 0))
-  let result = run Effect.result(Client.readSome(&mut exchangeValue.*, &mut body))
-  match move result {
-    Result.Success {value} => {
-      drop value
-      return 99
-    }
-    Result.Failure {error} => match move error {
-      ClientError cause => match move cause {
-        ClientError.Timeout => {}
-        _ => {
-          return 100
-        }
-      }
-      OutOfMemoryError allocation => {
-        fail move allocation
-      }
-    }
-  }
-  let finish = run Effect.result(Client.finishResponse(&mut exchangeValue.*))
-  return match move finish {
-    Result.Success {value} => {
-      drop value
-      return 101
-    }
-    Result.Failure {error} => {
-      if invalidState(move error) {
-        return 0
-      }
-      return 102
-    }
-  }
-}
 
 fn invalidState(error: ClientError) -> bool {
   return match move error {
