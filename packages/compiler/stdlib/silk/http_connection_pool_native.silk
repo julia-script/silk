@@ -164,7 +164,8 @@ fn sameBodyLimits(left: &BodyLimits, right: &BodyLimits) -> bool {
     && sameHeaderLimits(&left.trailerValues, &right.trailerValues)
 }
 
-fn sameLimits(left: &Limits, right: &Limits) -> bool {
+/// Compares every HTTP connection, parser, framing, capacity, and discard limit.
+pub fn limitsEqual(left: &Limits, right: &Limits) -> bool {
   return sameHeadLimits(&left.head, &right.head)
     && sameBodyLimits(&left.requestBody, &right.requestBody)
     && sameBodyLimits(&left.responseBody, &right.responseBody)
@@ -374,7 +375,7 @@ pub fn acceptsLimits(
   limits: Limits,
 ) -> bool {
   let context = Pool.context(handle)
-  return sameLimits(&context.limitsValue, &limits)
+  return limitsEqual(&context.limitsValue, &limits)
 }
 
 /// Checks out one direct origin and lends its exclusive connection to `handler`.
