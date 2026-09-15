@@ -911,7 +911,7 @@ effect<'call> fn tunnelExchange<'call, 'exchange: 'call>(
   }
   run Client.finishRequest(&mut exchangeValue.*, &trailers)
   let observed8 = run Client.receive(&mut exchangeValue.*)
-  if observed8 != 200 {
+  if observed8 != 204 {
     return 77
   }
   return run Client.withTunnel(&mut exchangeValue.*, tunnel)
@@ -1315,7 +1315,7 @@ fn inputFor(scenario: i32) -> &'static [u8] {
     return b"HTTP/1.1 200 OK\\r\\nTransfer-Encoding: chunked\\r\\nTrailer: Content-Digest\\r\\n\\r\\n4\\r\\nWiki\\r\\n0\\r\\nContent-Digest: yes\\r\\n\\r\\n"
   }
   if scenario == 4 {
-    return b"HTTP/1.1 200 Connected\\r\\nContent-Length: ignored\\r\\nTransfer-Encoding: ignored\\r\\n\\r\\nTUNN"
+    return b"HTTP/1.1 204 Connected\\r\\nContent-Length: ignored\\r\\nTransfer-Encoding: ignored\\r\\n\\r\\nTUNN"
   }
   if scenario == 6 || scenario == 12 {
     return b"HTTP/1.1 103 Hint\\r\\n\\r\\nHTTP/1.1 103 Hint\\r\\n\\r\\n"

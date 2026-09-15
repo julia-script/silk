@@ -351,6 +351,14 @@ pub fn selectResponse<'value>(
   let version = head.version()
   let statusValue = head.status()
   let status = Status.code(&statusValue)
+  if Method.format(requestMethod) == "CONNECT" && status >= 200 && status < 300 {
+    return Result.succeed<Selection<'value>, BodyError>(Selection<'value> {
+      framingValue: Framing.Tunnel,
+      anomalyValue: Anomaly.None,
+      statsFields: head.fields(),
+      copyFields: head.fields(),
+    })
+  }
   if semanticallyEmpty(statusValue, requestMethod) {
     let mut anomaly = Anomaly.None
     let hasLength = hasHeader(head.fields(), b"content-length")
@@ -364,14 +372,6 @@ pub fn selectResponse<'value>(
     return Result.succeed<Selection<'value>, BodyError>(Selection<'value> {
       framingValue: Framing.Empty,
       anomalyValue: anomaly,
-      statsFields: head.fields(),
-      copyFields: head.fields(),
-    })
-  }
-  if Method.format(requestMethod) == "CONNECT" && status >= 200 && status < 300 {
-    return Result.succeed<Selection<'value>, BodyError>(Selection<'value> {
-      framingValue: Framing.Tunnel,
-      anomalyValue: Anomaly.None,
       statsFields: head.fields(),
       copyFields: head.fields(),
     })
@@ -423,6 +423,14 @@ pub fn validateOutgoingResponse<'value>(
       Option.none<usize>(),
     ))
   }
+  if Method.format(requestMethod) == "CONNECT" && status >= 200 && status < 300 {
+    return Result.succeed<Selection<'value>, BodyError>(Selection<'value> {
+      framingValue: Framing.Tunnel,
+      anomalyValue: Anomaly.None,
+      statsFields: head.fields(),
+      copyFields: head.fields(),
+    })
+  }
   if semanticallyEmpty(statusValue, requestMethod) {
     let validated = scanResponseHead(head, policy)
     if let Result<HeadMetadata, BodyError>.Failure {error} = move validated {
@@ -430,14 +438,6 @@ pub fn validateOutgoingResponse<'value>(
     }
     return Result.succeed<Selection<'value>, BodyError>(Selection<'value> {
       framingValue: Framing.Empty,
-      anomalyValue: Anomaly.None,
-      statsFields: head.fields(),
-      copyFields: head.fields(),
-    })
-  }
-  if Method.format(requestMethod) == "CONNECT" && status >= 200 && status < 300 {
-    return Result.succeed<Selection<'value>, BodyError>(Selection<'value> {
-      framingValue: Framing.Tunnel,
       anomalyValue: Anomaly.None,
       statsFields: head.fields(),
       copyFields: head.fields(),
