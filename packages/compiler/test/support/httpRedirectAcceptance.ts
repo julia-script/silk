@@ -9,13 +9,17 @@ export const httpRedirectPolicyImports = `import silk.http_headers {
   Limits as RedirectHeaderLimits,
   OwnedHeaders,
 }
+import silk.byte_duplex {ByteDuplex, ByteIoError, ReadTransfer}
 import silk.http {ValueError}
-import silk.http_client {ContinuePolicy}
+import silk.http_client {ClientError, ContinuePolicy, Exchange, RouteTransport}
+import silk.http_transport {HttpTransport, TransportError}
 import silk.http_redirect {
+  AttemptClient,
+  AttemptHandler,
+  AttemptRequest,
   BodyChunk,
   BodyDecision,
   BodyProducer,
-  BodySource,
   CrossOriginPolicy,
   DowngradePolicy,
   History,
@@ -27,6 +31,7 @@ import silk.http_redirect {
   Post301302Policy,
   PreviousResponsePolicy,
   ProducerHandler,
+  ResponseHandler,
   RedirectComponent,
   RedirectContext,
   RedirectError,
@@ -36,25 +41,233 @@ import silk.http_redirect {
   Request as RedirectRequest,
   StatusDecision,
   admitOrigin,
-  admitReplay,
   crossOriginHeaderPolicy,
   resolveLocation,
   sanitizeHeaders,
   statusDecision,
   transition,
+  withBytesResponse,
+  withEmptyResponse,
+  withOneShotResponse,
+  withReplayResponse,
 }
 import silk.http_origin {OriginError as RedirectOriginError}
+import silk.monotonic_clock {MonotonicClock}
+import silk.random {Random}
 import silk.string {String}
-import silk.system_clock {SystemClock}
+import silk.system_clock {Instant, SystemClock}
+import silk.u64
 import silk.uri {OwnedUri}
 import silk.uri_reference {ParseError as RedirectParseError}
 `
 
 export const httpRedirectPolicySupport = `enum RedirectFactoryFailure { Failed }
 enum RedirectProducerFailure { Failed }
+enum RedirectCallbackFailure { Failed }
+enum RedirectAcquisitionFailure { Rejected }
 
 service RedirectFactoryRequirement {}
 service RedirectProducerRequirement {}
+service RedirectCallbackRequirement {
+  effect fn accepted() -> bool ? &mut RedirectCallbackRequirement
+}
+service RedirectAcquisitionRequirement {
+  effect fn accepted() -> bool ? &mut RedirectAcquisitionRequirement
+}
+
+struct RedirectWitnessTransport {}
+
+impl RedirectWitnessTransport {
+  unsafe effect fn readHttp(
+    self: &mut Self,
+    output: &mut [u8],
+    deadline: Option<Instant>,
+  ) -> ReadTransfer
+  ! TransportError | OutOfMemoryError
+  ? &mut MonotonicClock | &mut Allocator | &mut Random {
+    drop self
+    drop output
+    drop deadline
+    return ReadTransfer.End
+  }
+
+  unsafe effect fn writeHttp(
+    self: &mut Self,
+    input: &[u8],
+    deadline: Option<Instant>,
+  ) -> usize
+  ! TransportError | OutOfMemoryError
+  ? &mut MonotonicClock | &mut Allocator | &mut Random {
+    drop self
+    drop deadline
+    return input.length
+  }
+
+  effect fn flushHttp(self: &mut Self, deadline: Option<Instant>) -> ()
+  ! TransportError | OutOfMemoryError
+  ? &mut MonotonicClock | &mut Allocator | &mut Random {
+    drop self
+    drop deadline
+    return ()
+  }
+
+  effect fn closeHttp(self: &mut Self) -> () ! TransportError {
+    drop self
+    return ()
+  }
+
+  unsafe effect fn readBytes(
+    self: &mut Self,
+    output: &mut [u8],
+    deadline: Option<Instant>,
+  ) -> ReadTransfer ! ByteIoError ? &mut MonotonicClock {
+    drop self
+    drop output
+    drop deadline
+    return ReadTransfer.End
+  }
+
+  unsafe effect fn writeBytes(
+    self: &mut Self,
+    input: &[u8],
+    deadline: Option<Instant>,
+  ) -> usize ! ByteIoError ? &mut MonotonicClock {
+    drop self
+    drop deadline
+    return input.length
+  }
+
+  unsafe effect fn flushBytes(
+    self: &mut Self,
+    deadline: Option<Instant>,
+  ) -> () ! ByteIoError ? &mut MonotonicClock {
+    drop self
+    drop deadline
+    return ()
+  }
+
+  unsafe effect fn shutdownBytes(
+    self: &mut Self,
+    deadline: Option<Instant>,
+  ) -> () ! ByteIoError ? &mut MonotonicClock {
+    drop self
+    drop deadline
+    return ()
+  }
+
+  unsafe effect fn closeBytes(self: &mut Self) -> () ! ByteIoError {
+    drop self
+    return ()
+  }
+}
+
+impl HttpTransport for RedirectWitnessTransport {
+  readSomeRaw: RedirectWitnessTransport.readHttp
+  writeSomeRaw: RedirectWitnessTransport.writeHttp
+  flush: RedirectWitnessTransport.flushHttp
+  close: RedirectWitnessTransport.closeHttp
+}
+
+impl ByteDuplex for RedirectWitnessTransport {
+  readSomeRaw: RedirectWitnessTransport.readBytes
+  writeSomeRaw: RedirectWitnessTransport.writeBytes
+  flushRaw: RedirectWitnessTransport.flushBytes
+  shutdownWriteRaw: RedirectWitnessTransport.shutdownBytes
+  closeRaw: RedirectWitnessTransport.closeBytes
+}
+
+struct RedirectRejectingClient {}
+
+impl<
+  'policy,
+  A,
+  HandlerError,
+  ?HandlerRequirements,
+  H: AttemptHandler<'policy, RedirectWitnessTransport, A, HandlerError ? HandlerRequirements>,
+> RedirectRejectingClient {
+  effect fn withAttempt(
+    client: &mut Self,
+    request: AttemptRequest<'policy>,
+    deadline: Option<Instant>,
+    handler: H,
+  ) -> A
+  ! HandlerError | RedirectAcquisitionFailure
+  ? HandlerRequirements | &mut RedirectAcquisitionRequirement
+  where
+    HandlerRequirements in Without<HandlerRequirements, ByteDuplex>,
+    HandlerRequirements in Without<HandlerRequirements, HttpTransport> {
+    drop client
+    drop request
+    drop deadline
+    drop handler
+    let accepted = run RedirectAcquisitionRequirement.accepted()
+    drop accepted
+    fail RedirectAcquisitionFailure.Rejected
+  }
+}
+
+impl<
+  'policy,
+  A,
+  HandlerError,
+  ?HandlerRequirements,
+  H: AttemptHandler<'policy, RedirectWitnessTransport, A, HandlerError ? HandlerRequirements>,
+> AttemptClient<
+  'policy,
+  RedirectWitnessTransport,
+  A,
+  HandlerError,
+  RedirectAcquisitionFailure,
+  HandlerRequirements,
+  &mut RedirectAcquisitionRequirement,
+  H,
+> for RedirectRejectingClient {
+  withAttempt: RedirectRejectingClient.withAttempt
+}
+
+struct RedirectFinalUse {}
+
+impl RedirectFinalUse {
+  effect<'call> fn handle<
+    'call,
+    'exchangeView: 'call,
+    'transport: 'exchangeView,
+    'provider: 'transport,
+    'tunnel: 'provider,
+  >(
+    handler: Self,
+    uri: Uri<'call>,
+    hop: usize,
+    exchange: &'call mut Exchange<'exchangeView, RouteTransport<
+      'transport,
+      'provider,
+      'tunnel,
+      RedirectWitnessTransport,
+    >>,
+  ) -> i32 ! RedirectCallbackFailure ? &mut RedirectCallbackRequirement
+  where
+    &mut RedirectWitnessTransport provides &HttpTransport from &mut HttpTransport | &mut MonotonicClock | &mut Allocator | &mut Random,
+    &mut RedirectWitnessTransport provides &HttpTransport from &mut HttpTransport,
+    &mut RedirectWitnessTransport provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock | &mut Allocator | &mut Random,
+    &mut RedirectWitnessTransport provides &ByteDuplex from &mut ByteDuplex {
+    drop handler
+    drop uri
+    drop hop
+    drop exchange
+    if !run RedirectCallbackRequirement.accepted() {
+      fail RedirectCallbackFailure.Failed
+    }
+    return 17
+  }
+}
+
+impl ResponseHandler<
+  RedirectWitnessTransport,
+  i32,
+  RedirectCallbackFailure ? &mut RedirectCallbackRequirement
+> for RedirectFinalUse {
+  handle: RedirectFinalUse.handle
+}
 
 struct RedirectProducer { offset: usize }
 
@@ -81,7 +294,7 @@ struct RedirectProducerUse {}
 impl ProducerHandler<
   RedirectProducer,
   i32,
-  RedirectProducerFailure ? &mut RedirectProducerRequirement,
+  RedirectProducerFailure ? &mut RedirectProducerRequirement
 > for RedirectProducerUse {
   effect<'call> fn handle<'call>(handler: Self, producer: &'call mut RedirectProducer) -> i32
   ! RedirectProducerFailure
@@ -415,6 +628,168 @@ fn redirectFormattedIs(headers: &Headers, output: &mut [u8], expected: &[u8]) ->
     Result.Success {value} => value == expected.length && redirectBytesEqual(output, expected)
   }
 }
+
+fn redirectOperationRequest<'headers>(
+  uri: Uri<'static>,
+  headers: Headers<'headers>,
+) -> RedirectRequest<'static, 'static, 'headers, 'static> {
+  return RedirectRequest<'static, 'static, 'headers, 'static> {
+    uri: uri,
+    method: Method.post(),
+    headers: headers,
+    headerPolicy: HeaderPolicy.defaults(),
+    version: Version.Http11,
+    continuePolicy: ContinuePolicy.Disabled,
+    limits: redirectHeaderLimits(),
+    maxHeadBytes: 512,
+    maxCredentialBytes: 128,
+  }
+}
+
+pub effect fn redirectEmptyContractWitness<
+  'uri,
+  'method,
+  'headers,
+  'policy,
+  'scratch,
+>(
+  client: &mut RedirectRejectingClient,
+  request: RedirectRequest<'uri, 'method, 'headers, 'policy>,
+  policy: &'policy RedirectPolicy,
+  scratch: &'scratch mut [u8],
+) -> i32
+! RedirectError
+  | ValueError
+  | RedirectCallbackFailure
+  | ClientError
+  | OutOfMemoryError
+  | RedirectAcquisitionFailure
+? &mut RedirectCallbackRequirement
+  | &mut RedirectAcquisitionRequirement
+  | &mut MonotonicClock
+  | &mut Allocator
+  | &mut Random {
+  return run withEmptyResponse(
+    client,
+    move request,
+    policy,
+    Option.none<Instant>(),
+    move scratch,
+    RedirectFinalUse {},
+  )
+}
+
+pub effect fn redirectBytesContractWitness<
+  'uri,
+  'method,
+  'headers,
+  'policy,
+  'bytes,
+  'scratch,
+>(
+  client: &mut RedirectRejectingClient,
+  request: RedirectRequest<'uri, 'method, 'headers, 'policy>,
+  policy: &'policy RedirectPolicy,
+  bytes: &'bytes [u8],
+  scratch: &'scratch mut [u8],
+) -> i32
+! RedirectError
+  | ValueError
+  | RedirectCallbackFailure
+  | ClientError
+  | OutOfMemoryError
+  | RedirectAcquisitionFailure
+? &mut RedirectCallbackRequirement
+  | &mut RedirectAcquisitionRequirement
+  | &mut MonotonicClock
+  | &mut Allocator
+  | &mut Random {
+  return run withBytesResponse(
+    client,
+    move request,
+    policy,
+    bytes,
+    Option.none<Instant>(),
+    move scratch,
+    RedirectFinalUse {},
+  )
+}
+
+pub effect fn redirectOneShotContractWitness<
+  'uri,
+  'method,
+  'headers,
+  'policy,
+  'scratch,
+>(
+  client: &mut RedirectRejectingClient,
+  request: RedirectRequest<'uri, 'method, 'headers, 'policy>,
+  policy: &'policy RedirectPolicy,
+  producer: RedirectProducer,
+  scratch: &'scratch mut [u8],
+) -> i32
+! RedirectError
+  | ValueError
+  | RedirectProducerFailure
+  | RedirectCallbackFailure
+  | ClientError
+  | OutOfMemoryError
+  | RedirectAcquisitionFailure
+? &mut RedirectProducerRequirement
+  | &mut RedirectCallbackRequirement
+  | &mut RedirectAcquisitionRequirement
+  | &mut MonotonicClock
+  | &mut Allocator
+  | &mut Random {
+  return run withOneShotResponse(
+    client,
+    move request,
+    policy,
+    move producer,
+    Option.none<Instant>(),
+    move scratch,
+    RedirectFinalUse {},
+  )
+}
+
+pub effect fn redirectReplayContractWitness<
+  'uri,
+  'method,
+  'headers,
+  'policy,
+  'scratch,
+>(
+  client: &mut RedirectRejectingClient,
+  request: RedirectRequest<'uri, 'method, 'headers, 'policy>,
+  policy: &'policy RedirectPolicy,
+  factory: RedirectFactory,
+  scratch: &'scratch mut [u8],
+) -> i32
+! RedirectError
+  | ValueError
+  | RedirectFactoryFailure
+  | RedirectProducerFailure
+  | RedirectCallbackFailure
+  | ClientError
+  | OutOfMemoryError
+  | RedirectAcquisitionFailure
+? &mut RedirectFactoryRequirement
+  | &mut RedirectProducerRequirement
+  | &mut RedirectCallbackRequirement
+  | &mut RedirectAcquisitionRequirement
+  | &mut MonotonicClock
+  | &mut Allocator
+  | &mut Random {
+  return run withReplayResponse(
+    client,
+    move request,
+    policy,
+    move factory,
+    Option.none<Instant>(),
+    move scratch,
+    RedirectFinalUse {},
+  )
+}
 `
 
 export const redirectPolicyCompileWitness = `pub fn redirectPolicyCompileWitness() -> i32 {
@@ -526,40 +901,6 @@ export const redirectPolicyCompileWitness = `pub fn redirectPolicyCompileWitness
     NameList.empty(),
   ), RedirectComponent.History, RedirectReasonTag.SizeOverflow, usize.ZERO, Option.none<u16>()) {
     return 122
-  }
-
-  let empty: BodySource<'static, i32, i32> = BodySource.Empty
-  let repeatable: BodySource<'static, i32, i32> = BodySource.RepeatableBytes {bytes: b"body"}
-  let oneShot: BodySource<'static, i32, i32> = BodySource.OneShot {producer: 42}
-  let replay: BodySource<'static, i32, RedirectFactory> = BodySource.ReplayFactory {
-    factory: RedirectFactory {},
-  }
-  if let Result.Failure {error} = admitReplay(&empty, 9, BodyDecision.Retain) {
-    drop error
-    return 125
-  }
-  if let Result.Failure {error} = admitReplay(&repeatable, 9, BodyDecision.Retain) {
-    drop error
-    return 126
-  }
-  if let Result.Failure {error} = admitReplay(&replay, 9, BodyDecision.Retain) {
-    drop error
-    return 127
-  }
-  if let Result.Failure {error} = admitReplay(&oneShot, usize.ZERO, BodyDecision.Retain) {
-    drop error
-    return 127
-  }
-  if !redirectFailureIs(
-    admitReplay(&oneShot, usize.ONE, BodyDecision.Retain),
-    RedirectComponent.Body,
-    RedirectReasonTag.ReplayUnavailable,
-    usize.ZERO,
-    Option.none<u16>(),
-  ) { return 128 }
-  if let Result.Failure {error} = admitReplay(&oneShot, usize.ONE, BodyDecision.Drop) {
-    drop error
-    return 130
   }
 
   let cleaned = crossOriginHeaderPolicy(HeaderPolicy {
@@ -914,7 +1255,7 @@ export const verifyRedirectPolicy = `pub effect fn verifyRedirectPolicy() -> boo
   if !redirectFormattedIs(
     &cross,
     &mut retainOutput,
-    b"X-Safe: safe-value\r\nx-safe: second\r\nAccept-Encoding: gzip\r\nContent-Type: text/plain\r\nContent-Encoding: identity\r\nContent-Language: en\r\n",
+    b"X-Safe: safe-value\\r\\nx-safe: second\\r\\nAccept-Encoding: gzip\\r\\nContent-Type: text/plain\\r\\nContent-Encoding: identity\\r\\nContent-Language: en\\r\\n",
   ) { return false }
 
   let droppedOwned = run redirectTakeValue(run sanitizeHeaders(
@@ -929,7 +1270,7 @@ export const verifyRedirectPolicy = `pub effect fn verifyRedirectPolicy() -> boo
   if !redirectFormattedIs(
     &dropped,
     &mut dropOutput,
-    b"X-Safe: safe-value\r\nx-safe: second\r\nAccept-Encoding: gzip\r\n",
+    b"X-Safe: safe-value\\r\\nx-safe: second\\r\\nAccept-Encoding: gzip\\r\\n",
   ) { return false }
   return true
 }`
@@ -937,31 +1278,75 @@ export const verifyRedirectPolicy = `pub effect fn verifyRedirectPolicy() -> boo
 export const httpRedirectAffineEscapeDiagnosticSource = `struct RedirectEscapingProducerUse {}
 
 impl ProducerHandler<
-  RedirectProducer,
-  &'static mut RedirectProducer,
-  never ? never,
+  RedirectDiagnosticProducer,
+  &'static mut RedirectDiagnosticProducer,
+  never ? never
 > for RedirectEscapingProducerUse {
   effect<'call> fn handle<'call>(
     handler: Self,
-    producer: &'call mut RedirectProducer,
-  ) -> &'static mut RedirectProducer {
+    producer: &'call mut RedirectDiagnosticProducer,
+  ) -> &'static mut RedirectDiagnosticProducer {
     drop handler
-    return producer
+    return move producer
   }
 }`
 
-export const httpRedirectAffineDuplicationDiagnosticSource = `fn redirectDuplicateOneShot(
-  source: BodySource<'static, RedirectProducer, RedirectFactory>,
-) -> RedirectProducer {
-  return match move source {
-    BodySource.OneShot {producer} => {
-      let duplicate = move producer
-      drop duplicate
-      return move producer
-    }
-    _ => RedirectProducer {offset: usize.ZERO}
-  }
+export const httpRedirectAffineDuplicationDiagnosticSource = `effect fn redirectDuplicateOneShot(
+  producer: RedirectProducer,
+) -> i32
+! RedirectError
+  | ValueError
+  | RedirectParseError
+  | RedirectProducerFailure
+  | RedirectCallbackFailure
+  | ClientError
+  | OutOfMemoryError
+  | RedirectAcquisitionFailure
+? &mut RedirectProducerRequirement
+  | &mut RedirectCallbackRequirement
+  | &mut RedirectAcquisitionRequirement
+  | &mut MonotonicClock
+  | &mut Allocator
+  | &mut Random {
+  let entries: [Header<'static>; 0] = []
+  let headers = run redirectTakeValue(Headers.make(&entries, redirectHeaderLimits()))
+  let uri = run redirectTakeParse(Uri.parse("https://example/a"))
+  let policy = RedirectPolicy.defaults()
+  let mut client = RedirectRejectingClient {}
+  let mut scratch: [u8; 1] = [0]
+  let first = run withOneShotResponse(
+    &mut client,
+    redirectOperationRequest(uri, headers),
+    &policy,
+    move producer,
+    Option.none<Instant>(),
+    &mut scratch,
+    RedirectFinalUse {},
+  )
+  drop first
+  return run withOneShotResponse(
+    &mut client,
+    redirectOperationRequest(uri, headers),
+    &policy,
+    move producer,
+    Option.none<Instant>(),
+    &mut scratch,
+    RedirectFinalUse {},
+  )
 }`
+
+export const httpRedirectAffineDiagnosticSource = `${httpProxyPolicyCommonImports}
+import silk.http {Status}
+${httpRedirectPolicyImports}
+${httpRedirectPolicySupport}
+
+struct RedirectDiagnosticProducer {}
+
+${httpRedirectAffineEscapeDiagnosticSource}
+
+${httpRedirectAffineDuplicationDiagnosticSource}
+
+pub fn main() -> i32 { return 42 }`
 
 export const httpRedirectPolicyFragments = `${httpRedirectPolicyImports}
 ${httpRedirectPolicySupport}
@@ -970,9 +1355,44 @@ ${verifyRedirectPolicy}`
 
 export const httpProxyRedirectPolicyMain = `struct RedirectFactoryRequirementProvider {}
 struct RedirectProducerRequirementProvider {}
+struct RedirectCallbackRequirementProvider {}
+struct RedirectAcquisitionRequirementProvider {}
+struct RedirectClockProvider {}
+struct RedirectRandomProvider {}
 
 impl RedirectFactoryRequirement for RedirectFactoryRequirementProvider {}
 impl RedirectProducerRequirement for RedirectProducerRequirementProvider {}
+impl RedirectCallbackRequirement for RedirectCallbackRequirementProvider {
+  effect fn accepted(self: &mut Self) -> bool { return true }
+}
+impl RedirectAcquisitionRequirement for RedirectAcquisitionRequirementProvider {
+  effect fn accepted(self: &mut Self) -> bool { return true }
+}
+impl MonotonicClock for RedirectClockProvider {
+  effect fn now(self: &mut Self) -> Instant { return SystemClock.make(0, 0) }
+  effect fn getResolution(self: &mut Self) -> u64 { return u64.toU64(1) }
+  effect fn waitUntil(self: &mut Self, when: Instant) -> () {
+    drop self
+    drop when
+    return ()
+  }
+  effect fn waitFor(self: &mut Self, duration: u64) -> () {
+    drop self
+    drop duration
+    return ()
+  }
+}
+impl Random for RedirectRandomProvider {
+  effect fn fillBytes(self: &mut Self, output: &mut [u8]) -> () {
+    drop self
+    let mut index = usize.ZERO
+    while index < output.length {
+      output[index] = 0
+      index = index + usize.ONE
+    }
+    return ()
+  }
+}
 
 effect fn recoverProxyPolicy(error: OutOfMemoryError) -> bool {
   drop error
@@ -993,6 +1413,51 @@ effect fn recoverRedirectReplay(
   return -1
 }
 
+effect fn recoverRedirectBaseContract(
+  error: RedirectError
+    | ValueError
+    | RedirectCallbackFailure
+    | ClientError
+    | OutOfMemoryError
+    | RedirectAcquisitionFailure,
+) -> i32 {
+  return match move error {
+    RedirectAcquisitionFailure.Rejected => 17
+    _ => -1
+  }
+}
+
+effect fn recoverRedirectOneShotContract(
+  error: RedirectError
+    | ValueError
+    | RedirectProducerFailure
+    | RedirectCallbackFailure
+    | ClientError
+    | OutOfMemoryError
+    | RedirectAcquisitionFailure,
+) -> i32 {
+  return match move error {
+    RedirectAcquisitionFailure.Rejected => 17
+    _ => -1
+  }
+}
+
+effect fn recoverRedirectReplayContract(
+  error: RedirectError
+    | ValueError
+    | RedirectFactoryFailure
+    | RedirectProducerFailure
+    | RedirectCallbackFailure
+    | ClientError
+    | OutOfMemoryError
+    | RedirectAcquisitionFailure,
+) -> i32 {
+  return match move error {
+    RedirectAcquisitionFailure.Rejected => 17
+    _ => -1
+  }
+}
+
 pub fn main() -> i32 {
   let compileWitness = redirectPolicyCompileWitness()
   let mut allocator = Allocator.systemAllocatorProvider()
@@ -1007,11 +1472,97 @@ pub fn main() -> i32 {
   let mut factory = RedirectFactory {}
   let mut factoryRequirement = RedirectFactoryRequirementProvider {}
   let mut producerRequirement = RedirectProducerRequirementProvider {}
+  let mut callbackRequirement = RedirectCallbackRequirementProvider {}
+  let mut acquisitionRequirement = RedirectAcquisitionRequirementProvider {}
+  let mut clock = RedirectClockProvider {}
+  let mut random = RedirectRandomProvider {}
+  let operationPolicy = RedirectPolicy.defaults()
   let replay = redirectReplayRowWitness(&mut factory)
     |> Effect.provideMut<RedirectFactoryRequirement>(&mut factoryRequirement)
     |> Effect.provideMut<RedirectProducerRequirement>(&mut producerRequirement)
   let replayWitness = run Effect.catchAll(move replay, recoverRedirectReplay)
-  if proxyWitness && redirectWitness && compileWitness == 0 && replayWitness == 17 { return 42 }
+  let operationEntries: [Header<'static>; 0] = []
+  let operationHeaders = match move Headers.make(&operationEntries, redirectHeaderLimits()) {
+    Result.Failure {error} => {
+      drop error
+      return 0
+    }
+    Result.Success {value} => value
+  }
+  let operationUri = match move Uri.parse("https://example/a") {
+    Result.Failure {error} => {
+      drop error
+      return 0
+    }
+    Result.Success {value} => value
+  }
+  let mut operationClient = RedirectRejectingClient {}
+  let mut operationScratch: [u8; 1] = [0]
+  let emptyContract = redirectEmptyContractWitness(
+    &mut operationClient,
+    redirectOperationRequest(operationUri, operationHeaders),
+    &operationPolicy,
+    &mut operationScratch,
+  )
+    |> Effect.provideMut<RedirectCallbackRequirement>(&mut callbackRequirement)
+    |> Effect.provideMut<RedirectAcquisitionRequirement>(&mut acquisitionRequirement)
+    |> Effect.provideMut<MonotonicClock>(&mut clock)
+    |> Effect.provideMut<Allocator>(&mut allocator)
+    |> Effect.provideMut<Random>(&mut random)
+  let emptyWitness = run Effect.catchAll(move emptyContract, recoverRedirectBaseContract)
+  let bytesContract = redirectBytesContractWitness(
+    &mut operationClient,
+    redirectOperationRequest(operationUri, operationHeaders),
+    &operationPolicy,
+    b"x",
+    &mut operationScratch,
+  )
+    |> Effect.provideMut<RedirectCallbackRequirement>(&mut callbackRequirement)
+    |> Effect.provideMut<RedirectAcquisitionRequirement>(&mut acquisitionRequirement)
+    |> Effect.provideMut<MonotonicClock>(&mut clock)
+    |> Effect.provideMut<Allocator>(&mut allocator)
+    |> Effect.provideMut<Random>(&mut random)
+  let bytesWitness = run Effect.catchAll(move bytesContract, recoverRedirectBaseContract)
+  let oneShotContract = redirectOneShotContractWitness(
+    &mut operationClient,
+    redirectOperationRequest(operationUri, operationHeaders),
+    &operationPolicy,
+    RedirectProducer {offset: usize.ZERO},
+    &mut operationScratch,
+  )
+    |> Effect.provideMut<RedirectProducerRequirement>(&mut producerRequirement)
+    |> Effect.provideMut<RedirectCallbackRequirement>(&mut callbackRequirement)
+    |> Effect.provideMut<RedirectAcquisitionRequirement>(&mut acquisitionRequirement)
+    |> Effect.provideMut<MonotonicClock>(&mut clock)
+    |> Effect.provideMut<Allocator>(&mut allocator)
+    |> Effect.provideMut<Random>(&mut random)
+  let oneShotWitness = run Effect.catchAll(
+    move oneShotContract,
+    recoverRedirectOneShotContract,
+  )
+  let replayContract = redirectReplayContractWitness(
+    &mut operationClient,
+    redirectOperationRequest(operationUri, operationHeaders),
+    &operationPolicy,
+    RedirectFactory {},
+    &mut operationScratch,
+  )
+    |> Effect.provideMut<RedirectFactoryRequirement>(&mut factoryRequirement)
+    |> Effect.provideMut<RedirectProducerRequirement>(&mut producerRequirement)
+    |> Effect.provideMut<RedirectCallbackRequirement>(&mut callbackRequirement)
+    |> Effect.provideMut<RedirectAcquisitionRequirement>(&mut acquisitionRequirement)
+    |> Effect.provideMut<MonotonicClock>(&mut clock)
+    |> Effect.provideMut<Allocator>(&mut allocator)
+    |> Effect.provideMut<Random>(&mut random)
+  let replayContractWitness = run Effect.catchAll(
+    move replayContract,
+    recoverRedirectReplayContract,
+  )
+  if proxyWitness && redirectWitness && compileWitness == 0 && replayWitness == 17
+    && emptyWitness == 17
+    && bytesWitness == 17
+    && oneShotWitness == 17
+    && replayContractWitness == 17 { return 42 }
   return 0
 }`
 
