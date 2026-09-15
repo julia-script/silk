@@ -169,6 +169,8 @@ pub union FetchReason {
   InvalidOptions,
   /// Checked accounting cannot represent the required total.
   SizeOverflow,
+  /// A caller-defined sink rejected the current offered chunk.
+  DestinationRejected,
   /// Content selection failed; borrowed coding tokens are copied into bounded owned storage.
   Content { pub error: FetchContentError },
   /// One independent finite resource would exceed its inclusive limit.
@@ -480,7 +482,7 @@ impl<S, SinkError, ?SinkRequirements, S: Sink<SinkError ? SinkRequirements>> Sin
           error: move error,
           context: FetchError {
             phase: FetchPhase.Destination,
-            reason: FetchReason.InvalidOptions,
+            reason: FetchReason.DestinationRejected,
             status: Option.none<Status>(),
             uri: Option.none<OwnedUri>(),
             deliveredBodyBytes: deliveredBefore,
@@ -586,6 +588,100 @@ impl DiscardDestination {
 impl Destination<FetchResult, FetchError, never> for DiscardDestination {
   accept: DiscardDestination.accept
   publish: DiscardDestination.publish
+}
+
+interface SemanticRequestHandler<A, E, ?R> {
+  effect<'call> fn handle<'call>(
+    handler: Self,
+    request: Redirect.Request<'call, 'call, 'call, 'call>,
+  ) -> A ! E ? R
+}
+
+fn redirectRequest<'call>(
+  uri: Uri<'call>,
+  method: Method<'call>,
+  headers: Headers<'call>,
+  headerPolicy: HeaderPolicy<'call>,
+  version: Version,
+  continuePolicy: ContinuePolicy,
+  limits: HeaderLimits,
+  maxHeadBytes: usize,
+  maxCredentialBytes: usize,
+) -> Redirect.Request<'call, 'call, 'call, 'call> {
+  return Redirect.Request<'call, 'call, 'call, 'call> {
+    uri: uri,
+    method: method,
+    headers: headers,
+    headerPolicy: headerPolicy,
+    version: version,
+    continuePolicy: move continuePolicy,
+    limits: limits,
+    maxHeadBytes: maxHeadBytes,
+    maxCredentialBytes: maxCredentialBytes,
+  }
+}
+
+effect fn withSemanticRequest<
+  'uri,
+  'method,
+  'headers,
+  'policy,
+  A,
+  E,
+  ?R,
+  H: SemanticRequestHandler<A, E ? R>,
+>(
+  request: FetchRequest<'uri, 'method, 'headers, 'policy>,
+  handler: H,
+) -> A ! E | ValueError ? R {
+  let FetchRequest<'uri, 'method, 'headers, 'policy> {
+    uriValue,
+    methodValue,
+    headersValue,
+    headerPolicyValue,
+    versionValue,
+    continuePolicyValue,
+    limitsValue,
+    maxHeadBytesValue,
+    maxCredentialBytesValue,
+  } = move request
+  return match move headersValue {
+    RequestHeaders.Empty => {
+      let empty: [Header<'static>; 0] = []
+      let headers = match move Headers.make(&empty, limitsValue) {
+        Result.Failure {error} => {
+          fail move error
+        }
+        Result.Success {value} => value
+      }
+      let selected = redirectRequest(
+        uriValue,
+        methodValue,
+        headers,
+        headerPolicyValue,
+        versionValue,
+        copyContinuePolicy(&continuePolicyValue),
+        limitsValue,
+        maxHeadBytesValue,
+        maxCredentialBytesValue,
+      )
+      run SemanticRequestHandler<A, E ? R>.handle(move handler, move selected)
+    }
+    RequestHeaders.Borrowed {headers} => {
+      let selected = redirectRequest(
+        uriValue,
+        methodValue,
+        headers,
+        headerPolicyValue,
+        versionValue,
+        move continuePolicyValue,
+        limitsValue,
+        maxHeadBytesValue,
+        maxCredentialBytesValue,
+      )
+      run SemanticRequestHandler<A, E ? R>.handle(move handler, move selected)
+    }
+  }
 }
 
 struct HeaderMetadata {
