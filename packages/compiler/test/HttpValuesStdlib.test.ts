@@ -9,6 +9,7 @@ import * as SourceFile from '../src/SourceFile.js'
 import * as Stdlib from '../src/Stdlib.js'
 import * as Projections from './support/projections.js'
 import { httpValuesAcceptanceSource } from './support/httpValuesAcceptance.js'
+import { httpProxyPolicyAcceptanceSource } from './support/httpProxyAcceptance.js'
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
@@ -282,6 +283,20 @@ pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
           (operation) => operation._tag === 'Drop' && CleanupPlan.reclaims(operation.cleanup),
         ),
       )
+    }),
+  60_000,
+)
+
+it.effect(
+  'analyzes bounded HTTP proxy policy and its shared route matrix once',
+  () =>
+    Effect.gen(function* () {
+      const snapshot = yield* AnalysisFixture.retainingMain(
+        'http-proxy/policy',
+        ascii(httpProxyPolicyAcceptanceSource),
+      )
+      assert.deepEqual(diagnosticSummary(snapshot), [])
+      assert.deepEqual(MirVerification.verify(Analysis.loweredMir(snapshot)), [])
     }),
   60_000,
 )

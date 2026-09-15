@@ -1,7 +1,7 @@
 ## 1. Bounded proxy policy
 
-- [ ] 1.1 Add `silk.http_proxy` configuration, auth, bypass, route, route-key, and error values with checked owned-capacity validation plus caller-supplied nonsecret `ProxyConfigId`/`ProxyAuthContextId` copy and exact-equality semantics; prove malformed URI/auth/capacity input, credential-context rotation, and configuration-time encrypted-proxy refusal in the one shared analysis snapshot.
-- [ ] 1.2 Implement exact normalized-origin bypass and pure Direct/Forward/Tunnel selection with no encrypted-proxy route variant and with pure recomputation hooks; cover the admitted route matrix, identity retention, and equivalent numeric host identities in the shared proxy support program.
+- [x] 1.1 Add `silk.http_proxy` configuration, auth, bypass, route, route-key, and error values with checked owned-capacity validation plus caller-supplied nonsecret `ProxyConfigId`/`ProxyAuthContextId` copy and exact-equality semantics; prove malformed URI/auth/capacity input, credential-context rotation, and configuration-time encrypted-proxy refusal in the one shared analysis snapshot.
+- [x] 1.2 Implement exact normalized-origin bypass and pure Direct/Forward/Tunnel selection with no encrypted-proxy route variant and with pure recomputation hooks; cover the admitted route matrix, identity retention, and equivalent numeric host identities in the shared proxy support program.
 
 ## 2. Proxy wire preparation
 
