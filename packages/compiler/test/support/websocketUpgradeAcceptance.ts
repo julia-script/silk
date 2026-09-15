@@ -412,7 +412,7 @@ effect<'call> fn useChannel<'call, 'transport: 'call>(
   ))
   return match move served {
     Result<i32, WebSocketError>.Success {value} => value
-    Result<i32, WebSocketError>.Failure {error} => { drop error 193 }
+    Result<i32, WebSocketError>.Failure {error} => { drop error return 193 }
   }
 }
 
