@@ -367,6 +367,8 @@
       "CollectedResponse",
       "DestinationFailure",
       "FetchClient",
+      "FetchContentError",
+      "FetchContentReason",
       "FetchError",
       "FetchLimit",
       "FetchOptions",
