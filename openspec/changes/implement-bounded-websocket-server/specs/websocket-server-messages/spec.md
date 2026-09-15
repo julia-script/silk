@@ -76,7 +76,8 @@ whole-message allocation or unbounded work.
 One successful `readEvent` SHALL return at most one `Event`: `Text { count }`, `Binary { count }`,
 `Ping { payload }`, `Pong { payload }`, or `PeerClose { data }`. Text and Binary SHALL name only the
 initialized prefix of the caller's output; they SHALL retain no borrow into the mutable session.
-Text SHALL publish only after the complete unmasked payload passes `String.fromUtf8`. Ping, Pong,
+Text SHALL publish only after the complete unmasked payload passes the same complete UTF-8
+admission rules as `String.fromUtf8`. Ping, Pong,
 and Close SHALL publish copied fixed-capacity metadata independent of later session mutation.
 Invalid text or close-reason UTF-8 SHALL return `InvalidUtf8` naming the component, select close
 code 1007, and publish no event. A read failure MAY have modified an output prefix, but that prefix

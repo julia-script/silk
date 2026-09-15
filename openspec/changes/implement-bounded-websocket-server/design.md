@@ -258,9 +258,11 @@ base header, the selected extended length, and four-byte mask. It validates in t
 5. policy maximum, checked `usize` narrowing, caller capacity, and close-attempt accounting;
 6. payload input and in-place XOR using `(payloadOffset + index) % 4`.
 
-Data reads go directly into caller output through exact bounded reads, then unmask in place. Text
-uses `String.fromUtf8` only after the full frame is present. On failure, a partially initialized
-prefix is deliberately not returned as a message. Controls read into the fixed 125-byte scratch.
+Data reads go directly into caller output through exact bounded reads and unmask in place. Text
+applies the same complete UTF-8 admission rules as `String.fromUtf8` incrementally while the
+single affine output borrow is active, then publishes only after the full frame is present. On
+failure, a partially initialized prefix is deliberately not returned as a message. Controls read
+into the fixed 125-byte scratch.
 One `readEvent` handles one frame only; Ping is published only after its automatic Pong flush and
 Pong is never skipped.
 
