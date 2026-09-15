@@ -1,5 +1,7 @@
 //! Bounded HTTP proxy policy, pure route selection, and owned CONNECT rejection metadata.
 //!
+//! # Details
+//!
 //! Proxy policy owns its prepared authentication token and exact-origin bypass entries. Selection
 //! does not allocate or use the network. A selected route supplies its configured authentication
 //! only through bounded output. CONNECT rejection copies have fixed field and owned-byte limits.
@@ -554,7 +556,9 @@ fn connectMetadataLimits() -> Limits {
   }
 }
 
-/// Classifies one complete final CONNECT response and owns only bounded rejection metadata.
+/// Classifies a complete final CONNECT response into success or bounded rejection metadata.
+///
+/// # Details
 ///
 /// Any 2xx response is accepted. A 407 retains status, reason, and ordered duplicate
 /// `Proxy-Authenticate` fields only; other final non-2xx responses retain all ordered fields.
@@ -635,6 +639,8 @@ impl<'configuration> Route<'configuration> {
   }
   /// Returns the complete configured `Proxy-Authorization` value length, or zero when absent.
   ///
+  /// # Details
+  ///
   /// The prepared token remains private; possessing a policy-selected route is the capability to
   /// request its bounded wire representation.
   pub fn proxyAuthorizationLength(self: &Self) -> usize {
@@ -645,7 +651,6 @@ impl<'configuration> Route<'configuration> {
     }
   }
   /// Writes the complete configured `Proxy-Authorization` value without exposing token storage.
-  ///
   /// Returns `None` without changing `output` when it is too small.
   pub fn writeProxyAuthorizationInto(self: &Self, output: &mut [u8]) -> Option<usize> {
     let required = Route.proxyAuthorizationLength(self)
