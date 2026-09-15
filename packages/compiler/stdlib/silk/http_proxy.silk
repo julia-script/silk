@@ -1,25 +1,15 @@
-//! Bounded HTTP proxy configuration and pure per-origin route selection.
+//! Bounded HTTP proxy policy, pure route selection, and owned CONNECT rejection metadata.
 //!
 //! Proxy policy owns its prepared authentication token and exact-origin bypass entries. Selection
-//! copies only checked hosts, ports, origins, and caller-supplied nonsecret identities; it performs
-//! no allocation, resolution, connection acquisition, authentication generation, or wire output.
+//! does not allocate or use the network. A selected route supplies its configured authentication
+//! only through bounded output. CONNECT rejection copies have fixed field and owned-byte limits.
 
 import silk.allocator {Allocator, OutOfMemoryError}
 import silk.base64 {Base64, Base64Error}
 import silk.bytes {Bytes}
-import silk.http {Method, Version}
-import silk.http_headers {Headers, Limits}
+import silk.http {OwnedResponseHead, ResponseHead, Status, ValueError}
+import silk.http_headers {Limits}
 import silk.http_origin {Origin, OriginError}
-import silk.http_request as Request
-import silk.http_request {
-  BodyMode,
-  HeaderPolicy,
-  PreparedRequest,
-  RequestError,
-  RoutedMode,
-  RoutedProxyAuthorization,
-}
-import silk.http_target {RequestTarget, TargetForm}
 import silk.layout {Layout}
 import silk.network_address {DomainHost, Host, Ipv4Address, Ipv6Address, Port}
 import silk.option {Option}
@@ -84,12 +74,35 @@ pub union ProxyReason {
   InvalidRoute,
 }
 
-/// A typed proxy policy failure containing no identity payload or credential bytes.
-pub struct ProxyError {
+/// A copyable proxy-policy admission failure containing no identity or credential bytes.
+pub struct ProxyAdmissionError {
   /// The proxy value that failed admission.
   pub component: ProxyComponent
   /// The admission rule that failed.
   pub reason: ProxyReason
+}
+
+/// A typed proxy failure whose response variants own only bounded, nonsecret metadata.
+pub union ProxyError {
+  /// Configuration, route, or credential admission failed without retaining input bytes.
+  Admission {
+    /// The structured copyable admission failure.
+    pub error: ProxyAdmissionError,
+  },
+  /// A complete CONNECT response exceeded the fixed owned-metadata budget.
+  ProxyMetadataLimit,
+  /// A 407 response retaining status, reason, and ordered `Proxy-Authenticate` fields only.
+  ProxyAuthenticationRequired {
+    /// The bounded independently owned response metadata.
+    pub response: OwnedResponseHead,
+  },
+  /// Another final non-2xx response retaining status, reason, and all ordered fields.
+  ProxyRejected {
+    /// The bounded independently owned response metadata.
+    pub response: OwnedResponseHead,
+  },
+  /// Response classification was attempted before a final CONNECT response existed.
+  InvalidConnectResponse,
 }
 
 /// An opaque configuration identity made from a caller-supplied nonsecret `u64`.
@@ -172,15 +185,22 @@ pub struct RouteKey {
 }
 
 impl Copy for ProxyReason {}
-impl Copy for ProxyError {}
+impl Copy for ProxyAdmissionError {}
 impl Copy for ProxyConfigId {}
 impl Copy for ProxyAuthContextId {}
 impl Copy for RouteIdentity {}
 impl<'configuration> Copy for Route<'configuration> {}
 impl Copy for RouteKey {}
 
+impl ProxyError {
+  /// Returns the credential-free failure for an incompatible sealed route.
+  pub fn invalidRoute() -> ProxyError {
+    return failure(ProxyComponent.Route, ProxyReason.InvalidRoute)
+  }
+}
+
 fn failure(component: ProxyComponent, reason: ProxyReason) -> ProxyError {
-  return ProxyError {component: component, reason: move reason}
+  return ProxyError.Admission {error: ProxyAdmissionError {component: component, reason: move reason}}
 }
 
 fn limitFailure(component: ProxyComponent, limit: ProxyLimit, allowed: usize, attempted: usize) -> ProxyError {
@@ -233,6 +253,38 @@ fn hostsEqual(left: &Host, right: &Host) -> bool {
     Host.Ipv6 {value} => match & right.* {
       Host.Ipv6 {value: other} => Ipv6Address.equals(&value, &other)
       _ => false
+    }
+  }
+}
+
+fn authenticationLength(configuration: &ProxyConfig) -> usize {
+  return match & configuration.authenticationValue {
+    ProxyAuth.None {contextIdValue} => usize.ZERO
+    ProxyAuth.Basic {contextIdValue, tokenValue} => Bytes.length(&tokenValue) + 6
+  }
+}
+
+fn writeAuthentication(configuration: &ProxyConfig, output: &mut [u8]) -> Option<usize> {
+  let required = authenticationLength(configuration)
+  if output.length < required {
+    return Option<usize>.None
+  }
+  return match & configuration.authenticationValue {
+    ProxyAuth.None {contextIdValue} => Option.Some {value: usize.ZERO}
+    ProxyAuth.Basic {contextIdValue, tokenValue} => {
+      output[0] = 66
+      output[1] = 97
+      output[2] = 115
+      output[3] = 105
+      output[4] = 99
+      output[5] = 32
+      let token = Bytes.asSlice(&tokenValue)
+      let mut index = usize.ZERO
+      while index < token.length {
+        output[index + 6] = token[index]
+        index = index + usize.ONE
+      }
+      return Option.Some {value: required}
     }
   }
 }
@@ -490,132 +542,57 @@ pub fn selectRoute<'configuration>(
   }
 }
 
-effect fn prepareSelectedForward<'value>(
-  configuration: &'value ProxyConfig,
-  originalOrigin: Origin,
-  uri: &Uri<'value>,
-  version: Version,
-  method: Method<'value>,
-  headers: &Headers<'value>,
-  policy: &HeaderPolicy<'value>,
-  body: BodyMode,
-  require100: bool,
-  limits: Limits,
-  maxHeadBytes: usize,
-  maxCredentialBytes: usize,
-) -> PreparedRequest ! ProxyError | RequestError | OutOfMemoryError ? &mut Allocator {
-  let logicalOrigin = match move Origin.fromUri(uri) {
-    Result<Origin, OriginError>.Failure {error} => {
-      fail failure(ProxyComponent.Route, ProxyReason.InvalidRoute)
-    }
-    Result<Origin, OriginError>.Success {value} => value
-  }
-  if !Origin.equals(&originalOrigin, &logicalOrigin) {
-    fail failure(ProxyComponent.Route, ProxyReason.InvalidRoute)
-  }
-  let physicalPeer = match move Origin.make(
-    configuration.proxyHostValue,
-    configuration.proxyPortValue,
-    false,
-  ) {
-    Result<Origin, OriginError>.Failure {error} => {
-      fail failure(ProxyComponent.Route, ProxyReason.InvalidRoute)
-    }
-    Result<Origin, OriginError>.Success {value} => value
-  }
-  let mut targetStorage = run Bytes.zeroed(limits.maxTargetBytes)
-  let output = Bytes.asMutSlice(&mut targetStorage)
-  let count = match move RequestTarget.fromUri(uri, TargetForm.Absolute, &mut output) {
-    Result.Failure {error} => {
-      fail RequestError.Value {error: move error}
-    }
-    Result.Success {value} => value
-  }
-  drop output
-  let bytes = Slice.view<u8>(Bytes.asSlice(&targetStorage), usize.ZERO, count)
-  let text = match move String.fromUtf8(bytes) {
-    Result.Failure {error} => {
-      drop error
-      fail RequestError.InvalidTarget
-    }
-    Result.Success {value} => value
-  }
-  let target = match move RequestTarget.parse(&method, text, limits.maxTargetBytes) {
-    Result.Failure {error} => {
-      fail RequestError.Value {error: move error}
-    }
-    Result.Success {value} => value
-  }
-  return match & configuration.authenticationValue {
-    ProxyAuth.None {contextIdValue} => run Request.prepareRouted(
-      &logicalOrigin,
-      &physicalPeer,
-      RoutedMode.Forward,
-      RoutedProxyAuthorization<'value>.Absent,
-      version,
-      method,
-      target,
-      headers,
-      policy,
-      body,
-      require100,
-      limits,
-      maxHeadBytes,
-      maxCredentialBytes,
-    )
-    ProxyAuth.Basic {contextIdValue, tokenValue} => run Request.prepareRouted(
-      &logicalOrigin,
-      &physicalPeer,
-      RoutedMode.Forward,
-      RoutedProxyAuthorization.BasicToken {value: Bytes.asSlice(&tokenValue)},
-      version,
-      method,
-      target,
-      headers,
-      policy,
-      body,
-      require100,
-      limits,
-      maxHeadBytes,
-      maxCredentialBytes,
-    )
+fn connectMetadataLimits() -> Limits {
+  return Limits {
+    maxMethodBytes: usize.ZERO,
+    maxTargetBytes: usize.ZERO,
+    maxNameBytes: 256,
+    maxValueBytes: 8192,
+    maxFields: 100,
+    maxFieldBytes: 32768,
+    maxOwnedBytes: 32768,
   }
 }
 
-/// Prepares one Forward route as an origin-bound absolute-form request for its plain proxy peer.
+/// Classifies one complete final CONNECT response and owns only bounded rejection metadata.
 ///
-/// The selected configuration is the only source of `Proxy-Authorization`. The original URI
-/// spelling is preserved except that user information and fragments are excluded and an empty
-/// path becomes `/`.
-pub effect fn prepareForward<'configuration, 'value>(
-  route: &Route<'configuration>,
-  uri: &Uri<'value>,
-  version: Version,
-  method: Method<'value>,
-  headers: &Headers<'value>,
-  policy: &HeaderPolicy<'value>,
-  body: BodyMode,
-  require100: bool,
-  limits: Limits,
-  maxHeadBytes: usize,
-  maxCredentialBytes: usize,
-) -> PreparedRequest ! ProxyError | RequestError | OutOfMemoryError ? &mut Allocator {
-  return match & route.* {
-    Route.Forward {identity, configuration, origin} => run prepareSelectedForward(
-      configuration,
-      origin,
-      uri,
-      version,
-      method,
-      headers,
-      policy,
-      body,
-      require100,
-      limits,
-      maxHeadBytes,
-      maxCredentialBytes,
-    )
-    _ => { fail failure(ProxyComponent.Route, ProxyReason.InvalidRoute) }
+/// Any 2xx response is accepted. A 407 retains status, reason, and ordered duplicate
+/// `Proxy-Authenticate` fields only; other final non-2xx responses retain all ordered fields.
+/// Complete-head copy failures map to `ProxyMetadataLimit`, while allocation failure remains
+/// `OutOfMemoryError`. Call this only after the shared client's parser has returned a final head.
+pub effect fn classifyConnect(
+  head: &ResponseHead,
+) -> () ! ProxyError | OutOfMemoryError ? &mut Allocator {
+  let status = ResponseHead.status(head)
+  let code = Status.code(&status)
+  if code < 200 {
+    fail ProxyError.InvalidConnectResponse
+  }
+  if code >= 200 && code < 300 {
+    return ()
+  }
+  let limits = connectMetadataLimits()
+  if code == 407 {
+    let copied = run ResponseHead.copyMatchingHeaders(head, "Proxy-Authenticate", limits)
+    return match move copied {
+      Result<OwnedResponseHead, ValueError>.Failure {error} => {
+        drop error
+        fail ProxyError.ProxyMetadataLimit
+      }
+      Result<OwnedResponseHead, ValueError>.Success {value} => {
+        fail ProxyError.ProxyAuthenticationRequired {response: move value}
+      }
+    }
+  }
+  let copied = run ResponseHead.copy(head, limits)
+  return match move copied {
+    Result<OwnedResponseHead, ValueError>.Failure {error} => {
+      drop error
+      fail ProxyError.ProxyMetadataLimit
+    }
+    Result<OwnedResponseHead, ValueError>.Success {value} => {
+      fail ProxyError.ProxyRejected {response: move value}
+    }
   }
 }
 
@@ -650,6 +627,44 @@ impl<'configuration> Route<'configuration> {
       Route.Direct {identity, configuration, origin} => identity.proxyPort
       Route.Forward {identity, configuration, origin} => identity.proxyPort
       Route.Tunnel {identity, configuration, origin} => identity.proxyPort
+    }
+  }
+  /// Returns the plaintext proxy peer retained by the sealed route.
+  pub fn physicalPeer(self: &Self) -> Result<Origin, OriginError> {
+    return Origin.make(Route.proxyHost(self), Route.proxyPort(self), false)
+  }
+  /// Returns the complete configured `Proxy-Authorization` value length, or zero when absent.
+  ///
+  /// The prepared token remains private; possessing a policy-selected route is the capability to
+  /// request its bounded wire representation.
+  pub fn proxyAuthorizationLength(self: &Self) -> usize {
+    return match & self.* {
+      Route.Direct {identity, configuration, origin} => authenticationLength(configuration)
+      Route.Forward {identity, configuration, origin} => authenticationLength(configuration)
+      Route.Tunnel {identity, configuration, origin} => authenticationLength(configuration)
+    }
+  }
+  /// Writes the complete configured `Proxy-Authorization` value without exposing token storage.
+  ///
+  /// Returns `None` without changing `output` when it is too small.
+  pub fn writeProxyAuthorizationInto(self: &Self, output: &mut [u8]) -> Option<usize> {
+    let required = Route.proxyAuthorizationLength(self)
+    if output.length < required {
+      return Option<usize>.None
+    }
+    if required == usize.ZERO {
+      return Option.Some {value: usize.ZERO}
+    }
+    return match & self.* {
+      Route.Direct {identity, configuration, origin} => {
+        return writeAuthentication(configuration, &mut output)
+      }
+      Route.Forward {identity, configuration, origin} => {
+        return writeAuthentication(configuration, &mut output)
+      }
+      Route.Tunnel {identity, configuration, origin} => {
+        return writeAuthentication(configuration, &mut output)
+      }
     }
   }
   /// Returns the configuration identity retained when policy selected the route.

@@ -994,6 +994,24 @@ where
   return code
 }
 
+/// Receives bounded informational heads until the shared parser reaches one final response.
+///
+/// Parser, head, informational-budget, 101-upgrade, transport, and deadline failures remain the
+/// original `ClientError`. This operation does not copy response metadata or consume a body.
+pub effect fn receiveFinal<'exchange, P>(exchange: &mut Exchange<'exchange, P>) -> u16
+! ClientError | OutOfMemoryError
+? &mut MonotonicClock | &mut Allocator | &mut Random
+where
+  &mut P provides &HttpTransport from &mut HttpTransport | &mut MonotonicClock | &mut Allocator | &mut Random {
+  while true {
+    let code = run receive(exchange)
+    if code >= 200 {
+      return code
+    }
+  }
+  return 200
+}
+
 /// Reads one framed payload prefix without consuming the next message suffix.
 pub effect fn readSome<'exchange, P>(exchange: &mut Exchange<'exchange, P>, output: &mut [u8]) -> usize
 ! ClientError | OutOfMemoryError
