@@ -225,15 +225,16 @@ caching.
 
 ### Requirement: Tunnel ownership composes with original-origin TLS exactly once
 
-Successful CONNECT SHALL expose one single-use, allocation-free tunnel-transfer operation. A failed
-transition SHALL leave the current close authority unchanged. An invalid pre-publication transition
-SHALL leave the HTTP owner Armed. A repeated post-publication transition SHALL observe the existing
-Closed or Transferred authority and SHALL NOT rearm it. A valid transition SHALL construct a
-complete affine `ByteDuplex`, then atomically disarm the HTTP owner's physical close authority and
-publish the duplex, with no fallible or cancelable step between disarm and publication. The duplex
-SHALL own the exact concrete transport close authority and unread buffered suffix. Reads SHALL serve
-the suffix before underlying transport input; writes and flushes SHALL forward unchanged. Its
-complete close SHALL be terminal and idempotent and SHALL attempt the concrete close at most once.
+Successful CONNECT SHALL expose one single-use, allocation-free tunnel-transfer operation. The
+public first transfer SHALL start with Armed close authority. Its higher-ranked exclusive borrow
+SHALL prevent a concurrent or reentrant repeat. A valid transition SHALL construct a complete
+affine `ByteDuplex`, then atomically disarm the HTTP owner's physical close authority and publish the
+duplex, with no fallible or cancelable step between disarm and publication. After scoped
+finalization, a repeated transfer SHALL observe Closed, fail, and leave that terminal authority
+unchanged. The duplex SHALL own the exact concrete transport close authority and unread buffered
+suffix. Reads SHALL serve the suffix before underlying transport input; writes and flushes SHALL
+forward unchanged. Its complete close SHALL be terminal and idempotent and SHALL attempt the
+concrete close at most once.
 
 The transferred duplex SHALL retain the concrete provider's write-direction authority:
 `shutdownWrite` SHALL perform the canonical flush and forward directional shutdown exactly once
@@ -285,11 +286,10 @@ values exactly from its `options` and `limits` arguments.
 - **WHEN** the route callback returns its own typed failure and terminal transport close also fails
 - **THEN** cleanup attempts physical close at most once and the callback failure remains observable
 
-#### Scenario: Preserve the current authority on failed transfer
+#### Scenario: Reject transfer after scoped finalization
 
-- **WHEN** tunnel transfer is requested in an invalid state or a repeated transfer is attempted
-- **THEN** no duplex is published, invalid pre-publication keeps the HTTP owner Armed, and repeated
-  post-publication transfer leaves the existing Closed or Transferred authority unchanged
+- **WHEN** transfer completed, its scoped duplex finalized, and the caller repeats the transfer
+- **THEN** no duplex is published and the existing Closed authority remains unchanged
 
 #### Scenario: Preserve directional shutdown across transfer
 

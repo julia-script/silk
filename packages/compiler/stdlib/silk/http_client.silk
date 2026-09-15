@@ -1557,7 +1557,8 @@ impl<'tunnel, P> Tunnel<'tunnel, P> {
   ///
   /// # Gotchas
   ///
-  /// An invalid or repeated transfer returns `InvalidState` and does not change close authority.
+  /// After scoped finalization, a repeated transfer returns `InvalidState` and leaves the existing
+  /// Closed authority unchanged.
   pub effect fn transferByteDuplex<'transfer, 'callback, A, E, ?CallbackRequirements>(
     self: &'transfer mut Self,
     callback: for<'call, 'duplexView: 'call> once fn<'callback>(
