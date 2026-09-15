@@ -9,11 +9,12 @@ response state outside its owner.
 ## What Changes
 
 - Add an ordinary-source `silk.http_redirect` actor with validated `RedirectPolicy`, bounded
-  redirect history and URI storage, explicit Follow/Manual behavior, and a scoped
-  `Redirect.withResponse` operation that lends exactly one final response to its callback.
-- Add a rebuildable semantic redirect request plus `BodySource` variants for empty, borrowed
-  repeatable bytes, affine one-shot producers, and effectful replay factories that create a fresh
-  scoped producer for every attempt.
+  redirect history and URI storage, explicit Follow/Manual behavior, and source-specific scoped
+  response operations that lend exactly one final response to their callback.
+- Add a rebuildable semantic redirect request plus separate empty, borrowed-repeatable-byte,
+  affine-one-shot, and effectful-replay-factory operations. Each operation exposes only the source
+  errors, requirements, and witnesses it can actually use; replay factories create a fresh scoped
+  producer for every attempt.
 - Implement the exact 301/302/303/307/308 method/body matrix, URI-reference resolution and RFC 9110
   fragment inheritance, method-aware loop detection, hop/history/URI limits, and distinct typed
   redirect failures.

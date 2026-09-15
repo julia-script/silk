@@ -53,16 +53,24 @@ Alternative: reverse-parse `PreparedRequest.bytes()` after every response. Rejec
 cannot recover fragment absence, caller policy, header provenance, or affine body authority and
 would duplicate the parser and serializer contracts.
 
-### Body sources separate first-attempt ownership from replay capability
+### Source-specific operations expose only relevant evidence
 
-Define a generic `BodySource<'bytes, OneShot, Factory>` union:
+Expose four public operations over one private iterative engine:
 
-- `Empty` selects empty framing and needs no producer.
-- `RepeatableBytes` borrows immutable bytes for the complete operation and creates a zero-resource
-  cursor for every retained-body attempt.
-- `OneShot` moves one affine producer into operation state and permits exactly one producer scope.
-- `ReplayFactory` moves an effectful factory whose higher-ranked callback lends a fresh producer for
-  each attempt, including attempt zero.
+- `withEmptyResponse` selects empty framing and has no source type or source channels.
+- `withBytesResponse` borrows immutable bytes for the complete operation and creates a
+  zero-resource cursor for every retained-body attempt.
+- `withOneShotResponse` moves one affine producer into operation state and exposes only that
+  producer's generic failure, requirement, and conformance evidence.
+- `withReplayResponse` moves an effectful factory whose higher-ranked callback lends a fresh
+  producer for each attempt, including attempt zero, and exposes only the factory and producer
+  channel families.
+
+Silk has neither default generic arguments nor existential interface values. A fieldless Empty or
+RepeatableBytes variant in `BodySource<'bytes, OneShot, Factory>` therefore cannot infer the absent
+`OneShot` and `Factory` types, while unconditional operation bounds would require irrelevant
+conformance witnesses. Separate operations keep the public API callable without dummy types or
+providers and let every signature state its exact channels.
 
 A small `BodyProducer` interface supplies selected `BodyMode` metadata and pulls bounded byte
 chunks. A factory uses callback-scoped acquisition rather than returning an unconstrained producer,
@@ -70,12 +78,18 @@ so file handles or other resources cannot escape and release failures can be bra
 manual cleanup branches. The shared writer loops on `http_client.writeSome`, records observed bytes,
 then calls `finishRequest`; selected framing, declared known length, and observed length must agree.
 The factory and producer retain separate generic error and requirement parameters, and those rows
-flow through `withResponse` without wrapping.
+flow through `withReplayResponse` without wrapping.
 
 When a transition drops content, no producer/factory call occurs. When it retains content, Empty,
 RepeatableBytes, and ReplayFactory are available; OneShot after attempt zero fails before the next
 acquisition. An early final does not restore OneShot authority because external producer effects may
 already have occurred even when the writer reports no progress.
+
+Alternative: retain the tri-generic BodySource union and add placeholder providers or convenience
+constructors. Rejected because the public operation would still require irrelevant evidence and
+would preserve an unusable core shape. A public source interface was also rejected because Silk
+interface operations may add only lifetime parameters, forcing acquisition, callback, and channel
+families onto every source type.
 
 Alternative: buffer a OneShot body on its first use. Rejected because it changes memory bounds,
 duplicates caller storage, cannot roll back source effects, and makes replayability depend on timing.
@@ -84,14 +98,18 @@ duplicates caller storage, cannot roll back source effects, and makes replayabil
 
 The redirect actor defines an `AttemptClient` interface and a callback-style `AttemptHandler`. One
 call receives the current independently owned URI, immutable semantic request fields, body mode,
-unchanged deadline, and one scoped producer. It selects/recomputes the route, prepares the request
+unchanged deadline, and one private service-backed selected body. It selects/recomputes the route, prepares the request
 through `http_request`, acquires a connection, drives `withExchange`, and lends the active exchange
 to the handler. The handler's response/exchange borrow is higher-ranked and cannot escape.
 
-`Redirect.withResponse(client, request, policy, bodySource, deadline, callback)` remains generic over
-the client, producer, factory, and final callback. Its return channel is the direct union of redirect,
-URI/request/client/acquisition/source errors and the callback's `E`; its requirement row is their
-direct union with the callback's `R`. No `unknown` erasure or boxed dynamic dispatch is introduced.
+The four public response operations remain generic over the client and final callback; the OneShot
+and Replay variants additionally quantify only their own relevant source families. One private
+generic `SelectedBody` service adapts Empty, bytes, OneShot, or the current replay loan to one fixed
+attempt-handler type. Lexically providing that service around the complete attempt removes only its
+private requirement, so the client needs one handler witness rather than one witness per concrete
+producer. Public return and requirement channels remain direct unions of only the errors and
+requirements that operation can encounter. No `unknown` erasure or boxed dynamic dispatch is
+introduced.
 
 The proxy-aware adapter stores the immutable proxy configuration or selected initial route and
 uses `Route.recompute` for every current origin. Direct/Tunnel attempts prepare origin-form requests;
@@ -100,13 +118,13 @@ and caller-supplied trust acquisition. The native adapter belongs beside existin
 acquisition rather than inside the pure redirect policy. Later pooling can implement the same
 interface without changing redirect rules.
 
-Alternative: let `withResponse` open native sockets directly. Rejected because it would hard-code a
+Alternative: let the response operations open native sockets directly. Rejected because it would hard-code a
 provider, impede deterministic scripted evidence, and create a second acquisition path for pooling
 and fetch.
 
 ### One iterative state machine separates intermediate and final scopes
 
-`withResponse` owns an internal `State` containing current owned URI, current method, owned sanitized
+The private iterative engine owns a `State` containing current owned URI, current method, owned sanitized
 headers, current body disposition, hop count, and bounded history. Each loop iteration invokes one
 attempt-client bracket. Inside the attempt handler it receives the final response head and returns
 one of two nonescaping outcomes:
@@ -202,8 +220,9 @@ another socket or certificate matrix.
 ## Risks / Trade-offs
 
 - [Higher-ranked factory/client rows expose a compiler limitation] -> model them after the existing
-  route/client handlers, prove signatures in structured analysis first, and keep runtime cases in
-  the one shared corpus source.
+  route/client handlers, hide concrete producers behind one lexically supplied generic service,
+  prove signatures in structured analysis first, and keep runtime cases in the one shared corpus
+  source.
 - [Sanitization accidentally retains credentials or duplicate framing] -> use deny-last precedence,
   route/request-owned generation, and exact emitted-byte assertions for authority changes.
 - [Fragment inheritance mutates or aliases the current URI] -> resolve into separate bounded storage,
