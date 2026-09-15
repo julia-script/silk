@@ -456,7 +456,7 @@ pub interface AttemptClient<
 /// A routed client calls `handleRouted` with its final routed transport. A direct client calls
 /// `handleDirect` with its direct HTTP transport. Each operation lends the same owned request and
 /// validated method only for its exchange scope. Neither exchange form can escape in `A`.
-pub interface HybridAttemptHandler<
+pub service HybridAttempt<
   'policy,
   RoutedP,
   DirectP,
@@ -472,14 +472,13 @@ pub interface HybridAttemptHandler<
     'provider: 'transport,
     'tunnel: 'provider,
   >(
-    handler: Self,
     request: &'call AttemptRequest<'policy>,
     method: Method<'call>,
     exchange: &'call mut Exchange<
       'exchangeView,
       RouteTransport<'transport, 'provider, 'tunnel, RoutedP>
     >,
-  ) -> A ! E ? R where
+  ) -> A ! E ? R | &mut HybridAttempt<'policy, RoutedP, DirectP, A, E, R> where
     &mut RoutedP provides &HttpTransport from &mut HttpTransport | &mut MonotonicClock | &mut Allocator | &mut Random,
     &mut RoutedP provides &HttpTransport from &mut HttpTransport,
     &mut RoutedP provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock | &mut Allocator | &mut Random,
@@ -487,11 +486,10 @@ pub interface HybridAttemptHandler<
 
   /// Handles one direct exchange after direct request preparation and acquisition finish.
   effect<'call> fn handleDirect<'call, 'exchangeView: 'call>(
-    handler: Self,
     request: &'call AttemptRequest<'policy>,
     method: Method<'call>,
     exchange: &'call mut Exchange<'exchangeView, DirectP>,
-  ) -> A ! E ? R where
+  ) -> A ! E ? R | &mut HybridAttempt<'policy, RoutedP, DirectP, A, E, R> where
     &mut DirectP provides &HttpTransport from &mut HttpTransport | &mut MonotonicClock | &mut Allocator | &mut Random,
     &mut DirectP provides &HttpTransport from &mut HttpTransport
 }
@@ -512,21 +510,19 @@ pub interface HybridAttemptClient<
   AcquisitionError,
   ?HandlerRequirements,
   ?AcquisitionRequirements,
-  H: HybridAttemptHandler<
-    'policy,
-    RoutedP,
-    DirectP,
-    A,
-    HandlerError ? HandlerRequirements
-  >,
 > {
   /// Rebuilds, acquires, and drives one routed or direct scoped request.
   effect fn withAttempt(
     client: &mut Self,
     request: AttemptRequest<'policy>,
     deadline: Option<Instant>,
-    handler: H,
-  ) -> A ! HandlerError | AcquisitionError ? HandlerRequirements | AcquisitionRequirements where
+  ) -> A ! HandlerError | AcquisitionError ? HandlerRequirements | AcquisitionRequirements | &mut HybridAttempt<
+    'policy,
+    RoutedP,
+    DirectP,
+    A,
+    HandlerError ? HandlerRequirements
+  > where
     HandlerRequirements in Without<HandlerRequirements, ByteDuplex>,
     HandlerRequirements in Without<HandlerRequirements, HttpTransport>
 }
@@ -813,36 +809,94 @@ fn atResponse(error: RedirectError, hop: usize, status: Status) -> RedirectError
   return move contextual
 }
 
+interface FinalResponse<T, H, A, E, ?R> {
+  effect<'call> fn handle<'call, 'exchangeView: 'call>(
+    adapter: Self,
+    callback: H,
+    uri: Uri<'call>,
+    hop: usize,
+    exchange: &'call mut Exchange<'exchangeView, T>,
+  ) -> A ! E ? R where
+    &mut T provides &HttpTransport from &mut HttpTransport | &mut MonotonicClock | &mut Allocator | &mut Random,
+    &mut T provides &HttpTransport from &mut HttpTransport
+}
+
+struct RoutedFinalResponse<P> {}
+
 impl<
-  'policy,
-  'scratch,
+  'transport,
+  'provider: 'transport,
+  'tunnel: 'provider,
+  P,
+  H,
+  A,
   E,
   ?R,
-  P,
-  A,
-  CallbackError,
-  ?CallbackRequirements,
-  H: ResponseHandler<P, A, CallbackError ? CallbackRequirements>,
-> RedirectAttemptHandler<'policy, 'scratch, E, R, H> {
-  effect fn handle<
-    'call,
-    'exchangeView: 'call,
-    'transport: 'exchangeView,
-    'provider: 'transport,
-    'tunnel: 'provider,
-  >(
-    handler: Self,
-    request: &'call AttemptRequest<'policy>,
-    method: Method<'call>,
-    exchange: &'call mut Exchange<'exchangeView, RouteTransport<'transport, 'provider, 'tunnel, P>>,
-  ) -> AttemptStep<'policy, 'scratch, A, H>
-  ! RedirectError | ValueError | E | CallbackError | ClientError | OutOfMemoryError
-  ? R | CallbackRequirements | &mut SelectedBody<E, R> | &mut MonotonicClock | &mut Allocator | &mut Random
-  where
+  H: ResponseHandler<P, A, E ? R>,
+> RoutedFinalResponse<P> {
+  effect fn handle<'call, 'exchangeView: 'call>(
+    adapter: Self,
+    callback: H,
+    uri: Uri<'call>,
+    hop: usize,
+    exchange: &'call mut Exchange<
+      'exchangeView,
+      RouteTransport<'transport, 'provider, 'tunnel, P>
+    >,
+  ) -> A ! E ? R where
     &mut P provides &HttpTransport from &mut HttpTransport | &mut MonotonicClock | &mut Allocator | &mut Random,
     &mut P provides &HttpTransport from &mut HttpTransport,
     &mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock | &mut Allocator | &mut Random,
     &mut P provides &ByteDuplex from &mut ByteDuplex {
+    drop adapter
+    return run ResponseHandler<P, A, E ? R>.handle(move callback, uri, hop, move exchange)
+  }
+}
+
+impl<
+  'transport,
+  'provider: 'transport,
+  'tunnel: 'provider,
+  P,
+  H,
+  A,
+  E,
+  ?R,
+  H: ResponseHandler<P, A, E ? R>,
+> FinalResponse<
+  RouteTransport<'transport, 'provider, 'tunnel, P>,
+  H,
+  A,
+  E ? R
+> for RoutedFinalResponse<P> {
+  handle: RoutedFinalResponse.handle
+}
+
+effect fn handleAttemptCore<
+  'policy,
+  'scratch,
+  'call,
+  'exchangeView: 'call,
+  E,
+  ?R,
+  T,
+  A,
+  CallbackError,
+  ?CallbackRequirements,
+  H,
+  Final: FinalResponse<T, H, A, CallbackError ? CallbackRequirements>,
+>(
+  handler: RedirectAttemptHandler<'policy, 'scratch, E, R, H>,
+  request: &'call AttemptRequest<'policy>,
+  method: Method<'call>,
+  exchange: &'call mut Exchange<'exchangeView, T>,
+  finalResponse: Final,
+) -> AttemptStep<'policy, 'scratch, A, H>
+! RedirectError | ValueError | E | CallbackError | ClientError | OutOfMemoryError
+? R | CallbackRequirements | &mut SelectedBody<E, R> | &mut MonotonicClock | &mut Allocator | &mut Random
+where
+  &mut T provides &HttpTransport from &mut HttpTransport | &mut MonotonicClock | &mut Allocator | &mut Random,
+  &mut T provides &HttpTransport from &mut HttpTransport {
     let RedirectAttemptHandler<'policy, 'scratch, E, R, H> {
       policy,
       history,
@@ -906,7 +960,8 @@ impl<
       Result.Success {value} => value
     }
     if decision == StatusDecision.Final {
-      let value = run ResponseHandler<P, A, CallbackError ? CallbackRequirements>.handle(
+      let value = run FinalResponse<T, H, A, CallbackError ? CallbackRequirements>.handle(
+        move finalResponse,
         move callback,
         request.uri.view(),
         followedHops,
@@ -1024,6 +1079,54 @@ impl<
       callback: move callback,
       scratch: move scratch,
     }
+}
+
+struct RedirectHybridAttempt<'policy, 'scratch, E, ?R, H> {
+  handler: Option<RedirectAttemptHandler<'policy, 'scratch, E, R, H>>
+}
+
+fn unavailableHybrid<T>() -> T { return unavailableHybrid<T>() }
+
+impl<
+  'policy,
+  'scratch,
+  E,
+  ?R,
+  P,
+  A,
+  CallbackError,
+  ?CallbackRequirements,
+  H: ResponseHandler<P, A, CallbackError ? CallbackRequirements>,
+> RedirectAttemptHandler<'policy, 'scratch, E, R, H> {
+  effect fn handle<
+    'call,
+    'exchangeView: 'call,
+    'transport: 'exchangeView,
+    'provider: 'transport,
+    'tunnel: 'provider,
+  >(
+    handler: Self,
+    request: &'call AttemptRequest<'policy>,
+    method: Method<'call>,
+    exchange: &'call mut Exchange<
+      'exchangeView,
+      RouteTransport<'transport, 'provider, 'tunnel, P>
+    >,
+  ) -> AttemptStep<'policy, 'scratch, A, H>
+  ! RedirectError | ValueError | E | CallbackError | ClientError | OutOfMemoryError
+  ? R | CallbackRequirements | &mut SelectedBody<E, R> | &mut MonotonicClock | &mut Allocator | &mut Random
+  where
+    &mut P provides &HttpTransport from &mut HttpTransport | &mut MonotonicClock | &mut Allocator | &mut Random,
+    &mut P provides &HttpTransport from &mut HttpTransport,
+    &mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock | &mut Allocator | &mut Random,
+    &mut P provides &ByteDuplex from &mut ByteDuplex {
+    return run handleAttemptCore(
+      move handler,
+      request,
+      method,
+      move exchange,
+      RoutedFinalResponse<P> {},
+    )
   }
 }
 
@@ -1048,6 +1151,271 @@ impl<
   H,
 > {
   handle: RedirectAttemptHandler.handle
+}
+
+struct HybridRoutedFinalResponse<RoutedP, DirectP> {}
+
+impl<
+  'transport,
+  'provider: 'transport,
+  'tunnel: 'provider,
+  RoutedP,
+  DirectP,
+  H,
+  A,
+  E,
+  ?R,
+  H: HybridResponseHandler<RoutedP, DirectP, A, E ? R>,
+> HybridRoutedFinalResponse<RoutedP, DirectP> {
+  effect fn handle<'call, 'exchangeView: 'call>(
+    adapter: Self,
+    callback: H,
+    uri: Uri<'call>,
+    hop: usize,
+    exchange: &'call mut Exchange<
+      'exchangeView,
+      RouteTransport<'transport, 'provider, 'tunnel, RoutedP>
+    >,
+  ) -> A ! E ? R where
+    &mut RoutedP provides &HttpTransport from &mut HttpTransport | &mut MonotonicClock | &mut Allocator | &mut Random,
+    &mut RoutedP provides &HttpTransport from &mut HttpTransport,
+    &mut RoutedP provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock | &mut Allocator | &mut Random,
+    &mut RoutedP provides &ByteDuplex from &mut ByteDuplex {
+    drop adapter
+    return run HybridResponseHandler<RoutedP, DirectP, A, E ? R>.handleRouted(
+      move callback,
+      uri,
+      hop,
+      move exchange,
+    )
+  }
+}
+
+impl<
+  'transport,
+  'provider: 'transport,
+  'tunnel: 'provider,
+  RoutedP,
+  DirectP,
+  H,
+  A,
+  E,
+  ?R,
+  H: HybridResponseHandler<RoutedP, DirectP, A, E ? R>,
+> FinalResponse<
+  RouteTransport<'transport, 'provider, 'tunnel, RoutedP>,
+  H,
+  A,
+  E ? R
+> for HybridRoutedFinalResponse<RoutedP, DirectP> {
+  handle: HybridRoutedFinalResponse.handle
+}
+
+struct HybridDirectFinalResponse<RoutedP, DirectP> {}
+
+impl<
+  RoutedP,
+  DirectP,
+  H,
+  A,
+  E,
+  ?R,
+  H: HybridResponseHandler<RoutedP, DirectP, A, E ? R>,
+> HybridDirectFinalResponse<RoutedP, DirectP> {
+  effect fn handle<'call, 'exchangeView: 'call>(
+    adapter: Self,
+    callback: H,
+    uri: Uri<'call>,
+    hop: usize,
+    exchange: &'call mut Exchange<'exchangeView, DirectP>,
+  ) -> A ! E ? R where
+    &mut DirectP provides &HttpTransport from &mut HttpTransport | &mut MonotonicClock | &mut Allocator | &mut Random,
+    &mut DirectP provides &HttpTransport from &mut HttpTransport {
+    drop adapter
+    return run HybridResponseHandler<RoutedP, DirectP, A, E ? R>.handleDirect(
+      move callback,
+      uri,
+      hop,
+      move exchange,
+    )
+  }
+}
+
+impl<
+  RoutedP,
+  DirectP,
+  H,
+  A,
+  E,
+  ?R,
+  H: HybridResponseHandler<RoutedP, DirectP, A, E ? R>,
+> FinalResponse<DirectP, H, A, E ? R> for HybridDirectFinalResponse<RoutedP, DirectP> {
+  handle: HybridDirectFinalResponse.handle
+}
+
+impl<
+  'policy,
+  'scratch,
+  E,
+  ?R,
+  RoutedP,
+  DirectP,
+  A,
+  CallbackError,
+  ?CallbackRequirements,
+  H: HybridResponseHandler<RoutedP, DirectP, A, CallbackError ? CallbackRequirements>,
+> RedirectAttemptHandler<'policy, 'scratch, E, R, H> {
+  effect fn handleHybridRouted<
+    'call,
+    'exchangeView: 'call,
+    'transport: 'exchangeView,
+    'provider: 'transport,
+    'tunnel: 'provider,
+  >(
+    handler: Self,
+    request: &'call AttemptRequest<'policy>,
+    method: Method<'call>,
+    exchange: &'call mut Exchange<
+      'exchangeView,
+      RouteTransport<'transport, 'provider, 'tunnel, RoutedP>
+    >,
+  ) -> AttemptStep<'policy, 'scratch, A, H>
+  ! RedirectError | ValueError | E | CallbackError | ClientError | OutOfMemoryError
+  ? R | CallbackRequirements | &mut SelectedBody<E, R> | &mut MonotonicClock | &mut Allocator | &mut Random
+  where
+    &mut RoutedP provides &HttpTransport from &mut HttpTransport | &mut MonotonicClock | &mut Allocator | &mut Random,
+    &mut RoutedP provides &HttpTransport from &mut HttpTransport,
+    &mut RoutedP provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock | &mut Allocator | &mut Random,
+    &mut RoutedP provides &ByteDuplex from &mut ByteDuplex {
+    return run handleAttemptCore(
+      move handler,
+      request,
+      method,
+      move exchange,
+      HybridRoutedFinalResponse<RoutedP, DirectP> {},
+    )
+  }
+
+  effect fn handleHybridDirect<'call, 'exchangeView: 'call>(
+    handler: Self,
+    request: &'call AttemptRequest<'policy>,
+    method: Method<'call>,
+    exchange: &'call mut Exchange<'exchangeView, DirectP>,
+  ) -> AttemptStep<'policy, 'scratch, A, H>
+  ! RedirectError | ValueError | E | CallbackError | ClientError | OutOfMemoryError
+  ? R | CallbackRequirements | &mut SelectedBody<E, R> | &mut MonotonicClock | &mut Allocator | &mut Random
+  where
+    &mut DirectP provides &HttpTransport from &mut HttpTransport | &mut MonotonicClock | &mut Allocator | &mut Random,
+    &mut DirectP provides &HttpTransport from &mut HttpTransport {
+    return run handleAttemptCore(
+      move handler,
+      request,
+      method,
+      move exchange,
+      HybridDirectFinalResponse<RoutedP, DirectP> {},
+    )
+  }
+}
+
+impl<
+  'policy,
+  'scratch,
+  E,
+  ?R,
+  RoutedP,
+  DirectP,
+  A,
+  CallbackError,
+  ?CallbackRequirements,
+  H: HybridResponseHandler<RoutedP, DirectP, A, CallbackError ? CallbackRequirements>,
+> RedirectHybridAttempt<'policy, 'scratch, E, R, H> {
+  effect fn handleRouted<
+    'call,
+    'exchangeView: 'call,
+    'transport: 'exchangeView,
+    'provider: 'transport,
+    'tunnel: 'provider,
+  >(
+    provider: &mut Self,
+    request: &'call AttemptRequest<'policy>,
+    method: Method<'call>,
+    exchange: &'call mut Exchange<
+      'exchangeView,
+      RouteTransport<'transport, 'provider, 'tunnel, RoutedP>
+    >,
+  ) -> AttemptStep<'policy, 'scratch, A, H>
+  ! RedirectError | ValueError | E | CallbackError | ClientError | OutOfMemoryError
+  ? R | CallbackRequirements | &mut SelectedBody<E, R> | &mut MonotonicClock | &mut Allocator | &mut Random
+  where
+    &mut RoutedP provides &HttpTransport from &mut HttpTransport | &mut MonotonicClock | &mut Allocator | &mut Random,
+    &mut RoutedP provides &HttpTransport from &mut HttpTransport,
+    &mut RoutedP provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock | &mut Allocator | &mut Random,
+    &mut RoutedP provides &ByteDuplex from &mut ByteDuplex {
+    let stored = Intrinsic.replace(
+      provider.handler,
+      Option.none<RedirectAttemptHandler<'policy, 'scratch, E, R, H>>(),
+    )
+    let handler = match move stored {
+      Option.Some {value} => move value
+      Option.None => unavailableHybrid<RedirectAttemptHandler<'policy, 'scratch, E, R, H>>()
+    }
+    return run RedirectAttemptHandler.handleHybridRouted(
+      move handler,
+      request,
+      method,
+      move exchange,
+    )
+  }
+
+  effect fn handleDirect<'call, 'exchangeView: 'call>(
+    provider: &mut Self,
+    request: &'call AttemptRequest<'policy>,
+    method: Method<'call>,
+    exchange: &'call mut Exchange<'exchangeView, DirectP>,
+  ) -> AttemptStep<'policy, 'scratch, A, H>
+  ! RedirectError | ValueError | E | CallbackError | ClientError | OutOfMemoryError
+  ? R | CallbackRequirements | &mut SelectedBody<E, R> | &mut MonotonicClock | &mut Allocator | &mut Random
+  where
+    &mut DirectP provides &HttpTransport from &mut HttpTransport | &mut MonotonicClock | &mut Allocator | &mut Random,
+    &mut DirectP provides &HttpTransport from &mut HttpTransport {
+    let stored = Intrinsic.replace(
+      provider.handler,
+      Option.none<RedirectAttemptHandler<'policy, 'scratch, E, R, H>>(),
+    )
+    let handler = match move stored {
+      Option.Some {value} => move value
+      Option.None => unavailableHybrid<RedirectAttemptHandler<'policy, 'scratch, E, R, H>>()
+    }
+    return run RedirectAttemptHandler.handleHybridDirect(
+      move handler,
+      request,
+      method,
+      move exchange,
+    )
+  }
+}
+
+impl<
+  'policy,
+  'scratch,
+  E,
+  ?R,
+  RoutedP,
+  DirectP,
+  A,
+  CallbackError,
+  ?CallbackRequirements,
+  H: HybridResponseHandler<RoutedP, DirectP, A, CallbackError ? CallbackRequirements>,
+> HybridAttempt<
+  'policy,
+  RoutedP,
+  DirectP,
+  AttemptStep<'policy, 'scratch, A, H>,
+  RedirectError | ValueError | E | CallbackError | ClientError | OutOfMemoryError
+  ? R | CallbackRequirements | &mut SelectedBody<E, R> | &mut MonotonicClock | &mut Allocator | &mut Random
+> for RedirectHybridAttempt<'policy, 'scratch, E, R, H> {
+  handleRouted: RedirectHybridAttempt.handleRouted
+  handleDirect: RedirectHybridAttempt.handleDirect
 }
 
 fn intoAttemptRequest<'policy>(state: RedirectState<'policy>, mode: BodyMode) -> AttemptRequest<
@@ -1154,12 +1522,194 @@ effect fn initialize<'uri, 'method, 'headers, 'policy>(
   }
 }
 
+service AttemptDispatch<'policy, H, A, E, ?R> {
+  effect fn withAttempt(
+    request: AttemptRequest<'policy>,
+    deadline: Option<Instant>,
+    handler: H,
+  ) -> A ! E ? R | &mut AttemptDispatch<'policy, H, A, E, R>
+}
+
+struct RoutedAttemptDispatch<'client, C> {client: &'client mut C}
+
+impl<
+  'client,
+  'policy,
+  D,
+  P,
+  H,
+  A,
+  HandlerError,
+  AcquisitionError,
+  ?HandlerRequirements,
+  ?AcquisitionRequirements,
+  H: AttemptHandler<'policy, P, A, HandlerError ? HandlerRequirements>,
+  C: AttemptClient<
+    'policy,
+    P,
+    A,
+    HandlerError,
+    AcquisitionError,
+    HandlerRequirements,
+    AcquisitionRequirements,
+    H,
+  >,
+> RoutedAttemptDispatch<'client, C> {
+  effect fn withAttempt(
+    dispatch: &mut Self,
+    request: AttemptRequest<'policy>,
+    deadline: Option<Instant>,
+    handler: H,
+  ) -> A ! HandlerError | AcquisitionError ? HandlerRequirements | AcquisitionRequirements {
+    return run AttemptClient<
+      'policy,
+      P,
+      A,
+      HandlerError,
+      AcquisitionError,
+      HandlerRequirements,
+      AcquisitionRequirements,
+      H,
+    >.withAttempt(dispatch.client, move request, move deadline, move handler)
+  }
+}
+
+impl<
+  'client,
+  'policy,
+  C,
+  P,
+  H,
+  A,
+  HandlerError,
+  AcquisitionError,
+  ?HandlerRequirements,
+  ?AcquisitionRequirements,
+  H: AttemptHandler<'policy, P, A, HandlerError ? HandlerRequirements>,
+  C: AttemptClient<
+    'policy,
+    P,
+    A,
+    HandlerError,
+    AcquisitionError,
+    HandlerRequirements,
+    AcquisitionRequirements,
+    H,
+  >,
+> AttemptDispatch<
+  'policy,
+  H,
+  A,
+  HandlerError | AcquisitionError
+  ? HandlerRequirements | AcquisitionRequirements
+> for RoutedAttemptDispatch<'client, C> {
+  withAttempt: RoutedAttemptDispatch.withAttempt
+}
+
+struct HybridAttemptDispatch<'client, C> {client: &'client mut C}
+
+impl<
+  'client,
+  'policy,
+  'scratch,
+  C,
+  RoutedP,
+  DirectP,
+  H,
+  A,
+  BodyError,
+  CallbackError,
+  AcquisitionError,
+  ?BodyRequirements,
+  ?CallbackRequirements,
+  ?AcquisitionRequirements,
+  H: HybridResponseHandler<RoutedP, DirectP, A, CallbackError ? CallbackRequirements>,
+  C: HybridAttemptClient<
+    'policy,
+    RoutedP,
+    DirectP,
+    AttemptStep<'policy, 'scratch, A, H>,
+    RedirectError | ValueError | BodyError | CallbackError | ClientError | OutOfMemoryError,
+    AcquisitionError,
+    BodyRequirements | CallbackRequirements | &mut SelectedBody<BodyError, BodyRequirements> | &mut MonotonicClock | &mut Allocator | &mut Random,
+    AcquisitionRequirements,
+  >,
+> HybridAttemptDispatch<'client, C> {
+  effect fn withAttempt(
+    dispatch: &mut Self,
+    request: AttemptRequest<'policy>,
+    deadline: Option<Instant>,
+    handler: RedirectAttemptHandler<'policy, 'scratch, BodyError, BodyRequirements, H>,
+  ) -> AttemptStep<'policy, 'scratch, A, H>
+  ! RedirectError | ValueError | BodyError | CallbackError | ClientError | OutOfMemoryError | AcquisitionError
+  ? BodyRequirements | CallbackRequirements | AcquisitionRequirements | &mut SelectedBody<BodyError, BodyRequirements> | &mut MonotonicClock | &mut Allocator | &mut Random {
+    let mut provider = RedirectHybridAttempt<'policy, 'scratch, BodyError, BodyRequirements, H> {
+      handler: Option.some<RedirectAttemptHandler<'policy, 'scratch, BodyError, BodyRequirements, H>>(
+        move handler,
+      ),
+    }
+    return run HybridAttemptClient<
+      'policy,
+      RoutedP,
+      DirectP,
+      AttemptStep<'policy, 'scratch, A, H>,
+      RedirectError | ValueError | BodyError | CallbackError | ClientError | OutOfMemoryError,
+      AcquisitionError,
+      BodyRequirements | CallbackRequirements | &mut SelectedBody<BodyError, BodyRequirements> | &mut MonotonicClock | &mut Allocator | &mut Random,
+      AcquisitionRequirements,
+    >.withAttempt(dispatch.client, move request, move deadline)
+      |> Effect.provideMut<HybridAttempt<
+        'policy,
+        RoutedP,
+        DirectP,
+        AttemptStep<'policy, 'scratch, A, H>,
+        RedirectError | ValueError | BodyError | CallbackError | ClientError | OutOfMemoryError
+        ? BodyRequirements | CallbackRequirements | &mut SelectedBody<BodyError, BodyRequirements> | &mut MonotonicClock | &mut Allocator | &mut Random
+      >>(&mut provider)
+  }
+}
+
+impl<
+  'client,
+  'policy,
+  'scratch,
+  C,
+  RoutedP,
+  DirectP,
+  H,
+  A,
+  BodyError,
+  CallbackError,
+  AcquisitionError,
+  ?BodyRequirements,
+  ?CallbackRequirements,
+  ?AcquisitionRequirements,
+  H: HybridResponseHandler<RoutedP, DirectP, A, CallbackError ? CallbackRequirements>,
+  C: HybridAttemptClient<
+    'policy,
+    RoutedP,
+    DirectP,
+    AttemptStep<'policy, 'scratch, A, H>,
+    RedirectError | ValueError | BodyError | CallbackError | ClientError | OutOfMemoryError,
+    AcquisitionError,
+    BodyRequirements | CallbackRequirements | &mut SelectedBody<BodyError, BodyRequirements> | &mut MonotonicClock | &mut Allocator | &mut Random,
+    AcquisitionRequirements,
+  >,
+> AttemptDispatch<
+  'policy,
+  RedirectAttemptHandler<'policy, 'scratch, BodyError, BodyRequirements, H>,
+  AttemptStep<'policy, 'scratch, A, H>,
+  RedirectError | ValueError | BodyError | CallbackError | ClientError | OutOfMemoryError | AcquisitionError
+  ? BodyRequirements | CallbackRequirements | AcquisitionRequirements | &mut SelectedBody<BodyError, BodyRequirements> | &mut MonotonicClock | &mut Allocator | &mut Random
+> for HybridAttemptDispatch<'client, C> {
+  withAttempt: HybridAttemptDispatch.withAttempt
+}
+
 interface SelectedAttempt<P, A, E, ?R> {
   effect fn handle(handler: Self, mode: BodyMode, replayable: bool) -> A ! E ? R
 }
 
-struct SelectedAttemptHandler<'client, 'policy, 'scratch, C, H> {
-  client: &'client mut C
+struct SelectedAttemptHandler<'policy, 'scratch, H> {
   state: RedirectState<'policy>
   policy: &'policy Policy
   history: History
@@ -1170,31 +1720,17 @@ struct SelectedAttemptHandler<'client, 'policy, 'scratch, C, H> {
 }
 
 impl<
-  'client,
   'policy,
   'scratch,
-  C,
   H,
   E,
   ?R,
-  P,
   A,
   CallbackError,
   AcquisitionError,
   ?CallbackRequirements,
   ?AcquisitionRequirements,
-  H: ResponseHandler<P, A, CallbackError ? CallbackRequirements>,
-  C: AttemptClient<
-    'policy,
-    P,
-    AttemptStep<'policy, 'scratch, A, H>,
-    RedirectError | ValueError | E | CallbackError | ClientError | OutOfMemoryError,
-    AcquisitionError,
-    R | CallbackRequirements | &mut SelectedBody<E, R> | &mut MonotonicClock | &mut Allocator | &mut Random,
-    AcquisitionRequirements,
-    RedirectAttemptHandler<'policy, 'scratch, E, R, H>,
-  >,
-> SelectedAttemptHandler<'client, 'policy, 'scratch, C, H> {
+> SelectedAttemptHandler<'policy, 'scratch, H> {
   effect fn handle(self: Self, mode: BodyMode, replayable: bool) -> AttemptStep<
     'policy,
     'scratch,
@@ -1202,18 +1738,19 @@ impl<
     H,
   >
   ! RedirectError | ValueError | E | CallbackError | ClientError | OutOfMemoryError | AcquisitionError
-  ? R | CallbackRequirements | AcquisitionRequirements | &mut SelectedBody<E, R> | &mut MonotonicClock | &mut Allocator | &mut Random
+  ? R | CallbackRequirements | AcquisitionRequirements | &mut SelectedBody<E, R> | &mut AttemptDispatch<
+    'policy,
+    RedirectAttemptHandler<'policy, 'scratch, E, R, H>,
+    AttemptStep<'policy, 'scratch, A, H>,
+    RedirectError | ValueError | E | CallbackError | ClientError | OutOfMemoryError | AcquisitionError
+    ? R | CallbackRequirements | AcquisitionRequirements | &mut SelectedBody<E, R> | &mut MonotonicClock | &mut Allocator | &mut Random
+  > | &mut MonotonicClock | &mut Allocator | &mut Random
   where
-    &mut P provides &HttpTransport from &mut HttpTransport | &mut MonotonicClock | &mut Allocator | &mut Random,
-    &mut P provides &HttpTransport from &mut HttpTransport,
-    &mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock | &mut Allocator | &mut Random,
-    &mut P provides &ByteDuplex from &mut ByteDuplex,
     R in Without<R, ByteDuplex>,
     R in Without<R, HttpTransport>,
     CallbackRequirements in Without<CallbackRequirements, ByteDuplex>,
     CallbackRequirements in Without<CallbackRequirements, HttpTransport> {
-    let SelectedAttemptHandler<'client, 'policy, 'scratch, C, H> {
-      client,
+    let SelectedAttemptHandler<'policy, 'scratch, H> {
       state,
       policy,
       history,
@@ -1245,24 +1782,19 @@ impl<
       scratch: move scratch,
       callback: move callback,
     }
-    return run AttemptClient<
+    return run AttemptDispatch<
       'policy,
-      P,
-      AttemptStep<'policy, 'scratch, A, H>,
-      RedirectError | ValueError | E | CallbackError | ClientError | OutOfMemoryError,
-      AcquisitionError,
-      R | CallbackRequirements | &mut SelectedBody<E, R> | &mut MonotonicClock | &mut Allocator | &mut Random,
-      AcquisitionRequirements,
       RedirectAttemptHandler<'policy, 'scratch, E, R, H>,
-    >.withAttempt(client, move request, move deadline, move attemptHandler)
+      AttemptStep<'policy, 'scratch, A, H>,
+      RedirectError | ValueError | E | CallbackError | ClientError | OutOfMemoryError | AcquisitionError
+      ? R | CallbackRequirements | AcquisitionRequirements | &mut SelectedBody<E, R> | &mut MonotonicClock | &mut Allocator | &mut Random
+    >.withAttempt(move request, move deadline, move attemptHandler)
   }
 }
 
 impl<
-  'client,
   'policy,
   'scratch,
-  C,
   H,
   E,
   ?R,
@@ -1272,27 +1804,16 @@ impl<
   AcquisitionError,
   ?CallbackRequirements,
   ?AcquisitionRequirements,
-  H: ResponseHandler<P, A, CallbackError ? CallbackRequirements>,
-  C: AttemptClient<
-    'policy,
-    P,
-    AttemptStep<'policy, 'scratch, A, H>,
-    RedirectError | ValueError | E | CallbackError | ClientError | OutOfMemoryError,
-    AcquisitionError,
-    R | CallbackRequirements | &mut SelectedBody<E, R> | &mut MonotonicClock | &mut Allocator | &mut Random,
-    AcquisitionRequirements,
-    RedirectAttemptHandler<'policy, 'scratch, E, R, H>,
-  >,
 > SelectedAttempt<P, AttemptStep<'policy, 'scratch, A, H>, RedirectError | ValueError | E | CallbackError | ClientError | OutOfMemoryError | AcquisitionError ? R | CallbackRequirements | AcquisitionRequirements | &mut SelectedBody<
   E,
   R,
-> | &mut MonotonicClock | &mut Allocator | &mut Random> for SelectedAttemptHandler<
-  'client,
+> | &mut AttemptDispatch<
   'policy,
-  'scratch,
-  C,
-  H,
-> {
+  RedirectAttemptHandler<'policy, 'scratch, E, R, H>,
+  AttemptStep<'policy, 'scratch, A, H>,
+  RedirectError | ValueError | E | CallbackError | ClientError | OutOfMemoryError | AcquisitionError
+  ? R | CallbackRequirements | AcquisitionRequirements | &mut SelectedBody<E, R> | &mut MonotonicClock | &mut Allocator | &mut Random
+> | &mut MonotonicClock | &mut Allocator | &mut Random> for SelectedAttemptHandler<'policy, 'scratch, H> {
   handle: SelectedAttemptHandler.handle
 }
 
@@ -1616,7 +2137,7 @@ effect fn runResponseLoop<
   'headers,
   'policy,
   'scratch,
-  C,
+  D,
   P,
   Plan,
   A,
@@ -1628,16 +2149,13 @@ effect fn runResponseLoop<
   ?SourceRequirements,
   ?CallbackRequirements,
   ?AcquisitionRequirements,
-  H: ResponseHandler<P, A, CallbackError ? CallbackRequirements>,
-  C: AttemptClient<
+  H,
+  D: AttemptDispatch<
     'policy,
-    P,
-    AttemptStep<'policy, 'scratch, A, H>,
-    RedirectError | ValueError | BodyError | CallbackError | ClientError | OutOfMemoryError,
-    AcquisitionError,
-    BodyRequirements | CallbackRequirements | &mut SelectedBody<BodyError, BodyRequirements> | &mut MonotonicClock | &mut Allocator | &mut Random,
-    AcquisitionRequirements,
     RedirectAttemptHandler<'policy, 'scratch, BodyError, BodyRequirements, H>,
+    AttemptStep<'policy, 'scratch, A, H>,
+    RedirectError | ValueError | BodyError | CallbackError | ClientError | OutOfMemoryError | AcquisitionError
+    ? BodyRequirements | CallbackRequirements | AcquisitionRequirements | &mut SelectedBody<BodyError, BodyRequirements> | &mut MonotonicClock | &mut Allocator | &mut Random
   >,
   Plan: SourcePlan<
     P,
@@ -1647,11 +2165,17 @@ effect fn runResponseLoop<
     RedirectError | ValueError | BodyError | CallbackError | ClientError | OutOfMemoryError | AcquisitionError,
     BodyRequirements,
     SourceRequirements,
-    BodyRequirements | CallbackRequirements | AcquisitionRequirements | &mut MonotonicClock | &mut Allocator | &mut Random,
-    SelectedAttemptHandler<'client, 'policy, 'scratch, C, H>,
+    BodyRequirements | CallbackRequirements | AcquisitionRequirements | &mut AttemptDispatch<
+      'policy,
+      RedirectAttemptHandler<'policy, 'scratch, BodyError, BodyRequirements, H>,
+      AttemptStep<'policy, 'scratch, A, H>,
+      RedirectError | ValueError | BodyError | CallbackError | ClientError | OutOfMemoryError | AcquisitionError
+      ? BodyRequirements | CallbackRequirements | AcquisitionRequirements | &mut SelectedBody<BodyError, BodyRequirements> | &mut MonotonicClock | &mut Allocator | &mut Random
+    > | &mut MonotonicClock | &mut Allocator | &mut Random,
+    SelectedAttemptHandler<'policy, 'scratch, H>,
   >,
 >(
-  client: &'client mut C,
+  dispatch: &'client mut D,
   request: Request<'uri, 'method, 'headers, 'policy>,
   policy: &'policy Policy,
   plan: Plan,
@@ -1662,10 +2186,6 @@ effect fn runResponseLoop<
 ! RedirectError | ValueError | BodyError | SourceError | CallbackError | ClientError | OutOfMemoryError | AcquisitionError
 ? BodyRequirements | SourceRequirements | CallbackRequirements | AcquisitionRequirements | &mut MonotonicClock | &mut Allocator | &mut Random
 where
-  &mut P provides &HttpTransport from &mut HttpTransport | &mut MonotonicClock | &mut Allocator | &mut Random,
-  &mut P provides &HttpTransport from &mut HttpTransport,
-  &mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock | &mut Allocator | &mut Random,
-  &mut P provides &ByteDuplex from &mut ByteDuplex,
   BodyRequirements in Without<BodyRequirements, ByteDuplex>,
   BodyRequirements in Without<BodyRequirements, HttpTransport>,
   SourceRequirements in Without<SourceRequirements, ByteDuplex>,
@@ -1683,8 +2203,7 @@ where
   let mut selectedPlan = move plan
   let mut followedHops = usize.ZERO
   while true {
-    let selected = SelectedAttemptHandler<'client, 'policy, 'scratch, C, H> {
-      client: &mut client.*,
+    let selected = SelectedAttemptHandler<'policy, 'scratch, H> {
       state: move currentState,
       policy: policy,
       history: move currentHistory,
@@ -1701,9 +2220,22 @@ where
       RedirectError | ValueError | BodyError | CallbackError | ClientError | OutOfMemoryError | AcquisitionError,
       BodyRequirements,
       SourceRequirements,
-      BodyRequirements | CallbackRequirements | AcquisitionRequirements | &mut MonotonicClock | &mut Allocator | &mut Random,
-      SelectedAttemptHandler<'client, 'policy, 'scratch, C, H>,
+      BodyRequirements | CallbackRequirements | AcquisitionRequirements | &mut AttemptDispatch<
+        'policy,
+        RedirectAttemptHandler<'policy, 'scratch, BodyError, BodyRequirements, H>,
+        AttemptStep<'policy, 'scratch, A, H>,
+        RedirectError | ValueError | BodyError | CallbackError | ClientError | OutOfMemoryError | AcquisitionError
+        ? BodyRequirements | CallbackRequirements | AcquisitionRequirements | &mut SelectedBody<BodyError, BodyRequirements> | &mut MonotonicClock | &mut Allocator | &mut Random
+      > | &mut MonotonicClock | &mut Allocator | &mut Random,
+      SelectedAttemptHandler<'policy, 'scratch, H>,
     >.withSelected(&mut selectedPlan, move selected)
+      |> Effect.provideMut<AttemptDispatch<
+        'policy,
+        RedirectAttemptHandler<'policy, 'scratch, BodyError, BodyRequirements, H>,
+        AttemptStep<'policy, 'scratch, A, H>,
+        RedirectError | ValueError | BodyError | CallbackError | ClientError | OutOfMemoryError | AcquisitionError
+        ? BodyRequirements | CallbackRequirements | AcquisitionRequirements | &mut SelectedBody<BodyError, BodyRequirements> | &mut MonotonicClock | &mut Allocator | &mut Random
+      >>(dispatch)
     match move outcome {
       AttemptStep.Final {value} => {
         return move value
@@ -1717,8 +2249,14 @@ where
           RedirectError | ValueError | BodyError | CallbackError | ClientError | OutOfMemoryError | AcquisitionError,
           BodyRequirements,
           SourceRequirements,
-          BodyRequirements | CallbackRequirements | AcquisitionRequirements | &mut MonotonicClock | &mut Allocator | &mut Random,
-          SelectedAttemptHandler<'client, 'policy, 'scratch, C, H>,
+          BodyRequirements | CallbackRequirements | AcquisitionRequirements | &mut AttemptDispatch<
+            'policy,
+            RedirectAttemptHandler<'policy, 'scratch, BodyError, BodyRequirements, H>,
+            AttemptStep<'policy, 'scratch, A, H>,
+            RedirectError | ValueError | BodyError | CallbackError | ClientError | OutOfMemoryError | AcquisitionError
+            ? BodyRequirements | CallbackRequirements | AcquisitionRequirements | &mut SelectedBody<BodyError, BodyRequirements> | &mut MonotonicClock | &mut Allocator | &mut Random
+          > | &mut MonotonicClock | &mut Allocator | &mut Random,
+          SelectedAttemptHandler<'policy, 'scratch, H>,
         >.applyRedirect(&mut selectedPlan, body)
         currentState = move state
         currentHistory = move history
@@ -1790,8 +2328,72 @@ where
   CallbackRequirements in Without<CallbackRequirements, HttpTransport>,
   AcquisitionRequirements in Without<AcquisitionRequirements, ByteDuplex>,
   AcquisitionRequirements in Without<AcquisitionRequirements, HttpTransport> {
+  let mut dispatch = RoutedAttemptDispatch<'client, C> {client: move client}
   return run runResponseLoop(
-    client,
+    &mut dispatch,
+    move request,
+    policy,
+    RepeatablePlan<'static> {bytes: b"", retained: true},
+    move deadline,
+    move scratch,
+    move handler,
+  )
+}
+
+/// Follows a body-free request through a client that can select routed or direct acquisition.
+///
+/// Each attempt uses one acquisition form. The operation reuses the same iterative redirect state
+/// machine as [`withEmptyResponse`] and invokes `handler` exactly once for the final response.
+pub effect fn withEmptyHybridResponse<
+  'client,
+  'uri,
+  'method,
+  'headers,
+  'policy,
+  'scratch,
+  C,
+  RoutedP,
+  DirectP,
+  A,
+  CallbackError,
+  AcquisitionError,
+  ?CallbackRequirements,
+  ?AcquisitionRequirements,
+  H: HybridResponseHandler<RoutedP, DirectP, A, CallbackError ? CallbackRequirements>,
+  C: HybridAttemptClient<
+    'policy,
+    RoutedP,
+    DirectP,
+    AttemptStep<'policy, 'scratch, A, H>,
+    RedirectError | ValueError | CallbackError | ClientError | OutOfMemoryError,
+    AcquisitionError,
+    CallbackRequirements | &mut SelectedBody<never, never> | &mut MonotonicClock | &mut Allocator | &mut Random,
+    AcquisitionRequirements,
+  >,
+>(
+  client: &'client mut C,
+  request: Request<'uri, 'method, 'headers, 'policy>,
+  policy: &'policy Policy,
+  deadline: Option<Instant>,
+  scratch: &'scratch mut [u8],
+  handler: H,
+) -> A
+! RedirectError | ValueError | CallbackError | ClientError | OutOfMemoryError | AcquisitionError
+? CallbackRequirements | AcquisitionRequirements | &mut MonotonicClock | &mut Allocator | &mut Random
+where
+  &mut RoutedP provides &HttpTransport from &mut HttpTransport | &mut MonotonicClock | &mut Allocator | &mut Random,
+  &mut RoutedP provides &HttpTransport from &mut HttpTransport,
+  &mut RoutedP provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock | &mut Allocator | &mut Random,
+  &mut RoutedP provides &ByteDuplex from &mut ByteDuplex,
+  &mut DirectP provides &HttpTransport from &mut HttpTransport | &mut MonotonicClock | &mut Allocator | &mut Random,
+  &mut DirectP provides &HttpTransport from &mut HttpTransport,
+  CallbackRequirements in Without<CallbackRequirements, ByteDuplex>,
+  CallbackRequirements in Without<CallbackRequirements, HttpTransport>,
+  AcquisitionRequirements in Without<AcquisitionRequirements, ByteDuplex>,
+  AcquisitionRequirements in Without<AcquisitionRequirements, HttpTransport> {
+  let mut dispatch = HybridAttemptDispatch<'client, C> {client: move client}
+  return run runResponseLoop(
+    &mut dispatch,
     move request,
     policy,
     RepeatablePlan<'static> {bytes: b"", retained: true},
@@ -1862,8 +2464,78 @@ where
     let enriched = run enrichCurrent(bodyContractFailure(usize.ZERO), &request.uri)
     fail move enriched
   }
+  let mut dispatch = RoutedAttemptDispatch<'client, C> {client: move client}
   return run runResponseLoop(
-    client,
+    &mut dispatch,
+    move request,
+    policy,
+    RepeatablePlan<'bytes> {bytes: bytes, retained: true},
+    move deadline,
+    move scratch,
+    move handler,
+  )
+}
+
+/// Follows replayable bytes through a client that can select routed or direct acquisition.
+///
+/// Every retained-body attempt starts at byte zero. A dropped-body transition changes all later
+/// attempts to empty framing. A nonempty body requires positive scratch before contact.
+pub effect fn withBytesHybridResponse<
+  'client,
+  'uri,
+  'method,
+  'headers,
+  'policy,
+  'bytes,
+  'scratch,
+  C,
+  RoutedP,
+  DirectP,
+  A,
+  CallbackError,
+  AcquisitionError,
+  ?CallbackRequirements,
+  ?AcquisitionRequirements,
+  H: HybridResponseHandler<RoutedP, DirectP, A, CallbackError ? CallbackRequirements>,
+  C: HybridAttemptClient<
+    'policy,
+    RoutedP,
+    DirectP,
+    AttemptStep<'policy, 'scratch, A, H>,
+    RedirectError | ValueError | CallbackError | ClientError | OutOfMemoryError,
+    AcquisitionError,
+    CallbackRequirements | &mut SelectedBody<never, never> | &mut MonotonicClock | &mut Allocator | &mut Random,
+    AcquisitionRequirements,
+  >,
+>(
+  client: &'client mut C,
+  request: Request<'uri, 'method, 'headers, 'policy>,
+  policy: &'policy Policy,
+  bytes: &'bytes [u8],
+  deadline: Option<Instant>,
+  scratch: &'scratch mut [u8],
+  handler: H,
+) -> A
+! RedirectError | ValueError | CallbackError | ClientError | OutOfMemoryError | AcquisitionError
+? CallbackRequirements | AcquisitionRequirements | &mut MonotonicClock | &mut Allocator | &mut Random
+where
+  &mut RoutedP provides &HttpTransport from &mut HttpTransport | &mut MonotonicClock | &mut Allocator | &mut Random,
+  &mut RoutedP provides &HttpTransport from &mut HttpTransport,
+  &mut RoutedP provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock | &mut Allocator | &mut Random,
+  &mut RoutedP provides &ByteDuplex from &mut ByteDuplex,
+  &mut DirectP provides &HttpTransport from &mut HttpTransport | &mut MonotonicClock | &mut Allocator | &mut Random,
+  &mut DirectP provides &HttpTransport from &mut HttpTransport,
+  CallbackRequirements in Without<CallbackRequirements, ByteDuplex>,
+  CallbackRequirements in Without<CallbackRequirements, HttpTransport>,
+  AcquisitionRequirements in Without<AcquisitionRequirements, ByteDuplex>,
+  AcquisitionRequirements in Without<AcquisitionRequirements, HttpTransport> {
+  if bytes.length != usize.ZERO && scratch.length == usize.ZERO {
+    let enriched = run enrichCurrent(bodyContractFailure(usize.ZERO), &request.uri)
+    fail move enriched
+  }
+  let mut dispatch = HybridAttemptDispatch<'client, C> {client: move client}
+  return run runResponseLoop(
+    &mut dispatch,
     move request,
     policy,
     RepeatablePlan<'bytes> {bytes: bytes, retained: true},
@@ -1943,8 +2615,87 @@ where
     let enriched = run enrichCurrent(bodyContractFailure(usize.ZERO), &request.uri)
     fail move enriched
   }
+  let mut dispatch = RoutedAttemptDispatch<'client, C> {client: move client}
   return run runResponseLoop(
-    client,
+    &mut dispatch,
+    move request,
+    policy,
+    OneShotPlan<Producer> {state: OneShotState<Producer>.Fresh {producer: move producer}},
+    move deadline,
+    move scratch,
+    move handler,
+  )
+}
+
+/// Follows an affine body producer through routed or direct acquisition.
+///
+/// The producer is consumed for the first attempted body only. A redirect that retains the body
+/// fails with `ReplayUnavailable`; a transition that drops the body continues with empty framing.
+pub effect fn withOneShotHybridResponse<
+  'client,
+  'uri,
+  'method,
+  'headers,
+  'policy,
+  'scratch,
+  C,
+  RoutedP,
+  DirectP,
+  Producer,
+  A,
+  ProducerError,
+  CallbackError,
+  AcquisitionError,
+  ?ProducerRequirements,
+  ?CallbackRequirements,
+  ?AcquisitionRequirements,
+  Producer: BodyProducer<ProducerError ? ProducerRequirements>,
+  H: HybridResponseHandler<RoutedP, DirectP, A, CallbackError ? CallbackRequirements>,
+  C: HybridAttemptClient<
+    'policy,
+    RoutedP,
+    DirectP,
+    AttemptStep<'policy, 'scratch, A, H>,
+    RedirectError | ValueError | ProducerError | CallbackError | ClientError | OutOfMemoryError,
+    AcquisitionError,
+    ProducerRequirements | CallbackRequirements | &mut SelectedBody<
+      ProducerError,
+      ProducerRequirements,
+    > | &mut MonotonicClock | &mut Allocator | &mut Random,
+    AcquisitionRequirements,
+  >,
+>(
+  client: &'client mut C,
+  request: Request<'uri, 'method, 'headers, 'policy>,
+  policy: &'policy Policy,
+  producer: Producer,
+  deadline: Option<Instant>,
+  scratch: &'scratch mut [u8],
+  handler: H,
+) -> A
+! RedirectError | ValueError | ProducerError | CallbackError | ClientError | OutOfMemoryError | AcquisitionError
+? ProducerRequirements | CallbackRequirements | AcquisitionRequirements | &mut MonotonicClock | &mut Allocator | &mut Random
+where
+  &mut RoutedP provides &HttpTransport from &mut HttpTransport | &mut MonotonicClock | &mut Allocator | &mut Random,
+  &mut RoutedP provides &HttpTransport from &mut HttpTransport,
+  &mut RoutedP provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock | &mut Allocator | &mut Random,
+  &mut RoutedP provides &ByteDuplex from &mut ByteDuplex,
+  &mut DirectP provides &HttpTransport from &mut HttpTransport | &mut MonotonicClock | &mut Allocator | &mut Random,
+  &mut DirectP provides &HttpTransport from &mut HttpTransport,
+  ProducerRequirements in Without<ProducerRequirements, ByteDuplex>,
+  ProducerRequirements in Without<ProducerRequirements, HttpTransport>,
+  CallbackRequirements in Without<CallbackRequirements, ByteDuplex>,
+  CallbackRequirements in Without<CallbackRequirements, HttpTransport>,
+  AcquisitionRequirements in Without<AcquisitionRequirements, ByteDuplex>,
+  AcquisitionRequirements in Without<AcquisitionRequirements, HttpTransport> {
+  let mode = BodyProducer<ProducerError ? ProducerRequirements>.mode(&producer)
+  if mode != BodyMode.Empty && scratch.length == usize.ZERO {
+    let enriched = run enrichCurrent(bodyContractFailure(usize.ZERO), &request.uri)
+    fail move enriched
+  }
+  let mut dispatch = HybridAttemptDispatch<'client, C> {client: move client}
+  return run runResponseLoop(
+    &mut dispatch,
     move request,
     policy,
     OneShotPlan<Producer> {state: OneShotState<Producer>.Fresh {producer: move producer}},
@@ -2007,10 +2758,16 @@ pub effect fn withReplayResponse<
     FactoryError,
     RedirectError | ValueError | ProducerError | CallbackError | ClientError | OutOfMemoryError | AcquisitionError,
     FactoryRequirements,
-    ProducerRequirements | CallbackRequirements | AcquisitionRequirements | &mut MonotonicClock | &mut Allocator | &mut Random,
+    ProducerRequirements | CallbackRequirements | AcquisitionRequirements | &mut AttemptDispatch<
+      'policy,
+      RedirectAttemptHandler<'policy, 'scratch, ProducerError, ProducerRequirements, H>,
+      AttemptStep<'policy, 'scratch, A, H>,
+      RedirectError | ValueError | ProducerError | CallbackError | ClientError | OutOfMemoryError | AcquisitionError
+      ? ProducerRequirements | CallbackRequirements | AcquisitionRequirements | &mut SelectedBody<ProducerError, ProducerRequirements> | &mut MonotonicClock | &mut Allocator | &mut Random
+    > | &mut MonotonicClock | &mut Allocator | &mut Random,
     ReplaySelectedHandler<
       ProducerError,
-      SelectedAttemptHandler<'client, 'policy, 'scratch, C, H>,
+      SelectedAttemptHandler<'policy, 'scratch, H>,
       ProducerRequirements,
     >,
   >,
@@ -2038,8 +2795,106 @@ where
   CallbackRequirements in Without<CallbackRequirements, HttpTransport>,
   AcquisitionRequirements in Without<AcquisitionRequirements, ByteDuplex>,
   AcquisitionRequirements in Without<AcquisitionRequirements, HttpTransport> {
+  let mut dispatch = RoutedAttemptDispatch<'client, C> {client: move client}
   return run runResponseLoop(
-    client,
+    &mut dispatch,
+    move request,
+    policy,
+    ReplayPlan<Factory, Producer> {factory: move factory, retained: true},
+    move deadline,
+    move scratch,
+    move handler,
+  )
+}
+
+/// Follows replayable producer scopes through routed or direct acquisition.
+///
+/// Each retained-body attempt receives one fresh producer inside the factory scope. A dropped-body
+/// transition stops factory acquisition. All source and acquisition channels remain direct.
+pub effect fn withReplayHybridResponse<
+  'client,
+  'uri,
+  'method,
+  'headers,
+  'policy,
+  'scratch,
+  C,
+  RoutedP,
+  DirectP,
+  Factory,
+  Producer,
+  A,
+  FactoryError,
+  ProducerError,
+  CallbackError,
+  AcquisitionError,
+  ?FactoryRequirements,
+  ?ProducerRequirements,
+  ?CallbackRequirements,
+  ?AcquisitionRequirements,
+  Producer: BodyProducer<ProducerError ? ProducerRequirements>,
+  H: HybridResponseHandler<RoutedP, DirectP, A, CallbackError ? CallbackRequirements>,
+  C: HybridAttemptClient<
+    'policy,
+    RoutedP,
+    DirectP,
+    AttemptStep<'policy, 'scratch, A, H>,
+    RedirectError | ValueError | ProducerError | CallbackError | ClientError | OutOfMemoryError,
+    AcquisitionError,
+    ProducerRequirements | CallbackRequirements | &mut SelectedBody<
+      ProducerError,
+      ProducerRequirements,
+    > | &mut MonotonicClock | &mut Allocator | &mut Random,
+    AcquisitionRequirements,
+  >,
+  Factory: ReplayFactory<
+    Producer,
+    AttemptStep<'policy, 'scratch, A, H>,
+    FactoryError,
+    RedirectError | ValueError | ProducerError | CallbackError | ClientError | OutOfMemoryError | AcquisitionError,
+    FactoryRequirements,
+    ProducerRequirements | CallbackRequirements | AcquisitionRequirements | &mut AttemptDispatch<
+      'policy,
+      RedirectAttemptHandler<'policy, 'scratch, ProducerError, ProducerRequirements, H>,
+      AttemptStep<'policy, 'scratch, A, H>,
+      RedirectError | ValueError | ProducerError | CallbackError | ClientError | OutOfMemoryError | AcquisitionError
+      ? ProducerRequirements | CallbackRequirements | AcquisitionRequirements | &mut SelectedBody<ProducerError, ProducerRequirements> | &mut MonotonicClock | &mut Allocator | &mut Random
+    > | &mut MonotonicClock | &mut Allocator | &mut Random,
+    ReplaySelectedHandler<
+      ProducerError,
+      SelectedAttemptHandler<'policy, 'scratch, H>,
+      ProducerRequirements,
+    >,
+  >,
+>(
+  client: &'client mut C,
+  request: Request<'uri, 'method, 'headers, 'policy>,
+  policy: &'policy Policy,
+  factory: Factory,
+  deadline: Option<Instant>,
+  scratch: &'scratch mut [u8],
+  handler: H,
+) -> A
+! RedirectError | ValueError | FactoryError | ProducerError | CallbackError | ClientError | OutOfMemoryError | AcquisitionError
+? FactoryRequirements | ProducerRequirements | CallbackRequirements | AcquisitionRequirements | &mut MonotonicClock | &mut Allocator | &mut Random
+where
+  &mut RoutedP provides &HttpTransport from &mut HttpTransport | &mut MonotonicClock | &mut Allocator | &mut Random,
+  &mut RoutedP provides &HttpTransport from &mut HttpTransport,
+  &mut RoutedP provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock | &mut Allocator | &mut Random,
+  &mut RoutedP provides &ByteDuplex from &mut ByteDuplex,
+  &mut DirectP provides &HttpTransport from &mut HttpTransport | &mut MonotonicClock | &mut Allocator | &mut Random,
+  &mut DirectP provides &HttpTransport from &mut HttpTransport,
+  FactoryRequirements in Without<FactoryRequirements, ByteDuplex>,
+  FactoryRequirements in Without<FactoryRequirements, HttpTransport>,
+  ProducerRequirements in Without<ProducerRequirements, ByteDuplex>,
+  ProducerRequirements in Without<ProducerRequirements, HttpTransport>,
+  CallbackRequirements in Without<CallbackRequirements, ByteDuplex>,
+  CallbackRequirements in Without<CallbackRequirements, HttpTransport>,
+  AcquisitionRequirements in Without<AcquisitionRequirements, ByteDuplex>,
+  AcquisitionRequirements in Without<AcquisitionRequirements, HttpTransport> {
+  let mut dispatch = HybridAttemptDispatch<'client, C> {client: move client}
+  return run runResponseLoop(
+    &mut dispatch,
     move request,
     policy,
     ReplayPlan<Factory, Producer> {factory: move factory, retained: true},
