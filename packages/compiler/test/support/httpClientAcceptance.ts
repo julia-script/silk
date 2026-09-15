@@ -1475,11 +1475,7 @@ effect<'call> fn discardExchange<'call, 'exchange: 'call>(
     if status != 200 {
       return 94
     }
-    let outcome = run Client.discardRemainingAtMost(&mut exchangeValue.*, 4)
-    match move outcome {
-      DiscardOutcome.Completed => {}
-      DiscardOutcome.CapReached => { return 157 }
-    }
+    run Client.discardRemaining(&mut exchangeValue.*, 4)
     run Client.finishResponse(&mut exchangeValue.*)
     return 0
   }
