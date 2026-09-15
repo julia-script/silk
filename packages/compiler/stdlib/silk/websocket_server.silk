@@ -552,8 +552,9 @@ where &'transport mut P provides &ByteDuplex from &mut ByteDuplex,
     }
     State.Open => {}
   }
-  let length = match &data {
-    Option.None => usize.ZERO
+  let mut length = usize.ZERO
+  match &data {
+    Option.None => {}
     Option.Some {value} => {
       socket.control[0] = u16.toU8(value.codeValue / 256)
       socket.control[1] = u16.toU8(value.codeValue % 256)
@@ -563,7 +564,7 @@ where &'transport mut P provides &ByteDuplex from &mut ByteDuplex,
         socket.control[2 + index] = reason[index]
         index = index + usize.ONE
       }
-      2 + reason.length
+      length = 2 + reason.length
     }
   }
   let copied = ownedControl(&socket.*, length)
@@ -678,15 +679,18 @@ where &'transport mut P provides &ByteDuplex from &mut ByteDuplex,
   let useLease = effect fn(
     owned: &mut ServerLease<'channel, 'transport, P>,
   ) -> A ! E ? R {
+    let socketLimits = owned.limits
+    let channel = &mut owned.channel.*
     let mut socket = ServerWebSocket {
-      channel: &mut owned.channel.*,
-      limits: owned.limits,
+      channel: move channel,
+      limits: socketLimits,
       stateValue: State.Open,
       failureValue: Failure.Protocol,
       header: emptyHeader(),
       control: emptyControl(),
     }
-    return run use(&mut socket)
+    let socketView = &mut socket
+    return run use(move socketView)
   }
   let release = effect fn(
     owned: &mut ServerLease<'channel, 'transport, P>,
@@ -834,11 +838,12 @@ where &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut Monoton
     )
     let unmasked = unmask(move filled, count, &header.mask, offset)
     if text {
-      let chunk = Slice.view<u8>(unmasked, usize.ZERO, count)
+      let chunk = Slice.view<u8>(move unmasked, usize.ZERO, count)
       run acceptUtf8(&mut validation, chunk)
       drop chunk
+    } else {
+      drop unmasked
     }
-    drop unmasked
     offset = offset + count
   }
   if text && validation.remaining != usize.ZERO {
@@ -1273,7 +1278,7 @@ where &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut Monoton
     headerLength,
   )
   let unmasked = unmask(move initialized, length, mask, usize.ZERO)
-  return move unmasked
+  return Slice.view<u8>(move unmasked, usize.ZERO, length)
 }
 
 effect fn readControl<'channel, 'transport, P>(
