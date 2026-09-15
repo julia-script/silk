@@ -167,12 +167,14 @@ SHALL ignore `Content-Length` and `Transfer-Encoding` on that successful respons
 A 407 response SHALL return `ProxyAuthenticationRequired` owning the status/reason and every
 `Proxy-Authenticate` field, including duplicates in original order. Other non-2xx responses SHALL
 return `ProxyRejected` owning the status/reason and every field in original order. Both copies SHALL
-use limits of 100 fields, 256 name bytes, 8192 value bytes, 32768 aggregate field bytes, and 65536
-total owned bytes. Parser/head/informational failures SHALL take precedence before a final head
-exists. After a complete final head, metadata overflow SHALL return `ProxyMetadataLimit` and
-allocation refusal SHALL remain `OutOfMemoryError`, each before the status-specific error. Cleanup
-failure SHALL NOT replace any protected outcome. A rejection SHALL close without unbounded body
-draining, retry, downgrade, or transient capability caching.
+use limits of 100 fields, 256 name bytes, 8192 value bytes, 32768 aggregate field bytes, and 32768
+total owned bytes. Total-owned accounting SHALL include field-record storage as well as copied
+payload bytes, making the limit reachable beneath the wire-head ceiling. Parser/head/informational
+failures SHALL take precedence before a final head exists. After a complete final head, metadata
+overflow SHALL return `ProxyMetadataLimit` and allocation refusal SHALL remain `OutOfMemoryError`,
+each before the status-specific error. Cleanup failure SHALL NOT replace any protected outcome. A
+rejection SHALL close without unbounded body draining, retry, downgrade, or transient capability
+caching.
 
 #### Scenario: Enter a tunnel on non-200 success
 
@@ -191,7 +193,7 @@ draining, retry, downgrade, or transient capability caching.
 #### Scenario: Prefer owned metadata capacity failure
 
 - **WHEN** a complete non-2xx head passes parser limits but its selected owned metadata exceeds the
-  65536-byte copy bound
+  32768-byte total-owned copy bound because copied field records add to its payload bytes
 - **THEN** the route returns `ProxyMetadataLimit`, preserves that failure through cleanup, and does
   not publish a borrowed or partial rejection value
 
@@ -228,6 +230,21 @@ connected operation. It SHALL preserve the callback's success, failure, and requ
 prevent the callback from escaping or duplicating the transport borrow; and close the physical
 owner at most once after success, typed failure, structured cancellation, TLS failure, or callback
 failure without replacing the protected outcome.
+
+The target-neutral acquisition adapter supplied to `withRoute` SHALL lend one owned plain provider
+that implements both `HttpTransport` and `ByteDuplex` for exactly the selected physical peer and
+unchanged deadline. It SHALL also carry explicit HTTP limits, HTTP version/ALPN policy, TLS client
+limits, and finite handshake duration. `withRoute` SHALL use those values for the resulting
+connection and origin TLS; it SHALL NOT silently substitute defaults. The native
+`withProxyRoute(route, options, limits, preparedTrust, handler)` sibling SHALL derive the adapter
+values exactly from its `options` and `limits` arguments.
+
+#### Scenario: Preserve explicit client settings
+
+- **WHEN** a route client supplies nondefault HTTP limits, version/ALPN policy, TLS limits, and
+  handshake duration
+- **THEN** routing and tunneled authentication use those exact settings without replacing any with
+  library defaults
 
 #### Scenario: Authenticate only after CONNECT
 
