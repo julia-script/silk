@@ -21,7 +21,16 @@ import silk.http_basic {BasicError}
 import silk.http_origin {Origin, OriginError}
 import silk.uri_reference {ParseError}
 import silk.slice {Slice}
-import silk.http_client_native {Options, NativeClientError, preflight}
+import silk.http_client_native {Options, NativeClientError, preflight, preflightProxyRoute}
+import silk.http_proxy {
+  BypassPolicy,
+  ProxyAuth,
+  ProxyAuthContextId,
+  ProxyConfig,
+  ProxyConfigId,
+  ProxyError,
+  selectRoute,
+}
 import silk.option {Option}
 import silk.system_clock {Instant, SystemClock}
 import silk.bytes {Bytes}
@@ -304,6 +313,95 @@ fn nativeAdmissionChecks() -> i32 {
   return match move preflight(&dns, &options) {
     Result.Success {value} => 0
     Result.Failure {error} => 4
+  }
+}
+
+effect fn nativeProxyAdmissionChecks() -> i32 ! OutOfMemoryError ? &mut Allocator {
+  let direct = nativeOrigin("http://127.0.0.1/")
+  let forward = nativeOrigin("http://127.0.0.3/")
+  let proxy = nativeOrigin("http://127.0.0.2:3128/")
+  let bypassEntries = [direct]
+  let bypass = match move run BypassPolicy.copy(&bypassEntries) {
+    Result.Success {value} => move value
+    Result.Failure {error} => {
+      drop error
+      return 1
+    }
+  }
+  let config = match move ProxyConfig.fromUri(
+    ProxyConfigId.make(u64.toU64(1)),
+    "http://127.0.0.2:3128",
+    ProxyAuth.none(ProxyAuthContextId.make(u64.toU64(2))),
+    move bypass,
+    4096,
+  ) {
+    Result.Success {value} => move value
+    Result.Failure {error} => {
+      drop error
+      return 2
+    }
+  }
+  let options = Options.defaults()
+  let directRoute = selectRoute(&config, direct)
+  match move preflightProxyRoute(&directRoute, &options) {
+    Result.Success {value} => {
+      if !Origin.equals(&value, &direct) { return 3 }
+    }
+    Result.Failure {error} => match move error {
+      NativeClientError cause => match move cause {
+        NativeClientError.UnsupportedTarget => { return 0 }
+        _ => { return 4 }
+      }
+      ProxyError cause => {
+        drop cause
+        return 5
+      }
+    }
+  }
+  let forwardRoute = selectRoute(&config, forward)
+  match move preflightProxyRoute(&forwardRoute, &options) {
+    Result.Success {value} => {
+      if !Origin.equals(&value, &proxy) { return 6 }
+    }
+    Result.Failure {error} => {
+      drop error
+      return 7
+    }
+  }
+
+  let empty: [Origin; 0] = []
+  let dnsBypass = match move run BypassPolicy.copy(&empty) {
+    Result.Success {value} => move value
+    Result.Failure {error} => {
+      drop error
+      return 8
+    }
+  }
+  let dnsConfig = match move ProxyConfig.fromUri(
+    ProxyConfigId.make(u64.toU64(3)),
+    "http://proxy.example:3128",
+    ProxyAuth.none(ProxyAuthContextId.make(u64.toU64(4))),
+    move dnsBypass,
+    4096,
+  ) {
+    Result.Success {value} => move value
+    Result.Failure {error} => {
+      drop error
+      return 9
+    }
+  }
+  let dnsRoute = selectRoute(&dnsConfig, forward)
+  let mut deadlineOptions = Options.defaults()
+  deadlineOptions.deadline = Option.some<Instant>(SystemClock.make(7, 0))
+  return match move preflightProxyRoute(&dnsRoute, &deadlineOptions) {
+    Result.Success {value} => 10
+    Result.Failure {error} => match move error {
+      NativeClientError cause => match move cause {
+        NativeClientError.UnsupportedDeadline => 0
+        _ => 11
+      }
+      ProxyError cause => 12
+    }
   }
 }
 
@@ -770,6 +868,11 @@ pub fn main() -> i32 {
     return 200 + admitted
   }
   let mut allocator = Allocator.systemAllocatorProvider()
+  let proxyAdmitted = run nativeProxyAdmissionChecks()
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  if proxyAdmitted != 0 {
+    return 300 + proxyAdmitted
+  }
   return run Effect.catchAll(allPrograms(), recover)
     |> Effect.provideMut<Allocator>(&mut allocator)
 }
