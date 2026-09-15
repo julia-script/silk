@@ -12,7 +12,7 @@
 
 ## 3. Scoped client composition
 
-- [ ] 3.1 Add the smallest `http_client` bounded-discard outcome that distinguishes Completed from CapReached while preserving malformed framing, read, deadline, allocation, and transport failures; encode wire-overhead cap versus malformed-framing behavior in the redirect corpus source.
+- [x] 3.1 Add the smallest `http_client` bounded-discard outcome that distinguishes Completed from CapReached while preserving malformed framing, read, deadline, allocation, and transport failures; encode wire-overhead cap versus malformed-framing behavior in the redirect corpus source.
 - [ ] 3.2 Add the higher-ranked target-neutral attempt-client/handler boundary that rebuilds each prepared request, drives one scoped exchange, and preserves generic callback/acquisition/source channels; encode nonescaping response/URI borrows and exact callback rows in the shared analysis snapshot.
 - [ ] 3.3 Implement proxy-aware attempt preparation and acquisition using `Route.recompute`, Forward absolute-form preparation, Direct/Tunnel origin-form preparation, original-origin TLS, and the unchanged deadline; encode proxy-to-bypass-to-proxy route signals and assert no disallowed contact or credential leakage without adding a TLS/socket matrix.
 - [ ] 3.4 Implement iterative `Redirect.withResponse` state ownership, final callback invocation, intermediate Close/Drain handling, and nested producer/attempt finalization; encode hop count, protected policy/source/callback/read/cancellation outcomes, total deadline, and exactly-one release counters in the one runtime corpus source.
