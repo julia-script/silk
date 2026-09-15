@@ -711,6 +711,10 @@ impl<'configuration> Route<'configuration> {
 }
 
 impl RouteKey {
+  /// Returns the normalized original origin retained by this sealed route identity.
+  pub fn originalOrigin(self: &Self) -> Origin { return self.originValue }
+  /// Returns the selected route mode without exposing proxy configuration or credential bytes.
+  pub fn mode(self: &Self) -> RouteMode { return self.modeValue }
   /// Compares route mode, original origin, proxy endpoint, and both opaque identities.
   pub fn equals(self: &Self, other: &Self) -> bool {
     return self.modeValue == other.modeValue
