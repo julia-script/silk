@@ -441,14 +441,19 @@ pub effect fn readEvent<'channel, 'transport, P>(
 ) -> Event
 ! WebSocketError
 ? &mut MonotonicClock
-where &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock {
-  run requireOpen(socket, Operation.ReadEvent)
-  let attempted = run Effect.result(readEventCore(socket, output, copyDeadline(&deadline)))
+where &'transport mut P provides &ByteDuplex from &mut ByteDuplex,
+  &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock {
+  run requireOpen(&socket.*, Operation.ReadEvent)
+  let attempted = run Effect.result(readEventCore(
+    &mut socket.*,
+    &mut output.*,
+    copyDeadline(&deadline),
+  ))
   return match move attempted {
     Result<Event, WebSocketError>.Success {value} => move value
     Result<Event, WebSocketError>.Failure {error} => {
       return run failTerminal(
-        socket,
+        &mut socket.*,
         move error,
         copyDeadline(&deadline),
         Operation.ReadEvent,
@@ -465,11 +470,12 @@ pub effect fn writeText<'message, 'channel, 'transport, P>(
 ) -> ()
 ! WebSocketError
 ? &mut MonotonicClock
-where &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock {
-  run requireOpen(socket, Operation.WriteText)
+where &'transport mut P provides &ByteDuplex from &mut ByteDuplex,
+  &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock {
+  run requireOpen(&socket.*, Operation.WriteText)
   let bytes = String.utf8Bytes(message)
-  run validateMessageLength(socket, bytes.length)
-  return run writePublicFrame(socket, 1, bytes, move deadline, Operation.WriteText)
+  run validateMessageLength(&socket.*, bytes.length)
+  return run writePublicFrame(&mut socket.*, 1, bytes, move deadline, Operation.WriteText)
 }
 
 /// Writes and flushes one final unmasked Binary frame.
@@ -480,10 +486,11 @@ pub effect fn writeBinary<'message, 'channel, 'transport, P>(
 ) -> ()
 ! WebSocketError
 ? &mut MonotonicClock
-where &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock {
-  run requireOpen(socket, Operation.WriteBinary)
-  run validateMessageLength(socket, message.length)
-  return run writePublicFrame(socket, 2, message, move deadline, Operation.WriteBinary)
+where &'transport mut P provides &ByteDuplex from &mut ByteDuplex,
+  &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock {
+  run requireOpen(&socket.*, Operation.WriteBinary)
+  run validateMessageLength(&socket.*, message.length)
+  return run writePublicFrame(&mut socket.*, 2, message, move deadline, Operation.WriteBinary)
 }
 
 /// Writes and flushes one final unmasked Ping frame with at most 125 payload bytes.
@@ -494,10 +501,11 @@ pub effect fn writePing<'message, 'channel, 'transport, P>(
 ) -> ()
 ! WebSocketError
 ? &mut MonotonicClock
-where &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock {
-  run requireOpen(socket, Operation.WritePing)
+where &'transport mut P provides &ByteDuplex from &mut ByteDuplex,
+  &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock {
+  run requireOpen(&socket.*, Operation.WritePing)
   run validateControlLength(message.length)
-  return run writePublicFrame(socket, 9, message, move deadline, Operation.WritePing)
+  return run writePublicFrame(&mut socket.*, 9, message, move deadline, Operation.WritePing)
 }
 
 /// Writes and flushes one final unmasked Pong frame with at most 125 payload bytes.
@@ -508,10 +516,11 @@ pub effect fn writePong<'message, 'channel, 'transport, P>(
 ) -> ()
 ! WebSocketError
 ? &mut MonotonicClock
-where &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock {
-  run requireOpen(socket, Operation.WritePong)
+where &'transport mut P provides &ByteDuplex from &mut ByteDuplex,
+  &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock {
+  run requireOpen(&socket.*, Operation.WritePong)
   run validateControlLength(message.length)
-  return run writePublicFrame(socket, 10, message, move deadline, Operation.WritePong)
+  return run writePublicFrame(&mut socket.*, 10, message, move deadline, Operation.WritePong)
 }
 
 /// Sends and flushes the local Close frame once.
@@ -528,16 +537,17 @@ pub effect fn sendClose<'close, 'channel, 'transport, P>(
 ) -> ()
 ! WebSocketError
 ? &mut MonotonicClock
-where &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock {
+where &'transport mut P provides &ByteDuplex from &mut ByteDuplex,
+  &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock {
   match socket.stateValue {
     State.CloseSent => { return () }
     State.Closed => { return () }
     State.Failed => {
-      fail WebSocketError.PreviousFailure {failure: priorFailure(socket)}
+      fail WebSocketError.PreviousFailure {failure: priorFailure(&socket.*)}
     }
     State.Open => {}
   }
-  let length = match & data.* {
+  let length = match &data {
     Option.None => usize.ZERO
     Option.Some {value} => {
       socket.control[0] = u16.toU8(value.codeValue / 256)
@@ -551,10 +561,10 @@ where &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut Monoton
       2 + reason.length
     }
   }
-  let copied = ownedControl(socket, length)
+  let copied = ownedControl(&socket.*, length)
   let payload = copied.asSlice()
   let written = run Effect.result(writePublicFrame(
-    socket,
+    &mut socket.*,
     8,
     payload,
     move deadline,
@@ -588,7 +598,8 @@ pub effect fn finishClose<'channel, 'transport, P>(
 ) -> ()
 ! WebSocketError
 ? &mut MonotonicClock
-where &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock {
+where &'transport mut P provides &ByteDuplex from &mut ByteDuplex,
+  &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock {
   match socket.stateValue {
     State.Open => {
       fail WebSocketError.InvalidState {
@@ -598,16 +609,19 @@ where &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut Monoton
     }
     State.Closed => { return () }
     State.Failed => {
-      fail WebSocketError.PreviousFailure {failure: priorFailure(socket)}
+      fail WebSocketError.PreviousFailure {failure: priorFailure(&socket.*)}
     }
     State.CloseSent => {}
   }
-  let attempted = run Effect.result(finishCloseCore(socket, copyInstant(&deadline)))
+  let attempted = run Effect.result(finishCloseCore(
+    &mut socket.*,
+    copyInstant(&deadline),
+  ))
   return match move attempted {
     Result<(), WebSocketError>.Success {value} => move value
     Result<(), WebSocketError>.Failure {error} => {
       return run failTerminal(
-        socket,
+        &mut socket.*,
         move error,
         Option.some<Instant>(copyInstant(&deadline)),
         Operation.FinishClose,
@@ -640,7 +654,8 @@ pub effect fn withServer<
 ) -> A
 ! E | WebSocketError
 ? R | &mut MonotonicClock
-where &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock,
+where &'transport mut P provides &ByteDuplex from &mut ByteDuplex,
+  &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock,
   R in Without<R, ByteDuplex> {
   let admitted = Limits.make(
     limits.maxMessageBytes,
@@ -685,7 +700,8 @@ effect fn finishCloseCore<'channel, 'transport, P>(
 ) -> ()
 ! WebSocketError
 ? &mut MonotonicClock
-where &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock {
+where &'transport mut P provides &ByteDuplex from &mut ByteDuplex,
+  &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock {
   let mut frames = usize.ZERO
   let mut wireBytes = usize.ZERO
   while true {
@@ -704,7 +720,7 @@ where &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut Monoton
     }
     let remaining = socket.limits.maxCloseBytes - wireBytes
     let header = run readHeader(
-      socket,
+      &mut socket.*,
       Option.none<usize>(),
       Option.some<usize>(remaining),
       Option.some<Instant>(copyInstant(&deadline)),
@@ -715,7 +731,7 @@ where &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut Monoton
     match header.opcode {
       Opcode.Text => {
         run discardData(
-          socket,
+          &mut socket.*,
           &header,
           true,
           Option.some<Instant>(copyInstant(&deadline)),
@@ -723,7 +739,7 @@ where &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut Monoton
       }
       Opcode.Binary => {
         run discardData(
-          socket,
+          &mut socket.*,
           &header,
           false,
           Option.some<Instant>(copyInstant(&deadline)),
@@ -731,15 +747,15 @@ where &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut Monoton
       }
       Opcode.Ping => {
         run readControl(
-          socket,
+          &mut socket.*,
           &header,
           Option.some<Instant>(copyInstant(&deadline)),
           Operation.FinishClose,
         )
-        let copied = ownedControl(socket, header.payloadLength)
+        let copied = ownedControl(&socket.*, header.payloadLength)
         let payload = copied.asSlice()
         let written = run Effect.result(writeFrameRaw(
-          socket,
+          &mut socket.*,
           10,
           payload,
           Option.some<Instant>(copyInstant(&deadline)),
@@ -753,7 +769,7 @@ where &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut Monoton
       }
       Opcode.Pong => {
         run readControl(
-          socket,
+          &mut socket.*,
           &header,
           Option.some<Instant>(copyInstant(&deadline)),
           Operation.FinishClose,
@@ -761,14 +777,14 @@ where &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut Monoton
       }
       Opcode.Close => {
         run readControl(
-          socket,
+          &mut socket.*,
           &header,
           Option.some<Instant>(copyInstant(&deadline)),
           Operation.FinishClose,
         )
-        let data = run peerCloseData(socket, header.payloadLength)
+        let data = run peerCloseData(&socket.*, header.payloadLength)
         let closed = run completePeerClose(
-          socket,
+          &mut socket.*,
           move data,
           header.payloadLength,
           false,
@@ -809,7 +825,9 @@ where &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut Monoton
     )
     unmask(&mut socket.control, count, &header.mask, offset)
     if text {
-      run acceptUtf8(&mut validation, Slice.view<u8>(&socket.control, usize.ZERO, count))
+      let chunk = Slice.view<u8>(&socket.control, usize.ZERO, count)
+      run acceptUtf8(&mut validation, chunk)
+      drop chunk
     }
     offset = offset + count
   }
@@ -904,9 +922,10 @@ effect fn readEventCore<'channel, 'transport, P>(
 ) -> Event
 ! WebSocketError
 ? &mut MonotonicClock
-where &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock {
+where &'transport mut P provides &ByteDuplex from &mut ByteDuplex,
+  &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock {
   let header = run readHeader(
-    socket,
+    &mut socket.*,
     Option.some<usize>(output.length),
     Option.none<usize>(),
     copyDeadline(&deadline),
@@ -915,15 +934,16 @@ where &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut Monoton
   return match header.opcode {
     Opcode.Text => {
       run readPayload(
-        socket,
-        output,
+        &mut socket.*,
+        &mut output.*,
         header.payloadLength,
         &header.mask,
         header.wireLength - header.payloadLength,
         move deadline,
         Operation.ReadEvent,
       )
-      let text = String.fromUtf8(Slice.view<u8>(output, usize.ZERO, header.payloadLength))
+      let payload = Slice.view<u8>(output, usize.ZERO, header.payloadLength)
+      let text = String.fromUtf8(payload)
       match move text {
         Result<string, InvalidUtf8>.Failure {error} => {
           drop error
@@ -931,12 +951,13 @@ where &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut Monoton
         }
         Result<string, InvalidUtf8>.Success {value} => { drop value }
       }
+      drop payload
       return Event.Text {count: header.payloadLength}
     }
     Opcode.Binary => {
       run readPayload(
-        socket,
-        output,
+        &mut socket.*,
+        &mut output.*,
         header.payloadLength,
         &header.mask,
         header.wireLength - header.payloadLength,
@@ -946,11 +967,16 @@ where &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut Monoton
       return Event.Binary {count: header.payloadLength}
     }
     Opcode.Ping => {
-      run readControl(socket, &header, copyDeadline(&deadline), Operation.ReadEvent)
-      let payload = ownedControl(socket, header.payloadLength)
+      run readControl(
+        &mut socket.*,
+        &header,
+        copyDeadline(&deadline),
+        Operation.ReadEvent,
+      )
+      let payload = ownedControl(&socket.*, header.payloadLength)
       let bytes = payload.asSlice()
       let written = run Effect.result(writeFrameRaw(
-        socket,
+        &mut socket.*,
         10,
         bytes,
         copyDeadline(&deadline),
@@ -964,15 +990,20 @@ where &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut Monoton
       return Event.Ping {payload: move payload}
     }
     Opcode.Pong => {
-      run readControl(socket, &header, move deadline, Operation.ReadEvent)
-      return Event.Pong {payload: ownedControl(socket, header.payloadLength)}
+      run readControl(&mut socket.*, &header, move deadline, Operation.ReadEvent)
+      return Event.Pong {payload: ownedControl(&socket.*, header.payloadLength)}
     }
     Opcode.Close => {
-      run readControl(socket, &header, copyDeadline(&deadline), Operation.ReadEvent)
-      let normalize = closeCodeInControl(socket, header.payloadLength) == 1010
-      let data = run peerCloseData(socket, header.payloadLength)
+      run readControl(
+        &mut socket.*,
+        &header,
+        copyDeadline(&deadline),
+        Operation.ReadEvent,
+      )
+      let normalize = closeCodeInControl(&socket.*, header.payloadLength) == 1010
+      let data = run peerCloseData(&socket.*, header.payloadLength)
       let closed = run completePeerClose(
-        socket,
+        &mut socket.*,
         move data,
         header.payloadLength,
         normalize,
@@ -995,7 +1026,7 @@ effect fn readHeader<'channel, 'transport, P>(
 ! WebSocketError
 ? &mut MonotonicClock
 where &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock {
-  match & closeRemaining.* {
+  match &closeRemaining {
     Option.None => {}
     Option.Some {value} => {
       if value < 2 {
@@ -1036,7 +1067,7 @@ where &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut Monoton
   }
   let extended = if marker == 126 { 2 } else if marker == 127 { 8 } else { usize.ZERO }
   let headerLength = 6 + extended
-  run checkCloseRemaining(socket, &closeRemaining, headerLength)
+  run checkCloseRemaining(&socket.*, &closeRemaining, headerLength)
   if extended > usize.ZERO {
     run readInto(
       &mut socket.channel.*,
@@ -1071,10 +1102,10 @@ where &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut Monoton
   let payloadLength = if control {
     u64.toUsize(length)
   } else {
-    run boundedPayload(socket, length, &capacity)
+    run boundedPayload(&socket.*, length, &capacity)
   }
   let wireLength = match move usize.checkedAdd(headerLength, payloadLength) {
-    Option.None => match & closeRemaining.* {
+    Option.None => match &closeRemaining {
       Option.None => { fail WebSocketError.InvalidLimits {kind: LimitKind.Arithmetic} }
       Option.Some {value} => {
         drop value
@@ -1086,7 +1117,7 @@ where &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut Monoton
     }
     Option.Some {value} => value
   }
-  run checkCloseRemaining(socket, &closeRemaining, wireLength)
+  run checkCloseRemaining(&socket.*, &closeRemaining, wireLength)
   run readInto(
     &mut socket.channel.*,
     &mut socket.header,
@@ -1219,14 +1250,14 @@ effect fn readPayload<'channel, 'transport, P>(
 where &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock {
   run readInto(
     &mut socket.channel.*,
-    output,
+    &mut output.*,
     usize.ZERO,
     length,
     move deadline,
     operation,
     headerLength,
   )
-  unmask(output, length, mask, usize.ZERO)
+  unmask(&mut output.*, length, mask, usize.ZERO)
   return ()
 }
 
@@ -1257,7 +1288,9 @@ fn ownedControl<'channel, 'transport, P>(
   length: usize,
 ) -> ControlPayload {
   let mut bytes = emptyControl()
-  copyBytes(&mut bytes, Slice.view<u8>(&socket.control, usize.ZERO, length))
+  let payload = Slice.view<u8>(&socket.control, usize.ZERO, length)
+  copyBytes(&mut bytes, payload)
+  drop payload
   return ControlPayload {bytes: move bytes, length: length}
 }
 
@@ -1299,16 +1332,23 @@ effect fn completePeerClose<'channel, 'transport, P>(
 ) -> PeerCloseData
 ! WebSocketError
 ? &mut MonotonicClock
-where &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock {
+where &'transport mut P provides &ByteDuplex from &mut ByteDuplex,
+  &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock {
   if reply {
     if normalize {
       let normalized: [u8; 2] = [3, 232]
-      run writeFrameRaw(socket, 8, &normalized, copyDeadline(&deadline), operation)
+      run writeFrameRaw(
+        &mut socket.*,
+        8,
+        &normalized,
+        copyDeadline(&deadline),
+        operation,
+      )
     } else {
-      let copied = ownedControl(socket, payloadLength)
+      let copied = ownedControl(&socket.*, payloadLength)
       let payload = copied.asSlice()
       let written = run Effect.result(writeFrameRaw(
-        socket,
+        &mut socket.*,
         8,
         payload,
         copyDeadline(&deadline),
@@ -1341,9 +1381,10 @@ effect fn writePublicFrame<'channel, 'transport, P>(
 ) -> ()
 ! WebSocketError
 ? &mut MonotonicClock
-where &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock {
+where &'transport mut P provides &ByteDuplex from &mut ByteDuplex,
+  &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock {
   let attempted = run Effect.result(writeFrameRaw(
-    socket,
+    &mut socket.*,
     opcode,
     payload,
     copyDeadline(&deadline),
@@ -1353,7 +1394,12 @@ where &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut Monoton
     Result<(), WebSocketError>.Success {value} => move value
     Result<(), WebSocketError>.Failure {error} => {
       if arithmeticError(&error) { fail move error }
-      return run failTerminal(socket, move error, Option.none<Instant>(), operation)
+      return run failTerminal(
+        &mut socket.*,
+        move error,
+        Option.none<Instant>(),
+        operation,
+      )
     }
   }
 }
@@ -1482,16 +1528,17 @@ effect fn failTerminal<'channel, 'transport, P>(
 ) -> never
 ! WebSocketError
 ? &mut MonotonicClock
-where &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock {
+where &'transport mut P provides &ByteDuplex from &mut ByteDuplex,
+  &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock {
   let failure = failureClass(&error)
   let closeCode = failureCloseCode(&error)
   if socket.stateValue == State.Open {
-    match & deadline.* {
+    match &deadline {
       Option.None => {}
       Option.Some {value} => {
         let now = run MonotonicClock.now()
         if !reached(&now, &value) {
-          match & closeCode.* {
+          match &closeCode {
             Option.None => {}
             Option.Some {value: code} => {
               let payload: [u8; 2] = [
@@ -1499,7 +1546,7 @@ where &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut Monoton
                 u16.toU8(code % 256),
               ]
               let graceful = writeFrameRaw(
-                socket,
+                &mut socket.*,
                 8,
                 &payload,
                 Option.some<Instant>(copyInstant(&value)),
