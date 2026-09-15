@@ -145,6 +145,8 @@ pub enum ProtocolReason {
   LengthHighBit,
   /// A control frame payload exceeds 125 bytes.
   ControlTooLarge,
+  /// A control frame clears FIN and therefore attempts illegal fragmentation.
+  ControlFragmented,
   /// A Close frame payload has exactly one byte.
   ClosePayloadLength,
   /// A peer Close frame contains a disallowed status code.
@@ -1049,7 +1051,7 @@ where &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut Monoton
   let control = controlOpcode(&opcode)
   if !finalFrame {
     if control {
-      fail WebSocketError.ProtocolError {reason: ProtocolReason.ControlTooLarge}
+      fail WebSocketError.ProtocolError {reason: ProtocolReason.ControlFragmented}
     }
     fail WebSocketError.UnsupportedFragmentation
   }
