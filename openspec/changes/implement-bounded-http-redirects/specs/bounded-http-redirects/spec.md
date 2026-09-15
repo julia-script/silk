@@ -153,11 +153,11 @@ SHALL recompute policy through the active immutable proxy configuration. Direct 
 requests SHALL use origin-form targets; Forward SHALL use the proxy actor's absolute-form path;
 route-specific proxy authentication SHALL remain owned by that route.
 
-The public redirect operation SHALL call its final callback exactly once with the final scoped
-response, independently owned final URI, and hop count. It SHALL preserve arbitrary callback
-success, failure, and requirement channels, and neither the borrowed response nor a URI view SHALL
-escape the owner implicitly. It SHALL NOT implement another parser, resolver, transport, TLS pump,
-automatic retry, concurrent attempt, or connection pool.
+Each public redirect operation SHALL call its final callback exactly once with the final scoped
+response, independently owned final URI, and hop count. Each operation SHALL preserve arbitrary
+callback success, failure, and requirement channels, and neither the borrowed response nor a URI
+view SHALL escape the owner implicitly. No redirect operation SHALL implement another parser,
+resolver, transport, TLS pump, automatic retry, concurrent attempt, or connection pool.
 
 #### Scenario: Proxy bypass is recomputed on every hop
 
