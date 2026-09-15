@@ -99,10 +99,11 @@ not silently change the security route.
 Build CONNECT as a body-free routed prepared request and run it through the current client exchange.
 The existing `withTunnel` operation is the only transition from HTTP parsing to tunneled bytes. Add
 one single-use `Tunnel.transferByteDuplex` transition. It is allocation-free and infallible after
-its state precondition: an invalid or repeated call fails while the HTTP owner remains armed; a
-valid call first constructs the complete adapter, then atomically marks the HTTP connection
-physically transferred and returns the affine adapter. There is no fallible or cancelable operation
-between disarming the HTTP owner and publishing the adapter.
+its state precondition. A failed call leaves the current close authority unchanged: an invalid
+pre-publication call leaves the HTTP owner Armed, while a repeated post-publication call observes
+the terminal Closed authority. A valid call first constructs the complete adapter, then atomically
+marks the HTTP connection physically Transferred and publishes the affine adapter. There is no
+fallible or cancelable operation between disarming the HTTP owner and publishing the adapter.
 
 The adapter serves the retained suffix before transport input and forwards read, write, flush, and
 write-direction shutdown to the concrete `ByteDuplex` provider under the tunnel's clamped deadline.

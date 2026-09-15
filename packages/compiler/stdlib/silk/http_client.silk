@@ -1582,7 +1582,7 @@ impl<'tunnel, P> Tunnel<'tunnel, P> {
     let use = effect fn(owned: &mut TransferredTunnel<'transfer, P>) -> A
     ! E
     ? CallbackRequirements {
-      return run callback(&mut owned.*)
+      return run move callback(move &mut owned.*)
     }
     let release = effect fn(owned: &mut TransferredTunnel<'transfer, P>) -> () {
       let closed = ByteDuplex.close()
