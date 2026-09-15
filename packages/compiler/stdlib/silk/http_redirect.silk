@@ -1,0 +1,1473 @@
+//! Bounded, replay-aware HTTP redirect policy and pure transition preparation.
+//!
+//! # When to use
+//!
+//! Use [`Policy`] to admit finite redirect authority before an HTTP attempt. Use [`transition`],
+//! [`resolveLocation`], [`History`], and [`sanitizeHeaders`] to construct a next attempt without
+//! mutating the caller's semantic request.
+//!
+//! # Details
+//!
+//! This actor owns policy names and redirect history, but never owns credentials or response-body
+//! bytes. Network acquisition and exchange driving remain in `silk.http_client`.
+
+import silk.allocator {Allocator, OutOfMemoryError}
+import silk.bytes {Bytes}
+import silk.http {Header, Method, Status, ValueError, Version}
+import silk.http_client {ContinuePolicy}
+import silk.http_headers {HeaderIterator, Headers, Limits as HeaderLimits, OwnedHeaders}
+import silk.http_origin {Origin, OriginError}
+import silk.http_request {BodyMode, HeaderPolicy}
+import silk.layout {Layout}
+import silk.option {Option}
+import silk.result {Result}
+import silk.slice {Slice}
+import silk.string {String}
+import silk.system_clock {Instant}
+import silk.u64
+import silk.u8
+import silk.uri {OwnedUri, Uri}
+import silk.uri_reference {ParseError, UriReference}
+import silk.usize
+import silk.vector {Vector}
+
+/// Whether a response is returned unchanged or eligible redirect statuses are followed.
+pub enum Mode {
+  /// Returns the first response without inspecting `Location`.
+  Manual,
+  /// Applies the admitted redirect policy.
+  Follow,
+}
+
+/// Whether a cross-origin redirect is admitted.
+pub enum CrossOriginPolicy {
+  /// Rejects every normalized-origin change.
+  Deny,
+  /// Admits an origin change after deny-last header sanitization.
+  Allow,
+}
+
+/// Whether an HTTPS-to-HTTP redirect is admitted after cross-origin admission.
+pub enum DowngradePolicy {
+  /// Rejects a secure-to-plaintext transition.
+  Deny,
+  /// Admits a secure-to-plaintext transition after cross-origin sanitization.
+  Allow,
+}
+
+/// The special method rule for exact uppercase POST on status 301 or 302.
+pub enum Post301302Policy {
+  /// Preserves POST and its body.
+  Preserve,
+  /// Changes exact uppercase POST to GET and drops its body.
+  ToGet,
+}
+
+/// How an intermediate response is handled before its attempt scope is released.
+pub union PreviousResponsePolicy {
+  /// Performs no drain and lets the attempt owner close an incomplete response.
+  Close,
+  /// Attempts a bounded discard under a finite absolute deadline.
+  Drain {
+    /// Maximum response wire bytes that may be discarded.
+    pub maxDiscardWireBytes: u64,
+    /// Absolute discard deadline, later clamped to the operation deadline.
+    pub deadline: Instant,
+  },
+}
+
+/// Finite admission limits for one owned case-insensitive field-name list.
+pub struct NameListLimits {
+  /// Maximum number of names, including duplicates.
+  pub maxNames: usize
+  /// Maximum bytes in any one name.
+  pub maxNameBytes: usize
+  /// Maximum aggregate name payload plus owned index storage.
+  pub maxOwnedBytes: usize
+}
+
+impl Copy for NameListLimits {}
+
+/// A bounded owned list of validated HTTP field names.
+pub struct NameList {
+  values: Vector<String>
+  ownedBytesValue: usize
+}
+
+/// Finite URI, hop, and history capacities for one redirect operation.
+pub struct HistoryLimits {
+  /// Maximum followed redirects.
+  pub maxHops: usize
+  /// Maximum bytes in each raw or resolved URI serialization.
+  pub maxUriBytes: usize
+  /// Maximum history payload plus index storage bytes.
+  pub maxHistoryBytes: usize
+}
+
+impl Copy for HistoryLimits {}
+
+/// An immutable admitted redirect policy with owned field-name lists.
+pub struct Policy {
+  modeValue: Mode
+  historyValue: HistoryLimits
+  crossOriginValue: CrossOriginPolicy
+  downgradeValue: DowngradePolicy
+  post301302Value: Post301302Policy
+  previousResponseValue: PreviousResponsePolicy
+  safeCustomValue: NameList
+  sensitiveValue: NameList
+}
+
+/// The bounded value whose admission or transition failed.
+pub enum RedirectComponent {
+  /// The admitted policy and its owned lists.
+  Policy,
+  /// A response `Location` field.
+  Location,
+  /// The resolved next URI.
+  Uri,
+  /// The normalized destination origin.
+  Origin,
+  /// The method-aware redirect history.
+  History,
+  /// The current body replay authority.
+  Body,
+}
+
+/// The finite redirect resource that exceeded its bound.
+pub enum RedirectLimit {
+  /// Owned policy-name count.
+  PolicyNames,
+  /// One policy-name byte count.
+  PolicyNameBytes,
+  /// Aggregate policy-name payload and index storage.
+  PolicyOwnedBytes,
+  /// Raw or resolved URI bytes.
+  UriBytes,
+  /// Method-aware history entries.
+  HistoryEntries,
+  /// Aggregate history payload and index storage.
+  HistoryBytes,
+}
+
+/// A redirect-specific failure reason without response or credential borrows.
+pub union RedirectReason {
+  /// Policy arithmetic or values cannot be admitted.
+  InvalidPolicy,
+  /// A name appears in both the safe-custom and sensitive lists.
+  NameListOverlap,
+  /// Required finite storage does not fit in `usize`.
+  SizeOverflow,
+  /// A finite resource exceeds its inclusive bound.
+  LimitExceeded {
+    /// The resource whose limit was exceeded.
+    pub limit: RedirectLimit,
+    /// The inclusive admitted maximum.
+    pub allowed: usize,
+    /// The rejected resource value.
+    pub attempted: usize,
+  },
+  /// A selected redirect has no `Location` field.
+  LocationMissing,
+  /// A selected redirect has more than one `Location` field.
+  LocationAmbiguous,
+  /// A `Location` field is not UTF-8 or is not a valid URI reference.
+  LocationInvalid,
+  /// The resolved URI is not an admitted HTTP or HTTPS origin.
+  RedirectSchemeDenied,
+  /// Policy rejects a normalized-origin change.
+  RedirectOriginDenied,
+  /// Policy rejects an HTTPS-to-HTTP transition.
+  DowngradeDenied,
+  /// A selected redirect has no remaining hop capacity.
+  HopLimit,
+  /// A transformed method and request target repeat an earlier history key.
+  RedirectLoop,
+  /// A retained body has no replay authority.
+  ReplayUnavailable,
+  /// A producer's framing or observed length violates its declared contract.
+  ReplayContractMismatch,
+}
+
+impl Copy for RedirectReason {}
+
+/// Independently owned, bounded context attached at the redirect boundary.
+pub struct RedirectContext {
+  /// Zero-based current attempt number.
+  pub hop: usize
+  /// Response status when one is relevant.
+  pub status: Option<Status>
+  /// Independently owned current URI when retained by the failure boundary.
+  pub currentUri: Option<OwnedUri>
+  /// Independently owned next URI when retained by the failure boundary.
+  pub nextUri: Option<OwnedUri>
+}
+
+/// A redirect-specific failure with no response, credential, body, or proxy-token borrow.
+pub struct RedirectError {
+  /// The bounded value associated with the failure.
+  pub component: RedirectComponent
+  /// The stable machine-readable failure reason.
+  pub reason: RedirectReason
+  /// Independently owned bounded transition context.
+  pub context: RedirectContext
+}
+
+/// A rebuildable semantic request, distinct from an owned serialized prepared request.
+pub struct Request<'uri, 'method, 'headers, 'policy> {
+  /// Caller-owned initial URI, including fragment metadata.
+  pub uri: Uri<'uri>
+  /// Caller-owned initial method with exact spelling.
+  pub method: Method<'method>
+  /// Caller-owned semantic fields, excluding generated framing and authority fields.
+  pub headers: Headers<'headers>
+  /// Caller-owned generated-field and credential policy.
+  pub headerPolicy: HeaderPolicy<'policy>
+  /// HTTP version used for every rebuilt attempt.
+  pub version: Version
+  /// Upload expectation policy used for every rebuilt attempt.
+  pub continuePolicy: ContinuePolicy
+  /// Shared request and owned-header value limits.
+  pub limits: HeaderLimits
+  /// Maximum bytes in each owned serialized request head.
+  pub maxHeadBytes: usize
+  /// Maximum generated credential bytes in each request head.
+  pub maxCredentialBytes: usize
+}
+
+/// The result of pulling one bounded producer chunk into caller storage.
+pub struct BodyChunk {
+  /// Number of initialized bytes written at the start of caller storage.
+  pub length: usize
+  /// Whether no later pull may produce bytes.
+  pub end: bool
+}
+
+impl Copy for BodyChunk {}
+
+/// A scoped body source with explicit framing metadata and bounded pulls.
+pub interface BodyProducer<E, ?R> {
+  /// Returns framing metadata before an attempt writes its request head.
+  fn mode(producer: &Self) -> BodyMode
+  /// Initializes at most `output.length` bytes and reports progress without retaining `output`.
+  effect fn pull(producer: &mut Self, output: &mut [u8]) -> BodyChunk ! E ? R
+}
+
+/// A higher-ranked body-producer callback whose producer loan cannot escape.
+pub interface ProducerHandler<P, A, E, ?R> {
+  /// Uses one producer only inside its factory-owned scope.
+  effect<'call> fn handle<'call>(handler: Self, producer: &'call mut P) -> A ! E ? R
+}
+
+/// A reusable factory that lends one fresh scoped producer for each attempted request.
+pub interface ReplayFactory<
+  P,
+  A,
+  FactoryError,
+  ProducerError,
+  ?FactoryRequirements,
+  ?ProducerRequirements,
+  H: ProducerHandler<P, A, ProducerError ? ProducerRequirements>,
+> {
+  /// Acquires, lends, and releases one fresh producer while preserving both channel families.
+  effect fn withProducer(factory: &mut Self, handler: H) -> A ! FactoryError | ProducerError ? FactoryRequirements | ProducerRequirements
+}
+
+/// Body ownership and replay authority for the complete redirect operation.
+pub union BodySource<'bytes, OneShot, Factory> {
+  /// Supplies no request body and needs no replay authority.
+  Empty,
+  /// Borrows complete immutable bytes and can create a fresh zero-resource cursor per attempt.
+  RepeatableBytes {
+    /// Complete body bytes borrowed for the redirect operation.
+    pub bytes: &'bytes [u8],
+  },
+  /// Owns one affine producer that can be consumed by at most one attempt.
+  OneShot {
+    /// Producer authority moved into redirect state.
+    pub producer: OneShot,
+  },
+  /// Owns a reusable scoped producer factory invoked once for every attempt, including the first.
+  ReplayFactory {
+    /// Factory authority moved into redirect state.
+    pub factory: Factory,
+  },
+}
+
+/// Checks whether a selected body transition can be served by the source before any next contact.
+pub fn admitReplay<'bytes, OneShot, Factory>(
+  source: &BodySource<'bytes, OneShot, Factory>,
+  attemptedRequests: usize,
+  decision: BodyDecision,
+) -> Result<(), RedirectError> {
+  if decision == BodyDecision.Drop {
+    return Result.succeed<(), RedirectError>(())
+  }
+  return match & source.* {
+    BodySource.Empty => Result.succeed<(), RedirectError>(())
+    BodySource.RepeatableBytes {bytes} => Result.succeed<(), RedirectError>(())
+    BodySource.ReplayFactory {factory} => Result.succeed<(), RedirectError>(())
+    BodySource.OneShot {producer} => {
+      if attemptedRequests == usize.ZERO {
+        Result.succeed<(), RedirectError>(())
+      } else {
+        Result.failResult<(), RedirectError>(
+          failure(
+            RedirectComponent.Body,
+            RedirectReason.ReplayUnavailable,
+            attemptedRequests - usize.ONE,
+            Option.none<Status>(),
+          ),
+        )
+      }
+    }
+  }
+}
+
+/// Whether the current response is final or selects redirect transition processing.
+pub enum StatusDecision {
+  /// Returns the current response without inspecting `Location`.
+  Final,
+  /// Applies redirect transition processing.
+  Redirect,
+}
+
+/// Whether the next attempt retains or drops the current body.
+pub enum BodyDecision {
+  /// Retains framing and requires repeatability for a later attempt.
+  Retain,
+  /// Drops the source and every content-associated field.
+  Drop,
+}
+
+/// A selected next method and body disposition.
+pub struct Transition<'method> {
+  /// Exact next method, either preserved or the canonical GET/HEAD value.
+  pub method: Method<'method>
+  /// Whether content remains part of the next attempt.
+  pub body: BodyDecision
+}
+
+impl<'method> Copy for Transition<'method> {}
+
+fn emptyContext(hop: usize, status: Option<Status>) -> RedirectContext {
+  return RedirectContext {
+    hop: hop,
+    status: status,
+    currentUri: Option.none<OwnedUri>(),
+    nextUri: Option.none<OwnedUri>(),
+  }
+}
+
+fn failure(component: RedirectComponent, reason: RedirectReason, hop: usize, status: Option<Status>) -> RedirectError {
+  return RedirectError {
+    component: component,
+    reason: move reason,
+    context: emptyContext(hop, status),
+  }
+}
+
+fn limitFailure(
+  component: RedirectComponent,
+  limit: RedirectLimit,
+  allowed: usize,
+  attempted: usize,
+) -> RedirectError {
+  return failure(
+    component,
+    RedirectReason.LimitExceeded {limit: limit, allowed: allowed, attempted: attempted},
+    usize.ZERO,
+    Option.none<Status>(),
+  )
+}
+
+fn folded(value: u8) -> u8 {
+  if value >= 65 && value <= 90 {
+    return value + 32
+  }
+  return value
+}
+
+fn foldedEqual(left: &[u8], right: &[u8]) -> bool {
+  if left.length != right.length {
+    return false
+  }
+  let mut index = usize.ZERO
+  while index < left.length {
+    if folded(left[index]) != folded(right[index]) {
+      return false
+    }
+    index = index + usize.ONE
+  }
+  return true
+}
+
+fn tokenByte(value: u8) -> bool {
+  if value >= 65 && value <= 90 {
+    return true
+  }
+  if value >= 97 && value <= 122 {
+    return true
+  }
+  if value >= 48 && value <= 57 {
+    return true
+  }
+  return value == 33 || value == 35 || value == 36 || value == 37 || value == 38 || value == 39 || value == 42 || value == 43 || value == 45 || value == 46 || value == 94 || value == 95 || value == 96 || value == 124 || value == 126
+}
+
+fn validName(value: string) -> bool {
+  let bytes = String.utf8Bytes(value)
+  if bytes.length == usize.ZERO {
+    return false
+  }
+  let mut index = usize.ZERO
+  while index < bytes.length {
+    if !tokenByte(bytes[index]) {
+      return false
+    }
+    index = index + usize.ONE
+  }
+  return true
+}
+
+impl NameList {
+  /// Creates an empty admitted list without allocating.
+  pub fn empty() -> NameList {
+    return NameList {values: Vector.make<String>(), ownedBytesValue: usize.ZERO}
+  }
+  /// Validates and copies field names under exact count, per-name, and owned-byte boundaries.
+  pub effect fn copy(names: &[string], limits: NameListLimits) -> Result<NameList, RedirectError>
+  ! OutOfMemoryError
+  ? &mut Allocator {
+    if names.length > limits.maxNames {
+      return Result.failResult<NameList, RedirectError>(
+        limitFailure(
+          RedirectComponent.Policy,
+          RedirectLimit.PolicyNames,
+          limits.maxNames,
+          names.length,
+        ),
+      )
+    }
+    let records = match move usize.checkedMultiply(Layout.of<String>().bytes, names.length) {
+      Option.None => {
+        return Result.failResult<NameList, RedirectError>(
+          failure(
+            RedirectComponent.Policy,
+            RedirectReason.SizeOverflow,
+            usize.ZERO,
+            Option.none<Status>(),
+          ),
+        )
+      }
+      Option.Some {value} => value
+    }
+    let mut ownedBytes = records
+    let mut index = usize.ZERO
+    while index < names.length {
+      let length = String.byteLength(names[index])
+      if length > limits.maxNameBytes {
+        return Result.failResult<NameList, RedirectError>(
+          limitFailure(
+            RedirectComponent.Policy,
+            RedirectLimit.PolicyNameBytes,
+            limits.maxNameBytes,
+            length,
+          ),
+        )
+      }
+      if !validName(names[index]) {
+        return Result.failResult<NameList, RedirectError>(
+          failure(
+            RedirectComponent.Policy,
+            RedirectReason.InvalidPolicy,
+            usize.ZERO,
+            Option.none<Status>(),
+          ),
+        )
+      }
+      ownedBytes = match move usize.checkedAdd(ownedBytes, length) {
+        Option.None => {
+          return Result.failResult<NameList, RedirectError>(
+            failure(
+              RedirectComponent.Policy,
+              RedirectReason.SizeOverflow,
+              usize.ZERO,
+              Option.none<Status>(),
+            ),
+          )
+        }
+        Option.Some {value} => value
+      }
+      if ownedBytes > limits.maxOwnedBytes {
+        return Result.failResult<NameList, RedirectError>(
+          limitFailure(
+            RedirectComponent.Policy,
+            RedirectLimit.PolicyOwnedBytes,
+            limits.maxOwnedBytes,
+            ownedBytes,
+          ),
+        )
+      }
+      index = index + usize.ONE
+    }
+    let mut copied = Vector.make<String>()
+    let reserved = run Vector.reserveExact<String>(&mut copied, names.length)
+    index = usize.ZERO
+    while index < names.length {
+      let value = run String.copy(names[index])
+      let appended = run Vector.append<String>(&mut copied, move value)
+      index = index + usize.ONE
+    }
+    return Result.succeed<NameList, RedirectError>(
+      NameList {values: move copied, ownedBytesValue: ownedBytes},
+    )
+  }
+  /// Reports ASCII case-insensitive membership without allocating.
+  pub fn contains(self: &Self, name: string) -> bool {
+    let names = Vector.asSlice<String>(&self.values)
+    let sought = String.utf8Bytes(name)
+    let mut index = usize.ZERO
+    while index < names.length {
+      if foldedEqual(String.ownedUtf8Bytes(&names[index]), sought) {
+        return true
+      }
+      index = index + usize.ONE
+    }
+    return false
+  }
+  /// Returns the number of owned names.
+  pub fn count(self: &Self) -> usize {
+    return Vector.length<String>(&self.values)
+  }
+  /// Returns accounted payload plus index storage bytes.
+  pub fn ownedBytes(self: &Self) -> usize {
+    return self.ownedBytesValue
+  }
+}
+
+fn listsOverlap(left: &NameList, right: &NameList) -> bool {
+  let names = Vector.asSlice<String>(&left.values)
+  let mut index = usize.ZERO
+  while index < names.length {
+    if NameList.contains(right, String.view(&names[index])) {
+      return true
+    }
+    index = index + usize.ONE
+  }
+  return false
+}
+
+impl Policy {
+  /// Returns Manual policy with finite defaults and empty owned name lists.
+  pub fn defaults() -> Policy {
+    return Policy {
+      modeValue: Mode.Manual,
+      historyValue: HistoryLimits {maxHops: 10, maxUriBytes: 8192, maxHistoryBytes: 90112},
+      crossOriginValue: CrossOriginPolicy.Deny,
+      downgradeValue: DowngradePolicy.Deny,
+      post301302Value: Post301302Policy.Preserve,
+      previousResponseValue: PreviousResponsePolicy.Close,
+      safeCustomValue: NameList.empty(),
+      sensitiveValue: NameList.empty(),
+    }
+  }
+  /// Admits an immutable policy, rejecting list overlap and history-capacity overflow before I/O.
+  pub fn make(
+    mode: Mode,
+    history: HistoryLimits,
+    crossOrigin: CrossOriginPolicy,
+    downgrade: DowngradePolicy,
+    post301302: Post301302Policy,
+    previousResponse: PreviousResponsePolicy,
+    safeCustom: NameList,
+    sensitive: NameList,
+  ) -> Result<Policy, RedirectError> {
+    let entries = match move usize.checkedAdd(history.maxHops, usize.ONE) {
+      Option.None => {
+        return Result.failResult<Policy, RedirectError>(
+          failure(
+            RedirectComponent.History,
+            RedirectReason.SizeOverflow,
+            usize.ZERO,
+            Option.none<Status>(),
+          ),
+        )
+      }
+      Option.Some {value} => value
+    }
+    let records = match move usize.checkedMultiply(Layout.of<HistoryKey>().bytes, entries) {
+      Option.None => {
+        return Result.failResult<Policy, RedirectError>(
+          failure(
+            RedirectComponent.History,
+            RedirectReason.SizeOverflow,
+            usize.ZERO,
+            Option.none<Status>(),
+          ),
+        )
+      }
+      Option.Some {value} => value
+    }
+    if records > history.maxHistoryBytes {
+      return Result.failResult<Policy, RedirectError>(
+        limitFailure(
+          RedirectComponent.History,
+          RedirectLimit.HistoryBytes,
+          history.maxHistoryBytes,
+          records,
+        ),
+      )
+    }
+    if listsOverlap(&safeCustom, &sensitive) {
+      return Result.failResult<Policy, RedirectError>(
+        failure(
+          RedirectComponent.Policy,
+          RedirectReason.NameListOverlap,
+          usize.ZERO,
+          Option.none<Status>(),
+        ),
+      )
+    }
+    return Result.succeed<Policy, RedirectError>(
+      Policy {
+        modeValue: mode,
+        historyValue: history,
+        crossOriginValue: crossOrigin,
+        downgradeValue: downgrade,
+        post301302Value: post301302,
+        previousResponseValue: move previousResponse,
+        safeCustomValue: move safeCustom,
+        sensitiveValue: move sensitive,
+      },
+    )
+  }
+  /// Returns whether responses are returned manually or followed.
+  pub fn mode(self: &Self) -> Mode {
+    return self.modeValue
+  }
+  /// Returns admitted URI, history, and hop capacities.
+  pub fn historyLimits(self: &Self) -> HistoryLimits {
+    return self.historyValue
+  }
+  /// Returns cross-origin admission policy.
+  pub fn crossOrigin(self: &Self) -> CrossOriginPolicy {
+    return self.crossOriginValue
+  }
+  /// Returns HTTPS-to-HTTP downgrade policy.
+  pub fn downgrade(self: &Self) -> DowngradePolicy {
+    return self.downgradeValue
+  }
+  /// Returns exact POST behavior for 301 and 302.
+  pub fn post301302(self: &Self) -> Post301302Policy {
+    return self.post301302Value
+  }
+  /// Borrows intermediate-response cleanup policy.
+  pub fn previousResponse(self: &Self) -> &PreviousResponsePolicy {
+    return &self.previousResponseValue
+  }
+  /// Borrows the admitted cross-origin safe-custom field names.
+  pub fn safeCustom(self: &Self) -> &NameList {
+    return &self.safeCustomValue
+  }
+  /// Borrows the admitted always-sensitive field names.
+  pub fn sensitive(self: &Self) -> &NameList {
+    return &self.sensitiveValue
+  }
+}
+
+fn redirectStatus(status: &Status) -> bool {
+  let code = Status.code(status)
+  return code == 301 || code == 302 || code == 303 || code == 307 || code == 308
+}
+
+/// Classifies a response status without inspecting `Location` and enforces selected-hop capacity.
+pub fn statusDecision(policy: &Policy, status: Status, followedHops: usize) -> Result<
+  StatusDecision,
+  RedirectError,
+> {
+  if Policy.mode(policy) == Mode.Manual || !redirectStatus(&status) {
+    return Result.succeed<StatusDecision, RedirectError>(StatusDecision.Final)
+  }
+  if followedHops >= Policy.historyLimits(policy).maxHops {
+    return Result.failResult<StatusDecision, RedirectError>(
+      failure(
+        RedirectComponent.Policy,
+        RedirectReason.HopLimit,
+        followedHops,
+        Option.some<Status>(status),
+      ),
+    )
+  }
+  return Result.succeed<StatusDecision, RedirectError>(StatusDecision.Redirect)
+}
+
+/// Computes the exact RFC redirect method and body transition for a selected status.
+pub fn transition<'method>(policy: &Policy, status: Status, method: Method<'method>) -> Transition<
+  'method,
+> {
+  let code = Status.code(&status)
+  if code == 303 {
+    if Method.equals(&method, &Method.head()) {
+      return Transition<'method> {method: method, body: BodyDecision.Drop}
+    }
+    return Transition<'method> {method: Method.get(), body: BodyDecision.Drop}
+  }
+  if (code == 301 || code == 302) && Policy.post301302(policy) == Post301302Policy.ToGet && Method.equals(
+    &method,
+    &Method.post(),
+  ) {
+    return Transition<'method> {method: Method.get(), body: BodyDecision.Drop}
+  }
+  return Transition<'method> {method: method, body: BodyDecision.Retain}
+}
+
+fn optionalPresent<T>(value: Option<T>) -> bool {
+  return match move value {
+    Option.None => false
+    Option.Some {value: present} => true
+  }
+}
+
+fn extractLocation<'head>(headers: &Headers<'head>, maxUriBytes: usize, hop: usize, status: Status) -> Result<
+  &'head [u8],
+  RedirectError,
+> {
+  let mut selected = Option.none<&'head [u8]>()
+  let mut count = usize.ZERO
+  let mut iterator = Headers.getAll(headers, "location")
+  while true {
+    let next = HeaderIterator.next(&mut iterator)
+    match move next {
+      Option.None => {
+        break
+      }
+      Option.Some {value} => {
+        count = match move usize.checkedAdd(count, usize.ONE) {
+          Option.None => {
+            return Result.failResult<&'head [u8], RedirectError>(
+              failure(
+                RedirectComponent.Location,
+                RedirectReason.SizeOverflow,
+                hop,
+                Option.some<Status>(status),
+              ),
+            )
+          }
+          Option.Some {value: incremented} => incremented
+        }
+        if count > usize.ONE {
+          return Result.failResult<&'head [u8], RedirectError>(
+            failure(
+              RedirectComponent.Location,
+              RedirectReason.LocationAmbiguous,
+              hop,
+              Option.some<Status>(status),
+            ),
+          )
+        }
+        selected = Option.some<&'head [u8]>(Header.value(&value))
+      }
+    }
+  }
+  let value = match move selected {
+    Option.None => {
+      return Result.failResult<&'head [u8], RedirectError>(
+        failure(
+          RedirectComponent.Location,
+          RedirectReason.LocationMissing,
+          hop,
+          Option.some<Status>(status),
+        ),
+      )
+    }
+    Option.Some {value} => value
+  }
+  if value.length > maxUriBytes {
+    return Result.failResult<&'head [u8], RedirectError>(
+      RedirectError {
+        component: RedirectComponent.Location,
+        reason: RedirectReason.LimitExceeded {
+          limit: RedirectLimit.UriBytes,
+          allowed: maxUriBytes,
+          attempted: value.length,
+        },
+        context: emptyContext(hop, Option.some<Status>(status)),
+      },
+    )
+  }
+  return Result.succeed<&'head [u8], RedirectError>(value)
+}
+
+fn appendInheritedFragment(
+  output: &mut Bytes,
+  base: &Uri,
+  reference: &UriReference,
+  maxUriBytes: usize,
+  hop: usize,
+  status: Status,
+) -> Result<(), RedirectError> ! OutOfMemoryError ? &mut Allocator {
+  if optionalPresent<string>(UriReference.fragment(reference)) {
+    return Result.succeed<(), RedirectError>(())
+  }
+  let fragment = match move Uri.fragment(base) {
+    Option.None => {
+      return Result.succeed<(), RedirectError>(())
+    }
+    Option.Some {value} => value
+  }
+  let withMarker = match move usize.checkedAdd(Bytes.length(output), usize.ONE) {
+    Option.None => {
+      return Result.failResult<(), RedirectError>(
+        failure(
+          RedirectComponent.Uri,
+          RedirectReason.SizeOverflow,
+          hop,
+          Option.some<Status>(status),
+        ),
+      )
+    }
+    Option.Some {value} => value
+  }
+  let required = match move usize.checkedAdd(withMarker, String.byteLength(fragment)) {
+    Option.None => {
+      return Result.failResult<(), RedirectError>(
+        failure(
+          RedirectComponent.Uri,
+          RedirectReason.SizeOverflow,
+          hop,
+          Option.some<Status>(status),
+        ),
+      )
+    }
+    Option.Some {value} => value
+  }
+  if required > maxUriBytes {
+    return Result.failResult<(), RedirectError>(
+      RedirectError {
+        component: RedirectComponent.Uri,
+        reason: RedirectReason.LimitExceeded {
+          limit: RedirectLimit.UriBytes,
+          allowed: maxUriBytes,
+          attempted: required,
+        },
+        context: emptyContext(hop, Option.some<Status>(status)),
+      },
+    )
+  }
+  let marker = b"#"
+  let wroteMarker = run Bytes.append(output, marker)
+  let wroteFragment = run Bytes.append(output, String.utf8Bytes(fragment))
+  return Result.succeed<(), RedirectError>(())
+}
+
+fn originFailure(error: OriginError) -> RedirectReason {
+  return match move error {
+    OriginError.InvalidScheme => RedirectReason.RedirectSchemeDenied
+    _ => RedirectReason.LocationInvalid
+  }
+}
+
+/// Extracts exactly one bounded `Location`, resolves it, applies HTTP fragment inheritance, and owns it.
+pub effect fn resolveLocation<'head>(
+  current: &Uri,
+  headers: &Headers<'head>,
+  limits: HistoryLimits,
+  hop: usize,
+  status: Status,
+) -> Result<OwnedUri, RedirectError> ! OutOfMemoryError ? &mut Allocator {
+  let raw = match move extractLocation(headers, limits.maxUriBytes, hop, status) {
+    Result.Failure {error} => {
+      return Result.failResult<OwnedUri, RedirectError>(move error)
+    }
+    Result.Success {value} => value
+  }
+  let text = match move String.fromUtf8(raw) {
+    Result.Failure {error} => {
+      return Result.failResult<OwnedUri, RedirectError>(
+        failure(
+          RedirectComponent.Location,
+          RedirectReason.LocationInvalid,
+          hop,
+          Option.some<Status>(status),
+        ),
+      )
+    }
+    Result.Success {value} => value
+  }
+  let rawOwned = run String.copy(text)
+  let reference = match move UriReference.parse(String.view(&rawOwned)) {
+    Result.Failure {error} => {
+      return Result.failResult<OwnedUri, RedirectError>(
+        failure(
+          RedirectComponent.Location,
+          RedirectReason.LocationInvalid,
+          hop,
+          Option.some<Status>(status),
+        ),
+      )
+    }
+    Result.Success {value} => value
+  }
+  let combinedBound = match move usize.checkedAdd(
+    String.byteLength(Uri.format(current)),
+    raw.length,
+  ) {
+    Option.None => {
+      return Result.failResult<OwnedUri, RedirectError>(
+        failure(
+          RedirectComponent.Uri,
+          RedirectReason.SizeOverflow,
+          hop,
+          Option.some<Status>(status),
+        ),
+      )
+    }
+    Option.Some {value} => value
+  }
+  match move usize.checkedAdd(combinedBound, usize.ONE) {
+    Option.None => {
+      return Result.failResult<OwnedUri, RedirectError>(
+        failure(
+          RedirectComponent.Uri,
+          RedirectReason.SizeOverflow,
+          hop,
+          Option.some<Status>(status),
+        ),
+      )
+    }
+    Option.Some {value} => {
+      drop value
+    }
+  }
+  let mut output = Bytes.make()
+  match move run Uri.resolveInto(&mut output, current, &reference) {
+    Result.Failure {error} => {
+      return Result.failResult<OwnedUri, RedirectError>(
+        failure(
+          RedirectComponent.Location,
+          RedirectReason.LocationInvalid,
+          hop,
+          Option.some<Status>(status),
+        ),
+      )
+    }
+    Result.Success {value} => {}
+  }
+  let inherited = run appendInheritedFragment(
+    &mut output,
+    current,
+    &reference,
+    limits.maxUriBytes,
+    hop,
+    status,
+  )
+  match move inherited {
+    Result.Failure {error} => {
+      return Result.failResult<OwnedUri, RedirectError>(move error)
+    }
+    Result.Success {value} => {}
+  }
+  let resolvedLength = Bytes.length(&output)
+  if resolvedLength > limits.maxUriBytes {
+    return Result.failResult<OwnedUri, RedirectError>(
+      RedirectError {
+        component: RedirectComponent.Uri,
+        reason: RedirectReason.LimitExceeded {
+          limit: RedirectLimit.UriBytes,
+          allowed: limits.maxUriBytes,
+          attempted: resolvedLength,
+        },
+        context: emptyContext(hop, Option.some<Status>(status)),
+      },
+    )
+  }
+  let resolvedText = unsafe String.fromUtf8Unchecked(Bytes.asSlice(&output))
+  let parsed = match move Uri.parse(resolvedText) {
+    Result.Failure {error} => {
+      return Result.failResult<OwnedUri, RedirectError>(
+        failure(
+          RedirectComponent.Uri,
+          RedirectReason.LocationInvalid,
+          hop,
+          Option.some<Status>(status),
+        ),
+      )
+    }
+    Result.Success {value} => value
+  }
+  match move Origin.fromUri(&parsed) {
+    Result.Failure {error} => {
+      return Result.failResult<OwnedUri, RedirectError>(
+        failure(RedirectComponent.Origin, originFailure(error), hop, Option.some<Status>(status)),
+      )
+    }
+    Result.Success {value} => {
+      drop value
+    }
+  }
+  let ownedText = unsafe String.fromBytesUnchecked(move output)
+  return match move OwnedUri.fromString(move ownedText) {
+    Result.Failure {error} => Result.failResult<OwnedUri, RedirectError>(
+      failure(
+        RedirectComponent.Uri,
+        RedirectReason.LocationInvalid,
+        hop,
+        Option.some<Status>(status),
+      ),
+    )
+    Result.Success {value} => Result.succeed<OwnedUri, RedirectError>(move value)
+  }
+}
+
+/// Validates cross-origin and downgrade policy and reports whether sanitization is cross-origin.
+pub fn admitOrigin(policy: &Policy, current: &Origin, next: &Origin, hop: usize, status: Status) -> Result<
+  bool,
+  RedirectError,
+> {
+  if Origin.equals(current, next) {
+    return Result.succeed<bool, RedirectError>(false)
+  }
+  if Policy.crossOrigin(policy) == CrossOriginPolicy.Deny {
+    return Result.failResult<bool, RedirectError>(
+      failure(
+        RedirectComponent.Origin,
+        RedirectReason.RedirectOriginDenied,
+        hop,
+        Option.some<Status>(status),
+      ),
+    )
+  }
+  if Origin.secure(current) && !Origin.secure(next) && Policy.downgrade(policy) == DowngradePolicy.Deny {
+    return Result.failResult<bool, RedirectError>(
+      failure(
+        RedirectComponent.Origin,
+        RedirectReason.DowngradeDenied,
+        hop,
+        Option.some<Status>(status),
+      ),
+    )
+  }
+  return Result.succeed<bool, RedirectError>(true)
+}
+
+struct HistoryKey {
+  method: String
+  origin: Origin
+  target: String
+}
+
+/// Bounded method-aware redirect-loop history with preallocated index capacity.
+pub struct History {
+  keys: Vector<HistoryKey>
+  limits: HistoryLimits
+  maxEntriesValue: usize
+  ownedBytesValue: usize
+}
+
+fn targetLength(uri: &Uri) -> Result<usize, RedirectError> {
+  let pathLength = String.byteLength(Uri.path(uri))
+  let mut length = pathLength
+  if pathLength == usize.ZERO {
+    length = usize.ONE
+  }
+  return match move Uri.query(uri) {
+    Option.None => Result.succeed<usize, RedirectError>(length)
+    Option.Some {value} => {
+      let marked = match move usize.checkedAdd(length, usize.ONE) {
+        Option.None => {
+          return Result.failResult<usize, RedirectError>(
+            failure(
+              RedirectComponent.History,
+              RedirectReason.SizeOverflow,
+              usize.ZERO,
+              Option.none<Status>(),
+            ),
+          )
+        }
+        Option.Some {value: total} => total
+      }
+      return match move usize.checkedAdd(marked, String.byteLength(value)) {
+        Option.None => Result.failResult<usize, RedirectError>(
+          failure(
+            RedirectComponent.History,
+            RedirectReason.SizeOverflow,
+            usize.ZERO,
+            Option.none<Status>(),
+          ),
+        )
+        Option.Some {value: total} => Result.succeed<usize, RedirectError>(total)
+      }
+    }
+  }
+}
+
+fn targetEqual(target: string, uri: &Uri) -> bool {
+  let targetBytes = String.utf8Bytes(target)
+  let path = String.utf8Bytes(Uri.path(uri))
+  let mut cursor = usize.ZERO
+  if path.length == usize.ZERO {
+    if targetBytes.length == usize.ZERO || targetBytes[usize.ZERO] != 47 {
+      return false
+    }
+    cursor = usize.ONE
+  } else {
+    if targetBytes.length < path.length {
+      return false
+    }
+    let mut index = usize.ZERO
+    while index < path.length {
+      if targetBytes[index] != path[index] {
+        return false
+      }
+      index = index + usize.ONE
+    }
+    cursor = path.length
+  }
+  return match move Uri.query(uri) {
+    Option.None => cursor == targetBytes.length
+    Option.Some {value} => {
+      let query = String.utf8Bytes(value)
+      if cursor >= targetBytes.length || targetBytes[cursor] != 63 {
+        return false
+      }
+      cursor = cursor + usize.ONE
+      if targetBytes.length - cursor != query.length {
+        return false
+      }
+      let mut index = usize.ZERO
+      while index < query.length {
+        if targetBytes[cursor + index] != query[index] {
+          return false
+        }
+        index = index + usize.ONE
+      }
+      return true
+    }
+  }
+}
+
+fn writeTarget(output: &mut Bytes, uri: &Uri) -> () ! OutOfMemoryError ? &mut Allocator {
+  let path = String.utf8Bytes(Uri.path(uri))
+  if path.length == usize.ZERO {
+    let wroteSlash = run Bytes.append(output, b"/")
+  } else {
+    let wrotePath = run Bytes.append(output, path)
+  }
+  match move Uri.query(uri) {
+    Option.None => {}
+    Option.Some {value} => {
+      let wroteMarker = run Bytes.append(output, b"?")
+      let wroteQuery = run Bytes.append(output, String.utf8Bytes(value))
+    }
+  }
+  return ()
+}
+
+impl History {
+  /// Validates `maxHops + 1`, accounts index storage, and reserves all history records before I/O.
+  pub effect fn make(limits: HistoryLimits) -> Result<History, RedirectError>
+  ! OutOfMemoryError
+  ? &mut Allocator {
+    let entries = match move usize.checkedAdd(limits.maxHops, usize.ONE) {
+      Option.None => {
+        return Result.failResult<History, RedirectError>(
+          failure(
+            RedirectComponent.History,
+            RedirectReason.SizeOverflow,
+            usize.ZERO,
+            Option.none<Status>(),
+          ),
+        )
+      }
+      Option.Some {value} => value
+    }
+    let records = match move usize.checkedMultiply(Layout.of<HistoryKey>().bytes, entries) {
+      Option.None => {
+        return Result.failResult<History, RedirectError>(
+          failure(
+            RedirectComponent.History,
+            RedirectReason.SizeOverflow,
+            usize.ZERO,
+            Option.none<Status>(),
+          ),
+        )
+      }
+      Option.Some {value} => value
+    }
+    if records > limits.maxHistoryBytes {
+      return Result.failResult<History, RedirectError>(
+        limitFailure(
+          RedirectComponent.History,
+          RedirectLimit.HistoryBytes,
+          limits.maxHistoryBytes,
+          records,
+        ),
+      )
+    }
+    let mut keys = Vector.make<HistoryKey>()
+    let reserved = run Vector.reserveExact<HistoryKey>(&mut keys, entries)
+    return Result.succeed<History, RedirectError>(
+      History {keys: move keys, limits: limits, maxEntriesValue: entries, ownedBytesValue: records},
+    )
+  }
+  /// Checks and inserts one transformed method, normalized origin, and exact path/query key.
+  pub effect fn insert<'method>(self: &mut Self, method: Method<'method>, origin: Origin, uri: &Uri) -> Result<
+    (),
+    RedirectError,
+  > ! OutOfMemoryError ? &mut Allocator {
+    let keyCount = Vector.length<HistoryKey>(&self.keys)
+    let keys = Vector.asSlice<HistoryKey>(&self.keys)
+    let mut index = usize.ZERO
+    while index < keys.length {
+      if String.view(&keys[index].method) == Method.format(&method) && Origin.equals(
+        &keys[index].origin,
+        &origin,
+      ) && targetEqual(String.view(&keys[index].target), uri) {
+        return Result.failResult<(), RedirectError>(
+          failure(
+            RedirectComponent.History,
+            RedirectReason.RedirectLoop,
+            keyCount - usize.ONE,
+            Option.none<Status>(),
+          ),
+        )
+      }
+      index = index + usize.ONE
+    }
+    drop keys
+    if keyCount >= self.maxEntriesValue {
+      let attempted = match move usize.checkedAdd(keyCount, usize.ONE) {
+        Option.None => usize.MAX
+        Option.Some {value} => value
+      }
+      return Result.failResult<(), RedirectError>(
+        limitFailure(
+          RedirectComponent.History,
+          RedirectLimit.HistoryEntries,
+          self.maxEntriesValue,
+          attempted,
+        ),
+      )
+    }
+    let selectedTargetLength = match move targetLength(uri) {
+      Result.Failure {error} => {
+        return Result.failResult<(), RedirectError>(move error)
+      }
+      Result.Success {value} => value
+    }
+    let payload = match move usize.checkedAdd(
+      String.byteLength(Method.format(&method)),
+      selectedTargetLength,
+    ) {
+      Option.None => {
+        return Result.failResult<(), RedirectError>(
+          failure(
+            RedirectComponent.History,
+            RedirectReason.SizeOverflow,
+            keyCount,
+            Option.none<Status>(),
+          ),
+        )
+      }
+      Option.Some {value} => value
+    }
+    let required = match move usize.checkedAdd(self.ownedBytesValue, payload) {
+      Option.None => {
+        return Result.failResult<(), RedirectError>(
+          failure(
+            RedirectComponent.History,
+            RedirectReason.SizeOverflow,
+            keyCount,
+            Option.none<Status>(),
+          ),
+        )
+      }
+      Option.Some {value} => value
+    }
+    if required > self.limits.maxHistoryBytes {
+      return Result.failResult<(), RedirectError>(
+        RedirectError {
+          component: RedirectComponent.History,
+          reason: RedirectReason.LimitExceeded {
+            limit: RedirectLimit.HistoryBytes,
+            allowed: self.limits.maxHistoryBytes,
+            attempted: required,
+          },
+          context: emptyContext(keyCount, Option.none<Status>()),
+        },
+      )
+    }
+    let ownedMethod = run String.copy(Method.format(&method))
+    let mut targetBytes = Bytes.make()
+    let reserved = run Bytes.reserveExact(&mut targetBytes, selectedTargetLength)
+    let wrote = run writeTarget(&mut targetBytes, uri)
+    let ownedTarget = unsafe String.fromBytesUnchecked(move targetBytes)
+    let appended = run Vector.append<HistoryKey>(
+      &mut self.keys,
+      HistoryKey {method: move ownedMethod, origin: origin, target: move ownedTarget},
+    )
+    self.ownedBytesValue = required
+    return Result.succeed<(), RedirectError>(())
+  }
+  /// Returns the number of stored method-aware keys.
+  pub fn count(self: &Self) -> usize {
+    return Vector.length<HistoryKey>(&self.keys)
+  }
+  /// Returns accounted key payload plus preallocated index storage bytes.
+  pub fn ownedBytes(self: &Self) -> usize {
+    return self.ownedBytesValue
+  }
+}
+
+fn named(name: string, expected: string) -> bool {
+  return foldedEqual(String.utf8Bytes(name), String.utf8Bytes(expected))
+}
+
+fn alwaysRemoved(name: string) -> bool {
+  return named(name, "host") || named(name, "connection") || named(name, "keep-alive") || named(
+    name,
+    "te",
+  ) || named(name, "trailer") || named(name, "transfer-encoding") || named(name, "upgrade") || named(
+    name,
+    "proxy-connection",
+  ) || named(name, "proxy-authorization") || named(name, "content-length") || named(name, "expect")
+}
+
+fn droppedContent(name: string) -> bool {
+  return named(name, "content-length") || named(name, "transfer-encoding") || named(
+    name,
+    "content-type",
+  ) || named(name, "content-encoding") || named(name, "content-language") || named(
+    name,
+    "content-location",
+  ) || named(name, "digest") || named(name, "content-digest") || named(name, "repr-digest") || named(
+    name,
+    "trailer",
+  ) || named(name, "expect")
+}
+
+fn fixedCrossOriginSafe(name: string, body: BodyDecision) -> bool {
+  if named(name, "accept") || named(name, "accept-encoding") || named(name, "accept-language") || named(
+    name,
+    "user-agent",
+  ) {
+    return true
+  }
+  return match body {
+    BodyDecision.Drop => false
+    BodyDecision.Retain => named(name, "content-type") || named(name, "content-encoding") || named(
+      name,
+      "content-language",
+    )
+  }
+}
+
+fn denyLast(policy: &Policy, name: string) -> bool {
+  return named(name, "authorization") || named(name, "cookie") || named(name, "proxy-authorization") || named(
+    name,
+    "origin",
+  ) || named(name, "referer") || NameList.contains(Policy.sensitive(policy), name)
+}
+
+fn connectionValueNames(value: &[u8], name: string) -> bool {
+  let sought = String.utf8Bytes(name)
+  let mut start = usize.ZERO
+  while start < value.length {
+    while start < value.length && (value[start] == 9 || value[start] == 32 || value[start] == 44) {
+      start = start + usize.ONE
+    }
+    let mut end = start
+    while end < value.length && value[end] != 44 {
+      end = end + usize.ONE
+    }
+    let mut trimmed = end
+    while trimmed > start && (value[trimmed - usize.ONE] == 9 || value[trimmed - usize.ONE] == 32) {
+      trimmed = trimmed - usize.ONE
+    }
+    if trimmed > start && foldedEqual(Slice.view<u8>(value, start, trimmed - start), sought) {
+      return true
+    }
+    if end == value.length {
+      return false
+    }
+    start = end + usize.ONE
+  }
+  return false
+}
+
+fn nominated(headers: &Headers, name: string) -> bool {
+  let mut fields = Headers.getAll(headers, "connection")
+  while true {
+    let next = HeaderIterator.next(&mut fields)
+    match move next {
+      Option.None => {
+        return false
+      }
+      Option.Some {value} => {
+        if connectionValueNames(Header.value(&value), name) {
+          return true
+        }
+      }
+    }
+  }
+}
+
+fn keepHeader(
+  headers: &Headers,
+  policy: &Policy,
+  name: string,
+  crossOrigin: bool,
+  body: BodyDecision,
+) -> bool {
+  if alwaysRemoved(name) || nominated(headers, name) {
+    return false
+  }
+  if body == BodyDecision.Drop && droppedContent(name) {
+    return false
+  }
+  if !crossOrigin {
+    return true
+  }
+  let admitted = fixedCrossOriginSafe(name, body) || NameList.contains(
+    Policy.safeCustom(policy),
+    name,
+  )
+  if !admitted {
+    return false
+  }
+  return !denyLast(policy, name)
+}
+
+/// Rebuilds owned fields with hop-by-hop removal, body filtering, and cross-origin deny-last rules.
+pub effect fn sanitizeHeaders<'value>(
+  headers: &Headers<'value>,
+  policy: &Policy,
+  crossOrigin: bool,
+  body: BodyDecision,
+  limits: HeaderLimits,
+) -> Result<OwnedHeaders, ValueError> ! OutOfMemoryError ? &mut Allocator {
+  let mut selected = Vector.make<Header<'value>>()
+  let reserved = run Vector.reserveExact<Header<'value>>(&mut selected, Headers.count(headers))
+  let mut iterator = Headers.iter(headers)
+  while true {
+    let next = HeaderIterator.next(&mut iterator)
+    match move next {
+      Option.None => {
+        break
+      }
+      Option.Some {value} => {
+        if keepHeader(headers, policy, Header.name(&value), crossOrigin, body) {
+          let appended = run Vector.append<Header<'value>>(&mut selected, value)
+        }
+      }
+    }
+  }
+  let borrowed = match move Headers.make(Vector.asSlice<Header<'value>>(&selected), limits) {
+    Result.Failure {error} => {
+      return Result.failResult<OwnedHeaders, ValueError>(move error)
+    }
+    Result.Success {value} => value
+  }
+  return run Headers.copy(&borrowed, limits)
+}
