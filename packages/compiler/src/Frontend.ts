@@ -1,6 +1,7 @@
 import * as ConfigurationValue from './ConfigurationValue.js'
 import * as ConfigurationOrigin from './ConfigurationOrigin.js'
 import type * as PackageConfiguration from './PackageConfiguration.js'
+import type * as ProfileBootstrap from './ProfileBootstrap.js'
 import * as CompilationProfile from './CompilationProfile.js'
 import * as Result from 'effect/Result'
 import * as ConfigurationError from './ConfigurationError.js'
@@ -74,7 +75,7 @@ interface HeaderFacts {
   readonly surfaces: ReadonlyMap<string, ModuleSurface.ModuleSurface>
 }
 
-const analyzeHeaders = Effect.fnUntraced(function* (
+const analyzeHeaders = Effect.fn('Frontend.analyzeHeaders')(function* (
   closure: ModuleClosure.Facts,
   report: Array<PhaseReport.PhaseReport>,
   options: Options,
@@ -132,7 +133,7 @@ interface ElaboratedModules {
   readonly computed: ReadonlyMap<string, Elaboration.Result>
 }
 
-const elaborateModules = Effect.fnUntraced(function* (
+const elaborateModules = Effect.fn('Frontend.elaborateModules')(function* (
   closure: ModuleClosure.Facts,
   headers: HeaderFacts,
   retained: ReadonlyMap<string, Elaboration.Result> = new Map(),
@@ -168,7 +169,7 @@ const elaborateModules = Effect.fnUntraced(function* (
   return Object.freeze({ results, computed })
 })
 
-const analyzeSemantics = Effect.fnUntraced(function* (
+const analyzeSemantics = Effect.fn('Frontend.analyzeSemantics')(function* (
   closure: ModuleClosure.Facts,
   headers: HeaderFacts,
   report: Array<PhaseReport.PhaseReport>,
@@ -321,7 +322,7 @@ const analyzeSemantics = Effect.fnUntraced(function* (
   )
 })
 
-const analyzeFrontend = Effect.fnUntraced(function* (
+const analyzeFrontend = Effect.fn('Frontend.analyzeFrontend')(function* (
   closure: ModuleClosure.Facts,
   report: Array<PhaseReport.PhaseReport>,
   options: Options,
@@ -335,7 +336,7 @@ const analyzeFrontend = Effect.fnUntraced(function* (
 })
 
 /** Supplies lazy static helpers with headers and source, without checking executable bodies. */
-const bootstrapFacts = Effect.fnUntraced(function* (
+const bootstrapFacts = Effect.fn('Frontend.bootstrapFacts')(function* (
   closure: ModuleClosure.Facts,
   report: Array<PhaseReport.PhaseReport>,
   options: Options,
@@ -376,82 +377,110 @@ const bootstrapFacts = Effect.fnUntraced(function* (
   )
 })
 
-/** Constructs the complete recoverable compiler frontend for one compilation request. */
-export const frontend = Effect.fn('Frontend.frontend')(function* (
+type ProfileSnapshot =
+  | Result.Result<CompilationProfile.Initial, ConfigurationError.ConfigurationError>
+  | undefined
+type BindingSnapshot = Result.Result<
+  ReadonlyArray<PackageConfiguration.Binding>,
+  ConfigurationError.ConfigurationError
+>
+type CompositionSnapshot =
+  | Result.Result<ArtifactComposition.Resolved, ConfigurationError.ConfigurationError>
+  | undefined
+
+const normalizeProfile = Effect.fn('Frontend.normalizeProfile')(function* (
   request: ModuleClosure.CompilationRequest,
-  options: Options = {},
-  componentModules: ReadonlyArray<string> = [],
-): Effect.fn.Return<Frontend, never, SourceResolver.SourceResolver> {
-  const initialInput =
+) {
+  const input =
     request.configuration?.profile ??
     (request.target === undefined ? undefined : { target: request.target })
-  const initial =
-    initialInput === undefined
-      ? undefined
-      : yield* Effect.result(CompilationProfile.normalize(initialInput))
-  const bindingSnapshot = yield* Effect.result(
-    Effect.gen(function* () {
-      const bindings: Array<PackageConfiguration.Binding> = []
-      for (const binding of request.configuration?.bindings ?? []) {
-        const origin = ConfigurationOrigin.snapshot(binding.origin)
-        const value = yield* ConfigurationValue.decode(binding.value, origin)
-        bindings.push(Object.freeze({ ...binding, origin, value }))
-      }
-      return Object.freeze(bindings)
-    }),
-  )
-  let configuration = request.configuration
-  if (configuration !== undefined) {
-    const profile =
-      initial !== undefined && Result.isSuccess(initial)
-        ? CompilationProfile.input(initial.success)
-        : configuration.profile
-    configuration = Object.freeze({
-      ...configuration,
-      profile,
-      bindings: Result.isSuccess(bindingSnapshot) ? bindingSnapshot.success : Object.freeze([]),
-      ...(configuration.modules === undefined
-        ? {}
-        : {
-            modules: Object.freeze(
-              configuration.modules.map((module) => Object.freeze({ ...module })),
-            ),
-          }),
-    })
+  return input === undefined ? undefined : yield* Effect.result(CompilationProfile.normalize(input))
+})
+
+const decodeBindings = Effect.fn('Frontend.decodeBindings')(function* (
+  configuration: ModuleClosure.CompilationRequest['configuration'],
+) {
+  const bindings: Array<PackageConfiguration.Binding> = []
+  for (const binding of configuration?.bindings ?? []) {
+    const origin = ConfigurationOrigin.snapshot(binding.origin)
+    const value = yield* ConfigurationValue.decode(binding.value, origin)
+    bindings.push(Object.freeze({ ...binding, origin, value }))
   }
-  const composition =
-    initial !== undefined && Result.isSuccess(initial)
-      ? yield* Effect.result(
-          Effect.gen(function* () {
-            const catalog = yield* ArtifactComposition.decode(
-              configuration?.composition ?? ArtifactComposition.defaults(initial.success),
-              configuration?.compositionOrigin,
-            )
-            return yield* ArtifactComposition.resolve(catalog, request.root.id, initial.success)
-          }),
-        )
-      : undefined
-  const additionalRoots: Array<SourceFile.SourceFile> = []
-  const rootFailures: Array<SourceResolver.SourceResolverError> = []
-  let rootError: ConfigurationError.ConfigurationError | undefined
+  return Object.freeze(bindings)
+})
+
+const snapshotConfiguration = Effect.fn('Frontend.snapshotConfiguration')(
+  (
+    configuration: ModuleClosure.CompilationRequest['configuration'],
+    initial: ProfileSnapshot,
+    bindings: BindingSnapshot,
+  ) =>
+    Effect.sync(() => {
+      if (configuration === undefined) return undefined
+      const profile =
+        initial !== undefined && Result.isSuccess(initial)
+          ? CompilationProfile.input(initial.success)
+          : configuration.profile
+      return Object.freeze({
+        ...configuration,
+        profile,
+        bindings: Result.isSuccess(bindings) ? bindings.success : Object.freeze([]),
+        ...(configuration.modules === undefined
+          ? {}
+          : {
+              modules: Object.freeze(
+                configuration.modules.map((module) => Object.freeze({ ...module })),
+              ),
+            }),
+      })
+    }),
+)
+
+const resolveComposition = Effect.fn('Frontend.resolveComposition')(function* (
+  root: string,
+  configuration: ModuleClosure.CompilationRequest['configuration'],
+  initial: CompilationProfile.Initial,
+) {
+  const catalog = yield* ArtifactComposition.decode(
+    configuration?.composition ?? ArtifactComposition.defaults(initial),
+    configuration?.compositionOrigin,
+  )
+  return yield* ArtifactComposition.resolve(catalog, root, initial)
+})
+
+interface AdditionalRoots {
+  readonly sources: ReadonlyArray<SourceFile.SourceFile>
+  readonly failures: ReadonlyArray<SourceResolver.SourceResolverError>
+  readonly error: ConfigurationError.ConfigurationError | undefined
+}
+
+/** Load composition roots while retaining missing sources and operational failures separately. */
+const loadAdditionalRoots = Effect.fn('Frontend.loadAdditionalRoots')(function* (
+  root: string,
+  composition: CompositionSnapshot,
+  componentModules: ReadonlyArray<string>,
+): Effect.fn.Return<AdditionalRoots, never, SourceResolver.SourceResolver> {
+  const sources: Array<SourceFile.SourceFile> = []
+  const failures: Array<SourceResolver.SourceResolverError> = []
+  let error: ConfigurationError.ConfigurationError | undefined
   if (composition !== undefined && Result.isSuccess(composition)) {
     const missing: Array<string> = []
     for (const module of new Set([...composition.success.modules, ...componentModules])) {
-      if (module === request.root.id) continue
+      if (module === root) continue
       const resolved = yield* Effect.result(
         Stdlib.isReserved(module)
           ? SourceResolver.resolveStandardLibrary(module)
           : SourceResolver.resolve(module),
       )
-      if (Result.isFailure(resolved)) rootFailures.push(resolved.failure)
+      if (Result.isFailure(resolved)) failures.push(resolved.failure)
       else if (Option.isNone(resolved.success)) missing.push(module)
       else
-        additionalRoots.push(
+        sources.push(
           SourceFile.make(module, resolved.success.value.bytes, resolved.success.value.origin),
         )
     }
     if (missing.length > 0)
-      rootError = ConfigurationError.make(
+      error = ConfigurationError.make(
         'ArtifactComposition.roots',
         'MissingParameter',
         'artifact source roots',
@@ -465,100 +494,180 @@ export const frontend = Effect.fn('Frontend.frontend')(function* (
         missing,
       )
   }
-  const report: Array<PhaseReport.PhaseReport> = []
-  const loadedClosure = yield* PhaseReport.measureEffectInto(
+  return { sources, failures, error }
+})
+
+const loadClosure = Effect.fn('Frontend.loadClosure')(function* (
+  request: ModuleClosure.CompilationRequest,
+  roots: AdditionalRoots,
+  report: Array<PhaseReport.PhaseReport>,
+  options: Options,
+) {
+  const closure = yield* PhaseReport.measureEffectInto(
     report,
     'closure',
     1,
-    ModuleClosure.load(request, additionalRoots),
+    ModuleClosure.load(request, roots.sources),
     (value) => value.modules.length,
     (value) => value.diagnostics.length,
     options,
   )
-  const closure =
-    rootFailures.length === 0
-      ? loadedClosure
-      : Object.freeze({
-          ...loadedClosure,
-          resolutionFailures: Object.freeze([...loadedClosure.resolutionFailures, ...rootFailures]),
-        })
-  yield* Effect.yieldNow
-  const facts = yield* ModuleSelection.required(closure)
-    ? bootstrapFacts(closure, report, options)
-    : analyzeFrontend(closure, report, options)
-  let initialFacts: Pick<Frontend, 'initialProfile' | 'configurationError'> = {}
-  if (initial !== undefined)
-    initialFacts = Result.isSuccess(initial)
-      ? { initialProfile: initial.success }
-      : { configurationError: initial.failure }
-  let compositionFacts: Pick<Frontend, 'composition' | 'configurationError'> = {}
-  if (composition !== undefined)
-    compositionFacts = Result.isSuccess(composition)
-      ? { composition: composition.success }
-      : { configurationError: composition.failure }
-  const unselected: Frontend = OpaqueRealization.withCatalog(
-    Object.freeze({
-      closure,
-      ...facts,
-      ...initialFacts,
-      ...compositionFacts,
-      ...(rootError === undefined ? {} : { configurationError: rootError }),
-      ...(configuration === undefined ? {} : { configuration }),
-      ...(Result.isFailure(bindingSnapshot) ? { configurationError: bindingSnapshot.failure } : {}),
-      ...(request.target === undefined ? {} : { requestedTarget: request.target }),
+  return roots.failures.length === 0
+    ? closure
+    : Object.freeze({
+        ...closure,
+        resolutionFailures: Object.freeze([...closure.resolutionFailures, ...roots.failures]),
+      })
+})
+
+/** Preserve configuration-error precedence and the semantic facts' opaque realization catalog. */
+const assembleSnapshot = Effect.fn('Frontend.assembleSnapshot')(
+  (
+    request: ModuleClosure.CompilationRequest,
+    closure: ModuleClosure.Closure,
+    facts: FrontendFacts,
+    initial: ProfileSnapshot,
+    composition: CompositionSnapshot,
+    roots: AdditionalRoots,
+    configuration: ModuleClosure.CompilationRequest['configuration'],
+    bindings: BindingSnapshot,
+  ) =>
+    Effect.sync((): Frontend => {
+      let initialFacts: Pick<Frontend, 'initialProfile' | 'configurationError'> = {}
+      if (initial !== undefined)
+        initialFacts = Result.isSuccess(initial)
+          ? { initialProfile: initial.success }
+          : { configurationError: initial.failure }
+      let compositionFacts: Pick<Frontend, 'composition' | 'configurationError'> = {}
+      if (composition !== undefined)
+        compositionFacts = Result.isSuccess(composition)
+          ? { composition: composition.success }
+          : { configurationError: composition.failure }
+      return OpaqueRealization.withCatalog(
+        Object.freeze({
+          closure,
+          ...facts,
+          ...initialFacts,
+          ...compositionFacts,
+          ...(roots.error === undefined ? {} : { configurationError: roots.error }),
+          ...(configuration === undefined ? {} : { configuration }),
+          ...(Result.isFailure(bindings) ? { configurationError: bindings.failure } : {}),
+          ...(request.target === undefined ? {} : { requestedTarget: request.target }),
+        }),
+        OpaqueRealization.catalogOf(facts),
+      )
     }),
-    OpaqueRealization.catalogOf(facts),
-  )
-  if (!ModuleSelection.required(closure)) return unselected
-  const configured = yield* Realization.configure(unselected, request.target)
-  if (configured.completion === undefined) {
-    const span = closure.modules.find((module) => module.name === closure.rootModule)?.syntax.root
-      .span
-    return span === undefined
-      ? configured.frontend
-      : OpaqueRealization.withCatalog(
-          {
-            ...configured.frontend,
-            diagnostics: Diagnostic.merge(configured.frontend.diagnostics, [
-              Diagnostic.staticPhaseViolation(
-                'ModuleSelection.profile',
-                request.target ?? '<unavailable>',
-                [],
-                span,
-              ),
-            ]),
-          },
-          OpaqueRealization.catalogOf(configured.frontend),
-        )
-  }
+)
+
+const diagnoseIncompleteProfile = Effect.fn('Frontend.diagnoseIncompleteProfile')(
+  (self: Frontend, closure: ModuleClosure.Closure, target: string | undefined) =>
+    Effect.sync((): Frontend => {
+      const span = closure.modules.find((module) => module.name === closure.rootModule)?.syntax.root
+        .span
+      return span === undefined
+        ? self
+        : OpaqueRealization.withCatalog(
+            {
+              ...self,
+              diagnostics: Diagnostic.merge(self.diagnostics, [
+                Diagnostic.staticPhaseViolation(
+                  'ModuleSelection.profile',
+                  target ?? '<unavailable>',
+                  [],
+                  span,
+                ),
+              ]),
+            },
+            OpaqueRealization.catalogOf(self),
+          )
+    }),
+)
+
+const selectModules = Effect.fn('Frontend.selectModules')(function* (
+  request: ModuleClosure.CompilationRequest,
+  closure: ModuleClosure.Closure,
+  roots: AdditionalRoots,
+  completion: ProfileBootstrap.Completion,
+) {
   const selected = yield* ModuleSelection.select(
-    { roots: [request.root, ...additionalRoots], application: request.root.id },
+    { roots: [request.root, ...roots.sources], application: request.root.id },
     {
       ...closure,
       _tag: 'ProjectModuleClosure',
-      rootModules: [request.root.id, ...additionalRoots.map((root) => root.id)],
+      rootModules: [request.root.id, ...roots.sources.map((root) => root.id)],
     },
-    configured.completion,
+    completion,
   )
   const selectedClosure = ModuleClosure.view(
     {
       ...selected.closure,
-      resolutionFailures: Object.freeze([...selected.closure.resolutionFailures, ...rootFailures]),
+      resolutionFailures: Object.freeze([
+        ...selected.closure.resolutionFailures,
+        ...roots.failures,
+      ]),
     },
     closure.rootModule,
   )
   if (selectedClosure === undefined) throw new RangeError('Module selection lost its root')
-  const selectedFacts = yield* analyzeFrontend(selectedClosure, report, options)
-  return OpaqueRealization.withCatalog(
-    Object.freeze({
-      ...unselected,
-      ...selectedFacts,
-      closure: selectedClosure,
-      selection: selected.selection,
-      profile: selected.selection.profile,
-    }),
-    OpaqueRealization.catalogOf(selectedFacts),
+  return { closure: selectedClosure, selection: selected.selection }
+})
+
+const finalizeSelection = Effect.fn('Frontend.finalizeSelection')(
+  (
+    self: Frontend,
+    facts: FrontendFacts,
+    closure: ModuleClosure.Closure,
+    selection: ModuleSelection.ModuleSelection,
+  ) =>
+    Effect.sync((): Frontend =>
+      OpaqueRealization.withCatalog(
+        Object.freeze({ ...self, ...facts, closure, selection, profile: selection.profile }),
+        OpaqueRealization.catalogOf(facts),
+      ),
+    ),
+)
+
+/** Constructs the complete recoverable compiler frontend for one compilation request. */
+export const frontend = Effect.fn('Frontend.frontend')(function* (
+  request: ModuleClosure.CompilationRequest,
+  options: Options = {},
+  componentModules: ReadonlyArray<string> = [],
+): Effect.fn.Return<Frontend, never, SourceResolver.SourceResolver> {
+  yield* Effect.annotateCurrentSpan('frontend.root', request.root.id)
+  const initial = yield* normalizeProfile(request)
+  const bindings = yield* Effect.result(decodeBindings(request.configuration))
+  const configuration = yield* snapshotConfiguration(request.configuration, initial, bindings)
+  const composition =
+    initial !== undefined && Result.isSuccess(initial)
+      ? yield* Effect.result(resolveComposition(request.root.id, configuration, initial.success))
+      : undefined
+  const roots = yield* loadAdditionalRoots(request.root.id, composition, componentModules)
+  const report: Array<PhaseReport.PhaseReport> = []
+  const closure = yield* loadClosure(request, roots, report, options)
+  yield* Effect.yieldNow
+  const requiresSelection = ModuleSelection.required(closure)
+  yield* Effect.annotateCurrentSpan('frontend.requiresSelection', requiresSelection)
+  const facts = yield* requiresSelection
+    ? bootstrapFacts(closure, report, options)
+    : analyzeFrontend(closure, report, options)
+  const unselected = yield* assembleSnapshot(
+    request,
+    closure,
+    facts,
+    initial,
+    composition,
+    roots,
+    configuration,
+    bindings,
   )
+  if (!requiresSelection) return unselected
+
+  const configured = yield* Realization.configure(unselected, request.target)
+  if (configured.completion === undefined)
+    return yield* diagnoseIncompleteProfile(configured.frontend, closure, request.target)
+  const selected = yield* selectModules(request, closure, roots, configured.completion)
+  const selectedFacts = yield* analyzeFrontend(selected.closure, report, options)
+  return yield* finalizeSelection(unselected, selectedFacts, selected.closure, selected.selection)
 })
 
 /** Selected module closure and headers shared by compilation and source catalogs. */
@@ -569,12 +678,23 @@ export interface SelectedProject {
   readonly headers: HeaderFacts
 }
 
-/** Runs canonical profile/bootstrap/selection without elaborating unrelated executable bodies. */
-export const selectProject = Effect.fn('Frontend.selectProject')(function* (
+const resolveProjectComposition = Effect.fn('Frontend.resolveProjectComposition')(function* (
+  application: string,
+  configuration: NonNullable<ModuleClosure.ProjectRequest['configuration']>,
+) {
+  const profile = yield* CompilationProfile.decode(configuration.profile)
+  return yield* resolveComposition(application, configuration, profile)
+})
+
+interface ExpandedProject {
+  readonly request: ModuleClosure.ProjectRequest
+  readonly failures: ReadonlyArray<SourceResolver.SourceResolverError>
+  readonly missing: ReadonlyArray<string>
+}
+
+const loadProjectRoots = Effect.fn('Frontend.loadProjectRoots')(function* (
   request: ModuleClosure.ProjectRequest,
-  report: Array<PhaseReport.PhaseReport> = [],
-  options: Options = {},
-): Effect.fn.Return<SelectedProject, never, SourceResolver.SourceResolver> {
+): Effect.fn.Return<ExpandedProject, never, SourceResolver.SourceResolver> {
   const roots = [...request.roots]
   const application = request.application ?? roots[0]?.id
   const requestedModules = new Set(application === undefined ? [] : [application])
@@ -582,14 +702,7 @@ export const selectProject = Effect.fn('Frontend.selectProject')(function* (
   const missing: Array<string> = []
   if (request.configuration !== undefined && application !== undefined) {
     const selectedRoots = yield* Effect.result(
-      Effect.gen(function* () {
-        const profile = yield* CompilationProfile.decode(request.configuration?.profile)
-        const catalog = yield* ArtifactComposition.decode(
-          request.configuration?.composition ?? ArtifactComposition.defaults(profile),
-          request.configuration?.compositionOrigin,
-        )
-        return yield* ArtifactComposition.resolve(catalog, application, profile)
-      }),
+      resolveProjectComposition(application, request.configuration),
     )
     if (Result.isSuccess(selectedRoots))
       for (const module of selectedRoots.success.modules) requestedModules.add(module)
@@ -608,21 +721,67 @@ export const selectProject = Effect.fn('Frontend.selectProject')(function* (
         SourceFile.make(module, resolved.success.value.bytes, resolved.success.value.origin),
       )
   }
-  const expanded = { ...request, roots, ...(application === undefined ? {} : { application }) }
-  let closure = yield* PhaseReport.measureEffectInto(
+  return {
+    request: { ...request, roots, ...(application === undefined ? {} : { application }) },
+    failures,
+    missing,
+  }
+})
+
+const loadProjectClosure = Effect.fn('Frontend.loadProjectClosure')(function* (
+  expanded: ExpandedProject,
+  rootCount: number,
+  report: Array<PhaseReport.PhaseReport>,
+  options: Options,
+) {
+  const closure = yield* PhaseReport.measureEffectInto(
     report,
     'closure',
-    request.roots.length,
-    ModuleClosure.loadProject(expanded),
+    rootCount,
+    ModuleClosure.loadProject(expanded.request),
     (value) => value.modules.length,
     (value) => value.diagnostics.length,
     options,
   )
-  closure = Object.freeze({
+  return Object.freeze({
     ...closure,
-    resolutionFailures: Object.freeze([...closure.resolutionFailures, ...failures]),
+    resolutionFailures: Object.freeze([...closure.resolutionFailures, ...expanded.failures]),
   })
-  yield* Effect.yieldNow
+})
+
+const diagnoseProjectProfile = Effect.fn('Frontend.diagnoseProjectProfile')(
+  (closure: ModuleClosure.ProjectClosure, frontend: Frontend, first: string | undefined) =>
+    Effect.sync(() => {
+      const span = closure.modules.find((module) => module.name === first)?.syntax.root.span
+      return Object.freeze({
+        ...closure,
+        diagnostics: Diagnostic.merge(
+          closure.diagnostics,
+          frontend.diagnostics.filter(
+            (diagnostic) => diagnostic.code === Diagnostic.invalidConfigurationCode,
+          ),
+          span === undefined || !ModuleSelection.required(closure)
+            ? []
+            : [
+                Diagnostic.staticPhaseViolation(
+                  'ModuleSelection.profile',
+                  '<unavailable>',
+                  [],
+                  span,
+                ),
+              ],
+        ),
+      })
+    }),
+)
+
+const configureProjectSelection = Effect.fn('Frontend.configureProjectSelection')(function* (
+  request: ModuleClosure.ProjectRequest,
+  closure: ModuleClosure.ProjectClosure,
+  report: Array<PhaseReport.PhaseReport>,
+  options: Options,
+) {
+  const application = request.application
   let selection: ModuleSelection.ModuleSelection | undefined
   let profile: CompilationProfile.CompilationProfile | undefined
   let bootstrapHeaders: HeaderFacts | undefined
@@ -648,62 +807,77 @@ export const selectProject = Effect.fn('Frontend.selectProject')(function* (
     )
     profile = configured.completion?.profile
     if (configured.completion !== undefined && ModuleSelection.required(closure)) {
-      const selected = yield* ModuleSelection.select(expanded, closure, configured.completion)
+      const selected = yield* ModuleSelection.select(request, closure, configured.completion)
       closure = selected.closure
       selection = selected.selection
     } else if (configured.completion === undefined) {
-      const span = closure.modules.find((module) => module.name === first)?.syntax.root.span
-      closure = Object.freeze({
-        ...closure,
-        diagnostics: Diagnostic.merge(
-          closure.diagnostics,
-          configured.frontend.diagnostics.filter(
-            (diagnostic) => diagnostic.code === Diagnostic.invalidConfigurationCode,
-          ),
-          span === undefined || !ModuleSelection.required(closure)
-            ? []
-            : [
-                Diagnostic.staticPhaseViolation(
-                  'ModuleSelection.profile',
-                  '<unavailable>',
-                  [],
-                  span,
-                ),
-              ],
-        ),
-      })
+      closure = yield* diagnoseProjectProfile(closure, configured.frontend, first)
     }
   }
-  const headers = bootstrapHeaders ?? (yield* analyzeHeaders(closure, report, options))
-  const span =
-    roots[0] === undefined
-      ? undefined
-      : closure.modules.find((module) => module.name === roots[0]?.id)?.syntax.root.span
-  if (missing.length > 0 && span !== undefined)
-    closure = {
-      ...closure,
-      diagnostics: Diagnostic.merge(closure.diagnostics, [
-        Diagnostic.invalidConfiguration(
-          ConfigurationError.make(
-            'Frontend.selectProject',
-            'MissingParameter',
-            'artifact source roots',
-            [
-              request.configuration?.compositionOrigin ??
-                ConfigurationOrigin.literal('application'),
-            ],
-            missing,
-          ),
-          span,
-        ),
-      ]),
-    }
+  return { closure, profile, selection, bootstrapHeaders }
+})
 
+const diagnoseMissingProjectRoots = Effect.fn('Frontend.diagnoseMissingProjectRoots')(
+  (
+    request: ModuleClosure.ProjectRequest,
+    closure: ModuleClosure.ProjectClosure,
+    missing: ReadonlyArray<string>,
+  ) =>
+    Effect.sync(() => {
+      const span =
+        request.roots[0] === undefined
+          ? undefined
+          : closure.modules.find((module) => module.name === request.roots[0]?.id)?.syntax.root.span
+      if (missing.length > 0 && span !== undefined)
+        closure = {
+          ...closure,
+          diagnostics: Diagnostic.merge(closure.diagnostics, [
+            Diagnostic.invalidConfiguration(
+              ConfigurationError.make(
+                'Frontend.selectProject',
+                'MissingParameter',
+                'artifact source roots',
+                [
+                  request.configuration?.compositionOrigin ??
+                    ConfigurationOrigin.literal('application'),
+                ],
+                missing,
+              ),
+              span,
+            ),
+          ]),
+        }
+
+      return closure
+    }),
+)
+
+/** Runs canonical profile/bootstrap/selection without elaborating unrelated executable bodies. */
+export const selectProject = Effect.fn('Frontend.selectProject')(function* (
+  request: ModuleClosure.ProjectRequest,
+  report: Array<PhaseReport.PhaseReport> = [],
+  options: Options = {},
+): Effect.fn.Return<SelectedProject, never, SourceResolver.SourceResolver> {
+  yield* Effect.annotateCurrentSpan(
+    'frontend.roots',
+    request.roots.map((root) => root.id),
+  )
+  const expanded = yield* loadProjectRoots(request)
+  const loaded = yield* loadProjectClosure(expanded, request.roots.length, report, options)
+  yield* Effect.yieldNow
+  const selected = yield* configureProjectSelection(expanded.request, loaded, report, options)
+  const headers =
+    selected.bootstrapHeaders ?? (yield* analyzeHeaders(selected.closure, report, options))
+  const closure = yield* diagnoseMissingProjectRoots(
+    expanded.request,
+    selected.closure,
+    expanded.missing,
+  )
   return Object.freeze({
     closure,
     headers,
-    ...(profile === undefined ? {} : { profile }),
-    ...(selection === undefined ? {} : { selection }),
+    ...(selected.profile === undefined ? {} : { profile: selected.profile }),
+    ...(selected.selection === undefined ? {} : { selection: selected.selection }),
   })
 })
 
