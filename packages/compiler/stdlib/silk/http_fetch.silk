@@ -703,25 +703,25 @@ impl Destination<FetchResult, FetchError, never> for DiscardDestination {
   publish: DiscardDestination.publish
 }
 
-interface SemanticRequestHandler<A, E, ?R> {
+interface SemanticRequestHandler<'policy, A, E, ?R> {
   effect<'call> fn handle<'call>(
     handler: Self,
-    request: Redirect.Request<'call, 'call, 'call, 'call>,
+    request: Redirect.Request<'call, 'call, 'call, 'policy>,
   ) -> A ! E ? R
 }
 
-fn redirectRequest<'call>(
+fn redirectRequest<'call, 'policy>(
   uri: Uri<'call>,
   method: Method<'call>,
   headers: Headers<'call>,
-  headerPolicy: HeaderPolicy<'call>,
+  headerPolicy: HeaderPolicy<'policy>,
   version: Version,
   continuePolicy: ContinuePolicy,
   limits: HeaderLimits,
   maxHeadBytes: usize,
   maxCredentialBytes: usize,
-) -> Redirect.Request<'call, 'call, 'call, 'call> {
-  return Redirect.Request<'call, 'call, 'call, 'call> {
+) -> Redirect.Request<'call, 'call, 'call, 'policy> {
+  return Redirect.Request<'call, 'call, 'call, 'policy> {
     uri: uri,
     method: method,
     headers: headers,
@@ -742,7 +742,7 @@ effect fn withSemanticRequest<
   A,
   E,
   ?R,
-  H: SemanticRequestHandler<A, E ? R>,
+  H: SemanticRequestHandler<'policy, A, E ? R>,
 >(
   request: FetchRequest<'uri, 'method, 'headers, 'policy>,
   handler: H,
@@ -778,7 +778,7 @@ effect fn withSemanticRequest<
         maxHeadBytesValue,
         maxCredentialBytesValue,
       )
-      run SemanticRequestHandler<A, E ? R>.handle(move handler, move selected)
+      run SemanticRequestHandler<'policy, A, E ? R>.handle(move handler, move selected)
     }
     RequestHeaders.Borrowed {headers} => {
       let selected = redirectRequest(
@@ -792,7 +792,7 @@ effect fn withSemanticRequest<
         maxHeadBytesValue,
         maxCredentialBytesValue,
       )
-      run SemanticRequestHandler<A, E ? R>.handle(move handler, move selected)
+      run SemanticRequestHandler<'policy, A, E ? R>.handle(move handler, move selected)
     }
   }
 }
@@ -1139,14 +1139,16 @@ impl<
   handleDirect: DeliveryResponseHandler.handleDirect
 }
 
-struct EmptyOperation<'fetch, C, D> {
+struct EmptyOperation<'fetch, 'policy, C, D> {
   fetch: &'fetch mut Fetch<C>
+  policyAnchor: [&'policy (); 0]
   options: FetchOptions
   destination: D
 }
 
 impl<
   'fetch,
+  'policy,
   C,
   D,
   RoutedP,
@@ -1157,10 +1159,20 @@ impl<
   ?DestinationRequirements,
   ?AcquisitionRequirements,
   D: Destination<A, DestinationError ? DestinationRequirements>,
-> EmptyOperation<'fetch, C, D> {
+  C: FetchClient<
+    'policy,
+    RoutedP,
+    DirectP,
+    Redirect.AttemptStep<'policy, A>,
+    RedirectError | FetchError | ValueError | BodyError | DestinationError | ClientError | OutOfMemoryError,
+    AcquisitionError,
+    DestinationRequirements | &mut Redirect.SelectedBody<never, never> | &mut MonotonicClock | &mut Allocator | &mut Random,
+    AcquisitionRequirements,
+  >,
+> EmptyOperation<'fetch, 'policy, C, D> {
   effect<'call> fn handle<'call>(
     operation: Self,
-    request: Redirect.Request<'call, 'call, 'call, 'call>,
+    request: Redirect.Request<'call, 'call, 'call, 'policy>,
   ) -> A
   ! RedirectError | FetchError | ValueError | BodyError | DestinationError | ClientError | OutOfMemoryError | AcquisitionError
   ? DestinationRequirements | AcquisitionRequirements | &mut MonotonicClock | &mut Allocator | &mut Random
@@ -1169,7 +1181,8 @@ impl<
     DestinationRequirements in Without<DestinationRequirements, HttpTransport>,
     AcquisitionRequirements in Without<AcquisitionRequirements, ByteDuplex>,
     AcquisitionRequirements in Without<AcquisitionRequirements, HttpTransport> {
-    let EmptyOperation<'fetch, C, D> {fetch, options, destination} = move operation
+    let EmptyOperation<'fetch, 'policy, C, D> {fetch, policyAnchor, options, destination} = move operation
+    drop policyAnchor
     let FetchOptions {
       redirect,
       content,
@@ -1214,6 +1227,7 @@ impl<
 
 impl<
   'fetch,
+  'policy,
   C,
   D,
   RoutedP,
@@ -1224,11 +1238,22 @@ impl<
   ?DestinationRequirements,
   ?AcquisitionRequirements,
   D: Destination<A, DestinationError ? DestinationRequirements>,
+  C: FetchClient<
+    'policy,
+    RoutedP,
+    DirectP,
+    Redirect.AttemptStep<'policy, A>,
+    RedirectError | FetchError | ValueError | BodyError | DestinationError | ClientError | OutOfMemoryError,
+    AcquisitionError,
+    DestinationRequirements | &mut Redirect.SelectedBody<never, never> | &mut MonotonicClock | &mut Allocator | &mut Random,
+    AcquisitionRequirements,
+  >,
 > SemanticRequestHandler<
+  'policy,
   A,
   RedirectError | FetchError | ValueError | BodyError | DestinationError | ClientError | OutOfMemoryError | AcquisitionError
   ? DestinationRequirements | AcquisitionRequirements | &mut MonotonicClock | &mut Allocator | &mut Random,
-> for EmptyOperation<'fetch, C, D> {
+> for EmptyOperation<'fetch, 'policy, C, D> {
   handle: EmptyOperation.handle
 }
 
@@ -1257,6 +1282,16 @@ pub effect fn toSinkEmpty<
   ?SinkRequirements,
   ?AcquisitionRequirements,
   S: Sink<SinkError ? SinkRequirements>,
+  C: FetchClient<
+    'policy,
+    RoutedP,
+    DirectP,
+    Redirect.AttemptStep<'policy, FetchResult>,
+    RedirectError | FetchError | ValueError | BodyError | DestinationFailure<SinkError> | ClientError | OutOfMemoryError,
+    AcquisitionError,
+    SinkRequirements | &mut Redirect.SelectedBody<never, never> | &mut MonotonicClock | &mut Allocator | &mut Random,
+    AcquisitionRequirements,
+  >,
 >(
   fetch: &'fetch mut Fetch<C>,
   request: FetchRequest<'uri, 'method, 'headers, 'policy>,
@@ -1271,8 +1306,9 @@ where
   AcquisitionRequirements in Without<AcquisitionRequirements, ByteDuplex>,
   AcquisitionRequirements in Without<AcquisitionRequirements, HttpTransport> {
   run admit(&options)
-  let operation = EmptyOperation<'fetch, C, SinkDestination<S>> {
+  let operation = EmptyOperation<'fetch, 'policy, C, SinkDestination<S>> {
     fetch: move fetch,
+    policyAnchor: [],
     options: move options,
     destination: SinkDestination<S> {sink: move sink},
   }
@@ -1291,6 +1327,16 @@ pub effect fn collectEmpty<
   DirectP,
   AcquisitionError,
   ?AcquisitionRequirements,
+  C: FetchClient<
+    'policy,
+    RoutedP,
+    DirectP,
+    Redirect.AttemptStep<'policy, CollectedResponse>,
+    RedirectError | FetchError | ValueError | BodyError | ClientError | OutOfMemoryError,
+    AcquisitionError,
+    &mut Redirect.SelectedBody<never, never> | &mut MonotonicClock | &mut Allocator | &mut Random,
+    AcquisitionRequirements,
+  >,
 >(
   fetch: &'fetch mut Fetch<C>,
   request: FetchRequest<'uri, 'method, 'headers, 'policy>,
@@ -1303,8 +1349,9 @@ where
   AcquisitionRequirements in Without<AcquisitionRequirements, ByteDuplex>,
   AcquisitionRequirements in Without<AcquisitionRequirements, HttpTransport> {
   run admit(&options)
-  let operation = EmptyOperation<'fetch, C, CollectDestination> {
+  let operation = EmptyOperation<'fetch, 'policy, C, CollectDestination> {
     fetch: move fetch,
+    policyAnchor: [],
     options: move options,
     destination: CollectDestination {body: Bytes.make(), maximum: maxBodyBytes},
   }
@@ -1323,6 +1370,16 @@ pub effect fn discardEmpty<
   DirectP,
   AcquisitionError,
   ?AcquisitionRequirements,
+  C: FetchClient<
+    'policy,
+    RoutedP,
+    DirectP,
+    Redirect.AttemptStep<'policy, FetchResult>,
+    RedirectError | FetchError | ValueError | BodyError | ClientError | OutOfMemoryError,
+    AcquisitionError,
+    &mut Redirect.SelectedBody<never, never> | &mut MonotonicClock | &mut Allocator | &mut Random,
+    AcquisitionRequirements,
+  >,
 >(
   fetch: &'fetch mut Fetch<C>,
   request: FetchRequest<'uri, 'method, 'headers, 'policy>,
@@ -1335,17 +1392,19 @@ where
   AcquisitionRequirements in Without<AcquisitionRequirements, ByteDuplex>,
   AcquisitionRequirements in Without<AcquisitionRequirements, HttpTransport> {
   run admit(&options)
-  let operation = EmptyOperation<'fetch, C, DiscardDestination> {
+  let operation = EmptyOperation<'fetch, 'policy, C, DiscardDestination> {
     fetch: move fetch,
+    policyAnchor: [],
     options: move options,
     destination: DiscardDestination {maximum: maxDiscardBytes},
   }
   return run withSemanticRequest(move request, move operation)
 }
 
-struct BytesOperation<'fetch, 'bytes, C, D> {
+struct BytesOperation<'fetch, 'bytes, 'policy, C, D> {
   fetch: &'fetch mut Fetch<C>
   bytes: &'bytes [u8]
+  policyAnchor: [&'policy (); 0]
   options: FetchOptions
   destination: D
 }
@@ -1353,6 +1412,7 @@ struct BytesOperation<'fetch, 'bytes, C, D> {
 impl<
   'fetch,
   'bytes,
+  'policy,
   C,
   D,
   RoutedP,
@@ -1363,10 +1423,20 @@ impl<
   ?DestinationRequirements,
   ?AcquisitionRequirements,
   D: Destination<A, DestinationError ? DestinationRequirements>,
-> BytesOperation<'fetch, 'bytes, C, D> {
+  C: FetchClient<
+    'policy,
+    RoutedP,
+    DirectP,
+    Redirect.AttemptStep<'policy, A>,
+    RedirectError | FetchError | ValueError | BodyError | DestinationError | ClientError | OutOfMemoryError,
+    AcquisitionError,
+    DestinationRequirements | &mut Redirect.SelectedBody<never, never> | &mut MonotonicClock | &mut Allocator | &mut Random,
+    AcquisitionRequirements,
+  >,
+> BytesOperation<'fetch, 'bytes, 'policy, C, D> {
   effect<'call> fn handle<'call>(
     operation: Self,
-    request: Redirect.Request<'call, 'call, 'call, 'call>,
+    request: Redirect.Request<'call, 'call, 'call, 'policy>,
   ) -> A
   ! RedirectError | FetchError | ValueError | BodyError | DestinationError | ClientError | OutOfMemoryError | AcquisitionError
   ? DestinationRequirements | AcquisitionRequirements | &mut MonotonicClock | &mut Allocator | &mut Random
@@ -1375,7 +1445,14 @@ impl<
     DestinationRequirements in Without<DestinationRequirements, HttpTransport>,
     AcquisitionRequirements in Without<AcquisitionRequirements, ByteDuplex>,
     AcquisitionRequirements in Without<AcquisitionRequirements, HttpTransport> {
-    let BytesOperation<'fetch, 'bytes, C, D> {fetch, bytes, options, destination} = move operation
+    let BytesOperation<'fetch, 'bytes, 'policy, C, D> {
+      fetch,
+      bytes,
+      policyAnchor,
+      options,
+      destination,
+    } = move operation
+    drop policyAnchor
     let FetchOptions {
       redirect,
       content,
@@ -1422,6 +1499,7 @@ impl<
 impl<
   'fetch,
   'bytes,
+  'policy,
   C,
   D,
   RoutedP,
@@ -1432,11 +1510,22 @@ impl<
   ?DestinationRequirements,
   ?AcquisitionRequirements,
   D: Destination<A, DestinationError ? DestinationRequirements>,
+  C: FetchClient<
+    'policy,
+    RoutedP,
+    DirectP,
+    Redirect.AttemptStep<'policy, A>,
+    RedirectError | FetchError | ValueError | BodyError | DestinationError | ClientError | OutOfMemoryError,
+    AcquisitionError,
+    DestinationRequirements | &mut Redirect.SelectedBody<never, never> | &mut MonotonicClock | &mut Allocator | &mut Random,
+    AcquisitionRequirements,
+  >,
 > SemanticRequestHandler<
+  'policy,
   A,
   RedirectError | FetchError | ValueError | BodyError | DestinationError | ClientError | OutOfMemoryError | AcquisitionError
   ? DestinationRequirements | AcquisitionRequirements | &mut MonotonicClock | &mut Allocator | &mut Random,
-> for BytesOperation<'fetch, 'bytes, C, D> {
+> for BytesOperation<'fetch, 'bytes, 'policy, C, D> {
   handle: BytesOperation.handle
 }
 
@@ -1457,6 +1546,16 @@ pub effect fn toSinkBytes<
   ?SinkRequirements,
   ?AcquisitionRequirements,
   S: Sink<SinkError ? SinkRequirements>,
+  C: FetchClient<
+    'policy,
+    RoutedP,
+    DirectP,
+    Redirect.AttemptStep<'policy, FetchResult>,
+    RedirectError | FetchError | ValueError | BodyError | DestinationFailure<SinkError> | ClientError | OutOfMemoryError,
+    AcquisitionError,
+    SinkRequirements | &mut Redirect.SelectedBody<never, never> | &mut MonotonicClock | &mut Allocator | &mut Random,
+    AcquisitionRequirements,
+  >,
 >(
   fetch: &'fetch mut Fetch<C>,
   request: FetchRequest<'uri, 'method, 'headers, 'policy>,
@@ -1472,9 +1571,10 @@ where
   AcquisitionRequirements in Without<AcquisitionRequirements, ByteDuplex>,
   AcquisitionRequirements in Without<AcquisitionRequirements, HttpTransport> {
   run admit(&options)
-  let operation = BytesOperation<'fetch, 'bytes, C, SinkDestination<S>> {
+  let operation = BytesOperation<'fetch, 'bytes, 'policy, C, SinkDestination<S>> {
     fetch: move fetch,
     bytes: bytes,
+    policyAnchor: [],
     options: move options,
     destination: SinkDestination<S> {sink: move sink},
   }
@@ -1494,6 +1594,16 @@ pub effect fn collectBytes<
   DirectP,
   AcquisitionError,
   ?AcquisitionRequirements,
+  C: FetchClient<
+    'policy,
+    RoutedP,
+    DirectP,
+    Redirect.AttemptStep<'policy, CollectedResponse>,
+    RedirectError | FetchError | ValueError | BodyError | ClientError | OutOfMemoryError,
+    AcquisitionError,
+    &mut Redirect.SelectedBody<never, never> | &mut MonotonicClock | &mut Allocator | &mut Random,
+    AcquisitionRequirements,
+  >,
 >(
   fetch: &'fetch mut Fetch<C>,
   request: FetchRequest<'uri, 'method, 'headers, 'policy>,
@@ -1507,9 +1617,10 @@ where
   AcquisitionRequirements in Without<AcquisitionRequirements, ByteDuplex>,
   AcquisitionRequirements in Without<AcquisitionRequirements, HttpTransport> {
   run admit(&options)
-  let operation = BytesOperation<'fetch, 'bytes, C, CollectDestination> {
+  let operation = BytesOperation<'fetch, 'bytes, 'policy, C, CollectDestination> {
     fetch: move fetch,
     bytes: bytes,
+    policyAnchor: [],
     options: move options,
     destination: CollectDestination {body: Bytes.make(), maximum: maxBodyBytes},
   }
@@ -1529,6 +1640,16 @@ pub effect fn discardBytes<
   DirectP,
   AcquisitionError,
   ?AcquisitionRequirements,
+  C: FetchClient<
+    'policy,
+    RoutedP,
+    DirectP,
+    Redirect.AttemptStep<'policy, FetchResult>,
+    RedirectError | FetchError | ValueError | BodyError | ClientError | OutOfMemoryError,
+    AcquisitionError,
+    &mut Redirect.SelectedBody<never, never> | &mut MonotonicClock | &mut Allocator | &mut Random,
+    AcquisitionRequirements,
+  >,
 >(
   fetch: &'fetch mut Fetch<C>,
   request: FetchRequest<'uri, 'method, 'headers, 'policy>,
@@ -1542,24 +1663,27 @@ where
   AcquisitionRequirements in Without<AcquisitionRequirements, ByteDuplex>,
   AcquisitionRequirements in Without<AcquisitionRequirements, HttpTransport> {
   run admit(&options)
-  let operation = BytesOperation<'fetch, 'bytes, C, DiscardDestination> {
+  let operation = BytesOperation<'fetch, 'bytes, 'policy, C, DiscardDestination> {
     fetch: move fetch,
     bytes: bytes,
+    policyAnchor: [],
     options: move options,
     destination: DiscardDestination {maximum: maxDiscardBytes},
   }
   return run withSemanticRequest(move request, move operation)
 }
 
-struct OneShotOperation<'fetch, C, D, Producer> {
+struct OneShotOperation<'fetch, 'policy, C, D, Producer> {
   fetch: &'fetch mut Fetch<C>
   producer: Producer
+  policyAnchor: [&'policy (); 0]
   options: FetchOptions
   destination: D
 }
 
 impl<
   'fetch,
+  'policy,
   C,
   D,
   Producer,
@@ -1574,10 +1698,20 @@ impl<
   ?AcquisitionRequirements,
   Producer: BodyProducer<ProducerError ? ProducerRequirements>,
   D: Destination<A, DestinationError ? DestinationRequirements>,
-> OneShotOperation<'fetch, C, D, Producer> {
+  C: FetchClient<
+    'policy,
+    RoutedP,
+    DirectP,
+    Redirect.AttemptStep<'policy, A>,
+    RedirectError | FetchError | ValueError | BodyError | ProducerError | DestinationError | ClientError | OutOfMemoryError,
+    AcquisitionError,
+    ProducerRequirements | DestinationRequirements | &mut Redirect.SelectedBody<ProducerError, ProducerRequirements> | &mut MonotonicClock | &mut Allocator | &mut Random,
+    AcquisitionRequirements,
+  >,
+> OneShotOperation<'fetch, 'policy, C, D, Producer> {
   effect<'call> fn handle<'call>(
     operation: Self,
-    request: Redirect.Request<'call, 'call, 'call, 'call>,
+    request: Redirect.Request<'call, 'call, 'call, 'policy>,
   ) -> A
   ! RedirectError | FetchError | ValueError | BodyError | ProducerError | DestinationError | ClientError | OutOfMemoryError | AcquisitionError
   ? ProducerRequirements | DestinationRequirements | AcquisitionRequirements | &mut MonotonicClock | &mut Allocator | &mut Random
@@ -1588,7 +1722,14 @@ impl<
     DestinationRequirements in Without<DestinationRequirements, HttpTransport>,
     AcquisitionRequirements in Without<AcquisitionRequirements, ByteDuplex>,
     AcquisitionRequirements in Without<AcquisitionRequirements, HttpTransport> {
-    let OneShotOperation<'fetch, C, D, Producer> {fetch, producer, options, destination} = move operation
+    let OneShotOperation<'fetch, 'policy, C, D, Producer> {
+      fetch,
+      producer,
+      policyAnchor,
+      options,
+      destination,
+    } = move operation
+    drop policyAnchor
     let FetchOptions {
       redirect,
       content,
@@ -1634,6 +1775,7 @@ impl<
 
 impl<
   'fetch,
+  'policy,
   C,
   D,
   Producer,
@@ -1648,11 +1790,22 @@ impl<
   ?AcquisitionRequirements,
   Producer: BodyProducer<ProducerError ? ProducerRequirements>,
   D: Destination<A, DestinationError ? DestinationRequirements>,
+  C: FetchClient<
+    'policy,
+    RoutedP,
+    DirectP,
+    Redirect.AttemptStep<'policy, A>,
+    RedirectError | FetchError | ValueError | BodyError | ProducerError | DestinationError | ClientError | OutOfMemoryError,
+    AcquisitionError,
+    ProducerRequirements | DestinationRequirements | &mut Redirect.SelectedBody<ProducerError, ProducerRequirements> | &mut MonotonicClock | &mut Allocator | &mut Random,
+    AcquisitionRequirements,
+  >,
 > SemanticRequestHandler<
+  'policy,
   A,
   RedirectError | FetchError | ValueError | BodyError | ProducerError | DestinationError | ClientError | OutOfMemoryError | AcquisitionError
   ? ProducerRequirements | DestinationRequirements | AcquisitionRequirements | &mut MonotonicClock | &mut Allocator | &mut Random,
-> for OneShotOperation<'fetch, C, D, Producer> {
+> for OneShotOperation<'fetch, 'policy, C, D, Producer> {
   handle: OneShotOperation.handle
 }
 
@@ -1676,6 +1829,16 @@ pub effect fn toSinkOneShot<
   ?AcquisitionRequirements,
   Producer: BodyProducer<ProducerError ? ProducerRequirements>,
   S: Sink<SinkError ? SinkRequirements>,
+  C: FetchClient<
+    'policy,
+    RoutedP,
+    DirectP,
+    Redirect.AttemptStep<'policy, FetchResult>,
+    RedirectError | FetchError | ValueError | BodyError | ProducerError | DestinationFailure<SinkError> | ClientError | OutOfMemoryError,
+    AcquisitionError,
+    ProducerRequirements | SinkRequirements | &mut Redirect.SelectedBody<ProducerError, ProducerRequirements> | &mut MonotonicClock | &mut Allocator | &mut Random,
+    AcquisitionRequirements,
+  >,
 >(
   fetch: &'fetch mut Fetch<C>,
   request: FetchRequest<'uri, 'method, 'headers, 'policy>,
@@ -1693,9 +1856,10 @@ where
   AcquisitionRequirements in Without<AcquisitionRequirements, ByteDuplex>,
   AcquisitionRequirements in Without<AcquisitionRequirements, HttpTransport> {
   run admit(&options)
-  let operation = OneShotOperation<'fetch, C, SinkDestination<S>, Producer> {
+  let operation = OneShotOperation<'fetch, 'policy, C, SinkDestination<S>, Producer> {
     fetch: move fetch,
     producer: move producer,
+    policyAnchor: [],
     options: move options,
     destination: SinkDestination<S> {sink: move sink},
   }
@@ -1718,6 +1882,16 @@ pub effect fn collectOneShot<
   ?ProducerRequirements,
   ?AcquisitionRequirements,
   Producer: BodyProducer<ProducerError ? ProducerRequirements>,
+  C: FetchClient<
+    'policy,
+    RoutedP,
+    DirectP,
+    Redirect.AttemptStep<'policy, CollectedResponse>,
+    RedirectError | FetchError | ValueError | BodyError | ProducerError | ClientError | OutOfMemoryError,
+    AcquisitionError,
+    ProducerRequirements | &mut Redirect.SelectedBody<ProducerError, ProducerRequirements> | &mut MonotonicClock | &mut Allocator | &mut Random,
+    AcquisitionRequirements,
+  >,
 >(
   fetch: &'fetch mut Fetch<C>,
   request: FetchRequest<'uri, 'method, 'headers, 'policy>,
@@ -1733,9 +1907,10 @@ where
   AcquisitionRequirements in Without<AcquisitionRequirements, ByteDuplex>,
   AcquisitionRequirements in Without<AcquisitionRequirements, HttpTransport> {
   run admit(&options)
-  let operation = OneShotOperation<'fetch, C, CollectDestination, Producer> {
+  let operation = OneShotOperation<'fetch, 'policy, C, CollectDestination, Producer> {
     fetch: move fetch,
     producer: move producer,
+    policyAnchor: [],
     options: move options,
     destination: CollectDestination {body: Bytes.make(), maximum: maxBodyBytes},
   }
@@ -1758,6 +1933,16 @@ pub effect fn discardOneShot<
   ?ProducerRequirements,
   ?AcquisitionRequirements,
   Producer: BodyProducer<ProducerError ? ProducerRequirements>,
+  C: FetchClient<
+    'policy,
+    RoutedP,
+    DirectP,
+    Redirect.AttemptStep<'policy, FetchResult>,
+    RedirectError | FetchError | ValueError | BodyError | ProducerError | ClientError | OutOfMemoryError,
+    AcquisitionError,
+    ProducerRequirements | &mut Redirect.SelectedBody<ProducerError, ProducerRequirements> | &mut MonotonicClock | &mut Allocator | &mut Random,
+    AcquisitionRequirements,
+  >,
 >(
   fetch: &'fetch mut Fetch<C>,
   request: FetchRequest<'uri, 'method, 'headers, 'policy>,
@@ -1773,24 +1958,27 @@ where
   AcquisitionRequirements in Without<AcquisitionRequirements, ByteDuplex>,
   AcquisitionRequirements in Without<AcquisitionRequirements, HttpTransport> {
   run admit(&options)
-  let operation = OneShotOperation<'fetch, C, DiscardDestination, Producer> {
+  let operation = OneShotOperation<'fetch, 'policy, C, DiscardDestination, Producer> {
     fetch: move fetch,
     producer: move producer,
+    policyAnchor: [],
     options: move options,
     destination: DiscardDestination {maximum: maxDiscardBytes},
   }
   return run withSemanticRequest(move request, move operation)
 }
 
-struct ReplayOperation<'fetch, C, D, Factory, Producer> {
+struct ReplayOperation<'fetch, 'policy, C, D, Factory, Producer> {
   fetch: &'fetch mut Fetch<C>
   factory: Factory
+  policyAnchor: [&'policy (); 0]
   options: FetchOptions
   destination: D
 }
 
 impl<
   'fetch,
+  'policy,
   C,
   D,
   Factory,
@@ -1809,10 +1997,20 @@ impl<
   Factory: ReplayFactory<Producer, FactoryError, FactoryRequirements>,
   Producer: BodyProducer<ProducerError ? ProducerRequirements>,
   D: Destination<A, DestinationError ? DestinationRequirements>,
-> ReplayOperation<'fetch, C, D, Factory, Producer> {
+  C: FetchClient<
+    'policy,
+    RoutedP,
+    DirectP,
+    Redirect.AttemptStep<'policy, A>,
+    RedirectError | FetchError | ValueError | BodyError | ProducerError | DestinationError | ClientError | OutOfMemoryError,
+    AcquisitionError,
+    ProducerRequirements | DestinationRequirements | &mut Redirect.SelectedBody<ProducerError, ProducerRequirements> | &mut MonotonicClock | &mut Allocator | &mut Random,
+    AcquisitionRequirements,
+  >,
+> ReplayOperation<'fetch, 'policy, C, D, Factory, Producer> {
   effect<'call> fn handle<'call>(
     operation: Self,
-    request: Redirect.Request<'call, 'call, 'call, 'call>,
+    request: Redirect.Request<'call, 'call, 'call, 'policy>,
   ) -> A
   ! RedirectError | FetchError | ValueError | BodyError | FactoryError | ProducerError | DestinationError | ClientError | OutOfMemoryError | AcquisitionError
   ? FactoryRequirements | ProducerRequirements | DestinationRequirements | AcquisitionRequirements | &mut MonotonicClock | &mut Allocator | &mut Random
@@ -1825,7 +2023,14 @@ impl<
     DestinationRequirements in Without<DestinationRequirements, HttpTransport>,
     AcquisitionRequirements in Without<AcquisitionRequirements, ByteDuplex>,
     AcquisitionRequirements in Without<AcquisitionRequirements, HttpTransport> {
-    let ReplayOperation<'fetch, C, D, Factory, Producer> {fetch, factory, options, destination} = move operation
+    let ReplayOperation<'fetch, 'policy, C, D, Factory, Producer> {
+      fetch,
+      factory,
+      policyAnchor,
+      options,
+      destination,
+    } = move operation
+    drop policyAnchor
     let FetchOptions {
       redirect,
       content,
@@ -1871,6 +2076,7 @@ impl<
 
 impl<
   'fetch,
+  'policy,
   C,
   D,
   Factory,
@@ -1889,11 +2095,22 @@ impl<
   Factory: ReplayFactory<Producer, FactoryError, FactoryRequirements>,
   Producer: BodyProducer<ProducerError ? ProducerRequirements>,
   D: Destination<A, DestinationError ? DestinationRequirements>,
+  C: FetchClient<
+    'policy,
+    RoutedP,
+    DirectP,
+    Redirect.AttemptStep<'policy, A>,
+    RedirectError | FetchError | ValueError | BodyError | ProducerError | DestinationError | ClientError | OutOfMemoryError,
+    AcquisitionError,
+    ProducerRequirements | DestinationRequirements | &mut Redirect.SelectedBody<ProducerError, ProducerRequirements> | &mut MonotonicClock | &mut Allocator | &mut Random,
+    AcquisitionRequirements,
+  >,
 > SemanticRequestHandler<
+  'policy,
   A,
   RedirectError | FetchError | ValueError | BodyError | FactoryError | ProducerError | DestinationError | ClientError | OutOfMemoryError | AcquisitionError
   ? FactoryRequirements | ProducerRequirements | DestinationRequirements | AcquisitionRequirements | &mut MonotonicClock | &mut Allocator | &mut Random,
-> for ReplayOperation<'fetch, C, D, Factory, Producer> {
+> for ReplayOperation<'fetch, 'policy, C, D, Factory, Producer> {
   handle: ReplayOperation.handle
 }
 
@@ -1921,6 +2138,16 @@ pub effect fn toSinkReplay<
   Factory: ReplayFactory<Producer, FactoryError, FactoryRequirements>,
   Producer: BodyProducer<ProducerError ? ProducerRequirements>,
   S: Sink<SinkError ? SinkRequirements>,
+  C: FetchClient<
+    'policy,
+    RoutedP,
+    DirectP,
+    Redirect.AttemptStep<'policy, FetchResult>,
+    RedirectError | FetchError | ValueError | BodyError | ProducerError | DestinationFailure<SinkError> | ClientError | OutOfMemoryError,
+    AcquisitionError,
+    ProducerRequirements | SinkRequirements | &mut Redirect.SelectedBody<ProducerError, ProducerRequirements> | &mut MonotonicClock | &mut Allocator | &mut Random,
+    AcquisitionRequirements,
+  >,
 >(
   fetch: &'fetch mut Fetch<C>,
   request: FetchRequest<'uri, 'method, 'headers, 'policy>,
@@ -1940,9 +2167,10 @@ where
   AcquisitionRequirements in Without<AcquisitionRequirements, ByteDuplex>,
   AcquisitionRequirements in Without<AcquisitionRequirements, HttpTransport> {
   run admit(&options)
-  let operation = ReplayOperation<'fetch, C, SinkDestination<S>, Factory, Producer> {
+  let operation = ReplayOperation<'fetch, 'policy, C, SinkDestination<S>, Factory, Producer> {
     fetch: move fetch,
     factory: move factory,
+    policyAnchor: [],
     options: move options,
     destination: SinkDestination<S> {sink: move sink},
   }
@@ -1969,6 +2197,16 @@ pub effect fn collectReplay<
   ?AcquisitionRequirements,
   Factory: ReplayFactory<Producer, FactoryError, FactoryRequirements>,
   Producer: BodyProducer<ProducerError ? ProducerRequirements>,
+  C: FetchClient<
+    'policy,
+    RoutedP,
+    DirectP,
+    Redirect.AttemptStep<'policy, CollectedResponse>,
+    RedirectError | FetchError | ValueError | BodyError | ProducerError | ClientError | OutOfMemoryError,
+    AcquisitionError,
+    ProducerRequirements | &mut Redirect.SelectedBody<ProducerError, ProducerRequirements> | &mut MonotonicClock | &mut Allocator | &mut Random,
+    AcquisitionRequirements,
+  >,
 >(
   fetch: &'fetch mut Fetch<C>,
   request: FetchRequest<'uri, 'method, 'headers, 'policy>,
@@ -1986,9 +2224,10 @@ where
   AcquisitionRequirements in Without<AcquisitionRequirements, ByteDuplex>,
   AcquisitionRequirements in Without<AcquisitionRequirements, HttpTransport> {
   run admit(&options)
-  let operation = ReplayOperation<'fetch, C, CollectDestination, Factory, Producer> {
+  let operation = ReplayOperation<'fetch, 'policy, C, CollectDestination, Factory, Producer> {
     fetch: move fetch,
     factory: move factory,
+    policyAnchor: [],
     options: move options,
     destination: CollectDestination {body: Bytes.make(), maximum: maxBodyBytes},
   }
@@ -2015,6 +2254,16 @@ pub effect fn discardReplay<
   ?AcquisitionRequirements,
   Factory: ReplayFactory<Producer, FactoryError, FactoryRequirements>,
   Producer: BodyProducer<ProducerError ? ProducerRequirements>,
+  C: FetchClient<
+    'policy,
+    RoutedP,
+    DirectP,
+    Redirect.AttemptStep<'policy, FetchResult>,
+    RedirectError | FetchError | ValueError | BodyError | ProducerError | ClientError | OutOfMemoryError,
+    AcquisitionError,
+    ProducerRequirements | &mut Redirect.SelectedBody<ProducerError, ProducerRequirements> | &mut MonotonicClock | &mut Allocator | &mut Random,
+    AcquisitionRequirements,
+  >,
 >(
   fetch: &'fetch mut Fetch<C>,
   request: FetchRequest<'uri, 'method, 'headers, 'policy>,
@@ -2032,9 +2281,10 @@ where
   AcquisitionRequirements in Without<AcquisitionRequirements, ByteDuplex>,
   AcquisitionRequirements in Without<AcquisitionRequirements, HttpTransport> {
   run admit(&options)
-  let operation = ReplayOperation<'fetch, C, DiscardDestination, Factory, Producer> {
+  let operation = ReplayOperation<'fetch, 'policy, C, DiscardDestination, Factory, Producer> {
     fetch: move fetch,
     factory: move factory,
+    policyAnchor: [],
     options: move options,
     destination: DiscardDestination {maximum: maxDiscardBytes},
   }
