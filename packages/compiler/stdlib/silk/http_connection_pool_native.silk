@@ -18,6 +18,7 @@
 //! later owned proxy transport seam must provide a different context.
 
 import silk.allocator {Allocator, OutOfMemoryError}
+import silk.http_body {Limits as BodyLimits}
 import silk.http_client {ClientError, Connection, ConnectionHandler, Limits}
 import silk.http_client_native as Native {
   NativeClientError,
@@ -36,6 +37,8 @@ import silk.http_connection_pool as Pool {
   PoolHandler,
 }
 import silk.http_origin {Origin}
+import silk.http_head {Limits as HeadLimits}
+import silk.http_headers {Limits as HeaderLimits}
 import silk.http_transport {HttpTransport}
 import silk.https_identity {IdentityError}
 import silk.monotonic_clock {MonotonicClock}
@@ -128,6 +131,49 @@ fn hasTrust(context: &Context) -> bool {
     Option.None => false
     Option.Some {value} => true
   }
+}
+
+fn sameHeaderLimits(left: &HeaderLimits, right: &HeaderLimits) -> bool {
+  return left.maxMethodBytes == right.maxMethodBytes
+    && left.maxTargetBytes == right.maxTargetBytes
+    && left.maxNameBytes == right.maxNameBytes
+    && left.maxValueBytes == right.maxValueBytes
+    && left.maxFields == right.maxFields
+    && left.maxFieldBytes == right.maxFieldBytes
+    && left.maxOwnedBytes == right.maxOwnedBytes
+}
+
+fn sameHeadLimits(left: &HeadLimits, right: &HeadLimits) -> bool {
+  return left.maxHeadBytes == right.maxHeadBytes
+    && left.maxStartLineBytes == right.maxStartLineBytes
+    && left.maxFieldLineBytes == right.maxFieldLineBytes
+    && left.maxOwnedBytes == right.maxOwnedBytes
+    && sameHeaderLimits(&left.values, &right.values)
+}
+
+fn sameBodyLimits(left: &BodyLimits, right: &BodyLimits) -> bool {
+  return left.maxWireBytes == right.maxWireBytes
+    && left.maxPayloadBytes == right.maxPayloadBytes
+    && left.maxChunkBytes == right.maxChunkBytes
+    && left.maxChunks == right.maxChunks
+    && left.maxChunkLineBytes == right.maxChunkLineBytes
+    && left.maxExtensionBytes == right.maxExtensionBytes
+    && left.maxTrailerBytes == right.maxTrailerBytes
+    && left.maxTrailerFields == right.maxTrailerFields
+    && left.maxOwnedBytes == right.maxOwnedBytes
+    && sameHeaderLimits(&left.trailerValues, &right.trailerValues)
+}
+
+fn sameLimits(left: &Limits, right: &Limits) -> bool {
+  return sameHeadLimits(&left.head, &right.head)
+    && sameBodyLimits(&left.requestBody, &right.requestBody)
+    && sameBodyLimits(&left.responseBody, &right.responseBody)
+    && left.readCapacity == right.readCapacity
+    && left.writeCapacity == right.writeCapacity
+    && left.maxRequests == right.maxRequests
+    && left.maxInformationalResponses == right.maxInformationalResponses
+    && left.maxInformationalWireBytes == right.maxInformationalWireBytes
+    && left.maxDiscardWireBytes == right.maxDiscardWireBytes
 }
 
 impl Context {
@@ -316,6 +362,19 @@ pub effect fn copyHandle(
 ! TrustSourceError | OutOfMemoryError
 ? &mut Allocator {
   return run Pool.copyHandle(handle)
+}
+
+/// Reports whether a handle's frozen HTTP connection limits exactly match `limits`.
+///
+/// Fetch-style clients use this pre-contact admission before a checkout can reuse or open an owner.
+/// Every parser, framing, capacity, informational, request-budget, and discard field participates;
+/// the comparison does not inspect mutable pool state.
+pub fn acceptsLimits(
+  handle: &Handle<ConnectionKey, NativeTransport, Context>,
+  limits: Limits,
+) -> bool {
+  let context = Pool.context(handle)
+  return sameLimits(&context.limitsValue, &limits)
 }
 
 /// Checks out one direct origin and lends its exclusive connection to `handler`.
