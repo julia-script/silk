@@ -136,7 +136,8 @@ export const addPhiIncoming = Effect.fnUntraced(function* (
         'FunctionBody.addPhiIncoming',
       )
       const instruction = draft.instructions[index]
-      if (instruction?._tag !== 'Phi' || instruction.sealed) {
+      const pending = draft.openPhis.get(index)
+      if (instruction?._tag !== 'Phi' || instruction.sealed || pending === undefined) {
         return yield* Result.fail(
           invalidState({
             operation: 'FunctionBody.addPhiIncoming',
@@ -165,7 +166,7 @@ export const addPhiIncoming = Effect.fnUntraced(function* (
         block,
         'FunctionBody.addPhiIncoming',
       )
-      if (instruction.incoming.some((entry) => entry.block === blockIndex)) {
+      if (pending.blocks.has(blockIndex)) {
         return yield* Result.fail(
           invalidState({
             operation: 'FunctionBody.addPhiIncoming',
@@ -174,13 +175,10 @@ export const addPhiIncoming = Effect.fnUntraced(function* (
           }),
         )
       }
-      draft.instructions[index] = Object.freeze({
-        ...instruction,
-        incoming: Object.freeze([
-          ...instruction.incoming,
-          Object.freeze({ value: resolved.operand, block: blockIndex }),
-        ]),
-      })
+      // Copying and freezing the growing list made 2,048 inputs take 378ms in the
+      // construction probe. Keep draft-owned inputs mutable until the phi is sealed.
+      pending.incoming.push(Object.freeze({ value: resolved.operand, block: blockIndex }))
+      pending.blocks.add(blockIndex)
     }),
   )
 })
@@ -199,7 +197,8 @@ export const sealPhi = Effect.fnUntraced(function* (
     Result.gen(function* () {
       const index = yield* FunctionBodyState.resolvePhi(draft, phiHandle, 'FunctionBody.sealPhi')
       const instruction = draft.instructions[index]
-      if (instruction?._tag !== 'Phi' || instruction.sealed) {
+      const pending = draft.openPhis.get(index)
+      if (instruction?._tag !== 'Phi' || instruction.sealed || pending === undefined) {
         return yield* Result.fail(
           invalidState({
             operation: 'FunctionBody.sealPhi',
@@ -208,7 +207,12 @@ export const sealPhi = Effect.fnUntraced(function* (
           }),
         )
       }
-      draft.instructions[index] = Object.freeze({ ...instruction, sealed: true })
+      draft.instructions[index] = Object.freeze({
+        ...instruction,
+        incoming: Object.freeze(pending.incoming),
+        sealed: true,
+      })
+      draft.openPhis.delete(index)
       const value = draft.valueHandles[instruction.result]
       if (value === undefined) {
         return yield* Result.fail(

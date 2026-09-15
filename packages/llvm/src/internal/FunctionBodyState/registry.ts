@@ -54,6 +54,7 @@ export const create = (
     blocks: [],
     blockHandles: [],
     instructions: [],
+    openPhis: new Map(),
     instructionHandles: [],
     values: [],
     valueHandles: [],
@@ -579,6 +580,7 @@ export const makePhiHandle = (
     const index = yield* resolveInstruction(draft, instruction, 'FunctionBody.phi')
     const handle = Handle.make('Phi', draft.owner, index)
     phiEntries.set(handle, { owner: draft.owner, index })
+    draft.openPhis.set(index, { incoming: [], blocks: new Set() })
     return handle
   })
 

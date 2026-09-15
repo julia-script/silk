@@ -391,8 +391,17 @@ it.effect('builds a diamond with branches, a forward-aware phi, and a direct cal
         yield* Block.setInsertionPoint(body, merge)
         const phi = yield* FunctionBody.phi(body, i32, 'result')
         yield* FunctionBody.addPhiIncoming(body, phi, added, onTrue)
+        const duplicate = yield* Effect.flip(
+          FunctionBody.addPhiIncoming(body, phi, subtracted, onTrue),
+        )
+        assert.strictEqual(duplicate.reason._tag, 'InvalidState')
         yield* FunctionBody.addPhiIncoming(body, phi, subtracted, onFalse)
-        yield* FunctionBody.returnValue(body, yield* FunctionBody.sealPhi(body, phi))
+        const result = yield* FunctionBody.sealPhi(body, phi)
+        const sealed = yield* Effect.flip(
+          FunctionBody.addPhiIncoming(body, phi, subtracted, onFalse),
+        )
+        assert.strictEqual(sealed.reason._tag, 'InvalidState')
+        yield* FunctionBody.returnValue(body, result)
       }),
     )
 

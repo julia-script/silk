@@ -325,12 +325,11 @@ export const emit = Effect.fnUntraced(function* (
       break
     }
     case 'Return': {
-      const returned = yield* readLocal(terminator.value)
-      const instruction = yield* NativeReturn.complete(
+      const instruction = yield* NativeReturn.completeLocal(
         context.suspension,
-        returned,
-        `return_value_b${block.id.ordinal}`,
+        context.storage,
         terminator.value,
+        `return_value_b${block.id.ordinal}`,
       )
       yield* NativeDebug.locate(context.debug, terminator.provenance.span, instruction)
       break

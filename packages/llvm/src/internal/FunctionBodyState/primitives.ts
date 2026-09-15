@@ -41,6 +41,15 @@ export interface Draft {
   readonly blocks: Array<MutableBlock>
   readonly blockHandles: Array<BlockActor.Block>
   readonly instructions: Array<FunctionBodyDescription.Instruction>
+  readonly openPhis: Map<
+    number,
+    {
+      readonly incoming: Array<
+        Extract<FunctionBodyDescription.Instruction, { readonly _tag: 'Phi' }>['incoming'][number]
+      >
+      readonly blocks: Set<number>
+    }
+  >
   readonly instructionHandles: Array<FunctionBodyActor.Instruction>
   readonly values: Array<MutableValue>
   readonly valueHandles: Array<ValueActor.Value>

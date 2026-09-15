@@ -1793,7 +1793,7 @@ export const matchesInstance = (
     return expected !== undefined && StaticValue.key(argument) === StaticValue.key(expected)
   })
 
-/** Selects the exact semantic Effect runner before runtime-equivalent instance matching. */
+/** Filters the concrete declaration before comparing its exact semantic Effect contract. */
 export const matchesEffectInstance = (
   fn: MirFunction,
   declaration: DeclarationFacts.CanonicalId,
@@ -1803,12 +1803,12 @@ export const matchesEffectInstance = (
   providers?: ReadonlyArray<EffectExecutionContract.RequirementAuthorization>,
 ): boolean =>
   fn.result._tag === 'EffectOutcome' &&
+  matchesInstance(fn, declaration, typeArguments, staticArguments) &&
   EffectExecutionContract.matches(
     fn.result.type,
     effect,
     providers ?? fn.effectRunner?.providers ?? Object.freeze([]),
-  ) &&
-  matchesInstance(fn, declaration, typeArguments, staticArguments)
+  )
 
 /** Tests exact concrete instance identity, including the resolved contract row. */
 export const matchesInstanceKey = (fn: MirFunction, key: Instances.InstanceKey): boolean =>
