@@ -333,12 +333,20 @@ it.effect(
           `missing lowered exact-row witness: ${witness}`,
         )
       }
+      assert.isTrue(
+        mir.functions.some((fn) => fn.id.name === 'redirectPolicyCompileWitness'),
+        'missing lowered redirect policy behavior sentinel',
+      )
+      assert.isTrue(
+        mir.functions.some((fn) => fn.id.name.startsWith('verifyRedirectPolicy$effect$')),
+        'missing lowered allocation-backed redirect behavior sentinel',
+      )
     }),
   120_000,
 )
 
 it.effect(
-  'rejects escaping and duplicating scoped redirect producers in one frontend analysis',
+  'rejects escaping response loans and escaping or duplicating scoped redirect producers',
   () =>
     Effect.gen(function* () {
       const snapshot = yield* AnalysisFixture.frontend(
@@ -352,6 +360,8 @@ it.effect(
           .trim(),
       }))
       assert.deepEqual(diagnostics, [
+        { code: 'SEM0025', span: 'move uri' },
+        { code: 'SEM0025', span: 'move exchange' },
         { code: 'SEM0025', span: 'move producer' },
         { code: 'OWN0001', span: 'move producer' },
       ])
