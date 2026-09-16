@@ -494,7 +494,9 @@ pub service AcquiredRouteContext<P, A, E, ?R> {
     &mut P provides &HttpTransport from &mut HttpTransport | &mut MonotonicClock | &mut Allocator | &mut Random,
     &mut P provides &HttpTransport from &mut HttpTransport,
     &mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock | &mut Allocator | &mut Random,
-    &mut P provides &ByteDuplex from &mut ByteDuplex
+    &mut P provides &ByteDuplex from &mut ByteDuplex,
+    R in Without<R, ByteDuplex>,
+    R in Without<R, HttpTransport>
 }
 
 /// A target-neutral owner that acquires one exact physical peer for a routed scope.
@@ -507,7 +509,7 @@ pub interface RouteClient<P, A, E, AcquisitionError, ?AcquisitionRequirements, ?
     A,
     E,
     R,
-  >
+  > where R in Without<R, ByteDuplex>, R in Without<R, HttpTransport>
 }
 
 /// The uniform final HTTP transport lent to a routed callback.
@@ -1265,7 +1267,12 @@ where
       move handler,
     )
   }
-  return run Tunnel.transferByteDuplex(&mut tunnel.*, move useTransferred)
+  return run Tunnel.transferByteDuplex<
+    P,
+    A,
+    E | ProxyError | ClientError | Tls.ConnectionError | IdentityError | OutOfMemoryError,
+    R | &mut Allocator | &mut MonotonicClock | &mut SystemClock | &mut Random,
+  >(&mut tunnel.*, move useTransferred)
 }
 
 effect<'provider> fn withDirectTlsRoute<
@@ -1295,11 +1302,11 @@ where
   R in Without<R, ByteDuplex>,
   R in Without<R, HttpTransport> {
   let host = Origin.host(&origin)
+  let protocols = [AlpnProtocol {bytes: b"http/1.1"}]
   let mut name = zeroRouteName()
   let nameLength = copyRouteDomain(&host, &mut name)
   let nameBytes = Slice.view<u8>(&name, usize.ZERO, nameLength)
   let reference = admittedRouteReference(host, nameBytes)
-  let protocols = [AlpnProtocol {bytes: b"http/1.1"}]
   let config = ClientConfig {
     reference: reference,
     alpn: routeAlpn(&protocols, settings.protocol),
@@ -1319,7 +1326,12 @@ where
     )
   }
   let loan = Transport.borrow(move provider)
-  return run Tls.withClient(
+  return run Tls.withClient<
+    A,
+    E | ClientError | OutOfMemoryError,
+    R | &mut Allocator,
+    Loan<'provider, P>,
+  >(
     move loan,
     &config,
     move trust,
@@ -1359,11 +1371,11 @@ where
   R in Without<R, HttpTransport> {
   let origin = Route.originalOrigin(&route)
   let host = Origin.host(&origin)
+  let protocols = [AlpnProtocol {bytes: b"http/1.1"}]
   let mut name = zeroRouteName()
   let nameLength = copyRouteDomain(&host, &mut name)
   let nameBytes = Slice.view<u8>(&name, usize.ZERO, nameLength)
   let reference = admittedRouteReference(host, nameBytes)
-  let protocols = [AlpnProtocol {bytes: b"http/1.1"}]
   let config = ClientConfig {
     reference: reference,
     alpn: routeAlpn(&protocols, settings.protocol),
@@ -1383,7 +1395,12 @@ where
     )
   }
   let loan = Transport.borrow(move provider)
-  return run Tls.withClient(
+  return run Tls.withClient<
+    A,
+    E | ClientError | OutOfMemoryError,
+    R | &mut Allocator,
+    Loan<'provider, TransferredTunnel<'tunnel, P>>,
+  >(
     move loan,
     &config,
     move trust,
@@ -1604,7 +1621,18 @@ impl<'configuration, P, A, E, ?R, H: RouteHandler<'configuration, P, A, E ? R>> 
   R,
   H,
 > {
-  use: useRouteContext
+  effect fn use(context: &mut Self, provider: P) -> A
+  ! E | ProxyError | ClientError | Tls.ConnectionError | IdentityError | OutOfMemoryError
+  ? R | &mut Allocator | &mut MonotonicClock | &mut SystemClock | &mut Random
+  where
+    &mut P provides &HttpTransport from &mut HttpTransport | &mut MonotonicClock | &mut Allocator | &mut Random,
+    &mut P provides &HttpTransport from &mut HttpTransport,
+    &mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock | &mut Allocator | &mut Random,
+    &mut P provides &ByteDuplex from &mut ByteDuplex,
+    R in Without<R, ByteDuplex>,
+    R in Without<R, HttpTransport> {
+    return run useRouteContext<'configuration, P, A, E, R, H>(move context, move provider)
+  }
 }
 
 effect fn makeRoutePlan<'configuration, H>(
@@ -1716,7 +1744,9 @@ where
       fail move error
     }
   }
-  let settings = RouteClient.settings(&client)
+  let settings = RouteClient<P, A, E | ProxyError | ClientError | Tls.ConnectionError | IdentityError | OutOfMemoryError, AcquisitionError, AcquisitionRequirements ? R | &mut Allocator | &mut MonotonicClock | &mut SystemClock | &mut Random>.settings(
+    &client,
+  )
   let peer = run selectedPeer(&route)
   let plan = run makeRoutePlan(
     route,
