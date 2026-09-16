@@ -211,6 +211,50 @@ pub struct ParseError {
   pub fieldIndex: Option<usize>
 }
 
+/// Validates parser storage arithmetic and the owned-storage limit without allocation or input.
+///
+/// # Details
+///
+/// The required storage contains `maxHeadBytes` plus fixed field metadata for `maxFields`.
+/// Arithmetic overflow returns `SizeOverflow`. Excess storage returns the exact `OwnedBytes` limit.
+pub fn validateLimits(limits: &Limits) -> Result<(), ParseError> {
+  let metadata = match move usize.checkedMultiply(limits.values.maxFields, RECORD_BYTES) {
+    Option<usize>.None => {
+      return Result.failResult<(), ParseError>(parseError(
+        ParseReason.SizeOverflow,
+        ParseComponent.Parser,
+        usize.ZERO,
+        Option.none<usize>(),
+      ))
+    }
+    Option<usize>.Some {value} => value
+  }
+  let required = match move usize.checkedAdd(limits.maxHeadBytes, metadata) {
+    Option<usize>.None => {
+      return Result.failResult<(), ParseError>(parseError(
+        ParseReason.SizeOverflow,
+        ParseComponent.Parser,
+        usize.ZERO,
+        Option.none<usize>(),
+      ))
+    }
+    Option<usize>.Some {value} => value
+  }
+  if required > limits.maxOwnedBytes {
+    return Result.failResult<(), ParseError>(parseError(
+      ParseReason.LimitExceeded {
+        limit: ParseLimitKind.OwnedBytes,
+        allowed: limits.maxOwnedBytes,
+        attempted: required,
+      },
+      ParseComponent.Parser,
+      usize.ZERO,
+      Option.none<usize>(),
+    ))
+  }
+  return Result.succeed<(), ParseError>(())
+}
+
 enum HeadKind { Request, Response }
 
 enum Phase { StartLine, Fields }
@@ -485,6 +529,7 @@ impl<'owner> RequestHead<'owner> {
       limits,
     )
   }
+
 }
 
 impl<'owner> ResponseHead<'owner> {
@@ -531,6 +576,39 @@ impl<'owner> ResponseHead<'owner> {
       Vector.asSlice<Header<'owner>>(&entries),
       limits,
     )
+  }
+
+  /// Copies the status, reason, and only matching fields into independent storage.
+  ///
+  /// # Details
+  ///
+  /// Matching is ASCII case-insensitive. Duplicate matches remain distinct and preserve wire order.
+  /// The supplied limits apply to the selected fields and complete owned result, not unrelated
+  /// fields retained by the parser.
+  pub effect fn copyMatchingHeaders<'name>(
+    self: &Self,
+    name: string<'name>,
+    limits: ValueLimits,
+  ) -> Result<OwnedResponseHead, ValueError> ! OutOfMemoryError ? &mut Allocator {
+    let selected = run collectMatchingHeaders(
+      self.bytes,
+      self.records,
+      self.fieldCountValue,
+      name,
+      limits,
+    )
+    return match move selected {
+      Result<Vector<Header<'owner>>, ValueError>.Failure {error} => {
+        return Result.failResult<OwnedResponseHead, ValueError>(move error)
+      }
+      Result<Vector<Header<'owner>>, ValueError>.Success {value} => run copyResponseValues(
+        self.versionValue,
+        ResponseHead.status(self),
+        ResponseHead.reason(self),
+        Vector.asSlice<Header<'owner>>(&value),
+        limits,
+      )
+    }
   }
 }
 
@@ -750,40 +828,12 @@ pub fn writeResponseInto<'value>(
 effect fn makeCore(kind: HeadKind, limits: Limits) -> Result<ParserCore, ParseError>
 ! OutOfMemoryError
 ? &mut Allocator {
-  let metadata = match move usize.checkedMultiply(limits.values.maxFields, RECORD_BYTES) {
-    Option<usize>.None => {
-      return Result.failResult<ParserCore, ParseError>(parseError(
-        ParseReason.SizeOverflow,
-        ParseComponent.Parser,
-        usize.ZERO,
-        Option.none<usize>(),
-      ))
-    }
-    Option<usize>.Some {value} => value
+  let valid = validateLimits(&limits)
+  if let Result<(), ParseError>.Failure {error} = move valid {
+    return Result.failResult<ParserCore, ParseError>(move error)
   }
-  let required = match move usize.checkedAdd(limits.maxHeadBytes, metadata) {
-    Option<usize>.None => {
-      return Result.failResult<ParserCore, ParseError>(parseError(
-        ParseReason.SizeOverflow,
-        ParseComponent.Parser,
-        usize.ZERO,
-        Option.none<usize>(),
-      ))
-    }
-    Option<usize>.Some {value} => value
-  }
-  if required > limits.maxOwnedBytes {
-    return Result.failResult<ParserCore, ParseError>(parseError(
-      ParseReason.LimitExceeded {
-        limit: ParseLimitKind.OwnedBytes,
-        allowed: limits.maxOwnedBytes,
-        attempted: required,
-      },
-      ParseComponent.Parser,
-      usize.ZERO,
-      Option.none<usize>(),
-    ))
-  }
+  let metadata = limits.values.maxFields * RECORD_BYTES
+  let required = limits.maxHeadBytes + metadata
   let storage = run exactZeroed(required)
   return Result.succeed<ParserCore, ParseError>(ParserCore {
     kind: kind,
@@ -2026,6 +2076,18 @@ fn asciiLower(value: u8) -> u8 {
   return value
 }
 
+fn asciiEqual<'left, 'right>(left: string<'left>, right: string<'right>) -> bool {
+  let leftBytes = String.utf8Bytes(left)
+  let rightBytes = String.utf8Bytes(right)
+  if leftBytes.length != rightBytes.length { return false }
+  let mut index = usize.ZERO
+  while index < leftBytes.length {
+    if asciiLower(leftBytes[index]) != asciiLower(rightBytes[index]) { return false }
+    index = index + usize.ONE
+  }
+  return true
+}
+
 fn fieldIndex(core: &ParserCore) -> Option<usize> {
   return match core.phase {
     Phase.StartLine => Option.none<usize>()
@@ -2237,6 +2299,44 @@ effect fn collectHeaders<'owner>(
     index = index + usize.ONE
   }
   return move entries
+}
+
+effect fn collectMatchingHeaders<'owner, 'name>(
+  bytes: &'owner [u8],
+  records: &'owner [u8],
+  count: usize,
+  name: string<'name>,
+  limits: ValueLimits,
+) -> Result<Vector<Header<'owner>>, ValueError> ! OutOfMemoryError ? &mut Allocator {
+  let mut selectedCount = usize.ZERO
+  let mut index = usize.ZERO
+  while index < count {
+    let record = readRecord(records, index)
+    let fieldName = asciiText(range(bytes, record.nameStart, record.nameLength))
+    if asciiEqual(fieldName, name) { selectedCount = selectedCount + usize.ONE }
+    index = index + usize.ONE
+  }
+  let mut entries = Vector.make<Header<'owner>>()
+  let reserved = run Vector.reserveExact<Header<'owner>>(&mut entries, selectedCount)
+  drop reserved
+  index = usize.ZERO
+  while index < count {
+    let record = readRecord(records, index)
+    let fieldName: string<'owner> = asciiText(range(bytes, record.nameStart, record.nameLength))
+    if asciiEqual(fieldName, name) {
+      let fieldValue: &'owner [u8] = range(bytes, record.valueStart, record.valueLength)
+      let header = match move Header.make(fieldName, fieldValue, limits) {
+        Result<Header<'owner>, ValueError>.Failure {error} => {
+          return Result.failResult<Vector<Header<'owner>>, ValueError>(move error)
+        }
+        Result<Header<'owner>, ValueError>.Success {value} => value
+      }
+      let appended = run Vector.append<Header<'owner>>(&mut entries, header)
+      drop appended
+    }
+    index = index + usize.ONE
+  }
+  return Result.succeed<Vector<Header<'owner>>, ValueError>(move entries)
 }
 
 effect fn copyRequestValues<'value>(

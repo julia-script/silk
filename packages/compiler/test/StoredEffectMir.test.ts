@@ -6,6 +6,8 @@ import * as Analysis from '../src/Analysis.js'
 import type * as CleanupPlan from '../src/CleanupPlan.js'
 import * as CoroutineFrame from '../src/CoroutineFrame.js'
 import * as Layout from '../src/Layout.js'
+import * as Lifetime from '../src/Lifetime.js'
+import type * as Lower from '../src/Lower.js'
 import * as Mir from '../src/Mir.js'
 import * as MirEncoding from '../src/MirEncoding.js'
 import * as MirNormalization from '../src/MirNormalization.js'
@@ -19,11 +21,59 @@ import * as SuspensionMir from '../src/SuspensionMir.js'
 import * as SuspensionOwnership from '../src/SuspensionOwnership.js'
 import * as Target from '../src/Target.js'
 import * as Type from '../src/Type.js'
+import * as ValueType from '../src/ValueType.js'
 import { unreachable } from './support/raise.js'
 import { recoveredProvidedWrite, recoveredWriterModule } from './support/recoveredProvidedWrite.js'
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
+
+it('maps proven providers onto lifetime-erased runner requirements without guessing ambiguity', () => {
+  const owner = { module: 'providers', name: 'borrow' }
+  const capability = (ordinal: number) =>
+    Type.nominal('providers', 'Read', [Lifetime.bound(owner, ordinal, 'borrow')])
+  const provide = (ordinal: number): Lower.ProvidedRequirement => {
+    const selected = capability(ordinal)
+    return {
+      capability: selected,
+      providerType: selected,
+      witness: { _tag: 'IdentityConformanceWitness', capability: selected, provider: selected },
+      role: 'DefaultRole',
+      access: 'Exclusive',
+      requirementAccess: 'Exclusive',
+    }
+  }
+  const requested = capability(0)
+  const effect = Type.effect(
+    'i32',
+    [],
+    {
+      environment: Lifetime.staticLifetime,
+      lifetimeBinders: [],
+    },
+    'Shared',
+    [{ capability: requested, role: 'DefaultRole', access: 'Exclusive' }],
+  )
+  const caller = provide(1)
+  assert.deepEqual(ValueType.requirementsFor([caller], effect), [
+    { ...caller, capability: requested },
+  ])
+  const exact = provide(0)
+  assert.deepEqual(ValueType.requirementsFor([caller, exact], effect), [exact])
+  assert.strictEqual(ValueType.requirementsFor([caller, provide(2)], effect), undefined)
+  assert.strictEqual(ValueType.requirementsFor([{ ...caller, role: 'Other' }], effect), undefined)
+  assert.strictEqual(
+    ValueType.requirementsFor([{ ...caller, access: 'Shared' }], effect),
+    undefined,
+  )
+  assert.strictEqual(
+    ValueType.requirementsFor(
+      [{ ...caller, capability: Type.nominal('providers', 'Write') }],
+      effect,
+    ),
+    undefined,
+  )
+})
 
 const lowerStored = Effect.fnUntraced(function* (
   name: string,
@@ -266,20 +316,21 @@ it.effect('binds provider-specialized runs to their exact generated runner and w
     const { module } = yield* lowerStored(
       'stored-effect-mir/provided-runner',
       `import silk.effect { Effect }
-service Counter { effect fn get() -> i32 ? &Counter }
+service Counter<A> { effect fn get() -> A ? &Counter<A> }
 service Meter { effect fn read() -> i32 ? &Meter }
-struct Fixed { value: i32 }
-effect fn get(self: &Fixed) -> i32 { return self.value }
-effect fn read(self: &Fixed) -> i32 { return self.value }
-impl Counter for Fixed { get: Fixed.get }
-impl Meter for Fixed { read: Fixed.read }
-effect fn count() -> i32 ? &Counter { return run Counter.get() }
+struct Fixed<T> { value: T }
+effect fn get<T>(self: &Fixed<T>) -> i32 { return 42 }
+effect fn read(self: &Fixed<i32>) -> i32 { return self.value }
+impl<T> Counter<i32> for Fixed<T> { get: Fixed.get }
+impl Meter for Fixed<i32> { read: Fixed.read }
+effect fn count<A>() -> A ? &Counter<A> { return run Counter.get<A>() }
 effect fn measure() -> i32 ? &Meter { return run Meter.read() }
 pub fn main() -> i32 {
-  let fixed = Fixed { value: 42 }
-  let ignored = run (count() |> Effect.provide(&fixed))
+  let fixed = Fixed<i32> { value: 42 }
+  let other = Fixed<bool> { value: true }
+  let ignored = run (count<i32>() |> Effect.provide(&fixed))
   let alsoIgnored = run (measure() |> Effect.provide(&fixed))
-  return run (count() |> Effect.provide(&fixed))
+  return run (count<i32>() |> Effect.provide(&other))
 }`,
     )
     const providedRuns = module.functions.flatMap((fn) =>
@@ -323,6 +374,85 @@ pub fn main() -> i32 {
       MirVerification.verify(replaceOperation(module, counter, wrongWitness)).map(
         (violation) => violation.rule,
       ),
+      'InvalidEffectOperation',
+    )
+  }),
+)
+
+it.effect('retains admitted service targets through argument lifetime coercions', () =>
+  Effect.gen(function* () {
+    const { snapshot, module } = yield* lowerStored(
+      'stored-effect-mir/service-argument-lifetime',
+      `import silk.effect { Effect }
+struct Request<'a> { value: &'a i32 }
+service Read<'a> { effect fn get(request: Request<'a>) -> i32 ? &Read<'a> }
+struct Holder<'a> { value: &'a i32 }
+impl<'a> Read<'a> for Holder<'a> {
+  effect fn get(self: &Self, request: Request<'a>) -> i32 { return request.value.* }
+}
+fn request<'a>(value: &'a i32) -> Request<'a> { return Request<'a> { value: value } }
+effect fn read<'a>(value: &'a i32) -> i32 ? &Read<'a> {
+  let request = request(value)
+  return run Read.get<'a>(move request)
+}
+pub fn main() -> i32 {
+  let value = 42
+  let provider = Holder { value: &value }
+  return run read(&value) |> Effect.provide(&provider)
+}`,
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    assert.deepEqual(MirVerification.verify(module), [])
+    assert.isTrue(module.functions.some((fn) => fn.id.name.startsWith('impl@0.get$effect$')))
+    const run =
+      module.functions
+        .flatMap(MirVerification.operations)
+        .find(
+          (operation) =>
+            operation._tag === 'RunEffectValue' &&
+            operation.providers.some((provider) => provider.capability.name === 'Read'),
+        ) ?? unreachable('expected provided read')
+    if (run._tag !== 'RunEffectValue') return
+    const provider = run.providers.at(0) ?? unreachable('expected read provider')
+    const withWitnessCapability = (capability: Type.Nominal): Mir.Module => {
+      const witness = { ...provider.witness, capability }
+      const replaced = module.functions.flatMap(MirVerification.operations).reduce(
+        (current, operation) =>
+          operation._tag === 'RunEffectValue' &&
+          operation.runner.module === run.runner.module &&
+          operation.runner.name === run.runner.name
+            ? replaceOperation(current, operation, {
+                ...operation,
+                providers: operation.providers.map((bound) => ({ ...bound, witness })),
+              })
+            : current,
+        module,
+      )
+      return {
+        ...replaced,
+        functions: replaced.functions.map((fn) =>
+          fn.id.module === run.runner.module &&
+          fn.id.name === run.runner.name &&
+          fn.effectRunner !== undefined
+            ? {
+                ...fn,
+                effectRunner: {
+                  ...fn.effectRunner,
+                  providers: fn.effectRunner.providers.map((bound) => ({ ...bound, witness })),
+                },
+              }
+            : fn,
+        ),
+      }
+    }
+    const proofContext = Type.nominal(provider.capability.module, 'Read', [
+      Lifetime.local({ module: provider.capability.module, name: 'main' }, 'witness', 0),
+    ])
+    assert.deepEqual(MirVerification.verify(withWitnessCapability(proofContext)), [])
+    assert.include(
+      MirVerification.verify(
+        withWitnessCapability(Type.nominal(provider.capability.module, 'Read', ['i32'])),
+      ).map((violation) => violation.rule),
       'InvalidEffectOperation',
     )
   }),

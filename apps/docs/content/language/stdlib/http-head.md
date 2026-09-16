@@ -26,7 +26,7 @@ of that caller-visible capacity. Feed, head access, reset, and serialization all
 
 Import as `RequestParser` with `import silk.http_head { RequestParser }`.
 
-Public declarations: 21.
+Public declarations: 22.
 
 <a id="declaration-73696c6b2f687474705f686561643a3a4c696d697473"></a>
 
@@ -732,6 +732,21 @@ pub fieldIndex: silk/option.Option<usize>
 
 Field ordinal when the failure belongs to one field.
 
+<a id="declaration-73696c6b2f687474705f686561643a3a76616c69646174654c696d697473"></a>
+
+## `validateLimits`
+
+```silk
+pub fn validateLimits<'life0>(limits: &'life0 silk/http_head.Limits) -> silk/result.Result<(), silk/http_head.ParseError>
+```
+
+Validates parser storage arithmetic and the owned-storage limit without allocation or input.
+
+### Details
+
+The required storage contains `maxHeadBytes` plus fixed field metadata for `maxFields`.
+Arithmetic overflow returns `SizeOverflow`. Excess storage returns the exact `OwnedBytes` limit.
+
 <a id="declaration-73696c6b2f687474705f686561643a3a52657175657374506172736572"></a>
 
 ## `RequestParser`
@@ -1021,6 +1036,22 @@ pub effect<'env> fn copy<'owner: 'env, 'life1: 'env, 'env>(self: &'life1 Respons
 ```
 
 Copies this head into the shared independently owned HTTP head representation.
+
+<a id="declaration-73696c6b2f687474705f686561643a3a526573706f6e7365486561642e636f70794d61746368696e6748656164657273"></a>
+
+### Method `ResponseHead.copyMatchingHeaders`
+
+```silk
+pub effect<'env> fn copyMatchingHeaders<'owner: 'env, 'name: 'env, 'life2: 'env, 'env>(self: &'life2 ResponseHead<'owner>, name: string<'name>, limits: ValueLimits) -> silk/result.Result<silk/http.OwnedResponseHead, silk/http.ValueError> ! OutOfMemoryError ? &mut Allocator
+```
+
+Copies the status, reason, and only matching fields into independent storage.
+
+#### Details
+
+Matching is ASCII case-insensitive. Duplicate matches remain distinct and preserve wire order.
+The supplied limits apply to the selected fields and complete owned result, not unrelated
+fields retained by the parser.
 
 <a id="declaration-73696c6b2f687474705f686561643a3a696d706c656d656e746174696f6e3a34"></a>
 

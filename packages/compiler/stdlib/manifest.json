@@ -309,6 +309,32 @@
     "namespace": "HttpClientNative"
   },
   {
+    "module": "silk/http_connection_pool",
+    "path": "silk/http_connection_pool.silk",
+    "namespace": "Pool",
+    "aliases": [
+      "Collection",
+      "Config",
+      "ConfigField",
+      "ConnectionKey",
+      "Counts",
+      "CheckoutResult",
+      "CheckoutSource",
+      "EndpointIdentity",
+      "Handle",
+      "PoolContext",
+      "PoolContextCopy",
+      "PoolError",
+      "PoolHandler",
+      "PoolKey"
+    ]
+  },
+  {
+    "module": "silk/http_connection_pool_native",
+    "path": "silk/http_connection_pool_native.silk",
+    "namespace": "PoolNative"
+  },
+  {
     "module": "silk/http_content",
     "path": "silk/http_content.silk",
     "namespace": "ContentReader",
@@ -332,6 +358,35 @@
       "ResponseContext",
       "ReuseDisposition"
     ]
+  },
+  {
+    "module": "silk/http_fetch",
+    "path": "silk/http_fetch.silk",
+    "namespace": "Fetch",
+    "aliases": [
+      "CollectedResponse",
+      "DestinationFailure",
+      "FetchClient",
+      "FetchContentError",
+      "FetchContentReason",
+      "FetchError",
+      "FetchLimit",
+      "FetchOptions",
+      "FetchPhase",
+      "FetchReason",
+      "FetchRequest",
+      "FetchResult",
+      "PoolMode",
+      "ProxyMode",
+      "RepresentationMetadata",
+      "ResponseMetadata",
+      "Sink"
+    ]
+  },
+  {
+    "module": "silk/http_fetch_native",
+    "path": "silk/http_fetch_native.silk",
+    "namespace": "FetchNative"
   },
   {
     "module": "silk/http_head",
@@ -364,6 +419,30 @@
     "module": "silk/http_origin",
     "path": "silk/http_origin.silk",
     "namespace": "Origin"
+  },
+  {
+    "module": "silk/http_proxy",
+    "path": "silk/http_proxy.silk",
+    "namespace": "ProxyConfig",
+    "aliases": [
+      "ProxyAuth",
+      "ProxyAuthContextId",
+      "ProxyAdmissionError",
+      "ProxyComponent",
+      "ProxyConfigId",
+      "ProxyError",
+      "ProxyLimit",
+      "ProxyReason",
+      "BypassPolicy",
+      "Route",
+      "RouteKey",
+      "RouteMode"
+    ]
+  },
+  {
+    "module": "silk/http_redirect",
+    "path": "silk/http_redirect.silk",
+    "namespace": "Redirect"
   },
   {
     "module": "silk/http_request",
@@ -1011,6 +1090,29 @@
     "module": "silk/wasm_start",
     "path": "silk/wasm_start.silk",
     "namespace": "WasmStart"
+  },
+  {
+    "module": "silk/websocket_server",
+    "path": "silk/websocket_server.silk",
+    "namespace": "WebSocketServer",
+    "aliases": [
+      "CloseData",
+      "CloseDataReason",
+      "CloseLimitKind",
+      "CloseReason",
+      "ControlPayload",
+      "Event",
+      "Failure",
+      "LimitKind",
+      "Limits",
+      "Operation",
+      "PeerCloseData",
+      "ProtocolReason",
+      "ServerWebSocket",
+      "State",
+      "Utf8Component",
+      "WebSocketError"
+    ]
   },
   {
     "module": "silk/websocket_upgrade",

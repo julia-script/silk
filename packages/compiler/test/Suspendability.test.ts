@@ -20,6 +20,38 @@ import * as Projections from './support/projections.js'
 
 const encoder = new TextEncoder()
 
+it.effect('lowers service calls inside a generic scoped callback with a borrowed capture', () =>
+  Effect.gen(function* () {
+    const self = yield* AnalysisFixture.retainingMain(
+      'suspendability/scoped-service-capture',
+      encoder.encode(`import silk.effect {Effect}
+service Clock { effect fn now() -> i32 ? &mut Clock }
+struct ReadyClock {}
+impl Clock for ReadyClock { effect fn now(self: &mut Self) -> i32 { return 42 } }
+struct Guard<P> { provider: P }
+struct Config<'data> { value: &'data i32 }
+effect fn scoped<P>(provider: P, config: &Config) -> i32 ? &mut Clock {
+  let use = effect fn(owned: &mut Guard<P>) -> i32 ? &mut Clock {
+    let value = run Clock.now()
+    drop owned
+    return value + config.value.*
+  }
+  let release = effect fn(owned: &mut Guard<P>) -> () { drop owned return () }
+  return run Effect.useReleaseNonParking(Guard<P> {provider: move provider}, move use, move release)
+}
+pub fn main() -> i32 {
+  let mut clock = ReadyClock {}
+  let value = 0
+  let config = Config {value: &value}
+  return run scoped((), &config) |> Effect.provideMut<Clock>(&mut clock)
+}`),
+      'wasm32-unknown-unknown',
+    )
+    assert.deepEqual(Analysis.diagnostics(self), [])
+    assert.deepEqual(MirVerification.verify(Analysis.loweredMir(self)), [])
+  }),
+)
+
 const snapshot = (source: string) =>
   AnalysisFixture.retainingMain(
     'suspendability/main',

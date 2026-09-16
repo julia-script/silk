@@ -13,7 +13,7 @@ before reuse. Cleanup closes terminally without a hidden flush, body drain, retr
 
 Import as `Client` with `import silk.http_client as Client`.
 
-Public declarations: 29.
+Public declarations: 44.
 
 <a id="declaration-73696c6b2f687474705f636c69656e743a3a436f6e6e656374696f6e5068617365"></a>
 
@@ -323,7 +323,7 @@ Maximum aggregate informational head wire bytes; use 65536 for the standard defa
 pub maxDiscardWireBytes: u64
 ```
 
-Maximum wire bytes consumed by one explicit discard operation.
+Maximum wire bytes consumed by one explicit discard or drain operation; at most 1048576.
 
 <a id="declaration-73696c6b2f687474705f636c69656e743a3a4c696d6974732e64656661756c7473"></a>
 
@@ -593,6 +593,130 @@ ClientError.Timeout: ClientError
 
 Reports the overall absolute deadline expiring.
 
+<a id="declaration-73696c6b2f687474705f636c69656e743a3a76616c69646174654c696d697473"></a>
+
+## `validateLimits`
+
+```silk
+pub fn validateLimits<'life0>(limits: &'life0 silk/http_client.Limits) -> silk/result.Result<(), silk/http_client.ClientError>
+```
+
+Validates connection limits without allocation, transport contact, or parser construction.
+
+### Details
+
+Read and write capacities must be positive. The discard limit must not exceed 1,048,576 wire
+bytes. Head parser storage must have representable metadata and fit its owned-storage limit.
+Head storage failures retain the exact parser error in `ClientError.Head`.
+
+<a id="declaration-73696c6b2f687474705f636c69656e743a3a446973636172644f7574636f6d65"></a>
+
+## `DiscardOutcome`
+
+```silk
+pub enum DiscardOutcome
+```
+
+The result of a bounded response-framing discard.
+
+<a id="declaration-73696c6b2f687474705f636c69656e743a3a446973636172644f7574636f6d653a3a6d656d6265723a30"></a>
+
+### `Completed`
+
+```silk
+Completed = 0
+```
+
+The complete response boundary was reached within the limit.
+
+<a id="declaration-73696c6b2f687474705f636c69656e743a3a446973636172644f7574636f6d653a3a6d656d6265723a31"></a>
+
+### `CapReached`
+
+```silk
+CapReached = 1
+```
+
+The next response-framing byte would exceed the limit.
+
+<a id="declaration-73696c6b2f687474705f636c69656e743a3a5265757365456c69676962696c697479"></a>
+
+## `ReuseEligibility`
+
+```silk
+pub union ReuseEligibility
+```
+
+Whether one owned connection can return to an idle pool.
+
+<a id="declaration-73696c6b2f687474705f636c69656e743a3a5265757365456c69676962696c6974793a3a76617269616e743a30"></a>
+
+### `Eligible`
+
+```silk
+ReuseEligibility.Eligible: ReuseEligibility
+```
+
+The connection has complete persistent boundaries and can return to an idle pool.
+
+<a id="declaration-73696c6b2f687474705f636c69656e743a3a5265757365456c69676962696c6974793a3a76617269616e743a31"></a>
+
+### `NotReady`
+
+```silk
+ReuseEligibility.NotReady: ReuseEligibility
+```
+
+The connection is not ready after one complete reusable exchange.
+
+<a id="declaration-73696c6b2f687474705f636c69656e743a3a5265757365456c69676962696c6974793a3a76617269616e743a32"></a>
+
+### `NotOwned`
+
+```silk
+ReuseEligibility.NotOwned: ReuseEligibility
+```
+
+The connection no longer owns armed physical close authority.
+
+<a id="declaration-73696c6b2f687474705f636c69656e743a3a5265757365456c69676962696c6974793a3a76617269616e743a33"></a>
+
+### `RequestLimit`
+
+```silk
+ReuseEligibility.RequestLimit: ReuseEligibility
+```
+
+The connection has reached its finite request-count limit.
+
+<a id="declaration-73696c6b2f687474705f636c69656e743a3a5265757365456c69676962696c6974793a3a76617269616e743a34"></a>
+
+### `RetainedInput`
+
+```silk
+ReuseEligibility.RetainedInput { bytes: usize }: ReuseEligibility
+```
+
+The connection retains bytes after the complete response boundary.
+
+<a id="declaration-73696c6b2f687474705f636c69656e743a3a5265757365456c69676962696c6974793a3a76617269616e743a343a3a6669656c643a30"></a>
+
+#### Field `bytes`
+
+```silk
+pub bytes: usize
+```
+
+The exact retained byte count.
+
+<a id="declaration-73696c6b2f687474705f636c69656e743a3a696d706c656d656e746174696f6e3a31"></a>
+
+## Implementation `Copy for ReuseEligibility`
+
+```silk
+impl Copy for ReuseEligibility
+```
+
 <a id="declaration-73696c6b2f687474705f636c69656e743a3a577269746550726f6772657373"></a>
 
 ## `WriteProgress`
@@ -643,7 +767,7 @@ pub totalWire: u64
 
 Cumulative encoded wire bytes.
 
-<a id="declaration-73696c6b2f687474705f636c69656e743a3a696d706c656d656e746174696f6e3a31"></a>
+<a id="declaration-73696c6b2f687474705f636c69656e743a3a696d706c656d656e746174696f6e3a32"></a>
 
 ## Implementation `Copy for WriteProgress`
 
@@ -690,6 +814,21 @@ pub fn transportContext<P, 'view>(self: &'view Connection<P>) -> silk/http_clien
 ```
 
 Borrows the provider for immutable route and connection-context inspection.
+
+<a id="declaration-73696c6b2f687474705f636c69656e743a3a7265757365456c69676962696c697479"></a>
+
+## `reuseEligibility`
+
+```silk
+pub fn reuseEligibility<P, 'life1>(connection: &'life1 silk/http_client.Connection<P>) -> ReuseEligibility
+```
+
+Returns whether an owned connection can return to an idle pool without resetting client state.
+
+### Details
+
+`Eligible` requires Ready phase, armed physical ownership, request-budget headroom, and no
+retained input. Other results identify the first failed condition without exposing counters.
 
 <a id="declaration-73696c6b2f687474705f636c69656e743a3a5472616e73706f7274436f6e74657874"></a>
 
@@ -762,6 +901,269 @@ effect<'call> fn handle<'call: 'call>(handler: Self, connection: &'call mut silk
 
 Runs inside an exclusive connection scope and preserves caller channels.
 
+<a id="declaration-73696c6b2f687474705f636c69656e743a3a526f75746550726f746f636f6c"></a>
+
+## `RouteProtocol`
+
+```silk
+pub enum RouteProtocol
+```
+
+The HTTP version and TLS application-protocol policy for one routed scope.
+
+<a id="declaration-73696c6b2f687474705f636c69656e743a3a526f75746550726f746f636f6c3a3a6d656d6265723a30"></a>
+
+### `Http10`
+
+```silk
+Http10 = 0
+```
+
+Uses HTTP/1.0 and sends no TLS application-protocol extension.
+
+<a id="declaration-73696c6b2f687474705f636c69656e743a3a526f75746550726f746f636f6c3a3a6d656d6265723a31"></a>
+
+### `OptionalHttp11`
+
+```silk
+OptionalHttp11 = 1
+```
+
+Uses HTTP/1.1 and permits the TLS peer to omit application-protocol selection.
+
+<a id="declaration-73696c6b2f687474705f636c69656e743a3a526f75746550726f746f636f6c3a3a6d656d6265723a32"></a>
+
+### `RequiredHttp11`
+
+```silk
+RequiredHttp11 = 2
+```
+
+Uses HTTP/1.1 and requires the TLS peer to select `http/1.1`.
+
+<a id="declaration-73696c6b2f687474705f636c69656e743a3a526f75746553657474696e6773"></a>
+
+## `RouteSettings`
+
+```silk
+pub struct RouteSettings
+```
+
+Complete finite settings for one target-neutral routed HTTP scope.
+
+<a id="declaration-73696c6b2f687474705f636c69656e743a3a526f75746553657474696e67733a3a6669656c643a30"></a>
+
+### Field `http`
+
+```silk
+pub http: Limits
+```
+
+Connection, parser, buffering, and message limits.
+
+<a id="declaration-73696c6b2f687474705f636c69656e743a3a526f75746553657474696e67733a3a6669656c643a31"></a>
+
+### Field `request`
+
+```silk
+pub request: HeaderLimits
+```
+
+Request-head value limits used for the generated CONNECT request.
+
+<a id="declaration-73696c6b2f687474705f636c69656e743a3a526f75746553657474696e67733a3a6669656c643a32"></a>
+
+### Field `maxRequestHeadBytes`
+
+```silk
+pub maxRequestHeadBytes: usize
+```
+
+Maximum owned bytes in the generated CONNECT head.
+
+<a id="declaration-73696c6b2f687474705f636c69656e743a3a526f75746553657474696e67733a3a6669656c643a33"></a>
+
+### Field `maxProxyCredentialBytes`
+
+```silk
+pub maxProxyCredentialBytes: usize
+```
+
+Maximum owned proxy-credential bytes in the generated CONNECT head.
+
+<a id="declaration-73696c6b2f687474705f636c69656e743a3a526f75746553657474696e67733a3a6669656c643a34"></a>
+
+### Field `protocol`
+
+```silk
+pub protocol: RouteProtocol
+```
+
+HTTP version and TLS application-protocol policy.
+
+<a id="declaration-73696c6b2f687474705f636c69656e743a3a526f75746553657474696e67733a3a6669656c643a35"></a>
+
+### Field `tls`
+
+```silk
+pub tls: ClientLimits
+```
+
+TLS client protocol limits.
+
+<a id="declaration-73696c6b2f687474705f636c69656e743a3a526f75746553657474696e67733a3a6669656c643a36"></a>
+
+### Field `handshakeDurationNanoseconds`
+
+```silk
+pub handshakeDurationNanoseconds: u64
+```
+
+Finite TLS handshake duration in nanoseconds.
+
+<a id="declaration-73696c6b2f687474705f636c69656e743a3a696d706c656d656e746174696f6e3a33"></a>
+
+## Implementation `Copy for RouteSettings`
+
+```silk
+impl Copy for RouteSettings
+```
+
+<a id="declaration-73696c6b2f687474705f636c69656e743a3a4163717569726564526f757465436f6e74657874"></a>
+
+## `AcquiredRouteContext`
+
+```silk
+pub service AcquiredRouteContext<P, A, E, ?R>
+```
+
+Lexical consumer of one plain provider supplied to a target-neutral route acquisition scope.
+
+<a id="declaration-73696c6b2f687474705f636c69656e743a3a4163717569726564526f757465436f6e746578743a3a6f7065726174696f6e3a757365"></a>
+
+### Operation `use`
+
+```silk
+effect<'env> fn use<'env>(provider: P) -> A ! E ? R | &mut silk/http_client.AcquiredRouteContext<P, A, E, ? R> where &mut P provides &HttpTransport from &mut HttpTransport | &mut MonotonicClock | &mut Allocator | &mut Random, &mut P provides &HttpTransport from &mut HttpTransport, &mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock | &mut Allocator | &mut Random, &mut P provides &ByteDuplex from &mut ByteDuplex, R in Without<R, &ByteDuplex>, R in Without<R, &HttpTransport>
+```
+
+Consumes the exact provider selected for the requested physical peer.
+
+<a id="declaration-73696c6b2f687474705f636c69656e743a3a526f757465436c69656e74"></a>
+
+## `RouteClient`
+
+```silk
+pub interface RouteClient<P, A, E, AcquisitionError, ?AcquisitionRequirements, ?R>
+```
+
+A target-neutral owner that acquires one exact physical peer for a routed scope.
+
+<a id="declaration-73696c6b2f687474705f636c69656e743a3a526f757465436c69656e743a3a6f7065726174696f6e3a73657474696e6773"></a>
+
+### Operation `settings`
+
+```silk
+fn settings<'life6>(client: &'life6 Self) -> RouteSettings
+```
+
+Returns all HTTP and TLS settings without applying hidden defaults.
+
+<a id="declaration-73696c6b2f687474705f636c69656e743a3a526f757465436c69656e743a3a6f7065726174696f6e3a61637175697265"></a>
+
+### Operation `acquire`
+
+```silk
+effect<'env> fn acquire<'env>(client: Self, peer: Origin, deadline: silk/option.Option<silk/system_clock.Instant>) -> A ! E | AcquisitionError ? AcquisitionRequirements | R | &mut silk/http_client.AcquiredRouteContext<P, A, E, ? R> where R in Without<R, &ByteDuplex>, R in Without<R, &HttpTransport>
+```
+
+Acquires one owned plain provider for `peer` under the unchanged absolute `deadline`.
+
+<a id="declaration-73696c6b2f687474705f636c69656e743a3a526f7574655472616e73706f7274"></a>
+
+## `RouteTransport`
+
+```silk
+pub struct RouteTransport<'transport, 'provider: 'transport, 'tunnel: 'provider, P>
+```
+
+The uniform final HTTP transport lent to a routed callback.
+
+<a id="declaration-73696c6b2f687474705f636c69656e743a3a526f75746548616e646c6572"></a>
+
+## `RouteHandler`
+
+```silk
+pub interface RouteHandler<'configuration, P, A, E, ?R>
+```
+
+A higher-ranked callback for one selected route and its final HTTP connection.
+
+<a id="declaration-73696c6b2f687474705f636c69656e743a3a526f75746548616e646c65723a3a6f7065726174696f6e3a68616e646c65"></a>
+
+### Operation `handle`
+
+```silk
+effect<'call> fn handle<'call: 'call, 'transport: 'call, 'provider: 'transport + 'call, 'tunnel: 'provider + 'call>(handler: Self, route: silk/http_proxy.Route<'configuration>, connection: &'call mut silk/http_client.Connection<silk/http_client.RouteTransport<'transport, 'provider, 'tunnel, P>>) -> A ! E ? R where &mut P provides &HttpTransport from &mut HttpTransport | &mut MonotonicClock | &mut Allocator | &mut Random, &mut P provides &HttpTransport from &mut HttpTransport, &mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock | &mut Allocator | &mut Random, &mut P provides &ByteDuplex from &mut ByteDuplex
+```
+
+Runs after route acquisition and required origin authentication complete.
+
+<a id="declaration-73696c6b2f687474705f636c69656e743a3a696d706c656d656e746174696f6e3a34"></a>
+
+## Implementation `HttpTransport for silk/http_client.RouteTransport<'transport, 'provider, 'tunnel, P>`
+
+```silk
+impl HttpTransport for silk/http_client.RouteTransport<'transport, 'provider, 'tunnel, P>
+```
+
+<a id="declaration-73696c6b2f687474705f636c69656e743a3a696d706c656d656e746174696f6e3a343a3a6f7065726174696f6e3a30"></a>
+
+### Operation `readSomeRaw`
+
+```silk
+readSomeRaw = RouteTransport.read
+```
+
+<a id="declaration-73696c6b2f687474705f636c69656e743a3a696d706c656d656e746174696f6e3a343a3a6f7065726174696f6e3a31"></a>
+
+### Operation `writeSomeRaw`
+
+```silk
+writeSomeRaw = RouteTransport.write
+```
+
+<a id="declaration-73696c6b2f687474705f636c69656e743a3a696d706c656d656e746174696f6e3a343a3a6f7065726174696f6e3a32"></a>
+
+### Operation `flush`
+
+```silk
+flush = RouteTransport.flushOutput
+```
+
+<a id="declaration-73696c6b2f687474705f636c69656e743a3a696d706c656d656e746174696f6e3a343a3a6f7065726174696f6e3a33"></a>
+
+### Operation `close`
+
+```silk
+close = RouteTransport.closeTransport
+```
+
+<a id="declaration-73696c6b2f687474705f636c69656e743a3a77697468526f757465"></a>
+
+## `withRoute`
+
+```silk
+pub effect<'env> fn withRoute<'configuration: 'env, P, A, E, AcquisitionError, ?R, ?AcquisitionRequirements, H: 'env, C: 'env, 'env>(client: C, route: silk/http_proxy.Route<'configuration>, preparedTrust: silk/option.Option<silk/trust_snapshot.TrustSnapshot>, deadline: silk/option.Option<silk/system_clock.Instant>, handler: H) -> A ! E | AcquisitionError | ProxyError | ClientError | Tls.ConnectionError | IdentityError | OutOfMemoryError ? R | AcquisitionRequirements | &mut Allocator | &mut MonotonicClock | &mut SystemClock | &mut Random where &mut P provides &HttpTransport from &mut HttpTransport | &mut MonotonicClock | &mut Allocator | &mut Random, &mut P provides &HttpTransport from &mut HttpTransport, &mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock | &mut Allocator | &mut Random, &mut P provides &ByteDuplex from &mut ByteDuplex, R in Without<R, &ByteDuplex>, R in Without<R, &HttpTransport>
+```
+
+Acquires and lends one route-selected HTTP connection under one unchanged absolute deadline.
+
+### Details
+
+Trust presence is validated before acquisition. Forward uses the plain proxy connection. A
+Tunnel sends CONNECT before it authenticates the original origin and lends the secured channel.
+
 <a id="declaration-73696c6b2f687474705f636c69656e743a3a6d616b654f776e6564"></a>
 
 ## `makeOwned`
@@ -808,7 +1210,7 @@ Closes an owned connection terminally without flushing or draining; repeated clo
 ## `withExchange`
 
 ```silk
-pub effect<'env> fn withExchange<'exchange: 'env, 'callback: 'env, P: 'env, A, E, ?R, 'life6: 'env, 'env>(connection: &'exchange mut silk/http_client.Connection<P>, request: &'life6 silk/http_request.PreparedRequest, requestedOptions: RequestOptions, callback: for<'call, 'exchangeView: 'call> once fn<'callback>(&'call mut silk/http_client.Exchange<'exchangeView, P>) -> once Effect<'call; A ! E ? R>) -> A ! E | ClientError | OutOfMemoryError ? R | &mut Allocator
+pub effect<'env> fn withExchange<'exchange: 'env, 'callback: 'env, P: 'env, A, E, ?R, 'life6: 'env, 'env>(connection: &'exchange mut silk/http_client.Connection<P>, request: &'life6 silk/http_request.PreparedRequest, requestedOptions: RequestOptions, callback: for<'call, 'exchangeView: 'call> once fn<'callback>(&'call mut silk/http_client.Exchange<'exchangeView, P>) -> once Effect<'call & 'callback; A ! E ? R>) -> A ! E | ClientError | OutOfMemoryError ? R | &mut Allocator
 ```
 
 Lends one prepared exchange. Incomplete or failed callbacks permanently remove reuse authority.
@@ -853,6 +1255,21 @@ pub effect<'env> fn receive<'exchange: 'env, P: 'env, 'life2: 'env, 'env>(exchan
 
 Receives one bounded head; informational and final error statuses remain ordinary response values.
 
+<a id="declaration-73696c6b2f687474705f636c69656e743a3a7265636569766546696e616c"></a>
+
+## `receiveFinal`
+
+```silk
+pub effect<'env> fn receiveFinal<'exchange: 'env, P: 'env, 'life2: 'env, 'env>(exchange: &'life2 mut silk/http_client.Exchange<'exchange, P>) -> u16 ! ClientError | OutOfMemoryError ? &mut MonotonicClock | &mut Allocator | &mut Random where &mut P provides &HttpTransport from &mut HttpTransport | &mut MonotonicClock | &mut Allocator | &mut Random
+```
+
+Receives bounded informational heads until the shared parser reaches one final response.
+
+### Details
+
+Parser, head, informational-budget, 101-upgrade, transport, and deadline failures remain the
+original `ClientError`. This operation does not copy response metadata or consume a body.
+
 <a id="declaration-73696c6b2f687474705f636c69656e743a3a72656164536f6d65"></a>
 
 ## `readSome`
@@ -862,6 +1279,57 @@ pub effect<'env> fn readSome<'exchange: 'env, P: 'env, 'life2: 'env, 'life3: 'en
 ```
 
 Reads one framed payload prefix without consuming the next message suffix.
+
+<a id="declaration-73696c6b2f687474705f636c69656e743a3a6469736361726452656d61696e696e6741744d6f7374"></a>
+
+## `discardRemainingAtMost`
+
+```silk
+pub effect<'env> fn discardRemainingAtMost<'exchange: 'env, P: 'env, 'life2: 'env, 'env>(exchange: &'life2 mut silk/http_client.Exchange<'exchange, P>, maxWireBytes: u64, deadline: silk/option.Option<silk/system_clock.Instant>) -> DiscardOutcome ! ClientError | OutOfMemoryError ? &mut MonotonicClock | &mut Allocator | &mut Random where &mut P provides &HttpTransport from &mut HttpTransport | &mut MonotonicClock | &mut Allocator | &mut Random
+```
+
+Discards response framing up to one aggregate wire-byte limit and reports whether it completed.
+
+### When to use
+
+Use this operation when a caller can continue after the discard reaches its cap.
+
+### Details
+
+The operation uses the smaller caller limit and `Limits.maxDiscardWireBytes`. The limit
+includes payload and framing bytes. Its explicit cleanup deadline is clamped to the exchange's
+unchanged operation deadline. `Completed` permits a later [`finishResponse`](#declaration-73696c6b2f687474705f636c69656e743a3a66696e697368526573706f6e7365) call. `CapReached`
+leaves the exchange incomplete and removes reuse authority.
+
+### Gotchas
+
+Malformed framing and read, deadline, allocation, or transport failures remain typed failures.
+
+<a id="declaration-73696c6b2f687474705f636c69656e743a3a647261696e416e6446696e69736841744d6f7374"></a>
+
+## `drainAndFinishAtMost`
+
+```silk
+pub effect<'env> fn drainAndFinishAtMost<'exchange: 'env, P: 'env, 'life2: 'env, 'env>(exchange: &'life2 mut silk/http_client.Exchange<'exchange, P>, maxWireBytes: u64, deadline: Instant) -> DiscardOutcome ! ClientError | OutOfMemoryError ? &mut MonotonicClock | &mut Allocator | &mut Random where &mut P provides &HttpTransport from &mut HttpTransport | &mut MonotonicClock | &mut Allocator | &mut Random
+```
+
+Drains and finishes the selected response under one finite aggregate wire-byte limit.
+
+### When to use
+
+Use this operation inside the live exchange when a response must complete before connection
+reuse. The standard client limit is 65536 bytes, and the maximum admitted limit is 1048576.
+
+### Details
+
+The operation uses the smaller caller limit and `Limits.maxDiscardWireBytes`. The limit counts
+payload, framing, and trailers. The finite deadline is clamped to the request deadline. If a
+content decoder was selected, the operation validates it before it calls [`finishResponse`](#declaration-73696c6b2f687474705f636c69656e743a3a66696e697368526573706f6e7365).
+
+### Gotchas
+
+`CapReached` leaves the exchange incomplete. Timeout, malformed framing, read, allocation,
+transport, and content-decoder failures remain their original typed failures.
 
 <a id="declaration-73696c6b2f687474705f636c69656e743a3a6469736361726452656d61696e696e67"></a>
 
@@ -914,6 +1382,27 @@ pub struct Tunnel<'tunnel, P>
 
 An exclusive non-HTTP channel that reads the buffered response suffix first.
 
+<a id="declaration-73696c6b2f687474705f636c69656e743a3a54756e6e656c2e7472616e73666572427974654475706c6578"></a>
+
+### Method `Tunnel.transferByteDuplex`
+
+```silk
+pub effect<'env> fn transferByteDuplex<'tunnel: 'env, P: 'env, 'transfer: 'env, 'callback: 'env, A, E, ?CallbackRequirements, 'env>(self: &'transfer mut Tunnel<'tunnel, P>, callback: for<'call, 'duplexView: 'call> once fn<'callback>(&'call mut silk/http_client.TransferredTunnel<'duplexView, P>) -> once Effect<'call & 'callback; A ! E ? CallbackRequirements>) -> A ! E | ClientError ? CallbackRequirements where &mut P provides &ByteDuplex from &mut ByteDuplex, CallbackRequirements in Without<CallbackRequirements, &ByteDuplex>
+```
+
+Transfers the exact tunnel provider and retained input suffix to one scoped byte duplex.
+
+#### Details
+
+This operation allocates no memory. It constructs the complete duplex before the HTTP owner
+transfers its physical close authority. The callback owns that authority until cleanup.
+Cleanup closes the duplex after success, typed failure, or structured cancellation.
+
+#### Gotchas
+
+After scoped finalization, a repeated transfer returns `InvalidState` and leaves the existing
+Closed authority unchanged.
+
 <a id="declaration-73696c6b2f687474705f636c69656e743a3a54756e6e656c2e72656164536f6d65"></a>
 
 ### Method `Tunnel.readSome`
@@ -934,26 +1423,93 @@ pub effect<'env> fn writeSome<'tunnel: 'env, P: 'env, 'life2: 'env, 'life3: 'env
 
 Writes one tunnel prefix under the caller's absolute deadline.
 
+<a id="declaration-73696c6b2f687474705f636c69656e743a3a5472616e7366657272656454756e6e656c"></a>
+
+## `TransferredTunnel`
+
+```silk
+pub struct TransferredTunnel<'tunnel, P>
+```
+
+One transferred tunnel that owns the connection's byte transport and retained input suffix.
+
+### Details
+
+Reads use the retained suffix before the provider. All deadlines are clamped to the exchange
+deadline. Complete close is terminal and attempts the concrete provider close at most one time.
+
 <a id="declaration-73696c6b2f687474705f636c69656e743a3a7769746854756e6e656c"></a>
 
 ## `withTunnel`
 
 ```silk
-pub effect<'env> fn withTunnel<'tunnel: 'env, 'exchange: 'tunnel + 'env, 'callback: 'env, P: 'env, A, E, ?R, 'env>(exchange: &'tunnel mut silk/http_client.Exchange<'exchange, P>, callback: for<'call, 'tunnelView: 'call> once fn<'callback>(&'call mut silk/http_client.Tunnel<'tunnelView, P>) -> once Effect<'call; A ! E ? R>) -> A ! E | ClientError ? R
+pub effect<'env> fn withTunnel<'tunnel: 'env, 'exchange: 'tunnel + 'env, 'callback: 'env, P: 'env, A, E, ?R, 'env>(exchange: &'tunnel mut silk/http_client.Exchange<'exchange, P>, callback: for<'call, 'tunnelView: 'call> once fn<'callback>(&'call mut silk/http_client.Tunnel<'tunnelView, P>) -> once Effect<'call & 'callback; A ! E ? R>) -> A ! E | ClientError ? R
 ```
 
 Hands successful CONNECT to one scoped tunnel callback and permanently consumes HTTP reuse authority.
+
+<a id="declaration-73696c6b2f687474705f636c69656e743a3a696d706c656d656e746174696f6e3a36"></a>
+
+## Implementation `ByteDuplex for silk/http_client.TransferredTunnel<'tunnel, P>`
+
+```silk
+impl ByteDuplex for silk/http_client.TransferredTunnel<'tunnel, P>
+```
+
+<a id="declaration-73696c6b2f687474705f636c69656e743a3a696d706c656d656e746174696f6e3a363a3a6f7065726174696f6e3a30"></a>
+
+### Operation `readSomeRaw`
+
+```silk
+readSomeRaw = TransferredTunnel.read
+```
+
+<a id="declaration-73696c6b2f687474705f636c69656e743a3a696d706c656d656e746174696f6e3a363a3a6f7065726174696f6e3a31"></a>
+
+### Operation `writeSomeRaw`
+
+```silk
+writeSomeRaw = TransferredTunnel.write
+```
+
+<a id="declaration-73696c6b2f687474705f636c69656e743a3a696d706c656d656e746174696f6e3a363a3a6f7065726174696f6e3a32"></a>
+
+### Operation `flushRaw`
+
+```silk
+flushRaw = TransferredTunnel.flushOutput
+```
+
+<a id="declaration-73696c6b2f687474705f636c69656e743a3a696d706c656d656e746174696f6e3a363a3a6f7065726174696f6e3a33"></a>
+
+### Operation `shutdownWriteRaw`
+
+```silk
+shutdownWriteRaw = TransferredTunnel.shutdownOutput
+```
+
+<a id="declaration-73696c6b2f687474705f636c69656e743a3a696d706c656d656e746174696f6e3a363a3a6f7065726174696f6e3a34"></a>
+
+### Operation `closeRaw`
+
+```silk
+closeRaw = TransferredTunnel.closeTransport
+```
 
 <a id="declaration-73696c6b2f687474705f636c69656e743a3a626567696e436f6e74656e74"></a>
 
 ## `beginContent`
 
 ```silk
-pub effect<'env> fn beginContent<'head: 'env, 'exchange: 'head + 'env, P: 'env, 'env>(exchange: &'head mut silk/http_client.Exchange<'exchange, P>, mode: ContentMode, limits: ContentLimits) -> () ! ClientError | silk/http_content.ContentError<'head> | OutOfMemoryError ? &mut Allocator | &mut MonotonicClock
+pub effect<'env> fn beginContent<'head: 'env, 'exchange: 'head + 'env, P: 'env, 'env>(exchange: &'head mut silk/http_client.Exchange<'exchange, P>, mode: ContentMode, limits: ContentLimits) -> AppliedPlan ! ClientError | silk/http_content.ContentError<'head> | OutOfMemoryError ? &mut Allocator | &mut MonotonicClock
 ```
 
 Selects one content pipeline from this exchange's current head before a nonempty raw read or a discard.
+
+### Details
+
 Planning errors borrow the head and must be handled before the exchange is used again.
+The returned copy records the applied representation policy without exposing the affine decoder.
 
 <a id="declaration-73696c6b2f687474705f636c69656e743a3a72656164436f6e74656e74536f6d65"></a>
 

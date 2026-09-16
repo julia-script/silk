@@ -6,9 +6,14 @@ import * as CleanupPlan from '../src/CleanupPlan.js'
 import * as Intrinsic from '../src/Intrinsic.js'
 import * as MirVerification from '../src/MirVerification.js'
 import * as SourceFile from '../src/SourceFile.js'
+import * as SourceResolver from '../src/SourceResolver.js'
 import * as Stdlib from '../src/Stdlib.js'
 import * as Projections from './support/projections.js'
 import { httpValuesAcceptanceSource } from './support/httpValuesAcceptance.js'
+import {
+  httpRedirectAffineDiagnosticSource,
+  httpProxyRedirectPolicyAcceptanceSource,
+} from './support/httpRedirectAcceptance.js'
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
@@ -108,8 +113,12 @@ pub fn main() -> i32 { return 42 }`
         '  pub fn fromUri(',
         '\n/// Validates Host cardinality',
       )
-      assert.lengthOf(fromUri.match(/usize\.checkedAdd/g) ?? [], 2)
-      assert.lengthOf(fromUri.match(/sizeFailure\(/g) ?? [], 2)
+      assert.lengthOf(fromUri.match(/usize\.checkedAdd/g) ?? [], 3)
+      assert.lengthOf(fromUri.match(/sizeFailure\(/g) ?? [], 3)
+      assert.include(
+        fromUri,
+        'if path.length == usize.ZERO {\n        required = match move usize.checkedAdd(required, usize.ONE)',
+      )
 
       assert.isFalse(
         Intrinsic.all().some((actor) =>
@@ -284,4 +293,109 @@ pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
       )
     }),
   60_000,
+)
+
+it.effect(
+  'compiles HTTP pool, proxy, and redirect policy witnesses and verifies their lowered MIR once',
+  () =>
+    Effect.gen(function* () {
+      // Keep the positive composite free of diagnostics so its one retained program can lower.
+      // The focused frontend-only assertion below owns the intentional affine failures.
+      const module = 'http-proxy-redirect/policy'
+      // The native copy witness has a borrowed input, so retain its closed definition explicitly
+      // instead of expecting an uncalled declaration to become reachable from main.
+      const snapshot = yield* Analysis.makeRealized({
+        root: SourceFile.make(module, ascii(httpProxyRedirectPolicyAcceptanceSource)),
+        configuration: AnalysisFixture.configuration(module, 'x86_64-unknown-linux-gnu', [
+          'main',
+          'nativePoolCopyWitness',
+        ]),
+      }).pipe(Effect.provide(SourceResolver.empty))
+      assert.deepEqual(diagnosticSummary(snapshot), [])
+      const mir = Analysis.loweredMir(snapshot)
+      assert.deepEqual(MirVerification.verify(mir), [])
+      for (const operation of ['Config.defaults', 'ConnectionKey.direct', 'ConnectionKey.origin']) {
+        assert.isTrue(
+          mir.functions.some(
+            (fn) =>
+              fn.id.module === 'silk/http_connection_pool' && fn.id.name.startsWith(operation),
+          ),
+          `missing lowered pool declaration: ${operation}`,
+        )
+      }
+      for (const witness of ['poolDeclarationsWitness', 'poolCountsShape']) {
+        assert.isTrue(
+          mir.functions.some((fn) => fn.id.name.startsWith(witness)),
+          `missing lowered pool declaration witness: ${witness}`,
+        )
+      }
+      assert.isTrue(
+        mir.functions.some(
+          (fn) =>
+            fn.id.module === 'silk/http_connection_pool_native' &&
+            fn.id.name.startsWith('copyHandle$effect$'),
+        ),
+        'missing lowered native pool context copy witness',
+      )
+      for (const operation of [
+        'withEmptyResponse',
+        'withBytesResponse',
+        'withOneShotResponse',
+        'withReplayResponse',
+      ]) {
+        assert.isTrue(
+          mir.functions.some(
+            (fn) =>
+              fn.id.module === 'silk/http_redirect' &&
+              fn.id.name.startsWith(`${operation}$effect$`),
+          ),
+          `missing lowered redirect operation: ${operation}`,
+        )
+      }
+      for (const witness of [
+        'redirectEmptyContractWitness',
+        'redirectBytesContractWitness',
+        'redirectOneShotContractWitness',
+        'redirectReplayContractWitness',
+      ]) {
+        assert.isTrue(
+          mir.functions.some((fn) => fn.id.name.startsWith(`${witness}$effect$`)),
+          `missing lowered exact-row witness: ${witness}`,
+        )
+      }
+      assert.isTrue(
+        mir.functions.some((fn) => fn.id.name === 'redirectPolicyCompileWitness'),
+        'missing lowered redirect policy behavior sentinel',
+      )
+      assert.isTrue(
+        mir.functions.some((fn) => fn.id.name.startsWith('verifyRedirectPolicy$effect$')),
+        'missing lowered allocation-backed redirect behavior sentinel',
+      )
+    }),
+  // This single full-program witness took 455 seconds on the contended compiler shard.
+  600_000,
+)
+
+it.effect(
+  'rejects escaping response loans and escaping or duplicating scoped redirect producers',
+  () =>
+    Effect.gen(function* () {
+      const snapshot = yield* AnalysisFixture.frontend(
+        'http-redirect/affine-diagnostics',
+        ascii(httpRedirectAffineDiagnosticSource),
+      )
+      const diagnostics = Analysis.diagnostics(snapshot).map((diagnostic) => ({
+        code: diagnostic.code,
+        span: httpRedirectAffineDiagnosticSource
+          .slice(diagnostic.span.start, diagnostic.span.end)
+          .trim(),
+      }))
+      assert.deepEqual(diagnostics, [
+        { code: 'SEM0025', span: 'move uri' },
+        { code: 'SEM0025', span: 'move exchange' },
+        { code: 'SEM0129', span: 'move producer' },
+        { code: 'OWN0001', span: 'move producer' },
+      ])
+    }),
+  120_000,
 )

@@ -696,7 +696,15 @@ export const analyzeDeclaredType = (
   if (syntax.kind === 'UnionType') {
     const members = syntax.children
       .filter(isDeclaredTypeNode)
-      .map((member) => analyzeDeclaredType(source, member, typeParameters, false, lifetimeContext))
+      .map((member) =>
+        analyzeDeclaredType(
+          source,
+          member,
+          typeParameters,
+          genericArgumentPosition,
+          lifetimeContext,
+        ),
+      )
     const diagnostics: Array<Diagnostic.Diagnostic> = members.flatMap((member) =>
       Array.from(member.diagnostics),
     )
@@ -4846,7 +4854,15 @@ export const finalizeLifetimeHeader = (
     })
   })
   const typeParameters = Object.freeze([
-    ...member.typeParameters.filter((parameter) => !parameter.implicitLifetime),
+    ...member.typeParameters.filter(
+      (parameter) =>
+        !parameter.implicitLifetime ||
+        // Re-elaborate this header's invocation binders, not implicit lifetimes inherited
+        // by an anonymous function from its enclosing declaration's captured environment.
+        (implHead === undefined &&
+          (parameter.type.owner.module !== prior.owner.module ||
+            parameter.type.owner.name !== prior.owner.name)),
+    ),
     ...(retainsOwner ? ambient : []),
     ...implicit,
   ])

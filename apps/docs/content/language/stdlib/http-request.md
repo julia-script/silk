@@ -8,12 +8,13 @@ Origin-bound HTTP request preparation with finite storage and explicit header po
 
 ## Details
 
-`prepare` owns the serialized head before an exchange can send bytes. It generates framing
-fields and rejects conflicting fields. Credentials are explicit and never read from a URI.
+`prepare` owns the direct serialized head before an exchange can send bytes. The routed
+operations require a policy-selected proxy route. They derive the proxy peer and authentication
+from that route. All operations generate framing fields and reject conflicting caller fields.
 
 Import as `HttpRequest` with `import silk.http_request as HttpRequest`.
 
-Public declarations: 9.
+Public declarations: 11.
 
 <a id="declaration-73696c6b2f687474705f726571756573743a3a426f64794d6f6465"></a>
 
@@ -319,7 +320,7 @@ pub fn defaults<'value>() -> silk/http_request.HeaderPolicy<'value>
 
 Returns generated defaults, absent authorization, and plaintext Basic rejection.
 
-<a id="declaration-73696c6b2f687474705f726571756573743a3a696d706c656d656e746174696f6e3a33"></a>
+<a id="declaration-73696c6b2f687474705f726571756573743a3a696d706c656d656e746174696f6e3a34"></a>
 
 ## Implementation `Copy for silk/http_request.HeaderPolicy<'value>`
 
@@ -525,7 +526,17 @@ Borrows the serialized request head until this owner is dropped.
 pub fn origin<'life0>(self: &'life0 PreparedRequest) -> Origin
 ```
 
-Returns the immutable connection origin, including its security scheme.
+Returns the logical request origin used for target, Host, and origin credentials.
+
+<a id="declaration-73696c6b2f687474705f726571756573743a3a5072657061726564526571756573742e706879736963616c50656572"></a>
+
+### Method `PreparedRequest.physicalPeer`
+
+```silk
+pub fn physicalPeer<'life0>(self: &'life0 PreparedRequest) -> Origin
+```
+
+Returns the physical peer on whose connection this request is admitted.
 
 <a id="declaration-73696c6b2f687474705f726571756573743a3a5072657061726564526571756573742e76657273696f6e"></a>
 
@@ -572,6 +583,39 @@ Validates and serializes one request before any transport operation.
 Caller fields preserve order. Host, User-Agent, Accept, framing, Expect, and Connection belong
 to policy and cannot also occur in `headers`. Output owns all borrowed input bytes.
 `maxHeadBytes` and `maxCredentialBytes` bound owned head and credential storage.
+
+<a id="declaration-73696c6b2f687474705f726571756573743a3a70726570617265466f7277617264"></a>
+
+## `prepareForward`
+
+```silk
+pub effect<'env> fn prepareForward<'configuration: 'env, 'value: 'env, 'life2: 'env, 'life3: 'env, 'life4: 'env, 'life5: 'env, 'env>(route: &'life2 silk/http_proxy.Route<'configuration>, uri: &'life3 silk/uri.Uri<'value>, version: Version, method: silk/http.Method<'value>, headers: &'life4 silk/http_headers.Headers<'value>, policy: &'life5 silk/http_request.HeaderPolicy<'value>, body: BodyMode, require100: bool, limits: Limits, maxHeadBytes: usize, maxCredentialBytes: usize) -> PreparedRequest ! ProxyError | RequestError | OutOfMemoryError ? &mut Allocator
+```
+
+Prepares one Forward route as an origin-bound absolute-form request for its plain proxy peer.
+
+### Details
+
+The sealed route is the only source of the physical peer and `Proxy-Authorization`. The
+original URI spelling is preserved except that user information and fragments are excluded and
+an empty path becomes `/`. Forward preparation always generates the logical-origin Host,
+including for HTTP/1.0.
+
+<a id="declaration-73696c6b2f687474705f726571756573743a3a70726570617265436f6e6e656374"></a>
+
+## `prepareConnect`
+
+```silk
+pub effect<'env> fn prepareConnect<'configuration: 'env, 'life1: 'env, 'env>(route: &'life1 silk/http_proxy.Route<'configuration>, limits: Limits, maxHeadBytes: usize, maxCredentialBytes: usize) -> PreparedRequest ! ProxyError | RequestError | OutOfMemoryError ? &mut Allocator
+```
+
+Prepares the one body-free HTTP/1.1 CONNECT head admitted by a Tunnel route.
+
+### Details
+
+The authority-form target and Host are both derived from the route's normalized original
+origin and always include its effective port. Callers cannot supply fields, a body, a physical
+peer, or proxy credentials.
 
 <a id="declaration-73696c6b2f687474705f726571756573743a3a66726f6d557269"></a>
 

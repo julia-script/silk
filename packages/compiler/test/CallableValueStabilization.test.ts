@@ -10,6 +10,113 @@ const codesOf = (name: string, source: string) =>
     Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
   )
 
+it.effect(
+  'admits scoped provider callbacks capturing an independently borrowed configuration',
+  () =>
+    Effect.gen(function* () {
+      assert.deepEqual(
+        yield* codesOf(
+          'callable-stabilization/independent-capture',
+          `struct Loan<'provider, P> { provider: &'provider mut P }
+struct Owned<P> { provider: P }
+struct Route<'configuration> { label: &'configuration i32 }
+effect fn scoped<'env, P>(provider: P, use: for<'call> once fn<'env>(&'call mut Owned<P>) -> once Effect<'call & 'env; i32>) -> i32 {
+  let mut owned = Owned<P> {provider: move provider}
+  return run use(&mut owned)
+}
+effect<'view & 'configuration> fn finish<'configuration, 'view, 'provider: 'view, P>(
+  owned: &'view mut Owned<Loan<'provider, P>>, route: Route<'configuration>,
+) -> i32 { drop owned return route.label.* }
+effect<'provider> fn route<'configuration: 'provider, 'provider, P>(provider: &'provider mut P, route: Route<'configuration>) -> i32 {
+  let use = effect fn(owned: &mut Owned<Loan<'provider, P>>) -> i32 {
+    return run finish<'configuration, P>(move owned, move route)
+  }
+  return run scoped(Loan<'provider, P> {provider: move provider}, move use)
+}
+struct Transferred<'tunnel, P> { value: &'tunnel mut P }
+struct TunnelTransport<'view, 'provider: 'view, 'tunnel: 'provider, P> { connection: &'view mut Owned<Loan<'provider, Transferred<'tunnel, P>>> }
+fn transport<'view, 'provider: 'view, 'tunnel: 'provider, P>(owned: &'view mut Owned<Loan<'provider, Transferred<'tunnel, P>>>) -> TunnelTransport<'view, 'provider, 'tunnel, P> {
+  return TunnelTransport<'view, 'provider, 'tunnel, P> {connection: move owned}
+}
+effect<'view & 'configuration> fn finishTunnel<'configuration, 'view, 'provider: 'view, 'tunnel: 'provider, P>(
+  owned: TunnelTransport<'view, 'provider, 'tunnel, P>, route: Route<'configuration>,
+) -> i32 { drop owned return route.label.* }
+effect<'provider> fn tunnelRoute<'configuration: 'provider, 'provider, 'tunnel: 'provider, P>(provider: &'provider mut Transferred<'tunnel, P>, route: Route<'configuration>) -> i32 {
+  let use = effect fn(owned: &mut Owned<Loan<'provider, Transferred<'tunnel, P>>>) -> i32 {
+    let selected = transport(move owned)
+    return run finishTunnel<'configuration, P>(move selected, move route)
+  }
+  return run scoped(Loan<'provider, Transferred<'tunnel, P>> {provider: move provider}, move use)
+}
+pub fn main() -> i32 { return 0 }`,
+        ),
+        [],
+      )
+    }),
+)
+
+it.effect('elides nominal input lifetimes in anonymous callable headers', () =>
+  Effect.gen(function* () {
+    assert.deepEqual(
+      yield* codesOf(
+        'callable-stabilization/nominal-lifetime-elision',
+        `struct Holder<'data, T> { value: &'data T }
+fn ordinary(holder: Holder<i32>) -> i32 {
+  let read = fn(value: &Holder<i32>) -> i32 { return value.value.* }
+  return read(&holder)
+}
+effect fn effectful(holder: Holder<i32>) -> i32 {
+  let read = effect fn(value: &Holder<i32>) -> i32 { return value.value.* }
+  return run read(&holder)
+}
+fn generic<T>(holder: Holder<T>) -> () {
+  let inspect = fn(value: &Holder<T>) -> () { drop value }
+  inspect(&holder)
+}
+effect fn genericEffect<T>(holder: Holder<T>) -> () {
+  let inspect = effect fn(value: &Holder<T>) -> () { drop value }
+  run inspect(&holder)
+}
+pub fn main() -> i32 { return 0 }`,
+      ),
+      [],
+    )
+  }),
+)
+
+it.effect('infers open callback rows under quantified borrowed-input lifetime bounds', () =>
+  Effect.gen(function* () {
+    assert.deepEqual(
+      yield* codesOf(
+        'callable-stabilization/quantified-open-row',
+        `
+struct Holder<'data, T> { value: &'data T }
+service Logger { effect fn log() -> () ? &Logger }
+struct Problem {}
+effect fn scope<'env, T, A, E, ?R>(
+  holder: &mut Holder<T>,
+  use: for<'call, 'view: 'call> once fn<'env>(&'call mut Holder<'view, T>) -> once Effect<'call & 'env; A ! E ? R>,
+) -> A ! E ? R { return run use(move holder) }
+effect fn caller<'env, T, C, A, E, ?R>(
+  holder: &mut Holder<T>,
+  captured: C,
+  work: once fn<'env>() -> once Effect<'env; A ! E | Problem ? R | &Logger>,
+) -> A ! E | Problem ? R | &Logger {
+  let use = effect fn(value: &mut Holder<T>) -> A ! E | Problem ? R | &Logger {
+    drop value
+    drop captured
+    return run work()
+  }
+  return run scope(move holder, move use)
+}
+pub fn main() -> i32 { return 0 }
+`,
+      ),
+      [],
+    )
+  }),
+)
+
 // ISSUE-2: joining two named function items reports SEM0080 instead of invalid MIR.
 it.effect('rejects a match that joins two named function items', () =>
   Effect.gen(function* () {

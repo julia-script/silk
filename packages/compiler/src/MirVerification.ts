@@ -7062,7 +7062,10 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
                         provider.role === requirement.role &&
                         provider.requirementAccess === requirement.access &&
                         SilkType.equals(provider.capability, requirement.capability) &&
-                        SilkType.equals(provider.witness.capability, provider.capability) &&
+                        // The row is exact, but its admitted witness can come from another
+                        // proof-only lifetime context of this shared physical runner.
+                        SilkType.runtimeKey(provider.witness.capability) ===
+                          SilkType.runtimeKey(provider.capability) &&
                         SilkType.equals(provider.witness.provider, provider.providerType) &&
                         (requirement.access === 'Shared' ||
                           provider.access === 'Exclusive' ||

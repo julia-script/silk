@@ -1,8 +1,9 @@
 //! Origin-bound HTTP request preparation with finite storage and explicit header policy.
 //!
 //! # Details
-//! `prepare` owns the serialized head before an exchange can send bytes. It generates framing
-//! fields and rejects conflicting fields. Credentials are explicit and never read from a URI.
+//! `prepare` owns the direct serialized head before an exchange can send bytes. The routed
+//! operations require a policy-selected proxy route. They derive the proxy peer and authentication
+//! from that route. All operations generate framing fields and reject conflicting caller fields.
 
 import silk.allocator {Allocator, OutOfMemoryError}
 import silk.bytes {Bytes}
@@ -12,6 +13,7 @@ import silk.http_basic {BasicError}
 import silk.http_head as Head
 import silk.http_headers {HeaderIterator, Headers, Limits}
 import silk.http_origin {Origin, OriginError}
+import silk.http_proxy {ProxyError, Route, RouteMode}
 import silk.http_target {RequestTarget, TargetForm}
 import silk.option {Option}
 import silk.result {Result}
@@ -80,6 +82,21 @@ pub enum BasicSecurity {
   /// Permits plaintext Basic without changing HTTPS authentication.
   AllowInsecureBasic,
 }
+
+enum RoutedMode {
+  Forward,
+  Connect,
+}
+
+union Admission<'configuration> {
+  Direct,
+  Routed {
+    mode: RoutedMode,
+    route: Route<'configuration>,
+  },
+}
+
+impl<'configuration> Copy for Admission<'configuration> {}
 
 /// Policy for generated request fields and connection persistence.
 pub struct HeaderPolicy<'value> {
@@ -156,7 +173,8 @@ pub union RequestError {
 pub struct PreparedRequest {
   storage: Bytes
   length: usize
-  originValue: Origin
+  logicalOriginValue: Origin
+  physicalPeerValue: Origin
   versionValue: Version
   bodyValue: BodyMode
   continueValue: bool
@@ -167,9 +185,13 @@ impl PreparedRequest {
   pub fn bytes<'a>(self: &'a Self) -> &'a [u8] {
     return Slice.view<u8>(Bytes.asSlice(&self.storage), usize.ZERO, self.length)
   }
-  /// Returns the immutable connection origin, including its security scheme.
+  /// Returns the logical request origin used for target, Host, and origin credentials.
   pub fn origin(self: &Self) -> Origin {
-    return self.originValue
+    return self.logicalOriginValue
+  }
+  /// Returns the physical peer on whose connection this request is admitted.
+  pub fn physicalPeer(self: &Self) -> Origin {
+    return self.physicalPeerValue
   }
   /// Returns the admitted HTTP version.
   pub fn version(self: &Self) -> Version {
@@ -204,6 +226,198 @@ pub effect fn prepare<'value>(
   maxHeadBytes: usize,
   maxCredentialBytes: usize,
 ) -> PreparedRequest ! RequestError | OutOfMemoryError ? &mut Allocator {
+  return run prepareCore(
+    origin,
+    origin,
+    Admission<'value>.Direct,
+    version,
+    method,
+    target,
+    headers,
+    policy,
+    body,
+    require100,
+    limits,
+    maxHeadBytes,
+    maxCredentialBytes,
+  )
+}
+
+/// Prepares one Forward route as an origin-bound absolute-form request for its plain proxy peer.
+///
+/// # Details
+///
+/// The sealed route is the only source of the physical peer and `Proxy-Authorization`. The
+/// original URI spelling is preserved except that user information and fragments are excluded and
+/// an empty path becomes `/`. Forward preparation always generates the logical-origin Host,
+/// including for HTTP/1.0.
+pub effect fn prepareForward<'configuration, 'value>(
+  route: &Route<'configuration>,
+  uri: &Uri<'value>,
+  version: Version,
+  method: Method<'value>,
+  headers: &Headers<'value>,
+  policy: &HeaderPolicy<'value>,
+  body: BodyMode,
+  require100: bool,
+  limits: Limits,
+  maxHeadBytes: usize,
+  maxCredentialBytes: usize,
+) -> PreparedRequest ! ProxyError | RequestError | OutOfMemoryError ? &mut Allocator {
+  if Route.mode(route) != RouteMode.Forward {
+    fail ProxyError.invalidRoute()
+  }
+  let logicalOrigin = match move Origin.fromUri(uri) {
+    Result<Origin, OriginError>.Failure {error} => {
+      fail ProxyError.invalidRoute()
+    }
+    Result<Origin, OriginError>.Success {value} => value
+  }
+  if Origin.secure(&logicalOrigin) || !Origin.equals(&Route.originalOrigin(route), &logicalOrigin) {
+    fail ProxyError.invalidRoute()
+  }
+  let physicalPeer = match move Route.physicalPeer(route) {
+    Result<Origin, OriginError>.Failure {error} => {
+      fail ProxyError.invalidRoute()
+    }
+    Result<Origin, OriginError>.Success {value} => value
+  }
+  if Origin.secure(&physicalPeer) {
+    fail ProxyError.invalidRoute()
+  }
+  let mut targetStorage = run Bytes.zeroed(limits.maxTargetBytes)
+  let output = Bytes.asMutSlice(&mut targetStorage)
+  let count = match move RequestTarget.fromUri(uri, TargetForm.Absolute, &mut output) {
+    Result.Failure {error} => {
+      fail RequestError.Value {error: move error}
+    }
+    Result.Success {value} => value
+  }
+  drop output
+  let bytes = Slice.view<u8>(Bytes.asSlice(&targetStorage), usize.ZERO, count)
+  let text = match move String.fromUtf8(bytes) {
+    Result.Failure {error} => {
+      drop error
+      fail RequestError.InvalidTarget
+    }
+    Result.Success {value} => value
+  }
+  let target = match move RequestTarget.parse(&method, text, limits.maxTargetBytes) {
+    Result.Failure {error} => {
+      fail RequestError.Value {error: move error}
+    }
+    Result.Success {value} => value
+  }
+  return run prepareCore(
+    &logicalOrigin,
+    &physicalPeer,
+    Admission.Routed {mode: RoutedMode.Forward, route: route.*},
+    version,
+    method,
+    target,
+    headers,
+    policy,
+    body,
+    require100,
+    limits,
+    maxHeadBytes,
+    maxCredentialBytes,
+  )
+}
+
+/// Prepares the one body-free HTTP/1.1 CONNECT head admitted by a Tunnel route.
+///
+/// # Details
+///
+/// The authority-form target and Host are both derived from the route's normalized original
+/// origin and always include its effective port. Callers cannot supply fields, a body, a physical
+/// peer, or proxy credentials.
+pub effect fn prepareConnect<'configuration>(
+  route: &Route<'configuration>,
+  limits: Limits,
+  maxHeadBytes: usize,
+  maxCredentialBytes: usize,
+) -> PreparedRequest ! ProxyError | RequestError | OutOfMemoryError ? &mut Allocator {
+  if Route.mode(route) != RouteMode.Tunnel {
+    fail ProxyError.invalidRoute()
+  }
+  let logicalOrigin = Route.originalOrigin(route)
+  if !Origin.secure(&logicalOrigin) {
+    fail ProxyError.invalidRoute()
+  }
+  let physicalPeer = match move Route.physicalPeer(route) {
+    Result<Origin, OriginError>.Failure {error} => {
+      fail ProxyError.invalidRoute()
+    }
+    Result<Origin, OriginError>.Success {value} => value
+  }
+  if Origin.secure(&physicalPeer) {
+    fail ProxyError.invalidRoute()
+  }
+  let mut authorityStorage = run Bytes.zeroed(261)
+  let authorityOutput = Bytes.asMutSlice(&mut authorityStorage)
+  let authorityLength = match move Origin.authorityWithPortInto(&logicalOrigin, &mut authorityOutput) {
+    Result<usize, OriginError>.Failure {error} => {
+      fail RequestError.Origin {error: move error}
+    }
+    Result<usize, OriginError>.Success {value} => value
+  }
+  drop authorityOutput
+  let authorityBytes = Slice.view<u8>(Bytes.asSlice(&authorityStorage), usize.ZERO, authorityLength)
+  let authority = match move String.fromUtf8(authorityBytes) {
+    Result.Failure {error} => {
+      drop error
+      fail RequestError.InvalidTarget
+    }
+    Result.Success {value} => value
+  }
+  let method = Method.connect()
+  let target = match move RequestTarget.parse(&method, authority, limits.maxTargetBytes) {
+    Result.Failure {error} => {
+      fail RequestError.Value {error: move error}
+    }
+    Result.Success {value} => value
+  }
+  let fields: [Header<'static>; 0] = []
+  let headers = match move Headers.make(&fields, limits) {
+    Result.Failure {error} => {
+      fail RequestError.Value {error: move error}
+    }
+    Result.Success {value} => value
+  }
+  let policy = HeaderPolicy.defaults()
+  return run prepareCore(
+    &logicalOrigin,
+    &physicalPeer,
+    Admission.Routed {mode: RoutedMode.Connect, route: route.*},
+    Version.Http11,
+    method,
+    target,
+    &headers,
+    &policy,
+    BodyMode.Empty,
+    false,
+    limits,
+    maxHeadBytes,
+    maxCredentialBytes,
+  )
+}
+
+effect fn prepareCore<'configuration, 'value>(
+  logicalOrigin: &Origin,
+  physicalPeer: &Origin,
+  admission: Admission<'configuration>,
+  version: Version,
+  method: Method<'value>,
+  target: RequestTarget<'value>,
+  headers: &Headers<'value>,
+  policy: &HeaderPolicy<'value>,
+  body: BodyMode,
+  require100: bool,
+  limits: Limits,
+  maxHeadBytes: usize,
+  maxCredentialBytes: usize,
+) -> PreparedRequest ! RequestError | OutOfMemoryError ? &mut Allocator {
   if version == Version.Http10 {
     if require100 {
       fail RequestError.InvalidBodyMode
@@ -215,8 +429,38 @@ pub effect fn prepare<'value>(
       _ => {}
     }
   }
+  match admission {
+    Admission.Direct => {}
+    Admission.Routed {mode, route} => match mode {
+      RoutedMode.Forward => {
+        if !RequestTarget.isAbsolute(&target) { fail RequestError.InvalidTarget }
+      }
+      RoutedMode.Connect => {
+        if !RequestTarget.isAuthority(&target) { fail RequestError.InvalidTarget }
+        if Method.format(&method) != "CONNECT" || version != Version.Http11 {
+          fail RequestError.InvalidTarget
+        }
+        match body {
+          BodyMode.Empty => {}
+          _ => { fail RequestError.InvalidBodyMode }
+        }
+        if require100 { fail RequestError.InvalidBodyMode }
+      }
+    }
+  }
   let targetText = RequestTarget.format(target)
   let targetBytes = String.utf8Bytes(targetText)
+  match admission {
+    Admission.Routed {mode, route} => match mode {
+      RoutedMode.Connect => {
+        if !Origin.matchesAuthority(logicalOrigin, targetText) {
+          fail RequestError.InvalidTarget
+        }
+      }
+      RoutedMode.Forward => {}
+    }
+    Admission.Direct => {}
+  }
   if targetBytes.length > usize.ZERO && targetBytes[usize.ZERO] != 47 && targetText != "*" && Method.format(
     &method,
   ) != "CONNECT" {
@@ -233,7 +477,7 @@ pub effect fn prepare<'value>(
       }
       Result.Success {value} => value
     }
-    if !Origin.equals(origin, &other) {
+    if !Origin.equals(logicalOrigin, &other) {
       fail RequestError.InvalidTarget
     }
   }
@@ -263,7 +507,7 @@ pub effect fn prepare<'value>(
           if Header.value(&value).length > maxCredentialBytes {
             fail RequestError.CredentialLimit
           }
-          run validateBasicTransport(origin, Header.value(&value), policy.basicSecurity)
+          run validateBasicTransport(logicalOrigin, Header.value(&value), policy.basicSecurity)
         }
       }
     }
@@ -530,7 +774,7 @@ pub effect fn prepare<'value>(
     0,
     0,
   ]
-  let authorityLength = match move Origin.authorityInto(origin, &mut authorityStorage) {
+  let authorityLength = match move Origin.authorityInto(logicalOrigin, &mut authorityStorage) {
     Result.Failure {error} => {
       fail RequestError.Origin {error: error}
     }
@@ -561,7 +805,7 @@ pub effect fn prepare<'value>(
       if value.length > maxCredentialBytes {
         fail RequestError.CredentialLimit
       }
-      run validateBasicTransport(origin, value, policy.basicSecurity)
+      run validateBasicTransport(logicalOrigin, value, policy.basicSecurity)
       let output = Bytes.asMutSlice(&mut credential)
       let mut index = usize.ZERO
       while index < value.length {
@@ -576,7 +820,7 @@ pub effect fn prepare<'value>(
       if rawAuthorization {
         fail RequestError.MultipleAuthorization
       }
-      if !Origin.secure(origin) && policy.basicSecurity != BasicSecurity.AllowInsecureBasic {
+      if !Origin.secure(logicalOrigin) && policy.basicSecurity != BasicSecurity.AllowInsecureBasic {
         fail RequestError.InsecureBasic
       }
       let needed = match move Basic.encodedLength(username.length, password.length) {
@@ -603,6 +847,29 @@ pub effect fn prepare<'value>(
       hasAuthorization = true
     }
   }
+  let mut proxyCredential = Bytes.make()
+  let mut proxyCredentialLength = usize.ZERO
+  match admission {
+    Admission.Direct => {}
+    Admission.Routed {mode, route} => {
+      let required = Route.proxyAuthorizationLength(&route)
+      if required > maxCredentialBytes {
+        fail RequestError.CredentialLimit
+      }
+      if required > usize.ZERO {
+        proxyCredential = run Bytes.zeroed(required)
+        let output = Bytes.asMutSlice(&mut proxyCredential)
+        let wroteProxyCredential = Route.writeProxyAuthorizationInto(&route, &mut output)
+        drop output
+        proxyCredentialLength = match move wroteProxyCredential {
+          Option<usize>.None => {
+            fail RequestError.CredentialLimit
+          }
+          Option<usize>.Some {value} => value
+        }
+      }
+    }
+  }
   let mut entries = Vector.make<Header>()
   let mut source = Headers.iter(headers)
   while true {
@@ -615,32 +882,55 @@ pub effect fn prepare<'value>(
       }
     }
   }
-  match policy.host {
-    HeaderControl.Omit => {
-      if version == Version.Http11 {
-        fail RequestError.MissingHost
+  if proxyCredentialLength > usize.ZERO {
+    run append(
+      &mut entries,
+      "Proxy-Authorization",
+      Slice.view<u8>(Bytes.asSlice(&proxyCredential), usize.ZERO, proxyCredentialLength),
+      limits,
+    )
+  }
+  match admission {
+    Admission.Routed {mode, route} => match mode {
+      RoutedMode.Forward => {
+        run append(
+          &mut entries,
+          "Host",
+          Slice.view<u8>(&authorityStorage, usize.ZERO, authorityLength),
+          limits,
+        )
+      }
+      RoutedMode.Connect => {
+        run append(&mut entries, "Host", targetBytes, limits)
       }
     }
-    HeaderControl.Default => {
-      run append(
-        &mut entries,
-        "Host",
-        Slice.view<u8>(&authorityStorage, usize.ZERO, authorityLength),
-        limits,
-      )
-    }
-    HeaderControl.Value {value} => {
-      let text = match move String.fromUtf8(value) {
-        Result.Failure {error} => {
-          drop error
+    Admission.Direct => match policy.host {
+      HeaderControl.Omit => {
+        if version == Version.Http11 {
+          fail RequestError.MissingHost
+        }
+      }
+      HeaderControl.Default => {
+        run append(
+          &mut entries,
+          "Host",
+          Slice.view<u8>(&authorityStorage, usize.ZERO, authorityLength),
+          limits,
+        )
+      }
+      HeaderControl.Value {value} => {
+        let text = match move String.fromUtf8(value) {
+          Result.Failure {error} => {
+            drop error
+            fail RequestError.ConflictingAuthority
+          }
+          Result.Success {value: text} => text
+        }
+        if !Origin.matchesAuthority(logicalOrigin, text) {
           fail RequestError.ConflictingAuthority
         }
-        Result.Success {value: text} => text
+        run append(&mut entries, "Host", value, limits)
       }
-      if !Origin.matchesAuthority(origin, text) {
-        fail RequestError.ConflictingAuthority
-      }
-      run append(&mut entries, "Host", value, limits)
     }
   }
   run controlled(&mut entries, "User-Agent", policy.userAgent, b"silk-http/1", limits)
@@ -697,7 +987,8 @@ pub effect fn prepare<'value>(
   return PreparedRequest {
     storage: move storage,
     length: length,
-    originValue: origin.*,
+    logicalOriginValue: logicalOrigin.*,
+    physicalPeerValue: physicalPeer.*,
     versionValue: version,
     bodyValue: body,
     continueValue: require100,

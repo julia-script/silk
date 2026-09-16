@@ -351,6 +351,14 @@ pub fn selectResponse<'value>(
   let version = head.version()
   let statusValue = head.status()
   let status = Status.code(&statusValue)
+  if Method.format(requestMethod) == "CONNECT" && status >= 200 && status < 300 {
+    return Result.succeed<Selection<'value>, BodyError>(Selection<'value> {
+      framingValue: Framing.Tunnel,
+      anomalyValue: Anomaly.None,
+      statsFields: head.fields(),
+      copyFields: head.fields(),
+    })
+  }
   if semanticallyEmpty(statusValue, requestMethod) {
     let mut anomaly = Anomaly.None
     let hasLength = hasHeader(head.fields(), b"content-length")
@@ -364,14 +372,6 @@ pub fn selectResponse<'value>(
     return Result.succeed<Selection<'value>, BodyError>(Selection<'value> {
       framingValue: Framing.Empty,
       anomalyValue: anomaly,
-      statsFields: head.fields(),
-      copyFields: head.fields(),
-    })
-  }
-  if Method.format(requestMethod) == "CONNECT" && status >= 200 && status < 300 {
-    return Result.succeed<Selection<'value>, BodyError>(Selection<'value> {
-      framingValue: Framing.Tunnel,
-      anomalyValue: Anomaly.None,
       statsFields: head.fields(),
       copyFields: head.fields(),
     })
@@ -423,6 +423,14 @@ pub fn validateOutgoingResponse<'value>(
       Option.none<usize>(),
     ))
   }
+  if Method.format(requestMethod) == "CONNECT" && status >= 200 && status < 300 {
+    return Result.succeed<Selection<'value>, BodyError>(Selection<'value> {
+      framingValue: Framing.Tunnel,
+      anomalyValue: Anomaly.None,
+      statsFields: head.fields(),
+      copyFields: head.fields(),
+    })
+  }
   if semanticallyEmpty(statusValue, requestMethod) {
     let validated = scanResponseHead(head, policy)
     if let Result<HeadMetadata, BodyError>.Failure {error} = move validated {
@@ -430,14 +438,6 @@ pub fn validateOutgoingResponse<'value>(
     }
     return Result.succeed<Selection<'value>, BodyError>(Selection<'value> {
       framingValue: Framing.Empty,
-      anomalyValue: Anomaly.None,
-      statsFields: head.fields(),
-      copyFields: head.fields(),
-    })
-  }
-  if Method.format(requestMethod) == "CONNECT" && status >= 200 && status < 300 {
-    return Result.succeed<Selection<'value>, BodyError>(Selection<'value> {
-      framingValue: Framing.Tunnel,
       anomalyValue: Anomaly.None,
       statsFields: head.fields(),
       copyFields: head.fields(),
@@ -2621,6 +2621,30 @@ impl<'owner> Trailers<'owner> {
   /// Returns the number of retained trailer fields.
   pub fn count(self: &Self) -> usize { return self.countValue }
 
+  /// Returns the exact payload-plus-index bytes required by an independent owned copy.
+  pub fn requiredOwnedBytes(self: &Self) -> Result<usize, BodyError> {
+    let recordBytes = match move usize.checkedMultiply(self.countValue, FIELD_RECORD_BYTES) {
+      Option<usize>.None => {
+        return Result.failResult<usize, BodyError>(baseError(
+          BodyReason.SizeOverflow,
+          BodyComponent.TrailerValue,
+          u64.MIN,
+          Option.none<usize>(),
+        ))
+      }
+      Option<usize>.Some {value} => value
+    }
+    return match move usize.checkedAdd(self.bytes.length, recordBytes) {
+      Option<usize>.None => Result.failResult<usize, BodyError>(baseError(
+        BodyReason.SizeOverflow,
+        BodyComponent.TrailerValue,
+        u64.MIN,
+        Option.none<usize>(),
+      ))
+      Option<usize>.Some {value} => Result.succeed<usize, BodyError>(value)
+    }
+  }
+
   /// Borrows an iterator over trailer fields in their retained order.
   pub fn fields(self: &'owner Self) -> TrailerIterator<'owner> {
     return TrailerIterator<'owner> {
@@ -2641,27 +2665,11 @@ impl<'owner> Trailers<'owner> {
     if let Result.Failure {error} = move validated {
       return Result.failResult<OwnedTrailers, BodyError>(move error)
     }
-    let recordBytes = match move usize.checkedMultiply(self.countValue, FIELD_RECORD_BYTES) {
-      Option<usize>.None => {
-        return Result.failResult<OwnedTrailers, BodyError>(baseError(
-          BodyReason.SizeOverflow,
-          BodyComponent.TrailerValue,
-          u64.MIN,
-          Option.none<usize>(),
-        ))
+    let required = match move self.requiredOwnedBytes() {
+      Result<usize, BodyError>.Failure {error} => {
+        return Result.failResult<OwnedTrailers, BodyError>(move error)
       }
-      Option<usize>.Some {value} => value
-    }
-    let required = match move usize.checkedAdd(self.bytes.length, recordBytes) {
-      Option<usize>.None => {
-        return Result.failResult<OwnedTrailers, BodyError>(baseError(
-          BodyReason.SizeOverflow,
-          BodyComponent.TrailerValue,
-          u64.MIN,
-          Option.none<usize>(),
-        ))
-      }
-      Option<usize>.Some {value} => value
+      Result<usize, BodyError>.Success {value} => value
     }
     if required > limits.maxOwnedBytes {
       return Result.failResult<OwnedTrailers, BodyError>(baseError(
@@ -2695,6 +2703,11 @@ pub struct OwnedTrailers {
 }
 
 impl OwnedTrailers {
+  /// Returns the exact retained trailer payload-plus-index byte count.
+  pub fn ownedBytes(self: &Self) -> usize {
+    return Bytes.length(&self.bytes) + Bytes.length(&self.records)
+  }
+
   /// Borrows a trailer view tied to this owner.
   pub fn view<'owner>(self: &'owner Self) -> Trailers<'owner> {
     return Trailers<'owner> {

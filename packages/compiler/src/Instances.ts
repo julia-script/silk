@@ -161,7 +161,7 @@ export interface CallInstance {
   /** Caller-authored metadata aligned with target static arguments, outside instance identity. */
   readonly staticArgumentOrigins?: ReadonlyArray<StaticEvaluation.TextOrigin | undefined>
   readonly resultEffect?: string
-  /** Lexical selections used to resolve the hidden argument identities at this call. */
+  /** Lexical selections used to resolve the target or hidden argument identities at this call. */
   readonly providers?: ReadonlyArray<CallProvider>
 }
 

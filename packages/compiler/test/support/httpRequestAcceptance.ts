@@ -21,7 +21,29 @@ import silk.http_basic {BasicError}
 import silk.http_origin {Origin, OriginError}
 import silk.uri_reference {ParseError}
 import silk.slice {Slice}
-import silk.http_client_native {Options, NativeClientError, preflight}
+import silk.http_client_native {
+  acquireOwned,
+  acquireUnixOwned,
+  NativeRedirectClient,
+  NativeRouteProvider,
+  Options,
+  NativeClientError,
+  preflight,
+  preflightProxyRoute,
+}
+import silk.native_socket {NativeSocketError}
+import silk.http_redirect as Redirect {ResponseHandler}
+import silk.http_proxy {
+  BypassPolicy,
+  ProxyAuth,
+  ProxyAuthContextId,
+  ProxyConfig,
+  ProxyConfigId,
+  ProxyError,
+  Route,
+  RouteMode,
+  selectRoute,
+}
 import silk.option {Option}
 import silk.system_clock {Instant, SystemClock}
 import silk.bytes {Bytes}
@@ -33,7 +55,9 @@ import silk.http_client {
   Exchange,
   ClientError,
   ConnectionPhase,
+  ContinuePolicy,
   RequestOptions,
+  RouteTransport,
   Limits as ClientLimits,
 }
 import silk.http_content as Content
@@ -60,6 +84,13 @@ import silk.random {Random}
 import silk.http_transport {HttpTransport, TransportError}
 import silk.vector {Vector}
 import silk.u64
+import silk.trust_source {TrustSource}
+import silk.trust_snapshot {
+  TrustConfigurationReason,
+  TrustLoadLimits,
+  TrustSnapshot,
+  TrustSourceError,
+}
 
 fn bytesEqual(left: &[u8], right: &[u8]) -> bool {
   if left.length != right.length {
@@ -254,19 +285,153 @@ fn policyChecks() -> i32 {
   return 0
 }
 
-fn nativeOrigin(text: string) -> Origin {
+fn nativeUri<'text>(text: string<'text>) -> Uri<'text> {
   let uri = match move Uri.parse(text) {
+    Result.Success {value} => value
+    Result.Failure {error} => {
+      let invalid = 1 / 0
+      return nativeUri(text)
+    }
+  }
+  return uri
+}
+
+fn nativeOrigin(text: string) -> Origin {
+  let uri = nativeUri(text)
+  return match move Origin.fromUri(&uri) {
     Result.Success {value} => value
     Result.Failure {error} => {
       let invalid = 1 / 0
       return nativeOrigin(text)
     }
   }
-  return match move Origin.fromUri(&uri) {
+}
+
+struct RedirectDeadlineResponse {}
+
+impl RedirectDeadlineResponse {
+  effect<
+    'call,
+    'exchangeView: 'call,
+    'transport: 'exchangeView,
+    'provider: 'transport,
+    'tunnel: 'provider,
+  > fn handle<
+    'call,
+    'exchangeView: 'call,
+    'transport: 'exchangeView,
+    'provider: 'transport,
+    'tunnel: 'provider,
+  >(
+    handler: &mut Self,
+    uri: Uri<'call>,
+    hop: usize,
+    exchange: &'call mut Exchange<
+      'exchangeView,
+      RouteTransport<'transport, 'provider, 'tunnel, NativeRouteProvider>
+    >,
+  ) -> i32 {
+    drop handler
+    drop uri
+    drop hop
+    drop exchange
+    return 20
+  }
+}
+
+impl ResponseHandler<NativeRouteProvider, i32, never ? never> for RedirectDeadlineResponse {
+  handle: RedirectDeadlineResponse.handle
+}
+
+struct RedirectWallClock {}
+
+impl SystemClock for RedirectWallClock {
+  effect fn now(self: &mut Self) -> Instant { return SystemClock.make(0, 0) }
+  effect fn getResolution(self: &mut Self) -> u64 { return u64.toU64(1) }
+}
+
+struct RedirectTrustSource {}
+
+impl TrustSource for RedirectTrustSource {
+  effect fn load(
+    self: &mut Self,
+    limits: TrustLoadLimits,
+  ) -> TrustSnapshot
+  ! TrustSourceError | OutOfMemoryError
+  ? &mut Allocator {
+    drop self
+    drop limits
+    fail TrustSourceError.InvalidConfiguration {reason: TrustConfigurationReason.EmptyRoot}
+  }
+}
+
+static if (Intrinsic.targetOperatingSystem() == "darwin" && Intrinsic.targetArchitecture() == "aarch64" && Intrinsic.targetAbi() == "apple" && Intrinsic.profileText(
+  "libc",
+) == "system") || (Intrinsic.targetOperatingSystem() == "linux" && Intrinsic.targetAbi() == "gnu" && Intrinsic.profileText(
+  "libc",
+) == "gnu" && (Intrinsic.targetArchitecture() == "aarch64" || Intrinsic.targetArchitecture() == "x86_64")) {
+  fn expectedRedirectDeadline(error: NativeClientError) -> bool {
+    return match move error {
+      NativeClientError.UnsupportedDeadline => true
+      _ => false
+    }
+  }
+} else {
+  fn expectedRedirectDeadline(error: NativeClientError) -> bool {
+    return match move error {
+      NativeClientError.UnsupportedTarget => true
+      _ => false
+    }
+  }
+}
+
+effect fn redirectAdapterDeadlineCheck<'configuration>(
+  route: Route<'configuration>,
+) -> i32 ! OutOfMemoryError ? &mut Allocator {
+  let uri = nativeUri("http://127.0.0.3/redirect-adapter")
+  let fields: [Header<'static>; 0] = []
+  let headers = match move Headers.make(&fields, limits()) {
     Result.Success {value} => value
     Result.Failure {error} => {
-      let invalid = 1 / 0
-      return nativeOrigin(text)
+      drop error
+      return 21
+    }
+  }
+  let request = Redirect.Request {
+    uri: uri,
+    method: Method.get(),
+    headers: headers,
+    headerPolicy: HeaderPolicy.defaults(),
+    version: Version.Http11,
+    continuePolicy: ContinuePolicy.Disabled,
+    limits: limits(),
+    maxHeadBytes: 4096,
+    maxCredentialBytes: 128,
+  }
+  let mut client = NativeRedirectClient.make(route, Options.defaults(), ClientLimits.defaults())
+  let policy = Redirect.Policy.defaults()
+  let mut scratch: [u8; 1] = [0]
+  let mut wall = RedirectWallClock {}
+  let mut clock = BudgetClock {}
+  let mut random = BudgetRandom {}
+  let mut trust = RedirectTrustSource {}
+  let attempted = run Effect.result(Redirect.withEmptyResponse(
+    &mut client,
+    move request,
+    &policy,
+    Option.some<Instant>(SystemClock.make(7, 0)),
+    &mut scratch,
+    RedirectDeadlineResponse {},
+  ))
+    |> Effect.provideMut<TrustSource>(&mut trust)
+    |> Effect.provideMut<SystemClock>(&mut wall)
+    |> Effect.provideMut<Random>(&mut random)
+    |> Effect.provideMut<MonotonicClock>(&mut clock)
+  return match move attempted {
+    Result.Success {value} => 22
+    Result.Failure {error} => match move error {
+      NativeClientError cause => if expectedRedirectDeadline(move cause) { 0 } else { 23 }
+      _ => 24
     }
   }
 }
@@ -305,6 +470,298 @@ fn nativeAdmissionChecks() -> i32 {
     Result.Success {value} => 0
     Result.Failure {error} => 4
   }
+}
+
+static if (Intrinsic.targetOperatingSystem() == "darwin" && Intrinsic.targetArchitecture() == "aarch64" && Intrinsic.targetAbi() == "apple" && Intrinsic.profileText(
+  "libc",
+) == "system") || (Intrinsic.targetOperatingSystem() == "linux" && Intrinsic.targetAbi() == "gnu" && Intrinsic.profileText(
+  "libc",
+) == "gnu" && (Intrinsic.targetArchitecture() == "aarch64" || Intrinsic.targetArchitecture() == "x86_64")) {
+  effect fn nativeOwnedAcquisitionChecks() -> i32
+  ? &mut Allocator | &mut MonotonicClock | &mut SystemClock | &mut Random {
+    let direct = nativeOrigin("http://127.0.0.1/")
+    let mut directOptions = Options.defaults()
+    directOptions.deadline = Option.some<Instant>(SystemClock.make(10, 0))
+    let directAttempt = run Effect.result(acquireOwned(
+      direct,
+      move directOptions,
+      ClientLimits.defaults(),
+      Option.none<TrustSnapshot>(),
+      Option.some<Instant>(SystemClock.make(0, 0)),
+    ))
+    match move directAttempt {
+      Result.Success {value} => {
+        drop value
+        return 1
+      }
+      Result.Failure {error} => match move error {
+        NativeSocketError cause => match move cause {
+          NativeSocketError.Timeout => {}
+          _ => { return 2 }
+        }
+        _ => { return 3 }
+      }
+    }
+
+    let unix = nativeOrigin("http://unix.invalid/")
+    let mut unixOptions = Options.defaults()
+    unixOptions.deadline = Option.some<Instant>(SystemClock.make(0, 0))
+    let unixAttempt = run Effect.result(acquireUnixOwned(
+      b"/tmp/silk-owned-acquisition",
+      unix,
+      move unixOptions,
+      ClientLimits.defaults(),
+      Option.none<TrustSnapshot>(),
+      Option.some<Instant>(SystemClock.make(10, 0)),
+    ))
+    match move unixAttempt {
+      Result.Success {value} => {
+        drop value
+        return 4
+      }
+      Result.Failure {error} => match move error {
+        NativeSocketError cause => match move cause {
+          NativeSocketError.Timeout => {}
+          _ => { return 5 }
+        }
+        _ => { return 6 }
+      }
+    }
+
+    let secure = nativeOrigin("https://127.0.0.1/")
+    let secureAttempt = run Effect.result(acquireOwned(
+      secure,
+      Options.defaults(),
+      ClientLimits.defaults(),
+      Option.none<TrustSnapshot>(),
+      Option.none<Instant>(),
+    ))
+    return match move secureAttempt {
+      Result.Success {value} => {
+        drop value
+        7
+      }
+      Result.Failure {error} => match move error {
+        NativeClientError cause => match move cause {
+          NativeClientError.TrustRequired => 0
+          _ => 8
+        }
+        _ => 9
+      }
+    }
+  }
+} else {
+  effect fn nativeOwnedAcquisitionChecks() -> i32 {
+    let direct = nativeOrigin("http://127.0.0.1/")
+    let attempted = run Effect.result(acquireOwned(
+      direct,
+      Options.defaults(),
+      ClientLimits.defaults(),
+      Option.none<TrustSnapshot>(),
+      Option.none<Instant>(),
+    ))
+    match move attempted {
+      Result.Success {value} => {
+        drop value
+        return 10
+      }
+      Result.Failure {error} => match move error {
+        NativeClientError.UnsupportedTarget => {}
+        _ => { return 11 }
+      }
+    }
+    let unix = nativeOrigin("http://unix.invalid/")
+    let unixAttempt = run Effect.result(acquireUnixOwned(
+      b"/tmp/silk-owned-acquisition",
+      unix,
+      Options.defaults(),
+      ClientLimits.defaults(),
+      Option.none<TrustSnapshot>(),
+      Option.none<Instant>(),
+    ))
+    return match move unixAttempt {
+      Result.Success {value} => {
+        drop value
+        12
+      }
+      Result.Failure {error} => match move error {
+        NativeClientError.UnsupportedTarget => 0
+        _ => 13
+      }
+    }
+  }
+}
+
+effect fn nativeProxyAdmissionChecks() -> i32 ! OutOfMemoryError ? &mut Allocator {
+  let direct = nativeOrigin("http://127.0.0.1/")
+  let firstForward = nativeOrigin("http://127.0.0.3/")
+  let secondForward = nativeOrigin("http://127.0.0.4/")
+  let proxy = nativeOrigin("http://127.0.0.2:3128/")
+  let bypassEntries = [direct]
+  let bypass = match move run BypassPolicy.copy(&bypassEntries) {
+    Result.Success {value} => move value
+    Result.Failure {error} => {
+      drop error
+      return 1
+    }
+  }
+  let authentication = match move run ProxyAuth.preparedBasic(
+    ProxyAuthContextId.make(u64.toU64(2)),
+    b"dXNlcjpwYXNz",
+  ) {
+    Result.Success {value} => move value
+    Result.Failure {error} => {
+      drop error
+      return 2
+    }
+  }
+  let config = match move ProxyConfig.fromUri(
+    ProxyConfigId.make(u64.toU64(1)),
+    "http://127.0.0.2:3128",
+    move authentication,
+    move bypass,
+    4096,
+  ) {
+    Result.Success {value} => move value
+    Result.Failure {error} => {
+      drop error
+      return 3
+    }
+  }
+  let directUri = nativeUri("http://127.0.0.1/two#hidden")
+  let secondUri = nativeUri("http://127.0.0.4/three#hidden")
+  let firstRoute = selectRoute(&config, firstForward)
+  let directRoute = Route.recompute(&firstRoute, direct)
+  let secondRoute = Route.recompute(&directRoute, secondForward)
+  if Route.mode(&firstRoute) != RouteMode.Forward
+    || Route.mode(&directRoute) != RouteMode.Direct
+    || Route.mode(&secondRoute) != RouteMode.Forward {
+    return 4
+  }
+  let fields: [Header<'static>; 0] = []
+  let headers = match move Headers.make(&fields, limits()) {
+    Result.Success {value} => value
+    Result.Failure {error} => {
+      drop error
+      return 5
+    }
+  }
+  let policy = HeaderPolicy.defaults()
+  let directPrepared = match move run Effect.result(Request.fromUri(
+    &directUri,
+    Version.Http11,
+    Method.get(),
+    &headers,
+    &policy,
+    BodyMode.Empty,
+    false,
+    limits(),
+    4096,
+    128,
+  )) {
+    Result.Success {value} => move value
+    Result.Failure {error} => {
+      drop error
+      return 6
+    }
+  }
+  if !bytesEqual(
+    PreparedRequest.bytes(&directPrepared),
+    b"GET /two HTTP/1.1\\r\\nHost: 127.0.0.1\\r\\nUser-Agent: silk-http/1\\r\\nAccept: */*\\r\\n\\r\\n",
+  ) {
+    return 7
+  }
+  let secondPrepared = match move run Effect.result(Request.prepareForward(
+    &secondRoute,
+    &secondUri,
+    Version.Http11,
+    Method.get(),
+    &headers,
+    &policy,
+    BodyMode.Empty,
+    false,
+    limits(),
+    4096,
+    128,
+  )) {
+    Result.Success {value} => move value
+    Result.Failure {error} => {
+      drop error
+      return 8
+    }
+  }
+  if !bytesEqual(
+    PreparedRequest.bytes(&secondPrepared),
+    b"GET http://127.0.0.4/three HTTP/1.1\\r\\nProxy-Authorization: Basic dXNlcjpwYXNz\\r\\nHost: 127.0.0.4\\r\\nUser-Agent: silk-http/1\\r\\nAccept: */*\\r\\n\\r\\n",
+  ) {
+    return 9
+  }
+  let options = Options.defaults()
+  match move preflightProxyRoute(&directRoute, &options) {
+    Result.Success {value} => {
+      if !Origin.equals(&value, &direct) { return 10 }
+    }
+    Result.Failure {error} => match move error {
+      NativeClientError cause => match move cause {
+        NativeClientError.UnsupportedTarget => {}
+        _ => { return 11 }
+      }
+      ProxyError cause => {
+        drop cause
+        return 12
+      }
+    }
+  }
+  match move preflightProxyRoute(&secondRoute, &options) {
+    Result.Success {value} => {
+      if !Origin.equals(&value, &proxy) { return 13 }
+    }
+    Result.Failure {error} => match move error {
+      NativeClientError cause => match move cause {
+        NativeClientError.UnsupportedTarget => {}
+        _ => { return 14 }
+      }
+      ProxyError cause => {
+        drop cause
+        return 14
+      }
+    }
+  }
+
+  let empty: [Origin; 0] = []
+  let dnsBypass = match move run BypassPolicy.copy(&empty) {
+    Result.Success {value} => move value
+    Result.Failure {error} => {
+      drop error
+      return 15
+    }
+  }
+  let dnsConfig = match move ProxyConfig.fromUri(
+    ProxyConfigId.make(u64.toU64(3)),
+    "http://proxy.example:3128",
+    ProxyAuth.none(ProxyAuthContextId.make(u64.toU64(4))),
+    move dnsBypass,
+    4096,
+  ) {
+    Result.Success {value} => move value
+    Result.Failure {error} => {
+      drop error
+      return 16
+    }
+  }
+  let dnsRoute = selectRoute(&dnsConfig, firstForward)
+  let mut deadlineOptions = Options.defaults()
+  deadlineOptions.deadline = Option.some<Instant>(SystemClock.make(7, 0))
+  match move preflightProxyRoute(&dnsRoute, &deadlineOptions) {
+    Result.Success {value} => { return 17 }
+    Result.Failure {error} => match move error {
+      NativeClientError cause => {
+        if !expectedRedirectDeadline(move cause) { return 18 }
+      }
+      ProxyError cause => { return 19 }
+    }
+  }
+  return run redirectAdapterDeadlineCheck(dnsRoute)
 }
 
 fn limits() -> Limits {
@@ -770,6 +1227,22 @@ pub fn main() -> i32 {
     return 200 + admitted
   }
   let mut allocator = Allocator.systemAllocatorProvider()
+  let mut clock = BudgetClock {}
+  let mut wall = RedirectWallClock {}
+  let mut random = BudgetRandom {}
+  let ownedAdmitted = run nativeOwnedAcquisitionChecks()
+    |> Effect.provideMut<Random>(&mut random)
+    |> Effect.provideMut<SystemClock>(&mut wall)
+    |> Effect.provideMut<MonotonicClock>(&mut clock)
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  if ownedAdmitted != 0 {
+    return 250 + ownedAdmitted
+  }
+  let proxyAdmitted = run nativeProxyAdmissionChecks()
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  if proxyAdmitted != 0 {
+    return 300 + proxyAdmitted
+  }
   return run Effect.catchAll(allPrograms(), recover)
     |> Effect.provideMut<Allocator>(&mut allocator)
 }

@@ -314,3 +314,51 @@ flush = Loan.flushOutput
 ```silk
 close = Loan.closeLease
 ```
+
+<a id="declaration-73696c6b2f687474705f7472616e73706f72743a3a696d706c656d656e746174696f6e3a33"></a>
+
+## Implementation `ByteDuplex for silk/http_transport.Loan<'provider, P>`
+
+```silk
+impl ByteDuplex for silk/http_transport.Loan<'provider, P>
+```
+
+<a id="declaration-73696c6b2f687474705f7472616e73706f72743a3a696d706c656d656e746174696f6e3a333a3a6f7065726174696f6e3a30"></a>
+
+### Operation `readSomeRaw`
+
+```silk
+readSomeRaw = Loan.readBytes
+```
+
+<a id="declaration-73696c6b2f687474705f7472616e73706f72743a3a696d706c656d656e746174696f6e3a333a3a6f7065726174696f6e3a31"></a>
+
+### Operation `writeSomeRaw`
+
+```silk
+writeSomeRaw = Loan.writeBytes
+```
+
+<a id="declaration-73696c6b2f687474705f7472616e73706f72743a3a696d706c656d656e746174696f6e3a333a3a6f7065726174696f6e3a32"></a>
+
+### Operation `flushRaw`
+
+```silk
+flushRaw = Loan.flushBytes
+```
+
+<a id="declaration-73696c6b2f687474705f7472616e73706f72743a3a696d706c656d656e746174696f6e3a333a3a6f7065726174696f6e3a33"></a>
+
+### Operation `shutdownWriteRaw`
+
+```silk
+shutdownWriteRaw = Loan.shutdownBytes
+```
+
+<a id="declaration-73696c6b2f687474705f7472616e73706f72743a3a696d706c656d656e746174696f6e3a333a3a6f7065726174696f6e3a34"></a>
+
+### Operation `closeRaw`
+
+```silk
+closeRaw = Loan.closeBytes
+```

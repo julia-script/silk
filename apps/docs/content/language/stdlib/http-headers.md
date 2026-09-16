@@ -198,6 +198,21 @@ pub effect<'env> fn copy<'value: 'env, 'life1: 'env, 'env>(self: &'life1 Headers
 
 Copies fields into independent byte and index storage under `maxOwnedBytes`.
 
+<a id="declaration-73696c6b2f687474705f686561646572733a3a486561646572732e636f70794d61746368696e67"></a>
+
+### Method `Headers.copyMatching`
+
+```silk
+pub effect<'env> fn copyMatching<'value: 'env, 'life1: 'env, 'env>(self: &'life1 Headers<'value>, name: string<'value>, limits: Limits) -> silk/result.Result<silk/http_headers.OwnedHeaders, silk/http.ValueError> ! OutOfMemoryError ? &mut Allocator
+```
+
+Copies only case-insensitively matching fields in their original order.
+
+#### Details
+
+All selected-field and owned-capacity limits are checked before allocation. Duplicate fields
+remain distinct and retain their original relative order.
+
 <a id="declaration-73696c6b2f687474705f686561646572733a3a486561646572732e72657175697265644f776e65644279746573"></a>
 
 ### Method `Headers.requiredOwnedBytes`

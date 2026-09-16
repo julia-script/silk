@@ -926,6 +926,38 @@ it('checks provider compatibility independently from exact stored access', () =>
   assert.strictEqual(RequirementRow.providerCanSelect('Take', 'Exclusive'), true)
 })
 
+it('subtracts exact service keys without waiting for unrelated borrow lifetimes', () => {
+  const lifetime = Lifetime.bound({ module: 'work', name: 'provide' }, 0, 'borrow')
+  const policy = Type.requirementRowPolicy()
+  const selected: Type.Requirement = {
+    capability: Type.nominal('work', 'Selected', [lifetime]),
+    role: 'DefaultRole',
+    access: 'Exclusive',
+  }
+  const remaining = { ...selected, capability: Type.nominal('work', 'Other', [lifetime]) }
+  const difference = RowAlgebra.without(
+    policy,
+    RowAlgebra.concrete(policy, [selected, remaining]),
+    RowAlgebra.concrete(policy, [{ ...selected, access: 'Shared' }]),
+  )
+  assert.deepEqual(RowAlgebra.concretize(policy, difference), {
+    _tag: 'Concrete',
+    row: { members: [remaining] },
+  })
+  // Same nominal heads with different unresolved lifetimes may still collide later.
+  const otherLifetime = Lifetime.bound({ module: 'work', name: 'provide' }, 1, 'other')
+  assert.strictEqual(
+    RowAlgebra.without(
+      policy,
+      RowAlgebra.concrete(policy, [selected]),
+      RowAlgebra.concrete(policy, [
+        { ...selected, capability: Type.nominal('work', 'Selected', [otherLifetime]) },
+      ]),
+    ).expression._tag,
+    'Without',
+  )
+})
+
 it('defers concrete difference until generic member keys finish specializing', () => {
   const owner = { module: 'work', name: 'difference' }
   const left = Type.parameter(owner, 0, 'A')
@@ -958,6 +990,19 @@ it('defers concrete difference until generic member keys finish specializing', (
     access: Type.Requirement['access'],
     role: string,
   ): Type.Requirement => ({ capability: capability(argument), access, role })
+  const sourceRow = RowAlgebra.concrete(requirementPolicy, [
+    requirement(left, 'Exclusive', 'Audit'),
+  ])
+  const possiblyEqual = RowAlgebra.concrete(requirementPolicy, [
+    requirement(right, 'Shared', 'Audit'),
+  ])
+  assert.isFalse(
+    RowAlgebra.isKnownSubset(
+      requirementPolicy,
+      sourceRow,
+      RowAlgebra.without(requirementPolicy, sourceRow, possiblyEqual),
+    ),
+  )
   const specialize = (
     source: Type.Requirement,
     selected: Type.Requirement,
@@ -967,7 +1012,7 @@ it('defers concrete difference until generic member keys finish specializing', (
       RowAlgebra.concrete(requirementPolicy, [source]),
       RowAlgebra.concrete(requirementPolicy, [selected]),
     )
-    assert.strictEqual(open.expression._tag, 'Without')
+    assert.strictEqual(open.expression._tag, source.role === selected.role ? 'Without' : 'Concrete')
     const specialized = Type.substituteRequirementsRow(open, substitution)
     const result = RowAlgebra.concretize(requirementPolicy, specialized)
     assert.strictEqual(result._tag, 'Concrete')

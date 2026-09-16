@@ -3357,6 +3357,7 @@ const checkFunction = (
   index: DeclarationIndex.Index,
   semantic?: Elaboration.FunctionFact,
   localSharedBoundaries: ReadonlyArray<SourceSpan.SourceSpan> = Object.freeze([]),
+  localSharedResultBoundaries: ReadonlyArray<SourceSpan.SourceSpan> = Object.freeze([]),
 ): CheckedFunction => {
   const declaration = fn.declaration
   const copyAssumptions = new Set(
@@ -3423,7 +3424,9 @@ const checkFunction = (
             boundary,
           ),
         )
+  }
 
+  if (localSharedResultBoundaries.length > 0) {
     const parameter = fn.declaration.parameters.at(0)?.id
     if (parameter !== undefined) {
       const bindings = new Map<number, Hir.Expression>()
@@ -3503,7 +3506,7 @@ const checkFunction = (
           return true
         return false
       })
-      for (const boundary of localSharedBoundaries) {
+      for (const boundary of localSharedResultBoundaries) {
         for (const escapeSite of escapeSites)
           state.diagnostics.push(
             Diagnostic.localSharedAccessEscape('Result', escapeSite.span, boundary),
@@ -4765,6 +4768,7 @@ export interface CheckInput {
   readonly semantic: Elaboration.FunctionFact | undefined
   readonly index: DeclarationIndex.Index
   readonly boundaries: ReadonlyArray<SourceSpan.SourceSpan>
+  readonly resultBoundaries: ReadonlyArray<SourceSpan.SourceSpan>
 }
 
 /** Resolves ownership inputs without running the checker or reconstructing prior diagnostics. */
@@ -4783,6 +4787,27 @@ export const input = (
         ? (accessBoundaryPlan.boundaries.get(localSharedTargetKey(fn.declaration.canonical.id)) ??
           Object.freeze([]))
         : Object.freeze([]),
+    resultBoundaries:
+      fn.declaration.canonical._tag === 'Canonical'
+        ? (accessBoundaryPlan.resultBoundaries.get(
+            localSharedTargetKey(fn.declaration.canonical.id),
+          ) ?? Object.freeze([]))
+        : Object.freeze([]),
+  })
+
+const sameBoundarySpans = (
+  left: ReadonlyArray<SourceSpan.SourceSpan>,
+  right: ReadonlyArray<SourceSpan.SourceSpan>,
+): boolean =>
+  left.length === right.length &&
+  left.every((span, ordinal) => {
+    const other = right[ordinal]
+    return (
+      other !== undefined &&
+      span.sourceId === other.sourceId &&
+      span.start === other.start &&
+      span.end === other.end
+    )
   })
 
 /** Requires identical semantic authorities and equal ordered access-boundary spans. */
@@ -4790,20 +4815,12 @@ export const matchesInput = (self: CheckInput, other: CheckInput): boolean =>
   self.function === other.function &&
   self.semantic === other.semantic &&
   self.index === other.index &&
-  self.boundaries.length === other.boundaries.length &&
-  self.boundaries.every((span, ordinal) => {
-    const right = other.boundaries[ordinal]
-    return (
-      right !== undefined &&
-      span.sourceId === right.sourceId &&
-      span.start === right.start &&
-      span.end === right.end
-    )
-  })
+  sameBoundarySpans(self.boundaries, other.boundaries) &&
+  sameBoundarySpans(self.resultBoundaries, other.resultBoundaries)
 
 /** Executes ownership checking with exactly the supplied semantic authorities. */
 export const check = (self: CheckInput): CheckedFunction =>
-  checkFunction(self.function, self.index, self.semantic, self.boundaries)
+  checkFunction(self.function, self.index, self.semantic, self.boundaries, self.resultBoundaries)
 
 interface SourceProof {
   readonly input: CheckInput
@@ -4856,6 +4873,7 @@ export const localSharedResultEscapes = (facts: {
 export interface LocalSharedAccessBoundaryPlan {
   readonly _tag: 'LocalSharedAccessBoundaryPlan'
   readonly boundaries: ReadonlyMap<string, ReadonlyArray<SourceSpan.SourceSpan>>
+  readonly resultBoundaries: ReadonlyMap<string, ReadonlyArray<SourceSpan.SourceSpan>>
 }
 
 const localSharedTargetKey = (target: DeclarationFacts.CanonicalId): string =>
@@ -4988,10 +5006,15 @@ export const localSharedAccessBoundaryPlan = (
       }
     }
   }
+  // Only a callback's result crosses the access boundary. A helper may return an intermediate
+  // borrow to that callback, provided the callback consumes it before returning its own result.
+  const resultBoundaries = new Map(
+    [...boundaries].map(([key, spans]) => [key, Object.freeze([...spans])] as const),
+  )
   // Every synchronous helper called by a restricted callback still runs while the original access
   // loan is live, even when it does not receive the borrowed parameter. Propagate the sealed
-  // boundary through the complete ordinary call graph so transitive park, wake, or result escape is
-  // judged exactly like direct callback code, independent of helper names.
+  // boundary through the complete ordinary call graph so transitive park or wake is judged exactly
+  // like direct callback code, independent of helper names.
   changed = true
   while (changed) {
     changed = false
@@ -5022,6 +5045,7 @@ export const localSharedAccessBoundaryPlan = (
   }
   return Object.freeze({
     _tag: 'LocalSharedAccessBoundaryPlan',
+    resultBoundaries,
     boundaries: new Map(
       [...boundaries].map(([key, spans]) => [key, Object.freeze(spans)] as const),
     ),

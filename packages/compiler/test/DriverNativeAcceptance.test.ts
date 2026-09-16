@@ -14,7 +14,7 @@ import * as NativeLinkInput from '../src/NativeLinkInput.js'
 import * as NativeToolchain from '../src/NativeToolchain.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
-import { nativeCorpus, type NativeRun } from './support/corpus.js'
+import { httpRedirectCorpusProgram, nativeCorpus, type NativeRun } from './support/corpus.js'
 import { base64AcceptanceSource } from './support/base64Acceptance.js'
 import { httpClientAcceptanceSource } from './support/httpClientAcceptance.js'
 import { httpClientContentAcceptanceSource } from './support/httpClientContentAcceptance.js'
@@ -166,7 +166,16 @@ const selectedCorpus = shardedCorpus.filter(
   (program) => selectedNativeCases.size === 0 || selectedNativeCases.has(program.name),
 )
 const portableWasmCorpus = [
-  { name: 'http-client', source: httpClientAcceptanceSource, expected: 0 },
+  {
+    name: httpRedirectCorpusProgram.name,
+    source: httpRedirectCorpusProgram.source,
+    expected: 0,
+  },
+  {
+    name: 'http-proxy-routed-preparation-and-scripted-tunnel-portability',
+    source: httpClientAcceptanceSource,
+    expected: 0,
+  },
   { name: 'http-client-content', source: httpClientContentAcceptanceSource, expected: 0 },
   { name: 'http-client-request', source: httpRequestAcceptanceSource, expected: 0 },
   { name: 'http-values', source: httpValuesAcceptanceSource, expected: 0 },

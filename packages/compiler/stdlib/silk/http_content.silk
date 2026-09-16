@@ -635,7 +635,14 @@ fn makeAcceptEncoding<'value>(
   return Result.succeed<Option<Header<'value>>, ValueError>(Option.none<Header<'value>>())
 }
 
-fn validateLimits<'head>(limits: &Limits) -> Result<(), ContentError<'head>> {
+/// Validates source-independent content limits without allocation or body I/O.
+///
+/// # Details
+///
+/// `maxDepth` must be from one through four. `intermediateCapacity` must be from one through
+/// 65,536 bytes. Other byte limits can be zero and are enforced by planning or content I/O.
+/// Codec-specific storage validation occurs when a plan selects that codec.
+pub fn validateLimits<'head>(limits: &Limits) -> Result<(), ContentError<'head>> {
   if limits.maxDepth == usize.ZERO || limits.maxDepth > MAX_CODINGS {
     return planFailure<()>(ContentReason<'head>.InvalidLimit {
       limit: ContentLimitKind.CodingDepth,

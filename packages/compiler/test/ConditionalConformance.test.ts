@@ -4,6 +4,7 @@ import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as ConformanceProof from '../src/ConformanceProof.js'
 import * as Hir from '../src/Hir.js'
+import * as Lifetime from '../src/Lifetime.js'
 import * as MirEncoding from '../src/MirEncoding.js'
 import * as MirVerification from '../src/MirVerification.js'
 import * as Type from '../src/Type.js'
@@ -14,6 +15,149 @@ const ascii = (value: string): Uint8Array => Uint8Array.from(value, (unit) => un
 
 const analyze = (name: string, source: string) =>
   AnalysisFixture.retainingMain(name, ascii(source), 'wasm32-unknown-unknown')
+
+it.effect('selects capability-bound parameters for one reusable provider', () =>
+  Effect.gen(function* () {
+    const module = 'conformance/capability-bound-parameters'
+    const source = `interface Echo<T> {
+  fn echo(self: &Self, value: T) -> T
+}
+struct Client {}
+impl<T> Echo<T> for Client {
+  fn echo(self: &Self, value: T) -> T { return move value }
+}
+interface Pick<T, R> { fn pick(self: &Self, value: T) -> R }
+impl<T> Pick<T, i32> for Client {
+  fn pick(self: &Self, value: T) -> i32 { drop value return 1 }
+}
+fn choose<R, C: Pick<bool, R>>(client: &C) -> R {
+  return Pick<bool, R>.pick(client, true)
+}
+fn calls(client: &Client) -> i32 {
+  let flag = Echo<bool>.echo(client, true)
+  let inferred = choose(client)
+  if flag { return Echo<i32>.echo(client, 42) + inferred }
+  return 0
+}
+interface Unfixed<T> {}
+impl<T> Unfixed<T> for Client {}
+fn unknown<A, C: Unfixed<A>>(client: &C) -> () { drop client }
+fn rejected(client: &Client) -> () { return unknown(client) }`
+    const snapshot = yield* AnalysisFixture.frontend(module, ascii(source))
+    assert.deepEqual(
+      Analysis.diagnostics(snapshot).map((diagnostic) => ({
+        code: diagnostic.code,
+        span: source.slice(diagnostic.span.start, diagnostic.span.end).trim(),
+      })),
+      [{ code: 'SEM0099', span: 'unknown(client)' }],
+    )
+    for (const argument of ['i32', 'bool'] as const) {
+      const proof = ConformanceProof.prove(
+        Analysis.declarationIndex(snapshot),
+        Type.nominal(module, 'Client'),
+        Type.nominal(module, 'Echo', [argument]),
+      )
+      assert.strictEqual(proof._tag, 'Proved')
+      if (proof._tag === 'Proved')
+        assert.deepEqual(proof.typeArguments.map(Type.encodeGenericArgument), [argument])
+    }
+  }),
+)
+
+it.effect('retains a proved interface target across lifetime-only application differences', () =>
+  Effect.gen(function* () {
+    const module = 'conformance/witness-application-lifetimes'
+    const snapshot = yield* AnalysisFixture.frontend(
+      module,
+      ascii(`struct Request<'a> { value: &'a i32 }
+interface Read<'a> { effect fn read(self: &Self, request: Request<'a>) -> Request<'a> }
+struct Client<'a> { value: &'a i32 }
+impl<'a> Read<'a> for Client<'a> {
+  effect fn read(self: &Self, request: Request<'a>) -> Request<'a> { return move request }
+}
+effect fn invoke<'a, C: Read<'a>>(client: &C, request: Request<'a>) -> Request<'a> {
+  return run Read<'a>.read(client, move request)
+}`),
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    const hir = Projections.hirOf(snapshot, module) ?? raise('expected HIR')
+    const fn =
+      hir.functions.find(
+        (fn) => fn.declaration.name._tag === 'Present' && fn.declaration.name.spelling === 'invoke',
+      ) ?? raise('expected invocation')
+    const call =
+      fn.statements
+        .flatMap(Hir.statementExpressions)
+        .flatMap(Hir.expressionTree)
+        .find((expression) => expression._tag === 'InterfaceOperationCall') ??
+      raise('expected interface call')
+    if (call._tag !== 'InterfaceOperationCall') return
+    const owner = { module, name: 'main' }
+    const provider = Type.nominal(module, 'Client', [Lifetime.local(owner, 'provider', 0)])
+    const substitution = new Map<string, Type.GenericArgument>(
+      fn.declaration.typeParameters.map((parameter, ordinal) => [
+        Type.key(parameter.type),
+        parameter.type.kind === 'Lifetime'
+          ? Lifetime.local(owner, 'application', ordinal)
+          : provider,
+      ]),
+    )
+    const capability = Type.substitute(call.capability, substitution)
+    if (!Type.isNominal(capability)) return raise('expected capability')
+    const index = Analysis.declarationIndex(snapshot)
+    assert.strictEqual(ConformanceProof.prove(index, provider, capability)._tag, 'Proved')
+    const target = ConformanceProof.interfaceWitnessTarget(
+      index,
+      provider,
+      capability,
+      call.operation,
+      call.contract,
+      substitution,
+    )
+    assert.strictEqual(target?.implementation.name, 'impl@0.read')
+    const wrongApplication = {
+      ...call.contract,
+      operands: call.contract.operands.map((operand, ordinal) =>
+        ordinal === 1 && operand.type._tag === 'Resolved'
+          ? { ...operand, type: { ...operand.type, type: 'bool' as const } }
+          : operand,
+      ),
+    }
+    assert.strictEqual(
+      ConformanceProof.interfaceWitnessTarget(
+        index,
+        provider,
+        capability,
+        call.operation,
+        wrongApplication,
+        substitution,
+      ),
+      undefined,
+    )
+  }),
+)
+
+it.effect('does not invent witness lifetimes for concrete requirement-row access', () =>
+  Effect.gen(function* () {
+    const source = `service Clock {}
+service Selected<T, E, ?R> {}
+interface Use<'policy, E, ?R> {
+  effect fn use(self: &mut Self, policy: &'policy i32) -> () ! E ? R
+}
+struct Client<'policy, E, ?R> {policy: &'policy i32}
+impl<'policy, E, ?R>
+Use<'policy, E, R | &mut Selected<&'policy i32, E, R> | &mut Clock>
+for Client<'policy, E, R> {
+  effect fn use(self: &mut Self, policy: &'policy i32) -> ()
+  ! E ? R | &mut Selected<&'policy i32, E, R> | &mut Clock { return () }
+}`
+    const snapshot = yield* AnalysisFixture.frontend(
+      'conformance/row-access-lifetimes',
+      ascii(source),
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+  }),
+)
 
 const effectContext = `interface Handler<P, A, E, ?R> {
   effect fn handle(handler: Self, provider: &mut P) -> A ! E ? R
@@ -82,6 +226,32 @@ where R in Without<R, ByteDuplex> {
   )
 }
 `
+
+it.effect('resolves nested conditional contexts from exact enclosing bounds', () =>
+  Effect.gen(function* () {
+    const source = `interface Ready {}
+struct Wrapper<T> { value: T }
+impl<T: Ready> Ready for Wrapper<T> {}
+fn accept<T: Ready>(value: T) -> () { drop value }
+fn forward<T: Ready>(value: T) -> () {
+  return accept(Wrapper<Wrapper<T>> {value: Wrapper<T> {value: move value}})
+}
+fn missing<T>(value: T) -> () {
+  return accept(Wrapper<Wrapper<T>> {value: Wrapper<T> {value: move value}})
+}`
+    const snapshot = yield* Analysis.ofSource(
+      'conditional-conformance/nested-context',
+      ascii(source),
+    )
+    assert.deepEqual(
+      Analysis.diagnostics(snapshot).map((diagnostic) => ({
+        code: diagnostic.code,
+        start: diagnostic.span.start,
+      })),
+      [{ code: 'SEM0121', start: source.lastIndexOf(' accept(') }],
+    )
+  }),
+)
 
 it.effect('infers exact Effect-polymorphic and split-row conditional contexts', () =>
   Effect.gen(function* () {
