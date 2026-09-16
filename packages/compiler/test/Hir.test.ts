@@ -88,15 +88,9 @@ it.effect('preserves contextual conversions across generic and service calls', (
   Effect.gen(function* () {
     const service = yield* elaborateWithStdlib(
       'hir://service-argument-conversion.silk',
-      `import silk.effect { Effect }
-service Sink { effect fn put(value: i32 | bool) -> i32 ? &Sink }
-struct Provider {}
-impl Sink for Provider { effect fn put(self: &Self, value: i32 | bool) -> i32 { return 42 } }
-effect fn use() -> i32 ? &Sink { return run Sink.put(1) }
-pub fn main() -> i32 {
-  let provider = Provider {}
-  return run Effect.provide(use(), &provider)
-}`,
+      `service Sink<'a, ?R> { effect fn put(value: i32 | bool) -> i32 ? R | &Sink<'a, R> }
+effect fn use() -> i32 ? &Sink<'static, never> { return run Sink.put<'static, never>(1) }
+pub fn main() -> i32 { return 42 }`,
     )
     assert.deepEqual(service.diagnostics, [])
     const use = service.hir.functions.find(
@@ -109,8 +103,13 @@ pub fn main() -> i32 {
             (expression) => expression._tag === 'ServiceEffectConstruct',
           )
     assert.strictEqual(serviceConstruct?._tag, 'ServiceEffectConstruct')
-    if (serviceConstruct?._tag === 'ServiceEffectConstruct')
+    if (serviceConstruct?._tag === 'ServiceEffectConstruct') {
       assert.strictEqual(serviceConstruct.arguments.at(0)?._tag, 'UnionConvert')
+      assert.deepEqual(serviceConstruct.service.arguments.map(Type.encodeGenericArgument), [
+        "'static",
+        '? ',
+      ])
+    }
 
     const generic = elaborate(
       'hir://generic-argument-conversion.silk',

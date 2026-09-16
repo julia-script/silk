@@ -1626,9 +1626,10 @@ export const hirExpression = (
     fact.type._tag === 'Available' &&
     Type.isEffect(fact.type.type)
   ) {
-    const serviceArguments = fact.contract.typeArguments
-      .slice(0, fact.reference.service.typeParameters.length)
-      .filter(Type.isTypeArgument)
+    const serviceArguments = fact.contract.typeArguments.slice(
+      0,
+      fact.reference.service.typeParameters.length,
+    )
     const service = Type.nominal(
       fact.reference.service.canonical.id.module,
       fact.reference.service.canonical.id.name,
