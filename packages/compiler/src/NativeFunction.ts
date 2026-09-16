@@ -401,7 +401,6 @@ export const emitBodies = Effect.fn('NativeFunction.emitBodies')(function* (
       yield* Effect.annotateCurrentSpan({
         'entry.symbol': entry.symbol,
       })
-      // yield* Effect.log(`Emitting body for native function: ${entry.symbol.slice(0, 60)} (chars ${entry.symbol.length})`)
       let subprogram: LlvmMetadata.Optional
       if (debug && file !== undefined && compileUnit !== undefined) {
         const startLine = positionOf(table, NativeDebug.functionStart(entry.fn)).line
@@ -1230,6 +1229,4 @@ export const emitBodies = Effect.fn('NativeFunction.emitBodies')(function* (
       )
     }).pipe(Effect.withSpan('NativeFunction.emitBodies_entry'))
   }
-
-  yield* Effect.log(`Finished emitting ${declared.length}`)
 })
