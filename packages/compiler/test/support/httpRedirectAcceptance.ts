@@ -88,14 +88,14 @@ const httpFetchPolicySupport = `pub effect fn nativeFetchSourceFamiliesWitness<
   | &mut RedirectProducerRequirement
   | &mut RedirectFactoryRequirement {
   let empty = run Effect.result(HttpFetch.discardEmpty(
-    fetch,
+    &mut fetch.*,
     FetchRequest.get(emptyUri),
     FetchOptions.defaults(),
     u64.toU64(1),
   ))
   drop empty
   let bytes = run Effect.result(HttpFetch.discardBytes(
-    fetch,
+    &mut fetch.*,
     FetchRequest.get(bytesUri),
     b"x",
     FetchOptions.defaults(),
@@ -103,7 +103,7 @@ const httpFetchPolicySupport = `pub effect fn nativeFetchSourceFamiliesWitness<
   ))
   drop bytes
   let oneShot = run Effect.result(HttpFetch.discardOneShot(
-    fetch,
+    &mut fetch.*,
     FetchRequest.get(oneShotUri),
     RedirectProducer {offset: usize.ZERO},
     FetchOptions.defaults(),
@@ -111,7 +111,7 @@ const httpFetchPolicySupport = `pub effect fn nativeFetchSourceFamiliesWitness<
   ))
   drop oneShot
   let replay = run Effect.result(HttpFetch.discardReplay(
-    fetch,
+    &mut fetch.*,
     FetchRequest.get(replayUri),
     RedirectFactory {},
     FetchOptions.defaults(),
@@ -1021,7 +1021,7 @@ const redirectPolicyCompileWitness = `pub fn redirectPolicyCompileWitness() -> i
 
   let cleaned = crossOriginHeaderPolicy(HeaderPolicy {
     host: HeaderControl.Value {value: b"old.example"},
-    userAgent: HeaderControl.Omit,
+    userAgent: HeaderControl<'static>.Omit,
     accept: HeaderControl.Value {value: b"application/json"},
     authorization: Authorization.Basic {username: b"user", password: b"secret"},
     basicSecurity: BasicSecurity.AllowInsecureBasic,
