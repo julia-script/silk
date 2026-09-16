@@ -216,9 +216,20 @@ export const check = (
     if (parameter.staticProperties.includes('Intrinsic.Detached')) return true
     if (parameter.representationBound !== undefined)
       return prove(parameter.representationBound.environment, lifetime)
-    return (scope.parameterBounds.get(Type.key(parameter)) ?? []).some((bound) =>
-      prove(bound, lifetime),
-    )
+    const bounds = scope.parameterBounds.get(Type.key(parameter)) ?? []
+    if (bounds.some((bound) => Lifetime.outlives(scope.assumptions, bound, lifetime))) return true
+    // Inference may retain an obligation while reporting success. Do not select a weaker
+    // redundant bound first and thereby constrain a caller's region more than necessary.
+    return bounds
+      .filter(
+        (bound) =>
+          !bounds.some(
+            (other) =>
+              Lifetime.outlives(scope.assumptions, other, bound) &&
+              !Lifetime.outlives(scope.assumptions, bound, other),
+          ),
+      )
+      .some((bound) => prove(bound, lifetime))
   })
 }
 

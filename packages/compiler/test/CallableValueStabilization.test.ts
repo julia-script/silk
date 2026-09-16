@@ -33,6 +33,21 @@ effect<'provider> fn route<'configuration: 'provider, 'provider, P>(provider: &'
   }
   return run scoped(Loan<'provider, P> {provider: move provider}, move use)
 }
+struct Transferred<'tunnel, P> { value: &'tunnel mut P }
+struct TunnelTransport<'view, 'provider: 'view, 'tunnel: 'provider, P> { connection: &'view mut Owned<Loan<'provider, Transferred<'tunnel, P>>> }
+fn transport<'view, 'provider: 'view, 'tunnel: 'provider, P>(owned: &'view mut Owned<Loan<'provider, Transferred<'tunnel, P>>>) -> TunnelTransport<'view, 'provider, 'tunnel, P> {
+  return TunnelTransport<'view, 'provider, 'tunnel, P> {connection: move owned}
+}
+effect<'view & 'configuration> fn finishTunnel<'configuration, 'view, 'provider: 'view, 'tunnel: 'provider, P>(
+  owned: TunnelTransport<'view, 'provider, 'tunnel, P>, route: Route<'configuration>,
+) -> i32 { drop owned return route.label.* }
+effect<'provider> fn tunnelRoute<'configuration: 'provider, 'provider, 'tunnel: 'provider, P>(provider: &'provider mut Transferred<'tunnel, P>, route: Route<'configuration>) -> i32 {
+  let use = effect fn(owned: &mut Owned<Loan<'provider, Transferred<'tunnel, P>>>) -> i32 {
+    let selected = transport(move owned)
+    return run finishTunnel<'configuration, P>(move selected, move route)
+  }
+  return run scoped(Loan<'provider, Transferred<'tunnel, P>> {provider: move provider}, move use)
+}
 pub fn main() -> i32 { return 0 }`,
         ),
         [],
