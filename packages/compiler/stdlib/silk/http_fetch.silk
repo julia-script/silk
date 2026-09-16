@@ -770,7 +770,13 @@ interface SemanticRequestHandler<'policy, RoutedP, DirectP, A, E, ?R> {
   effect<'call> fn handle<'call>(
     handler: Self,
     request: Redirect.Request<'call, 'call, 'call, 'policy>,
-  ) -> A ! E ? R
+  ) -> A ! E ? R where
+    &mut RoutedP provides &HttpTransport from &mut HttpTransport | &mut MonotonicClock | &mut Allocator | &mut Random,
+    &mut RoutedP provides &HttpTransport from &mut HttpTransport,
+    &mut RoutedP provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock | &mut Allocator | &mut Random,
+    &mut RoutedP provides &ByteDuplex from &mut ByteDuplex,
+    &mut DirectP provides &HttpTransport from &mut HttpTransport | &mut MonotonicClock | &mut Allocator | &mut Random,
+    &mut DirectP provides &HttpTransport from &mut HttpTransport
 }
 
 fn redirectRequest<'call, 'policy>(
@@ -808,7 +814,14 @@ effect fn withSemanticRequest<
   E,
   ?R,
   H: SemanticRequestHandler<'policy, RoutedP, DirectP, A, E ? R>,
->(request: FetchRequest<'uri, 'method, 'headers, 'policy>, handler: H) -> A ! E | ValueError ? R {
+>(request: FetchRequest<'uri, 'method, 'headers, 'policy>, handler: H) -> A ! E | ValueError ? R
+where
+  &mut RoutedP provides &HttpTransport from &mut HttpTransport | &mut MonotonicClock | &mut Allocator | &mut Random,
+  &mut RoutedP provides &HttpTransport from &mut HttpTransport,
+  &mut RoutedP provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock | &mut Allocator | &mut Random,
+  &mut RoutedP provides &ByteDuplex from &mut ByteDuplex,
+  &mut DirectP provides &HttpTransport from &mut HttpTransport | &mut MonotonicClock | &mut Allocator | &mut Random,
+  &mut DirectP provides &HttpTransport from &mut HttpTransport {
   let FetchRequest<'uri, 'method, 'headers, 'policy> {
     uriValue,
     methodValue,
@@ -1393,6 +1406,12 @@ impl<
   ! RedirectError | FetchError | ValueError | BodyError | DestinationError | ClientError | OutOfMemoryError | AcquisitionError
   ? DestinationRequirements | AcquisitionRequirements | &mut MonotonicClock | &mut Allocator | &mut Random
   where
+    &mut RoutedP provides &HttpTransport from &mut HttpTransport | &mut MonotonicClock | &mut Allocator | &mut Random,
+    &mut RoutedP provides &HttpTransport from &mut HttpTransport,
+    &mut RoutedP provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock | &mut Allocator | &mut Random,
+    &mut RoutedP provides &ByteDuplex from &mut ByteDuplex,
+    &mut DirectP provides &HttpTransport from &mut HttpTransport | &mut MonotonicClock | &mut Allocator | &mut Random,
+    &mut DirectP provides &HttpTransport from &mut HttpTransport,
     DestinationRequirements in Without<DestinationRequirements, ByteDuplex>,
     DestinationRequirements in Without<DestinationRequirements, HttpTransport>,
     AcquisitionRequirements in Without<AcquisitionRequirements, ByteDuplex>,
@@ -1456,7 +1475,11 @@ impl<
       maxBufferedBytes: maxBufferedBytes,
       deadline: copyDeadline(&deadline),
     }
-    return run mapSwitching(
+    return run mapSwitching<
+      A,
+      RedirectError | FetchError | ValueError | BodyError | DestinationError | OutOfMemoryError | AcquisitionError,
+      DestinationRequirements | AcquisitionRequirements | &mut MonotonicClock | &mut Allocator | &mut Random,
+    >(
       Redirect.withEmptyHybridResponse(
         &mut adapter,
         move request,
@@ -1511,6 +1534,12 @@ pub effect fn toSinkEmpty<
 ! RedirectError | FetchError | ValueError | BodyError | DestinationFailure<SinkError> | ClientError | OutOfMemoryError | AcquisitionError
 ? SinkRequirements | AcquisitionRequirements | &mut MonotonicClock | &mut Allocator | &mut Random
 where
+  &mut RoutedP provides &HttpTransport from &mut HttpTransport | &mut MonotonicClock | &mut Allocator | &mut Random,
+  &mut RoutedP provides &HttpTransport from &mut HttpTransport,
+  &mut RoutedP provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock | &mut Allocator | &mut Random,
+  &mut RoutedP provides &ByteDuplex from &mut ByteDuplex,
+  &mut DirectP provides &HttpTransport from &mut HttpTransport | &mut MonotonicClock | &mut Allocator | &mut Random,
+  &mut DirectP provides &HttpTransport from &mut HttpTransport,
   SinkRequirements in Without<SinkRequirements, ByteDuplex>,
   SinkRequirements in Without<SinkRequirements, HttpTransport>,
   AcquisitionRequirements in Without<AcquisitionRequirements, ByteDuplex>,
@@ -1567,6 +1596,12 @@ pub effect fn collectEmpty<
 ! RedirectError | FetchError | ValueError | BodyError | ClientError | OutOfMemoryError | AcquisitionError
 ? AcquisitionRequirements | &mut MonotonicClock | &mut Allocator | &mut Random
 where
+  &mut RoutedP provides &HttpTransport from &mut HttpTransport | &mut MonotonicClock | &mut Allocator | &mut Random,
+  &mut RoutedP provides &HttpTransport from &mut HttpTransport,
+  &mut RoutedP provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock | &mut Allocator | &mut Random,
+  &mut RoutedP provides &ByteDuplex from &mut ByteDuplex,
+  &mut DirectP provides &HttpTransport from &mut HttpTransport | &mut MonotonicClock | &mut Allocator | &mut Random,
+  &mut DirectP provides &HttpTransport from &mut HttpTransport,
   AcquisitionRequirements in Without<AcquisitionRequirements, ByteDuplex>,
   AcquisitionRequirements in Without<AcquisitionRequirements, HttpTransport> {
   run admit(&options)
@@ -1621,6 +1656,12 @@ pub effect fn discardEmpty<
 ! RedirectError | FetchError | ValueError | BodyError | ClientError | OutOfMemoryError | AcquisitionError
 ? AcquisitionRequirements | &mut MonotonicClock | &mut Allocator | &mut Random
 where
+  &mut RoutedP provides &HttpTransport from &mut HttpTransport | &mut MonotonicClock | &mut Allocator | &mut Random,
+  &mut RoutedP provides &HttpTransport from &mut HttpTransport,
+  &mut RoutedP provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock | &mut Allocator | &mut Random,
+  &mut RoutedP provides &ByteDuplex from &mut ByteDuplex,
+  &mut DirectP provides &HttpTransport from &mut HttpTransport | &mut MonotonicClock | &mut Allocator | &mut Random,
+  &mut DirectP provides &HttpTransport from &mut HttpTransport,
   AcquisitionRequirements in Without<AcquisitionRequirements, ByteDuplex>,
   AcquisitionRequirements in Without<AcquisitionRequirements, HttpTransport> {
   run admit(&options)
@@ -1709,6 +1750,12 @@ impl<
   ! RedirectError | FetchError | ValueError | BodyError | DestinationError | ClientError | OutOfMemoryError | AcquisitionError
   ? DestinationRequirements | AcquisitionRequirements | &mut MonotonicClock | &mut Allocator | &mut Random
   where
+    &mut RoutedP provides &HttpTransport from &mut HttpTransport | &mut MonotonicClock | &mut Allocator | &mut Random,
+    &mut RoutedP provides &HttpTransport from &mut HttpTransport,
+    &mut RoutedP provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock | &mut Allocator | &mut Random,
+    &mut RoutedP provides &ByteDuplex from &mut ByteDuplex,
+    &mut DirectP provides &HttpTransport from &mut HttpTransport | &mut MonotonicClock | &mut Allocator | &mut Random,
+    &mut DirectP provides &HttpTransport from &mut HttpTransport,
     DestinationRequirements in Without<DestinationRequirements, ByteDuplex>,
     DestinationRequirements in Without<DestinationRequirements, HttpTransport>,
     AcquisitionRequirements in Without<AcquisitionRequirements, ByteDuplex>,
@@ -1773,7 +1820,11 @@ impl<
       maxBufferedBytes: maxBufferedBytes,
       deadline: copyDeadline(&deadline),
     }
-    return run mapSwitching(
+    return run mapSwitching<
+      A,
+      RedirectError | FetchError | ValueError | BodyError | DestinationError | OutOfMemoryError | AcquisitionError,
+      DestinationRequirements | AcquisitionRequirements | &mut MonotonicClock | &mut Allocator | &mut Random,
+    >(
       Redirect.withBytesHybridResponse(
         &mut adapter,
         move request,
@@ -1822,6 +1873,12 @@ pub effect fn toSinkBytes<
 ! RedirectError | FetchError | ValueError | BodyError | DestinationFailure<SinkError> | ClientError | OutOfMemoryError | AcquisitionError
 ? SinkRequirements | AcquisitionRequirements | &mut MonotonicClock | &mut Allocator | &mut Random
 where
+  &mut RoutedP provides &HttpTransport from &mut HttpTransport | &mut MonotonicClock | &mut Allocator | &mut Random,
+  &mut RoutedP provides &HttpTransport from &mut HttpTransport,
+  &mut RoutedP provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock | &mut Allocator | &mut Random,
+  &mut RoutedP provides &ByteDuplex from &mut ByteDuplex,
+  &mut DirectP provides &HttpTransport from &mut HttpTransport | &mut MonotonicClock | &mut Allocator | &mut Random,
+  &mut DirectP provides &HttpTransport from &mut HttpTransport,
   SinkRequirements in Without<SinkRequirements, ByteDuplex>,
   SinkRequirements in Without<SinkRequirements, HttpTransport>,
   AcquisitionRequirements in Without<AcquisitionRequirements, ByteDuplex>,
@@ -1882,6 +1939,12 @@ pub effect fn collectBytes<
 ! RedirectError | FetchError | ValueError | BodyError | ClientError | OutOfMemoryError | AcquisitionError
 ? AcquisitionRequirements | &mut MonotonicClock | &mut Allocator | &mut Random
 where
+  &mut RoutedP provides &HttpTransport from &mut HttpTransport | &mut MonotonicClock | &mut Allocator | &mut Random,
+  &mut RoutedP provides &HttpTransport from &mut HttpTransport,
+  &mut RoutedP provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock | &mut Allocator | &mut Random,
+  &mut RoutedP provides &ByteDuplex from &mut ByteDuplex,
+  &mut DirectP provides &HttpTransport from &mut HttpTransport | &mut MonotonicClock | &mut Allocator | &mut Random,
+  &mut DirectP provides &HttpTransport from &mut HttpTransport,
   AcquisitionRequirements in Without<AcquisitionRequirements, ByteDuplex>,
   AcquisitionRequirements in Without<AcquisitionRequirements, HttpTransport> {
   run admit(&options)
@@ -1940,6 +2003,12 @@ pub effect fn discardBytes<
 ! RedirectError | FetchError | ValueError | BodyError | ClientError | OutOfMemoryError | AcquisitionError
 ? AcquisitionRequirements | &mut MonotonicClock | &mut Allocator | &mut Random
 where
+  &mut RoutedP provides &HttpTransport from &mut HttpTransport | &mut MonotonicClock | &mut Allocator | &mut Random,
+  &mut RoutedP provides &HttpTransport from &mut HttpTransport,
+  &mut RoutedP provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock | &mut Allocator | &mut Random,
+  &mut RoutedP provides &ByteDuplex from &mut ByteDuplex,
+  &mut DirectP provides &HttpTransport from &mut HttpTransport | &mut MonotonicClock | &mut Allocator | &mut Random,
+  &mut DirectP provides &HttpTransport from &mut HttpTransport,
   AcquisitionRequirements in Without<AcquisitionRequirements, ByteDuplex>,
   AcquisitionRequirements in Without<AcquisitionRequirements, HttpTransport> {
   run admit(&options)
@@ -2039,6 +2108,12 @@ impl<
   ! RedirectError | FetchError | ValueError | BodyError | ProducerError | DestinationError | ClientError | OutOfMemoryError | AcquisitionError
   ? ProducerRequirements | DestinationRequirements | AcquisitionRequirements | &mut MonotonicClock | &mut Allocator | &mut Random
   where
+    &mut RoutedP provides &HttpTransport from &mut HttpTransport | &mut MonotonicClock | &mut Allocator | &mut Random,
+    &mut RoutedP provides &HttpTransport from &mut HttpTransport,
+    &mut RoutedP provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock | &mut Allocator | &mut Random,
+    &mut RoutedP provides &ByteDuplex from &mut ByteDuplex,
+    &mut DirectP provides &HttpTransport from &mut HttpTransport | &mut MonotonicClock | &mut Allocator | &mut Random,
+    &mut DirectP provides &HttpTransport from &mut HttpTransport,
     ProducerRequirements in Without<ProducerRequirements, ByteDuplex>,
     ProducerRequirements in Without<ProducerRequirements, HttpTransport>,
     DestinationRequirements in Without<DestinationRequirements, ByteDuplex>,
@@ -2110,8 +2185,22 @@ impl<
       maxBufferedBytes: maxBufferedBytes,
       deadline: copyDeadline(&deadline),
     }
-    return run mapSwitching(
-      Redirect.withOneShotHybridResponse(
+    return run mapSwitching<
+      A,
+      ProducerError | RedirectError | FetchError | ValueError | BodyError | DestinationError | OutOfMemoryError | AcquisitionError,
+      ProducerRequirements | DestinationRequirements | AcquisitionRequirements | &mut MonotonicClock | &mut Allocator | &mut Random,
+    >(
+      Redirect.withOneShotHybridResponse<
+        RoutedP,
+        DirectP,
+        A,
+        ProducerError,
+        FetchError | ValueError | BodyError | DestinationError | ClientError | OutOfMemoryError,
+        AcquisitionError,
+        ProducerRequirements,
+        DestinationRequirements | &mut Allocator | &mut MonotonicClock | &mut Random,
+        AcquisitionRequirements,
+      >(
         &mut adapter,
         move request,
         &redirect,
@@ -2168,6 +2257,12 @@ pub effect fn toSinkOneShot<
 > | ClientError | OutOfMemoryError | AcquisitionError
 ? ProducerRequirements | SinkRequirements | AcquisitionRequirements | &mut MonotonicClock | &mut Allocator | &mut Random
 where
+  &mut RoutedP provides &HttpTransport from &mut HttpTransport | &mut MonotonicClock | &mut Allocator | &mut Random,
+  &mut RoutedP provides &HttpTransport from &mut HttpTransport,
+  &mut RoutedP provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock | &mut Allocator | &mut Random,
+  &mut RoutedP provides &ByteDuplex from &mut ByteDuplex,
+  &mut DirectP provides &HttpTransport from &mut HttpTransport | &mut MonotonicClock | &mut Allocator | &mut Random,
+  &mut DirectP provides &HttpTransport from &mut HttpTransport,
   ProducerRequirements in Without<ProducerRequirements, ByteDuplex>,
   ProducerRequirements in Without<ProducerRequirements, HttpTransport>,
   SinkRequirements in Without<SinkRequirements, ByteDuplex>,
@@ -2234,6 +2329,12 @@ pub effect fn collectOneShot<
 ! RedirectError | FetchError | ValueError | BodyError | ProducerError | ClientError | OutOfMemoryError | AcquisitionError
 ? ProducerRequirements | AcquisitionRequirements | &mut MonotonicClock | &mut Allocator | &mut Random
 where
+  &mut RoutedP provides &HttpTransport from &mut HttpTransport | &mut MonotonicClock | &mut Allocator | &mut Random,
+  &mut RoutedP provides &HttpTransport from &mut HttpTransport,
+  &mut RoutedP provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock | &mut Allocator | &mut Random,
+  &mut RoutedP provides &ByteDuplex from &mut ByteDuplex,
+  &mut DirectP provides &HttpTransport from &mut HttpTransport | &mut MonotonicClock | &mut Allocator | &mut Random,
+  &mut DirectP provides &HttpTransport from &mut HttpTransport,
   ProducerRequirements in Without<ProducerRequirements, ByteDuplex>,
   ProducerRequirements in Without<ProducerRequirements, HttpTransport>,
   AcquisitionRequirements in Without<AcquisitionRequirements, ByteDuplex>,
@@ -2298,6 +2399,12 @@ pub effect fn discardOneShot<
 ! RedirectError | FetchError | ValueError | BodyError | ProducerError | ClientError | OutOfMemoryError | AcquisitionError
 ? ProducerRequirements | AcquisitionRequirements | &mut MonotonicClock | &mut Allocator | &mut Random
 where
+  &mut RoutedP provides &HttpTransport from &mut HttpTransport | &mut MonotonicClock | &mut Allocator | &mut Random,
+  &mut RoutedP provides &HttpTransport from &mut HttpTransport,
+  &mut RoutedP provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock | &mut Allocator | &mut Random,
+  &mut RoutedP provides &ByteDuplex from &mut ByteDuplex,
+  &mut DirectP provides &HttpTransport from &mut HttpTransport | &mut MonotonicClock | &mut Allocator | &mut Random,
+  &mut DirectP provides &HttpTransport from &mut HttpTransport,
   ProducerRequirements in Without<ProducerRequirements, ByteDuplex>,
   ProducerRequirements in Without<ProducerRequirements, HttpTransport>,
   AcquisitionRequirements in Without<AcquisitionRequirements, ByteDuplex>,
@@ -2410,6 +2517,12 @@ impl<
   ! RedirectError | FetchError | ValueError | BodyError | FactoryError | ProducerError | DestinationError | ClientError | OutOfMemoryError | AcquisitionError
   ? FactoryRequirements | ProducerRequirements | DestinationRequirements | AcquisitionRequirements | &mut MonotonicClock | &mut Allocator | &mut Random
   where
+    &mut RoutedP provides &HttpTransport from &mut HttpTransport | &mut MonotonicClock | &mut Allocator | &mut Random,
+    &mut RoutedP provides &HttpTransport from &mut HttpTransport,
+    &mut RoutedP provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock | &mut Allocator | &mut Random,
+    &mut RoutedP provides &ByteDuplex from &mut ByteDuplex,
+    &mut DirectP provides &HttpTransport from &mut HttpTransport | &mut MonotonicClock | &mut Allocator | &mut Random,
+    &mut DirectP provides &HttpTransport from &mut HttpTransport,
     FactoryRequirements in Without<FactoryRequirements, ByteDuplex>,
     FactoryRequirements in Without<FactoryRequirements, HttpTransport>,
     ProducerRequirements in Without<ProducerRequirements, ByteDuplex>,
@@ -2486,8 +2599,25 @@ impl<
       maxBufferedBytes: maxBufferedBytes,
       deadline: copyDeadline(&deadline),
     }
-    return run mapSwitching(
-      Redirect.withReplayHybridResponse(
+    return run mapSwitching<
+      A,
+      FactoryError | ProducerError | RedirectError | FetchError | ValueError | BodyError | DestinationError | OutOfMemoryError | AcquisitionError,
+      FactoryRequirements | ProducerRequirements | DestinationRequirements | AcquisitionRequirements | &mut MonotonicClock | &mut Allocator | &mut Random,
+    >(
+      Redirect.withReplayHybridResponse<
+        RoutedP,
+        DirectP,
+        A,
+        FactoryError,
+        ProducerError,
+        FetchError | ValueError | BodyError | DestinationError | ClientError | OutOfMemoryError,
+        AcquisitionError,
+        FactoryRequirements,
+        ProducerRequirements,
+        DestinationRequirements | &mut Allocator | &mut MonotonicClock | &mut Random,
+        AcquisitionRequirements,
+        Producer,
+      >(
         &mut adapter,
         move request,
         &redirect,
@@ -2547,6 +2677,12 @@ pub effect fn toSinkReplay<
 > | ClientError | OutOfMemoryError | AcquisitionError
 ? FactoryRequirements | ProducerRequirements | SinkRequirements | AcquisitionRequirements | &mut MonotonicClock | &mut Allocator | &mut Random
 where
+  &mut RoutedP provides &HttpTransport from &mut HttpTransport | &mut MonotonicClock | &mut Allocator | &mut Random,
+  &mut RoutedP provides &HttpTransport from &mut HttpTransport,
+  &mut RoutedP provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock | &mut Allocator | &mut Random,
+  &mut RoutedP provides &ByteDuplex from &mut ByteDuplex,
+  &mut DirectP provides &HttpTransport from &mut HttpTransport | &mut MonotonicClock | &mut Allocator | &mut Random,
+  &mut DirectP provides &HttpTransport from &mut HttpTransport,
   FactoryRequirements in Without<FactoryRequirements, ByteDuplex>,
   FactoryRequirements in Without<FactoryRequirements, HttpTransport>,
   ProducerRequirements in Without<ProducerRequirements, ByteDuplex>,
@@ -2621,6 +2757,12 @@ pub effect fn collectReplay<
 ! RedirectError | FetchError | ValueError | BodyError | FactoryError | ProducerError | ClientError | OutOfMemoryError | AcquisitionError
 ? FactoryRequirements | ProducerRequirements | AcquisitionRequirements | &mut MonotonicClock | &mut Allocator | &mut Random
 where
+  &mut RoutedP provides &HttpTransport from &mut HttpTransport | &mut MonotonicClock | &mut Allocator | &mut Random,
+  &mut RoutedP provides &HttpTransport from &mut HttpTransport,
+  &mut RoutedP provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock | &mut Allocator | &mut Random,
+  &mut RoutedP provides &ByteDuplex from &mut ByteDuplex,
+  &mut DirectP provides &HttpTransport from &mut HttpTransport | &mut MonotonicClock | &mut Allocator | &mut Random,
+  &mut DirectP provides &HttpTransport from &mut HttpTransport,
   FactoryRequirements in Without<FactoryRequirements, ByteDuplex>,
   FactoryRequirements in Without<FactoryRequirements, HttpTransport>,
   ProducerRequirements in Without<ProducerRequirements, ByteDuplex>,
@@ -2693,6 +2835,12 @@ pub effect fn discardReplay<
 ! RedirectError | FetchError | ValueError | BodyError | FactoryError | ProducerError | ClientError | OutOfMemoryError | AcquisitionError
 ? FactoryRequirements | ProducerRequirements | AcquisitionRequirements | &mut MonotonicClock | &mut Allocator | &mut Random
 where
+  &mut RoutedP provides &HttpTransport from &mut HttpTransport | &mut MonotonicClock | &mut Allocator | &mut Random,
+  &mut RoutedP provides &HttpTransport from &mut HttpTransport,
+  &mut RoutedP provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock | &mut Allocator | &mut Random,
+  &mut RoutedP provides &ByteDuplex from &mut ByteDuplex,
+  &mut DirectP provides &HttpTransport from &mut HttpTransport | &mut MonotonicClock | &mut Allocator | &mut Random,
+  &mut DirectP provides &HttpTransport from &mut HttpTransport,
   FactoryRequirements in Without<FactoryRequirements, ByteDuplex>,
   FactoryRequirements in Without<FactoryRequirements, HttpTransport>,
   ProducerRequirements in Without<ProducerRequirements, ByteDuplex>,
