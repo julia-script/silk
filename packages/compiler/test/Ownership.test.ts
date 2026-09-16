@@ -2313,6 +2313,7 @@ fn bad() -> i32 { let value = 42 return choose(move value, value) }`
         { ...good, semantic: { ...(good.semantic ?? unreachable('expected semantic fact')) } },
         { ...good, index: { ...good.index } },
         { ...good, boundaries: [good.function.declaration.syntax.span] },
+        { ...good, resultBoundaries: [good.function.declaration.syntax.span] },
       ]
       for (const input of changed) {
         assert.isUndefined(Ownership.sourceProof(input))
@@ -2328,8 +2329,8 @@ fn bad() -> i32 { let value = 42 return choose(move value, value) }`
       const beforeHit = ResidualOwnership.counters(query)
       assert.strictEqual(ResidualOwnership.check(query, failedInput, 'SelectedStaticBody'), failed)
       const afterHit = ResidualOwnership.counters(query)
-      assert.strictEqual(afterHit.checked, 5)
-      assert.strictEqual(afterHit.requests, 10)
+      assert.strictEqual(afterHit.checked, 6)
+      assert.strictEqual(afterHit.requests, 11)
       assert.strictEqual(afterHit.cacheReused, 3)
       assert.deepEqual(afterHit.executedWork, beforeHit.executedWork)
       assert.isAbove(afterHit.executedWork.loanAccessChecks, 0)
@@ -2341,6 +2342,7 @@ fn bad() -> i32 { let value = 42 return choose(move value, value) }`
           'CacheReused',
           'SourceReused',
           'CacheReused',
+          'Checked',
           'Checked',
           'Checked',
           'Checked',
