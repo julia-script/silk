@@ -1485,11 +1485,16 @@ export const resolveStructTarget = (
           parameter.type.kind !== 'EffectRepresentation',
       )
       if (supplied.length <= sourceParameters.length) {
+        const valueParameters = sourceParameters.filter(
+          (parameter) => parameter.type.kind !== 'Lifetime',
+        )
+        let suppliedOrdinal = 0
         const resolvedArguments = supplied.map((argument) =>
-          DeclarationResolution.resolveTypeFact(
+          DeclarationResolution.resolveGenericArgumentFact(
             resolution.index,
             source.id,
             argument,
+            argument._tag === 'Lifetime' ? undefined : valueParameters.at(suppliedOrdinal++)?.type,
             (module, argumentPath) =>
               NameResolution.resolveType(nameResolution, resolution.index, module, argumentPath),
           ),
@@ -1519,15 +1524,14 @@ export const resolveStructTarget = (
             const resolved = suppliedValues.at(valueOrdinal)
             valueOrdinal += 1
             if (resolved === undefined) return [Type.parameterArgument(parameter.type)]
+            if (parameter.type.kind === 'RequirementRow')
+              return resolved.argument !== undefined &&
+                Type.isRequirementRowArgument(resolved.argument)
+                ? [resolved.argument]
+                : []
             if (resolved?.fact._tag !== 'Resolved') return []
             if (parameter.type.kind === 'Value')
               return Type.isTypeArgument(resolved.fact.type) ? [resolved.fact.type] : []
-            if (
-              parameter.type.kind === 'RequirementRow' &&
-              Type.isParameter(resolved.fact.type) &&
-              resolved.fact.type.kind === 'RequirementRow'
-            )
-              return [Type.requirementRowArgument([], [resolved.fact.type])]
             return []
           },
         )

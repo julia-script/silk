@@ -67,6 +67,27 @@ effect fn reject<E>(error: E) -> () ! Failure<E> {
   }),
 )
 
+it.effect('infers literal lifetimes alongside empty and concrete requirement rows', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSource(
+      'generics/literal-row-lifetimes',
+      new TextEncoder().encode(`service Clock {}
+service Logger {}
+struct Context<'value, ?R> { value: &'value i32 }
+fn construct<?R>(value: &i32) -> () {
+  let empty = Context<never> { value: value }
+  let concrete = Context<(&mut Clock) | (&Logger)> { value: value }
+  let generic = Context<R> { value: value }
+  drop empty
+  drop concrete
+  drop generic
+  return ()
+}`),
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+  }),
+)
+
 it.effect('preserves access in nonfinal concrete nominal requirement arguments', () =>
   Effect.gen(function* () {
     const snapshot = yield* Analysis.ofSource(

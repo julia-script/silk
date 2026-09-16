@@ -1602,6 +1602,22 @@ export const resolveTypeFact = (
     index.modules,
   )
 
+/** Resolves a construction argument with its declared kind before normalizing value unions. */
+export const resolveGenericArgumentFact = (
+  index: Index,
+  module: string,
+  fact: DeclaredTypeFact,
+  parameter: Type.Parameter | undefined,
+  resolver: TypeResolver,
+): GenericArgumentResolution =>
+  resolveGenericArgument(
+    module,
+    fact,
+    parameter,
+    ResolutionSeams.make(resolver, () => Object.freeze({ _tag: 'Missing' })),
+    index.modules,
+  )
+
 const resolveRequirementRole = (
   module: string,
   role: RequirementRoleFact,
