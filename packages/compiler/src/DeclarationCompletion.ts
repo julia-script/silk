@@ -1461,13 +1461,29 @@ export const complete = (
         ...Type.parameters(provider).map(Type.key),
         ...Type.freeLifetimes(provider).map(Lifetime.key),
       ])
-      const unused = declaredParameters.filter(
-        (parameter) => !usedParameterKeys.has(Type.key(parameter)),
-      )
+      const capabilityLifetimeKeys = new Set(Type.freeLifetimes(capability).map(Lifetime.key))
+      const unused = conformance.typeParameters
+        .filter((parameter) => parameter.duplicateOf === undefined)
+        .filter(
+          (parameter) =>
+            !usedParameterKeys.has(Type.key(parameter.type)) &&
+            // A concrete requirement-row argument retains reference access but deliberately
+            // erases the reference region: service requirements are ambient access, not borrows
+            // stored by the provider or part of conformance selection. Header lifetime elision
+            // still creates a binder before the target parameter kind is resolved. Discard only
+            // that compiler-created binder once normalization proves it is absent from both the
+            // capability and provider; authored binders and retained capability lifetimes keep
+            // the ordinary coherence requirement.
+            !(
+              parameter.implicitLifetime === true &&
+              parameter.type.kind === 'Lifetime' &&
+              !capabilityLifetimeKeys.has(Type.key(parameter.type))
+            ),
+        )
       if (unused.length > 0) {
         diagnostics.push(
           invalidDiagnostic(
-            `impl type parameter ${unused.map((parameter) => parameter.name).join(', ')} is not used by the provider type`,
+            `impl type parameter ${unused.map((parameter) => parameter.type.name).join(', ')} is not used by the provider type`,
             conformance.syntax.span,
           ),
         )

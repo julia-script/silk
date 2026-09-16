@@ -85,6 +85,42 @@ fn preserve<?R>(value: Rows<R | (&mut Clock) | (&Logger), never>) -> () {
   }),
 )
 
+it.effect('does not bind erased implicit service-row lifetimes to the provider', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSource(
+      'generics/conformance-service-row-lifetimes',
+      new TextEncoder().encode(`service Clock {}
+service Allocator {}
+interface Contract<?Acquisition, ?Handler> {}
+struct Provider {}
+impl Contract<&mut Clock | &mut Allocator, never> for Provider {}`),
+    )
+    const conformance = Analysis.declarationIndex(snapshot).modules.at(0)?.conformances.at(0)
+    assert.isDefined(conformance)
+    if (conformance === undefined) return
+    assert.strictEqual(
+      conformance.typeParameters.filter((parameter) => parameter.implicitLifetime === true).length,
+      2,
+    )
+    assert.deepEqual(
+      conformance.provider._tag === 'Resolved'
+        ? Type.freeLifetimes(conformance.provider.type).map(Lifetime.key)
+        : undefined,
+      [],
+    )
+    assert.deepEqual(
+      conformance.capability._tag === 'Resolved'
+        ? Type.freeLifetimes(conformance.capability.type).map(Lifetime.key)
+        : undefined,
+      [],
+    )
+    assert.deepEqual(
+      Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
+      [],
+    )
+  }),
+)
+
 it.effect('retains source-shaped row expressions and callable constraints in module facts', () =>
   Effect.gen(function* () {
     const constrained = `service Binder {
