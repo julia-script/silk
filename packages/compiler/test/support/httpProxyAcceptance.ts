@@ -111,7 +111,7 @@ effect fn proxyClassifyConnect(
   }
   let mut encoded = run Bytes.zeroed(required)
   let output = Bytes.asMutSlice(&mut encoded)
-  let written = match move writeResponseInto(head, output, proxyConnectInputLimits()) {
+  let written = match move writeResponseInto(head, &mut output, proxyConnectInputLimits()) {
     Result.Failure {error} => { fail move error }
     Result.Success {value} => value
   }

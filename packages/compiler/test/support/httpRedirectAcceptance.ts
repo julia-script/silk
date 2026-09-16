@@ -133,6 +133,8 @@ import silk.http_redirect {
   Attempt,
   AttemptClient,
   AttemptRequest,
+  AttemptStep,
+  SelectedBody,
   BodyChunk,
   BodyDecision,
   BodyProducer,
@@ -291,31 +293,44 @@ impl ByteDuplex for RedirectWitnessTransport {
   closeRaw: RedirectWitnessTransport.closeBytes
 }
 
-struct RedirectRejectingClient {}
+struct RedirectRejectingClient<'policy, ProducerError, ?ProducerRequirements> {
+  policy: &'policy RedirectPolicy
+}
 
-impl<
+impl<'policy, ProducerError, ?ProducerRequirements> AttemptClient<
   'policy,
-  A,
-  HandlerError,
-  ?HandlerRequirements,
-> RedirectRejectingClient {
+  RedirectWitnessTransport,
+  AttemptStep<'policy, i32>,
+  RedirectError | ValueError | ProducerError | RedirectCallbackFailure | ClientError | OutOfMemoryError,
+  RedirectAcquisitionFailure,
+  &mut RedirectAcquisitionRequirement,
+  ProducerRequirements | &mut RedirectCallbackRequirement
+    | &mut SelectedBody<ProducerError, ProducerRequirements>
+    | &mut MonotonicClock | &mut Allocator | &mut Random,
+> for RedirectRejectingClient<'policy, ProducerError, ProducerRequirements> {
   effect fn withAttempt(
     client: &mut Self,
     request: AttemptRequest<'policy>,
     deadline: Option<Instant>,
-  ) -> A
-  ! HandlerError | RedirectAcquisitionFailure
-  ? HandlerRequirements
+  ) -> AttemptStep<'policy, i32>
+  ! RedirectError | ValueError | ProducerError | RedirectCallbackFailure | ClientError
+    | OutOfMemoryError | RedirectAcquisitionFailure
+  ? ProducerRequirements | &mut RedirectCallbackRequirement
+    | &mut SelectedBody<ProducerError, ProducerRequirements>
+    | &mut MonotonicClock | &mut Allocator | &mut Random
     | &mut RedirectAcquisitionRequirement
     | &mut Attempt<
       'policy,
       RedirectWitnessTransport,
-      A,
-      HandlerError ? HandlerRequirements
+      AttemptStep<'policy, i32>,
+      RedirectError | ValueError | ProducerError | RedirectCallbackFailure | ClientError | OutOfMemoryError,
+      ProducerRequirements | &mut RedirectCallbackRequirement
+        | &mut SelectedBody<ProducerError, ProducerRequirements>
+        | &mut MonotonicClock | &mut Allocator | &mut Random,
     >
   where
-    HandlerRequirements in Without<HandlerRequirements, ByteDuplex>,
-    HandlerRequirements in Without<HandlerRequirements, HttpTransport> {
+    ProducerRequirements in Without<ProducerRequirements, ByteDuplex>,
+    ProducerRequirements in Without<ProducerRequirements, HttpTransport> {
     drop client
     drop request
     drop deadline
@@ -323,23 +338,6 @@ impl<
     drop accepted
     fail RedirectAcquisitionFailure.Rejected
   }
-}
-
-impl<
-  'policy,
-  A,
-  HandlerError,
-  ?HandlerRequirements,
-> AttemptClient<
-  'policy,
-  RedirectWitnessTransport,
-  A,
-  HandlerError,
-  RedirectAcquisitionFailure,
-  HandlerRequirements,
-  &mut RedirectAcquisitionRequirement,
-> for RedirectRejectingClient {
-  withAttempt: RedirectRejectingClient.withAttempt
 }
 
 struct RedirectFinalUse {}
@@ -391,7 +389,7 @@ struct RedirectProducer { offset: usize }
 impl BodyProducer<RedirectProducerFailure ? &mut RedirectProducerRequirement> for RedirectProducer {
   fn mode(producer: &Self) -> BodyMode {
     drop producer
-    return BodyMode.KnownLength {length: usize.ONE}
+    return BodyMode.KnownLength {length: u64.toU64(1)}
   }
 
   effect fn pull(producer: &mut Self, output: &mut [u8]) -> BodyChunk
@@ -432,7 +430,7 @@ impl ReplayFactory<
   release: RedirectFactory.release
 }
 
-pub effect fn redirectReplayRowWitness(factory: &mut RedirectFactory) -> i32
+effect fn redirectReplayRowWitness(factory: &mut RedirectFactory) -> i32
 ! RedirectFactoryFailure | RedirectProducerFailure
 ? &mut RedirectFactoryRequirement | &mut RedirectProducerRequirement {
   let producer = run ReplayFactory<
@@ -466,7 +464,7 @@ const httpRedirectBehaviorSupport = `fn redirectStatus(code: u16) -> Status {
   return match move Status.fromCode(code) {
     Result.Failure {error} => {
       drop error
-      redirectStatus(200)
+      return redirectStatus(200)
     }
     Result.Success {value} => value
   }
@@ -483,7 +481,7 @@ fn redirectOrigin(text: string) -> Option<Origin> {
   return match move Origin.fromUri(&uri) {
     Result.Failure {error} => {
       drop error
-      Option.none<Origin>()
+      return Option.none<Origin>()
     }
     Result.Success {value} => Option.some<Origin>(value)
   }
@@ -567,10 +565,7 @@ fn redirectContextIs(
   let statusMatches = match move status {
     Option.None => match move actualStatus {
       Option.None => true
-      Option.Some {value} => {
-        drop value
-        false
-      }
+      Option.Some {value} => false
     }
     Option.Some {value: expected} => match move actualStatus {
       Option.None => false
@@ -579,20 +574,15 @@ fn redirectContextIs(
   }
   let currentPresent = match move currentUri {
     Option.None => false
-    Option.Some {value} => {
-      drop value
-      true
-    }
+    Option.Some {value} => true
   }
   let nextPresent = match move nextUri {
     Option.None => false
-    Option.Some {value} => {
-      drop value
-      true
-    }
+    Option.Some {value} => true
   }
   return actualHop == hop && statusMatches
-    && currentPresent == hasCurrentUri && nextPresent == hasNextUri
+    && (currentPresent && hasCurrentUri || !currentPresent && !hasCurrentUri)
+    && (nextPresent && hasNextUri || !nextPresent && !hasNextUri)
 }
 
 fn redirectFailureIs<T>(
@@ -605,12 +595,12 @@ fn redirectFailureIs<T>(
   return match move result {
     Result.Success {value} => {
       drop value
-      false
+      return false
     }
     Result.Failure {error} => {
       let RedirectError {component: actual, reason: actualReason, context} = move error
       return actual == component && redirectReasonIs(move actualReason, reason)
-        && redirectContextIs(move context, hop, status, false, false)
+        && redirectContextIs(move context, hop, move status, false, false)
     }
   }
 }
@@ -627,7 +617,7 @@ fn redirectLimitFailureIs<T>(
   return match move result {
     Result.Success {value} => {
       drop value
-      false
+      return false
     }
     Result.Failure {error} => {
       let RedirectError {component: actual, reason, context} = move error
@@ -640,7 +630,7 @@ fn redirectLimitFailureIs<T>(
         _ => false
       }
       return actual == component && reasonMatches
-        && redirectContextIs(move context, hop, status, false, false)
+        && redirectContextIs(move context, hop, move status, false, false)
     }
   }
 }
@@ -654,7 +644,7 @@ fn redirectDecisionIs(
   return match move statusDecision(policy, status, followedHops) {
     Result.Failure {error} => {
       drop error
-      false
+      return false
     }
     Result.Success {value} => value == expected
   }
@@ -693,14 +683,21 @@ fn redirectBytesEqual(left: &[u8], right: &[u8]) -> bool {
   return true
 }
 
+fn redirectOwnedUriIs(value: &OwnedUri, expected: string) -> bool {
+  let view = value.view()
+  return Uri.format(&view) == expected
+}
+
 effect fn redirectHeader(name: string<'static>, value: &'static [u8]) -> Header<'static>
 ! ValueError {
   return run redirectTakeValue(Header.make(name, value, redirectHeaderLimits()))
 }
 
-effect fn redirectHeaders(location: &'static [u8]) -> Headers<'static> ! ValueError {
+effect fn redirectHeaders(location: &'static [u8]) -> OwnedHeaders
+! ValueError | OutOfMemoryError ? &mut Allocator {
   let entries = [run redirectHeader("Location", location)]
-  return run redirectTakeValue(Headers.make(&entries, redirectHeaderLimits()))
+  let view = run redirectTakeValue(Headers.make(&entries, redirectHeaderLimits()))
+  return run redirectTakeValue(run Headers.copy(&view, redirectHeaderLimits()))
 }
 
 effect fn redirectResolve(
@@ -735,12 +732,12 @@ effect fn redirectResolvedIs(
 }
 
 fn redirectFormattedIs(headers: &Headers, output: &mut [u8], expected: &[u8]) -> bool {
-  return match move Headers.formatInto(headers, output) {
+  return match move Headers.formatInto(headers, &mut output) {
     Result.Failure {error} => {
       drop error
-      false
+      return false
     }
-    Result.Success {value} => value == expected.length && redirectBytesEqual(output, expected)
+    Result.Success {value} => value == expected.length && redirectBytesEqual(&output, expected)
   }
 }
 
@@ -763,14 +760,14 @@ const httpRedirectOperationContractSupport = `fn redirectOperationRequest<'heade
   }
 }
 
-pub effect fn redirectEmptyContractWitness<
+effect fn redirectEmptyContractWitness<
   'uri,
   'method,
   'headers,
   'policy,
   'scratch,
 >(
-  client: &mut RedirectRejectingClient,
+  client: &mut RedirectRejectingClient<'policy, never, never>,
   request: RedirectRequest<'uri, 'method, 'headers, 'policy>,
   policy: &'policy RedirectPolicy,
   scratch: &'scratch mut [u8],
@@ -787,7 +784,7 @@ pub effect fn redirectEmptyContractWitness<
   | &mut Allocator
   | &mut Random {
   return run withEmptyResponse(
-    client,
+    move client,
     move request,
     policy,
     Option.none<Instant>(),
@@ -796,7 +793,7 @@ pub effect fn redirectEmptyContractWitness<
   )
 }
 
-pub effect fn redirectBytesContractWitness<
+effect fn redirectBytesContractWitness<
   'uri,
   'method,
   'headers,
@@ -804,7 +801,7 @@ pub effect fn redirectBytesContractWitness<
   'bytes,
   'scratch,
 >(
-  client: &mut RedirectRejectingClient,
+  client: &mut RedirectRejectingClient<'policy, never, never>,
   request: RedirectRequest<'uri, 'method, 'headers, 'policy>,
   policy: &'policy RedirectPolicy,
   bytes: &'bytes [u8],
@@ -822,7 +819,7 @@ pub effect fn redirectBytesContractWitness<
   | &mut Allocator
   | &mut Random {
   return run withBytesResponse(
-    client,
+    move client,
     move request,
     policy,
     bytes,
@@ -832,14 +829,14 @@ pub effect fn redirectBytesContractWitness<
   )
 }
 
-pub effect fn redirectOneShotContractWitness<
+effect fn redirectOneShotContractWitness<
   'uri,
   'method,
   'headers,
   'policy,
   'scratch,
 >(
-  client: &mut RedirectRejectingClient,
+  client: &mut RedirectRejectingClient<'policy, RedirectProducerFailure, &mut RedirectProducerRequirement>,
   request: RedirectRequest<'uri, 'method, 'headers, 'policy>,
   policy: &'policy RedirectPolicy,
   producer: RedirectProducer,
@@ -859,7 +856,7 @@ pub effect fn redirectOneShotContractWitness<
   | &mut Allocator
   | &mut Random {
   return run withOneShotResponse(
-    client,
+    move client,
     move request,
     policy,
     move producer,
@@ -869,14 +866,14 @@ pub effect fn redirectOneShotContractWitness<
   )
 }
 
-pub effect fn redirectReplayContractWitness<
+effect fn redirectReplayContractWitness<
   'uri,
   'method,
   'headers,
   'policy,
   'scratch,
 >(
-  client: &mut RedirectRejectingClient,
+  client: &mut RedirectRejectingClient<'policy, RedirectProducerFailure, &mut RedirectProducerRequirement>,
   request: RedirectRequest<'uri, 'method, 'headers, 'policy>,
   policy: &'policy RedirectPolicy,
   factory: RedirectFactory,
@@ -898,7 +895,7 @@ pub effect fn redirectReplayContractWitness<
   | &mut Allocator
   | &mut Random {
   return run withReplayResponse(
-    client,
+    move client,
     move request,
     policy,
     move factory,
@@ -921,7 +918,8 @@ const redirectPolicyCompileWitness = `pub fn redirectPolicyCompileWitness() -> i
     || RedirectPolicy.post301302(&defaults) != Post301302Policy.Preserve
     || NameList.count(RedirectPolicy.safeCustom(&defaults)) != usize.ZERO
     || NameList.count(RedirectPolicy.sensitive(&defaults)) != usize.ZERO { return 101 }
-  match RedirectPolicy.previousResponse(&defaults) {
+  let defaultPrevious = RedirectPolicy.previousResponse(&defaults)
+  match &defaultPrevious.* {
     PreviousResponsePolicy.Close => {}
     _ => { return 102 }
   }
@@ -957,15 +955,16 @@ const redirectPolicyCompileWitness = `pub fn redirectPolicyCompileWitness() -> i
     }
     Result.Success {value} => value
   }
-  match RedirectPolicy.previousResponse(&follow) {
+  let followPrevious = RedirectPolicy.previousResponse(&follow)
+  match &followPrevious.* {
     PreviousResponsePolicy.Drain {maxDiscardWireBytes, deadline} => {
-      if maxDiscardWireBytes != 64 || SystemClock.seconds(deadline) != 9 { return 112 }
+      if maxDiscardWireBytes != 64 || SystemClock.seconds(&deadline) != 9 { return 112 }
     }
     _ => { return 112 }
   }
   let selected: [u16; 5] = [301, 302, 303, 307, 308]
   let mut selectedIndex = usize.ZERO
-  while selectedIndex < selected.length {
+  while selectedIndex < 5 {
     let selectedStatus = redirectStatus(selected[selectedIndex])
     if !redirectDecisionIs(&follow, selectedStatus, usize.ZERO, StatusDecision.Redirect) {
       return 113 + usize.toI32(selectedIndex)
@@ -1047,7 +1046,7 @@ const redirectPolicyCompileWitness = `pub fn redirectPolicyCompileWitness() -> i
   if !Origin.equals(&current, &equivalent) { return 140 }
   let changedUris: [string<'static>; 2] = ["https://example.com:444", "https://sub.example.com"]
   let mut changedIndex = usize.ZERO
-  while changedIndex < changedUris.length {
+  while changedIndex < 2 {
     let changed = match move redirectOrigin(changedUris[changedIndex]) {
       Option.None => { return 141 }
       Option.Some {value} => value
@@ -1151,15 +1150,17 @@ const verifyRedirectPolicy = `pub effect fn verifyRedirectPolicy() -> bool
     },
   ]
   let mut locationIndex = usize.ZERO
-  while locationIndex < locations.length {
+  while locationIndex < 4 {
     let selected = locations[locationIndex]
-    let selectedHeaders = run redirectHeaders(selected.location)
+    let selectedOwner = run redirectHeaders(selected.location)
+    let selectedHeaders = OwnedHeaders.view(&selectedOwner)
     if !run redirectResolvedIs(selected.current, &selectedHeaders, 128, selected.expected) {
       return false
     }
     locationIndex = locationIndex + usize.ONE
   }
-  let relativeHeaders = run redirectHeaders(b"../b?x")
+  let relativeOwner = run redirectHeaders(b"../b?x")
+  let relativeHeaders = OwnedHeaders.view(&relativeOwner)
   let resolvedBytes = String.byteLength("https://example/b?x#old")
   if !redirectLimitFailureIs(run redirectResolve(
     "https://example/a#old",
@@ -1196,17 +1197,11 @@ const verifyRedirectPolicy = `pub effect fn verifyRedirectPolicy() -> bool
   drop request
   let currentContextCopied = match & ownedContext.currentUri {
     Option.None => false
-    Option.Some {value} => {
-      let view = value.view()
-      Uri.format(&view) == "https://example/a#start"
-    }
+    Option.Some {value} => redirectOwnedUriIs(&value, "https://example/a#start")
   }
   let nextContextCopied = match & ownedContext.nextUri {
     Option.None => false
-    Option.Some {value} => {
-      let view = value.view()
-      Uri.format(&view) == "https://next.example/b#next"
-    }
+    Option.Some {value} => redirectOwnedUriIs(&value, "https://next.example/b#next")
   }
   if !currentContextCopied || !nextContextCopied
     || !redirectContextIs(move ownedContext, 3, Option.some<u16>(302), true, true) {
@@ -1220,17 +1215,20 @@ const verifyRedirectPolicy = `pub effect fn verifyRedirectPolicy() -> bool
   if !redirectFailureIs(run redirectResolve("https://example/a", &duplicateHeaders, 128),
     RedirectComponent.Location, RedirectReasonTag.LocationAmbiguous, usize.ONE,
     Option.some<u16>(302)) { return false }
-  let invalidHeaders = run redirectHeaders(b"/%")
+  let invalidOwner = run redirectHeaders(b"/%")
+  let invalidHeaders = OwnedHeaders.view(&invalidOwner)
   if !redirectFailureIs(run redirectResolve("https://example/a", &invalidHeaders, 128),
     RedirectComponent.Location, RedirectReasonTag.LocationInvalid, usize.ONE,
     Option.some<u16>(302)) { return false }
-  let schemeHeaders = run redirectHeaders(b"ftp://example/a")
+  let schemeOwner = run redirectHeaders(b"ftp://example/a")
+  let schemeHeaders = OwnedHeaders.view(&schemeOwner)
   if !redirectFailureIs(run redirectResolve("https://example/a", &schemeHeaders, 128),
     RedirectComponent.Origin, RedirectReasonTag.RedirectSchemeDenied, usize.ONE,
     Option.some<u16>(302)) { return false }
 
   let exactUri = "https://b.example/"
-  let exactHeaders = run redirectHeaders(String.utf8Bytes(exactUri))
+  let exactOwner = run redirectHeaders(String.utf8Bytes(exactUri))
+  let exactHeaders = OwnedHeaders.view(&exactOwner)
   if !run redirectResolvedIs(
     "https://example/a",
     &exactHeaders,
@@ -1404,8 +1402,8 @@ ${httpRedirectBehaviorSupport}`
 export const httpRedirectAffineEscapeDiagnosticSource = `effect fn redirectEscapingProducerUse(
   producer: RedirectDiagnosticProducer,
 ) -> &'static mut RedirectDiagnosticProducer {
-  let use = effect<'call> fn(
-    producer: &'call mut RedirectDiagnosticProducer,
+  let use = effect fn(
+    producer: &mut RedirectDiagnosticProducer,
   ) -> &'static mut RedirectDiagnosticProducer {
     return move producer
   }
@@ -1530,7 +1528,7 @@ export const httpRedirectAffineDuplicationDiagnosticSource = `effect fn redirect
   let headers = run redirectTakeValue(Headers.make(&entries, redirectHeaderLimits()))
   let uri = run redirectTakeParse(Uri.parse("https://example/a"))
   let policy = RedirectPolicy.defaults()
-  let mut client = RedirectRejectingClient {}
+  let mut client = RedirectRejectingClient<RedirectProducerFailure, &mut RedirectProducerRequirement> {policy: &policy}
   let mut scratch: [u8; 1] = [0]
   let first = run withOneShotResponse(
     &mut client,
@@ -1642,7 +1640,7 @@ effect fn recoverRedirectBaseContract(
     | RedirectAcquisitionFailure,
 ) -> i32 {
   return match move error {
-    RedirectAcquisitionFailure.Rejected => 17
+    RedirectAcquisitionFailure cause => match move cause { RedirectAcquisitionFailure.Rejected => 17 }
     _ => -1
   }
 }
@@ -1657,7 +1655,7 @@ effect fn recoverRedirectOneShotContract(
     | RedirectAcquisitionFailure,
 ) -> i32 {
   return match move error {
-    RedirectAcquisitionFailure.Rejected => 17
+    RedirectAcquisitionFailure cause => match move cause { RedirectAcquisitionFailure.Rejected => 17 }
     _ => -1
   }
 }
@@ -1673,7 +1671,7 @@ effect fn recoverRedirectReplayContract(
     | RedirectAcquisitionFailure,
 ) -> i32 {
   return match move error {
-    RedirectAcquisitionFailure.Rejected => 17
+    RedirectAcquisitionFailure cause => match move cause { RedirectAcquisitionFailure.Rejected => 17 }
     _ => -1
   }
 }
@@ -1717,7 +1715,7 @@ pub fn main() -> i32 {
     }
     Result.Success {value} => value
   }
-  let mut operationClient = RedirectRejectingClient {}
+  let mut operationClient = RedirectRejectingClient<never, never> {policy: &operationPolicy}
   let mut operationScratch: [u8; 1] = [0]
   let emptyContract = redirectEmptyContractWitness(
     &mut operationClient,
@@ -1744,8 +1742,9 @@ pub fn main() -> i32 {
     |> Effect.provideMut<Allocator>(&mut allocator)
     |> Effect.provideMut<Random>(&mut random)
   let bytesWitness = run Effect.catchAll(move bytesContract, recoverRedirectBaseContract)
+  let mut producerClient = RedirectRejectingClient<RedirectProducerFailure, &mut RedirectProducerRequirement> {policy: &operationPolicy}
   let oneShotContract = redirectOneShotContractWitness(
-    &mut operationClient,
+    &mut producerClient,
     redirectOperationRequest(operationUri, operationHeaders),
     &operationPolicy,
     RedirectProducer {offset: usize.ZERO},
@@ -1762,7 +1761,7 @@ pub fn main() -> i32 {
     recoverRedirectOneShotContract,
   )
   let replayContract = redirectReplayContractWitness(
-    &mut operationClient,
+    &mut producerClient,
     redirectOperationRequest(operationUri, operationHeaders),
     &operationPolicy,
     RedirectFactory {},

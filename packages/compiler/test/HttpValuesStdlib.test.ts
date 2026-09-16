@@ -385,7 +385,7 @@ it.effect(
       assert.deepEqual(diagnostics, [
         { code: 'SEM0025', span: 'move uri' },
         { code: 'SEM0025', span: 'move exchange' },
-        { code: 'SEM0025', span: 'move producer' },
+        { code: 'SEM0129', span: 'move producer' },
         { code: 'OWN0001', span: 'move producer' },
       ])
     }),
