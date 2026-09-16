@@ -201,7 +201,11 @@ const concreteSource = (
   return concrete._tag === 'Concrete' ? concrete.row : undefined
 }
 
-const relationCandidates = (relation: Relation, oracle: ConformanceOracle): RelationCandidates => {
+const relationCandidates = (
+  relation: Relation,
+  oracle: ConformanceOracle,
+  selected?: Type.RequirementsRow,
+): RelationCandidates => {
   const candidates = new Map<string, CandidateRecord>()
   const observation = oracle.observation
   const work =
@@ -215,7 +219,25 @@ const relationCandidates = (relation: Relation, oracle: ConformanceOracle): Rela
           },
           'ProviderSelection',
         )
-  for (const member of concreteSource(relation.wanted)?.members ?? []) {
+  // An explicit selector can name a known member of an otherwise open source row. Never infer
+  // a selector from that partial view: an unknown tail could contain another matching member.
+  const selectedMembers = selectedFinite(selected)?.members
+  const explicitMember = selectedMembers?.length === 1 ? selectedMembers.at(0) : undefined
+  const rowPolicy = Type.requirementRowPolicy()
+  const sourceMembers =
+    concreteSource(relation.wanted)?.members ??
+    (explicitMember === undefined
+      ? []
+      : RowAlgebra.positiveConcreteMembers(rowPolicy, relation.wanted.source).filter(
+          (member) =>
+            memberKey(member) === memberKey(explicitMember) &&
+            RowAlgebra.isKnownSubset(
+              rowPolicy,
+              RowAlgebra.concrete(rowPolicy, [member]),
+              relation.wanted.source,
+            ),
+        ))
+  for (const member of sourceMembers) {
     if (work !== undefined) ResolutionWork.visit(work)
     const status = candidateStatus(relation.wanted, member, oracle)
     if (status !== undefined) {
@@ -316,7 +338,9 @@ export const solve = (options: {
 }): Result => {
   if (options.relations.length === 0)
     throw new RangeError('Provider selection requires at least one relation')
-  const maps = candidates(options.relations, options.oracle)
+  const maps = groupRelations(options.relations).map((relation) =>
+    relationCandidates(relation, options.oracle, options.selected),
+  )
   const selected = selectedFinite(options.selected)
   if (options.selected !== undefined && (selected === undefined || selected.members.length !== 1))
     return rejected([

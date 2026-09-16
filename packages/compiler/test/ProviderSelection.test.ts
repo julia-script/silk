@@ -66,6 +66,38 @@ const oracle = (
 
 const memberKey = RequirementRow.policy<Type.Nominal | Type.Parameter>(Type.key).collisionKey
 
+it('selects only an explicitly named, retained member of an open source row', () => {
+  const policy = Type.requirementRowPolicy()
+  const source = RowAlgebra.union(policy, selected, row([requirement('A')]))
+  const solve = (
+    sourceRow: Type.RequirementsRow,
+    selector?: Type.RequirementsRow,
+    mode: Constraint.ProviderMode = 'Exclusive',
+  ) =>
+    ProviderSelection.solve({
+      relations: [
+        {
+          wanted: Constraint.providerSelection(mode, provider, selected, sourceRow),
+          origins: [origin(0)],
+        },
+      ],
+      ...(selector === undefined ? {} : { selected: selector }),
+      responsible: applicationOrigin,
+      oracle: oracle(),
+    })
+  const explicit = row([requirement('A', 'Shared')])
+  const accepted = solve(source, explicit)
+  assert.strictEqual(accepted._tag, 'Selected')
+  if (accepted._tag === 'Selected') assert.strictEqual(accepted.member.access, 'Exclusive')
+  assert.strictEqual(solve(source)._tag, 'Rejected')
+  assert.strictEqual(solve(source, row([requirement('B')]))._tag, 'Rejected')
+  assert.strictEqual(solve(RowAlgebra.without(policy, source, explicit), explicit)._tag, 'Rejected')
+  const shared = solve(source, explicit, 'Shared')
+  assert.strictEqual(shared._tag, 'Rejected')
+  if (shared._tag === 'Rejected')
+    assert.strictEqual(shared.diagnostics[0].problem._tag, 'ProviderAccessMismatch')
+})
+
 it('rejects an empty relation set as an internal invariant violation', () => {
   assert.throws(
     () =>

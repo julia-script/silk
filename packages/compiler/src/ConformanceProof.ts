@@ -127,24 +127,23 @@ const boundAssumedBy = (
  * This is symbolic admission, not a proof object: concrete instance discovery still closes the
  * ordinary conformance goal and records the canonical witness tree.
  */
-export const assumedConditionalConformance = (
+const assumedConditionalSelection = (
   self: Index,
   provider: Type.Type,
   capability: Type.Nominal,
   assumptions: DeclarationFact,
-): boolean => {
-  if (Type.isRuntimeConcrete(provider) && Type.isRuntimeConcrete(capability)) return false
+): ConformanceCandidate | undefined => {
+  if (Type.isRuntimeConcrete(provider) && Type.isRuntimeConcrete(capability)) return undefined
   const candidates = conformanceCandidates(
     self,
     ConformanceGoal.make(capability, provider),
     'AssumedOpen',
   )
-  if (candidates.length !== 1) return false
+  if (candidates.length !== 1) return undefined
   const selected = candidates.at(0)
-  if (selected === undefined) return false
+  if (selected === undefined) return undefined
   const requirements = declaredRequirements(self.modules, selected.conformance)
-  return (
-    requirements.length > 0 &&
+  return requirements.length > 0 &&
     requirements.every((requirement) => {
       const requiredCapability = Type.substitute(requirement.capability, selected.substitution)
       const requiredProvider = Type.substitute(requirement.provider, selected.substitution)
@@ -153,8 +152,17 @@ export const assumedConditionalConformance = (
         boundAssumedBy(assumptions, requiredProvider, requiredCapability)
       )
     })
-  )
+    ? selected
+    : undefined
 }
+
+/** Tests whether exact enclosing interface bounds justify one open conditional conformance. */
+export const assumedConditionalConformance = (
+  self: Index,
+  provider: Type.Type,
+  capability: Type.Nominal,
+  assumptions: DeclarationFact,
+): boolean => assumedConditionalSelection(self, provider, capability, assumptions) !== undefined
 
 /** One open source conformance selected only from exact enclosing generic assumptions. */
 export interface SymbolicConformanceSelection {
@@ -1111,7 +1119,37 @@ export const providerMatch = (
   self: Index,
   provider: Type.Type,
   capability: Type.Nominal,
+  assumptions?: DeclarationFact,
 ): Constraint.ConformanceOutcome => {
+  const assumed =
+    assumptions === undefined
+      ? undefined
+      : assumedConditionalSelection(self, provider, capability, assumptions)
+  if (assumed !== undefined)
+    return Object.freeze({
+      _tag: 'Unique',
+      match: Object.freeze({
+        _tag: 'Conformance',
+        witness: Object.freeze({
+          origin: Object.freeze({
+            _tag: 'SourceWitness',
+            declaration: Object.freeze({
+              module: assumed.module,
+              name: `conformance#${assumed.conformance.ordinal}`,
+            }),
+          }),
+          typeArguments: Object.freeze(
+            assumed.conformance.typeParameters
+              .filter((parameter) => parameter.duplicateOf === undefined)
+              .map(
+                (parameter) =>
+                  assumed.substitution.get(Type.key(parameter.type)) ??
+                  Type.parameterArgument(parameter.type),
+              ),
+          ),
+        }),
+      }),
+    })
   const proof = prove(self, provider, capability)
   if (proof._tag === 'Unproved') {
     if (proof.failure._tag === 'MissingWitness') return Object.freeze({ _tag: 'NoMatch' })

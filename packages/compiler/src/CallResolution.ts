@@ -1324,7 +1324,7 @@ export const solveCallableConstraints = (
           initiator: { kind: 'CallConstraint', key: selectedKey, span },
         },
         match: (provider: Type.Type, capability: Type.Nominal) =>
-          ConformanceProof.providerMatch(resolution.index, provider, capability),
+          ConformanceProof.providerMatch(resolution.index, provider, capability, caller),
       }),
     })
     if (solved._tag === 'Rejected') {

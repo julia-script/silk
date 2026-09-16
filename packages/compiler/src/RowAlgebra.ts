@@ -360,6 +360,22 @@ export const isKnownSubset = <Member, RowParameter, SymbolicMember, MemberParame
     )
       return true
     if (left._tag === 'Union') return left.operands.every((operand) => prove(operand, right))
+    if (left._tag === 'Without') {
+      // Subtraction can only remove requirements. Keep the symbolic expression intact, but
+      // prove against its upper bound after removing members with an already identical key.
+      if (prove(left.source, right)) return true
+      if (left.source._tag === 'Union')
+        return left.source.operands.every((source) =>
+          prove({ _tag: 'Without', source, selected: left.selected }, right),
+        )
+      if (left.source._tag === 'Concrete' && left.selected._tag === 'Concrete')
+        return prove(
+          concreteExpression(
+            FiniteRow.difference(policy.finite, left.source.row, left.selected.row),
+          ),
+          right,
+        )
+    }
     if (right._tag === 'Union') return right.operands.some((operand) => prove(left, operand))
     if (right._tag === 'Without') return prove(left, right.source) && disjoint(left, right.selected)
     if (left._tag === 'Concrete' && right._tag === 'Concrete')
@@ -459,25 +475,28 @@ export const positiveConcreteMembers = <Member, RowParameter, SymbolicMember, Me
   policy: Policy<Member, RowParameter, SymbolicMember, MemberParameter>,
   self: Row<Member, RowParameter, SymbolicMember>,
 ): ReadonlyArray<Member> => {
-  const members: Array<Member> = []
-  const visit = (expression: Expression<Member, RowParameter, SymbolicMember>): void => {
+  const visit = (
+    expression: Expression<Member, RowParameter, SymbolicMember>,
+  ): ReadonlyArray<Member> => {
     switch (expression._tag) {
       case 'Concrete':
-        members.push(...expression.row.members)
-        return
+        return expression.row.members
       case 'RowParameter':
       case 'Singleton':
-        return
+        return []
       case 'Union':
-        for (const operand of expression.operands) visit(operand)
-        return
+        return expression.operands.flatMap(visit)
       case 'Without':
-        visit(expression.source)
-        return
+        return expression.selected._tag === 'Concrete'
+          ? FiniteRow.difference(
+              policy.finite,
+              FiniteRow.make(policy.finite, visit(expression.source)),
+              expression.selected.row,
+            ).members
+          : visit(expression.source)
     }
   }
-  visit(self.expression)
-  return FiniteRow.make(policy.finite, members).members
+  return FiniteRow.make(policy.finite, visit(self.expression)).members
 }
 
 /** Rewrites concrete members structurally and renormalizes substitution-created collisions. */
