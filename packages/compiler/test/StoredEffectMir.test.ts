@@ -318,18 +318,19 @@ it.effect('binds provider-specialized runs to their exact generated runner and w
       `import silk.effect { Effect }
 service Counter<A> { effect fn get() -> A ? &Counter<A> }
 service Meter { effect fn read() -> i32 ? &Meter }
-struct Fixed { value: i32 }
-effect fn get(self: &Fixed) -> i32 { return self.value }
-effect fn read(self: &Fixed) -> i32 { return self.value }
-impl Counter<i32> for Fixed { get: Fixed.get }
-impl Meter for Fixed { read: Fixed.read }
+struct Fixed<T> { value: T }
+effect fn get<T>(self: &Fixed<T>) -> i32 { return 42 }
+effect fn read(self: &Fixed<i32>) -> i32 { return self.value }
+impl<T> Counter<i32> for Fixed<T> { get: Fixed.get }
+impl Meter for Fixed<i32> { read: Fixed.read }
 effect fn count<A>() -> A ? &Counter<A> { return run Counter.get<A>() }
 effect fn measure() -> i32 ? &Meter { return run Meter.read() }
 pub fn main() -> i32 {
-  let fixed = Fixed { value: 42 }
+  let fixed = Fixed<i32> { value: 42 }
+  let other = Fixed<bool> { value: true }
   let ignored = run (count<i32>() |> Effect.provide(&fixed))
   let alsoIgnored = run (measure() |> Effect.provide(&fixed))
-  return run (count<i32>() |> Effect.provide(&fixed))
+  return run (count<i32>() |> Effect.provide(&other))
 }`,
     )
     const providedRuns = module.functions.flatMap((fn) =>

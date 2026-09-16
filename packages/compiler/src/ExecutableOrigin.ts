@@ -4260,6 +4260,13 @@ export const make = (operations: Operations) => {
                 owner: serviceCall.context.owner,
                 target,
                 span: serviceCall.expression.span,
+                providers: Object.freeze([
+                  Object.freeze({
+                    capability: binding.witness.capability,
+                    providerType: binding.witness.provider,
+                    role: binding.selected.role,
+                  }),
+                ]),
                 ...(serviceCall.expression.staticArgumentOrigins === undefined
                   ? {}
                   : { staticArgumentOrigins: serviceCall.expression.staticArgumentOrigins }),
