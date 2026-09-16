@@ -24,6 +24,14 @@ effect fn effectful(holder: Holder<i32>) -> i32 {
   let read = effect fn(value: &Holder<i32>) -> i32 { return value.value.* }
   return run read(&holder)
 }
+fn generic<T>(holder: Holder<T>) -> () {
+  let inspect = fn(value: &Holder<T>) -> () { drop value }
+  inspect(&holder)
+}
+effect fn genericEffect<T>(holder: Holder<T>) -> () {
+  let inspect = effect fn(value: &Holder<T>) -> () { drop value }
+  run inspect(&holder)
+}
 pub fn main() -> i32 { return 0 }`,
       ),
       [],

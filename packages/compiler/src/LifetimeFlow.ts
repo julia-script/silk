@@ -168,8 +168,8 @@ export const analyze = (
   statements: ReadonlyArray<Elaboration.StatementFact>,
   body: BodyLifetime.BodyLifetime,
   index: DeclarationIndex.Index,
+  outlivesScope: TypeOutlives.Context = TypeOutlives.context(index.modules),
 ): LifetimeFlow => {
-  const outlivesScope = TypeOutlives.context(index.modules)
   const applicationDiagnostics = new Map<string, Diagnostic.Diagnostic>()
   const entries = [...body.points]
   const root = entries.at(0)?.[0] ?? declaration.syntax
