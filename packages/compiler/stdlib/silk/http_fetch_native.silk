@@ -154,7 +154,7 @@ fn attemptOptions(options: &Options, deadline: &Option<Instant>) -> Options {
 }
 
 fn copyContinuePolicy(value: &ContinuePolicy) -> ContinuePolicy {
-  return match value {
+  return match &value.* {
     ContinuePolicy.Disabled => ContinuePolicy.Disabled
     ContinuePolicy.Require100 {deadline} => ContinuePolicy.Require100 {
       deadline: copyInstant(&deadline),
@@ -163,25 +163,21 @@ fn copyContinuePolicy(value: &ContinuePolicy) -> ContinuePolicy {
 }
 
 fn requiresContinue(value: &ContinuePolicy) -> bool {
-  return match value {
+  return match &value.* {
     ContinuePolicy.Disabled => false
     ContinuePolicy.Require100 {deadline} => true
   }
 }
 
-struct RoutedAttemptUse {}
+struct RoutedAttemptUse<'policy, A, HandlerError, ?HandlerRequirements> {}
 
-impl RoutedAttemptUse {
+impl<'policy, A, HandlerError, ?HandlerRequirements> RoutedAttemptUse<'policy, A, HandlerError, HandlerRequirements> {
   effect<'call> fn handle<
     'call,
     'exchangeView: 'call,
     'transport: 'exchangeView,
     'provider: 'transport,
     'tunnel: 'provider,
-    'policy,
-    A,
-    HandlerError,
-    ?HandlerRequirements,
   >(
     use: &mut Self,
     request: &'call AttemptRequest<'policy>,
@@ -200,13 +196,9 @@ impl RoutedAttemptUse {
     HandlerError ? HandlerRequirements
   > {
     drop use
-    return run HybridAttempt<
-      'policy,
-      NativeRouteProvider,
-      NativeTransport,
-      A,
-      HandlerError ? HandlerRequirements
-    >.handleRouted(request, method, move exchange)
+    return run HybridAttempt.handleRouted<
+      'policy, NativeRouteProvider, NativeTransport, A, HandlerError, HandlerRequirements,
+    >(request, method, move exchange)
   }
 }
 
@@ -226,19 +218,19 @@ impl<
     A,
     HandlerError ? HandlerRequirements
   >
-> for RoutedAttemptUse {
+> for RoutedAttemptUse<'policy, A, HandlerError, HandlerRequirements> {
   handle: RoutedAttemptUse.handle
 }
 
-struct DirectAttemptUse<'request, 'policy> {
+struct DirectAttemptUse<'policy, A, HandlerError, ?HandlerRequirements, 'request> {
   request: &'request AttemptRequest<'policy>
   method: Method<'request>
   prepared: PreparedRequest
   options: RequestOptions
 }
 
-impl<'request, 'policy> DirectAttemptUse<'request, 'policy> {
-  effect<'call> fn handle<'call, A, HandlerError, ?HandlerRequirements>(
+impl<'policy, A, HandlerError, ?HandlerRequirements, 'request> DirectAttemptUse<'policy, A, HandlerError, HandlerRequirements, 'request> {
+  effect<'call> fn handle<'call>(
     use: Self,
     connection: &'call mut Connection<NativeTransport>,
   ) -> A
@@ -252,7 +244,7 @@ impl<'request, 'policy> DirectAttemptUse<'request, 'policy> {
       HandlerError ? HandlerRequirements
     >
     | &mut Allocator {
-    let DirectAttemptUse<'request, 'policy> {request, method, prepared, options} = move use
+    let DirectAttemptUse<'policy, A, HandlerError, HandlerRequirements, 'request> {request, method, prepared, options} = move use
     let handle = effect fn(
       exchange: &mut Exchange<NativeTransport>,
     ) -> A
@@ -264,15 +256,11 @@ impl<'request, 'policy> DirectAttemptUse<'request, 'policy> {
       A,
       HandlerError ? HandlerRequirements
     > {
-      return run HybridAttempt<
-        'policy,
-        NativeRouteProvider,
-        NativeTransport,
-        A,
-        HandlerError ? HandlerRequirements
-      >.handleDirect(request, method, move exchange)
+      return run HybridAttempt.handleDirect<
+        'policy, NativeRouteProvider, NativeTransport, A, HandlerError, HandlerRequirements,
+      >(request, method, move exchange)
     }
-    return run Client.withExchange(connection, &prepared, move options, move handle)
+    return run Client.withExchange(move connection, &prepared, move options, move handle)
   }
 }
 
@@ -295,7 +283,7 @@ impl<
       HandlerError ? HandlerRequirements
     >
     | &mut Allocator
-> for DirectAttemptUse<'request, 'policy> {
+> for DirectAttemptUse<'policy, A, HandlerError, HandlerRequirements, 'request> {
   handle: DirectAttemptUse.handle
 }
 
@@ -347,8 +335,10 @@ static if (Intrinsic.targetOperatingSystem() == "darwin" && Intrinsic.targetArch
     | &mut TrustSource
   where HandlerRequirements in Without<HandlerRequirements, ByteDuplex>,
     HandlerRequirements in Without<HandlerRequirements, HttpTransport> {
-    let mut fresh = NativeRedirectClient.make(route, move options, limits)
-    let mut attempt = RoutedAttemptUse {}
+    let mut fresh = NativeRedirectClient<'configuration, 'policy, A, HandlerError,
+      HandlerRequirements | &mut HybridAttempt<'policy, NativeRouteProvider, NativeTransport, A, HandlerError ? HandlerRequirements>
+    >.make(route, move options, limits)
+    let mut attempt = RoutedAttemptUse<'policy, A, HandlerError, HandlerRequirements> {}
     return run AttemptClient<
       'policy,
       NativeRouteProvider,
@@ -454,7 +444,7 @@ static if (Intrinsic.targetOperatingSystem() == "darwin" && Intrinsic.targetArch
       request.maxHeadBytes,
       request.maxCredentialBytes,
     )
-    let use = DirectAttemptUse {
+    let use = DirectAttemptUse<'policy, A, HandlerError, HandlerRequirements> {
       request: &request,
       method: method,
       prepared: move prepared,
@@ -478,20 +468,46 @@ static if (Intrinsic.targetOperatingSystem() == "darwin" && Intrinsic.targetArch
           copyDeadline(&deadline),
           move use,
         )
-        let CheckoutResult<A> {value, source} = move checked
+        let CheckoutResult<A> {value: result, source} = move checked
         drop source
-        return move value
+        return move result
       }
     }
   }
 
-  impl<'configuration> Context<'configuration> {
-    effect fn withAttempt<
-      'policy,
-      A,
-      HandlerError,
-      ?HandlerRequirements,
-    >(
+  impl<
+    'configuration,
+    'policy,
+    A,
+    HandlerError,
+    ?HandlerRequirements,
+  > FetchClient<
+    'policy,
+    NativeRouteProvider,
+    NativeTransport,
+    A,
+    HandlerError,
+    ProxyError
+      | RequestError
+      | ValueError
+      | OriginError
+      | ClientError
+      | NativeClientError
+      | ResolverError
+      | NativeSocketError
+      | ConnectionError
+      | IdentityError
+      | TrustSourceError
+      | OutOfMemoryError
+      | PoolError,
+    HandlerRequirements,
+    &mut Allocator
+      | &mut MonotonicClock
+      | &mut SystemClock
+      | &mut Random
+      | &mut TrustSource,
+  > for Context<'configuration> {
+    effect fn withAttempt(
       client: &mut Self,
       request: AttemptRequest<'policy>,
       httpLimits: Limits,
@@ -538,8 +554,8 @@ static if (Intrinsic.targetOperatingSystem() == "darwin" && Intrinsic.targetArch
       }
       if proxyMode == ProxyMode.Direct {
         return match poolMode {
-          PoolMode.Fresh => run withDirect(
-            client,
+          PoolMode.Fresh => run withDirect<'configuration, 'policy, A, HandlerError, HandlerRequirements>(
+            &client.*,
             Option.none<&Handle<ConnectionKey, NativeTransport, NativePool.Context>>(),
             origin,
             move request,
@@ -547,17 +563,17 @@ static if (Intrinsic.targetOperatingSystem() == "darwin" && Intrinsic.targetArch
             move deadline,
           )
           PoolMode.UseContextPool => match & client.poolValue {
-            Option.None => run withDirect(
-              client,
+            Option.None => run withDirect<'configuration, 'policy, A, HandlerError, HandlerRequirements>(
+              &client.*,
               Option.none<&Handle<ConnectionKey, NativeTransport, NativePool.Context>>(),
               origin,
               move request,
               httpLimits,
               move deadline,
             )
-            Option.Some {value} => run withDirect(
-              client,
-              Option.some<&Handle<ConnectionKey, NativeTransport, NativePool.Context>>(value),
+            Option.Some {value} => run withDirect<'configuration, 'policy, A, HandlerError, HandlerRequirements>(
+              &client.*,
+              Option.some<&Handle<ConnectionKey, NativeTransport, NativePool.Context>>(&value),
               origin,
               move request,
               httpLimits,
@@ -568,7 +584,7 @@ static if (Intrinsic.targetOperatingSystem() == "darwin" && Intrinsic.targetArch
       }
       let route = Route.recompute(&client.routeValue, origin)
       return match poolMode {
-        PoolMode.Fresh => run withFreshRouted(
+        PoolMode.Fresh => run withFreshRouted<'configuration, 'policy, A, HandlerError, HandlerRequirements>(
           route,
           attemptOptions(&client.optionsValue, &deadline),
           httpLimits,
@@ -576,7 +592,7 @@ static if (Intrinsic.targetOperatingSystem() == "darwin" && Intrinsic.targetArch
           move deadline,
         )
         PoolMode.UseContextPool => match & client.poolValue {
-          Option.None => run withFreshRouted(
+          Option.None => run withFreshRouted<'configuration, 'policy, A, HandlerError, HandlerRequirements>(
             route,
             attemptOptions(&client.optionsValue, &deadline),
             httpLimits,
@@ -585,9 +601,9 @@ static if (Intrinsic.targetOperatingSystem() == "darwin" && Intrinsic.targetArch
           )
           Option.Some {value} => {
             if Route.mode(&route) != RouteMode.Direct { fail PoolError.ContextMismatch }
-            return run withDirect(
-              client,
-              Option.some<&Handle<ConnectionKey, NativeTransport, NativePool.Context>>(value),
+            return run withDirect<'configuration, 'policy, A, HandlerError, HandlerRequirements>(
+              &client.*,
+              Option.some<&Handle<ConnectionKey, NativeTransport, NativePool.Context>>(&value),
               Route.originalOrigin(&route),
               move request,
               httpLimits,
@@ -598,7 +614,7 @@ static if (Intrinsic.targetOperatingSystem() == "darwin" && Intrinsic.targetArch
       }
     }
   }
-
+} else {
   impl<
     'configuration,
     'policy,
@@ -611,36 +627,11 @@ static if (Intrinsic.targetOperatingSystem() == "darwin" && Intrinsic.targetArch
     NativeTransport,
     A,
     HandlerError,
-    ProxyError
-      | RequestError
-      | ValueError
-      | OriginError
-      | ClientError
-      | NativeClientError
-      | ResolverError
-      | NativeSocketError
-      | ConnectionError
-      | IdentityError
-      | TrustSourceError
-      | OutOfMemoryError
-      | PoolError,
+    NativeClientError,
     HandlerRequirements,
-    &mut Allocator
-      | &mut MonotonicClock
-      | &mut SystemClock
-      | &mut Random
-      | &mut TrustSource,
+    never,
   > for Context<'configuration> {
-    withAttempt: Context.withAttempt
-  }
-} else {
-  impl<'configuration> Context<'configuration> {
-    effect fn withAttemptUnsupported<
-      'policy,
-      A,
-      HandlerError,
-      ?HandlerRequirements,
-    >(
+    effect fn withAttempt(
       client: &mut Self,
       request: AttemptRequest<'policy>,
       httpLimits: Limits,
@@ -666,24 +657,5 @@ static if (Intrinsic.targetOperatingSystem() == "darwin" && Intrinsic.targetArch
       drop deadline
       fail NativeClientError.UnsupportedTarget
     }
-  }
-
-  impl<
-    'configuration,
-    'policy,
-    A,
-    HandlerError,
-    ?HandlerRequirements,
-  > FetchClient<
-    'policy,
-    NativeRouteProvider,
-    NativeTransport,
-    A,
-    HandlerError,
-    NativeClientError,
-    HandlerRequirements,
-    never,
-  > for Context<'configuration> {
-    withAttempt: Context.withAttemptUnsupported
   }
 }
