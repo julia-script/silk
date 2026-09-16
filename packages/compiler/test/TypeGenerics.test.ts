@@ -43,16 +43,25 @@ const descendants = (node: SyntaxTree.Node): ReadonlyArray<SyntaxTree.Node> =>
 
 it.effect('admits detached generic nominal failure payloads', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSource(
-      'generics/nominal-failure',
-      new TextEncoder().encode(`struct Failure<E> { error: E }
+    const source = `struct Failure<E> { error: E }
 effect fn wrap<E: Intrinsic.Detached>(error: E) -> () ! Failure<E> {
   fail Failure<E> { error: move error }
-}`),
+}
+effect fn reject<E>(error: E) -> () ! Failure<E> {
+  fail Failure<E> { error: move error }
+}`
+    const snapshot = yield* Analysis.ofSource(
+      'generics/nominal-failure',
+      new TextEncoder().encode(source),
     )
     assert.deepEqual(
       Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
-      [],
+      ['SEM0061', 'SEM0061'],
+    )
+    assert.isTrue(
+      Analysis.diagnostics(snapshot).every(
+        (diagnostic) => diagnostic.span.start >= source.indexOf('effect fn reject'),
+      ),
     )
   }),
 )

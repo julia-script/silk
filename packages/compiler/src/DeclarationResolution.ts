@@ -1865,13 +1865,7 @@ export const resolveFailureRow = (
   const failures = new Map<string, Type.Type>()
   let available = row.parameters.length === 0
   for (const member of members) {
-    if (
-      member._tag !== 'Resolved' ||
-      !(
-        Type.isRuntimeConcrete(member.type) ||
-        (Type.isParameter(member.type) && member.type.kind === 'Value')
-      )
-    ) {
+    if (member._tag !== 'Resolved' || !Type.isFailureValue(member.type)) {
       available = false
       if (member._tag === 'Resolved')
         diagnostics.push(

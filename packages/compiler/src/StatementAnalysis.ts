@@ -1507,9 +1507,7 @@ export const analyzeStatements = (
         throw new RangeError(`Semantic analysis cannot analyze ${expressionNode.kind}`)
       context.diagnostics.push(...expression.diagnostics)
       const failure =
-        expression.type !== undefined &&
-        (Type.isRuntimeConcrete(expression.type) ||
-          (Type.isParameter(expression.type) && expression.type.kind === 'Value'))
+        expression.type !== undefined && Type.isFailureValue(expression.type)
           ? expression.type
           : undefined
       if (!context.effectBlock && context.declaration.functionKind !== 'Effect')
