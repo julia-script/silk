@@ -696,7 +696,15 @@ export const analyzeDeclaredType = (
   if (syntax.kind === 'UnionType') {
     const members = syntax.children
       .filter(isDeclaredTypeNode)
-      .map((member) => analyzeDeclaredType(source, member, typeParameters, false, lifetimeContext))
+      .map((member) =>
+        analyzeDeclaredType(
+          source,
+          member,
+          typeParameters,
+          genericArgumentPosition,
+          lifetimeContext,
+        ),
+      )
     const diagnostics: Array<Diagnostic.Diagnostic> = members.flatMap((member) =>
       Array.from(member.diagnostics),
     )

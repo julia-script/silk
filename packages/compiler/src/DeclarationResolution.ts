@@ -446,8 +446,29 @@ export const resolveDeclaredType = (
       fact.target._tag === 'Unresolved'
         ? resolvers.type(module, fact.target.path)
         : resolveDeclaredType(module, fact.target, resolvers, modules)
+    const targetDeclaration =
+      target.fact._tag === 'Resolved' && Type.isNominal(target.fact.type)
+        ? memberByNominal(modules, target.fact.type)
+        : undefined
+    const targetParameters =
+      target.fact._tag === 'Resolved' && Type.isNominal(target.fact.type)
+        ? (targetDeclaration?.typeParameters.map((parameter) => parameter.type) ??
+          Type.intrinsicNominalParameters(target.fact.type))
+        : undefined
+    const targetOrdinaryParameters = targetParameters?.filter(
+      (parameter) => parameter.kind !== 'Lifetime',
+    )
+    let argumentOrdinal = 0
     const arguments_ = fact.arguments.map((argument) =>
-      resolveDeclaredType(module, argument, resolvers, modules),
+      argument._tag === 'Lifetime'
+        ? resolveGenericArgument(module, argument, undefined, resolvers, modules)
+        : resolveGenericArgument(
+            module,
+            argument,
+            targetOrdinaryParameters?.at(argumentOrdinal++),
+            resolvers,
+            modules,
+          ),
     )
     const requirements =
       fact.requirementRow?.requirements.map((requirement) => {
@@ -465,26 +486,16 @@ export const resolveDeclaredType = (
       ...requirements.flatMap((requirement) => requirement.role.diagnostics),
     ]
     if (target.fact._tag === 'Resolved' && Type.isNominal(target.fact.type)) {
-      const declaration = memberByNominal(modules, target.fact.type)
+      const declaration = targetDeclaration
       // An alias to an applied nominal accepts no further arguments.
       const expected =
         target.fact.type.arguments.length > 0
           ? 0
           : (declaration?.typeParameters.length ?? Type.intrinsicNominalArity(target.fact.type))
-      const declaredParameters =
-        declaration?.typeParameters.map((parameter) => parameter.type) ??
-        Type.intrinsicNominalParameters(target.fact.type)
-      const ordinaryParameters = declaredParameters?.filter(
-        (parameter) => parameter.kind !== 'Lifetime',
-      )
+      const declaredParameters = targetParameters
       const writtenLifetimes = arguments_.filter((argument) => argument.fact._tag === 'Lifetime')
       const ordinaryArguments = arguments_.filter((argument) => argument.fact._tag !== 'Lifetime')
-      const valueArguments = ordinaryArguments.map(
-        (argument, ordinal): Type.GenericArgument | undefined =>
-          argument.fact._tag === 'Resolved'
-            ? genericArgumentForParameter(ordinaryParameters?.at(ordinal), argument.fact.type)
-            : undefined,
-      )
+      const valueArguments = ordinaryArguments.map((argument) => argument.argument)
       const lifetimeArguments =
         fact.implicitLifetimeArguments ??
         writtenLifetimes.flatMap((argument) =>
@@ -969,12 +980,74 @@ const genericArgumentForParameter = (
     if (Type.isParameter(type) && type.kind === 'RequirementRow')
       return Type.requirementRowArgument([], [type])
     if (Type.isNever(type)) return Type.requirementRowArgument([])
+    if (
+      Type.isReference(type) &&
+      (Type.isNominal(type.target) ||
+        (Type.isParameter(type.target) && type.target.kind === 'Value'))
+    )
+      return Type.requirementRowArgument([
+        Object.freeze({ capability: type.target, role: 'DefaultRole', access: type.access }),
+      ])
+    if (Type.isUnion(type)) {
+      const members = type.members.map((member) => genericArgumentForParameter(parameter, member))
+      if (members.every(Type.isRequirementRowArgument))
+        return Type.requirementRowArgument(
+          members.flatMap(Type.requirementMembers),
+          members.flatMap(Type.requirementRowParameters),
+        )
+    }
     if (Type.isNominal(type) || (Type.isParameter(type) && type.kind === 'Value'))
       return Type.requirementRowArgument([
         Object.freeze({ capability: type, role: 'DefaultRole', access: 'Shared' }),
       ])
   }
   return type
+}
+
+type GenericArgumentResolution = TypeResolution & {
+  readonly argument?: Type.GenericArgument
+}
+
+/** Resolves a generic argument with the declaration parameter's kind available as context. */
+const resolveGenericArgument = (
+  module: string,
+  fact: DeclaredTypeFact,
+  parameter: Type.Parameter | undefined,
+  resolvers: ResolutionSeams.ResolutionSeams,
+  modules: ReadonlyArray<ModuleHeaders>,
+): GenericArgumentResolution => {
+  if (parameter?.kind === 'RequirementRow' && fact._tag === 'Union') {
+    const members = fact.members.map((member) =>
+      resolveGenericArgument(module, member, parameter, resolvers, modules),
+    )
+    const diagnostics = Object.freeze(members.flatMap((member) => member.diagnostics))
+    const arguments_ = members.map((member) => member.argument)
+    const argument = arguments_.every(
+      (member): member is Type.RequirementRowArgument =>
+        member !== undefined && Type.isRequirementRowArgument(member),
+    )
+      ? Type.requirementRowArgument(
+          arguments_.flatMap(Type.requirementMembers),
+          arguments_.flatMap(Type.requirementRowParameters),
+        )
+      : undefined
+    const cause = diagnostics.at(-1)
+    return Object.freeze({
+      fact: Object.freeze({
+        ...fact,
+        members: Object.freeze(members.map((member) => member.fact)),
+        ...(cause === undefined ? {} : { cause: Diagnostic.identity(cause) }),
+      }),
+      diagnostics,
+      ...(argument === undefined ? {} : { argument }),
+    })
+  }
+  const resolved = resolveDeclaredType(module, fact, resolvers, modules)
+  if (resolved.fact._tag !== 'Resolved') return resolved
+  return Object.freeze({
+    ...resolved,
+    argument: genericArgumentForParameter(parameter, resolved.fact.type),
+  })
 }
 
 /**

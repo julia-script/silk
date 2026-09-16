@@ -41,6 +41,50 @@ const descendants = (node: SyntaxTree.Node): ReadonlyArray<SyntaxTree.Node> =>
     SyntaxTree.isNode(child) ? [child, ...descendants(child)] : [],
   )
 
+it.effect('preserves access in nonfinal concrete nominal requirement arguments', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSource(
+      'generics/nominal-row-access',
+      new TextEncoder().encode(`service Clock {}
+service Logger {}
+struct Rows<?Acquisition, ?Handler> {}
+fn preserve<?R>(value: Rows<R | (&mut Clock) | (&Logger), never>) -> () {
+  drop value
+}`),
+    )
+    assert.deepEqual(
+      Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
+      [],
+    )
+    const parameter = Analysis.declarationIndex(snapshot)
+      .modules.at(0)
+      ?.declarations.find(
+        (declaration) =>
+          declaration.name._tag === 'Present' && declaration.name.spelling === 'preserve',
+      )
+      ?.parameters.at(0)?.declaredType
+    if (parameter?._tag !== 'Resolved' || !Type.isNominal(parameter.type))
+      return unreachable('expected resolved Rows parameter')
+    const row = parameter.type.arguments.at(0)
+    if (row === undefined || !Type.isRequirementRowArgument(row))
+      return unreachable('expected acquisition requirement row')
+    assert.deepEqual(
+      Type.requirementMembers(row).map((requirement) => [
+        requirement.capability.name,
+        requirement.access,
+      ]),
+      [
+        ['Clock', 'Exclusive'],
+        ['Logger', 'Shared'],
+      ],
+    )
+    assert.deepEqual(
+      Type.requirementRowParameters(row).map((rowParameter) => rowParameter.name),
+      ['R'],
+    )
+  }),
+)
+
 it.effect('retains source-shaped row expressions and callable constraints in module facts', () =>
   Effect.gen(function* () {
     const constrained = `service Binder {
