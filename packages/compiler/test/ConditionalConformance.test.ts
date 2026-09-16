@@ -4,6 +4,7 @@ import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as ConformanceProof from '../src/ConformanceProof.js'
 import * as Hir from '../src/Hir.js'
+import * as Lifetime from '../src/Lifetime.js'
 import * as MirEncoding from '../src/MirEncoding.js'
 import * as MirVerification from '../src/MirVerification.js'
 import * as Type from '../src/Type.js'
@@ -60,6 +61,79 @@ fn rejected(client: &Client) -> () { return unknown(client) }`
       if (proof._tag === 'Proved')
         assert.deepEqual(proof.typeArguments.map(Type.encodeGenericArgument), [argument])
     }
+  }),
+)
+
+it.effect('retains a proved interface target across lifetime-only application differences', () =>
+  Effect.gen(function* () {
+    const module = 'conformance/witness-application-lifetimes'
+    const snapshot = yield* AnalysisFixture.frontend(
+      module,
+      ascii(`struct Request<'a> { value: &'a i32 }
+interface Read<'a> { effect fn read(self: &Self, request: Request<'a>) -> Request<'a> }
+struct Client<'a> { value: &'a i32 }
+impl<'a> Read<'a> for Client<'a> {
+  effect fn read(self: &Self, request: Request<'a>) -> Request<'a> { return move request }
+}
+effect fn invoke<'a, C: Read<'a>>(client: &C, request: Request<'a>) -> Request<'a> {
+  return run Read<'a>.read(client, move request)
+}`),
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    const hir = Projections.hirOf(snapshot, module) ?? raise('expected HIR')
+    const fn =
+      hir.functions.find(
+        (fn) => fn.declaration.name._tag === 'Present' && fn.declaration.name.spelling === 'invoke',
+      ) ?? raise('expected invocation')
+    const call =
+      fn.statements
+        .flatMap(Hir.statementExpressions)
+        .flatMap(Hir.expressionTree)
+        .find((expression) => expression._tag === 'InterfaceOperationCall') ??
+      raise('expected interface call')
+    if (call._tag !== 'InterfaceOperationCall') return
+    const owner = { module, name: 'main' }
+    const provider = Type.nominal(module, 'Client', [Lifetime.local(owner, 'provider', 0)])
+    const substitution = new Map<string, Type.GenericArgument>(
+      fn.declaration.typeParameters.map((parameter, ordinal) => [
+        Type.key(parameter.type),
+        parameter.type.kind === 'Lifetime'
+          ? Lifetime.local(owner, 'application', ordinal)
+          : provider,
+      ]),
+    )
+    const capability = Type.substitute(call.capability, substitution)
+    if (!Type.isNominal(capability)) return raise('expected capability')
+    const index = Analysis.declarationIndex(snapshot)
+    assert.strictEqual(ConformanceProof.prove(index, provider, capability)._tag, 'Proved')
+    const target = ConformanceProof.interfaceWitnessTarget(
+      index,
+      provider,
+      capability,
+      call.operation,
+      call.contract,
+      substitution,
+    )
+    assert.strictEqual(target?.implementation.name, 'impl@0.read')
+    const wrongApplication = {
+      ...call.contract,
+      operands: call.contract.operands.map((operand, ordinal) =>
+        ordinal === 1 && operand.type._tag === 'Resolved'
+          ? { ...operand, type: { ...operand.type, type: 'bool' as const } }
+          : operand,
+      ),
+    }
+    assert.strictEqual(
+      ConformanceProof.interfaceWitnessTarget(
+        index,
+        provider,
+        capability,
+        call.operation,
+        wrongApplication,
+        substitution,
+      ),
+      undefined,
+    )
   }),
 )
 

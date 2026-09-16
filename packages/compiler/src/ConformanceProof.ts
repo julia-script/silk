@@ -857,15 +857,19 @@ const invocationLifetimeSubstitution = (
     accepts: (source: Lifetime.Lifetime, target: Lifetime.Lifetime, invariant: boolean) =>
       Lifetime.equals(source, target) && (!invariant || Lifetime.equals(target, source)),
   })
+  // This reconstructs invocation binders for an already-proved witness, not a new compatibility
+  // check. Admitted application lifetimes can differ from the header's retained proof context.
+  // Preserve inferred binders only when every non-lifetime part still has the same runtime shape.
+  const inferInvocation = (pattern: Type.Type, actual: Type.Type): boolean =>
+    TypeInference.infer(pattern, actual, inferred, lifetimes) ||
+    Type.runtimeKey(Type.substitute(pattern, inferred)) === Type.runtimeKey(actual)
   for (const [ordinal, operand] of contract.operands.entries()) {
     const actual = application.operands.at(ordinal)
     if (operand.type._tag !== 'Resolved' || actual?.type._tag !== 'Resolved') return undefined
     if (
-      !TypeInference.infer(
+      !inferInvocation(
         Type.substitute(operand.type.type, headerSubstitution),
         Type.substitute(actual.type.type, applicationSubstitution),
-        inferred,
-        lifetimes,
       )
     )
       return undefined
@@ -873,11 +877,9 @@ const invocationLifetimeSubstitution = (
   if (
     contract.success._tag !== 'Resolved' ||
     application.success._tag !== 'Resolved' ||
-    !TypeInference.infer(
+    !inferInvocation(
       Type.substitute(contract.success.type, headerSubstitution),
       Type.substitute(application.success.type, applicationSubstitution),
-      inferred,
-      lifetimes,
     )
   )
     return undefined
