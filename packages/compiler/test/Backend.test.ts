@@ -62,6 +62,74 @@ const emit = Effect.fnUntraced(function* (text: string, request: Backend.Codegen
 const golden = (name: string): string =>
   readFileSync(new URL(`./goldens/${name}`, import.meta.url), 'utf8')
 
+it.effect('reads match tags and proven variant fields without decoding unrelated payloads', () =>
+  Effect.gen(function* () {
+    const artifact = yield* emit(
+      `struct Span { start: i32 end: i32 }
+union Token {
+  First { span: Span },
+  Second { padding: i64, span: Span },
+  Third { span: Span, extra: i32 },
+}
+fn kind(token: Token) -> i32 {
+  return match move token {
+    Token.First { .. } => 1
+    Token.Second { .. } => 2
+    Token.Third { .. } => 3
+  }
+}
+fn start(token: Token) -> i32 {
+  return match move token {
+    Token.First { span: Span { start, .. } } => start
+    Token.Second { span: Span { start, .. }, .. } => start
+    Token.Third { span: Span { start, .. }, .. } => start
+  }
+}
+fn makeToken(choice: i32) -> Token {
+  if choice == 0 { return Token.First { span: Span { start: 1, end: 2 } } }
+  if choice == 1 { return Token.Second { padding: 9, span: Span { start: 41, end: 42 } } }
+  return Token.Third { span: Span { start: 3, end: 4 }, extra: 5 }
+}
+fn constructors() -> i32 {
+  return kind(Token.First { span: Span { start: 1, end: 2 } }) +
+    start(Token.Second { padding: 9, span: Span { start: 41, end: 42 } })
+}
+pub fn main() -> i32 { return constructors() + start(makeToken(1)) }`,
+      { mode: 'release' },
+    )
+    for (const name of ['kind', 'start']) {
+      const body =
+        artifact.ir
+          .match(new RegExp(`define hidden [^\\n]+@silk_golden_program_${name}__[^]*?\\n}`))
+          ?.at(0) ?? unreachable(`expected ${name} definition`)
+      // Match tests branch on scalar tags. Decoding a union payload here would introduce
+      // additional switches across variants that the match has already distinguished.
+      let block = ''
+      for (const line of body.split('\n')) {
+        if (/^\S+:$/.test(line)) block = line.slice(0, -1)
+        // An incoming ABI payload may be stored once in entry. Match arms must not
+        // decode the union again to read its tag or a field whose variant is proven.
+        if (/^\s+switch /.test(line)) assert.strictEqual(block, 'entry')
+      }
+      assert.match(body, /icmp eq i32/)
+    }
+    const constructors =
+      artifact.ir.match(/define hidden [^\n]+@silk_golden_program_constructors__[^]*?\n}/)?.at(0) ??
+      unreachable('expected constructors definition')
+    // The constructors know their variant; only later ABI reads may need a dispatch.
+    assert.notMatch(constructors, /switch i32 %place\d+_store/)
+    const returned =
+      artifact.ir.match(/define hidden [^\n]+@silk_golden_program_makeToken__[^]*?\n}/)?.at(0) ??
+      unreachable('expected union-returning function')
+    assert.match(returned, /call void @llvm.memmove[^\n]+%completion_storage/)
+    assert.match(returned, /switch i32 %completion_value_/)
+    // All alternatives share one conversion at the return boundary. No branch may
+    // expand the union while moving its selected value into completion storage.
+    for (const line of returned.split('\n'))
+      if (/^\s+switch /.test(line)) assert.match(line, /switch i32 %completion_value_/)
+  }),
+)
+
 it.effect('uses addressable storage as the mutable local backing store', () =>
   Effect.gen(function* () {
     const snapshot = yield* AnalysisFixture.retainingMain(
@@ -152,16 +220,18 @@ pub fn main() -> i32 { return run observing((), observer, Effect.catchAll(choose
     const address =
       choose.match(new RegExp(`${stored} = getelementptr i8, ptr (%addr\\d+), i32 (\\d+)`)) ??
       unreachable('expected a planned payload offset')
-    const projection =
-      choose
-        .match(
-          new RegExp(`(%place\\w+) = getelementptr i8, ptr ${address.at(1)}, i32 ${address.at(2)}`),
-        )
-        ?.at(1) ?? unreachable('expected the returned payload projection')
-    assert.include(choose, `ptr ${projection}`)
-    assert.match(choose, /phi i32[^\n]+\[ %place[^,]+, %completion_exit/)
+    assert.match(
+      choose,
+      new RegExp(`call void @llvm.memmove[^\\n]+%completion_storage[^\\n]+${address.at(1)},`),
+    )
+    assert.notMatch(choose, /phi i32[^\n]+%completion_exit/)
+    assert.match(
+      choose,
+      /completion:\n[^]*?%completion_value_0 = load i32, ptr %completion_storage/,
+    )
     assert.match(choose, /^define hidden void /)
-    assert.match(choose, /store i32 %completion_lane0, ptr %completion_result_0_ptr/)
+    assert.match(choose, /store i32 %completion_value_0, ptr %completion_result_0_ptr/)
+    assert.match(choose, /store \{[^\n]+\} %completion_lane0, ptr %completion_result_2_ptr/)
     assert.match(choose, /getelementptr \{[^\n]+\}, ptr %[^,]+, i32 0, i32 0/)
     assert.notMatch(choose, /insertvalue [^\n]+%completion_lane/)
   }),

@@ -16,6 +16,8 @@
 /examples/tiny-language/build-js/
 
 .scratch
+# Preserve the shared compiler profiling harness under global scratchpad ignores.
+!/packages/compiler/scratchpad/
 .vercel
 .env*
 

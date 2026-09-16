@@ -398,41 +398,30 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
       break
     }
     case 'ConstructUnionVariant': {
-      const targetLanes = NativeType.lanesFor(types, operation.type)
-      const tagLane = targetLanes.at(0)
-      if (tagLane === undefined) throw new RangeError('LLVM nominal union lost its tag lane')
+      const planned = Layout.entry(program.layout, Mir.semanticType(operation.type))
+      if (planned?.representation._tag !== 'NominalUnion')
+        throw new RangeError('Construction lost its nominal union layout')
+      const variant = planned.representation.variants.find(
+        (candidate) => candidate.ordinal === operation.variantOrdinal,
+      )
+      if (variant === undefined) throw new RangeError('Construction lost its selected variant')
       const tag = yield* Constant.integerSigned(builder, i32, BigInt(operation.variantOrdinal))
-      const sourceValues = (yield* NativeStorage.materializeArguments(
-        nativeStorage,
-        operation.fields.map((field) => field.value),
-      )).flat()
-      const sourceLanes = operation.fields.flatMap((field) => {
-        const fieldType = entry.fn.localTypes.at(field.value.ordinal)
-        return fieldType === undefined ? [] : [...NativeType.valueLanesFor(types, fieldType)]
-      })
-      const payload: Array<Value.Input> = []
-      for (let ordinal = 1; ordinal < targetLanes.length; ordinal += 1) {
-        const targetLane = targetLanes.at(ordinal)
-        if (targetLane === undefined) throw new RangeError('LLVM nominal union lost a payload lane')
-        const input = sourceValues.at(ordinal - 1)
-        const sourceLane = sourceLanes.at(ordinal - 1)
-        payload.push(
-          input === undefined || sourceLane === undefined
-            ? yield* Constant.nullValue(builder, NativeType.laneType(types, targetLane))
-            : yield* NativeArith.coerceLane(
-                arith.lane,
-                input,
-                sourceLane,
-                targetLane,
-                `nominal_union${operation.destination.ordinal}_${ordinal - 1}`,
-              ),
+      yield* NativeStorage.writeLane(nativeStorage, operation.destination, 0, tag)
+      // The constructor already selects the variant. Initialize only its fields instead of
+      // round-tripping through ABI carriers and switching over all possible variants again.
+      for (const input of operation.fields) {
+        const field = variant.fields.find((field) =>
+          DeclarationFacts.sameFieldId(field.id, input.field),
+        )
+        if (field === undefined) throw new RangeError('Construction lost its variant field layout')
+        yield* NativeStorage.constructField(
+          nativeStorage,
+          operation.destination,
+          input.value,
+          planned.representation.payloadOffset + field.offset,
+          input.stored,
         )
       }
-      yield* NativeStorage.writeLocal(
-        nativeStorage,
-        operation.destination.ordinal,
-        Object.freeze([tag, ...payload]),
-      )
       break
     }
     case 'ConstructArray': {

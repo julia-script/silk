@@ -41,6 +41,15 @@ export interface Draft {
   readonly blocks: Array<MutableBlock>
   readonly blockHandles: Array<BlockActor.Block>
   readonly instructions: Array<FunctionBodyDescription.Instruction>
+  readonly openPhis: Map<
+    number,
+    {
+      readonly incoming: Array<
+        Extract<FunctionBodyDescription.Instruction, { readonly _tag: 'Phi' }>['incoming'][number]
+      >
+      readonly blocks: Set<number>
+    }
+  >
   readonly instructionHandles: Array<FunctionBodyActor.Instruction>
   readonly values: Array<MutableValue>
   readonly valueHandles: Array<ValueActor.Value>
@@ -66,7 +75,11 @@ export const valueEntries = new WeakMap<ValueActor.Value, LocalEntry>()
 
 export const phiEntries = new WeakMap<FunctionBodyActor.Phi, LocalEntry>()
 
-export const switchEntries = new WeakMap<FunctionBodyActor.Switch, LocalEntry>()
+export interface SwitchEntry extends LocalEntry {
+  readonly block: number
+}
+
+export const switchEntries = new WeakMap<FunctionBodyActor.Switch, SwitchEntry>()
 
 /** @internal */
 export const fail = (
@@ -105,13 +118,13 @@ export const assertActive = (
 }
 
 /** @internal */
-export const localEntry = <A extends object>(
-  entries: WeakMap<A, LocalEntry>,
+export const localEntry = <A extends object, Entry extends LocalEntry>(
+  entries: WeakMap<A, Entry>,
   draft: Draft,
   handle: A,
   operation: string,
   kind: string,
-): Result.Result<LocalEntry, LlvmError> => {
+): Result.Result<Entry, LlvmError> => {
   const entry = entries.get(handle)
   if (entry === undefined) return fail(operation, `Unknown ${kind} handle`, handle)
   if (entry.owner !== draft.owner) {

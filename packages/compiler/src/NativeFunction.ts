@@ -748,6 +748,11 @@ export const emitBodies = Effect.fnUntraced(function* (context: EmissionContext)
           : undefined
         const initialBlock = blocks.get(entry.fn.entry.ordinal)
         if (initialBlock === undefined) throw new RangeError('Native function has no entry block')
+        const completion = yield* NativeReturn.makeCompletion(
+          storageContext,
+          entry,
+          diagnostic !== undefined && diagnostic.outcomes.size > 0,
+        )
         yield* FunctionBody.branch(body, dispatchBlock ?? initialBlock)
         if (entry.suspendable) {
           const entryBlock = blocks.get(entry.fn.entry.ordinal)
@@ -974,9 +979,7 @@ export const emitBodies = Effect.fnUntraced(function* (context: EmissionContext)
         })
 
         const suspensionReturnContext: NativeSuspension.ReturnContext = Object.freeze({
-          ...(diagnostic === undefined || diagnostic.outcomes.size === 0
-            ? {}
-            : { completion: { block: yield* LlvmBlock.make(body, 'completion'), exits: [] } }),
+          ...(completion === undefined ? {} : { completion }),
           builder,
           body,
           i32,

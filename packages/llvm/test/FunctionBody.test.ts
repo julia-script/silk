@@ -391,8 +391,17 @@ it.effect('builds a diamond with branches, a forward-aware phi, and a direct cal
         yield* Block.setInsertionPoint(body, merge)
         const phi = yield* FunctionBody.phi(body, i32, 'result')
         yield* FunctionBody.addPhiIncoming(body, phi, added, onTrue)
+        const duplicate = yield* Effect.flip(
+          FunctionBody.addPhiIncoming(body, phi, subtracted, onTrue),
+        )
+        assert.strictEqual(duplicate.reason._tag, 'InvalidState')
         yield* FunctionBody.addPhiIncoming(body, phi, subtracted, onFalse)
-        yield* FunctionBody.returnValue(body, yield* FunctionBody.sealPhi(body, phi))
+        const result = yield* FunctionBody.sealPhi(body, phi)
+        const sealed = yield* Effect.flip(
+          FunctionBody.addPhiIncoming(body, phi, subtracted, onFalse),
+        )
+        assert.strictEqual(sealed.reason._tag, 'InvalidState')
+        yield* FunctionBody.returnValue(body, result)
       }),
     )
 
@@ -423,6 +432,8 @@ it.effect('builds and finalizes switches with unique cases', () =>
         yield* Block.setInsertionPoint(body, entry)
         const argument = yield* Value.argument(body, 0)
         const switchHandle = yield* FunctionBody.switchTerminator(body, argument, fallback)
+        // Cases may be added after the insertion point has moved away from the switch.
+        yield* Block.setInsertionPoint(body, selected)
         yield* FunctionBody.addSwitchCase(body, switchHandle, zero, selected)
         const duplicate = yield* Effect.flip(
           FunctionBody.addSwitchCase(body, switchHandle, zero, fallback),
@@ -432,7 +443,9 @@ it.effect('builds and finalizes switches with unique cases', () =>
         yield* Block.setInsertionPoint(body, fallback)
         yield* FunctionBody.returnValue(body, one)
         yield* Block.setInsertionPoint(body, selected)
-        yield* FunctionBody.returnValue(body, zero)
+        const phi = yield* FunctionBody.phi(body, i32, 'selected_value')
+        yield* FunctionBody.addPhiIncoming(body, phi, zero, entry)
+        yield* FunctionBody.returnValue(body, yield* FunctionBody.sealPhi(body, phi))
       }),
     )
 

@@ -305,7 +305,7 @@ export const switchTerminator = Effect.fnUntraced(function* (
           }),
         )
         yield* FunctionBodyState.addPredecessor(draft, destination, predecessor)
-        return yield* FunctionBodyState.makeSwitchHandle(draft, instruction)
+        return yield* FunctionBodyState.makeSwitchHandle(draft, instruction, predecessor)
       }),
   )
 })
@@ -324,7 +324,7 @@ export const addSwitchCase = Effect.fnUntraced(function* (
 ): Effect.fn.Return<void, LlvmError> {
   yield* FunctionBodyState.mutateModule(self, 'FunctionBody.addSwitchCase', (draft, module) =>
     Result.gen(function* () {
-      const index = yield* FunctionBodyState.resolveSwitch(
+      const { index, block: predecessor } = yield* FunctionBodyState.resolveSwitch(
         draft,
         switchHandle,
         'FunctionBody.addSwitchCase',
@@ -383,9 +383,6 @@ export const addSwitchCase = Effect.fnUntraced(function* (
         destination,
         'FunctionBody.addSwitchCase',
       )
-      const predecessor = draft.blocks.findIndex((candidate) =>
-        candidate.instructions.includes(index),
-      )
       draft.instructions[index] = Object.freeze({
         ...instruction,
         cases: Object.freeze([
@@ -393,7 +390,7 @@ export const addSwitchCase = Effect.fnUntraced(function* (
           Object.freeze({ value: constantIndex, block }),
         ]),
       })
-      if (predecessor >= 0) yield* FunctionBodyState.addPredecessor(draft, block, predecessor)
+      yield* FunctionBodyState.addPredecessor(draft, block, predecessor)
     }),
   )
 })
@@ -410,7 +407,7 @@ export const sealSwitch = Effect.fnUntraced(function* (
 ): Effect.fn.Return<Instruction, LlvmError> {
   return yield* FunctionBodyState.mutate(self, 'FunctionBody.sealSwitch', (draft) =>
     Result.gen(function* () {
-      const index = yield* FunctionBodyState.resolveSwitch(
+      const { index } = yield* FunctionBodyState.resolveSwitch(
         draft,
         switchHandle,
         'FunctionBody.sealSwitch',

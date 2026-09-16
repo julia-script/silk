@@ -573,7 +573,7 @@
     "test:native-acceptance": "vitest run test/DriverNativeAcceptance.test.ts --passWithNoTests --maxWorkers=1",
     "test:parallel": "vitest run --passWithNoTests --exclude test/DriverNativeAcceptance.test.ts --exclude test/DriverTlsClientWasmAcceptance.test.ts --exclude test/DriverTlsConnectionWasmAcceptance.test.ts",
     "test:tls-client-wasm": "vitest run test/DriverTlsClientWasmAcceptance.test.ts --passWithNoTests --maxWorkers=1",
-    "typecheck": "pnpm unicode:check && pnpm stdlib:check && pnpm toolchain:generate && tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json",
+    "typecheck": "pnpm unicode:check && pnpm stdlib:check && pnpm toolchain:generate && tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json && tsc -p scratchpad/tsconfig.json",
     "documentation:generate": "node scripts/generate-documentation.mjs",
     "documentation:check": "node scripts/generate-documentation.mjs --check",
     "documentation:examples": "pnpm --filter @silklang/cli doctest:stdlib",
