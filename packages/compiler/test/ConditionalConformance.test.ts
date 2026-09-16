@@ -18,22 +18,38 @@ const analyze = (name: string, source: string) =>
 it.effect('selects capability-bound parameters for one reusable provider', () =>
   Effect.gen(function* () {
     const module = 'conformance/capability-bound-parameters'
-    const snapshot = yield* AnalysisFixture.frontend(
-      module,
-      ascii(`interface Echo<T> {
+    const source = `interface Echo<T> {
   fn echo(self: &Self, value: T) -> T
 }
 struct Client {}
 impl<T> Echo<T> for Client {
   fn echo(self: &Self, value: T) -> T { return move value }
 }
+interface Pick<T, R> { fn pick(self: &Self, value: T) -> R }
+impl<T> Pick<T, i32> for Client {
+  fn pick(self: &Self, value: T) -> i32 { drop value return 1 }
+}
+fn choose<R, C: Pick<bool, R>>(client: &C) -> R {
+  return Pick<bool, R>.pick(client, true)
+}
 fn calls(client: &Client) -> i32 {
   let flag = Echo<bool>.echo(client, true)
-  if flag { return Echo<i32>.echo(client, 42) }
+  let inferred = choose(client)
+  if flag { return Echo<i32>.echo(client, 42) + inferred }
   return 0
-}`),
+}
+interface Unfixed<T> {}
+impl<T> Unfixed<T> for Client {}
+fn unknown<A, C: Unfixed<A>>(client: &C) -> () { drop client }
+fn rejected(client: &Client) -> () { return unknown(client) }`
+    const snapshot = yield* AnalysisFixture.frontend(module, ascii(source))
+    assert.deepEqual(
+      Analysis.diagnostics(snapshot).map((diagnostic) => ({
+        code: diagnostic.code,
+        span: source.slice(diagnostic.span.start, diagnostic.span.end).trim(),
+      })),
+      [{ code: 'SEM0099', span: 'unknown(client)' }],
     )
-    assert.deepEqual(Analysis.diagnostics(snapshot), [])
     for (const argument of ['i32', 'bool'] as const) {
       const proof = ConformanceProof.prove(
         Analysis.declarationIndex(snapshot),

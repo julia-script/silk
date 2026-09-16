@@ -1082,6 +1082,51 @@ interface KnownProviderBoundInference {
 const sameNominalDeclaration = (left: Type.Nominal, right: Type.Nominal): boolean =>
   left.module === right.module && left.name === right.name && left.sealed === right.sealed
 
+const openParameterKeys = (type: Type.Type): ReadonlyArray<string> => [
+  ...Type.parameters(type).map(Type.key),
+  ...Type.freeLifetimes(type)
+    .filter((lifetime) => lifetime._tag === 'BoundLifetime')
+    .map(Lifetime.key),
+]
+
+// The provider fixes only its own binders. A source conformance may also bind parameters through
+// its capability head; instantiate those from already-known bound arguments before using the
+// candidate to infer the call's remaining arguments. Never leak a conformance-owned binder into
+// the caller or use the expected result to choose a provider.
+const instantiateKnownProviderContract = (
+  candidate: Type.Nominal,
+  pattern: Type.Nominal,
+  provider: Type.Type,
+  callBinders: ReadonlySet<string>,
+): Type.Nominal | undefined => {
+  const providerParameters = new Set(openParameterKeys(provider))
+  const binders = new Set(
+    openParameterKeys(candidate).filter((key) => !providerParameters.has(key)),
+  )
+  if (binders.size === 0) return candidate
+  const inferred = new Map<string, Type.GenericArgument>()
+  for (const [ordinal, argument] of pattern.arguments.entries()) {
+    const supplied = candidate.arguments.at(ordinal)
+    if (supplied === undefined) return undefined
+    const wanted = Type.nominal(pattern.module, pattern.name, [argument])
+    if (openParameterKeys(wanted).some((key) => callBinders.has(key))) continue
+    if (
+      !TypeInference.inferOpenGenericArguments(
+        Type.nominal(candidate.module, candidate.name, [supplied]),
+        wanted,
+        inferred,
+        binders,
+      ).matches
+    )
+      return undefined
+  }
+  const instantiated = Type.substitute(candidate, inferred)
+  return Type.isNominal(instantiated) &&
+    !openParameterKeys(instantiated).some((key) => binders.has(key))
+    ? instantiated
+    : undefined
+}
+
 /**
  * Fills call binders from direct interface bounds after operands have fixed their provider.
  *
@@ -1126,7 +1171,16 @@ const inferKnownProviderBounds = (
           resolution.scope.module,
           provider,
           caller,
-        ).filter((candidate) => sameNominalDeclaration(candidate, pattern))
+        ).flatMap((candidate) => {
+          if (!sameNominalDeclaration(candidate, pattern)) return []
+          const instantiated = instantiateKnownProviderContract(
+            candidate,
+            pattern,
+            provider,
+            callBinders,
+          )
+          return instantiated === undefined ? [] : [instantiated]
+        })
         const matching = candidates.flatMap((candidate) => {
           const trial = new Map(substitution)
           return TypeInference.inferOpenGenericArguments(pattern, candidate, trial, callBinders)
