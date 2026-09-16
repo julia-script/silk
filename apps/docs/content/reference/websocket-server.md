@@ -59,11 +59,11 @@ operation order, not a second transport or executable fixture. `handleSocket` re
 `Limits.make(maxMessageBytes, maxCloseFrames, maxCloseBytes)` validates three positive finite
 bounds. `Limits.defaults()` returns:
 
-| Field             | Default | Meaning                                                    |
-| ----------------- | ------: | ---------------------------------------------------------- |
-| `maxMessageBytes` |   65536 | Maximum Text or Binary payload                             |
-| `maxCloseFrames`  |      32 | Aggregate peer frames consumed by one `finishClose` call  |
-| `maxCloseBytes`   |   65536 | Aggregate frame header, mask, and payload bytes consumed  |
+| Field             | Default | Meaning                                                  |
+| ----------------- | ------: | -------------------------------------------------------- |
+| `maxMessageBytes` |   65536 | Maximum Text or Binary payload                           |
+| `maxCloseFrames`  |      32 | Aggregate peer frames consumed by one `finishClose` call |
+| `maxCloseBytes`   |   65536 | Aggregate frame header, mask, and payload bytes consumed |
 
 A zero field returns `InvalidLimits` with `LimitKind.MessageBytes`, `CloseFrames`, or
 `CloseBytes` before the channel is borrowed or any I/O occurs. Close-handshake counter overflow is
@@ -71,12 +71,12 @@ reported against the affected frame or byte budget as `CloseLimitExceeded`.
 
 The public `state(socket)` query returns exactly:
 
-| State       | Meaning                                                                |
-| ----------- | ---------------------------------------------------------------------- |
-| `Open`      | Data, control, and an initial Close frame may be written or read.       |
-| `CloseSent` | A local Close was flushed; only `finishClose` may read peer frames.      |
-| `Closed`    | The close handshake and terminal provider close completed.              |
-| `Failed`    | A sticky terminal failure occurred; later operations perform no I/O.    |
+| State       | Meaning                                                              |
+| ----------- | -------------------------------------------------------------------- |
+| `Open`      | Data, control, and an initial Close frame may be written or read.    |
+| `CloseSent` | A local Close was flushed; only `finishClose` may read peer frames.  |
+| `Closed`    | The close handshake and terminal provider close completed.           |
+| `Failed`    | A sticky terminal failure occurred; later operations perform no I/O. |
 
 The session preallocates no message-sized storage. It retains only fixed frame-header, mask,
 control, and close-metadata scratch. Text and Binary payloads use caller storage.
@@ -112,12 +112,12 @@ retries uncertain bytes.
 
 These operations write one final, unmasked server frame and flush it before success:
 
-| Operation                                      | Payload rule                         |
-| ---------------------------------------------- | ------------------------------------ |
-| `writeText(socket, message, deadline)`         | Valid `string`, at most message cap  |
-| `writeBinary(socket, message, deadline)`       | Bytes, at most message cap           |
-| `writePing(socket, message, deadline)`         | At most 125 bytes                    |
-| `writePong(socket, message, deadline)`         | At most 125 bytes                    |
+| Operation                                | Payload rule                        |
+| ---------------------------------------- | ----------------------------------- |
+| `writeText(socket, message, deadline)`   | Valid `string`, at most message cap |
+| `writeBinary(socket, message, deadline)` | Bytes, at most message cap          |
+| `writePing(socket, message, deadline)`   | At most 125 bytes                   |
+| `writePong(socket, message, deadline)`   | At most 125 bytes                   |
 
 The actor validates state and length before accepting the first frame byte, uses the minimal
 7-, 16-, or 64-bit length form, and never masks server output. The caller's complete payload stays
@@ -170,21 +170,21 @@ returns the sticky failure in `Failed`. A simultaneous peer Close emits no secon
 
 `WebSocketError` keeps policy, protocol, state, and I/O failures distinct:
 
-| Variant                         | Meaning                                                         |
-| ------------------------------- | --------------------------------------------------------------- |
-| `InvalidLimits`                 | A named public limit failed admission.                          |
-| `InvalidState`                  | An operation is unavailable in the current state.               |
-| `PreviousFailure`               | A prior terminal failure; no new I/O occurs.                    |
-| `BufferTooSmall`                | Caller capacity cannot hold one otherwise legal message.        |
-| `MessageTooLarge`               | Peer data exceeds the configured message policy.                |
-| `UnsupportedFragmentation`      | Data FIN is clear or the opcode is Continuation.                 |
-| `ProtocolError`                 | Mask, RSV, opcode, length, control, or close syntax is invalid.  |
-| `InvalidCloseData`              | Caller-provided close code or reason length is invalid.          |
-| `InvalidUtf8`                   | Text or close-reason bytes are not complete UTF-8.               |
-| `CloseLimitExceeded`            | Close-frame or close-byte work reached its aggregate cap.        |
-| `Truncated`                     | The byte stream ended before a complete required frame.          |
-| `Buffer`                        | Buffered I/O failed with exact progress.                         |
-| `Transport`                     | A direct terminal provider operation failed.                     |
+| Variant                    | Meaning                                                         |
+| -------------------------- | --------------------------------------------------------------- |
+| `InvalidLimits`            | A named public limit failed admission.                          |
+| `InvalidState`             | An operation is unavailable in the current state.               |
+| `PreviousFailure`          | A prior terminal failure; no new I/O occurs.                    |
+| `BufferTooSmall`           | Caller capacity cannot hold one otherwise legal message.        |
+| `MessageTooLarge`          | Peer data exceeds the configured message policy.                |
+| `UnsupportedFragmentation` | Data FIN is clear or the opcode is Continuation.                |
+| `ProtocolError`            | Mask, RSV, opcode, length, control, or close syntax is invalid. |
+| `InvalidCloseData`         | Caller-provided close code or reason length is invalid.         |
+| `InvalidUtf8`              | Text or close-reason bytes are not complete UTF-8.              |
+| `CloseLimitExceeded`       | Close-frame or close-byte work reached its aggregate cap.       |
+| `Truncated`                | The byte stream ended before a complete required frame.         |
+| `Buffer`                   | Buffered I/O failed with exact progress.                        |
+| `Transport`                | A direct terminal provider operation failed.                    |
 
 The first failure returns its complete structured cause. Because `BufferError` and `ByteIoError`
 are affine external errors, the session stores only a copyable `Failure` classification for later
