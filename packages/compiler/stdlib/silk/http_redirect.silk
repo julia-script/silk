@@ -615,24 +615,35 @@ struct ProducerSelected<'producer, Producer, E, ?R> {
   producer: &'producer mut Producer
 }
 
-effect fn pullProducerSelected<'producer, E, ?R, Producer: BodyProducer<E ? R>>(
-  self: &mut ProducerSelected<'producer, Producer, E, R>,
-  output: &mut [u8],
-) -> BodyChunk ! E ? R {
-  return run BodyProducer<E ? R>.pull(&mut self.producer.*, move output)
-}
-
 impl<'producer, E, ?R, Producer: BodyProducer<E ? R>> SelectedBody<E, R> for ProducerSelected<
   'producer,
   Producer,
   E,
   R,
 > {
-  pull: pullProducerSelected
+  effect fn pull(self: &mut Self, output: &mut [u8]) -> BodyChunk ! E ? R {
+    return run BodyProducer<E ? R>.pull(&mut self.producer.*, move output)
+  }
 }
 
 struct ServiceBodyProducer<E, ?R> {
   modeValue: BodyMode
+}
+
+fn serviceAttemptBody<'scope, E, ?R>(producer: &'scope mut ServiceBodyProducer<E, R>, empty: bool) -> AttemptBody<
+  'scope,
+  'scope,
+  'scope,
+  ServiceBodyProducer<E, R>,
+  ServiceBodyProducer<E, R>,
+> {
+  if empty {
+    drop producer
+    return AttemptBody<'scope, 'scope, 'scope, ServiceBodyProducer<E, R>, ServiceBodyProducer<E, R>>.Empty
+  }
+  return AttemptBody<'scope, 'scope, 'scope, ServiceBodyProducer<E, R>, ServiceBodyProducer<E, R>>.OneShot {
+    producer: move producer,
+  }
 }
 
 impl<E, ?R> BodyProducer<E ? R | &mut SelectedBody<E, R>> for ServiceBodyProducer<E, R> {
@@ -643,7 +654,7 @@ impl<E, ?R> BodyProducer<E ? R | &mut SelectedBody<E, R>> for ServiceBodyProduce
   ! E
   ? R | &mut SelectedBody<E, R> {
     drop producer
-    return run SelectedBody.pull<E, R>(output)
+    return run SelectedBody.pull<E, R>(move output)
   }
 }
 
@@ -735,12 +746,12 @@ where
     PreviousResponsePolicy.Close => ()
     PreviousResponsePolicy.Drain {maxDiscardWireBytes, deadline} => {
       let outcome = run Client.discardRemainingAtMost(
-        exchange,
+        &mut exchange.*,
         maxDiscardWireBytes,
         Option.some<Instant>(copyInstant(&deadline)),
       )
       match move outcome {
-        DiscardOutcome.Completed => run Client.finishResponse(exchange)
+        DiscardOutcome.Completed => run Client.finishResponse(&mut exchange.*)
         DiscardOutcome.CapReached => ()
       }
     }
@@ -768,35 +779,6 @@ interface FinalResponse<T, H, A, E, ?R> {
 
 struct RoutedFinalResponse<'transport, 'provider, 'tunnel, P, H, A, E, ?R> {}
 
-effect fn handleRoutedFinalResponse<
-  'transport,
-  'provider: 'transport,
-  'tunnel: 'provider,
-  P,
-  A,
-  E,
-  ?R,
-  H: ResponseHandler<P, A, E ? R>,
-  'call,
-  'exchangeView: 'call,
->(
-  adapter: RoutedFinalResponse<'transport, 'provider, 'tunnel, P, H, A, E, R>,
-  callback: &mut H,
-  uri: Uri<'call>,
-  hop: usize,
-  exchange: &'call mut Exchange<'exchangeView, RouteTransport<'transport, 'provider, 'tunnel, P>>,
-) -> A
-! E
-? R
-where
-  &mut P provides &HttpTransport from &mut HttpTransport | &mut MonotonicClock | &mut Allocator | &mut Random,
-  &mut P provides &HttpTransport from &mut HttpTransport,
-  &mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock | &mut Allocator | &mut Random,
-  &mut P provides &ByteDuplex from &mut ByteDuplex {
-  drop adapter
-  return run ResponseHandler<P, A, E ? R>.handle(callback, uri, hop, move exchange)
-}
-
 impl<
   'transport,
   'provider: 'transport,
@@ -816,7 +798,23 @@ impl<
   E,
   R,
 > {
-  handle: handleRoutedFinalResponse
+  effect<'call> fn handle<'call, 'exchangeView: 'call>(
+    adapter: Self,
+    callback: &mut H,
+    uri: Uri<'call>,
+    hop: usize,
+    exchange: &'call mut Exchange<'exchangeView, RouteTransport<'transport, 'provider, 'tunnel, P>>,
+  ) -> A
+  ! E
+  ? R
+  where
+    &mut P provides &HttpTransport from &mut HttpTransport | &mut MonotonicClock | &mut Allocator | &mut Random,
+    &mut P provides &HttpTransport from &mut HttpTransport,
+    &mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock | &mut Allocator | &mut Random,
+    &mut P provides &ByteDuplex from &mut ByteDuplex {
+    drop adapter
+    return run ResponseHandler<P, A, E ? R>.handle(callback, uri, hop, move exchange)
+  }
 }
 
 effect fn handleAttemptCore<
@@ -853,44 +851,18 @@ where
     }
     Result.Success {value} => value
   }
-  if bodyModeEmpty(&request.bodyMode) {
-    let emptyBody = AttemptBody<
-      'static,
-      'static,
-      'static,
-      ServiceBodyProducer<E, R>,
-      ServiceBodyProducer<E, R>,
-    >.Empty
-    let written = run writeBody(
-      exchange,
-      &request.uri.view(),
-      request.bodyMode,
-      move emptyBody,
-      scratch,
-      &trailers,
-      followedHops,
-    )
-    drop written
-  } else {
-    let mut serviceProducer = ServiceBodyProducer<E, R> {modeValue: request.bodyMode}
-    let selectedBody = AttemptBody<
-      'static,
-      'call,
-      'static,
-      ServiceBodyProducer<E, R>,
-      ServiceBodyProducer<E, R>,
-    >.OneShot {producer: &mut serviceProducer}
-    let written = run writeBody(
-      exchange,
-      &request.uri.view(),
-      request.bodyMode,
-      move selectedBody,
-      scratch,
-      &trailers,
-      followedHops,
-    )
-    drop written
-  }
+  let mut serviceProducer = ServiceBodyProducer<E, R> {modeValue: request.bodyMode}
+  let selectedBody = serviceAttemptBody(&mut serviceProducer, bodyModeEmpty(&request.bodyMode))
+  let written = run writeBody(
+    &mut exchange.*,
+    &request.uri.view(),
+    request.bodyMode,
+    move selectedBody,
+    &mut scratch,
+    &trailers,
+    followedHops,
+  )
+  drop written
   let head = run Exchange.head(&exchange.*)
   let status = head.status()
   let decision = match move statusDecision(policy, status, followedHops) {
@@ -903,15 +875,22 @@ where
   if decision == StatusDecision.Final {
     let value = run FinalResponse<T, H, A, CallbackError ? CallbackRequirements>.handle(
       move finalResponse,
-      callback,
+      move callback,
       request.uri.view(),
       followedHops,
-      exchange,
+      move exchange,
     )
     return AttemptStep<'policy, A>.Final {value: move value}
   }
   let currentUri = request.uri.view()
-  let responseHeaders = head.headers()
+  let locationHead = match move run head.copyMatchingHeaders("Location", request.requestLimits) {
+    Result.Failure {error} => {
+      fail move error
+    }
+    Result.Success {value} => move value
+  }
+  let locationView = locationHead.view()
+  let responseHeaders = locationView.headers()
   let nextUri = match move run resolveLocation(
     &currentUri,
     &responseHeaders,
@@ -1012,7 +991,7 @@ where
     maxCredentialBytes: request.maxCredentialBytes,
     expectedBodyMode: Option.some<BodyMode>(nextBodyMode),
   }
-  run cleanupIntermediate(exchange, Policy.previousResponse(policy))
+  run cleanupIntermediate(&mut exchange.*, Policy.previousResponse(policy))
   return AttemptStep<'policy, A>.Redirect {
     state: move nextState,
     history: move nextHistory,
@@ -1061,7 +1040,7 @@ impl<'attempt, 'policy, E, ?R, H> RedirectRoutedAttempt<'attempt, 'policy, E, R,
     }
     return run handleAttemptCore(
       move handler,
-      provider.scratch,
+      &mut provider.scratch,
       &mut provider.callback.*,
       request,
       method,
@@ -1115,44 +1094,6 @@ impl<
 
 struct HybridRoutedFinalResponse<'transport, 'provider, 'tunnel, RoutedP, DirectP, H, A, E, ?R> {}
 
-effect fn handleHybridRoutedFinalResponse<
-  'transport,
-  'provider: 'transport,
-  'tunnel: 'provider,
-  RoutedP,
-  DirectP,
-  A,
-  E,
-  ?R,
-  H: HybridResponseHandler<RoutedP, DirectP, A, E ? R>,
-  'call,
-  'exchangeView: 'call,
->(
-  adapter: HybridRoutedFinalResponse<'transport, 'provider, 'tunnel, RoutedP, DirectP, H, A, E, R>,
-  callback: &mut H,
-  uri: Uri<'call>,
-  hop: usize,
-  exchange: &'call mut Exchange<
-    'exchangeView,
-    RouteTransport<'transport, 'provider, 'tunnel, RoutedP>,
-  >,
-) -> A
-! E
-? R
-where
-  &mut RoutedP provides &HttpTransport from &mut HttpTransport | &mut MonotonicClock | &mut Allocator | &mut Random,
-  &mut RoutedP provides &HttpTransport from &mut HttpTransport,
-  &mut RoutedP provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock | &mut Allocator | &mut Random,
-  &mut RoutedP provides &ByteDuplex from &mut ByteDuplex {
-  drop adapter
-  return run HybridResponseHandler<RoutedP, DirectP, A, E ? R>.handleRouted(
-    callback,
-    uri,
-    hop,
-    move exchange,
-  )
-}
-
 impl<
   'transport,
   'provider: 'transport,
@@ -1174,40 +1115,34 @@ impl<
   E,
   R,
 > {
-  handle: handleHybridRoutedFinalResponse
+  effect<'call> fn handle<'call, 'exchangeView: 'call>(
+    adapter: Self,
+    callback: &mut H,
+    uri: Uri<'call>,
+    hop: usize,
+    exchange: &'call mut Exchange<
+      'exchangeView,
+      RouteTransport<'transport, 'provider, 'tunnel, RoutedP>,
+    >,
+  ) -> A
+  ! E
+  ? R
+  where
+    &mut RoutedP provides &HttpTransport from &mut HttpTransport | &mut MonotonicClock | &mut Allocator | &mut Random,
+    &mut RoutedP provides &HttpTransport from &mut HttpTransport,
+    &mut RoutedP provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock | &mut Allocator | &mut Random,
+    &mut RoutedP provides &ByteDuplex from &mut ByteDuplex {
+    drop adapter
+    return run HybridResponseHandler<RoutedP, DirectP, A, E ? R>.handleRouted(
+      callback,
+      uri,
+      hop,
+      move exchange,
+    )
+  }
 }
 
 struct HybridDirectFinalResponse<RoutedP, DirectP, H, A, E, ?R> {}
-
-effect fn handleHybridDirectFinalResponse<
-  RoutedP,
-  DirectP,
-  A,
-  E,
-  ?R,
-  H: HybridResponseHandler<RoutedP, DirectP, A, E ? R>,
-  'call,
-  'exchangeView: 'call,
->(
-  adapter: HybridDirectFinalResponse<RoutedP, DirectP, H, A, E, R>,
-  callback: &mut H,
-  uri: Uri<'call>,
-  hop: usize,
-  exchange: &'call mut Exchange<'exchangeView, DirectP>,
-) -> A
-! E
-? R
-where
-  &mut DirectP provides &HttpTransport from &mut HttpTransport | &mut MonotonicClock | &mut Allocator | &mut Random,
-  &mut DirectP provides &HttpTransport from &mut HttpTransport {
-  drop adapter
-  return run HybridResponseHandler<RoutedP, DirectP, A, E ? R>.handleDirect(
-    callback,
-    uri,
-    hop,
-    move exchange,
-  )
-}
 
 impl<RoutedP, DirectP, A, E, ?R, H: HybridResponseHandler<RoutedP, DirectP, A, E ? R>> FinalResponse<DirectP, H, A, E ? R> for HybridDirectFinalResponse<
   RoutedP,
@@ -1217,7 +1152,26 @@ impl<RoutedP, DirectP, A, E, ?R, H: HybridResponseHandler<RoutedP, DirectP, A, E
   E,
   R,
 > {
-  handle: handleHybridDirectFinalResponse
+  effect<'call> fn handle<'call, 'exchangeView: 'call>(
+    adapter: Self,
+    callback: &mut H,
+    uri: Uri<'call>,
+    hop: usize,
+    exchange: &'call mut Exchange<'exchangeView, DirectP>,
+  ) -> A
+  ! E
+  ? R
+  where
+    &mut DirectP provides &HttpTransport from &mut HttpTransport | &mut MonotonicClock | &mut Allocator | &mut Random,
+    &mut DirectP provides &HttpTransport from &mut HttpTransport {
+    drop adapter
+    return run HybridResponseHandler<RoutedP, DirectP, A, E ? R>.handleDirect(
+      callback,
+      uri,
+      hop,
+      move exchange,
+    )
+  }
 }
 
 impl<'policy, E, ?R> RedirectAttemptHandler<'policy, E, R> {
@@ -1253,8 +1207,8 @@ impl<'policy, E, ?R> RedirectAttemptHandler<'policy, E, R> {
     &mut RoutedP provides &ByteDuplex from &mut ByteDuplex {
     return run handleAttemptCore(
       move handler,
-      scratch,
-      callback,
+      move scratch,
+      move callback,
       request,
       method,
       move exchange,
@@ -1295,8 +1249,8 @@ impl<'policy, E, ?R> RedirectAttemptHandler<'policy, E, R> {
     &mut DirectP provides &HttpTransport from &mut HttpTransport {
     return run handleAttemptCore(
       move handler,
-      scratch,
-      callback,
+      move scratch,
+      move callback,
       request,
       method,
       move exchange,
@@ -1571,14 +1525,14 @@ impl<'client, 'resources, C, H, BodyError, ?BodyRequirements> RoutedAttemptDispa
       handler: Option.some<RedirectAttemptHandler<'policy, BodyError, BodyRequirements>>(
         move handler,
       ),
-      scratch: dispatch.scratch,
+      scratch: &mut dispatch.scratch,
       callback: &mut dispatch.callback.*,
     }
     return run AttemptClient<'policy, P, AttemptStep<'policy, A>, RedirectError | ValueError | BodyError | CallbackError | ClientError | OutOfMemoryError, AcquisitionError, AcquisitionRequirements ? BodyRequirements | CallbackRequirements | &mut SelectedBody<
       BodyError,
       BodyRequirements,
     > | &mut MonotonicClock | &mut Allocator | &mut Random>.withAttempt(
-      dispatch.client,
+      &mut dispatch.client.*,
       move request,
       move deadline,
     )
@@ -1668,14 +1622,14 @@ impl<'client, 'resources, C, H, BodyError, ?BodyRequirements> HybridAttemptDispa
       handler: Option.some<RedirectAttemptHandler<'policy, BodyError, BodyRequirements>>(
         move handler,
       ),
-      scratch: dispatch.scratch,
+      scratch: &mut dispatch.scratch,
       callback: &mut dispatch.callback.*,
     }
     return run HybridAttemptClient<'policy, RoutedP, DirectP, AttemptStep<'policy, A>, RedirectError | ValueError | BodyError | CallbackError | ClientError | OutOfMemoryError, AcquisitionError, AcquisitionRequirements ? BodyRequirements | CallbackRequirements | &mut SelectedBody<
       BodyError,
       BodyRequirements,
     > | &mut MonotonicClock | &mut Allocator | &mut Random>.withAttempt(
-      dispatch.client,
+      &mut dispatch.client.*,
       move request,
       move deadline,
     )
@@ -1782,17 +1736,13 @@ impl<'policy> SelectedAttemptHandler<'policy> {
       followedHops: followedHops,
       replayable: replayable,
     }
-    return run AttemptDispatch<'policy, RedirectAttemptHandler<'policy, E, R>, AttemptStep<
+    return run AttemptDispatch.withAttempt<
       'policy,
-      A,
-    >, RedirectError | ValueError | E | CallbackError | ClientError | OutOfMemoryError | AcquisitionError ? R | CallbackRequirements | AcquisitionRequirements | &mut SelectedBody<
-      E,
-      R,
-    > | &mut MonotonicClock | &mut Allocator | &mut Random>.withAttempt(
-      move request,
-      move deadline,
-      move attemptHandler,
-    )
+      RedirectAttemptHandler<'policy, E, R>,
+      AttemptStep<'policy, A>,
+      RedirectError | ValueError | E | CallbackError | ClientError | OutOfMemoryError | AcquisitionError,
+      R | CallbackRequirements | AcquisitionRequirements | &mut SelectedBody<E, R> | &mut MonotonicClock | &mut Allocator | &mut Random,
+    >(move request, move deadline, move attemptHandler)
   }
 }
 
@@ -1888,7 +1838,15 @@ impl<'bytes> RepeatablePlan<'bytes> {
       >>.handle(move handler, BodyMode.KnownLength {length: usize.toU64(plan.bytes.length)}, true)
         |> Effect.provideMut<SelectedBody<BodyError, BodyRequirements>>(&mut provider)
     }
-    return run runEmptySelected(move handler)
+    return run runEmptySelected<
+      P,
+      BodyError,
+      A,
+      HandlerError,
+      BodyRequirements,
+      HandlerRequirements,
+      H,
+    >(move handler)
   }
   fn applyRedirect(plan: &mut Self, body: BodyDecision) -> () {
     if body == BodyDecision.Drop {
@@ -2040,7 +1998,15 @@ impl<Factory, Producer> ReplayPlan<Factory, Producer> {
       }
       return run Effect.useReleaseNonParking(move producer, move use, move release)
     }
-    return run runEmptySelected(move handler)
+    return run runEmptySelected<
+      P,
+      BodyError,
+      A,
+      HandlerError,
+      BodyRequirements,
+      HandlerRequirements,
+      H,
+    >(move handler)
   }
   fn applyRedirect(plan: &mut Self, body: BodyDecision) -> () {
     if body == BodyDecision.Drop {
@@ -2141,9 +2107,9 @@ where
   AcquisitionRequirements in Without<AcquisitionRequirements, ByteDuplex>,
   AcquisitionRequirements in Without<AcquisitionRequirements, HttpTransport> {
   let initial = run initialize(move request, policy)
-  let InitialRedirect<'policy> {state, history} = move initial
-  let mut currentState = move state
-  let mut currentHistory = move history
+  let InitialRedirect<'policy> {state: initialState, history: initialHistory} = move initial
+  let mut currentState = move initialState
+  let mut currentHistory = move initialHistory
   let mut selectedPlan = move plan
   let mut followedHops = usize.ZERO
   while true {
@@ -2181,12 +2147,12 @@ where
           BodyError,
           BodyRequirements,
         > | &mut MonotonicClock | &mut Allocator | &mut Random>,
-      >(dispatch)
+      >(&mut dispatch.*)
     match move outcome {
-      AttemptStep.Final {value} => {
+      AttemptStep<'policy, A>.Final {value} => {
         return move value
       }
-      AttemptStep.Redirect {state, history, body} => {
+      AttemptStep<'policy, A>.Redirect {state, history, body} => {
         SourcePlan<
           P,
           BodyError,
@@ -2269,8 +2235,8 @@ where
   let hasScratch = scratch.length != usize.ZERO
   let mut callback = move handler
   let mut dispatch = RoutedAttemptDispatch {
-    client: move client,
-    scratch: move scratch,
+    client: &mut client.*,
+    scratch: &mut scratch,
     callback: &mut callback,
   }
   return run runResponseLoop(
@@ -2330,8 +2296,8 @@ where
   let hasScratch = scratch.length != usize.ZERO
   let mut callback = move handler
   let mut dispatch = HybridAttemptDispatch {
-    client: move client,
-    scratch: move scratch,
+    client: &mut client.*,
+    scratch: &mut scratch,
     callback: &mut callback,
   }
   return run runResponseLoop(
@@ -2401,8 +2367,8 @@ where
   let hasScratch = scratch.length != usize.ZERO
   let mut callback = move handler
   let mut dispatch = RoutedAttemptDispatch {
-    client: move client,
-    scratch: move scratch,
+    client: &mut client.*,
+    scratch: &mut scratch,
     callback: &mut callback,
   }
   return run runResponseLoop(
@@ -2468,8 +2434,8 @@ where
   let hasScratch = scratch.length != usize.ZERO
   let mut callback = move handler
   let mut dispatch = HybridAttemptDispatch {
-    client: move client,
-    scratch: move scratch,
+    client: &mut client.*,
+    scratch: &mut scratch,
     callback: &mut callback,
   }
   return run runResponseLoop(
@@ -2544,8 +2510,8 @@ where
   let hasScratch = scratch.length != usize.ZERO
   let mut callback = move handler
   let mut dispatch = RoutedAttemptDispatch {
-    client: move client,
-    scratch: move scratch,
+    client: &mut client.*,
+    scratch: &mut scratch,
     callback: &mut callback,
   }
   return run runResponseLoop(
@@ -2616,8 +2582,8 @@ where
   let hasScratch = scratch.length != usize.ZERO
   let mut callback = move handler
   let mut dispatch = HybridAttemptDispatch {
-    client: move client,
-    scratch: move scratch,
+    client: &mut client.*,
+    scratch: &mut scratch,
     callback: &mut callback,
   }
   return run runResponseLoop(
@@ -2693,8 +2659,8 @@ where
   let hasScratch = scratch.length != usize.ZERO
   let mut callback = move handler
   let mut dispatch = RoutedAttemptDispatch {
-    client: move client,
-    scratch: move scratch,
+    client: &mut client.*,
+    scratch: &mut scratch,
     callback: &mut callback,
   }
   return run runResponseLoop(
@@ -2765,8 +2731,8 @@ where
   let hasScratch = scratch.length != usize.ZERO
   let mut callback = move handler
   let mut dispatch = HybridAttemptDispatch {
-    client: move client,
-    scratch: move scratch,
+    client: &mut client.*,
+    scratch: &mut scratch,
     callback: &mut callback,
   }
   return run runResponseLoop(
@@ -2807,6 +2773,7 @@ fn attemptBodyMode<
 
 struct AttemptBodyCursor<'bytes, 'oneShot, 'replay, OneShot, ReplayProducer> {
   body: AttemptBody<'bytes, 'oneShot, 'replay, OneShot, ReplayProducer>
+  offset: usize
 }
 
 effect fn pullAttemptBody<
@@ -2826,18 +2793,19 @@ effect fn pullAttemptBody<
   return match &mut cursor.body {
     AttemptBody.Empty => BodyChunk {length: usize.ZERO, end: true}
     AttemptBody.RepeatableBytes {bytes, offset} => {
-      let remaining = bytes.length - offset.*
+      drop offset
+      let remaining = bytes.length - cursor.offset
       let mut length = remaining
       if output.length < length {
         length = output.length
       }
       let mut index = usize.ZERO
       while index < length {
-        output[index] = bytes[offset.* + index]
+        output[index] = bytes[cursor.offset + index]
         index = index + usize.ONE
       }
-      offset.* = offset.* + length
-      return BodyChunk {length: length, end: offset.* == bytes.length}
+      cursor.offset = cursor.offset + length
+      return BodyChunk {length: length, end: cursor.offset == bytes.length}
     }
     AttemptBody.OneShot {producer: oneShot} => run BodyProducer<OneShotError ? OneShotRequirements>.pull(
       &mut oneShot,
@@ -3005,8 +2973,13 @@ where
     fail move enriched
   }
 
+  let offset = match & body {
+    AttemptBody.RepeatableBytes {offset, ..} => offset
+    _ => usize.ZERO
+  }
   let mut selectedBody = AttemptBodyCursor<'bytes, 'oneShot, 'replay, OneShot, ReplayProducer> {
     body: move body,
+    offset: offset,
   }
   run Client.send(&mut exchange.*)
   while exchange.phase() == ExchangePhase.AwaitContinue {
@@ -3034,7 +3007,7 @@ where
           ReplayRequirements,
           OneShot,
           ReplayProducer,
-        >(&mut selectedBody, &mut scratch.*),
+        >(&mut selectedBody, &mut scratch),
       )
       let chunk = match move pulled {
         Result.Success {value} => move value
@@ -3064,7 +3037,7 @@ where
         }
       }
 
-      let input = Slice.view<u8>(scratch, usize.ZERO, chunk.length)
+      let input = Slice.view<u8>(&scratch, usize.ZERO, chunk.length)
       let mut consumed = usize.ZERO
       while consumed < input.length {
         let remaining = Slice.view<u8>(input, consumed, input.length - consumed)
@@ -3572,7 +3545,7 @@ effect fn appendInheritedFragment(
     }
     Option.Some {value} => value
   }
-  let withMarker = match move usize.checkedAdd(Bytes.length(output), usize.ONE) {
+  let withMarker = match move usize.checkedAdd(Bytes.length(&output.*), usize.ONE) {
     Option.None => {
       return Result.failResult<(), RedirectError>(
         failure(
@@ -3612,8 +3585,8 @@ effect fn appendInheritedFragment(
     )
   }
   let marker = b"#"
-  let wroteMarker = run Bytes.append(output, marker)
-  let wroteFragment = run Bytes.append(output, String.utf8Bytes(fragment))
+  let wroteMarker = run Bytes.append(&mut output.*, marker)
+  let wroteFragment = run Bytes.append(&mut output.*, String.utf8Bytes(fragment))
   return Result.succeed<(), RedirectError>(())
 }
 
@@ -3918,15 +3891,15 @@ fn targetRangeEqual(storage: &[u8], start: usize, end: usize, uri: &Uri) -> bool
 effect fn writeTarget(output: &mut Bytes, uri: &Uri) -> () ! OutOfMemoryError ? &mut Allocator {
   let path = String.utf8Bytes(Uri.path(uri))
   if path.length == usize.ZERO {
-    let wroteSlash = run Bytes.append(output, b"/")
+    let wroteSlash = run Bytes.append(&mut output.*, b"/")
   } else {
-    let wrotePath = run Bytes.append(output, path)
+    let wrotePath = run Bytes.append(&mut output.*, path)
   }
   match move Uri.query(uri) {
     Option.None => {}
     Option.Some {value} => {
-      let wroteMarker = run Bytes.append(output, b"?")
-      let wroteQuery = run Bytes.append(output, String.utf8Bytes(value))
+      let wroteMarker = run Bytes.append(&mut output.*, b"?")
+      let wroteQuery = run Bytes.append(&mut output.*, String.utf8Bytes(value))
     }
   }
   return ()
