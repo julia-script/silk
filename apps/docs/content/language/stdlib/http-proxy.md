@@ -852,6 +852,26 @@ pub struct RouteKey
 
 Stable route identity for later pooling and redirect recomputation.
 
+<a id="declaration-73696c6b2f687474705f70726f78793a3a526f7574654b65792e6f726967696e616c4f726967696e"></a>
+
+### Method `RouteKey.originalOrigin`
+
+```silk
+pub fn originalOrigin<'life0>(self: &'life0 RouteKey) -> Origin
+```
+
+Returns the normalized original origin retained by this sealed route identity.
+
+<a id="declaration-73696c6b2f687474705f70726f78793a3a526f7574654b65792e6d6f6465"></a>
+
+### Method `RouteKey.mode`
+
+```silk
+pub fn mode<'life0>(self: &'life0 RouteKey) -> RouteMode
+```
+
+Returns the selected route mode without exposing proxy configuration or credential bytes.
+
 <a id="declaration-73696c6b2f687474705f70726f78793a3a526f7574654b65792e657175616c73"></a>
 
 ### Method `RouteKey.equals`
@@ -925,7 +945,7 @@ Purely selects Direct, Forward, or Tunnel for one original origin.
 ## `classifyConnect`
 
 ```silk
-pub effect<'env> fn classifyConnect<'life0: 'env, 'life1: 'env, 'env>(head: &'life0 silk/http.ResponseHead<'life1>) -> () ! ProxyError | OutOfMemoryError ? &mut Allocator
+pub effect<'env> fn classifyConnect<'life0: 'env, 'life1: 'env, 'env>(head: &'life0 silk/http_head.ResponseHead<'life1>) -> () ! ProxyError | OutOfMemoryError ? &mut Allocator
 ```
 
 Classifies a complete final CONNECT response into success or bounded rejection metadata.

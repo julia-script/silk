@@ -1218,6 +1218,16 @@ pub fn count<'owner, 'life1>(self: &'life1 Trailers<'owner>) -> usize
 
 Returns the number of retained trailer fields.
 
+<a id="declaration-73696c6b2f687474705f626f64793a3a547261696c6572732e72657175697265644f776e65644279746573"></a>
+
+### Method `Trailers.requiredOwnedBytes`
+
+```silk
+pub fn requiredOwnedBytes<'owner, 'life1>(self: &'life1 Trailers<'owner>) -> silk/result.Result<usize, silk/http_body.BodyError>
+```
+
+Returns the exact payload-plus-index bytes required by an independent owned copy.
+
 <a id="declaration-73696c6b2f687474705f626f64793a3a547261696c6572732e6669656c6473"></a>
 
 ### Method `Trailers.fields`
@@ -1247,6 +1257,16 @@ pub struct OwnedTrailers
 ```
 
 An independently owned trailer section.
+
+<a id="declaration-73696c6b2f687474705f626f64793a3a4f776e6564547261696c6572732e6f776e65644279746573"></a>
+
+### Method `OwnedTrailers.ownedBytes`
+
+```silk
+pub fn ownedBytes<'life0>(self: &'life0 OwnedTrailers) -> usize
+```
+
+Returns the exact retained trailer payload-plus-index byte count.
 
 <a id="declaration-73696c6b2f687474705f626f64793a3a4f776e6564547261696c6572732e76696577"></a>
 

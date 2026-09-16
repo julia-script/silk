@@ -1011,6 +1011,21 @@ pub effect<'env> fn copy<'value: 'env, 'life1: 'env, 'env>(self: &'life1 Respons
 
 Copies the complete response head into independent bounded storage.
 
+<a id="declaration-73696c6b2f687474703a3a526573706f6e7365486561642e636f70794d61746368696e6748656164657273"></a>
+
+### Method `ResponseHead.copyMatchingHeaders`
+
+```silk
+pub effect<'env> fn copyMatchingHeaders<'value: 'env, 'life1: 'env, 'env>(self: &'life1 ResponseHead<'value>, name: string<'value>, limits: Limits) -> silk/result.Result<silk/http.OwnedResponseHead, silk/http.ValueError> ! OutOfMemoryError ? &mut Allocator
+```
+
+Copies the response status, reason, and only matching fields into independent storage.
+
+#### Details
+
+Matching is ASCII case-insensitive. Duplicate matches remain distinct and preserve wire order.
+The total-owned limit covers copied reason bytes, field payload, and field records.
+
 <a id="declaration-73696c6b2f687474703a3a4f776e6564526573706f6e736548656164"></a>
 
 ## `OwnedResponseHead`

@@ -328,6 +328,8 @@ pub interface BodyProducer<E, ?R> {
 
 /// A reusable factory that lends one fresh scoped producer for each attempted request.
 ///
+/// # Details
+///
 /// Redirect orchestration owns each acquired producer and brackets it through one complete
 /// attempt. `release` is infallible and non-suspending, so cleanup cannot replace the attempt's
 /// success or failure. Factory result and callback types remain outside this public contract.
@@ -582,6 +584,7 @@ pub interface HybridResponseHandler<RoutedP, DirectP, A, E, ?R> {
 /// Redirect orchestration provides this service only inside the scoped attempt callback. Clients
 /// may name it to preserve exact requirement rows, but cannot retain its producer or body loan.
 pub service SelectedBody<E, ?R> {
+  /// Writes the next selected request-body chunk into `output` without retaining the buffer.
   effect fn pull(output: &mut [u8]) -> BodyChunk ! E ? R | &mut SelectedBody<E, R>
 }
 
@@ -999,24 +1002,77 @@ where
   }
 }
 
-struct RedirectRoutedAttempt<'attempt, 'policy, E, ?R, H> {
+struct RedirectRoutedAttempt<
+  'attempt,
+  'callback,
+  'policy,
+  P,
+  A,
+  E,
+  ?R,
+  CallbackError,
+  ?CallbackRequirements,
+  H,
+> {
   handler: Option<RedirectAttemptHandler<'policy, E, R>>
   scratch: &'attempt mut [u8]
-  callback: &'attempt mut H
+  callback: &'callback mut H
 }
 
-impl<'attempt, 'policy, E, ?R, H> RedirectRoutedAttempt<'attempt, 'policy, E, R, H> {
-  effect fn handle<
+struct RedirectHybridAttempt<
+  'attempt,
+  'callback,
+  'policy,
+  RoutedP,
+  DirectP,
+  A,
+  E,
+  ?R,
+  CallbackError,
+  ?CallbackRequirements,
+  H,
+> {
+  handler: Option<RedirectAttemptHandler<'policy, E, R>>
+  scratch: &'attempt mut [u8]
+  callback: &'callback mut H
+}
+
+fn unavailableHybrid<T>() -> T {
+  return unavailableHybrid<T>()
+}
+
+impl<
+  'attempt,
+  'callback,
+  'policy,
+  E,
+  ?R,
+  P,
+  A,
+  CallbackError,
+  ?CallbackRequirements,
+  H: ResponseHandler<P, A, CallbackError ? CallbackRequirements>,
+> Attempt<'policy, P, AttemptStep<'policy, A>, RedirectError | ValueError | E | CallbackError | ClientError | OutOfMemoryError ? R | CallbackRequirements | &mut SelectedBody<
+  E,
+  R,
+> | &mut MonotonicClock | &mut Allocator | &mut Random> for RedirectRoutedAttempt<
+  'attempt,
+  'callback,
+  'policy,
+  P,
+  A,
+  E,
+  R,
+  CallbackError,
+  CallbackRequirements,
+  H,
+> {
+  effect<'call> fn handle<
     'call,
     'exchangeView: 'call,
     'transport: 'exchangeView,
     'provider: 'transport,
     'tunnel: 'provider,
-    P,
-    A,
-    CallbackError,
-    ?CallbackRequirements,
-    H: ResponseHandler<P, A, CallbackError ? CallbackRequirements>,
   >(
     provider: &mut Self,
     request: &'call AttemptRequest<'policy>,
@@ -1057,39 +1113,6 @@ impl<'attempt, 'policy, E, ?R, H> RedirectRoutedAttempt<'attempt, 'policy, E, R,
       > {},
     )
   }
-}
-
-struct RedirectHybridAttempt<'attempt, 'policy, E, ?R, H> {
-  handler: Option<RedirectAttemptHandler<'policy, E, R>>
-  scratch: &'attempt mut [u8]
-  callback: &'attempt mut H
-}
-
-fn unavailableHybrid<T>() -> T {
-  return unavailableHybrid<T>()
-}
-
-impl<
-  'attempt,
-  'policy,
-  E,
-  ?R,
-  P,
-  A,
-  CallbackError,
-  ?CallbackRequirements,
-  H: ResponseHandler<P, A, CallbackError ? CallbackRequirements>,
-> Attempt<'policy, P, AttemptStep<'policy, A>, RedirectError | ValueError | E | CallbackError | ClientError | OutOfMemoryError ? R | CallbackRequirements | &mut SelectedBody<
-  E,
-  R,
-> | &mut MonotonicClock | &mut Allocator | &mut Random> for RedirectRoutedAttempt<
-  'attempt,
-  'policy,
-  E,
-  R,
-  H,
-> {
-  handle: RedirectRoutedAttempt.handle
 }
 
 struct HybridRoutedFinalResponse<'transport, 'provider, 'tunnel, RoutedP, DirectP, H, A, E, ?R> {}
@@ -1259,19 +1282,40 @@ impl<'policy, E, ?R> RedirectAttemptHandler<'policy, E, R> {
   }
 }
 
-impl<'attempt, 'policy, E, ?R, H> RedirectHybridAttempt<'attempt, 'policy, E, R, H> {
-  effect fn handleRouted<
+impl<
+  'attempt,
+  'callback,
+  'policy,
+  E,
+  ?R,
+  RoutedP,
+  DirectP,
+  A,
+  CallbackError,
+  ?CallbackRequirements,
+  H: HybridResponseHandler<RoutedP, DirectP, A, CallbackError ? CallbackRequirements>,
+> HybridAttempt<'policy, RoutedP, DirectP, AttemptStep<'policy, A>, RedirectError | ValueError | E | CallbackError | ClientError | OutOfMemoryError ? R | CallbackRequirements | &mut SelectedBody<
+  E,
+  R,
+> | &mut MonotonicClock | &mut Allocator | &mut Random> for RedirectHybridAttempt<
+  'attempt,
+  'callback,
+  'policy,
+  RoutedP,
+  DirectP,
+  A,
+  E,
+  R,
+  CallbackError,
+  CallbackRequirements,
+  H,
+> {
+  effect<'call> fn handleRouted<
     'call,
     'exchangeView: 'call,
     'transport: 'exchangeView,
     'provider: 'transport,
     'tunnel: 'provider,
-    RoutedP,
-    DirectP,
-    A,
-    CallbackError,
-    ?CallbackRequirements,
-    H: HybridResponseHandler<RoutedP, DirectP, A, CallbackError ? CallbackRequirements>,
   >(
     provider: &mut Self,
     request: &'call AttemptRequest<'policy>,
@@ -1296,25 +1340,18 @@ impl<'attempt, 'policy, E, ?R, H> RedirectHybridAttempt<'attempt, 'policy, E, R,
       Option.Some {value} => move value
       Option.None => unavailableHybrid<RedirectAttemptHandler<'policy, E, R>>()
     }
-    return run RedirectAttemptHandler.handleHybridRouted(
-      move handler,
-      provider.scratch,
-      &mut provider.callback.*,
-      request,
-      method,
-      move exchange,
-    )
+    return run RedirectAttemptHandler.handleHybridRouted<
+      E,
+      R,
+      RoutedP,
+      DirectP,
+      A,
+      CallbackError,
+      CallbackRequirements,
+      H,
+    >(move handler, &mut provider.scratch, &mut provider.callback.*, request, method, move exchange)
   }
-  effect fn handleDirect<
-    'call,
-    'exchangeView: 'call,
-    RoutedP,
-    DirectP,
-    A,
-    CallbackError,
-    ?CallbackRequirements,
-    H: HybridResponseHandler<RoutedP, DirectP, A, CallbackError ? CallbackRequirements>,
-  >(
+  effect<'call> fn handleDirect<'call, 'exchangeView: 'call>(
     provider: &mut Self,
     request: &'call AttemptRequest<'policy>,
     method: Method<'call>,
@@ -1333,40 +1370,17 @@ impl<'attempt, 'policy, E, ?R, H> RedirectHybridAttempt<'attempt, 'policy, E, R,
       Option.Some {value} => move value
       Option.None => unavailableHybrid<RedirectAttemptHandler<'policy, E, R>>()
     }
-    return run RedirectAttemptHandler.handleHybridDirect(
-      move handler,
-      provider.scratch,
-      &mut provider.callback.*,
-      request,
-      method,
-      move exchange,
-    )
+    return run RedirectAttemptHandler.handleHybridDirect<
+      E,
+      R,
+      RoutedP,
+      DirectP,
+      A,
+      CallbackError,
+      CallbackRequirements,
+      H,
+    >(move handler, &mut provider.scratch, &mut provider.callback.*, request, method, move exchange)
   }
-}
-
-impl<
-  'attempt,
-  'policy,
-  E,
-  ?R,
-  RoutedP,
-  DirectP,
-  A,
-  CallbackError,
-  ?CallbackRequirements,
-  H: HybridResponseHandler<RoutedP, DirectP, A, CallbackError ? CallbackRequirements>,
-> HybridAttempt<'policy, RoutedP, DirectP, AttemptStep<'policy, A>, RedirectError | ValueError | E | CallbackError | ClientError | OutOfMemoryError ? R | CallbackRequirements | &mut SelectedBody<
-  E,
-  R,
-> | &mut MonotonicClock | &mut Allocator | &mut Random> for RedirectHybridAttempt<
-  'attempt,
-  'policy,
-  E,
-  R,
-  H,
-> {
-  handleRouted: RedirectHybridAttempt.handleRouted
-  handleDirect: RedirectHybridAttempt.handleDirect
 }
 
 fn intoAttemptRequest<'policy>(state: RedirectState<'policy>, mode: BodyMode) -> AttemptRequest<
@@ -1483,71 +1497,32 @@ service AttemptDispatch<'policy, H, A, E, ?R> {
   >
 }
 
-struct RoutedAttemptDispatch<'client, 'resources, C, H, BodyError, ?BodyRequirements> {
-  client: &'client mut C
-  scratch: &'resources mut [u8]
-  callback: &'resources mut H
-}
-
-impl<'client, 'resources, C, H, BodyError, ?BodyRequirements> RoutedAttemptDispatch<
+struct RoutedAttemptDispatch<
   'client,
   'resources,
+  'callback,
+  'policy,
+  P,
+  A,
   C,
   H,
   BodyError,
-  BodyRequirements,
+  CallbackError,
+  AcquisitionError,
+  ?BodyRequirements,
+  ?CallbackRequirements,
+  ?AcquisitionRequirements,
 > {
-  effect fn withAttempt<
-    'policy,
-    P,
-    A,
-    CallbackError,
-    AcquisitionError,
-    ?CallbackRequirements,
-    ?AcquisitionRequirements,
-    H: ResponseHandler<P, A, CallbackError ? CallbackRequirements>,
-    C: AttemptClient<'policy, P, A, RedirectError | ValueError | BodyError | CallbackError | ClientError | OutOfMemoryError, AcquisitionError, AcquisitionRequirements ? BodyRequirements | CallbackRequirements | &mut SelectedBody<
-      BodyError,
-      BodyRequirements,
-    > | &mut MonotonicClock | &mut Allocator | &mut Random>,
-  >(
-    dispatch: &mut Self,
-    request: AttemptRequest<'policy>,
-    deadline: Option<Instant>,
-    handler: RedirectAttemptHandler<'policy, BodyError, BodyRequirements>,
-  ) -> AttemptStep<'policy, A>
-  ! RedirectError | ValueError | BodyError | CallbackError | ClientError | OutOfMemoryError | AcquisitionError
-  ? BodyRequirements | CallbackRequirements | AcquisitionRequirements | &mut SelectedBody<
-    BodyError,
-    BodyRequirements,
-  > | &mut MonotonicClock | &mut Allocator | &mut Random {
-    let mut provider = RedirectRoutedAttempt {
-      handler: Option.some<RedirectAttemptHandler<'policy, BodyError, BodyRequirements>>(
-        move handler,
-      ),
-      scratch: &mut dispatch.scratch,
-      callback: &mut dispatch.callback.*,
-    }
-    return run AttemptClient<'policy, P, AttemptStep<'policy, A>, RedirectError | ValueError | BodyError | CallbackError | ClientError | OutOfMemoryError, AcquisitionError, AcquisitionRequirements ? BodyRequirements | CallbackRequirements | &mut SelectedBody<
-      BodyError,
-      BodyRequirements,
-    > | &mut MonotonicClock | &mut Allocator | &mut Random>.withAttempt(
-      &mut dispatch.client.*,
-      move request,
-      move deadline,
-    )
-      |> Effect.provideMut<
-        Attempt<'policy, P, AttemptStep<'policy, A>, RedirectError | ValueError | BodyError | CallbackError | ClientError | OutOfMemoryError ? BodyRequirements | CallbackRequirements | &mut SelectedBody<
-          BodyError,
-          BodyRequirements,
-        > | &mut MonotonicClock | &mut Allocator | &mut Random>,
-      >(&mut provider)
-  }
+  policy: &'policy Policy
+  client: &'client mut C
+  scratch: &'resources mut [u8]
+  callback: &'callback mut H
 }
 
 impl<
   'client,
   'resources,
+  'callback,
   'policy,
   P,
   A,
@@ -1571,43 +1546,20 @@ impl<
 > | &mut MonotonicClock | &mut Allocator | &mut Random> for RoutedAttemptDispatch<
   'client,
   'resources,
+  'callback,
+  'policy,
+  P,
+  A,
   C,
   H,
   BodyError,
+  CallbackError,
+  AcquisitionError,
   BodyRequirements,
+  CallbackRequirements,
+  AcquisitionRequirements,
 > {
-  withAttempt: RoutedAttemptDispatch.withAttempt
-}
-
-struct HybridAttemptDispatch<'client, 'resources, C, H, BodyError, ?BodyRequirements> {
-  client: &'client mut C
-  scratch: &'resources mut [u8]
-  callback: &'resources mut H
-}
-
-impl<'client, 'resources, C, H, BodyError, ?BodyRequirements> HybridAttemptDispatch<
-  'client,
-  'resources,
-  C,
-  H,
-  BodyError,
-  BodyRequirements,
-> {
-  effect fn withAttempt<
-    'policy,
-    RoutedP,
-    DirectP,
-    A,
-    CallbackError,
-    AcquisitionError,
-    ?CallbackRequirements,
-    ?AcquisitionRequirements,
-    H: HybridResponseHandler<RoutedP, DirectP, A, CallbackError ? CallbackRequirements>,
-    C: HybridAttemptClient<'policy, RoutedP, DirectP, AttemptStep<'policy, A>, RedirectError | ValueError | BodyError | CallbackError | ClientError | OutOfMemoryError, AcquisitionError, AcquisitionRequirements ? BodyRequirements | CallbackRequirements | &mut SelectedBody<
-      BodyError,
-      BodyRequirements,
-    > | &mut MonotonicClock | &mut Allocator | &mut Random>,
-  >(
+  effect fn withAttempt(
     dispatch: &mut Self,
     request: AttemptRequest<'policy>,
     deadline: Option<Instant>,
@@ -1618,14 +1570,22 @@ impl<'client, 'resources, C, H, BodyError, ?BodyRequirements> HybridAttemptDispa
     BodyError,
     BodyRequirements,
   > | &mut MonotonicClock | &mut Allocator | &mut Random {
-    let mut provider = RedirectHybridAttempt<'resources, 'policy, BodyError, BodyRequirements, H> {
+    let mut provider = RedirectRoutedAttempt<
+      P,
+      A,
+      BodyError,
+      BodyRequirements,
+      CallbackError,
+      CallbackRequirements,
+      H,
+    > {
       handler: Option.some<RedirectAttemptHandler<'policy, BodyError, BodyRequirements>>(
         move handler,
       ),
       scratch: &mut dispatch.scratch,
       callback: &mut dispatch.callback.*,
     }
-    return run HybridAttemptClient<'policy, RoutedP, DirectP, AttemptStep<'policy, A>, RedirectError | ValueError | BodyError | CallbackError | ClientError | OutOfMemoryError, AcquisitionError, AcquisitionRequirements ? BodyRequirements | CallbackRequirements | &mut SelectedBody<
+    return run AttemptClient<'policy, P, AttemptStep<'policy, A>, RedirectError | ValueError | BodyError | CallbackError | ClientError | OutOfMemoryError, AcquisitionError, AcquisitionRequirements ? BodyRequirements | CallbackRequirements | &mut SelectedBody<
       BodyError,
       BodyRequirements,
     > | &mut MonotonicClock | &mut Allocator | &mut Random>.withAttempt(
@@ -1634,7 +1594,7 @@ impl<'client, 'resources, C, H, BodyError, ?BodyRequirements> HybridAttemptDispa
       move deadline,
     )
       |> Effect.provideMut<
-        HybridAttempt<'policy, RoutedP, DirectP, AttemptStep<'policy, A>, RedirectError | ValueError | BodyError | CallbackError | ClientError | OutOfMemoryError ? BodyRequirements | CallbackRequirements | &mut SelectedBody<
+        Attempt<'policy, P, AttemptStep<'policy, A>, RedirectError | ValueError | BodyError | CallbackError | ClientError | OutOfMemoryError ? BodyRequirements | CallbackRequirements | &mut SelectedBody<
           BodyError,
           BodyRequirements,
         > | &mut MonotonicClock | &mut Allocator | &mut Random>,
@@ -1642,9 +1602,33 @@ impl<'client, 'resources, C, H, BodyError, ?BodyRequirements> HybridAttemptDispa
   }
 }
 
+struct HybridAttemptDispatch<
+  'client,
+  'resources,
+  'callback,
+  'policy,
+  RoutedP,
+  DirectP,
+  A,
+  C,
+  H,
+  BodyError,
+  CallbackError,
+  AcquisitionError,
+  ?BodyRequirements,
+  ?CallbackRequirements,
+  ?AcquisitionRequirements,
+> {
+  policy: &'policy Policy
+  client: &'client mut C
+  scratch: &'resources mut [u8]
+  callback: &'callback mut H
+}
+
 impl<
   'client,
   'resources,
+  'callback,
   'policy,
   RoutedP,
   DirectP,
@@ -1669,19 +1653,79 @@ impl<
 > | &mut MonotonicClock | &mut Allocator | &mut Random> for HybridAttemptDispatch<
   'client,
   'resources,
+  'callback,
+  'policy,
+  RoutedP,
+  DirectP,
+  A,
   C,
   H,
   BodyError,
+  CallbackError,
+  AcquisitionError,
   BodyRequirements,
+  CallbackRequirements,
+  AcquisitionRequirements,
 > {
-  withAttempt: HybridAttemptDispatch.withAttempt
+  effect fn withAttempt(
+    dispatch: &mut Self,
+    request: AttemptRequest<'policy>,
+    deadline: Option<Instant>,
+    handler: RedirectAttemptHandler<'policy, BodyError, BodyRequirements>,
+  ) -> AttemptStep<'policy, A>
+  ! RedirectError | ValueError | BodyError | CallbackError | ClientError | OutOfMemoryError | AcquisitionError
+  ? BodyRequirements | CallbackRequirements | AcquisitionRequirements | &mut SelectedBody<
+    BodyError,
+    BodyRequirements,
+  > | &mut MonotonicClock | &mut Allocator | &mut Random {
+    let mut provider = RedirectHybridAttempt<
+      RoutedP,
+      DirectP,
+      A,
+      BodyError,
+      BodyRequirements,
+      CallbackError,
+      CallbackRequirements,
+      H,
+    > {
+      handler: Option.some<RedirectAttemptHandler<'policy, BodyError, BodyRequirements>>(
+        move handler,
+      ),
+      scratch: &mut dispatch.scratch,
+      callback: &mut dispatch.callback.*,
+    }
+    return run HybridAttemptClient<'policy, RoutedP, DirectP, AttemptStep<'policy, A>, RedirectError | ValueError | BodyError | CallbackError | ClientError | OutOfMemoryError, AcquisitionError, AcquisitionRequirements ? BodyRequirements | CallbackRequirements | &mut SelectedBody<
+      BodyError,
+      BodyRequirements,
+    > | &mut MonotonicClock | &mut Allocator | &mut Random>.withAttempt(
+      &mut dispatch.client.*,
+      move request,
+      move deadline,
+    )
+      |> Effect.provideMut<
+        HybridAttempt<'policy, RoutedP, DirectP, AttemptStep<'policy, A>, RedirectError | ValueError | BodyError | CallbackError | ClientError | OutOfMemoryError ? BodyRequirements | CallbackRequirements | &mut SelectedBody<
+          BodyError,
+          BodyRequirements,
+        > | &mut MonotonicClock | &mut Allocator | &mut Random>,
+      >(&mut provider)
+  }
 }
 
 interface SelectedAttempt<P, A, E, ?R> {
   effect fn handle(handler: Self, mode: BodyMode, replayable: bool) -> A ! E ? R
 }
 
-struct SelectedAttemptHandler<'policy> {
+struct SelectedAttemptHandler<
+  'policy,
+  E,
+  ?R,
+  P,
+  A,
+  CallbackError,
+  AcquisitionError,
+  ?CallbackRequirements,
+  ?AcquisitionRequirements,
+> {
   state: RedirectState<'policy>
   policy: &'policy Policy
   history: History
@@ -1690,16 +1734,34 @@ struct SelectedAttemptHandler<'policy> {
   deadline: Option<Instant>
 }
 
-impl<'policy> SelectedAttemptHandler<'policy> {
-  effect fn handle<
-    E,
-    ?R,
-    A,
-    CallbackError,
-    AcquisitionError,
-    ?CallbackRequirements,
-    ?AcquisitionRequirements,
-  >(self: Self, mode: BodyMode, replayable: bool) -> AttemptStep<'policy, A>
+impl<
+  'policy,
+  E,
+  ?R,
+  P,
+  A,
+  CallbackError,
+  AcquisitionError,
+  ?CallbackRequirements,
+  ?AcquisitionRequirements,
+> SelectedAttempt<P, AttemptStep<'policy, A>, RedirectError | ValueError | E | CallbackError | ClientError | OutOfMemoryError | AcquisitionError ? R | CallbackRequirements | AcquisitionRequirements | &mut SelectedBody<
+  E,
+  R,
+> | &mut AttemptDispatch<'policy, RedirectAttemptHandler<'policy, E, R>, AttemptStep<'policy, A>, RedirectError | ValueError | E | CallbackError | ClientError | OutOfMemoryError | AcquisitionError ? R | CallbackRequirements | AcquisitionRequirements | &mut SelectedBody<
+  E,
+  R,
+> | &mut MonotonicClock | &mut Allocator | &mut Random> | &mut MonotonicClock | &mut Allocator | &mut Random> for SelectedAttemptHandler<
+  'policy,
+  E,
+  R,
+  P,
+  A,
+  CallbackError,
+  AcquisitionError,
+  CallbackRequirements,
+  AcquisitionRequirements,
+> {
+  effect fn handle(self: Self, mode: BodyMode, replayable: bool) -> AttemptStep<'policy, A>
   ! RedirectError | ValueError | E | CallbackError | ClientError | OutOfMemoryError | AcquisitionError
   ? R | CallbackRequirements | AcquisitionRequirements | &mut SelectedBody<E, R> | &mut AttemptDispatch<'policy, RedirectAttemptHandler<
     'policy,
@@ -1714,7 +1776,17 @@ impl<'policy> SelectedAttemptHandler<'policy> {
     R in Without<R, HttpTransport>,
     CallbackRequirements in Without<CallbackRequirements, ByteDuplex>,
     CallbackRequirements in Without<CallbackRequirements, HttpTransport> {
-    let SelectedAttemptHandler<'policy> {state, policy, history, followedHops, hasScratch, deadline} = move self
+    let SelectedAttemptHandler<
+      'policy,
+      E,
+      R,
+      P,
+      A,
+      CallbackError,
+      AcquisitionError,
+      CallbackRequirements,
+      AcquisitionRequirements,
+    > {state, policy, history, followedHops, hasScratch, deadline} = move self
     if let Option.Some {value} = &state.expectedBodyMode {
       if !bodyModesEqual(value, mode) {
         let enriched = run enrichCurrent(bodyContractFailure(followedHops), &state.uri.view())
@@ -1744,28 +1816,6 @@ impl<'policy> SelectedAttemptHandler<'policy> {
       R | CallbackRequirements | AcquisitionRequirements | &mut SelectedBody<E, R> | &mut MonotonicClock | &mut Allocator | &mut Random,
     >(move request, move deadline, move attemptHandler)
   }
-}
-
-impl<
-  'policy,
-  E,
-  ?R,
-  P,
-  A,
-  CallbackError,
-  AcquisitionError,
-  ?CallbackRequirements,
-  ?AcquisitionRequirements,
-> SelectedAttempt<P, AttemptStep<'policy, A>, RedirectError | ValueError | E | CallbackError | ClientError | OutOfMemoryError | AcquisitionError ? R | CallbackRequirements | AcquisitionRequirements | &mut SelectedBody<
-  E,
-  R,
-> | &mut AttemptDispatch<'policy, RedirectAttemptHandler<'policy, E, R>, AttemptStep<'policy, A>, RedirectError | ValueError | E | CallbackError | ClientError | OutOfMemoryError | AcquisitionError ? R | CallbackRequirements | AcquisitionRequirements | &mut SelectedBody<
-  E,
-  R,
-> | &mut MonotonicClock | &mut Allocator | &mut Random> | &mut MonotonicClock | &mut Allocator | &mut Random> for SelectedAttemptHandler<
-  'policy,
-> {
-  handle: SelectedAttemptHandler.handle
 }
 
 interface SourcePlan<
@@ -1809,24 +1859,43 @@ effect fn runEmptySelected<
     |> Effect.provideMut<SelectedBody<BodyError, BodyRequirements>>(&mut provider)
 }
 
-struct RepeatablePlan<'bytes> {
+struct RepeatablePlan<
+  'bytes,
+  P,
+  BodyError,
+  A,
+  HandlerError,
+  ?BodyRequirements,
+  ?HandlerRequirements,
+  H,
+> {
   bytes: &'bytes [u8]
   retained: bool
 }
 
-impl<'bytes> RepeatablePlan<'bytes> {
-  effect fn withSelected<
-    P,
+impl<
+  'bytes,
+  P,
+  BodyError,
+  A,
+  HandlerError,
+  ?BodyRequirements,
+  ?HandlerRequirements,
+  H: SelectedAttempt<P, A, HandlerError ? HandlerRequirements | &mut SelectedBody<
     BodyError,
-    A,
-    HandlerError,
-    ?BodyRequirements,
-    ?HandlerRequirements,
-    H: SelectedAttempt<P, A, HandlerError ? HandlerRequirements | &mut SelectedBody<
-      BodyError,
-      BodyRequirements,
-    >>,
-  >(plan: &mut Self, handler: H) -> A ! HandlerError ? HandlerRequirements {
+    BodyRequirements,
+  >>,
+> SourcePlan<P, BodyError, A, never, HandlerError, BodyRequirements, never, HandlerRequirements, H> for RepeatablePlan<
+  'bytes,
+  P,
+  BodyError,
+  A,
+  HandlerError,
+  BodyRequirements,
+  HandlerRequirements,
+  H,
+> {
+  effect fn withSelected(plan: &mut Self, handler: H) -> A ! HandlerError ? HandlerRequirements {
     if plan.retained && plan.bytes.length != usize.ZERO {
       let mut provider = BytesSelected<'bytes, BodyError, BodyRequirements> {
         bytes: plan.bytes,
@@ -1856,48 +1925,47 @@ impl<'bytes> RepeatablePlan<'bytes> {
   }
 }
 
-impl<
-  'bytes,
+union OneShotState<Producer> {
+  Fresh {producer: Producer},
+  Spent,
+}
+
+struct OneShotPlan<
   P,
   BodyError,
   A,
   HandlerError,
   ?BodyRequirements,
   ?HandlerRequirements,
+  Producer,
+  H,
+> {
+  state: OneShotState<Producer>
+}
+
+impl<
+  P,
+  BodyError,
+  A,
+  HandlerError,
+  ?BodyRequirements,
+  ?HandlerRequirements,
+  Producer: BodyProducer<BodyError ? BodyRequirements>,
   H: SelectedAttempt<P, A, HandlerError ? HandlerRequirements | &mut SelectedBody<
     BodyError,
     BodyRequirements,
   >>,
-> SourcePlan<P, BodyError, A, never, HandlerError, BodyRequirements, never, HandlerRequirements, H> for RepeatablePlan<
-  'bytes,
+> SourcePlan<P, BodyError, A, never, HandlerError, BodyRequirements, never, HandlerRequirements, H> for OneShotPlan<
+  P,
+  BodyError,
+  A,
+  HandlerError,
+  BodyRequirements,
+  HandlerRequirements,
+  Producer,
+  H,
 > {
-  withSelected: RepeatablePlan.withSelected
-  applyRedirect: RepeatablePlan.applyRedirect
-}
-
-union OneShotState<Producer> {
-  Fresh {producer: Producer},
-  Spent,
-}
-
-struct OneShotPlan<Producer> {
-  state: OneShotState<Producer>
-}
-
-impl<Producer> OneShotPlan<Producer> {
-  effect fn withSelected<
-    P,
-    BodyError,
-    A,
-    HandlerError,
-    ?BodyRequirements,
-    ?HandlerRequirements,
-    Producer: BodyProducer<BodyError ? BodyRequirements>,
-    H: SelectedAttempt<P, A, HandlerError ? HandlerRequirements | &mut SelectedBody<
-      BodyError,
-      BodyRequirements,
-    >>,
-  >(plan: &mut Self, handler: H) -> A ! HandlerError ? HandlerRequirements {
+  effect fn withSelected(plan: &mut Self, handler: H) -> A ! HandlerError ? HandlerRequirements {
     let state = Intrinsic.replace(plan.state, OneShotState<Producer>.Spent)
     return match move state {
       OneShotState.Spent => {
@@ -1932,47 +2000,62 @@ impl<Producer> OneShotPlan<Producer> {
   }
 }
 
+struct ReplayPlan<
+  P,
+  BodyError,
+  A,
+  FactoryError,
+  HandlerError,
+  ?BodyRequirements,
+  ?FactoryRequirements,
+  ?HandlerRequirements,
+  Factory,
+  Producer,
+  H,
+> {
+  factory: Factory
+  retained: bool
+}
+
 impl<
   P,
   BodyError,
   A,
+  FactoryError,
   HandlerError,
   ?BodyRequirements,
+  ?FactoryRequirements,
   ?HandlerRequirements,
   Producer: BodyProducer<BodyError ? BodyRequirements>,
   H: SelectedAttempt<P, A, HandlerError ? HandlerRequirements | &mut SelectedBody<
     BodyError,
     BodyRequirements,
   >>,
-> SourcePlan<P, BodyError, A, never, HandlerError, BodyRequirements, never, HandlerRequirements, H> for OneShotPlan<
+  Factory: ReplayFactory<Producer, FactoryError, FactoryRequirements>,
+> SourcePlan<
+  P,
+  BodyError,
+  A,
+  FactoryError,
+  HandlerError,
+  BodyRequirements,
+  FactoryRequirements,
+  HandlerRequirements,
+  H,
+> for ReplayPlan<
+  P,
+  BodyError,
+  A,
+  FactoryError,
+  HandlerError,
+  BodyRequirements,
+  FactoryRequirements,
+  HandlerRequirements,
+  Factory,
   Producer,
+  H,
 > {
-  withSelected: OneShotPlan.withSelected
-  applyRedirect: OneShotPlan.applyRedirect
-}
-
-struct ReplayPlan<Factory, Producer> {
-  factory: Factory
-  retained: bool
-}
-
-impl<Factory, Producer> ReplayPlan<Factory, Producer> {
-  effect fn withSelected<
-    P,
-    BodyError,
-    A,
-    FactoryError,
-    HandlerError,
-    ?BodyRequirements,
-    ?FactoryRequirements,
-    ?HandlerRequirements,
-    Producer: BodyProducer<BodyError ? BodyRequirements>,
-    H: SelectedAttempt<P, A, HandlerError ? HandlerRequirements | &mut SelectedBody<
-      BodyError,
-      BodyRequirements,
-    >>,
-    Factory: ReplayFactory<Producer, FactoryError, FactoryRequirements>,
-  >(plan: &mut Self, handler: H) -> A
+  effect fn withSelected(plan: &mut Self, handler: H) -> A
   ! FactoryError | HandlerError
   ? FactoryRequirements | HandlerRequirements {
     if plan.retained {
@@ -2016,42 +2099,12 @@ impl<Factory, Producer> ReplayPlan<Factory, Producer> {
   }
 }
 
-impl<
-  P,
-  BodyError,
-  A,
-  FactoryError,
-  HandlerError,
-  ?BodyRequirements,
-  ?FactoryRequirements,
-  ?HandlerRequirements,
-  Producer: BodyProducer<BodyError ? BodyRequirements>,
-  H: SelectedAttempt<P, A, HandlerError ? HandlerRequirements | &mut SelectedBody<
-    BodyError,
-    BodyRequirements,
-  >>,
-  Factory: ReplayFactory<Producer, FactoryError, FactoryRequirements>,
-> SourcePlan<
-  P,
-  BodyError,
-  A,
-  FactoryError,
-  HandlerError,
-  BodyRequirements,
-  FactoryRequirements,
-  HandlerRequirements,
-  H,
-> for ReplayPlan<Factory, Producer> {
-  withSelected: ReplayPlan.withSelected
-  applyRedirect: ReplayPlan.applyRedirect
-}
-
 effect fn runResponseLoop<
+  'policy,
   'client,
   'uri,
   'method,
   'headers,
-  'policy,
   P,
   A,
   BodyError,
@@ -2062,13 +2115,7 @@ effect fn runResponseLoop<
   ?SourceRequirements,
   ?CallbackRequirements,
   ?AcquisitionRequirements,
-  D: AttemptDispatch<'policy, RedirectAttemptHandler<'policy, BodyError, BodyRequirements>, AttemptStep<
-    'policy,
-    A,
-  >, RedirectError | ValueError | BodyError | CallbackError | ClientError | OutOfMemoryError | AcquisitionError ? BodyRequirements | CallbackRequirements | AcquisitionRequirements | &mut SelectedBody<
-    BodyError,
-    BodyRequirements,
-  > | &mut MonotonicClock | &mut Allocator | &mut Random>,
+  D,
   Plan: SourcePlan<
     P,
     BodyError,
@@ -2085,7 +2132,17 @@ effect fn runResponseLoop<
       BodyError,
       BodyRequirements,
     > | &mut MonotonicClock | &mut Allocator | &mut Random> | &mut MonotonicClock | &mut Allocator | &mut Random,
-    SelectedAttemptHandler<'policy>,
+    SelectedAttemptHandler<
+      'policy,
+      BodyError,
+      BodyRequirements,
+      P,
+      A,
+      CallbackError,
+      AcquisitionError,
+      CallbackRequirements,
+      AcquisitionRequirements,
+    >,
   >,
 >(
   dispatch: &'client mut D,
@@ -2098,6 +2155,21 @@ effect fn runResponseLoop<
 ! RedirectError | ValueError | BodyError | SourceError | CallbackError | ClientError | OutOfMemoryError | AcquisitionError
 ? BodyRequirements | SourceRequirements | CallbackRequirements | AcquisitionRequirements | &mut MonotonicClock | &mut Allocator | &mut Random
 where
+  &mut D provides &AttemptDispatch<'policy, RedirectAttemptHandler<
+    'policy,
+    BodyError,
+    BodyRequirements,
+  >, AttemptStep<'policy, A>, RedirectError | ValueError | BodyError | CallbackError | ClientError | OutOfMemoryError | AcquisitionError ? BodyRequirements | CallbackRequirements | AcquisitionRequirements | &mut SelectedBody<
+    BodyError,
+    BodyRequirements,
+  > | &mut MonotonicClock | &mut Allocator | &mut Random> from BodyRequirements | SourceRequirements | CallbackRequirements | AcquisitionRequirements | &mut AttemptDispatch<'policy, RedirectAttemptHandler<
+    'policy,
+    BodyError,
+    BodyRequirements,
+  >, AttemptStep<'policy, A>, RedirectError | ValueError | BodyError | CallbackError | ClientError | OutOfMemoryError | AcquisitionError ? BodyRequirements | CallbackRequirements | AcquisitionRequirements | &mut SelectedBody<
+    BodyError,
+    BodyRequirements,
+  > | &mut MonotonicClock | &mut Allocator | &mut Random> | &mut MonotonicClock | &mut Allocator | &mut Random,
   BodyRequirements in Without<BodyRequirements, ByteDuplex>,
   BodyRequirements in Without<BodyRequirements, HttpTransport>,
   SourceRequirements in Without<SourceRequirements, ByteDuplex>,
@@ -2113,7 +2185,17 @@ where
   let mut selectedPlan = move plan
   let mut followedHops = usize.ZERO
   while true {
-    let selected = SelectedAttemptHandler<'policy> {
+    let selected = SelectedAttemptHandler<
+      'policy,
+      BodyError,
+      BodyRequirements,
+      P,
+      A,
+      CallbackError,
+      AcquisitionError,
+      CallbackRequirements,
+      AcquisitionRequirements,
+    > {
       state: move currentState,
       policy: policy,
       history: move currentHistory,
@@ -2137,7 +2219,17 @@ where
         BodyError,
         BodyRequirements,
       > | &mut MonotonicClock | &mut Allocator | &mut Random> | &mut MonotonicClock | &mut Allocator | &mut Random,
-      SelectedAttemptHandler<'policy>,
+      SelectedAttemptHandler<
+        'policy,
+        BodyError,
+        BodyRequirements,
+        P,
+        A,
+        CallbackError,
+        AcquisitionError,
+        CallbackRequirements,
+        AcquisitionRequirements,
+      >,
     >.withSelected(&mut selectedPlan, move selected)
       |> Effect.provideMut<
         AttemptDispatch<'policy, RedirectAttemptHandler<'policy, BodyError, BodyRequirements>, AttemptStep<
@@ -2169,7 +2261,17 @@ where
             BodyError,
             BodyRequirements,
           > | &mut MonotonicClock | &mut Allocator | &mut Random> | &mut MonotonicClock | &mut Allocator | &mut Random,
-          SelectedAttemptHandler<'policy>,
+          SelectedAttemptHandler<
+            'policy,
+            BodyError,
+            BodyRequirements,
+            P,
+            A,
+            CallbackError,
+            AcquisitionError,
+            CallbackRequirements,
+            AcquisitionRequirements,
+          >,
         >.applyRedirect(&mut selectedPlan, body)
         currentState = move state
         currentHistory = move history
@@ -2234,22 +2336,69 @@ where
   AcquisitionRequirements in Without<AcquisitionRequirements, HttpTransport> {
   let hasScratch = scratch.length != usize.ZERO
   let mut callback = move handler
-  let mut dispatch = RoutedAttemptDispatch {
-    client: &mut client.*,
-    scratch: &mut scratch,
-    callback: &mut callback,
-  }
-  return run runResponseLoop(
+  let mut dispatch = RoutedAttemptDispatch<
+    P,
+    A,
+    C,
+    H,
+    never,
+    CallbackError,
+    AcquisitionError,
+    never,
+    CallbackRequirements,
+    AcquisitionRequirements,
+  > {policy: policy, client: &mut client.*, scratch: &mut scratch, callback: &mut callback}
+  return run runResponseLoop<
+    'policy,
+    P,
+    A,
+    never,
+    never,
+    CallbackError,
+    AcquisitionError,
+    never,
+    never,
+    CallbackRequirements,
+    AcquisitionRequirements,
+  >(
     &mut dispatch,
     move request,
     policy,
-    RepeatablePlan<'static> {bytes: b"", retained: true},
+    RepeatablePlan<
+      'static,
+      P,
+      never,
+      AttemptStep<'policy, A>,
+      RedirectError | ValueError | CallbackError | ClientError | OutOfMemoryError | AcquisitionError,
+      never,
+      CallbackRequirements | AcquisitionRequirements | &mut AttemptDispatch<'policy, RedirectAttemptHandler<
+        'policy,
+        never,
+        never,
+      >, AttemptStep<'policy, A>, RedirectError | ValueError | CallbackError | ClientError | OutOfMemoryError | AcquisitionError ? CallbackRequirements | AcquisitionRequirements | &mut SelectedBody<
+        never,
+        never,
+      > | &mut MonotonicClock | &mut Allocator | &mut Random> | &mut MonotonicClock | &mut Allocator | &mut Random,
+      SelectedAttemptHandler<
+        'policy,
+        never,
+        never,
+        P,
+        A,
+        CallbackError,
+        AcquisitionError,
+        CallbackRequirements,
+        AcquisitionRequirements,
+      >,
+    > {bytes: b"", retained: true},
     move deadline,
     hasScratch,
   )
 }
 
 /// Follows a body-free request through a client that can select routed or direct acquisition.
+///
+/// # Details
 ///
 /// Each attempt uses one acquisition form. The operation reuses the same iterative redirect state
 /// machine as [`withEmptyResponse`] and invokes `handler` exactly once for the final response.
@@ -2295,16 +2444,62 @@ where
   AcquisitionRequirements in Without<AcquisitionRequirements, HttpTransport> {
   let hasScratch = scratch.length != usize.ZERO
   let mut callback = move handler
-  let mut dispatch = HybridAttemptDispatch {
-    client: &mut client.*,
-    scratch: &mut scratch,
-    callback: &mut callback,
-  }
-  return run runResponseLoop(
+  let mut dispatch = HybridAttemptDispatch<
+    RoutedP,
+    DirectP,
+    A,
+    C,
+    H,
+    never,
+    CallbackError,
+    AcquisitionError,
+    never,
+    CallbackRequirements,
+    AcquisitionRequirements,
+  > {policy: policy, client: &mut client.*, scratch: &mut scratch, callback: &mut callback}
+  return run runResponseLoop<
+    'policy,
+    RoutedP,
+    A,
+    never,
+    never,
+    CallbackError,
+    AcquisitionError,
+    never,
+    never,
+    CallbackRequirements,
+    AcquisitionRequirements,
+  >(
     &mut dispatch,
     move request,
     policy,
-    RepeatablePlan<'static> {bytes: b"", retained: true},
+    RepeatablePlan<
+      'static,
+      RoutedP,
+      never,
+      AttemptStep<'policy, A>,
+      RedirectError | ValueError | CallbackError | ClientError | OutOfMemoryError | AcquisitionError,
+      never,
+      CallbackRequirements | AcquisitionRequirements | &mut AttemptDispatch<'policy, RedirectAttemptHandler<
+        'policy,
+        never,
+        never,
+      >, AttemptStep<'policy, A>, RedirectError | ValueError | CallbackError | ClientError | OutOfMemoryError | AcquisitionError ? CallbackRequirements | AcquisitionRequirements | &mut SelectedBody<
+        never,
+        never,
+      > | &mut MonotonicClock | &mut Allocator | &mut Random> | &mut MonotonicClock | &mut Allocator | &mut Random,
+      SelectedAttemptHandler<
+        'policy,
+        never,
+        never,
+        RoutedP,
+        A,
+        CallbackError,
+        AcquisitionError,
+        CallbackRequirements,
+        AcquisitionRequirements,
+      >,
+    > {bytes: b"", retained: true},
     move deadline,
     hasScratch,
   )
@@ -2366,22 +2561,69 @@ where
   }
   let hasScratch = scratch.length != usize.ZERO
   let mut callback = move handler
-  let mut dispatch = RoutedAttemptDispatch {
-    client: &mut client.*,
-    scratch: &mut scratch,
-    callback: &mut callback,
-  }
-  return run runResponseLoop(
+  let mut dispatch = RoutedAttemptDispatch<
+    P,
+    A,
+    C,
+    H,
+    never,
+    CallbackError,
+    AcquisitionError,
+    never,
+    CallbackRequirements,
+    AcquisitionRequirements,
+  > {policy: policy, client: &mut client.*, scratch: &mut scratch, callback: &mut callback}
+  return run runResponseLoop<
+    'policy,
+    P,
+    A,
+    never,
+    never,
+    CallbackError,
+    AcquisitionError,
+    never,
+    never,
+    CallbackRequirements,
+    AcquisitionRequirements,
+  >(
     &mut dispatch,
     move request,
     policy,
-    RepeatablePlan<'bytes> {bytes: bytes, retained: true},
+    RepeatablePlan<
+      'bytes,
+      P,
+      never,
+      AttemptStep<'policy, A>,
+      RedirectError | ValueError | CallbackError | ClientError | OutOfMemoryError | AcquisitionError,
+      never,
+      CallbackRequirements | AcquisitionRequirements | &mut AttemptDispatch<'policy, RedirectAttemptHandler<
+        'policy,
+        never,
+        never,
+      >, AttemptStep<'policy, A>, RedirectError | ValueError | CallbackError | ClientError | OutOfMemoryError | AcquisitionError ? CallbackRequirements | AcquisitionRequirements | &mut SelectedBody<
+        never,
+        never,
+      > | &mut MonotonicClock | &mut Allocator | &mut Random> | &mut MonotonicClock | &mut Allocator | &mut Random,
+      SelectedAttemptHandler<
+        'policy,
+        never,
+        never,
+        P,
+        A,
+        CallbackError,
+        AcquisitionError,
+        CallbackRequirements,
+        AcquisitionRequirements,
+      >,
+    > {bytes: bytes, retained: true},
     move deadline,
     hasScratch,
   )
 }
 
 /// Follows replayable bytes through a client that can select routed or direct acquisition.
+///
+/// # Details
 ///
 /// Every retained-body attempt starts at byte zero. A dropped-body transition changes all later
 /// attempts to empty framing. A nonempty body requires positive scratch before contact.
@@ -2433,16 +2675,62 @@ where
   }
   let hasScratch = scratch.length != usize.ZERO
   let mut callback = move handler
-  let mut dispatch = HybridAttemptDispatch {
-    client: &mut client.*,
-    scratch: &mut scratch,
-    callback: &mut callback,
-  }
-  return run runResponseLoop(
+  let mut dispatch = HybridAttemptDispatch<
+    RoutedP,
+    DirectP,
+    A,
+    C,
+    H,
+    never,
+    CallbackError,
+    AcquisitionError,
+    never,
+    CallbackRequirements,
+    AcquisitionRequirements,
+  > {policy: policy, client: &mut client.*, scratch: &mut scratch, callback: &mut callback}
+  return run runResponseLoop<
+    'policy,
+    RoutedP,
+    A,
+    never,
+    never,
+    CallbackError,
+    AcquisitionError,
+    never,
+    never,
+    CallbackRequirements,
+    AcquisitionRequirements,
+  >(
     &mut dispatch,
     move request,
     policy,
-    RepeatablePlan<'bytes> {bytes: bytes, retained: true},
+    RepeatablePlan<
+      'bytes,
+      RoutedP,
+      never,
+      AttemptStep<'policy, A>,
+      RedirectError | ValueError | CallbackError | ClientError | OutOfMemoryError | AcquisitionError,
+      never,
+      CallbackRequirements | AcquisitionRequirements | &mut AttemptDispatch<'policy, RedirectAttemptHandler<
+        'policy,
+        never,
+        never,
+      >, AttemptStep<'policy, A>, RedirectError | ValueError | CallbackError | ClientError | OutOfMemoryError | AcquisitionError ? CallbackRequirements | AcquisitionRequirements | &mut SelectedBody<
+        never,
+        never,
+      > | &mut MonotonicClock | &mut Allocator | &mut Random> | &mut MonotonicClock | &mut Allocator | &mut Random,
+      SelectedAttemptHandler<
+        'policy,
+        never,
+        never,
+        RoutedP,
+        A,
+        CallbackError,
+        AcquisitionError,
+        CallbackRequirements,
+        AcquisitionRequirements,
+      >,
+    > {bytes: bytes, retained: true},
     move deadline,
     hasScratch,
   )
@@ -2509,22 +2797,69 @@ where
   }
   let hasScratch = scratch.length != usize.ZERO
   let mut callback = move handler
-  let mut dispatch = RoutedAttemptDispatch {
-    client: &mut client.*,
-    scratch: &mut scratch,
-    callback: &mut callback,
-  }
-  return run runResponseLoop(
+  let mut dispatch = RoutedAttemptDispatch<
+    P,
+    A,
+    C,
+    H,
+    ProducerError,
+    CallbackError,
+    AcquisitionError,
+    ProducerRequirements,
+    CallbackRequirements,
+    AcquisitionRequirements,
+  > {policy: policy, client: &mut client.*, scratch: &mut scratch, callback: &mut callback}
+  return run runResponseLoop<
+    'policy,
+    P,
+    A,
+    ProducerError,
+    never,
+    CallbackError,
+    AcquisitionError,
+    ProducerRequirements,
+    never,
+    CallbackRequirements,
+    AcquisitionRequirements,
+  >(
     &mut dispatch,
     move request,
     policy,
-    OneShotPlan<Producer> {state: OneShotState<Producer>.Fresh {producer: move producer}},
+    OneShotPlan<
+      P,
+      ProducerError,
+      AttemptStep<'policy, A>,
+      RedirectError | ValueError | ProducerError | CallbackError | ClientError | OutOfMemoryError | AcquisitionError,
+      ProducerRequirements,
+      ProducerRequirements | CallbackRequirements | AcquisitionRequirements | &mut AttemptDispatch<'policy, RedirectAttemptHandler<
+        'policy,
+        ProducerError,
+        ProducerRequirements,
+      >, AttemptStep<'policy, A>, RedirectError | ValueError | ProducerError | CallbackError | ClientError | OutOfMemoryError | AcquisitionError ? ProducerRequirements | CallbackRequirements | AcquisitionRequirements | &mut SelectedBody<
+        ProducerError,
+        ProducerRequirements,
+      > | &mut MonotonicClock | &mut Allocator | &mut Random> | &mut MonotonicClock | &mut Allocator | &mut Random,
+      Producer,
+      SelectedAttemptHandler<
+        'policy,
+        ProducerError,
+        ProducerRequirements,
+        P,
+        A,
+        CallbackError,
+        AcquisitionError,
+        CallbackRequirements,
+        AcquisitionRequirements,
+      >,
+    > {state: OneShotState<Producer>.Fresh {producer: move producer}},
     move deadline,
     hasScratch,
   )
 }
 
 /// Follows an affine body producer through routed or direct acquisition.
+///
+/// # Details
 ///
 /// The producer is consumed for the first attempted body only. A redirect that retains the body
 /// fails with `ReplayUnavailable`; a transition that drops the body continues with empty framing.
@@ -2581,16 +2916,62 @@ where
   }
   let hasScratch = scratch.length != usize.ZERO
   let mut callback = move handler
-  let mut dispatch = HybridAttemptDispatch {
-    client: &mut client.*,
-    scratch: &mut scratch,
-    callback: &mut callback,
-  }
-  return run runResponseLoop(
+  let mut dispatch = HybridAttemptDispatch<
+    RoutedP,
+    DirectP,
+    A,
+    C,
+    H,
+    ProducerError,
+    CallbackError,
+    AcquisitionError,
+    ProducerRequirements,
+    CallbackRequirements,
+    AcquisitionRequirements,
+  > {policy: policy, client: &mut client.*, scratch: &mut scratch, callback: &mut callback}
+  return run runResponseLoop<
+    'policy,
+    RoutedP,
+    A,
+    ProducerError,
+    never,
+    CallbackError,
+    AcquisitionError,
+    ProducerRequirements,
+    never,
+    CallbackRequirements,
+    AcquisitionRequirements,
+  >(
     &mut dispatch,
     move request,
     policy,
-    OneShotPlan<Producer> {state: OneShotState<Producer>.Fresh {producer: move producer}},
+    OneShotPlan<
+      RoutedP,
+      ProducerError,
+      AttemptStep<'policy, A>,
+      RedirectError | ValueError | ProducerError | CallbackError | ClientError | OutOfMemoryError | AcquisitionError,
+      ProducerRequirements,
+      ProducerRequirements | CallbackRequirements | AcquisitionRequirements | &mut AttemptDispatch<'policy, RedirectAttemptHandler<
+        'policy,
+        ProducerError,
+        ProducerRequirements,
+      >, AttemptStep<'policy, A>, RedirectError | ValueError | ProducerError | CallbackError | ClientError | OutOfMemoryError | AcquisitionError ? ProducerRequirements | CallbackRequirements | AcquisitionRequirements | &mut SelectedBody<
+        ProducerError,
+        ProducerRequirements,
+      > | &mut MonotonicClock | &mut Allocator | &mut Random> | &mut MonotonicClock | &mut Allocator | &mut Random,
+      Producer,
+      SelectedAttemptHandler<
+        'policy,
+        ProducerError,
+        ProducerRequirements,
+        RoutedP,
+        A,
+        CallbackError,
+        AcquisitionError,
+        CallbackRequirements,
+        AcquisitionRequirements,
+      >,
+    > {state: OneShotState<Producer>.Fresh {producer: move producer}},
     move deadline,
     hasScratch,
   )
@@ -2658,22 +3039,72 @@ where
   AcquisitionRequirements in Without<AcquisitionRequirements, HttpTransport> {
   let hasScratch = scratch.length != usize.ZERO
   let mut callback = move handler
-  let mut dispatch = RoutedAttemptDispatch {
-    client: &mut client.*,
-    scratch: &mut scratch,
-    callback: &mut callback,
-  }
-  return run runResponseLoop(
+  let mut dispatch = RoutedAttemptDispatch<
+    P,
+    A,
+    C,
+    H,
+    ProducerError,
+    CallbackError,
+    AcquisitionError,
+    ProducerRequirements,
+    CallbackRequirements,
+    AcquisitionRequirements,
+  > {policy: policy, client: &mut client.*, scratch: &mut scratch, callback: &mut callback}
+  return run runResponseLoop<
+    'policy,
+    P,
+    A,
+    ProducerError,
+    FactoryError,
+    CallbackError,
+    AcquisitionError,
+    ProducerRequirements,
+    FactoryRequirements,
+    CallbackRequirements,
+    AcquisitionRequirements,
+  >(
     &mut dispatch,
     move request,
     policy,
-    ReplayPlan<Factory, Producer> {factory: move factory, retained: true},
+    ReplayPlan<
+      P,
+      ProducerError,
+      AttemptStep<'policy, A>,
+      FactoryError,
+      RedirectError | ValueError | ProducerError | CallbackError | ClientError | OutOfMemoryError | AcquisitionError,
+      ProducerRequirements,
+      FactoryRequirements,
+      ProducerRequirements | CallbackRequirements | AcquisitionRequirements | &mut AttemptDispatch<'policy, RedirectAttemptHandler<
+        'policy,
+        ProducerError,
+        ProducerRequirements,
+      >, AttemptStep<'policy, A>, RedirectError | ValueError | ProducerError | CallbackError | ClientError | OutOfMemoryError | AcquisitionError ? ProducerRequirements | CallbackRequirements | AcquisitionRequirements | &mut SelectedBody<
+        ProducerError,
+        ProducerRequirements,
+      > | &mut MonotonicClock | &mut Allocator | &mut Random> | &mut MonotonicClock | &mut Allocator | &mut Random,
+      Factory,
+      Producer,
+      SelectedAttemptHandler<
+        'policy,
+        ProducerError,
+        ProducerRequirements,
+        P,
+        A,
+        CallbackError,
+        AcquisitionError,
+        CallbackRequirements,
+        AcquisitionRequirements,
+      >,
+    > {factory: move factory, retained: true},
     move deadline,
     hasScratch,
   )
 }
 
 /// Follows replayable producer scopes through routed or direct acquisition.
+///
+/// # Details
 ///
 /// Each retained-body attempt receives one fresh producer inside the factory scope. A dropped-body
 /// transition stops factory acquisition. All source and acquisition channels remain direct.
@@ -2730,16 +3161,65 @@ where
   AcquisitionRequirements in Without<AcquisitionRequirements, HttpTransport> {
   let hasScratch = scratch.length != usize.ZERO
   let mut callback = move handler
-  let mut dispatch = HybridAttemptDispatch {
-    client: &mut client.*,
-    scratch: &mut scratch,
-    callback: &mut callback,
-  }
-  return run runResponseLoop(
+  let mut dispatch = HybridAttemptDispatch<
+    RoutedP,
+    DirectP,
+    A,
+    C,
+    H,
+    ProducerError,
+    CallbackError,
+    AcquisitionError,
+    ProducerRequirements,
+    CallbackRequirements,
+    AcquisitionRequirements,
+  > {policy: policy, client: &mut client.*, scratch: &mut scratch, callback: &mut callback}
+  return run runResponseLoop<
+    'policy,
+    RoutedP,
+    A,
+    ProducerError,
+    FactoryError,
+    CallbackError,
+    AcquisitionError,
+    ProducerRequirements,
+    FactoryRequirements,
+    CallbackRequirements,
+    AcquisitionRequirements,
+  >(
     &mut dispatch,
     move request,
     policy,
-    ReplayPlan<Factory, Producer> {factory: move factory, retained: true},
+    ReplayPlan<
+      RoutedP,
+      ProducerError,
+      AttemptStep<'policy, A>,
+      FactoryError,
+      RedirectError | ValueError | ProducerError | CallbackError | ClientError | OutOfMemoryError | AcquisitionError,
+      ProducerRequirements,
+      FactoryRequirements,
+      ProducerRequirements | CallbackRequirements | AcquisitionRequirements | &mut AttemptDispatch<'policy, RedirectAttemptHandler<
+        'policy,
+        ProducerError,
+        ProducerRequirements,
+      >, AttemptStep<'policy, A>, RedirectError | ValueError | ProducerError | CallbackError | ClientError | OutOfMemoryError | AcquisitionError ? ProducerRequirements | CallbackRequirements | AcquisitionRequirements | &mut SelectedBody<
+        ProducerError,
+        ProducerRequirements,
+      > | &mut MonotonicClock | &mut Allocator | &mut Random> | &mut MonotonicClock | &mut Allocator | &mut Random,
+      Factory,
+      Producer,
+      SelectedAttemptHandler<
+        'policy,
+        ProducerError,
+        ProducerRequirements,
+        RoutedP,
+        A,
+        CallbackError,
+        AcquisitionError,
+        CallbackRequirements,
+        AcquisitionRequirements,
+      >,
+    > {factory: move factory, retained: true},
     move deadline,
     hasScratch,
   )

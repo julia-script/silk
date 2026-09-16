@@ -14,7 +14,7 @@ an overall deadline before dispatch. Cleanup closes without a flush or TLS shutd
 
 Import as `HttpClientNative` with `import silk.http_client_native as HttpClientNative`.
 
-Public declarations: 9.
+Public declarations: 16.
 
 <a id="declaration-73696c6b2f687474705f636c69656e745f6e61746976653a3a4e6174697665526f757465"></a>
 
@@ -96,6 +96,16 @@ Synchronous hostname resolution cannot honor the supplied overall deadline.
 
 <a id="declaration-73696c6b2f687474705f636c69656e745f6e61746976653a3a4e6174697665436c69656e744572726f723a3a76617269616e743a33"></a>
 
+### `TrustRequired`
+
+```silk
+NativeClientError.TrustRequired: NativeClientError
+```
+
+HTTPS owned acquisition requires one caller-prepared frozen trust snapshot.
+
+<a id="declaration-73696c6b2f687474705f636c69656e745f6e61746976653a3a4e6174697665436c69656e744572726f723a3a76617269616e743a34"></a>
+
 ### `AlpnMismatch`
 
 ```silk
@@ -104,7 +114,7 @@ NativeClientError.AlpnMismatch { error: ConnectionError }: NativeClientError
 
 Required HTTP/1.1 application protocol negotiation did not succeed.
 
-<a id="declaration-73696c6b2f687474705f636c69656e745f6e61746976653a3a4e6174697665436c69656e744572726f723a3a76617269616e743a333a3a6669656c643a30"></a>
+<a id="declaration-73696c6b2f687474705f636c69656e745f6e61746976653a3a4e6174697665436c69656e744572726f723a3a76617269616e743a343a3a6669656c643a30"></a>
 
 #### Field `error`
 
@@ -294,6 +304,155 @@ pub fn route<'life0>(self: &'life0 NativeTransport) -> NativeRoute
 
 Returns owned immutable route metadata while leaving the transport exclusively inside its session.
 
+<a id="declaration-73696c6b2f687474705f636c69656e745f6e61746976653a3a4e6174697665526f75746550726f7669646572"></a>
+
+## `NativeRouteProvider`
+
+```silk
+pub struct NativeRouteProvider
+```
+
+One affine plain native provider owned by a routed HTTP scope.
+
+### Details
+
+The provider retains the exact socket selected for the route's physical peer. HTTP and raw
+byte authority share one terminal state so CONNECT transfer cannot duplicate ownership.
+
+<a id="declaration-73696c6b2f687474705f636c69656e745f6e61746976653a3a696d706c656d656e746174696f6e3a31"></a>
+
+## Implementation `HttpTransport for NativeRouteProvider`
+
+```silk
+impl HttpTransport for NativeRouteProvider
+```
+
+<a id="declaration-73696c6b2f687474705f636c69656e745f6e61746976653a3a696d706c656d656e746174696f6e3a313a3a6f7065726174696f6e3a30"></a>
+
+### Operation `readSomeRaw`
+
+```silk
+readSomeRaw = NativeRouteProvider.readHttp
+```
+
+<a id="declaration-73696c6b2f687474705f636c69656e745f6e61746976653a3a696d706c656d656e746174696f6e3a313a3a6f7065726174696f6e3a31"></a>
+
+### Operation `writeSomeRaw`
+
+```silk
+writeSomeRaw = NativeRouteProvider.writeHttp
+```
+
+<a id="declaration-73696c6b2f687474705f636c69656e745f6e61746976653a3a696d706c656d656e746174696f6e3a313a3a6f7065726174696f6e3a32"></a>
+
+### Operation `flush`
+
+```silk
+flush = NativeRouteProvider.flushHttp
+```
+
+<a id="declaration-73696c6b2f687474705f636c69656e745f6e61746976653a3a696d706c656d656e746174696f6e3a313a3a6f7065726174696f6e3a33"></a>
+
+### Operation `close`
+
+```silk
+close = NativeRouteProvider.closeHttp
+```
+
+<a id="declaration-73696c6b2f687474705f636c69656e745f6e61746976653a3a696d706c656d656e746174696f6e3a32"></a>
+
+## Implementation `ByteDuplex for NativeRouteProvider`
+
+```silk
+impl ByteDuplex for NativeRouteProvider
+```
+
+<a id="declaration-73696c6b2f687474705f636c69656e745f6e61746976653a3a696d706c656d656e746174696f6e3a323a3a6f7065726174696f6e3a30"></a>
+
+### Operation `readSomeRaw`
+
+```silk
+readSomeRaw = NativeRouteProvider.readBytes
+```
+
+<a id="declaration-73696c6b2f687474705f636c69656e745f6e61746976653a3a696d706c656d656e746174696f6e3a323a3a6f7065726174696f6e3a31"></a>
+
+### Operation `writeSomeRaw`
+
+```silk
+writeSomeRaw = NativeRouteProvider.writeBytes
+```
+
+<a id="declaration-73696c6b2f687474705f636c69656e745f6e61746976653a3a696d706c656d656e746174696f6e3a323a3a6f7065726174696f6e3a32"></a>
+
+### Operation `flushRaw`
+
+```silk
+flushRaw = NativeRouteProvider.flushBytes
+```
+
+<a id="declaration-73696c6b2f687474705f636c69656e745f6e61746976653a3a696d706c656d656e746174696f6e3a323a3a6f7065726174696f6e3a33"></a>
+
+### Operation `shutdownWriteRaw`
+
+```silk
+shutdownWriteRaw = NativeRouteProvider.shutdownBytes
+```
+
+<a id="declaration-73696c6b2f687474705f636c69656e745f6e61746976653a3a696d706c656d656e746174696f6e3a323a3a6f7065726174696f6e3a34"></a>
+
+### Operation `closeRaw`
+
+```silk
+closeRaw = NativeRouteProvider.closeBytes
+```
+
+<a id="declaration-73696c6b2f687474705f636c69656e745f6e61746976653a3a616371756972654f776e6564"></a>
+
+## `acquireOwned`
+
+```silk
+pub effect<'static> fn acquireOwned(origin: Origin, options: Options, limits: Limits, preparedTrust: silk/option.Option<silk/trust_snapshot.TrustSnapshot>, acquisitionDeadline: silk/option.Option<silk/system_clock.Instant>) -> silk/http_client.Connection<silk/http_client_native.NativeTransport> ! NativeClientError | ClientError | ResolverError | NativeSocketError | ConnectionError | IdentityError | OutOfMemoryError ? &mut Allocator | &mut MonotonicClock | &mut SystemClock | &mut Random
+```
+
+Acquires and publishes one complete direct TCP or HTTPS HTTP connection owner.
+
+### Details
+
+`acquisitionDeadline` can only shorten `options.deadline`. HTTPS consumes one caller-prepared
+frozen trust snapshot and authenticates the exact original origin. The returned HTTP owner
+retains no acquisition or request deadline; callers must close it or transfer it into another
+scoped owner.
+
+<a id="declaration-73696c6b2f687474705f636c69656e745f6e61746976653a3a61646d6974556e6978526f757465"></a>
+
+## `admitUnixRoute`
+
+```silk
+pub effect<'life0> fn admitUnixRoute<'life0>(path: &'life0 [u8]) -> NativeRoute ! NativeSocketError
+```
+
+Copies one Unix path into bounded native route metadata before transport contact.
+
+### Details
+
+The target-specific native address capacity is checked before the returned route is published.
+
+<a id="declaration-73696c6b2f687474705f636c69656e745f6e61746976653a3a61637175697265556e69784f776e6564"></a>
+
+## `acquireUnixOwned`
+
+```silk
+pub effect<'life0> fn acquireUnixOwned<'life0>(path: &'life0 [u8], origin: Origin, options: Options, limits: Limits, preparedTrust: silk/option.Option<silk/trust_snapshot.TrustSnapshot>, acquisitionDeadline: silk/option.Option<silk/system_clock.Instant>) -> silk/http_client.Connection<silk/http_client_native.NativeTransport> ! NativeClientError | ClientError | NativeSocketError | ConnectionError | IdentityError | OutOfMemoryError ? &mut Allocator | &mut MonotonicClock | &mut SystemClock | &mut Random
+```
+
+Acquires and publishes one complete Unix-routed HTTP or HTTPS connection owner.
+
+### Details
+
+The Unix path selects only the physical transport. TLS still authenticates `origin`, and the
+returned HTTP owner retains neither the acquisition nor request deadline.
+
 <a id="declaration-73696c6b2f687474705f636c69656e745f6e61746976653a3a77697468436f6e6e656374696f6e"></a>
 
 ## `withConnection`
@@ -306,8 +465,8 @@ Resolves and acquires one origin, then lends its serial HTTP connection to one h
 
 ### Details
 
-HTTPS loads trust after socket acquisition under a nonparking release bracket. Host fields
-never replace the origin identity. `Http10` disables ALPN; other policies offer only HTTP/1.1.
+HTTPS freezes trust before opening and authenticates the original origin. Host fields never
+replace that identity. `Http10` disables ALPN; other policies offer only HTTP/1.1.
 
 <a id="declaration-73696c6b2f687474705f636c69656e745f6e61746976653a3a77697468556e6978436f6e6e656374696f6e"></a>
 
@@ -323,7 +482,23 @@ Connects an explicit Unix socket while retaining a separate HTTP and TLS authori
 
 The socket path selects only the transport. HTTPS authenticates `origin` with explicit trust.
 
-<a id="declaration-73696c6b2f687474705f636c69656e745f6e61746976653a3a696d706c656d656e746174696f6e3a31"></a>
+<a id="declaration-73696c6b2f687474705f636c69656e745f6e61746976653a3a7769746850726f7879526f757465"></a>
+
+## `withProxyRoute`
+
+```silk
+pub effect<'env> fn withProxyRoute<'configuration: 'env, A, E, ?R, H: 'env, 'env>(route: silk/http_proxy.Route<'configuration>, options: Options, limits: Limits, preparedTrust: silk/option.Option<silk/trust_snapshot.TrustSnapshot>, handler: H) -> A ! E | ProxyError | ClientError | NativeClientError | ResolverError | NativeSocketError | ConnectionError | IdentityError | OutOfMemoryError ? R | &mut Allocator | &mut MonotonicClock | &mut SystemClock | &mut Random where R in Without<R, &ByteDuplex>, R in Without<R, &HttpTransport>
+```
+
+Resolves and connects only one sealed route's physical peer, then lends the final HTTP scope.
+
+### Details
+
+`options.deadline` is passed unchanged through native preflight, resolution, connection,
+CONNECT, and TLS. `limits` supplies both the HTTP scope and generated CONNECT bounds. Secure
+routes consume caller-prepared trust; no resolver fallback or alternate endpoint is selected.
+
+<a id="declaration-73696c6b2f687474705f636c69656e745f6e61746976653a3a696d706c656d656e746174696f6e3a34"></a>
 
 ## Implementation `HttpTransport for NativeTransport`
 
@@ -331,7 +506,7 @@ The socket path selects only the transport. HTTPS authenticates `origin` with ex
 impl HttpTransport for NativeTransport
 ```
 
-<a id="declaration-73696c6b2f687474705f636c69656e745f6e61746976653a3a696d706c656d656e746174696f6e3a313a3a6f7065726174696f6e3a30"></a>
+<a id="declaration-73696c6b2f687474705f636c69656e745f6e61746976653a3a696d706c656d656e746174696f6e3a343a3a6f7065726174696f6e3a30"></a>
 
 ### Operation `readSomeRaw`
 
@@ -339,7 +514,7 @@ impl HttpTransport for NativeTransport
 readSomeRaw = NativeTransport.read
 ```
 
-<a id="declaration-73696c6b2f687474705f636c69656e745f6e61746976653a3a696d706c656d656e746174696f6e3a313a3a6f7065726174696f6e3a31"></a>
+<a id="declaration-73696c6b2f687474705f636c69656e745f6e61746976653a3a696d706c656d656e746174696f6e3a343a3a6f7065726174696f6e3a31"></a>
 
 ### Operation `writeSomeRaw`
 
@@ -347,7 +522,7 @@ readSomeRaw = NativeTransport.read
 writeSomeRaw = NativeTransport.write
 ```
 
-<a id="declaration-73696c6b2f687474705f636c69656e745f6e61746976653a3a696d706c656d656e746174696f6e3a313a3a6f7065726174696f6e3a32"></a>
+<a id="declaration-73696c6b2f687474705f636c69656e745f6e61746976653a3a696d706c656d656e746174696f6e3a343a3a6f7065726174696f6e3a32"></a>
 
 ### Operation `flush`
 
@@ -355,7 +530,7 @@ writeSomeRaw = NativeTransport.write
 flush = NativeTransport.flushOutput
 ```
 
-<a id="declaration-73696c6b2f687474705f636c69656e745f6e61746976653a3a696d706c656d656e746174696f6e3a313a3a6f7065726174696f6e3a33"></a>
+<a id="declaration-73696c6b2f687474705f636c69656e745f6e61746976653a3a696d706c656d656e746174696f6e3a343a3a6f7065726174696f6e3a33"></a>
 
 ### Operation `close`
 
@@ -372,6 +547,66 @@ pub fn preflight<'life0, 'life1>(origin: &'life0 silk/http_origin.Origin, option
 ```
 
 Checks native TCP support and rejects a hostname deadline before resolver dispatch.
+
+<a id="declaration-73696c6b2f687474705f636c69656e745f6e61746976653a3a707265666c6967687450726f7879526f757465"></a>
+
+## `preflightProxyRoute`
+
+```silk
+pub fn preflightProxyRoute<'configuration, 'life1, 'life2>(route: &'life1 silk/http_proxy.Route<'configuration>, options: &'life2 silk/http_client_native.Options) -> silk/result.Result<silk/http_origin.Origin, silk/http_client_native.NativeClientError | silk/http_proxy.ProxyError>
+```
+
+Returns the exact route-selected native peer after target and deadline preflight.
+
+### Details
+
+Direct returns the original origin; Forward and Tunnel return the sealed plain proxy origin.
+A finite deadline with either selected domain fails before synchronous resolver dispatch.
+
+<a id="declaration-73696c6b2f687474705f636c69656e745f6e61746976653a3a4e61746976655265646972656374436c69656e74"></a>
+
+## `NativeRedirectClient`
+
+```silk
+pub struct NativeRedirectClient<'configuration, 'policy, A, HandlerError, ?HandlerRequirements>
+```
+
+Rebuildable native route acquisition for bounded redirect operations.
+
+### Details
+
+The initial sealed route retains the immutable proxy configuration. On supported native
+targets, every attempt recomputes policy for its current URI, completes method, target, header,
+and native-route preflight before destination contact, and replaces the stored option deadline
+with the operation's unchanged absolute deadline. Secure attempts load a fresh trust snapshot
+before acquisition; tunneled TLS continues to authenticate the original origin through
+[`withProxyRoute`](#declaration-73696c6b2f687474705f636c69656e745f6e61746976653a3a7769746850726f7879526f757465). Other targets fail with `UnsupportedTarget` before inspecting the request.
+
+<a id="declaration-73696c6b2f687474705f636c69656e745f6e61746976653a3a4e61746976655265646972656374436c69656e742e6d616b65"></a>
+
+### Associated function `NativeRedirectClient.make`
+
+```silk
+pub fn make<'configuration, 'policy, A, HandlerError, ?HandlerRequirements>(route: silk/http_proxy.Route<'configuration>, options: Options, limits: Limits) -> silk/http_client_native.NativeRedirectClient<'configuration, 'policy, A, HandlerError, ? HandlerRequirements>
+```
+
+Creates a reusable redirect attempt client from one policy-selected route.
+
+<a id="declaration-73696c6b2f687474705f636c69656e745f6e61746976653a3a696d706c656d656e746174696f6e3a36"></a>
+
+## Implementation `silk/http_redirect.AttemptClient<'policy, silk/http_client_native.NativeRouteProvider, A, HandlerError, silk/allocator.OutOfMemoryError | silk/http.ValueError | silk/http_client.ClientError | silk/http_client_native.NativeClientError | silk/http_origin.OriginError | silk/http_proxy.ProxyError | silk/http_request.RequestError | silk/https_identity.IdentityError | silk/native_socket.NativeSocketError | silk/resolver.ResolverError | silk/tls_connection.ConnectionError | silk/trust_snapshot.TrustSourceError, ? &mut silk/allocator.Allocator | &mut silk/monotonic_clock.MonotonicClock | &mut silk/random.Random | &mut silk/system_clock.SystemClock | &mut silk/trust_source.TrustSource, ? HandlerRequirements> for silk/http_client_native.NativeRedirectClient<'configuration, 'policy, A, HandlerError, ? HandlerRequirements>`
+
+```silk
+impl silk/http_redirect.AttemptClient<'policy, silk/http_client_native.NativeRouteProvider, A, HandlerError, silk/allocator.OutOfMemoryError | silk/http.ValueError | silk/http_client.ClientError | silk/http_client_native.NativeClientError | silk/http_origin.OriginError | silk/http_proxy.ProxyError | silk/http_request.RequestError | silk/https_identity.IdentityError | silk/native_socket.NativeSocketError | silk/resolver.ResolverError | silk/tls_connection.ConnectionError | silk/trust_snapshot.TrustSourceError, ? &mut silk/allocator.Allocator | &mut silk/monotonic_clock.MonotonicClock | &mut silk/random.Random | &mut silk/system_clock.SystemClock | &mut silk/trust_source.TrustSource, ? HandlerRequirements> for silk/http_client_native.NativeRedirectClient<'configuration, 'policy, A, HandlerError, ? HandlerRequirements>
+```
+
+<a id="declaration-73696c6b2f687474705f636c69656e745f6e61746976653a3a696d706c656d656e746174696f6e3a363a3a6f7065726174696f6e3a30"></a>
+
+### Operation `withAttempt`
+
+```silk
+withAttempt = NativeRedirectClient.withAttempt
+```
 
 <a id="declaration-73696c6b2f687474705f636c69656e745f6e61746976653a3a726f757465"></a>
 

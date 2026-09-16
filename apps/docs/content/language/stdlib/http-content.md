@@ -30,7 +30,7 @@ traps that bypass Effect finalizers and Drop.
 
 Import as `ContentReader` with `import silk.http_content { ContentReader }`.
 
-Public declarations: 24.
+Public declarations: 25.
 
 <a id="declaration-73696c6b2f687474705f636f6e74656e743a3a4d6f6465"></a>
 
@@ -1245,6 +1245,22 @@ pub fn acceptEncoding<'value>(mode: Mode, policy: silk/http_content.AcceptEncodi
 ```
 
 Builds at most one validated `Accept-Encoding` field without mutating a request.
+
+<a id="declaration-73696c6b2f687474705f636f6e74656e743a3a76616c69646174654c696d697473"></a>
+
+## `validateLimits`
+
+```silk
+pub fn validateLimits<'head, 'life1>(limits: &'life1 silk/http_content.Limits) -> silk/result.Result<(), silk/http_content.ContentError<'head>>
+```
+
+Validates source-independent content limits without allocation or body I/O.
+
+### Details
+
+`maxDepth` must be from one through four. `intermediateCapacity` must be from one through
+65,536 bytes. Other byte limits can be zero and are enforced by planning or content I/O.
+Codec-specific storage validation occurs when a plan selects that codec.
 
 <a id="declaration-73696c6b2f687474705f636f6e74656e743a3a4465636f646572"></a>
 
