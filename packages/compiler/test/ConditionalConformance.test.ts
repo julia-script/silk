@@ -15,6 +15,38 @@ const ascii = (value: string): Uint8Array => Uint8Array.from(value, (unit) => un
 const analyze = (name: string, source: string) =>
   AnalysisFixture.retainingMain(name, ascii(source), 'wasm32-unknown-unknown')
 
+it.effect('selects capability-bound parameters for one reusable provider', () =>
+  Effect.gen(function* () {
+    const module = 'conformance/capability-bound-parameters'
+    const snapshot = yield* AnalysisFixture.frontend(
+      module,
+      ascii(`interface Echo<T> {
+  fn echo(self: &Self, value: T) -> T
+}
+struct Client {}
+impl<T> Echo<T> for Client {
+  fn echo(self: &Self, value: T) -> T { return move value }
+}
+fn calls(client: &Client) -> i32 {
+  let flag = Echo<bool>.echo(client, true)
+  if flag { return Echo<i32>.echo(client, 42) }
+  return 0
+}`),
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    for (const argument of ['i32', 'bool'] as const) {
+      const proof = ConformanceProof.prove(
+        Analysis.declarationIndex(snapshot),
+        Type.nominal(module, 'Client'),
+        Type.nominal(module, 'Echo', [argument]),
+      )
+      assert.strictEqual(proof._tag, 'Proved')
+      if (proof._tag === 'Proved')
+        assert.deepEqual(proof.typeArguments.map(Type.encodeGenericArgument), [argument])
+    }
+  }),
+)
+
 it.effect('does not invent witness lifetimes for concrete requirement-row access', () =>
   Effect.gen(function* () {
     const source = `service Clock {}

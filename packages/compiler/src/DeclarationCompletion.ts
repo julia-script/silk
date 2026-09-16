@@ -1457,9 +1457,18 @@ export const complete = (
       }
       if (conformance.termination._tag === 'NonTerminating') continue
       if (conformance.coherence._tag === 'Overlapping') continue
+      // A source interface application is part of the witness head, so it can determine a binder
+      // even when one reusable provider stores no value of that type. Sealed capabilities still
+      // bind parameters through the provider alone. Coherence and proof inference use both heads.
       const usedParameterKeys = new Set([
         ...Type.parameters(provider).map(Type.key),
         ...Type.freeLifetimes(provider).map(Lifetime.key),
+        ...(sourceContract === undefined
+          ? []
+          : [
+              ...Type.parameters(capability).map(Type.key),
+              ...Type.freeLifetimes(capability).map(Lifetime.key),
+            ]),
       ])
       const unused = conformance.typeParameters
         .filter((parameter) => parameter.duplicateOf === undefined)
@@ -1467,7 +1476,7 @@ export const complete = (
       if (unused.length > 0) {
         diagnostics.push(
           invalidDiagnostic(
-            `impl type parameter ${unused.map((parameter) => parameter.type.name).join(', ')} is not used by the provider type`,
+            `impl type parameter ${unused.map((parameter) => parameter.type.name).join(', ')} is not used by the ${sourceContract === undefined ? 'provider type' : 'conformance head'}`,
             conformance.syntax.span,
           ),
         )

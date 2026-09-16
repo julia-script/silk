@@ -122,6 +122,14 @@ need a target-neutral boundary and acquisition ownership already belongs to clie
 Alternative: pass separate mutable trust, proxy, and pool knobs per request. Rejected because those
 values are part of authenticated connection identity and could make pool reuse unsafe.
 
+The immutable native context must remain reusable across callback result and error families. Its
+`FetchClient` conformance therefore binds those parameters in the interface application rather than
+storing phantom per-invocation parameters in `Context`. Conformance admission must follow the
+prescriptive IMPL-006 rule: every binder is determined by the complete interface/provider head.
+Parameters absent from both sides remain invalid, overlap still compares complete heads, and
+conditional requirements must still descend through the provider. This does not introduce runtime
+dispatch or generic interface-operation syntax.
+
 ### Final metadata is copied once and moved into the result
 
 Inside the final redirect callback, copy the final current URI and response head under one admitted
