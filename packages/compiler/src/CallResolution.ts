@@ -1363,7 +1363,7 @@ export const solveCallableConstraints = (
   // provider selectors are visible to structural proofs.
   for (const entry of checked) {
     const wanted = Constraint.substitute(entry.constraint, substitution)
-    if (givens.some((given) => Constraint.key(given) === Constraint.key(wanted))) {
+    if (Constraint.isImplied(wanted, givens)) {
       evidence.push(Constraint.assumed(wanted, substitution))
       continue
     }

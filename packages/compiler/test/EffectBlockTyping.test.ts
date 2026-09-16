@@ -95,6 +95,10 @@ it.effect('excludes one service from an otherwise open callback requirement row'
     const accepted = yield* analyze(`struct Lease {}
 service Duplex { effect fn touch() -> () ? &mut Duplex }
 service Audit { effect fn record() -> () ? &mut Audit }
+effect fn consume<?R>() -> () ? R where R in Without<R, &mut Duplex> { return () }
+effect fn extend<?R>() -> () ? R | &mut Audit where R in Without<R, &mut Duplex> {
+  return run consume<R | &mut Audit>()
+}
 effect fn scoped<'env, A, E, ?R>(
   lease: &'env mut Lease,
   callback: for<'call> once fn<'env>(
@@ -118,6 +122,14 @@ pub fn main() -> i32 { return 42 }`)
 
     const rejected = yield* analyze(`struct Lease {}
 service Duplex { effect fn touch() -> () ? &mut Duplex }
+service Audit { effect fn record() -> () ? &mut Audit }
+effect fn consume<?R>() -> () ? R where R in Without<R, &mut Duplex> { return () }
+effect fn unproven<?R>() -> () ? R | &mut Audit {
+  return run consume<R | &mut Audit>()
+}
+effect fn forbidden<?R>() -> () ? R | &mut Duplex where R in Without<R, &mut Duplex> {
+  return run consume<R | &mut Duplex>()
+}
 effect fn scoped<'env, A, E, ?R>(
   lease: &'env mut Lease,
   callback: for<'call> once fn<'env>(
@@ -130,7 +142,7 @@ where R in Without<R, &mut Duplex> {
 effect fn bypass(lease: &mut Lease) -> i32 ? &mut Duplex { drop lease run Duplex.touch() return 42 }
 effect fn rejected(lease: &mut Lease) -> i32 ? &mut Duplex { return run scoped(move lease, bypass) }
 pub fn main() -> i32 { return 42 }`)
-    assert.deepEqual(codes(rejected), ['SEM0074'])
+    assert.deepEqual(codes(rejected), ['SEM0074', 'SEM0074', 'SEM0074'])
   }),
 )
 

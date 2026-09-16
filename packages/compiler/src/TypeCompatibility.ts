@@ -175,8 +175,8 @@ const outlives = (
       retain(self, [() => self.commitOutlives?.(longer, shorter)])
     return true
   }
-  // Discharge compound obligations through their constituents. Only free atomic obligations
-  // reach the local-region solver; a rigid invocation region cannot be committed into its graph.
+  // Rigid invocation regions cannot be committed into the local graph. Discharge their
+  // compound obligations through constituents, retaining only free sub-obligations.
   if (longer._tag === 'IntersectionLifetime')
     return commitWhen(
       self,

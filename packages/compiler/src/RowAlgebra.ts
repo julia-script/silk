@@ -306,25 +306,62 @@ export const equals = <Member, RowParameter, SymbolicMember, MemberParameter>(
 ): boolean => key(policy, left) === key(policy, right)
 
 /**
- * Proves a subset relation from normalized row structure alone.
+ * Proves a subset relation from normalized row structure and declared subset assumptions.
  *
  * This is intentionally forward-only: exact operands and concrete finite subsets are provable,
- * as are unions composed entirely from such operands. A `Without` expression is never inverted or
- * used to bind either side; it is comparable only by exact expression identity.
+ * as are unions composed entirely from such operands. Declared subset assumptions can establish
+ * exclusion of a member, but are never inverted or used to bind either side.
  */
 export const isKnownSubset = <Member, RowParameter, SymbolicMember, MemberParameter>(
   policy: Policy<Member, RowParameter, SymbolicMember, MemberParameter>,
   candidate: Row<Member, RowParameter, SymbolicMember>,
   container: Row<Member, RowParameter, SymbolicMember>,
+  assumptions: ReadonlyArray<{
+    readonly selected: Row<Member, RowParameter, SymbolicMember>
+    readonly source: Row<Member, RowParameter, SymbolicMember>
+  }> = [],
 ): boolean => {
+  const row = (expression: Expression<Member, RowParameter, SymbolicMember>) => ({
+    expression,
+    memberWellFormed: [],
+  })
+  const disjoint = (
+    left: Expression<Member, RowParameter, SymbolicMember>,
+    right: Expression<Member, RowParameter, SymbolicMember>,
+  ): boolean => {
+    if (left._tag === 'Concrete' && right._tag === 'Concrete')
+      return (
+        ![...left.row.members, ...right.row.members].some(policy.concreteMemberMaySpecialize) &&
+        !left.row.members.some((member) => FiniteRow.has(policy.finite, right.row, member))
+      )
+    return assumptions.some(
+      (given) =>
+        given.selected.memberWellFormed.length === 0 &&
+        given.source.memberWellFormed.length === 0 &&
+        given.source.expression._tag === 'Without' &&
+        isKnownSubset(policy, row(left), given.selected) &&
+        isKnownSubset(policy, row(right), row(given.source.expression.selected)),
+    )
+  }
   const prove = (
     left: Expression<Member, RowParameter, SymbolicMember>,
     right: Expression<Member, RowParameter, SymbolicMember>,
   ): boolean => {
     if (expressionKey(policy, left) === expressionKey(policy, right)) return true
     if (left._tag === 'Concrete' && left.row.members.length === 0) return true
+    if (
+      assumptions.some(
+        (given) =>
+          given.selected.memberWellFormed.length === 0 &&
+          given.source.memberWellFormed.length === 0 &&
+          expressionKey(policy, left) === expressionKey(policy, given.selected.expression) &&
+          expressionKey(policy, right) === expressionKey(policy, given.source.expression),
+      )
+    )
+      return true
     if (left._tag === 'Union') return left.operands.every((operand) => prove(operand, right))
     if (right._tag === 'Union') return right.operands.some((operand) => prove(left, operand))
+    if (right._tag === 'Without') return prove(left, right.source) && disjoint(left, right.selected)
     if (left._tag === 'Concrete' && right._tag === 'Concrete')
       return FiniteRow.isSubset(policy.finite, left.row, right.row)
     return false
