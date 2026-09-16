@@ -256,19 +256,31 @@ export const without = <Member, RowParameter, SymbolicMember, MemberParameter>(
     return Object.freeze({ expression: source.expression, memberWellFormed: obligations })
   if (selected.expression._tag === 'Concrete' && selected.expression.row.members.length === 0)
     return Object.freeze({ expression: source.expression, memberWellFormed: obligations })
-  if (
-    source.expression._tag === 'Concrete' &&
-    selected.expression._tag === 'Concrete' &&
-    ![...source.expression.row.members, ...selected.expression.row.members].some(
-      policy.concreteMemberMaySpecialize,
+  if (source.expression._tag === 'Concrete' && selected.expression._tag === 'Concrete') {
+    const differenceKey = policy.finite.differenceKey ?? policy.finite.collisionKey
+    const selectedMembers = selected.expression.row.members
+    const selectedKeys = new Set(selectedMembers.map(differenceKey))
+    // Equal keys stay equal under substitution. A surviving key is safe only when it
+    // cannot later collide with a selected key; unrelated nominal heads/roles prove that
+    // even when either service contains borrowed lifetimes or generic arguments.
+    const stable = source.expression.row.members.every(
+      (member) =>
+        selectedKeys.has(differenceKey(member)) ||
+        selectedMembers.every(
+          (other) =>
+            policy.concreteMembersAreDisjoint?.(member, other) === true ||
+            (!policy.concreteMemberMaySpecialize(member) &&
+              !policy.concreteMemberMaySpecialize(other)),
+        ),
     )
-  )
-    return Object.freeze({
-      expression: concreteExpression(
-        FiniteRow.difference(policy.finite, source.expression.row, selected.expression.row),
-      ),
-      memberWellFormed: obligations,
-    })
+    if (stable)
+      return Object.freeze({
+        expression: concreteExpression(
+          FiniteRow.difference(policy.finite, source.expression.row, selected.expression.row),
+        ),
+        memberWellFormed: obligations,
+      })
+  }
   if (policy.allowsSetCancellation && source.expression._tag === 'Union') {
     const remaining = source.expression.operands.filter(
       (operand) => expressionKey(policy, operand) !== selectedKey,
