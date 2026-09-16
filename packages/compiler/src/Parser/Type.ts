@@ -146,6 +146,7 @@ export const parseTypeArgumentList = (
     ) &&
     (!following.includes(nextSignificantKind(state) ?? 'EndOfFile') ||
       nullablePointerStarts(state) ||
+      nextSignificantKind(state) === 'Identifier' ||
       nextSignificantKind(state) === 'LeftParenthesis')
   ) {
     const argumentFollowing: ReadonlyArray<Token.TokenKind> = [

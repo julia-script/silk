@@ -88,6 +88,21 @@ fn construct<?R>(value: &i32) -> () {
   }),
 )
 
+it.effect('parses applied services inside provider constraints', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSource(
+      'generics/applied-provider-constraint',
+      new TextEncoder().encode(`service Envelope<T> {}
+fn require<P>(provider: &mut P) -> ()
+where &mut P provides &Envelope<i32> from &mut Envelope<i32> {
+  drop provider
+  return ()
+}`),
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+  }),
+)
+
 it.effect('preserves access in nonfinal concrete nominal requirement arguments', () =>
   Effect.gen(function* () {
     const snapshot = yield* Analysis.ofSource(
