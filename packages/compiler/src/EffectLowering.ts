@@ -1768,7 +1768,13 @@ export const lowerServiceEffectValue = (
     if (lowered === 'Transferred' || lowered === undefined) return lowered
     loweredArguments.push(lowered.result)
   }
-  const call = fn.call(subject.span, target, undefined, subject.staticArguments)
+  const call = fn.call(
+    subject.span,
+    target,
+    undefined,
+    subject.staticArguments,
+    availableRequirements,
+  )
   if (
     call === undefined ||
     call.target.declaration.module !== target.module ||
