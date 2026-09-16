@@ -564,3 +564,92 @@ export const verify = (self: Layout.Plan): ReadonlyArray<Layout.Violation> => {
     return Object.freeze([])
   return invalid
 }
+
+/** Stored outcomes retain the active member's ordinary bytes; carrier lanes belong to transport. */
+export interface Outcome {
+  readonly size: number
+  readonly alignment: number
+  readonly payloadOffset: number
+  readonly members: ReadonlyArray<
+    Member & {
+      readonly storage:
+        | { readonly _tag: 'Value' }
+        | { readonly _tag: 'Transport'; readonly slots: ReadonlyArray<Slot> }
+    }
+  >
+}
+const layouts = new WeakMap<Layout.Plan, Map<string, Outcome>>()
+
+export const outcome = (plan: Layout.Plan, type: Type.Effect): Outcome => {
+  let cache = layouts.get(plan)
+  if (cache === undefined) {
+    cache = new Map()
+    layouts.set(plan, cache)
+  }
+  const key = Type.runtimeKey(type)
+  const cached = cache.get(key)
+  if (cached !== undefined) return cached
+  const view = find(plan, 'Outcome', type)
+  if (view === undefined) throw new RangeError('Native outcome lost its member plan')
+  let alignment = 4
+  let payloadSize = 0
+  const members: Array<Outcome['members'][number]> = []
+  for (const member of view.members) {
+    const entry = Layout.entry(plan, member.type)
+    if (entry !== undefined) {
+      alignment = Math.max(alignment, entry.alignment)
+      payloadSize = Math.max(payloadSize, entry.size)
+      members.push({ ...member, storage: { _tag: 'Value' } })
+      continue
+    }
+    // An erased executable has an ABI shape but no exact native environment. Its member
+    // crosses an explicit lane transport; ordinary values retain their canonical bytes.
+    if (member.lanes.length > 0 && !Type.isEffect(member.type) && !Type.isCallable(member.type))
+      throw new RangeError(`Native outcome lost its member layout: ${Type.encode(member.type)}`)
+    const packed = transport(
+      plan.target,
+      member.lanes.map(({ lane }) => lane),
+    )
+    alignment = Math.max(alignment, packed.alignment)
+    payloadSize = Math.max(payloadSize, packed.end)
+    members.push({ ...member, storage: { _tag: 'Transport', slots: packed.entries } })
+  }
+  const payloadOffset = alignUp(4, alignment)
+  const selected = {
+    size: alignUp(payloadOffset + payloadSize, alignment),
+    alignment,
+    payloadOffset,
+    members,
+  }
+  cache.set(key, selected)
+  return selected
+}
+
+/** Converts one explicit transport lane through the active native outcome member. */
+export const outcomeLocation = (
+  plan: Layout.Plan,
+  type: Type.Effect,
+  lane: Layout.CallingLane,
+  ordinal: number,
+): Location => {
+  if (ordinal === 0) return { _tag: 'Slot', lane, offset: 0 }
+  const view = outcome(plan, type)
+  return {
+    _tag: 'Choice',
+    tagOffset: 0,
+    alternatives: view.members.flatMap((member) => {
+      const mapping = member.lanes.find((mapping) => mapping.slot === ordinal)
+      if (mapping === undefined) return []
+      let selected: Location | undefined
+      if (member.storage._tag === 'Value')
+        selected = location(plan, member.type, mapping.lane, view.payloadOffset)
+      else {
+        const slot = member.storage.slots.at(member.lanes.indexOf(mapping))
+        if (slot === undefined) throw new RangeError('Outcome member lost its transport slot')
+        selected = { _tag: 'Slot', lane: mapping.lane, offset: view.payloadOffset + slot.offset }
+      }
+      if (selected === undefined) throw new RangeError('Native outcome lost a member lane')
+      return [{ tag: member.tag, location: selected }]
+    }),
+  }
+}

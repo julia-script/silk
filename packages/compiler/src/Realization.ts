@@ -1,3 +1,4 @@
+import * as CompilerTrace from './CompilerTrace.js'
 import * as NativeAssemblyPlanning from './NativeAssemblyPlanning.js'
 import * as ArtifactPlan from './ArtifactPlan.js'
 import * as ToolchainIntegrity from './ToolchainIntegrity.js'
@@ -70,6 +71,7 @@ const discoverInstances = Effect.fn('Realization.discoverInstances')(function* (
   report: Array<PhaseReport.PhaseReport>,
   options: Options,
 ) {
+  const trace = yield* CompilerTrace.capture()
   const instances = PhaseReport.measureInto(
     report,
     'instance-discovery',
@@ -87,6 +89,7 @@ const discoverInstances = Effect.fn('Realization.discoverInstances')(function* (
             completion,
             self.resolution,
             self.composition,
+            trace,
           ),
     (value) => value.instances.length,
     (value) => value.violations.length,
@@ -178,10 +181,14 @@ const buildLayoutCatalog = Effect.fn('Realization.buildLayoutCatalog')(
   ) => Effect.sync(() => Layout.catalog(target, index, instances, opaqueRealizations)),
 )
 
-const planLayout = Effect.fn('Realization.planLayout')(
-  (catalog: Layout.Catalog, instances: Instances.Discovery, index: DeclarationIndex.Index) =>
-    Effect.sync(() => Layout.plan(catalog, instances, index)),
-)
+const planLayout = Effect.fn('Realization.planLayout')(function* (
+  catalog: Layout.Catalog,
+  instances: Instances.Discovery,
+  index: DeclarationIndex.Index,
+) {
+  const trace = yield* CompilerTrace.capture()
+  return Layout.plan(catalog, instances, index, trace)
+})
 
 const lowerMir = Effect.fn('Realization.lowerMir')(function* (
   self: Frontend,
@@ -207,14 +214,15 @@ const lowerMir = Effect.fn('Realization.lowerMir')(function* (
   )
 })
 
-const lowerProgram = Effect.fn('Realization.lowerProgram')(
-  (
-    instances: Instances.Discovery,
-    layout: Layout.Plan,
-    index: DeclarationIndex.Index,
-    opaqueRealizations: OpaqueRealization.Catalog,
-  ) => Effect.sync(() => Lower.lowerProgram(instances, layout, index, opaqueRealizations)),
-)
+const lowerProgram = Effect.fn('Realization.lowerProgram')(function* (
+  instances: Instances.Discovery,
+  layout: Layout.Plan,
+  index: DeclarationIndex.Index,
+  opaqueRealizations: OpaqueRealization.Catalog,
+) {
+  const trace = yield* CompilerTrace.capture()
+  return Lower.lowerProgram(instances, layout, index, opaqueRealizations, trace)
+})
 
 const buildProvisionalMir = Effect.fn('Realization.buildProvisionalMir')(
   (instances: Instances.Discovery, layout: Layout.Plan, index: DeclarationIndex.Index) =>

@@ -1,3 +1,4 @@
+import * as MirVerification from '@silklang/compiler/MirVerification'
 import { assert, it } from '@effect/vitest'
 import * as Backend from '@silklang/compiler/Backend'
 import type * as Diagnostic from '@silklang/compiler/Diagnostic'
@@ -150,24 +151,20 @@ it('reports every durable native-library path on success', () => {
 
 it('lists each MIR violation with its rule, location, and owning function', () => {
   const outcome: Driver.Outcome = {
-    _tag: 'BackendFailed',
-    error: new Backend.BackendError({
-      operation: 'Backend.emit',
-      backend: 'LLVM',
-      message: 'LLVM cannot emit invalid MIR',
-      reason: {
-        _tag: 'InvalidMir',
-        violations: [
-          {
-            _tag: 'Violation',
-            rule: 'InvalidLoan',
-            function: { _tag: 'CanonicalDeclarationId', module: 'main', name: 'useCounter' },
-            provenance: { span: span(4, 8), generated: false },
-            detail: 'loan escapes its region',
-          },
-          { _tag: 'Violation', rule: 'InvalidArtifactRoot', detail: 'retained root missing' },
-        ],
-      },
+    _tag: 'VerificationFailed',
+    error: new MirVerification.MirVerificationError({
+      operation: 'MirVerification.check',
+      message: 'MIR verification failed',
+      violations: [
+        {
+          _tag: 'Violation',
+          rule: 'InvalidLoan',
+          function: { _tag: 'CanonicalDeclarationId', module: 'main', name: 'useCounter' },
+          provenance: { span: span(4, 8), generated: false },
+          detail: 'loan escapes its region',
+        },
+        { _tag: 'Violation', rule: 'InvalidArtifactRoot', detail: 'retained root missing' },
+      ],
     }),
     diagnostics: [],
     report: [],
@@ -175,7 +172,7 @@ it('lists each MIR violation with its rule, location, and owning function', () =
   assert.strictEqual(
     Report.outcome(outcome, source('one\ntwo\nthree'), 'main.silk'),
     [
-      'Backend error: LLVM cannot emit invalid MIR',
+      'Verification error: MIR verification failed',
       '  main.silk:2:1: error[InvalidLoan] loan escapes its region (in main.useCounter)',
       '  error[InvalidArtifactRoot] retained root missing',
     ].join('\n'),

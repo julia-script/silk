@@ -32,7 +32,7 @@ export const storageOf = (
       alignment: program.layout.target.pointerAlignment,
     })
   if (slot.type._tag === 'EffectOutcome')
-    return ValueStorage.find(program.layout, 'Outcome', slot.type.type)
+    return ValueStorage.outcome(program.layout, slot.type.type)
   if (slot.type._tag === 'EffectComposite')
     return ValueStorage.find(program.layout, 'CompositeCarrier', slot.type.type)
   if (

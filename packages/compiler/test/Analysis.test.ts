@@ -1,3 +1,4 @@
+import * as CompilerTrace from '../src/CompilerTrace.js'
 import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
@@ -24,6 +25,62 @@ import { unreachable } from './support/raise.js'
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
+
+it.effect('preserves synchronous trace nesting, results, and defects', () =>
+  Effect.gen(function* () {
+    const spans: Array<Tracer.Span> = []
+    const tracer = Tracer.make({
+      span(options) {
+        const span = new Tracer.NativeSpan(options)
+        spans.push(span)
+        return span
+      },
+    })
+    const value = { answer: 42 }
+    const defect = new Error('trace probe')
+    yield* Effect.gen(function* () {
+      const trace = yield* CompilerTrace.capture()
+      assert.strictEqual(
+        trace('outer', () => trace('inner', () => value)),
+        value,
+      )
+      assert.throws(
+        () =>
+          trace('failed', () =>
+            trace('failedChild', () => {
+              throw defect
+            }),
+          ),
+        defect,
+      )
+      trace('sibling', () => undefined, { 'function.name': 'probe' })
+    }).pipe(Effect.withSpan('root'), Effect.withTracer(tracer))
+    const span = (name: string) => spans.find((item) => item.name === name) ?? unreachable(name)
+    for (const [child, parent] of [
+      ['outer', 'root'],
+      ['inner', 'outer'],
+      ['failedChild', 'failed'],
+      ['sibling', 'root'],
+    ] as const) {
+      assert.strictEqual(Option.getOrUndefined(span(child).parent)?.spanId, span(parent).spanId)
+    }
+    for (const item of spans) assert.strictEqual(item.status._tag, 'Ended')
+    for (const name of ['failed', 'failedChild']) {
+      const status = span(name).status
+      assert.strictEqual(status._tag === 'Ended' && status.exit._tag, 'Failure')
+    }
+    assert.strictEqual(span('sibling').attributes.get('function.name'), 'probe')
+    const count = spans.length
+    yield* Effect.gen(function* () {
+      const trace = yield* CompilerTrace.capture()
+      assert.strictEqual(
+        trace('disabled', () => value),
+        value,
+      )
+    }).pipe(Effect.withTracerEnabled(false), Effect.withTracer(tracer))
+    assert.strictEqual(spans.length, count)
+  }),
+)
 
 it.effect('traces frontend stages through ordinary, selected, and incomplete-profile returns', () =>
   Effect.gen(function* () {

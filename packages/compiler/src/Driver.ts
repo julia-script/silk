@@ -1,3 +1,4 @@
+import * as MirVerification from './MirVerification.js'
 import * as HelperCapability from './HelperCapability.js'
 import * as NativeRequirementBinding from './NativeRequirementBinding.js'
 import * as ArtifactPlan from './ArtifactPlan.js'
@@ -169,6 +170,8 @@ const decodeCachedEmission = (
 
 /** One driver request. */
 export interface CompileRequest {
+  /** Audit compiler MIR invariants before emission/cache reuse. Defaults to false. */
+  readonly verifyMir?: boolean
   readonly nativeBindings?: ReadonlyArray<NativeRequirementBinding.NativeRequirementBinding>
   readonly stage?: ArtifactPlan.Stage
   readonly compilation: ModuleClosure.CompilationRequest
@@ -221,10 +224,18 @@ export interface TargetFailed {
   readonly report: ReadonlyArray<DriverPhaseReport>
 }
 
-/** Shared MIR validation, compatibility, or backend construction stopped emission. */
+/** Backend capability checks or construction stopped emission. */
 export interface BackendFailed {
   readonly _tag: 'BackendFailed'
   readonly error: Backend.BackendError
+  readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
+  readonly report: ReadonlyArray<DriverPhaseReport>
+}
+
+/** An explicitly requested compiler-invariant audit stopped compilation. */
+export interface VerificationFailed {
+  readonly _tag: 'VerificationFailed'
+  readonly error: MirVerification.MirVerificationError
   readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
   readonly report: ReadonlyArray<DriverPhaseReport>
 }
@@ -257,7 +268,13 @@ export class SourceResolutionFailed extends Data.TaggedError('SourceResolutionFa
 }> {}
 
 /** The closed outcome of one driver run. */
-export type Outcome = Compiled | Rejected | TargetFailed | BackendFailed | ToolchainFailed
+export type Outcome =
+  | Compiled
+  | Rejected
+  | TargetFailed
+  | BackendFailed
+  | VerificationFailed
+  | ToolchainFailed
 
 const commitLibraryInterface = Effect.fnUntraced(function* (
   request: CompileRequest,
@@ -522,6 +539,25 @@ export const compile = Effect.fn('Driver.compile')(function* (
       failures: targetIntegrity.failures,
       report: Object.freeze([...report]),
     })
+  // Explicit audits run even when a later emission-cache lookup can reuse the artifact.
+  if (request.verifyMir === true) {
+    const verified = yield* PhaseReport.measureEffectInto(
+      report,
+      'mir-verification',
+      program.functions.length,
+      Effect.result(MirVerification.check(program)),
+      (result) => (Result.isSuccess(result) ? program.functions.length : 0),
+      (result) => (Result.isFailure(result) ? result.failure.violations.length : 0),
+      { heapBytes },
+    )
+    if (Result.isFailure(verified))
+      return Object.freeze({
+        _tag: 'VerificationFailed',
+        error: verified.failure,
+        diagnostics,
+        report: Object.freeze([...report]),
+      })
+  }
   // 9. Look up LLVM emission independently of the final-artifact cache. The key covers the
   // distribution, backend, profile, artifact plan/kind, mode, source closure, and ABI manifests.
   const mode = preparation.profile.debug ? 'debug' : 'release'

@@ -1,3 +1,4 @@
+import * as ProjectOptions from './ProjectOptions.js'
 import * as PlatformSupply from '@silklang/compiler/PlatformSupply'
 import * as ProjectProfile from '@silklang/compiler/ProjectProfile'
 import * as ConfigurationOrigin from '@silklang/compiler/ConfigurationOrigin'
@@ -71,6 +72,7 @@ const timings = Flag.boolean('timings').pipe(
 )
 
 export interface Options {
+  readonly verifyMir?: boolean
   readonly source: string
   readonly sourceRoot: string | undefined
   readonly output: string
@@ -167,6 +169,7 @@ export const run = Effect.fn('BuildExeCommand.run')(function* (
     },
     scopeName: 'silk-build-exe',
     saveTemps: options.saveTemps,
+    verifyMir: options.verifyMir ?? false,
     timings: options.timings,
   })
   return attempted.status
@@ -184,6 +187,7 @@ export const command = Command.make(
     platformSupply,
     clang,
     saveTemps,
+    verifyMir: ProjectOptions.verifyMir,
     timings,
   },
   Effect.fnUntraced(function* (config) {
@@ -203,6 +207,7 @@ export const command = Command.make(
       }),
       clang: config.clang,
       saveTemps: config.saveTemps,
+      verifyMir: config.verifyMir,
       timings: config.timings,
     })
     yield* CommandExit.complete(status)

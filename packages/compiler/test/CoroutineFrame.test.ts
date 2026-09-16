@@ -7,6 +7,10 @@ import * as Instances from '../src/Instances.js'
 import * as Mir from '../src/Mir.js'
 import * as MirEncoding from '../src/MirEncoding.js'
 import * as MirVerification from '../src/MirVerification.js'
+import * as Layout from '../src/Layout.js'
+import * as NativeType from '../src/NativeType.js'
+import * as ValueStorage from '../src/ValueStorage.js'
+import { unreachable } from './support/raise.js'
 
 const encoder = new TextEncoder()
 
@@ -27,6 +31,38 @@ const analyze = (source = suspended) =>
     encoder.encode(source),
     'wasm32-unknown-unknown',
   )
+
+it.effect('reserves canonical outcome padding when planning retained payloads', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* analyze(`import silk.effect { Effect }
+struct Padded { first: u8 wide: i64 last: u8 }
+effect fn values() -> [Padded; 2] {
+  return [Padded { first: 1, wide: 2, last: 3 }, Padded { first: 4, wide: 5, last: 6 }]
+}
+pub fn main() -> i32 {
+  let payload = run values()
+  let resumed = run Effect.suspend(effect { return 42 })
+  drop payload
+  return resumed
+}`)
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    const program = Analysis.loweredMir(snapshot)
+    const result = program.functions.find((fn) => fn.id.name.startsWith('values$effect$'))?.result
+    if (result?._tag !== 'EffectOutcome') return unreachable('expected an outcome')
+    const slot =
+      program.functions
+        .flatMap((fn) => fn.suspension?.frame?.states.flatMap((state) => state.slots) ?? [])
+        .at(0) ?? unreachable('expected a retained slot')
+    const stored = ValueStorage.outcome(program.layout, result.type)
+    const payload =
+      Layout.entry(program.layout, result.type.success) ?? unreachable('expected array layout')
+    assert.isAtLeast(stored.size, stored.payloadOffset + payload.size)
+    assert.deepEqual(
+      CoroutineFrame.storageOf(program, { ...slot, type: result }),
+      NativeType.addressLayout(program.layout, result),
+    )
+  }),
+)
 
 it.effect('plans one deterministic maximum frame per specialized invocation', () =>
   Effect.gen(function* () {

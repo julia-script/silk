@@ -364,16 +364,20 @@ export const dropThroughPlan = Effect.fnUntraced(function* (
       // A synchronous call, not a bare `callDirect`: the helper may run user drop hooks, so the
       // caller's address-taken roots reload exactly as they did for the former inline expansion.
       NativeResult.sourceValues(
-        yield* NativeCall.callSynchronous(
-          call.synchronous,
-          {
-            handle: context.executionRelease,
-            resultLaneCount: 0,
-            suspendable: false,
-            ...(Mir.hasDiagnosticObservation(program) ? { diagnosticParameter: 1 } : {}),
-          },
-          NativeArgument.fromValues([base]),
-          `${tag}_release`,
+        yield* NativeResult.materialize(
+          context.storage,
+          yield* NativeCall.callSynchronous(
+            call.synchronous,
+            {
+              handle: context.executionRelease,
+              resultLaneCount: 0,
+              suspendable: false,
+              ...(Mir.hasDiagnosticObservation(program) ? { diagnosticParameter: 1 } : {}),
+            },
+            NativeArgument.fromValues([base]),
+            `${tag}_release`,
+          ),
+          `${tag}_source_result`,
         ),
       )
       return
@@ -693,11 +697,15 @@ export const dropThroughPlan = Effect.fnUntraced(function* (
       }
       const base = yield* NativePlace.base(receiver, context.storage, `${tag}_receiver`)
       NativeResult.sourceValues(
-        yield* NativeCall.callValues(
-          call,
-          target,
-          NativeArgument.fromValues([base]),
-          `${tag}_hook`,
+        yield* NativeResult.materialize(
+          context.storage,
+          yield* NativeCall.callValues(
+            call,
+            target,
+            NativeArgument.fromValues([base]),
+            `${tag}_hook`,
+          ),
+          `${tag}_source_result`,
         ),
       )
       yield* dropThroughPlan(

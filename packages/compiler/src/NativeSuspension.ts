@@ -963,7 +963,7 @@ export const joinOutcome = Effect.fnUntraced(function* (
     Mir.Operation,
     { readonly _tag: 'RunEffect' | 'RunEffectValue' | 'CatchEffect' }
   >,
-  completedResult: NativeResult.NativeResult,
+  completedResult: NativeResult.Received,
   name: string,
 ) {
   const {
@@ -996,7 +996,8 @@ export const joinOutcome = Effect.fnUntraced(function* (
   const resumeBlock = resumeBlocks.get(suspensionPointKey(descriptor.point))
   if (generated === undefined || resumeBlock === undefined)
     throw new RangeError('LLVM coroutine resume lost generated control')
-  yield* NativeStorage.writeJoin(nativeStorage, operation.outcome, completedValues)
+  yield* NativeStorage.writeValue(nativeStorage, operation.outcome, completedValues)
+  yield* NativeStorage.commitLocal(nativeStorage, operation.outcome)
   const following = yield* LlvmBlock.make(body, `${name}_joined`)
   yield* FunctionBody.branch(body, following)
   yield* LlvmBlock.setInsertionPoint(body, resumeBlock)
@@ -1020,15 +1021,9 @@ export const joinOutcome = Effect.fnUntraced(function* (
     NativeType.lanesFor(types, operation.outcomeType),
     transferResultOffset,
   )
+  const resumed: Array<Value.Input> = []
   for (const [ordinal, lane] of outcomePacked.entries.entries()) {
-    const target = yield* NativeStorage.slotPointer(
-      nativeStorage,
-      operation.outcome,
-      ordinal,
-      `${name}_resume_target${ordinal}`,
-    )
-    yield* FunctionBody.store(
-      body,
+    resumed.push(
       yield* FunctionBody.load(
         body,
         NativeType.laneType(types, lane.lane),
@@ -1041,9 +1036,9 @@ export const joinOutcome = Effect.fnUntraced(function* (
         ),
         `${name}_resume_outcome${ordinal}`,
       ),
-      target,
     )
   }
+  yield* NativeStorage.writeJoin(nativeStorage, operation.outcome, resumed)
   yield* FunctionBody.branch(body, following)
   yield* LlvmBlock.setInsertionPoint(body, following)
   for (const field of generated.layout.payload)
@@ -1056,5 +1051,5 @@ export const joinOutcome = Effect.fnUntraced(function* (
   // Re-root the complete mutable cache here so later success/failure dispatch never retains an
   // SSA value defined only by the synchronous completion arm.
   yield* NativeStorage.reloadRoots(nativeStorage, `${name}_joined`)
-  return yield* NativeStorage.materialize(nativeStorage, operation.outcome)
+  return NativeStorage.readLocal(nativeStorage, operation.outcome)
 })

@@ -31,9 +31,14 @@ export const makeCompletion = Effect.fnUntraced(function* (
 ): Effect.fn.Return<Completion | undefined, LlvmError.LlvmError> {
   const stored = NativeValue.classify(context.types.program.layout, entry.fn.result) === 'Place'
   if (!stored && !hasOutcomes) return undefined
-  const place = stored
-    ? yield* NativePlace.allocate(context, entry.fn.result, 'completion_storage', 'entry')
-    : undefined
+  let place: NativePlace.NativePlace | undefined
+  if (entry.resultStorage?._tag === 'Canonical')
+    place = NativeResult.place(
+      entry,
+      yield* Value.argument(context.body, entry.resultStorage.parameter),
+    )
+  else if (stored)
+    place = yield* NativePlace.allocate(context, entry.fn.result, 'completion_storage', 'entry')
   return {
     block: yield* Block.make(context.body, 'completion'),
     ...(place === undefined ? {} : { place }),
@@ -105,9 +110,20 @@ export const complete = Effect.fnUntraced(function* (
 /** Consumes an already owned result and releases the invocation's remaining outcome references. */
 export const completeResult = Effect.fnUntraced(function* (
   context: NativeSuspension.ReturnContext,
-  result: NativeResult.NativeResult,
+  incoming: NativeResult.Received,
   name: string,
 ): Effect.fn.Return<FunctionBody.Instruction, LlvmError.LlvmError> {
+  if ('place' in incoming && context.completion?.place !== undefined) {
+    if ((incoming.diagnostic !== undefined) !== (context.entry.diagnosticResult !== undefined))
+      throw new RangeError('Completion lost diagnostic ownership')
+    yield* NativePlace.transfer(context.completion.place, context, incoming.place)
+    return yield* enqueue(
+      context,
+      context.completion,
+      incoming.diagnostic === undefined ? [] : [incoming.diagnostic],
+    )
+  }
+  const result = yield* NativeResult.materialize(context, incoming, name)
   if (
     result.values.length !== context.entry.resultLaneCount ||
     (result.diagnostic !== undefined) !== (context.entry.diagnosticResult !== undefined)
@@ -166,6 +182,24 @@ export const emitCompletion = Effect.fnUntraced(function* (
     }
     yield* FunctionBody.sealPhi(context.body, phi)
     fields.push(yield* FunctionBody.phiValue(context.body, phi))
+  }
+  if (context.entry.resultStorage?._tag === 'Canonical') {
+    if (context.entry.diagnosticResult !== undefined) {
+      const diagnostic = fields.at(0)
+      if (diagnostic === undefined) throw new RangeError('Completion lost its diagnostic result')
+      yield* NativeResult.storeDiagnostic(
+        context.body,
+        context.entry.resultStorage,
+        yield* Value.argument(context.body, context.entry.resultStorage.parameter),
+        diagnostic,
+        'completion',
+      )
+    }
+    if (context.diagnostic !== undefined)
+      for (const outcome of context.diagnostic.outcomes.values())
+        yield* NativeDiagnosticOutcome.release(outcome, context.diagnostic)
+    yield* FunctionBody.returnVoid(context.body)
+    return
   }
   const values =
     completion.place === undefined

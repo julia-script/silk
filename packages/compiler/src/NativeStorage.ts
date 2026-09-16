@@ -230,6 +230,20 @@ export const writeLocal = Effect.fnUntraced(function* (
   context.locals.set(root, place)
 })
 
+/** Adopts a logical result into independent local storage, preserving aggregate bytes. */
+export const writeValue = Effect.fnUntraced(function* (
+  context: Context,
+  root: Mir.LocalId,
+  value: NativeValue.NativeValue,
+) {
+  if (context.transientOutcomes.has(root.ordinal)) {
+    context.locals.set(root.ordinal, value)
+    return
+  }
+  if (value._tag === 'NativePlace') return yield* receivePlace(context, root, value)
+  return yield* writeLocal(context, root.ordinal, value._tag === 'Empty' ? [] : value.values)
+})
+
 /** A value assignment preserves independent destination bytes; MIR owns initialization transfer. */
 export const copyLocal = Effect.fnUntraced(function* (
   context: Context,

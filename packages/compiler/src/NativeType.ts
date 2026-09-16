@@ -16,12 +16,45 @@ export interface LoweringContext {
   readonly integerTypes: ReadonlyMap<number, LlvmType.Type>
 }
 
+// Native emission observes an immutable target plan. Rebuilding every environment for each
+// lane made Effect.result take 3.4s; these weak caches share facts without retaining a build.
+const laneCache = new WeakMap<Layout.Plan, WeakMap<Mir.Type, ReadonlyArray<Layout.CallingLane>>>()
+const placementCache = new WeakMap<
+  Layout.Plan,
+  WeakMap<object, ReadonlyArray<Layout.EnvironmentLanePlacement>>
+>()
+
+const environmentPlacements = (
+  layout: Layout.Plan,
+  type: Mir.Type,
+): ReadonlyArray<Layout.EnvironmentLanePlacement> | undefined => {
+  if (
+    (type._tag !== 'EffectValue' && type._tag !== 'CallableValue') ||
+    type.storage !== undefined ||
+    type.environment === undefined
+  )
+    return undefined
+  let entries = placementCache.get(layout)
+  if (entries === undefined) {
+    entries = new WeakMap()
+    placementCache.set(layout, entries)
+  }
+  const cached = entries.get(type.environment)
+  if (cached !== undefined) return cached
+  const placements =
+    type._tag === 'EffectValue'
+      ? Layout.effectEnvironmentLanePlacements(layout, type.environment)
+      : Layout.callableEnvironmentLanePlacements(layout, type.environment)
+  entries.set(type.environment, placements)
+  return placements
+}
+
 /** Addressable storage follows concrete executable environments, not erased public types. */
 export const addressLayout = (
   layout: Layout.Plan,
   type: Mir.Type,
 ): { readonly size: number; readonly alignment: number } | undefined => {
-  if (type._tag === 'EffectOutcome') return ValueStorage.find(layout, 'Outcome', type.type)
+  if (type._tag === 'EffectOutcome') return ValueStorage.outcome(layout, type.type)
   if (type._tag === 'EffectComposite')
     return ValueStorage.find(layout, 'CompositeCarrier', type.type)
   if (type._tag === 'EffectValue')
@@ -40,19 +73,13 @@ export const addressLaneOffset = (
   lane: Layout.CallingLane,
   ordinal: number,
 ): number | undefined => {
-  if (type._tag === 'EffectOutcome')
-    return ValueStorage.find(layout, 'Outcome', type.type)?.slots.at(ordinal)?.offset
+  if (type._tag === 'EffectOutcome') {
+    const selected = ValueStorage.outcomeLocation(layout, type.type, lane, ordinal)
+    return selected._tag === 'Slot' ? selected.offset : undefined
+  }
   if (type._tag === 'EffectComposite')
     return ValueStorage.find(layout, 'CompositeCarrier', type.type)?.slots.at(ordinal)?.offset
-  let placements: ReadonlyArray<Layout.EnvironmentLanePlacement> | undefined
-  if (type._tag === 'EffectValue' && type.storage === undefined)
-    placements = Layout.effectEnvironmentLanePlacements(layout, type.environment)
-  else if (
-    type._tag === 'CallableValue' &&
-    type.storage === undefined &&
-    type.environment !== undefined
-  )
-    placements = Layout.callableEnvironmentLanePlacements(layout, type.environment)
+  const placements = environmentPlacements(layout, type)
   if (placements !== undefined) {
     const placement = placements.at(ordinal)
     if (placement === undefined) return undefined
@@ -78,19 +105,13 @@ export const addressLocation = (
   lane: Layout.CallingLane,
   ordinal: number,
 ): ValueStorage.Location | undefined => {
-  if (type._tag === 'EffectOutcome' || type._tag === 'EffectComposite') {
+  if (type._tag === 'EffectOutcome')
+    return ValueStorage.outcomeLocation(layout, type.type, lane, ordinal)
+  if (type._tag === 'EffectComposite') {
     const offset = addressLaneOffset(layout, type, lane, ordinal)
     return offset === undefined ? undefined : { _tag: 'Slot', lane, offset }
   }
-  let placements: ReadonlyArray<Layout.EnvironmentLanePlacement> | undefined
-  if (type._tag === 'EffectValue' && type.storage === undefined)
-    placements = Layout.effectEnvironmentLanePlacements(layout, type.environment)
-  else if (
-    type._tag === 'CallableValue' &&
-    type.storage === undefined &&
-    type.environment !== undefined
-  )
-    placements = Layout.callableEnvironmentLanePlacements(layout, type.environment)
+  const placements = environmentPlacements(layout, type)
   if (placements !== undefined) {
     const placement = placements.at(ordinal)
     if (placement === undefined) return undefined
@@ -108,7 +129,7 @@ export const addressLocation = (
 }
 
 /** Resolves the physical ABI lanes of one MIR value. */
-export const lanesFor = (
+const computeLanes = (
   context: LoweringContext,
   type: Mir.Type,
 ): ReadonlyArray<Layout.CallingLane> => {
@@ -151,6 +172,23 @@ export const lanesFor = (
   if (shape === undefined)
     throw new RangeError(`LLVM backend lost calling shape for ${Mir.typeText(type)}`)
   return shape.lanes
+}
+
+/** Reuses the complete lane vector within its owning immutable target plan. */
+export const lanesFor = (
+  context: LoweringContext,
+  type: Mir.Type,
+): ReadonlyArray<Layout.CallingLane> => {
+  let entries = laneCache.get(context.program.layout)
+  if (entries === undefined) {
+    entries = new WeakMap()
+    laneCache.set(context.program.layout, entries)
+  }
+  const cached = entries.get(type)
+  if (cached !== undefined) return cached
+  const lanes = computeLanes(context, type)
+  entries.set(type, lanes)
+  return lanes
 }
 
 /** Resolves value lanes when an EnvironmentBorrow is loaded rather than passed by address. */

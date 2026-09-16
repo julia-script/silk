@@ -1,3 +1,4 @@
+import * as CompilerTrace from './CompilerTrace.js'
 import * as CLayout from './CLayout.js'
 import * as DeclarationFacts from './DeclarationFacts.js'
 import type * as DeclarationIndex from './DeclarationIndex.js'
@@ -1386,13 +1387,16 @@ const verifyStaticData = (self: Plan): ReadonlyArray<Violation> => {
 }
 
 /** Verifies canonical target, ordering, uniqueness, representation, and ABI facts. */
-export const verify = (self: Plan): ReadonlyArray<Violation> =>
+export const verify = (
+  self: Plan,
+  trace: CompilerTrace.CompilerTrace = CompilerTrace.none,
+): ReadonlyArray<Violation> =>
   Object.freeze([
-    ...commonViolations(self.target, self.entries),
-    ...verifyCallingShapes(self),
-    ...ValueStorage.verify(self),
-    ...verifyLiteralVerdicts(self),
-    ...verifyStaticData(self),
+    ...trace('LayoutVerify.verifyEntries', () => commonViolations(self.target, self.entries)),
+    ...trace('LayoutVerify.verifyCallingShapes', () => verifyCallingShapes(self)),
+    ...trace('LayoutVerify.verifyValueStorage', () => ValueStorage.verify(self)),
+    ...trace('LayoutVerify.verifyLiterals', () => verifyLiteralVerdicts(self)),
+    ...trace('LayoutVerify.verifyStaticData', () => verifyStaticData(self)),
   ])
 
 /** Verifies all available entries and deterministic ordering within a nominal catalog. */

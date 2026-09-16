@@ -1,3 +1,4 @@
+import * as CompilerTrace from './CompilerTrace.js'
 import * as CleanupPlan from './CleanupPlan.js'
 import * as ConformanceProof from './ConformanceProof.js'
 import * as DeclarationFacts from './DeclarationFacts.js'
@@ -3103,45 +3104,49 @@ export const plan = (
   self: Catalog,
   discovery: Instances.Discovery,
   index: DeclarationIndex.Index,
+  trace: CompilerTrace.CompilerTrace = CompilerTrace.none,
 ): Plan => {
-  const reached = new Map<string, DeclarationFacts.SemanticType>()
-  for (const instance of discovery.instances) addFunctionTypes(reached, instance)
-  for (const effect of discovery.effects) reached.set(Type.runtimeKey(effect.type), effect.type)
-  for (const instance of discovery.instances) {
-    for (const expression of instance.function.statements
-      .flatMap(Hir.statementExpressions)
-      .flatMap(Hir.expressionTree)) {
-      if (expression._tag === 'EffectCatch') reached.set(Type.runtimeKey('bool'), 'bool')
-      if (
-        expression._tag !== 'BuiltinCall' ||
-        (expression.operation !== 'ExecutionLayout' &&
-          expression.operation !== 'ExecutionFromAllocation')
-      )
-        continue
-      const arguments_ = expression.typeArguments.map((argument) =>
-        Instances.concreteEffectRepresentationArgument(
-          instance.function,
-          instance.key,
-          Type.substituteGenericArgument(
-            argument,
-            instance.substitution,
-            instance.specialization.compatibility,
+  const reached = trace('Layout.collectReachableTypes', () => {
+    const reached = new Map<string, DeclarationFacts.SemanticType>()
+    for (const instance of discovery.instances) addFunctionTypes(reached, instance)
+    for (const effect of discovery.effects) reached.set(Type.runtimeKey(effect.type), effect.type)
+    for (const instance of discovery.instances) {
+      for (const expression of instance.function.statements
+        .flatMap(Hir.statementExpressions)
+        .flatMap(Hir.expressionTree)) {
+        if (expression._tag === 'EffectCatch') reached.set(Type.runtimeKey('bool'), 'bool')
+        if (
+          expression._tag !== 'BuiltinCall' ||
+          (expression.operation !== 'ExecutionLayout' &&
+            expression.operation !== 'ExecutionFromAllocation')
+        )
+          continue
+        const arguments_ = expression.typeArguments.map((argument) =>
+          Instances.concreteEffectRepresentationArgument(
+            instance.function,
+            instance.key,
+            Type.substituteGenericArgument(
+              argument,
+              instance.substitution,
+              instance.specialization.compatibility,
+            ),
           ),
-        ),
-      )
-      for (const argument of [arguments_.at(0), arguments_.at(2)])
-        if (argument !== undefined && Type.isTypeArgument(argument))
-          reached.set(Type.runtimeKey(argument), argument)
-      for (const argument of [arguments_.at(1), arguments_.at(3)]) {
-        const represented = argument === undefined ? undefined : Type.representedType(argument)
-        if (represented !== undefined) reached.set(Type.runtimeKey(represented), represented)
+        )
+        for (const argument of [arguments_.at(0), arguments_.at(2)])
+          if (argument !== undefined && Type.isTypeArgument(argument))
+            reached.set(Type.runtimeKey(argument), argument)
+        for (const argument of [arguments_.at(1), arguments_.at(3)]) {
+          const represented = argument === undefined ? undefined : Type.representedType(argument)
+          if (represented !== undefined) reached.set(Type.runtimeKey(represented), represented)
+        }
       }
     }
-  }
-  for (const callable of discovery.callables) {
-    for (const capture of callable.captures)
-      reached.set(Type.runtimeKey(capture.type), capture.type)
-  }
+    for (const callable of discovery.callables) {
+      for (const capture of callable.captures)
+        reached.set(Type.runtimeKey(capture.type), capture.type)
+    }
+    return reached
+  })
   const entries = new Map<string, Entry>()
   const resolve = (type: DeclarationFacts.SemanticType): Entry | undefined => {
     if (Type.isBuiltin(type)) return scalarEntry(self.target, type)
@@ -3209,247 +3214,278 @@ export const plan = (
       for (const member of candidate.representation.members) add(member.type)
     }
   }
-  for (const type of reached.values()) add(type)
+  trace('Layout.resolveEntries', () => {
+    for (const type of reached.values()) add(type)
+  })
   const orderedEntries = Object.freeze(
     [...entries.values()].sort((left, right) => compareRuntimeTypes(left.type, right.type)),
   )
-  const literals = wordLiteralVerdicts(self.target, discovery, self.wordConstants)
-  const localSharedAllocationProvenance = LocalSharedAllocationProvenance.plan(discovery, index)
-  const localSharedDiagnostics: Array<Diagnostic.Diagnostic> = []
-  for (const instance of discovery.instances) {
-    for (const expression of instance.function.statements
-      .flatMap(Hir.statementExpressions)
-      .flatMap(Hir.expressionTree)) {
-      if (expression._tag !== 'BuiltinCall' || expression.operation !== 'SharedLayout') continue
-      const raw = expression.typeArguments.at(0)
-      const element =
-        raw !== undefined && Type.isTypeArgument(raw)
-          ? Type.substitute(raw, instance.substitution, instance.specialization.compatibility)
-          : undefined
-      const elementLayout = element === undefined ? undefined : resolve(element)
-      if (
-        element !== undefined &&
-        elementLayout !== undefined &&
-        LocalSharedControlBlock.plan(self.target, element, elementLayout)._tag ===
-          'LocalSharedControlBlockUnavailable'
-      )
-        localSharedDiagnostics.push(
-          Diagnostic.intrinsicTargetUnavailable(
-            'Intrinsic.sharedLayout',
-            self.target.id,
-            expression.span,
-          ),
+  const literals = trace('Layout.checkLiterals', () =>
+    wordLiteralVerdicts(self.target, discovery, self.wordConstants),
+  )
+  const localSharedAllocationProvenance = trace('Layout.planLocalSharedAllocation', () =>
+    LocalSharedAllocationProvenance.plan(discovery, index),
+  )
+  const localSharedDiagnostics = trace('Layout.checkLocalSharedLayouts', () => {
+    const localSharedDiagnostics: Array<Diagnostic.Diagnostic> = []
+    for (const instance of discovery.instances) {
+      for (const expression of instance.function.statements
+        .flatMap(Hir.statementExpressions)
+        .flatMap(Hir.expressionTree)) {
+        if (expression._tag !== 'BuiltinCall' || expression.operation !== 'SharedLayout') continue
+        const raw = expression.typeArguments.at(0)
+        const element =
+          raw !== undefined && Type.isTypeArgument(raw)
+            ? Type.substitute(raw, instance.substitution, instance.specialization.compatibility)
+            : undefined
+        const elementLayout = element === undefined ? undefined : resolve(element)
+        if (
+          element !== undefined &&
+          elementLayout !== undefined &&
+          LocalSharedControlBlock.plan(self.target, element, elementLayout)._tag ===
+            'LocalSharedControlBlockUnavailable'
         )
+          localSharedDiagnostics.push(
+            Diagnostic.intrinsicTargetUnavailable(
+              'Intrinsic.sharedLayout',
+              self.target.id,
+              expression.span,
+            ),
+          )
+      }
     }
-  }
-  const shaped = new Map(
-    orderedEntries.map((entry) => [Type.runtimeKey(entry.type), entry.type] as const),
-  )
-  for (const type of reached.values()) {
-    if (
-      Type.isRuntimeConcrete(type) &&
-      (Type.isEffect(type) ||
-        Type.isNever(type) ||
-        (Type.isRepresented(type) &&
-          Type.isCompositeEffectRepresentationArgument(type.representation.argument)))
+    return localSharedDiagnostics
+  })
+  const shapeTypes = trace('Layout.collectShapeTypes', () => {
+    const shaped = new Map(
+      orderedEntries.map((entry) => [Type.runtimeKey(entry.type), entry.type] as const),
     )
-      shaped.set(Type.runtimeKey(type), type)
-  }
-  const shapeTypes = Object.freeze([...shaped.values()].sort(compareRuntimeTypes))
-  const staticDataById = new Map<string, StaticText.Data>()
-  for (const instance of discovery.instances) {
-    const expressions = instance.function.statements
-      .flatMap(Hir.statementExpressions)
-      .flatMap(Hir.runtimeExpressionTree)
-    for (const expression of expressions) {
-      if (expression._tag === 'StaticStringLiteral' || expression._tag === 'StaticByteViewLiteral')
-        staticDataById.set(expression.data.id, expression.data)
+    for (const type of reached.values()) {
+      if (
+        Type.isRuntimeConcrete(type) &&
+        (Type.isEffect(type) ||
+          Type.isNever(type) ||
+          (Type.isRepresented(type) &&
+            Type.isCompositeEffectRepresentationArgument(type.representation.argument)))
+      )
+        shaped.set(Type.runtimeKey(type), type)
     }
-  }
-  const addressBits: 32 | 64 = self.target.pointerSize === 4 ? 32 : 64
-  const staticData = Object.freeze(
-    [...staticDataById.values()]
-      .sort((left, right) => left.id.localeCompare(right.id))
-      .map((data) =>
-        Object.freeze({
-          _tag: 'StaticDataPlacement' as const,
-          data,
-          alignment: 1 as const,
-          addressBits,
-          lengthBits: addressBits,
-        }),
-      ),
+    const shapeTypes = Object.freeze([...shaped.values()].sort(compareRuntimeTypes))
+    return shapeTypes
+  })
+  const staticData = trace('Layout.planStaticData', () => {
+    const staticDataById = new Map<string, StaticText.Data>()
+    for (const instance of discovery.instances) {
+      const expressions = instance.function.statements
+        .flatMap(Hir.statementExpressions)
+        .flatMap(Hir.runtimeExpressionTree)
+      for (const expression of expressions) {
+        if (
+          expression._tag === 'StaticStringLiteral' ||
+          expression._tag === 'StaticByteViewLiteral'
+        )
+          staticDataById.set(expression.data.id, expression.data)
+      }
+    }
+    const addressBits: 32 | 64 = self.target.pointerSize === 4 ? 32 : 64
+    const staticData = Object.freeze(
+      [...staticDataById.values()]
+        .sort((left, right) => left.id.localeCompare(right.id))
+        .map((data) =>
+          Object.freeze({
+            _tag: 'StaticDataPlacement' as const,
+            data,
+            alignment: 1 as const,
+            addressBits,
+            lengthBits: addressBits,
+          }),
+        ),
+    )
+    return staticData
+  })
+  const callablePlans = trace('Layout.planCallableEnvironments', () =>
+    callableEnvironments(self.target, orderedEntries, discovery),
   )
-  const callablePlans = callableEnvironments(self.target, orderedEntries, discovery)
-  const effectPlans = effectEnvironments(self.target, orderedEntries, discovery, callablePlans)
-  const executionPlanByKey = new Map<string, ExecutionPackage.Plan>()
-  const executionUnavailableByKey = new Map<string, ExecutionPackage.Unavailable>()
-  const executionDiagnostics: Array<Diagnostic.Diagnostic> = []
-  const representedStorageLayout = (
-    argument: Type.GenericArgument,
-  ): { readonly size: number; readonly alignment: number } | undefined => {
-    if (Type.isExactRepresentationArgument(argument)) {
-      if (Type.isEffectIdentityArgument(argument.identity)) {
-        const environment = effectEnvironmentByIdentity(effectPlans, argument.identity)
+  const effectPlans = trace('Layout.planEffectEnvironments', () =>
+    effectEnvironments(self.target, orderedEntries, discovery, callablePlans),
+  )
+  const { executionPackages, executionDiagnostics } = trace('Layout.planExecutionPackages', () => {
+    const executionPlanByKey = new Map<string, ExecutionPackage.Plan>()
+    const executionUnavailableByKey = new Map<string, ExecutionPackage.Unavailable>()
+    const executionDiagnostics: Array<Diagnostic.Diagnostic> = []
+    const representedStorageLayout = (
+      argument: Type.GenericArgument,
+    ): { readonly size: number; readonly alignment: number } | undefined => {
+      if (Type.isExactRepresentationArgument(argument)) {
+        if (Type.isEffectIdentityArgument(argument.identity)) {
+          const environment = effectEnvironmentByIdentity(effectPlans, argument.identity)
+          return environment === undefined
+            ? undefined
+            : Object.freeze({ size: environment.size, alignment: environment.alignment })
+        }
+        if (!Type.isCallableIdentityArgument(argument.identity)) return undefined
+        const callableIdentity = argument.identity
+        const callableEnvironment = callableIdentity.environment
+        if (callableEnvironment === undefined) return Object.freeze({ size: 0, alignment: 1 })
+        const environment = callablePlans.find(
+          (
+            candidate,
+          ): candidate is Extract<CallableEnvironment, { readonly _tag: 'CallableEnvironment' }> =>
+            candidate._tag === 'CallableEnvironment' &&
+            Type.runtimeCallableEnvironmentIdentityKey(
+              Instances.callableEnvironmentIdentity(candidate.callable),
+            ) === Type.runtimeCallableEnvironmentIdentityKey(callableEnvironment),
+        )
         return environment === undefined
           ? undefined
           : Object.freeze({ size: environment.size, alignment: environment.alignment })
       }
-      if (!Type.isCallableIdentityArgument(argument.identity)) return undefined
-      const callableIdentity = argument.identity
-      const callableEnvironment = callableIdentity.environment
-      if (callableEnvironment === undefined) return Object.freeze({ size: 0, alignment: 1 })
-      const environment = callablePlans.find(
-        (
-          candidate,
-        ): candidate is Extract<CallableEnvironment, { readonly _tag: 'CallableEnvironment' }> =>
-          candidate._tag === 'CallableEnvironment' &&
-          Type.runtimeCallableEnvironmentIdentityKey(
-            Instances.callableEnvironmentIdentity(candidate.callable),
-          ) === Type.runtimeCallableEnvironmentIdentityKey(callableEnvironment),
-      )
-      return environment === undefined
-        ? undefined
-        : Object.freeze({ size: environment.size, alignment: environment.alignment })
+      if (Type.isCompositeEffectRepresentationArgument(argument)) {
+        const alternatives = argument.alternatives.map(representedStorageLayout)
+        if (alternatives.some((alternative) => alternative === undefined)) return undefined
+        const available = alternatives.filter(
+          (alternative): alternative is { readonly size: number; readonly alignment: number } =>
+            alternative !== undefined,
+        )
+        const payloadAlignment = available.reduce(
+          (maximum, alternative) => Math.max(maximum, alternative.alignment),
+          1,
+        )
+        const payloadSize = available.reduce(
+          (maximum, alternative) => Math.max(maximum, alternative.size),
+          0,
+        )
+        const alignment = Math.max(4, payloadAlignment)
+        const payloadOffset = alignUp(4, payloadAlignment)
+        const size = alignUp(payloadOffset + payloadSize, alignment)
+        return Number.isSafeInteger(size) ? Object.freeze({ size, alignment }) : undefined
+      }
+      return undefined
     }
-    if (Type.isCompositeEffectRepresentationArgument(argument)) {
-      const alternatives = argument.alternatives.map(representedStorageLayout)
-      if (alternatives.some((alternative) => alternative === undefined)) return undefined
-      const available = alternatives.filter(
-        (alternative): alternative is { readonly size: number; readonly alignment: number } =>
-          alternative !== undefined,
-      )
-      const payloadAlignment = available.reduce(
-        (maximum, alternative) => Math.max(maximum, alternative.alignment),
-        1,
-      )
-      const payloadSize = available.reduce(
-        (maximum, alternative) => Math.max(maximum, alternative.size),
-        0,
-      )
-      const alignment = Math.max(4, payloadAlignment)
-      const payloadOffset = alignUp(4, payloadAlignment)
-      const size = alignUp(payloadOffset + payloadSize, alignment)
-      return Number.isSafeInteger(size) ? Object.freeze({ size, alignment }) : undefined
+    const suspensionOf = (argument: Type.GenericArgument): SuspensionMode.Summary => {
+      if (Type.isExactRepresentationArgument(argument))
+        return Type.isEffectIdentityArgument(argument.identity)
+          ? Instances.representedEffectSuspensionOf(discovery, argument.identity)
+          : SuspensionMode.direct
+      if (Type.isCompositeEffectRepresentationArgument(argument))
+        return SuspensionMode.join(argument.alternatives.map(suspensionOf))
+      return SuspensionMode.openExecutable(Object.freeze([]))
     }
-    return undefined
-  }
-  const suspensionOf = (argument: Type.GenericArgument): SuspensionMode.Summary => {
-    if (Type.isExactRepresentationArgument(argument))
-      return Type.isEffectIdentityArgument(argument.identity)
-        ? Instances.representedEffectSuspensionOf(discovery, argument.identity)
-        : SuspensionMode.direct
-    if (Type.isCompositeEffectRepresentationArgument(argument))
-      return SuspensionMode.join(argument.alternatives.map(suspensionOf))
-    return SuspensionMode.openExecutable(Object.freeze([]))
-  }
-  for (const instance of discovery.instances) {
-    for (const expression of instance.function.statements
-      .flatMap(Hir.statementExpressions)
-      .flatMap(Hir.expressionTree)) {
-      if (
-        expression._tag !== 'BuiltinCall' ||
-        (expression.operation !== 'ExecutionLayout' &&
-          expression.operation !== 'ExecutionFromAllocation')
-      )
-        continue
-      const arguments_ = expression.typeArguments.map((argument) =>
-        Instances.concreteEffectRepresentationArgument(
-          instance.function,
-          instance.key,
-          Type.substituteGenericArgument(
-            argument,
-            instance.substitution,
-            instance.specialization.compatibility,
-          ),
-        ),
-      )
-      const result = arguments_.at(0)
-      const bodyArgument = arguments_.at(1)
-      const endpoint = arguments_.at(2)
-      const callbackArgument = arguments_.at(3)
-      const body = bodyArgument === undefined ? undefined : Type.representedType(bodyArgument)
-      const callback =
-        callbackArgument === undefined ? undefined : Type.representedType(callbackArgument)
-      if (
-        result === undefined ||
-        !Type.isTypeArgument(result) ||
-        bodyArgument === undefined ||
-        body === undefined ||
-        endpoint === undefined ||
-        !Type.isTypeArgument(endpoint) ||
-        callback === undefined ||
-        callbackArgument === undefined
-      )
-        continue
-      const bodyLayout = representedStorageLayout(bodyArgument)
-      const endpointLayout = resolve(endpoint)
-      const callbackLayout = representedStorageLayout(callbackArgument)
-      if (bodyLayout === undefined || endpointLayout === undefined || callbackLayout === undefined)
-        continue
-      const specialization: ExecutionPackage.Specialization = Object.freeze({
-        result,
-        body,
-        endpoint,
-        callback,
-        suspension: suspensionOf(bodyArgument),
-      })
-      const planned = ExecutionPackage.plan(self.target, specialization, {
-        body: bodyLayout,
-        endpoint: endpointLayout,
-        callback: callbackLayout,
-      })
-      const selected =
-        planned._tag === 'ExecutionPackagePlan'
-          ? Object.freeze({
-              ...planned,
-              cleanup: Object.freeze({
-                body: CleanupPlan.cleanupPlan(index, body),
-                endpoint: CleanupPlan.cleanupPlan(index, endpoint),
-                callback: CleanupPlan.cleanupPlan(index, callback),
-              }),
-            })
-          : planned
-      const key = ExecutionPackage.specializationKey(specialization)
-      if (selected._tag === 'ExecutionPackagePlan') executionPlanByKey.set(key, selected)
-      else {
-        executionUnavailableByKey.set(key, selected)
-        executionDiagnostics.push(
-          Diagnostic.intrinsicTargetUnavailable(
-            `Intrinsic.${expression.operation === 'ExecutionLayout' ? 'executionLayout' : 'executionFromAllocation'}`,
-            self.target.id,
-            expression.span,
+    for (const instance of discovery.instances) {
+      for (const expression of instance.function.statements
+        .flatMap(Hir.statementExpressions)
+        .flatMap(Hir.expressionTree)) {
+        if (
+          expression._tag !== 'BuiltinCall' ||
+          (expression.operation !== 'ExecutionLayout' &&
+            expression.operation !== 'ExecutionFromAllocation')
+        )
+          continue
+        const arguments_ = expression.typeArguments.map((argument) =>
+          Instances.concreteEffectRepresentationArgument(
+            instance.function,
+            instance.key,
+            Type.substituteGenericArgument(
+              argument,
+              instance.substitution,
+              instance.specialization.compatibility,
+            ),
           ),
         )
+        const result = arguments_.at(0)
+        const bodyArgument = arguments_.at(1)
+        const endpoint = arguments_.at(2)
+        const callbackArgument = arguments_.at(3)
+        const body = bodyArgument === undefined ? undefined : Type.representedType(bodyArgument)
+        const callback =
+          callbackArgument === undefined ? undefined : Type.representedType(callbackArgument)
+        if (
+          result === undefined ||
+          !Type.isTypeArgument(result) ||
+          bodyArgument === undefined ||
+          body === undefined ||
+          endpoint === undefined ||
+          !Type.isTypeArgument(endpoint) ||
+          callback === undefined ||
+          callbackArgument === undefined
+        )
+          continue
+        const bodyLayout = representedStorageLayout(bodyArgument)
+        const endpointLayout = resolve(endpoint)
+        const callbackLayout = representedStorageLayout(callbackArgument)
+        if (
+          bodyLayout === undefined ||
+          endpointLayout === undefined ||
+          callbackLayout === undefined
+        )
+          continue
+        const specialization: ExecutionPackage.Specialization = Object.freeze({
+          result,
+          body,
+          endpoint,
+          callback,
+          suspension: suspensionOf(bodyArgument),
+        })
+        const planned = ExecutionPackage.plan(self.target, specialization, {
+          body: bodyLayout,
+          endpoint: endpointLayout,
+          callback: callbackLayout,
+        })
+        const selected =
+          planned._tag === 'ExecutionPackagePlan'
+            ? Object.freeze({
+                ...planned,
+                cleanup: Object.freeze({
+                  body: CleanupPlan.cleanupPlan(index, body),
+                  endpoint: CleanupPlan.cleanupPlan(index, endpoint),
+                  callback: CleanupPlan.cleanupPlan(index, callback),
+                }),
+              })
+            : planned
+        const key = ExecutionPackage.specializationKey(specialization)
+        if (selected._tag === 'ExecutionPackagePlan') executionPlanByKey.set(key, selected)
+        else {
+          executionUnavailableByKey.set(key, selected)
+          executionDiagnostics.push(
+            Diagnostic.intrinsicTargetUnavailable(
+              `Intrinsic.${expression.operation === 'ExecutionLayout' ? 'executionLayout' : 'executionFromAllocation'}`,
+              self.target.id,
+              expression.span,
+            ),
+          )
+        }
       }
     }
-  }
-  const executionPackages: ExecutionPackage.Module = Object.freeze({
-    _tag: 'ExecutionPackageModule',
-    plans: Object.freeze(
-      [...executionPlanByKey.values()].sort((left, right) =>
-        left.provenance.localeCompare(right.provenance),
-      ),
-    ),
-    unavailable: Object.freeze(
-      [...executionUnavailableByKey.values()].sort((left, right) =>
-        ExecutionPackage.specializationKey(left.specialization).localeCompare(
-          ExecutionPackage.specializationKey(right.specialization),
+    const executionPackages: ExecutionPackage.Module = Object.freeze({
+      _tag: 'ExecutionPackageModule',
+      plans: Object.freeze(
+        [...executionPlanByKey.values()].sort((left, right) =>
+          left.provenance.localeCompare(right.provenance),
         ),
       ),
-    ),
+      unavailable: Object.freeze(
+        [...executionUnavailableByKey.values()].sort((left, right) =>
+          ExecutionPackage.specializationKey(left.specialization).localeCompare(
+            ExecutionPackage.specializationKey(right.specialization),
+          ),
+        ),
+      ),
+    })
+    return { executionPackages, executionDiagnostics }
   })
   const specializedShapeTypes = new Map(
     shapeTypes.map((type) => [Type.runtimeKey(type), type] as const),
   )
   for (const environment of effectPlans)
     specializedShapeTypes.set(Type.runtimeKey(environment.effect), environment.effect)
-  const plannedShapes = callingShapes(
-    self.target,
-    orderedEntries,
-    [...specializedShapeTypes.values()].sort(compareRuntimeTypes),
-    effectPlans,
-    callablePlans,
+  const plannedShapes = trace('Layout.planCallingShapes', () =>
+    callingShapes(
+      self.target,
+      orderedEntries,
+      [...specializedShapeTypes.values()].sort(compareRuntimeTypes),
+      effectPlans,
+      callablePlans,
+    ),
   )
   const base: Plan = Object.freeze({
     _tag: 'LayoutPlan',
@@ -3470,7 +3506,10 @@ export const plan = (
       ...executionDiagnostics,
     ]),
   })
-  return Object.freeze({ ...base, valueStorage: ValueStorage.plan(base) })
+  return Object.freeze({
+    ...base,
+    valueStorage: trace('Layout.planValueStorage', () => ValueStorage.plan(base)),
+  })
 }
 
 /** Constructs a scalar plan for hand-built MIR samples and focused tests. */

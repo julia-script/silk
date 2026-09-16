@@ -168,3 +168,14 @@ text do not establish complete tool identity, and unresolved inputs are not repr
 
 Backend-emission reuse, runtime-object caching, and the existing LLVM-to-WebAssembly cache policy
 remain independent of this native final-artifact admission rule.
+
+### Optional MIR verification
+
+Normal compilation skips the compiler-invariant audit. Enable it with `verifyMir: true` on
+`Driver.compile` or `Analysis.codegen` when developing the compiler. The driver records a separate
+`mir-verification` phase before emission-cache lookup; an audit failure returns `VerificationFailed`.
+`Analysis.codegen` exposes `MirVerificationError` in its typed error channel.
+
+Call `yield* MirVerification.check(program)` to audit hand-built MIR independently. `Backend.emit`
+expects internally consistent MIR and retains target, intrinsic, and foreign capability checks.
+The shared compiler-test driver enables verification by default, including native acceptance tests.

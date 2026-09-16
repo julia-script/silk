@@ -1,3 +1,6 @@
+import * as Data from 'effect/Data'
+import * as Effect from 'effect/Effect'
+import * as CompilerTrace from './CompilerTrace.js'
 import * as SuspensionMir from './SuspensionMir.js'
 import * as CoroutineFrame from './CoroutineFrame.js'
 import * as NativeAssembly from './NativeAssembly.js'
@@ -3124,406 +3127,452 @@ const pointerOperationViolation = (
   }
 }
 
-export const verify = (self: Module): ReadonlyArray<Violation> => {
+/** An explicit compiler-invariant audit rejected a lowered program. */
+export class MirVerificationError extends Data.TaggedError('MirVerificationError')<{
+  readonly operation: 'MirVerification.check'
+  readonly message: string
+  readonly violations: ReadonlyArray<Violation>
+}> {}
+
+/** Optional traced audit for compiler development and callers constructing MIR directly. */
+export const check = Effect.fn('MirVerification.check')(function* (
+  self: Module,
+): Effect.fn.Return<void, MirVerificationError> {
+  yield* Effect.annotateCurrentSpan({
+    'module.name': self.module,
+    'functions.count': self.functions.length,
+  })
+  const trace = yield* CompilerTrace.capture()
+  const violations = trace('MirVerification.verify', () => verify(self, trace))
+  if (violations.length > 0)
+    return yield* new MirVerificationError({
+      operation: 'MirVerification.check',
+      message: 'MIR verification failed',
+      violations,
+    })
+})
+
+/** Returns compiler-invariant violations without emitting code. */
+export const verify = (
+  self: Module,
+  trace: CompilerTrace.CompilerTrace = CompilerTrace.none,
+): ReadonlyArray<Violation> => {
   let cached = verifyCache.get(self)
   if (cached === undefined) {
-    cached = computeVerify(self)
+    cached = computeVerify(self, trace)
     verifyCache.set(self, cached)
   }
   return cached
 }
 
-const computeVerify = (self: Module): ReadonlyArray<Violation> => {
-  const violations: Array<Violation> = LayoutVerify.verify(self.layout).map((violation) =>
+const computeVerify = (
+  self: Module,
+  trace: CompilerTrace.CompilerTrace,
+): ReadonlyArray<Violation> => {
+  const violations: Array<Violation> = trace('LayoutVerify.verify', () =>
+    LayoutVerify.verify(self.layout, trace),
+  ).map((violation) =>
     Object.freeze({
       _tag: 'Violation' as const,
       rule: 'InvalidLayout' as const,
       detail: `${violation.rule}: ${violation.detail}`,
     }),
   )
-  violations.push(...coroutineFrameLayoutViolations(self))
-  for (const fn of self.functions) {
-    const operations = fn.regions.flatMap(operationsOf).flatMap(operationTree)
-    for (const operation of operations) {
-      if (operation._tag !== 'NativeAssembly') continue
-      const destination = fn.localTypes[operation.destination.ordinal]
-      if (
-        destination === undefined ||
-        !SilkType.equals(semanticType(destination), semanticType(operation.type))
-      )
-        violations.push({
-          _tag: 'Violation',
-          rule: 'InvalidNativeAssembly',
-          function: fn.id,
-          detail: 'assembly destination must have the declared result type',
-        })
-      const operands = operation.arguments.flatMap((argument) => {
-        const type = fn.localTypes[argument.ordinal]
-        return type === undefined ? [] : [semanticType(type)]
+  violations.push(
+    ...trace('MirVerification.verifyCoroutineFrames', () => coroutineFrameLayoutViolations(self)),
+  )
+  const { sameDeclaration, foreignStaticInitializerValid } = trace(
+    'MirVerification.verifyModule',
+    () => {
+      for (const fn of self.functions) {
+        const operations = fn.regions.flatMap(operationsOf).flatMap(operationTree)
+        for (const operation of operations) {
+          if (operation._tag !== 'NativeAssembly') continue
+          const destination = fn.localTypes[operation.destination.ordinal]
+          if (
+            destination === undefined ||
+            !SilkType.equals(semanticType(destination), semanticType(operation.type))
+          )
+            violations.push({
+              _tag: 'Violation',
+              rule: 'InvalidNativeAssembly',
+              function: fn.id,
+              detail: 'assembly destination must have the declared result type',
+            })
+          const operands = operation.arguments.flatMap((argument) => {
+            const type = fn.localTypes[argument.ordinal]
+            return type === undefined ? [] : [semanticType(type)]
+          })
+          for (const detail of NativeAssembly.violations(
+            operation.assembly,
+            semanticType(operation.type),
+            operands,
+            self.layout.target,
+          ))
+            violations.push({
+              _tag: 'Violation',
+              rule: 'InvalidNativeAssembly',
+              function: fn.id,
+              detail,
+            })
+          const owner = fn.regions.find((region) => operationsOf(region).includes(operation))
+          if (
+            operation.assembly.noReturn &&
+            (owner?._tag !== 'OperationRegion' ||
+              owner.outcome._tag !== 'Trap' ||
+              owner.operations.at(-1) !== operation)
+          )
+            violations.push({
+              _tag: 'Violation',
+              rule: 'InvalidNativeAssembly',
+              function: fn.id,
+              detail: 'terminal assembly must end its region without a continuation',
+            })
+        }
+        if (fn.machine !== undefined) {
+          const assembly = operations[0]
+          if (
+            !NativeAssembly.available(self.layout.target) ||
+            fn.parameterCount !== 0 ||
+            !SilkType.equals(semanticType(fn.result), SilkType.unit) ||
+            operations.length !== 1 ||
+            assembly?._tag !== 'NativeAssembly' ||
+            !assembly.assembly.noReturn ||
+            !assembly.assembly.sideEffects ||
+            assembly.arguments.length !== 0 ||
+            fn.regions.some(
+              (region) => region._tag !== 'OperationRegion' || region.outcome._tag !== 'Trap',
+            )
+          )
+            violations.push({
+              _tag: 'Violation',
+              rule: 'InvalidMachineFunction',
+              function: fn.id,
+              detail:
+                'naked function requires exactly one operand-free terminal assembly operation',
+            })
+        }
+      }
+
+      const retained = new Set<string>()
+      for (const root of self.retainedRoots ?? []) {
+        const key = Instances.keyText(root)
+        if (retained.has(key) || !self.functions.some((fn) => matchesInstanceKey(fn, root)))
+          violations.push(
+            Object.freeze({
+              _tag: 'Violation',
+              rule: 'InvalidArtifactRoot',
+              detail: 'Retained roots must uniquely identify emitted function instances',
+            }),
+          )
+        retained.add(key)
+      }
+      for (const record of [...self.foreignCalls, ...self.foreignExports]) {
+        if (!CAbi.isCanonicalSignature(record.signature, self.layout.target))
+          violations.push(
+            Object.freeze({
+              _tag: 'Violation',
+              rule: 'InvalidForeignOperation',
+              detail: `Foreign signature ${record.symbol} has noncanonical target ABI facts`,
+            }),
+          )
+      }
+
+      const sameDeclaration = (
+        left: DeclarationFacts.CanonicalId,
+        right: DeclarationFacts.CanonicalId,
+      ): boolean => left.module === right.module && left.name === right.name
+      const declarationKey = (declaration: DeclarationFacts.CanonicalId): string =>
+        `${declaration.module}\u0000${declaration.name}`
+      const exportInventoryCanonical = self.foreignExports.every((record, ordinal) => {
+        const previous = ordinal === 0 ? undefined : self.foreignExports.at(ordinal - 1)
+        if (previous === undefined) return true
+        return (
+          previous.declaration.module.localeCompare(record.declaration.module) < 0 ||
+          (previous.declaration.module === record.declaration.module &&
+            (previous.declarationSpan.start < record.declarationSpan.start ||
+              (previous.declarationSpan.start === record.declarationSpan.start &&
+                previous.declarationSpan.end < record.declarationSpan.end)))
+        )
       })
-      for (const detail of NativeAssembly.violations(
-        operation.assembly,
-        semanticType(operation.type),
-        operands,
-        self.layout.target,
-      ))
-        violations.push({
-          _tag: 'Violation',
-          rule: 'InvalidNativeAssembly',
-          function: fn.id,
-          detail,
-        })
-      const owner = fn.regions.find((region) => operationsOf(region).includes(operation))
-      if (
-        operation.assembly.noReturn &&
-        (owner?._tag !== 'OperationRegion' ||
-          owner.outcome._tag !== 'Trap' ||
-          owner.operations.at(-1) !== operation)
-      )
-        violations.push({
-          _tag: 'Violation',
-          rule: 'InvalidNativeAssembly',
-          function: fn.id,
-          detail: 'terminal assembly must end its region without a continuation',
-        })
-    }
-    if (fn.machine !== undefined) {
-      const assembly = operations[0]
-      if (
-        !NativeAssembly.available(self.layout.target) ||
-        fn.parameterCount !== 0 ||
-        !SilkType.equals(semanticType(fn.result), SilkType.unit) ||
-        operations.length !== 1 ||
-        assembly?._tag !== 'NativeAssembly' ||
-        !assembly.assembly.noReturn ||
-        !assembly.assembly.sideEffects ||
-        assembly.arguments.length !== 0 ||
-        fn.regions.some(
-          (region) => region._tag !== 'OperationRegion' || region.outcome._tag !== 'Trap',
+      const exportDeclarations = new Set<string>()
+      if (!exportInventoryCanonical) {
+        violations.push(
+          Object.freeze({
+            _tag: 'Violation',
+            rule: 'InvalidForeignOperation',
+            detail: 'Foreign export inventory is duplicated or outside canonical declaration order',
+          }),
         )
-      )
-        violations.push({
-          _tag: 'Violation',
-          rule: 'InvalidMachineFunction',
-          function: fn.id,
-          detail: 'naked function requires exactly one operand-free terminal assembly operation',
-        })
-    }
-  }
-
-  const retained = new Set<string>()
-  for (const root of self.retainedRoots ?? []) {
-    const key = Instances.keyText(root)
-    if (retained.has(key) || !self.functions.some((fn) => matchesInstanceKey(fn, root)))
-      violations.push(
-        Object.freeze({
-          _tag: 'Violation',
-          rule: 'InvalidArtifactRoot',
-          detail: 'Retained roots must uniquely identify emitted function instances',
-        }),
-      )
-    retained.add(key)
-  }
-  for (const record of [...self.foreignCalls, ...self.foreignExports]) {
-    if (!CAbi.isCanonicalSignature(record.signature, self.layout.target))
-      violations.push(
-        Object.freeze({
-          _tag: 'Violation',
-          rule: 'InvalidForeignOperation',
-          detail: `Foreign signature ${record.symbol} has noncanonical target ABI facts`,
-        }),
-      )
-  }
-
-  const sameDeclaration = (
-    left: DeclarationFacts.CanonicalId,
-    right: DeclarationFacts.CanonicalId,
-  ): boolean => left.module === right.module && left.name === right.name
-  const declarationKey = (declaration: DeclarationFacts.CanonicalId): string =>
-    `${declaration.module}\u0000${declaration.name}`
-  const exportInventoryCanonical = self.foreignExports.every((record, ordinal) => {
-    const previous = ordinal === 0 ? undefined : self.foreignExports.at(ordinal - 1)
-    if (previous === undefined) return true
-    return (
-      previous.declaration.module.localeCompare(record.declaration.module) < 0 ||
-      (previous.declaration.module === record.declaration.module &&
-        (previous.declarationSpan.start < record.declarationSpan.start ||
-          (previous.declarationSpan.start === record.declarationSpan.start &&
-            previous.declarationSpan.end < record.declarationSpan.end)))
-    )
-  })
-  const exportDeclarations = new Set<string>()
-  if (!exportInventoryCanonical) {
-    violations.push(
-      Object.freeze({
-        _tag: 'Violation',
-        rule: 'InvalidForeignOperation',
-        detail: 'Foreign export inventory is duplicated or outside canonical declaration order',
-      }),
-    )
-  }
-  for (const record of self.foreignExports) {
-    const key = declarationKey(record.declaration)
-    const declarationUnique = !exportDeclarations.has(key)
-    exportDeclarations.add(key)
-    const implementation = self.functions.find((candidate) =>
-      matchesInstanceKey(candidate, record.key),
-    )
-    const implementationType =
-      implementation === undefined
-        ? undefined
-        : SilkType.foreignFunction(
-            implementation.localTypes.slice(0, implementation.parameterCount).map(semanticType),
-            semanticType(implementation.result),
-            record.type.contract,
-            record.type,
-          )
-    const signatureAdmitted =
-      record.type.parameters.every((parameter, ordinal) =>
-        SilkType.isReference(parameter)
-          ? record.type.contract.borrow.includes(ordinal)
-          : CAbi.admit(parameter, 'Parameter')._tag === 'Admitted',
-      ) && CAbi.admit(record.type.result, 'Result')._tag === 'Admitted'
-    const signature = signatureAdmitted
-      ? CAbi.signature(
-          record.type.parameters,
-          record.type.result,
-          self.layout.target,
-          record.type.contract,
+      }
+      for (const record of self.foreignExports) {
+        const key = declarationKey(record.declaration)
+        const declarationUnique = !exportDeclarations.has(key)
+        exportDeclarations.add(key)
+        const implementation = self.functions.find((candidate) =>
+          matchesInstanceKey(candidate, record.key),
         )
-      : undefined
-    if (
-      !declarationUnique ||
-      !sameDeclaration(record.key.declaration, record.declaration) ||
-      (self.layout.target.kind === 'Native' &&
-        (implementationType === undefined || !SilkType.equals(implementationType, record.type))) ||
-      signature === undefined ||
-      CAbi.signatureKey(record.signature) !== CAbi.signatureKey(signature)
-    ) {
-      violations.push(
-        Object.freeze({
-          _tag: 'Violation',
-          rule: 'InvalidForeignOperation',
-          detail: `Foreign export ${record.symbol} does not match one unique canonical implementation`,
-        }),
-      )
-    }
-  }
-  const foreignStaticInitializerValid = (record: Module['foreignStatics'][number]): boolean => {
-    if (record.direction === 'Import') return record.literal === undefined
-    const scalar = typeof record.type === 'string' ? Scalar.find(record.type) : undefined
-    if (record.literal?._tag === 'IntegerLiteral' && scalar?.category === 'Integer') {
-      const range = Scalar.range(scalar, self.layout.target.pointerSize === 4 ? 32 : 64)
-      return record.literal.value >= range.minimum && record.literal.value <= range.maximum
-    }
-    if (record.literal?._tag === 'FloatingLiteral' && scalar?.category === 'Floating') {
-      const value = Number(record.literal.spelling)
-      return (
-        Number.isFinite(value) && (scalar.spelling !== 'f32' || Number.isFinite(Math.fround(value)))
-      )
-    }
-    return false
-  }
-  const foreignStaticLoads = self.functions.flatMap((fn) =>
-    operations(fn).filter(
-      (operation): operation is Extract<Operation, { readonly _tag: 'ForeignStaticLoad' }> =>
-        operation._tag === 'ForeignStaticLoad',
-    ),
-  )
-  const staticDeclarations = new Set<string>()
-  const staticInventoryCanonical = self.foreignStatics.every((record, ordinal) => {
-    const previous = ordinal === 0 ? undefined : self.foreignStatics.at(ordinal - 1)
-    if (previous === undefined) return true
-    return (
-      previous.declarationSpan.sourceId.localeCompare(record.declarationSpan.sourceId) < 0 ||
-      (previous.declarationSpan.sourceId === record.declarationSpan.sourceId &&
-        (previous.declarationSpan.start < record.declarationSpan.start ||
-          (previous.declarationSpan.start === record.declarationSpan.start &&
-            previous.declarationSpan.end < record.declarationSpan.end)))
-    )
-  })
-  if (!staticInventoryCanonical) {
-    violations.push(
-      Object.freeze({
-        _tag: 'Violation',
-        rule: 'InvalidForeignOperation',
-        detail: 'Foreign static inventory is duplicated or outside canonical source order',
-      }),
-    )
-  }
-  for (const record of self.foreignStatics) {
-    const key = declarationKey(record.declaration)
-    const declarationUnique = !staticDeclarations.has(key)
-    staticDeclarations.add(key)
-    const retainedImportValid =
-      record.direction === 'Export' ||
-      foreignStaticLoads.some((operation) =>
-        sameDeclaration(operation.declaration, record.declaration),
-      )
-    if (
-      CAbi.admit(record.type, 'Parameter')._tag === 'NotAdmitted' ||
-      !declarationUnique ||
-      !foreignStaticInitializerValid(record) ||
-      !retainedImportValid
-    ) {
-      violations.push(
-        Object.freeze({
-          _tag: 'Violation',
-          rule: 'InvalidForeignOperation',
-          detail: `Foreign static ${record.symbol} has an invalid ${record.direction.toLowerCase()} type, initializer, or reachability record`,
-        }),
-      )
-    }
-  }
-  const expectedAuthorities = self.layout.executionPackages.plans.length
-  if (
-    self.executionTransitions.length !== expectedAuthorities ||
-    self.executionTransitions.some(
-      (authority, ordinal) =>
-        authority.package !== ordinal ||
-        authority.root !== ordinal + 1 ||
-        authority.readiness !== self.layout.executionPackages.plans.at(ordinal)?.readinessStorage ||
-        ExecutionTransition.verifyAuthority(authority).length > 0,
-    )
-  ) {
-    violations.push(
-      Object.freeze({
-        _tag: 'Violation',
-        rule: 'InvalidExecutionOperation',
-        detail: 'execution transition authority is incomplete or non-canonical',
-      }),
-    )
-  }
-  const staticData = self.staticData ?? []
-  const staticTableValid = staticData.every((data, ordinal) => {
-    const previous = ordinal === 0 ? undefined : staticData.at(ordinal - 1)
-    const expectedId = `${data.kind === 'Text' ? 'text' : 'bytes'}:${data.bytes
-      .map((byte) => byte.toString(16).padStart(2, '0'))
-      .join('')}`
-    return (
-      (previous === undefined || previous.id < data.id) &&
-      data.id === expectedId &&
-      data.utf8 === (data.kind === 'Text') &&
-      data.bytes.every((byte) => Number.isInteger(byte) && byte >= 0 && byte <= 255)
-    )
-  })
-  const placements = self.layout.staticData ?? []
-  const placementMatches =
-    placements.length === staticData.length &&
-    placements.every((placement, ordinal) => placement.data.id === staticData.at(ordinal)?.id)
-  if (!staticTableValid || !placementMatches) {
-    violations.push(
-      Object.freeze({
-        _tag: 'Violation',
-        rule: 'InvalidSliceOperation',
-        detail: 'static-data table is non-canonical or disagrees with target placement',
-      }),
-    )
-  }
-  const originReachable = SuspensionMir.originReachableFunctions(self)
-  const orphanRelay = self.functions
-    .flatMap((fn) =>
-      (fn.suspension?.regions ?? []).flatMap((region) => {
+        const implementationType =
+          implementation === undefined
+            ? undefined
+            : SilkType.foreignFunction(
+                implementation.localTypes.slice(0, implementation.parameterCount).map(semanticType),
+                semanticType(implementation.result),
+                record.type.contract,
+                record.type,
+              )
+        const signatureAdmitted =
+          record.type.parameters.every((parameter, ordinal) =>
+            SilkType.isReference(parameter)
+              ? record.type.contract.borrow.includes(ordinal)
+              : CAbi.admit(parameter, 'Parameter')._tag === 'Admitted',
+          ) && CAbi.admit(record.type.result, 'Result')._tag === 'Admitted'
+        const signature = signatureAdmitted
+          ? CAbi.signature(
+              record.type.parameters,
+              record.type.result,
+              self.layout.target,
+              record.type.contract,
+            )
+          : undefined
         if (
-          region._tag !== 'RunSuspendableEffectRegion' ||
-          // Parking originates an external transfer in this execution. Its suspension region
-          // carries continuation state, but it does not call a separate child runner.
-          region.operation._tag === 'ExecutionPark'
-        )
-          return []
-        const declaration = region.runner.declaration
-        return declaration === undefined ||
-          !self.functions.some(
-            (candidate) =>
-              originReachable.has(instanceText(candidate.instance)) &&
-              matchesInstance(
-                candidate,
-                declaration,
-                region.runner.typeArguments,
-                region.runner.instance?.staticArguments ?? Object.freeze([]),
-              ),
+          !declarationUnique ||
+          !sameDeclaration(record.key.declaration, record.declaration) ||
+          (self.layout.target.kind === 'Native' &&
+            (implementationType === undefined ||
+              !SilkType.equals(implementationType, record.type))) ||
+          signature === undefined ||
+          CAbi.signatureKey(record.signature) !== CAbi.signatureKey(signature)
+        ) {
+          violations.push(
+            Object.freeze({
+              _tag: 'Violation',
+              rule: 'InvalidForeignOperation',
+              detail: `Foreign export ${record.symbol} does not match one unique canonical implementation`,
+            }),
           )
-          ? [Object.freeze({ fn, region })]
-          : []
-      }),
-    )
-    .at(0)
-  if (orphanRelay !== undefined)
-    violations.push(
-      Object.freeze({
-        _tag: 'Violation',
-        rule: 'OrphanSuspensionMachinery',
-        function: orphanRelay.fn.id,
-        detail: `suspendable relay through ${orphanRelay.region.runner.declaration === undefined ? 'an unknown runner' : targetText(orphanRelay.region.runner.declaration)} belongs to a function with no reachable explicit transfer origin (origin-reachable: ${
-          self.functions
-            .filter((fn) => originReachable.has(instanceText(fn.instance)))
-            .map((fn) => targetText(fn.id))
-            .join(', ') || 'none'
-        })`,
-      }),
-    )
-  for (const root of self.foreignExports.map((item) => item.key)) {
-    if (!self.functions.some((fn) => matchesInstanceKey(fn, root)))
-      violations.push(
-        Object.freeze({
-          _tag: 'Violation',
-          rule: 'InvalidArtifactRoot',
-          detail: `artifact root ${instanceText(root)} has no retained function`,
-        }),
+        }
+      }
+      const foreignStaticInitializerValid = (record: Module['foreignStatics'][number]): boolean => {
+        if (record.direction === 'Import') return record.literal === undefined
+        const scalar = typeof record.type === 'string' ? Scalar.find(record.type) : undefined
+        if (record.literal?._tag === 'IntegerLiteral' && scalar?.category === 'Integer') {
+          const range = Scalar.range(scalar, self.layout.target.pointerSize === 4 ? 32 : 64)
+          return record.literal.value >= range.minimum && record.literal.value <= range.maximum
+        }
+        if (record.literal?._tag === 'FloatingLiteral' && scalar?.category === 'Floating') {
+          const value = Number(record.literal.spelling)
+          return (
+            Number.isFinite(value) &&
+            (scalar.spelling !== 'f32' || Number.isFinite(Math.fround(value)))
+          )
+        }
+        return false
+      }
+      const foreignStaticLoads = self.functions.flatMap((fn) =>
+        operations(fn).filter(
+          (operation): operation is Extract<Operation, { readonly _tag: 'ForeignStaticLoad' }> =>
+            operation._tag === 'ForeignStaticLoad',
+        ),
       )
-  }
-  const sharedElements = [
-    ...new Map(
-      self.layout.entries.flatMap((entry) => {
-        if (!SilkType.isSharedCore(entry.type)) return []
-        const element = SilkType.typeArgumentAt(entry.type, 0)
-        return element === undefined ? [] : [[SilkType.key(element), element] as const]
-      }),
-    ).values(),
-  ].sort((left, right) => SilkType.key(left).localeCompare(SilkType.key(right)))
-  const payloadCleanupHelpers = self.functions.filter(
-    (fn) =>
-      fn.id.module === LocalSharedPayloadCleanup.declaration.module &&
-      fn.id.name === LocalSharedPayloadCleanup.declaration.name,
+      const staticDeclarations = new Set<string>()
+      const staticInventoryCanonical = self.foreignStatics.every((record, ordinal) => {
+        const previous = ordinal === 0 ? undefined : self.foreignStatics.at(ordinal - 1)
+        if (previous === undefined) return true
+        return (
+          previous.declarationSpan.sourceId.localeCompare(record.declarationSpan.sourceId) < 0 ||
+          (previous.declarationSpan.sourceId === record.declarationSpan.sourceId &&
+            (previous.declarationSpan.start < record.declarationSpan.start ||
+              (previous.declarationSpan.start === record.declarationSpan.start &&
+                previous.declarationSpan.end < record.declarationSpan.end)))
+        )
+      })
+      if (!staticInventoryCanonical) {
+        violations.push(
+          Object.freeze({
+            _tag: 'Violation',
+            rule: 'InvalidForeignOperation',
+            detail: 'Foreign static inventory is duplicated or outside canonical source order',
+          }),
+        )
+      }
+      for (const record of self.foreignStatics) {
+        const key = declarationKey(record.declaration)
+        const declarationUnique = !staticDeclarations.has(key)
+        staticDeclarations.add(key)
+        const retainedImportValid =
+          record.direction === 'Export' ||
+          foreignStaticLoads.some((operation) =>
+            sameDeclaration(operation.declaration, record.declaration),
+          )
+        if (
+          CAbi.admit(record.type, 'Parameter')._tag === 'NotAdmitted' ||
+          !declarationUnique ||
+          !foreignStaticInitializerValid(record) ||
+          !retainedImportValid
+        ) {
+          violations.push(
+            Object.freeze({
+              _tag: 'Violation',
+              rule: 'InvalidForeignOperation',
+              detail: `Foreign static ${record.symbol} has an invalid ${record.direction.toLowerCase()} type, initializer, or reachability record`,
+            }),
+          )
+        }
+      }
+      const expectedAuthorities = self.layout.executionPackages.plans.length
+      if (
+        self.executionTransitions.length !== expectedAuthorities ||
+        self.executionTransitions.some(
+          (authority, ordinal) =>
+            authority.package !== ordinal ||
+            authority.root !== ordinal + 1 ||
+            authority.readiness !==
+              self.layout.executionPackages.plans.at(ordinal)?.readinessStorage ||
+            ExecutionTransition.verifyAuthority(authority).length > 0,
+        )
+      ) {
+        violations.push(
+          Object.freeze({
+            _tag: 'Violation',
+            rule: 'InvalidExecutionOperation',
+            detail: 'execution transition authority is incomplete or non-canonical',
+          }),
+        )
+      }
+      const staticData = self.staticData ?? []
+      const staticTableValid = staticData.every((data, ordinal) => {
+        const previous = ordinal === 0 ? undefined : staticData.at(ordinal - 1)
+        const expectedId = `${data.kind === 'Text' ? 'text' : 'bytes'}:${data.bytes
+          .map((byte) => byte.toString(16).padStart(2, '0'))
+          .join('')}`
+        return (
+          (previous === undefined || previous.id < data.id) &&
+          data.id === expectedId &&
+          data.utf8 === (data.kind === 'Text') &&
+          data.bytes.every((byte) => Number.isInteger(byte) && byte >= 0 && byte <= 255)
+        )
+      })
+      const placements = self.layout.staticData ?? []
+      const placementMatches =
+        placements.length === staticData.length &&
+        placements.every((placement, ordinal) => placement.data.id === staticData.at(ordinal)?.id)
+      if (!staticTableValid || !placementMatches) {
+        violations.push(
+          Object.freeze({
+            _tag: 'Violation',
+            rule: 'InvalidSliceOperation',
+            detail: 'static-data table is non-canonical or disagrees with target placement',
+          }),
+        )
+      }
+      const originReachable = SuspensionMir.originReachableFunctions(self)
+      const orphanRelay = self.functions
+        .flatMap((fn) =>
+          (fn.suspension?.regions ?? []).flatMap((region) => {
+            if (
+              region._tag !== 'RunSuspendableEffectRegion' ||
+              // Parking originates an external transfer in this execution. Its suspension region
+              // carries continuation state, but it does not call a separate child runner.
+              region.operation._tag === 'ExecutionPark'
+            )
+              return []
+            const declaration = region.runner.declaration
+            return declaration === undefined ||
+              !self.functions.some(
+                (candidate) =>
+                  originReachable.has(instanceText(candidate.instance)) &&
+                  matchesInstance(
+                    candidate,
+                    declaration,
+                    region.runner.typeArguments,
+                    region.runner.instance?.staticArguments ?? Object.freeze([]),
+                  ),
+              )
+              ? [Object.freeze({ fn, region })]
+              : []
+          }),
+        )
+        .at(0)
+      if (orphanRelay !== undefined)
+        violations.push(
+          Object.freeze({
+            _tag: 'Violation',
+            rule: 'OrphanSuspensionMachinery',
+            function: orphanRelay.fn.id,
+            detail: `suspendable relay through ${orphanRelay.region.runner.declaration === undefined ? 'an unknown runner' : targetText(orphanRelay.region.runner.declaration)} belongs to a function with no reachable explicit transfer origin (origin-reachable: ${
+              self.functions
+                .filter((fn) => originReachable.has(instanceText(fn.instance)))
+                .map((fn) => targetText(fn.id))
+                .join(', ') || 'none'
+            })`,
+          }),
+        )
+      for (const root of self.foreignExports.map((item) => item.key)) {
+        if (!self.functions.some((fn) => matchesInstanceKey(fn, root)))
+          violations.push(
+            Object.freeze({
+              _tag: 'Violation',
+              rule: 'InvalidArtifactRoot',
+              detail: `artifact root ${instanceText(root)} has no retained function`,
+            }),
+          )
+      }
+      const sharedElements = [
+        ...new Map(
+          self.layout.entries.flatMap((entry) => {
+            if (!SilkType.isSharedCore(entry.type)) return []
+            const element = SilkType.typeArgumentAt(entry.type, 0)
+            return element === undefined ? [] : [[SilkType.key(element), element] as const]
+          }),
+        ).values(),
+      ].sort((left, right) => SilkType.key(left).localeCompare(SilkType.key(right)))
+      const payloadCleanupHelpers = self.functions.filter(
+        (fn) =>
+          fn.id.module === LocalSharedPayloadCleanup.declaration.module &&
+          fn.id.name === LocalSharedPayloadCleanup.declaration.name,
+      )
+      for (const element of sharedElements) {
+        const helpers = payloadCleanupHelpers.filter((fn) =>
+          matchesInstance(fn, LocalSharedPayloadCleanup.declaration, [element]),
+        )
+        const helper = helpers.at(0)
+        const parameter = helper?.localTypes.at(0)
+        if (
+          helpers.length !== 1 ||
+          helper === undefined ||
+          helper.parameterCount !== 1 ||
+          parameter === undefined ||
+          !SilkType.equals(semanticType(parameter), element) ||
+          helper.result._tag !== 'i32' ||
+          helper.suspension !== undefined
+        ) {
+          violations.push(
+            Object.freeze({
+              _tag: 'Violation',
+              rule: 'InvalidLocalSharedOperation',
+              localSharedReason: 'CleanupContract',
+              ...(helper === undefined ? {} : { function: helper.id }),
+              detail: `local-shared payload ${SilkType.encode(element)} must resolve to one synchronous single-parameter cleanup helper`,
+            }),
+          )
+        }
+      }
+      if (payloadCleanupHelpers.length !== sharedElements.length) {
+        violations.push(
+          Object.freeze({
+            _tag: 'Violation',
+            rule: 'InvalidLocalSharedOperation',
+            localSharedReason: 'CleanupContract',
+            detail: 'local-shared payload cleanup helper inventory is stale or contains duplicates',
+          }),
+        )
+      }
+      return { sameDeclaration, foreignStaticInitializerValid }
+    },
   )
-  for (const element of sharedElements) {
-    const helpers = payloadCleanupHelpers.filter((fn) =>
-      matchesInstance(fn, LocalSharedPayloadCleanup.declaration, [element]),
-    )
-    const helper = helpers.at(0)
-    const parameter = helper?.localTypes.at(0)
-    if (
-      helpers.length !== 1 ||
-      helper === undefined ||
-      helper.parameterCount !== 1 ||
-      parameter === undefined ||
-      !SilkType.equals(semanticType(parameter), element) ||
-      helper.result._tag !== 'i32' ||
-      helper.suspension !== undefined
-    ) {
-      violations.push(
-        Object.freeze({
-          _tag: 'Violation',
-          rule: 'InvalidLocalSharedOperation',
-          localSharedReason: 'CleanupContract',
-          ...(helper === undefined ? {} : { function: helper.id }),
-          detail: `local-shared payload ${SilkType.encode(element)} must resolve to one synchronous single-parameter cleanup helper`,
-        }),
-      )
-    }
-  }
-  if (payloadCleanupHelpers.length !== sharedElements.length) {
-    violations.push(
-      Object.freeze({
-        _tag: 'Violation',
-        rule: 'InvalidLocalSharedOperation',
-        localSharedReason: 'CleanupContract',
-        detail: 'local-shared payload cleanup helper inventory is stale or contains duplicates',
-      }),
-    )
-  }
   const instanceKeys = new Set<string>()
-  for (const fn of self.functions) {
+  const verifyFunction = (fn: Module['functions'][number]): void => {
     const allRegions = regionsTree(fn.regions)
     const caughtOutcomes = new Map(
       fn.regions
@@ -7384,40 +7433,53 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
           violation.function?.module === fn.id.module && violation.function.name === fn.id.name,
       )
     ) {
-      violations.push(...initializationOf(fn, self.layout).violations)
-    }
-  }
-  for (const verdict of self.normalization ?? []) {
-    const candidates = self.functions.filter(
-      (candidate) =>
-        candidate.id.module === verdict.function.module &&
-        candidate.id.name === verdict.function.name,
-    )
-    const fn = candidates.find((candidate) => {
-      const region = regionsTree(candidate.regions).find(
-        (candidateRegion) => candidateRegion.id.ordinal === verdict.region.ordinal,
-      )
-      return region !== undefined && candidate.localTypes.at(verdict.local.ordinal) !== undefined
-    })
-    const region =
-      fn === undefined
-        ? undefined
-        : regionsTree(fn.regions).find(
-            (candidate) => candidate.id.ordinal === verdict.region.ordinal,
-          )
-    const local = fn?.localTypes.at(verdict.local.ordinal)
-    const synchronous = verdict._tag === 'Rejected' || verdict.guards.includes('Synchronous')
-    if (fn === undefined || region === undefined || local === undefined || !synchronous) {
       violations.push(
-        Object.freeze({
-          _tag: 'Violation',
-          rule: 'InvalidNormalization',
-          ...(fn === undefined ? {} : { function: fn.id }),
-          ...(region === undefined ? {} : { region: region.id }),
-          detail: 'normalization verdict has dangling identities or lacks its synchronous proof',
-        }),
+        ...trace('MirVerification.verifyInitialization', () => initializationOf(fn, self.layout))
+          .violations,
       )
     }
   }
+  for (const [ordinal, fn] of self.functions.entries()) {
+    trace('MirVerification.verifyFunction', () => verifyFunction(fn), {
+      'function.module': fn.id.module,
+      'function.name': fn.id.name,
+      'function.ordinal': ordinal,
+      'regions.count': fn.regions.length,
+    })
+  }
+  trace('MirVerification.verifyNormalization', () => {
+    for (const verdict of self.normalization ?? []) {
+      const candidates = self.functions.filter(
+        (candidate) =>
+          candidate.id.module === verdict.function.module &&
+          candidate.id.name === verdict.function.name,
+      )
+      const fn = candidates.find((candidate) => {
+        const region = regionsTree(candidate.regions).find(
+          (candidateRegion) => candidateRegion.id.ordinal === verdict.region.ordinal,
+        )
+        return region !== undefined && candidate.localTypes.at(verdict.local.ordinal) !== undefined
+      })
+      const region =
+        fn === undefined
+          ? undefined
+          : regionsTree(fn.regions).find(
+              (candidate) => candidate.id.ordinal === verdict.region.ordinal,
+            )
+      const local = fn?.localTypes.at(verdict.local.ordinal)
+      const synchronous = verdict._tag === 'Rejected' || verdict.guards.includes('Synchronous')
+      if (fn === undefined || region === undefined || local === undefined || !synchronous) {
+        violations.push(
+          Object.freeze({
+            _tag: 'Violation',
+            rule: 'InvalidNormalization',
+            ...(fn === undefined ? {} : { function: fn.id }),
+            ...(region === undefined ? {} : { region: region.id }),
+            detail: 'normalization verdict has dangling identities or lacks its synchronous proof',
+          }),
+        )
+      }
+    }
+  })
   return Object.freeze(violations)
 }

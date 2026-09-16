@@ -11,6 +11,7 @@ export type {
   SourceResolutionFailed,
   TargetFailed,
   ToolchainFailed,
+  VerificationFailed,
 } from '../../src/Driver.js'
 
 export type CompileRequest = Omit<Driver.CompileRequest, 'packageName'> & {
@@ -20,6 +21,7 @@ export type CompileRequest = Omit<Driver.CompileRequest, 'packageName'> & {
 /** Test application edge with deterministic heap telemetry. */
 export const compile = Effect.fnUntraced(function* (request: CompileRequest) {
   return yield* Driver.compile({
+    verifyMir: true,
     ...request,
     packageName: request.packageName ?? 'compiler-test',
   }).pipe(Effect.provide(HeapObservation.layerTest))

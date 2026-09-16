@@ -714,7 +714,7 @@ export const emitBodies = Effect.fn('NativeFunction.emitBodies')(function* (
               continue
             }
             const values: Array<Value.Input> = []
-            for (let lane = 0; lane < lanesFor(logicalType).length; lane += 1) {
+            for (let lane = 0, count = lanesFor(logicalType).length; lane < count; lane += 1) {
               values.push(yield* Value.argument(body, physicalParameter))
               physicalParameter += 1
             }

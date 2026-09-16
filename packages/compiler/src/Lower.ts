@@ -1,3 +1,4 @@
+import * as CompilerTrace from './CompilerTrace.js'
 import * as CleanupPlan from './CleanupPlan.js'
 import * as ConformanceProof from './ConformanceProof.js'
 import type * as DeclarationFacts from './DeclarationFacts.js'
@@ -329,27 +330,31 @@ export const lowerProgram = (
   layout: Layout.Plan,
   index: DeclarationIndex.Index,
   opaqueRealizations: OpaqueRealization.Catalog,
+  trace: CompilerTrace.CompilerTrace = CompilerTrace.none,
 ): Mir.Module => {
-  const declaredForeignStatics = Object.freeze(
-    index.modules.flatMap((module) =>
-      module.members.flatMap((member) =>
-        member._tag === 'ForeignStaticDeclaration' &&
-        member.canonical._tag === 'Canonical' &&
-        member.declaredType._tag === 'Resolved'
-          ? [
-              Object.freeze({
-                declaration: member.canonical.id,
-                declarationSpan: member.syntax.span,
-                direction: member.direction,
-                symbol: member.foreign.symbol,
-                type: member.declaredType.type,
-                ...(member.literal === undefined ? {} : { literal: member.literal }),
-              }),
-            ]
-          : [],
+  const declaredForeignStatics = trace('Lower.collectForeignStatics', () => {
+    const declaredForeignStatics = Object.freeze(
+      index.modules.flatMap((module) =>
+        module.members.flatMap((member) =>
+          member._tag === 'ForeignStaticDeclaration' &&
+          member.canonical._tag === 'Canonical' &&
+          member.declaredType._tag === 'Resolved'
+            ? [
+                Object.freeze({
+                  declaration: member.canonical.id,
+                  declarationSpan: member.syntax.span,
+                  direction: member.direction,
+                  symbol: member.foreign.symbol,
+                  type: member.declaredType.type,
+                  ...(member.literal === undefined ? {} : { literal: member.literal }),
+                }),
+              ]
+            : [],
+        ),
       ),
-    ),
-  )
+    )
+    return declaredForeignStatics
+  })
   const ownershipOf = (instance: Instances.Instance): Ownership.ModuleOwnership =>
     Object.freeze({
       _tag: 'OwnershipFacts',
@@ -357,149 +362,179 @@ export const lowerProgram = (
       functions: Object.freeze([instance.ownership]),
       diagnostics: Object.freeze([]),
     })
-  const staticDataById = new Map<
-    string,
-    Extract<
-      Hir.Expression,
-      { readonly _tag: 'StaticStringLiteral' | 'StaticByteViewLiteral' }
-    >['data']
-  >()
-  for (const instance of discovery.instances) {
-    for (const expression of instance.function.statements
-      .flatMap(Hir.statementExpressions)
-      .flatMap(Hir.runtimeExpressionTree)) {
-      if (expression._tag === 'StaticStringLiteral' || expression._tag === 'StaticByteViewLiteral')
-        staticDataById.set(expression.data.id, expression.data)
+  const staticData = trace('Lower.collectStaticData', () => {
+    const staticDataById = new Map<
+      string,
+      Extract<
+        Hir.Expression,
+        { readonly _tag: 'StaticStringLiteral' | 'StaticByteViewLiteral' }
+      >['data']
+    >()
+    for (const instance of discovery.instances) {
+      for (const expression of instance.function.statements
+        .flatMap(Hir.statementExpressions)
+        .flatMap(Hir.runtimeExpressionTree)) {
+        if (
+          expression._tag === 'StaticStringLiteral' ||
+          expression._tag === 'StaticByteViewLiteral'
+        )
+          staticDataById.set(expression.data.id, expression.data)
+      }
     }
-  }
-  const staticData = Object.freeze(
-    [...staticDataById.values()].sort((left, right) => left.id.localeCompare(right.id)),
-  )
+    const staticData = Object.freeze(
+      [...staticDataById.values()].sort((left, right) => left.id.localeCompare(right.id)),
+    )
+    return staticData
+  })
   // Discovery retains separate proof contexts so every call is checked. Once contracts are
   // concrete, contexts with the same emitted arguments and contract share one machine body.
-  const runtimeInstances = new Map<string, Instances.Instance>()
-  for (const instance of discovery.instances) {
-    const key = `${instanceText(
-      instance.key.declaration,
-      instance.key.typeArguments,
-      instance.key.staticArguments,
-    )}\u0002${instance.key.contractRow.join('\u0000')}`
-    runtimeInstances.set(key, instance)
-  }
-  const effectResults = new Map<string, ExecutableEffectType>()
-  const generatedRunners: Array<GeneratedEffectRunner> = []
-  for (const instance of runtimeInstances.values()) {
-    const resultKey = instanceText(
-      instance.key.declaration,
-      instance.key.typeArguments,
-      instance.key.staticArguments,
-    )
-    const block = returnedEffectBlock(instance.function)
-    const blockType =
-      block === undefined
-        ? undefined
-        : Type.substitute(block.type, instance.substitution, instance.specialization.compatibility)
-    const type =
-      block === undefined || blockType === undefined || !Type.isEffect(blockType)
-        ? undefined
-        : effectValueType(layout, instance.key, block, blockType)
-    if (type !== undefined && block !== undefined) {
-      effectResults.set(resultKey, type)
-      generatedRunners.push(
-        Object.freeze({
-          _tag: 'BlockEffectRunner',
-          id: Hir.effectRunnerId(instance.key.declaration, block.site),
-          owner: instance,
-          block,
-          type,
-          specializationKey: baseRunnerKey(instance.key, block.site, type.type),
-          providedRequirements: Object.freeze([]),
-          witnessTargets: specializedWitnessEffectTargets(index, instance, block),
-        }),
-      )
-      continue
+  const runtimeInstances = trace('Lower.selectRuntimeInstances', () => {
+    const runtimeInstances = new Map<string, Instances.Instance>()
+    for (const instance of discovery.instances) {
+      const key = `${instanceText(
+        instance.key.declaration,
+        instance.key.typeArguments,
+        instance.key.staticArguments,
+      )}\u0002${instance.key.contractRow.join('\u0000')}`
+      runtimeInstances.set(key, instance)
     }
-    const returned = returnedValueType(
-      layout,
-      opaqueRealizations,
-      instance.function,
-      instance.substitution,
-    )
-    if (returned?._tag === 'EffectComposite') effectResults.set(resultKey, returned)
-  }
-  const functions = [...runtimeInstances.values()].map((instance) =>
-    lowerInstance(
-      instance,
-      ownershipOf(instance),
-      layout,
-      index,
-      discovery.instances,
-      discovery.calls,
-      effectResults,
-      generatedRunners,
-      opaqueRealizations,
-    ),
-  )
-  const helperSpan = SourceSpan.fromOffsets(discovery.rootModule, 0, 0)
-  if (helperSpan === undefined) throw new RangeError('Generated local-shared cleanup lost its span')
-  const sharedElements = [
-    ...new Map(
-      layout.entries.flatMap((entry) => {
-        if (!Type.isSharedCore(entry.type)) return []
-        const element = Type.typeArgumentAt(entry.type, 0)
-        return element === undefined ? [] : [[Type.key(element), element] as const]
-      }),
-    ).values(),
-  ].sort((left, right) => Type.key(left).localeCompare(Type.key(right)))
-  for (const element of sharedElements) {
-    const parameterType = mirType(element)
-    if (parameterType === undefined)
-      throw new RangeError('Generated local-shared cleanup lost its concrete payload type')
-    const parameter = local(0)
-    const result = local(1)
-    const cleanup = CleanupPlan.cleanupPlan(index, element)
-    functions.push(
-      Object.freeze({
-        _tag: 'MirFunction' as const,
-        id: LocalSharedPayloadCleanup.declaration,
-        instance: LocalSharedPayloadCleanup.instance(element),
-        parameterCount: 1,
-        localTypes: Object.freeze([parameterType, i32]),
-        result: i32,
-        entry: Object.freeze({ _tag: 'Region' as const, ordinal: 0 }),
-        regions: Object.freeze([
+    return runtimeInstances
+  })
+  const { effectResults, generatedRunners } = trace('Lower.prepareEffectRunners', () => {
+    const effectResults = new Map<string, ExecutableEffectType>()
+    const generatedRunners: Array<GeneratedEffectRunner> = []
+    for (const instance of runtimeInstances.values()) {
+      const resultKey = instanceText(
+        instance.key.declaration,
+        instance.key.typeArguments,
+        instance.key.staticArguments,
+      )
+      const block = returnedEffectBlock(instance.function)
+      const blockType =
+        block === undefined
+          ? undefined
+          : Type.substitute(
+              block.type,
+              instance.substitution,
+              instance.specialization.compatibility,
+            )
+      const type =
+        block === undefined || blockType === undefined || !Type.isEffect(blockType)
+          ? undefined
+          : effectValueType(layout, instance.key, block, blockType)
+      if (type !== undefined && block !== undefined) {
+        effectResults.set(resultKey, type)
+        generatedRunners.push(
           Object.freeze({
-            _tag: 'OperationRegion' as const,
-            id: Object.freeze({ _tag: 'Region' as const, ordinal: 0 }),
-            operations: Object.freeze([
-              ...(cleanup._tag === 'NoCleanup'
-                ? []
-                : [
-                    Object.freeze({
-                      _tag: 'Drop' as const,
-                      local: parameter,
-                      cleanup,
-                      provenance: generated(helperSpan),
-                    }),
-                  ]),
-              Object.freeze({
-                _tag: 'Literal' as const,
-                destination: result,
-                type: i32,
-                value: 0n,
+            _tag: 'BlockEffectRunner',
+            id: Hir.effectRunnerId(instance.key.declaration, block.site),
+            owner: instance,
+            block,
+            type,
+            specializationKey: baseRunnerKey(instance.key, block.site, type.type),
+            providedRequirements: Object.freeze([]),
+            witnessTargets: specializedWitnessEffectTargets(index, instance, block),
+          }),
+        )
+        continue
+      }
+      const returned = returnedValueType(
+        layout,
+        opaqueRealizations,
+        instance.function,
+        instance.substitution,
+      )
+      if (returned?._tag === 'EffectComposite') effectResults.set(resultKey, returned)
+    }
+    return { effectResults, generatedRunners }
+  })
+  const functions = trace('Lower.lowerInstances', () => {
+    const functions = [...runtimeInstances.values()].map((instance) =>
+      trace(
+        'Lower.lowerInstance',
+        () =>
+          lowerInstance(
+            instance,
+            ownershipOf(instance),
+            layout,
+            index,
+            discovery.instances,
+            discovery.calls,
+            effectResults,
+            generatedRunners,
+            opaqueRealizations,
+          ),
+        {
+          'function.module': instance.key.declaration.module,
+          'function.name': instance.key.declaration.name,
+        },
+      ),
+    )
+    return functions
+  })
+  trace('Lower.lowerCleanupHelpers', () => {
+    const helperSpan = SourceSpan.fromOffsets(discovery.rootModule, 0, 0)
+    if (helperSpan === undefined)
+      throw new RangeError('Generated local-shared cleanup lost its span')
+    const sharedElements = [
+      ...new Map(
+        layout.entries.flatMap((entry) => {
+          if (!Type.isSharedCore(entry.type)) return []
+          const element = Type.typeArgumentAt(entry.type, 0)
+          return element === undefined ? [] : [[Type.key(element), element] as const]
+        }),
+      ).values(),
+    ].sort((left, right) => Type.key(left).localeCompare(Type.key(right)))
+    for (const element of sharedElements) {
+      const parameterType = mirType(element)
+      if (parameterType === undefined)
+        throw new RangeError('Generated local-shared cleanup lost its concrete payload type')
+      const parameter = local(0)
+      const result = local(1)
+      const cleanup = CleanupPlan.cleanupPlan(index, element)
+      functions.push(
+        Object.freeze({
+          _tag: 'MirFunction' as const,
+          id: LocalSharedPayloadCleanup.declaration,
+          instance: LocalSharedPayloadCleanup.instance(element),
+          parameterCount: 1,
+          localTypes: Object.freeze([parameterType, i32]),
+          result: i32,
+          entry: Object.freeze({ _tag: 'Region' as const, ordinal: 0 }),
+          regions: Object.freeze([
+            Object.freeze({
+              _tag: 'OperationRegion' as const,
+              id: Object.freeze({ _tag: 'Region' as const, ordinal: 0 }),
+              operations: Object.freeze([
+                ...(cleanup._tag === 'NoCleanup'
+                  ? []
+                  : [
+                      Object.freeze({
+                        _tag: 'Drop' as const,
+                        local: parameter,
+                        cleanup,
+                        provenance: generated(helperSpan),
+                      }),
+                    ]),
+                Object.freeze({
+                  _tag: 'Literal' as const,
+                  destination: result,
+                  type: i32,
+                  value: 0n,
+                  provenance: generated(helperSpan),
+                }),
+              ]),
+              outcome: Object.freeze({
+                _tag: 'Return' as const,
+                value: result,
                 provenance: generated(helperSpan),
               }),
-            ]),
-            outcome: Object.freeze({
-              _tag: 'Return' as const,
-              value: result,
-              provenance: generated(helperSpan),
             }),
-          }),
-        ]),
-      }),
-    )
-  }
+          ]),
+        }),
+      )
+    }
+  })
   const loweredRunners: Array<{
     readonly spec: GeneratedEffectRunner
     readonly runner: Mir.MirFunction
@@ -520,54 +555,90 @@ export const lowerProgram = (
     if (generated === undefined) continue
     let runner: Mir.MirFunction | undefined
     if (generated._tag === 'BlockEffectRunner') {
-      const outcome = lowerEffectRunner(
-        generated,
-        ownershipOf(generated.owner),
-        layout,
-        index,
-        discovery.instances,
-        discovery.calls,
-        effectResults,
-        generatedRunners,
-        opaqueRealizations,
+      const outcome = trace(
+        'Lower.lowerEffectRunner',
+        () =>
+          lowerEffectRunner(
+            generated,
+            ownershipOf(generated.owner),
+            layout,
+            index,
+            discovery.instances,
+            discovery.calls,
+            effectResults,
+            generatedRunners,
+            opaqueRealizations,
+          ),
+        {
+          'function.module': generated.id.module,
+          'function.name': generated.id.name,
+          'runner.ordinal': ordinal,
+        },
       )
       if (outcome._tag === 'LoweredGeneratedEffectRunner') runner = outcome.runner
       else unavailableRunners.push(outcome)
     } else if (generated._tag === 'CatchEffectRunner') {
-      runner = lowerCatchEffectRunner(
-        generated,
-        ownershipOf(generated.owner),
-        layout,
-        index,
-        discovery.instances,
-        discovery.calls,
-        effectResults,
-        generatedRunners,
-        opaqueRealizations,
+      runner = trace(
+        'Lower.lowerCatchEffectRunner',
+        () =>
+          lowerCatchEffectRunner(
+            generated,
+            ownershipOf(generated.owner),
+            layout,
+            index,
+            discovery.instances,
+            discovery.calls,
+            effectResults,
+            generatedRunners,
+            opaqueRealizations,
+          ),
+        {
+          'function.module': generated.id.module,
+          'function.name': generated.id.name,
+          'runner.ordinal': ordinal,
+        },
       )
     } else if (generated._tag === 'BuiltinEffectRunner') {
-      runner = lowerBuiltinEffectRunner(
-        generated,
-        ownershipOf(generated.owner),
-        layout,
-        index,
-        discovery.instances,
-        discovery.calls,
-        effectResults,
-        generatedRunners,
-        opaqueRealizations,
+      runner = trace(
+        'Lower.lowerBuiltinEffectRunner',
+        () =>
+          lowerBuiltinEffectRunner(
+            generated,
+            ownershipOf(generated.owner),
+            layout,
+            index,
+            discovery.instances,
+            discovery.calls,
+            effectResults,
+            generatedRunners,
+            opaqueRealizations,
+          ),
+        {
+          'function.module': generated.id.module,
+          'function.name': generated.id.name,
+          'runner.ordinal': ordinal,
+        },
       )
     } else {
-      runner = lowerWitnessEffectRunner(
-        generated,
-        ownershipOf(generated.owner),
-        layout,
-        index,
-        discovery.instances,
-        discovery.calls,
-        effectResults,
-        generatedRunners,
-        opaqueRealizations,
+      runner = trace(
+        'Lower.lowerWitnessEffectRunner',
+        () =>
+          lowerWitnessEffectRunner(
+            generated,
+            ownershipOf(generated.owner),
+            layout,
+            index,
+            discovery.instances,
+            discovery.calls,
+            effectResults,
+            generatedRunners,
+            opaqueRealizations,
+          ),
+        {
+          'function.module': generated.id.module,
+          'function.name': generated.id.name,
+          'runner.ordinal': ordinal,
+        },
       )
     }
     if (runner !== undefined) loweredRunners.push(Object.freeze({ spec: generated, runner }))
@@ -621,32 +692,36 @@ export const lowerProgram = (
     }
     return changed
   }
-  for (const fn of functions) retainReferencedRunners(fn)
-  let retainedChanged = true
-  while (retainedChanged) {
-    retainedChanged = false
-    for (const { spec, runner } of loweredRunners) {
-      if (
-        !retainedRunners.has(
+  trace('Lower.retainReferencedRunners', () => {
+    for (const fn of functions) retainReferencedRunners(fn)
+    let retainedChanged = true
+    while (retainedChanged) {
+      retainedChanged = false
+      for (const { spec, runner } of loweredRunners) {
+        if (
+          !retainedRunners.has(
+            runnerKey(spec.id, spec.owner.key.typeArguments, spec.owner.key.staticArguments),
+          )
+        )
+          continue
+        if (retainReferencedRunners(runner)) retainedChanged = true
+      }
+    }
+    const unavailable = unavailableReferencedEffectRunner(unavailableRunners, retainedRunners)
+    if (unavailable !== undefined) requireGeneratedEffectRunner(unavailable)
+    functions.push(
+      ...loweredRunners.flatMap(({ spec, runner }) => {
+        return retainedRunners.has(
           runnerKey(spec.id, spec.owner.key.typeArguments, spec.owner.key.staticArguments),
         )
-      )
-        continue
-      if (retainReferencedRunners(runner)) retainedChanged = true
-    }
-  }
-  const unavailable = unavailableReferencedEffectRunner(unavailableRunners, retainedRunners)
-  if (unavailable !== undefined) requireGeneratedEffectRunner(unavailable)
-  functions.push(
-    ...loweredRunners.flatMap(({ spec, runner }) => {
-      return retainedRunners.has(
-        runnerKey(spec.id, spec.owner.key.typeArguments, spec.owner.key.staticArguments),
-      )
-        ? [runner]
-        : []
-    }),
+          ? [runner]
+          : []
+      }),
+    )
+  })
+  const finalizedLayout = trace('Lower.finalizeExecutionPackages', () =>
+    withExecutionPackageCleanups(layout, functions),
   )
-  const finalizedLayout = withExecutionPackageCleanups(layout, functions)
   const foreignStaticUses = new Set(
     functions.flatMap((fn) =>
       Mir.topologicalRegions(fn).flatMap((region) =>

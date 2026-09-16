@@ -132,6 +132,7 @@ Shared options are:
 - `--profile-input <json>` — select a complete logical profile with typed bindings.
 - `--optimization <debug|release|release-with-debug>` — optimization for target shorthand.
 - `--release` — shorthand for `--optimization release`.
+- `--verify-mir` — on `build` and `run`, audit compiler MIR invariants before emission; disabled by default.
 
 Named and complete profiles conflict with target and optimization flags. With no explicit selector,
 the project default profile wins, followed by manifest targets and explicit host resolution.
@@ -204,7 +205,7 @@ silk build-exe ./src/app/Main.silk --source-root ./src -o ./main
 ```
 
 It supports `--source-root`, `--output`/`-o`, native `--target`, `--optimization`, `--profile-input`, `--clang`,
-`--save-temps`, and `--timings`.
+`--save-temps`, `--timings`, and `--verify-mir`.
 
 ## Exit behavior
 

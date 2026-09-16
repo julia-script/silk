@@ -949,6 +949,8 @@ pub fn main() -> i32 {
     }
     const declarations = yield* NativeDeclare.functions({
       builder,
+      types,
+      lanePointers: { builder, byteType: yield* LlvmType.integer(builder, 8), offsetType: i32 },
       program: types.program,
       i32,
       pointer,

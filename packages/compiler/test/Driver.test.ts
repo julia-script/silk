@@ -1,3 +1,5 @@
+import * as CompilerDriver from '../src/Driver.js'
+import * as HeapObservation from '../src/HeapObservation.js'
 import { rsaWasmSource } from './support/rsaAcceptance.js'
 import { aesGcmWasmAcceptanceSource } from './support/aesGcmAcceptance.js'
 import { tlsHkdfWasmSource } from './support/tlsHkdfAcceptance.js'
@@ -93,6 +95,7 @@ const expectedPhases = [
   'target-layout',
   'mir-lowering',
   'toolchain-target',
+  'mir-verification',
   'backend',
   'object',
   'runtime',
@@ -150,6 +153,27 @@ it.effect('reports every phase in order with counts and totals', () =>
   }),
 )
 
+it.effect('omits the MIR audit by default in the compiler driver', () =>
+  Effect.gen(function* () {
+    const outcome = yield* CompilerDriver.compile({
+      compilation: {
+        root: SourceFile.make(
+          'memory/default-verification',
+          ascii('pub fn main() -> i32 { return 42 }'),
+        ),
+      },
+      packageName: 'verification-test',
+      toolchain,
+      artifactKind: 'NativeExecutable',
+      stage: 'llvm-ir',
+      destination: join(destinationRoot, 'default-verification.ll'),
+      cache: false,
+    }).pipe(Effect.provide(Layer.merge(SourceResolver.empty, HeapObservation.layerTest)))
+    assert.strictEqual(outcome._tag, 'Compiled')
+    assert.isFalse(outcome.report.some((entry) => entry.phase === 'mir-verification'))
+  }),
+)
+
 it.effect('keeps array failures in their owning phase', () =>
   Effect.gen(function* () {
     const mismatch = yield* compileSource(
@@ -167,9 +191,10 @@ it.effect('keeps array failures in their owning phase', () =>
       `fn consume(values: [[[i32; 2147483647]; 2147483647]; 0]) -> i32 { return 42 }
 pub fn main() -> i32 { return consume([]) }`,
     )
-    assert.strictEqual(unavailable._tag, 'BackendFailed')
-    if (unavailable._tag !== 'BackendFailed') return
-    assert.strictEqual(unavailable.error.reason._tag, 'InvalidMir')
+    assert.strictEqual(unavailable._tag, 'VerificationFailed')
+    if (unavailable._tag !== 'VerificationFailed') return
+    assert.isAbove(unavailable.error.violations.length, 0)
+    assert.strictEqual(unavailable.report.at(-1)?.phase, 'mir-verification')
     assert.strictEqual(
       unavailable.report.some((entry) => entry.phase === 'object'),
       false,
@@ -528,6 +553,7 @@ it.effect(
           // so nothing is shared between them but the directory.
           const source = 'pub fn main() -> i32 { return 40 + 2 }'
           const first = yield* compileSource('default-cache-first', source, {
+            verifyMir: false,
             toolchain: Object.freeze({ _tag: 'Toolchain', clang, llvmAr: 'llvm-ar' }),
             cache: true,
           })
@@ -550,6 +576,12 @@ it.effect(
             second.report.some((entry) => entry.phase === 'artifact-cache'),
             true,
           )
+          assert.isFalse(first.report.some((entry) => entry.phase === 'mir-verification'))
+          assert.isBelow(
+            second.report.findIndex((entry) => entry.phase === 'mir-verification'),
+            second.report.findIndex((entry) => entry.phase === 'backend-cache'),
+          )
+          assert.isTrue(second.report.some((entry) => entry.phase === 'mir-verification'))
           assert.deepEqual(readFileSync(second.path), readFileSync(first.path))
           const run = spawnSync(second.path, [], { encoding: 'utf8' })
           assert.strictEqual(run.status, 42)

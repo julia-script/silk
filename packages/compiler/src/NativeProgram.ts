@@ -136,6 +136,8 @@ export const emit = Effect.fn('NativeProgram.emit')(function* (
 
   const functionDeclarations = yield* NativeDeclare.functions(
     Object.freeze({
+      types: typeContext,
+      lanePointers,
       builder,
       program,
       i32,
@@ -670,7 +672,10 @@ const retainRoots = Effect.fn('NativeProgram.retainRoots')(function* (
         operation: 'Backend.emit',
         backend: 'LLVM',
         message: 'Retained root has no emitted definition',
-        reason: { _tag: 'InvalidMir', violations: MirVerification.verify(program) },
+        reason: {
+          _tag: 'UnsupportedMir',
+          detail: `Missing retained root ${root.declaration.module}.${root.declaration.name}`,
+        },
       })
     retained.push(
       yield* Constant.fromGlobal(

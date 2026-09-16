@@ -1243,13 +1243,23 @@ export const diagnostics = (self: FrontendSnapshot): ReadonlyArray<Diagnostic.Di
 export const phases = (self: FrontendSnapshot): ReadonlyArray<PhaseReport.PhaseReport> =>
   self.report
 
+/** Analysis orchestration options; verification is independent of backend emission. */
+export interface CodegenRequest extends Backend.CodegenRequest {
+  /** Run the optional compiler-invariant audit before emission. Defaults to false. */
+  readonly verifyMir?: boolean
+}
+
 /** Emits the snapshot's lowered program through LLVM. */
 export const codegen = Effect.fn('Analysis.codegen')(function* (
   self: Snapshot,
-  request: Backend.CodegenRequest,
+  request: CodegenRequest,
 ): Effect.fn.Return<
   Backend.LlvmBitcodeArtifact,
-  Backend.BackendError | Target.TargetError | AnalysisUnavailable | CodegenUnavailable
+  | Backend.BackendError
+  | MirVerification.MirVerificationError
+  | Target.TargetError
+  | AnalysisUnavailable
+  | CodegenUnavailable
 > {
   if (Diagnostic.hasErrors(self.diagnostics) || self.closure.resolutionFailures.length > 0) {
     return yield* new CodegenUnavailable({
@@ -1261,15 +1271,7 @@ export const codegen = Effect.fn('Analysis.codegen')(function* (
   }
   const selected = LlvmBackend.LlvmBackend
   if (self.mir._tag === 'Unavailable') return yield* self.mir.error
-  const violations = MirVerification.verify(self.mir.value)
-  if (violations.length > 0) {
-    return yield* new Backend.BackendError({
-      operation: 'Backend.emit',
-      backend: selected.name,
-      message: `${selected.name} cannot emit invalid MIR`,
-      reason: { _tag: 'InvalidMir', violations },
-    })
-  }
+  if (request.verifyMir === true) yield* MirVerification.check(self.mir.value)
   const availability = IntrinsicAvailability.select(
     self.instances.intrinsics,
     self.mir.value.layout.target,
@@ -1327,8 +1329,9 @@ export const codegen = Effect.fn('Analysis.codegen')(function* (
       reason: { _tag: 'UnsupportedMir', detail: 'Invalid support profile' },
     })
   }
+  const { verifyMir: _verifyMir, ...emission } = request
   return yield* Backend.emit(selected, self.mir.value, {
-    ...request,
+    ...emission,
     sources:
       request.sources ??
       new Map(
