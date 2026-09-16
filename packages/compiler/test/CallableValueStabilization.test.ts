@@ -10,6 +10,36 @@ const codesOf = (name: string, source: string) =>
     Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
   )
 
+it.effect(
+  'admits scoped provider callbacks capturing an independently borrowed configuration',
+  () =>
+    Effect.gen(function* () {
+      assert.deepEqual(
+        yield* codesOf(
+          'callable-stabilization/independent-capture',
+          `struct Loan<'provider, P> { provider: &'provider mut P }
+struct Owned<P> { provider: P }
+struct Route<'configuration> { label: &'configuration i32 }
+effect fn scoped<'env, P>(provider: P, use: for<'call> once fn<'env>(&'call mut Owned<P>) -> once Effect<'call & 'env; i32>) -> i32 {
+  let mut owned = Owned<P> {provider: move provider}
+  return run use(&mut owned)
+}
+effect<'view & 'configuration> fn finish<'configuration, 'view, 'provider: 'view, P>(
+  owned: &'view mut Owned<Loan<'provider, P>>, route: Route<'configuration>,
+) -> i32 { drop owned return route.label.* }
+effect<'provider> fn route<'configuration: 'provider, 'provider, P>(provider: &'provider mut P, route: Route<'configuration>) -> i32 {
+  let use = effect fn(owned: &mut Owned<Loan<'provider, P>>) -> i32 {
+    return run finish<'configuration, P>(move owned, move route)
+  }
+  return run scoped(Loan<'provider, P> {provider: move provider}, move use)
+}
+pub fn main() -> i32 { return 0 }`,
+        ),
+        [],
+      )
+    }),
+)
+
 it.effect('elides nominal input lifetimes in anonymous callable headers', () =>
   Effect.gen(function* () {
     assert.deepEqual(
