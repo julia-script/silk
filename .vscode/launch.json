@@ -2,6 +2,19 @@
   "version": "0.2.0",
   "configurations": [
     {
+      "name": "Silk: Compiler scratchpad",
+      "type": "node",
+      "request": "launch",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["--import", "tsx"],
+      "program": "${workspaceFolder}/packages/compiler/scratchpad/compile.ts",
+      "cwd": "${workspaceFolder}/packages/compiler",
+      "preLaunchTask": "Silk: Prepare compiler scratchpad",
+      "sourceMaps": true,
+      "console": "integratedTerminal",
+      "skipFiles": ["<node_internals>/**"]
+    },
+    {
       "name": "Silk: Run current file",
       "type": "node-terminal",
       "request": "launch",

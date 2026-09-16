@@ -191,7 +191,9 @@ export interface ThunkContext {
 }
 
 /** Emits child, resume, and machine-driver suspension thunks. */
-export const emitThunks = Effect.fnUntraced(function* (context: ThunkContext) {
+export const emitThunks = Effect.fn('NativeSuspension.emitThunks')(function* (
+  context: ThunkContext,
+) {
   const {
     builder,
     program,

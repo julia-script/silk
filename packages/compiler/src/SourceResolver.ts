@@ -100,6 +100,7 @@ export const resolve = Effect.fn('SourceResolver.resolve')(function* (
 export const resolveStandardLibrary = Effect.fn('SourceResolver.resolveStandardLibrary')(function* (
   module: string,
 ): Effect.fn.Return<Option.Option<ResolvedSource>, SourceResolverError, SourceResolver> {
+  yield* Effect.annotateCurrentSpan('module', module)
   if (!Stdlib.isReserved(module) || !isCanonicalModule(module)) {
     return yield* new SourceResolverError({
       operation: 'SourceResolver.resolveStandardLibrary',
@@ -109,6 +110,7 @@ export const resolveStandardLibrary = Effect.fn('SourceResolver.resolveStandardL
     })
   }
   const resolver = yield* SourceResolver
+
   return Option.map(yield* resolver.resolveStandardLibrary(module), (source) =>
     resolved(source.bytes, source.origin),
   )

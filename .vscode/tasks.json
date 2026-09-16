@@ -2,6 +2,13 @@
   "version": "2.0.0",
   "tasks": [
     {
+      "label": "Silk: Prepare compiler scratchpad",
+      "type": "shell",
+      "command": "pnpm --filter @silklang/compiler scratchpad:prepare",
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": ["$tsc"]
+    },
+    {
       "label": "Silk: Run current file",
       "detail": "Compile the active .silk file with build-exe (source root = its directory) and run it.",
       "type": "shell",

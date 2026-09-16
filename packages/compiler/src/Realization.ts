@@ -61,53 +61,15 @@ const foreignStaticTargetDiagnostics = (
     }),
   )
 
-function discoverAndLower(
+const discoverInstances = Effect.fn('Realization.discoverInstances')(function* (
   self: Frontend,
-  targetId: string | undefined,
+  targetSelection: Target.Selection,
   completion: ProfileBootstrap.Completion | undefined,
-  options: Options & {
-    readonly artifactKind?: ArtifactKind.ArtifactKind
-    readonly optimization?: 'debug' | 'release' | 'release-with-debug'
-  },
-): Realization
-function discoverAndLower(
-  self: Frontend,
-  targetId: string | undefined,
-  completion: ProfileBootstrap.Completion | undefined,
-  options: Options & {
-    readonly artifactKind?: ArtifactKind.ArtifactKind
-    readonly optimization?: 'debug' | 'release' | 'release-with-debug'
-  },
-  prepareForEmission: true,
-): Preparation
-function discoverAndLower(
-  self: Frontend,
-  targetId: string | undefined,
-  completion: ProfileBootstrap.Completion | undefined,
-  options: Options & {
-    readonly artifactKind?: ArtifactKind.ArtifactKind
-    readonly optimization?: 'debug' | 'release' | 'release-with-debug'
-  },
-  prepareForEmission = false,
-): Realization | Preparation {
-  const report = [...self.report]
-  if (prepareForEmission && Diagnostic.hasErrors(self.diagnostics))
-    return Object.freeze({
-      _tag: 'Rejected',
-      diagnostics: self.diagnostics,
-      report: Object.freeze(report),
-    })
-
-  const specializationInvalid =
-    Diagnostic.hasGenericSpecializationErrors(self.diagnostics) ||
-    hasInvalidGenericBody(self.index, self.diagnostics)
-  // Static specialization is target-relative. Resolve the closed target before constructing any
-  // executable worklist so no candidate body can observe a missing or host-inferred target.
-  const targetSelection = Target.select(targetId)
-  const foreignStaticDiagnostics =
-    targetSelection._tag === 'Resolved'
-      ? foreignStaticTargetDiagnostics(self.index, targetSelection.target)
-      : Object.freeze([])
+  specializationInvalid: boolean,
+  prepareForEmission: boolean,
+  report: Array<PhaseReport.PhaseReport>,
+  options: Options,
+) {
   const instances = PhaseReport.measureInto(
     report,
     'instance-discovery',
@@ -130,22 +92,214 @@ function discoverAndLower(
     (value) => value.violations.length,
     { ...options, counters: (value) => value.counters },
   )
-  const declarationDiagnosticKeys = new Set(
-    self.diagnostics.map(
-      (diagnostic) =>
-        `${diagnostic.phase}\u0000${diagnostic.code}\u0000${diagnostic.span.sourceId}\u0000${diagnostic.span.start}\u0000${diagnostic.span.end}`,
-    ),
+  yield* Effect.annotateCurrentSpan({
+    'modules.count': self.results.size,
+    'instances.count': instances.instances.length,
+    'violations.count': instances.violations.length,
+    ...instances.counters,
+  })
+  return instances
+})
+
+const collectInstanceDiagnostics = Effect.fn('Realization.collectInstanceDiagnostics')(
+  (
+    self: Frontend,
+    instances: Instances.Discovery,
+    foreignStaticDiagnostics: ReadonlyArray<Diagnostic.Diagnostic>,
+  ) =>
+    Effect.sync(() => {
+      const declarationDiagnosticKeys = new Set(
+        self.diagnostics.map(
+          (diagnostic) =>
+            `${diagnostic.phase}\u0000${diagnostic.code}\u0000${diagnostic.span.sourceId}\u0000${diagnostic.span.start}\u0000${diagnostic.span.end}`,
+        ),
+      )
+      const residualizationDiagnostics = instances.residualizationDiagnostics.filter(
+        (diagnostic) =>
+          !declarationDiagnosticKeys.has(
+            `${diagnostic.phase}\u0000${diagnostic.code}\u0000${diagnostic.span.sourceId}\u0000${diagnostic.span.start}\u0000${diagnostic.span.end}`,
+          ),
+      )
+      return Diagnostic.merge(
+        self.diagnostics,
+        residualizationDiagnostics,
+        instanceViolationDiagnostics(self, instances),
+        foreignStaticDiagnostics,
+      )
+    }),
+)
+
+const buildTargetLayout = Effect.fn('Realization.buildTargetLayout')(function* (
+  self: Frontend,
+  instances: Instances.Discovery,
+  targetSelection: Target.Selection,
+  analysisUnavailable: AnalysisUnavailable | undefined,
+  prepareForEmission: boolean,
+) {
+  const selection = targetSelection
+  if (selection._tag === 'Unavailable')
+    return Object.freeze({ _tag: 'Unavailable' as const, selection, error: selection.error })
+  if (prepareForEmission) {
+    const availability = IntrinsicAvailability.select(instances.intrinsics, selection.target)
+    if (availability._tag === 'Unavailable')
+      return Object.freeze({
+        _tag: 'IntrinsicUnavailable' as const,
+        selection,
+        error: Target.unavailableInventory(selection.target, availability.operations),
+      })
+  }
+  if (analysisUnavailable !== undefined)
+    return Object.freeze({
+      _tag: 'AnalysisUnavailable' as const,
+      selection,
+      error: analysisUnavailable,
+    })
+  const catalog = yield* buildLayoutCatalog(
+    selection.target,
+    self.index,
+    instances,
+    OpaqueRealization.catalogOf(self),
   )
-  const residualizationDiagnostics = instances.residualizationDiagnostics.filter(
-    (diagnostic) =>
-      !declarationDiagnosticKeys.has(
-        `${diagnostic.phase}\u0000${diagnostic.code}\u0000${diagnostic.span.sourceId}\u0000${diagnostic.span.start}\u0000${diagnostic.span.end}`,
-      ),
+  return Object.freeze({
+    _tag: 'Available' as const,
+    selection,
+    target: selection.target,
+    catalog,
+    layout: yield* planLayout(catalog, instances, self.index),
+  })
+})
+
+const buildLayoutCatalog = Effect.fn('Realization.buildLayoutCatalog')(
+  (
+    target: Target.Target,
+    index: DeclarationIndex.Index,
+    instances: Instances.Discovery,
+    opaqueRealizations: OpaqueRealization.Catalog,
+  ) => Effect.sync(() => Layout.catalog(target, index, instances, opaqueRealizations)),
+)
+
+const planLayout = Effect.fn('Realization.planLayout')(
+  (catalog: Layout.Catalog, instances: Instances.Discovery, index: DeclarationIndex.Index) =>
+    Effect.sync(() => Layout.plan(catalog, instances, index)),
+)
+
+const lowerMir = Effect.fn('Realization.lowerMir')(function* (
+  self: Frontend,
+  instances: Instances.Discovery,
+  layout: Layout.Plan,
+  profile: CompilationProfile.CompilationProfile | undefined,
+  options: Options,
+) {
+  const program = yield* lowerProgram(
+    instances,
+    layout,
+    self.index,
+    OpaqueRealization.catalogOf(self),
   )
-  const baseDiagnostics = Diagnostic.merge(
-    self.diagnostics,
-    residualizationDiagnostics,
-    instanceViolationDiagnostics(self, instances),
+  const provisional = yield* buildProvisionalMir(instances, layout, self.index)
+  return yield* finalizeMir(
+    program,
+    provisional,
+    self.index,
+    OpaqueRealization.catalogOf(self),
+    profile,
+    options,
+  )
+})
+
+const lowerProgram = Effect.fn('Realization.lowerProgram')(
+  (
+    instances: Instances.Discovery,
+    layout: Layout.Plan,
+    index: DeclarationIndex.Index,
+    opaqueRealizations: OpaqueRealization.Catalog,
+  ) => Effect.sync(() => Lower.lowerProgram(instances, layout, index, opaqueRealizations)),
+)
+
+const buildProvisionalMir = Effect.fn('Realization.buildProvisionalMir')(
+  (instances: Instances.Discovery, layout: Layout.Plan, index: DeclarationIndex.Index) =>
+    Effect.sync(() => ProvisionalMir.build(instances, layout, index)),
+)
+
+const checkForeignPlanning = Effect.fn('Realization.checkForeignPlanning')(
+  (program: Mir.Module, target: Target.Target) =>
+    Effect.sync(() => ForeignPlanning.check(program, target)),
+)
+
+function discoverAndLower(
+  self: Frontend,
+  targetId: string | undefined,
+  completion: ProfileBootstrap.Completion | undefined,
+  options: Options & {
+    readonly artifactKind?: ArtifactKind.ArtifactKind
+    readonly optimization?: 'debug' | 'release' | 'release-with-debug'
+  },
+): Effect.Effect<Realization>
+function discoverAndLower(
+  self: Frontend,
+  targetId: string | undefined,
+  completion: ProfileBootstrap.Completion | undefined,
+  options: Options & {
+    readonly artifactKind?: ArtifactKind.ArtifactKind
+    readonly optimization?: 'debug' | 'release' | 'release-with-debug'
+  },
+  prepareForEmission: true,
+): Effect.Effect<Preparation>
+function discoverAndLower(
+  self: Frontend,
+  targetId: string | undefined,
+  completion: ProfileBootstrap.Completion | undefined,
+  options: Options & {
+    readonly artifactKind?: ArtifactKind.ArtifactKind
+    readonly optimization?: 'debug' | 'release' | 'release-with-debug'
+  },
+  prepareForEmission = false,
+): Effect.Effect<Realization | Preparation> {
+  return discoverAndLowerEffect(self, targetId, completion, options, prepareForEmission)
+}
+
+const discoverAndLowerEffect = Effect.fn('Realization.discoverAndLower')(function* (
+  self: Frontend,
+  targetId: string | undefined,
+  completion: ProfileBootstrap.Completion | undefined,
+  options: Options,
+  prepareForEmission: boolean,
+): Effect.fn.Return<Realization | Preparation> {
+  yield* Effect.annotateCurrentSpan({
+    'root.module': self.closure.rootModule,
+    'realization.mode': prepareForEmission ? 'prepare' : 'analyze',
+    'mir.normalize': options.normalizeMir !== false,
+  })
+  const report = [...self.report]
+  if (prepareForEmission && Diagnostic.hasErrors(self.diagnostics))
+    return Object.freeze({
+      _tag: 'Rejected',
+      diagnostics: self.diagnostics,
+      report: Object.freeze(report),
+    })
+
+  const specializationInvalid =
+    Diagnostic.hasGenericSpecializationErrors(self.diagnostics) ||
+    hasInvalidGenericBody(self.index, self.diagnostics)
+  // Static specialization is target-relative. Resolve the closed target before constructing any
+  // executable worklist so no candidate body can observe a missing or host-inferred target.
+  const targetSelection = Target.select(targetId)
+  const foreignStaticDiagnostics =
+    targetSelection._tag === 'Resolved'
+      ? foreignStaticTargetDiagnostics(self.index, targetSelection.target)
+      : Object.freeze([])
+  const instances = yield* discoverInstances(
+    self,
+    targetSelection,
+    completion,
+    specializationInvalid,
+    prepareForEmission,
+    report,
+    options,
+  )
+  const baseDiagnostics = yield* collectInstanceDiagnostics(
+    self,
+    instances,
     foreignStaticDiagnostics,
   )
   if (prepareForEmission && Diagnostic.hasErrors(baseDiagnostics))
@@ -191,43 +345,11 @@ function discoverAndLower(
     return undefined
   })()
 
-  const targetLayout = PhaseReport.measureInto(
+  const targetLayout = yield* PhaseReport.measureEffectInto(
     report,
     'target-layout',
     instances.instances.length,
-    () => {
-      const selection = targetSelection
-      if (selection._tag === 'Unavailable')
-        return Object.freeze({ _tag: 'Unavailable' as const, selection, error: selection.error })
-      if (prepareForEmission) {
-        const availability = IntrinsicAvailability.select(instances.intrinsics, selection.target)
-        if (availability._tag === 'Unavailable')
-          return Object.freeze({
-            _tag: 'IntrinsicUnavailable' as const,
-            selection,
-            error: Target.unavailableInventory(selection.target, availability.operations),
-          })
-      }
-      if (analysisUnavailable !== undefined)
-        return Object.freeze({
-          _tag: 'AnalysisUnavailable' as const,
-          selection,
-          error: analysisUnavailable,
-        })
-      const catalog = Layout.catalog(
-        selection.target,
-        self.index,
-        instances,
-        OpaqueRealization.catalogOf(self),
-      )
-      return Object.freeze({
-        _tag: 'Available' as const,
-        selection,
-        target: selection.target,
-        catalog,
-        layout: Layout.plan(catalog, instances, self.index),
-      })
-    },
+    buildTargetLayout(self, instances, targetSelection, analysisUnavailable, prepareForEmission),
     (value) => (value._tag === 'Available' ? value.layout.entries.length : 0),
     (value) => (value._tag === 'Available' ? value.layout.diagnostics.length : 0),
     options,
@@ -291,24 +413,11 @@ function discoverAndLower(
     targetLiteralError === undefined &&
     residualizationError === undefined &&
     sourceDiagnosticError === undefined
-      ? PhaseReport.measureInto(
+      ? yield* PhaseReport.measureEffectInto(
           report,
           'mir-lowering',
           instances.instances.length,
-          () =>
-            finalizeMir(
-              Lower.lowerProgram(
-                instances,
-                targetLayout.layout,
-                self.index,
-                OpaqueRealization.catalogOf(self),
-              ),
-              ProvisionalMir.build(instances, targetLayout.layout, self.index),
-              self.index,
-              OpaqueRealization.catalogOf(self),
-              completion?.profile,
-              options,
-            ),
+          lowerMir(self, instances, targetLayout.layout, completion?.profile, options),
           (value) => value.program?.functions.length ?? 0,
           (value) => value.diagnostics.length,
           options,
@@ -331,7 +440,7 @@ function discoverAndLower(
       self.composition === undefined
     )
       throw new RangeError('Driver lowering reached an unavailable target after its gates')
-    const planning = ForeignPlanning.check(program, targetLayout.target)
+    const planning = yield* checkForeignPlanning(program, targetLayout.target)
     if (planning.length > 0)
       return Object.freeze({
         _tag: 'Rejected',
@@ -385,7 +494,7 @@ function discoverAndLower(
     diagnostics: finalizedDiagnostics,
     report: Object.freeze([...report]),
   })
-}
+})
 
 /** Completes configuration without performing runtime specialization, shared with project tooling. */
 export const configure = Effect.fn('Realization.configure')(function* (
@@ -576,7 +685,7 @@ export const realize = Effect.fn('Realization.realize')(function* (
     undefined,
     typeof targetId === 'object' ? targetId : undefined,
   )
-  let realized = discoverAndLower(ready.frontend, ready.targetId, ready.completion, options)
+  let realized = yield* discoverAndLower(ready.frontend, ready.targetId, ready.completion, options)
   if (
     realized.mir._tag === 'Available' &&
     realized.profile !== undefined &&
@@ -594,7 +703,7 @@ export const realize = Effect.fn('Realization.realize')(function* (
         options,
       )
       ready = yield* configure(expanded, realized.profile.target.id)
-      realized = discoverAndLower(ready.frontend, ready.targetId, ready.completion, options)
+      realized = yield* discoverAndLower(ready.frontend, ready.targetId, ready.completion, options)
       if (realized.mir._tag === 'Available') {
         const component = yield* Effect.result(
           ExecutionStorageComponent.resolve(selection.success, realized.mir.value),
@@ -682,7 +791,13 @@ export const prepare = Effect.fn('Realization.prepare')(function* (
   } = {},
 ): Effect.fn.Return<Preparation, never, SourceResolver.SourceResolver> {
   let ready = yield* configure(self, targetId, options.artifactKind, options.optimization)
-  let prepared = discoverAndLower(ready.frontend, ready.targetId, ready.completion, options, true)
+  let prepared = yield* discoverAndLower(
+    ready.frontend,
+    ready.targetId,
+    ready.completion,
+    options,
+    true,
+  )
   if (prepared._tag !== 'Prepared') return prepared
   if (ExecutionStorageComponent.demanded(prepared.program)) {
     const selection = yield* Effect.result(
@@ -697,7 +812,13 @@ export const prepare = Effect.fn('Realization.prepare')(function* (
         options,
       )
       ready = yield* configure(expanded, prepared.target.id)
-      prepared = discoverAndLower(ready.frontend, ready.targetId, ready.completion, options, true)
+      prepared = yield* discoverAndLower(
+        ready.frontend,
+        ready.targetId,
+        ready.completion,
+        options,
+        true,
+      )
       if (prepared._tag !== 'Prepared') return prepared
       const component = yield* Effect.result(
         ExecutionStorageComponent.resolve(selection.success, prepared.program),
@@ -774,41 +895,69 @@ import * as SuspensionMir from './SuspensionMir.js'
 import * as SuspensionOwnership from './SuspensionOwnership.js'
 import * as Target from './Target.js'
 
-const normalizeMir = (
-  program: Mir.Module,
-  provisional: ProvisionalMir.Module,
-  options: Options,
-): Mir.Module =>
-  options.normalizeMir === false ? program : MirNormalization.normalize(program, provisional)
+const normalizeMir = Effect.fn('Realization.normalizeMir')(
+  (program: Mir.Module, provisional: ProvisionalMir.Module, options: Options) =>
+    Effect.sync(() =>
+      options.normalizeMir === false ? program : MirNormalization.normalize(program, provisional),
+    ),
+)
 
-const finalizeMir = (
+const finalizeMir = Effect.fn('Realization.finalizeMir')(function* (
   program: Mir.Module,
   provisional: ProvisionalMir.Module,
   index: DeclarationIndex.Index,
   opaqueRealizations: OpaqueRealization.Catalog,
   profile: CompilationProfile.CompilationProfile | undefined,
   options: Options,
-): {
+): Effect.fn.Return<{
   readonly program: Mir.Module | undefined
   readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
-} => {
-  const normalized = normalizeMir(program, provisional, options)
-  const ownership = SuspensionOwnership.plan(normalized, provisional, index, opaqueRealizations)
+}> {
+  const normalized = yield* normalizeMir(program, provisional, options)
+  const ownership = yield* planSuspensionOwnership(
+    normalized,
+    provisional,
+    index,
+    opaqueRealizations,
+  )
   const diagnostics = [
     ...ownership.violations.map((violation) =>
       Diagnostic.invalidSuspensionOwnership(violation.detail, violation.span),
     ),
-    ...NativeAssemblyPlanning.diagnostics(normalized, profile),
+    ...(yield* checkNativeAssembly(normalized, profile)),
   ]
   if (diagnostics.length > 0) return { program: undefined, diagnostics }
   if (options.normalizeMir === false) return { program: normalized, diagnostics }
-  return {
-    program: CoroutineFrame.apply(
-      SuspensionMir.finalize(normalized, provisional, ownership, index),
-    ),
-    diagnostics,
-  }
-}
+  const suspended = yield* finalizeSuspensionMir(normalized, provisional, ownership, index)
+  return { program: yield* applyCoroutineFrames(suspended), diagnostics }
+})
+
+const planSuspensionOwnership = Effect.fn('Realization.planSuspensionOwnership')(
+  (
+    program: Mir.Module,
+    provisional: ProvisionalMir.Module,
+    index: DeclarationIndex.Index,
+    opaqueRealizations: OpaqueRealization.Catalog,
+  ) => Effect.sync(() => SuspensionOwnership.plan(program, provisional, index, opaqueRealizations)),
+)
+
+const checkNativeAssembly = Effect.fn('Realization.checkNativeAssembly')(
+  (program: Mir.Module, profile: CompilationProfile.CompilationProfile | undefined) =>
+    Effect.sync(() => NativeAssemblyPlanning.diagnostics(program, profile)),
+)
+
+const finalizeSuspensionMir = Effect.fn('Realization.finalizeSuspensionMir')(
+  (
+    program: Mir.Module,
+    provisional: ProvisionalMir.Module,
+    ownership: SuspensionOwnership.Module,
+    index: DeclarationIndex.Index,
+  ) => Effect.sync(() => SuspensionMir.finalize(program, provisional, ownership, index)),
+)
+
+const applyCoroutineFrames = Effect.fn('Realization.applyCoroutineFrames')((program: Mir.Module) =>
+  Effect.sync(() => CoroutineFrame.apply(program)),
+)
 
 /** An available target-owned artifact or the reason realization could not construct it. */
 export type Targeted<A> =

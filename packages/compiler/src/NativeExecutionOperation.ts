@@ -1367,69 +1367,71 @@ const releaseHelperSymbol = 'silk_execution_release'
  * `DeclaredFunction` only feeds the cleanup contexts: its MIR has one Execution parameter and no
  * roots, and its identity is distinct from every real function so no instance lookup can alias it.
  */
-export const declareReleaseHelper = Effect.fnUntraced(function* (
-  builder: Builder.Builder,
-  program: Mir.Module,
-  pointer: LlvmType.Type,
-  declaredVoidType: LlvmType.Type | undefined,
-): Effect.fn.Return<NativeLoweringContext.DeclaredFunction | undefined, LlvmError.LlvmError> {
-  const source = program.functions
-    .flatMap((fn) =>
-      MirVerification.operations(fn).flatMap((operation) =>
-        operation._tag === 'ExecutionFromAllocation' ? [{ fn, operation }] : [],
-      ),
-    )
-    .at(0)
-  if (source === undefined) return undefined
-  // Resolved only here: an unneeded void type would perturb every other module's type table.
-  const voidType = declaredVoidType ?? (yield* LlvmType.voidType(builder))
-  const diagnostics = Mir.hasDiagnosticObservation(program)
-  const parameters = diagnostics
-    ? [
-        pointer,
-        pointer,
-        yield* NativeDiagnosticFailure.type({
-          builder,
+export const declareReleaseHelper = Effect.fn('NativeExecutionOperation.declareReleaseHelper')(
+  function* (
+    builder: Builder.Builder,
+    program: Mir.Module,
+    pointer: LlvmType.Type,
+    declaredVoidType: LlvmType.Type | undefined,
+  ): Effect.fn.Return<NativeLoweringContext.DeclaredFunction | undefined, LlvmError.LlvmError> {
+    const source = program.functions
+      .flatMap((fn) =>
+        MirVerification.operations(fn).flatMap((operation) =>
+          operation._tag === 'ExecutionFromAllocation' ? [{ fn, operation }] : [],
+        ),
+      )
+      .at(0)
+    if (source === undefined) return undefined
+    // Resolved only here: an unneeded void type would perturb every other module's type table.
+    const voidType = declaredVoidType ?? (yield* LlvmType.voidType(builder))
+    const diagnostics = Mir.hasDiagnosticObservation(program)
+    const parameters = diagnostics
+      ? [
           pointer,
-          word: yield* LlvmType.integer(builder, program.layout.target.pointerSize * 8),
-        }),
-      ]
-    : [pointer]
-  const executionType = SilkType.execution(source.operation.plan.specialization.result)
-  const id = Object.freeze({ ...source.fn.id, name: releaseHelperSymbol })
-  const { suspension: _suspension, ...base } = source.fn
-  const fn: Mir.MirFunction = Object.freeze({
-    ...base,
-    id,
-    instance: Object.freeze({ ...source.fn.instance, declaration: id }),
-    parameterCount: 1,
-    localTypes: Object.freeze([Object.freeze({ _tag: 'Nominal' as const, type: executionType })]),
-  })
-  return Object.freeze({
-    fn,
-    symbol: releaseHelperSymbol,
-    publicSymbol: releaseHelperSymbol,
-    handle: yield* FunctionActor.declare(
-      builder,
-      releaseHelperSymbol,
-      yield* LlvmType.functionType(builder, voidType, parameters),
-      { visibility: 'hidden' },
-    ),
-    resultType: voidType,
-    emittedResultType: voidType,
-    resultLaneCount: 0,
-    suspendable: false,
-    parameterTypes: Object.freeze(parameters),
-    argumentParameters: NativeArgument.parameters(program.layout, fn, (type) => {
-      const shape = Layout.callingShape(program.layout, Mir.semanticType(type))
-      if (shape === undefined)
-        throw new RangeError('Release helper lost its source parameter shape')
-      return shape.lanes
-    }),
-    ...(diagnostics ? { diagnosticParameter: 1 } : {}),
-    linear: Object.freeze([]),
-  })
-})
+          pointer,
+          yield* NativeDiagnosticFailure.type({
+            builder,
+            pointer,
+            word: yield* LlvmType.integer(builder, program.layout.target.pointerSize * 8),
+          }),
+        ]
+      : [pointer]
+    const executionType = SilkType.execution(source.operation.plan.specialization.result)
+    const id = Object.freeze({ ...source.fn.id, name: releaseHelperSymbol })
+    const { suspension: _suspension, ...base } = source.fn
+    const fn: Mir.MirFunction = Object.freeze({
+      ...base,
+      id,
+      instance: Object.freeze({ ...source.fn.instance, declaration: id }),
+      parameterCount: 1,
+      localTypes: Object.freeze([Object.freeze({ _tag: 'Nominal' as const, type: executionType })]),
+    })
+    return Object.freeze({
+      fn,
+      symbol: releaseHelperSymbol,
+      publicSymbol: releaseHelperSymbol,
+      handle: yield* FunctionActor.declare(
+        builder,
+        releaseHelperSymbol,
+        yield* LlvmType.functionType(builder, voidType, parameters),
+        { visibility: 'hidden' },
+      ),
+      resultType: voidType,
+      emittedResultType: voidType,
+      resultLaneCount: 0,
+      suspendable: false,
+      parameterTypes: Object.freeze(parameters),
+      argumentParameters: NativeArgument.parameters(program.layout, fn, (type) => {
+        const shape = Layout.callingShape(program.layout, Mir.semanticType(type))
+        if (shape === undefined)
+          throw new RangeError('Release helper lost its source parameter shape')
+        return shape.lanes
+      }),
+      ...(diagnostics ? { diagnosticParameter: 1 } : {}),
+      linear: Object.freeze([]),
+    })
+  },
+)
 
 export interface ReleaseHelperContext {
   readonly builder: Builder.Builder
@@ -1453,7 +1455,9 @@ export interface ReleaseHelperContext {
  * retains another Execution releases it through a runtime call instead of re-expanding the
  * module's whole resume-frame inventory during IR construction.
  */
-export const emitReleaseHelper = Effect.fnUntraced(function* (context: ReleaseHelperContext) {
+export const emitReleaseHelper = Effect.fn('NativeExecutionOperation.emitReleaseHelper')(function* (
+  context: ReleaseHelperContext,
+) {
   const {
     builder,
     program,

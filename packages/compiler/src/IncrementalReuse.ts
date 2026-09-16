@@ -18,7 +18,9 @@ export interface ProjectReuseBasis {
 const moduleBatchSize = 8
 
 /** Yields between bounded batches of incremental frontend work. */
-export const checkpointModuleBatch = Effect.fnUntraced(function* (ordinal: number) {
+export const checkpointModuleBatch = Effect.fn('IncrementalReuse.checkpointModuleBatch')(function* (
+  ordinal: number,
+) {
   if (ordinal > 0 && ordinal % moduleBatchSize === 0) yield* Effect.yieldNow
 })
 

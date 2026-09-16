@@ -291,6 +291,8 @@ export const compile = Effect.fn('Driver.compile')(function* (
   SourceResolutionFailed | NativeToolchain.ToolchainError,
   SourceResolver.SourceResolver | HeapObservation.HeapObservation
 > {
+  // 1. Initialize the shared phase report, heap sampler, compiler distribution, and cache location.
+  // Measured stages append timings and counts here; each outcome freezes the report so far.
   const report: Array<DriverPhaseReport> = []
   const heapObservation = yield* HeapObservation.HeapObservation
   const heapBytes = heapObservation.heapBytes
@@ -300,6 +302,8 @@ export const compile = Effect.fn('Driver.compile')(function* (
     Effect.orDie,
   )
 
+  // 2. Check the compiler distribution against the toolchain sources supplied by the resolver.
+  // Unreadable toolchain sources become integrity failures, so a broken installation stops here.
   const frontendIntegrity = yield* PhaseReport.measureEffectInto(
     report,
     'toolchain-integrity',
@@ -335,6 +339,8 @@ export const compile = Effect.fn('Driver.compile')(function* (
       report: Object.freeze([...report]),
     })
 
+  // 3. Choose the target: an explicit configuration wins over a target ID, then the host default.
+  // Host detection is needed only when the caller supplies neither configuration nor target.
   const hostSelection =
     request.compilation.target === undefined && request.compilation.configuration === undefined
       ? NativeToolchain.hostSelection()
@@ -350,6 +356,8 @@ export const compile = Effect.fn('Driver.compile')(function* (
     request.compilation.configuration?.profile.target ??
     request.compilation.target ??
     (hostSelection?._tag === 'Resolved' ? hostSelection.target.id : undefined)
+  // Turn a bare target selection into a package profile for the frontend. Preserve an explicit
+  // configuration; otherwise derive artifact, optimization, and debug settings from the request.
   const compilation: ModuleClosure.CompilationRequest =
     request.compilation.configuration !== undefined || targetId === undefined
       ? request.compilation
@@ -368,9 +376,15 @@ export const compile = Effect.fn('Driver.compile')(function* (
             },
           },
         }
+
+  // 4. Load and parse the transitive module closure, resolve declarations and names, elaborate
+  // bodies, and analyze semantics and ownership. Retain its diagnostics and per-phase observations.
   const frontend = yield* Frontend.frontend(compilation, { heapBytes })
+
   report.push(...frontend.report.map(phaseWithHeap))
   const closure = frontend.closure
+  // Imported-source storage failures use the typed Effect error channel and retain all available
+  // source facts. Ordinary source diagnostics are handled by the preparation gate below.
   if (closure.resolutionFailures.length > 0) {
     return yield* new SourceResolutionFailed({
       operation: 'Driver.compile',
@@ -381,6 +395,8 @@ export const compile = Effect.fn('Driver.compile')(function* (
       report: Object.freeze([...report]),
     })
   }
+  // 5. Select LLVM emission and reject artifact kinds that cannot be produced for this target.
+  // Unresolved targets pass to preparation, which returns the corresponding target failure.
   const backend = LlvmBackend.LlvmBackend
   const artifactTarget = Target.select(targetId)
   if (
@@ -393,6 +409,8 @@ export const compile = Effect.fn('Driver.compile')(function* (
       diagnostics: frontend.diagnostics,
       report: Object.freeze([...report]),
     })
+  // Complete target-specific configuration, discover concrete instances, and lower to normalized
+  // MIR (the shared middle-level representation), including any demanded storage components.
   const preparation = yield* Realization.prepare(frontend, targetId, {
     heapBytes,
     artifactKind: request.artifactKind,
@@ -400,6 +418,8 @@ export const compile = Effect.fn('Driver.compile')(function* (
       ? {}
       : { optimization: request.optimization }),
   })
+  // Preparation carries the frontend report forward. Replace the earlier frontend entries to
+  // avoid counting them twice, while retaining the driver's initial distribution-integrity check.
   const integrityReport = report.at(0)
   report.splice(
     0,
@@ -407,6 +427,7 @@ export const compile = Effect.fn('Driver.compile')(function* (
     ...(integrityReport === undefined ? [] : [integrityReport]),
     ...preparation.report.map(phaseWithHeap),
   )
+  // Stop before emission when source/configuration diagnostics or target selection reject MIR.
   if (preparation._tag === 'Rejected')
     return Object.freeze({
       _tag: 'Rejected',
@@ -421,6 +442,8 @@ export const compile = Effect.fn('Driver.compile')(function* (
       diagnostics: preparation.diagnostics,
       report: Object.freeze([...report]),
     })
+  // 6. Build the logical artifact plan from the prepared program, profile, and composition.
+  // It records roots, exports, native requirements, and identity for the requested output stage.
   const { diagnostics, program, target } = preparation
   const stage = request.stage ?? 'final'
   const plannedArtifact = yield* Effect.result(
@@ -433,6 +456,8 @@ export const compile = Effect.fn('Driver.compile')(function* (
       distribution.digest,
     ),
   )
+  // Attach an invalid artifact configuration to the root source span as a user diagnostic.
+  // A missing root span is an internal invariant violation rather than a compilation outcome.
   if (Result.isFailure(plannedArtifact)) {
     const span = closure.modules.find((module) => module.name === closure.rootModule)?.syntax.root
       .span
@@ -448,6 +473,8 @@ export const compile = Effect.fn('Driver.compile')(function* (
   }
   const artifactPlan = plannedArtifact.success
 
+  // 7. Decode supplied foreign ABI manifests and compare their contracts with the MIR program.
+  // Run this before cache lookup so cached code cannot bypass foreign-interface validation.
   const importedInterfaces: Array<AbiManifest.Imported> = []
   const interfaceDiagnostics: Array<Diagnostic.Diagnostic> = []
   for (const source of request.foreignInterfaces ?? []) {
@@ -455,6 +482,8 @@ export const compile = Effect.fn('Driver.compile')(function* (
     if (Result.isFailure(decoded)) interfaceDiagnostics.push(decoded.failure)
     else importedInterfaces.push(decoded.success)
   }
+  // Combine malformed-manifest and contract-mismatch diagnostics, including manifest sources
+  // in the rejected outcome so callers can render their diagnostic spans.
   interfaceDiagnostics.push(...AbiManifest.check(importedInterfaces, program))
   if (interfaceDiagnostics.length > 0)
     return Object.freeze({
@@ -466,6 +495,9 @@ export const compile = Effect.fn('Driver.compile')(function* (
       diagnostics: Object.freeze([...diagnostics, ...interfaceDiagnostics]),
       report: Object.freeze([...report]),
     })
+  // 8. Verify that the distribution supports the target's demanded intrinsics and runtime.
+  // Missing target operations become TargetFailed; inconsistent distribution data becomes
+  // ToolchainFailed. Both stop the pipeline before backend code generation.
   const targetIntegrity = PhaseReport.measureInto(
     report,
     'toolchain-target',
@@ -490,6 +522,8 @@ export const compile = Effect.fn('Driver.compile')(function* (
       failures: targetIntegrity.failures,
       report: Object.freeze([...report]),
     })
+  // 9. Look up LLVM emission independently of the final-artifact cache. The key covers the
+  // distribution, backend, profile, artifact plan/kind, mode, source closure, and ABI manifests.
   const mode = preparation.profile.debug ? 'debug' : 'release'
   const emissionCache =
     request.cache !== false
@@ -509,6 +543,7 @@ export const compile = Effect.fn('Driver.compile')(function* (
           closure.sources,
           request.foreignInterfaces ?? [],
         )
+  // Missing or undecodable entries are cache misses; a usable entry restores bitcode and metadata.
   const cachedEmission =
     emissionCache !== undefined && emissionCacheKey !== undefined
       ? decodeCachedEmission(
@@ -517,6 +552,8 @@ export const compile = Effect.fn('Driver.compile')(function* (
           target,
         )
       : undefined
+  // Reuse cached emission or ask LLVM to emit the prepared MIR, recording which path ran.
+  // Pass source bytes for backend source information and convert BackendError to an outcome.
   const emitted =
     cachedEmission !== undefined
       ? PhaseReport.measureInto(
@@ -558,6 +595,7 @@ export const compile = Effect.fn('Driver.compile')(function* (
       report: Object.freeze([...report]),
     })
   }
+  // Publish newly emitted bitcode to the emission cache when its metadata can be serialized.
   const artifact = emitted.artifact
   if (
     cachedEmission === undefined &&
@@ -570,6 +608,9 @@ export const compile = Effect.fn('Driver.compile')(function* (
       yield* NativeToolchain.writeArtifactCache(emissionCache, emissionCacheKey, encoded)
   }
 
+  // 10. An intermediate-stage request ends here: write LLVM IR, bitcode, assembly, or an object
+  // to the destination inside a temporary build scope, then return its identity and diagnostics.
+  // The scope removes temporary files on exit unless saveTemps is enabled.
   if (stage !== 'final') {
     const path = yield* NativeToolchain.withBuildScope(
       request.scopeName ?? 'representation',
@@ -602,6 +643,8 @@ export const compile = Effect.fn('Driver.compile')(function* (
       toolchainIdentity: distribution.digest,
     })
   }
+  // 11. For final artifacts, bind the plan's logical native requirements to caller-supplied
+  // physical inputs. Report missing or incompatible bindings against the root source span.
   const bound = yield* Effect.result(
     NativeRequirementBinding.resolve(
       artifactPlan.requirements,
@@ -623,6 +666,7 @@ export const compile = Effect.fn('Driver.compile')(function* (
       report: Object.freeze([...report]),
     })
   }
+  // Keep caller link-input order, followed by the inputs supplied by resolved requirements.
   const cacheKind = request.artifactKind
   const scopeName = request.scopeName ?? 'driver'
   const requestedNativeInputs = Object.freeze([
@@ -640,6 +684,8 @@ export const compile = Effect.fn('Driver.compile')(function* (
       nativeLinkInputs,
       request.destination,
     )
+  // 12. Try final WebAssembly artifact reuse using bitcode, profile, toolchain, and runtime source.
+  // Native artifacts need a complete physical link plan, so their final-cache lookup happens later.
   const cacheAdmission = NativeToolchain.finalArtifactCacheAdmission(cacheKind)
   const artifactCache =
     cacheAdmission._tag !== 'Ineligible' &&
@@ -666,6 +712,8 @@ export const compile = Effect.fn('Driver.compile')(function* (
     cacheKey !== undefined &&
     artifact._tag === 'LlvmBitcodeArtifact'
   ) {
+    // Validate cached bytes for the requested artifact kind and target before committing them
+    // to the durable destination. A miss continues to the build scope below.
     const bytes = yield* NativeToolchain.readArtifactCache(artifactCache, cacheKey)
     if (bytes !== undefined && NativeToolchain.isCachedArtifact(bytes, cacheKind, target)) {
       const committed = yield* PhaseReport.measureEffectInto(
@@ -677,6 +725,7 @@ export const compile = Effect.fn('Driver.compile')(function* (
         () => 0,
         { heapBytes },
       )
+      // Publish C header and ABI metadata when the restored artifact kind requires an interface.
       const libraryInterface =
         ArtifactKind.isLibrary(cacheKind) || cacheKind === 'NativeObject'
           ? yield* PhaseReport.measureEffectInto(
@@ -712,10 +761,14 @@ export const compile = Effect.fn('Driver.compile')(function* (
     }
   }
 
+  // 13. Build a final artifact on a cache miss. All temporary products live in this scope;
+  // successful outputs are committed to the destination before scope cleanup runs.
   return yield* NativeToolchain.withBuildScope(
     scopeName,
     (scope) =>
       Effect.gen(function* () {
+        // WebAssembly branch: finalize the emitted bitcode with the selected profile and runtime
+        // support, commit the module, and cache its bytes when final-artifact caching is enabled.
         if (!Target.isNative(target)) {
           const finalized = yield* PhaseReport.measureEffectInto(
             report,
@@ -755,6 +808,7 @@ export const compile = Effect.fn('Driver.compile')(function* (
           })
         }
 
+        // Native branch: guard against a WebAssembly artifact request reaching native emission.
         if (cacheKind === 'WebAssemblyModule')
           return Object.freeze({
             _tag: 'TargetFailed',
@@ -763,6 +817,8 @@ export const compile = Effect.fn('Driver.compile')(function* (
             report: Object.freeze([...report]),
           })
 
+        // 14. Resolve the native toolchain for the profile and turn LLVM bitcode into an object.
+        // Track both generated object files and any helper capabilities reported by emission.
         const toolchain = yield* NativeToolchain.resolveToolchain(
           request.toolchain,
           preparation.profile,
@@ -778,6 +834,8 @@ export const compile = Effect.fn('Driver.compile')(function* (
         )
         const generatedObjects: Array<NativeToolchain.PathArtifact> = [object.artifact]
         const helpers = object.helpers === undefined ? [] : [object.helpers]
+        // Executables and shared libraries need helper implementations at this link step.
+        // Compile those helpers and include their required native libraries in the link inputs.
         const final = cacheKind === 'NativeExecutable' || cacheKind === 'NativeSharedLibrary'
         if (final && object.helpers !== undefined) {
           const support = yield* NativeToolchain.compileHelpers(
@@ -795,6 +853,7 @@ export const compile = Effect.fn('Driver.compile')(function* (
           ? [...nativeLinkInputs, ...HelperCapability.linkInputs(helpers)]
           : nativeLinkInputs
 
+        // Add the Silk native runtime object only when the emitted program references it.
         if (artifact.nativeRuntimeSymbols.length > 0) {
           const runtime = yield* PhaseReport.measureEffectInto(
             report,
@@ -807,6 +866,8 @@ export const compile = Effect.fn('Driver.compile')(function* (
           )
           generatedObjects.push(runtime.artifact)
         }
+        // A standalone object with no additional objects or inputs needs no linker invocation.
+        // Commit it directly, publish its C header/ABI manifest, and return the completed result.
         if (
           cacheKind === 'NativeObject' &&
           generatedObjects.length === 1 &&
@@ -837,6 +898,8 @@ export const compile = Effect.fn('Driver.compile')(function* (
             toolchainIdentity: distribution.digest,
           })
         }
+        // 15. Build the complete native link/archive plan, including generated objects, supplied
+        // inputs, loader selection, and helpers. Its identity determines final native cache reuse.
         const linkPlan = yield* NativeToolchain.planNativeLink(
           toolchain,
           scope,
@@ -855,6 +918,8 @@ export const compile = Effect.fn('Driver.compile')(function* (
             : (toolchain.artifactCache ??
               NativeToolchain.defaultArtifactCache(nativeCacheDirectory))
         const nativeKey = `native-${linkPlan.identity}.blob`
+        // Validate the physical plan even on cache hits, then accept cached bytes only when their
+        // artifact kind and target match. Otherwise execute the finalizer and record the link phase.
         yield* NativeToolchain.validateLinkPlan(linkPlan)
         const cached =
           nativeCache === undefined
@@ -873,12 +938,14 @@ export const compile = Effect.fn('Driver.compile')(function* (
           () => 0,
           { heapBytes },
         )
+        // Cache freshly finalized bytes and publish the inspectable link plan beside the artifact.
         if (!reusable && nativeCache !== undefined)
           yield* NativeToolchain.writeArtifactCache(nativeCache, nativeKey, linked.bytes)
         const linkPlanPath = yield* NativeToolchain.commitLinkPlan(
           linkPlan,
           `${request.destination}.link.json`,
         )
+        // Libraries and native objects also publish a C header and behavioral ABI manifest.
         const libraryInterface =
           ArtifactKind.isLibrary(cacheKind) || cacheKind === 'NativeObject'
             ? yield* PhaseReport.measureEffectInto(
@@ -893,6 +960,8 @@ export const compile = Effect.fn('Driver.compile')(function* (
                 { heapBytes },
               )
             : undefined
+        // Return the durable artifact together with linkage provenance, foreign symbols,
+        // diagnostics, and the complete phase report. Exiting this scope releases temporary files.
         return Object.freeze({
           _tag: 'Compiled',
           linkPlan,
