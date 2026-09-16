@@ -109,8 +109,18 @@ export const intersection = (members: ReadonlyArray<Lifetime>): Lifetime => {
 
 const ownerKey = (self: Owner): string => Canonical.record('Declaration', [self.module, self.name])
 
+const keyCache = new WeakMap<Lifetime, string>()
+
 /** Encodes proof identity without parameter spelling, source offsets or concrete referents. */
 export const key = (self: Lifetime): string => {
+  const cached = keyCache.get(self)
+  if (cached !== undefined) return cached
+  const identity = computeKey(self)
+  keyCache.set(self, identity)
+  return identity
+}
+
+const computeKey = (self: Lifetime): string => {
   switch (self._tag) {
     case 'StaticLifetime':
       return 'static'
@@ -185,9 +195,25 @@ export const assumptions = (bounds: ReadonlyArray<Outlives>): Assumptions => {
   })
 }
 
+const outlivesProofs = new WeakMap<Assumptions, Map<string, Map<string, boolean>>>()
+
 /** Proves finite outlives relationships, including the introduction/elimination rules of meet. */
 export const outlives = (self: Assumptions, longer: Lifetime, shorter: Lifetime): boolean => {
   if (longer._tag === 'StaticLifetime' || equals(longer, shorter)) return true
+  const source = key(longer)
+  const destination = key(shorter)
+  const proofs = outlivesProofs.get(self) ?? new Map<string, Map<string, boolean>>()
+  const successors = proofs.get(source) ?? new Map<string, boolean>()
+  const cached = successors.get(destination)
+  if (cached !== undefined) return cached
+  const proven = proveOutlives(self, longer, shorter)
+  successors.set(destination, proven)
+  proofs.set(source, successors)
+  outlivesProofs.set(self, proofs)
+  return proven
+}
+
+const proveOutlives = (self: Assumptions, longer: Lifetime, shorter: Lifetime): boolean => {
   const destination = key(shorter)
   const edges = new Map<string, Array<string>>()
   const intersections = new Map<string, Intersection>()

@@ -241,6 +241,29 @@ const scopeSignature = (
   )
 }
 
+const nominalDependencies = new WeakMap<DeclarationFacts.MemberFact, ReadonlyArray<string>>()
+
+const nominalDependenciesOf = (member: DeclarationFacts.MemberFact): ReadonlyArray<string> => {
+  const cached = nominalDependencies.get(member)
+  if (cached !== undefined) return cached
+  const selected = new Set<string>()
+  // Documentation checks thousands of bodies against the same immutable declarations. Walk each
+  // declaration shape once; callers still close over these edges in their own dependency set.
+  SemanticRebinding.visit(member, (value) => {
+    if (
+      records(value) &&
+      value._tag === 'NominalType' &&
+      typeof value.module === 'string' &&
+      typeof value.name === 'string'
+    )
+      selected.add(`${value.module}/${value.name}`)
+    return !(records(value) && (value._tag === 'SyntaxNode' || value._tag === 'Token'))
+  })
+  const result = Object.freeze([...selected])
+  nominalDependencies.set(member, result)
+  return result
+}
+
 const dependencies = (
   self: BodyQuery,
   analysis: ExpressionAnalysis.FunctionAnalysis,
@@ -276,16 +299,7 @@ const dependencies = (
     })
     // Resolved nominal shapes carry variance, cleanup and nested lifetime requirements. Traverse
     // only those selected shapes; a visited declaration bounds recursive components finitely.
-    SemanticRebinding.visit(member, (value) => {
-      if (
-        records(value) &&
-        value._tag === 'NominalType' &&
-        typeof value.module === 'string' &&
-        typeof value.name === 'string'
-      )
-        add(`${value.module}/${value.name}`)
-      return !(records(value) && (value._tag === 'SyntaxNode' || value._tag === 'Token'))
-    })
+    for (const dependency of nominalDependenciesOf(member)) add(dependency)
   }
   for (const key of [...selected].sort()) add(key)
   // A failed lookup consumed the absence of this exact member. Retain that input so adding
