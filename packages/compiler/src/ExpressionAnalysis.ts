@@ -4,7 +4,6 @@ import * as AggregateIdentity from './AggregateIdentity.js'
 import * as BodyLifetime from './BodyLifetime.js'
 import * as Lifetime from './Lifetime.js'
 import * as TypeCompatibility from './TypeCompatibility.js'
-import * as TypeOutlives from './TypeOutlives.js'
 import * as CallableContract from './CallableContract.js'
 import * as ConformanceProof from './ConformanceProof.js'
 import * as Constraint from './Constraint.js'
@@ -8873,10 +8872,6 @@ const analyzeAnonymousCallable = (
     parameter.declaredType._tag === 'Resolved' ? [parameter.declaredType.type] : [],
   )
   const complete = result !== undefined && parameterTypes.length === authoredParameters.length
-  const inputLifetimes = TypeOutlives.inputLifetimes(
-    parameterTypes,
-    TypeOutlives.context(resolution.index.modules),
-  )
   const callable =
     complete && result !== undefined && lifetimes !== undefined
       ? Type.callable(
@@ -8884,14 +8879,6 @@ const analyzeAnonymousCallable = (
           result,
           {
             ...lifetimes,
-            lifetimeBounds: [
-              ...(lifetimes.lifetimeBounds ?? []),
-              ...(inputLifetimes.lifetimeBounds ?? []),
-            ],
-            typeOutlives: [
-              ...(lifetimes.typeOutlives ?? []),
-              ...(inputLifetimes.typeOutlives ?? []),
-            ],
             // Authored anonymous parameters quantify their own elided lifetimes. Captured outer
             // lifetimes remain free and continue to constrain the stored environment.
             lifetimeBinders: (collected.fact.lifetimeElaboration?.implicit ?? []).map((binder) =>

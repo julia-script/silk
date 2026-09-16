@@ -723,18 +723,28 @@ const inferQuantifiedExecutable = (
   // Only the rigid comparison uses these assumptions; the escape check below still prevents
   // an invocation binder from entering the caller's specialization.
   const openedPattern = open(pattern, patternSubstitution)
-  const proves = (longer: Lifetime.Lifetime, shorter: Lifetime.Lifetime): boolean =>
-    Lifetime.outlives(
-      Lifetime.assumptions(
-        openedPattern.lifetimeBounds.map((bound) => ({
-          longer: substituteLifetime(bound.longer, trial),
-          shorter: substituteLifetime(bound.shorter, trial),
-        })),
-      ),
-      longer,
-      shorter,
-    ) ||
-    (context.lifetimes?.accepts(longer, shorter, false) ?? false)
+  const proves = (longer: Lifetime.Lifetime, shorter: Lifetime.Lifetime): boolean => {
+    if (
+      Lifetime.outlives(
+        Lifetime.assumptions(
+          openedPattern.lifetimeBounds.map((bound) => ({
+            longer: substituteLifetime(bound.longer, trial),
+            shorter: substituteLifetime(bound.shorter, trial),
+          })),
+        ),
+        longer,
+        shorter,
+      )
+    )
+      return true
+    // Separate rigid invocation proofs from free local-region obligations before delegating.
+    // A meet may contain both, while the caller's region solver must never absorb a placeholder.
+    if (longer._tag === 'IntersectionLifetime')
+      return longer.members.every((member) => proves(member, shorter))
+    if (shorter._tag === 'IntersectionLifetime')
+      return shorter.members.some((member) => proves(longer, member))
+    return context.lifetimes?.accepts(longer, shorter, false) ?? false
+  }
   const scoped: InferenceContext = {
     ...context,
     lifetimes: {

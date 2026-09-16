@@ -39,6 +39,36 @@ pub fn main() -> i32 { return 0 }`,
   }),
 )
 
+it.effect('infers open callback rows under quantified borrowed-input lifetime bounds', () =>
+  Effect.gen(function* () {
+    assert.deepEqual(
+      yield* codesOf(
+        'callable-stabilization/quantified-open-row',
+        `
+struct Holder<'data, T> { value: &'data T }
+service Logger { effect fn log() -> () ? &Logger }
+effect fn scope<'env, T, A, E, ?R>(
+  holder: &Holder<T>,
+  use: for<'call, 'view: 'call> once fn<'env>(&'call Holder<'view, T>) -> once Effect<'call & 'env; A ! E ? R>,
+) -> A ! E ? R { return run use(holder) }
+effect fn caller<'env, T, A, E, ?R>(
+  holder: &Holder<T>,
+  work: once fn<'env>() -> once Effect<'env; A ! E ? R | &Logger>,
+) -> A ! E ? R | &Logger {
+  let use = effect fn(value: &Holder<T>) -> A ! E ? R | &Logger {
+    drop value
+    return run work()
+  }
+  return run scope(holder, move use)
+}
+pub fn main() -> i32 { return 0 }
+`,
+      ),
+      [],
+    )
+  }),
+)
+
 // ISSUE-2: joining two named function items reports SEM0080 instead of invalid MIR.
 it.effect('rejects a match that joins two named function items', () =>
   Effect.gen(function* () {
