@@ -580,6 +580,8 @@ impl<'owner> ResponseHead<'owner> {
 
   /// Copies the status, reason, and only matching fields into independent storage.
   ///
+  /// # Details
+  ///
   /// Matching is ASCII case-insensitive. Duplicate matches remain distinct and preserve wire order.
   /// The supplied limits apply to the selected fields and complete owned result, not unrelated
   /// fields retained by the parser.

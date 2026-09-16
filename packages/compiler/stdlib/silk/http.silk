@@ -733,6 +733,8 @@ impl<'value> ResponseHead<'value> {
 
   /// Copies the response status, reason, and only matching fields into independent storage.
   ///
+  /// # Details
+  ///
   /// Matching is ASCII case-insensitive. Duplicate matches remain distinct and preserve wire order.
   /// The total-owned limit covers copied reason bytes, field payload, and field records.
   pub effect fn copyMatchingHeaders(

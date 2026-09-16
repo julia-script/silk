@@ -79,7 +79,10 @@ pub enum ConfigField {
 /// A pool admission, capacity, lifecycle, or checked-accounting failure.
 pub union PoolError {
   /// Configuration was rejected before allocation or publication.
-  InvalidConfig { pub field: ConfigField },
+  InvalidConfig {
+    /// The configuration field whose value is outside its admitted range.
+    pub field: ConfigField,
+  },
   /// No legal idle eviction can satisfy global and per-origin capacity.
   PoolFull,
   /// The root pool has closed; surviving handles cannot acquire or publish.
@@ -171,12 +174,17 @@ pub union EndpointIdentity {
   /// Direct network contact, conservatively partitioned by the original origin.
   Direct,
   /// A sealed JUL-199 route, including mode, endpoint, original origin, and credential identity.
-  Proxy { pub route: RouteKey },
+  Proxy {
+    /// The sealed proxy route identity used to partition reusable connections.
+    pub route: RouteKey,
+  },
   /// Direct Unix-domain contact with an exact owned pathname.
   Unix { path: Bytes },
 }
 
 /// The standard conservative key used by direct native and proxy-aware pool contexts.
+///
+/// # Details
 ///
 /// Provider representation, HTTP policy, TLS verification/trust/ALPN policy, and connector policy
 /// belong to the constructor-sealed [`PoolContext`]. This key retains only request-visible route
@@ -967,6 +975,8 @@ where
 }
 
 /// Checks out exactly one owner, lends it to `handler`, and publishes it only when client-eligible.
+///
+/// # Details
 ///
 /// Acquisition uses the earlier of `requestDeadline` and `acquisitionDeadline`; the connector must
 /// construct pooled owners without retaining that bound. The handler remains responsible for

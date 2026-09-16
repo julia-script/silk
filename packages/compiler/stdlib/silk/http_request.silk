@@ -245,6 +245,8 @@ pub effect fn prepare<'value>(
 
 /// Prepares one Forward route as an origin-bound absolute-form request for its plain proxy peer.
 ///
+/// # Details
+///
 /// The sealed route is the only source of the physical peer and `Proxy-Authorization`. The
 /// original URI spelling is preserved except that user information and fragments are excluded and
 /// an empty path becomes `/`. Forward preparation always generates the logical-origin Host,
@@ -324,6 +326,8 @@ pub effect fn prepareForward<'configuration, 'value>(
 }
 
 /// Prepares the one body-free HTTP/1.1 CONNECT head admitted by a Tunnel route.
+///
+/// # Details
 ///
 /// The authority-form target and Host are both derived from the route's normalized original
 /// origin and always include its effective port. Callers cannot supply fields, a body, a physical

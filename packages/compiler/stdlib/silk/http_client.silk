@@ -374,6 +374,8 @@ impl<P> Connection<P> {
 
 /// Returns whether an owned connection can return to an idle pool without resetting client state.
 ///
+/// # Details
+///
 /// `Eligible` requires Ready phase, armed physical ownership, request-budget headroom, and no
 /// retained input. Other results identify the first failed condition without exposing counters.
 pub fn reuseEligibility<P>(connection: &Connection<P>) -> ReuseEligibility {
@@ -2414,6 +2416,8 @@ where
 
 /// Receives bounded informational heads until the shared parser reaches one final response.
 ///
+/// # Details
+///
 /// Parser, head, informational-budget, 101-upgrade, transport, and deadline failures remain the
 /// original `ClientError`. This operation does not copy response metadata or consume a body.
 pub effect fn receiveFinal<'exchange, P>(exchange: &mut Exchange<'exchange, P>) -> u16
@@ -3389,6 +3393,9 @@ fn clampDeadline(first: &Option<Instant>, second: &Option<Instant>) -> Option<In
 }
 
 /// Selects one content pipeline from this exchange's current head before a nonempty raw read or a discard.
+///
+/// # Details
+///
 /// Planning errors borrow the head and must be handled before the exchange is used again.
 /// The returned copy records the applied representation policy without exposing the affine decoder.
 pub effect fn beginContent<'head, 'exchange: 'head, P>(

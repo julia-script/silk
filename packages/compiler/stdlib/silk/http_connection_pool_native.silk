@@ -58,6 +58,8 @@ union ContextRoute {
 
 /// An immutable native provider, HTTP, route, TLS, ALPN, and prepared-trust context.
 ///
+/// # Details
+///
 /// Construction is available only through [`withDirectPool`] and [`withUnixPool`]. The context
 /// accepts direct keys for its route and rejects all sealed proxy keys before native contact.
 pub struct Context {
@@ -365,6 +367,8 @@ where &mut NativeTransport provides &HttpTransport from &mut HttpTransport {
 
 /// Copies the complete native context before publishing another shared-state alias.
 ///
+/// # Details
+///
 /// Trust or allocation failure leaves the source handle valid and publishes no new handle.
 pub effect fn copyHandle(
   handle: &Handle<ConnectionKey, NativeTransport, Context>,
@@ -375,6 +379,8 @@ pub effect fn copyHandle(
 }
 
 /// Reports whether a handle's frozen HTTP connection limits exactly match `limits`.
+///
+/// # Details
 ///
 /// Fetch-style clients use this pre-contact admission before a checkout can reuse or open an owner.
 /// Every parser, framing, capacity, informational, request-budget, and discard field participates;

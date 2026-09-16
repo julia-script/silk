@@ -356,6 +356,8 @@ impl<'value> Headers<'value> {
 
   /// Copies only case-insensitively matching fields in their original order.
   ///
+  /// # Details
+  ///
   /// All selected-field and owned-capacity limits are checked before allocation. Duplicate fields
   /// remain distinct and retain their original relative order.
   pub effect fn copyMatching(

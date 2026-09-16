@@ -303,6 +303,8 @@ pub struct CloseData {
 impl CloseData {
   /// Validates and copies one server Close status and UTF-8 reason.
   ///
+  /// # Details
+  ///
   /// The operation rejects client-only code `1010`, other disallowed codes, reasons above 123
   /// bytes, and invalid UTF-8 before it publishes owned data.
   pub fn make(code: u16, reason: &[u8]) -> Result<CloseData, WebSocketError> {
@@ -386,6 +388,8 @@ pub union Event {
 }
 
 /// One callback-scoped affine server WebSocket over the upgraded buffered channel.
+///
+/// # Details
 ///
 /// Callers receive this value only through [`withServer`]. A returned event never retains a
 /// mutable borrow into this value.

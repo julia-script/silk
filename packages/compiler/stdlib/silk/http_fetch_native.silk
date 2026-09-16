@@ -94,6 +94,8 @@ impl<'configuration> Context<'configuration> {
 
   /// Owns one native fresh-acquisition context and a copied direct-pool capability.
   ///
+  /// # Details
+  ///
   /// The copied handle retains the pool's already bounded immutable transport, HTTP, TLS, ALPN,
   /// and trust context. Route compatibility remains a per-attempt pre-contact admission check.
   pub effect fn makeWithPool(

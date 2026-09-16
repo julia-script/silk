@@ -9,8 +9,8 @@
 //! # Details
 //!
 //! Fetch owns no transport policy. A [`FetchClient`] supplies routed or pooled attempts under one
-//! unchanged deadline, [`silk.http_redirect`] owns redirect and source authority, and
-//! [`silk.http_client`] owns response framing and content provenance. Every public destination is
+//! unchanged deadline, `silk.http_redirect` owns redirect and source authority, and
+//! `silk.http_client` owns response framing and content provenance. Every public destination is
 //! finite, and every completed result owns the metadata that outlives the live response.
 
 import silk.allocator {Allocator, OutOfMemoryError}
@@ -124,25 +124,68 @@ pub enum FetchLimit {
 /// An owned isomorphic form of a content failure whose unsupported token cannot borrow the head.
 pub union FetchContentReason {
   /// A content configuration or byte count exceeds its admitted range.
-  InvalidLimit {pub limit: ContentLimitKind, pub allowed: u64, pub attempted: u64},
+  InvalidLimit {
+    /// The rejected configuration or byte class.
+    pub limit: ContentLimitKind,
+    /// The applicable maximum.
+    pub allowed: u64,
+    /// The rejected value or count.
+    pub attempted: u64,
+  },
   /// A Content-Encoding element is empty or malformed.
-  CodingSyntax {pub position: CodingPosition},
+  CodingSyntax {
+    /// The exact location of the invalid token or byte.
+    pub position: CodingPosition,
+  },
   /// A valid coding name has no selected decoder; the exact token is independently owned.
-  UnsupportedCoding {pub position: CodingPosition, pub token: Bytes},
+  UnsupportedCoding {
+    /// The token position in the original response.
+    pub position: CodingPosition,
+    /// An owned copy of the exact unsupported token.
+    pub token: Bytes,
+  },
   /// A partial response selected a nonidentity decoder.
-  PartialResponse {pub position: CodingPosition},
+  PartialResponse {
+    /// The first nonidentity coding in wire order.
+    pub position: CodingPosition,
+  },
   /// The response body is a protocol tunnel rather than a representation.
   Tunnel,
   /// HTTP framing rejected the response body.
-  Body {pub error: BodyError},
+  Body {
+    /// The original body error, including committed wire progress.
+    pub error: BodyError,
+  },
   /// Buffered input or its transport failed.
-  Buffer {pub error: BufferError},
+  Buffer {
+    /// The original buffer error and its transport cause.
+    pub error: BufferError,
+  },
   /// Gzip or zlib decoding failed.
-  Inflate {pub stage: usize, pub wireIndex: usize, pub error: DecodeError},
+  Inflate {
+    /// The zero-based reverse application stage.
+    pub stage: usize,
+    /// The original coding position in wire order.
+    pub wireIndex: usize,
+    /// The exact inflate failure and decoder-call progress.
+    pub error: DecodeError,
+  },
   /// Zstandard decoding failed.
-  Zstandard {pub stage: usize, pub wireIndex: usize, pub error: ZstdError},
+  Zstandard {
+    /// The zero-based reverse application stage.
+    pub stage: usize,
+    /// The original coding position in wire order.
+    pub wireIndex: usize,
+    /// The exact Zstandard failure and decoder-call progress.
+    pub error: ZstdError,
+  },
   /// A finished coding stream had additional encoded bytes.
-  TrailingEncodedData {pub stage: usize, pub wireIndex: usize},
+  TrailingEncodedData {
+    /// The zero-based reverse application stage.
+    pub stage: usize,
+    /// The original coding position in wire order.
+    pub wireIndex: usize,
+  },
   /// Checked content accounting overflowed.
   ArithmeticOverflow,
   /// The content reader was already failed or abandoned.
@@ -168,19 +211,34 @@ pub union FetchReason {
   /// One or more finite options are inconsistent or outside their admitted domain.
   InvalidOptions,
   /// The supplied HTTP connection limits failed their owning client's pre-contact admission.
-  InvalidHttpOptions {pub error: ClientError},
+  InvalidHttpOptions {
+    /// The client's original pre-contact admission failure.
+    pub error: ClientError,
+  },
   /// HTTP value copying failed while Fetch owned the final-head boundary.
-  HttpValue {pub error: ValueError},
+  HttpValue {
+    /// The original HTTP value validation or copying failure.
+    pub error: ValueError,
+  },
   /// HTTP body or trailer validation failed after final-response selection.
-  HttpBody {pub error: BodyError},
+  HttpBody {
+    /// The original body or trailer validation failure.
+    pub error: BodyError,
+  },
   /// The streaming client failed inside Fetch's final-response delivery boundary.
-  HttpClient {pub error: ClientError},
+  HttpClient {
+    /// The original final-response client failure.
+    pub error: ClientError,
+  },
   /// Checked accounting cannot represent the required total.
   SizeOverflow,
   /// A caller-defined sink rejected the current offered chunk.
   DestinationRejected,
   /// Content selection failed; borrowed coding tokens are copied into bounded owned storage.
-  Content {pub error: FetchContentError},
+  Content {
+    /// The owned content failure, including coding coordinates and byte totals.
+    pub error: FetchContentError,
+  },
   /// One independent finite resource would exceed its inclusive limit.
   LimitExceeded {
     /// The resource whose bound was reached.
@@ -426,6 +484,8 @@ impl<C> Fetch<C> {
 /// A sequential effectful destination whose metadata and current chunk loans cannot escape.
 pub interface Sink<E, ?R> {
   /// Accepts the complete offered chunk under the unchanged operation deadline.
+  ///
+  /// # Details
   ///
   /// `deadline` is the original absolute fetch deadline. `None` permits an unbounded wait. The
   /// callback must return before Fetch reads or offers another chunk.
