@@ -58,7 +58,7 @@ import silk.http_content {
 }
 import silk.http_headers {Headers, Limits as HeaderLimits}
 import silk.http_request as Request
-import silk.http_request {PreparedRequest, BodyMode, RequestError, Limits as RequestLimits}
+import silk.http_request {PreparedRequest, BodyMode, RequestError}
 import silk.http_origin {Origin, OriginError}
 import silk.http_proxy as Proxy
 import silk.http_proxy {ProxyError, Route, RouteMode}
@@ -83,6 +83,7 @@ import silk.string {String}
 import silk.http {Header}
 
 const DEFAULT_DRAIN_WIRE_BYTES: u64 = 65536
+
 const MAX_DRAIN_WIRE_BYTES: u64 = 1048576
 
 /// The exclusive connection state.
@@ -280,17 +281,15 @@ pub union ClientError {
 /// bytes. Head parser storage must have representable metadata and fit its owned-storage limit.
 /// Head storage failures retain the exact parser error in `ClientError.Head`.
 pub fn validateLimits(limits: &Limits) -> Result<(), ClientError> {
-  if limits.readCapacity == usize.ZERO
-    || limits.writeCapacity == usize.ZERO
-    || limits.maxDiscardWireBytes > MAX_DRAIN_WIRE_BYTES {
+  if limits.readCapacity == usize.ZERO || limits.writeCapacity == usize.ZERO || limits.maxDiscardWireBytes > MAX_DRAIN_WIRE_BYTES {
     return Result.failResult<(), ClientError>(ClientError.InvalidLimits)
   }
   return match move Head.validateLimits(&limits.head) {
     Result<(), ParseError>.Failure {error} => {
-      Result.failResult<(), ClientError>(ClientError.Head {error: move error})
+      return Result.failResult<(), ClientError>(ClientError.Head {error: move error})
     }
     Result<(), ParseError>.Success {value} => {
-      Result.succeed<(), ClientError>(move value)
+      return Result.succeed<(), ClientError>(move value)
     }
   }
 }
@@ -473,7 +472,7 @@ pub struct RouteSettings {
   /// Connection, parser, buffering, and message limits.
   pub http: Limits
   /// Request-head value limits used for the generated CONNECT request.
-  pub request: RequestLimits
+  pub request: HeaderLimits
   /// Maximum owned bytes in the generated CONNECT head.
   pub maxRequestHeadBytes: usize
   /// Maximum owned proxy-credential bytes in the generated CONNECT head.
@@ -486,14 +485,12 @@ pub struct RouteSettings {
   pub handshakeDurationNanoseconds: u64
 }
 
-impl Copy for RouteProtocol {}
 impl Copy for RouteSettings {}
 
-/// One plain provider supplied to a target-neutral route acquisition scope.
-pub interface AcquiredRouteContext<P, A, E, ?R> {
-  /// Consumes the context and the exact provider selected for the requested physical peer.
-  effect fn use(context: Self, provider: P) -> A ! E ? R
-  where
+/// Lexical consumer of one plain provider supplied to a target-neutral route acquisition scope.
+pub service AcquiredRouteContext<P, A, E, ?R> {
+  /// Consumes the exact provider selected for the requested physical peer.
+  effect fn use(provider: P) -> A ! E ? R | &mut AcquiredRouteContext<P, A, E, R> where
     &mut P provides &HttpTransport from &mut HttpTransport | &mut MonotonicClock | &mut Allocator | &mut Random,
     &mut P provides &HttpTransport from &mut HttpTransport,
     &mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock | &mut Allocator | &mut Random,
@@ -501,57 +498,52 @@ pub interface AcquiredRouteContext<P, A, E, ?R> {
 }
 
 /// A target-neutral owner that acquires one exact physical peer for a routed scope.
-pub interface RouteClient<
-  P,
-  A,
-  E,
-  AcquisitionError,
-  ?R,
-  ?AcquisitionRequirements,
-  C: AcquiredRouteContext<P, A, E ? R>,
-> {
+pub interface RouteClient<P, A, E, AcquisitionError, ?AcquisitionRequirements, ?R> {
   /// Returns all HTTP and TLS settings without applying hidden defaults.
   fn settings(client: &Self) -> RouteSettings
   /// Acquires one owned plain provider for `peer` under the unchanged absolute `deadline`.
-  effect fn acquire(client: Self, peer: Origin, deadline: Option<Instant>, context: C) -> A
-  ! E | AcquisitionError
-  ? R | AcquisitionRequirements
+  effect fn acquire(client: Self, peer: Origin, deadline: Option<Instant>) -> A ! E | AcquisitionError ? AcquisitionRequirements | R | &mut AcquiredRouteContext<
+    P,
+    A,
+    E,
+    R,
+  >
 }
 
 /// The uniform final HTTP transport lent to a routed callback.
-pub union RouteTransport<'transport, 'provider: 'transport, 'tunnel: 'provider, P> {
+pub struct RouteTransport<'transport, 'provider: 'transport, 'tunnel: 'provider, P> {
+  state: RouteTransportState<'transport, 'provider, 'tunnel, P>
+}
+
+union RouteTransportState<'transport, 'provider: 'transport, 'tunnel: 'provider, P> {
   /// A plain direct or Forward transport over the acquired provider's HTTP contract.
   Plain {provider: Loan<'provider, P>},
   /// An authenticated direct transport.
   SecuredDirect {provider: Secured<'transport, Loan<'provider, P>>},
   /// An authenticated transport established through CONNECT.
-  SecuredTunnel {
-    provider: Secured<'transport, Loan<'provider, TransferredTunnel<'tunnel, P>>>,
-  },
+  SecuredTunnel {provider: Secured<'transport, Loan<'provider, TransferredTunnel<'tunnel, P>>>},
 }
 
 /// A higher-ranked callback for one selected route and its final HTTP connection.
 pub interface RouteHandler<'configuration, P, A, E, ?R> {
   /// Runs after route acquisition and required origin authentication complete.
-  effect<'call> fn handle<
-    'call,
-    'transport: 'call,
-    'provider: 'transport,
-    'tunnel: 'provider,
-  >(
+  effect<'call> fn handle<'call, 'transport: 'call, 'provider: 'transport, 'tunnel: 'provider>(
     handler: Self,
     route: Route<'configuration>,
     connection: &'call mut Connection<RouteTransport<'transport, 'provider, 'tunnel, P>>,
-  ) -> A ! E ? R
-  where
+  ) -> A ! E ? R where
     &mut P provides &HttpTransport from &mut HttpTransport | &mut MonotonicClock | &mut Allocator | &mut Random,
     &mut P provides &HttpTransport from &mut HttpTransport,
     &mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock | &mut Allocator | &mut Random,
     &mut P provides &ByteDuplex from &mut ByteDuplex
 }
 
-impl<'transport, 'provider: 'transport, 'tunnel: 'provider, P>
-RouteTransport<'transport, 'provider, 'tunnel, P> {
+impl<'transport, 'provider: 'transport, 'tunnel: 'provider, P> RouteTransport<
+  'transport,
+  'provider,
+  'tunnel,
+  P,
+> {
   effect fn read(self: &mut Self, output: &mut [u8], deadline: Option<Instant>) -> ReadTransfer
   ! TransportError | OutOfMemoryError
   ? &mut MonotonicClock | &mut Allocator | &mut Random
@@ -560,16 +552,24 @@ RouteTransport<'transport, 'provider, 'tunnel, P> {
     &mut P provides &HttpTransport from &mut HttpTransport | &mut MonotonicClock | &mut Allocator | &mut Random,
     &mut P provides &ByteDuplex from &mut ByteDuplex,
     &mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock | &mut Allocator | &mut Random {
-    return match &mut self.* {
-      RouteTransport.Plain {provider} => run HttpTransport.readSome(move output, move deadline)
+    return match &mut self.state {
+      RouteTransportState<'transport, 'provider, 'tunnel, P>.Plain {provider} => run HttpTransport.readSome(
+        move output,
+        move deadline,
+      )
         |> Effect.provideMut<HttpTransport>(&mut provider)
-      RouteTransport.SecuredDirect {provider} => run HttpTransport.readSome(move output, move deadline)
+      RouteTransportState<'transport, 'provider, 'tunnel, P>.SecuredDirect {provider} => run HttpTransport.readSome(
+        move output,
+        move deadline,
+      )
         |> Effect.provideMut<HttpTransport>(&mut provider)
-      RouteTransport.SecuredTunnel {provider} => run HttpTransport.readSome(move output, move deadline)
+      RouteTransportState<'transport, 'provider, 'tunnel, P>.SecuredTunnel {provider} => run HttpTransport.readSome(
+        move output,
+        move deadline,
+      )
         |> Effect.provideMut<HttpTransport>(&mut provider)
     }
   }
-
   effect fn write(self: &mut Self, input: &[u8], deadline: Option<Instant>) -> usize
   ! TransportError | OutOfMemoryError
   ? &mut MonotonicClock | &mut Allocator | &mut Random
@@ -578,16 +578,24 @@ RouteTransport<'transport, 'provider, 'tunnel, P> {
     &mut P provides &HttpTransport from &mut HttpTransport | &mut MonotonicClock | &mut Allocator | &mut Random,
     &mut P provides &ByteDuplex from &mut ByteDuplex,
     &mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock | &mut Allocator | &mut Random {
-    return match &mut self.* {
-      RouteTransport.Plain {provider} => run HttpTransport.writeSome(move input, move deadline)
+    return match &mut self.state {
+      RouteTransportState<'transport, 'provider, 'tunnel, P>.Plain {provider} => run HttpTransport.writeSome(
+        move input,
+        move deadline,
+      )
         |> Effect.provideMut<HttpTransport>(&mut provider)
-      RouteTransport.SecuredDirect {provider} => run HttpTransport.writeSome(move input, move deadline)
+      RouteTransportState<'transport, 'provider, 'tunnel, P>.SecuredDirect {provider} => run HttpTransport.writeSome(
+        move input,
+        move deadline,
+      )
         |> Effect.provideMut<HttpTransport>(&mut provider)
-      RouteTransport.SecuredTunnel {provider} => run HttpTransport.writeSome(move input, move deadline)
+      RouteTransportState<'transport, 'provider, 'tunnel, P>.SecuredTunnel {provider} => run HttpTransport.writeSome(
+        move input,
+        move deadline,
+      )
         |> Effect.provideMut<HttpTransport>(&mut provider)
     }
   }
-
   effect fn flushOutput(self: &mut Self, deadline: Option<Instant>) -> ()
   ! TransportError | OutOfMemoryError
   ? &mut MonotonicClock | &mut Allocator | &mut Random
@@ -596,90 +604,52 @@ RouteTransport<'transport, 'provider, 'tunnel, P> {
     &mut P provides &HttpTransport from &mut HttpTransport | &mut MonotonicClock | &mut Allocator | &mut Random,
     &mut P provides &ByteDuplex from &mut ByteDuplex,
     &mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock | &mut Allocator | &mut Random {
-    return match &mut self.* {
-      RouteTransport.Plain {provider} => run HttpTransport.flush(move deadline)
+    return match &mut self.state {
+      RouteTransportState<'transport, 'provider, 'tunnel, P>.Plain {provider} => run HttpTransport.flush(
+        move deadline,
+      )
         |> Effect.provideMut<HttpTransport>(&mut provider)
-      RouteTransport.SecuredDirect {provider} => run HttpTransport.flush(move deadline)
+      RouteTransportState<'transport, 'provider, 'tunnel, P>.SecuredDirect {provider} => run HttpTransport.flush(
+        move deadline,
+      )
         |> Effect.provideMut<HttpTransport>(&mut provider)
-      RouteTransport.SecuredTunnel {provider} => run HttpTransport.flush(move deadline)
+      RouteTransportState<'transport, 'provider, 'tunnel, P>.SecuredTunnel {provider} => run HttpTransport.flush(
+        move deadline,
+      )
         |> Effect.provideMut<HttpTransport>(&mut provider)
     }
   }
-
-  effect fn closeTransport(self: &mut Self) -> () ! TransportError
+  effect fn closeTransport(self: &mut Self) -> ()
+  ! TransportError
   where
     &mut P provides &HttpTransport from &mut HttpTransport,
     &mut P provides &ByteDuplex from &mut ByteDuplex {
-    return match &mut self.* {
-      RouteTransport.Plain {provider} => run HttpTransport.close()
+    return match &mut self.state {
+      RouteTransportState<'transport, 'provider, 'tunnel, P>.Plain {provider} => run HttpTransport.close()
         |> Effect.provideMut<HttpTransport>(&mut provider)
-      RouteTransport.SecuredDirect {provider} => run HttpTransport.close()
+      RouteTransportState<'transport, 'provider, 'tunnel, P>.SecuredDirect {provider} => run HttpTransport.close()
         |> Effect.provideMut<HttpTransport>(&mut provider)
-      RouteTransport.SecuredTunnel {provider} => run HttpTransport.close()
+      RouteTransportState<'transport, 'provider, 'tunnel, P>.SecuredTunnel {provider} => run HttpTransport.close()
         |> Effect.provideMut<HttpTransport>(&mut provider)
     }
   }
 }
 
-impl<'transport, 'provider: 'transport, 'tunnel: 'provider, P> HttpTransport
-for RouteTransport<'transport, 'provider, 'tunnel, P> {
+impl<'transport, 'provider: 'transport, 'tunnel: 'provider, P> HttpTransport for RouteTransport<
+  'transport,
+  'provider,
+  'tunnel,
+  P,
+> {
   readSomeRaw: RouteTransport.read
   writeSomeRaw: RouteTransport.write
   flush: RouteTransport.flushOutput
   close: RouteTransport.closeTransport
 }
 
-struct FinalRouteHandler<'configuration, H> {
+struct FinalRouteContext<'configuration, H> {
   route: Route<'configuration>
-  handler: Option<H>
-}
-
-impl<
-  'configuration,
-  'transport,
-  'provider: 'transport,
-  'tunnel: 'provider,
-  P,
-  A,
-  E,
-  ?R,
-  H: RouteHandler<'configuration, P, A, E ? R>,
-> FinalRouteHandler<'configuration, H> {
-  effect fn handle(
-    bridge: Self,
-    connection: &mut Connection<RouteTransport<'transport, 'provider, 'tunnel, P>>,
-  ) -> A ! E ? R
-  where
-    &mut P provides &HttpTransport from &mut HttpTransport | &mut MonotonicClock | &mut Allocator | &mut Random,
-    &mut P provides &HttpTransport from &mut HttpTransport,
-    &mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock | &mut Allocator | &mut Random,
-    &mut P provides &ByteDuplex from &mut ByteDuplex {
-    let FinalRouteHandler<'configuration, H> {route, handler} = move bridge
-    let selected = match move handler {
-      Option.Some {value} => move value
-      Option.None => unavailable<H>()
-    }
-    return run RouteHandler<'configuration, P, A, E ? R>.handle(
-      move selected,
-      route,
-      move connection,
-    )
-  }
-}
-
-impl<
-  'configuration,
-  'transport,
-  'provider: 'transport,
-  'tunnel: 'provider,
-  P,
-  A,
-  E,
-  ?R,
-  H: RouteHandler<'configuration, P, A, E ? R>,
-> ConnectionHandler<RouteTransport<'transport, 'provider, 'tunnel, P>, A, E ? R>
-for FinalRouteHandler<'configuration, H> {
-  handle: FinalRouteHandler.handle
+  handler: H
 }
 
 fn routeVersion(protocol: RouteProtocol) -> Version {
@@ -715,10 +685,267 @@ fn copyRouteDomain(host: &Host, output: &mut [u8]) -> usize {
 }
 
 fn zeroRouteName() -> [u8; 253] {
-  return [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+  return [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+  ]
 }
 
-fn routeReference<'host>(host: &Host, name: &'host [u8]) -> Result<ReferenceIdentity<'host>, IdentityError> {
+fn routeReference<'host>(host: &Host, name: &'host [u8]) -> Result<
+  ReferenceIdentity<'host>,
+  IdentityError,
+> {
   let selected = match & host.* {
     Host.Domain {value} => OriginHost<'host>.Dns {bytes: name}
     Host.Ipv4 {value} => OriginHost<'host>.Ipv4 {bytes: Ipv4Address.octets(&value)}
@@ -727,8 +954,8 @@ fn routeReference<'host>(host: &Host, name: &'host [u8]) -> Result<ReferenceIden
   return HttpsIdentity.reference(move selected)
 }
 
-fn admittedRouteReference<'host>(host: &Host, name: &'host [u8]) -> ReferenceIdentity<'host> {
-  return match & host.* {
+fn admittedRouteReference<'host>(host: Host, name: &'host [u8]) -> ReferenceIdentity<'host> {
+  return match host {
     Host.Domain {value} => ReferenceIdentity<'host>.Dns {bytes: name}
     Host.Ipv4 {value} => ReferenceIdentity<'host>.Ipv4 {bytes: Ipv4Address.octets(&value)}
     Host.Ipv6 {value} => ReferenceIdentity<'host>.Ipv6 {bytes: Ipv6Address.octets(&value)}
@@ -743,7 +970,7 @@ effect fn selectedPeer<'configuration>(route: &Route<'configuration>) -> Origin 
     Result<Origin, OriginError>.Success {value} => value
     Result<Origin, OriginError>.Failure {error} => {
       drop error
-      fail Proxy.invalidRoute()
+      fail ProxyError.invalidRoute()
     }
   }
 }
@@ -755,7 +982,10 @@ fn requiresTrust<'configuration>(route: &Route<'configuration>) -> bool {
   return Route.mode(route) == RouteMode.Direct && Origin.secure(&Route.originalOrigin(route))
 }
 
-fn preflightRouteIdentity<'configuration>(route: &Route<'configuration>) -> Result<(), IdentityError> {
+fn preflightRouteIdentity<'configuration>(route: &Route<'configuration>) -> Result<
+  (),
+  IdentityError,
+> {
   if !requiresTrust(route) {
     return Result.succeed<(), IdentityError>(())
   }
@@ -764,21 +994,21 @@ fn preflightRouteIdentity<'configuration>(route: &Route<'configuration>) -> Resu
   let nameLength = copyRouteDomain(&host, &mut name)
   let nameBytes = Slice.view<u8>(&name, usize.ZERO, nameLength)
   return match move routeReference(&host, nameBytes) {
-    Result<ReferenceIdentity, IdentityError>.Success {value} => {
+    Result.Success {value} => {
       drop value
-      Result.succeed<(), IdentityError>(())
+      return Result.succeed<(), IdentityError>(())
     }
-    Result<ReferenceIdentity, IdentityError>.Failure {error} => {
-      Result.failResult<(), IdentityError>(move error)
+    Result.Failure {error} => {
+      return Result.failResult<(), IdentityError>(move error)
     }
   }
 }
 
-effect fn takeTrust(value: Option<TrustSnapshot>) -> TrustSnapshot ! ProxyError {
-  return match move value {
+effect fn takeTrust(selected: Option<TrustSnapshot>) -> TrustSnapshot ! ProxyError {
+  return match move selected {
     Option.Some {value} => move value
     Option.None => {
-      fail Proxy.invalidRoute()
+      fail ProxyError.invalidRoute()
     }
   }
 }
@@ -787,12 +1017,14 @@ effect fn prepareRouteConnect<'configuration>(
   route: &Route<'configuration>,
   settings: RouteSettings,
 ) -> PreparedRequest ! ProxyError | ClientError | OutOfMemoryError ? &mut Allocator {
-  let attempted = run Effect.result(Request.prepareConnect(
-    route,
-    settings.request,
-    settings.maxRequestHeadBytes,
-    settings.maxProxyCredentialBytes,
-  ))
+  let attempted = run Effect.result(
+    Request.prepareConnect(
+      route,
+      settings.request,
+      settings.maxRequestHeadBytes,
+      settings.maxProxyCredentialBytes,
+    ),
+  )
   return match move attempted {
     Result<PreparedRequest, ProxyError | RequestError | OutOfMemoryError>.Success {value} => move value
     Result<PreparedRequest, ProxyError | RequestError | OutOfMemoryError>.Failure {error} => match move error {
@@ -810,7 +1042,107 @@ effect fn prepareRouteConnect<'configuration>(
   }
 }
 
-effect fn withPlainRoute<'configuration, 'provider, P, A, E, ?R, H: RouteHandler<'configuration, P, A, E ? R>>(
+fn directRouteTransport<'transport, 'provider: 'transport, P>(
+  connection: &'transport mut OwnedConnection<Loan<'provider, P>>,
+) -> RouteTransport<'transport, 'provider, 'provider, P> {
+  return RouteTransport<'transport, 'provider, 'provider, P> {
+    state: RouteTransportState<'transport, 'provider, 'provider, P>.SecuredDirect {
+      provider: Transport.secured(move connection),
+    },
+  }
+}
+
+fn tunnelRouteTransport<'transport, 'provider: 'transport, 'tunnel: 'provider, P>(
+  connection: &'transport mut OwnedConnection<Loan<'provider, TransferredTunnel<'tunnel, P>>>,
+) -> RouteTransport<'transport, 'provider, 'tunnel, P> {
+  return RouteTransport<'transport, 'provider, 'tunnel, P> {
+    state: RouteTransportState<'transport, 'provider, 'tunnel, P>.SecuredTunnel {
+      provider: Transport.secured(move connection),
+    },
+  }
+}
+
+effect<'transport & 'configuration> fn withFinalRoute<
+  'configuration,
+  'transport,
+  'provider: 'transport,
+  'tunnel: 'provider,
+  P,
+  A,
+  E,
+  ?R,
+  H: RouteHandler<'configuration, P, A, E ? R>,
+>(
+  transport: RouteTransport<'transport, 'provider, 'tunnel, P>,
+  origin: Origin,
+  route: Route<'configuration>,
+  settings: RouteSettings,
+  deadline: Option<Instant>,
+  handler: H,
+) -> A
+! E | ClientError | OutOfMemoryError
+? R | &mut Allocator
+where
+  &mut P provides &HttpTransport from &mut HttpTransport | &mut MonotonicClock | &mut Allocator | &mut Random,
+  &mut P provides &HttpTransport from &mut HttpTransport,
+  &mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock | &mut Allocator | &mut Random,
+  &mut P provides &ByteDuplex from &mut ByteDuplex {
+  let connection = run makeOwned(
+    move transport,
+    origin,
+    routeVersion(settings.protocol),
+    settings.http,
+    move deadline,
+  )
+  let lease = ConnectionLease<
+    RouteTransport<'transport, 'provider, 'tunnel, P>,
+    FinalRouteContext<'configuration, H>,
+  > {
+    connection: move connection,
+    handler: Option.some<FinalRouteContext<'configuration, H>>(
+      FinalRouteContext<'configuration, H> {route: route, handler: move handler},
+    ),
+  }
+  let use = effect fn(
+    owned: &mut ConnectionLease<
+      RouteTransport<'transport, 'provider, 'tunnel, P>,
+      FinalRouteContext<'configuration, H>,
+    >,
+  ) -> A ! E ? R {
+    let context = match move Intrinsic.replace(
+      owned.handler,
+      Option.none<FinalRouteContext<'configuration, H>>(),
+    ) {
+      Option.Some {value} => move value
+      Option.None => unavailable<FinalRouteContext<'configuration, H>>()
+    }
+    let FinalRouteContext<'configuration, H> {route: selectedRoute, handler: selectedHandler} = move context
+    return run RouteHandler<'configuration, P, A, E ? R>.handle(
+      move selectedHandler,
+      selectedRoute,
+      &mut owned.connection,
+    )
+  }
+  let release = effect fn(
+    owned: &mut ConnectionLease<
+      RouteTransport<'transport, 'provider, 'tunnel, P>,
+      FinalRouteContext<'configuration, H>,
+    >,
+  ) -> () {
+    return run releaseConnectionLease(&mut owned.*)
+  }
+  return run Effect.useReleaseNonParking(move lease, move use, move release)
+}
+
+effect<'provider> fn withPlainRoute<
+  'configuration: 'provider,
+  'provider,
+  P,
+  A,
+  E,
+  ?R,
+  H: RouteHandler<'configuration, P, A, E ? R>,
+>(
   provider: &'provider mut P,
   peer: Origin,
   route: Route<'configuration>,
@@ -828,31 +1160,116 @@ where
   R in Without<R, ByteDuplex>,
   R in Without<R, HttpTransport> {
   let loan = Transport.borrow(move provider)
-  let transport = RouteTransport<'provider, 'provider, 'provider, P>.Plain {
-    provider: move loan,
+  let transport = RouteTransport<'provider, 'provider, 'provider, P> {
+    state: RouteTransportState<'provider, 'provider, 'provider, P>.Plain {provider: move loan},
   }
-  let bridge = FinalRouteHandler<'configuration, H> {
-    route: route,
-    handler: Option.some<H>(move handler),
-  }
-  return run withOwned<
-    RouteTransport<'provider, 'provider, 'provider, P>,
-    A,
-    E,
-    R,
-    FinalRouteHandler<'configuration, H>,
-  >(
+  return run withFinalRoute<'configuration, 'provider, 'provider, 'provider, P, A, E, R, H>(
     move transport,
     peer,
-    routeVersion(settings.protocol),
-    settings.http,
+    route,
+    settings,
     move deadline,
-    move bridge,
+    move handler,
   )
 }
 
-effect fn withDirectTlsRoute<
+effect fn completeRouteConnect<
   'configuration,
+  'view,
+  P,
+  A,
+  E,
+  ?R,
+  H: RouteHandler<'configuration, P, A, E ? R>,
+>(
+  exchange: &mut Exchange<'view, P>,
+  route: Route<'configuration>,
+  trust: TrustSnapshot,
+  settings: RouteSettings,
+  deadline: Option<Instant>,
+  handler: H,
+) -> A
+! E | ProxyError | ClientError | Tls.ConnectionError | IdentityError | OutOfMemoryError
+? R | &mut Allocator | &mut MonotonicClock | &mut SystemClock | &mut Random
+where
+  &mut P provides &HttpTransport from &mut HttpTransport | &mut MonotonicClock | &mut Allocator | &mut Random,
+  &mut P provides &HttpTransport from &mut HttpTransport,
+  &mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock | &mut Allocator | &mut Random,
+  &mut P provides &ByteDuplex from &mut ByteDuplex,
+  R in Without<R, ByteDuplex>,
+  R in Without<R, HttpTransport> {
+  let fields: [Header<'static>; 0] = []
+  let trailers = match move Headers.make(&fields, settings.request) {
+    Result.Success {value} => value
+    Result.Failure {error} => {
+      drop error
+      fail ClientError.InvalidRequest
+    }
+  }
+  run send(&mut exchange.*)
+  run finishRequest(&mut exchange.*, &trailers)
+  let status = run receiveFinal(&mut exchange.*)
+  drop status
+  let head = run Exchange.head(&exchange.*)
+  run Proxy.classifyConnect(&head)
+  drop head
+  let useTunnel = effect fn(tunnel: &mut Tunnel<P>) -> A
+  ! E | ProxyError | ClientError | Tls.ConnectionError | IdentityError | OutOfMemoryError
+  ? R | &mut Allocator | &mut MonotonicClock | &mut SystemClock | &mut Random {
+    return run transferRouteTunnel<'configuration, P, A, E, R, H>(
+      move tunnel,
+      route,
+      move trust,
+      settings,
+      copyDeadline(&deadline),
+      move handler,
+    )
+  }
+  return run withTunnel(&mut exchange.*, move useTunnel)
+}
+
+effect fn transferRouteTunnel<
+  'configuration,
+  'view,
+  P,
+  A,
+  E,
+  ?R,
+  H: RouteHandler<'configuration, P, A, E ? R>,
+>(
+  tunnel: &mut Tunnel<'view, P>,
+  route: Route<'configuration>,
+  trust: TrustSnapshot,
+  settings: RouteSettings,
+  deadline: Option<Instant>,
+  handler: H,
+) -> A
+! E | ProxyError | ClientError | Tls.ConnectionError | IdentityError | OutOfMemoryError
+? R | &mut Allocator | &mut MonotonicClock | &mut SystemClock | &mut Random
+where
+  &mut P provides &HttpTransport from &mut HttpTransport | &mut MonotonicClock | &mut Allocator | &mut Random,
+  &mut P provides &HttpTransport from &mut HttpTransport,
+  &mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock | &mut Allocator | &mut Random,
+  &mut P provides &ByteDuplex from &mut ByteDuplex,
+  R in Without<R, ByteDuplex>,
+  R in Without<R, HttpTransport> {
+  let useTransferred = effect fn(transferred: &mut TransferredTunnel<P>) -> A
+  ! E | ProxyError | ClientError | Tls.ConnectionError | IdentityError | OutOfMemoryError
+  ? R | &mut Allocator | &mut MonotonicClock | &mut SystemClock | &mut Random {
+    return run withTunnelTlsRoute<'configuration, P, A, E, R, H>(
+      move transferred,
+      route,
+      move trust,
+      settings,
+      copyDeadline(&deadline),
+      move handler,
+    )
+  }
+  return run Tunnel.transferByteDuplex(&mut tunnel.*, move useTransferred)
+}
+
+effect<'provider> fn withDirectTlsRoute<
+  'configuration: 'provider,
   'provider,
   P,
   A,
@@ -881,56 +1298,41 @@ where
   let mut name = zeroRouteName()
   let nameLength = copyRouteDomain(&host, &mut name)
   let nameBytes = Slice.view<u8>(&name, usize.ZERO, nameLength)
-  let reference = admittedRouteReference(&host, nameBytes)
+  let reference = admittedRouteReference(host, nameBytes)
   let protocols = [AlpnProtocol {bytes: b"http/1.1"}]
   let config = ClientConfig {
     reference: reference,
     alpn: routeAlpn(&protocols, settings.protocol),
     limits: settings.tls,
   }
-  let use = effect fn(
-    connection: &mut OwnedConnection<Loan<'provider, P>>,
-  ) -> A
+  let use = effect fn(connection: &mut OwnedConnection<Loan<'provider, P>>) -> A
   ! E | ClientError | OutOfMemoryError
   ? R | &mut Allocator {
-    let secured = Transport.secured(move connection)
-    let transport = RouteTransport<P>.SecuredDirect {
-      provider: move secured,
-    }
-    let bridge = FinalRouteHandler<'configuration, H> {
-      route: route,
-      handler: Option.some<H>(move handler),
-    }
-    return run withOwned<
-      RouteTransport<P>,
-      A,
-      E,
-      R,
-      FinalRouteHandler<'configuration, H>,
-    >(
+    let transport = directRouteTransport(move connection)
+    return run withFinalRoute<'configuration, P, A, E, R, H>(
       move transport,
       origin,
-      routeVersion(settings.protocol),
-      settings.http,
+      route,
+      settings,
       copyDeadline(&deadline),
-      move bridge,
+      move handler,
     )
   }
   let loan = Transport.borrow(move provider)
-  return run Tls.withClient<A, E | ClientError | OutOfMemoryError, R | &mut Allocator, Loan<'provider, P>>(
+  return run Tls.withClient(
     move loan,
     &config,
     move trust,
     ConnectionOptions {
       handshakeTimeoutNanoseconds: settings.handshakeDurationNanoseconds,
-      externalDeadline: move deadline,
+      externalDeadline: copyDeadline(&deadline),
     },
     move use,
   )
 }
 
-effect fn withTunnelTlsRoute<
-  'configuration,
+effect<'provider> fn withTunnelTlsRoute<
+  'configuration: 'provider,
   'provider,
   'tunnel: 'provider,
   P,
@@ -960,7 +1362,7 @@ where
   let mut name = zeroRouteName()
   let nameLength = copyRouteDomain(&host, &mut name)
   let nameBytes = Slice.view<u8>(&name, usize.ZERO, nameLength)
-  let reference = admittedRouteReference(&host, nameBytes)
+  let reference = admittedRouteReference(host, nameBytes)
   let protocols = [AlpnProtocol {bytes: b"http/1.1"}]
   let config = ClientConfig {
     reference: reference,
@@ -969,51 +1371,38 @@ where
   }
   let use = effect fn(
     connection: &mut OwnedConnection<Loan<'provider, TransferredTunnel<'tunnel, P>>>,
-  ) -> A
-  ! E | ClientError | OutOfMemoryError
-  ? R | &mut Allocator {
-    let secured = Transport.secured(move connection)
-    let transport = RouteTransport<P>.SecuredTunnel {
-      provider: move secured,
-    }
-    let bridge = FinalRouteHandler<'configuration, H> {
-      route: route,
-      handler: Option.some<H>(move handler),
-    }
-    return run withOwned<
-      RouteTransport<P>,
-      A,
-      E,
-      R,
-      FinalRouteHandler<'configuration, H>,
-    >(
+  ) -> A ! E | ClientError | OutOfMemoryError ? R | &mut Allocator {
+    let transport = tunnelRouteTransport(move connection)
+    return run withFinalRoute<'configuration, P, A, E, R, H>(
       move transport,
       origin,
-      routeVersion(settings.protocol),
-      settings.http,
+      route,
+      settings,
       copyDeadline(&deadline),
-      move bridge,
+      move handler,
     )
   }
   let loan = Transport.borrow(move provider)
-  return run Tls.withClient<
-    A,
-    E | ClientError | OutOfMemoryError,
-    R | &mut Allocator,
-    Loan<'provider, TransferredTunnel<'tunnel, P>>,
-  >(
+  return run Tls.withClient(
     move loan,
     &config,
     move trust,
     ConnectionOptions {
       handshakeTimeoutNanoseconds: settings.handshakeDurationNanoseconds,
-      externalDeadline: move deadline,
+      externalDeadline: copyDeadline(&deadline),
     },
     move use,
   )
 }
 
-struct ConnectRouteHandler<'configuration, H> {
+struct ConnectRouteHandler<
+  'configuration,
+  P,
+  A,
+  E,
+  ?R,
+  H: RouteHandler<'configuration, P, A, E ? R>,
+> {
   route: Route<'configuration>
   request: PreparedRequest
   trust: Option<TrustSnapshot>
@@ -1022,104 +1411,108 @@ struct ConnectRouteHandler<'configuration, H> {
   handler: Option<H>
 }
 
-impl<
+effect fn withConnectHandler<
   'configuration,
   P,
   A,
   E,
   ?R,
   H: RouteHandler<'configuration, P, A, E ? R>,
-> ConnectRouteHandler<'configuration, H> {
-  effect fn handle(bridge: Self, connection: &mut Connection<P>) -> A
+>(
+  transport: P,
+  peer: Origin,
+  limits: Limits,
+  deadline: Option<Instant>,
+  handler: ConnectRouteHandler<'configuration, P, A, E, R, H>,
+) -> A
+! E | ProxyError | ClientError | Tls.ConnectionError | IdentityError | OutOfMemoryError
+? R | &mut Allocator | &mut MonotonicClock | &mut SystemClock | &mut Random
+where
+  &mut P provides &HttpTransport from &mut HttpTransport | &mut MonotonicClock | &mut Allocator | &mut Random,
+  &mut P provides &HttpTransport from &mut HttpTransport,
+  &mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock | &mut Allocator | &mut Random,
+  &mut P provides &ByteDuplex from &mut ByteDuplex,
+  R in Without<R, ByteDuplex>,
+  R in Without<R, HttpTransport> {
+  let connection = run makeOwned(move transport, peer, Version.Http11, limits, move deadline)
+  let lease = ConnectionLease<P, ConnectRouteHandler<'configuration, P, A, E, R, H>> {
+    connection: move connection,
+    handler: Option.some<ConnectRouteHandler<'configuration, P, A, E, R, H>>(move handler),
+  }
+  let use = effect fn(
+    owned: &mut ConnectionLease<P, ConnectRouteHandler<'configuration, P, A, E, R, H>>,
+  ) -> A
   ! E | ProxyError | ClientError | Tls.ConnectionError | IdentityError | OutOfMemoryError
-  ? R | &mut Allocator | &mut MonotonicClock | &mut SystemClock | &mut Random
-  where
-    &mut P provides &HttpTransport from &mut HttpTransport | &mut MonotonicClock | &mut Allocator | &mut Random,
-    &mut P provides &HttpTransport from &mut HttpTransport,
-    &mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock | &mut Allocator | &mut Random,
-    &mut P provides &ByteDuplex from &mut ByteDuplex,
-    R in Without<R, ByteDuplex>,
-    R in Without<R, HttpTransport> {
-    let ConnectRouteHandler<'configuration, H> {
-      route,
-      request,
-      trust,
-      settings,
-      deadline,
-      handler,
-    } = move bridge
-    let selectedTrust = run takeTrust(move trust)
-    let selectedHandler = match move handler {
+  ? R | &mut Allocator | &mut MonotonicClock | &mut SystemClock | &mut Random {
+    let selected = match move Intrinsic.replace(
+      owned.handler,
+      Option.none<ConnectRouteHandler<'configuration, P, A, E, R, H>>(),
+    ) {
       Option.Some {value} => move value
-      Option.None => unavailable<H>()
+      Option.None => unavailable<ConnectRouteHandler<'configuration, P, A, E, R, H>>()
     }
-    let fields: [Header<'static>; 0] = []
-    let trailers = match move Headers.make(&fields, settings.request) {
-      Result.Success {value} => value
-      Result.Failure {error} => {
-        drop error
-        fail ClientError.InvalidRequest
-      }
-    }
-    let useExchange = effect fn(exchange: &mut Exchange<P>) -> A
-    ! E | ProxyError | ClientError | Tls.ConnectionError | IdentityError | OutOfMemoryError
-    ? R | &mut Allocator | &mut MonotonicClock | &mut SystemClock | &mut Random {
-      run send(&mut exchange.*)
-      run finishRequest(&mut exchange.*, &trailers)
-      let status = run receiveFinal(&mut exchange.*)
-      drop status
-      let head = run Exchange.head(&exchange.*)
-      run Proxy.classifyConnect(&head)
-      drop head
-      let useTunnel = effect fn(
-        tunnel: &mut Tunnel<P>,
-      ) -> A
-      ! E | ClientError | Tls.ConnectionError | IdentityError | OutOfMemoryError
-      ? R | &mut Allocator | &mut MonotonicClock | &mut SystemClock | &mut Random {
-        let useTransferred = effect fn(
-          transferred: &mut TransferredTunnel<P>,
-        ) -> A
-        ! E | ClientError | Tls.ConnectionError | IdentityError | OutOfMemoryError
-        ? R | &mut Allocator | &mut MonotonicClock | &mut SystemClock | &mut Random {
-          return run withTunnelTlsRoute(
-            move transferred,
-            route,
-            move selectedTrust,
-            settings,
-            copyDeadline(&deadline),
-            move selectedHandler,
-          )
-        }
-        return run Tunnel.transferByteDuplex(&mut tunnel.*, move useTransferred)
-      }
-      return run withTunnel(&mut exchange.*, move useTunnel)
-    }
-    return run withExchange(
-      move connection,
-      &request,
-      RequestOptions {
-        deadline: copyDeadline(&deadline),
-        continuePolicy: ContinuePolicy.Disabled,
-      },
-      move useExchange,
+    return run handleConnectRoute<'configuration, P, A, E, R, H>(
+      move selected,
+      &mut owned.connection,
     )
   }
+  let release = effect fn(
+    owned: &mut ConnectionLease<P, ConnectRouteHandler<'configuration, P, A, E, R, H>>,
+  ) -> () {
+    return run releaseConnectionLease(&mut owned.*)
+  }
+  return run Effect.useReleaseNonParking(move lease, move use, move release)
 }
 
-impl<
+effect<'call> fn handleConnectRoute<
   'configuration,
+  'call,
   P,
   A,
   E,
   ?R,
   H: RouteHandler<'configuration, P, A, E ? R>,
-> ConnectionHandler<
-  P,
-  A,
-  E | ProxyError | ClientError | Tls.ConnectionError | IdentityError | OutOfMemoryError
-  ? R | &mut Allocator | &mut MonotonicClock | &mut SystemClock | &mut Random
-> for ConnectRouteHandler<'configuration, H> {
-  handle: ConnectRouteHandler.handle
+>(bridge: ConnectRouteHandler<'configuration, P, A, E, R, H>, connection: &'call mut Connection<P>) -> A
+! E | ProxyError | ClientError | Tls.ConnectionError | IdentityError | OutOfMemoryError
+? R | &mut Allocator | &mut MonotonicClock | &mut SystemClock | &mut Random
+where
+  &mut P provides &HttpTransport from &mut HttpTransport | &mut MonotonicClock | &mut Allocator | &mut Random,
+  &mut P provides &HttpTransport from &mut HttpTransport,
+  &mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock | &mut Allocator | &mut Random,
+  &mut P provides &ByteDuplex from &mut ByteDuplex,
+  R in Without<R, ByteDuplex>,
+  R in Without<R, HttpTransport> {
+  let ConnectRouteHandler<'configuration, P, A, E, R, H> {
+    route,
+    request,
+    trust,
+    settings,
+    deadline,
+    handler,
+  } = move bridge
+  let selectedTrust = run takeTrust(move trust)
+  let selectedHandler = match move handler {
+    Option.Some {value} => move value
+    Option.None => unavailable<H>()
+  }
+  let useExchange = effect fn(exchange: &mut Exchange<P>) -> A
+  ! E | ProxyError | ClientError | Tls.ConnectionError | IdentityError | OutOfMemoryError
+  ? R | &mut Allocator | &mut MonotonicClock | &mut SystemClock | &mut Random {
+    return run completeRouteConnect<'configuration, P, A, E, R, H>(
+      move exchange,
+      route,
+      move selectedTrust,
+      settings,
+      copyDeadline(&deadline),
+      move selectedHandler,
+    )
+  }
+  return run withExchange(
+    move connection,
+    &request,
+    RequestOptions {deadline: copyDeadline(&deadline), continuePolicy: ContinuePolicy.Disabled},
+    move useExchange,
+  )
 }
 
 struct RouteScope<'configuration, H> {
@@ -1132,101 +1525,150 @@ struct RouteScope<'configuration, H> {
 
 union RoutePlan<'configuration, H> {
   Plain {scope: RouteScope<'configuration, H>},
-  DirectTls {
-    scope: RouteScope<'configuration, H>,
-    trust: TrustSnapshot,
-  },
-  Tunnel {
-    scope: RouteScope<'configuration, H>,
-    trust: TrustSnapshot,
-    request: PreparedRequest,
-  },
+  DirectTls {scope: RouteScope<'configuration, H>, trust: TrustSnapshot},
+  Tunnel {scope: RouteScope<'configuration, H>, trust: TrustSnapshot, request: PreparedRequest},
 }
 
-struct RouteUseContext<'configuration, H> {
-  plan: RoutePlan<'configuration, H>
+struct RouteUseContext<'configuration, P, A, E, ?R, H: RouteHandler<'configuration, P, A, E ? R>> {
+  plan: Option<RoutePlan<'configuration, H>>
 }
 
-impl<
-  'configuration,
-  P,
-  A,
-  E,
-  ?R,
-  H: RouteHandler<'configuration, P, A, E ? R>,
-> RouteUseContext<'configuration, H> {
-  effect fn use(context: Self, mut provider: P) -> A
-  ! E | ProxyError | ClientError | Tls.ConnectionError | IdentityError | OutOfMemoryError
-  ? R | &mut Allocator | &mut MonotonicClock | &mut SystemClock | &mut Random
-  where
-    &mut P provides &HttpTransport from &mut HttpTransport | &mut MonotonicClock | &mut Allocator | &mut Random,
-    &mut P provides &HttpTransport from &mut HttpTransport,
-    &mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock | &mut Allocator | &mut Random,
-    &mut P provides &ByteDuplex from &mut ByteDuplex,
-    R in Without<R, ByteDuplex>,
-    R in Without<R, HttpTransport> {
-    let RouteUseContext<'configuration, H> {plan} = move context
-    return match move plan {
-      RoutePlan<'configuration, H>.Plain {scope} => {
-        let RouteScope<'configuration, H> {route, peer, settings, deadline, handler} = move scope
-        return run withPlainRoute(
-          &mut provider,
-          peer,
-          route,
-          settings,
-          move deadline,
-          move handler,
-        )
+effect fn useRouteContext<'configuration, P, A, E, ?R, H: RouteHandler<'configuration, P, A, E ? R>>(
+  context: &mut RouteUseContext<'configuration, P, A, E, R, H>,
+  mut provider: P,
+) -> A
+! E | ProxyError | ClientError | Tls.ConnectionError | IdentityError | OutOfMemoryError
+? R | &mut Allocator | &mut MonotonicClock | &mut SystemClock | &mut Random
+where
+  &mut P provides &HttpTransport from &mut HttpTransport | &mut MonotonicClock | &mut Allocator | &mut Random,
+  &mut P provides &HttpTransport from &mut HttpTransport,
+  &mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock | &mut Allocator | &mut Random,
+  &mut P provides &ByteDuplex from &mut ByteDuplex,
+  R in Without<R, ByteDuplex>,
+  R in Without<R, HttpTransport> {
+  let selected = Intrinsic.replace(context.plan, Option.none<RoutePlan<'configuration, H>>())
+  let plan = match move selected {
+    Option.Some {value} => move value
+    Option.None => unavailable<RoutePlan<'configuration, H>>()
+  }
+  return match move plan {
+    RoutePlan<'configuration, H>.Plain {scope} => {
+      let RouteScope<'configuration, H> {route, peer, settings, deadline, handler} = move scope
+      return run withPlainRoute<'configuration, P, A, E, R, H>(
+        &mut provider,
+        peer,
+        route,
+        settings,
+        move deadline,
+        move handler,
+      )
+    }
+    RoutePlan<'configuration, H>.DirectTls {scope, trust} => {
+      let RouteScope<'configuration, H> {route, peer, settings, deadline, handler} = move scope
+      return run withDirectTlsRoute<'configuration, P, A, E, R, H>(
+        &mut provider,
+        peer,
+        route,
+        move trust,
+        settings,
+        move deadline,
+        move handler,
+      )
+    }
+    RoutePlan<'configuration, H>.Tunnel {scope, trust, request} => {
+      let RouteScope<'configuration, H> {route, peer, settings, deadline, handler} = move scope
+      let tunnelHandler = ConnectRouteHandler<'configuration, P, A, E, R, H> {
+        route: route,
+        request: move request,
+        trust: Option.some<TrustSnapshot>(move trust),
+        settings: settings,
+        deadline: copyDeadline(&deadline),
+        handler: Option.some<H>(move handler),
       }
-      RoutePlan<'configuration, H>.DirectTls {scope, trust} => {
-        let RouteScope<'configuration, H> {route, peer, settings, deadline, handler} = move scope
-        return run withDirectTlsRoute(
-          &mut provider,
-          peer,
-          route,
-          move trust,
-          settings,
-          move deadline,
-          move handler,
-        )
-      }
-      RoutePlan<'configuration, H>.Tunnel {scope, trust, request} => {
-        let RouteScope<'configuration, H> {route, peer, settings, deadline, handler} = move scope
-        let tunnelHandler = ConnectRouteHandler<'configuration, H> {
-          route: route,
-          request: move request,
-          trust: Option.some<TrustSnapshot>(move trust),
-          settings: settings,
-          deadline: copyDeadline(&deadline),
-          handler: Option.some<H>(move handler),
-        }
-        return run withOwned<P, A, E | ProxyError | Tls.ConnectionError | IdentityError, R | &mut MonotonicClock | &mut SystemClock | &mut Random, ConnectRouteHandler<'configuration, H>>(
-          move provider,
-          peer,
-          Version.Http11,
-          settings.http,
-          move deadline,
-          move tunnelHandler,
-        )
-      }
+      return run withConnectHandler<'configuration, P, A, E, R, H>(
+        move provider,
+        peer,
+        settings.http,
+        move deadline,
+        move tunnelHandler,
+      )
     }
   }
 }
 
-impl<
+impl<'configuration, P, A, E, ?R, H: RouteHandler<'configuration, P, A, E ? R>> AcquiredRouteContext<P, A, E | ProxyError | ClientError | Tls.ConnectionError | IdentityError | OutOfMemoryError ? R | &mut Allocator | &mut MonotonicClock | &mut SystemClock | &mut Random> for RouteUseContext<
   'configuration,
   P,
   A,
   E,
-  ?R,
-  H: RouteHandler<'configuration, P, A, E ? R>,
-> AcquiredRouteContext<
-  P,
-  A,
-  E | ProxyError | ClientError | Tls.ConnectionError | IdentityError | OutOfMemoryError
-  ? R | &mut Allocator | &mut MonotonicClock | &mut SystemClock | &mut Random
-> for RouteUseContext<'configuration, H> {
-  use: RouteUseContext.use
+  R,
+  H,
+> {
+  use: useRouteContext
+}
+
+effect fn makeRoutePlan<'configuration, H>(
+  route: Route<'configuration>,
+  preparedTrust: Option<TrustSnapshot>,
+  deadline: Option<Instant>,
+  handler: H,
+  peer: Origin,
+  settings: RouteSettings,
+) -> RoutePlan<'configuration, H> ! ProxyError | ClientError | OutOfMemoryError ? &mut Allocator {
+  return match Route.mode(&route) {
+    RouteMode.Direct => {
+      if Origin.secure(&Route.originalOrigin(&route)) {
+        let trust = run takeTrust(move preparedTrust)
+        return RoutePlan<'configuration, H>.DirectTls {
+          scope: RouteScope<'configuration, H> {
+            route: route,
+            peer: peer,
+            settings: settings,
+            deadline: copyDeadline(&deadline),
+            handler: move handler,
+          },
+          trust: move trust,
+        }
+      }
+      drop preparedTrust
+      return RoutePlan<'configuration, H>.Plain {
+        scope: RouteScope<'configuration, H> {
+          route: route,
+          peer: peer,
+          settings: settings,
+          deadline: copyDeadline(&deadline),
+          handler: move handler,
+        },
+      }
+    }
+    RouteMode.Forward => {
+      drop preparedTrust
+      return RoutePlan<'configuration, H>.Plain {
+        scope: RouteScope<'configuration, H> {
+          route: route,
+          peer: peer,
+          settings: settings,
+          deadline: copyDeadline(&deadline),
+          handler: move handler,
+        },
+      }
+    }
+    RouteMode.Tunnel => {
+      let trust = run takeTrust(move preparedTrust)
+      let request = run prepareRouteConnect(&route, settings)
+      return RoutePlan<'configuration, H>.Tunnel {
+        scope: RouteScope<'configuration, H> {
+          route: route,
+          peer: peer,
+          settings: settings,
+          deadline: copyDeadline(&deadline),
+          handler: move handler,
+        },
+        trust: move trust,
+        request: move request,
+      }
+    }
+  }
 }
 
 /// Acquires and lends one route-selected HTTP connection under one unchanged absolute deadline.
@@ -1244,15 +1686,7 @@ pub effect fn withRoute<
   ?R,
   ?AcquisitionRequirements,
   H: RouteHandler<'configuration, P, A, E ? R>,
-  C: RouteClient<
-    P,
-    A,
-    E | ProxyError | ClientError | Tls.ConnectionError | IdentityError | OutOfMemoryError,
-    AcquisitionError,
-    R | &mut Allocator | &mut MonotonicClock | &mut SystemClock | &mut Random,
-    AcquisitionRequirements,
-    RouteUseContext<'configuration, H>,
-  >,
+  C: RouteClient<P, A, E | ProxyError | ClientError | Tls.ConnectionError | IdentityError | OutOfMemoryError, AcquisitionError, AcquisitionRequirements ? R | &mut Allocator | &mut MonotonicClock | &mut SystemClock | &mut Random>,
 >(
   client: C,
   route: Route<'configuration>,
@@ -1274,7 +1708,7 @@ where
     Option.Some {value} => true
   }
   if hasTrust != requiresTrust(&route) {
-    fail Proxy.invalidRoute()
+    fail ProxyError.invalidRoute()
   }
   match move preflightRouteIdentity(&route) {
     Result<(), IdentityError>.Success {value} => {}
@@ -1284,74 +1718,26 @@ where
   }
   let settings = RouteClient.settings(&client)
   let peer = run selectedPeer(&route)
-  let mode = Route.mode(&route)
-  let plan = match move mode {
-    RouteMode.Direct => {
-      if Origin.secure(&Route.originalOrigin(&route)) {
-        let trust = run takeTrust(move preparedTrust)
-        RoutePlan<'configuration, H>.DirectTls {
-          scope: RouteScope<'configuration, H> {
-            route: route,
-            peer: peer,
-            settings: settings,
-            deadline: copyDeadline(&deadline),
-            handler: move handler,
-          },
-          trust: move trust,
-        }
-      } else {
-        drop preparedTrust
-        RoutePlan<'configuration, H>.Plain {
-          scope: RouteScope<'configuration, H> {
-            route: route,
-            peer: peer,
-            settings: settings,
-            deadline: copyDeadline(&deadline),
-            handler: move handler,
-          },
-        }
-      }
-    }
-    RouteMode.Forward => {
-      drop preparedTrust
-      RoutePlan<'configuration, H>.Plain {
-        scope: RouteScope<'configuration, H> {
-          route: route,
-          peer: peer,
-          settings: settings,
-          deadline: copyDeadline(&deadline),
-          handler: move handler,
-        },
-      }
-    }
-    RouteMode.Tunnel => {
-      let trust = run takeTrust(move preparedTrust)
-      let request = run prepareRouteConnect(&route, settings)
-      RoutePlan<'configuration, H>.Tunnel {
-        scope: RouteScope<'configuration, H> {
-          route: route,
-          peer: peer,
-          settings: settings,
-          deadline: copyDeadline(&deadline),
-          handler: move handler,
-        },
-        trust: move trust,
-        request: move request,
-      }
-    }
+  let plan = run makeRoutePlan(
+    route,
+    move preparedTrust,
+    copyDeadline(&deadline),
+    move handler,
+    peer,
+    settings,
+  )
+  let context = RouteUseContext<'configuration, P, A, E, R, H> {
+    plan: Option.some<RoutePlan<'configuration, H>>(move plan),
   }
-  let context = RouteUseContext<'configuration, H> {
-    plan: move plan,
-  }
-  return run RouteClient<
-    P,
-    A,
-    E | ProxyError | ClientError | Tls.ConnectionError | IdentityError | OutOfMemoryError,
-    AcquisitionError,
-    R | &mut Allocator | &mut MonotonicClock | &mut SystemClock | &mut Random,
-    AcquisitionRequirements,
-    RouteUseContext<'configuration, H>,
-  >.acquire(move client, peer, move deadline, move context)
+  let mut provider = move context
+  return run RouteClient<P, A, E | ProxyError | ClientError | Tls.ConnectionError | IdentityError | OutOfMemoryError, AcquisitionError, AcquisitionRequirements ? R | &mut Allocator | &mut MonotonicClock | &mut SystemClock | &mut Random>.acquire(
+    move client,
+    peer,
+    move deadline,
+  )
+    |> Effect.provideMut<
+      AcquiredRouteContext<P, A, E | ProxyError | ClientError | Tls.ConnectionError | IdentityError | OutOfMemoryError ? R | &mut Allocator | &mut MonotonicClock | &mut SystemClock | &mut Random>,
+    >(&mut provider)
 }
 
 /// Owns the transport and bounded parser state so a completed connection can be retained for later exchanges.
@@ -1371,7 +1757,9 @@ where &mut P provides &HttpTransport from &mut HttpTransport {
   ! ClientError | OutOfMemoryError
   ? &mut Allocator {
     let valid = validateLimits(&limits)
-    if let Result<(), ClientError>.Failure {error} = move valid { fail move error }
+    if let Result<(), ClientError>.Failure {error} = move valid {
+      fail move error
+    }
     let requestParser = match move run RequestParser.make(limits.head) {
       Result.Failure {error} => {
         fail ClientError.Head {error: move error}
@@ -1511,6 +1899,16 @@ struct ConnectionLease<P, H> {
   handler: Option<H>
 }
 
+effect fn releaseConnectionLease<P, H>(owned: &mut ConnectionLease<P, H>) -> ()
+where &mut P provides &HttpTransport from &mut HttpTransport {
+  if owned.connection.closeAuthority != CloseAuthority.Armed {
+    return ()
+  }
+  owned.connection.closeAuthority = CloseAuthority.Closed
+  owned.connection.phaseValue = ConnectionPhase.Closed
+  return run closeProvider<P>(&mut owned.connection.transport)
+}
+
 fn unavailable<T>() -> T {
   let crash = 1 / 0
   return unavailable<T>()
@@ -1531,7 +1929,7 @@ pub effect fn withExchange<'exchange, 'callback, P, A, E, ?R>(
   requestedOptions: RequestOptions,
   callback: for<'call, 'exchangeView: 'call> once fn<'callback>(
     &'call mut Exchange<'exchangeView, P>,
-  ) -> once Effect<'call; A ! E ? R>,
+  ) -> once Effect<'call & 'callback; A ! E ? R>,
 ) -> A ! E | ClientError | OutOfMemoryError ? R | &mut Allocator {
   if connection.phaseValue != ConnectionPhase.Ready {
     fail ClientError.InvalidState
@@ -1994,7 +2392,7 @@ pub effect fn receiveFinal<'exchange, P>(exchange: &mut Exchange<'exchange, P>) 
 where
   &mut P provides &HttpTransport from &mut HttpTransport | &mut MonotonicClock | &mut Allocator | &mut Random {
   while true {
-    let code = run receive(exchange)
+    let code = run receive(&mut exchange.*)
     if code >= 200 {
       return code
     }
@@ -2086,12 +2484,12 @@ pub effect fn discardRemainingAtMost<'exchange, P>(
 where
   &mut P provides &HttpTransport from &mut HttpTransport | &mut MonotonicClock | &mut Allocator | &mut Random {
   let selectedDeadline = clampDeadline(&deadline, &exchange.options.deadline)
-  let attempted = run discardRemainingCore(exchange, maxWireBytes, move selectedDeadline)
+  let attempted = run discardRemainingCore(&mut exchange.*, maxWireBytes, move selectedDeadline)
   return match move attempted {
     DiscardAttempt.Completed => DiscardOutcome.Completed
     DiscardAttempt.CapReached {error} => {
       drop error
-      DiscardOutcome.CapReached
+      return DiscardOutcome.CapReached
     }
   }
 }
@@ -2129,25 +2527,25 @@ where
   let selectedDeadline = clampDeadline(&requestedDeadline, &exchange.options.deadline)
   let mut outcome = DiscardOutcome.Completed
   if exchange.contentSelected {
-    outcome = run drainSelectedContentAtMost(exchange, maxWireBytes, move selectedDeadline)
+    outcome = run drainSelectedContentAtMost(&mut exchange.*, maxWireBytes, move selectedDeadline)
   } else {
-    let attempted = run discardRemainingCore(exchange, maxWireBytes, move selectedDeadline)
+    let attempted = run discardRemainingCore(&mut exchange.*, maxWireBytes, move selectedDeadline)
     outcome = match move attempted {
       DiscardAttempt.Completed => DiscardOutcome.Completed
       DiscardAttempt.CapReached {error} => {
         drop error
-        DiscardOutcome.CapReached
+        return DiscardOutcome.CapReached
       }
     }
   }
   return match move outcome {
     DiscardOutcome.CapReached => {
       exchange.reusable = false
-      DiscardOutcome.CapReached
+      return DiscardOutcome.CapReached
     }
     DiscardOutcome.Completed => {
-      run finishResponse(exchange)
-      DiscardOutcome.Completed
+      run finishResponse(&mut exchange.*)
+      return DiscardOutcome.Completed
     }
   }
 }
@@ -2163,7 +2561,7 @@ pub effect fn discardRemaining<'exchange, P>(
 where
   &mut P provides &HttpTransport from &mut HttpTransport | &mut MonotonicClock | &mut Allocator | &mut Random {
   let selectedDeadline = copyDeadline(&exchange.options.deadline)
-  let attempted = run discardRemainingCore(exchange, maxWireBytes, move selectedDeadline)
+  let attempted = run discardRemainingCore(&mut exchange.*, maxWireBytes, move selectedDeadline)
   return match move attempted {
     DiscardAttempt.Completed => ()
     DiscardAttempt.CapReached {error} => {
@@ -2276,12 +2674,7 @@ where
       Option.None => {
         fail ClientError.InvalidState
       }
-      Option.Some {value} => stepContentBox(
-        &mut value,
-        bytes,
-        &mut output,
-        exchange.connection.eof,
-      )
+      Option.Some {value} => stepContentBox(&mut value, bytes, &mut output, exchange.connection.eof)
     }
     drop output
     drop bytes
@@ -2312,7 +2705,7 @@ where
 
 fn discardCapReached(error: &BodyError) -> bool {
   return match error.reason {
-    BodyReason.DiscardLimit {allowed: _, attempted: _} => true
+    BodyReason.DiscardLimit {allowed, attempted} => true
     _ => false
   }
 }
@@ -2711,7 +3104,7 @@ pub struct TransferredTunnel<'tunnel, P> {
 /// Hands successful CONNECT to one scoped tunnel callback and permanently consumes HTTP reuse authority.
 pub effect fn withTunnel<'tunnel, 'exchange: 'tunnel, 'callback, P, A, E, ?R>(
   exchange: &'tunnel mut Exchange<'exchange, P>,
-  callback: for<'call, 'tunnelView: 'call> once fn<'callback>(&'call mut Tunnel<'tunnelView, P>) -> once Effect<'call; A ! E ? R>,
+  callback: for<'call, 'tunnelView: 'call> once fn<'callback>(&'call mut Tunnel<'tunnelView, P>) -> once Effect<'call & 'callback; A ! E ? R>,
 ) -> A ! E | ClientError ? R {
   if exchange.phaseValue != ExchangePhase.Tunnel {
     fail ClientError.InvalidState
@@ -2743,7 +3136,7 @@ impl<'tunnel, P> Tunnel<'tunnel, P> {
     self: &'transfer mut Self,
     callback: for<'call, 'duplexView: 'call> once fn<'callback>(
       &'call mut TransferredTunnel<'duplexView, P>,
-    ) -> once Effect<'call; A ! E ? CallbackRequirements>,
+    ) -> once Effect<'call & 'callback; A ! E ? CallbackRequirements>,
   ) -> A
   ! E | ClientError
   ? CallbackRequirements
@@ -2759,10 +3152,8 @@ impl<'tunnel, P> Tunnel<'tunnel, P> {
       overallDeadline: move deadline,
       writeShutdown: false,
     }
-    transferred.connection.closeAuthority = CloseAuthority.Transferred
-    let use = effect fn(owned: &mut TransferredTunnel<'transfer, P>) -> A
-    ! E
-    ? CallbackRequirements {
+    TransferredTunnel.publish(&mut transferred)
+    let use = effect fn(owned: &mut TransferredTunnel<'transfer, P>) -> A ! E ? CallbackRequirements {
       return run move callback(&mut owned.*)
     }
     let release = effect fn(owned: &mut TransferredTunnel<'transfer, P>) -> () {
@@ -2772,7 +3163,6 @@ impl<'tunnel, P> Tunnel<'tunnel, P> {
     }
     return run Effect.useReleaseNonParking(move transferred, move use, move release)
   }
-
   /// Reads the retained tunnel suffix before asking the underlying transport for more input.
   pub effect fn readSome(self: &mut Self, output: &mut [u8], requestedDeadline: Option<Instant>) -> ReadTransfer
   ! ClientError | OutOfMemoryError
@@ -2824,11 +3214,10 @@ impl<'tunnel, P> Tunnel<'tunnel, P> {
 }
 
 impl<'tunnel, P> TransferredTunnel<'tunnel, P> {
-  unsafe effect fn read(
-    self: &mut Self,
-    output: &mut [u8],
-    requestedDeadline: Option<Instant>,
-  ) -> ReadTransfer
+  fn publish(self: &mut Self) -> () {
+    self.connection.closeAuthority = CloseAuthority.Transferred
+  }
+  unsafe effect fn read(self: &mut Self, output: &mut [u8], requestedDeadline: Option<Instant>) -> ReadTransfer
   ! ByteIoError
   ? &mut MonotonicClock
   where &mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock {
@@ -2854,12 +3243,7 @@ impl<'tunnel, P> TransferredTunnel<'tunnel, P> {
     return run unsafe ByteDuplex.readSomeRaw(move output, move deadline)
       |> Effect.provideMut<ByteDuplex>(&mut self.connection.transport)
   }
-
-  unsafe effect fn write(
-    self: &mut Self,
-    input: &[u8],
-    requestedDeadline: Option<Instant>,
-  ) -> usize
+  unsafe effect fn write(self: &mut Self, input: &[u8], requestedDeadline: Option<Instant>) -> usize
   ! ByteIoError
   ? &mut MonotonicClock
   where &mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock {
@@ -2871,11 +3255,7 @@ impl<'tunnel, P> TransferredTunnel<'tunnel, P> {
     return run unsafe ByteDuplex.writeSomeRaw(move input, move deadline)
       |> Effect.provideMut<ByteDuplex>(&mut self.connection.transport)
   }
-
-  unsafe effect fn flushOutput(
-    self: &mut Self,
-    requestedDeadline: Option<Instant>,
-  ) -> ()
+  unsafe effect fn flushOutput(self: &mut Self, requestedDeadline: Option<Instant>) -> ()
   ! ByteIoError
   ? &mut MonotonicClock
   where &mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock {
@@ -2887,11 +3267,7 @@ impl<'tunnel, P> TransferredTunnel<'tunnel, P> {
     return run unsafe ByteDuplex.flushRaw(move deadline)
       |> Effect.provideMut<ByteDuplex>(&mut self.connection.transport)
   }
-
-  unsafe effect fn shutdownOutput(
-    self: &mut Self,
-    requestedDeadline: Option<Instant>,
-  ) -> ()
+  unsafe effect fn shutdownOutput(self: &mut Self, requestedDeadline: Option<Instant>) -> ()
   ! ByteIoError
   ? &mut MonotonicClock
   where &mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock {
@@ -2907,7 +3283,6 @@ impl<'tunnel, P> TransferredTunnel<'tunnel, P> {
     return run unsafe ByteDuplex.shutdownWriteRaw(move deadline)
       |> Effect.provideMut<ByteDuplex>(&mut self.connection.transport)
   }
-
   unsafe effect fn closeTransport(self: &mut Self) -> ()
   ! ByteIoError
   where &mut P provides &ByteDuplex from &mut ByteDuplex {
@@ -2929,10 +3304,9 @@ impl<'tunnel, P> ByteDuplex for TransferredTunnel<'tunnel, P> {
   closeRaw: TransferredTunnel.closeTransport
 }
 
-effect fn checkByteDeadline(
-  deadline: &Option<Instant>,
-  operation: ByteIoOperation,
-) -> () ! ByteIoError ? &mut MonotonicClock {
+effect fn checkByteDeadline(deadline: &Option<Instant>, operation: ByteIoOperation) -> ()
+! ByteIoError
+? &mut MonotonicClock {
   let now = run MonotonicClock.now()
   if let Option.Some {value: limit} = &deadline.* {
     if !before(&now, &limit) {
