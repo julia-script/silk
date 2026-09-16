@@ -12,7 +12,16 @@ import silk.uri {Uri}
 import silk.usize`
 
 export const httpProxyPolicyImports = `import silk.bytes {Bytes}
-import silk.http {OwnedResponseHead, ResponseHead, Status}
+import silk.http {OwnedResponseHead, ResponseHead as ValueResponseHead, Status, ValueError}
+import silk.http_head {
+  Limits as ResponseParserLimits,
+  ParseError as HeadParseError,
+  ParsedResponse,
+  ResponseParser,
+  parseResponse,
+  responseSerializedSize,
+  writeResponseInto,
+}
 import silk.http_headers {HeaderIterator, Limits as ProxyValueLimits}
 import silk.http_origin {OriginError}
 import silk.http_proxy {
@@ -52,8 +61,8 @@ export const httpProxyPolicySupport = `fn proxyBytesEqual(left: &[u8], right: &[
   return true
 }
 
-fn proxyReasonEquals(head: &ResponseHead, expected: &[u8]) -> bool {
-  return match move ResponseHead.reason(head) {
+fn proxyReasonEquals(head: &ValueResponseHead, expected: &[u8]) -> bool {
+  return match move ValueResponseHead.reason(head) {
     Option.None => false
     Option.Some {value} => proxyBytesEqual(value, expected)
   }
@@ -81,6 +90,44 @@ fn proxyConnectInputLimits() -> ProxyValueLimits {
     maxFieldBytes: 32768,
     maxOwnedBytes: 65536,
   }
+}
+
+fn proxyResponseParserLimits() -> ResponseParserLimits {
+  return ResponseParserLimits {
+    maxHeadBytes: 65536,
+    maxStartLineBytes: 8192,
+    maxFieldLineBytes: 16384,
+    maxOwnedBytes: 70000,
+    values: proxyConnectInputLimits(),
+  }
+}
+
+effect fn proxyClassifyConnect(
+  head: &ValueResponseHead,
+) -> () ! ProxyError | ValueError | HeadParseError | OutOfMemoryError ? &mut Allocator {
+  let required = match move responseSerializedSize(head, proxyConnectInputLimits()) {
+    Result.Failure {error} => { fail move error }
+    Result.Success {value} => value
+  }
+  let mut encoded = run Bytes.zeroed(required)
+  let output = Bytes.asMutSlice(&mut encoded)
+  let written = match move writeResponseInto(head, output, proxyConnectInputLimits()) {
+    Result.Failure {error} => { fail move error }
+    Result.Success {value} => value
+  }
+  drop output
+  if written != required { fail ProxyError.ProxyMetadataLimit }
+  let parsed = match move run parseResponse(Bytes.asSlice(&encoded), proxyResponseParserLimits()) {
+    Result.Failure {error} => { fail move error }
+    Result.Success {value} => value
+  }
+  let ParsedResponse {parser, progress} = move parsed
+  drop progress
+  let head = match move ResponseParser.head(&parser) {
+    Result.Failure {error} => { fail move error }
+    Result.Success {value} => value
+  }
+  return run classifyConnect(&head)
 }
 
 effect fn proxyFilled(length: usize) -> Bytes ! OutOfMemoryError ? &mut Allocator {
@@ -322,7 +369,7 @@ export const verifyProxyPolicy = `effect fn verifyProxyPolicy() -> bool ! OutOfM
     Result.Failure {error} => { return false }
     Result.Success {value} => value
   }
-  let successHead = match move ResponseHead.make(
+  let successHead = match move ValueResponseHead.make(
     Version.Http11,
     successStatus,
     Option.none<&'static [u8]>(),
@@ -332,7 +379,7 @@ export const verifyProxyPolicy = `effect fn verifyProxyPolicy() -> bool ! OutOfM
     Result.Failure {error} => { return false }
     Result.Success {value} => value
   }
-  match move run Effect.result(classifyConnect(&successHead)) {
+  match move run Effect.result(proxyClassifyConnect(&successHead)) {
     Result.Failure {error} => { return false }
     Result.Success {value} => {}
   }
@@ -346,7 +393,7 @@ export const verifyProxyPolicy = `effect fn verifyProxyPolicy() -> bool ! OutOfM
     Result.Failure {error} => { return false }
     Result.Success {value} => value
   }
-  let upgradeHead = match move ResponseHead.make(
+  let upgradeHead = match move ValueResponseHead.make(
     Version.Http11,
     upgradeStatus,
     Option.none<&'static [u8]>(),
@@ -356,7 +403,7 @@ export const verifyProxyPolicy = `effect fn verifyProxyPolicy() -> bool ! OutOfM
     Result.Failure {error} => { return false }
     Result.Success {value} => value
   }
-  match move run Effect.result(classifyConnect(&upgradeHead)) {
+  match move run Effect.result(proxyClassifyConnect(&upgradeHead)) {
     Result.Success {value} => { return false }
     Result.Failure {error} => match move error {
       ProxyError.InvalidConnectResponse => {}
@@ -385,7 +432,7 @@ export const verifyProxyPolicy = `effect fn verifyProxyPolicy() -> bool ! OutOfM
     Result.Failure {error} => { return false }
     Result.Success {value} => value
   }
-  let authenticationHead = match move ResponseHead.make(
+  let authenticationHead = match move ValueResponseHead.make(
     Version.Http11,
     authenticationStatus,
     Option.some<&'static [u8]>(b"Proxy Authentication Required"),
@@ -395,16 +442,16 @@ export const verifyProxyPolicy = `effect fn verifyProxyPolicy() -> bool ! OutOfM
     Result.Failure {error} => { return false }
     Result.Success {value} => value
   }
-  match move run Effect.result(classifyConnect(&authenticationHead)) {
+  match move run Effect.result(proxyClassifyConnect(&authenticationHead)) {
     Result.Success {value} => { return false }
     Result.Failure {error} => match move error {
       ProxyError.ProxyAuthenticationRequired {response} => {
         let view = OwnedResponseHead.view(&response)
-        let status = ResponseHead.status(&view)
+        let status = ValueResponseHead.status(&view)
         if Status.code(&status) != 407 || !proxyReasonEquals(&view, b"Proxy Authentication Required") {
           return false
         }
-        let fields = ResponseHead.headers(&view)
+        let fields = ValueResponseHead.headers(&view)
         if Headers.count(&fields) != 2 { return false }
         let mut selected = Headers.getAll(&fields, "Proxy-Authenticate")
         let first = match move HeaderIterator.next(&mut selected) {
@@ -439,7 +486,7 @@ export const verifyProxyPolicy = `effect fn verifyProxyPolicy() -> bool ! OutOfM
     Result.Failure {error} => { return false }
     Result.Success {value} => value
   }
-  let rejectionHead = match move ResponseHead.make(
+  let rejectionHead = match move ValueResponseHead.make(
     Version.Http11,
     rejectionStatus,
     Option.some<&'static [u8]>(b"Bad Gateway"),
@@ -449,14 +496,14 @@ export const verifyProxyPolicy = `effect fn verifyProxyPolicy() -> bool ! OutOfM
     Result.Failure {error} => { return false }
     Result.Success {value} => value
   }
-  match move run Effect.result(classifyConnect(&rejectionHead)) {
+  match move run Effect.result(proxyClassifyConnect(&rejectionHead)) {
     Result.Success {value} => { return false }
     Result.Failure {error} => match move error {
       ProxyError.ProxyRejected {response} => {
         let view = OwnedResponseHead.view(&response)
-        let status = ResponseHead.status(&view)
+        let status = ValueResponseHead.status(&view)
         if Status.code(&status) != 502 || !proxyReasonEquals(&view, b"Bad Gateway") { return false }
-        let fields = ResponseHead.headers(&view)
+        let fields = ValueResponseHead.headers(&view)
         if Headers.count(&fields) != 2 { return false }
         let mut ordered = Headers.iter(&fields)
         let first = match move HeaderIterator.next(&mut ordered) {
@@ -501,7 +548,7 @@ export const verifyProxyPolicy = `effect fn verifyProxyPolicy() -> bool ! OutOfM
     Result.Failure {error} => { return false }
     Result.Success {value} => value
   }
-  let overflowHead = match move ResponseHead.make(
+  let overflowHead = match move ValueResponseHead.make(
     Version.Http11,
     rejectionStatus,
     Option.none<&'static [u8]>(),
@@ -511,7 +558,7 @@ export const verifyProxyPolicy = `effect fn verifyProxyPolicy() -> bool ! OutOfM
     Result.Failure {error} => { return false }
     Result.Success {value} => value
   }
-  match move run Effect.result(classifyConnect(&overflowHead)) {
+  match move run Effect.result(proxyClassifyConnect(&overflowHead)) {
     Result.Success {value} => { return false }
     Result.Failure {error} => match move error {
       ProxyError.ProxyMetadataLimit => {}

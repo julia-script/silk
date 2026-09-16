@@ -529,6 +529,7 @@ impl<'owner> RequestHead<'owner> {
       limits,
     )
   }
+
 }
 
 impl<'owner> ResponseHead<'owner> {
@@ -575,6 +576,37 @@ impl<'owner> ResponseHead<'owner> {
       Vector.asSlice<Header<'owner>>(&entries),
       limits,
     )
+  }
+
+  /// Copies the status, reason, and only matching fields into independent storage.
+  ///
+  /// Matching is ASCII case-insensitive. Duplicate matches remain distinct and preserve wire order.
+  /// The supplied limits apply to the selected fields and complete owned result, not unrelated
+  /// fields retained by the parser.
+  pub effect fn copyMatchingHeaders<'name>(
+    self: &Self,
+    name: string<'name>,
+    limits: ValueLimits,
+  ) -> Result<OwnedResponseHead, ValueError> ! OutOfMemoryError ? &mut Allocator {
+    let selected = run collectMatchingHeaders(
+      self.bytes,
+      self.records,
+      self.fieldCountValue,
+      name,
+      limits,
+    )
+    return match move selected {
+      Result<Vector<Header<'owner>>, ValueError>.Failure {error} => {
+        return Result.failResult<OwnedResponseHead, ValueError>(move error)
+      }
+      Result<Vector<Header<'owner>>, ValueError>.Success {value} => run copyResponseValues(
+        self.versionValue,
+        ResponseHead.status(self),
+        ResponseHead.reason(self),
+        Vector.asSlice<Header<'owner>>(&value),
+        limits,
+      )
+    }
   }
 }
 
@@ -2042,6 +2074,18 @@ fn asciiLower(value: u8) -> u8 {
   return value
 }
 
+fn asciiEqual<'left, 'right>(left: string<'left>, right: string<'right>) -> bool {
+  let leftBytes = String.utf8Bytes(left)
+  let rightBytes = String.utf8Bytes(right)
+  if leftBytes.length != rightBytes.length { return false }
+  let mut index = usize.ZERO
+  while index < leftBytes.length {
+    if asciiLower(leftBytes[index]) != asciiLower(rightBytes[index]) { return false }
+    index = index + usize.ONE
+  }
+  return true
+}
+
 fn fieldIndex(core: &ParserCore) -> Option<usize> {
   return match core.phase {
     Phase.StartLine => Option.none<usize>()
@@ -2253,6 +2297,44 @@ effect fn collectHeaders<'owner>(
     index = index + usize.ONE
   }
   return move entries
+}
+
+effect fn collectMatchingHeaders<'owner, 'name>(
+  bytes: &'owner [u8],
+  records: &'owner [u8],
+  count: usize,
+  name: string<'name>,
+  limits: ValueLimits,
+) -> Result<Vector<Header<'owner>>, ValueError> ! OutOfMemoryError ? &mut Allocator {
+  let mut selectedCount = usize.ZERO
+  let mut index = usize.ZERO
+  while index < count {
+    let record = readRecord(records, index)
+    let fieldName = asciiText(range(bytes, record.nameStart, record.nameLength))
+    if asciiEqual(fieldName, name) { selectedCount = selectedCount + usize.ONE }
+    index = index + usize.ONE
+  }
+  let mut entries = Vector.make<Header<'owner>>()
+  let reserved = run Vector.reserveExact<Header<'owner>>(&mut entries, selectedCount)
+  drop reserved
+  index = usize.ZERO
+  while index < count {
+    let record = readRecord(records, index)
+    let fieldName: string<'owner> = asciiText(range(bytes, record.nameStart, record.nameLength))
+    if asciiEqual(fieldName, name) {
+      let fieldValue: &'owner [u8] = range(bytes, record.valueStart, record.valueLength)
+      let header = match move Header.make(fieldName, fieldValue, limits) {
+        Result<Header<'owner>, ValueError>.Failure {error} => {
+          return Result.failResult<Vector<Header<'owner>>, ValueError>(move error)
+        }
+        Result<Header<'owner>, ValueError>.Success {value} => value
+      }
+      let appended = run Vector.append<Header<'owner>>(&mut entries, header)
+      drop appended
+    }
+    index = index + usize.ONE
+  }
+  return Result.succeed<Vector<Header<'owner>>, ValueError>(move entries)
 }
 
 effect fn copyRequestValues<'value>(
