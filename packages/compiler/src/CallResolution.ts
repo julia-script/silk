@@ -308,6 +308,84 @@ const isTypeArgumentNode = (element: SyntaxTree.Element): element is SyntaxTree.
     element.kind === 'ParenthesizedType' ||
     element.kind === 'UnionType')
 
+const requirementArgumentOfType = (
+  type: Type.Type,
+  role: RequirementRow.Role,
+): Type.RequirementRowArgument | undefined => {
+  if (Type.isParameter(type) && type.kind === 'RequirementRow')
+    return Type.requirementRowArgument([], [type])
+  if (Type.isNever(type)) return Type.requirementRowArgument([])
+  if (
+    Type.isReference(type) &&
+    (Type.isNominal(type.target) ||
+      (Type.isParameter(type.target) && type.target.kind === 'Value'))
+  )
+    return Type.requirementRowArgument([
+      Object.freeze({ capability: type.target, role, access: type.access }),
+    ])
+  if (Type.isUnion(type)) {
+    const members = type.members.map((member) => requirementArgumentOfType(member, role))
+    if (
+      members.every(
+        (member): member is Type.RequirementRowArgument => member !== undefined,
+      )
+    )
+      return Type.requirementRowArgument(
+        members.flatMap(Type.requirementMembers),
+        members.flatMap(Type.requirementRowParameters),
+      )
+    return undefined
+  }
+  if (Type.isNominal(type) || (Type.isParameter(type) && type.kind === 'Value'))
+    return Type.requirementRowArgument([
+      Object.freeze({ capability: type, role, access: 'Shared' }),
+    ])
+  return undefined
+}
+
+const explicitSourceCallTypeParameters = (
+  source: SourceFile.SourceFile,
+  call: SyntaxTree.Node,
+  resolution: ResolutionContext,
+): ReadonlyArray<Type.Parameter> => {
+  const identifiers = callReferenceTokens(call)
+  const first = identifiers.at(0)
+  const second = identifiers.at(1)
+  let target: SourceCallable | undefined
+  if (first !== undefined && second === undefined) {
+    const resolved = NameResolution.lookup(
+      resolution.scope,
+      resolution.index,
+      spelling(source, first),
+    )
+    if (resolved._tag === 'Resolved' && resolved.declaration._tag === 'FunctionDeclaration')
+      target = resolved.declaration
+  } else if (first !== undefined && second !== undefined) {
+    const qualifier = NameResolution.lookup(
+      resolution.scope,
+      resolution.index,
+      spelling(source, first),
+    )
+    const member = spelling(source, second)
+    if (qualifier._tag === 'Namespace') {
+      const selected = DeclarationFacts.lookup(resolution.index, qualifier.module, member)
+      if (selected._tag === 'Resolved' && selected.declaration._tag === 'FunctionDeclaration')
+        target = selected.declaration
+    } else if (qualifier._tag === 'Resolved') {
+      const associated = NameResolution.lookupAssociated(
+        resolution.index,
+        qualifier.declaration,
+        member,
+        resolution.scope.module,
+      )
+      if (associated._tag === 'Inherent') target = associated.declaration
+      else if (qualifier.declaration._tag === 'ServiceDeclaration')
+        target = serviceOperation(qualifier.declaration, member)
+    }
+  }
+  return target?.typeParameters.map((parameter) => parameter.type) ?? Object.freeze([])
+}
+
 /**
  * The type arguments an applied qualifier supplies ahead of the call's own list: for an inherent
  * member `Option<i32>.map<i64>(...)` the owner's `<i32>` binds the owner binders, so the complete
@@ -355,7 +433,16 @@ export const analyzeCallTypeArguments = (
     ...leading,
     ...(list === undefined ? [] : list.children.filter(isTypeArgumentNode)),
   ]
+  const targetParameters = explicitSourceCallTypeParameters(source, call, resolution)
+  const lifetimeParameters = targetParameters.filter((parameter) => parameter.kind === 'Lifetime')
+  const ordinaryParameters = targetParameters.filter((parameter) => parameter.kind !== 'Lifetime')
+  let lifetimeOrdinal = 0
+  let ordinaryOrdinal = 0
   const analyzed = nodes.map((node, ordinal) => {
+    const targetParameter =
+      node.kind === 'LifetimeType'
+        ? lifetimeParameters.at(lifetimeOrdinal++)
+        : ordinaryParameters.at(ordinaryOrdinal++)
     const selectorNodes =
       node.kind === 'RequirementSelector'
         ? node.children.filter(SyntaxTree.isNode)
@@ -464,6 +551,52 @@ export const analyzeCallTypeArguments = (
       true,
       lifetimeContext,
     )
+    if (targetParameter?.kind === 'RequirementRow' && raw.fact._tag === 'Union') {
+      const members = raw.fact.members.map((member) =>
+        DeclarationResolution.resolveTypeFact(
+          resolution.index,
+          source.id,
+          member,
+          (module, path) =>
+            NameResolution.resolveType(nameResolution, resolution.index, module, path),
+        ),
+      )
+      const arguments_ = members.map((member) =>
+        member.fact._tag === 'Resolved'
+          ? requirementArgumentOfType(
+              member.fact.type,
+              requirementRole ?? RequirementRow.defaultRole,
+            )
+          : undefined,
+      )
+      const argument = arguments_.every(
+        (member): member is Type.RequirementRowArgument => member !== undefined,
+      )
+        ? Type.requirementRowArgument(
+            arguments_.flatMap(Type.requirementMembers),
+            arguments_.flatMap(Type.requirementRowParameters),
+          )
+        : undefined
+      const diagnostics = Diagnostic.merge(
+        raw.diagnostics,
+        ...members.map((member) => member.diagnostics),
+        roleDiagnostics,
+      )
+      return Object.freeze({
+        fact: Object.freeze({
+          _tag: 'TypeArgument' as const,
+          ordinal,
+          syntax: node,
+          declared: Object.freeze({
+            ...raw.fact,
+            members: Object.freeze(members.map((member) => member.fact)),
+          }),
+          ...(requirementRole === undefined ? {} : { requirementRole }),
+          ...(argument === undefined ? {} : { type: argument }),
+        }),
+        diagnostics,
+      })
+    }
     const resolved = DeclarationResolution.resolveTypeFact(
       resolution.index,
       source.id,
@@ -662,33 +795,10 @@ export const genericArgumentOfTypeArgument = (
       return writtenType.representation.argument
     return undefined
   }
-  if (Type.isParameter(writtenType) && writtenType.kind === 'RequirementRow')
-    return Type.requirementRowArgument([], [writtenType])
-  if (Type.isNever(writtenType)) return Type.requirementRowArgument([])
-  if (
-    !Type.isNominal(writtenType) &&
-    !(Type.isParameter(writtenType) && writtenType.kind === 'Value')
+  return requirementArgumentOfType(
+    writtenType,
+    fact.requirementRole ?? RequirementRow.defaultRole,
   )
-    return undefined
-  return Type.isParameter(writtenType)
-    ? Type.requirementRowArgumentFromRow(
-        RowAlgebra.singleton(
-          Type.requirementRowPolicy(),
-          Type.requirementMemberShape(
-            writtenType,
-            'Shared',
-            fact.requirementRole ?? RequirementRow.defaultRole,
-          ),
-          fact.syntax.span,
-        ),
-      )
-    : Type.requirementRowArgument([
-        Object.freeze({
-          capability: writtenType,
-          role: fact.requirementRole ?? RequirementRow.defaultRole,
-          access: 'Shared',
-        }),
-      ])
 }
 
 interface SelectedCallLifetimes {

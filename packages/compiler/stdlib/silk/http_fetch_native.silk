@@ -169,18 +169,17 @@ fn requiresContinue(value: &ContinuePolicy) -> bool {
 
 struct RoutedAttemptUse {}
 
-impl<
-  'policy,
-  A,
-  HandlerError,
-  ?HandlerRequirements,
-> RoutedAttemptUse {
+impl RoutedAttemptUse {
   effect<'call> fn handle<
     'call,
     'exchangeView: 'call,
     'transport: 'exchangeView,
     'provider: 'transport,
     'tunnel: 'provider,
+    'policy,
+    A,
+    HandlerError,
+    ?HandlerRequirements,
   >(
     use: &mut Self,
     request: &'call AttemptRequest<'policy>,
@@ -236,14 +235,8 @@ struct DirectAttemptUse<'request, 'policy> {
   options: RequestOptions
 }
 
-impl<
-  'request,
-  'policy,
-  A,
-  HandlerError,
-  ?HandlerRequirements,
-> DirectAttemptUse<'request, 'policy> {
-  effect<'call> fn handle<'call>(
+impl<'request, 'policy> DirectAttemptUse<'request, 'policy> {
+  effect<'call> fn handle<'call, A, HandlerError, ?HandlerRequirements>(
     use: Self,
     connection: &'call mut Connection<NativeTransport>,
   ) -> A
@@ -258,8 +251,8 @@ impl<
     >
     | &mut Allocator {
     let DirectAttemptUse<'request, 'policy> {request, method, prepared, options} = move use
-    let handle = effect<'exchangeCall, 'exchangeView: 'exchangeCall> fn(
-      exchange: &'exchangeCall mut Exchange<'exchangeView, NativeTransport>,
+    let handle = effect fn(
+      exchange: &mut Exchange<NativeTransport>,
     ) -> A
     ! HandlerError
     ? HandlerRequirements | &mut HybridAttempt<
@@ -371,18 +364,18 @@ static if (Intrinsic.targetOperatingSystem() == "darwin" && Intrinsic.targetArch
         | IdentityError
         | TrustSourceError
         | OutOfMemoryError,
-      HandlerRequirements | &mut HybridAttempt<
+      &mut Allocator
+        | &mut MonotonicClock
+        | &mut SystemClock
+        | &mut Random
+        | &mut TrustSource
+      ? HandlerRequirements | &mut HybridAttempt<
         'policy,
         NativeRouteProvider,
         NativeTransport,
         A,
         HandlerError ? HandlerRequirements
-      >,
-      &mut Allocator
-        | &mut MonotonicClock
-        | &mut SystemClock
-        | &mut Random
-        | &mut TrustSource,
+      >
     >.withAttempt(&mut fresh, move request, move deadline)
       |> Effect.provideMut<Attempt<
         'policy,
@@ -485,7 +478,7 @@ static if (Intrinsic.targetOperatingSystem() == "darwin" && Intrinsic.targetArch
         )
         let CheckoutResult<A> {value, source} = move checked
         drop source
-        move value
+        return move value
       }
     }
   }
@@ -590,7 +583,7 @@ static if (Intrinsic.targetOperatingSystem() == "darwin" && Intrinsic.targetArch
           )
           Option.Some {value} => {
             if Route.mode(&route) != RouteMode.Direct { fail PoolError.ContextMismatch }
-            run withDirect(
+            return run withDirect(
               client,
               Option.some<&Handle<ConnectionKey, NativeTransport, NativePool.Context>>(value),
               Route.originalOrigin(&route),

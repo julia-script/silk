@@ -85,6 +85,36 @@ fn preserve<?R>(value: Rows<R | (&mut Clock) | (&Logger), never>) -> () {
   }),
 )
 
+it.effect('preserves access in nonfinal concrete call requirement arguments', () =>
+  Effect.gen(function* () {
+    const module = 'generics/call-row-access'
+    const snapshot = yield* Analysis.ofSource(
+      module,
+      new TextEncoder().encode(`service Clock {}
+service Logger {}
+fn select<?Acquisition, ?Handler>() -> i32 { return 42 }
+pub fn main() -> i32 {
+  return select<&mut Clock | &Logger, never>()
+}`),
+    )
+    assert.deepEqual(
+      Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
+      [],
+    )
+    const returned = Analysis.rootAnalysis(snapshot).functions.find(
+      (candidate) =>
+        candidate.declaration.name._tag === 'Present' &&
+        candidate.declaration.name.spelling === 'main',
+    )?.returnedExpression
+    assert.strictEqual(returned?._tag, 'Call')
+    if (returned?._tag !== 'Call') return
+    assert.deepEqual(returned.typeArguments.map(Type.encodeGenericArgument), [
+      `? &mut ${module}.Clock | &${module}.Logger`,
+      '? ',
+    ])
+  }),
+)
+
 it.effect('does not bind erased implicit service-row lifetimes to the provider', () =>
   Effect.gen(function* () {
     const snapshot = yield* Analysis.ofSource(

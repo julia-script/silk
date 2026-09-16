@@ -723,11 +723,14 @@ const inferQuantifiedExecutable = (
   // Only the rigid comparison uses these assumptions; the escape check below still prevents
   // an invocation binder from entering the caller's specialization.
   const openedPattern = open(pattern, patternSubstitution)
+  // Captured data already establishes formation facts. Preserve those while checking the
+  // returned Effect, without assuming any precondition that mentions an invocation binder.
+  const formation = executableFormationRequirements(actual)
   const proves = (longer: Lifetime.Lifetime, shorter: Lifetime.Lifetime): boolean => {
     if (
       Lifetime.outlives(
         Lifetime.assumptions(
-          openedPattern.lifetimeBounds.map((bound) => ({
+          [...openedPattern.lifetimeBounds, ...formation.lifetimeBounds].map((bound) => ({
             longer: substituteLifetime(bound.longer, trial),
             shorter: substituteLifetime(bound.shorter, trial),
           })),
@@ -755,7 +758,7 @@ const inferQuantifiedExecutable = (
         satisfiesOutlives(
           type,
           lifetime,
-          openedPattern.typeOutlives.map((bound) => ({
+          [...openedPattern.typeOutlives, ...formation.typeOutlives].map((bound) => ({
             type: substitute(bound.type, trial),
             lifetime: substituteLifetime(bound.lifetime, trial),
           })),

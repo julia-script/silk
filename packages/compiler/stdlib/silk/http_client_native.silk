@@ -261,10 +261,12 @@ fn proxyPeer<'configuration>(route: &Route<'configuration>) -> Result<Origin, Pr
     return Result.succeed<Origin, ProxyError>(Route.originalOrigin(route))
   }
   return match move Route.physicalPeer(route) {
-    Result.Success {value} => Result.succeed<Origin, ProxyError>(value)
+    Result.Success {value} => {
+      return Result.succeed<Origin, ProxyError>(value)
+    }
     Result.Failure {error} => {
       drop error
-      Result.failResult<Origin, ProxyError>(ProxyError.invalidRoute())
+      return Result.failResult<Origin, ProxyError>(ProxyError.invalidRoute())
     }
   }
 }
@@ -455,15 +457,16 @@ static if (Intrinsic.targetOperatingSystem() == "darwin" && Intrinsic.targetArch
     requestDeadline: &Option<Instant>,
     acquisitionDeadline: &Option<Instant>,
   ) -> Option<Instant> {
-    return match requestDeadline {
+    return match & requestDeadline.* {
       Option.None => copyDeadline(acquisitionDeadline)
-      Option.Some {value: request} => match acquisitionDeadline {
-        Option.None => Option.some<Instant>(copyOpeningInstant(&request))
-        Option.Some {value: acquisition} => {
-          if instantEarlierOrEqual(&acquisition, &request) {
-            Option.some<Instant>(copyOpeningInstant(&acquisition))
-          } else {
-            Option.some<Instant>(copyOpeningInstant(&request))
+      Option.Some {value: request} => {
+        return match & acquisitionDeadline.* {
+          Option.None => Option.some<Instant>(copyOpeningInstant(&request))
+          Option.Some {value: acquisition} => {
+            if instantEarlierOrEqual(&acquisition, &request) {
+              return Option.some<Instant>(copyOpeningInstant(&acquisition))
+            }
+            return Option.some<Instant>(copyOpeningInstant(&request))
           }
         }
       }
@@ -473,7 +476,7 @@ static if (Intrinsic.targetOperatingSystem() == "darwin" && Intrinsic.targetArch
   effect fn checkOpeningDeadline(deadline: &Option<Instant>) -> ()
   ! NativeSocketError
   ? &mut MonotonicClock {
-    if let Option.Some {value: limit} = deadline {
+    if let Option.Some {value: limit} = & deadline.* {
       let now = run MonotonicClock.now()
       if instantEarlierOrEqual(&limit, &now) {
         fail NativeSocketError.Timeout
@@ -483,7 +486,7 @@ static if (Intrinsic.targetOperatingSystem() == "darwin" && Intrinsic.targetArch
   }
 
   fn trustPresent(trust: &Option<TrustSnapshot>) -> bool {
-    return match trust {
+    return match & trust.* {
       Option.None => false
       Option.Some {value} => true
     }
@@ -530,7 +533,7 @@ static if (Intrinsic.targetOperatingSystem() == "darwin" && Intrinsic.targetArch
     route: NativeRoute,
     deadline: Option<Instant>,
   ) -> Connection<NativeTransport>
-  ! NativeClientError | ClientError | ConnectionError | IdentityError | OutOfMemoryError
+  ! NativeClientError | ClientError | NativeSocketError | ConnectionError | IdentityError | OutOfMemoryError
   ? &mut Allocator | &mut MonotonicClock | &mut SystemClock | &mut Random {
     let guard = OwnedPublication {
       socket: Option.some<NativeConnection>(move socket),
@@ -538,14 +541,14 @@ static if (Intrinsic.targetOperatingSystem() == "darwin" && Intrinsic.targetArch
       connection: Option.none<Connection<NativeTransport>>(),
     }
     let use = effect fn(owned: &mut OwnedPublication) -> Connection<NativeTransport>
-    ! NativeClientError | ClientError | ConnectionError | IdentityError | OutOfMemoryError
+    ! NativeClientError | ClientError | NativeSocketError | ConnectionError | IdentityError | OutOfMemoryError
     ? &mut Allocator | &mut MonotonicClock | &mut SystemClock | &mut Random {
       if Origin.secure(&origin) {
         let trust = match move preparedTrust {
           Option.Some {value} => move value
           Option.None => unavailable<TrustSnapshot>()
         }
-        run securePrepared(owned, &origin, options, route, move trust)
+        run securePrepared(&mut owned.*, &origin, options, route, move trust)
       } else {
         drop preparedTrust
         let stored = Intrinsic.replace(owned.socket, Option.none<NativeConnection>())
@@ -588,7 +591,7 @@ static if (Intrinsic.targetOperatingSystem() == "darwin" && Intrinsic.targetArch
       }
     }
     let release = effect fn(owned: &mut OwnedPublication) -> () {
-      return run releasePublication(owned)
+      return run releasePublication(&mut owned.*)
     }
     return run Effect.useReleaseNonParking(move guard, move use, move release)
   }
@@ -753,7 +756,7 @@ static if (Intrinsic.targetOperatingSystem() == "darwin" && Intrinsic.targetArch
       move trust,
       Option.none<Instant>(),
     )
-    return run withPublishedConnection(move connection, move handler)
+    return run withPublishedConnection<A, E, R, H>(move connection, move handler)
   }
   /// Connects an explicit Unix socket while retaining a separate HTTP and TLS authority.
   ///
@@ -780,20 +783,15 @@ static if (Intrinsic.targetOperatingSystem() == "darwin" && Intrinsic.targetArch
       move trust,
       Option.none<Instant>(),
     )
-    return run withPublishedConnection(move connection, move handler)
+    return run withPublishedConnection<A, E, R, H>(move connection, move handler)
   }
-  struct NativeProxyClient {
+  struct NativeProxyClient<A, E, ?R> {
     options: Options
     limits: Limits
     expectedPeer: Origin
   }
 
-  impl<
-    A,
-    E,
-    ?R,
-    C: AcquiredRouteContext<NativeRouteProvider, A, E ? R>,
-  > NativeProxyClient {
+  impl<A, E, ?R> NativeProxyClient<A, E, R> {
     fn settings(client: &Self) -> RouteSettings {
       return proxySettings(&client.options, client.limits)
     }
@@ -802,37 +800,38 @@ static if (Intrinsic.targetOperatingSystem() == "darwin" && Intrinsic.targetArch
       client: Self,
       peer: Origin,
       deadline: Option<Instant>,
-      context: C,
     ) -> A
-    ! E | ProxyError | NativeClientError | ResolverError | NativeSocketError
-    ? R | &mut Allocator | &mut MonotonicClock {
-      let NativeProxyClient {options, limits, expectedPeer} = move client
+    ! E | ProxyError | NativeClientError | ResolverError | NativeSocketError | OutOfMemoryError
+    ? R
+      | &mut Allocator
+      | &mut MonotonicClock
+      | &mut AcquiredRouteContext<
+        NativeRouteProvider,
+        A,
+        E ? R | &mut Allocator | &mut MonotonicClock
+      > {
+      let NativeProxyClient<A, E, R> {options, limits, expectedPeer} = move client
       drop limits
       if !Origin.equals(&expectedPeer, &peer) {
         fail ProxyError.invalidRoute()
       }
       let provider = run acquireRouteProvider(peer, &options, &deadline)
-      return run AcquiredRouteContext<NativeRouteProvider, A, E ? R>.use(
-        move context,
-        move provider,
-      )
+      return run AcquiredRouteContext<
+        NativeRouteProvider,
+        A,
+        E ? R | &mut Allocator | &mut MonotonicClock
+      >.use(move provider)
     }
   }
 
-  impl<
-    A,
-    E,
-    ?R,
-    C: AcquiredRouteContext<NativeRouteProvider, A, E ? R>,
-  > RouteClient<
+  impl<A, E, ?R> RouteClient<
     NativeRouteProvider,
     A,
     E,
-    ProxyError | NativeClientError | ResolverError | NativeSocketError,
-    R,
+    ProxyError | NativeClientError | ResolverError | NativeSocketError | OutOfMemoryError,
     &mut Allocator | &mut MonotonicClock,
-    C
-  > for NativeProxyClient {
+    ? R | &mut Allocator | &mut MonotonicClock
+  > for NativeProxyClient<A, E, R> {
     settings: NativeProxyClient.settings
     acquire: NativeProxyClient.acquire
   }
@@ -866,7 +865,11 @@ static if (Intrinsic.targetOperatingSystem() == "darwin" && Intrinsic.targetArch
       Result.Failure {error} => { fail move error }
     }
     let deadline = copyDeadline(&options.deadline)
-    let client = NativeProxyClient {
+    let client = NativeProxyClient<
+      A,
+      E | ProxyError | ClientError | ConnectionError | IdentityError | OutOfMemoryError
+      ? R | &mut Allocator | &mut MonotonicClock | &mut SystemClock | &mut Random
+    > {
       options: move options,
       limits: limits,
       expectedPeer: expectedPeer,
@@ -885,7 +888,7 @@ static if (Intrinsic.targetOperatingSystem() == "darwin" && Intrinsic.targetArch
     options: &Options,
     deadline: &Option<Instant>,
   ) -> NativeRouteProvider
-  ! NativeClientError | ResolverError | NativeSocketError
+  ! NativeClientError | ResolverError | NativeSocketError | OutOfMemoryError
   ? &mut Allocator | &mut MonotonicClock {
     let admitted = preflightDeadline(&peer, deadline)
     if let Result.Failure {error} = move admitted {
@@ -960,7 +963,7 @@ static if (Intrinsic.targetOperatingSystem() == "darwin" && Intrinsic.targetArch
     let nameBytes = Slice.view<u8>(&name, usize.ZERO, nameLength)
     let protocols = [AlpnProtocol {bytes: b"http/1.1"}]
     let transport = run authenticatePrepared(
-      owned,
+      &mut owned.*,
       &host,
       nameBytes,
       &protocols,
@@ -1179,7 +1182,7 @@ static if (Intrinsic.targetOperatingSystem() == "darwin" && Intrinsic.targetArch
     let host = Origin.host(origin)
     match host {
       Host.Domain {value} => {
-        if let Option.Some {value: mark} = deadline {
+        if let Option.Some {value: mark} = & deadline.* {
           return Result.failResult<(), NativeClientError>(NativeClientError.UnsupportedDeadline)
         }
       }
@@ -1212,10 +1215,10 @@ static if (Intrinsic.targetOperatingSystem() == "darwin" && Intrinsic.targetArch
     }
     return match move preflight(&peer, options) {
       Result<(), NativeClientError>.Success {value} => {
-        Result.succeed<Origin, ProxyError | NativeClientError>(peer)
+        return Result.succeed<Origin, ProxyError | NativeClientError>(peer)
       }
       Result<(), NativeClientError>.Failure {error} => {
-        Result.failResult<Origin, ProxyError | NativeClientError>(move error)
+        return Result.failResult<Origin, ProxyError | NativeClientError>(move error)
       }
     }
   }
@@ -1443,20 +1446,31 @@ static if (Intrinsic.targetOperatingSystem() == "darwin" && Intrinsic.targetArch
 /// with the operation's unchanged absolute deadline. Secure attempts load a fresh trust snapshot
 /// before acquisition; tunneled TLS continues to authenticate the original origin through
 /// [`withProxyRoute`]. Other targets fail with `UnsupportedTarget` before inspecting the request.
-pub struct NativeRedirectClient<'configuration> {
+pub struct NativeRedirectClient<
+  'configuration,
+  'policy,
+  A,
+  HandlerError,
+  ?HandlerRequirements,
+> {
   routeValue: Route<'configuration>
   optionsValue: Options
   limitsValue: Limits
 }
 
-impl<'configuration> NativeRedirectClient<'configuration> {
+impl<'configuration, 'policy, A, HandlerError, ?HandlerRequirements> NativeRedirectClient<
+  'configuration,
+  'policy,
+  A,
+  HandlerError ? HandlerRequirements
+> {
   /// Creates a reusable redirect attempt client from one policy-selected route.
   pub fn make(
     route: Route<'configuration>,
     options: Options,
     limits: Limits,
-  ) -> NativeRedirectClient<'configuration> {
-    return NativeRedirectClient<'configuration> {
+  ) -> NativeRedirectClient<'configuration, 'policy, A, HandlerError ? HandlerRequirements> {
+    return NativeRedirectClient<'configuration, 'policy, A, HandlerError ? HandlerRequirements> {
       routeValue: route,
       optionsValue: move options,
       limitsValue: limits,
@@ -1476,7 +1490,7 @@ fn copyRedirectDeadline(value: &Option<Instant>) -> Option<Instant> {
 }
 
 fn copyRedirectContinuePolicy(value: &ContinuePolicy) -> ContinuePolicy {
-  return match value {
+  return match & value.* {
     ContinuePolicy.Disabled => ContinuePolicy.Disabled
     ContinuePolicy.Require100 {deadline} => ContinuePolicy.Require100 {
       deadline: copyRedirectInstant(&deadline),
@@ -1485,7 +1499,7 @@ fn copyRedirectContinuePolicy(value: &ContinuePolicy) -> ContinuePolicy {
 }
 
 fn redirectRequiresContinue(value: &ContinuePolicy) -> bool {
-  return match value {
+  return match & value.* {
     ContinuePolicy.Disabled => false
     ContinuePolicy.Require100 {deadline} => true
   }
@@ -1506,7 +1520,15 @@ fn redirectOptions(options: &Options, deadline: &Option<Instant>) -> Options {
   }
 }
 
-struct NativeRedirectRouteHandler<'request, 'policy, A, HandlerError, ?HandlerRequirements> {
+struct NativeRedirectRouteHandler<
+  'configuration,
+  'request,
+  'policy,
+  A,
+  HandlerError,
+  ?HandlerRequirements,
+> {
+  routeWitness: Route<'configuration>
   request: &'request AttemptRequest<'policy>
   method: Method<'request>
   prepared: PreparedRequest
@@ -1514,19 +1536,20 @@ struct NativeRedirectRouteHandler<'request, 'policy, A, HandlerError, ?HandlerRe
 }
 
 impl<
+  'configuration,
   'request,
   'policy,
   A,
   HandlerError,
   ?HandlerRequirements,
-> NativeRedirectRouteHandler<'request, 'policy, A, HandlerError, HandlerRequirements> {
-  effect<
-    'call,
-    'transport: 'call,
-    'provider: 'transport,
-    'tunnel: 'provider,
-  > fn handle<
-    'configuration,
+> NativeRedirectRouteHandler<
+  'configuration,
+  'request,
+  'policy,
+  A,
+  HandlerError ? HandlerRequirements
+> {
+  effect<'call> fn handle<
     'call,
     'transport: 'call,
     'provider: 'transport,
@@ -1542,16 +1565,23 @@ impl<
   ? HandlerRequirements
     | &mut Attempt<'policy, NativeRouteProvider, A, HandlerError ? HandlerRequirements>
     | &mut Allocator {
-    let NativeRedirectRouteHandler<'request, 'policy, A, HandlerError, HandlerRequirements> {
+    let NativeRedirectRouteHandler<
+      'configuration,
+      'request,
+      'policy,
+      A,
+      HandlerError ? HandlerRequirements
+    > {
+      routeWitness,
       request,
       method,
       prepared,
       options,
     } = move bridge
+    drop routeWitness
     drop route
-    let use = effect<'exchangeCall, 'exchangeView: 'exchangeCall> fn(
-      exchange: &'exchangeCall mut Exchange<
-        'exchangeView,
+    let use = effect fn(
+      exchange: &mut Exchange<
         RouteTransport<'transport, 'provider, 'tunnel, NativeRouteProvider>
       >,
     ) -> A
@@ -1566,7 +1596,7 @@ impl<
         'policy,
         NativeRouteProvider,
         A,
-        HandlerError ? HandlerRequirements,
+        HandlerError ? HandlerRequirements
       >.handle(request, method, move exchange)
     }
     return run withExchange(move connection, &prepared, move options, move use)
@@ -1588,7 +1618,13 @@ impl<
   ? HandlerRequirements
     | &mut Attempt<'policy, NativeRouteProvider, A, HandlerError ? HandlerRequirements>
     | &mut Allocator
-> for NativeRedirectRouteHandler<'request, 'policy, A, HandlerError, HandlerRequirements> {
+> for NativeRedirectRouteHandler<
+  'configuration,
+  'request,
+  'policy,
+  A,
+  HandlerError ? HandlerRequirements
+> {
   handle: NativeRedirectRouteHandler.handle
 }
 
@@ -1605,7 +1641,7 @@ static if (Intrinsic.targetOperatingSystem() == "darwin" && Intrinsic.targetArch
     A,
     HandlerError,
     ?HandlerRequirements,
-  > NativeRedirectClient<'configuration> {
+  > NativeRedirectClient<'configuration, 'policy, A, HandlerError ? HandlerRequirements> {
     effect fn withAttempt(
       client: &mut Self,
       request: AttemptRequest<'policy>,
@@ -1654,8 +1690,8 @@ static if (Intrinsic.targetOperatingSystem() == "darwin" && Intrinsic.targetArch
       }
       let headers = request.headers.view()
       let require100 = redirectRequiresContinue(&request.continuePolicy)
-      let prepared = if Route.mode(&route) == RouteMode.Forward {
-        run Request.prepareForward(
+      let prepared = match Route.mode(&route) {
+        RouteMode.Forward => run Request.prepareForward(
           &route,
           &uri,
           request.version,
@@ -1668,8 +1704,19 @@ static if (Intrinsic.targetOperatingSystem() == "darwin" && Intrinsic.targetArch
           request.maxHeadBytes,
           request.maxCredentialBytes,
         )
-      } else {
-        run Request.fromUri(
+        RouteMode.Direct => run Request.fromUri(
+          &uri,
+          request.version,
+          method,
+          &headers,
+          &request.headerPolicy,
+          request.bodyMode,
+          require100,
+          request.requestLimits,
+          request.maxHeadBytes,
+          request.maxCredentialBytes,
+        )
+        RouteMode.Tunnel => run Request.fromUri(
           &uri,
           request.version,
           method,
@@ -1682,16 +1729,16 @@ static if (Intrinsic.targetOperatingSystem() == "darwin" && Intrinsic.targetArch
           request.maxCredentialBytes,
         )
       }
-      let trust = if secure {
-        Option.some<TrustSnapshot>(run TrustSource.load(options.trust))
-      } else {
-        Option.none<TrustSnapshot>()
+      let mut trust = Option.none<TrustSnapshot>()
+      if secure {
+        trust = Option.some<TrustSnapshot>(run TrustSource.load(options.trust))
       }
       let requestOptions = RequestOptions {
         deadline: copyRedirectDeadline(&deadline),
         continuePolicy: copyRedirectContinuePolicy(&request.continuePolicy),
       }
       let bridge = NativeRedirectRouteHandler {
+        routeWitness: route,
         request: &request,
         method: method,
         prepared: move prepared,
@@ -1730,13 +1777,13 @@ static if (Intrinsic.targetOperatingSystem() == "darwin" && Intrinsic.targetArch
       | IdentityError
       | TrustSourceError
       | OutOfMemoryError,
-    HandlerRequirements,
     &mut Allocator
       | &mut MonotonicClock
       | &mut SystemClock
       | &mut Random
       | &mut TrustSource,
-  > for NativeRedirectClient<'configuration> {
+    HandlerRequirements
+  > for NativeRedirectClient<'configuration, 'policy, A, HandlerError ? HandlerRequirements> {
     withAttempt: NativeRedirectClient.withAttempt
   }
 } else {
@@ -1746,7 +1793,7 @@ static if (Intrinsic.targetOperatingSystem() == "darwin" && Intrinsic.targetArch
     A,
     HandlerError,
     ?HandlerRequirements,
-  > NativeRedirectClient<'configuration> {
+  > NativeRedirectClient<'configuration, 'policy, A, HandlerError ? HandlerRequirements> {
     effect fn withAttemptUnsupported(
       client: &mut Self,
       request: AttemptRequest<'policy>,
@@ -1775,9 +1822,9 @@ static if (Intrinsic.targetOperatingSystem() == "darwin" && Intrinsic.targetArch
     A,
     HandlerError,
     NativeClientError,
-    HandlerRequirements,
     never,
-  > for NativeRedirectClient<'configuration> {
+    HandlerRequirements,
+  > for NativeRedirectClient<'configuration, 'policy, A, HandlerError ? HandlerRequirements> {
     withAttempt: NativeRedirectClient.withAttemptUnsupported
   }
 }
