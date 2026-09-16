@@ -316,20 +316,20 @@ it.effect('binds provider-specialized runs to their exact generated runner and w
     const { module } = yield* lowerStored(
       'stored-effect-mir/provided-runner',
       `import silk.effect { Effect }
-service Counter { effect fn get() -> i32 ? &Counter }
+service Counter<A> { effect fn get() -> A ? &Counter<A> }
 service Meter { effect fn read() -> i32 ? &Meter }
 struct Fixed { value: i32 }
 effect fn get(self: &Fixed) -> i32 { return self.value }
 effect fn read(self: &Fixed) -> i32 { return self.value }
-impl Counter for Fixed { get: Fixed.get }
+impl Counter<i32> for Fixed { get: Fixed.get }
 impl Meter for Fixed { read: Fixed.read }
-effect fn count() -> i32 ? &Counter { return run Counter.get() }
+effect fn count<A>() -> A ? &Counter<A> { return run Counter.get<A>() }
 effect fn measure() -> i32 ? &Meter { return run Meter.read() }
 pub fn main() -> i32 {
   let fixed = Fixed { value: 42 }
-  let ignored = run (count() |> Effect.provide(&fixed))
+  let ignored = run (count<i32>() |> Effect.provide(&fixed))
   let alsoIgnored = run (measure() |> Effect.provide(&fixed))
-  return run (count() |> Effect.provide(&fixed))
+  return run (count<i32>() |> Effect.provide(&fixed))
 }`,
     )
     const providedRuns = module.functions.flatMap((fn) =>

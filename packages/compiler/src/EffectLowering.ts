@@ -1749,10 +1749,11 @@ export const lowerServiceEffectValue = (
   subject: Extract<Hir.Expression, { readonly _tag: 'ServiceEffectConstruct' }>,
   availableRequirements: ReadonlyArray<ProvidedRequirement>,
 ): LoweredExpression | undefined => {
+  const service = fn.semantic(subject.service)
   const provided = availableRequirements.find(
     (requirement) =>
       requirement.role === subject.role &&
-      Type.equals(requirement.capability, subject.service) &&
+      Type.equals(requirement.capability, service) &&
       (subject.access === 'Shared' ||
         requirement.access === 'Exclusive' ||
         requirement.access === 'Take'),
