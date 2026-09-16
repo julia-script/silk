@@ -141,6 +141,57 @@ it('canonicalizes lifetime binders without erasing declaration, scope or assumpt
   )
 })
 
+it('reuses lifetime proof keys across repeated comparisons and enclosing intersections', () => {
+  let ownerReads = 0
+  const owner = Object.freeze({ module: 'lifetimes', name: 'cached' })
+  const lifetime: Lifetime.Local = Object.freeze({
+    _tag: 'LocalLifetime',
+    get owner() {
+      ownerReads += 1
+      return owner
+    },
+    context: 'Borrow:0',
+    ordinal: 0,
+  })
+  const first = Lifetime.key(lifetime)
+  const readsAfterFirst = ownerReads
+  assert.isAbove(readsAfterFirst, 0)
+  assert.strictEqual(Lifetime.key(lifetime), first)
+  assert.isTrue(Lifetime.equals(lifetime, Lifetime.local(owner, 'Borrow:0', 0)))
+  const other = Lifetime.bound(owner, 0, 'other')
+  const meet = Lifetime.intersection([lifetime, other])
+  assert.isTrue(Lifetime.outlives(Lifetime.assumptions([]), lifetime, meet))
+  assert.strictEqual(ownerReads, readsAfterFirst)
+})
+
+it('reuses outlives proofs only within the same immutable assumptions', () => {
+  const owner = { module: 'lifetimes', name: 'proofs' }
+  const a = Lifetime.bound(owner, 0, 'a')
+  const b = Lifetime.bound(owner, 1, 'b')
+  const c = Lifetime.bound(owner, 2, 'c')
+  const assumptions = Lifetime.assumptions([
+    { longer: a, shorter: b },
+    { longer: b, shorter: c },
+  ])
+  let reads = 0
+  const observed: Lifetime.Assumptions = Object.freeze({
+    key: assumptions.key,
+    get bounds() {
+      reads += 1
+      return assumptions.bounds
+    },
+  })
+  assert.isTrue(Lifetime.outlives(observed, a, c))
+  assert.isFalse(Lifetime.outlives(observed, c, a))
+  const initialReads = reads
+  assert.isAbove(initialReads, 0)
+  assert.isTrue(Lifetime.outlives(observed, Lifetime.bound(owner, 0, 'renamed'), c))
+  assert.isFalse(Lifetime.outlives(observed, c, a))
+  assert.strictEqual(reads, initialReads)
+  assert.isFalse(Lifetime.outlives(Lifetime.assumptions([]), a, c))
+  assert.isTrue(Lifetime.outlives(Lifetime.assumptions([{ longer: c, shorter: a }]), c, a))
+})
+
 it('canonicalizes finite environment intersections without promoting their validity', () => {
   const owner = { module: 'lifetimes', name: 'intersection' }
   const a = Lifetime.bound(owner, 0, 'a')

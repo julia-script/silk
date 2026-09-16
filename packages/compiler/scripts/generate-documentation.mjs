@@ -10,6 +10,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync
 import { fileURLToPath } from 'node:url'
 import * as Console from 'effect/Console'
 import * as Data from 'effect/Data'
+import * as Duration from 'effect/Duration'
 import * as Effect from 'effect/Effect'
 import { format } from 'oxfmt'
 import * as DocumentationPolicy from '../../docgen/dist/Policy.js'
@@ -71,12 +72,13 @@ const stdlibTree = async () => {
   const seen = new Set()
   const violations = new Map()
   for (const selected of documentationProfiles) {
-    const analysis = await Effect.runPromise(
+    const [elapsed, analysis] = await Effect.runPromise(
       ProjectAnalysis.make(
         analyzed.map((entry) => entry.root),
         { configuration: { profile: selected.profile } },
-      ).pipe(Effect.provide(SourceResolver.empty)),
+      ).pipe(Effect.provide(SourceResolver.empty), Effect.timed),
     )
+    log(`Documentation analysis ${selected.name}: ${Duration.toSeconds(elapsed).toFixed(2)}s`)
     const project = DocumentationProject.fromProjectAnalysis(analysis)
     projects.push({
       name: selected.name,
