@@ -629,7 +629,11 @@ export function parseBlock(
   let children: ReadonlyArray<SyntaxTree.Element> = leftBrace.elements
 
   while (!endsBlock(state) && !(matchArm && startsFollowingMatchArm(state))) {
-    const statement = parseBlockChild(state)
+    const parsed = parseBlockChild(state)
+    // Expression recovery can deliberately leave a declaration/statement boundary untouched.
+    // If that token is not a block boundary here, consume it as an error rather than retrying
+    // the same zero-width statement forever.
+    const statement = parsed.state.index > state.index ? parsed : parseErrorStatement(parsed.state)
     children = Object.freeze([...children, statement.node])
     state = statement.state
   }
