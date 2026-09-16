@@ -372,7 +372,8 @@ it.effect(
         'missing lowered allocation-backed redirect behavior sentinel',
       )
     }),
-  360_000,
+  // This single full-program witness took 455 seconds on the contended compiler shard.
+  600_000,
 )
 
 it.effect(
