@@ -354,31 +354,6 @@ const cycleFacts = (modules: ReadonlyArray<Module>): ReadonlyArray<ReadonlyArray
   )
 }
 
-const resolve = Effect.fn('ModuleClosure.resolve')(function* (
-  module: string,
-): Effect.fn.Return<Resolution, never, SourceResolver.SourceResolver> {
-  // Standard-library identities resolve from the compiler-shipped sources exclusively; a
-  // user resolver is never consulted inside the reserved namespace.
-  if (Stdlib.isReserved(module)) {
-    const attempted = yield* Effect.result(SourceResolver.resolveStandardLibrary(module))
-    const resolution: Resolution = Result.isFailure(attempted)
-      ? Object.freeze({ _tag: 'Failed', error: attempted.failure })
-      : Option.match(attempted.success, {
-          onNone: () => Object.freeze({ _tag: 'Absent' as const }),
-          onSome: (source) => Object.freeze({ _tag: 'Found' as const, source }),
-        })
-    return resolution
-  }
-  const attempted = yield* Effect.result(SourceResolver.resolve(module))
-  const resolution: Resolution = Result.isFailure(attempted)
-    ? Object.freeze({ _tag: 'Failed', error: attempted.failure })
-    : Option.match(attempted.success, {
-        onNone: () => Object.freeze({ _tag: 'Absent' as const }),
-        onSome: (source) => Object.freeze({ _tag: 'Found' as const, source }),
-      })
-  return resolution
-})
-
 /**
  * Discovers imports admitted by the supplied declaration decisions. Undecided groups admit neither
  * arm; Frontend coordinates profile completion and subsequent selection passes. Roots and the final
@@ -428,6 +403,28 @@ export const loadProject = Effect.fn('ModuleClosure.loadProject')(function* (
     ]),
   )
   const pending: Array<string> = [...rootModules]
+
+  const resolve = Effect.fn('ModuleClosure.resolve')(function* (
+    module: string,
+  ): Effect.fn.Return<Resolution, never, SourceResolver.SourceResolver> {
+    const cached = resolutions.get(module)
+    if (cached !== undefined) return cached
+    // Standard-library identities resolve from the compiler-shipped sources exclusively; a
+    // user resolver is never consulted inside the reserved namespace.
+    const attempted = yield* Effect.result(
+      Stdlib.isReserved(module)
+        ? SourceResolver.resolveStandardLibrary(module)
+        : SourceResolver.resolve(module),
+    )
+    const resolution: Resolution = Result.isFailure(attempted)
+      ? Object.freeze({ _tag: 'Failed', error: attempted.failure })
+      : Option.match(attempted.success, {
+          onNone: () => Object.freeze({ _tag: 'Absent' as const }),
+          onSome: (source) => Object.freeze({ _tag: 'Found' as const, source }),
+        })
+    resolutions.set(module, resolution)
+    return resolution
+  })
 
   while (pending.length > 0) {
     pending.sort()
