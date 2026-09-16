@@ -288,7 +288,7 @@ impl Contract<&mut Clock | &mut Allocator, never> for Provider {}`),
     if (conformance === undefined) return
     assert.strictEqual(
       conformance.typeParameters.filter((parameter) => parameter.implicitLifetime === true).length,
-      2,
+      0,
     )
     assert.deepEqual(
       conformance.provider._tag === 'Resolved'
