@@ -1336,10 +1336,16 @@ export const solveCallableConstraints = (
       continue
     }
     const selectedArgument = substitution.get(selectedKey)
+    const firstWanted = wanted.at(0)
+    const explicitSelection =
+      firstWanted?._tag === 'ProviderSelectionConstraint' &&
+      RowAlgebra.concretize(Type.requirementRowPolicy(), firstWanted.selected)._tag === 'Concrete'
+        ? firstWanted.selected
+        : undefined
     const selected =
       selectedArgument !== undefined && Type.isRequirementRowArgument(selectedArgument)
         ? selectedArgument.row
-        : undefined
+        : explicitSelection
     const relations = wanted.flatMap((constraint, ordinal) =>
       constraint._tag === 'ProviderSelectionConstraint'
         ? [

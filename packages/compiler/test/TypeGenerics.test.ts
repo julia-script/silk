@@ -88,15 +88,20 @@ fn construct<?R>(value: &i32) -> () {
   }),
 )
 
-it.effect('parses applied services inside provider constraints', () =>
+it.effect('selects applied services explicitly from open provider constraint rows', () =>
   Effect.gen(function* () {
     const snapshot = yield* Analysis.ofSource(
       'generics/applied-provider-constraint',
       new TextEncoder().encode(`service Envelope<T> {}
-fn require<P>(provider: &mut P) -> ()
-where &mut P provides &Envelope<i32> from &mut Envelope<i32> {
+struct Provider {}
+impl Envelope<i32> for Provider {}
+fn require<?R, P>(provider: &mut P) -> ()
+where &mut P provides &Envelope<i32> from R | &mut Envelope<i32> {
   drop provider
   return ()
+}
+fn invoke<?R>(provider: &mut Provider) -> () {
+  return require<R>(move provider)
 }`),
     )
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
