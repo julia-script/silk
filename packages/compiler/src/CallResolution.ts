@@ -317,19 +317,14 @@ const requirementArgumentOfType = (
   if (Type.isNever(type)) return Type.requirementRowArgument([])
   if (
     Type.isReference(type) &&
-    (Type.isNominal(type.target) ||
-      (Type.isParameter(type.target) && type.target.kind === 'Value'))
+    (Type.isNominal(type.target) || (Type.isParameter(type.target) && type.target.kind === 'Value'))
   )
     return Type.requirementRowArgument([
       Object.freeze({ capability: type.target, role, access: type.access }),
     ])
   if (Type.isUnion(type)) {
     const members = type.members.map((member) => requirementArgumentOfType(member, role))
-    if (
-      members.every(
-        (member): member is Type.RequirementRowArgument => member !== undefined,
-      )
-    )
+    if (members.every((member): member is Type.RequirementRowArgument => member !== undefined))
       return Type.requirementRowArgument(
         members.flatMap(Type.requirementMembers),
         members.flatMap(Type.requirementRowParameters),
@@ -553,12 +548,8 @@ export const analyzeCallTypeArguments = (
     )
     if (targetParameter?.kind === 'RequirementRow' && raw.fact._tag === 'Union') {
       const members = raw.fact.members.map((member) =>
-        DeclarationResolution.resolveTypeFact(
-          resolution.index,
-          source.id,
-          member,
-          (module, path) =>
-            NameResolution.resolveType(nameResolution, resolution.index, module, path),
+        DeclarationResolution.resolveTypeFact(resolution.index, source.id, member, (module, path) =>
+          NameResolution.resolveType(nameResolution, resolution.index, module, path),
         ),
       )
       const arguments_ = members.map((member) =>
@@ -780,6 +771,8 @@ export const genericArgumentOfTypeArgument = (
   if (parameter.kind === 'Lifetime')
     return Lifetime.isLifetime(writtenType) ? writtenType : undefined
   if (Lifetime.isLifetime(writtenType)) return undefined
+  if (Type.isRequirementRowArgument(writtenType))
+    return parameter.kind === 'RequirementRow' ? writtenType : undefined
   if (parameter.kind === 'Value') return Type.isTypeArgument(writtenType) ? writtenType : undefined
   if (parameter.kind === 'CallableRepresentation' || parameter.kind === 'EffectRepresentation') {
     if (
@@ -795,10 +788,7 @@ export const genericArgumentOfTypeArgument = (
       return writtenType.representation.argument
     return undefined
   }
-  return requirementArgumentOfType(
-    writtenType,
-    fact.requirementRole ?? RequirementRow.defaultRole,
-  )
+  return requirementArgumentOfType(writtenType, fact.requirementRole ?? RequirementRow.defaultRole)
 }
 
 interface SelectedCallLifetimes {
@@ -953,7 +943,8 @@ export const seededSpecialization = (
     if (argument === undefined) {
       let suppliedKind: Type.ParameterKind = 'Value'
       if (Lifetime.isLifetime(writtenType)) suppliedKind = 'Lifetime'
-      else if (Type.isNominal(writtenType)) suppliedKind = 'RequirementRow'
+      else if (Type.isRequirementRowArgument(writtenType) || Type.isNominal(writtenType))
+        suppliedKind = 'RequirementRow'
       conflicts.push(
         Object.freeze({
           diagnostic: Diagnostic.genericParameterKindMismatch(

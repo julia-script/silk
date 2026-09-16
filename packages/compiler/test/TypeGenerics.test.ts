@@ -41,6 +41,22 @@ const descendants = (node: SyntaxTree.Node): ReadonlyArray<SyntaxTree.Node> =>
     SyntaxTree.isNode(child) ? [child, ...descendants(child)] : [],
   )
 
+it.effect('admits detached generic nominal failure payloads', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSource(
+      'generics/nominal-failure',
+      new TextEncoder().encode(`struct Failure<E> { error: E }
+effect fn wrap<E: Intrinsic.Detached>(error: E) -> () ! Failure<E> {
+  fail Failure<E> { error: move error }
+}`),
+    )
+    assert.deepEqual(
+      Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
+      [],
+    )
+  }),
+)
+
 it.effect('preserves access in nonfinal concrete nominal requirement arguments', () =>
   Effect.gen(function* () {
     const snapshot = yield* Analysis.ofSource(
@@ -108,7 +124,9 @@ pub fn main() -> i32 {
     )?.returnedExpression
     assert.strictEqual(returned?._tag, 'Call')
     if (returned?._tag !== 'Call') return
-    assert.deepEqual(returned.typeArguments.map(Type.encodeGenericArgument), [
+    assert.strictEqual(returned.contract._tag, 'Compatible')
+    if (returned.contract._tag !== 'Compatible') return
+    assert.deepEqual(returned.contract.typeArguments.map(Type.encodeGenericArgument), [
       `? &mut ${module}.Clock | &${module}.Logger`,
       '? ',
     ])
