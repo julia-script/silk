@@ -315,7 +315,36 @@ export const forHeader = (
       }
       if (path !== undefined) nominal(node, path, scope, output, defaultOutput, allocate)
       // The path names a nominal; it is not itself a separate borrowed occurrence.
-      if (list !== undefined) walk(list, scope, output, defaultOutput, allocate, quantified)
+      if (list !== undefined) {
+        const ordinaryParameters =
+          path === undefined
+            ? []
+            : (nominalParameters?.(path)?.filter((parameter) => parameter.kind !== 'Lifetime') ??
+              [])
+        let argumentOrdinal = 0
+        const requirement = (argument: SyntaxTree.Node): void => {
+          if (argument.kind === 'UnionType') {
+            for (const member of argument.children.filter(SyntaxTree.isNode)) requirement(member)
+          } else if (argument.kind === 'ReferenceType') {
+            // A row's outer reference denotes service access, not a stored borrow. Nested
+            // capability arguments still carry ordinary lifetimes and must be elaborated.
+            const explicit = SyntaxTree.directToken(argument, 'Lifetime')
+            if (explicit !== undefined) resolve(argument, explicit, scope)
+            regions.set(argument, Lifetime.staticLifetime)
+            for (const member of argument.children.filter(SyntaxTree.isNode))
+              walk(member, scope, output, defaultOutput, allocate, quantified)
+          } else walk(argument, scope, output, defaultOutput, allocate, quantified)
+        }
+        for (const argument of list.children.filter(SyntaxTree.isNode)) {
+          if (argument.kind === 'LifetimeType') {
+            walk(argument, scope, output, defaultOutput, allocate, quantified)
+            continue
+          }
+          const parameter = ordinaryParameters.at(argumentOrdinal++)
+          if (parameter?.kind === 'RequirementRow') requirement(argument)
+          else walk(argument, scope, output, defaultOutput, allocate, quantified)
+        }
+      }
       return
     }
     if (node.kind === 'TypePath' && !isString(source, node))

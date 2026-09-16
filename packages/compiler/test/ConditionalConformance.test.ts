@@ -15,6 +15,28 @@ const ascii = (value: string): Uint8Array => Uint8Array.from(value, (unit) => un
 const analyze = (name: string, source: string) =>
   AnalysisFixture.retainingMain(name, ascii(source), 'wasm32-unknown-unknown')
 
+it.effect('does not invent witness lifetimes for concrete requirement-row access', () =>
+  Effect.gen(function* () {
+    const source = `service Clock {}
+service Selected<T, E, ?R> {}
+interface Use<'policy, E, ?R> {
+  effect fn use(self: &mut Self, policy: &'policy i32) -> () ! E ? R
+}
+struct Client<'policy, E, ?R> {policy: &'policy i32}
+impl<'policy, E, ?R>
+Use<'policy, E, R | &mut Selected<&'policy i32, E, R> | &mut Clock>
+for Client<'policy, E, R> {
+  effect fn use(self: &mut Self, policy: &'policy i32) -> ()
+  ! E ? R | &mut Selected<&'policy i32, E, R> | &mut Clock { return () }
+}`
+    const snapshot = yield* AnalysisFixture.frontend(
+      'conformance/row-access-lifetimes',
+      ascii(source),
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+  }),
+)
+
 const effectContext = `interface Handler<P, A, E, ?R> {
   effect fn handle(handler: Self, provider: &mut P) -> A ! E ? R
 }
