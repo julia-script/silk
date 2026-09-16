@@ -83,6 +83,32 @@ where R in Without<R, ByteDuplex> {
 }
 `
 
+it.effect('resolves nested conditional contexts from exact enclosing bounds', () =>
+  Effect.gen(function* () {
+    const source = `interface Ready {}
+struct Wrapper<T> { value: T }
+impl<T: Ready> Ready for Wrapper<T> {}
+fn accept<T: Ready>(value: T) -> () { drop value }
+fn forward<T: Ready>(value: T) -> () {
+  return accept(Wrapper<Wrapper<T>> {value: Wrapper<T> {value: move value}})
+}
+fn missing<T>(value: T) -> () {
+  return accept(Wrapper<Wrapper<T>> {value: Wrapper<T> {value: move value}})
+}`
+    const snapshot = yield* Analysis.ofSource(
+      'conditional-conformance/nested-context',
+      ascii(source),
+    )
+    assert.deepEqual(
+      Analysis.diagnostics(snapshot).map((diagnostic) => ({
+        code: diagnostic.code,
+        start: diagnostic.span.start,
+      })),
+      [{ code: 'SEM0121', start: source.lastIndexOf(' accept(') }],
+    )
+  }),
+)
+
 it.effect('infers exact Effect-polymorphic and split-row conditional contexts', () =>
   Effect.gen(function* () {
     const snapshot = yield* analyze(

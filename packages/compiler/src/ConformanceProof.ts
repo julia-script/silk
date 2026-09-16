@@ -122,10 +122,11 @@ const boundAssumedBy = (
   )
 
 /**
- * Whether one open conditional head is justified entirely by a generic caller's exact bounds.
+ * Whether one open conditional head follows from admitted witnesses and exact caller bounds.
  *
  * This is symbolic admission, not a proof object: concrete instance discovery still closes the
- * ordinary conformance goal and records the canonical witness tree.
+ * ordinary conformance goal and records the canonical witness tree. Every recursive requirement
+ * has a strictly smaller provider, as checked when the conformance was admitted.
  */
 const assumedConditionalSelection = (
   self: Index,
@@ -149,7 +150,10 @@ const assumedConditionalSelection = (
       const requiredProvider = Type.substitute(requirement.provider, selected.substitution)
       return (
         Type.isNominal(requiredCapability) &&
-        boundAssumedBy(assumptions, requiredProvider, requiredCapability)
+        (boundAssumedBy(assumptions, requiredProvider, requiredCapability) ||
+          prove(self, requiredProvider, requiredCapability)._tag === 'Proved' ||
+          assumedConditionalSelection(self, requiredProvider, requiredCapability, assumptions) !==
+            undefined)
       )
     })
     ? selected

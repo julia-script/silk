@@ -1143,8 +1143,11 @@ const inferKnownProviderBounds = (
             (candidate) =>
               Type.equals(candidate.capability, selected.candidate) &&
               caller !== undefined &&
-              candidate.requirements.every((requirement) =>
-                boundAssumedBy(caller, requirement.provider, requirement.capability),
+              ConformanceProof.assumedConditionalConformance(
+                resolution.index,
+                provider,
+                candidate.capability,
+                caller,
               ),
           )
           const selectedSymbolic = symbolic.length === 1 ? symbolic.at(0) : undefined
