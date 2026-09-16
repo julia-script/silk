@@ -41,6 +41,7 @@ import silk.http_content {
   ContentReason,
 }
 import silk.http_headers {Headers, Limits as HeaderLimits}
+import silk.http_head {ResponseHead as ParsedResponseHead}
 import silk.http_redirect as Redirect
 import silk.http_redirect {
   AttemptRequest,
@@ -881,30 +882,17 @@ effect fn checkedMetadataAdd(phase: FetchPhase, left: usize, right: usize) -> us
 
 effect fn copyHeaderMetadata<'uri, 'head>(
   uri: &Uri<'uri>,
-  head: &ResponseHead<'head>,
+  head: &ParsedResponseHead<'head>,
   limits: HeaderLimits,
   maximum: usize,
 ) -> HeaderMetadata ! FetchError | ValueError | OutOfMemoryError ? &mut Allocator {
   let uriBytes = String.byteLength(Uri.format(uri))
-  let fields = head.headers()
-  let headerBytes = match move Headers.requiredOwnedBytes(&fields) {
-    Result.Failure {error} => {
-      fail move error
-    }
-    Result.Success {value} => value
-  }
-  let reasonBytes = match move head.reason() {
-    Option.None => usize.ZERO
-    Option.Some {value} => value.length
-  }
-  let withHeaders = run checkedMetadataAdd(FetchPhase.Head, uriBytes, headerBytes)
-  let total = run checkedMetadataAdd(FetchPhase.Head, withHeaders, reasonBytes)
-  if total > maximum {
+  if uriBytes > maximum {
     fail limitFailure(
       FetchPhase.Head,
       FetchLimit.OwnedMetadataBytes,
       usize.toU64(maximum),
-      usize.toU64(total),
+      usize.toU64(uriBytes),
       u64.MIN,
       usize.ZERO,
     )
@@ -916,6 +904,27 @@ effect fn copyHeaderMetadata<'uri, 'head>(
       fail move error
     }
     Result.Success {value} => move value
+  }
+  let copiedView = OwnedResponseHead.view(&copiedHead)
+  let fields = copiedView.headers()
+  let headerBytes = match move Headers.requiredOwnedBytes(&fields) {
+    Result.Failure {error} => {
+      fail move error
+    }
+    Result.Success {value} => value
+  }
+  let reasonBytes = head.reason().length
+  let withHeaders = run checkedMetadataAdd(FetchPhase.Head, uriBytes, headerBytes)
+  let total = run checkedMetadataAdd(FetchPhase.Head, withHeaders, reasonBytes)
+  if total > maximum {
+    fail limitFailure(
+      FetchPhase.Head,
+      FetchLimit.OwnedMetadataBytes,
+      usize.toU64(maximum),
+      usize.toU64(total),
+      u64.MIN,
+      usize.ZERO,
+    )
   }
   let copiedUri = run Uri.copy(uri)
   return HeaderMetadata {uri: move copiedUri, head: move copiedHead, ownedBytes: total}
@@ -956,6 +965,30 @@ effect fn copyFinalTrailers<'trailers>(
         Result.Success {value: owned} => move owned
       }
       return Option.some<OwnedTrailers>(move copied)
+    }
+  }
+}
+
+effect fn startContent<'head, 'exchange: 'head, P>(
+  exchange: &'head mut Exchange<'exchange, P>,
+  mode: ContentMode,
+  limits: ContentLimits,
+  metadataUsed: usize,
+  metadataMaximum: usize,
+) -> AppliedPlan ! FetchError | OutOfMemoryError ? &mut Allocator | &mut MonotonicClock {
+  return match move run Effect.result(Client.beginContent(move exchange, mode, move limits)) {
+    Result.Success {value} => value
+    Result.Failure {error} => match move error {
+      ClientError cause => {
+        fail fetchFailure(FetchPhase.Decode, FetchReason.HttpClient {error: move cause})
+      }
+      OutOfMemoryError cause => {
+        fail move cause
+      }
+      ContentError<'head> cause => {
+        let owned = run ownContentError(move cause, metadataUsed, metadataMaximum)
+        fail fetchFailure(FetchPhase.Decode, FetchReason.Content {error: move owned})
+      }
     }
   }
 }
@@ -1054,46 +1087,22 @@ where
     selectedContentLimits.maxEncoded = maxEncodedBodyBytes
   }
   let selected = run Effect.result(
-    Client.beginContent(exchange, content, move selectedContentLimits),
+    startContent(
+      &mut exchange.*,
+      content,
+      move selectedContentLimits,
+      copied.ownedBytes,
+      maxOwnedMetadataBytes,
+    ),
   )
   let applied = match move selected {
     Result.Success {value} => value
     Result.Failure {error} => match move error {
-      ClientError cause => {
-        fail ownedResponseFailure(
-          FetchPhase.Decode,
-          FetchReason.HttpClient {error: move cause},
-          Option.some<Status>(status),
-          move copied.uri,
-          u64.MIN,
-          usize.ZERO,
-        )
+      FetchError cause => {
+        fail enrichResponseFailure(move cause, status, move copied.uri, u64.MIN, usize.ZERO)
       }
       OutOfMemoryError cause => {
         fail move cause
-      }
-      ContentError cause => {
-        let owned = match move run Effect.result(
-          ownContentError(move cause, copied.ownedBytes, maxOwnedMetadataBytes),
-        ) {
-          Result.Success {value} => value
-          Result.Failure {error} => match move error {
-            FetchError nested => {
-              fail enrichResponseFailure(move nested, status, move copied.uri, u64.MIN, usize.ZERO)
-            }
-            OutOfMemoryError nested => {
-              fail move nested
-            }
-          }
-        }
-        fail ownedResponseFailure(
-          FetchPhase.Decode,
-          FetchReason.Content {error: move owned},
-          Option.some<Status>(status),
-          move copied.uri,
-          u64.MIN,
-          usize.ZERO,
-        )
       }
     }
   }
@@ -1112,7 +1121,7 @@ where
   let mut encoded = u64.MIN
   while true {
     let output = Bytes.asMutSlice(&mut buffer)
-    let progress = match move run Effect.result(Client.readContentSome(exchange, move output)) {
+    let progress = match move run Effect.result(Client.readContentSome(&mut exchange.*, move output)) {
       Result.Success {value} => value
       Result.Failure {error} => match move error {
         ClientError cause => {
@@ -1183,7 +1192,7 @@ where
       break
     }
   }
-  let trailerView = match move run Effect.result(Client.trailers(exchange)) {
+  let trailerView = match move run Effect.result(Client.trailers(&exchange.*)) {
     Result.Success {value} => value
     Result.Failure {error} => {
       fail ownedMetadataFailure(
@@ -1224,7 +1233,7 @@ where
   }
   let trailerBytes = match & trailers {
     Option.None => usize.ZERO
-    Option.Some {value} => OwnedTrailers.ownedBytes(value)
+    Option.Some {value} => OwnedTrailers.ownedBytes(&value)
   }
   let totalMetadata = match move run Effect.result(
     checkedMetadataAdd(FetchPhase.Decode, metadata.ownedBytes, trailerBytes),
@@ -1234,7 +1243,7 @@ where
       fail enrichMetadataFailure(move error, move metadata, delivered, usize.ZERO)
     }
   }
-  match move run Effect.result(Client.finishResponse(exchange)) {
+  match move run Effect.result(Client.finishResponse(&mut exchange.*)) {
     Result.Success {value} => {
       drop value
     }
