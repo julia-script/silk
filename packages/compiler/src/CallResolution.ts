@@ -132,6 +132,7 @@ export function analyzeArguments(
   const first = identifiers.at(0)
   const second = identifiers.at(1)
   let target: SourceCallable | undefined
+  let enclosingTypeParameters: ReadonlyArray<Type.Parameter> = Object.freeze([])
   let builtinParameters: ReadonlyArray<SemanticType> = Object.freeze([])
   let builtinTypeParameters: ReadonlyArray<Type.Parameter> = Object.freeze([])
   let builtinLifetimes: ReadonlyArray<Lifetime.Bound> = Object.freeze([])
@@ -183,6 +184,9 @@ export function analyzeArguments(
       qualifier.declaration._tag === 'ServiceDeclaration'
     ) {
       target = serviceOperation(qualifier.declaration, memberSpelling)
+      enclosingTypeParameters = qualifier.declaration.typeParameters.map(
+        (parameter) => parameter.type,
+      )
     } else if (
       qualifier._tag === 'Resolved' &&
       qualifier.declaration._tag === 'InterfaceDeclaration'
@@ -213,14 +217,16 @@ export function analyzeArguments(
       )
     }
   }
-  const declaredTypeParameters =
-    target?.typeParameters.map((parameter) => parameter.type) ?? Object.freeze([])
+  const declaredTypeParameters = [
+    ...enclosingTypeParameters,
+    ...(target?.typeParameters.map((parameter) => parameter.type) ?? []),
+  ]
   const explicitTypes = callTypeArguments?.types
   const explicitBuiltinSubstitution =
     callTypeArguments?.explicit === true &&
     explicitTypes !== undefined &&
     explicitTypes.length <= builtinTypeParameters.length
-      ? TypeInference.prefixSubstitution(builtinTypeParameters, explicitTypes)
+      ? explicitArgumentSubstitution(builtinTypeParameters, callTypeArguments.facts)
       : undefined
   const builtinSubstitution = selectedCallLifetimes(
     call,
@@ -233,7 +239,7 @@ export function analyzeArguments(
   // exactly as they are when nothing was written.
   const explicitSubstitution =
     callTypeArguments?.explicit === true && explicitTypes !== undefined
-      ? TypeInference.prefixSubstitution(declaredTypeParameters, explicitTypes)
+      ? explicitArgumentSubstitution(declaredTypeParameters, callTypeArguments.facts)
       : undefined
   const substitution =
     target === undefined
@@ -793,6 +799,29 @@ export const genericArgumentOfTypeArgument = (
     return undefined
   }
   return requirementArgumentOfType(writtenType, fact.requirementRole ?? RequirementRow.defaultRole)
+}
+
+/** Normalizes written row and representation arguments before they contextualize value arguments. */
+const explicitArgumentSubstitution = (
+  parameters: ReadonlyArray<Type.Parameter>,
+  facts: ReadonlyArray<TypeArgumentFact>,
+): Type.Substitution | undefined => {
+  const lifetimes = parameters.filter((parameter) => parameter.kind === 'Lifetime')
+  const ordinary = parameters.filter((parameter) => parameter.kind !== 'Lifetime')
+  let lifetimeOrdinal = 0
+  let ordinaryOrdinal = 0
+  const arguments_: Array<Type.GenericArgument> = []
+  for (const fact of facts) {
+    const parameter =
+      fact.type !== undefined && Lifetime.isLifetime(fact.type)
+        ? lifetimes.at(lifetimeOrdinal++)
+        : ordinary.at(ordinaryOrdinal++)
+    const argument =
+      parameter === undefined ? undefined : genericArgumentOfTypeArgument(parameter, fact)
+    if (argument === undefined) return undefined
+    arguments_.push(argument)
+  }
+  return TypeInference.prefixSubstitution(parameters, arguments_)
 }
 
 interface SelectedCallLifetimes {

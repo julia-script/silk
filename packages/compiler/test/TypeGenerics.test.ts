@@ -103,6 +103,31 @@ where &mut P provides &Envelope<i32> from &mut Envelope<i32> {
   }),
 )
 
+it.effect('specializes retained service lifetimes at named operation calls', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSource(
+      'generics/service-retained-lifetime',
+      new TextEncoder().encode(`struct Request<'policy> { value: &'policy i32 }
+struct Handler<'policy, E, ?R> { value: &'policy i32 }
+struct Response<'policy, A> {
+  value: A
+  policy: &'policy i32
+}
+service Dispatch<'policy, H, A, E, ?R> {
+  effect fn use(value: Request<'policy>, handler: H) -> A ! E ? R | &mut Dispatch<'policy, H, A, E, R>
+}
+fn prepare<'policy>(value: Request<'policy>) -> Request<'policy> { return move value }
+effect fn forward<'policy, A, E, ?R>(value: Request<'policy>, handler: Handler<'policy, E, R>) -> Response<'policy, A>
+! E ? R | &mut Dispatch<'policy, Handler<'policy, E, R>, Response<'policy, A>, E, R> {
+  let prepared = prepare(move value)
+  return run Dispatch.use<'policy, Handler<'policy, E, R>, Response<'policy, A>, E, R>(move prepared, move handler)
+}
+pub fn main() -> i32 { return 0 }`),
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+  }),
+)
+
 it.effect('preserves access in nonfinal concrete nominal requirement arguments', () =>
   Effect.gen(function* () {
     const snapshot = yield* Analysis.ofSource(
