@@ -4854,7 +4854,15 @@ export const finalizeLifetimeHeader = (
     })
   })
   const typeParameters = Object.freeze([
-    ...member.typeParameters.filter((parameter) => !parameter.implicitLifetime),
+    ...member.typeParameters.filter(
+      (parameter) =>
+        !parameter.implicitLifetime ||
+        // Re-elaborate this header's invocation binders, not implicit lifetimes inherited
+        // by an anonymous function from its enclosing declaration's captured environment.
+        (implHead === undefined &&
+          (parameter.type.owner.module !== prior.owner.module ||
+            parameter.type.owner.name !== prior.owner.name)),
+    ),
     ...(retainsOwner ? ambient : []),
     ...implicit,
   ])
