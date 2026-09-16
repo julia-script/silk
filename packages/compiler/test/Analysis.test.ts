@@ -1,7 +1,11 @@
 import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
+import * as Option from 'effect/Option'
+import * as Tracer from 'effect/Tracer'
 import * as Analysis from '../src/Analysis.js'
+import * as Frontend from '../src/Frontend.js'
+import type * as ModuleClosure from '../src/ModuleClosure.js'
 import * as ConformanceProof from '../src/ConformanceProof.js'
 import * as ExecutableProperty from '../src/ExecutableProperty.js'
 import * as ExecutionAffinity from '../src/ExecutionAffinity.js'
@@ -16,9 +20,77 @@ import * as SyntaxTree from '../src/SyntaxTree.js'
 import * as Type from '../src/Type.js'
 import { invalidMatchCorpus } from './support/corpus.js'
 import * as Projections from './support/projections.js'
+import { unreachable } from './support/raise.js'
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
+
+it.effect('traces frontend stages through ordinary, selected, and incomplete-profile returns', () =>
+  Effect.gen(function* () {
+    const conditional = ascii(`
+static if Intrinsic.targetOperatingSystem() == "darwin" {
+  pub fn value() -> i32 { return 1 }
+} else {
+  pub fn value() -> i32 { return 2 }
+}`)
+    const requests: ReadonlyArray<ModuleClosure.CompilationRequest> = [
+      { root: SourceFile.make('ordinary', ascii('pub fn value() -> i32 { return 0 }')) },
+      {
+        root: SourceFile.make('selected', conditional),
+        configuration: {
+          profile: {
+            target: 'aarch64-apple-darwin',
+            artifact: 'object',
+            runtime: { kind: 'none' },
+          },
+        },
+      },
+      { root: SourceFile.make('incomplete', conditional) },
+    ]
+    for (const request of requests) {
+      const spans: Array<Tracer.Span> = []
+      const tracer = Tracer.make({
+        span(options) {
+          const span = new Tracer.NativeSpan(options)
+          spans.push(span)
+          return span
+        },
+      })
+      const frontend = yield* Frontend.frontend(request).pipe(
+        Effect.provide(SourceResolver.empty),
+        Effect.withTracer(tracer),
+      )
+      const root =
+        spans.find((span) => span.name === 'Frontend.frontend') ?? unreachable('frontend span')
+      assert.strictEqual(root.attributes.get('frontend.root'), request.root.id)
+      assert.strictEqual(
+        root.attributes.get('frontend.requiresSelection'),
+        request.root.id !== 'ordinary',
+      )
+      for (const name of [
+        'normalizeProfile',
+        'decodeBindings',
+        'snapshotConfiguration',
+        'loadAdditionalRoots',
+        'loadClosure',
+        'assembleSnapshot',
+      ]) {
+        const span = spans.find((span) => span.name === `Frontend.${name}`) ?? unreachable(name)
+        assert.strictEqual(Option.getOrUndefined(span.parent)?.spanId, root.spanId)
+      }
+      for (const span of spans) assert.strictEqual(span.status._tag, 'Ended', span.name)
+      if (request.root.id === 'incomplete') {
+        assert.isTrue(spans.some((span) => span.name === 'Frontend.diagnoseIncompleteProfile'))
+        assert.isFalse(spans.some((span) => span.name === 'Frontend.analyzeFrontend'))
+        assert.isAbove(frontend.diagnostics.length, 0)
+      } else {
+        assert.deepEqual(frontend.diagnostics, [])
+        assert.isTrue(spans.some((span) => span.name === 'Frontend.analyzeSemantics'))
+        assert.strictEqual(frontend.selection !== undefined, request.root.id === 'selected')
+      }
+    }
+  }),
+)
 
 const snapshot = (
   rootModule: string,

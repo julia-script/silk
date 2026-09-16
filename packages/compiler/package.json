@@ -559,6 +559,8 @@
     "build": "pnpm unicode:generate && pnpm stdlib:generate && pnpm toolchain:generate && pnpm clean && tsc -p tsconfig.json",
     "clean": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
     "dev": "node scripts/watch-toolchain.mjs",
+    "scratchpad": "node --import tsx scratchpad/compile.ts",
+    "scratchpad:prepare": "pnpm --filter @silklang/llvm build && pnpm unicode:generate && pnpm stdlib:generate && pnpm toolchain:generate",
     "lexer:bench": "pnpm build && node scripts/lexer-benchmark.mjs",
     "lifetime:bench": "pnpm build && node scripts/lifetime-benchmark.mjs",
     "stdlib:check": "node scripts/generate-stdlib.mjs --check",
@@ -609,6 +611,7 @@
   "devDependencies": {
     "@effect/vitest": "catalog:",
     "@types/node": "^24.10.1",
-    "oxfmt": "0.66.0"
+    "oxfmt": "0.66.0",
+    "tsx": "^4.23.13"
   }
 }

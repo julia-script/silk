@@ -517,7 +517,7 @@ const releaseBodyBuild = Effect.fnUntraced(function* (
  * @category functions
  * @since 0.0.0
  */
-export const buildBody = Effect.fnUntraced(function* <A, E, R>(
+export const buildBody = Effect.fn('Function.buildBody')(function* <A, E, R>(
   builder: Builder.Builder,
   self: Function,
   action: (body: FunctionBody.FunctionBody) => Effect.Effect<A, E, R>,

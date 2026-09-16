@@ -363,6 +363,11 @@ const cycleFacts = (modules: ReadonlyArray<Module>): ReadonlyArray<ReadonlyArray
 export const loadProject = Effect.fn('ModuleClosure.loadProject')(function* (
   request: ProjectRequest,
 ): Effect.fn.Return<ProjectClosure, never, SourceResolver.SourceResolver> {
+  yield* Effect.annotateCurrentSpan({
+    'request.application': request.application,
+    'request.roots': request.roots.map((root) => root.id),
+    'request.previous': request.previous?.modules.map((module) => module.name),
+  })
   const roots = canonicalRoots(request.roots)
   const rootModules = Object.freeze(roots.map((root) => root.id))
   const previousModules = new Map(request.previous?.modules.map((module) => [module.name, module]))
@@ -399,25 +404,18 @@ export const loadProject = Effect.fn('ModuleClosure.loadProject')(function* (
   )
   const pending: Array<string> = [...rootModules]
 
-  const resolve = Effect.fnUntraced(function* (
+  const resolve = Effect.fn('ModuleClosure.resolve')(function* (
     module: string,
   ): Effect.fn.Return<Resolution, never, SourceResolver.SourceResolver> {
     const cached = resolutions.get(module)
     if (cached !== undefined) return cached
     // Standard-library identities resolve from the compiler-shipped sources exclusively; a
     // user resolver is never consulted inside the reserved namespace.
-    if (Stdlib.isReserved(module)) {
-      const attempted = yield* Effect.result(SourceResolver.resolveStandardLibrary(module))
-      const resolution: Resolution = Result.isFailure(attempted)
-        ? Object.freeze({ _tag: 'Failed', error: attempted.failure })
-        : Option.match(attempted.success, {
-            onNone: () => Object.freeze({ _tag: 'Absent' as const }),
-            onSome: (source) => Object.freeze({ _tag: 'Found' as const, source }),
-          })
-      resolutions.set(module, resolution)
-      return resolution
-    }
-    const attempted = yield* Effect.result(SourceResolver.resolve(module))
+    const attempted = yield* Effect.result(
+      Stdlib.isReserved(module)
+        ? SourceResolver.resolveStandardLibrary(module)
+        : SourceResolver.resolve(module),
+    )
     const resolution: Resolution = Result.isFailure(attempted)
       ? Object.freeze({ _tag: 'Failed', error: attempted.failure })
       : Option.match(attempted.success, {

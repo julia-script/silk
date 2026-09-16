@@ -276,6 +276,7 @@ export const select = Effect.fn('ModuleSelection.select')(function* (
     string,
     Result.Result<Option.Option<SourceResolver.ResolvedSource>, SourceResolver.SourceResolverError>
   >()
+
   for (const module of initial.modules) {
     resolved.set(
       module.name,
