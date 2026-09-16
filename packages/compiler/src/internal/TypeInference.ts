@@ -262,7 +262,16 @@ const inferRequirementRowArgument = (
   allowOpenActual: boolean,
   context: InferenceContext,
 ): boolean => {
-  if (genericArgumentKey(pattern) === genericArgumentKey(actual)) return true
+  if (genericArgumentKey(pattern) === genericArgumentKey(actual))
+    return (
+      !context.allowOpenGenericArguments ||
+      (requirementRowParameters(pattern).every((parameter_) =>
+        bindGenericArgument(parameter_, parameterArgument(parameter_), inferred, context),
+      ) &&
+        requirementMembers(pattern).every((requirement) =>
+          inferType(requirement.capability, requirement.capability, inferred, context),
+        ))
+    )
   const substitutedPattern = requirementRowArgumentFromRow(
     substituteRequirementsRow(pattern.row, inferred),
   )
