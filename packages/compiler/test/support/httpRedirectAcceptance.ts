@@ -34,11 +34,11 @@ fn poolCountsShape(counts: PoolCounts) -> bool {
 }
 
 effect fn nativePoolCopyWitness(
-  handle: &PoolHandle<PoolConnectionKey, NativeTransport, NativePoolContext>,
+  handle: &'static PoolHandle<PoolConnectionKey, NativeTransport, NativePoolContext>,
 ) -> PoolHandle<PoolConnectionKey, NativeTransport, NativePoolContext>
-! TrustSourceError | OutOfMemoryError
-? &mut Allocator {
-  return run PoolNative.copyHandle(handle)
+! TrustSourceError | OutOfMemoryError {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  return run PoolNative.copyHandle(handle) |> Effect.provideMut<Allocator>(&mut allocator)
 }
 
 fn poolDeclarationsWitness() -> bool {

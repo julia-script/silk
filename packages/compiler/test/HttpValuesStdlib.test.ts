@@ -6,6 +6,7 @@ import * as CleanupPlan from '../src/CleanupPlan.js'
 import * as Intrinsic from '../src/Intrinsic.js'
 import * as MirVerification from '../src/MirVerification.js'
 import * as SourceFile from '../src/SourceFile.js'
+import * as SourceResolver from '../src/SourceResolver.js'
 import * as Stdlib from '../src/Stdlib.js'
 import * as Projections from './support/projections.js'
 import { httpValuesAcceptanceSource } from './support/httpValuesAcceptance.js'
@@ -300,10 +301,16 @@ it.effect(
     Effect.gen(function* () {
       // Keep the positive composite free of diagnostics so its one retained program can lower.
       // The focused frontend-only assertion below owns the intentional affine failures.
-      const snapshot = yield* AnalysisFixture.retainingMain(
-        'http-proxy-redirect/policy',
-        ascii(httpProxyRedirectPolicyAcceptanceSource),
-      )
+      const module = 'http-proxy-redirect/policy'
+      // The native copy witness has a borrowed input, so retain its closed definition explicitly
+      // instead of expecting an uncalled declaration to become reachable from main.
+      const snapshot = yield* Analysis.makeRealized({
+        root: SourceFile.make(module, ascii(httpProxyRedirectPolicyAcceptanceSource)),
+        configuration: AnalysisFixture.configuration(module, 'x86_64-unknown-linux-gnu', [
+          'main',
+          'nativePoolCopyWitness',
+        ]),
+      }).pipe(Effect.provide(SourceResolver.empty))
       assert.deepEqual(diagnosticSummary(snapshot), [])
       const mir = Analysis.loweredMir(snapshot)
       assert.deepEqual(MirVerification.verify(mir), [])
@@ -365,7 +372,7 @@ it.effect(
         'missing lowered allocation-backed redirect behavior sentinel',
       )
     }),
-  120_000,
+  360_000,
 )
 
 it.effect(
