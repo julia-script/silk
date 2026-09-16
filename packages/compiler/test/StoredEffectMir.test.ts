@@ -404,6 +404,57 @@ pub fn main() -> i32 {
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
     assert.deepEqual(MirVerification.verify(module), [])
     assert.isTrue(module.functions.some((fn) => fn.id.name.startsWith('impl@0.get$effect$')))
+    const run =
+      module.functions
+        .flatMap(MirVerification.operations)
+        .find(
+          (operation) =>
+            operation._tag === 'RunEffectValue' &&
+            operation.providers.some((provider) => provider.capability.name === 'Read'),
+        ) ?? unreachable('expected provided read')
+    if (run._tag !== 'RunEffectValue') return
+    const provider = run.providers.at(0) ?? unreachable('expected read provider')
+    const withWitnessCapability = (capability: Type.Nominal): Mir.Module => {
+      const witness = { ...provider.witness, capability }
+      const replaced = module.functions.flatMap(MirVerification.operations).reduce(
+        (current, operation) =>
+          operation._tag === 'RunEffectValue' &&
+          operation.runner.module === run.runner.module &&
+          operation.runner.name === run.runner.name
+            ? replaceOperation(current, operation, {
+                ...operation,
+                providers: operation.providers.map((bound) => ({ ...bound, witness })),
+              })
+            : current,
+        module,
+      )
+      return {
+        ...replaced,
+        functions: replaced.functions.map((fn) =>
+          fn.id.module === run.runner.module &&
+          fn.id.name === run.runner.name &&
+          fn.effectRunner !== undefined
+            ? {
+                ...fn,
+                effectRunner: {
+                  ...fn.effectRunner,
+                  providers: fn.effectRunner.providers.map((bound) => ({ ...bound, witness })),
+                },
+              }
+            : fn,
+        ),
+      }
+    }
+    const proofContext = Type.nominal(provider.capability.module, 'Read', [
+      Lifetime.local({ module: provider.capability.module, name: 'main' }, 'witness', 0),
+    ])
+    assert.deepEqual(MirVerification.verify(withWitnessCapability(proofContext)), [])
+    assert.include(
+      MirVerification.verify(
+        withWitnessCapability(Type.nominal(provider.capability.module, 'Read', ['i32'])),
+      ).map((violation) => violation.rule),
+      'InvalidEffectOperation',
+    )
   }),
 )
 
