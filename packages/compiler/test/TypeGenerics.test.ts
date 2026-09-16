@@ -1030,6 +1030,11 @@ it.effect('accepts failure-row and requirement-row arguments in an explicit pref
       new TextEncoder().encode(`struct First {}
 struct Second {}
 service Clock {}
+service Logger {}
+service Dispatch<A, ?R> { effect fn read() -> A ? R | &mut Dispatch<A, R> }
+effect fn useDispatch<?R>() -> i32 ? R | &mut Clock | &mut Logger | &mut Dispatch<i32 ? R | &mut Clock | &mut Logger> {
+  return run Dispatch.read<i32, R | &mut Clock | &mut Logger>()
+}
 effect fn risky() -> i32 ! First | Second { fail First {} }
 effect fn read() -> i32 ? &Clock { return 42 }
 effect fn keepFailures<E>(self: once Effect<i32 ! E>) -> i32 ! E { return run self }

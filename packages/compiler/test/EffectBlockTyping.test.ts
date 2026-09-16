@@ -14,7 +14,7 @@ const analyze = (text: string) =>
     Effect.provide(SourceResolver.memory(new Map())),
   )
 
-const codes = (self: Analysis.Snapshot): ReadonlyArray<string> =>
+const codes = (self: Analysis.FrontendSnapshot): ReadonlyArray<string> =>
   Analysis.diagnostics(self).map((diagnostic) => diagnostic.code)
 
 it.effect('provides a conditional generic callback context with extended rows', () =>
@@ -126,7 +126,11 @@ it.effect('excludes one service from an otherwise open callback requirement row'
     const accepted = yield* analyze(`struct Lease {}
 service Duplex { effect fn touch() -> () ? &mut Duplex }
 service Audit { effect fn record() -> () ? &mut Audit }
+service Envelope<P> {}
 effect fn consume<?R>() -> () ? R where R in Without<R, &mut Duplex> { return () }
+effect fn extendGeneric<P, ?R>() -> () ? R | &mut Envelope<P> where R in Without<R, &mut Duplex> {
+  return run consume<R | &mut Envelope<P>>()
+}
 effect fn extend<?R>() -> () ? R | &mut Audit where R in Without<R, &mut Duplex> {
   return run consume<R | &mut Audit>()
 }

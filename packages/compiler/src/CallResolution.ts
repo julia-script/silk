@@ -374,8 +374,12 @@ const explicitSourceCallTypeParameters = (
         resolution.scope.module,
       )
       if (associated._tag === 'Inherent') target = associated.declaration
-      else if (qualifier.declaration._tag === 'ServiceDeclaration')
+      else if (qualifier.declaration._tag === 'ServiceDeclaration') {
         target = serviceOperation(qualifier.declaration, member)
+        if (target !== undefined)
+          return DeclarationFacts.callableContract(target, qualifier.declaration.typeParameters)
+            .binders
+      }
     }
   }
   return target?.typeParameters.map((parameter) => parameter.type) ?? Object.freeze([])

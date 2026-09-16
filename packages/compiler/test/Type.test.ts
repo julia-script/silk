@@ -958,6 +958,19 @@ it('defers concrete difference until generic member keys finish specializing', (
     access: Type.Requirement['access'],
     role: string,
   ): Type.Requirement => ({ capability: capability(argument), access, role })
+  const sourceRow = RowAlgebra.concrete(requirementPolicy, [
+    requirement(left, 'Exclusive', 'Audit'),
+  ])
+  const possiblyEqual = RowAlgebra.concrete(requirementPolicy, [
+    requirement(right, 'Shared', 'Audit'),
+  ])
+  assert.isFalse(
+    RowAlgebra.isKnownSubset(
+      requirementPolicy,
+      sourceRow,
+      RowAlgebra.without(requirementPolicy, sourceRow, possiblyEqual),
+    ),
+  )
   const specialize = (
     source: Type.Requirement,
     selected: Type.Requirement,

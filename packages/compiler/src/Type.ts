@@ -1115,6 +1115,12 @@ export function requirementRowPolicy(): RowAlgebra.Policy<
   return Object.freeze({
     finite: RequirementRow.policy<Nominal | Parameter>(key),
     concreteMemberMaySpecialize: (member: Requirement) => typeMaySpecialize(member.capability),
+    concreteMembersAreDisjoint: (left: Requirement, right: Requirement) =>
+      left.role !== right.role ||
+      (isNominal(left.capability) &&
+        isNominal(right.capability) &&
+        (left.capability.module !== right.capability.module ||
+          left.capability.name !== right.capability.name)),
     rowParameterKey: key,
     symbolicMemberKey: (member: RequirementMemberShape) =>
       Canonical.record('RequirementMemberShape', [

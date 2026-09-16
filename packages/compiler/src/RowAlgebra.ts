@@ -14,6 +14,8 @@ export interface Policy<Member, RowParameter, SymbolicMember, MemberParameter> {
   readonly finite: FiniteRow.Policy<Member>
   /** Whether later substitution or executable-owner specialization may change this member's key. */
   readonly concreteMemberMaySpecialize: (member: Member) => boolean
+  /** Additional domain evidence that two keys cannot collide under later substitution. */
+  readonly concreteMembersAreDisjoint?: (left: Member, right: Member) => boolean
   readonly rowParameterKey: (parameter: RowParameter) => string
   readonly symbolicMemberKey: (member: SymbolicMember) => string
   readonly symbolicMemberParameters: (member: SymbolicMember) => ReadonlyArray<MemberParameter>
@@ -330,9 +332,15 @@ export const isKnownSubset = <Member, RowParameter, SymbolicMember, MemberParame
     right: Expression<Member, RowParameter, SymbolicMember>,
   ): boolean => {
     if (left._tag === 'Concrete' && right._tag === 'Concrete')
-      return (
-        ![...left.row.members, ...right.row.members].some(policy.concreteMemberMaySpecialize) &&
-        !left.row.members.some((member) => FiniteRow.has(policy.finite, right.row, member))
+      return left.row.members.every((a) =>
+        right.row.members.every(
+          (b) =>
+            policy.concreteMembersAreDisjoint?.(a, b) === true ||
+            (!policy.concreteMemberMaySpecialize(a) &&
+              !policy.concreteMemberMaySpecialize(b) &&
+              (policy.finite.differenceKey ?? policy.finite.collisionKey)(a) !==
+                (policy.finite.differenceKey ?? policy.finite.collisionKey)(b)),
+        ),
       )
     return assumptions.some(
       (given) =>
