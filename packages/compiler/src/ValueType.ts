@@ -553,25 +553,36 @@ export const requirementsFor = (
   available: ReadonlyArray<ProvidedRequirement>,
   effect: Type.Effect,
 ): ReadonlyArray<ProvidedRequirement> | undefined => {
-  const selected = Type.requirementMembers(effect).map((requirement) =>
-    available.find(
+  const selected = Type.requirementMembers(effect).map((requirement) => {
+    if (!Type.isNominal(requirement.capability)) return undefined
+    const compatible = available.filter(
       (candidate) =>
         candidate.role === requirement.role &&
-        Type.equals(candidate.capability, requirement.capability) &&
         (requirement.access === 'Shared' ||
           candidate.access === 'Exclusive' ||
           candidate.access === 'Take'),
-    ),
-  )
+    )
+    const exact = compatible.find((candidate) =>
+      Type.equals(candidate.capability, requirement.capability),
+    )
+    // Discovery shares physical runners across proof-only lifetime substitutions. This
+    // boundary only maps already-proved providers, never chooses a source conformance.
+    const runtimeKey = Type.runtimeKey(requirement.capability)
+    const physical =
+      exact === undefined
+        ? compatible.filter((candidate) => Type.runtimeKey(candidate.capability) === runtimeKey)
+        : []
+    const candidate = exact ?? (physical.length === 1 ? physical.at(0) : undefined)
+    return candidate === undefined
+      ? undefined
+      : Object.freeze({
+          ...candidate,
+          capability: requirement.capability,
+          requirementAccess: requirement.access,
+        })
+  })
   return selected.every((candidate) => candidate !== undefined)
-    ? Object.freeze(
-        selected.flatMap((candidate, ordinal) => {
-          const requirement = Type.requirementMembers(effect).at(ordinal)
-          return candidate === undefined || requirement === undefined
-            ? []
-            : [Object.freeze({ ...candidate, requirementAccess: requirement.access })]
-        }),
-      )
+    ? Object.freeze(selected.flatMap((candidate) => (candidate === undefined ? [] : [candidate])))
     : undefined
 }
 

@@ -6,6 +6,8 @@ import * as Analysis from '../src/Analysis.js'
 import type * as CleanupPlan from '../src/CleanupPlan.js'
 import * as CoroutineFrame from '../src/CoroutineFrame.js'
 import * as Layout from '../src/Layout.js'
+import * as Lifetime from '../src/Lifetime.js'
+import type * as Lower from '../src/Lower.js'
 import * as Mir from '../src/Mir.js'
 import * as MirEncoding from '../src/MirEncoding.js'
 import * as MirNormalization from '../src/MirNormalization.js'
@@ -19,11 +21,59 @@ import * as SuspensionMir from '../src/SuspensionMir.js'
 import * as SuspensionOwnership from '../src/SuspensionOwnership.js'
 import * as Target from '../src/Target.js'
 import * as Type from '../src/Type.js'
+import * as ValueType from '../src/ValueType.js'
 import { unreachable } from './support/raise.js'
 import { recoveredProvidedWrite, recoveredWriterModule } from './support/recoveredProvidedWrite.js'
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
+
+it('maps proven providers onto lifetime-erased runner requirements without guessing ambiguity', () => {
+  const owner = { module: 'providers', name: 'borrow' }
+  const capability = (ordinal: number) =>
+    Type.nominal('providers', 'Read', [Lifetime.bound(owner, ordinal, 'borrow')])
+  const provide = (ordinal: number): Lower.ProvidedRequirement => {
+    const selected = capability(ordinal)
+    return {
+      capability: selected,
+      providerType: selected,
+      witness: { _tag: 'IdentityConformanceWitness', capability: selected, provider: selected },
+      role: 'DefaultRole',
+      access: 'Exclusive',
+      requirementAccess: 'Exclusive',
+    }
+  }
+  const requested = capability(0)
+  const effect = Type.effect(
+    'i32',
+    [],
+    {
+      environment: Lifetime.staticLifetime,
+      lifetimeBinders: [],
+    },
+    'Shared',
+    [{ capability: requested, role: 'DefaultRole', access: 'Exclusive' }],
+  )
+  const caller = provide(1)
+  assert.deepEqual(ValueType.requirementsFor([caller], effect), [
+    { ...caller, capability: requested },
+  ])
+  const exact = provide(0)
+  assert.deepEqual(ValueType.requirementsFor([caller, exact], effect), [exact])
+  assert.strictEqual(ValueType.requirementsFor([caller, provide(2)], effect), undefined)
+  assert.strictEqual(ValueType.requirementsFor([{ ...caller, role: 'Other' }], effect), undefined)
+  assert.strictEqual(
+    ValueType.requirementsFor([{ ...caller, access: 'Shared' }], effect),
+    undefined,
+  )
+  assert.strictEqual(
+    ValueType.requirementsFor(
+      [{ ...caller, capability: Type.nominal('providers', 'Write') }],
+      effect,
+    ),
+    undefined,
+  )
+})
 
 const lowerStored = Effect.fnUntraced(function* (
   name: string,
