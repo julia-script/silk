@@ -773,9 +773,12 @@ static if (Intrinsic.targetOperatingSystem() == "darwin" && Intrinsic.targetArch
         fail ProxyError.invalidRoute()
       }
       let provider = run acquireRouteProvider(peer, &options, &deadline)
-      return run AcquiredRouteContext<NativeRouteProvider, A, E ? R | &mut Allocator | &mut MonotonicClock>.use(
-        move provider,
-      )
+      return run AcquiredRouteContext.use<
+        NativeRouteProvider,
+        A,
+        E,
+        R | &mut Allocator | &mut MonotonicClock,
+      >(move provider)
     }
   }
   impl<A, E, ?R> RouteClient<NativeRouteProvider, A, E, ProxyError | NativeClientError | ResolverError | NativeSocketError | OutOfMemoryError, &mut Allocator | &mut MonotonicClock ? R | &mut Allocator | &mut MonotonicClock> for NativeProxyClient<
@@ -1759,7 +1762,7 @@ impl<'configuration, 'request, 'policy, A, HandlerError, ?HandlerRequirements> N
     ) -> A
     ! HandlerError
     ? HandlerRequirements | &mut Attempt<'policy, NativeRouteProvider, A, HandlerError ? HandlerRequirements> {
-      return run Attempt<'policy, NativeRouteProvider, A, HandlerError ? HandlerRequirements>.handle(
+      return run Attempt.handle<'policy, NativeRouteProvider, A, HandlerError, HandlerRequirements>(
         request,
         method,
         move exchange,
