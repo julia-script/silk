@@ -9,6 +9,7 @@ export interface Context {
   readonly parameters: ReadonlyMap<string, DeclarationFacts.TypeParameterFact>
   readonly parameterBounds: ReadonlyMap<string, ReadonlyArray<Lifetime.Lifetime>>
   readonly nominals: ReadonlyMap<string, ReadonlyArray<DeclarationFacts.TypeParameterFact>>
+  readonly contractNominals: ReadonlySet<string>
   readonly work: {
     readonly declarations: number
     readonly headers: number
@@ -23,6 +24,20 @@ export type Prove = (longer: Lifetime.Lifetime, shorter: Lifetime.Lifetime) => b
 const contexts = new WeakMap<ReadonlyArray<DeclarationFacts.ModuleHeaders>, Context>()
 const nominalKey = (type: Type.Nominal): string => Type.key(Type.specializeNominal(type, []))
 
+const applicationBounds = (
+  parameter: DeclarationFacts.TypeParameterFact,
+  contract: boolean,
+  bounds: ReadonlyArray<Lifetime.Outlives>,
+  parameterBounds: ReadonlyMap<string, ReadonlyArray<Lifetime.Lifetime>>,
+): ReadonlyArray<Lifetime.Lifetime> => {
+  if (contract) return parameter.lifetimeBounds ?? []
+  if (parameter.type.kind === 'Lifetime')
+    return bounds
+      .filter((bound) => Lifetime.key(bound.longer) === Type.key(parameter.type))
+      .map((bound) => bound.shorter)
+  return parameterBounds.get(Type.key(parameter.type)) ?? []
+}
+
 /** Indexes immutable declaration assumptions by canonical owner, never by binder spelling. */
 export const context = (modules: ReadonlyArray<DeclarationFacts.ModuleHeaders>): Context => {
   const cached = contexts.get(modules)
@@ -36,6 +51,7 @@ export const context = (modules: ReadonlyArray<DeclarationFacts.ModuleHeaders>):
   }
   const parameters = new Map<string, DeclarationFacts.TypeParameterFact>()
   const nominals = new Map<string, ReadonlyArray<DeclarationFacts.TypeParameterFact>>()
+  const contractNominals = new Set<string>()
   const storedHeaders: Array<Type.Type> = []
   const executableHeaders: Array<Type.ExecutableLifetimes> = []
   const headerType = (fact: DeclarationFacts.DeclaredTypeFact): Type.Type | undefined => {
@@ -105,6 +121,10 @@ export const context = (modules: ReadonlyArray<DeclarationFacts.ModuleHeaders>):
         nominalKey(Type.nominal(declaration.canonical.id.module, declaration.canonical.id.name)),
         declaration.typeParameters,
       )
+      if (declaration._tag === 'ServiceDeclaration' || declaration._tag === 'InterfaceDeclaration')
+        contractNominals.add(
+          nominalKey(Type.nominal(declaration.canonical.id.module, declaration.canonical.id.name)),
+        )
     }
   }
   const bounds: Array<Lifetime.Outlives> = []
@@ -161,12 +181,12 @@ export const context = (modules: ReadonlyArray<DeclarationFacts.ModuleHeaders>):
         for (const [ordinal, parameter] of declared.entries()) {
           const argument = nominal.arguments.at(ordinal)
           if (argument === undefined) continue
-          const implied =
-            parameter.type.kind === 'Lifetime'
-              ? bounds
-                  .filter((bound) => Lifetime.key(bound.longer) === Type.key(parameter.type))
-                  .map((bound) => bound.shorter)
-              : (parameterBounds.get(Type.key(parameter.type)) ?? [])
+          const implied = applicationBounds(
+            parameter,
+            contractNominals.has(nominalKey(nominal)),
+            bounds,
+            parameterBounds,
+          )
           for (const shorter of implied)
             changed = add(argument, Type.substituteLifetime(shorter, substitution)) || changed
         }
@@ -177,6 +197,7 @@ export const context = (modules: ReadonlyArray<DeclarationFacts.ModuleHeaders>):
     parameters,
     parameterBounds,
     nominals,
+    contractNominals,
     work: Object.freeze(work),
   })
   contexts.set(modules, result)
@@ -262,12 +283,14 @@ const obligations = (self: Type.Nominal, scope: Context): ReadonlyArray<Failure>
   return parameters.flatMap((parameter, ordinal) => {
     const argument = self.arguments.at(ordinal)
     if (argument === undefined) return []
-    const requiredBounds =
-      parameter.type.kind === 'Lifetime'
-        ? scope.assumptions.bounds
-            .filter((bound) => Lifetime.key(bound.longer) === Type.key(parameter.type))
-            .map((bound) => bound.shorter)
-        : (scope.parameterBounds.get(Type.key(parameter.type)) ?? [])
+    // A capability or interface stores no operation arguments. Operation-local assumptions
+    // remain available to bodies but are not preconditions of applying the enclosing contract.
+    const requiredBounds = applicationBounds(
+      parameter,
+      scope.contractNominals.has(nominalKey(self)),
+      scope.assumptions.bounds,
+      scope.parameterBounds,
+    )
     return requiredBounds.map((bound) => ({
       argument,
       required: Type.substituteLifetime(bound, substitution),

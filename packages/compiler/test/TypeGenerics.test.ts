@@ -24,6 +24,7 @@ import type * as StaticValue from '../src/StaticValue.js'
 import * as SyntaxFormatter from '../src/SyntaxFormatter.js'
 import * as SyntaxTree from '../src/SyntaxTree.js'
 import * as Type from '../src/Type.js'
+import * as TypeOutlives from '../src/TypeOutlives.js'
 import * as Json from './support/Json.js'
 import * as Projections from './support/projections.js'
 import { unreachable } from './support/raise.js'
@@ -107,6 +108,38 @@ fn preserve<?R>(value: Rows<R | (&mut Clock) | (&Logger), never>) -> () {
       Type.requirementRowParameters(row).map((rowParameter) => rowParameter.name),
       ['R'],
     )
+  }),
+)
+
+it.effect('keeps operation-local lifetime bounds out of nominal contract applications', () =>
+  Effect.gen(function* () {
+    const module = 'generics/contract-local-lifetimes'
+    const snapshot = yield* Analysis.ofSource(
+      module,
+      new TextEncoder().encode(`
+service Context<P> { effect fn use(value: P) -> () ? &mut Context<P> }
+interface Handler<P> { effect fn handle(handler: Self, value: P) -> () }
+service Bounded<'data, P: 'data> {}
+struct Holder<'data, P> { value: &'data P }
+pub fn main() -> i32 { return 0 }
+`),
+    )
+    assert.deepEqual(
+      Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
+      [],
+    )
+    const scope = TypeOutlives.context(snapshot.index.modules)
+    const argument = Type.parameter({ module, name: 'caller' }, 0, 'T')
+    for (const name of ['Context', 'Handler'])
+      assert.deepEqual(TypeOutlives.application(Type.nominal(module, name, [argument]), scope), [])
+    for (const name of ['Bounded', 'Holder']) {
+      const failures = TypeOutlives.application(
+        Type.nominal(module, name, [Lifetime.staticLifetime, argument]),
+        scope,
+      )
+      assert.strictEqual(failures.length, 1)
+      assert.deepEqual(failures.at(0)?.required, Lifetime.staticLifetime)
+    }
   }),
 )
 
