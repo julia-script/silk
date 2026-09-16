@@ -198,6 +198,26 @@ pub fn format<'text>(self: RequestTarget<'text>) -> string<'text>
 
 Borrows the accepted lexical request target.
 
+<a id="declaration-73696c6b2f687474705f7461726765743a3a526571756573745461726765742e69734162736f6c757465"></a>
+
+### Method `RequestTarget.isAbsolute`
+
+```silk
+pub fn isAbsolute<'text, 'life1>(self: &'life1 RequestTarget<'text>) -> bool
+```
+
+Reports whether this target is absolute-form.
+
+<a id="declaration-73696c6b2f687474705f7461726765743a3a526571756573745461726765742e6973417574686f72697479"></a>
+
+### Method `RequestTarget.isAuthority`
+
+```silk
+pub fn isAuthority<'text, 'life1>(self: &'life1 RequestTarget<'text>) -> bool
+```
+
+Reports whether this target is authority-form.
+
 <a id="declaration-73696c6b2f687474705f7461726765743a3a526571756573745461726765742e66726f6d557269"></a>
 
 ### Associated function `RequestTarget.fromUri`

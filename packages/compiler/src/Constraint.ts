@@ -106,6 +106,24 @@ export const requirementSubset = (
   source: Type.RequirementsRow,
 ): RequirementSubset => Object.freeze({ _tag: 'RequirementSubsetConstraint', selected, source })
 
+/** Proves a selected row obligation from declared evidence without inferring any row arguments. */
+export const isImplied = (self: Constraint, givens: ReadonlyArray<Constraint>): boolean => {
+  if (givens.some((given) => key(given) === key(self))) return true
+  return (
+    self._tag === 'RequirementSubsetConstraint' &&
+    self.selected.memberWellFormed.length === 0 &&
+    self.source.memberWellFormed.length === 0 &&
+    RowAlgebra.isKnownSubset(
+      Type.requirementRowPolicy(),
+      self.selected,
+      self.source,
+      givens.filter(
+        (given): given is RequirementSubset => given._tag === 'RequirementSubsetConstraint',
+      ),
+    )
+  )
+}
+
 export const providerSelection = (
   mode: ProviderMode,
   provider: Type.Type,

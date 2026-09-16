@@ -14,6 +14,8 @@ export interface Policy<Member, RowParameter, SymbolicMember, MemberParameter> {
   readonly finite: FiniteRow.Policy<Member>
   /** Whether later substitution or executable-owner specialization may change this member's key. */
   readonly concreteMemberMaySpecialize: (member: Member) => boolean
+  /** Additional domain evidence that two keys cannot collide under later substitution. */
+  readonly concreteMembersAreDisjoint?: (left: Member, right: Member) => boolean
   readonly rowParameterKey: (parameter: RowParameter) => string
   readonly symbolicMemberKey: (member: SymbolicMember) => string
   readonly symbolicMemberParameters: (member: SymbolicMember) => ReadonlyArray<MemberParameter>
@@ -254,19 +256,31 @@ export const without = <Member, RowParameter, SymbolicMember, MemberParameter>(
     return Object.freeze({ expression: source.expression, memberWellFormed: obligations })
   if (selected.expression._tag === 'Concrete' && selected.expression.row.members.length === 0)
     return Object.freeze({ expression: source.expression, memberWellFormed: obligations })
-  if (
-    source.expression._tag === 'Concrete' &&
-    selected.expression._tag === 'Concrete' &&
-    ![...source.expression.row.members, ...selected.expression.row.members].some(
-      policy.concreteMemberMaySpecialize,
+  if (source.expression._tag === 'Concrete' && selected.expression._tag === 'Concrete') {
+    const differenceKey = policy.finite.differenceKey ?? policy.finite.collisionKey
+    const selectedMembers = selected.expression.row.members
+    const selectedKeys = new Set(selectedMembers.map(differenceKey))
+    // Equal keys stay equal under substitution. A surviving key is safe only when it
+    // cannot later collide with a selected key; unrelated nominal heads/roles prove that
+    // even when either service contains borrowed lifetimes or generic arguments.
+    const stable = source.expression.row.members.every(
+      (member) =>
+        selectedKeys.has(differenceKey(member)) ||
+        selectedMembers.every(
+          (other) =>
+            policy.concreteMembersAreDisjoint?.(member, other) === true ||
+            (!policy.concreteMemberMaySpecialize(member) &&
+              !policy.concreteMemberMaySpecialize(other)),
+        ),
     )
-  )
-    return Object.freeze({
-      expression: concreteExpression(
-        FiniteRow.difference(policy.finite, source.expression.row, selected.expression.row),
-      ),
-      memberWellFormed: obligations,
-    })
+    if (stable)
+      return Object.freeze({
+        expression: concreteExpression(
+          FiniteRow.difference(policy.finite, source.expression.row, selected.expression.row),
+        ),
+        memberWellFormed: obligations,
+      })
+  }
   if (policy.allowsSetCancellation && source.expression._tag === 'Union') {
     const remaining = source.expression.operands.filter(
       (operand) => expressionKey(policy, operand) !== selectedKey,
@@ -306,25 +320,84 @@ export const equals = <Member, RowParameter, SymbolicMember, MemberParameter>(
 ): boolean => key(policy, left) === key(policy, right)
 
 /**
- * Proves a subset relation from normalized row structure alone.
+ * Proves a subset relation from normalized row structure and declared subset assumptions.
  *
  * This is intentionally forward-only: exact operands and concrete finite subsets are provable,
- * as are unions composed entirely from such operands. A `Without` expression is never inverted or
- * used to bind either side; it is comparable only by exact expression identity.
+ * as are unions composed entirely from such operands. Declared subset assumptions can establish
+ * exclusion of a member, but are never inverted or used to bind either side.
  */
 export const isKnownSubset = <Member, RowParameter, SymbolicMember, MemberParameter>(
   policy: Policy<Member, RowParameter, SymbolicMember, MemberParameter>,
   candidate: Row<Member, RowParameter, SymbolicMember>,
   container: Row<Member, RowParameter, SymbolicMember>,
+  assumptions: ReadonlyArray<{
+    readonly selected: Row<Member, RowParameter, SymbolicMember>
+    readonly source: Row<Member, RowParameter, SymbolicMember>
+  }> = [],
 ): boolean => {
+  const row = (expression: Expression<Member, RowParameter, SymbolicMember>) => ({
+    expression,
+    memberWellFormed: [],
+  })
+  const disjoint = (
+    left: Expression<Member, RowParameter, SymbolicMember>,
+    right: Expression<Member, RowParameter, SymbolicMember>,
+  ): boolean => {
+    if (left._tag === 'Concrete' && right._tag === 'Concrete')
+      return left.row.members.every((a) =>
+        right.row.members.every(
+          (b) =>
+            policy.concreteMembersAreDisjoint?.(a, b) === true ||
+            (!policy.concreteMemberMaySpecialize(a) &&
+              !policy.concreteMemberMaySpecialize(b) &&
+              (policy.finite.differenceKey ?? policy.finite.collisionKey)(a) !==
+                (policy.finite.differenceKey ?? policy.finite.collisionKey)(b)),
+        ),
+      )
+    return assumptions.some(
+      (given) =>
+        given.selected.memberWellFormed.length === 0 &&
+        given.source.memberWellFormed.length === 0 &&
+        given.source.expression._tag === 'Without' &&
+        isKnownSubset(policy, row(left), given.selected) &&
+        isKnownSubset(policy, row(right), row(given.source.expression.selected)),
+    )
+  }
   const prove = (
     left: Expression<Member, RowParameter, SymbolicMember>,
     right: Expression<Member, RowParameter, SymbolicMember>,
   ): boolean => {
     if (expressionKey(policy, left) === expressionKey(policy, right)) return true
     if (left._tag === 'Concrete' && left.row.members.length === 0) return true
+    if (
+      assumptions.some(
+        (given) =>
+          given.selected.memberWellFormed.length === 0 &&
+          given.source.memberWellFormed.length === 0 &&
+          expressionKey(policy, left) === expressionKey(policy, given.selected.expression) &&
+          expressionKey(policy, right) === expressionKey(policy, given.source.expression),
+      )
+    )
+      return true
     if (left._tag === 'Union') return left.operands.every((operand) => prove(operand, right))
+    if (left._tag === 'Without') {
+      // Subtraction can only remove requirements. Keep the symbolic expression intact, but
+      // prove against its upper bound after removing members with an already identical key.
+      if (prove(left.source, right)) return true
+      if (left.source._tag === 'Union')
+        return left.source.operands.every((source) =>
+          prove({ _tag: 'Without', source, selected: left.selected }, right),
+        )
+      if (left.source._tag === 'Concrete' && left.selected._tag === 'Concrete')
+        return prove(
+          concreteExpression(
+            FiniteRow.difference(policy.finite, left.source.row, left.selected.row),
+          ),
+          right,
+        )
+    }
     if (right._tag === 'Union') return right.operands.some((operand) => prove(left, operand))
+    if (right._tag === 'Without') return prove(left, right.source) && disjoint(left, right.selected)
     if (left._tag === 'Concrete' && right._tag === 'Concrete')
       return FiniteRow.isSubset(policy.finite, left.row, right.row)
     return false
@@ -422,25 +495,28 @@ export const positiveConcreteMembers = <Member, RowParameter, SymbolicMember, Me
   policy: Policy<Member, RowParameter, SymbolicMember, MemberParameter>,
   self: Row<Member, RowParameter, SymbolicMember>,
 ): ReadonlyArray<Member> => {
-  const members: Array<Member> = []
-  const visit = (expression: Expression<Member, RowParameter, SymbolicMember>): void => {
+  const visit = (
+    expression: Expression<Member, RowParameter, SymbolicMember>,
+  ): ReadonlyArray<Member> => {
     switch (expression._tag) {
       case 'Concrete':
-        members.push(...expression.row.members)
-        return
+        return expression.row.members
       case 'RowParameter':
       case 'Singleton':
-        return
+        return []
       case 'Union':
-        for (const operand of expression.operands) visit(operand)
-        return
+        return expression.operands.flatMap(visit)
       case 'Without':
-        visit(expression.source)
-        return
+        return expression.selected._tag === 'Concrete'
+          ? FiniteRow.difference(
+              policy.finite,
+              FiniteRow.make(policy.finite, visit(expression.source)),
+              expression.selected.row,
+            ).members
+          : visit(expression.source)
     }
   }
-  visit(self.expression)
-  return FiniteRow.make(policy.finite, members).members
+  return FiniteRow.make(policy.finite, visit(self.expression)).members
 }
 
 /** Rewrites concrete members structurally and renormalizes substitution-created collisions. */

@@ -164,8 +164,19 @@ const outlives = (
 ): boolean => {
   self.work.outlivesObligations += 1
   if (Lifetime.outlives(self.assumptions, longer, shorter)) return true
-  // Discharge compound obligations through their constituents. Only free atomic obligations
-  // reach the local-region solver; a rigid invocation region cannot be committed into its graph.
+  const rigid = [...Lifetime.atoms(longer), ...Lifetime.atoms(shorter)].some(
+    (member) => member._tag === 'PlaceholderLifetime',
+  )
+  // Preserve a free meet as one finite-region obligation. Choosing the first inferable
+  // constituent of the shorter meet would accidentally require the whole longer region
+  // to outlive that constituent, even when only their intersection is needed.
+  if (!rigid && self.outlives?.(longer, shorter) === true) {
+    if (self.commitOutlives !== undefined)
+      retain(self, [() => self.commitOutlives?.(longer, shorter)])
+    return true
+  }
+  // Rigid invocation regions cannot be committed into the local graph. Discharge their
+  // compound obligations through constituents, retaining only free sub-obligations.
   if (longer._tag === 'IntersectionLifetime')
     return commitWhen(
       self,
@@ -176,16 +187,7 @@ const outlives = (
     return shorter.members.some((member) =>
       commitWhen(self, () => outlives(self, longer, member), Boolean),
     )
-  if (
-    [...Lifetime.atoms(longer), ...Lifetime.atoms(shorter)].some(
-      (member) => member._tag === 'PlaceholderLifetime',
-    )
-  )
-    return false
-  const proven = self.outlives?.(longer, shorter) ?? false
-  if (proven && self.commitOutlives !== undefined)
-    retain(self, [() => self.commitOutlives?.(longer, shorter)])
-  return proven
+  return false
 }
 
 /** Proves one selected structural data-validity obligation in the current comparison scope. */

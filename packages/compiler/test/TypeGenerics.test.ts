@@ -24,6 +24,7 @@ import type * as StaticValue from '../src/StaticValue.js'
 import * as SyntaxFormatter from '../src/SyntaxFormatter.js'
 import * as SyntaxTree from '../src/SyntaxTree.js'
 import * as Type from '../src/Type.js'
+import * as TypeOutlives from '../src/TypeOutlives.js'
 import * as Json from './support/Json.js'
 import * as Projections from './support/projections.js'
 import { unreachable } from './support/raise.js'
@@ -40,6 +41,287 @@ const descendants = (node: SyntaxTree.Node): ReadonlyArray<SyntaxTree.Node> =>
   node.children.flatMap((child): ReadonlyArray<SyntaxTree.Node> =>
     SyntaxTree.isNode(child) ? [child, ...descendants(child)] : [],
   )
+
+it.effect('admits detached generic nominal failure payloads', () =>
+  Effect.gen(function* () {
+    const source = `struct Failure<E> { error: E }
+effect fn wrap<E: Intrinsic.Detached, F>(error: E) -> () ! Failure<E> | F {
+  fail Failure<E> { error: move error }
+}
+effect fn reject<E>(error: E) -> () ! Failure<E> {
+  fail Failure<E> { error: move error }
+}`
+    const snapshot = yield* Analysis.ofSource(
+      'generics/nominal-failure',
+      new TextEncoder().encode(source),
+    )
+    assert.deepEqual(
+      Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
+      ['SEM0061', 'SEM0061'],
+    )
+    assert.isTrue(
+      Analysis.diagnostics(snapshot).every(
+        (diagnostic) => diagnostic.span.start >= source.indexOf('effect fn reject'),
+      ),
+    )
+    const wrap =
+      snapshot.index.modules
+        .flatMap((module) => module.declarations)
+        .filter((declaration) => declaration._tag === 'FunctionDeclaration')
+        .find(
+          (declaration) =>
+            declaration.name._tag === 'Present' && declaration.name.spelling === 'wrap',
+        ) ?? unreachable('missing wrap')
+    const failures = RowAlgebra.positiveConcreteMembers(
+      Type.failureRowPolicy(),
+      wrap.failureRow.row,
+    )
+    assert.strictEqual(failures.length, 1)
+    assert.isTrue(failures.some((failure) => Type.isNominal(failure) && failure.name === 'Failure'))
+  }),
+)
+
+it.effect('infers literal lifetimes alongside empty and concrete requirement rows', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSource(
+      'generics/literal-row-lifetimes',
+      new TextEncoder().encode(`service Clock {}
+service Logger {}
+struct Context<'value, ?R> { value: &'value i32 }
+fn construct<?R>(value: &i32) -> () {
+  let empty = Context<never> { value: value }
+  let concrete = Context<(&mut Clock) | (&Logger)> { value: value }
+  let generic = Context<R> { value: value }
+  drop empty
+  drop concrete
+  drop generic
+  return ()
+}`),
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+  }),
+)
+
+it.effect('selects applied services explicitly from open provider constraint rows', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSource(
+      'generics/applied-provider-constraint',
+      new TextEncoder().encode(`service Envelope<T> {}
+struct Provider {}
+impl Envelope<i32> for Provider {}
+fn require<?R, P>(provider: &mut P) -> ()
+where &mut P provides &Envelope<i32> from R | &mut Envelope<i32> {
+  drop provider
+  return ()
+}
+fn invoke<?R>(provider: &mut Provider) -> () {
+  return require<R>(move provider)
+}`),
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+  }),
+)
+
+it.effect('specializes retained service lifetimes at named operation calls', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSource(
+      'generics/service-retained-lifetime',
+      new TextEncoder().encode(`struct Request<'policy> { value: &'policy i32 }
+struct Handler<'policy, E, ?R> { value: &'policy i32 }
+struct Response<'policy, A> {
+  value: A
+  policy: &'policy i32
+}
+service Dispatch<'policy, H, A, E, ?R> {
+  effect fn use(value: Request<'policy>, handler: H) -> A ! E ? R | &mut Dispatch<'policy, H, A, E, R>
+}
+fn prepare<'policy>(value: Request<'policy>) -> Request<'policy> { return move value }
+effect fn forward<'policy, A, E, ?R>(value: Request<'policy>, handler: Handler<'policy, E, R>) -> Response<'policy, A>
+! E ? R | &mut Dispatch<'policy, Handler<'policy, E, R>, Response<'policy, A>, E, R> {
+  let prepared = prepare(move value)
+  return run Dispatch.use<'policy, Handler<'policy, E, R>, Response<'policy, A>, E, R>(move prepared, move handler)
+}
+pub fn main() -> i32 { return 0 }`),
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+  }),
+)
+
+it.effect('infers an applied interface provider independently of invocation lifetimes', () =>
+  Effect.gen(function* () {
+    const source = `struct View<'value, T> { value: &'value mut T }
+struct Uri<'value> { value: &'value i32 }
+fn uri<'value>(value: &'value i32) -> Uri<'value> { return Uri<'value> {value: value} }
+interface Handle<T> {
+  fn handle<'call, 'view: 'call>(handler: Self, name: Uri<'call>, view: &'call mut View<'view, T>) -> ()
+}
+fn forward<'call, 'view: 'call, T, H: Handle<T>>(
+  handler: H, value: &'call i32, view: &'call mut View<'view, T>,
+) -> () {
+  return Handle<T>.handle(move handler, uri(value), move view)
+}
+fn wrong<'call, 'view: 'call, T, H: Handle<T>>(
+  handler: H, view: &'call mut View<'view, T>,
+) -> () {
+  return Handle<T>.handle(move handler, true, move view)
+}`
+    const snapshot = yield* Analysis.ofSource(
+      'generics/applied-provider-lifetimes',
+      new TextEncoder().encode(source),
+    )
+    assert.deepEqual(
+      Analysis.diagnostics(snapshot).map((diagnostic) => ({
+        code: diagnostic.code,
+        start: diagnostic.span.start,
+      })),
+      [{ code: 'SEM0012', start: source.lastIndexOf(' true') }],
+    )
+  }),
+)
+
+it.effect('preserves access in nonfinal concrete nominal requirement arguments', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSource(
+      'generics/nominal-row-access',
+      new TextEncoder().encode(`service Clock {}
+service Logger {}
+struct Rows<?Acquisition, ?Handler> {}
+fn preserve<?R>(value: Rows<R | (&mut Clock) | (&Logger), never>) -> () {
+  drop value
+}`),
+    )
+    assert.deepEqual(
+      Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
+      [],
+    )
+    const parameter = Analysis.declarationIndex(snapshot)
+      .modules.at(0)
+      ?.declarations.find(
+        (declaration) =>
+          declaration.name._tag === 'Present' && declaration.name.spelling === 'preserve',
+      )
+      ?.parameters.at(0)?.declaredType
+    if (parameter?._tag !== 'Resolved' || !Type.isNominal(parameter.type))
+      return unreachable('expected resolved Rows parameter')
+    const row = parameter.type.arguments.at(0)
+    if (row === undefined || !Type.isRequirementRowArgument(row))
+      return unreachable('expected acquisition requirement row')
+    assert.deepEqual(
+      Type.requirementMembers(row).map((requirement) => [
+        requirement.capability.name,
+        requirement.access,
+      ]),
+      [
+        ['Clock', 'Exclusive'],
+        ['Logger', 'Shared'],
+      ],
+    )
+    assert.deepEqual(
+      Type.requirementRowParameters(row).map((rowParameter) => rowParameter.name),
+      ['R'],
+    )
+  }),
+)
+
+it.effect('keeps operation-local lifetime bounds out of nominal contract applications', () =>
+  Effect.gen(function* () {
+    const module = 'generics/contract-local-lifetimes'
+    const snapshot = yield* Analysis.ofSource(
+      module,
+      new TextEncoder().encode(`
+service Context<P> { effect fn use(value: P) -> () ? &mut Context<P> }
+interface Handler<P> { effect fn handle(handler: Self, value: P) -> () }
+service Bounded<'data, P: 'data> {}
+struct Holder<'data, P> { value: &'data P }
+pub fn main() -> i32 { return 0 }
+`),
+    )
+    assert.deepEqual(
+      Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
+      [],
+    )
+    const scope = TypeOutlives.context(snapshot.index.modules)
+    const argument = Type.parameter({ module, name: 'caller' }, 0, 'T')
+    for (const name of ['Context', 'Handler'])
+      assert.deepEqual(TypeOutlives.application(Type.nominal(module, name, [argument]), scope), [])
+    for (const name of ['Bounded', 'Holder']) {
+      const failures = TypeOutlives.application(
+        Type.nominal(module, name, [Lifetime.staticLifetime, argument]),
+        scope,
+      )
+      assert.strictEqual(failures.length, 1)
+      assert.deepEqual(failures.at(0)?.required, Lifetime.staticLifetime)
+    }
+  }),
+)
+
+it.effect('preserves access in nonfinal concrete call requirement arguments', () =>
+  Effect.gen(function* () {
+    const module = 'generics/call-row-access'
+    const snapshot = yield* Analysis.ofSource(
+      module,
+      new TextEncoder().encode(`service Clock {}
+service Logger {}
+fn select<?Acquisition, ?Handler>() -> i32 { return 42 }
+pub fn main() -> i32 {
+  return select<&mut Clock | &Logger, never>()
+}`),
+    )
+    assert.deepEqual(
+      Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
+      [],
+    )
+    const returned = Analysis.rootAnalysis(snapshot).functions.find(
+      (candidate) =>
+        candidate.declaration.name._tag === 'Present' &&
+        candidate.declaration.name.spelling === 'main',
+    )?.returnedExpression
+    assert.strictEqual(returned?._tag, 'Call')
+    if (returned?._tag !== 'Call') return
+    assert.strictEqual(returned.contract._tag, 'Compatible')
+    if (returned.contract._tag !== 'Compatible') return
+    assert.deepEqual(returned.contract.typeArguments.map(Type.encodeGenericArgument), [
+      `? &mut ${module}.Clock | &${module}.Logger`,
+      '? ',
+    ])
+  }),
+)
+
+it.effect('does not bind erased implicit service-row lifetimes to the provider', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSource(
+      'generics/conformance-service-row-lifetimes',
+      new TextEncoder().encode(`service Clock {}
+service Allocator {}
+interface Contract<?Acquisition, ?Handler> {}
+struct Provider {}
+impl Contract<&mut Clock | &mut Allocator, never> for Provider {}`),
+    )
+    const conformance = Analysis.declarationIndex(snapshot).modules.at(0)?.conformances.at(0)
+    assert.isDefined(conformance)
+    if (conformance === undefined) return
+    assert.strictEqual(
+      conformance.typeParameters.filter((parameter) => parameter.implicitLifetime === true).length,
+      0,
+    )
+    assert.deepEqual(
+      conformance.provider._tag === 'Resolved'
+        ? Type.freeLifetimes(conformance.provider.type).map(Lifetime.key)
+        : undefined,
+      [],
+    )
+    assert.deepEqual(
+      conformance.capability._tag === 'Resolved'
+        ? Type.freeLifetimes(conformance.capability.type).map(Lifetime.key)
+        : undefined,
+      [],
+    )
+    assert.deepEqual(
+      Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
+      [],
+    )
+  }),
+)
 
 it.effect('retains source-shaped row expressions and callable constraints in module facts', () =>
   Effect.gen(function* () {
@@ -860,6 +1142,11 @@ it.effect('accepts failure-row and requirement-row arguments in an explicit pref
       new TextEncoder().encode(`struct First {}
 struct Second {}
 service Clock {}
+service Logger {}
+service Dispatch<A, ?R> { effect fn read() -> A ? R | &mut Dispatch<A, R> }
+effect fn useDispatch<?R>() -> i32 ? R | &mut Clock | &mut Logger | &mut Dispatch<i32 ? R | &mut Clock | &mut Logger> {
+  return run Dispatch.read<i32, R | &mut Clock | &mut Logger>()
+}
 effect fn risky() -> i32 ! First | Second { fail First {} }
 effect fn read() -> i32 ? &Clock { return 42 }
 effect fn keepFailures<E>(self: once Effect<i32 ! E>) -> i32 ! E { return run self }

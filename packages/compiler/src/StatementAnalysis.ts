@@ -1507,9 +1507,7 @@ export const analyzeStatements = (
         throw new RangeError(`Semantic analysis cannot analyze ${expressionNode.kind}`)
       context.diagnostics.push(...expression.diagnostics)
       const failure =
-        expression.type !== undefined &&
-        (Type.isRuntimeConcrete(expression.type) ||
-          (Type.isParameter(expression.type) && expression.type.kind === 'Value'))
+        expression.type !== undefined && Type.isFailureValue(expression.type)
           ? expression.type
           : undefined
       if (!context.effectBlock && context.declaration.functionKind !== 'Effect')
@@ -1869,12 +1867,22 @@ export const analyzeFunctionBody = (
   }
   collectUnsafeSpans(declaration.syntax)
   const nextBindingOrdinal = { value: 0 }
+  const declaredOutlives = TypeOutlives.context(resolution.index.modules)
+  const outlivesScope =
+    resolution.anonymousDepth === 1
+      ? TypeOutlives.withInputs(
+          declaredOutlives,
+          declaration.parameters.flatMap((parameter) =>
+            parameter.declaredType._tag === 'Resolved' ? [parameter.declaredType.type] : [],
+          ),
+        )
+      : declaredOutlives
   const bodyLifetimes = BodyLifetime.make(
     declaration.canonical._tag === 'Canonical'
       ? declaration.canonical.id
       : { module: source.id, name: `#${declaration.id.ordinal}` },
     declaration.syntax,
-    TypeOutlives.context(resolution.index.modules).parameterBounds,
+    outlivesScope.parameterBounds,
   )
   const bodyResolution: ResolutionContext = Object.freeze({
     ...resolution,
@@ -1890,7 +1898,7 @@ export const analyzeFunctionBody = (
       bodyLifetimes,
       Lifetime.assumptions([
         ...(DeclarationFacts.executableLifetimes(declaration).lifetimeBounds ?? []),
-        ...TypeOutlives.context(resolution.index.modules).assumptions.bounds,
+        ...outlivesScope.assumptions.bounds,
       ]),
       NominalVariance.derive(resolution.index).summaries,
     ),
@@ -2055,6 +2063,7 @@ export const analyzeFunctionBody = (
     statements,
     bodyLifetimes,
     resolution.index,
+    outlivesScope,
   )
   context.diagnostics.push(...lifetimeFlow.diagnostics)
   return Object.freeze({

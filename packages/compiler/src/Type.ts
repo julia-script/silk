@@ -1115,6 +1115,12 @@ export function requirementRowPolicy(): RowAlgebra.Policy<
   return Object.freeze({
     finite: RequirementRow.policy<Nominal | Parameter>(key),
     concreteMemberMaySpecialize: (member: Requirement) => typeMaySpecialize(member.capability),
+    concreteMembersAreDisjoint: (left: Requirement, right: Requirement) =>
+      left.role !== right.role ||
+      (isNominal(left.capability) &&
+        isNominal(right.capability) &&
+        (left.capability.module !== right.capability.module ||
+          left.capability.name !== right.capability.name)),
     rowParameterKey: key,
     symbolicMemberKey: (member: RequirementMemberShape) =>
       Canonical.record('RequirementMemberShape', [
@@ -3055,6 +3061,18 @@ export function runtimeAvailable(self: Type): boolean {
 
 /** Tests whether a type is closed, fully available, and safe to expose to runtime consumers. */
 export const isRuntimeConcrete = (self: Type): boolean => isConcrete(self) && runtimeAvailable(self)
+
+/** Admits failure values whose generic retained payloads are known to be detached. */
+export const isFailureValue = (self: Type): boolean =>
+  isRuntimeConcrete(self) ||
+  (isParameter(self) && self.kind === 'Value') ||
+  (isUnion(self) && self.members.every(isFailureValue)) ||
+  (isNominal(self) &&
+    runtimeAvailable(self) &&
+    parameters(self).every(
+      (parameter) =>
+        parameter.kind === 'Value' && parameter.staticProperties.includes('Intrinsic.Detached'),
+    ))
 
 const isClosedGenericArgument = (self: GenericArgument): boolean => {
   if (Lifetime.isLifetime(self)) return true

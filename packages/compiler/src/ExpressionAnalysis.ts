@@ -1485,11 +1485,16 @@ export const resolveStructTarget = (
           parameter.type.kind !== 'EffectRepresentation',
       )
       if (supplied.length <= sourceParameters.length) {
+        const valueParameters = sourceParameters.filter(
+          (parameter) => parameter.type.kind !== 'Lifetime',
+        )
+        let suppliedOrdinal = 0
         const resolvedArguments = supplied.map((argument) =>
-          DeclarationResolution.resolveTypeFact(
+          DeclarationResolution.resolveGenericArgumentFact(
             resolution.index,
             source.id,
             argument,
+            argument._tag === 'Lifetime' ? undefined : valueParameters.at(suppliedOrdinal++)?.type,
             (module, argumentPath) =>
               NameResolution.resolveType(nameResolution, resolution.index, module, argumentPath),
           ),
@@ -1519,15 +1524,14 @@ export const resolveStructTarget = (
             const resolved = suppliedValues.at(valueOrdinal)
             valueOrdinal += 1
             if (resolved === undefined) return [Type.parameterArgument(parameter.type)]
+            if (parameter.type.kind === 'RequirementRow')
+              return resolved.argument !== undefined &&
+                Type.isRequirementRowArgument(resolved.argument)
+                ? [resolved.argument]
+                : []
             if (resolved?.fact._tag !== 'Resolved') return []
             if (parameter.type.kind === 'Value')
               return Type.isTypeArgument(resolved.fact.type) ? [resolved.fact.type] : []
-            if (
-              parameter.type.kind === 'RequirementRow' &&
-              Type.isParameter(resolved.fact.type) &&
-              resolved.fact.type.kind === 'RequirementRow'
-            )
-              return [Type.requirementRowArgument([], [resolved.fact.type])]
             return []
           },
         )
@@ -7863,16 +7867,23 @@ const resolveAppliedInterfaceProvider = (
   }
   const substitution = new Map<string, Type.GenericArgument>()
   const inferenceDiagnostics: Array<Diagnostic.Diagnostic> = []
+  const providerKey = Type.key(target.interface.self)
+  const providerBinders = new Set([providerKey])
   let providerOrigin: SourceSpan.SourceSpan | undefined
   for (const [ordinal, argument] of argumentsResult.facts.entries()) {
     const expected = target.reference.parameters.at(ordinal)
     if (expected === undefined || argument.type._tag !== 'Available') continue
-    const providerKey = Type.key(target.interface.self)
+    // Only operands containing Self select the provider. The completed call checks every operand
+    // after opening its invocation lifetimes; comparing unrelated operands here treats those
+    // quantified lifetimes as fixed and can reject a valid shorter call borrow.
+    if (!Type.parameters(expected).some((parameter) => Type.key(parameter) === providerKey))
+      continue
     const previousProvider = substitution.get(providerKey)
     const inference = TypeInference.inferOpenGenericArguments(
       expected,
       argument.type.type,
       substitution,
+      providerBinders,
     )
     if (!inference.matches) {
       const providerConflict = inference.conflicts.find((conflict) =>
@@ -8659,7 +8670,7 @@ const analyzeAnonymousCallable = (
     ordinal: 0x70000000 + node.span.start,
   })
   const canonical = Hir.anonymousCallableId(owner, site)
-  const collected = DeclarationCollection.collectAnonymousCallableDeclaration(
+  const initial = DeclarationCollection.collectAnonymousCallableDeclaration(
     source,
     node,
     hiddenId,
@@ -8672,6 +8683,26 @@ const analyzeAnonymousCallable = (
     diagnostics: Object.freeze([]),
   })
   const resolvers = NameResolution.makeResolvers(nameResolution, resolution.index)
+  const finalized = DeclarationCollection.finalizeLifetimeHeader(initial.fact, (path) => {
+    const resolved = resolvers.type(source.id, path)
+    if (
+      resolved.fact._tag !== 'Resolved' ||
+      !Type.isNominal(resolved.fact.type) ||
+      resolved.fact.type.arguments.length > 0
+    )
+      return undefined
+    return (
+      DeclarationResolution.memberByNominal(
+        resolution.index.modules,
+        resolved.fact.type,
+      )?.typeParameters.map((parameter) => parameter.type) ??
+      Type.intrinsicNominalParameters(resolved.fact.type)
+    )
+  })
+  const collected = Object.freeze({
+    ...initial,
+    fact: finalized._tag === 'FunctionDeclaration' ? finalized : initial.fact,
+  })
   const resolveType = (fact: DeclarationFacts.DeclaredTypeFact) =>
     DeclarationResolution.resolveTypeFact(resolution.index, source.id, fact, resolvers.type)
   const typeDiagnostics: Array<Diagnostic.Diagnostic> = []

@@ -354,6 +354,133 @@ impl<'value> Headers<'value> {
     })
   }
 
+  /// Copies only case-insensitively matching fields in their original order.
+  ///
+  /// # Details
+  ///
+  /// All selected-field and owned-capacity limits are checked before allocation. Duplicate fields
+  /// remain distinct and retain their original relative order.
+  pub effect fn copyMatching(
+    self: &Self,
+    name: string<'value>,
+    limits: Limits,
+  ) -> Result<OwnedHeaders, ValueError> ! OutOfMemoryError ? &mut Allocator {
+    let mut count = usize.ZERO
+    let mut fieldBytes = usize.ZERO
+    let mut iterator = Headers.getAll(self, name)
+    while true {
+      let next = HeaderIterator.next(&mut iterator)
+      match move next {
+        Option.None => { break }
+        Option.Some {value} => {
+          count = match move usize.checkedAdd(count, usize.ONE) {
+            Option.None => {
+              return Result.failResult<OwnedHeaders, ValueError>(sizeFailure(ValueComponent.Headers))
+            }
+            Option.Some {value: selected} => selected
+          }
+          if count > limits.maxFields {
+            return Result.failResult<OwnedHeaders, ValueError>(limitFailure(
+              ValueComponent.Headers,
+              LimitKind.Fields,
+              limits.maxFields,
+              count,
+            ))
+          }
+          let nameLength = String.byteLength(Header.name(&value))
+          let valueLength = Header.value(&value).length
+          if nameLength > limits.maxNameBytes {
+            return Result.failResult<OwnedHeaders, ValueError>(limitFailure(
+              ValueComponent.HeaderName,
+              LimitKind.NameBytes,
+              limits.maxNameBytes,
+              nameLength,
+            ))
+          }
+          if valueLength > limits.maxValueBytes {
+            return Result.failResult<OwnedHeaders, ValueError>(limitFailure(
+              ValueComponent.HeaderValue,
+              LimitKind.ValueBytes,
+              limits.maxValueBytes,
+              valueLength,
+            ))
+          }
+          let selectedBytes = match move checkedAdd(nameLength, valueLength, ValueComponent.Headers) {
+            Result.Failure {error} => {
+              return Result.failResult<OwnedHeaders, ValueError>(move error)
+            }
+            Result.Success {value: size} => size
+          }
+          fieldBytes = match move checkedAdd(fieldBytes, selectedBytes, ValueComponent.Headers) {
+            Result.Failure {error} => {
+              return Result.failResult<OwnedHeaders, ValueError>(move error)
+            }
+            Result.Success {value: size} => size
+          }
+          if fieldBytes > limits.maxFieldBytes {
+            return Result.failResult<OwnedHeaders, ValueError>(limitFailure(
+              ValueComponent.Headers,
+              LimitKind.FieldBytes,
+              limits.maxFieldBytes,
+              fieldBytes,
+            ))
+          }
+        }
+      }
+    }
+    let recordBytes = match move usize.checkedMultiply(Layout.of<HeaderRecord>().bytes, count) {
+      Option.None => {
+        return Result.failResult<OwnedHeaders, ValueError>(sizeFailure(ValueComponent.Headers))
+      }
+      Option.Some {value} => value
+    }
+    let ownedBytes = match move checkedAdd(fieldBytes, recordBytes, ValueComponent.Headers) {
+      Result.Failure {error} => {
+        return Result.failResult<OwnedHeaders, ValueError>(move error)
+      }
+      Result.Success {value} => value
+    }
+    if ownedBytes > limits.maxOwnedBytes {
+      return Result.failResult<OwnedHeaders, ValueError>(limitFailure(
+        ValueComponent.Headers,
+        LimitKind.OwnedBytes,
+        limits.maxOwnedBytes,
+        ownedBytes,
+      ))
+    }
+    let mut payload = Bytes.make()
+    let reservedPayload = run Bytes.reserveExact(&mut payload, fieldBytes)
+    let mut records = Vector.make<HeaderRecord>()
+    let reservedRecords = run Vector.reserveExact<HeaderRecord>(&mut records, count)
+    iterator = Headers.getAll(self, name)
+    while true {
+      let next = HeaderIterator.next(&mut iterator)
+      match move next {
+        Option.None => { break }
+        Option.Some {value} => {
+          let selectedName = String.utf8Bytes(Header.name(&value))
+          let selectedValue = Header.value(&value)
+          let nameStart = Bytes.length(&payload)
+          let wroteName = run Bytes.append(&mut payload, selectedName)
+          let valueStart = Bytes.length(&payload)
+          let wroteValue = run Bytes.append(&mut payload, selectedValue)
+          let wroteRecord = run Vector.append<HeaderRecord>(&mut records, HeaderRecord {
+            nameStart: nameStart,
+            nameLength: selectedName.length,
+            valueStart: valueStart,
+            valueLength: selectedValue.length,
+          })
+        }
+      }
+    }
+    return Result.succeed<OwnedHeaders, ValueError>(OwnedHeaders {
+      payload: move payload,
+      records: move records,
+      fieldBytesValue: fieldBytes,
+      ownedBytesValue: ownedBytes,
+    })
+  }
+
   /// Computes the payload-plus-index bytes required by an owned copy without allocating.
   pub fn requiredOwnedBytes(self: &Self) -> Result<usize, ValueError> {
     let recordLayout = Layout.of<HeaderRecord>()

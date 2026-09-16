@@ -14,7 +14,7 @@ an overall deadline before dispatch. Cleanup closes without a flush or TLS shutd
 
 Import as `HttpClientNative` with `import silk.http_client_native as HttpClientNative`.
 
-Public declarations: 9.
+Public declarations: 16.
 
 <a id="declaration-73696c6b2f687474705f636c69656e745f6e61746976653a3a4e6174697665526f757465"></a>
 
@@ -96,6 +96,16 @@ Synchronous hostname resolution cannot honor the supplied overall deadline.
 
 <a id="declaration-73696c6b2f687474705f636c69656e745f6e61746976653a3a4e6174697665436c69656e744572726f723a3a76617269616e743a33"></a>
 
+### `TrustRequired`
+
+```silk
+NativeClientError.TrustRequired: NativeClientError
+```
+
+HTTPS owned acquisition requires one caller-prepared frozen trust snapshot.
+
+<a id="declaration-73696c6b2f687474705f636c69656e745f6e61746976653a3a4e6174697665436c69656e744572726f723a3a76617269616e743a34"></a>
+
 ### `AlpnMismatch`
 
 ```silk
@@ -104,7 +114,7 @@ NativeClientError.AlpnMismatch { error: ConnectionError }: NativeClientError
 
 Required HTTP/1.1 application protocol negotiation did not succeed.
 
-<a id="declaration-73696c6b2f687474705f636c69656e745f6e61746976653a3a4e6174697665436c69656e744572726f723a3a76617269616e743a333a3a6669656c643a30"></a>
+<a id="declaration-73696c6b2f687474705f636c69656e745f6e61746976653a3a4e6174697665436c69656e744572726f723a3a76617269616e743a343a3a6669656c643a30"></a>
 
 #### Field `error`
 
@@ -294,6 +304,16 @@ pub fn route<'life0>(self: &'life0 NativeTransport) -> NativeRoute
 
 Returns empty route metadata; this target cannot acquire a native connection.
 
+<a id="declaration-73696c6b2f687474705f636c69656e745f6e61746976653a3a4e6174697665526f75746550726f7669646572"></a>
+
+## `NativeRouteProvider`
+
+```silk
+pub struct NativeRouteProvider
+```
+
+The unavailable routed native provider type for an unsupported target.
+
 <a id="declaration-73696c6b2f687474705f636c69656e745f6e61746976653a3a696d706c656d656e746174696f6e3a31"></a>
 
 ## Implementation `HttpTransport for NativeTransport`
@@ -342,6 +362,112 @@ close = NativeTransport.impl@1.close
 
 Completes locally because no native resource exists.
 
+<a id="declaration-73696c6b2f687474705f636c69656e745f6e61746976653a3a696d706c656d656e746174696f6e3a32"></a>
+
+## Implementation `HttpTransport for NativeRouteProvider`
+
+```silk
+impl HttpTransport for NativeRouteProvider
+```
+
+<a id="declaration-73696c6b2f687474705f636c69656e745f6e61746976653a3a696d706c656d656e746174696f6e3a323a3a6f7065726174696f6e3a30"></a>
+
+### Operation `readSomeRaw`
+
+```silk
+readSomeRaw = NativeRouteProvider.impl@2.readSomeRaw
+```
+
+Rejects reads because this target has no native connection.
+
+<a id="declaration-73696c6b2f687474705f636c69656e745f6e61746976653a3a696d706c656d656e746174696f6e3a323a3a6f7065726174696f6e3a31"></a>
+
+### Operation `writeSomeRaw`
+
+```silk
+writeSomeRaw = NativeRouteProvider.impl@2.writeSomeRaw
+```
+
+Rejects writes because this target has no native connection.
+
+<a id="declaration-73696c6b2f687474705f636c69656e745f6e61746976653a3a696d706c656d656e746174696f6e3a323a3a6f7065726174696f6e3a32"></a>
+
+### Operation `flush`
+
+```silk
+flush = NativeRouteProvider.impl@2.flush
+```
+
+Rejects flushing because this target has no native connection.
+
+<a id="declaration-73696c6b2f687474705f636c69656e745f6e61746976653a3a696d706c656d656e746174696f6e3a323a3a6f7065726174696f6e3a33"></a>
+
+### Operation `close`
+
+```silk
+close = NativeRouteProvider.impl@2.close
+```
+
+Completes locally because no native resource exists.
+
+<a id="declaration-73696c6b2f687474705f636c69656e745f6e61746976653a3a696d706c656d656e746174696f6e3a33"></a>
+
+## Implementation `ByteDuplex for NativeRouteProvider`
+
+```silk
+impl ByteDuplex for NativeRouteProvider
+```
+
+<a id="declaration-73696c6b2f687474705f636c69656e745f6e61746976653a3a696d706c656d656e746174696f6e3a333a3a6f7065726174696f6e3a30"></a>
+
+### Operation `readSomeRaw`
+
+```silk
+readSomeRaw = NativeRouteProvider.impl@3.readSomeRaw
+```
+
+Rejects reads because this target has no native connection.
+
+<a id="declaration-73696c6b2f687474705f636c69656e745f6e61746976653a3a696d706c656d656e746174696f6e3a333a3a6f7065726174696f6e3a31"></a>
+
+### Operation `writeSomeRaw`
+
+```silk
+writeSomeRaw = NativeRouteProvider.impl@3.writeSomeRaw
+```
+
+Rejects writes because this target has no native connection.
+
+<a id="declaration-73696c6b2f687474705f636c69656e745f6e61746976653a3a696d706c656d656e746174696f6e3a333a3a6f7065726174696f6e3a32"></a>
+
+### Operation `flushRaw`
+
+```silk
+flushRaw = NativeRouteProvider.impl@3.flushRaw
+```
+
+Rejects flushing because this target has no native connection.
+
+<a id="declaration-73696c6b2f687474705f636c69656e745f6e61746976653a3a696d706c656d656e746174696f6e3a333a3a6f7065726174696f6e3a33"></a>
+
+### Operation `shutdownWriteRaw`
+
+```silk
+shutdownWriteRaw = NativeRouteProvider.impl@3.shutdownWriteRaw
+```
+
+Rejects write shutdown because this target has no native connection.
+
+<a id="declaration-73696c6b2f687474705f636c69656e745f6e61746976653a3a696d706c656d656e746174696f6e3a333a3a6f7065726174696f6e3a34"></a>
+
+### Operation `closeRaw`
+
+```silk
+closeRaw = NativeRouteProvider.impl@3.closeRaw
+```
+
+Completes locally because no native resource exists.
+
 <a id="declaration-73696c6b2f687474705f636c69656e745f6e61746976653a3a707265666c69676874"></a>
 
 ## `preflight`
@@ -351,6 +477,46 @@ pub fn preflight<'life0, 'life1>(origin: &'life0 silk/http_origin.Origin, option
 ```
 
 Returns the typed unsupported-target result before allocation or provider dispatch.
+
+<a id="declaration-73696c6b2f687474705f636c69656e745f6e61746976653a3a707265666c6967687450726f7879526f757465"></a>
+
+## `preflightProxyRoute`
+
+```silk
+pub fn preflightProxyRoute<'configuration, 'life1, 'life2>(route: &'life1 silk/http_proxy.Route<'configuration>, options: &'life2 silk/http_client_native.Options) -> silk/result.Result<silk/http_origin.Origin, silk/http_client_native.NativeClientError | silk/http_proxy.ProxyError>
+```
+
+Returns unsupported-target before route inspection or provider dispatch.
+
+<a id="declaration-73696c6b2f687474705f636c69656e745f6e61746976653a3a616371756972654f776e6564"></a>
+
+## `acquireOwned`
+
+```silk
+pub effect<'static> fn acquireOwned(origin: Origin, options: Options, limits: Limits, preparedTrust: silk/option.Option<silk/trust_snapshot.TrustSnapshot>, acquisitionDeadline: silk/option.Option<silk/system_clock.Instant>) -> silk/http_client.Connection<silk/http_client_native.NativeTransport> ! NativeClientError
+```
+
+Rejects owned native HTTP acquisition before inspecting inputs on this target.
+
+<a id="declaration-73696c6b2f687474705f636c69656e745f6e61746976653a3a61646d6974556e6978526f757465"></a>
+
+## `admitUnixRoute`
+
+```silk
+pub effect<'life0> fn admitUnixRoute<'life0>(path: &'life0 [u8]) -> NativeRoute ! NativeClientError
+```
+
+Rejects Unix route admission before inspecting the path on an unsupported target.
+
+<a id="declaration-73696c6b2f687474705f636c69656e745f6e61746976653a3a61637175697265556e69784f776e6564"></a>
+
+## `acquireUnixOwned`
+
+```silk
+pub effect<'life0> fn acquireUnixOwned<'life0>(path: &'life0 [u8], origin: Origin, options: Options, limits: Limits, preparedTrust: silk/option.Option<silk/trust_snapshot.TrustSnapshot>, acquisitionDeadline: silk/option.Option<silk/system_clock.Instant>) -> silk/http_client.Connection<silk/http_client_native.NativeTransport> ! NativeClientError
+```
+
+Rejects owned Unix HTTP acquisition before inspecting inputs on this target.
 
 <a id="declaration-73696c6b2f687474705f636c69656e745f6e61746976653a3a77697468436f6e6e656374696f6e"></a>
 
@@ -371,6 +537,61 @@ pub effect<'env> fn withUnixConnection<A, E, ?R, H: 'env, 'life4: 'env, 'env>(pa
 ```
 
 Rejects Unix HTTP acquisition before allocation or provider dispatch on this target.
+
+<a id="declaration-73696c6b2f687474705f636c69656e745f6e61746976653a3a7769746850726f7879526f757465"></a>
+
+## `withProxyRoute`
+
+```silk
+pub effect<'env> fn withProxyRoute<'configuration: 'env, A, E, ?R, H: 'env, 'env>(route: silk/http_proxy.Route<'configuration>, options: Options, limits: Limits, preparedTrust: silk/option.Option<silk/trust_snapshot.TrustSnapshot>, handler: H) -> A ! E | NativeClientError ? R where R in Without<R, &ByteDuplex>, R in Without<R, &HttpTransport>
+```
+
+Rejects routed native acquisition before allocation or provider dispatch on this target.
+
+<a id="declaration-73696c6b2f687474705f636c69656e745f6e61746976653a3a4e61746976655265646972656374436c69656e74"></a>
+
+## `NativeRedirectClient`
+
+```silk
+pub struct NativeRedirectClient<'configuration, 'policy, A, HandlerError, ?HandlerRequirements>
+```
+
+Rebuildable native route acquisition for bounded redirect operations.
+
+### Details
+
+The initial sealed route retains the immutable proxy configuration. On supported native
+targets, every attempt recomputes policy for its current URI, completes method, target, header,
+and native-route preflight before destination contact, and replaces the stored option deadline
+with the operation's unchanged absolute deadline. Secure attempts load a fresh trust snapshot
+before acquisition; tunneled TLS continues to authenticate the original origin through
+[`withProxyRoute`](#declaration-73696c6b2f687474705f636c69656e745f6e61746976653a3a7769746850726f7879526f757465). Other targets fail with `UnsupportedTarget` before inspecting the request.
+
+<a id="declaration-73696c6b2f687474705f636c69656e745f6e61746976653a3a4e61746976655265646972656374436c69656e742e6d616b65"></a>
+
+### Associated function `NativeRedirectClient.make`
+
+```silk
+pub fn make<'configuration, 'policy, A, HandlerError, ?HandlerRequirements>(route: silk/http_proxy.Route<'configuration>, options: Options, limits: Limits) -> silk/http_client_native.NativeRedirectClient<'configuration, 'policy, A, HandlerError, ? HandlerRequirements>
+```
+
+Creates a reusable redirect attempt client from one policy-selected route.
+
+<a id="declaration-73696c6b2f687474705f636c69656e745f6e61746976653a3a696d706c656d656e746174696f6e3a35"></a>
+
+## Implementation `silk/http_redirect.AttemptClient<'policy, silk/http_client_native.NativeRouteProvider, A, HandlerError, silk/http_client_native.NativeClientError, ? , ? HandlerRequirements> for silk/http_client_native.NativeRedirectClient<'configuration, 'policy, A, HandlerError, ? HandlerRequirements>`
+
+```silk
+impl silk/http_redirect.AttemptClient<'policy, silk/http_client_native.NativeRouteProvider, A, HandlerError, silk/http_client_native.NativeClientError, ? , ? HandlerRequirements> for silk/http_client_native.NativeRedirectClient<'configuration, 'policy, A, HandlerError, ? HandlerRequirements>
+```
+
+<a id="declaration-73696c6b2f687474705f636c69656e745f6e61746976653a3a696d706c656d656e746174696f6e3a353a3a6f7065726174696f6e3a30"></a>
+
+### Operation `withAttempt`
+
+```silk
+withAttempt = NativeRedirectClient.withAttemptUnsupported
+```
 
 <a id="declaration-73696c6b2f687474705f636c69656e745f6e61746976653a3a726f757465"></a>
 

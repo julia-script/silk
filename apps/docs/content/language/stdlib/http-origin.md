@@ -96,6 +96,16 @@ pub struct Origin
 
 An owned HTTP authority and secure-transport selection.
 
+<a id="declaration-73696c6b2f687474705f6f726967696e3a3a4f726967696e2e6d616b65"></a>
+
+### Associated function `Origin.make`
+
+```silk
+pub fn make(host: Host, port: Port, secure: bool) -> silk/result.Result<silk/http_origin.Origin, silk/http_origin.OriginError>
+```
+
+Checks a host, a nonzero port, and an explicit transport-security selection.
+
 <a id="declaration-73696c6b2f687474705f6f726967696e3a3a4f726967696e2e66726f6d557269"></a>
 
 ### Associated function `Origin.fromUri`
@@ -160,6 +170,20 @@ pub fn authorityInto<'life0, 'life1>(self: &'life0 Origin, output: &'life1 mut [
 ```
 
 Writes the normalized authority and leaves output unchanged when capacity is insufficient.
+
+<a id="declaration-73696c6b2f687474705f6f726967696e3a3a4f726967696e2e617574686f7269747957697468506f7274496e746f"></a>
+
+### Method `Origin.authorityWithPortInto`
+
+```silk
+pub fn authorityWithPortInto<'life0, 'life1>(self: &'life0 Origin, output: &'life1 mut [u8]) -> silk/result.Result<usize, silk/http_origin.OriginError>
+```
+
+Writes the normalized authority with its effective port, including a default port.
+
+#### Details
+
+A capacity failure leaves `output` unchanged.
 
 <a id="declaration-73696c6b2f687474705f6f726967696e3a3a4f726967696e2e6d617463686573417574686f72697479"></a>
 

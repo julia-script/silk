@@ -226,6 +226,8 @@ jobs:
           --reporter=default --reporter=json
           --outputFile.json=compiler-shard-${{ matrix.shard }}.json
         env:
+          # The composite HTTP witness retains one full provider graph; its cold worker exceeds 4 GiB.
+          NODE_OPTIONS: --max-old-space-size=6144
           SILK_VERIFY_CORPUS_LIMIT: ${{ github.event_name == 'pull_request' && '2' || '' }}
       - uses: actions/upload-artifact@v4
         if: always()

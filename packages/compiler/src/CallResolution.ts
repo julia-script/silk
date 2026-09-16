@@ -132,6 +132,7 @@ export function analyzeArguments(
   const first = identifiers.at(0)
   const second = identifiers.at(1)
   let target: SourceCallable | undefined
+  let enclosingTypeParameters: ReadonlyArray<Type.Parameter> = Object.freeze([])
   let builtinParameters: ReadonlyArray<SemanticType> = Object.freeze([])
   let builtinTypeParameters: ReadonlyArray<Type.Parameter> = Object.freeze([])
   let builtinLifetimes: ReadonlyArray<Lifetime.Bound> = Object.freeze([])
@@ -183,6 +184,9 @@ export function analyzeArguments(
       qualifier.declaration._tag === 'ServiceDeclaration'
     ) {
       target = serviceOperation(qualifier.declaration, memberSpelling)
+      enclosingTypeParameters = qualifier.declaration.typeParameters.map(
+        (parameter) => parameter.type,
+      )
     } else if (
       qualifier._tag === 'Resolved' &&
       qualifier.declaration._tag === 'InterfaceDeclaration'
@@ -213,14 +217,16 @@ export function analyzeArguments(
       )
     }
   }
-  const declaredTypeParameters =
-    target?.typeParameters.map((parameter) => parameter.type) ?? Object.freeze([])
+  const declaredTypeParameters = [
+    ...enclosingTypeParameters,
+    ...(target?.typeParameters.map((parameter) => parameter.type) ?? []),
+  ]
   const explicitTypes = callTypeArguments?.types
   const explicitBuiltinSubstitution =
     callTypeArguments?.explicit === true &&
     explicitTypes !== undefined &&
     explicitTypes.length <= builtinTypeParameters.length
-      ? TypeInference.prefixSubstitution(builtinTypeParameters, explicitTypes)
+      ? explicitArgumentSubstitution(builtinTypeParameters, callTypeArguments.facts)
       : undefined
   const builtinSubstitution = selectedCallLifetimes(
     call,
@@ -233,7 +239,7 @@ export function analyzeArguments(
   // exactly as they are when nothing was written.
   const explicitSubstitution =
     callTypeArguments?.explicit === true && explicitTypes !== undefined
-      ? TypeInference.prefixSubstitution(declaredTypeParameters, explicitTypes)
+      ? explicitArgumentSubstitution(declaredTypeParameters, callTypeArguments.facts)
       : undefined
   const substitution =
     target === undefined
@@ -308,6 +314,83 @@ const isTypeArgumentNode = (element: SyntaxTree.Element): element is SyntaxTree.
     element.kind === 'ParenthesizedType' ||
     element.kind === 'UnionType')
 
+const requirementArgumentOfType = (
+  type: Type.Type,
+  role: RequirementRow.Role,
+): Type.RequirementRowArgument | undefined => {
+  if (Type.isParameter(type) && type.kind === 'RequirementRow')
+    return Type.requirementRowArgument([], [type])
+  if (Type.isNever(type)) return Type.requirementRowArgument([])
+  if (
+    Type.isReference(type) &&
+    (Type.isNominal(type.target) || (Type.isParameter(type.target) && type.target.kind === 'Value'))
+  )
+    return Type.requirementRowArgument([
+      Object.freeze({ capability: type.target, role, access: type.access }),
+    ])
+  if (Type.isUnion(type)) {
+    const members = type.members.map((member) => requirementArgumentOfType(member, role))
+    if (members.every((member): member is Type.RequirementRowArgument => member !== undefined))
+      return Type.requirementRowArgument(
+        members.flatMap(Type.requirementMembers),
+        members.flatMap(Type.requirementRowParameters),
+      )
+    return undefined
+  }
+  if (Type.isNominal(type) || (Type.isParameter(type) && type.kind === 'Value'))
+    return Type.requirementRowArgument([
+      Object.freeze({ capability: type, role, access: 'Shared' }),
+    ])
+  return undefined
+}
+
+const explicitSourceCallTypeParameters = (
+  source: SourceFile.SourceFile,
+  call: SyntaxTree.Node,
+  resolution: ResolutionContext,
+): ReadonlyArray<Type.Parameter> => {
+  const identifiers = callReferenceTokens(call)
+  const first = identifiers.at(0)
+  const second = identifiers.at(1)
+  let target: SourceCallable | undefined
+  if (first !== undefined && second === undefined) {
+    const resolved = NameResolution.lookup(
+      resolution.scope,
+      resolution.index,
+      spelling(source, first),
+    )
+    if (resolved._tag === 'Resolved' && resolved.declaration._tag === 'FunctionDeclaration')
+      target = resolved.declaration
+  } else if (first !== undefined && second !== undefined) {
+    const qualifier = NameResolution.lookup(
+      resolution.scope,
+      resolution.index,
+      spelling(source, first),
+    )
+    const member = spelling(source, second)
+    if (qualifier._tag === 'Namespace') {
+      const selected = DeclarationFacts.lookup(resolution.index, qualifier.module, member)
+      if (selected._tag === 'Resolved' && selected.declaration._tag === 'FunctionDeclaration')
+        target = selected.declaration
+    } else if (qualifier._tag === 'Resolved') {
+      const associated = NameResolution.lookupAssociated(
+        resolution.index,
+        qualifier.declaration,
+        member,
+        resolution.scope.module,
+      )
+      if (associated._tag === 'Inherent') target = associated.declaration
+      else if (qualifier.declaration._tag === 'ServiceDeclaration') {
+        target = serviceOperation(qualifier.declaration, member)
+        if (target !== undefined)
+          return DeclarationFacts.callableContract(target, qualifier.declaration.typeParameters)
+            .binders
+      }
+    }
+  }
+  return target?.typeParameters.map((parameter) => parameter.type) ?? Object.freeze([])
+}
+
 /**
  * The type arguments an applied qualifier supplies ahead of the call's own list: for an inherent
  * member `Option<i32>.map<i64>(...)` the owner's `<i32>` binds the owner binders, so the complete
@@ -355,7 +438,16 @@ export const analyzeCallTypeArguments = (
     ...leading,
     ...(list === undefined ? [] : list.children.filter(isTypeArgumentNode)),
   ]
+  const targetParameters = explicitSourceCallTypeParameters(source, call, resolution)
+  const lifetimeParameters = targetParameters.filter((parameter) => parameter.kind === 'Lifetime')
+  const ordinaryParameters = targetParameters.filter((parameter) => parameter.kind !== 'Lifetime')
+  let lifetimeOrdinal = 0
+  let ordinaryOrdinal = 0
   const analyzed = nodes.map((node, ordinal) => {
+    const targetParameter =
+      node.kind === 'LifetimeType'
+        ? lifetimeParameters.at(lifetimeOrdinal++)
+        : ordinaryParameters.at(ordinaryOrdinal++)
     const selectorNodes =
       node.kind === 'RequirementSelector'
         ? node.children.filter(SyntaxTree.isNode)
@@ -464,6 +556,48 @@ export const analyzeCallTypeArguments = (
       true,
       lifetimeContext,
     )
+    if (targetParameter?.kind === 'RequirementRow' && raw.fact._tag === 'Union') {
+      const members = raw.fact.members.map((member) =>
+        DeclarationResolution.resolveTypeFact(resolution.index, source.id, member, (module, path) =>
+          NameResolution.resolveType(nameResolution, resolution.index, module, path),
+        ),
+      )
+      const arguments_ = members.map((member) =>
+        member.fact._tag === 'Resolved'
+          ? requirementArgumentOfType(
+              member.fact.type,
+              requirementRole ?? RequirementRow.defaultRole,
+            )
+          : undefined,
+      )
+      const argument = arguments_.every(
+        (member): member is Type.RequirementRowArgument => member !== undefined,
+      )
+        ? Type.requirementRowArgument(
+            arguments_.flatMap(Type.requirementMembers),
+            arguments_.flatMap(Type.requirementRowParameters),
+          )
+        : undefined
+      const diagnostics = Diagnostic.merge(
+        raw.diagnostics,
+        ...members.map((member) => member.diagnostics),
+        roleDiagnostics,
+      )
+      return Object.freeze({
+        fact: Object.freeze({
+          _tag: 'TypeArgument' as const,
+          ordinal,
+          syntax: node,
+          declared: Object.freeze({
+            ...raw.fact,
+            members: Object.freeze(members.map((member) => member.fact)),
+          }),
+          ...(requirementRole === undefined ? {} : { requirementRole }),
+          ...(argument === undefined ? {} : { type: argument }),
+        }),
+        diagnostics,
+      })
+    }
     const resolved = DeclarationResolution.resolveTypeFact(
       resolution.index,
       source.id,
@@ -647,6 +781,8 @@ export const genericArgumentOfTypeArgument = (
   if (parameter.kind === 'Lifetime')
     return Lifetime.isLifetime(writtenType) ? writtenType : undefined
   if (Lifetime.isLifetime(writtenType)) return undefined
+  if (Type.isRequirementRowArgument(writtenType))
+    return parameter.kind === 'RequirementRow' ? writtenType : undefined
   if (parameter.kind === 'Value') return Type.isTypeArgument(writtenType) ? writtenType : undefined
   if (parameter.kind === 'CallableRepresentation' || parameter.kind === 'EffectRepresentation') {
     if (
@@ -662,33 +798,30 @@ export const genericArgumentOfTypeArgument = (
       return writtenType.representation.argument
     return undefined
   }
-  if (Type.isParameter(writtenType) && writtenType.kind === 'RequirementRow')
-    return Type.requirementRowArgument([], [writtenType])
-  if (Type.isNever(writtenType)) return Type.requirementRowArgument([])
-  if (
-    !Type.isNominal(writtenType) &&
-    !(Type.isParameter(writtenType) && writtenType.kind === 'Value')
-  )
-    return undefined
-  return Type.isParameter(writtenType)
-    ? Type.requirementRowArgumentFromRow(
-        RowAlgebra.singleton(
-          Type.requirementRowPolicy(),
-          Type.requirementMemberShape(
-            writtenType,
-            'Shared',
-            fact.requirementRole ?? RequirementRow.defaultRole,
-          ),
-          fact.syntax.span,
-        ),
-      )
-    : Type.requirementRowArgument([
-        Object.freeze({
-          capability: writtenType,
-          role: fact.requirementRole ?? RequirementRow.defaultRole,
-          access: 'Shared',
-        }),
-      ])
+  return requirementArgumentOfType(writtenType, fact.requirementRole ?? RequirementRow.defaultRole)
+}
+
+/** Normalizes written row and representation arguments before they contextualize value arguments. */
+const explicitArgumentSubstitution = (
+  parameters: ReadonlyArray<Type.Parameter>,
+  facts: ReadonlyArray<TypeArgumentFact>,
+): Type.Substitution | undefined => {
+  const lifetimes = parameters.filter((parameter) => parameter.kind === 'Lifetime')
+  const ordinary = parameters.filter((parameter) => parameter.kind !== 'Lifetime')
+  let lifetimeOrdinal = 0
+  let ordinaryOrdinal = 0
+  const arguments_: Array<Type.GenericArgument> = []
+  for (const fact of facts) {
+    const parameter =
+      fact.type !== undefined && Lifetime.isLifetime(fact.type)
+        ? lifetimes.at(lifetimeOrdinal++)
+        : ordinary.at(ordinaryOrdinal++)
+    const argument =
+      parameter === undefined ? undefined : genericArgumentOfTypeArgument(parameter, fact)
+    if (argument === undefined) return undefined
+    arguments_.push(argument)
+  }
+  return TypeInference.prefixSubstitution(parameters, arguments_)
 }
 
 interface SelectedCallLifetimes {
@@ -843,7 +976,8 @@ export const seededSpecialization = (
     if (argument === undefined) {
       let suppliedKind: Type.ParameterKind = 'Value'
       if (Lifetime.isLifetime(writtenType)) suppliedKind = 'Lifetime'
-      else if (Type.isNominal(writtenType)) suppliedKind = 'RequirementRow'
+      else if (Type.isRequirementRowArgument(writtenType) || Type.isNominal(writtenType))
+        suppliedKind = 'RequirementRow'
       conflicts.push(
         Object.freeze({
           diagnostic: Diagnostic.genericParameterKindMismatch(
@@ -948,6 +1082,51 @@ interface KnownProviderBoundInference {
 const sameNominalDeclaration = (left: Type.Nominal, right: Type.Nominal): boolean =>
   left.module === right.module && left.name === right.name && left.sealed === right.sealed
 
+const openParameterKeys = (type: Type.Type): ReadonlyArray<string> => [
+  ...Type.parameters(type).map(Type.key),
+  ...Type.freeLifetimes(type)
+    .filter((lifetime) => lifetime._tag === 'BoundLifetime')
+    .map(Lifetime.key),
+]
+
+// The provider fixes only its own binders. A source conformance may also bind parameters through
+// its capability head; instantiate those from already-known bound arguments before using the
+// candidate to infer the call's remaining arguments. Never leak a conformance-owned binder into
+// the caller or use the expected result to choose a provider.
+const instantiateKnownProviderContract = (
+  candidate: Type.Nominal,
+  pattern: Type.Nominal,
+  provider: Type.Type,
+  callBinders: ReadonlySet<string>,
+): Type.Nominal | undefined => {
+  const providerParameters = new Set(openParameterKeys(provider))
+  const binders = new Set(
+    openParameterKeys(candidate).filter((key) => !providerParameters.has(key)),
+  )
+  if (binders.size === 0) return candidate
+  const inferred = new Map<string, Type.GenericArgument>()
+  for (const [ordinal, argument] of pattern.arguments.entries()) {
+    const supplied = candidate.arguments.at(ordinal)
+    if (supplied === undefined) return undefined
+    const wanted = Type.nominal(pattern.module, pattern.name, [argument])
+    if (openParameterKeys(wanted).some((key) => callBinders.has(key))) continue
+    if (
+      !TypeInference.inferOpenGenericArguments(
+        Type.nominal(candidate.module, candidate.name, [supplied]),
+        wanted,
+        inferred,
+        binders,
+      ).matches
+    )
+      return undefined
+  }
+  const instantiated = Type.substitute(candidate, inferred)
+  return Type.isNominal(instantiated) &&
+    !openParameterKeys(instantiated).some((key) => binders.has(key))
+    ? instantiated
+    : undefined
+}
+
 /**
  * Fills call binders from direct interface bounds after operands have fixed their provider.
  *
@@ -992,7 +1171,16 @@ const inferKnownProviderBounds = (
           resolution.scope.module,
           provider,
           caller,
-        ).filter((candidate) => sameNominalDeclaration(candidate, pattern))
+        ).flatMap((candidate) => {
+          if (!sameNominalDeclaration(candidate, pattern)) return []
+          const instantiated = instantiateKnownProviderContract(
+            candidate,
+            pattern,
+            provider,
+            callBinders,
+          )
+          return instantiated === undefined ? [] : [instantiated]
+        })
         const matching = candidates.flatMap((candidate) => {
           const trial = new Map(substitution)
           return TypeInference.inferOpenGenericArguments(pattern, candidate, trial, callBinders)
@@ -1009,8 +1197,11 @@ const inferKnownProviderBounds = (
             (candidate) =>
               Type.equals(candidate.capability, selected.candidate) &&
               caller !== undefined &&
-              candidate.requirements.every((requirement) =>
-                boundAssumedBy(caller, requirement.provider, requirement.capability),
+              ConformanceProof.assumedConditionalConformance(
+                resolution.index,
+                provider,
+                candidate.capability,
+                caller,
               ),
           )
           const selectedSymbolic = symbolic.length === 1 ? symbolic.at(0) : undefined
@@ -1199,10 +1390,16 @@ export const solveCallableConstraints = (
       continue
     }
     const selectedArgument = substitution.get(selectedKey)
+    const firstWanted = wanted.at(0)
+    const explicitSelection =
+      firstWanted?._tag === 'ProviderSelectionConstraint' &&
+      RowAlgebra.concretize(Type.requirementRowPolicy(), firstWanted.selected)._tag === 'Concrete'
+        ? firstWanted.selected
+        : undefined
     const selected =
       selectedArgument !== undefined && Type.isRequirementRowArgument(selectedArgument)
         ? selectedArgument.row
-        : undefined
+        : explicitSelection
     const relations = wanted.flatMap((constraint, ordinal) =>
       constraint._tag === 'ProviderSelectionConstraint'
         ? [
@@ -1223,7 +1420,7 @@ export const solveCallableConstraints = (
           initiator: { kind: 'CallConstraint', key: selectedKey, span },
         },
         match: (provider: Type.Type, capability: Type.Nominal) =>
-          ConformanceProof.providerMatch(resolution.index, provider, capability),
+          ConformanceProof.providerMatch(resolution.index, provider, capability, caller),
       }),
     })
     if (solved._tag === 'Rejected') {
@@ -1262,7 +1459,7 @@ export const solveCallableConstraints = (
   // provider selectors are visible to structural proofs.
   for (const entry of checked) {
     const wanted = Constraint.substitute(entry.constraint, substitution)
-    if (givens.some((given) => Constraint.key(given) === Constraint.key(wanted))) {
+    if (Constraint.isImplied(wanted, givens)) {
       evidence.push(Constraint.assumed(wanted, substitution))
       continue
     }

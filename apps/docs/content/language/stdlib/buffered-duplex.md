@@ -10,7 +10,8 @@ One scoped buffered session over an exclusive concrete ByteDuplex provider.
 
 `withBuffered` owns separate fixed input and output state for the callback and terminally closes
 the provider after success, typed failure, or structured cancellation/interruption. Fatal traps
-bypass finalizers and Drop. Release intentionally performs no implicit flush.
+bypass finalizers and Drop. Release intentionally performs no implicit flush. [`close`](#declaration-73696c6b2f62756666657265645f6475706c65783a3a42756666657265644475706c65782e636c6f7365) permits
+an earlier terminal close and abandons all buffered bytes without a flush.
 
 Import as `BufferedDuplex` with `import silk.buffered_duplex { BufferedDuplex }`.
 
@@ -44,7 +45,7 @@ One callback-scoped buffered session owning direction states and borrowing a pri
 pub fn peek<'transport, P, 'a>(self: &'a BufferedDuplex<'transport, P>) -> &'a [u8]
 ```
 
-Borrows the initialized unread prefix.
+Borrows the initialized unread prefix, or an empty slice after terminal close.
 
 <a id="declaration-73696c6b2f62756666657265645f6475706c65783a3a42756666657265644475706c65782e756e72656164"></a>
 
@@ -54,7 +55,7 @@ Borrows the initialized unread prefix.
 pub fn unread<'transport, P, 'life2>(self: &'life2 BufferedDuplex<'transport, P>) -> usize
 ```
 
-Returns the unread input count.
+Returns the unread input count, or zero after terminal close.
 
 <a id="declaration-73696c6b2f62756666657265645f6475706c65783a3a42756666657265644475706c65782e70656e64696e67"></a>
 
@@ -64,7 +65,7 @@ Returns the unread input count.
 pub fn pending<'transport, P, 'life2>(self: &'life2 BufferedDuplex<'transport, P>) -> usize
 ```
 
-Returns the pending output count.
+Returns the pending output count, or zero after terminal close.
 
 <a id="declaration-73696c6b2f62756666657265645f6475706c65783a3a42756666657265644475706c65782e636f6e73756d65"></a>
 
@@ -191,6 +192,22 @@ Flushes pending output and then closes only the provider's write direction.
 A successful shutdown keeps input available but rejects later output operations. Any typed
 transport failure terminalizes the complete session. Structured cancellation is handled by
 the enclosing buffered scope, which terminally closes the retained provider.
+
+<a id="declaration-73696c6b2f62756666657265645f6475706c65783a3a42756666657265644475706c65782e636c6f7365"></a>
+
+### Method `BufferedDuplex.close`
+
+```silk
+pub effect<'env> fn close<'transport: 'env, P: 'env, 'life2: 'env, 'env>(self: &'life2 mut BufferedDuplex<'transport, P>) -> () ! ByteIoError where &mut P provides &ByteDuplex from &mut ByteDuplex
+```
+
+Terminally closes the provider once and abandons all buffered bytes without a flush.
+
+#### Details
+
+The operation marks the complete session terminal before it calls the provider. `peek`,
+`unread`, and `pending` report no buffered bytes after the call starts. Repeated calls succeed
+without another provider close, including after the first call returns `ByteIoError`.
 
 <a id="declaration-73696c6b2f62756666657265645f6475706c65783a3a4275666665726564436f6e74657874"></a>
 

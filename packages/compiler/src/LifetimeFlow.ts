@@ -168,8 +168,8 @@ export const analyze = (
   statements: ReadonlyArray<Elaboration.StatementFact>,
   body: BodyLifetime.BodyLifetime,
   index: DeclarationIndex.Index,
+  outlivesScope: TypeOutlives.Context = TypeOutlives.context(index.modules),
 ): LifetimeFlow => {
-  const outlivesScope = TypeOutlives.context(index.modules)
   const applicationDiagnostics = new Map<string, Diagnostic.Diagnostic>()
   const entries = [...body.points]
   const root = entries.at(0)?.[0] ?? declaration.syntax
@@ -389,6 +389,12 @@ export const analyze = (
     )
     const point = body.points.get(expression.syntax)
     if (expression.type._tag === 'Available') {
+      const value = Type.isRepresented(expression.type.type)
+        ? expression.type.type.contract
+        : expression.type.type
+      const inputLifetimes = Type.isCallable(value)
+        ? TypeOutlives.inputLifetimes(value.parameters, outlivesScope)
+        : undefined
       for (const nominal of Type.nominals(expression.type.type)) {
         const failures = TypeOutlives.application(nominal, outlivesScope, (longer, shorter) => {
           if (Lifetime.outlives(outlivesScope.assumptions, longer, shorter)) return true
@@ -410,9 +416,6 @@ export const analyze = (
         for (const failure of failures) {
           // Nominals below an invocation binder are validated under the callable's declared
           // preconditions. Free lifetimes and captured values retain the ordinary scope checks.
-          const value = Type.isRepresented(expression.type.type)
-            ? expression.type.type.contract
-            : expression.type.type
           if (
             Type.isCallable(value) &&
             Lifetime.atoms(failure.required).some((region) =>
@@ -422,9 +425,16 @@ export const analyze = (
             Type.satisfiesOutlives(
               failure.argument,
               failure.required,
-              value.typeOutlives,
+              [...value.typeOutlives, ...(inputLifetimes?.typeOutlives ?? [])],
               (longer, shorter) =>
-                Lifetime.outlives(Lifetime.assumptions(value.lifetimeBounds), longer, shorter),
+                Lifetime.outlives(
+                  Lifetime.assumptions([
+                    ...value.lifetimeBounds,
+                    ...(inputLifetimes?.lifetimeBounds ?? []),
+                  ]),
+                  longer,
+                  shorter,
+                ),
             )
           )
             continue

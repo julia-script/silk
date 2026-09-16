@@ -73,6 +73,25 @@ pub fn main() -> i32 { return 0 }`)
   }),
 )
 
+it.effect('allows helper loans consumed before the local-shared callback returns', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* AnalysisFixture.frontend(
+      'local-shared-lifecycle/helper-loan',
+      ascii(`struct Pair { first: i32 second: i32 }
+fn view<'a>(value: &'a mut Pair) -> &'a mut Pair { return move value }
+fn selected(value: &mut Pair) -> i32 {
+  let borrowed = view(move value)
+  return borrowed.first
+}
+fn fallback() -> i32 { return 0 }
+unsafe fn access(core: &Intrinsic.SharedCore<Pair>) -> i32 {
+  return Intrinsic.sharedWithMut<Pair, i32>(core, selected, fallback)
+}`),
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+  }),
+)
+
 it('classifies inexpressible local-shared escape containers at the ownership-fact tier', () => {
   const narrowed = Type.slice('Shared', 'i32', Lifetime.staticLifetime)
   const genericAggregate = Type.nominal('test', 'Box', [narrowed])

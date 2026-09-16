@@ -415,7 +415,7 @@ and structured cancellation close an unpublished provider exactly once.
 ## `withClient`
 
 ```silk
-pub effect<'env1> fn withClient<'env: 'env1, A, E, ?CallbackRequirements, P: 'env1, 'life5: 'env1, 'life6: 'env1, 'env1>(provider: P, config: &'life5 silk/tls_client.ClientConfig<'life6>, trust: TrustSnapshot, options: ConnectionOptions, callback: for<'call> once fn<'env>(&'call mut silk/tls_connection.OwnedConnection<P>) -> once Effect<'call; A ! E ? CallbackRequirements>) -> A ! E | ConnectionError | OutOfMemoryError ? CallbackRequirements | &mut SystemClock | &mut MonotonicClock | &mut Allocator | &mut Random where &mut P provides &ByteDuplex from &mut ByteDuplex, &mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock | &mut Allocator | &mut Random, CallbackRequirements in Without<CallbackRequirements, &ByteDuplex>
+pub effect<'env1> fn withClient<'env: 'env1, A, E, ?CallbackRequirements, P: 'env1, 'life5: 'env1, 'life6: 'env1, 'env1>(provider: P, config: &'life5 silk/tls_client.ClientConfig<'life6>, trust: TrustSnapshot, options: ConnectionOptions, callback: for<'call> once fn<'env>(&'call mut silk/tls_connection.OwnedConnection<P>) -> once Effect<'call & 'env; A ! E ? CallbackRequirements>) -> A ! E | ConnectionError | OutOfMemoryError ? CallbackRequirements | &mut SystemClock | &mut MonotonicClock | &mut Allocator | &mut Random where &mut P provides &ByteDuplex from &mut ByteDuplex, &mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock | &mut Allocator | &mut Random, CallbackRequirements in Without<CallbackRequirements, &ByteDuplex>
 ```
 
 Authenticates, lends, and terminally closes the same authoritative owned connection.

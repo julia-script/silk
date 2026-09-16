@@ -12,18 +12,21 @@ const binder = (
   representationBound?: Type.RepresentationBound,
 ): Type.Parameter => Type.parameter(owner, ordinal, name, kind, representationBound)
 
-it('retains identical open failure-row evidence in a nominal witness receiver', () => {
+it('retains identical open failure and requirement rows in a nominal witness receiver', () => {
   const failure = binder(0, 'E')
+  const requirements = binder(1, 'R', 'RequirementRow')
+  const row = Type.requirementRowArgument([], [requirements])
   const receiver = Type.nominal('witness-inference', 'Entry', [
     Type.effect(Type.unit, [failure], {
       environment: Lifetime.staticLifetime,
       lifetimeBinders: [],
     }),
+    row,
   ])
   const evidence = { label: 'receiver', pattern: receiver, actual: receiver }
-  const inferred = InterfaceWitnessInference.infer([failure], [evidence])
+  const inferred = InterfaceWitnessInference.infer([failure, requirements], [evidence])
   assert.strictEqual(inferred._tag, 'Inferred')
-  if (inferred._tag === 'Inferred') assert.deepEqual(inferred.arguments, [failure])
+  if (inferred._tag === 'Inferred') assert.deepEqual(inferred.arguments, [failure, row])
 
   const conflicting = InterfaceWitnessInference.infer(
     [failure],
@@ -32,6 +35,21 @@ it('retains identical open failure-row evidence in a nominal witness receiver', 
   assert.strictEqual(conflicting._tag, 'Failed')
   if (conflicting._tag === 'Failed')
     assert.strictEqual(conflicting.problem._tag, 'ConflictingBinder')
+
+  const conflictingRow = InterfaceWitnessInference.infer(
+    [requirements],
+    [
+      {
+        label: 'earlier row',
+        pattern: Type.nominal('witness-inference', 'Rows', [row]),
+        actual: Type.nominal('witness-inference', 'Rows', [Type.requirementRowArgument([])]),
+      },
+      evidence,
+    ],
+  )
+  assert.strictEqual(conflictingRow._tag, 'Failed')
+  if (conflictingRow._tag === 'Failed')
+    assert.strictEqual(conflictingRow.problem._tag, 'ConflictingBinder')
 })
 
 it('infers type, row, callable, and Effect representation binders in declaration order', () => {

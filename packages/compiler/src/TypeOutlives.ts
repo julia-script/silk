@@ -9,6 +9,7 @@ export interface Context {
   readonly parameters: ReadonlyMap<string, DeclarationFacts.TypeParameterFact>
   readonly parameterBounds: ReadonlyMap<string, ReadonlyArray<Lifetime.Lifetime>>
   readonly nominals: ReadonlyMap<string, ReadonlyArray<DeclarationFacts.TypeParameterFact>>
+  readonly contractNominals: ReadonlySet<string>
   readonly work: {
     readonly declarations: number
     readonly headers: number
@@ -23,6 +24,20 @@ export type Prove = (longer: Lifetime.Lifetime, shorter: Lifetime.Lifetime) => b
 const contexts = new WeakMap<ReadonlyArray<DeclarationFacts.ModuleHeaders>, Context>()
 const nominalKey = (type: Type.Nominal): string => Type.key(Type.specializeNominal(type, []))
 
+const applicationBounds = (
+  parameter: DeclarationFacts.TypeParameterFact,
+  contract: boolean,
+  bounds: ReadonlyArray<Lifetime.Outlives>,
+  parameterBounds: ReadonlyMap<string, ReadonlyArray<Lifetime.Lifetime>>,
+): ReadonlyArray<Lifetime.Lifetime> => {
+  if (contract) return parameter.lifetimeBounds ?? []
+  if (parameter.type.kind === 'Lifetime')
+    return bounds
+      .filter((bound) => Lifetime.key(bound.longer) === Type.key(parameter.type))
+      .map((bound) => bound.shorter)
+  return parameterBounds.get(Type.key(parameter.type)) ?? []
+}
+
 /** Indexes immutable declaration assumptions by canonical owner, never by binder spelling. */
 export const context = (modules: ReadonlyArray<DeclarationFacts.ModuleHeaders>): Context => {
   const cached = contexts.get(modules)
@@ -36,6 +51,7 @@ export const context = (modules: ReadonlyArray<DeclarationFacts.ModuleHeaders>):
   }
   const parameters = new Map<string, DeclarationFacts.TypeParameterFact>()
   const nominals = new Map<string, ReadonlyArray<DeclarationFacts.TypeParameterFact>>()
+  const contractNominals = new Set<string>()
   const storedHeaders: Array<Type.Type> = []
   const executableHeaders: Array<Type.ExecutableLifetimes> = []
   const headerType = (fact: DeclarationFacts.DeclaredTypeFact): Type.Type | undefined => {
@@ -105,6 +121,10 @@ export const context = (modules: ReadonlyArray<DeclarationFacts.ModuleHeaders>):
         nominalKey(Type.nominal(declaration.canonical.id.module, declaration.canonical.id.name)),
         declaration.typeParameters,
       )
+      if (declaration._tag === 'ServiceDeclaration' || declaration._tag === 'InterfaceDeclaration')
+        contractNominals.add(
+          nominalKey(Type.nominal(declaration.canonical.id.module, declaration.canonical.id.name)),
+        )
     }
   }
   const bounds: Array<Lifetime.Outlives> = []
@@ -161,12 +181,12 @@ export const context = (modules: ReadonlyArray<DeclarationFacts.ModuleHeaders>):
         for (const [ordinal, parameter] of declared.entries()) {
           const argument = nominal.arguments.at(ordinal)
           if (argument === undefined) continue
-          const implied =
-            parameter.type.kind === 'Lifetime'
-              ? bounds
-                  .filter((bound) => Lifetime.key(bound.longer) === Type.key(parameter.type))
-                  .map((bound) => bound.shorter)
-              : (parameterBounds.get(Type.key(parameter.type)) ?? [])
+          const implied = applicationBounds(
+            parameter,
+            contractNominals.has(nominalKey(nominal)),
+            bounds,
+            parameterBounds,
+          )
           for (const shorter of implied)
             changed = add(argument, Type.substituteLifetime(shorter, substitution)) || changed
         }
@@ -177,6 +197,7 @@ export const context = (modules: ReadonlyArray<DeclarationFacts.ModuleHeaders>):
     parameters,
     parameterBounds,
     nominals,
+    contractNominals,
     work: Object.freeze(work),
   })
   contexts.set(modules, result)
@@ -195,9 +216,20 @@ export const check = (
     if (parameter.staticProperties.includes('Intrinsic.Detached')) return true
     if (parameter.representationBound !== undefined)
       return prove(parameter.representationBound.environment, lifetime)
-    return (scope.parameterBounds.get(Type.key(parameter)) ?? []).some((bound) =>
-      prove(bound, lifetime),
-    )
+    const bounds = scope.parameterBounds.get(Type.key(parameter)) ?? []
+    if (bounds.some((bound) => Lifetime.outlives(scope.assumptions, bound, lifetime))) return true
+    // Inference may retain an obligation while reporting success. Do not select a weaker
+    // redundant bound first and thereby constrain a caller's region more than necessary.
+    return bounds
+      .filter(
+        (bound) =>
+          !bounds.some(
+            (other) =>
+              Lifetime.outlives(scope.assumptions, other, bound) &&
+              !Lifetime.outlives(scope.assumptions, bound, other),
+          ),
+      )
+      .some((bound) => prove(bound, lifetime))
   })
 }
 
@@ -207,42 +239,94 @@ export interface Failure {
   readonly ordinal: number
 }
 
-/** Checks one already selected nominal application; this operation performs no lookup search. */
-export const application = (
-  self: Type.Nominal,
+/** Input well-formedness is a local precondition, including a nominal's stored-data bounds. */
+export const inputLifetimes = (
+  inputs: ReadonlyArray<Type.Type>,
   scope: Context,
-  prove: Prove = (longer, shorter) => Lifetime.outlives(scope.assumptions, longer, shorter),
-): ReadonlyArray<Failure> => {
+): Pick<Type.ExecutableLifetimes, 'lifetimeBounds' | 'typeOutlives'> => {
+  const lifetimeBounds: Array<Lifetime.Outlives> = []
+  const typeOutlives: Array<Type.TypeOutlives> = []
+  const add = (argument: Type.GenericArgument, required: Lifetime.Lifetime): void => {
+    if (Lifetime.isLifetime(argument)) lifetimeBounds.push({ longer: argument, shorter: required })
+    else if (Type.isTypeArgument(argument))
+      typeOutlives.push({ type: argument, lifetime: required })
+  }
+  for (const input of inputs) {
+    for (const stored of Type.storageTypes(input)) {
+      if (Type.isReference(stored)) add(stored.target, stored.lifetime)
+      else if (Type.isSlice(stored)) add(stored.element, stored.lifetime)
+    }
+    for (const nominal of Type.nominals(input))
+      for (const obligation of obligations(nominal, scope))
+        add(obligation.argument, obligation.required)
+  }
+  return {
+    lifetimeBounds: Lifetime.assumptions(lifetimeBounds).bounds,
+    typeOutlives: Type.normalizeTypeOutlives(typeOutlives),
+  }
+}
+
+/** Extends a hidden body's context without publishing its invocation-local assumptions. */
+export const withInputs = (scope: Context, inputs: ReadonlyArray<Type.Type>): Context => {
+  const implied = inputLifetimes(inputs, scope)
+  const bounds = [...scope.assumptions.bounds, ...(implied.lifetimeBounds ?? [])]
+  const parameterBounds = new Map(scope.parameterBounds)
+  for (const bound of implied.typeOutlives ?? []) {
+    for (const longer of Type.storageLifetimes(bound.type))
+      bounds.push({ longer, shorter: bound.lifetime })
+    for (const parameter of Type.storageParameters(bound.type)) {
+      const key = Type.key(parameter)
+      const previous = parameterBounds.get(key) ?? []
+      if (!previous.some((lifetime) => Lifetime.equals(lifetime, bound.lifetime)))
+        parameterBounds.set(key, [...previous, bound.lifetime])
+    }
+  }
+  return { ...scope, assumptions: Lifetime.assumptions(bounds), parameterBounds }
+}
+
+const obligations = (self: Type.Nominal, scope: Context): ReadonlyArray<Failure> => {
   const parameters = scope.nominals.get(nominalKey(self)) ?? []
   const substitution = new Map<string, Type.GenericArgument>()
   for (const [ordinal, parameter] of parameters.entries()) {
     const argument = self.arguments.at(ordinal)
     if (argument !== undefined) substitution.set(Type.key(parameter.type), argument)
   }
-  return Object.freeze(
-    parameters.flatMap((parameter, ordinal) => {
-      const argument = self.arguments.at(ordinal)
-      if (argument === undefined) return []
-      const requiredBounds =
-        parameter.type.kind === 'Lifetime'
-          ? scope.assumptions.bounds
-              .filter((bound) => Lifetime.key(bound.longer) === Type.key(parameter.type))
-              .map((bound) => bound.shorter)
-          : (scope.parameterBounds.get(Type.key(parameter.type)) ?? [])
-      return requiredBounds.flatMap((bound) => {
-        const required = Type.substituteLifetime(bound, substitution)
-        let valid = false
-        if (Lifetime.isLifetime(argument)) valid = prove(argument, required)
-        else if (Type.isTypeArgument(argument)) valid = check(argument, required, scope, prove)
-        else if (Type.isRepresentationArgument(argument)) {
-          const represented = Type.representedType(argument)
-          valid = represented !== undefined && check(represented, required, scope, prove)
-        }
-        return valid ? [] : [{ argument, required, ordinal }]
-      })
+  return parameters.flatMap((parameter, ordinal) => {
+    const argument = self.arguments.at(ordinal)
+    if (argument === undefined) return []
+    // A capability or interface stores no operation arguments. Operation-local assumptions
+    // remain available to bodies but are not preconditions of applying the enclosing contract.
+    const requiredBounds = applicationBounds(
+      parameter,
+      scope.contractNominals.has(nominalKey(self)),
+      scope.assumptions.bounds,
+      scope.parameterBounds,
+    )
+    return requiredBounds.map((bound) => ({
+      argument,
+      required: Type.substituteLifetime(bound, substitution),
+      ordinal,
+    }))
+  })
+}
+
+/** Checks one already selected nominal application; this operation performs no lookup search. */
+export const application = (
+  self: Type.Nominal,
+  scope: Context,
+  prove: Prove = (longer, shorter) => Lifetime.outlives(scope.assumptions, longer, shorter),
+): ReadonlyArray<Failure> =>
+  Object.freeze(
+    obligations(self, scope).filter(({ argument, required }) => {
+      if (Lifetime.isLifetime(argument)) return !prove(argument, required)
+      if (Type.isTypeArgument(argument)) return !check(argument, required, scope, prove)
+      if (Type.isRepresentationArgument(argument)) {
+        const represented = Type.representedType(argument)
+        return represented === undefined || !check(represented, required, scope, prove)
+      }
+      return true
     }),
   )
-}
 
 /** Validates resolved headers after all parameter-implied assumptions are available. */
 export const moduleDiagnostics = (

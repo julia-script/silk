@@ -4,7 +4,8 @@
 //!
 //! `withBuffered` owns separate fixed input and output state for the callback and terminally closes
 //! the provider after success, typed failure, or structured cancellation/interruption. Fatal traps
-//! bypass finalizers and Drop. Release intentionally performs no implicit flush.
+//! bypass finalizers and Drop. Release intentionally performs no implicit flush. [`close`] permits
+//! an earlier terminal close and abandons all buffered bytes without a flush.
 
 import silk.allocator {Allocator, OutOfMemoryError}
 import silk.buffered_input {BufferError, BufferedInput, DiscardOutcome, FillOutcome, MAX_CAPACITY}
@@ -15,6 +16,7 @@ import silk.effect {Effect}
 import silk.monotonic_clock {MonotonicClock}
 import silk.option {Option}
 import silk.result {Result}
+import silk.slice {Slice}
 import silk.system_clock {Instant, SystemClock}
 import silk.usize
 
@@ -28,6 +30,7 @@ pub struct BufferedDuplex<'transport, P> {
   transport: &'transport mut P
   terminal: bool
   writeShutdown: bool
+  closeAttempted: bool
 }
 
 /// Compile-time adapter from one owned context to a higher-ranked buffered session use.
@@ -47,16 +50,26 @@ pub interface BufferedContext<P, A, E, ?R> {
 }
 
 impl<'transport, P> BufferedDuplex<'transport, P> {
-  /// Borrows the initialized unread prefix.
+  /// Borrows the initialized unread prefix, or an empty slice after terminal close.
   pub fn peek<'a>(self: &'a Self) -> &'a [u8] {
-    return BufferedInput.peek(&self.inputState)
+    let visible = BufferedInput.peek(&self.inputState)
+    if self.closeAttempted {
+      return Slice.view<u8>(visible, usize.ZERO, usize.ZERO)
+    }
+    return visible
   }
 
-  /// Returns the unread input count.
-  pub fn unread(self: &Self) -> usize { return BufferedInput.unread(&self.inputState) }
+  /// Returns the unread input count, or zero after terminal close.
+  pub fn unread(self: &Self) -> usize {
+    if self.closeAttempted { return usize.ZERO }
+    return BufferedInput.unread(&self.inputState)
+  }
 
-  /// Returns the pending output count.
-  pub fn pending(self: &Self) -> usize { return BufferedOutput.pending(&self.outputState) }
+  /// Returns the pending output count, or zero after terminal close.
+  pub fn pending(self: &Self) -> usize {
+    if self.closeAttempted { return usize.ZERO }
+    return BufferedOutput.pending(&self.outputState)
+  }
 
   /// Consumes exactly an initialized unread prefix.
   pub effect fn consume(self: &mut Self, count: usize) -> () ! BufferError {
@@ -264,6 +277,24 @@ impl<'transport, P> BufferedDuplex<'transport, P> {
       }
     }
     return ()
+  }
+
+  /// Terminally closes the provider once and abandons all buffered bytes without a flush.
+  ///
+  /// # Details
+  ///
+  /// The operation marks the complete session terminal before it calls the provider. `peek`,
+  /// `unread`, and `pending` report no buffered bytes after the call starts. Repeated calls succeed
+  /// without another provider close, including after the first call returns `ByteIoError`.
+  pub effect fn close(self: &mut Self) -> () ! ByteIoError
+  where &mut P provides &ByteDuplex from &mut ByteDuplex {
+    if self.closeAttempted { return () }
+    self.closeAttempted = true
+    self.terminal = true
+    self.writeShutdown = true
+    let operation = ByteDuplex.close()
+      |> Effect.provideMut<ByteDuplex>(&mut self.transport.*)
+    return run operation
   }
 
   effect fn settle<A>(self: &mut Self, attempted: Result<A, BufferError>) -> A ! BufferError {
@@ -482,6 +513,7 @@ where &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut Monoton
     transport: &mut transport.*,
     terminal: false,
     writeShutdown: false,
+    closeAttempted: false,
   }
   return run callback(&mut session)
 }
@@ -511,6 +543,7 @@ where &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut Monoton
     transport: &mut transport.*,
     terminal: false,
     writeShutdown: false,
+    closeAttempted: false,
   }
   return run BufferedContext<P, A, E ? CallbackRequirements>.use(
     move context,
@@ -556,6 +589,7 @@ where &'sourceTransport mut SP provides &ByteDuplex
     transport: &mut source.*,
     terminal: false,
     writeShutdown: false,
+    closeAttempted: false,
   }
   let mut destinationSession = BufferedDuplex {
     inputState: move destinationInput,
@@ -563,6 +597,7 @@ where &'sourceTransport mut SP provides &ByteDuplex
     transport: &mut destination.*,
     terminal: false,
     writeShutdown: false,
+    closeAttempted: false,
   }
   return run callback(&mut sourceSession, &mut destinationSession)
 }

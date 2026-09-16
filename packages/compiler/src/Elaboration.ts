@@ -1212,7 +1212,7 @@ export interface TypeArgumentFact {
   readonly ordinal: number
   readonly syntax: SyntaxTree.Node
   readonly declared: DeclaredTypeFact
-  readonly type?: SemanticType | Lifetime.Lifetime
+  readonly type?: SemanticType | Lifetime.Lifetime | Type.RequirementRowArgument
   /** Canonical role of an access-independent requirement selector such as `T at Role`. */
   readonly requirementRole?: Type.Requirement['role']
 }

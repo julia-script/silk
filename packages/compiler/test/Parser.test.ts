@@ -56,6 +56,20 @@ const parseBytes = (id: string, bytes: Uint8Array): SyntaxFile.SyntaxFile =>
 const parseText = (id: string, source: string): SyntaxFile.SyntaxFile =>
   parseBytes(id, ascii(source))
 
+it('recovers without stalling on an unsupported anonymous Effect environment', () => {
+  const source =
+    "fn main() -> () { let use = effect<'call> fn() -> () {} }\nfn next() -> i32 { return 42 }"
+  const parsed = parseText('unsupported-anonymous-environment', source)
+  assert.isNotEmpty(parsed.parserDiagnostics)
+  assertOriginalTokenTraversal(parsed)
+  assert.include(
+    directFunctionDeclarations(parsed.root).map((node) =>
+      directTokenText(parsed, node, 'Identifier'),
+    ),
+    'next',
+  )
+})
+
 const nodeShape = (node: SyntaxTree.Node): ExpectedNodeShape => ({
   kind: node.kind,
   children: node.children.map((child): string | ExpectedNodeShape => {
