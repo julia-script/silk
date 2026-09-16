@@ -87,5 +87,5 @@ impl silk/http_fetch.FetchClient<'policy, silk/http_client_native.NativeRoutePro
 ### Operation `withAttempt`
 
 ```silk
-withAttempt = Context.withAttempt
+withAttempt = Context.impl@2.withAttempt
 ```
