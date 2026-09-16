@@ -7867,16 +7867,23 @@ const resolveAppliedInterfaceProvider = (
   }
   const substitution = new Map<string, Type.GenericArgument>()
   const inferenceDiagnostics: Array<Diagnostic.Diagnostic> = []
+  const providerKey = Type.key(target.interface.self)
+  const providerBinders = new Set([providerKey])
   let providerOrigin: SourceSpan.SourceSpan | undefined
   for (const [ordinal, argument] of argumentsResult.facts.entries()) {
     const expected = target.reference.parameters.at(ordinal)
     if (expected === undefined || argument.type._tag !== 'Available') continue
-    const providerKey = Type.key(target.interface.self)
+    // Only operands containing Self select the provider. The completed call checks every operand
+    // after opening its invocation lifetimes; comparing unrelated operands here treats those
+    // quantified lifetimes as fixed and can reject a valid shorter call borrow.
+    if (!Type.parameters(expected).some((parameter) => Type.key(parameter) === providerKey))
+      continue
     const previousProvider = substitution.get(providerKey)
     const inference = TypeInference.inferOpenGenericArguments(
       expected,
       argument.type.type,
       substitution,
+      providerBinders,
     )
     if (!inference.matches) {
       const providerConflict = inference.conflicts.find((conflict) =>

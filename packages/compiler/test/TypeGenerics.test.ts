@@ -128,6 +128,38 @@ pub fn main() -> i32 { return 0 }`),
   }),
 )
 
+it.effect('infers an applied interface provider independently of invocation lifetimes', () =>
+  Effect.gen(function* () {
+    const source = `struct View<'value, T> { value: &'value mut T }
+struct Uri<'value> { value: &'value i32 }
+fn uri<'value>(value: &'value i32) -> Uri<'value> { return Uri<'value> {value: value} }
+interface Handle<T> {
+  fn handle<'call, 'view: 'call>(handler: Self, name: Uri<'call>, view: &'call mut View<'view, T>) -> ()
+}
+fn forward<'call, 'view: 'call, T, H: Handle<T>>(
+  handler: H, value: &'call i32, view: &'call mut View<'view, T>,
+) -> () {
+  return Handle<T>.handle(move handler, uri(value), move view)
+}
+fn wrong<'call, 'view: 'call, T, H: Handle<T>>(
+  handler: H, view: &'call mut View<'view, T>,
+) -> () {
+  return Handle<T>.handle(move handler, true, move view)
+}`
+    const snapshot = yield* Analysis.ofSource(
+      'generics/applied-provider-lifetimes',
+      new TextEncoder().encode(source),
+    )
+    assert.deepEqual(
+      Analysis.diagnostics(snapshot).map((diagnostic) => ({
+        code: diagnostic.code,
+        start: diagnostic.span.start,
+      })),
+      [{ code: 'SEM0012', start: source.lastIndexOf(' true') }],
+    )
+  }),
+)
+
 it.effect('preserves access in nonfinal concrete nominal requirement arguments', () =>
   Effect.gen(function* () {
     const snapshot = yield* Analysis.ofSource(
