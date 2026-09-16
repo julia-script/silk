@@ -304,7 +304,7 @@ pub enum DiscardOutcome {
 }
 
 /// Whether one owned connection can return to an idle pool.
-pub enum ReuseEligibility {
+pub union ReuseEligibility {
   /// The connection has complete persistent boundaries and can return to an idle pool.
   Eligible,
   /// The connection is not ready after one complete reusable exchange.
@@ -533,12 +533,7 @@ pub union RouteTransport<'transport, 'provider: 'transport, 'tunnel: 'provider, 
 /// A higher-ranked callback for one selected route and its final HTTP connection.
 pub interface RouteHandler<'configuration, P, A, E, ?R> {
   /// Runs after route acquisition and required origin authentication complete.
-  effect<
-    'call,
-    'transport: 'call,
-    'provider: 'transport,
-    'tunnel: 'provider,
-  > fn handle<
+  effect<'call> fn handle<
     'call,
     'transport: 'call,
     'provider: 'transport,
@@ -893,13 +888,13 @@ where
     alpn: routeAlpn(&protocols, settings.protocol),
     limits: settings.tls,
   }
-  let use = effect<'connection> fn(
-    connection: &'connection mut OwnedConnection<Loan<'provider, P>>,
+  let use = effect fn(
+    connection: &mut OwnedConnection<Loan<'provider, P>>,
   ) -> A
   ! E | ClientError | OutOfMemoryError
   ? R | &mut Allocator {
     let secured = Transport.secured(move connection)
-    let transport = RouteTransport<'connection, 'provider, 'provider, P>.SecuredDirect {
+    let transport = RouteTransport<P>.SecuredDirect {
       provider: move secured,
     }
     let bridge = FinalRouteHandler<'configuration, H> {
@@ -907,7 +902,7 @@ where
       handler: Option.some<H>(move handler),
     }
     return run withOwned<
-      RouteTransport<'connection, 'provider, 'provider, P>,
+      RouteTransport<P>,
       A,
       E,
       R,
@@ -972,13 +967,13 @@ where
     alpn: routeAlpn(&protocols, settings.protocol),
     limits: settings.tls,
   }
-  let use = effect<'connection> fn(
-    connection: &'connection mut OwnedConnection<Loan<'provider, TransferredTunnel<'tunnel, P>>>,
+  let use = effect fn(
+    connection: &mut OwnedConnection<Loan<'provider, TransferredTunnel<'tunnel, P>>>,
   ) -> A
   ! E | ClientError | OutOfMemoryError
   ? R | &mut Allocator {
     let secured = Transport.secured(move connection)
-    let transport = RouteTransport<'connection, 'provider, 'tunnel, P>.SecuredTunnel {
+    let transport = RouteTransport<P>.SecuredTunnel {
       provider: move secured,
     }
     let bridge = FinalRouteHandler<'configuration, H> {
@@ -986,7 +981,7 @@ where
       handler: Option.some<H>(move handler),
     }
     return run withOwned<
-      RouteTransport<'connection, 'provider, 'tunnel, P>,
+      RouteTransport<P>,
       A,
       E,
       R,
@@ -1076,13 +1071,13 @@ impl<
       let head = run Exchange.head(&exchange.*)
       run Proxy.classifyConnect(&head)
       drop head
-      let useTunnel = effect<'tunnelCall, 'tunnelView: 'tunnelCall> fn(
-        tunnel: &'tunnelCall mut Tunnel<'tunnelView, P>,
+      let useTunnel = effect fn(
+        tunnel: &mut Tunnel<P>,
       ) -> A
       ! E | ClientError | Tls.ConnectionError | IdentityError | OutOfMemoryError
       ? R | &mut Allocator | &mut MonotonicClock | &mut SystemClock | &mut Random {
-        let useTransferred = effect<'transferCall, 'duplexView: 'transferCall> fn(
-          transferred: &'transferCall mut TransferredTunnel<'duplexView, P>,
+        let useTransferred = effect fn(
+          transferred: &mut TransferredTunnel<P>,
         ) -> A
         ! E | ClientError | Tls.ConnectionError | IdentityError | OutOfMemoryError
         ? R | &mut Allocator | &mut MonotonicClock | &mut SystemClock | &mut Random {
@@ -2132,11 +2127,12 @@ where
   }
   let requestedDeadline = Option.some<Instant>(move deadline)
   let selectedDeadline = clampDeadline(&requestedDeadline, &exchange.options.deadline)
-  let outcome = if exchange.contentSelected {
-    run drainSelectedContentAtMost(exchange, maxWireBytes, move selectedDeadline)
+  let mut outcome = DiscardOutcome.Completed
+  if exchange.contentSelected {
+    outcome = run drainSelectedContentAtMost(exchange, maxWireBytes, move selectedDeadline)
   } else {
     let attempted = run discardRemainingCore(exchange, maxWireBytes, move selectedDeadline)
-    match move attempted {
+    outcome = match move attempted {
       DiscardAttempt.Completed => DiscardOutcome.Completed
       DiscardAttempt.CapReached {error} => {
         drop error
@@ -2767,7 +2763,7 @@ impl<'tunnel, P> Tunnel<'tunnel, P> {
     let use = effect fn(owned: &mut TransferredTunnel<'transfer, P>) -> A
     ! E
     ? CallbackRequirements {
-      return run move callback(move &mut owned.*)
+      return run move callback(&mut owned.*)
     }
     let release = effect fn(owned: &mut TransferredTunnel<'transfer, P>) -> () {
       let closed = ByteDuplex.close()

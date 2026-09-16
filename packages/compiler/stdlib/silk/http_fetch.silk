@@ -1409,7 +1409,7 @@ impl<
   'policy,
   A,
   RedirectError | FetchError | ValueError | BodyError | DestinationError | ClientError | OutOfMemoryError | AcquisitionError
-  ? DestinationRequirements | AcquisitionRequirements | &mut MonotonicClock | &mut Allocator | &mut Random,
+  ? DestinationRequirements | AcquisitionRequirements | &mut MonotonicClock | &mut Allocator | &mut Random
 > for EmptyOperation<'fetch, 'policy, C, D> {
   handle: EmptyOperation.handle
 }
@@ -1681,7 +1681,7 @@ impl<
   'policy,
   A,
   RedirectError | FetchError | ValueError | BodyError | DestinationError | ClientError | OutOfMemoryError | AcquisitionError
-  ? DestinationRequirements | AcquisitionRequirements | &mut MonotonicClock | &mut Allocator | &mut Random,
+  ? DestinationRequirements | AcquisitionRequirements | &mut MonotonicClock | &mut Allocator | &mut Random
 > for BytesOperation<'fetch, 'bytes, 'policy, C, D> {
   handle: BytesOperation.handle
 }
@@ -1961,7 +1961,7 @@ impl<
   'policy,
   A,
   RedirectError | FetchError | ValueError | BodyError | ProducerError | DestinationError | ClientError | OutOfMemoryError | AcquisitionError
-  ? ProducerRequirements | DestinationRequirements | AcquisitionRequirements | &mut MonotonicClock | &mut Allocator | &mut Random,
+  ? ProducerRequirements | DestinationRequirements | AcquisitionRequirements | &mut MonotonicClock | &mut Allocator | &mut Random
 > for OneShotOperation<'fetch, 'policy, C, D, Producer> {
   handle: OneShotOperation.handle
 }
@@ -2266,7 +2266,7 @@ impl<
   'policy,
   A,
   RedirectError | FetchError | ValueError | BodyError | FactoryError | ProducerError | DestinationError | ClientError | OutOfMemoryError | AcquisitionError
-  ? FactoryRequirements | ProducerRequirements | DestinationRequirements | AcquisitionRequirements | &mut MonotonicClock | &mut Allocator | &mut Random,
+  ? FactoryRequirements | ProducerRequirements | DestinationRequirements | AcquisitionRequirements | &mut MonotonicClock | &mut Allocator | &mut Random
 > for ReplayOperation<'fetch, 'policy, C, D, Factory, Producer> {
   handle: ReplayOperation.handle
 }
