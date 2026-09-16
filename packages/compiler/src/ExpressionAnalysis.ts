@@ -8659,7 +8659,7 @@ const analyzeAnonymousCallable = (
     ordinal: 0x70000000 + node.span.start,
   })
   const canonical = Hir.anonymousCallableId(owner, site)
-  const collected = DeclarationCollection.collectAnonymousCallableDeclaration(
+  const initial = DeclarationCollection.collectAnonymousCallableDeclaration(
     source,
     node,
     hiddenId,
@@ -8672,6 +8672,26 @@ const analyzeAnonymousCallable = (
     diagnostics: Object.freeze([]),
   })
   const resolvers = NameResolution.makeResolvers(nameResolution, resolution.index)
+  const finalized = DeclarationCollection.finalizeLifetimeHeader(initial.fact, (path) => {
+    const resolved = resolvers.type(source.id, path)
+    if (
+      resolved.fact._tag !== 'Resolved' ||
+      !Type.isNominal(resolved.fact.type) ||
+      resolved.fact.type.arguments.length > 0
+    )
+      return undefined
+    return (
+      DeclarationResolution.memberByNominal(
+        resolution.index.modules,
+        resolved.fact.type,
+      )?.typeParameters.map((parameter) => parameter.type) ??
+      Type.intrinsicNominalParameters(resolved.fact.type)
+    )
+  })
+  const collected = Object.freeze({
+    ...initial,
+    fact: finalized._tag === 'FunctionDeclaration' ? finalized : initial.fact,
+  })
   const resolveType = (fact: DeclarationFacts.DeclaredTypeFact) =>
     DeclarationResolution.resolveTypeFact(resolution.index, source.id, fact, resolvers.type)
   const typeDiagnostics: Array<Diagnostic.Diagnostic> = []

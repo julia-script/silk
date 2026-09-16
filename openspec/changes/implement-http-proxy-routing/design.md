@@ -32,6 +32,18 @@ compiler-known operation.
 
 ## Decisions
 
+### Anonymous callbacks use the existing lifetime-elision contract
+
+The routed scope exposed a compiler omission: anonymous callable headers were collected without
+replaying nominal lifetime arity after resolution, unlike named declarations. Reuse the existing
+header finalization and nominal lookup for those callbacks. This restores LIFE-003 rather than
+adding HTTP-specific compiler knowledge or new lifetime syntax. One structural regression covers
+ordinary and effect callbacks with independent outer and stored-data loans.
+
+Applied nominal types must also convert concrete service-reference arguments at requirement-row
+parameter positions without discarding Shared/Exclusive access. Normalize unions at that boundary
+using the existing row representation, so acquisition requirements can precede the handler row.
+
 ### One actor owns all proxy policy
 
 Add `silk.http_proxy` as the canonical owner of `ProxyConfig`, `ProxyAuth`, `BypassPolicy`, sealed

@@ -10,6 +10,27 @@ const codesOf = (name: string, source: string) =>
     Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
   )
 
+it.effect('elides nominal input lifetimes in anonymous callable headers', () =>
+  Effect.gen(function* () {
+    assert.deepEqual(
+      yield* codesOf(
+        'callable-stabilization/nominal-lifetime-elision',
+        `struct Holder<'data, T> { value: &'data T }
+fn ordinary(holder: Holder<i32>) -> i32 {
+  let read = fn(value: &Holder<i32>) -> i32 { return value.value.* }
+  return read(&holder)
+}
+effect fn effectful(holder: Holder<i32>) -> i32 {
+  let read = effect fn(value: &Holder<i32>) -> i32 { return value.value.* }
+  return run read(&holder)
+}
+pub fn main() -> i32 { return 0 }`,
+      ),
+      [],
+    )
+  }),
+)
+
 // ISSUE-2: joining two named function items reports SEM0080 instead of invalid MIR.
 it.effect('rejects a match that joins two named function items', () =>
   Effect.gen(function* () {
