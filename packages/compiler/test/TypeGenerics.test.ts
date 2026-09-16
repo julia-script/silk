@@ -45,7 +45,7 @@ const descendants = (node: SyntaxTree.Node): ReadonlyArray<SyntaxTree.Node> =>
 it.effect('admits detached generic nominal failure payloads', () =>
   Effect.gen(function* () {
     const source = `struct Failure<E> { error: E }
-effect fn wrap<E: Intrinsic.Detached>(error: E) -> () ! Failure<E> {
+effect fn wrap<E: Intrinsic.Detached, F>(error: E) -> () ! Failure<E> | F {
   fail Failure<E> { error: move error }
 }
 effect fn reject<E>(error: E) -> () ! Failure<E> {
@@ -64,6 +64,20 @@ effect fn reject<E>(error: E) -> () ! Failure<E> {
         (diagnostic) => diagnostic.span.start >= source.indexOf('effect fn reject'),
       ),
     )
+    const wrap =
+      snapshot.index.modules
+        .flatMap((module) => module.declarations)
+        .filter((declaration) => declaration._tag === 'FunctionDeclaration')
+        .find(
+          (declaration) =>
+            declaration.name._tag === 'Present' && declaration.name.spelling === 'wrap',
+        ) ?? unreachable('missing wrap')
+    const failures = RowAlgebra.positiveConcreteMembers(
+      Type.failureRowPolicy(),
+      wrap.failureRow.row,
+    )
+    assert.strictEqual(failures.length, 1)
+    assert.isTrue(failures.some((failure) => Type.isNominal(failure) && failure.name === 'Failure'))
   }),
 )
 

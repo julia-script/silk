@@ -1758,7 +1758,7 @@ const semanticFailureRow = (fact: RowExpressionFact): Type.FailureRow => {
           Type.failureMemberShape(fact.member.type),
           fact.syntax.span,
         )
-      return Type.isRuntimeConcrete(fact.member.type)
+      return Type.isFailureValue(fact.member.type)
         ? RowAlgebra.concrete(Type.failureRowPolicy(), Type.failureLeaves(fact.member.type))
         : RowAlgebra.concrete(Type.failureRowPolicy(), [])
     case 'UnionRowExpression':
