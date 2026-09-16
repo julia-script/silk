@@ -1820,7 +1820,15 @@ export const make = (operations: Operations) => {
     if (actualParameters.length !== target.contract.parameters.length) return undefined
     for (const [ordinal, parameter] of target.contract.parameters.entries()) {
       const actual = actualParameters.at(ordinal)
-      if (actual === undefined || !TypeInference.infer(parameter, actual, targetSubstitution))
+      if (actual === undefined) return undefined
+      // The service invocation and conformance already prove argument compatibility. A helper
+      // result may carry a coerced body-local lifetime rather than the provider's selected
+      // lifetime; discovery must retain that admitted call without re-proving region equality.
+      // Only lifetime-erased equality can recover failed inference, never a different value type.
+      if (
+        !TypeInference.infer(parameter, actual, targetSubstitution) &&
+        Type.runtimeKey(Type.substitute(parameter, targetSubstitution)) !== Type.runtimeKey(actual)
+      )
         return undefined
     }
     const typeArguments = target.declaration.typeParameters.flatMap((parameter) => {

@@ -379,6 +379,34 @@ pub fn main() -> i32 {
   }),
 )
 
+it.effect('retains admitted service targets through argument lifetime coercions', () =>
+  Effect.gen(function* () {
+    const { snapshot, module } = yield* lowerStored(
+      'stored-effect-mir/service-argument-lifetime',
+      `import silk.effect { Effect }
+struct Request<'a> { value: &'a i32 }
+service Read<'a> { effect fn get(request: Request<'a>) -> i32 ? &Read<'a> }
+struct Holder<'a> { value: &'a i32 }
+impl<'a> Read<'a> for Holder<'a> {
+  effect fn get(self: &Self, request: Request<'a>) -> i32 { return request.value.* }
+}
+fn request<'a>(value: &'a i32) -> Request<'a> { return Request<'a> { value: value } }
+effect fn read<'a>(value: &'a i32) -> i32 ? &Read<'a> {
+  let request = request(value)
+  return run Read.get<'a>(move request)
+}
+pub fn main() -> i32 {
+  let value = 42
+  let provider = Holder { value: &value }
+  return run read(&value) |> Effect.provide(&provider)
+}`,
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    assert.deepEqual(MirVerification.verify(module), [])
+    assert.isTrue(module.functions.some((fn) => fn.id.name.startsWith('impl@0.get$effect$')))
+  }),
+)
+
 it.effect('retains provided runner contracts through typed-failure recovery', () =>
   Effect.gen(function* () {
     const { snapshot, module } = yield* lowerStored(
