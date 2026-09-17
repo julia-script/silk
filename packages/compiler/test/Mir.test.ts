@@ -1081,7 +1081,7 @@ pub fn main() -> i32 { let ignored = inspect(Pointer.null<Record>()) return 42 }
     }),
 )
 
-it.effect('restores narrow success fields from widened Effect outcome lanes', () =>
+it.effect('reads narrow success fields from their stored Effect outcome payload', () =>
   Effect.gen(function* () {
     const snapshot = yield* AnalysisFixture.retainingMain(
       'mir/narrow-effect-record',
@@ -1089,7 +1089,21 @@ it.effect('restores narrow success fields from widened Effect outcome lanes', ()
     )
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
     const artifact = yield* Analysis.codegen(snapshot, { mode: 'debug' })
-    assert.match(artifact.ir, /effect_success\w+_width = trunc i64 .* to i16/)
-    assert.match(artifact.ir, /effect_success\w+_width = trunc i64 .* to i8/)
+    const check =
+      artifact.ir.match(
+        /define[^\n]+@silk_mir_narrow_effect_record_check_effect__[^\n]+\n([\s\S]*?)\n}/,
+      )?.[1] ?? raise('expected the check Effect runner')
+    // The success member keeps its four-byte struct layout even though the failure member
+    // needs two i64 fields. Read the selected fields at their own widths and offsets.
+    assert.match(check, /effect_success\w+ = getelementptr i8, ptr %\w+, i32 8/)
+    assert.match(check, /@llvm\.memmove[^\n]+%effect_success\w+, i32 4,/)
+    assert.match(
+      check,
+      /%(\w+) = getelementptr i8, ptr %\w+, i32 0\n\s+%\w+ = load i16, ptr %\1, align 2/,
+    )
+    assert.match(
+      check,
+      /%(\w+) = getelementptr i8, ptr %\w+, i32 2\n\s+%\w+ = load i8, ptr %\1, align 1/,
+    )
   }),
 )

@@ -314,7 +314,16 @@ it.effect('plans outcome storage separately from the concrete captured environme
       const view =
         ValueStorage.find(module.layout, 'Outcome', outcome.type) ??
         unreachable('expected outcome storage')
-      assert.strictEqual(NativeType.addressLayout(module.layout, outcome), view)
+      const storedOutcome = ValueStorage.outcome(module.layout, outcome.type)
+      assert.strictEqual(NativeType.addressLayout(module.layout, outcome), storedOutcome)
+      assert.deepEqual(
+        [storedOutcome.size, storedOutcome.alignment, storedOutcome.payloadOffset],
+        [8, 4, 4],
+      )
+      assert.deepEqual(
+        storedOutcome.members.map((member) => member.storage),
+        [{ _tag: 'Value' }],
+      )
       assert.strictEqual(NativeValue.classify(module.layout, outcome), 'Place')
       assert.isUndefined(Layout.entry(module.layout, outcome.type))
       for (const environment of module.layout.effectEnvironments) {
