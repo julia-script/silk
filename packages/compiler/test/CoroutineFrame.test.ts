@@ -71,7 +71,7 @@ it.effect('plans one deterministic maximum frame per specialized invocation', ()
     const left = Analysis.loweredMir(first)
     const right = Analysis.loweredMir(second)
     assert.deepEqual(Analysis.diagnostics(first), [])
-    assert.deepEqual(MirVerification.verify(left), [])
+    assert.deepEqual(yield* MirVerification.verify(left), [])
     assert.isDefined(left.coroutineFrames)
     assert.isDefined(right.coroutineFrames)
     if (left.coroutineFrames === undefined || right.coroutineFrames === undefined) return
@@ -121,7 +121,7 @@ it.effect('uses distinct resume states in one reusable invocation frame', () =>
     const self = yield* analyze()
     const program = Analysis.loweredMir(self)
     assert.deepEqual(Analysis.diagnostics(self), [])
-    assert.deepEqual(MirVerification.verify(program), [])
+    assert.deepEqual(yield* MirVerification.verify(program), [])
     const owner = program.functions.find((fn) => fn.id.name.startsWith('program$effect$'))
     const descriptor = owner?.suspension?.frame
     assert.isDefined(descriptor)
@@ -146,7 +146,7 @@ it.effect('keeps synchronous MIR free of coroutine-frame storage', () =>
     )
     const program = Analysis.loweredMir(self)
     assert.deepEqual(Analysis.diagnostics(self), [])
-    assert.deepEqual(MirVerification.verify(program), [])
+    assert.deepEqual(yield* MirVerification.verify(program), [])
     assert.isUndefined(program.coroutineFrames)
     assert.notInclude(MirEncoding.encode(program), 'coroutine-frame ')
   }),
@@ -162,7 +162,7 @@ it.effect('rejects missing, stale, and physically incomplete frame plans', () =>
     const { coroutineFrames: _coroutineFrames, ...logicalProgram } = program
     const withoutPlan: Mir.Module = Object.freeze(logicalProgram)
     assert.isTrue(
-      MirVerification.verify(withoutPlan).some(
+      (yield* MirVerification.verify(withoutPlan)).some(
         (violation) => violation.rule === 'InvalidCoroutineFrame',
       ),
     )
@@ -188,7 +188,7 @@ it.effect('rejects missing, stale, and physically incomplete frame plans', () =>
       }),
     })
     assert.isTrue(
-      MirVerification.verify(malformed).some(
+      (yield* MirVerification.verify(malformed)).some(
         (violation) => violation.rule === 'InvalidCoroutineFrame',
       ),
     )
@@ -200,7 +200,9 @@ it.effect('rejects missing, stale, and physically incomplete frame plans', () =>
       }),
     })
     assert.isTrue(
-      MirVerification.verify(stale).some((violation) => violation.rule === 'InvalidCoroutineFrame'),
+      (yield* MirVerification.verify(stale)).some(
+        (violation) => violation.rule === 'InvalidCoroutineFrame',
+      ),
     )
   }),
 )
@@ -221,7 +223,7 @@ effect fn program() -> i32 {
 }
 pub fn main() -> i32 { return run program() }`)
     assert.deepEqual(Analysis.diagnostics(self), [])
-    assert.deepEqual(MirVerification.verify(Analysis.loweredMir(self)), [])
+    assert.deepEqual(yield* MirVerification.verify(Analysis.loweredMir(self)), [])
     const program = Analysis.loweredMir(self)
     const owner = program.functions.find((fn) => fn.id.name.startsWith('program$effect$'))
     assert.isDefined(owner)

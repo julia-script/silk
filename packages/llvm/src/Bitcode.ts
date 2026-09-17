@@ -127,7 +127,9 @@ const buildGlobalOrder = (state: BuilderState.Snapshot): GlobalOrder => {
     strtab.set(entry.globalIndex, { offset: bytes.length, size: entry.global.name.bytes.length })
     bytes.push(...entry.global.name.bytes)
   }
-  return { entries: Object.freeze(entries), valueIndex, strtab, bytes: Object.freeze(bytes) }
+  // This byte array is owned by one encoding and only read by the string-table writer.
+  // Freezing multi-megabyte symbol tables dominated encode time in compiler replays.
+  return { entries: Object.freeze(entries), valueIndex, strtab, bytes }
 }
 
 /** @internal */

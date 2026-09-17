@@ -160,7 +160,7 @@ pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`),
     )
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
     const mir = Analysis.loweredMir(snapshot)
-    assert.deepEqual(MirVerification.verify(mir), [])
+    assert.deepEqual(yield* MirVerification.verify(mir), [])
     const releaseScratch = mir.functions.find(
       (fn) => fn.id.module === 'silk/vector' && fn.id.name === 'releaseScratch',
     )

@@ -85,7 +85,7 @@ it.effect('selects canonical string storage and calling lanes on every current t
           },
         ],
       )
-      assert.deepEqual(LayoutVerify.verify(selected.value), [])
+      assert.deepEqual(yield* LayoutVerify.verify(selected.value), [])
       assert.include(LayoutEncode.encode(selected.value), 'layout string')
       assert.include(LayoutEncode.encode(selected.value), 'Address<string')
     }
@@ -135,11 +135,11 @@ it.effect('rejects slice representation and calling-shape facts forged for strin
     })
 
     assert.include(
-      LayoutVerify.verify(malformed).map((violation) => violation.rule),
+      (yield* LayoutVerify.verify(malformed)).map((violation) => violation.rule),
       'InvalidAggregate',
     )
     assert.include(
-      LayoutVerify.verify(malformed).map((violation) => violation.rule),
+      (yield* LayoutVerify.verify(malformed)).map((violation) => violation.rule),
       'InvalidCallingShape',
     )
   }),

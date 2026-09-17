@@ -712,40 +712,101 @@ export const requirementSelection = (
   )
 }
 
+const specializationIndexCache = new WeakMap<
+  ReadonlyArray<Instance>,
+  ReadonlyMap<string, ReadonlyArray<Instance>>
+>()
+
 /** Returns every discovered instance with the exact declaration and kinded arguments. */
 export const matchingSpecialization = (
   self: Discovery,
   specialization: Specialization.Specialization,
 ): ReadonlyArray<Instance> => {
-  const identity = Specialization.runtimeKey(specialization)
-  return self.instances.filter((candidate) => Specialization.runtimeKey(candidate.key) === identity)
+  let index = specializationIndexCache.get(self.instances)
+  if (index === undefined) {
+    const groups = new Map<string, Array<Instance>>()
+    for (const instance of self.instances) {
+      const identity = Specialization.runtimeKey(instance.key)
+      const group = groups.get(identity)
+      if (group === undefined) groups.set(identity, [instance])
+      else group.push(instance)
+    }
+    // Keep every match in discovery order: callers must still detect ambiguous targets.
+    // Index by the immutable instance array so a new discovery frontier gets a fresh index.
+    index = new Map(
+      [...groups].map(([identity, instances]) => [identity, Object.freeze(instances)]),
+    )
+    specializationIndexCache.set(self.instances, index)
+  }
+  return index.get(Specialization.runtimeKey(specialization)) ?? Object.freeze([])
 }
 
 export const effectIdentity = (owner: InstanceKey, site: Hir.EffectSiteId): string =>
   `${keyText(owner)}\u0004${Hir.executableSiteKey(site)}`
 
+// HIR and instance keys are immutable. Hidden-parameter queries repeatedly reconstructed the
+// same selected substitution; retain only its immutable map, not mutable proof bookkeeping.
+const instanceSubstitutions = new WeakMap<
+  Hir.HirFunction,
+  WeakMap<InstanceKey, Type.Substitution | undefined>
+>()
 const instanceSubstitution = (
   fn: Hir.HirFunction,
   key: InstanceKey,
-): Type.Substitution | undefined =>
-  TypeInference.selectedSubstitution(
+): Type.Substitution | undefined => {
+  let cache = instanceSubstitutions.get(fn)
+  if (cache?.has(key)) return cache.get(key)
+  const substitution = TypeInference.selectedSubstitution(
     fn.declaration.typeParameters.map((parameter) => parameter.type),
     key.typeArguments.filter((argument) => !Type.isHiddenExecutableArgument(argument)),
   )?.substitution
+  if (cache === undefined) {
+    cache = new WeakMap()
+    instanceSubstitutions.set(fn, cache)
+  }
+  cache.set(key, substitution)
+  return substitution
+}
 
+interface ExecutableParameters {
+  readonly effects: ReadonlyArray<number>
+  readonly callables: ReadonlyArray<number>
+}
+// Effect and callable ordinals inspect the same specialized parameters. Computing both in one
+// traversal avoids repeating type substitution, and later hidden-parameter queries reuse it.
+const executableParameterCache = new WeakMap<
+  Hir.HirFunction,
+  WeakMap<Type.Substitution, ExecutableParameters>
+>()
+const executableParameters = (
+  fn: Hir.HirFunction,
+  substitution: Type.Substitution,
+): ExecutableParameters => {
+  let cache = executableParameterCache.get(fn)
+  const cached = cache?.get(substitution)
+  if (cached !== undefined) return cached
+  const effects: Array<number> = []
+  const callables: Array<number> = []
+  if (fn.contract._tag === 'Contract') {
+    for (const [ordinal, parameter] of fn.contract.parameters.entries()) {
+      const specialized = Type.substitute(parameter, substitution)
+      const contract = Type.isRepresented(specialized) ? specialized.contract : specialized
+      if (Type.isEffect(contract)) effects.push(ordinal)
+      if (Type.isCallable(specialized)) callables.push(ordinal)
+    }
+  }
+  const result = { effects: Object.freeze(effects), callables: Object.freeze(callables) }
+  if (cache === undefined) {
+    cache = new WeakMap()
+    executableParameterCache.set(fn, cache)
+  }
+  cache.set(substitution, result)
+  return result
+}
 const effectParameterOrdinals = (
   fn: Hir.HirFunction,
   substitution: Type.Substitution,
-): ReadonlyArray<number> =>
-  fn.contract._tag === 'Contract'
-    ? fn.contract.parameters.flatMap((parameter, ordinal) =>
-        (() => {
-          const specialized = Type.substitute(parameter, substitution)
-          const contract = Type.isRepresented(specialized) ? specialized.contract : specialized
-          return Type.isEffect(contract) ? [ordinal] : []
-        })(),
-      )
-    : Object.freeze([])
+): ReadonlyArray<number> => executableParameters(fn, substitution).effects
 
 export const parameterEffectRepresentationArgument = (
   fn: Hir.HirFunction,
@@ -818,12 +879,7 @@ export const concreteEffectRepresentationArgument = (
 const callableParameterOrdinals = (
   fn: Hir.HirFunction,
   substitution: Type.Substitution,
-): ReadonlyArray<number> =>
-  fn.contract._tag === 'Contract'
-    ? fn.contract.parameters.flatMap((parameter, ordinal) =>
-        Type.isCallable(Type.substitute(parameter, substitution)) ? [ordinal] : [],
-      )
-    : Object.freeze([])
+): ReadonlyArray<number> => executableParameters(fn, substitution).callables
 
 export const parameterCallableIdentity = (
   fn: Hir.HirFunction,
@@ -902,29 +958,44 @@ const compareInstanceKeys = (left: InstanceKey, right: InstanceKey): number => {
   return 0
 }
 
-const suspensionFact = (
-  self: Discovery,
-  predicate: (subject: SuspensionFact['subject']) => boolean,
-): SuspensionMode.Summary =>
-  self.suspension.find((fact) => predicate(fact.subject))?.summary ?? SuspensionMode.direct
+type SuspensionIndex = ReadonlyMap<
+  SuspensionFact['subject']['_tag'],
+  ReadonlyMap<string, SuspensionMode.Summary>
+>
+
+const suspensionIndexCache = new WeakMap<ReadonlyArray<SuspensionFact>, SuspensionIndex>()
+
+// Provisional MIR queries these facts for each execution on every convergence pass. Index the
+// immutable fact array once, keeping subject kinds separate and preserving first-match semantics.
+const suspensionIndex = (facts: ReadonlyArray<SuspensionFact>): SuspensionIndex => {
+  const cached = suspensionIndexCache.get(facts)
+  if (cached !== undefined) return cached
+  const groups = new Map<SuspensionFact['subject']['_tag'], Map<string, SuspensionMode.Summary>>()
+  for (const fact of facts) {
+    const subject = fact.subject
+    const identity = subject._tag === 'Effect' ? subject.identity : keyText(subject.key)
+    let group = groups.get(subject._tag)
+    if (group === undefined) {
+      group = new Map()
+      groups.set(subject._tag, group)
+    }
+    if (!group.has(identity)) group.set(identity, fact.summary)
+  }
+  suspensionIndexCache.set(facts, groups)
+  return groups
+}
 
 /** Returns the complete summary of a function plus any lazy Effect it returns. */
 export const suspensionOf = (self: Discovery, key: InstanceKey): SuspensionMode.Summary =>
-  suspensionFact(
-    self,
-    (subject) => subject._tag === 'Instance' && keyText(subject.key) === keyText(key),
-  )
+  suspensionIndex(self.suspension).get('Instance')?.get(keyText(key)) ?? SuspensionMode.direct
 
 /** Returns the summary of executing one function body, excluding its lazy result. */
 export const executionSuspensionOf = (self: Discovery, key: InstanceKey): SuspensionMode.Summary =>
-  suspensionFact(
-    self,
-    (subject) => subject._tag === 'Execution' && keyText(subject.key) === keyText(key),
-  )
+  suspensionIndex(self.suspension).get('Execution')?.get(keyText(key)) ?? SuspensionMode.direct
 
 /** Returns the summary of one exact hidden Effect runner. */
 export const effectSuspensionOf = (self: Discovery, identity: string): SuspensionMode.Summary =>
-  suspensionFact(self, (subject) => subject._tag === 'Effect' && subject.identity === identity)
+  suspensionIndex(self.suspension).get('Effect')?.get(identity) ?? SuspensionMode.direct
 
 const sameVisibleTypeArguments = (
   left: ReadonlyArray<Type.GenericArgument>,

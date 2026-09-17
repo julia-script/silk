@@ -856,7 +856,7 @@ pub fn main() -> i32 {
     )
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
     const program = Analysis.loweredMir(snapshot)
-    assert.deepEqual(MirVerification.verify(program), [])
+    assert.deepEqual(yield* MirVerification.verify(program), [])
     const nestedFn =
       program.functions.find((candidate) => candidate.id.name === 'nested') ??
       raise('expected nested MIR')
@@ -959,7 +959,7 @@ pub fn main() -> i32 { let deferredValue = run deferred(DeferredValue { value: 7
       )
       assert.deepEqual(Analysis.diagnostics(snapshot), [])
       const program = Analysis.loweredMir(snapshot)
-      assert.deepEqual(MirVerification.verify(program), [])
+      assert.deepEqual(yield* MirVerification.verify(program), [])
       const fn =
         program.functions.find((candidate) => candidate.id.name === 'argument') ??
         raise('expected argument MIR')
@@ -1033,7 +1033,7 @@ pub fn main() -> i32 { return partial(Choice.First, false) }`),
       )
       assert.deepEqual(Analysis.diagnostics(snapshot), [])
       const program = Analysis.loweredMir(snapshot)
-      assert.deepEqual(MirVerification.verify(program), [])
+      assert.deepEqual(yield* MirVerification.verify(program), [])
       const fn =
         program.functions.find((candidate) => candidate.id.name === 'partial') ??
         raise('expected partial MIR')
@@ -1092,7 +1092,7 @@ pub fn main() -> i32 { return guarded(Choice.First) + loops(Choice.Last) + stopp
     )
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
     const program = Analysis.loweredMir(snapshot)
-    assert.deepEqual(MirVerification.verify(program), [])
+    assert.deepEqual(yield* MirVerification.verify(program), [])
     const stoppedGuardFact =
       snapshot.results
         .get('ordinary-mir-guard-loop')

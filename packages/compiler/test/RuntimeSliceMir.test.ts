@@ -36,7 +36,7 @@ it.effect(
       const self = yield* snapshot(source)
       assert.deepEqual(Analysis.diagnostics(self), [])
       const mir = Analysis.loweredMir(self)
-      assert.deepEqual(MirVerification.verify(mir), [])
+      assert.deepEqual(yield* MirVerification.verify(mir), [])
 
       const shared = mir.functions.find((fn) => fn.id.name === 'shared')
       const sharedOperations = shared === undefined ? [] : MirVerification.operations(shared)
@@ -118,7 +118,7 @@ it.effect('rejects missing endings, consuming shared reads, and mismatched slice
       ]),
     })
     assert.include(
-      MirVerification.verify(missing).map((violation) => violation.rule),
+      (yield* MirVerification.verify(missing)).map((violation) => violation.rule),
       'InvalidLoan',
     )
 
@@ -157,7 +157,7 @@ it.effect('rejects missing endings, consuming shared reads, and mismatched slice
       ]),
     })
     assert.include(
-      MirVerification.verify(consumingShared).map((violation) => violation.rule),
+      (yield* MirVerification.verify(consumingShared)).map((violation) => violation.rule),
       'InvalidSliceOperation',
     )
 
@@ -195,7 +195,7 @@ it.effect('rejects missing endings, consuming shared reads, and mismatched slice
       ]),
     })
     assert.include(
-      MirVerification.verify(malformed).map((violation) => violation.rule),
+      (yield* MirVerification.verify(malformed)).map((violation) => violation.rule),
       'InvalidSliceOperation',
     )
   }),

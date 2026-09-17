@@ -45,7 +45,7 @@ it.effect('accepts the compiler-shaped fold through every static compiler phase'
     assert.strictEqual(Analysis.layoutOf(self)._tag, 'Available')
     const lowered = Analysis.loweredMir(self)
     assert.isAbove(lowered.functions.length, 0)
-    assert.deepEqual(MirVerification.verify(lowered), [])
+    assert.deepEqual(yield* MirVerification.verify(lowered), [])
     assert.strictEqual(
       Analysis.instancesOf(self).instances.filter(
         (instance) => instance.key.declaration.name === 'fold',

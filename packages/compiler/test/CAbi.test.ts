@@ -698,7 +698,7 @@ pub fn main() -> i32 {
     assert.include(artifact.ir, 'memory(argmem: read)')
     assert.notMatch(artifact.ir, /declare i32 @inspect[^\n]*nounwind/)
     const program = Analysis.loweredMir(snapshot)
-    assert.deepEqual(MirVerification.verify(program), [])
+    assert.deepEqual(yield* MirVerification.verify(program), [])
     const manifest = AbiManifest.make(Target.aarch64AppleDarwin, artifact.foreignImports, [], [])
     const manifestSource = SourceFile.make('interfaces/valid.json', AbiManifest.encode(manifest))
     const supplied = yield* AbiManifest.decode(manifestSource)
@@ -843,7 +843,7 @@ pub fn main() -> i32 { let value = 42 return invoke(read, &value) }
     )
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
     const program = Analysis.loweredMir(snapshot)
-    assert.deepEqual(MirVerification.verify(program), [])
+    assert.deepEqual(yield* MirVerification.verify(program), [])
     const operations = program.functions.flatMap(MirVerification.operations)
     const indirect = operations.find((operation) => operation._tag === 'ForeignIndirectCall')
     assert.isDefined(indirect)
@@ -1050,7 +1050,7 @@ pub fn main() -> i32 {
       ),
       [[], ['i32', 'i32', 'i32', 'u32'], ['i32']],
     )
-    assert.deepEqual(MirVerification.verify(program), [])
+    assert.deepEqual(yield* MirVerification.verify(program), [])
     const artifact = yield* Analysis.codegen(snapshot, { mode: 'release' })
     assert.include(artifact.ir, 'declare i32 @receive(i32, ...)')
     assert.include(artifact.ir, 'invoke i32 (i32, ...) @receive')
@@ -1075,7 +1075,7 @@ pub fn main() -> i32 {
       })),
     }
     assert.include(
-      MirVerification.verify(corrupted).map((entry) => entry.rule),
+      (yield* MirVerification.verify(corrupted)).map((entry) => entry.rule),
       'InvalidForeignCall',
     )
     const manifest = AbiManifest.make(Target.aarch64AppleDarwin, artifact.foreignImports, [], [])
@@ -1235,7 +1235,7 @@ pub fn main() -> i32 { let value: u16 = 41 return unsafe receive(add, 0, value) 
     )
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
     const program = Analysis.loweredMir(snapshot)
-    assert.deepEqual(MirVerification.verify(program), [])
+    assert.deepEqual(yield* MirVerification.verify(program), [])
     const call = program.foreignCalls.at(0) ?? unreachable('variadic callback declaration')
     assert.deepEqual(call.signature.contract.callbacks, [0])
     assert.strictEqual(call.signature.variadic, true)

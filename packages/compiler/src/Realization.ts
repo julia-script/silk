@@ -157,7 +157,7 @@ const buildTargetLayout = Effect.fn('Realization.buildTargetLayout')(function* (
       selection,
       error: analysisUnavailable,
     })
-  const catalog = yield* buildLayoutCatalog(
+  const catalog = yield* Layout.catalog(
     selection.target,
     self.index,
     instances,
@@ -168,26 +168,8 @@ const buildTargetLayout = Effect.fn('Realization.buildTargetLayout')(function* (
     selection,
     target: selection.target,
     catalog,
-    layout: yield* planLayout(catalog, instances, self.index),
+    layout: yield* Layout.plan(catalog, instances, self.index),
   })
-})
-
-const buildLayoutCatalog = Effect.fn('Realization.buildLayoutCatalog')(
-  (
-    target: Target.Target,
-    index: DeclarationIndex.Index,
-    instances: Instances.Discovery,
-    opaqueRealizations: OpaqueRealization.Catalog,
-  ) => Effect.sync(() => Layout.catalog(target, index, instances, opaqueRealizations)),
-)
-
-const planLayout = Effect.fn('Realization.planLayout')(function* (
-  catalog: Layout.Catalog,
-  instances: Instances.Discovery,
-  index: DeclarationIndex.Index,
-) {
-  const trace = yield* CompilerTrace.capture()
-  return Layout.plan(catalog, instances, index, trace)
 })
 
 const lowerMir = Effect.fn('Realization.lowerMir')(function* (

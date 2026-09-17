@@ -28,7 +28,7 @@ it.effect('selects only the ordinary platform entropy imports with no OS operati
         target.id,
       )
       assert.deepEqual(Analysis.diagnostics(snapshot), [])
-      assert.deepEqual(MirVerification.verify(Analysis.loweredMir(snapshot)), [])
+      assert.deepEqual(yield* MirVerification.verify(Analysis.loweredMir(snapshot)), [])
       assert.deepEqual(
         snapshot.instances.foreignCalls.map((call) => call.symbol),
         target.id.includes('apple') ? ['arc4random_buf'] : ['__errno_location', 'getrandom'],

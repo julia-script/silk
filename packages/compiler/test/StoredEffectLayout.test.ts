@@ -18,8 +18,8 @@ const storedLayout = Effect.fnUntraced(function* (
   target: Target.Target,
 ) {
   const snapshot = yield* AnalysisFixture.retainingMain(name, ascii(source), target.id)
-  const catalog = Layout.catalog(target, snapshot.index, snapshot.instances)
-  const plan = Layout.plan(catalog, snapshot.instances, snapshot.index)
+  const catalog = yield* Layout.catalog(target, snapshot.index, snapshot.instances)
+  const plan = yield* Layout.plan(catalog, snapshot.instances, snapshot.index)
   return Object.freeze({ snapshot, catalog, plan })
 })
 
@@ -74,7 +74,7 @@ pub fn main() -> i32 {
       assert.strictEqual(represented.alignment, 4)
       assert.strictEqual(deferred.representation._tag, 'Aggregate')
       assert.deepEqual(LayoutVerify.verifyCatalog(catalog, snapshot.index), [])
-      assert.deepEqual(LayoutVerify.verify(plan), [])
+      assert.deepEqual(yield* LayoutVerify.verify(plan), [])
     }
   }),
 )
@@ -137,7 +137,7 @@ pub fn main() -> i32 {
     )
 
     assert.strictEqual(LayoutEncode.encode(first.plan), LayoutEncode.encode(second.plan))
-    assert.deepEqual(LayoutVerify.verify(first.plan), [])
+    assert.deepEqual(yield* LayoutVerify.verify(first.plan), [])
     assert.isFalse(first.plan.entries.some((entry) => Type.isEffect(entry.type)))
   }),
 )
@@ -179,7 +179,7 @@ pub fn main() -> i32 {
       shape.laneCount,
       shape.tree.fields.reduce((total, field) => total + field.shape.laneCount, 0),
     )
-    assert.deepEqual(LayoutVerify.verify(plan), [])
+    assert.deepEqual(yield* LayoutVerify.verify(plan), [])
   }),
 )
 
@@ -213,6 +213,6 @@ pub fn main() -> i32 {
       middle.fields.map((field) => field.shape._tag),
       ['EffectEnvironmentShape', 'CallableEnvironmentShape'],
     )
-    assert.deepEqual(LayoutVerify.verify(plan), [])
+    assert.deepEqual(yield* LayoutVerify.verify(plan), [])
   }),
 )

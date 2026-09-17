@@ -221,7 +221,7 @@ it.effect(
         ),
         ['Equals', 'LessThan'],
       )
-      assert.deepEqual(MirVerification.verify(lowered), [])
+      assert.deepEqual(yield* MirVerification.verify(lowered), [])
       assert.deepEqual(
         operations.flatMap((operation) =>
           operation._tag === 'Literal' && operation.type._tag === 'u8'

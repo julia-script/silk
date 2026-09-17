@@ -26,6 +26,40 @@ it('writes VBR values with exact bigint semantics', () => {
   )
 })
 
+it('packs wide numbers and bigint limbs across unaligned word boundaries', () => {
+  const writer = Bitstream.make()
+  Bitstream.writeBits(writer, 1, 1)
+  Bitstream.writeBits(writer, Number.MAX_SAFE_INTEGER, 53)
+  Bitstream.writeBits(writer, 0x89ab_cdef, 32)
+  Bitstream.writeBits(writer, 0, 0)
+  Bitstream.writeBits(writer, 0x123456789abcdef0123456789abcdefn, 100)
+  Bitstream.alignTo32(writer)
+
+  assert.deepEqual(
+    writer.words,
+    [0xffff_ffff, 0x7bff_ffff, 0x7be2_6af3, 0x59e2_6af3, 0x7bc0_48d1, 0x01e2_6af3],
+  )
+})
+
+it('preserves high numeric bits and continuation bits in wide VBR groups', () => {
+  const writer = Bitstream.make()
+  Bitstream.writeBits(writer, 0x15, 5)
+  Bitstream.writeVbr(writer, Number.MAX_SAFE_INTEGER, 32)
+  Bitstream.writeVbr(writer, 0xffff_ffff, 31)
+  Bitstream.writeVbr(writer, 0x1_0000_0000, 6)
+  Bitstream.writeVbr(writer, 0, 2)
+  Bitstream.writeVbr(writer, 0xffff_ffff_ffff_ffffn, 32)
+  Bitstream.alignTo32(writer)
+
+  assert.deepEqual(
+    writer.words,
+    [
+      0xffff_fff5, 0x07ff_ffff, 0xffff_ffe0, 0x0000_003f, 0x0410_4100, 0xffff_8241, 0xffff_ffff,
+      0x0001_ffff, 0x0000_0000,
+    ],
+  )
+})
+
 it('rejects characters outside LLVM char6', () => {
   assert.throws(() => Bitstream.char6('-'), /Character is not representable/)
   assert.strictEqual(Bitstream.char6('a'), 0)

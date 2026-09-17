@@ -60,7 +60,7 @@ it.effect('realizes the consolidated owned address value contract on the native 
       })),
       [],
     )
-    assert.deepEqual(MirVerification.verify(Analysis.loweredMir(snapshot)), [])
+    assert.deepEqual(yield* MirVerification.verify(Analysis.loweredMir(snapshot)), [])
   }),
 )
 
@@ -81,7 +81,7 @@ it.effect('keeps the reference example executable', () =>
       'wasm32-unknown-unknown',
     )
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
-    assert.deepEqual(MirVerification.verify(Analysis.loweredMir(snapshot)), [])
+    assert.deepEqual(yield* MirVerification.verify(Analysis.loweredMir(snapshot)), [])
   }),
 )
 
@@ -117,7 +117,7 @@ it.effect(
           })),
           [],
         )
-        assert.deepEqual(MirVerification.verify(Analysis.loweredMir(snapshot)), [])
+        assert.deepEqual(yield* MirVerification.verify(Analysis.loweredMir(snapshot)), [])
         const imports = Analysis.instancesOf(snapshot).foreignCalls.map((call) => call.symbol)
         if (target === 'wasm32-unknown-unknown') {
           assert.deepEqual(imports, [])
@@ -141,7 +141,7 @@ pub fn main() -> i32 { return 42 }`),
         [{ code: 'SEM0014', start: 29 }],
       )
     }),
-  45_000,
+  45000,
 )
 
 it.effect(
@@ -156,7 +156,7 @@ it.effect(
         'x86_64-unknown-linux-gnu',
       )
       assert.deepEqual(Analysis.diagnostics(snapshot), [])
-      assert.deepEqual(MirVerification.verify(Analysis.loweredMir(snapshot)), [])
+      assert.deepEqual(yield* MirVerification.verify(Analysis.loweredMir(snapshot)), [])
       if (snapshot.mir._tag !== 'Available') return
       const parks = snapshot.mir.value.functions
         .flatMap(MirVerification.operations)
@@ -164,5 +164,5 @@ it.effect(
       assert.lengthOf(parks, 2)
       assert.isTrue(parks.every((park) => park.guardCleanup._tag !== 'NoCleanup'))
     }),
-  60_000,
+  60000,
 )

@@ -68,7 +68,7 @@ pub fn main() -> i32 {
       assert.include(fallbackInstances, 'impl@1.seed')
       assert.include(fallbackInstances, 'impl@2.encode')
       assert.include(fallbackInstances, 'decodeAge')
-      assert.deepEqual(MirVerification.verify(Analysis.loweredMir(fallback)), [])
+      assert.deepEqual(yield* MirVerification.verify(Analysis.loweredMir(fallback)), [])
       assert.isTrue(
         Analysis.loweredMir(fallback)
           .functions.flatMap(MirVerification.operations)
@@ -117,7 +117,7 @@ pub fn main() -> i32 {
         Analysis.instancesOf(adapted).instances.map((instance) => instance.key.declaration.name),
         'cellAdd',
       )
-      assert.deepEqual(MirVerification.verify(Analysis.loweredMir(adapted)), [])
+      assert.deepEqual(yield* MirVerification.verify(Analysis.loweredMir(adapted)), [])
     }),
 )
 
@@ -422,7 +422,7 @@ pub fn main() -> i32 { return run Intrinsic.catchFailure<Failed>(program(), reco
     )
     assert.deepEqual(Analysis.diagnostics(self), [])
     const mir = Analysis.loweredMir(self)
-    assert.deepEqual(MirVerification.verify(mir), [])
+    assert.deepEqual(yield* MirVerification.verify(mir), [])
     const runner =
       mir.functions.find((fn) => fn.id.name === 'program$effect$0') ??
       unreachable('expected owned witness adapter runner')
@@ -616,7 +616,7 @@ pub fn main() -> i32 {
 }`,
     )
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
-    assert.deepEqual(MirVerification.verify(Analysis.loweredMir(snapshot)), [])
+    assert.deepEqual(yield* MirVerification.verify(Analysis.loweredMir(snapshot)), [])
     const functions = Projections.hirOf(snapshot, sourceModule)?.functions ?? []
     const calls = functions.flatMap((fn) =>
       fn.statements
@@ -802,7 +802,7 @@ pub fn main() -> i32 {
 }`,
     )
     assert.deepEqual(Analysis.diagnostics(weakened), [])
-    assert.deepEqual(MirVerification.verify(Analysis.loweredMir(weakened)), [])
+    assert.deepEqual(yield* MirVerification.verify(Analysis.loweredMir(weakened)), [])
     assert.include(
       Analysis.instancesOf(weakened).instances.map((instance) => instance.key.declaration.name),
       'cellAdd',
@@ -833,7 +833,7 @@ pub fn main() -> i32 {
 }`,
     )
     assert.deepEqual(Analysis.diagnostics(replayed), [])
-    assert.deepEqual(MirVerification.verify(Analysis.loweredMir(replayed)), [])
+    assert.deepEqual(yield* MirVerification.verify(Analysis.loweredMir(replayed)), [])
     assert.isAtLeast(
       Analysis.loweredMir(replayed)
         .functions.flatMap(MirVerification.operations)

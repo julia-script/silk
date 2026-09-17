@@ -1496,7 +1496,7 @@ it.effect('rejects residual open MIR and keeps specialization symbols injective'
       ]),
     })
     assert.include(
-      MirVerification.verify(malformed).map((violation) => violation.rule),
+      (yield* MirVerification.verify(malformed)).map((violation) => violation.rule),
       'InvalidInstance',
     )
 

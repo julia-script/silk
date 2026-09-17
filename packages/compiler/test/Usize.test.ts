@@ -224,7 +224,7 @@ it.effect('rejects malformed usize target verdicts and MIR literals as verifier 
       literalVerdicts: [{ ...first, bits: 64 }],
     }
     assert.include(
-      LayoutVerify.verify(malformedLayout).map((violation) => violation.rule),
+      (yield* LayoutVerify.verify(malformedLayout)).map((violation) => violation.rule),
       'InvalidLiteralVerdict',
     )
 
@@ -246,7 +246,7 @@ it.effect('rejects malformed usize target verdicts and MIR literals as verifier 
       })),
     }
     assert.include(
-      MirVerification.verify(malformed).map((violation) => violation.rule),
+      (yield* MirVerification.verify(malformed)).map((violation) => violation.rule),
       'InvalidIntegerOperation',
     )
   }),

@@ -776,7 +776,8 @@ export const plan = (
   const plans: Array<Plan> = []
   const violations: Array<Violation> = []
   for (const fn of program.functions) {
-    const live = liveness(fn)
+    // Most functions have no relay control. Their fixed-point liveness cannot contribute a plan.
+    let live: ReturnType<typeof liveness> | undefined
     for (const region of fn.regions) {
       for (const operation of regionOperations(region).flatMap(Mir.operationTree)) {
         if (
@@ -810,6 +811,7 @@ export const plan = (
           )
           continue
         }
+        live ??= liveness(fn)
         const planned = planFor(
           program,
           index,

@@ -294,10 +294,8 @@ export const plan = (discovery: Instances.Discovery, index: DeclarationIndex.Ind
     instance: Instances.Instance,
     expression: { readonly span: SourceSpan.SourceSpan },
   ): Instances.CallInstance | undefined =>
-    discovery.calls.find(
-      (call) =>
-        Instances.keyText(call.owner) === ownerKey(instance) &&
-        sameSpan(call.span, expression.span),
+    (callsByOwner(discovery.calls).get(ownerKey(instance)) ?? []).find((call) =>
+      sameSpan(call.span, expression.span),
     )
 
   const targetAt = (

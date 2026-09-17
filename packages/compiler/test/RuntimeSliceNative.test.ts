@@ -97,7 +97,7 @@ pub fn main() -> i32 {
     )
     assert.deepEqual(Analysis.diagnostics(self), [])
     const mir = Analysis.loweredMir(self)
-    assert.deepEqual(MirVerification.verify(mir), [])
+    assert.deepEqual(yield* MirVerification.verify(mir), [])
     const main = mir.functions.find((fn) => fn.id.name === 'choose')
     assert.ok(main)
     const operations = MirVerification.operations(main)

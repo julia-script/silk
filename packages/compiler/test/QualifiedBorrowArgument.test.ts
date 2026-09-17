@@ -158,7 +158,7 @@ pub fn main() -> i32 {
       ascii(source),
     )
     assert.deepEqual(Analysis.diagnostics(self), [])
-    assert.deepEqual(MirVerification.verify(Analysis.loweredMir(self)), [])
+    assert.deepEqual(yield* MirVerification.verify(Analysis.loweredMir(self)), [])
   }),
 )
 
@@ -180,7 +180,7 @@ pub fn main() -> i32 {
     const self = yield* AnalysisFixture.retainingMain('qualified-borrow/field-view', ascii(source))
     assert.deepEqual(Analysis.diagnostics(self), [])
     const mir = Analysis.loweredMir(self)
-    assert.deepEqual(MirVerification.verify(mir), [])
+    assert.deepEqual(yield* MirVerification.verify(mir), [])
     const wholeOwnerRead = {
       ...mir,
       functions: mir.functions.map((fn) => ({
@@ -203,7 +203,7 @@ pub fn main() -> i32 {
       })),
     }
     assert.include(
-      MirVerification.verify(wholeOwnerRead).map((violation) => violation.rule),
+      (yield* MirVerification.verify(wholeOwnerRead)).map((violation) => violation.rule),
       'InvalidLoan',
     )
   }),

@@ -24,8 +24,12 @@ const lowerStored = Effect.fnUntraced(function* (name: string, source: string) {
     Target.wasm32UnknownUnknown.id,
   )
   assert.deepEqual(Analysis.diagnostics(snapshot), [])
-  const catalog = Layout.catalog(Target.wasm32UnknownUnknown, snapshot.index, snapshot.instances)
-  const layout = Layout.plan(catalog, snapshot.instances, snapshot.index)
+  const catalog = yield* Layout.catalog(
+    Target.wasm32UnknownUnknown,
+    snapshot.index,
+    snapshot.instances,
+  )
+  const layout = yield* Layout.plan(catalog, snapshot.instances, snapshot.index)
   const module = Lower.lowerProgram(
     snapshot.instances,
     layout,
@@ -102,7 +106,7 @@ pub fn main() -> i32 {
   return 0
 }`,
     )
-    assert.deepEqual(MirVerification.verify(module), [])
+    assert.deepEqual(yield* MirVerification.verify(module), [])
     const construct = module.functions
       .flatMap(MirVerification.operations)
       .find(
@@ -127,15 +131,19 @@ pub fn main() -> i32 {
         { access: 'Take', effect: false, callable: true },
       ],
     )
-
-    const drop = module.functions
-      .flatMap(MirVerification.operations)
-      .find(
-        (operation): operation is Extract<Mir.Operation, { readonly _tag: 'Drop' }> =>
-          operation._tag === 'Drop' &&
-          operation.cleanup._tag === 'StructCleanup' &&
-          operation.cleanup.fields.some((field) => field.cleanup._tag === 'EffectCleanup'),
-      )
+    const drop = module.functions.flatMap(MirVerification.operations).find(
+      (
+        operation,
+      ): operation is Extract<
+        Mir.Operation,
+        {
+          readonly _tag: 'Drop'
+        }
+      > =>
+        operation._tag === 'Drop' &&
+        operation.cleanup._tag === 'StructCleanup' &&
+        operation.cleanup.fields.some((field) => field.cleanup._tag === 'EffectCleanup'),
+    )
     assert.isDefined(drop)
     if (drop === undefined || drop.cleanup._tag !== 'StructCleanup') return
     const structCleanup = drop.cleanup
@@ -160,7 +168,12 @@ pub fn main() -> i32 {
     const replaceOuter = (
       cleanup: CleanupPlan.CleanupPlan,
       selected: CleanupPlan.CleanupPlan,
-    ): Extract<Mir.Operation, { readonly _tag: 'Drop' }> =>
+    ): Extract<
+      Mir.Operation,
+      {
+        readonly _tag: 'Drop'
+      }
+    > =>
       Object.freeze({
         ...drop,
         cleanup: Object.freeze({
@@ -260,9 +273,9 @@ pub fn main() -> i32 {
     ]
     for (const [cleanup, selected] of malformed) {
       assert.include(
-        MirVerification.verify(replaceDrop(module, drop, replaceOuter(cleanup, selected))).map(
-          (violation) => violation.rule,
-        ),
+        (yield* MirVerification.verify(
+          replaceDrop(module, drop, replaceOuter(cleanup, selected)),
+        )).map((violation) => violation.rule),
         'InvalidAggregateOperation',
       )
     }

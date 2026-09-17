@@ -621,23 +621,14 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
           release.initialization,
         )
       }
-      const returned: Array<Value.Input> = [
-        mappedTag,
-        ...(yield* NativeAggregate.failurePayload(
-          failure,
-          yield* NativeStorage.materialize(nativeStorage, operation.outcome),
-          operation.outcomeType.type,
-          tag,
-          operation.propagationType.type,
-          operation.tagMappings,
-          `effect_run${operation.destination.ordinal}_payload`,
-        )),
-      ]
-      yield* NativeReturn.complete(
+      yield* NativeReturn.propagateFailure(
         suspension.returns,
-        Object.freeze(returned.slice(0, operation.propagationLaneCount)),
-        'propagated_effect',
+        nativeStorage,
         operation.outcome,
+        tag,
+        mappedTag,
+        operation.tagMappings,
+        'propagated_effect',
       )
       yield* LlvmBlock.setInsertionPoint(body, followingBlock)
       // Both arms of this outcome dispatch reach here, so neither arm's cached
@@ -872,23 +863,14 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
           release.initialization,
         )
       }
-      const returned: Array<Value.Input> = [
-        propagatedTag,
-        ...(yield* NativeAggregate.failurePayload(
-          failure,
-          yield* NativeStorage.materialize(nativeStorage, operation.outcome),
-          operation.outcomeType.type,
-          tag,
-          operation.propagationType.type,
-          operation.tagMappings,
-          `effect_composite${operation.destination.ordinal}_payload`,
-        )),
-      ]
-      yield* NativeReturn.complete(
+      yield* NativeReturn.propagateFailure(
         suspension.returns,
-        Object.freeze(returned.slice(0, operation.propagationLaneCount)),
-        'propagated_effect_composite',
+        nativeStorage,
         operation.outcome,
+        tag,
+        propagatedTag,
+        operation.tagMappings,
+        'propagated_effect_composite',
       )
       yield* LlvmBlock.setInsertionPoint(body, completed)
       yield* NativeStorage.reloadRoots(
@@ -1074,23 +1056,14 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
           release.initialization,
         )
       }
-      const returned: Array<Value.Input> = [
-        mappedTag,
-        ...(yield* NativeAggregate.failurePayload(
-          failure,
-          yield* NativeStorage.materialize(nativeStorage, operation.outcome),
-          operation.outcomeType.type,
-          tag,
-          operation.propagationType.type,
-          operation.tagMappings,
-          `effect_value${operation.destination.ordinal}_payload`,
-        )),
-      ]
-      yield* NativeReturn.complete(
+      yield* NativeReturn.propagateFailure(
         suspension.returns,
-        Object.freeze(returned.slice(0, operation.propagationLaneCount)),
-        'propagated_effect_value',
+        nativeStorage,
         operation.outcome,
+        tag,
+        mappedTag,
+        operation.tagMappings,
+        'propagated_effect_value',
       )
       yield* LlvmBlock.setInsertionPoint(body, followingBlock)
       // Both arms of this outcome dispatch reach here, so neither arm's cached

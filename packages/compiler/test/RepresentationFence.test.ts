@@ -22,8 +22,9 @@ const assertFenced = (snapshot: Analysis.Snapshot, code: 'SEM0103' | 'SEM0107'):
   assert.strictEqual(snapshot.layout._tag, 'Unavailable')
   assert.strictEqual(snapshot.mir._tag, 'Unavailable')
 }
-
-const assertRealizedCallable = (snapshot: Analysis.Snapshot): void => {
+const assertRealizedCallable = Effect.fnUntraced(function* (
+  snapshot: Analysis.Snapshot,
+): Effect.fn.Return<void> {
   assert.notInclude(
     Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
     'SEM0103',
@@ -32,10 +33,11 @@ const assertRealizedCallable = (snapshot: Analysis.Snapshot): void => {
   assert.strictEqual(snapshot.layout._tag, 'Available')
   assert.strictEqual(snapshot.mir._tag, 'Available')
   if (snapshot.mir._tag === 'Available')
-    assert.deepEqual(MirVerification.verify(snapshot.mir.value), [])
-}
-
-const assertRealizedEffect = (snapshot: Analysis.Snapshot): void => {
+    assert.deepEqual(yield* MirVerification.verify(snapshot.mir.value), [])
+})
+const assertRealizedEffect = Effect.fnUntraced(function* (
+  snapshot: Analysis.Snapshot,
+): Effect.fn.Return<void> {
   assert.notInclude(
     Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
     'SEM0107',
@@ -44,8 +46,8 @@ const assertRealizedEffect = (snapshot: Analysis.Snapshot): void => {
   assert.strictEqual(snapshot.layout._tag, 'Available')
   assert.strictEqual(snapshot.mir._tag, 'Available')
   if (snapshot.mir._tag === 'Available')
-    assert.deepEqual(MirVerification.verify(snapshot.mir.value), [])
-}
+    assert.deepEqual(yield* MirVerification.verify(snapshot.mir.value), [])
+})
 
 it.effect('realizes exact represented callable storage through layout and MIR', () =>
   Effect.gen(function* () {
@@ -58,8 +60,7 @@ pub fn main() -> i32 {
   return parser.parse(1)
 }`,
     )
-
-    assertRealizedCallable(snapshot)
+    yield* assertRealizedCallable(snapshot)
   }),
 )
 
@@ -75,7 +76,7 @@ pub fn main() -> i32 {
   return parser.parse(1)
 }`
     const snapshot = yield* realized('representation-fence/callable-open', source)
-    assertRealizedCallable(snapshot)
+    yield* assertRealizedCallable(snapshot)
   }),
 )
 
@@ -89,8 +90,7 @@ pub fn main() -> i32 {
   return run deferred.operation
 }`,
     )
-
-    assertRealizedEffect(snapshot)
+    yield* assertRealizedEffect(snapshot)
   }),
 )
 
@@ -111,8 +111,7 @@ pub fn main() -> i32 {
   return 0
 }`,
       )
-
-      assertRealizedEffect(snapshot)
+      yield* assertRealizedEffect(snapshot)
     }
   }),
 )
@@ -128,7 +127,7 @@ pub fn main() -> i32 {
   return run deferred.operation
 }`
     const snapshot = yield* realized('representation-fence/effect-open', source)
-    assertRealizedEffect(snapshot)
+    yield* assertRealizedEffect(snapshot)
   }),
 )
 
@@ -379,7 +378,7 @@ pub fn main() -> i32 {
   return 0
 }`,
       )
-      assertRealizedCallable(snapshot)
+      yield* assertRealizedCallable(snapshot)
     }),
 )
 
@@ -402,6 +401,6 @@ pub fn main() -> i32 {
   return 0
 }`,
     )
-    assertRealizedEffect(snapshot)
+    yield* assertRealizedEffect(snapshot)
   }),
 )

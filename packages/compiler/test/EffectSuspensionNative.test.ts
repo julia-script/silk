@@ -120,7 +120,7 @@ it.effect('uses a private iterative native coroutine-frame protocol', () =>
       'aarch64-apple-darwin',
     )
     assert.deepEqual(Analysis.diagnostics(analysis), [])
-    assert.deepEqual(MirVerification.verify(Analysis.loweredMir(analysis)), [])
+    assert.deepEqual(yield* MirVerification.verify(Analysis.loweredMir(analysis)), [])
     assert.isTrue(
       Analysis.loweredMir(analysis).functions.some(
         (fn) => fn.suspension?.classification === 'Suspendable',
@@ -157,7 +157,7 @@ it.effect(
         'aarch64-apple-darwin',
       )
       assert.deepEqual(Analysis.diagnostics(analysis), [])
-      assert.deepEqual(MirVerification.verify(Analysis.loweredMir(analysis)), [])
+      assert.deepEqual(yield* MirVerification.verify(Analysis.loweredMir(analysis)), [])
       const provided = Analysis.loweredMir(analysis).functions.find(
         (fn) =>
           fn.id.name.startsWith('borrowedRead$effect$-1$provided$') &&
@@ -171,7 +171,7 @@ it.effect(
       )
       yield* Analysis.codegen(analysis, { mode: 'debug' })
     }),
-  30_000,
+  30000,
 )
 
 it.effect('propagates a failure after a resumed retry into its native handler', () =>

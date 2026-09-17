@@ -645,3 +645,55 @@ export const copy = Effect.fnUntraced(function* (
     },
   )
 })
+
+/** Copies canonical failure bytes between outcome envelopes with different success layouts. */
+export const copyFailure = Effect.fnUntraced(function* (
+  destination: NativePlace,
+  context: Context,
+  source: NativePlace,
+  mappings: ReadonlyArray<{ readonly source: number; readonly target: number }>,
+) {
+  if (destination.type._tag !== 'EffectOutcome' || source.type._tag !== 'EffectOutcome')
+    throw new RangeError('Failure copy requires two outcome places')
+  const layout = context.types.program.layout
+  const from = ValueStorage.outcome(layout, source.type.type)
+  const to = ValueStorage.outcome(layout, destination.type.type)
+  let size = 0
+  for (const mapping of mappings) {
+    const sourceMember = from.members.find((member) => member.tag === mapping.source)
+    const targetMember = to.members.find((member) => member.tag === mapping.target)
+    if (
+      mapping.source <= 0 ||
+      mapping.target <= 0 ||
+      sourceMember?.storage._tag !== 'Value' ||
+      targetMember?.storage._tag !== 'Value' ||
+      Type.runtimeKey(sourceMember.type) !== Type.runtimeKey(targetMember.type)
+    )
+      throw new RangeError('Failure copy requires matching canonical error members')
+    const member = Layout.entry(layout, sourceMember.type)
+    if (member === undefined) throw new RangeError('Failure copy lost its member layout')
+    size = Math.max(size, member.size)
+  }
+  if (from.payloadOffset + size > source.size || to.payloadOffset + size > destination.size)
+    throw new RangeError('Failure copy exceeds its outcome envelope')
+  if (size === 0) return
+  // The active error has identical storage in both envelopes. Copy the largest mapped
+  // error extent, including padding/inactive bytes, without interpreting those bytes as
+  // scalar lanes. Nested-union expansion produced thousands of instructions per HTTP run.
+  yield* Intrinsic.memmove(
+    context.body,
+    yield* storedPointer(destination, context, to.payloadOffset, 'failure_destination'),
+    yield* storedPointer(source, context, from.payloadOffset, 'failure_source'),
+    yield* Constant.integerUnsigned(
+      context.lanePointers.builder,
+      context.lanePointers.offsetType,
+      BigInt(size),
+    ),
+    {
+      destinationAlignment: yield* Alignment.fromByteUnits(
+        Math.min(destination.alignment, to.alignment),
+      ),
+      sourceAlignment: yield* Alignment.fromByteUnits(Math.min(source.alignment, from.alignment)),
+    },
+  )
+})

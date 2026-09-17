@@ -93,8 +93,8 @@ it.effect('plans target-width address plus usize slice layouts and heterogeneous
         { type: 'usize', bits: undefined, selector: 'SliceLengthSelector' },
       ],
     )
-    assert.deepEqual(LayoutVerify.verify(wasmPlan.value), [])
-    assert.deepEqual(LayoutVerify.verify(nativePlan.value), [])
+    assert.deepEqual(yield* LayoutVerify.verify(wasmPlan.value), [])
+    assert.deepEqual(yield* LayoutVerify.verify(nativePlan.value), [])
   }),
 )
 
@@ -157,7 +157,7 @@ it.effect('rejects a malformed address lane width', () =>
     })
 
     assert.include(
-      LayoutVerify.verify(malformed).map((violation) => violation.rule),
+      (yield* LayoutVerify.verify(malformed)).map((violation) => violation.rule),
       'InvalidCallingShape',
     )
   }),

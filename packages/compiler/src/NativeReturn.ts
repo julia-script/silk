@@ -11,6 +11,7 @@ import type * as Mir from './Mir.js'
 import * as NativePlace from './NativePlace.js'
 import * as NativeStorage from './NativeStorage.js'
 import * as NativeValue from './NativeValue.js'
+import * as NativeAggregate from './NativeAggregate.js'
 import type * as NativeLoweringContext from './NativeLoweringContext.js'
 
 /** Pending normal exits sharing one stored result conversion and diagnostic cleanup. */
@@ -88,6 +89,54 @@ const enqueue = Effect.fnUntraced(function* (
   yield* Block.setInsertionPoint(context.body, exit)
   completion.exits.push({ block: exit, fields })
   return yield* FunctionBody.branch(context.body, completion.block)
+})
+
+/** Propagates an outcome while preserving canonical error storage and diagnostic ownership. */
+export const propagateFailure = Effect.fnUntraced(function* (
+  context: NativeSuspension.ReturnContext,
+  storage: NativeStorage.Context,
+  source: Mir.LocalId,
+  sourceTag: Value.Input,
+  mappedTag: Value.Input,
+  mappings: ReadonlyArray<{ readonly source: number; readonly target: number }>,
+  name: string,
+) {
+  const sourceType = storage.fn.localTypes.at(source.ordinal)
+  const targetType = context.entry.fn.result
+  if (sourceType?._tag !== 'EffectOutcome' || targetType._tag !== 'EffectOutcome')
+    throw new RangeError('Failure propagation requires outcome types')
+  const value = NativeStorage.readLocal(storage, source)
+  const completion = context.completion
+  if (value._tag === 'NativePlace' && completion?.place !== undefined) {
+    yield* NativePlace.copyFailure(completion.place, context, value, mappings)
+    yield* NativePlace.storeLane(completion.place, context, 0, mappedTag, `${name}_tag`)
+    const diagnostic = yield* takeDiagnostic(context, source)
+    return yield* enqueue(context, completion, diagnostic === undefined ? [] : [diagnostic])
+  }
+  const values = yield* NativeStorage.materialize(storage, source)
+  const payload = yield* NativeAggregate.failurePayload(
+    {
+      builder: context.builder,
+      body: context.body,
+      program: context.types.program,
+      i32: context.i32,
+      types: context.types,
+      arith: {
+        body: context.body,
+        pointerBits: context.types.program.layout.target.pointerSize === 4 ? 32 : 64,
+        i32: context.i32,
+        integerTypes: context.types.integerTypes,
+        types: context.types,
+      },
+    },
+    values,
+    sourceType.type,
+    sourceTag,
+    targetType.type,
+    mappings,
+    `${name}_payload`,
+  )
+  return yield* complete(context, [mappedTag, ...payload], name, source)
 })
 
 /** Completes one invocation through its declared synchronous or suspension result ABI. */

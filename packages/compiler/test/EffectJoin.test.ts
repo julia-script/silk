@@ -80,7 +80,7 @@ pub fn main() -> i32 { return run outer(Flag.No) }`,
     )
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
     const mir = Analysis.loweredMir(snapshot)
-    assert.deepEqual(MirVerification.verify(mir), [])
+    assert.deepEqual(yield* MirVerification.verify(mir), [])
     const composite = mir.functions
       .flatMap(MirVerification.operations)
       .find((operation) => operation._tag === 'RunEffectComposite')
@@ -127,10 +127,10 @@ pub fn main() -> i32 { return run Effect.catchAll(Effect.ensuring(choose(2), cho
       [],
     )
     const mir = Analysis.loweredMir(snapshot)
-    assert.deepEqual(MirVerification.verify(mir), [])
+    assert.deepEqual(yield* MirVerification.verify(mir), [])
     const composites = mir.layout.valueStorage.filter((view) => view.role === 'CompositeCarrier')
     assert.isNotEmpty(composites)
-    assert.deepEqual(ValueStorage.verify(mir.layout), [])
+    assert.deepEqual(yield* ValueStorage.verify(mir.layout), [])
     for (const view of composites) {
       assert.strictEqual(view._tag, 'ValueStorage')
       if (view._tag !== 'ValueStorage') continue
@@ -154,7 +154,7 @@ pub fn main() -> i32 { return run Effect.catchAll(Effect.ensuring(choose(2), cho
           ),
         )
         assert.deepEqual(
-          ValueStorage.verify(missing).map((violation) => violation.rule),
+          (yield* ValueStorage.verify(missing)).map((violation) => violation.rule),
           ['InvalidValueStorage'],
         )
       }

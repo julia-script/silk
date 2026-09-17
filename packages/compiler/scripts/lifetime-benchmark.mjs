@@ -481,7 +481,7 @@ const checkSource = Effect.fnUntraced(
       realization = {
         instances: realized.instances.instances.length,
         phases: realized.report,
-        mirViolations: mir === undefined ? [] : MirVerification.verify(mir),
+        mirViolations: mir === undefined ? [] : yield* MirVerification.verify(mir),
         frameSlots: mir?.functions
           .flatMap((fn) => fn.suspension?.frame?.states ?? [])
           .map((state) => ({

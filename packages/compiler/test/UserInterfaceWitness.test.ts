@@ -242,6 +242,6 @@ pub fn main() -> i32 {
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
     assert.strictEqual(snapshot.mir._tag, 'Available')
     if (snapshot.mir._tag === 'Available')
-      assert.deepEqual(MirVerification.verify(snapshot.mir.value), [])
+      assert.deepEqual(yield* MirVerification.verify(snapshot.mir.value), [])
   }),
 )

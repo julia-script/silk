@@ -28,7 +28,7 @@ pub fn main() -> i32 { drop selectedCallable() drop selectedEffect() return 42 }
     )
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
     const program = Analysis.loweredMir(snapshot)
-    assert.deepEqual(MirVerification.verify(program), [])
+    assert.deepEqual(yield* MirVerification.verify(program), [])
     const conversions = program.functions.flatMap((fn) =>
       MirVerification.operations(fn).filter((operation) => operation._tag === 'ConvertUnion'),
     )
@@ -53,7 +53,7 @@ pub fn main() -> i32 { drop selectedCallable() drop selectedEffect() return 42 }
       })),
     }
     assert.deepEqual(
-      MirVerification.verify(invalid).map((violation) => violation.rule),
+      (yield* MirVerification.verify(invalid)).map((violation) => violation.rule),
       ['InvalidAggregateOperation', 'InvalidAggregateOperation'],
     )
   }),

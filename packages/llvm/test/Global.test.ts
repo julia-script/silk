@@ -3,6 +3,7 @@ import * as Effect from 'effect/Effect'
 import * as Alias from '../src/Alias.js'
 import * as Attribute from '../src/Attribute.js'
 import * as Builder from '../src/Builder.js'
+import * as ByteString from '../src/ByteString.js'
 import * as Constant from '../src/Constant.js'
 import * as FunctionActor from '../src/Function.js'
 import * as Global from '../src/Global.js'
@@ -155,6 +156,32 @@ it.effect('canonicalizes compatible function declarations and round-trips proper
     assert.strictEqual(first, second)
     assert.strictEqual((yield* FunctionActor.properties(builder, first)).attributes, attributes)
     assert.include(incompatible.message, 'incompatible global')
+  }),
+)
+
+it.effect('preserves exact byte identities across declaration and lookup', () =>
+  Effect.gen(function* () {
+    const builder = yield* Builder.make()
+    const signature = yield* Type.functionType(builder, yield* Type.voidType(builder), [])
+    // Cover every byte, including NUL and invalid UTF-8, then distinguish equal-length names
+    // whose hex digits would collide if bytes lost their leading zeroes.
+    const names = [
+      Uint8Array.from({ length: 256 }, (_, byte) => byte),
+      Uint8Array.of(0x01, 0x23),
+      Uint8Array.of(0x12, 0x03),
+    ]
+    const handles: Array<FunctionActor.Function> = []
+    for (const input of names) {
+      const name = ByteString.fromUint8Array(input)
+      const fn = yield* FunctionActor.declare(builder, name, signature)
+      const global = yield* FunctionActor.global(builder, fn)
+      assert.strictEqual(yield* FunctionActor.declare(builder, name, signature), fn)
+      assert.strictEqual(yield* Global.lookup(builder, name), global)
+      assert.strictEqual(yield* Global.lookup(builder, input), global)
+      assert.deepEqual(yield* Global.name(builder, global), name)
+      handles.push(fn)
+    }
+    assert.strictEqual(new Set(handles).size, names.length)
   }),
 )
 

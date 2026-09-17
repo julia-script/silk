@@ -24,6 +24,7 @@ import * as MirEncoding from '../src/MirEncoding.js'
 import * as MirVerification from '../src/MirVerification.js'
 import * as Realization from '../src/Realization.js'
 import * as Type from '../src/Type.js'
+import * as SuspensionMode from '../src/SuspensionMode.js'
 import { unreachable } from './support/raise.js'
 
 const ascii = (value: string): Uint8Array =>
@@ -39,6 +40,82 @@ const golden = (name: string): string =>
 
 const nestedSource = `pub fn identity(value: i32) -> i32 { return value }
 pub fn main() -> i32 { return identity(identity(42)) }`
+
+it.effect('preserves all specialization matches and isolates discovery frontiers', () =>
+  Effect.gen(function* () {
+    const analysis = yield* snapshot(nestedSource)
+    const discovery = analysis.instances
+    const base =
+      discovery.instances.find((instance) => instance.key.declaration.name === 'identity') ??
+      unreachable('expected identity instance')
+    const first: Instances.Instance = { ...base, key: { ...base.key, typeArguments: ['i32'] } }
+    const second: Instances.Instance = {
+      ...first,
+      key: { ...first.key, contractRow: ['another row'] },
+    }
+    const otherType: Instances.Instance = { ...base, key: { ...base.key, typeArguments: ['u32'] } }
+    const otherModule: Instances.Instance = {
+      ...first,
+      key: { ...first.key, declaration: { ...first.key.declaration, module: 'another/module' } },
+    }
+    const expanded = { ...discovery, instances: [otherModule, first, otherType, second] }
+    assert.deepEqual(Instances.matchingSpecialization(expanded, first.key), [first, second])
+    assert.deepEqual(Instances.matchingSpecialization(expanded, otherType.key), [otherType])
+    assert.deepEqual(Instances.matchingSpecialization(expanded, otherModule.key), [otherModule])
+    assert.deepEqual(
+      Instances.matchingSpecialization({ ...expanded, instances: [second] }, first.key),
+      [second],
+    )
+    assert.deepEqual(
+      Instances.matchingSpecialization({ ...expanded, instances: [] }, first.key),
+      [],
+    )
+    assert.deepEqual(Instances.matchingSpecialization(expanded, first.key), [first, second])
+  }),
+)
+
+it.effect('keeps suspension subjects, duplicate precedence, and fact snapshots independent', () =>
+  Effect.gen(function* () {
+    const analysis = yield* snapshot('pub fn main() -> i32 { return 0 }')
+    const discovery = analysis.instances
+    const key = discovery.instances.at(0)?.key ?? unreachable('expected main instance')
+    // Use the same text in all three namespaces so an untagged index cannot pass.
+    const identity = Instances.keyText(key)
+    const nested: SuspensionMode.Summary = {
+      ...SuspensionMode.direct,
+      modes: ['NestedTransfer'],
+    }
+    const parked: SuspensionMode.Summary = {
+      ...SuspensionMode.direct,
+      modes: ['ExternalPark'],
+    }
+    const facts: ReadonlyArray<Instances.SuspensionFact> = [
+      { _tag: 'SuspensionFact', subject: { _tag: 'Instance', key }, summary: nested },
+      { _tag: 'SuspensionFact', subject: { _tag: 'Execution', key }, summary: parked },
+      {
+        _tag: 'SuspensionFact',
+        subject: { _tag: 'Effect', identity },
+        summary: SuspensionMode.direct,
+      },
+      { _tag: 'SuspensionFact', subject: { _tag: 'Instance', key }, summary: parked },
+      { _tag: 'SuspensionFact', subject: { _tag: 'Execution', key }, summary: nested },
+      { _tag: 'SuspensionFact', subject: { _tag: 'Effect', identity }, summary: parked },
+    ]
+    const populated = { ...discovery, suspension: facts }
+    assert.strictEqual(Instances.suspensionOf(populated, { ...key }), nested)
+    assert.strictEqual(Instances.executionSuspensionOf(populated, key), parked)
+    assert.strictEqual(Instances.effectSuspensionOf(populated, identity), SuspensionMode.direct)
+    const replaced = { ...populated, suspension: facts.slice(3) }
+    assert.strictEqual(Instances.suspensionOf(replaced, key), parked)
+    assert.strictEqual(Instances.executionSuspensionOf(replaced, key), nested)
+    assert.strictEqual(Instances.effectSuspensionOf(replaced, identity), parked)
+    const empty = { ...populated, suspension: [] }
+    assert.strictEqual(Instances.suspensionOf(empty, key), SuspensionMode.direct)
+    assert.strictEqual(Instances.executionSuspensionOf(empty, key), SuspensionMode.direct)
+    assert.strictEqual(Instances.effectSuspensionOf(empty, identity), SuspensionMode.direct)
+    assert.strictEqual(Instances.suspensionOf(populated, key), nested)
+  }),
+)
 
 it('indexes canonical functions in source order without admitting unresolved declarations', () => {
   const first = { _tag: 'CanonicalDeclarationId', module: 'one', name: 'same' } as const
@@ -172,7 +249,7 @@ pub fn main() -> i32 { return 0 }`),
       prepared.program.foreignExports.map((export_) => export_.symbol),
       ['increment'],
     )
-    assert.deepStrictEqual(MirVerification.verify(prepared.program), [])
+    assert.deepStrictEqual(yield* MirVerification.verify(prepared.program), [])
     const artifact = yield* LlvmBackend.LlvmBackend.emit(prepared.program, { mode: 'release' })
     assert.match(artifact.ir, /define hidden i32 @silk_/)
     assert.match(artifact.ir, /define i32 @increment\(/)
@@ -681,9 +758,8 @@ pub fn main() -> i32 { return 40 |> add(2) }`),
     )
     const storedOperations = stored.functions.at(0)
     const directOperations = direct.functions.at(0)
-
-    assert.deepEqual(MirVerification.verify(stored), [])
-    assert.deepEqual(MirVerification.verify(direct), [])
+    assert.deepEqual(yield* MirVerification.verify(stored), [])
+    assert.deepEqual(yield* MirVerification.verify(direct), [])
     assert.deepEqual(
       storedOperations === undefined
         ? []
@@ -736,7 +812,7 @@ pub fn main() -> i32 { return 40 |> add(2) }`),
       ),
     })
     assert.include(
-      MirVerification.verify(malformed).map((violation) => violation.rule),
+      (yield* MirVerification.verify(malformed)).map((violation) => violation.rule),
       'InvalidCallableOperation',
     )
   }),
@@ -790,8 +866,12 @@ pub fn main() -> i32 {
             .filter(
               (
                 expression,
-              ): expression is Extract<Hir.Expression, { readonly _tag: 'CallableSection' }> =>
-                expression._tag === 'CallableSection',
+              ): expression is Extract<
+                Hir.Expression,
+                {
+                  readonly _tag: 'CallableSection'
+                }
+              > => expression._tag === 'CallableSection',
             )
     assert.deepEqual(
       sections.map((section) => ({
@@ -863,14 +943,20 @@ pub fn main() -> i32 {
     assert.strictEqual(Type.encode(hidden.contract.result), 'i32')
 
     const mir = Analysis.loweredMir(first)
-    assert.deepEqual(MirVerification.verify(mir), [])
+    assert.deepEqual(yield* MirVerification.verify(mir), [])
     const mainMir = mir.functions.find((fn) => fn.id.name === 'main')
     assert.isDefined(mainMir)
     if (mainMir === undefined) return
     const operations = MirVerification.operations(mainMir)
     const constructions = operations.filter(
-      (operation): operation is Extract<Mir.Operation, { readonly _tag: 'MakeCallable' }> =>
-        operation._tag === 'MakeCallable',
+      (
+        operation,
+      ): operation is Extract<
+        Mir.Operation,
+        {
+          readonly _tag: 'MakeCallable'
+        }
+      > => operation._tag === 'MakeCallable',
     )
     assert.deepEqual(
       constructions.map((operation) => ({
@@ -956,9 +1042,8 @@ pub fn main() -> i32 {
       consumedMain === undefined
         ? []
         : MirVerification.operations(consumedMain).map((operation) => operation._tag)
-
-    assert.deepEqual(MirVerification.verify(borrowed), [])
-    assert.deepEqual(MirVerification.verify(consumed), [])
+    assert.deepEqual(yield* MirVerification.verify(borrowed), [])
+    assert.deepEqual(yield* MirVerification.verify(consumed), [])
     assert.ok(borrowedTags.indexOf('BeginLoan') < borrowedTags.indexOf('MakeCallable'))
     assert.ok(borrowedTags.indexOf('MakeCallable') < borrowedTags.indexOf('EndLoan'))
     assert.ok(borrowedTags.indexOf('EndLoan') < borrowedTags.indexOf('Drop'))
@@ -986,9 +1071,8 @@ pub fn main() -> i32 { return (run work()) |> Intrinsic.i32Add(1) }`),
       )
       const composedMain = composed.functions.at(0)
       const groupedMain = grouped.functions.at(0)
-
-      assert.deepEqual(MirVerification.verify(composed), [])
-      assert.deepEqual(MirVerification.verify(grouped), [])
+      assert.deepEqual(yield* MirVerification.verify(composed), [])
+      assert.deepEqual(yield* MirVerification.verify(grouped), [])
       assert.include(
         composedMain === undefined
           ? []
@@ -1022,8 +1106,8 @@ pub fn main() -> i32 { return (run work()) |> Intrinsic.i32Add(1) }`,
     for (const source of sources) {
       const first = Analysis.loweredMir(yield* snapshot(source))
       const second = Analysis.loweredMir(yield* snapshot(source))
-      assert.deepEqual(MirVerification.verify(first), [])
-      assert.deepEqual(MirVerification.verify(second), [])
+      assert.deepEqual(yield* MirVerification.verify(first), [])
+      assert.deepEqual(yield* MirVerification.verify(second), [])
       const encoded = MirEncoding.encode(first)
       assert.strictEqual(encoded, MirEncoding.encode(second))
       assert.include(encoded, 'apply-callable')
@@ -1051,7 +1135,7 @@ it.effect('lowers binding cleanup and rejects ownership violations during analys
   Effect.gen(function* () {
     const bindings = Analysis.loweredMir(yield* snapshot(bindingSource))
     const bindingFunction = bindings.functions.at(0)
-    assert.deepEqual(MirVerification.verify(bindings), [])
+    assert.deepEqual(yield* MirVerification.verify(bindings), [])
     assert.strictEqual(MirEncoding.encode(bindings), golden('bindings.mir.txt'))
     assert.deepEqual(
       bindingFunction === undefined
@@ -1115,7 +1199,7 @@ it.effect('discovers calls and lowers nested matches as structured acyclic opera
       ['main', 'adjust'],
     )
     const mir = Analysis.loweredMir(result)
-    assert.deepEqual(MirVerification.verify(mir), [])
+    assert.deepEqual(yield* MirVerification.verify(mir), [])
     const main = mir.functions.find((fn) => fn.id.name === 'main')
     const matches =
       main === undefined
@@ -1172,7 +1256,7 @@ it.effect('rejects hand-built match decisions before LLVM emission', () =>
 
     assert.strictEqual(changed, true)
     assert.include(
-      MirVerification.verify(malformed).map((violation) => violation.rule),
+      (yield* MirVerification.verify(malformed)).map((violation) => violation.rule),
       'InvalidMatchDecision',
     )
   }),
@@ -1185,7 +1269,7 @@ it.effect('lowers branch diamonds identically across runs', () =>
   Effect.gen(function* () {
     const first = Analysis.loweredMir(yield* snapshot(branchProgram))
     const second = Analysis.loweredMir(yield* snapshot(branchProgram))
-    assert.deepEqual(MirVerification.verify(first), [])
+    assert.deepEqual(yield* MirVerification.verify(first), [])
     assert.strictEqual(MirEncoding.encode(first), golden('branch-program.mir.txt'))
     assert.strictEqual(MirEncoding.encode(first), MirEncoding.encode(second))
   }),
@@ -1311,7 +1395,7 @@ pub fn main() -> i32 {
   return firstValue + secondValue
 }`)
     assert.deepEqual(Analysis.diagnostics(result), [])
-    assert.deepEqual(MirVerification.verify(Analysis.loweredMir(result)), [])
+    assert.deepEqual(yield* MirVerification.verify(Analysis.loweredMir(result)), [])
     const discovery = Analysis.instancesOf(result)
     assert.strictEqual(
       discovery.instances.filter((instance) => instance.key.declaration.name === 'read').length,
@@ -1493,7 +1577,7 @@ it.effect(
         ['answer', 'keep', 'proxy'],
       )
       const program = Analysis.loweredMir(snapshot)
-      assert.deepEqual(MirVerification.verify(program), [])
+      assert.deepEqual(yield* MirVerification.verify(program), [])
       assert.deepEqual(
         program.retainedRoots?.map((root) => root.declaration.name),
         ['keep'],

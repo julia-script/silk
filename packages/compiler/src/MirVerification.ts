@@ -3142,8 +3142,7 @@ export const check = Effect.fn('MirVerification.check')(function* (
     'module.name': self.module,
     'functions.count': self.functions.length,
   })
-  const trace = yield* CompilerTrace.capture()
-  const violations = trace('MirVerification.verify', () => verify(self, trace))
+  const violations = yield* verify(self)
   if (violations.length > 0)
     return yield* new MirVerificationError({
       operation: 'MirVerification.check',
@@ -3153,25 +3152,23 @@ export const check = Effect.fn('MirVerification.check')(function* (
 })
 
 /** Returns compiler-invariant violations without emitting code. */
-export const verify = (
+export const verify = Effect.fn('MirVerification.verify')(function* (
   self: Module,
-  trace: CompilerTrace.CompilerTrace = CompilerTrace.none,
-): ReadonlyArray<Violation> => {
+): Effect.fn.Return<ReadonlyArray<Violation>> {
+  const trace = yield* CompilerTrace.capture()
   let cached = verifyCache.get(self)
   if (cached === undefined) {
-    cached = computeVerify(self, trace)
+    cached = yield* computeVerify(self, trace)
     verifyCache.set(self, cached)
   }
   return cached
-}
+})
 
-const computeVerify = (
+const computeVerify = Effect.fnUntraced(function* (
   self: Module,
   trace: CompilerTrace.CompilerTrace,
-): ReadonlyArray<Violation> => {
-  const violations: Array<Violation> = trace('LayoutVerify.verify', () =>
-    LayoutVerify.verify(self.layout, trace),
-  ).map((violation) =>
+): Effect.fn.Return<ReadonlyArray<Violation>> {
+  const violations: Array<Violation> = (yield* LayoutVerify.verify(self.layout)).map((violation) =>
     Object.freeze({
       _tag: 'Violation' as const,
       rule: 'InvalidLayout' as const,
@@ -7482,4 +7479,4 @@ const computeVerify = (
     }
   })
   return Object.freeze(violations)
-}
+})

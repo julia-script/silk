@@ -808,10 +808,10 @@ export const analyze = (
       retiredUses.set(identity, retired)
     }
   }
-  const universalAssumptions = Lifetime.assumptions([
-    ...outlivesScope.assumptions.bounds,
-    ...(DeclarationFacts.executableLifetimes(declaration).lifetimeBounds ?? []),
-  ])
+  const universalAssumptions = Lifetime.mergeAssumptions(
+    outlivesScope.assumptions,
+    Lifetime.assumptions(DeclarationFacts.executableLifetimes(declaration).lifetimeBounds ?? []),
+  )
   const universalDiagnostics = new Map<string, Diagnostic.Diagnostic>()
   const incoming = new Map<string, Array<Lifetime.Lifetime>>()
   for (const bound of constraints.values()) {

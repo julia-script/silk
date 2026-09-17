@@ -240,9 +240,9 @@ it.effect(
         configuration,
       }).pipe(Effect.provide(SourceResolver.empty))
       assert.deepEqual(Analysis.diagnostics(snapshot), [])
-      assert.deepEqual(MirVerification.verify(Analysis.loweredMir(snapshot)), [])
+      assert.deepEqual(yield* MirVerification.verify(Analysis.loweredMir(snapshot)), [])
     }),
-  180_000,
+  180000,
 )
 
 it.effect(
@@ -259,11 +259,18 @@ it.effect(
       }).pipe(Effect.provide(SourceResolver.empty))
       assert.deepEqual(Analysis.diagnostics(snapshot), [])
       const mir = Analysis.loweredMir(snapshot)
-      assert.deepEqual(MirVerification.verify(mir), [])
+      assert.deepEqual(yield* MirVerification.verify(mir), [])
       const contextualBuffered = mir.functions
         .flatMap((fn) => fn.localTypes)
         .find(
-          (type): type is Extract<Mir.Type, { readonly _tag: 'EffectValue' }> =>
+          (
+            type,
+          ): type is Extract<
+            Mir.Type,
+            {
+              readonly _tag: 'EffectValue'
+            }
+          > =>
             type._tag === 'EffectValue' &&
             type.environment.instance.declaration.name === 'withBufferedCapacity' &&
             type.type.access === 'Exclusive' &&
@@ -289,7 +296,7 @@ it.effect(
         ),
       )
     }),
-  300_000,
+  300000,
 )
 
 it.effect(

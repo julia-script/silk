@@ -37,7 +37,7 @@ it.effect(
         ]),
       }).pipe(Effect.provide(SourceResolver.empty))
       assert.deepEqual(Analysis.diagnostics(snapshot), [])
-      assert.deepEqual(MirVerification.verify(Analysis.loweredMir(snapshot)), [])
+      assert.deepEqual(yield* MirVerification.verify(Analysis.loweredMir(snapshot)), [])
       const actorSymbols = Analysis.instancesOf(snapshot)
         .foreignCalls.map((call) => call.symbol)
         .filter(
@@ -65,7 +65,7 @@ it.effect(
         assert.isTrue(parks.some((park) => park.guardCleanup._tag !== 'NoCleanup'))
       }
     }),
-  120_000,
+  120000,
 )
 
 it('exports one profile-agnostic native corpus program with independent ABI witnesses', () => {
@@ -98,7 +98,7 @@ it.effect('keeps the local pathname reference example executable', () =>
       'x86_64-unknown-linux-gnu',
     )
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
-    assert.deepEqual(MirVerification.verify(Analysis.loweredMir(snapshot)), [])
+    assert.deepEqual(yield* MirVerification.verify(Analysis.loweredMir(snapshot)), [])
   }),
 )
 

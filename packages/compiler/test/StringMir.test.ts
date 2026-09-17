@@ -126,7 +126,7 @@ it.effect('lowers every logical string path without reusing slice operations', (
     assert.include(encoded, 'slice-view')
     assert.include(encoded, 'string-byte-length')
     assert.include(encoded, 'string-not-equals-exact')
-    assert.deepEqual(MirVerification.verify(mir), [])
+    assert.deepEqual(yield* MirVerification.verify(mir), [])
   }),
 )
 
@@ -169,7 +169,7 @@ it.effect('rejects forged, mutable, confused, unterminated, and call-mismatched 
     )
     for (const candidate of [wrongStride, wrongViewSource]) {
       assert.include(
-        MirVerification.verify(candidate).map((violation) => violation.rule),
+        (yield* MirVerification.verify(candidate)).map((violation) => violation.rule),
         'InvalidRawStorageOperation',
       )
     }
@@ -207,20 +207,20 @@ it.effect('rejects forged, mutable, confused, unterminated, and call-mismatched 
 
     for (const candidate of [forged, mutable, confused]) {
       assert.include(
-        MirVerification.verify(candidate).map((violation) => violation.rule),
+        (yield* MirVerification.verify(candidate)).map((violation) => violation.rule),
         'InvalidStringOperation',
       )
     }
     assert.include(
-      MirVerification.verify(unterminated).map((violation) => violation.rule),
+      (yield* MirVerification.verify(unterminated)).map((violation) => violation.rule),
       'InvalidLoan',
     )
     assert.include(
-      MirVerification.verify(callMismatch).map((violation) => violation.rule),
+      (yield* MirVerification.verify(callMismatch)).map((violation) => violation.rule),
       'InvalidCallShape',
     )
     assert.include(
-      MirVerification.verify(shapeMismatch).map((violation) => violation.rule),
+      (yield* MirVerification.verify(shapeMismatch)).map((violation) => violation.rule),
       'InvalidLayout',
     )
   }),

@@ -1,3 +1,4 @@
+import * as Effect from 'effect/Effect'
 import { alignUp } from './internal/Align.js'
 import * as Layout from './Layout.js'
 import * as LayoutVerify from './LayoutVerify.js'
@@ -531,7 +532,9 @@ export const encode = (self: Selection): string =>
   )
 
 /** Rejects missing, reordered, overflowing, or noncanonical views before backend emission. */
-export const verify = (self: Layout.Plan): ReadonlyArray<Layout.Violation> => {
+export const verify = Effect.fn('ValueStorage.verify')(function* (
+  self: Layout.Plan,
+): Effect.fn.Return<ReadonlyArray<Layout.Violation>> {
   const invalid: ReadonlyArray<Layout.Violation> = Object.freeze([
     Object.freeze({
       _tag: 'LayoutViolation',
@@ -542,7 +545,7 @@ export const verify = (self: Layout.Plan): ReadonlyArray<Layout.Violation> => {
   if (plan(self).some((view) => view._tag === 'UnavailableValueStorage')) return invalid
   const expected = plan({
     ...self,
-    callingShapes: Layout.callingShapes(
+    callingShapes: yield* Layout.planCallingShapes(
       self.target,
       self.entries,
       self.callingShapes.map((shape) => shape.type),
@@ -563,7 +566,7 @@ export const verify = (self: Layout.Plan): ReadonlyArray<Layout.Violation> => {
   )
     return Object.freeze([])
   return invalid
-}
+})
 
 /** Stored outcomes retain the active member's ordinary bytes; carrier lanes belong to transport. */
 export interface Outcome {

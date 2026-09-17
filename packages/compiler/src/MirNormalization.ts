@@ -2,6 +2,7 @@ import * as CleanupPlan from './CleanupPlan.js'
 import type * as DeclarationFacts from './DeclarationFacts.js'
 import * as Mir from './Mir.js'
 import * as ProvisionalMir from './ProvisionalMir.js'
+import * as FunctionIndex from './internal/FunctionIndex.js'
 
 /**
  * Shared, backend-neutral normalization of representation-only Effect construction and dispatch.
@@ -64,12 +65,12 @@ const constructorGuardOf = (shape: ConstructorShape): ConstructorGuard =>
   shape.fn.regions.length === 1 ? 'SingleRegion' : 'TrivialCleanup'
 
 const directTarget = (
-  program: Mir.Module,
+  functions: FunctionIndex.FunctionIndex<Mir.MirFunction>,
   operation: Extract<Mir.Operation, { readonly _tag: 'Call' | 'ApplyCallable' }>,
 ): ConstructorShape | undefined => {
   if (operation._tag === 'Call') {
     return constructorShape(
-      program.functions.find((candidate) =>
+      FunctionIndex.candidates(functions, operation.target).find((candidate) =>
         Mir.matchesInstance(
           candidate,
           operation.target,
@@ -82,14 +83,14 @@ const directTarget = (
   const target = operation.target
   if (target?._tag !== 'DeclarationCallableTarget') return undefined
   return constructorShape(
-    program.functions.find((candidate) =>
+    FunctionIndex.candidates(functions, target.declaration).find((candidate) =>
       Mir.matchesInstance(candidate, target.declaration, operation.typeArguments),
     ),
   )
 }
 
 const hasConcreteTarget = (
-  program: Mir.Module,
+  functions: FunctionIndex.FunctionIndex<Mir.MirFunction>,
   operation: Extract<Mir.Operation, { readonly _tag: 'Call' | 'ApplyCallable' }>,
 ): boolean => {
   let declaration: DeclarationFacts.CanonicalId | undefined
@@ -100,7 +101,7 @@ const hasConcreteTarget = (
   }
   return (
     declaration !== undefined &&
-    program.functions.some((candidate) =>
+    FunctionIndex.candidates(functions, declaration).some((candidate) =>
       Mir.matchesInstance(candidate, declaration, operation.typeArguments),
     )
   )
@@ -128,11 +129,10 @@ const parametersFor = (
 }
 
 const foldConstructor = (
-  program: Mir.Module,
+  shape: ConstructorShape | undefined,
   operation: Mir.Operation,
 ): Extract<Mir.Operation, { readonly _tag: 'MakeEffect' }> | undefined => {
   if (operation._tag !== 'Call' && operation._tag !== 'ApplyCallable') return undefined
-  const shape = directTarget(program, operation)
   if (shape === undefined) return undefined
   const parameters = parametersFor(operation, shape.fn.parameterCount)
   if (parameters === undefined) return undefined
@@ -340,6 +340,9 @@ const mapRegions = (
 /** Normalizes one target-aware MIR module from exact provisional runner facts. */
 export const normalize = (program: Mir.Module, provisional: ProvisionalMir.Module): Mir.Module => {
   if (program.normalization !== undefined) return program
+  // A 2,548-function replay spent most normalization time scanning every function for each
+  // call. Narrow by declaration once; exact runtime/static matching and first-match order remain.
+  const functionIndex = FunctionIndex.make(program.functions, (fn) => fn.id)
   const verdicts: Array<Mir.NormalizationVerdict> = []
   let changed = false
   const functions = program.functions.map((fn) => {
@@ -350,7 +353,7 @@ export const normalize = (program: Mir.Module, provisional: ProvisionalMir.Modul
       const operations = region.operations.map((operation) => {
         const target =
           operation._tag === 'Call' || operation._tag === 'ApplyCallable'
-            ? directTarget(program, operation)
+            ? directTarget(functionIndex, operation)
             : undefined
         const targetSuspension =
           target === undefined
@@ -359,7 +362,7 @@ export const normalize = (program: Mir.Module, provisional: ProvisionalMir.Modul
                 ProvisionalMir.classificationOfExecution(provisional, target.fn.instance),
               )
         const folded =
-          targetSuspension === undefined ? foldConstructor(program, operation) : undefined
+          targetSuspension === undefined ? foldConstructor(target, operation) : undefined
         if (folded === undefined) {
           if (
             (operation._tag === 'Call' || operation._tag === 'ApplyCallable') &&
@@ -370,7 +373,9 @@ export const normalize = (program: Mir.Module, provisional: ProvisionalMir.Modul
                 _tag: 'Rejected',
                 reason:
                   targetSuspension ??
-                  (hasConcreteTarget(program, operation) ? 'ComplexConstructor' : 'DynamicTarget'),
+                  (hasConcreteTarget(functionIndex, operation)
+                    ? 'ComplexConstructor'
+                    : 'DynamicTarget'),
                 function: fn.id,
                 region: region.id,
                 local: operation.destination,

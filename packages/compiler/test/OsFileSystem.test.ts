@@ -216,10 +216,10 @@ pub effect fn main() -> () ! FileError | OutOfMemoryError {
         'aarch64-apple-darwin',
       )
       assert.deepEqual(Analysis.diagnostics(snapshot), [])
-      assert.deepEqual(MirVerification.verify(Analysis.loweredMir(snapshot)), [])
+      assert.deepEqual(yield* MirVerification.verify(Analysis.loweredMir(snapshot)), [])
       yield* Analysis.codegen(snapshot, { mode: 'release' })
     }),
-  60_000,
+  60000,
 )
 
 it.effect(

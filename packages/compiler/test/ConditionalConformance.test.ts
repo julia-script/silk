@@ -3,6 +3,8 @@ import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as ConformanceProof from '../src/ConformanceProof.js'
+import * as ConformanceGoal from '../src/ConformanceGoal.js'
+import * as DeclarationIndex from '../src/DeclarationIndex.js'
 import * as Hir from '../src/Hir.js'
 import * as Lifetime from '../src/Lifetime.js'
 import * as MirEncoding from '../src/MirEncoding.js'
@@ -61,6 +63,21 @@ fn rejected(client: &Client) -> () { return unknown(client) }`
       if (proof._tag === 'Proved')
         assert.deepEqual(proof.typeArguments.map(Type.encodeGenericArgument), [argument])
     }
+    const index = Analysis.declarationIndex(snapshot)
+    const goal = ConformanceGoal.make(
+      Type.nominal(module, 'Echo', ['i32']),
+      Type.nominal(module, 'Client'),
+    )
+    assert.lengthOf(ConformanceProof.conformanceCandidates(index, goal), 1)
+    // A new immutable module collection must not inherit the warmed discovery index.
+    const withoutImpls = DeclarationIndex.make(
+      index.stage,
+      index.modules.map((headers) => ({ ...headers, conformances: [] })),
+      index.diagnostics,
+      index.generatedAggregates,
+    )
+    assert.isEmpty(ConformanceProof.conformanceCandidates(withoutImpls, goal))
+    assert.lengthOf(ConformanceProof.conformanceCandidates(index, goal), 1)
   }),
 )
 
@@ -361,7 +378,7 @@ pub fn main() -> i32 {
     assert.deepEqual(realized?.key.evidence, [])
     assert.deepEqual(realized?.specialization.evidence, [])
     const mir = Analysis.loweredMir(snapshot)
-    assert.deepEqual(MirVerification.verify(mir), [])
+    assert.deepEqual(yield* MirVerification.verify(mir), [])
     const runner = mir.functions.find((fn) => fn.id.name === 'acquire$effect$0')
     assert.isDefined(runner)
     if (runner === undefined) return

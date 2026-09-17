@@ -148,7 +148,7 @@ it.effect('emits deterministic native never-driven package cleanup', () =>
       'aarch64-apple-darwin',
     )
     assert.deepEqual(Analysis.diagnostics(first), [])
-    assert.deepEqual(MirVerification.verify(Analysis.loweredMir(first)), [])
+    assert.deepEqual(yield* MirVerification.verify(Analysis.loweredMir(first)), [])
     const firstArtifact = yield* Analysis.codegen(first, { mode: 'release' })
     const secondArtifact = yield* Analysis.codegen(first, { mode: 'release' })
     assert.strictEqual(firstArtifact.ir, secondArtifact.ir)
@@ -174,16 +174,32 @@ it.effect(
       const initialize = operations.find(
         (
           operation,
-        ): operation is Extract<Mir.Operation, { readonly _tag: 'ExecutionFromAllocation' }> =>
-          operation._tag === 'ExecutionFromAllocation',
+        ): operation is Extract<
+          Mir.Operation,
+          {
+            readonly _tag: 'ExecutionFromAllocation'
+          }
+        > => operation._tag === 'ExecutionFromAllocation',
       )
       const drive = operations.find(
-        (operation): operation is Extract<Mir.Operation, { readonly _tag: 'ExecutionDrive' }> =>
-          operation._tag === 'ExecutionDrive',
+        (
+          operation,
+        ): operation is Extract<
+          Mir.Operation,
+          {
+            readonly _tag: 'ExecutionDrive'
+          }
+        > => operation._tag === 'ExecutionDrive',
       )
       const wake = operations.find(
-        (operation): operation is Extract<Mir.Operation, { readonly _tag: 'ExecutionWake' }> =>
-          operation._tag === 'ExecutionWake',
+        (
+          operation,
+        ): operation is Extract<
+          Mir.Operation,
+          {
+            readonly _tag: 'ExecutionWake'
+          }
+        > => operation._tag === 'ExecutionWake',
       )
       const otherPlan = snapshot.layout.value.executionPackages.plans.find(
         (plan) => plan.provenance !== initialize?.plan.provenance,
@@ -253,7 +269,7 @@ it.effect(
       ]
       for (const forged of forgeries)
         assert.include(
-          MirVerification.verify(forged).map((violation) => violation.rule),
+          (yield* MirVerification.verify(forged)).map((violation) => violation.rule),
           'InvalidExecutionOperation',
         )
     }),
@@ -538,7 +554,7 @@ pub fn main() -> () { return run Effect.catchAll(program(), recover) }`
         ),
         ['AllocationCleanup'],
       )
-    assert.deepEqual(MirVerification.verify(snapshot.mir.value), [])
+    assert.deepEqual(yield* MirVerification.verify(snapshot.mir.value), [])
   }),
 )
 

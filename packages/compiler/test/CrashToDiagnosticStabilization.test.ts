@@ -40,7 +40,7 @@ it.effect('lowers a 257-term left-nested arithmetic chain without host recursion
       `pub fn main() -> i32 {\n  return ${chain(257, '+', '1')}\n}\n`,
     )
     assert.deepEqual(codes(snapshot), [])
-    assert.deepEqual(MirVerification.verify(Analysis.loweredMir(snapshot)), [])
+    assert.deepEqual(yield* MirVerification.verify(Analysis.loweredMir(snapshot)), [])
   }),
 )
 
@@ -73,9 +73,9 @@ it.effect(
         `pub fn main() -> i32 {\n  let mut x = 0\n${'  x = x + 1\n'.repeat(5000)}  return x - 4958\n}\n`,
       )
       assert.deepEqual(codes(snapshot), [])
-      assert.deepEqual(MirVerification.verify(Analysis.loweredMir(snapshot)), [])
+      assert.deepEqual(yield* MirVerification.verify(Analysis.loweredMir(snapshot)), [])
     }),
-  240_000,
+  240000,
 )
 
 // ISSUE-43 — a callable contract as an explicit generic argument in expression position.

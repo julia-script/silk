@@ -30,7 +30,7 @@ it.effect('keeps explicit libraries and objects free of default startup and stor
         const mir = Analysis.loweredMir(snapshot)
         assert.deepEqual(mir.functions, [])
         assert.deepEqual(mir.foreignExports, [])
-        assert.deepEqual(MirVerification.verify(mir), [])
+        assert.deepEqual(yield* MirVerification.verify(mir), [])
       }
     }
   }),

@@ -550,7 +550,7 @@ pub fn main() -> i32 {
       )
       assert.deepEqual(Analysis.diagnostics(snapshot), [])
       const program = Analysis.loweredMir(snapshot)
-      assert.deepEqual(MirVerification.verify(program), [])
+      assert.deepEqual(yield* MirVerification.verify(program), [])
       const borrowed =
         program.functions.find((fn) => fn.id.name === 'inspectBorrowed') ??
         unreachable('expected borrowed pattern function')
@@ -623,7 +623,7 @@ pub fn main() -> i32 {
         { ...partial, initialization: { state: MovePath.make(), flags: [] } },
       ])
         assert.isTrue(
-          MirVerification.verify(replaceCleanup(corrupted)).some(
+          (yield* MirVerification.verify(replaceCleanup(corrupted))).some(
             (violation) => violation.rule === 'InvalidInitializationState',
           ),
         )
@@ -2451,7 +2451,7 @@ pub fn main() -> i32 {
       }).pipe(Effect.provide(SourceResolver.empty))
       assert.deepEqual(Analysis.diagnostics(snapshot), [])
       const program = Analysis.loweredMir(snapshot)
-      assert.deepEqual(MirVerification.verify(program), [])
+      assert.deepEqual(yield* MirVerification.verify(program), [])
       const fn =
         program.functions.find((fn) => fn.id.name === 'main') ?? unreachable('expected main')
       const operations = MirVerification.operations(fn)

@@ -73,7 +73,7 @@ it.effect('retains zero-lane reads and nested reborrows while restoring the pare
     assert.include(encoded, 'reborrow-value')
     assert.include(encoded, 'readEmpty')
     assert.deepEqual(Hir.verify(Analysis.rootAnalysis(snapshot).hir), [])
-    assert.deepEqual(MirVerification.verify(Analysis.loweredMir(snapshot)), [])
+    assert.deepEqual(yield* MirVerification.verify(Analysis.loweredMir(snapshot)), [])
   }),
 )
 
@@ -366,7 +366,7 @@ pub fn main() -> i32 {
       ]),
     })
     assert.include(
-      MirVerification.verify(consumingModule).map((violation) => violation.rule),
+      (yield* MirVerification.verify(consumingModule)).map((violation) => violation.rule),
       'InvalidAggregateOperation',
     )
 
@@ -419,7 +419,7 @@ pub fn main() -> i32 {
       ]),
     })
     assert.include(
-      MirVerification.verify(sharedWriteModule).map((violation) => violation.rule),
+      (yield* MirVerification.verify(sharedWriteModule)).map((violation) => violation.rule),
       'InvalidWrite',
     )
   }),
@@ -514,7 +514,7 @@ pub fn main() -> i32 {
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
     const mir = Analysis.loweredMir(snapshot)
     assert.isTrue(mir.functions.some((fn) => fn.id.name === 'inspect'))
-    assert.deepEqual(MirVerification.verify(mir), [])
+    assert.deepEqual(yield* MirVerification.verify(mir), [])
     for (const name of ['ordered', 'orderedBorrow']) {
       const ordered =
         mir.functions.find((fn) => fn.id.name === name) ??
@@ -568,7 +568,7 @@ pub fn main() -> i32 {
       ),
     }
     assert.isTrue(
-      MirVerification.verify(invalid).some(
+      (yield* MirVerification.verify(invalid)).some(
         (violation) =>
           violation.rule === 'InvalidAggregateOperation' &&
           violation.function === entries.id &&
