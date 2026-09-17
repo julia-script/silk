@@ -1,3 +1,5 @@
+import * as Option from 'effect/Option'
+import * as SourceOrigin from '../dist/SourceOrigin.js'
 // Regenerates apps/docs/content/language/stdlib/ and diagnostics.md.
 //
 // The standard library page comes from the same documentation model `silk doc` emits, so the
@@ -74,9 +76,28 @@ const stdlibTree = async () => {
   for (const selected of documentationProfiles) {
     const [elapsed, analysis] = await Effect.runPromise(
       ProjectAnalysis.make(
-        analyzed.map((entry) => entry.root),
+        analyzed.map((entry) => entry.root).map((source) => source.id),
         { configuration: { profile: selected.profile } },
-      ).pipe(Effect.provide(SourceResolver.empty), Effect.timed),
+      ).pipe(
+        Effect.provideService(SourceResolver.SourceResolver, {
+          resolve: () => Effect.succeedNone(),
+          resolveStandardLibrary: (module) =>
+            Effect.succeed(
+              Option.fromUndefinedOr(analyzed.find((entry) => entry.root.id === module)).pipe(
+                Option.map((entry) => SourceResolver.resolved(entry.bytes, SourceOrigin.memory())),
+              ),
+            ),
+          toolchainSources: Effect.succeed(
+            new Map(
+              analyzed.map((entry) => [
+                entry.root.id,
+                SourceResolver.resolved(entry.bytes, SourceOrigin.memory()),
+              ]),
+            ),
+          ),
+        }),
+        Effect.timed,
+      ),
     )
     log(`Documentation analysis ${selected.name}: ${Duration.toSeconds(elapsed).toFixed(2)}s`)
     const project = DocumentationProject.fromProjectAnalysis(analysis)

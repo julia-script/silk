@@ -22,7 +22,14 @@ const analyze = Effect.fnUntraced(function* (
     SourceFile.make(module, currentSources.get(module) ?? raise(`missing source ${module}`)),
   )
   const effect =
-    previous === undefined ? ProjectAnalysis.make(roots) : ProjectAnalysis.revise(previous, roots)
+    previous === undefined
+      ? ProjectAnalysis.make(roots.map((source) => source.id)).pipe(
+          Effect.provide(SourceResolver.overlay(roots)),
+        )
+      : ProjectAnalysis.revise(
+          previous,
+          roots.map((source) => source.id),
+        ).pipe(Effect.provide(SourceResolver.overlay(roots)))
   return yield* effect.pipe(Effect.provide(SourceResolver.memory(currentSources)))
 })
 

@@ -1,3 +1,4 @@
+import * as Layer from 'effect/Layer'
 import { createHash } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 import { NodeRuntime, NodeServices } from '@effect/platform-node'
@@ -177,7 +178,7 @@ const program = Effect.gen(function* () {
       const laneOutput = join(output, name)
       yield* fs.makeDirectory(laneOutput, { recursive: true })
       const snapshot = yield* Analysis.makeRealized({
-        root: SourceFile.make('conformance/boundary', source),
+        root: 'conformance/boundary',
         configuration: {
           profile: {
             target,
@@ -188,7 +189,13 @@ const program = Effect.gen(function* () {
             debug: mode === 'debug',
           },
         },
-      }).pipe(Effect.provide(SourceResolver.empty))
+      }).pipe(
+        Effect.provide(
+          SourceResolver.overlay([SourceFile.make('conformance/boundary', source)]).pipe(
+            Layer.provideMerge(SourceResolver.empty),
+          ),
+        ),
+      )
       const diagnostics = Analysis.diagnostics(snapshot)
       if (diagnostics.length !== 0)
         throw new Error(

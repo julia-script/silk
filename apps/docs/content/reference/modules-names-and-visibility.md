@@ -54,8 +54,9 @@ memory still has one explicit logical identity even when it has no filesystem pa
 
 **Diagnostics:** An import whose exact module does not exist reports `MOD0001` at the complete
 import path. A compilation request whose root identity itself is noncanonical is a client
-error rather than a Silk source diagnostic. A project module attempting to occupy the reserved
-`silk/` standard-library source space reports `MOD0004`.
+typed client error rather than a Silk source diagnostic. Reserved `silk/` identities always
+resolve from toolchain sources, including when named as the root; project files and editor overlays
+cannot replace them.
 
 **Evidence:** [module closure](../../../../openspec/specs/bootstrap-module-closure/spec.md),
 [source resolution](../../../../openspec/specs/bootstrap-source-resolution/spec.md),
@@ -125,13 +126,19 @@ that the module is absent.
 
 **Status:** Confirmed
 
-Compilation begins with one root module and follows its imports transitively. Each reachable module
+Compilation requests name one canonical root module string, such as `app/Main`. The front end
+resolves its bytes and source origin through the same source resolver used for imports, then follows
+its imports transitively. Each reachable module
 identity is resolved and parsed at most once, even when several modules import it.
 
 ```text
 app/Main -> feature/Left  -> shared/Value
          -> feature/Right -> shared/Value
 ```
+
+A missing or unreadable requested root returns a typed error before a successful analysis snapshot
+exists. Failed imports can still leave the successfully loaded modules available for analysis.
+In-memory callers register the root bytes with their resolver, just as they register dependencies.
 
 `shared/Value` belongs to the closure once. A source available to the resolver but unreachable from
 `app/Main` is not part of that compilation merely because it exists below the source root.

@@ -1,3 +1,4 @@
+import * as Layer from 'effect/Layer'
 import { assert, it } from '@effect/vitest'
 import * as Analysis from '@silklang/compiler/Analysis'
 import * as ProjectAnalysis from '@silklang/compiler/ProjectAnalysis'
@@ -151,17 +152,21 @@ pub fn b() -> i32 { return Core.answer() }
 `),
       ),
     ]
-    const analysis = yield* ProjectAnalysis.make(roots).pipe(
+    const analysis = yield* ProjectAnalysis.make(roots.map((source) => source.id)).pipe(
       Effect.provide(
-        SourceResolver.memory(
-          new Map([
-            [
-              'shared/Core',
-              encode(`/// Shared answer.
+        SourceResolver.overlay(roots).pipe(
+          Layer.provideMerge(
+            SourceResolver.memory(
+              new Map([
+                [
+                  'shared/Core',
+                  encode(`/// Shared answer.
 pub fn answer() -> i32 { return 42 }
 `),
-            ],
-          ]),
+                ],
+              ]),
+            ),
+          ),
         ),
       ),
     )

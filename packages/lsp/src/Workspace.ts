@@ -1,3 +1,4 @@
+import type * as ModuleClosure from '@silklang/compiler/ModuleClosure'
 import * as ConfigurationError from '@silklang/compiler/ConfigurationError'
 import * as ConfigurationOrigin from '@silklang/compiler/ConfigurationOrigin'
 import * as ProjectProfile from '@silklang/compiler/ProjectProfile'
@@ -200,18 +201,25 @@ const configuration = Effect.fnUntraced(function* (
 export const analyze = Effect.fn('Workspace.analyze')(function* (
   document: Document.Document,
   openDocuments: Iterable<Document.Document>,
-): Effect.fn.Return<Analysis.FrontendSnapshot, never, FileSystem.FileSystem | Path.Path> {
+): Effect.fn.Return<
+  Analysis.FrontendSnapshot,
+  ModuleClosure.ModuleClosureError,
+  FileSystem.FileSystem | Path.Path
+> {
   const overlays = new Map<string, SourceResolver.ResolvedSource>()
   for (const open of openDocuments) {
-    if (open.workspace === document.workspace && open.uri !== document.uri) {
+    if (open.workspace === document.workspace) {
       overlays.set(open.module, SourceResolver.resolved(open.bytes, SourceOrigin.memory(open.uri)))
     }
   }
+  overlays.set(
+    document.module,
+    SourceResolver.resolved(document.bytes, SourceOrigin.memory(document.uri)),
+  )
   const selected = yield* configuration(document)
-  const project = yield* ProjectAnalysis.make(
-    [SourceFile.make(document.module, document.bytes, SourceOrigin.memory(document.uri))],
-    selected,
-  ).pipe(Effect.provide(resolver(document.sourceRoot, overlays)))
+  const project = yield* ProjectAnalysis.make([document.module], selected).pipe(
+    Effect.provide(resolver(document.sourceRoot, overlays)),
+  )
   const view = ProjectAnalysis.view(project, document.module)
   if (view === undefined) throw new RangeError('Workspace analysis lost its root view')
   return view
@@ -231,7 +239,7 @@ export const analyzeProject = Effect.fn('Workspace.analyzeProject')(function* (
   onProgress?: (phase: string) => Effect.Effect<void>,
 ): Effect.fn.Return<
   ReadonlyMap<string, ProjectSnapshot.DocumentSnapshot>,
-  never,
+  ModuleClosure.ModuleClosureError,
   FileSystem.FileSystem | Path.Path
 > {
   const first = documents.at(0)
@@ -243,9 +251,7 @@ export const analyzeProject = Effect.fn('Workspace.analyzeProject')(function* (
       SourceResolver.resolved(document.bytes, SourceOrigin.memory(document.uri)),
     )
   }
-  const roots = documents.map((document) =>
-    SourceFile.make(document.module, document.bytes, SourceOrigin.memory(document.uri)),
-  )
+  const roots = documents.map((document) => document.module)
   const previousProject = previous.values().next().value?.project
   const priorCatalog = previous.values().next().value?.inventory
   const previousInventory =

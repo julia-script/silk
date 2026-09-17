@@ -1,3 +1,4 @@
+import * as Layer from 'effect/Layer'
 import { fileURLToPath } from 'node:url'
 import { createHash } from 'node:crypto'
 import { NodeRuntime, NodeServices } from '@effect/platform-node'
@@ -170,15 +171,7 @@ const program = Effect.gen(function* () {
         const snapshots = []
         for (const form of ['object', 'static-archive', 'loadable-module']) {
           const snapshot = yield* Analysis.makeRealized({
-            root: SourceFile.make(
-              'application',
-              runtime === 'custom'
-                ? source
-                : new TextEncoder().encode(
-                    new TextDecoder().decode(source) +
-                      '\nexport "C" fn bridge() -> i32 as "answer" { return answer() }',
-                  ),
-            ),
+            root: 'application',
             configuration: {
               profile: {
                 target,
@@ -200,15 +193,29 @@ const program = Effect.gen(function* () {
             },
           }).pipe(
             Effect.provide(
-              SourceResolver.memory(
-                new Map([
-                  [
-                    'runtime',
-                    new TextEncoder().encode(
-                      'import Intrinsic.application\nexport "C" fn answer() -> i32 { return application.answer() }',
-                    ),
-                  ],
-                ]),
+              SourceResolver.overlay([
+                SourceFile.make(
+                  'application',
+                  runtime === 'custom'
+                    ? source
+                    : new TextEncoder().encode(
+                        new TextDecoder().decode(source) +
+                          '\nexport "C" fn bridge() -> i32 as "answer" { return answer() }',
+                      ),
+                ),
+              ]).pipe(
+                Layer.provideMerge(
+                  SourceResolver.memory(
+                    new Map([
+                      [
+                        'runtime',
+                        new TextEncoder().encode(
+                          'import Intrinsic.application\nexport "C" fn answer() -> i32 { return application.answer() }',
+                        ),
+                      ],
+                    ]),
+                  ),
+                ),
               ),
             ),
           )

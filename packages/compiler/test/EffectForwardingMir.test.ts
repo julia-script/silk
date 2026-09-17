@@ -1,3 +1,4 @@
+import * as Layer from 'effect/Layer'
 import * as FunctionLowering from '../src/FunctionLowering.js'
 import * as Instances from '../src/Instances.js'
 import * as Lifetime from '../src/Lifetime.js'
@@ -158,12 +159,18 @@ pub fn main() -> i32 {
 it.effect('preserves observed application closure parameters through native startup', () =>
   Effect.gen(function* () {
     const self = yield* Analysis.makeRealized({
-      root: SourceFile.make(
-        'effect-forwarding/native-start',
-        encoder.encode('pub fn main() -> i32 { return 42 }'),
-      ),
+      root: 'effect-forwarding/native-start',
       configuration: { profile: { target: 'x86_64-unknown-linux-gnu', artifact: 'executable' } },
-    }).pipe(Effect.provide(SourceResolver.empty))
+    }).pipe(
+      Effect.provide(
+        SourceResolver.overlay([
+          SourceFile.make(
+            'effect-forwarding/native-start',
+            encoder.encode('pub fn main() -> i32 { return 42 }'),
+          ),
+        ]).pipe(Layer.provideMerge(SourceResolver.empty)),
+      ),
+    )
     assert.deepEqual(Analysis.diagnostics(self), [])
     assert.deepEqual(yield* MirVerification.verify(Analysis.loweredMir(self)), [])
   }),

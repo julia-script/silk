@@ -1,3 +1,4 @@
+import * as Layer from 'effect/Layer'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
@@ -28,8 +29,12 @@ const descendants = (node: SyntaxTree.Node): ReadonlyArray<SyntaxTree.Element> =
 
 const index = (id: string, source: string) =>
   Effect.map(
-    ModuleClosure.load({ root: SourceFile.make(id, encoder.encode(source)) }).pipe(
-      Effect.provide(SourceResolver.memory(new Map())),
+    ModuleClosure.load({ root: id }).pipe(
+      Effect.provide(
+        SourceResolver.overlay([SourceFile.make(id, encoder.encode(source))]).pipe(
+          Layer.provideMerge(SourceResolver.memory(new Map())),
+        ),
+      ),
     ),
     (closure) => NameResolution.analyze(closure).index,
   )

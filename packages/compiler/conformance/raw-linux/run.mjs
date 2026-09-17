@@ -1,3 +1,4 @@
+import * as Layer from 'effect/Layer'
 import { fileURLToPath } from 'node:url'
 import { NodeRuntime, NodeServices } from '@effect/platform-node'
 import * as Effect from 'effect/Effect'
@@ -162,12 +163,18 @@ const program = Effect.gen(function* () {
         debug: optimization === 'none',
       }
       const analysis = yield* Analysis.makeRealized({
-        root: SourceFile.make('raw/application', source),
+        root: 'raw/application',
         configuration: {
           profile: profileInput,
           composition: { runtimes: [{ name: 'raw', module: 'silk/raw_start' }], defaults: [] },
         },
-      }).pipe(Effect.provide(SourceResolver.empty))
+      }).pipe(
+        Effect.provide(
+          SourceResolver.overlay([SourceFile.make('raw/application', source)]).pipe(
+            Layer.provideMerge(SourceResolver.empty),
+          ),
+        ),
+      )
       const diagnostics = Analysis.diagnostics(analysis)
       if (diagnostics.some((diagnostic) => diagnostic.severity === 'error'))
         return yield* new ConformanceError({ message: yield* encode(diagnostics) })

@@ -1,3 +1,4 @@
+import * as Layer from 'effect/Layer'
 import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
@@ -21,9 +22,15 @@ const ascii = (value: string): Uint8Array =>
 
 const analyze = (text: string, target?: string) =>
   Analysis.makeRealized({
-    root: SourceFile.make('root', ascii(text)),
+    root: 'root',
     configuration: AnalysisFixture.configuration('root', target),
-  }).pipe(Effect.provide(SourceResolver.memory(new Map())))
+  }).pipe(
+    Effect.provide(
+      SourceResolver.overlay([SourceFile.make('root', ascii(text))]).pipe(
+        Layer.provideMerge(SourceResolver.memory(new Map())),
+      ),
+    ),
+  )
 
 const codes = (self: Analysis.Snapshot): ReadonlyArray<string> =>
   Analysis.diagnostics(self).map((diagnostic) => diagnostic.code)

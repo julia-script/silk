@@ -1,3 +1,4 @@
+import type * as ModuleClosure from '@silklang/compiler/ModuleClosure'
 import { Worker } from 'node:worker_threads'
 import * as Data from 'effect/Data'
 import * as Deferred from 'effect/Deferred'
@@ -55,7 +56,10 @@ export const makeInProcess = Effect.fn('ProjectWorker.makeInProcess')(function* 
       readonly rediscover: boolean
     },
     onProgress: (phase: string) => Effect.Effect<void>,
-  ) => Effect.Effect<ReadonlyMap<string, ProjectSnapshot.DocumentSnapshot>>
+  ) => Effect.Effect<
+    ReadonlyMap<string, ProjectSnapshot.DocumentSnapshot>,
+    ModuleClosure.ModuleClosureError
+  >
   readonly beforeQuery?: (query: import('./EditorQuery.js').EditorQuery) => Effect.Effect<void>
 }): Effect.fn.Return<ProjectWorker> {
   const events = yield* Queue.unbounded<Event>()

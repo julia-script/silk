@@ -1,3 +1,4 @@
+import * as Layer from 'effect/Layer'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Option from 'effect/Option'
@@ -131,10 +132,14 @@ pub fn keep(values: [Token.Token; 8]) -> [Token.Token; 8] { return values }
 pub fn main() -> i32 { return 0 }`,
       ),
     )
-    const snapshot = yield* Analysis.makeRealized({ root }).pipe(
+    const snapshot = yield* Analysis.makeRealized({ root: root.id }).pipe(
       Effect.provide(
-        SourceResolver.memory(
-          new Map([['model/Token', ascii('pub struct Token { pub kind: i32 }')]]),
+        SourceResolver.overlay([root]).pipe(
+          Layer.provideMerge(
+            SourceResolver.memory(
+              new Map([['model/Token', ascii('pub struct Token { pub kind: i32 }')]]),
+            ),
+          ),
         ),
       ),
     )

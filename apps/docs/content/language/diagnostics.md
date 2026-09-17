@@ -15,12 +15,12 @@ $ pnpm --filter @silklang/compiler documentation:generate
 | ------ | --------- | ----- |
 | `LEX`  | Lexical   | 12    |
 | `PAR`  | Parser    | 5     |
-| `MOD`  | Module    | 3     |
+| `MOD`  | Module    | 2     |
 | `SEM`  | Semantic  | 201   |
 | `OWN`  | Ownership | 19    |
 | `LAY`  | Layout    | 1     |
 
-There are 241 codes in total.
+There are 240 codes in total.
 
 ## Lexical (`LEX`)
 
@@ -51,11 +51,10 @@ There are 241 codes in total.
 
 ## Module (`MOD`)
 
-| Code      | Meaning                                                                         | Reported as                                                                                               |
-| --------- | ------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
-| `MOD0001` | Stable code for an import naming a module absent from the supplied sources.     | `Unknown module <module>`                                                                                 |
-| `MOD0002` | Stable code for an import redundantly naming its own containing module.         | `Module <module> imports itself`                                                                          |
-| `MOD0004` | Stable code for a user module claiming the reserved standard-library namespace. | `Module <module> claims the reserved standard-library namespace silk/; user modules must live outside it` |
+| Code      | Meaning                                                                     | Reported as                      |
+| --------- | --------------------------------------------------------------------------- | -------------------------------- |
+| `MOD0001` | Stable code for an import naming a module absent from the supplied sources. | `Unknown module <module>`        |
+| `MOD0002` | Stable code for an import redundantly naming its own containing module.     | `Module <module> imports itself` |
 
 ## Semantic (`SEM`)
 

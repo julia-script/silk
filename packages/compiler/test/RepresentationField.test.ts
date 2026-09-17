@@ -1,3 +1,4 @@
+import * as Layer from 'effect/Layer'
 import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
@@ -15,17 +16,27 @@ const encoder = new TextEncoder()
 
 const declarations = (id: string, source: string) =>
   Effect.map(
-    ModuleClosure.load({ root: SourceFile.make(id, encoder.encode(source)) }).pipe(
-      Effect.provide(SourceResolver.memory(new Map())),
+    ModuleClosure.load({ root: id }).pipe(
+      Effect.provide(
+        SourceResolver.overlay([SourceFile.make(id, encoder.encode(source))]).pipe(
+          Layer.provideMerge(SourceResolver.memory(new Map())),
+        ),
+      ),
     ),
     (closure) => NameResolution.analyze(closure).index,
   )
 
 const analyzeAt = (id: string, source: string, path: string) =>
   Analysis.make({
-    root: SourceFile.make(id, encoder.encode(source), SourceOrigin.projectFile(path)),
+    root: id,
     configuration: AnalysisFixture.configuration(id, 'wasm32-unknown-unknown'),
-  }).pipe(Effect.provide(SourceResolver.empty))
+  }).pipe(
+    Effect.provide(
+      SourceResolver.overlay([
+        SourceFile.make(id, encoder.encode(source), SourceOrigin.projectFile(path)),
+      ]).pipe(Layer.provideMerge(SourceResolver.empty)),
+    ),
+  )
 
 const exactCallable = (module: string, name = 'decode') =>
   Type.exactRepresentationArgument(

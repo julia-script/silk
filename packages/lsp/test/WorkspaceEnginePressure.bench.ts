@@ -45,8 +45,13 @@ const analyze = Effect.fnUntraced(function* (
   const previousProject = previous.values().next().value?.project
   const project = yield* (
     previousProject === undefined
-      ? ProjectAnalysis.make(roots)
-      : ProjectAnalysis.revise(previousProject, roots)
+      ? ProjectAnalysis.make(roots.map((source) => source.id)).pipe(
+          Effect.provide(SourceResolver.overlay(roots)),
+        )
+      : ProjectAnalysis.revise(
+          previousProject,
+          roots.map((source) => source.id),
+        ).pipe(Effect.provide(SourceResolver.overlay(roots)))
   ).pipe(Effect.provide(SourceResolver.empty))
   const moduleUris = new Map(documents.map((document) => [document.module, document.uri]))
   const inventory = yield* WorkspaceCatalog.defer(Effect.sync(() => WorkspaceInventory.make()))

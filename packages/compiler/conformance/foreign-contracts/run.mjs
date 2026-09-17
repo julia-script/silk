@@ -1,3 +1,4 @@
+import * as Layer from 'effect/Layer'
 import { fileURLToPath } from 'node:url'
 import { createHash } from 'node:crypto'
 import { NodeRuntime, NodeServices } from '@effect/platform-node'
@@ -188,7 +189,7 @@ const program = Effect.gen(function* () {
       const lane = join(output, name)
       yield* fs.makeDirectory(lane, { recursive: true })
       const snapshot = yield* Analysis.makeRealized({
-        root: SourceFile.make('conformance/contracts', source),
+        root: 'conformance/contracts',
         configuration: {
           profile: {
             target,
@@ -199,7 +200,13 @@ const program = Effect.gen(function* () {
             ...(architecture === undefined ? { deployment: '11.0.0' } : {}),
           },
         },
-      }).pipe(Effect.provide(SourceResolver.empty))
+      }).pipe(
+        Effect.provide(
+          SourceResolver.overlay([SourceFile.make('conformance/contracts', source)]).pipe(
+            Layer.provideMerge(SourceResolver.empty),
+          ),
+        ),
+      )
       if (Analysis.diagnostics(snapshot).length > 0)
         return yield* new ConformanceError({
           message: yield* encode(Analysis.diagnostics(snapshot)),

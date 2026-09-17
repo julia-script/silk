@@ -240,7 +240,7 @@ pub effect fn main() -> () ! Problem { let value = run Effect.ensuring(failing()
         'platform-conformance',
         Effect.fnUntraced(function* (scope) {
           const snapshot = yield* Analysis.makeRealized({
-            root: SourceFile.make('entry-conformance/root', fixture.source),
+            root: 'entry-conformance/root',
             configuration: {
               profile: {
                 ...input,
@@ -262,7 +262,13 @@ pub effect fn main() -> () ! Problem { let value = run Effect.ensuring(failing()
                 ],
               },
             },
-          }).pipe(Effect.provide(SourceResolver.empty))
+          }).pipe(
+            Effect.provide(
+              SourceResolver.overlay([
+                SourceFile.make('entry-conformance/root', fixture.source),
+              ]).pipe(Layer.provideMerge(SourceResolver.empty)),
+            ),
+          )
           const diagnostics = Analysis.diagnostics(snapshot)
           if (diagnostics.length !== 0)
             return yield* new ConformanceError({

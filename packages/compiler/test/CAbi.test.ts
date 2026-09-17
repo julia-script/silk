@@ -1,3 +1,4 @@
+import * as Layer from 'effect/Layer'
 import * as AnalysisFixture from './support/AnalysisFixture.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
@@ -985,7 +986,7 @@ pub fn main() { unsafe visit(entry) }`,
       const snapshot =
         name === 'machine'
           ? yield* Analysis.makeRealized({
-              root: SourceFile.make(`callbacks/${name}`, new TextEncoder().encode(source)),
+              root: `callbacks/${name}`,
               configuration: {
                 profile: {
                   target: 'x86_64-unknown-linux-gnu',
@@ -993,7 +994,13 @@ pub fn main() { unsafe visit(entry) }`,
                   runtime: { kind: 'none' },
                 },
               },
-            }).pipe(Effect.provide(SourceResolver.empty))
+            }).pipe(
+              Effect.provide(
+                SourceResolver.overlay([
+                  SourceFile.make(`callbacks/${name}`, new TextEncoder().encode(source)),
+                ]).pipe(Layer.provideMerge(SourceResolver.empty)),
+              ),
+            )
           : yield* AnalysisFixture.declarations(
               `callbacks/${name}`,
               new TextEncoder().encode(source),

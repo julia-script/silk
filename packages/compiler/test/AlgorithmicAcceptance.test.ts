@@ -1,3 +1,4 @@
+import * as Layer from 'effect/Layer'
 import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
@@ -27,11 +28,15 @@ if (rootBytes === undefined) throw new RangeError(`Fixture has no root module ${
 it.effect('accepts the compiler-shaped fold through every static compiler phase', () =>
   Effect.gen(function* () {
     const self = yield* Analysis.makeRealized({
-      root: SourceFile.make(rootModule, rootBytes),
+      root: rootModule,
       configuration: AnalysisFixture.configuration(rootModule, 'aarch64-apple-darwin'),
     }).pipe(
       Effect.provide(
-        SourceResolver.memory(new Map([...modules].filter(([name]) => name !== rootModule))),
+        SourceResolver.overlay([SourceFile.make(rootModule, rootBytes)]).pipe(
+          Layer.provideMerge(
+            SourceResolver.memory(new Map([...modules].filter(([name]) => name !== rootModule))),
+          ),
+        ),
       ),
     )
 

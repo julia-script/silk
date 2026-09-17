@@ -1,3 +1,4 @@
+import * as Layer from 'effect/Layer'
 import * as Exit from 'effect/Exit'
 import * as CompilationProfile from '../../dist/CompilationProfile.js'
 import { fileURLToPath } from 'node:url'
@@ -162,7 +163,7 @@ const program = Effect.gen(function* () {
       const mounted = `/fixtures/${name}`
       yield* fs.makeDirectory(lane, { recursive: true })
       const analysis = yield* Analysis.makeRealized({
-        root: SourceFile.make('assembly', source),
+        root: 'assembly',
         configuration: {
           profile: {
             target,
@@ -173,7 +174,13 @@ const program = Effect.gen(function* () {
             debug: mode === 'debug',
           },
         },
-      }).pipe(Effect.provide(SourceResolver.empty))
+      }).pipe(
+        Effect.provide(
+          SourceResolver.overlay([SourceFile.make('assembly', source)]).pipe(
+            Layer.provideMerge(SourceResolver.empty),
+          ),
+        ),
+      )
       if (Analysis.diagnostics(analysis).length > 0)
         return yield* new ConformanceError({
           message: yield* encode(Analysis.diagnostics(analysis)),

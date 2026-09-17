@@ -1,3 +1,4 @@
+import * as Layer from 'effect/Layer'
 import * as AnalysisFixture from './support/AnalysisFixture.js'
 import * as CompilationProfile from '../src/CompilationProfile.js'
 import { spawnSync } from 'node:child_process'
@@ -508,9 +509,15 @@ it.effect('binds a complete nested union payload that contains an imported opaqu
     const sourceId = 'layout/imported-opaque-union'
     const selected = AnalysisFixture.configuration(sourceId)
     const snapshot = yield* Analysis.make({
-      root: SourceFile.make(
-        sourceId,
-        ascii(`
+      root: sourceId,
+      configuration: selected,
+    }).pipe(
+      Effect.flatMap((frontend) => Analysis.realize(frontend, selected)),
+      Effect.provide(
+        SourceResolver.overlay([
+          SourceFile.make(
+            sourceId,
+            ascii(`
 import silk.result { Result }
 import layout.problem { Problem }
 
@@ -534,24 +541,24 @@ pub fn main() -> i32 {
   let extracted = extract(move result)
   return consume(move extracted)
 }`),
-      ),
-      configuration: selected,
-    }).pipe(
-      Effect.flatMap((frontend) => Analysis.realize(frontend, selected)),
-      Effect.provide(
-        SourceResolver.memory(
-          new Map([
-            [
-              'layout/problem',
-              ascii(`
+          ),
+        ]).pipe(
+          Layer.provideMerge(
+            SourceResolver.memory(
+              new Map([
+                [
+                  'layout/problem',
+                  ascii(`
 import silk.filesystem { FileError }
 
 pub union Problem {
   File { pub operation: i32, pub error: FileError },
   Limit { pub kind: i32, pub limit: usize }
 }`),
-            ],
-          ]),
+                ],
+              ]),
+            ),
+          ),
         ),
       ),
     )

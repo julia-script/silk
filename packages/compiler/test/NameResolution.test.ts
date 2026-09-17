@@ -1,3 +1,5 @@
+import * as Layer from 'effect/Layer'
+import type * as ModuleClosure from '../src/ModuleClosure.js'
 import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
@@ -15,7 +17,7 @@ const snapshot = (
   root: string,
   sources: Readonly<Record<string, string>>,
   target?: string,
-): Effect.Effect<Analysis.Snapshot> => {
+): Effect.Effect<Analysis.Snapshot, ModuleClosure.ModuleClosureError> => {
   const rootText = sources[root]
   if (rootText === undefined) throw new RangeError(`Fixture has no root source ${root}`)
   const imports = new Map(
@@ -24,9 +26,15 @@ const snapshot = (
       .map(([name, source]) => [name, ascii(source)] as const),
   )
   return Analysis.makeRealized({
-    root: SourceFile.make(root, ascii(rootText)),
+    root: root,
     configuration: AnalysisFixture.configuration(root, target),
-  }).pipe(Effect.provide(SourceResolver.memory(imports)))
+  }).pipe(
+    Effect.provide(
+      SourceResolver.overlay([SourceFile.make(root, ascii(rootText))]).pipe(
+        Layer.provideMerge(SourceResolver.memory(imports)),
+      ),
+    ),
+  )
 }
 
 it.effect('resolves scalar enums as ordinary nominal declaration types', () =>
@@ -89,15 +97,21 @@ fn wrong() -> Status { return Mode.Ready }`
 it.effect('resolves imported scalar enum types through explicit module scopes', () =>
   Effect.gen(function* () {
     const self = yield* Analysis.make({
-      root: SourceFile.make(
-        'app/Main',
-        ascii(
-          'import model.Status { Status }\nfn identity(value: Status) -> Status { return move value }\nfn ready() -> Status { return Status.Ready }',
-        ),
-      ),
+      root: 'app/Main',
     }).pipe(
       Effect.provide(
-        SourceResolver.memory(new Map([['model/Status', ascii('pub enum Status { Ready }')]])),
+        SourceResolver.overlay([
+          SourceFile.make(
+            'app/Main',
+            ascii(
+              'import model.Status { Status }\nfn identity(value: Status) -> Status { return move value }\nfn ready() -> Status { return Status.Ready }',
+            ),
+          ),
+        ]).pipe(
+          Layer.provideMerge(
+            SourceResolver.memory(new Map([['model/Status', ascii('pub enum Status { Ready }')]])),
+          ),
+        ),
       ),
     )
     const declaration = self.index.modules

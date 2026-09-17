@@ -1,3 +1,4 @@
+import * as Layer from 'effect/Layer'
 import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
@@ -42,11 +43,17 @@ it.effect('rejects native entropy members in Wasm and no-libc selections', () =>
     const source = 'import silk.os_random { OsRandom }\npub fn main() -> i32 { return 42 }'
     for (const target of Target.all) {
       const snapshot = yield* Analysis.makeRealized({
-        root: SourceFile.make('entropy/unavailable', encoder.encode(source)),
+        root: 'entropy/unavailable',
         configuration: {
           profile: { target: target.id, artifact: 'object', libc: 'none', entry: { kind: 'none' } },
         },
-      }).pipe(Effect.provide(SourceResolver.empty))
+      }).pipe(
+        Effect.provide(
+          SourceResolver.overlay([
+            SourceFile.make('entropy/unavailable', encoder.encode(source)),
+          ]).pipe(Layer.provideMerge(SourceResolver.empty)),
+        ),
+      )
       assert.deepEqual(
         Analysis.diagnostics(snapshot).map((diagnostic) => [
           diagnostic.code,

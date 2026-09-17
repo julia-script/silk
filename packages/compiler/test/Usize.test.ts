@@ -1,3 +1,4 @@
+import * as Layer from 'effect/Layer'
 import { unreachable } from './support/raise.js'
 import * as TestToolchain from './support/TestToolchain.js'
 import { spawnSync } from 'node:child_process'
@@ -143,12 +144,18 @@ pub fn main() -> i32 { if invalid() == 0 { return 1 } return 0 }`,
 it.effect('executes an exact native i64 call and rejects it for the WebAssembly target', () =>
   Effect.gen(function* () {
     const native = yield* Driver.compile({
-      compilation: { root: SourceFile.make('usize/program', ascii(nativeExact)) },
+      compilation: { root: 'usize/program' },
       toolchain: yield* TestToolchain.configured,
       optimization: 'release',
       artifactKind: 'NativeExecutable',
       destination: join(destinationRoot, 'native-exact'),
-    }).pipe(Effect.provide(SourceResolver.empty))
+    }).pipe(
+      Effect.provide(
+        SourceResolver.overlay([SourceFile.make('usize/program', ascii(nativeExact))]).pipe(
+          Layer.provideMerge(SourceResolver.empty),
+        ),
+      ),
+    )
     assert.strictEqual(native._tag, 'Compiled')
     if (native._tag !== 'Compiled') return
     const executed = spawnSync(native.path, [], { encoding: 'utf8' })

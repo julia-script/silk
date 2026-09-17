@@ -1,3 +1,4 @@
+import * as Layer from 'effect/Layer'
 import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
@@ -21,10 +22,16 @@ const snapshotWithImports = Effect.fnUntraced(function* (
   source: string,
   imports: Readonly<Record<string, string>>,
 ) {
-  return yield* Analysis.make({ root: SourceFile.make(root, encoder.encode(source)) }).pipe(
+  return yield* Analysis.make({ root: root }).pipe(
     Effect.provide(
-      SourceResolver.memory(
-        new Map(Object.entries(imports).map(([module, text]) => [module, encoder.encode(text)])),
+      SourceResolver.overlay([SourceFile.make(root, encoder.encode(source))]).pipe(
+        Layer.provideMerge(
+          SourceResolver.memory(
+            new Map(
+              Object.entries(imports).map(([module, text]) => [module, encoder.encode(text)]),
+            ),
+          ),
+        ),
       ),
     ),
   )

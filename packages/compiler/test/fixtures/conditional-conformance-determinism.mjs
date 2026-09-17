@@ -1,3 +1,4 @@
+import * as Layer from 'effect/Layer'
 import * as SourceFile from '../../dist/SourceFile.js'
 import * as SourceResolver from '../../dist/SourceResolver.js'
 import { createHash } from 'node:crypto'
@@ -75,12 +76,18 @@ const hash = (value) => createHash('sha256').update(value).digest('hex')
 const analyze = (target) =>
   Effect.runPromise(
     Analysis.makeRealized({
-      root: SourceFile.make(module_, bytes),
+      root: module_,
       configuration: {
         profile: { target, artifact: 'object', runtime: { kind: 'none' } },
         composition: { retention: [{ module: module_, declaration: 'main' }] },
       },
-    }).pipe(Effect.provide(SourceResolver.empty)),
+    }).pipe(
+      Effect.provide(
+        SourceResolver.overlay([SourceFile.make(module_, bytes)]).pipe(
+          Layer.provideMerge(SourceResolver.empty),
+        ),
+      ),
+    ),
   )
 
 // Both targets are pinned. A host-resolved triple would make the artifact hashes describe the

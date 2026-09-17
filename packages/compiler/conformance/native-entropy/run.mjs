@@ -136,9 +136,15 @@ const program = Effect.gen(function* () {
       'platform-conformance',
       Effect.fnUntraced(function* (scope) {
         const snapshot = yield* Analysis.makeRealized({
-          root: SourceFile.make('entropy-conformance/root', source),
+          root: 'entropy-conformance/root',
           configuration: { profile: { ...input, artifact: 'object', entry: { kind: 'none' } } },
-        }).pipe(Effect.provide(SourceResolver.empty))
+        }).pipe(
+          Effect.provide(
+            SourceResolver.overlay([SourceFile.make('entropy-conformance/root', source)]).pipe(
+              Layer.provideMerge(SourceResolver.empty),
+            ),
+          ),
+        )
         const diagnostics = Analysis.diagnostics(snapshot)
         if (diagnostics.length !== 0)
           return yield* new ConformanceError({

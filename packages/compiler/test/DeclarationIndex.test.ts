@@ -1,3 +1,4 @@
+import * as Layer from 'effect/Layer'
 import * as ForeignContract from '../src/ForeignContract.js'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
@@ -23,17 +24,21 @@ const ascii = (value: string): Uint8Array =>
 const collect = (
   rootModule: string,
   entries: ReadonlyArray<readonly [string, string]>,
-): Effect.Effect<DeclarationIndex.Index> => {
+): Effect.Effect<DeclarationIndex.Index, ModuleClosure.ModuleClosureError> => {
   const rootText = entries.find(([name]) => name === rootModule)?.[1]
   if (rootText === undefined) throw new RangeError(`Fixture has no root source ${rootModule}`)
   return Effect.map(
-    ModuleClosure.load({ root: SourceFile.make(rootModule, ascii(rootText)) }).pipe(
+    ModuleClosure.load({ root: rootModule }).pipe(
       Effect.provide(
-        SourceResolver.memory(
-          new Map(
-            entries
-              .filter(([name]) => name !== rootModule)
-              .map(([name, text]) => [name, ascii(text)] as const),
+        SourceResolver.overlay([SourceFile.make(rootModule, ascii(rootText))]).pipe(
+          Layer.provideMerge(
+            SourceResolver.memory(
+              new Map(
+                entries
+                  .filter(([name]) => name !== rootModule)
+                  .map(([name, text]) => [name, ascii(text)] as const),
+              ),
+            ),
           ),
         ),
       ),

@@ -1,3 +1,4 @@
+import * as Layer from 'effect/Layer'
 import * as NativeToolchain from '../src/NativeToolchain.js'
 import * as TestToolchain from './support/TestToolchain.js'
 import * as AnalysisFixture from './support/AnalysisFixture.js'
@@ -319,7 +320,7 @@ pub fn main() -> i32 {
 export "C" fn enter() -> i32 as "main" { return main() }`
       const compiled = yield* Driver.compile({
         compilation: {
-          root: SourceFile.make('os-filesystem/native-provider', ascii(source)),
+          root: 'os-filesystem/native-provider',
           configuration: {
             profile: {
               target: (yield* NativeToolchain.hostTarget()).id,
@@ -332,7 +333,13 @@ export "C" fn enter() -> i32 as "main" { return main() }`
         toolchain: yield* TestToolchain.configured,
         artifactKind: 'NativeExecutable',
         destination: join(destinationRoot, 'native-provider'),
-      }).pipe(Effect.provide(SourceResolver.empty))
+      }).pipe(
+        Effect.provide(
+          SourceResolver.overlay([
+            SourceFile.make('os-filesystem/native-provider', ascii(source)),
+          ]).pipe(Layer.provideMerge(SourceResolver.empty)),
+        ),
+      )
       assert.strictEqual(
         compiled._tag,
         'Compiled',
@@ -364,11 +371,17 @@ it.effect('omits native filesystem providers from Wasm and no-libc selections', 
     const source = 'import silk.os_filesystem { OsFileSystem }\npub fn main() -> i32 { return 42 }'
     for (const target of Target.all) {
       const snapshot = yield* Analysis.makeRealized({
-        root: SourceFile.make('filesystem/unavailable', ascii(source)),
+        root: 'filesystem/unavailable',
         configuration: {
           profile: { target: target.id, artifact: 'object', libc: 'none', entry: { kind: 'none' } },
         },
-      }).pipe(Effect.provide(SourceResolver.empty))
+      }).pipe(
+        Effect.provide(
+          SourceResolver.overlay([SourceFile.make('filesystem/unavailable', ascii(source))]).pipe(
+            Layer.provideMerge(SourceResolver.empty),
+          ),
+        ),
+      )
       assert.deepEqual(
         Analysis.diagnostics(snapshot).map((diagnostic) => [
           diagnostic.code,

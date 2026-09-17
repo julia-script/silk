@@ -1,3 +1,4 @@
+import * as Layer from 'effect/Layer'
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -43,7 +44,7 @@ it.effect(
     Effect.gen(function* () {
       const outcome = yield* Driver.compile({
         compilation: {
-          root: SourceFile.make('memory/tls-connection-wasm', ascii(tlsConnectionWasmSource)),
+          root: 'memory/tls-connection-wasm',
           target: 'wasm32-unknown-unknown',
         },
         toolchain,
@@ -51,7 +52,13 @@ it.effect(
         destination: join(destinationRoot, 'tls-connection.wasm'),
         cache: false,
         artifactKind: 'WebAssemblyModule',
-      }).pipe(Effect.provide(SourceResolver.empty))
+      }).pipe(
+        Effect.provide(
+          SourceResolver.overlay([
+            SourceFile.make('memory/tls-connection-wasm', ascii(tlsConnectionWasmSource)),
+          ]).pipe(Layer.provideMerge(SourceResolver.empty)),
+        ),
+      )
       let compilationMessage = 'scoped TLS connection'
       if (outcome._tag === 'BackendFailed') {
         compilationMessage = `${outcome.error.message}\n${Json.stringify(outcome.error.reason)}`

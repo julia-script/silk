@@ -1,3 +1,4 @@
+import * as Layer from 'effect/Layer'
 import { spawnSync } from 'node:child_process'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -96,13 +97,19 @@ it.effect('runs one million suspended native recursive frames with bounded machi
   Effect.gen(function* () {
     const compiled = yield* Driver.compile({
       compilation: {
-        root: SourceFile.make('suspension-native/deep', ascii(recursiveSource(1_000_000))),
+        root: 'suspension-native/deep',
       },
       toolchain: { ...(yield* TestToolchain.configured), runtimeObjectCache },
       optimization: 'release',
       artifactKind: 'NativeExecutable',
       destination: join(destinationRoot, 'deep'),
-    }).pipe(Effect.provide(SourceResolver.empty))
+    }).pipe(
+      Effect.provide(
+        SourceResolver.overlay([
+          SourceFile.make('suspension-native/deep', ascii(recursiveSource(1_000_000))),
+        ]).pipe(Layer.provideMerge(SourceResolver.empty)),
+      ),
+    )
 
     assert.strictEqual(compiled._tag, 'Compiled')
     if (compiled._tag !== 'Compiled') return
@@ -178,13 +185,19 @@ it.effect('propagates a failure after a resumed retry into its native handler', 
   Effect.gen(function* () {
     const compiled = yield* Driver.compile({
       compilation: {
-        root: SourceFile.make('suspension-native/retry-failure', ascii(retryFailureSource)),
+        root: 'suspension-native/retry-failure',
       },
       toolchain: { ...(yield* TestToolchain.configured), runtimeObjectCache },
       optimization: 'release',
       artifactKind: 'NativeExecutable',
       destination: join(destinationRoot, 'retry-failure'),
-    }).pipe(Effect.provide(SourceResolver.empty))
+    }).pipe(
+      Effect.provide(
+        SourceResolver.overlay([
+          SourceFile.make('suspension-native/retry-failure', ascii(retryFailureSource)),
+        ]).pipe(Layer.provideMerge(SourceResolver.empty)),
+      ),
+    )
 
     assert.strictEqual(compiled._tag, 'Compiled')
     if (compiled._tag !== 'Compiled') return

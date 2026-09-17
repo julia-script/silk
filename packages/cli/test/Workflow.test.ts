@@ -152,9 +152,10 @@ interface Pass {
 const watchRecording = Effect.fnUntraced(function* (root: string) {
   const passes: Array<Pass> = []
   const record = Effect.fnUntraced(function* (project: Project.Project) {
-    yield* Effect.sync(() => {
-      passes.push({ source: new TextDecoder().decode(project.entry.bytes) })
-    })
+    const source = yield* (yield* FileSystem.FileSystem)
+      .readFileString(project.entry.path)
+      .pipe(Effect.orDie)
+    passes.push({ source })
     return 0 as const
   })
   const watching = yield* Effect.forkChild(Workflow.watch(record, options(root)))
@@ -498,7 +499,7 @@ it.live(
 )
 
 it.live(
-  'compiles the exact source snapshot fingerprinted during watch startup',
+  'settles entry metadata before compiling during watch startup',
   () =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem
@@ -509,8 +510,8 @@ it.live(
       let injected = false
       const startupEditLayer = Layer.succeed(FileSystem.FileSystem, {
         ...fileSystem,
-        readFile: (path: string) =>
-          fileSystem.readFile(path).pipe(
+        stat: (path: string) =>
+          fileSystem.stat(path).pipe(
             Effect.tap(() => {
               if (path !== entry || injected) return Effect.void
               injected = true
@@ -524,8 +525,11 @@ it.live(
         project: Project.Project,
         _selection: Workflow.ProjectSelection,
       ) {
+        const source = yield* (yield* FileSystem.FileSystem)
+          .readFileString(project.entry.path)
+          .pipe(Effect.orDie)
         return yield* Effect.sync(() => {
-          observed.push(new TextDecoder().decode(project.entry.bytes))
+          observed.push(source)
           const status: Workflow.ExitStatus = 0
           return status
         })
@@ -555,13 +559,13 @@ it.live(
         project: Project.Project,
         _selection: Workflow.ProjectSelection,
       ) {
-        observed.push(new TextDecoder().decode(project.entry.bytes))
+        observed.push(yield* fileSystem.readFileString(project.entry.path))
         if (observed.length === 1) {
-          yield* fileSystem.writeFileString(`${root}/src/Main.silk`, replacement).pipe(Effect.orDie)
+          yield* fileSystem.writeFileString(`${root}/src/Main.silk`, replacement)
         }
         const status: Workflow.ExitStatus = 0
         return status
-      })
+      }, Effect.orDie)
 
       const watching = yield* Effect.forkChild(
         Workflow.watch(record, options(root)).pipe(Effect.provide(silentWatchLayer(fileSystem))),
@@ -753,4 +757,17 @@ it.live(
       yield* Fiber.interrupt(watching)
     }).pipe(Effect.scoped, Effect.provide(CompilerHost.layer)),
   Timeouts.nativeBuild,
+)
+
+it.effect('reports a missing selected root as an operational failure without output', () =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem
+    const root = yield* fs.makeTempDirectoryScoped()
+    yield* makeProject(root)
+    yield* fs.remove(`${root}/src/Main.silk`)
+    const project = yield* Project.load({ workingDirectory: root })
+    assert.strictEqual(project.entry.module, 'Main')
+    assert.strictEqual(yield* Workflow.checkProject(project, options(root)), 2)
+    assert.isFalse(yield* fs.exists(`${root}/build`))
+  }).pipe(Effect.scoped, Effect.provide(CompilerHost.layer)),
 )

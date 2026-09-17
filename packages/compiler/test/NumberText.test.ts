@@ -1,3 +1,4 @@
+import * as Layer from 'effect/Layer'
 import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { readFileSync } from 'node:fs'
 import { assert, it } from '@effect/vitest'
@@ -246,18 +247,22 @@ pub effect fn main() -> () ! WriterError {
   return run render() |> Effect.provideMut<Writer>(&mut writer)
 }`
     const snapshot = yield* Analysis.makeRealized({
-      root: SourceFile.make(module, encoder.encode(source)),
+      root: module,
       target: 'wasm32-unknown-unknown',
     }).pipe(
       Effect.provide(
-        SourceResolver.memory(
-          new Map([
-            [
-              'model/Person',
-              encoder.encode(`pub struct Person { pub name: string<'static> token: i32 }
+        SourceResolver.overlay([SourceFile.make(module, encoder.encode(source))]).pipe(
+          Layer.provideMerge(
+            SourceResolver.memory(
+              new Map([
+                [
+                  'model/Person',
+                  encoder.encode(`pub struct Person { pub name: string<'static> token: i32 }
 pub fn make() -> Person { return Person { name: "Julia", token: 42 } }`),
-            ],
-          ]),
+                ],
+              ]),
+            ),
+          ),
         ),
       ),
     )

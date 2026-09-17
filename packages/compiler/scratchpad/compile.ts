@@ -12,7 +12,6 @@ import * as OtlpTracer from 'effect/unstable/observability/OtlpTracer'
 import * as Driver from '../src/Driver.js'
 import * as FileSourceResolver from '../src/FileSourceResolver.js'
 import * as NodeHeapObservation from '../src/NodeHeapObservation.js'
-import * as SourceFile from '../src/SourceFile.js'
 import * as ChromeTrace from './ChromeTrace.js'
 
 const program = Effect.gen(function* () {
@@ -24,7 +23,6 @@ const program = Effect.gen(function* () {
 
   const destination = path.join(directory, 'dist', 'hello-world')
 
-  const bytes = yield* fs.readFile(path.join(sourceRoot, 'main.silk'))
   const homebrewClang = '/opt/homebrew/opt/llvm/bin/clang'
   const defaultClang = (yield* fs.exists(homebrewClang)) ? homebrewClang : 'clang'
   const clang = yield* Config.string('SILK_CLANG').pipe(Config.withDefault(defaultClang))
@@ -35,7 +33,7 @@ const program = Effect.gen(function* () {
 
   // Set a breakpoint here, then step into Driver.compile or any compiler phase in src/.
   const outcome = yield* Driver.compile({
-    compilation: { root: SourceFile.make('main', Uint8Array.from(bytes)) },
+    compilation: { root: 'main' },
     packageName: 'scratchpad-hello-world',
     artifactKind: 'NativeExecutable',
     toolchain: { _tag: 'Toolchain', clang, llvmAr },

@@ -18,24 +18,22 @@ it('strips exactly one suffix and rejects remaining dots', () => {
 })
 
 it('rejects a name whose stem is not a canonical identity', () => {
-  // ModuleClosure throws a RangeError on such identities; rejecting here keeps it a typed error.
+  // Entry selection and closure loading reject the same malformed identities.
   assert.strictEqual(SourceEntry.identify('my module.silk'), undefined)
   assert.strictEqual(SourceEntry.identify('.silk'), undefined)
 })
 
-it.effect('reads a file and pairs its bytes with the derived module identity', () =>
+it.effect('selects a path and derives its module without a file read', () =>
   Effect.gen(function* () {
     const fileSystem = yield* FileSystem.FileSystem
     const directory = yield* fileSystem.makeTempDirectoryScoped()
     const file = `${directory}/main.silk`
-    yield* fileSystem.writeFileString(file, 'pub fn main() -> i32 { return 42 }')
 
-    const entry = yield* SourceEntry.read(file)
+    const entry = yield* SourceEntry.select(file)
 
     assert.strictEqual(entry.module, 'main')
     assert.strictEqual(entry.path, file)
     assert.strictEqual(entry.sourceRoot, directory)
-    assert.strictEqual(new TextDecoder().decode(entry.bytes), 'pub fn main() -> i32 { return 42 }')
   }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
 )
 
@@ -46,9 +44,8 @@ it.effect('derives a nested entry identity from an explicit source root', () =>
     const nested = `${directory}/app`
     yield* fileSystem.makeDirectory(nested)
     const file = `${nested}/Main.silk`
-    yield* fileSystem.writeFileString(file, 'pub fn main() -> i32 { return 42 }')
 
-    const entry = yield* SourceEntry.read(file, directory)
+    const entry = yield* SourceEntry.select(file, directory)
     assert.strictEqual(entry.module, 'app/Main')
     assert.strictEqual(entry.sourceRoot, directory)
   }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
@@ -61,9 +58,8 @@ it.effect('rejects an entry outside the selected source root', () =>
     const sourceRoot = `${directory}/src`
     yield* fileSystem.makeDirectory(sourceRoot)
     const file = `${directory}/Main.silk`
-    yield* fileSystem.writeFileString(file, 'pub fn main() -> i32 { return 42 }')
 
-    const error = yield* Effect.flip(SourceEntry.read(file, sourceRoot))
+    const error = yield* Effect.flip(SourceEntry.select(file, sourceRoot))
     assert.strictEqual(error.reason._tag, 'OutsideSourceRoot')
   }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
 )
@@ -73,20 +69,17 @@ it.effect('fails with a typed error when the file name yields no identity', () =
     const fileSystem = yield* FileSystem.FileSystem
     const directory = yield* fileSystem.makeTempDirectoryScoped()
     const file = `${directory}/not valid.silk`
-    yield* fileSystem.writeFileString(file, 'pub fn main() -> i32 { return 42 }')
 
-    const error = yield* Effect.flip(SourceEntry.read(file))
+    const error = yield* Effect.flip(SourceEntry.select(file))
 
     assert.strictEqual(error.reason._tag, 'InvalidIdentity')
-    assert.strictEqual(error.operation, 'SourceEntry.identify')
+    assert.strictEqual(error.operation, 'SourceEntry.select')
   }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
 )
 
-it.effect('fails with a wrapped error when the file cannot be read', () =>
+it.effect('selects a nonexistent path without requiring source access', () =>
   Effect.gen(function* () {
-    const error = yield* Effect.flip(SourceEntry.read('/nonexistent/main.silk'))
-
-    assert.strictEqual(error.reason._tag, 'WrappedFailure')
-    assert.strictEqual(error.operation, 'SourceEntry.read')
+    const entry = yield* SourceEntry.select('/nonexistent/main.silk')
+    assert.strictEqual(entry.module, 'main')
   }).pipe(Effect.provide(NodeServices.layer)),
 )

@@ -147,7 +147,11 @@ export class CodegenUnavailable extends Data.TaggedError('CodegenUnavailable')<{
 /** Builds the frontend snapshot of one compilation request. */
 export const make = Effect.fn('Analysis.make')(function* (
   request: ModuleClosure.CompilationRequest,
-): Effect.fn.Return<SingleRootFrontendSnapshot, never, SourceResolver.SourceResolver> {
+): Effect.fn.Return<
+  SingleRootFrontendSnapshot,
+  ModuleClosure.ModuleClosureError,
+  SourceResolver.SourceResolver
+> {
   const frontend = yield* Frontend.frontend(request)
   yield* Effect.yieldNow
   const tooling = yield* FrontendTooling.make(frontend)
@@ -168,7 +172,7 @@ export const realize = Effect.fn('Analysis.realize')(function* (
   target: string | ModuleClosure.CompilationRequest['configuration'] = self.requestedTarget ??
     Target.x8664UnknownLinuxGnu.id,
   options: Frontend.Options = {},
-): Effect.fn.Return<Snapshot, never, SourceResolver.SourceResolver> {
+): Effect.fn.Return<Snapshot, ModuleClosure.ModuleClosureError, SourceResolver.SourceResolver> {
   const { frontend, ...realization } = yield* Realization.realize(self, target, options)
   const tooling =
     frontend.index === self.index && frontend.closure === self.closure
@@ -194,7 +198,7 @@ export const realize = Effect.fn('Analysis.realize')(function* (
 /** Builds and explicitly realizes one compilation request in a single effect. */
 export const makeRealized = Effect.fn('Analysis.makeRealized')(function* (
   request: ModuleClosure.CompilationRequest,
-): Effect.fn.Return<Snapshot, never, SourceResolver.SourceResolver> {
+): Effect.fn.Return<Snapshot, ModuleClosure.ModuleClosureError, SourceResolver.SourceResolver> {
   const selected =
     request.configuration === undefined && request.target === undefined
       ? { ...request, target: Target.x8664UnknownLinuxGnu.id }
@@ -207,12 +211,10 @@ export const ofSource = (
   sourceId: string,
   bytes: Uint8Array,
   target?: string,
-): Effect.Effect<SingleRootFrontendSnapshot> =>
+): Effect.Effect<SingleRootFrontendSnapshot, ModuleClosure.ModuleClosureError> =>
   Effect.provide(
-    target === undefined
-      ? make({ root: SourceFile.make(sourceId, bytes) })
-      : make({ root: SourceFile.make(sourceId, bytes), target }),
-    SourceResolver.empty,
+    target === undefined ? make({ root: sourceId }) : make({ root: sourceId, target }),
+    SourceResolver.memory(new Map([[sourceId, bytes]])),
   )
 
 /** Builds and explicitly realizes one single-module source. */
@@ -221,7 +223,7 @@ export const ofSourceRealized = (
   bytes: Uint8Array,
   target: string = Target.x8664UnknownLinuxGnu.id,
   options: Frontend.Options = {},
-): Effect.Effect<Snapshot> =>
+): Effect.Effect<Snapshot, ModuleClosure.ModuleClosureError> =>
   Effect.flatMap(ofSource(sourceId, bytes, target), (self) => realize(self, target, options)).pipe(
     Effect.provide(SourceResolver.empty),
   )

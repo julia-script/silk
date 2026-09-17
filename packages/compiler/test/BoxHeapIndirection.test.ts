@@ -1,3 +1,4 @@
+import * as Layer from 'effect/Layer'
 import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
@@ -286,26 +287,32 @@ pub fn main() -> i32 { return 0 }`
     assert.deepEqual(Analysis.diagnostics(single), [])
 
     const index = yield* ModuleClosure.load({
-      root: SourceFile.make(
-        'ast/expression',
-        ascii(
-          'import silk.box { Box }\nimport ast.statement\n' +
-            'import silk.box { Box }\npub struct Expression { body: Box<statement.Statement> value: i32 }\n' +
-            'pub fn main() -> i32 { return 0 }',
-        ),
-      ),
+      root: 'ast/expression',
     }).pipe(
       Effect.provide(
-        SourceResolver.memory(
-          new Map([
-            [
-              'ast/statement',
-              ascii(
-                'import silk.box { Box }\nimport ast.expression\n' +
-                  'import silk.box { Box }\npub struct Statement { head: Box<expression.Expression> }',
-              ),
-            ],
-          ]),
+        SourceResolver.overlay([
+          SourceFile.make(
+            'ast/expression',
+            ascii(
+              'import silk.box { Box }\nimport ast.statement\n' +
+                'import silk.box { Box }\npub struct Expression { body: Box<statement.Statement> value: i32 }\n' +
+                'pub fn main() -> i32 { return 0 }',
+            ),
+          ),
+        ]).pipe(
+          Layer.provideMerge(
+            SourceResolver.memory(
+              new Map([
+                [
+                  'ast/statement',
+                  ascii(
+                    'import silk.box { Box }\nimport ast.expression\n' +
+                      'import silk.box { Box }\npub struct Statement { head: Box<expression.Expression> }',
+                  ),
+                ],
+              ]),
+            ),
+          ),
         ),
       ),
       Effect.map((closure) => NameResolution.analyze(closure).index),

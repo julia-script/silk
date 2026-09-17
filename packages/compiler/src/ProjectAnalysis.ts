@@ -12,7 +12,6 @@ import type * as ModuleTooling from './ModuleTooling.js'
 import * as OpaqueRealization from './OpaqueRealization.js'
 import type * as PhaseReport from './PhaseReport.js'
 import * as SemanticInvalidation from './SemanticInvalidation.js'
-import type * as SourceFile from './SourceFile.js'
 import type * as SourceResolver from './SourceResolver.js'
 import type * as SyntaxFile from './SyntaxFile.js'
 
@@ -71,10 +70,14 @@ const opaqueRealizationsOf = (self: ProjectAnalysis): OpaqueRealization.Catalog 
   )
 
 const analyze = Effect.fnUntraced(function* (
-  roots: ReadonlyArray<SourceFile.SourceFile>,
+  roots: ReadonlyArray<string>,
   previous: ProjectAnalysis | undefined,
   options: Options,
-): Effect.fn.Return<ProjectAnalysis, never, SourceResolver.SourceResolver> {
+): Effect.fn.Return<
+  ProjectAnalysis,
+  ModuleClosure.ModuleClosureError,
+  SourceResolver.SourceResolver
+> {
   const unconfigured = yield* Frontend.frontendProject(
     {
       roots,
@@ -189,18 +192,26 @@ const analyze = Effect.fnUntraced(function* (
 
 /** Constructs one history-independent frontend analysis for the union closure of all roots. */
 export const make = Effect.fn('ProjectAnalysis.make')(function* (
-  roots: ReadonlyArray<SourceFile.SourceFile>,
+  roots: ReadonlyArray<string>,
   options: Options = {},
-): Effect.fn.Return<ProjectAnalysis, never, SourceResolver.SourceResolver> {
+): Effect.fn.Return<
+  ProjectAnalysis,
+  ModuleClosure.ModuleClosureError,
+  SourceResolver.SourceResolver
+> {
   return yield* analyze(roots, undefined, options)
 })
 
 /** Constructs a new coherent project while reusing safe syntax from one completed prior project. */
 export const revise = Effect.fn('ProjectAnalysis.revise')(function* (
   previous: ProjectAnalysis,
-  roots: ReadonlyArray<SourceFile.SourceFile>,
+  roots: ReadonlyArray<string>,
   options: Options = {},
-): Effect.fn.Return<ProjectAnalysis, never, SourceResolver.SourceResolver> {
+): Effect.fn.Return<
+  ProjectAnalysis,
+  ModuleClosure.ModuleClosureError,
+  SourceResolver.SourceResolver
+> {
   return yield* analyze(roots, previous, options)
 })
 

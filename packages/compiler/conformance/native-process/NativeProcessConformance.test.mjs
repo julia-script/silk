@@ -195,9 +195,15 @@ const runLane = Effect.fnUntraced(
       'platform-conformance',
       Effect.fnUntraced(function* (scope) {
         const snapshot = yield* Analysis.makeRealized({
-          root: SourceFile.make('process-conformance/root', source),
+          root: 'process-conformance/root',
           configuration: { profile: { ...input, artifact: 'object', entry: { kind: 'none' } } },
-        }).pipe(Effect.provide(SourceResolver.empty))
+        }).pipe(
+          Effect.provide(
+            SourceResolver.overlay([SourceFile.make('process-conformance/root', source)]).pipe(
+              Layer.provideMerge(SourceResolver.empty),
+            ),
+          ),
+        )
         const diagnostics = Analysis.diagnostics(snapshot)
         if (diagnostics.length !== 0)
           return yield* new ConformanceError({

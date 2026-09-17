@@ -1,3 +1,4 @@
+import * as Layer from 'effect/Layer'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
@@ -10,8 +11,12 @@ const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
 
 const analyze = (text: string) =>
-  Analysis.makeRealized({ root: SourceFile.make('root', ascii(text)) }).pipe(
-    Effect.provide(SourceResolver.memory(new Map())),
+  Analysis.makeRealized({ root: 'root' }).pipe(
+    Effect.provide(
+      SourceResolver.overlay([SourceFile.make('root', ascii(text))]).pipe(
+        Layer.provideMerge(SourceResolver.memory(new Map())),
+      ),
+    ),
   )
 
 const codes = (self: Analysis.FrontendSnapshot): ReadonlyArray<string> =>

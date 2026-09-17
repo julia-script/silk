@@ -1,3 +1,4 @@
+import * as Layer from 'effect/Layer'
 import * as NodeRuntime from '@effect/platform-node/NodeRuntime'
 import * as Console from 'effect/Console'
 import * as Data from 'effect/Data'
@@ -451,8 +452,14 @@ const checkSource = Effect.fnUntraced(
    */ function* (family, size, input) {
     const root = `benchmark/${family}/${size}`
     const [duration, project] = yield* Effect.timed(
-      ProjectAnalysis.make([SourceFile.make(root, bytes(input.source))]).pipe(
-        Effect.provide(SourceResolver.memory(new Map())),
+      ProjectAnalysis.make(
+        [SourceFile.make(root, bytes(input.source))].map((source) => source.id),
+      ).pipe(
+        Effect.provide(
+          SourceResolver.overlay([SourceFile.make(root, bytes(input.source))]).pipe(
+            Layer.provideMerge(SourceResolver.memory(new Map())),
+          ),
+        ),
       ),
     )
     const result = observe(project, root, duration)
@@ -560,8 +567,13 @@ const editWorkload = Effect.fnUntraced(
       const basis = revision === 'additional-generic-call' ? stable : previous
       const computation =
         basis === undefined
-          ? ProjectAnalysis.make(currentRoots)
-          : ProjectAnalysis.revise(basis, currentRoots)
+          ? ProjectAnalysis.make(currentRoots.map((source) => source.id)).pipe(
+              Effect.provide(SourceResolver.overlay(currentRoots)),
+            )
+          : ProjectAnalysis.revise(
+              basis,
+              currentRoots.map((source) => source.id),
+            ).pipe(Effect.provide(SourceResolver.overlay(currentRoots)))
       const [duration, project] = yield* Effect.timed(
         computation.pipe(
           Effect.provide(SourceResolver.memory(new Map([['growth/Leaf', bytes(leaf)]]))),

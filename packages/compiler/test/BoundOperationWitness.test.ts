@@ -1,3 +1,4 @@
+import * as Layer from 'effect/Layer'
 import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
@@ -283,20 +284,24 @@ pub fn main() -> i32 {
   return (&age) |> Encoding.Encodable<i32>.encode
 }`
     const snapshot = yield* Analysis.makeRealized({
-      root: SourceFile.make(module, ascii(source)),
+      root: module,
     }).pipe(
       Effect.provide(
-        SourceResolver.memory(
-          new Map([
-            [
-              'model/Encoding',
-              ascii(`pub interface Encodable<A> { fn encode(value: &Self) -> A }
+        SourceResolver.overlay([SourceFile.make(module, ascii(source))]).pipe(
+          Layer.provideMerge(
+            SourceResolver.memory(
+              new Map([
+                [
+                  'model/Encoding',
+                  ascii(`pub interface Encodable<A> { fn encode(value: &Self) -> A }
 pub struct Age { pub value: i32 }
 impl Encodable<i32> for Age {
   fn encode(value: &Self) -> i32 { return value.value }
 }`),
-            ],
-          ]),
+                ],
+              ]),
+            ),
+          ),
         ),
       ),
     )
@@ -322,27 +327,33 @@ impl Encodable<i32> for Age {
     assert.strictEqual(operation?.resolution._tag, 'Available')
 
     const inaccessible = yield* Analysis.makeRealized({
-      root: SourceFile.make(
-        `${module}/inaccessible`,
-        ascii(`import model.Hidden
+      root: `${module}/inaccessible`,
+    }).pipe(
+      Effect.provide(
+        SourceResolver.overlay([
+          SourceFile.make(
+            `${module}/inaccessible`,
+            ascii(`import model.Hidden
 pub fn main() -> i32 {
   let age = Hidden.Age { value: 42 }
   return Hidden.Encodable<i32>.encode(&age)
 }`),
-      ),
-    }).pipe(
-      Effect.provide(
-        SourceResolver.memory(
-          new Map([
-            [
-              'model/Hidden',
-              ascii(`interface Encodable<A> { fn encode(value: &Self) -> A }
+          ),
+        ]).pipe(
+          Layer.provideMerge(
+            SourceResolver.memory(
+              new Map([
+                [
+                  'model/Hidden',
+                  ascii(`interface Encodable<A> { fn encode(value: &Self) -> A }
 pub struct Age { pub value: i32 }
 impl Encodable<i32> for Age {
   fn encode(value: &Self) -> i32 { return value.value }
 }`),
-            ],
-          ]),
+                ],
+              ]),
+            ),
+          ),
         ),
       ),
     )

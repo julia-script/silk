@@ -72,9 +72,6 @@ export const unknownModuleCode = 'MOD0001' as const
 /** Stable code for an import redundantly naming its own containing module. */
 export const selfImportCode = 'MOD0002' as const
 
-/** Stable code for a user module claiming the reserved standard-library namespace. */
-export const reservedModuleIdentityCode = 'MOD0004' as const
-
 /** Stable code for a present return-type name that is not a bootstrap built-in. */
 export const unknownTypeCode = 'SEM0001' as const
 
@@ -500,7 +497,6 @@ export type Code =
   | typeof expressionNestingLimitExceededCode
   | typeof unknownModuleCode
   | typeof selfImportCode
-  | typeof reservedModuleIdentityCode
   | typeof unknownTypeCode
   | typeof integerOutOfRangeCode
   | typeof duplicateDeclarationNameCode
@@ -847,7 +843,6 @@ export type Reason =
     }
   | { readonly _tag: 'UnknownModule'; readonly module: string }
   | { readonly _tag: 'SelfImport'; readonly module: string }
-  | { readonly _tag: 'ReservedModuleIdentity'; readonly module: string }
   | { readonly _tag: 'UnknownType'; readonly spelling: string }
   | { readonly _tag: 'UnknownLifetime'; readonly spelling: string }
   | { readonly _tag: 'AmbiguousLifetimeElision' }
@@ -2017,17 +2012,6 @@ export const selfImport = (module: string, span: SourceSpan.SourceSpan): Diagnos
     severity: 'error',
     message: `Module ${module} imports itself`,
     reason: Object.freeze({ _tag: 'SelfImport', module }),
-    span,
-  })
-
-export const reservedModuleIdentity = (module: string, span: SourceSpan.SourceSpan): Diagnostic =>
-  Object.freeze({
-    _tag: 'Diagnostic',
-    phase: 'module',
-    code: reservedModuleIdentityCode,
-    severity: 'error',
-    message: `Module ${module} claims the reserved standard-library namespace silk/; user modules must live outside it`,
-    reason: Object.freeze({ _tag: 'ReservedModuleIdentity', module }),
     span,
   })
 

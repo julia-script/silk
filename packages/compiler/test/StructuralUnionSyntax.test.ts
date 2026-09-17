@@ -1,3 +1,4 @@
+import * as Layer from 'effect/Layer'
 import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
@@ -60,10 +61,14 @@ it.effect('resolves equivalent union spellings to one canonical type', () =>
 fn first(value: Token | (End | Token)) -> End | Token { return value }
 pub fn main() -> i32 { return 0 }`),
     )
-    const snapshot = yield* Analysis.makeRealized({ root }).pipe(
+    const snapshot = yield* Analysis.makeRealized({ root: root.id }).pipe(
       Effect.provide(
-        SourceResolver.memory(
-          new Map([['model/Types', ascii('pub struct Token {}\npub struct End {}')]]),
+        SourceResolver.overlay([root]).pipe(
+          Layer.provideMerge(
+            SourceResolver.memory(
+              new Map([['model/Types', ascii('pub struct Token {}\npub struct End {}')]]),
+            ),
+          ),
         ),
       ),
     )

@@ -1,3 +1,4 @@
+import * as Layer from 'effect/Layer'
 import { readFileSync } from 'node:fs'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
@@ -29,13 +30,19 @@ it.effect(
     Effect.gen(function* () {
       const sourceId = 'native-socket/gnu-boundaries'
       const snapshot = yield* Analysis.makeRealized({
-        root: SourceFile.make(sourceId, encoder.encode(nativeSocketAcceptanceSource)),
+        root: sourceId,
         configuration: AnalysisFixture.configuration(sourceId, 'x86_64-unknown-linux-gnu', [
           'runResolved',
           'runUnixRetry',
           'parkedOwnedAcquisition',
         ]),
-      }).pipe(Effect.provide(SourceResolver.empty))
+      }).pipe(
+        Effect.provide(
+          SourceResolver.overlay([
+            SourceFile.make(sourceId, encoder.encode(nativeSocketAcceptanceSource)),
+          ]).pipe(Layer.provideMerge(SourceResolver.empty)),
+        ),
+      )
       assert.deepEqual(Analysis.diagnostics(snapshot), [])
       assert.deepEqual(yield* MirVerification.verify(Analysis.loweredMir(snapshot)), [])
       const actorSymbols = Analysis.instancesOf(snapshot)

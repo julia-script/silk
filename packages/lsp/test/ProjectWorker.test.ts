@@ -49,8 +49,13 @@ const analyze = Effect.fnUntraced(function* (
   const previousProject = previous.values().next().value?.project
   const project = yield* (
     previousProject === undefined
-      ? ProjectAnalysis.make(roots)
-      : ProjectAnalysis.revise(previousProject, roots)
+      ? ProjectAnalysis.make(roots.map((source) => source.id)).pipe(
+          Effect.provide(SourceResolver.overlay(roots)),
+        )
+      : ProjectAnalysis.revise(
+          previousProject,
+          roots.map((source) => source.id),
+        ).pipe(Effect.provide(SourceResolver.overlay(roots)))
   ).pipe(Effect.provide(SourceResolver.empty))
   const moduleUris = new Map(documents.map((document) => [document.module, document.uri]))
   const inventory = yield* WorkspaceCatalog.defer(Effect.sync(() => WorkspaceInventory.make()))
@@ -322,4 +327,36 @@ it.effect(
       assert.notStrictEqual(yield* worker.awaitExit, 0)
     }).pipe(Effect.scoped),
   30_000,
+)
+
+it.effect('reports an unavailable root without publishing a successful revision', () =>
+  Effect.gen(function* () {
+    const worker = yield* ProjectWorker.makeInProcess({
+      epoch: WorkerEpoch.initial,
+      analyze: () =>
+        ProjectAnalysis.make(['missing']).pipe(
+          Effect.map(() => new Map<string, ProjectSnapshot.DocumentSnapshot>()),
+          Effect.provide(SourceResolver.empty),
+        ),
+    })
+    yield* initialize(worker)
+    yield* take(worker, 'Ready')
+    yield* worker.send(source(1, 'pub fn main() -> i32 { return 0 }'))
+    const failure = yield* take(worker, 'Failure')
+    assert.strictEqual(failure._tag, 'Failure')
+    if (failure._tag !== 'Failure') return
+    assert.strictEqual(failure.generation.value, 1)
+    yield* worker.send({
+      protocolVersion: WorkerProtocol.version,
+      _tag: 'Query',
+      epoch: WorkerEpoch.initial,
+      generation: { _tag: 'ProjectGeneration', value: 1 },
+      requestId: RequestId.initial,
+      query: { _tag: 'Diagnostics', uri, parameters: {} },
+    })
+    const result = yield* take(worker, 'Result')
+    assert.strictEqual(result._tag, 'Result')
+    if (result._tag === 'Result') assert.deepEqual(result.result, { _tag: 'Unavailable' })
+    yield* worker.shutdown
+  }).pipe(Effect.scoped),
 )

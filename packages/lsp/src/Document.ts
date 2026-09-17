@@ -1,3 +1,4 @@
+import type * as ModuleClosure from '@silklang/compiler/ModuleClosure'
 import * as Analysis from '@silklang/compiler/Analysis'
 import type * as AutoImport from '@silklang/compiler/AutoImport'
 import * as DeclarationFacts from '@silklang/compiler/DeclarationFacts'
@@ -676,8 +677,11 @@ export const codeActions = Effect.fn('Document.codeActions')(function* (
   snapshot: Analysis.FrontendSnapshot,
   range: Range,
   uriOf: (module: string) => string | undefined,
-  loadInventory?: Effect.Effect<WorkspaceInventory.WorkspaceInventory>,
-): Effect.fn.Return<ReadonlyArray<CodeAction>> {
+  loadInventory?: Effect.Effect<
+    WorkspaceInventory.WorkspaceInventory,
+    ModuleClosure.ModuleClosureError
+  >,
+): Effect.fn.Return<ReadonlyArray<CodeAction>, ModuleClosure.ModuleClosureError> {
   // `diagnostics` maps the same `owned` list one-to-one, so the two stay index-aligned.
   const published = compilerDiagnostics(self, snapshot, uriOf)
   const diagnostics = owned(self, snapshot)
@@ -806,10 +810,13 @@ export const disableCodeAction = (action: CodeAction, reason: string): CodeActio
 export const resolveCodeAction = Effect.fn('Document.resolveCodeAction')(function* (
   self: Document,
   snapshot: Analysis.FrontendSnapshot,
-  loadInventory: Effect.Effect<WorkspaceInventory.WorkspaceInventory>,
+  loadInventory: Effect.Effect<
+    WorkspaceInventory.WorkspaceInventory,
+    ModuleClosure.ModuleClosureError
+  >,
   action: CodeAction,
   uriOf: (module: string) => string | undefined,
-): Effect.fn.Return<CodeAction> {
+): Effect.fn.Return<CodeAction, ModuleClosure.ModuleClosureError> {
   const data = parseCodeActionData(action.data)
   if (
     data === undefined ||
@@ -1637,8 +1644,11 @@ export const completion = Effect.fn('Document.completion')(function* (
   self: Document,
   snapshot: Analysis.FrontendSnapshot,
   position: Position,
-  loadInventory?: Effect.Effect<WorkspaceInventory.WorkspaceInventory>,
-): Effect.fn.Return<CompletionList> {
+  loadInventory?: Effect.Effect<
+    WorkspaceInventory.WorkspaceInventory,
+    ModuleClosure.ModuleClosureError
+  >,
+): Effect.fn.Return<CompletionList, ModuleClosure.ModuleClosureError> {
   const result = Analysis.completionAt(
     snapshot,
     self.module,

@@ -1,3 +1,5 @@
+import * as Layer from 'effect/Layer'
+import type * as ModuleClosure from '../src/ModuleClosure.js'
 import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
@@ -13,14 +15,20 @@ const ascii = (value: string): Uint8Array =>
 
 const analyze = (text: string, target?: string) =>
   Analysis.makeRealized({
-    root: SourceFile.make('root', ascii(text)),
+    root: 'root',
     configuration: AnalysisFixture.configuration('root', target),
-  }).pipe(Effect.provide(SourceResolver.memory(new Map())))
+  }).pipe(
+    Effect.provide(
+      SourceResolver.overlay([SourceFile.make('root', ascii(text))]).pipe(
+        Layer.provideMerge(SourceResolver.memory(new Map())),
+      ),
+    ),
+  )
 
 const analyzeModules = (
   rootModule: string,
   entries: ReadonlyArray<readonly [string, string]>,
-): Effect.Effect<Analysis.Snapshot> => {
+): Effect.Effect<Analysis.Snapshot, ModuleClosure.ModuleClosureError> => {
   const rootText = entries.find(([name]) => name === rootModule)?.[1]
   if (rootText === undefined) throw new RangeError(`Fixture has no root source ${rootModule}`)
   const imports = new Map(
@@ -29,9 +37,15 @@ const analyzeModules = (
       .map(([name, text]) => [name, ascii(text)] as const),
   )
   return Analysis.makeRealized({
-    root: SourceFile.make(rootModule, ascii(rootText)),
+    root: rootModule,
     configuration: AnalysisFixture.configuration(rootModule),
-  }).pipe(Effect.provide(SourceResolver.memory(imports)))
+  }).pipe(
+    Effect.provide(
+      SourceResolver.overlay([SourceFile.make(rootModule, ascii(rootText))]).pipe(
+        Layer.provideMerge(SourceResolver.memory(imports)),
+      ),
+    ),
+  )
 }
 
 const codes = (self: Analysis.SingleRootFrontendSnapshot): ReadonlyArray<string> =>
@@ -297,8 +311,12 @@ impl Holder { pub fn zero() -> i32 { return 0 } }`
 )
 
 const analyzeConformance = (text: string) =>
-  Analysis.make({ root: SourceFile.make('root', ascii(text)) }).pipe(
-    Effect.provide(SourceResolver.memory(new Map())),
+  Analysis.make({ root: 'root' }).pipe(
+    Effect.provide(
+      SourceResolver.overlay([SourceFile.make('root', ascii(text))]).pipe(
+        Layer.provideMerge(SourceResolver.memory(new Map())),
+      ),
+    ),
   )
 
 it.effect('replays conformance owner lifetimes and inherits them in inline operations', () =>

@@ -1,3 +1,4 @@
+import * as Layer from 'effect/Layer'
 import { readFileSync } from 'node:fs'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
@@ -22,9 +23,15 @@ it.effect(
       if (example === undefined) return
       const sourceId = 'http-server/reference-example'
       const snapshot = yield* Frontend.frontend({
-        root: SourceFile.make(sourceId, encoder.encode(example)),
+        root: sourceId,
         configuration: AnalysisFixture.configuration(sourceId, 'x86_64-unknown-linux-gnu', []),
-      }).pipe(Effect.provide(SourceResolver.empty))
+      }).pipe(
+        Effect.provide(
+          SourceResolver.overlay([SourceFile.make(sourceId, encoder.encode(example))]).pipe(
+            Layer.provideMerge(SourceResolver.empty),
+          ),
+        ),
+      )
       assert.deepEqual(
         snapshot.diagnostics.map((diagnostic) => ({
           code: diagnostic.code,

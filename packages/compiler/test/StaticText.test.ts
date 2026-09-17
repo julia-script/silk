@@ -1,3 +1,4 @@
+import * as Layer from 'effect/Layer'
 import * as AnalysisFixture from './support/AnalysisFixture.js'
 import * as Schema from 'effect/Schema'
 import * as SourceResolver from '../src/SourceResolver.js'
@@ -2282,9 +2283,15 @@ static fn choose() -> i32 { if enabled { return 42 } else { return 7 } }
 pub fn main() -> i32 { static if enabled { return count } else { return 0 } }`
     const selected = AnalysisFixture.configuration('configured', Target.wasm32UnknownUnknown.id)
     const frontend = yield* Analysis.make({
-      root: SourceFile.make('configured', encoder.encode(source)),
+      root: 'configured',
       configuration: selected,
-    }).pipe(Effect.provide(SourceResolver.empty))
+    }).pipe(
+      Effect.provide(
+        SourceResolver.overlay([SourceFile.make('configured', encoder.encode(source))]).pipe(
+          Layer.provideMerge(SourceResolver.empty),
+        ),
+      ),
+    )
     for (const enabled of [false, true]) {
       const snapshot = yield* Analysis.realize(frontend, {
         ...selected,
@@ -2320,9 +2327,15 @@ pub static fn choose() -> u32 { return word }
 pub static fn validate(value: u32) -> bool { if value == 0 { compileError("count must be positive") } return true }
 static fn unused() -> u32 { return unused() }`
     const snapshot = yield* Analysis.make({
-      root: SourceFile.make('main', encoder.encode(root)),
+      root: 'main',
     }).pipe(
-      Effect.provide(SourceResolver.memory(new Map([['config/helper', encoder.encode(helper)]]))),
+      Effect.provide(
+        SourceResolver.overlay([SourceFile.make('main', encoder.encode(root))]).pipe(
+          Layer.provideMerge(
+            SourceResolver.memory(new Map([['config/helper', encoder.encode(helper)]])),
+          ),
+        ),
+      ),
     )
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
     const source = bootstrapSource(snapshot)
@@ -2435,10 +2448,7 @@ it.effect('snapshots configuration bindings before publishing a frontend', () =>
     const value = { kind: 'boolean', value: false }
     const profile = { target: 'wasm32-unknown-unknown', debug: false }
     const frontend = yield* Analysis.make({
-      root: SourceFile.make(
-        'main',
-        encoder.encode('pub param enabled: bool\npub fn main() -> i32 { return 0 }'),
-      ),
+      root: 'main',
       configuration: {
         package: 'demo@1.0.0',
         profile,
@@ -2453,7 +2463,16 @@ it.effect('snapshots configuration bindings before publishing a frontend', () =>
           },
         ],
       },
-    }).pipe(Effect.provide(SourceResolver.empty))
+    }).pipe(
+      Effect.provide(
+        SourceResolver.overlay([
+          SourceFile.make(
+            'main',
+            encoder.encode('pub param enabled: bool\npub fn main() -> i32 { return 0 }'),
+          ),
+        ]).pipe(Layer.provideMerge(SourceResolver.empty)),
+      ),
+    )
     value.value = true
     profile.debug = true
     const completed = yield* Analysis.realize(frontend).pipe(Effect.provide(SourceResolver.empty))

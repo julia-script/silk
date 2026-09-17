@@ -1,3 +1,4 @@
+import * as Layer from 'effect/Layer'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
@@ -312,17 +313,21 @@ pub fn main() -> i32 {
   let state = State.ready()
   return 0
 }`
-  return Analysis.make({ root: SourceFile.make('main', encoder.encode(source)) }).pipe(
+  return Analysis.make({ root: 'main' }).pipe(
     Effect.provide(
-      SourceResolver.memory(
-        new Map([
-          [
-            'state',
-            encoder.encode(
-              'pub union State { Ready, Waiting { count: i32 } }\nimpl State { pub fn ready() -> State { return State.Ready } }',
-            ),
-          ],
-        ]),
+      SourceResolver.overlay([SourceFile.make('main', encoder.encode(source))]).pipe(
+        Layer.provideMerge(
+          SourceResolver.memory(
+            new Map([
+              [
+                'state',
+                encoder.encode(
+                  'pub union State { Ready, Waiting { count: i32 } }\nimpl State { pub fn ready() -> State { return State.Ready } }',
+                ),
+              ],
+            ]),
+          ),
+        ),
       ),
     ),
     Effect.map((snapshot) => {
@@ -973,8 +978,12 @@ impl Counter {
   fn secret(self: &Self) -> i32 { return self.value }
 }
 pub fn local() -> i32 { let counter = Counter. return 0 }`
-  return Analysis.make({ root: SourceFile.make('main', encoder.encode(main)) }).pipe(
-    Effect.provide(SourceResolver.memory(new Map([['shapes', encoder.encode(shapes)]]))),
+  return Analysis.make({ root: 'main' }).pipe(
+    Effect.provide(
+      SourceResolver.overlay([SourceFile.make('main', encoder.encode(main))]).pipe(
+        Layer.provideMerge(SourceResolver.memory(new Map([['shapes', encoder.encode(shapes)]]))),
+      ),
+    ),
     Effect.map((snapshot) => {
       const labels = (module: string, source: string) =>
         Analysis.completionAt(
@@ -1305,8 +1314,14 @@ struct Provider {}
 impl Broken for Provider {}
 pub fn main() -> Provider { return Provider {} }`
   return Effect.all([
-    Analysis.make({ root: SourceFile.make('main', encoder.encode(qualifiedSource)) }).pipe(
-      Effect.provide(SourceResolver.memory(new Map([['contracts', encoder.encode(contracts)]]))),
+    Analysis.make({ root: 'main' }).pipe(
+      Effect.provide(
+        SourceResolver.overlay([SourceFile.make('main', encoder.encode(qualifiedSource))]).pipe(
+          Layer.provideMerge(
+            SourceResolver.memory(new Map([['contracts', encoder.encode(contracts)]])),
+          ),
+        ),
+      ),
     ),
     Analysis.ofSource('main', encoder.encode(invalidSource)),
   ]).pipe(
@@ -1375,8 +1390,12 @@ struct Provider {}
 impl Visible for Provider {}
 pub fn make() -> Provider { return Provider {} }`
   const analyze = Effect.fnUntraced(function* (library: string) {
-    return yield* Analysis.make({ root: SourceFile.make('main', encoder.encode(root)) }).pipe(
-      Effect.provide(SourceResolver.memory(new Map([['lib', encoder.encode(library)]]))),
+    return yield* Analysis.make({ root: 'main' }).pipe(
+      Effect.provide(
+        SourceResolver.overlay([SourceFile.make('main', encoder.encode(root))]).pipe(
+          Layer.provideMerge(SourceResolver.memory(new Map([['lib', encoder.encode(library)]]))),
+        ),
+      ),
     )
   })
   return Effect.all([analyze(privateContractLibrary), analyze(privateProviderLibrary)]).pipe(
@@ -1606,8 +1625,12 @@ it.effect('retains exact import, alias, qualifier, and unavailable-member tokens
 pub fn main() -> i32 { return read() }`
   const library = `pub fn answer() -> i32 { return 42 }
 fn hidden() -> i32 { return 0 }`
-  return Analysis.make({ root: SourceFile.make('root', encoder.encode(root)) }).pipe(
-    Effect.provide(SourceResolver.memory(new Map([['lib', encoder.encode(library)]]))),
+  return Analysis.make({ root: 'root' }).pipe(
+    Effect.provide(
+      SourceResolver.overlay([SourceFile.make('root', encoder.encode(root))]).pipe(
+        Layer.provideMerge(SourceResolver.memory(new Map([['lib', encoder.encode(library)]]))),
+      ),
+    ),
     Effect.map((snapshot) => {
       const at = (spelling: string, occurrence = 0) => {
         let offset = -1
@@ -1645,8 +1668,12 @@ pub fn main() -> i32 {
 }`
   const library = `pub struct Secret { pub value: i32 key: i32 }
 pub fn make(value: i32) -> Secret { return Secret { value: value, key: 7 } }`
-  return Analysis.make({ root: SourceFile.make('main', encoder.encode(root)) }).pipe(
-    Effect.provide(SourceResolver.memory(new Map([['lib', encoder.encode(library)]]))),
+  return Analysis.make({ root: 'main' }).pipe(
+    Effect.provide(
+      SourceResolver.overlay([SourceFile.make('main', encoder.encode(root))]).pipe(
+        Layer.provideMerge(SourceResolver.memory(new Map([['lib', encoder.encode(library)]]))),
+      ),
+    ),
     Effect.map((snapshot) => {
       const completionOffset = root.lastIndexOf('secret.') + 'secret.'.length
       const labels = Analysis.completionAt(snapshot, 'main', completionOffset)?.candidates.map(
@@ -1681,8 +1708,14 @@ struct Problem {}
 pub fn main() -> i32 { return 0 }`
   const models = `pub struct Box<T> { value: T }
 pub struct Other {}`
-  return Analysis.make({ root: SourceFile.make('main', encoder.encode(root)) }).pipe(
-    Effect.provide(SourceResolver.memory(new Map([['types/Models', encoder.encode(models)]]))),
+  return Analysis.make({ root: 'main' }).pipe(
+    Effect.provide(
+      SourceResolver.overlay([SourceFile.make('main', encoder.encode(root))]).pipe(
+        Layer.provideMerge(
+          SourceResolver.memory(new Map([['types/Models', encoder.encode(models)]])),
+        ),
+      ),
+    ),
     Effect.map((snapshot) => {
       const scope = NameResolution.scopeOf(snapshot.resolution, 'main')
       const box = Type.nominal('types/Models', 'Box', Object.freeze(['i32']))
@@ -1848,18 +1881,22 @@ pub fn main() -> i32 { return SystemAllocator. }`
 struct Local {}
 pub fn main(value: i32) -> i32 { return lib. }`
     const namespace = yield* Analysis.make({
-      root: SourceFile.make('main', encoder.encode(namespaceSource)),
+      root: 'main',
     }).pipe(
       Effect.provide(
-        SourceResolver.memory(
-          new Map([
-            [
-              'lib',
-              encoder.encode(
-                'pub fn visible() -> i32 { return 1 }\nfn hidden() -> i32 { return 0 }',
-              ),
-            ],
-          ]),
+        SourceResolver.overlay([SourceFile.make('main', encoder.encode(namespaceSource))]).pipe(
+          Layer.provideMerge(
+            SourceResolver.memory(
+              new Map([
+                [
+                  'lib',
+                  encoder.encode(
+                    'pub fn visible() -> i32 { return 1 }\nfn hidden() -> i32 { return 0 }',
+                  ),
+                ],
+              ]),
+            ),
+          ),
         ),
       ),
     )
@@ -1895,13 +1932,22 @@ pub fn main() -> i32 { return LocalLogger. }`
     const importedServiceSource = `import contracts { ContractLogger }
 pub fn main() -> i32 { return ContractLogger. }`
     const importedService = yield* Analysis.make({
-      root: SourceFile.make('main', encoder.encode(importedServiceSource)),
+      root: 'main',
     }).pipe(
       Effect.provide(
-        SourceResolver.memory(
-          new Map([
-            ['contracts', encoder.encode('pub service ContractLogger { fn enabled() -> bool }')],
-          ]),
+        SourceResolver.overlay([
+          SourceFile.make('main', encoder.encode(importedServiceSource)),
+        ]).pipe(
+          Layer.provideMerge(
+            SourceResolver.memory(
+              new Map([
+                [
+                  'contracts',
+                  encoder.encode('pub service ContractLogger { fn enabled() -> bool }'),
+                ],
+              ]),
+            ),
+          ),
         ),
       ),
     )
@@ -1941,11 +1987,15 @@ fn identity<T>(value: ) -> i32 { return 0 }`
     const importedUnionSource = `import contracts { ContractChoice }
 fn identity(value: ) -> i32 { return 0 }`
     const importedUnion = yield* Analysis.make({
-      root: SourceFile.make('main', encoder.encode(importedUnionSource)),
+      root: 'main',
     }).pipe(
       Effect.provide(
-        SourceResolver.memory(
-          new Map([['contracts', encoder.encode('pub union ContractChoice { Empty }')]]),
+        SourceResolver.overlay([SourceFile.make('main', encoder.encode(importedUnionSource))]).pipe(
+          Layer.provideMerge(
+            SourceResolver.memory(
+              new Map([['contracts', encoder.encode('pub union ContractChoice { Empty }')]]),
+            ),
+          ),
         ),
       ),
     )
@@ -1999,8 +2049,12 @@ pub fn helper() -> i32 { return 1 }
 `
   const source = `import shapes
 pub fn main() -> i32 { let value = shapes. return 0 }`
-  return Analysis.make({ root: SourceFile.make('main', encoder.encode(source)) }).pipe(
-    Effect.provide(SourceResolver.memory(new Map([['shapes', encoder.encode(shapes)]]))),
+  return Analysis.make({ root: 'main' }).pipe(
+    Effect.provide(
+      SourceResolver.overlay([SourceFile.make('main', encoder.encode(source))]).pipe(
+        Layer.provideMerge(SourceResolver.memory(new Map([['shapes', encoder.encode(shapes)]]))),
+      ),
+    ),
     Effect.map((snapshot) => {
       const offset = source.indexOf('shapes.') + 'shapes.'.length
       const completion = Analysis.completionAt(snapshot, 'main', offset)

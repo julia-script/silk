@@ -1,3 +1,4 @@
+import * as Layer from 'effect/Layer'
 import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
@@ -24,9 +25,15 @@ it.effect(
         'export "C" fn lifecycle()',
       )
       const snapshot = yield* Analysis.makeRealized({
-        root: SourceFile.make(module, ascii(source)),
+        root: module,
         configuration: AnalysisFixture.configuration(module, 'wasm32-unknown-unknown', []),
-      }).pipe(Effect.provide(SourceResolver.empty))
+      }).pipe(
+        Effect.provide(
+          SourceResolver.overlay([SourceFile.make(module, ascii(source))]).pipe(
+            Layer.provideMerge(SourceResolver.empty),
+          ),
+        ),
+      )
       assert.deepEqual(
         Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
         [],
@@ -700,9 +707,15 @@ effect fn program() -> i32 ! OutOfMemoryError {
 effect fn failed(error: OutOfMemoryError) -> i32 { drop error return -1 }
 pub fn main() -> i32 { return run Effect.catchAll(program(), failed) }`
       const snapshot = yield* Analysis.makeRealized({
-        root: SourceFile.make(module, ascii(source)),
+        root: module,
         configuration: AnalysisFixture.configuration(module, 'wasm32-unknown-unknown'),
-      }).pipe(Effect.provide(SourceResolver.empty))
+      }).pipe(
+        Effect.provide(
+          SourceResolver.overlay([SourceFile.make(module, ascii(source))]).pipe(
+            Layer.provideMerge(SourceResolver.empty),
+          ),
+        ),
+      )
       assert.deepEqual(
         Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
         [],

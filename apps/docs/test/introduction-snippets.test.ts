@@ -1,3 +1,4 @@
+import * as Layer from 'effect/Layer'
 import { readFileSync } from 'node:fs'
 import { assert, it } from '@effect/vitest'
 import * as Analysis from '@silklang/compiler/Analysis'
@@ -59,11 +60,17 @@ it.effect('keeps every live landing-page example diagnostics-correct', () =>
       const module = `landing-page/${index + 1}`
       const bytes = new TextEncoder().encode(snippet.source)
       const snapshot = yield* Analysis.makeRealized({
-        root: SourceFile.make(module, bytes),
+        root: module,
         configuration: {
           profile: { target: snippet.target, artifact: 'object', runtime: { kind: 'none' } },
         },
-      }).pipe(Effect.provide(SourceResolver.empty))
+      }).pipe(
+        Effect.provide(
+          SourceResolver.overlay([SourceFile.make(module, bytes)]).pipe(
+            Layer.provideMerge(SourceResolver.empty),
+          ),
+        ),
+      )
       const document = Document.make({
         uri: module,
         version: 0,
