@@ -1,3 +1,4 @@
+import * as Layer from 'effect/Layer'
 import * as TestToolchain from './support/TestToolchain.js'
 import { spawnSync } from 'node:child_process'
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
@@ -221,12 +222,18 @@ const failuresIn = (name: string, cases: ReadonlyArray<Case>) =>
   Effect.gen(function* () {
     const source = program(cases)
     const compiled = yield* Driver.compile({
-      compilation: { root: SourceFile.make(name, ascii(source)) },
+      compilation: { root: name },
       toolchain: yield* TestToolchain.configured,
       optimization: 'release',
       artifactKind: 'NativeExecutable',
       destination: join(destinationRoot, name.replaceAll('/', '-')),
-    }).pipe(Effect.provide(SourceResolver.empty))
+    }).pipe(
+      Effect.provide(
+        SourceResolver.overlay([SourceFile.make(name, ascii(source))]).pipe(
+          Layer.provideMerge(SourceResolver.empty),
+        ),
+      ),
+    )
     if ('diagnostics' in compiled)
       assert.deepEqual(
         compiled.diagnostics.map((diagnostic) => ({

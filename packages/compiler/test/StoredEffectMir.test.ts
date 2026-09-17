@@ -1,3 +1,4 @@
+import * as Layer from 'effect/Layer'
 import * as OpaqueRealization from '../src/OpaqueRealization.js'
 import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { assert, it } from '@effect/vitest'
@@ -83,9 +84,15 @@ const lowerStored = Effect.fnUntraced(function* (
 ) {
   const configuration = AnalysisFixture.configuration(name, target)
   const frontend = yield* Analysis.make({
-    root: SourceFile.make(name, ascii(source)),
+    root: name,
     configuration,
-  }).pipe(Effect.provide(SourceResolver.memory(imports)))
+  }).pipe(
+    Effect.provide(
+      SourceResolver.overlay([SourceFile.make(name, ascii(source))]).pipe(
+        Layer.provideMerge(SourceResolver.memory(imports)),
+      ),
+    ),
+  )
   const snapshot = yield* Analysis.realize(frontend, configuration, {
     normalizeMir: false,
   }).pipe(Effect.provide(SourceResolver.empty))

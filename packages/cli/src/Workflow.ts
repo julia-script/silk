@@ -98,13 +98,8 @@ const reportPreparationFailure = Effect.fnUntraced(function* (error: { readonly 
   return 2 as const
 })
 
-const loadedSources = (
-  outcome: Driver.Outcome,
-  entry: SourceEntry.SourceEntry,
-): ReadonlyMap<string, SourceFile.SourceFile> =>
-  outcome._tag === 'Rejected'
-    ? outcome.sources
-    : new Map([[entry.module, SourceFile.make(entry.module, entry.bytes)]])
+const loadedSources = (outcome: Driver.Outcome): ReadonlyMap<string, SourceFile.SourceFile> =>
+  outcome._tag === 'Rejected' ? outcome.sources : new Map()
 
 const outcomeStatus = (outcome: Exclude<Driver.Outcome, { readonly _tag: 'Compiled' }>): 1 | 2 => {
   switch (outcome._tag) {
@@ -118,7 +113,7 @@ const outcomeStatus = (outcome: Exclude<Driver.Outcome, { readonly _tag: 'Compil
   }
 }
 
-/** Compiles one already-materialized entry and classifies source versus operational failures. */
+/** Compiles one selected entry and classifies source versus operational failures. */
 export const compile = Effect.fn('Workflow.compile')(function* (
   options: CompileOptions,
 ): Effect.fn.Return<
@@ -140,7 +135,7 @@ export const compile = Effect.fn('Workflow.compile')(function* (
   const attempted = yield* Effect.result(
     Driver.compile({
       compilation: {
-        root: SourceFile.make(options.entry.module, options.entry.bytes),
+        root: options.entry.module,
         ...(options.configuration === undefined && options.target !== undefined
           ? { target: options.target }
           : {}),
@@ -166,6 +161,10 @@ export const compile = Effect.fn('Workflow.compile')(function* (
 
   if (Result.isFailure(attempted)) {
     const failure = attempted.failure
+    if (failure._tag === 'ModuleClosureError') {
+      yield* Console.error(failure.message)
+      return { _tag: 'NotBuilt', status: 2 }
+    }
     if (failure._tag === 'ToolchainError') {
       yield* Console.error(Report.toolchainError(failure))
       return { _tag: 'NotBuilt', status: 2 }
@@ -185,7 +184,7 @@ export const compile = Effect.fn('Workflow.compile')(function* (
   const outcome = attempted.success
   const summary = Report.outcome(
     outcome,
-    Report.catalog(resolver, loadedSources(outcome, options.entry), path),
+    Report.catalog(resolver, loadedSources(outcome), path),
     options.entry.path,
   )
   if (summary.length > 0) {
@@ -224,10 +223,17 @@ const checkTarget = Effect.fnUntraced(function* (
   const target = plan.target
   const path = yield* Path.Path
   const resolver = FileSourceResolver.make(project.entry.sourceRoot)
-  const analysis = yield* Analysis.makeRealized({
-    root: SourceFile.make(project.entry.module, project.entry.bytes),
-    configuration: BuildPlan.compilationConfiguration(plan),
-  }).pipe(Effect.provide(FileSourceResolver.layer(resolver)))
+  const attempted = yield* Effect.result(
+    Analysis.makeRealized({
+      root: project.entry.module,
+      configuration: BuildPlan.compilationConfiguration(plan),
+    }).pipe(Effect.provide(FileSourceResolver.layer(resolver))),
+  )
+  if (Result.isFailure(attempted)) {
+    yield* Console.error(`[${target.id}]\n${attempted.failure.message}`)
+    return { target, status: 2 }
+  }
+  const analysis = attempted.success
   const catalog = Report.catalog(resolver, Analysis.sources(analysis), path)
   const renderedDiagnostics = Report.diagnostics(Analysis.diagnostics(analysis), catalog)
   if (renderedDiagnostics.length > 0) {
@@ -430,27 +436,31 @@ const sourceFingerprint = Effect.fnUntraced(function* (
 interface ProjectSnapshot {
   readonly project: Project.Project
   readonly fingerprint: string
+  readonly entrySize: number
 }
 
 /**
  * Loads one project snapshot bracketed by equal source-tree observations. The returned
- * fingerprint therefore describes the same tree from which the materialized entry was read.
+ * fingerprint therefore describes the same tree from which the entry metadata was observed.
  */
 const projectSnapshot = Effect.fnUntraced(function* (
   options: ProjectSelection,
   root: string,
 ): Effect.fn.Return<ProjectSnapshot, Project.ProjectError, FileSystem.FileSystem | Path.Path> {
+  const fileSystem = yield* FileSystem.FileSystem
   while (true) {
     const before = yield* sourceFingerprint(root)
     const project = yield* loadProject(options)
+    const entryStat = yield* fileSystem.stat(project.entry.path).pipe(Effect.option)
+    const entrySize = Option.isSome(entryStat) ? Number(entryStat.value.size) : 0
     const after = yield* sourceFingerprint(root)
-    if (before === after) return { project, fingerprint: after }
+    if (before === after) return { project, fingerprint: after, entrySize }
     yield* Effect.sleep(settleInterval)
   }
 })
 
 /**
- * Samples a materialized project until its exact fingerprint settles. A transition from a
+ * Samples project metadata until its exact fingerprint settles. A transition from a
  * compiled nonempty entry to an empty candidate is held for the existing one-second budget: that
  * is the observable state left by a writer paused after truncation. At the budget boundary the
  * empty candidate is accepted, so an intentional empty edit is delayed but never suppressed.
@@ -463,8 +473,8 @@ const settledProject = Effect.fnUntraced(function* (
   let candidate = yield* projectSnapshot(options, root)
   let settlement = SourceSettlement.fromEntryTransition(
     candidate.fingerprint,
-    compiled.project.entry.bytes.length,
-    candidate.project.entry.bytes.length,
+    compiled.entrySize,
+    candidate.entrySize,
   )
   for (let sample = 0; sample < settleSamples; sample += 1) {
     yield* Effect.sleep(settleInterval)
@@ -475,8 +485,8 @@ const settledProject = Effect.fnUntraced(function* (
       candidate = sampled
       settlement = SourceSettlement.fromEntryTransition(
         sampled.fingerprint,
-        compiled.project.entry.bytes.length,
-        sampled.project.entry.bytes.length,
+        compiled.entrySize,
+        sampled.entrySize,
       )
       continue
     }

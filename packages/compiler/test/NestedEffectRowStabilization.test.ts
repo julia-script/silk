@@ -1,3 +1,4 @@
+import * as Layer from 'effect/Layer'
 import { spawnSync } from 'node:child_process'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -80,13 +81,19 @@ it.effect(
     Effect.gen(function* () {
       const compiled = yield* Driver.compile({
         compilation: {
-          root: SourceFile.make('effect-typing/provide-each-layer', ascii(provideEachLayer)),
+          root: 'effect-typing/provide-each-layer',
         },
         toolchain: { ...(yield* TestToolchain.configured), runtimeObjectCache },
         optimization: 'release',
         artifactKind: 'NativeExecutable',
         destination: join(destinationRoot, 'provide-each-layer'),
-      }).pipe(Effect.provide(SourceResolver.empty))
+      }).pipe(
+        Effect.provide(
+          SourceResolver.overlay([
+            SourceFile.make('effect-typing/provide-each-layer', ascii(provideEachLayer)),
+          ]).pipe(Layer.provideMerge(SourceResolver.empty)),
+        ),
+      )
 
       assert.strictEqual(compiled._tag, 'Compiled')
       if (compiled._tag !== 'Compiled') return

@@ -1,3 +1,4 @@
+import type * as ModuleClosure from '../src/ModuleClosure.js'
 import * as CompilerDriver from '../src/Driver.js'
 import * as HeapObservation from '../src/HeapObservation.js'
 import { rsaWasmSource } from './support/rsaAcceptance.js'
@@ -63,10 +64,13 @@ const compileSource = (
   name: string,
   text: string,
   overrides: Partial<Driver.CompileRequest> = {},
-): Effect.Effect<Driver.Outcome, Driver.SourceResolutionFailed | NativeToolchain.ToolchainError> =>
+): Effect.Effect<
+  Driver.Outcome,
+  ModuleClosure.ModuleClosureError | Driver.SourceResolutionFailed | NativeToolchain.ToolchainError
+> =>
   Driver.compile({
     compilation: {
-      root: SourceFile.make('memory/driver', ascii(text)),
+      root: 'memory/driver',
     },
     toolchain,
     optimization: 'release',
@@ -75,7 +79,13 @@ const compileSource = (
     cache: false,
     ...overrides,
     artifactKind: overrides.artifactKind ?? 'NativeExecutable',
-  }).pipe(Effect.provide(SourceResolver.empty))
+  }).pipe(
+    Effect.provide(
+      SourceResolver.overlay([
+        SourceFile.make(overrides.compilation?.root ?? 'memory/driver', ascii(text)),
+      ]).pipe(Layer.provideMerge(SourceResolver.empty)),
+    ),
+  )
 
 const expectedPhases = [
   'toolchain-integrity',
@@ -157,10 +167,7 @@ it.effect('omits the MIR audit by default in the compiler driver', () =>
   Effect.gen(function* () {
     const outcome = yield* CompilerDriver.compile({
       compilation: {
-        root: SourceFile.make(
-          'memory/default-verification',
-          ascii('pub fn main() -> i32 { return 42 }'),
-        ),
+        root: 'memory/default-verification',
       },
       packageName: 'verification-test',
       toolchain,
@@ -168,7 +175,16 @@ it.effect('omits the MIR audit by default in the compiler driver', () =>
       stage: 'llvm-ir',
       destination: join(destinationRoot, 'default-verification.ll'),
       cache: false,
-    }).pipe(Effect.provide(Layer.merge(SourceResolver.empty, HeapObservation.layerTest)))
+    }).pipe(
+      Effect.provide(
+        SourceResolver.overlay([
+          SourceFile.make(
+            'memory/default-verification',
+            ascii('pub fn main() -> i32 { return 42 }'),
+          ),
+        ]).pipe(Layer.provideMerge(Layer.merge(SourceResolver.empty, HeapObservation.layerTest))),
+      ),
+    )
     assert.strictEqual(outcome._tag, 'Compiled')
     assert.isFalse(outcome.report.some((entry) => entry.phase === 'mir-verification'))
   }),
@@ -227,16 +243,22 @@ it.effect('gates source rejection and operational resolution failure before back
     const failed = yield* Effect.result(
       Driver.compile({
         compilation: {
-          root: SourceFile.make(
-            'memory/driver',
-            ascii('import unreadable\npub fn main() -> i32 { return 42 }'),
-          ),
+          root: 'memory/driver',
         },
         toolchain,
         optimization: 'release',
         artifactKind: 'NativeExecutable',
         destination: join(destinationRoot, 'resolution-failed'),
-      }).pipe(Effect.provide(resolver)),
+      }).pipe(
+        Effect.provide(
+          SourceResolver.overlay([
+            SourceFile.make(
+              'memory/driver',
+              ascii('import unreadable\npub fn main() -> i32 { return 42 }'),
+            ),
+          ]).pipe(Layer.provideMerge(resolver)),
+        ),
+      ),
     )
     assert.strictEqual(failed._tag, 'Failure')
     if (failed._tag === 'Failure') {
@@ -273,17 +295,23 @@ it.effect('rejects a mismatched distribution before resolving user imports', () 
     })
     const outcome = yield* Driver.compile({
       compilation: {
-        root: SourceFile.make(
-          'memory/driver',
-          ascii('import missing/project\npub fn main() -> i32 { return 42 }'),
-        ),
+        root: 'memory/driver',
       },
       toolchain,
       optimization: 'release',
       artifactKind: 'NativeExecutable',
       destination: join(destinationRoot, 'mismatched-distribution'),
       distribution: mismatched,
-    }).pipe(Effect.provide(resolver))
+    }).pipe(
+      Effect.provide(
+        SourceResolver.overlay([
+          SourceFile.make(
+            'memory/driver',
+            ascii('import missing/project\npub fn main() -> i32 { return 42 }'),
+          ),
+        ]).pipe(Layer.provideMerge(resolver)),
+      ),
+    )
 
     assert.strictEqual(outcome._tag, 'ToolchainFailed')
     assert.strictEqual(projectResolutions, 0)
@@ -383,7 +411,7 @@ it.effect('stops unsupported targets before MIR or native tools', () =>
         'pub fn main() -> i32 { return 42 }',
         {
           compilation: {
-            root: SourceFile.make('memory/driver', ascii('pub fn main() -> i32 { return 42 }')),
+            root: 'memory/driver',
             target,
           },
         },
@@ -623,7 +651,7 @@ it.effect('rejects a supplied foreign contract before backend-cache or native-to
     )
     let cacheReads = 0
     const outcome = yield* compileSource('rejected-interface', text, {
-      compilation: { root, target: 'aarch64-apple-darwin' },
+      compilation: { root: root.id, target: 'aarch64-apple-darwin' },
       foreignInterfaces: [supplied],
       cache: true,
       toolchain: {
@@ -657,7 +685,7 @@ it.effect('executes bounded certificate decoding through LLVM-to-Wasm', () =>
   Effect.gen(function* () {
     const outcome = yield* compileSource('certificate.wasm', certificateWasmAcceptanceSource, {
       compilation: {
-        root: SourceFile.make('memory/certificate-wasm', ascii(certificateWasmAcceptanceSource)),
+        root: 'memory/certificate-wasm',
         target: 'wasm32-unknown-unknown',
       },
       artifactKind: 'WebAssemblyModule',
@@ -682,10 +710,7 @@ it.effect(
         certificateProfileWasmSource,
         {
           compilation: {
-            root: SourceFile.make(
-              'memory/certificate-profile-wasm',
-              ascii(certificateProfileWasmSource),
-            ),
+            root: 'memory/certificate-profile-wasm',
             target: 'wasm32-unknown-unknown',
           },
           artifactKind: 'WebAssemblyModule',
@@ -709,7 +734,7 @@ it.effect(
     Effect.gen(function* () {
       const outcome = yield* compileSource('certificate-path.wasm', certificatePathWasmSource, {
         compilation: {
-          root: SourceFile.make('memory/certificate-path-wasm', ascii(certificatePathWasmSource)),
+          root: 'memory/certificate-path-wasm',
           target: 'wasm32-unknown-unknown',
         },
         artifactKind: 'WebAssemblyModule',
@@ -732,7 +757,7 @@ it.effect(
     Effect.gen(function* () {
       const outcome = yield* compileSource('trust-source.wasm', trustSourceWasmSource, {
         compilation: {
-          root: SourceFile.make('memory/trust-source-wasm', ascii(trustSourceWasmSource)),
+          root: 'memory/trust-source-wasm',
           target: 'wasm32-unknown-unknown',
         },
         artifactKind: 'WebAssemblyModule',
@@ -766,10 +791,7 @@ it.effect(
         independentExecutionFinalizedDestroy,
         {
           compilation: {
-            root: SourceFile.make(
-              'memory/execution-finalized-destroy-wasm',
-              ascii(independentExecutionFinalizedDestroy),
-            ),
+            root: 'memory/execution-finalized-destroy-wasm',
             target: 'wasm32-unknown-unknown',
           },
           artifactKind: 'WebAssemblyModule',
@@ -792,7 +814,7 @@ it.effect('executes ChaCha20-Poly1305 through LLVM-to-Wasm', () =>
   Effect.gen(function* () {
     const outcome = yield* compileSource('chacha20-poly1305.wasm', chacha20Poly1305WasmSource, {
       compilation: {
-        root: SourceFile.make('memory/chacha20-poly1305-wasm', ascii(chacha20Poly1305WasmSource)),
+        root: 'memory/chacha20-poly1305-wasm',
         target: 'wasm32-unknown-unknown',
       },
       artifactKind: 'WebAssemblyModule',
@@ -814,7 +836,7 @@ it.effect('executes bounded AES-GCM through LLVM-to-Wasm', () =>
   Effect.gen(function* () {
     const outcome = yield* compileSource('aes-gcm.wasm', aesGcmWasmAcceptanceSource, {
       compilation: {
-        root: SourceFile.make('memory/aes-gcm-wasm', ascii(aesGcmWasmAcceptanceSource)),
+        root: 'memory/aes-gcm-wasm',
         target: 'wasm32-unknown-unknown',
       },
       artifactKind: 'WebAssemblyModule',
@@ -834,7 +856,7 @@ it.effect('executes P-256 agreement through LLVM-to-Wasm without host imports', 
   Effect.gen(function* () {
     const outcome = yield* compileSource('p256.wasm', p256WasmAcceptanceSource, {
       compilation: {
-        root: SourceFile.make('memory/p256-wasm', ascii(p256WasmAcceptanceSource)),
+        root: 'memory/p256-wasm',
         target: 'wasm32-unknown-unknown',
       },
       artifactKind: 'WebAssemblyModule',
@@ -856,7 +878,7 @@ it.effect('executes bounded X25519 agreement through LLVM-to-Wasm', () =>
   Effect.gen(function* () {
     const outcome = yield* compileSource('x25519.wasm', x25519WasmAcceptanceSource, {
       compilation: {
-        root: SourceFile.make('memory/x25519-wasm', ascii(x25519WasmAcceptanceSource)),
+        root: 'memory/x25519-wasm',
         target: 'wasm32-unknown-unknown',
       },
       artifactKind: 'WebAssemblyModule',
@@ -876,7 +898,7 @@ it.effect('executes ECDSA P-256 verification through LLVM-to-Wasm without host i
   Effect.gen(function* () {
     const outcome = yield* compileSource('ecdsa-p256.wasm', ecdsaP256WasmSource, {
       compilation: {
-        root: SourceFile.make('memory/ecdsa-p256-wasm', ascii(ecdsaP256WasmSource)),
+        root: 'memory/ecdsa-p256-wasm',
         target: 'wasm32-unknown-unknown',
       },
       artifactKind: 'WebAssemblyModule',
@@ -896,7 +918,7 @@ it.effect('executes bounded RSA verification through LLVM-to-Wasm', () =>
   Effect.gen(function* () {
     const outcome = yield* compileSource('rsa.wasm', rsaWasmSource, {
       compilation: {
-        root: SourceFile.make('memory/rsa-wasm', ascii(rsaWasmSource)),
+        root: 'memory/rsa-wasm',
         target: 'wasm32-unknown-unknown',
       },
       artifactKind: 'WebAssemblyModule',
@@ -917,7 +939,7 @@ it.effect('executes TLS HKDF through LLVM-to-Wasm without host imports', () =>
   Effect.gen(function* () {
     const outcome = yield* compileSource('tls-hkdf.wasm', tlsHkdfWasmSource, {
       compilation: {
-        root: SourceFile.make('memory/tls-hkdf-wasm', ascii(tlsHkdfWasmSource)),
+        root: 'memory/tls-hkdf-wasm',
         target: 'wasm32-unknown-unknown',
       },
       artifactKind: 'WebAssemblyModule',
@@ -940,7 +962,7 @@ it.effect('executes bounded TLS record framing through LLVM-to-Wasm', () =>
   Effect.gen(function* () {
     const outcome = yield* compileSource('tls-record.wasm', tlsRecordWasmSource, {
       compilation: {
-        root: SourceFile.make('memory/tls-record-wasm', ascii(tlsRecordWasmSource)),
+        root: 'memory/tls-record-wasm',
         target: 'wasm32-unknown-unknown',
       },
       artifactKind: 'WebAssemblyModule',

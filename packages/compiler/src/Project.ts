@@ -459,7 +459,7 @@ export const load = Effect.fn('Project.load')(function* (
     manifest.sourceRoot === undefined
       ? path.dirname(entryPath)
       : path.resolve(directory, manifest.sourceRoot)
-  const entry = yield* SourceEntry.read(entryPath, selectedSourceRoot).pipe(
+  const entry = yield* SourceEntry.select(entryPath, selectedSourceRoot).pipe(
     Effect.mapError(
       (error) =>
         new ProjectError({

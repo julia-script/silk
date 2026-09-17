@@ -1,3 +1,4 @@
+import * as Layer from 'effect/Layer'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Option from 'effect/Option'
@@ -36,8 +37,12 @@ pub fn main() -> i32 {
   return map(0)
 }`
 
-const analyze = Analysis.makeRealized({ root: SourceFile.make('main', encoder.encode(main)) }).pipe(
-  Effect.provide(SourceResolver.memory(new Map([['other', encoder.encode(other)]]))),
+const analyze = Analysis.makeRealized({ root: 'main' }).pipe(
+  Effect.provide(
+    SourceResolver.overlay([SourceFile.make('main', encoder.encode(main))]).pipe(
+      Layer.provideMerge(SourceResolver.memory(new Map([['other', encoder.encode(other)]]))),
+    ),
+  ),
 )
 
 const offsetOf = (source: string, spelling: string, occurrence = 0): number => {

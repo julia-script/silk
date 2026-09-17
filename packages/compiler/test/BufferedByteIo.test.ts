@@ -1,3 +1,4 @@
+import * as Layer from 'effect/Layer'
 import { readFileSync } from 'node:fs'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
@@ -302,7 +303,7 @@ import silk.bytes { Bytes }`,
       assert.isDefined(composition)
       if (composition === undefined) return
       const snapshot = yield* Analysis.makeRealized({
-        root: SourceFile.make(sourceId, encoder.encode(source)),
+        root: sourceId,
         configuration: {
           ...selected,
           composition: {
@@ -310,7 +311,13 @@ import silk.bytes { Bytes }`,
             retention: [{ module: 'silk/buffered_output', declaration: 'checkedAggregateLength' }],
           },
         },
-      }).pipe(Effect.provide(SourceResolver.empty))
+      }).pipe(
+        Effect.provide(
+          SourceResolver.overlay([SourceFile.make(sourceId, encoder.encode(source))]).pipe(
+            Layer.provideMerge(SourceResolver.empty),
+          ),
+        ),
+      )
       assert.deepEqual(Analysis.diagnostics(snapshot), [])
       const mir = Analysis.loweredMir(snapshot)
       const aggregate = mir.functions.find(

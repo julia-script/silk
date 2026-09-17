@@ -1,3 +1,4 @@
+import * as Layer from 'effect/Layer'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../../src/Analysis.js'
 import type * as Frontend from '../../src/Frontend.js'
@@ -35,11 +36,17 @@ export const frontend = Effect.fnUntraced(function* (
   sourceId: string,
   bytes: Uint8Array,
   target = 'x86_64-unknown-linux-gnu',
-): Effect.fn.Return<Analysis.SingleRootFrontendSnapshot> {
+): Effect.fn.Return<Analysis.SingleRootFrontendSnapshot, ModuleClosure.ModuleClosureError> {
   return yield* Analysis.make({
-    root: SourceFile.make(sourceId, bytes),
+    root: sourceId,
     configuration: configuration(sourceId, target),
-  }).pipe(Effect.provide(SourceResolver.empty))
+  }).pipe(
+    Effect.provide(
+      SourceResolver.overlay([SourceFile.make(sourceId, bytes)]).pipe(
+        Layer.provideMerge(SourceResolver.empty),
+      ),
+    ),
+  )
 })
 
 /** Realizes a retained function graph; default executable composition has separate conformance. */
@@ -48,14 +55,18 @@ export const retainingMain = Effect.fnUntraced(function* (
   bytes: Uint8Array,
   target = 'x86_64-unknown-linux-gnu',
   options: Frontend.Options = {},
-): Effect.fn.Return<Analysis.Snapshot> {
+): Effect.fn.Return<Analysis.Snapshot, ModuleClosure.ModuleClosureError> {
   const selected = configuration(sourceId, target)
   return yield* Analysis.make({
-    root: SourceFile.make(sourceId, bytes),
+    root: sourceId,
     configuration: selected,
   }).pipe(
     Effect.flatMap((frontend) => Analysis.realize(frontend, selected, options)),
-    Effect.provide(SourceResolver.empty),
+    Effect.provide(
+      SourceResolver.overlay([SourceFile.make(sourceId, bytes)]).pipe(
+        Layer.provideMerge(SourceResolver.empty),
+      ),
+    ),
   )
 })
 
@@ -64,10 +75,16 @@ export const declarations = Effect.fnUntraced(function* (
   sourceId: string,
   bytes: Uint8Array,
   target = 'x86_64-unknown-linux-gnu',
-): Effect.fn.Return<Analysis.Snapshot> {
+): Effect.fn.Return<Analysis.Snapshot, ModuleClosure.ModuleClosureError> {
   const selected = configuration(sourceId, target, [])
   return yield* Analysis.makeRealized({
-    root: SourceFile.make(sourceId, bytes),
+    root: sourceId,
     configuration: selected,
-  }).pipe(Effect.provide(SourceResolver.empty))
+  }).pipe(
+    Effect.provide(
+      SourceResolver.overlay([SourceFile.make(sourceId, bytes)]).pipe(
+        Layer.provideMerge(SourceResolver.empty),
+      ),
+    ),
+  )
 })

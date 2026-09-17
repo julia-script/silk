@@ -665,7 +665,7 @@ export const realize = Effect.fn('Realization.realize')(function* (
   options: Options = {},
 ): Effect.fn.Return<
   Realization & { readonly frontend: Frontend },
-  never,
+  ModuleClosure.ModuleClosureError,
   SourceResolver.SourceResolver
 > {
   let ready = yield* configure(
@@ -779,7 +779,7 @@ export const prepare = Effect.fn('Realization.prepare')(function* (
     readonly artifactKind?: ArtifactKind.ArtifactKind
     readonly optimization?: 'debug' | 'release' | 'release-with-debug'
   } = {},
-): Effect.fn.Return<Preparation, never, SourceResolver.SourceResolver> {
+): Effect.fn.Return<Preparation, ModuleClosure.ModuleClosureError, SourceResolver.SourceResolver> {
   let ready = yield* configure(self, targetId, options.artifactKind, options.optimization)
   let prepared = yield* discoverAndLower(
     ready.frontend,

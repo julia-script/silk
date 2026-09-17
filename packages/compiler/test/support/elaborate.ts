@@ -22,6 +22,7 @@ export const elaborate = (syntax: SyntaxFile.SyntaxFile): Elaboration.Result => 
     cycles: Object.freeze([]),
     diagnostics: Object.freeze([]),
     sources: new Map([[syntax.source.id, syntax.source]]),
+    missingRoots: Object.freeze([]),
     resolutionFailures: Object.freeze([]),
   })
   const analyzed = NameResolution.analyze(closure)

@@ -1,7 +1,6 @@
 import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
-import * as Exit from 'effect/Exit'
 import * as Layer from 'effect/Layer'
 import * as Option from 'effect/Option'
 import * as Analysis from '../src/Analysis.js'
@@ -45,17 +44,7 @@ it.effect(
         ),
       })
       const snapshot = yield* Analysis.make({
-        root: SourceFile.make(
-          'root',
-          ascii(`import policy { choose }
-static if choose() {
-  import active { value }
-  pub fn main() -> i32 { return value() }
-} else {
-  import missing
-  pub fn main() -> i32 { return nonexistent() }
-}`),
-        ),
+        root: 'root',
         configuration: {
           profile: {
             target: 'aarch64-apple-darwin',
@@ -63,7 +52,23 @@ static if choose() {
             runtime: { kind: 'none' },
           },
         },
-      }).pipe(Effect.provide(resolver))
+      }).pipe(
+        Effect.provide(
+          SourceResolver.overlay([
+            SourceFile.make(
+              'root',
+              ascii(`import policy { choose }
+static if choose() {
+  import active { value }
+  pub fn main() -> i32 { return value() }
+} else {
+  import missing
+  pub fn main() -> i32 { return nonexistent() }
+}`),
+            ),
+          ]).pipe(Layer.provideMerge(resolver)),
+        ),
+      )
       assert.deepEqual(snapshot.diagnostics, [])
       assert.deepEqual(calls, ['policy', 'active'])
       assert.deepEqual(Analysis.unusedImports(snapshot, 'root'), [])
@@ -106,24 +111,30 @@ static if true { const flag: bool = true } else { fn bad() -> () { let = 1 } }
 it.effect('publishes selected aliases across re-export chains with original identity', () =>
   Effect.gen(function* () {
     const snapshot = yield* Analysis.make({
-      root: SourceFile.make(
-        'root',
-        ascii('import facade { selected }\npub fn main() -> i32 { return selected() }'),
-      ),
+      root: 'root',
       target: 'aarch64-apple-darwin',
     }).pipe(
       Effect.provide(
-        SourceResolver.memory(
-          new Map([
-            [
-              'facade',
-              ascii(
-                'static if true { pub import middle { answer as selected } } else { pub import missing { answer as selected } }',
-              ),
-            ],
-            ['middle', ascii('pub import implementation { original as answer }')],
-            ['implementation', ascii('pub fn original() -> i32 { return 42 }')],
-          ]),
+        SourceResolver.overlay([
+          SourceFile.make(
+            'root',
+            ascii('import facade { selected }\npub fn main() -> i32 { return selected() }'),
+          ),
+        ]).pipe(
+          Layer.provideMerge(
+            SourceResolver.memory(
+              new Map([
+                [
+                  'facade',
+                  ascii(
+                    'static if true { pub import middle { answer as selected } } else { pub import missing { answer as selected } }',
+                  ),
+                ],
+                ['middle', ascii('pub import implementation { original as answer }')],
+                ['implementation', ascii('pub fn original() -> i32 { return 42 }')],
+              ]),
+            ),
+          ),
         ),
       ),
     )
@@ -165,22 +176,30 @@ static if left { const right: bool = true }
 it.effect('tracks availability cycles through selective imports', () =>
   Effect.gen(function* () {
     const snapshot = yield* Analysis.make({
-      root: SourceFile.make(
-        'root',
-        ascii('import policy { enabled }\nstatic if enabled { pub const selected: bool = true }'),
-      ),
+      root: 'root',
       target: 'aarch64-apple-darwin',
     }).pipe(
       Effect.provide(
-        SourceResolver.memory(
-          new Map([
-            [
-              'policy',
-              ascii(
-                'import root { selected }\nstatic if selected { pub const enabled: bool = true }',
-              ),
-            ],
-          ]),
+        SourceResolver.overlay([
+          SourceFile.make(
+            'root',
+            ascii(
+              'import policy { enabled }\nstatic if enabled { pub const selected: bool = true }',
+            ),
+          ),
+        ]).pipe(
+          Layer.provideMerge(
+            SourceResolver.memory(
+              new Map([
+                [
+                  'policy',
+                  ascii(
+                    'import root { selected }\nstatic if selected { pub const enabled: bool = true }',
+                  ),
+                ],
+              ]),
+            ),
+          ),
         ),
       ),
     )
@@ -196,30 +215,42 @@ it.effect('tracks availability cycles through selective imports', () =>
 it.effect('uses completed package configuration and rejects default availability cycles', () =>
   Effect.gen(function* () {
     const valid = yield* Analysis.make({
-      root: SourceFile.make(
-        'configured',
-        ascii(`pub param enabled: bool = true
-static if enabled { pub const selected: i32 = 1 } else { import missing }`),
-      ),
+      root: 'configured',
       configuration: {
         package: 'example@1',
         profile: { target: 'aarch64-apple-darwin', artifact: 'object', runtime: { kind: 'none' } },
       },
-    }).pipe(Effect.provide(SourceResolver.empty))
+    }).pipe(
+      Effect.provide(
+        SourceResolver.overlay([
+          SourceFile.make(
+            'configured',
+            ascii(`pub param enabled: bool = true
+static if enabled { pub const selected: i32 = 1 } else { import missing }`),
+          ),
+        ]).pipe(Layer.provideMerge(SourceResolver.empty)),
+      ),
+    )
     assert.deepEqual(valid.diagnostics, [])
     assert.strictEqual(Analysis.memberByName(valid, 'configured', 'selected')._tag, 'Resolved')
     assert.isDefined(valid.profile)
     const cyclic = yield* Analysis.make({
-      root: SourceFile.make(
-        'configured',
-        ascii(`pub param enabled: bool = choice
-static if enabled { const choice: bool = true }`),
-      ),
+      root: 'configured',
       configuration: {
         package: 'example@1',
         profile: { target: 'aarch64-apple-darwin', artifact: 'object', runtime: { kind: 'none' } },
       },
-    }).pipe(Effect.provide(SourceResolver.empty))
+    }).pipe(
+      Effect.provide(
+        SourceResolver.overlay([
+          SourceFile.make(
+            'configured',
+            ascii(`pub param enabled: bool = choice
+static if enabled { const choice: bool = true }`),
+          ),
+        ]).pipe(Layer.provideMerge(SourceResolver.empty)),
+      ),
+    )
     const diagnostic = cyclic.diagnostics.find(
       (diagnostic) => diagnostic.code === Diagnostic.invalidConfigurationCode,
     )
@@ -233,14 +264,20 @@ static if enabled { const choice: bool = true }`),
 it.effect('rejects package schemas first discovered through selected imports', () =>
   Effect.gen(function* () {
     const snapshot = yield* Analysis.make({
-      root: SourceFile.make('root', ascii('static if true { import settings }')),
+      root: 'root',
       configuration: {
         package: 'example@1',
         profile: { target: 'aarch64-apple-darwin', artifact: 'object', runtime: { kind: 'none' } },
       },
     }).pipe(
       Effect.provide(
-        SourceResolver.memory(new Map([['settings', ascii('pub param enabled: bool = true')]])),
+        SourceResolver.overlay([
+          SourceFile.make('root', ascii('static if true { import settings }')),
+        ]).pipe(
+          Layer.provideMerge(
+            SourceResolver.memory(new Map([['settings', ascii('pub param enabled: bool = true')]])),
+          ),
+        ),
       ),
     )
     const diagnostic = snapshot.diagnostics.find(
@@ -282,7 +319,7 @@ static if ${condition} { pub const selected: i32 = 1 } else { pub const other: i
 const fixture = (
   rootModule: string,
   entries: ReadonlyArray<readonly [string, string]>,
-): Effect.Effect<ModuleClosure.Closure> => {
+): Effect.Effect<ModuleClosure.Closure, ModuleClosure.ModuleClosureError> => {
   const rootText = entries.find(([name]) => name === rootModule)?.[1]
   if (rootText === undefined) throw new RangeError(`Fixture has no root source ${rootModule}`)
   const imports = new Map(
@@ -290,8 +327,12 @@ const fixture = (
       .filter(([name]) => name !== rootModule)
       .map(([name, text]) => [name, ascii(text)] as const),
   )
-  return ModuleClosure.load({ root: SourceFile.make(rootModule, ascii(rootText)) }).pipe(
-    Effect.provide(SourceResolver.memory(imports)),
+  return ModuleClosure.load({ root: rootModule }).pipe(
+    Effect.provide(
+      SourceResolver.overlay([SourceFile.make(rootModule, ascii(rootText))]).pipe(
+        Layer.provideMerge(SourceResolver.memory(imports)),
+      ),
+    ),
   )
 }
 
@@ -330,6 +371,7 @@ it.effect('loads a diamond once per module and excludes unreachable sources', ()
   Effect.gen(function* () {
     const calls: Array<string> = []
     const sources = new Map([
+      ['root', ascii(`import left\nimport right\n${fn}`)],
       ['left', ascii(`import shared\n${fn}`)],
       ['right', ascii(`import shared\n${fn}`)],
       ['shared', ascii(fn)],
@@ -348,14 +390,14 @@ it.effect('loads a diamond once per module and excludes unreachable sources', ()
         }),
     })
     const closure = yield* ModuleClosure.load({
-      root: SourceFile.make('root', ascii(`import left\nimport right\n${fn}`)),
+      root: 'root',
     }).pipe(Effect.provide(resolver))
 
     assert.deepEqual(
       closure.modules.map((module) => module.name),
       ['left', 'right', 'root', 'shared'],
     )
-    assert.deepEqual(calls, ['left', 'right', 'shared'])
+    assert.deepEqual(calls, ['root', 'left', 'right', 'shared'])
     assert.deepEqual([...closure.sources.keys()], ['left', 'right', 'root', 'shared'])
     assert.deepEqual(closure.resolutionFailures, [])
     assert.strictEqual(Object.isFrozen(closure), true)
@@ -375,7 +417,7 @@ it.effect('is deterministic across resolver supply order', () =>
   }),
 )
 
-it.effect('diagnoses absence and self-imports without resolving the root', () =>
+it.effect('diagnoses absence and self-imports without resolving the root again', () =>
   Effect.gen(function* () {
     const closure = yield* fixture('root', [['root', `import missing\nimport root\n${fn}`]])
     const root = closure.modules.at(0)
@@ -424,8 +466,14 @@ it.effect('retains partial closure facts around ordered operational failures', (
       },
     })
     const closure = yield* ModuleClosure.load({
-      root: SourceFile.make('root', ascii(`import zeta\nimport readable\nimport alpha\n${fn}`)),
-    }).pipe(Effect.provide(resolver))
+      root: 'root',
+    }).pipe(
+      Effect.provide(
+        SourceResolver.overlay([
+          SourceFile.make('root', ascii(`import zeta\nimport readable\nimport alpha\n${fn}`)),
+        ]).pipe(Layer.provideMerge(resolver)),
+      ),
+    )
 
     assert.deepEqual(
       closure.modules.map((module) => module.name),
@@ -491,12 +539,128 @@ it.effect('preserves case and rejects malformed explicit root identities', () =>
       'dot/../segment',
       'scheme://module',
     ]) {
-      const exit = yield* Effect.exit(
-        ModuleClosure.load({ root: SourceFile.make(invalid, ascii(fn)) }).pipe(
-          Effect.provide(SourceResolver.empty),
-        ),
+      const error = yield* Effect.flip(
+        ModuleClosure.load({ root: invalid }).pipe(Effect.provide(SourceResolver.empty)),
       )
-      assert.strictEqual(Exit.isFailure(exit), true)
+      assert.deepEqual(error.reason, { _tag: 'InvalidRoot', module: invalid })
     }
+  }),
+)
+
+it.effect('resolves root origins and reuses the root on an import back edge', () =>
+  Effect.gen(function* () {
+    const calls: Array<string> = []
+    const origin = SourceOrigin.projectFile('/project/app/Main.silk')
+    const resolver = Layer.succeed(SourceResolver.SourceResolver, {
+      resolveStandardLibrary: SourceResolver.resolveEmbeddedStandardLibrary,
+      toolchainSources: SourceResolver.embeddedToolchainSources,
+      resolve: (module: string) =>
+        Effect.sync(() => {
+          calls.push(module)
+          return Option.some(
+            SourceResolver.resolved(
+              ascii(module === 'app/Main' ? 'import child' : 'import app.Main'),
+              origin,
+            ),
+          )
+        }),
+    })
+    const closure = yield* ModuleClosure.load({ root: 'app/Main' }).pipe(Effect.provide(resolver))
+    assert.deepEqual(calls, ['app/Main', 'child'])
+    assert.deepEqual(closure.sources.get('app/Main')?.origin, origin)
+    assert.deepEqual(closure.cycles, [['app/Main', 'child']])
+  }),
+)
+
+it.effect('fails unavailable required roots before returning a partial project', () =>
+  Effect.gen(function* () {
+    const calls: Array<string> = []
+    const failure = new SourceResolver.SourceResolverError({
+      module: 'broken',
+      operation: 'test.root',
+      message: 'unreadable root',
+      reason: { _tag: 'WrappedFailure', cause: new Error('storage failure') },
+    })
+    const resolver = Layer.succeed(SourceResolver.SourceResolver, {
+      resolveStandardLibrary: SourceResolver.resolveEmbeddedStandardLibrary,
+      toolchainSources: SourceResolver.embeddedToolchainSources,
+      resolve: Effect.fnUntraced(function* (module: string) {
+        calls.push(module)
+        if (module === 'broken') return yield* failure
+        return Option.none()
+      }),
+    })
+    const invalid = yield* Effect.flip(
+      ModuleClosure.loadProject({ roots: ['valid', '../invalid'] }).pipe(Effect.provide(resolver)),
+    )
+    assert.deepEqual(invalid.reason, { _tag: 'InvalidRoot', module: '../invalid' })
+    assert.deepEqual(calls, [])
+    const missing = yield* Effect.flip(
+      ModuleClosure.loadProject({ roots: ['z', 'a'] }).pipe(Effect.provide(resolver)),
+    )
+    assert.deepEqual(missing.reason, { _tag: 'MissingRoot', module: 'a' })
+    assert.deepEqual(calls, ['a'])
+    const unreadable = yield* Effect.flip(
+      ModuleClosure.load({ root: 'broken' }).pipe(Effect.provide(resolver)),
+    )
+    assert.deepEqual(unreadable.reason, {
+      _tag: 'RootResolutionFailed',
+      module: 'broken',
+      error: failure,
+    })
+    const empty = yield* Effect.flip(
+      ModuleClosure.loadProject({ roots: [] }).pipe(Effect.provide(resolver)),
+    )
+    assert.deepEqual(empty.reason, { _tag: 'EmptyRoots' })
+  }),
+)
+
+it.effect('shares root, composition, and import outcomes across selected discovery passes', () =>
+  Effect.gen(function* () {
+    const calls: Array<string> = []
+    const sources = new Map([
+      [
+        'root',
+        ascii(
+          'import shared\nstatic if true { import selected }\nexport "C" fn main() -> i32 { return 0 }',
+        ),
+      ],
+      ['shared', ascii('pub fn value() -> i32 { return 1 }')],
+      ['selected', ascii('import shared')],
+    ])
+    const resolver = Layer.succeed(SourceResolver.SourceResolver, {
+      resolveStandardLibrary: SourceResolver.resolveEmbeddedStandardLibrary,
+      toolchainSources: SourceResolver.embeddedToolchainSources,
+      resolve: (module: string) =>
+        Effect.sync(() => {
+          calls.push(module)
+          const bytes = sources.get(module)
+          return bytes === undefined
+            ? Option.none()
+            : Option.some(SourceResolver.resolved(bytes, SourceOrigin.memory()))
+        }),
+    })
+    const analysis = yield* Analysis.make({
+      root: 'root',
+      configuration: {
+        profile: {
+          target: 'x86_64-unknown-linux-gnu',
+          artifact: 'object',
+          runtime: { kind: 'none' },
+        },
+        composition: {
+          runtimes: [],
+          defaults: [],
+          retention: [{ module: 'shared', declaration: 'value' }],
+          requirements: [],
+        },
+      },
+    }).pipe(Effect.provide(resolver))
+    assert.deepEqual(calls, ['root', 'shared', 'selected'])
+    assert.deepEqual(
+      analysis.closure.modules.map((module) => module.name),
+      ['root', 'selected', 'shared'],
+    )
+    assert.deepEqual(analysis.diagnostics, [])
   }),
 )

@@ -305,7 +305,7 @@ export const compile = Effect.fn('Driver.compile')(function* (
   request: CompileRequest,
 ): Effect.fn.Return<
   Outcome,
-  SourceResolutionFailed | NativeToolchain.ToolchainError,
+  ModuleClosure.ModuleClosureError | SourceResolutionFailed | NativeToolchain.ToolchainError,
   SourceResolver.SourceResolver | HeapObservation.HeapObservation
 > {
   // 1. Initialize the shared phase report, heap sampler, compiler distribution, and cache location.

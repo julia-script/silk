@@ -78,7 +78,7 @@ export interface Selection {
 export const analyze = Effect.fn('SourceCatalog.analyze')(function* (
   request: ModuleClosure.ProjectRequest,
   previous?: SourceCatalog,
-): Effect.fn.Return<Selection, never, SourceResolver.SourceResolver> {
+): Effect.fn.Return<Selection, ModuleClosure.ModuleClosureError, SourceResolver.SourceResolver> {
   const selected = yield* Frontend.selectProject(request)
   return Object.freeze({
     closure: selected.closure,

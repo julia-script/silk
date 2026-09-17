@@ -1,3 +1,4 @@
+import * as EffectResult from 'effect/Result'
 import * as Analysis from '@silklang/compiler/Analysis'
 import * as Effect from 'effect/Effect'
 import * as Example from './Example.js'
@@ -53,7 +54,11 @@ const encoder = new TextEncoder()
 
 const compile = Effect.fnUntraced(function* (example: Example.Example, target: string) {
   const identity = `doctest/${example.source.sourceId.replace(/[^A-Za-z0-9_-]/g, '-')}/${example.source.start}`
-  const snapshot = yield* Analysis.ofSourceRealized(identity, encoder.encode(example.code), target)
+  const attempted = yield* Effect.result(
+    Analysis.ofSourceRealized(identity, encoder.encode(example.code), target),
+  )
+  if (EffectResult.isFailure(attempted)) return Object.freeze([attempted.failure.message])
+  const snapshot = attempted.success
   const diagnostics = Analysis.diagnostics(snapshot).map(
     (diagnostic) => `${diagnostic.code}: ${diagnostic.message}`,
   )

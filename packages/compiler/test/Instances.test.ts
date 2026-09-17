@@ -1,3 +1,5 @@
+import * as Layer from 'effect/Layer'
+import type * as ModuleClosure from '../src/ModuleClosure.js'
 import * as AnalysisFixture from './support/AnalysisFixture.js'
 import * as ArtifactComposition from '../src/ArtifactComposition.js'
 import * as ArtifactPlan from '../src/ArtifactPlan.js'
@@ -32,7 +34,9 @@ const ascii = (value: string): Uint8Array =>
 
 // Pinned, not host-resolved: the goldens record a target line, so an unpinned host target makes
 // these assertions pass only on Apple Silicon.
-const snapshot = (text: string): Effect.Effect<Analysis.Snapshot> =>
+const snapshot = (
+  text: string,
+): Effect.Effect<Analysis.Snapshot, ModuleClosure.ModuleClosureError> =>
   AnalysisFixture.retainingMain('golden/program', ascii(text), 'aarch64-apple-darwin')
 
 const golden = (name: string): string =>
@@ -1489,7 +1493,7 @@ export "C" fn value() -> i32 { unsafe { return used() + data } }
 `),
     )
     const analysis = yield* Analysis.makeRealized({
-      root: source,
+      root: source.id,
       configuration: {
         profile: {
           target: 'x86_64-unknown-linux-gnu',
@@ -1503,7 +1507,11 @@ export "C" fn value() -> i32 { unsafe { return used() + data } }
           requirements: [{ kind: 'prebuilt-object', name: 'artifact' }],
         },
       },
-    }).pipe(Effect.provide(SourceResolver.empty))
+    }).pipe(
+      Effect.provide(
+        SourceResolver.overlay([source]).pipe(Layer.provideMerge(SourceResolver.empty)),
+      ),
+    )
     assert.deepEqual(Analysis.diagnostics(analysis), [])
     const plan = analysis.artifactPlan ?? unreachable('expected artifact plan')
     assert.deepEqual(plan.requirements.map((entry) => entry.name).sort(), [
@@ -1527,10 +1535,7 @@ it.effect(
   () =>
     Effect.gen(function* () {
       const snapshot = yield* Analysis.makeRealized({
-        root: SourceFile.make(
-          'application',
-          ascii('pub fn answer() -> i32 { return 42 } pub fn unused() -> i32 { return 9 }'),
-        ),
+        root: 'application',
         configuration: {
           profile: {
             target: 'aarch64-apple-darwin',
@@ -1550,19 +1555,28 @@ it.effect(
         },
       }).pipe(
         Effect.provide(
-          SourceResolver.memory(
-            new Map([
-              [
-                'runtime',
-                ascii(
-                  'import Intrinsic.application\nexport "C" fn proxy() -> i32 as "proxy" { return application.answer() }',
-                ),
-              ],
-              [
-                'capability',
-                ascii('fn keep() -> i32 { return 7 } pub fn unused() -> i32 { return 0 }'),
-              ],
-            ]),
+          SourceResolver.overlay([
+            SourceFile.make(
+              'application',
+              ascii('pub fn answer() -> i32 { return 42 } pub fn unused() -> i32 { return 9 }'),
+            ),
+          ]).pipe(
+            Layer.provideMerge(
+              SourceResolver.memory(
+                new Map([
+                  [
+                    'runtime',
+                    ascii(
+                      'import Intrinsic.application\nexport "C" fn proxy() -> i32 as "proxy" { return application.answer() }',
+                    ),
+                  ],
+                  [
+                    'capability',
+                    ascii('fn keep() -> i32 { return 7 } pub fn unused() -> i32 { return 0 }'),
+                  ],
+                ]),
+              ),
+            ),
           ),
         ),
       )
@@ -1767,7 +1781,7 @@ it.effect(
   () =>
     Effect.gen(function* () {
       const analysis = yield* Analysis.makeRealized({
-        root: SourceFile.make('identity', ascii('export "C" fn value() -> i32 { return 42 }')),
+        root: 'identity',
         configuration: {
           profile: {
             target: 'x86_64-unknown-linux-gnu',
@@ -1775,7 +1789,13 @@ it.effect(
             runtime: { kind: 'none' },
           },
         },
-      }).pipe(Effect.provide(SourceResolver.empty))
+      }).pipe(
+        Effect.provide(
+          SourceResolver.overlay([
+            SourceFile.make('identity', ascii('export "C" fn value() -> i32 { return 42 }')),
+          ]).pipe(Layer.provideMerge(SourceResolver.empty)),
+        ),
+      )
       const plan = analysis.artifactPlan ?? unreachable('expected logical plan')
       const remade = yield* ArtifactPlan.make(
         analysis,
@@ -1822,7 +1842,7 @@ it.effect(
         'pub fn selected<T>() -> i32 { return 1 }',
       ]) {
         const analysis = yield* Analysis.makeRealized({
-          root: SourceFile.make('roles', ascii(text)),
+          root: 'roles',
           configuration: {
             profile: {
               target: 'x86_64-unknown-linux-gnu',
@@ -1836,7 +1856,13 @@ it.effect(
               retention: [{ module: 'roles', declaration: 'selected' }],
             },
           },
-        }).pipe(Effect.provide(SourceResolver.empty))
+        }).pipe(
+          Effect.provide(
+            SourceResolver.overlay([SourceFile.make('roles', ascii(text))]).pipe(
+              Layer.provideMerge(SourceResolver.empty),
+            ),
+          ),
+        )
         const diagnostics = Analysis.diagnostics(analysis)
         assert.include(
           diagnostics.map((entry) => entry.code),
@@ -1845,7 +1871,7 @@ it.effect(
         assert.isTrue(diagnostics.every((entry) => entry.span.sourceId === 'roles'))
       }
       const analysis = yield* Analysis.makeRealized({
-        root: SourceFile.make('loader', ascii('export "C" fn value() -> i32 { return 42 }')),
+        root: 'loader',
         configuration: {
           profile: {
             target: 'x86_64-unknown-linux-gnu',
@@ -1854,7 +1880,13 @@ it.effect(
             entry: { kind: 'named', name: 'start' },
           },
         },
-      }).pipe(Effect.provide(SourceResolver.empty))
+      }).pipe(
+        Effect.provide(
+          SourceResolver.overlay([
+            SourceFile.make('loader', ascii('export "C" fn value() -> i32 { return 42 }')),
+          ]).pipe(Layer.provideMerge(SourceResolver.empty)),
+        ),
+      )
       assert.deepEqual(Analysis.diagnostics(analysis), [])
       const plan = analysis.artifactPlan ?? unreachable('expected intermediate plan')
       const rejected = yield* Effect.flip(
@@ -2007,12 +2039,18 @@ fn allocateOnly() -> () {
     application = source,
   ) {
     return yield* Analysis.makeRealized({
-      root: SourceFile.make('component/application', ascii(application)),
+      root: 'component/application',
       configuration: {
         profile: CompilationProfile.input(profile),
         composition: { ...defaults, components: selected ? [component] : [] },
       },
-    }).pipe(Effect.provide(SourceResolver.memory(new Map([['custom/storage', ascii(body)]]))))
+    }).pipe(
+      Effect.provide(
+        SourceResolver.overlay([SourceFile.make('component/application', ascii(application))]).pipe(
+          Layer.provideMerge(SourceResolver.memory(new Map([['custom/storage', ascii(body)]]))),
+        ),
+      ),
+    )
   })
   const rejections = [
     [provider, false, 'MissingParameter'],

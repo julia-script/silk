@@ -1,3 +1,4 @@
+import * as Layer from 'effect/Layer'
 import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
@@ -305,12 +306,18 @@ it.effect(
       // The native copy witness has a borrowed input, so retain its closed definition explicitly
       // instead of expecting an uncalled declaration to become reachable from main.
       const snapshot = yield* Analysis.makeRealized({
-        root: SourceFile.make(module, ascii(httpProxyRedirectPolicyAcceptanceSource)),
+        root: module,
         configuration: AnalysisFixture.configuration(module, 'x86_64-unknown-linux-gnu', [
           'main',
           'nativePoolCopyWitness',
         ]),
-      }).pipe(Effect.provide(SourceResolver.empty))
+      }).pipe(
+        Effect.provide(
+          SourceResolver.overlay([
+            SourceFile.make(module, ascii(httpProxyRedirectPolicyAcceptanceSource)),
+          ]).pipe(Layer.provideMerge(SourceResolver.empty)),
+        ),
+      )
       assert.deepEqual(diagnosticSummary(snapshot), [])
       const mir = Analysis.loweredMir(snapshot)
       assert.deepEqual(yield* MirVerification.verify(mir), [])

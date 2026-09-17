@@ -1,3 +1,4 @@
+import * as Layer from 'effect/Layer'
 /**
  * The language server's inspector surface: projects compiler inspector views for workspace
  * documents from the committed analysis, so editor clients can render compiler-phase views
@@ -111,11 +112,15 @@ const realizedFor = (session: ProjectSnapshot.DocumentSnapshot): Analysis.Snapsh
   const rootFile = sources.get(root) ?? SourceFile.make(root, session.document.bytes)
   const realized = Effect.runSync(
     Analysis.makeRealized({
-      root: rootFile,
+      root: rootFile.id,
       ...(session.snapshot.configuration === undefined
         ? {}
         : { configuration: session.snapshot.configuration }),
-    }).pipe(Effect.provide(SourceResolver.memory(bytes))),
+    }).pipe(
+      Effect.provide(
+        SourceResolver.overlay([rootFile]).pipe(Layer.provideMerge(SourceResolver.memory(bytes))),
+      ),
+    ),
   )
   byRoot.set(root, realized)
   return realized

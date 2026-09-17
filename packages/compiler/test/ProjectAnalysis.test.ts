@@ -1,3 +1,4 @@
+import * as Layer from 'effect/Layer'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Exit from 'effect/Exit'
@@ -26,7 +27,13 @@ const roots = Object.freeze([
 const sources = new Map([['shared/Core', ascii('pub fn answer() -> i32 { return 42 }')]])
 
 const make = (requestedRoots = roots) =>
-  ProjectAnalysis.make(requestedRoots).pipe(Effect.provide(SourceResolver.memory(sources)))
+  ProjectAnalysis.make(requestedRoots.map((source) => source.id)).pipe(
+    Effect.provide(
+      SourceResolver.overlay(requestedRoots).pipe(
+        Layer.provideMerge(SourceResolver.memory(sources)),
+      ),
+    ),
+  )
 
 it.effect(
   'isolates selected surfaces by profile while reusing parsed syntax and ignoring unloaded edits',
@@ -67,14 +74,25 @@ static if Intrinsic.targetOperatingSystem() == "darwin" {
           },
         },
       }
-      const darwin = yield* ProjectAnalysis.make([root], darwinOptions).pipe(
-        Effect.provide(supply('')),
-      )
-      const linux = yield* ProjectAnalysis.revise(darwin, [root], linuxOptions).pipe(
-        Effect.provide(supply('')),
-      )
-      const same = yield* ProjectAnalysis.revise(darwin, [root], darwinOptions).pipe(
-        Effect.provide(supply('invalid unloaded source')),
+      const darwin = yield* ProjectAnalysis.make(
+        [root].map((source) => source.id),
+        darwinOptions,
+      ).pipe(Effect.provide(SourceResolver.overlay([root]).pipe(Layer.provideMerge(supply('')))))
+      const linux = yield* ProjectAnalysis.revise(
+        darwin,
+        [root].map((source) => source.id),
+        linuxOptions,
+      ).pipe(Effect.provide(SourceResolver.overlay([root]).pipe(Layer.provideMerge(supply('')))))
+      const same = yield* ProjectAnalysis.revise(
+        darwin,
+        [root].map((source) => source.id),
+        darwinOptions,
+      ).pipe(
+        Effect.provide(
+          SourceResolver.overlay([root]).pipe(
+            Layer.provideMerge(supply('invalid unloaded source')),
+          ),
+        ),
       )
       for (const [project, expected] of [
         [darwin, 'darwin'],
@@ -127,10 +145,15 @@ static if enabled() { pub const first: i32 = 1 } else { pub const second: i32 = 
       SourceResolver.memory(
         new Map([['policy', ascii(`pub static fn enabled() -> bool { return ${value} }`)]]),
       )
-    const before = yield* ProjectAnalysis.make([root], options).pipe(Effect.provide(resolver(true)))
-    const after = yield* ProjectAnalysis.revise(before, [root], options).pipe(
-      Effect.provide(resolver(false)),
-    )
+    const before = yield* ProjectAnalysis.make(
+      [root].map((source) => source.id),
+      options,
+    ).pipe(Effect.provide(SourceResolver.overlay([root]).pipe(Layer.provideMerge(resolver(true)))))
+    const after = yield* ProjectAnalysis.revise(
+      before,
+      [root].map((source) => source.id),
+      options,
+    ).pipe(Effect.provide(SourceResolver.overlay([root]).pipe(Layer.provideMerge(resolver(false)))))
     const beforeView = ProjectAnalysis.view(before, 'selected') ?? raise('before view')
     const afterView = ProjectAnalysis.view(after, 'selected') ?? raise('after view')
     assert.deepEqual(beforeView.diagnostics, [])
@@ -164,17 +187,33 @@ pub fn main() -> i32 { let value = 42 let result = run Core.borrow(&value) retur
 fn privateValue() -> i32 { return 1 }`
     const resolve = (source: string) =>
       SourceResolver.memory(new Map([['shared/Core', ascii(source)]]))
-    const initial = yield* ProjectAnalysis.make([root]).pipe(Effect.provide(resolve(library)))
-    const edited = yield* ProjectAnalysis.revise(initial, [root]).pipe(
-      Effect.provide(resolve(library.replace('return 1', 'return 2'))),
+    const initial = yield* ProjectAnalysis.make([root].map((source) => source.id)).pipe(
+      Effect.provide(SourceResolver.overlay([root]).pipe(Layer.provideMerge(resolve(library)))),
     )
-    const renamed = yield* ProjectAnalysis.revise(edited, [root]).pipe(
+    const edited = yield* ProjectAnalysis.revise(
+      initial,
+      [root].map((source) => source.id),
+    ).pipe(
       Effect.provide(
-        resolve(
-          library
-            .replaceAll("'data", "'backing")
-            .replaceAll("'env", "'capture")
-            .replace('return 1', 'return 2'),
+        SourceResolver.overlay([root]).pipe(
+          Layer.provideMerge(resolve(library.replace('return 1', 'return 2'))),
+        ),
+      ),
+    )
+    const renamed = yield* ProjectAnalysis.revise(
+      edited,
+      [root].map((source) => source.id),
+    ).pipe(
+      Effect.provide(
+        SourceResolver.overlay([root]).pipe(
+          Layer.provideMerge(
+            resolve(
+              library
+                .replaceAll("'data", "'backing")
+                .replaceAll("'env", "'capture")
+                .replace('return 1', 'return 2'),
+            ),
+          ),
         ),
       ),
     )
@@ -185,8 +224,11 @@ fn privateValue() -> i32 { return 1 }`
           '\nfn another() -> i32 { let value = 21 let result = run Core.borrow(&value) return result.* }',
       ),
     )
-    const additional = yield* ProjectAnalysis.revise(initial, [extra]).pipe(
-      Effect.provide(resolve(library)),
+    const additional = yield* ProjectAnalysis.revise(
+      initial,
+      [extra].map((source) => source.id),
+    ).pipe(
+      Effect.provide(SourceResolver.overlay([extra]).pipe(Layer.provideMerge(resolve(library)))),
     )
     for (const project of [initial, edited, renamed, additional]) {
       const view = ProjectAnalysis.view(project, 'query/Effect') ?? raise('Effect consumer')
@@ -200,8 +242,15 @@ fn privateValue() -> i32 { return 1 }`
     assert.strictEqual(counts(edited).checked, 1)
     assert.strictEqual(counts(renamed).checked, 0)
     assert.strictEqual(counts(additional).checked, 1)
-    const constrained = yield* ProjectAnalysis.revise(initial, [root]).pipe(
-      Effect.provide(resolve(library.replace("'data: 'env", "'data: 'static"))),
+    const constrained = yield* ProjectAnalysis.revise(
+      initial,
+      [root].map((source) => source.id),
+    ).pipe(
+      Effect.provide(
+        SourceResolver.overlay([root]).pipe(
+          Layer.provideMerge(resolve(library.replace("'data: 'env", "'data: 'static"))),
+        ),
+      ),
     )
     assert.isAbove(counts(constrained).checked, 1)
     const invalid =
@@ -225,10 +274,17 @@ fn unrelated() -> i32 { return 7 }`),
 fn privateValue() -> i32 { return 1 }`
     const resolve = (source: string) =>
       SourceResolver.memory(new Map([['shared/Core', ascii(source)]]))
-    const initial = yield* ProjectAnalysis.make([root]).pipe(Effect.provide(resolve(library)))
+    const initial = yield* ProjectAnalysis.make([root].map((source) => source.id)).pipe(
+      Effect.provide(SourceResolver.overlay([root]).pipe(Layer.provideMerge(resolve(library)))),
+    )
     const editedSource = library.replace('return 1', 'return 2')
-    const edited = yield* ProjectAnalysis.revise(initial, [root]).pipe(
-      Effect.provide(resolve(editedSource)),
+    const edited = yield* ProjectAnalysis.revise(
+      initial,
+      [root].map((source) => source.id),
+    ).pipe(
+      Effect.provide(
+        SourceResolver.overlay([root]).pipe(Layer.provideMerge(resolve(editedSource))),
+      ),
     )
     const privateQueries = edited.report.find((phase) => phase.phase === 'body-queries')?.counters
     assert.strictEqual(privateQueries?._tag, 'BodyQueryCounters')
@@ -236,8 +292,13 @@ fn privateValue() -> i32 { return 1 }`
     assert.strictEqual(privateQueries.checked, 1)
     assert.strictEqual(privateQueries.ownershipReused, 2)
     const exclusiveSource = editedSource.replace("&'a i32", "&'a mut i32")
-    const exclusive = yield* ProjectAnalysis.revise(edited, [root]).pipe(
-      Effect.provide(resolve(exclusiveSource)),
+    const exclusive = yield* ProjectAnalysis.revise(
+      edited,
+      [root].map((source) => source.id),
+    ).pipe(
+      Effect.provide(
+        SourceResolver.overlay([root]).pipe(Layer.provideMerge(resolve(exclusiveSource))),
+      ),
     )
     const varianceQueries = exclusive.report.find(
       (phase) => phase.phase === 'body-queries',
@@ -250,8 +311,13 @@ fn privateValue() -> i32 { return 1 }`
       exclusiveSource +
       `
 impl<'a> Drop for Guard<'a> { fn drop(self: &mut Guard<'a>) -> () { return () } }`
-    const cleanup = yield* ProjectAnalysis.revise(exclusive, [root]).pipe(
-      Effect.provide(resolve(cleanupSource)),
+    const cleanup = yield* ProjectAnalysis.revise(
+      exclusive,
+      [root].map((source) => source.id),
+    ).pipe(
+      Effect.provide(
+        SourceResolver.overlay([root]).pipe(Layer.provideMerge(resolve(cleanupSource))),
+      ),
     )
     const cleanupQueries = cleanup.report.find((phase) => phase.phase === 'body-queries')?.counters
     assert.strictEqual(cleanupQueries?._tag, 'BodyQueryCounters')
@@ -259,8 +325,17 @@ impl<'a> Drop for Guard<'a> { fn drop(self: &mut Guard<'a>) -> () { return () } 
     // Adding a conformance changes the resolution catalog; implementation-only hook edits do not.
     assert.strictEqual(cleanupQueries.ownershipChecked, 4)
     assert.strictEqual(cleanupQueries.ownershipReused, 0)
-    const hookEdited = yield* ProjectAnalysis.revise(cleanup, [root]).pipe(
-      Effect.provide(resolve(cleanupSource.replace('return ()', 'self.value.* = 0 return ()'))),
+    const hookEdited = yield* ProjectAnalysis.revise(
+      cleanup,
+      [root].map((source) => source.id),
+    ).pipe(
+      Effect.provide(
+        SourceResolver.overlay([root]).pipe(
+          Layer.provideMerge(
+            resolve(cleanupSource.replace('return ()', 'self.value.* = 0 return ()')),
+          ),
+        ),
+      ),
     )
     const hookQueries = hookEdited.report.find((phase) => phase.phase === 'body-queries')?.counters
     assert.strictEqual(hookQueries?._tag, 'BodyQueryCounters')
@@ -287,12 +362,23 @@ fn sibling() -> i32 { return 8 }`),
       const library = `pub fn identity<'a>(value: &'a i32) -> &'a i32 { return value }
 fn privateValue() -> i32 { return 1 }
 pub fn value() -> i32 { return privateValue() }`
-      const initial = yield* ProjectAnalysis.make([root]).pipe(
-        Effect.provide(SourceResolver.memory(new Map([['shared/Core', ascii(library)]]))),
+      const initial = yield* ProjectAnalysis.make([root].map((source) => source.id)).pipe(
+        Effect.provide(
+          SourceResolver.overlay([root]).pipe(
+            Layer.provideMerge(SourceResolver.memory(new Map([['shared/Core', ascii(library)]]))),
+          ),
+        ),
       )
       const edited = library.replace('return 1', 'return 23')
-      const revised = yield* ProjectAnalysis.revise(initial, [root]).pipe(
-        Effect.provide(SourceResolver.memory(new Map([['shared/Core', ascii(edited)]]))),
+      const revised = yield* ProjectAnalysis.revise(
+        initial,
+        [root].map((source) => source.id),
+      ).pipe(
+        Effect.provide(
+          SourceResolver.overlay([root]).pipe(
+            Layer.provideMerge(SourceResolver.memory(new Map([['shared/Core', ascii(edited)]]))),
+          ),
+        ),
       )
       const queries = revised.report.find((phase) => phase.phase === 'body-queries')?.counters
       assert.strictEqual(queries?._tag, 'BodyQueryCounters')
@@ -302,8 +388,15 @@ pub fn value() -> i32 { return privateValue() }`
       assert.strictEqual(queries.ownershipChecked, 1)
       assert.strictEqual(queries.ownershipReused, 4)
       const alpha = edited.replaceAll("'a", "'long")
-      const renamed = yield* ProjectAnalysis.revise(revised, [root]).pipe(
-        Effect.provide(SourceResolver.memory(new Map([['shared/Core', ascii(alpha)]]))),
+      const renamed = yield* ProjectAnalysis.revise(
+        revised,
+        [root].map((source) => source.id),
+      ).pipe(
+        Effect.provide(
+          SourceResolver.overlay([root]).pipe(
+            Layer.provideMerge(SourceResolver.memory(new Map([['shared/Core', ascii(alpha)]]))),
+          ),
+        ),
       )
       const renamedQueries = renamed.report.find(
         (phase) => phase.phase === 'body-queries',
@@ -340,8 +433,15 @@ pub fn main() -> i32 { let value = 5 return Core.identity(&value).* }
 fn sibling() -> i32 { return 8 }
 fn additional() -> i32 { let value = 6 return Core.identity(&value).* }`),
       )
-      const additional = yield* ProjectAnalysis.revise(renamed, [additionalRoot]).pipe(
-        Effect.provide(SourceResolver.memory(new Map([['shared/Core', ascii(alpha)]]))),
+      const additional = yield* ProjectAnalysis.revise(
+        renamed,
+        [additionalRoot].map((source) => source.id),
+      ).pipe(
+        Effect.provide(
+          SourceResolver.overlay([additionalRoot]).pipe(
+            Layer.provideMerge(SourceResolver.memory(new Map([['shared/Core', ascii(alpha)]]))),
+          ),
+        ),
       )
       const additionalQueries = additional.report.find(
         (phase) => phase.phase === 'body-queries',
@@ -351,8 +451,17 @@ fn additional() -> i32 { let value = 6 return Core.identity(&value).* }`),
       assert.strictEqual(additionalQueries.checked, 1)
       assert.strictEqual(additionalQueries.reused, 5)
       const constrained = alpha.replace("identity<'long>", "identity<'long: 'static>")
-      const changedBound = yield* ProjectAnalysis.revise(renamed, [root]).pipe(
-        Effect.provide(SourceResolver.memory(new Map([['shared/Core', ascii(constrained)]]))),
+      const changedBound = yield* ProjectAnalysis.revise(
+        renamed,
+        [root].map((source) => source.id),
+      ).pipe(
+        Effect.provide(
+          SourceResolver.overlay([root]).pipe(
+            Layer.provideMerge(
+              SourceResolver.memory(new Map([['shared/Core', ascii(constrained)]])),
+            ),
+          ),
+        ),
       )
       const boundQueries = changedBound.report.find(
         (phase) => phase.phase === 'body-queries',
@@ -376,8 +485,14 @@ pub fn main() -> i32 { return Core.answer() }
 fn sibling() -> i32 { return 0 }`
     const root = SourceFile.make('query/Missing', ascii(source))
     const initialLibrary = 'pub fn other() -> i32 { return 1 }'
-    const initial = yield* ProjectAnalysis.make([root]).pipe(
-      Effect.provide(SourceResolver.memory(new Map([['shared/Core', ascii(initialLibrary)]]))),
+    const initial = yield* ProjectAnalysis.make([root].map((source) => source.id)).pipe(
+      Effect.provide(
+        SourceResolver.overlay([root]).pipe(
+          Layer.provideMerge(
+            SourceResolver.memory(new Map([['shared/Core', ascii(initialLibrary)]])),
+          ),
+        ),
+      ),
     )
     const initialView = ProjectAnalysis.view(initial, root.id) ?? raise('missing initial view')
     const missing = Analysis.diagnostics(initialView)
@@ -396,8 +511,17 @@ fn sibling() -> i32 { return 0 }`
       ],
     )
     const unrelatedLibrary = `${initialLibrary}\nfn unrelated() -> i32 { return 2 }`
-    const unrelated = yield* ProjectAnalysis.revise(initial, [root]).pipe(
-      Effect.provide(SourceResolver.memory(new Map([['shared/Core', ascii(unrelatedLibrary)]]))),
+    const unrelated = yield* ProjectAnalysis.revise(
+      initial,
+      [root].map((source) => source.id),
+    ).pipe(
+      Effect.provide(
+        SourceResolver.overlay([root]).pipe(
+          Layer.provideMerge(
+            SourceResolver.memory(new Map([['shared/Core', ascii(unrelatedLibrary)]])),
+          ),
+        ),
+      ),
     )
     const unrelatedWork = unrelated.report.find((phase) => phase.phase === 'body-queries')?.counters
     assert.strictEqual(unrelatedWork?._tag, 'BodyQueryCounters')
@@ -411,8 +535,17 @@ fn sibling() -> i32 { return 0 }`
       ['SEM0014'],
     )
     const repairedLibrary = `${unrelatedLibrary}\npub fn answer() -> i32 { return 42 }`
-    const repaired = yield* ProjectAnalysis.revise(unrelated, [root]).pipe(
-      Effect.provide(SourceResolver.memory(new Map([['shared/Core', ascii(repairedLibrary)]]))),
+    const repaired = yield* ProjectAnalysis.revise(
+      unrelated,
+      [root].map((source) => source.id),
+    ).pipe(
+      Effect.provide(
+        SourceResolver.overlay([root]).pipe(
+          Layer.provideMerge(
+            SourceResolver.memory(new Map([['shared/Core', ascii(repairedLibrary)]])),
+          ),
+        ),
+      ),
     )
     const repairedWork = repaired.report.find((phase) => phase.phase === 'body-queries')?.counters
     assert.strictEqual(repairedWork?._tag, 'BodyQueryCounters')
@@ -433,9 +566,18 @@ fn spare() -> i32 { return 0 }
 fn recursiveLeft() -> i32 { return recursiveRight() }
 fn recursiveRight() -> i32 { return recursiveLeft() }`
     const initial = yield* make([SourceFile.make('query/Static', ascii(source))])
-    const changed = yield* ProjectAnalysis.revise(initial, [
-      SourceFile.make('query/Static', ascii(source.replace('return 1', 'return 2'))),
-    ]).pipe(Effect.provide(SourceResolver.memory(sources)))
+    const changed = yield* ProjectAnalysis.revise(
+      initial,
+      [SourceFile.make('query/Static', ascii(source.replace('return 1', 'return 2')))].map(
+        (source) => source.id,
+      ),
+    ).pipe(
+      Effect.provide(
+        SourceResolver.overlay([
+          SourceFile.make('query/Static', ascii(source.replace('return 1', 'return 2'))),
+        ]).pipe(Layer.provideMerge(SourceResolver.memory(sources))),
+      ),
+    )
     const queries = changed.report.find((phase) => phase.phase === 'body-queries')?.counters
     assert.strictEqual(queries?._tag, 'BodyQueryCounters')
     if (queries?._tag !== 'BodyQueryCounters') return
@@ -460,9 +602,16 @@ fn broken() -> i32 { return missing() }`
       const initial = yield* make([SourceFile.make('query/Rebind', ascii(source))])
       const prefix = 'fn prefix() -> i32 { return 0 }\n'
       const currentSource = prefix + source
-      const current = yield* ProjectAnalysis.revise(initial, [
-        SourceFile.make('query/Rebind', ascii(currentSource)),
-      ]).pipe(Effect.provide(SourceResolver.memory(sources)))
+      const current = yield* ProjectAnalysis.revise(
+        initial,
+        [SourceFile.make('query/Rebind', ascii(currentSource))].map((source) => source.id),
+      ).pipe(
+        Effect.provide(
+          SourceResolver.overlay([SourceFile.make('query/Rebind', ascii(currentSource))]).pipe(
+            Layer.provideMerge(SourceResolver.memory(sources)),
+          ),
+        ),
+      )
       const queries = current.report.find((phase) => phase.phase === 'body-queries')?.counters
       assert.strictEqual(queries?._tag, 'BodyQueryCounters')
       if (queries?._tag !== 'BodyQueryCounters') return
@@ -631,8 +780,10 @@ it.effect('interrupts cooperative tooling batches before processing remaining mo
         ),
       ),
     )
-    const project = yield* ProjectAnalysis.make(batchRoots).pipe(
-      Effect.provide(SourceResolver.empty),
+    const project = yield* ProjectAnalysis.make(batchRoots.map((source) => source.id)).pipe(
+      Effect.provide(
+        SourceResolver.overlay(batchRoots).pipe(Layer.provideMerge(SourceResolver.empty)),
+      ),
     )
     const firstRoot = batchRoots.at(0) ?? raise('missing first batch root')
     const view = ProjectAnalysis.view(project, firstRoot.id) ?? raise('missing first batch view')
@@ -655,15 +806,12 @@ it.effect('interrupts cooperative tooling batches before processing remaining mo
   }),
 )
 
-it.effect('rejects conflicting source bytes for one canonical root', () =>
+it.effect('deduplicates repeated root identities through one resolver supply', () =>
   Effect.gen(function* () {
-    const exit = yield* Effect.exit(
-      make([
-        SourceFile.make('app/Main', ascii('pub fn main() -> i32 { return 1 }')),
-        SourceFile.make('app/Main', ascii('pub fn main() -> i32 { return 2 }')),
-      ]),
-    )
-    assert.strictEqual(Exit.isFailure(exit), true)
+    const source = SourceFile.make('app/Main', ascii('pub fn main() -> i32 { return 1 }'))
+    const project = yield* make([source, source])
+    assert.deepEqual(project.roots, ['app/Main'])
+    assert.strictEqual(project.views.size, 1)
   }),
 )
 
@@ -679,8 +827,15 @@ it.effect('reuses exact unchanged syntax and module semantics inside one coheren
       ),
       roots.at(1) ?? raise('missing app/B root'),
     ])
-    const current = yield* ProjectAnalysis.revise(previous, revisedRoots).pipe(
-      Effect.provide(SourceResolver.memory(sources)),
+    const current = yield* ProjectAnalysis.revise(
+      previous,
+      revisedRoots.map((source) => source.id),
+    ).pipe(
+      Effect.provide(
+        SourceResolver.overlay(revisedRoots).pipe(
+          Layer.provideMerge(SourceResolver.memory(sources)),
+        ),
+      ),
     )
     const previousModules = new Map(
       previous.closure.modules.map((module) => [module.name, module.syntax]),
@@ -809,26 +964,54 @@ it.effect('reports fresh and removed modules and refuses reuse across source ori
       ascii('pub fn main() -> i32 { return 1 }'),
       SourceOrigin.memory('file:///old/Main.silk'),
     )
-    const previous = yield* ProjectAnalysis.make([previousRoot]).pipe(
-      Effect.provide(SourceResolver.empty),
-    )
-    const current = yield* ProjectAnalysis.revise(previous, [
-      SourceFile.make(
-        'app/Next',
-        ascii('pub fn next() -> i32 { return 2 }'),
-        SourceOrigin.memory('file:///new/Next.silk'),
+    const previous = yield* ProjectAnalysis.make([previousRoot].map((source) => source.id)).pipe(
+      Effect.provide(
+        SourceResolver.overlay([previousRoot]).pipe(Layer.provideMerge(SourceResolver.empty)),
       ),
-    ]).pipe(Effect.provide(SourceResolver.empty))
+    )
+    const current = yield* ProjectAnalysis.revise(
+      previous,
+      [
+        SourceFile.make(
+          'app/Next',
+          ascii('pub fn next() -> i32 { return 2 }'),
+          SourceOrigin.memory('file:///new/Next.silk'),
+        ),
+      ].map((source) => source.id),
+    ).pipe(
+      Effect.provide(
+        SourceResolver.overlay([
+          SourceFile.make(
+            'app/Next',
+            ascii('pub fn next() -> i32 { return 2 }'),
+            SourceOrigin.memory('file:///new/Next.silk'),
+          ),
+        ]).pipe(Layer.provideMerge(SourceResolver.empty)),
+      ),
+    )
     assert.strictEqual(current.syntaxRevisions.has('app/Main'), false)
     assert.strictEqual(current.syntaxRevisions.get('app/Next')?._tag, 'Fresh')
 
-    const changedOrigin = yield* ProjectAnalysis.revise(previous, [
-      SourceFile.make(
-        'app/Main',
-        ascii('pub fn main() -> i32 { return 1 }'),
-        SourceOrigin.memory('file:///new/Main.silk'),
+    const changedOrigin = yield* ProjectAnalysis.revise(
+      previous,
+      [
+        SourceFile.make(
+          'app/Main',
+          ascii('pub fn main() -> i32 { return 1 }'),
+          SourceOrigin.memory('file:///new/Main.silk'),
+        ),
+      ].map((source) => source.id),
+    ).pipe(
+      Effect.provide(
+        SourceResolver.overlay([
+          SourceFile.make(
+            'app/Main',
+            ascii('pub fn main() -> i32 { return 1 }'),
+            SourceOrigin.memory('file:///new/Main.silk'),
+          ),
+        ]).pipe(Layer.provideMerge(SourceResolver.empty)),
       ),
-    ]).pipe(Effect.provide(SourceResolver.empty))
+    )
     assert.strictEqual(changedOrigin.syntaxRevisions.get('app/Main')?._tag, 'Changed')
     assert.notStrictEqual(
       changedOrigin.closure.modules.at(0)?.syntax,
@@ -844,8 +1027,13 @@ it.effect('recomputes conservatively when a reusable prior artifact is missing',
       ...previous,
       semantics: new Map([...previous.semantics].filter(([module]) => module !== 'app/B')),
     })
-    const current = yield* ProjectAnalysis.revise(incomplete, roots).pipe(
-      Effect.provide(SourceResolver.memory(sources)),
+    const current = yield* ProjectAnalysis.revise(
+      incomplete,
+      roots.map((source) => source.id),
+    ).pipe(
+      Effect.provide(
+        SourceResolver.overlay(roots).pipe(Layer.provideMerge(SourceResolver.memory(sources))),
+      ),
     )
 
     assert.strictEqual(current.semanticInvalidation.totals.reusable, 3)
@@ -869,8 +1057,13 @@ it.effect('recomputes tooling conservatively when prior module tooling is missin
         [...previous.toolingModules].filter(([module]) => module !== 'app/B'),
       ),
     })
-    const current = yield* ProjectAnalysis.revise(incomplete, roots).pipe(
-      Effect.provide(SourceResolver.memory(sources)),
+    const current = yield* ProjectAnalysis.revise(
+      incomplete,
+      roots.map((source) => source.id),
+    ).pipe(
+      Effect.provide(
+        SourceResolver.overlay(roots).pipe(Layer.provideMerge(SourceResolver.memory(sources))),
+      ),
     )
 
     assert.strictEqual(current.semantics.get('app/B'), previous.semantics.get('app/B'))
@@ -895,19 +1088,32 @@ it.effect(
       const caller = `import shared.Callbacks
 fn conflict() -> i32 { return 0 }
 unsafe fn probe(core: &Intrinsic.SharedCore<i32>) -> i32 { return 1 }`
-      const initial = yield* ProjectAnalysis.make([
-        SourceFile.make('boundary/Main', ascii(caller)),
-      ]).pipe(
-        Effect.provide(SourceResolver.memory(new Map([['shared/Callbacks', callbackSource]]))),
+      const initial = yield* ProjectAnalysis.make(
+        [SourceFile.make('boundary/Main', ascii(caller))].map((source) => source.id),
+      ).pipe(
+        Effect.provide(
+          SourceResolver.overlay([SourceFile.make('boundary/Main', ascii(caller))]).pipe(
+            Layer.provideMerge(
+              SourceResolver.memory(new Map([['shared/Callbacks', callbackSource]])),
+            ),
+          ),
+        ),
       )
       const edited = caller.replace(
         'return 1',
         'return Intrinsic.sharedWithMut<i32, i32>(core, Callbacks.use, conflict)',
       )
-      const revised = yield* ProjectAnalysis.revise(initial, [
-        SourceFile.make('boundary/Main', ascii(edited)),
-      ]).pipe(
-        Effect.provide(SourceResolver.memory(new Map([['shared/Callbacks', callbackSource]]))),
+      const revised = yield* ProjectAnalysis.revise(
+        initial,
+        [SourceFile.make('boundary/Main', ascii(edited))].map((source) => source.id),
+      ).pipe(
+        Effect.provide(
+          SourceResolver.overlay([SourceFile.make('boundary/Main', ascii(edited))]).pipe(
+            Layer.provideMerge(
+              SourceResolver.memory(new Map([['shared/Callbacks', callbackSource]])),
+            ),
+          ),
+        ),
       )
       const before = ProjectAnalysis.view(initial, 'boundary/Main') ?? raise('initial view')
       const after = ProjectAnalysis.view(revised, 'boundary/Main') ?? raise('revised view')
@@ -959,7 +1165,7 @@ it.effect('loads a configured application independently of open document roots',
           'Main',
           ascii('import Util\npub fn main() -> i32 { return Util.answer() }'),
         ),
-      ],
+      ].map((source) => source.id),
       {
         application: 'Entry',
         configuration: {
@@ -972,11 +1178,20 @@ it.effect('loads a configured application independently of open document roots',
       },
     ).pipe(
       Effect.provide(
-        SourceResolver.memory(
-          new Map([
-            ['Entry', ascii('pub fn entry() -> i32 { return 0 }')],
-            ['Util', ascii('pub fn other() -> i32 { return 11 }')],
-          ]),
+        SourceResolver.overlay([
+          SourceFile.make(
+            'Main',
+            ascii('import Util\npub fn main() -> i32 { return Util.answer() }'),
+          ),
+        ]).pipe(
+          Layer.provideMerge(
+            SourceResolver.memory(
+              new Map([
+                ['Entry', ascii('pub fn entry() -> i32 { return 0 }')],
+                ['Util', ascii('pub fn other() -> i32 { return 11 }')],
+              ]),
+            ),
+          ),
         ),
       ),
     )
@@ -998,12 +1213,20 @@ for (const [target, startup, explicitApplication] of [
       const application = SourceFile.make('Main', ascii('pub fn main() -> i32 { return 42 }'))
       const helper = SourceFile.make('Helper', ascii('pub fn value() -> i32 { return 7 }'))
       const project = yield* ProjectAnalysis.make(
-        explicitApplication ? [helper, application] : [application, helper],
+        (explicitApplication ? [helper, application] : [application, helper]).map(
+          (source) => source.id,
+        ),
         {
           ...(explicitApplication ? { application: 'Main' } : {}),
           configuration: { profile: { target } },
         },
-      ).pipe(Effect.provide(SourceResolver.memory(new Map())))
+      ).pipe(
+        Effect.provide(
+          SourceResolver.overlay(
+            explicitApplication ? [helper, application] : [application, helper],
+          ).pipe(Layer.provideMerge(SourceResolver.memory(new Map()))),
+        ),
+      )
       const view = ProjectAnalysis.view(project, 'Main') ?? raise('application view')
       assert.deepEqual(Analysis.diagnostics(view), [])
       assert.deepEqual(project.closure.resolutionFailures, [])

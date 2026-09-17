@@ -3,7 +3,6 @@ import * as Analysis from './Analysis.js'
 import type * as Backend from './Backend.js'
 import * as CompilationProfile from './CompilationProfile.js'
 import * as HelperCapability from './HelperCapability.js'
-import * as SourceFile from './SourceFile.js'
 import * as SourceResolver from './SourceResolver.js'
 
 /** Compiles one explicitly rooted source provider without an application or runtime root. */
@@ -42,12 +41,16 @@ export const compile = Effect.fn('HelperSource.compile')(function* (
     sanitizers: [],
   }
   const snapshot = yield* Analysis.makeRealized({
-    root: SourceFile.make(
-      'compiler-support/root',
-      new TextEncoder().encode(`import ${provider.root}\n`),
-    ),
+    root: 'compiler-support/root',
     configuration: { profile: input },
-  }).pipe(Effect.provide(SourceResolver.empty))
+  }).pipe(
+    Effect.provide(
+      SourceResolver.memory(
+        new Map([['compiler-support/root', new TextEncoder().encode(`import ${provider.root}\n`)]]),
+      ),
+    ),
+    Effect.mapError((error) => invalid(error.message)),
+  )
   const diagnostics = Analysis.diagnostics(snapshot)
   if (diagnostics.length !== 0 || snapshot.profile === undefined)
     return yield* invalid(diagnostics.map((entry) => `${entry.code}: ${entry.message}`).join('\n'))

@@ -1,3 +1,4 @@
+import * as Layer from 'effect/Layer'
 import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
@@ -1288,9 +1289,15 @@ it.effect('cuts off recursive generic calls that change an ancestor specializati
 pub fn main() -> i32 { return expand<i32>(1) }`),
     )
     const snapshot = yield* Analysis.makeRealized({
-      root: recursive,
+      root: recursive.id,
       configuration: AnalysisFixture.configuration(recursive.id),
-    }).pipe(Effect.provide(SourceResolver.memory(new Map())))
+    }).pipe(
+      Effect.provide(
+        SourceResolver.overlay([recursive]).pipe(
+          Layer.provideMerge(SourceResolver.memory(new Map())),
+        ),
+      ),
+    )
 
     assert.strictEqual(snapshot.instances.violations.length, 1)
     assert.deepEqual(

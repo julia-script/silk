@@ -1,3 +1,4 @@
+import * as Layer from 'effect/Layer'
 import type * as RuntimeComponent from '../src/RuntimeComponent.js'
 import * as ArtifactComposition from '../src/ArtifactComposition.js'
 import * as CompilationProfile from '../src/CompilationProfile.js'
@@ -91,7 +92,7 @@ const compileSource = Effect.fnUntraced(function* (
   })
   return yield* Driver.compile({
     compilation: {
-      root: SourceFile.make('memory/driver', ascii(text)),
+      root: 'memory/driver',
       configuration: {
         profile: CompilationProfile.input(profile),
         package: `${options.packageName ?? 'compiler-test'}@0.0.0`,
@@ -114,13 +115,19 @@ const compileSource = Effect.fnUntraced(function* (
       : { nativeLinkInputs: options.nativeLinkInputs }),
   }).pipe(
     Effect.provide(
-      imports === undefined
-        ? SourceResolver.empty
-        : SourceResolver.memory(
-            new Map(
-              Object.entries(imports).map(([module, source]) => [module, ascii(source)] as const),
-            ),
-          ),
+      SourceResolver.overlay([SourceFile.make('memory/driver', ascii(text))]).pipe(
+        Layer.provideMerge(
+          imports === undefined
+            ? SourceResolver.empty
+            : SourceResolver.memory(
+                new Map(
+                  Object.entries(imports).map(
+                    ([module, source]) => [module, ascii(source)] as const,
+                  ),
+                ),
+              ),
+        ),
+      ),
     ),
   )
 })
@@ -506,7 +513,7 @@ it.effect.each(selectedWasmCorpus)(
     Effect.gen(function* () {
       const outcome = yield* Driver.compile({
         compilation: {
-          root: SourceFile.make(`memory/${name}-wasm`, ascii(source)),
+          root: `memory/${name}-wasm`,
           target: 'wasm32-unknown-unknown',
         },
         toolchain,
@@ -514,7 +521,13 @@ it.effect.each(selectedWasmCorpus)(
         destination: join(destinationRoot, `${name}.wasm`),
         cache: false,
         artifactKind: 'WebAssemblyModule',
-      }).pipe(Effect.provide(SourceResolver.empty))
+      }).pipe(
+        Effect.provide(
+          SourceResolver.overlay([SourceFile.make(`memory/${name}-wasm`, ascii(source))]).pipe(
+            Layer.provideMerge(SourceResolver.empty),
+          ),
+        ),
+      )
       assert.strictEqual(
         outcome._tag,
         'Compiled',

@@ -174,7 +174,7 @@ int main(void) { return storage_lifecycle() == ${expected} ? 42 : 1; }
         'platform-conformance',
         Effect.fnUntraced(function* (scope) {
           const snapshot = yield* Analysis.makeRealized({
-            root: SourceFile.make('storage-conformance/root', fixture.source),
+            root: 'storage-conformance/root',
             configuration: {
               profile: { ...input, artifact: 'object', entry: { kind: 'none' } },
               composition: {
@@ -194,7 +194,13 @@ int main(void) { return storage_lifecycle() == ${expected} ? 42 : 1; }
                 })),
               },
             },
-          }).pipe(Effect.provide(SourceResolver.empty))
+          }).pipe(
+            Effect.provide(
+              SourceResolver.overlay([
+                SourceFile.make('storage-conformance/root', fixture.source),
+              ]).pipe(Layer.provideMerge(SourceResolver.empty)),
+            ),
+          )
           const diagnostics = Analysis.diagnostics(snapshot)
           if (diagnostics.length !== 0)
             return yield* new ConformanceError({

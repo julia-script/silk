@@ -154,7 +154,7 @@ const program = Effect.gen(function* () {
     const { source, receiver } = probe
     for (const optimization of ['none', 'speed']) {
       const snapshot = yield* Analysis.makeRealized({
-        root: SourceFile.make('storage-conformance/root', source),
+        root: 'storage-conformance/root',
         configuration: {
           profile: {
             target: 'wasm32-unknown-unknown',
@@ -180,7 +180,13 @@ const program = Effect.gen(function* () {
             })),
           },
         },
-      }).pipe(Effect.provide(SourceResolver.empty))
+      }).pipe(
+        Effect.provide(
+          SourceResolver.overlay([SourceFile.make('storage-conformance/root', source)]).pipe(
+            Layer.provideMerge(SourceResolver.empty),
+          ),
+        ),
+      )
       const diagnostics = Analysis.diagnostics(snapshot)
       if (diagnostics.length > 0)
         return yield* new ConformanceError({
@@ -288,7 +294,7 @@ const program = Effect.gen(function* () {
       const destination = path.join(output, `${name}-${optimization}.wasm`)
       const result = yield* Driver.compile({
         compilation: {
-          root: SourceFile.make(`storage-conformance/${name}`, source),
+          root: `storage-conformance/${name}`,
           configuration: {
             ...(composition === undefined ? {} : { composition }),
             profile: {
@@ -305,11 +311,15 @@ const program = Effect.gen(function* () {
         cache: false,
       }).pipe(
         Effect.provide(
-          refusal
-            ? SourceResolver.memory(
-                new Map([['fixture/refusal', new TextEncoder().encode(provider)]]),
-              )
-            : SourceResolver.empty,
+          SourceResolver.overlay([SourceFile.make(`storage-conformance/${name}`, source)]).pipe(
+            Layer.provideMerge(
+              refusal
+                ? SourceResolver.memory(
+                    new Map([['fixture/refusal', new TextEncoder().encode(provider)]]),
+                  )
+                : SourceResolver.empty,
+            ),
+          ),
         ),
       )
       if (result._tag !== 'Compiled')
@@ -337,7 +347,7 @@ const program = Effect.gen(function* () {
       const destination = path.join(output, `entry-${fixture.name}-${optimization}.wasm`)
       const result = yield* Driver.compile({
         compilation: {
-          root: SourceFile.make(`wasm-entry/${fixture.name}`, source),
+          root: `wasm-entry/${fixture.name}`,
           configuration: {
             profile: {
               target: 'wasm32-unknown-unknown',
@@ -351,7 +361,13 @@ const program = Effect.gen(function* () {
         packageName: 'wasm-entry',
         destination,
         cache: false,
-      }).pipe(Effect.provide(SourceResolver.empty))
+      }).pipe(
+        Effect.provide(
+          SourceResolver.overlay([SourceFile.make(`wasm-entry/${fixture.name}`, source)]).pipe(
+            Layer.provideMerge(SourceResolver.empty),
+          ),
+        ),
+      )
       if (result._tag !== 'Compiled')
         return yield* new ConformanceError({
           message: `entry ${fixture.name} ${optimization}: ${result._tag}`,

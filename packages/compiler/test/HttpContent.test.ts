@@ -1,3 +1,4 @@
+import * as Layer from 'effect/Layer'
 import { readFileSync } from 'node:fs'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
@@ -236,9 +237,15 @@ it.effect(
         'planning',
       ])
       const snapshot = yield* Analysis.makeRealized({
-        root: SourceFile.make(module, encoder.encode(httpContentPlanningSource)),
+        root: module,
         configuration,
-      }).pipe(Effect.provide(SourceResolver.empty))
+      }).pipe(
+        Effect.provide(
+          SourceResolver.overlay([
+            SourceFile.make(module, encoder.encode(httpContentPlanningSource)),
+          ]).pipe(Layer.provideMerge(SourceResolver.empty)),
+        ),
+      )
       assert.deepEqual(Analysis.diagnostics(snapshot), [])
       assert.deepEqual(yield* MirVerification.verify(Analysis.loweredMir(snapshot)), [])
     }),
@@ -254,9 +261,15 @@ it.effect(
         'providedResultCollision',
       ])
       const snapshot = yield* Analysis.makeRealized({
-        root: SourceFile.make(module, encoder.encode(providedResultCollisionSource)),
+        root: module,
         configuration,
-      }).pipe(Effect.provide(SourceResolver.empty))
+      }).pipe(
+        Effect.provide(
+          SourceResolver.overlay([
+            SourceFile.make(module, encoder.encode(providedResultCollisionSource)),
+          ]).pipe(Layer.provideMerge(SourceResolver.empty)),
+        ),
+      )
       assert.deepEqual(Analysis.diagnostics(snapshot), [])
       const mir = Analysis.loweredMir(snapshot)
       assert.deepEqual(yield* MirVerification.verify(mir), [])

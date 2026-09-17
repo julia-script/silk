@@ -3,6 +3,7 @@ import type * as ArtifactComposition from './ArtifactComposition.js'
 import type * as CompilationProfile from './CompilationProfile.js'
 import type * as PackageConfiguration from './PackageConfiguration.js'
 import * as Effect from 'effect/Effect'
+import * as Data from 'effect/Data'
 import * as Option from 'effect/Option'
 import * as Result from 'effect/Result'
 import * as Diagnostic from './Diagnostic.js'
@@ -12,15 +13,14 @@ import * as Lexer from './Lexer.js'
 import * as Parser from './Parser.js'
 import * as SourceFile from './SourceFile.js'
 import * as SourceResolver from './SourceResolver.js'
-import * as SourceSpan from './SourceSpan.js'
 import * as Stdlib from './Stdlib.js'
 import type * as SyntaxFile from './SyntaxFile.js'
 import * as SyntaxTree from './SyntaxTree.js'
 import type * as Token from './Token.js'
 
-/** One compilation request: an explicit root source plus optional target selection. */
+/** One compilation request: a canonical root identity plus optional target selection. */
 export interface CompilationRequest {
-  readonly root: SourceFile.SourceFile
+  readonly root: string
   readonly target?: string
   readonly configuration?: {
     readonly composition?: ArtifactComposition.Input
@@ -36,7 +36,9 @@ export interface CompilationRequest {
 export interface ProjectRequest {
   readonly application?: string
   readonly configuration?: CompilationRequest['configuration']
-  readonly roots: ReadonlyArray<SourceFile.SourceFile>
+  readonly roots: ReadonlyArray<string>
+  /** Composition roots retain recoverable absence/failure facts. */
+  readonly additionalRoots?: ReadonlyArray<string>
   readonly previous?: ProjectClosure
   /** Completed condition decisions for this discovery pass; absent decisions admit neither arm. */
   readonly selection?: ReadonlyMap<string, ReadonlyMap<number, boolean>>
@@ -99,6 +101,7 @@ export interface Facts {
   readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
   readonly sources: ReadonlyMap<string, SourceFile.SourceFile>
   readonly resolutionFailures: ReadonlyArray<SourceResolver.SourceResolverError>
+  readonly missingRoots: ReadonlyArray<string>
 }
 
 /** The deterministic closure admitted by one declaration-selection discovery pass. */
@@ -113,10 +116,20 @@ export interface ProjectClosure extends Facts {
   readonly rootModules: ReadonlyArray<string>
 }
 
-const validateRequest = (request: CompilationRequest): void => {
-  if (!SourceResolver.isCanonicalModule(request.root.id))
-    throw new RangeError(`Compilation request module identity ${request.root.id} is not canonical`)
-}
+/** A requested root cannot establish a complete analysis snapshot. */
+export class ModuleClosureError extends Data.TaggedError('ModuleClosureError')<{
+  readonly operation: 'ModuleClosure.loadProject'
+  readonly message: string
+  readonly reason:
+    | { readonly _tag: 'EmptyRoots' }
+    | { readonly _tag: 'InvalidRoot'; readonly module: string }
+    | { readonly _tag: 'MissingRoot'; readonly module: string }
+    | {
+        readonly _tag: 'RootResolutionFailed'
+        readonly module: string
+        readonly error: SourceResolver.SourceResolverError
+      }
+}> {}
 
 const compareText = (left: string, right: string): number => {
   if (left < right) return -1
@@ -124,34 +137,26 @@ const compareText = (left: string, right: string): number => {
   return 0
 }
 
-const sameBytes = (left: SourceFile.SourceFile, right: SourceFile.SourceFile): boolean => {
-  const leftBytes = SourceFile.toUint8Array(left)
-  const rightBytes = SourceFile.toUint8Array(right)
-  if (leftBytes.length !== rightBytes.length) return false
-  for (let index = 0; index < leftBytes.length; index += 1) {
-    if (leftBytes[index] !== rightBytes[index]) return false
-  }
-  return true
-}
-
-const canonicalRoots = (
-  roots: ReadonlyArray<SourceFile.SourceFile>,
-): ReadonlyArray<SourceFile.SourceFile> => {
-  if (roots.length === 0) throw new RangeError('Project analysis requires at least one root source')
-  const byModule = new Map<string, SourceFile.SourceFile>()
-  for (const root of roots) {
-    validateRequest({ root })
-    const existing = byModule.get(root.id)
-    if (existing !== undefined && !sameBytes(existing, root))
-      throw new RangeError(`Project analysis received conflicting roots for ${root.id}`)
-    if (existing === undefined) byModule.set(root.id, root)
-  }
-  return Object.freeze(
-    [...byModule.values()].sort((left, right) => {
-      return compareText(left.id, right.id)
-    }),
-  )
-}
+/** Validates the entire request before any source is accessed. */
+export const validateRoots = Effect.fn('ModuleClosure.validateRoots')(function* (
+  roots: ReadonlyArray<string>,
+  additionalRoots: ReadonlyArray<string> = [],
+): Effect.fn.Return<ReadonlyArray<string>, ModuleClosureError> {
+  if (roots.length === 0)
+    return yield* new ModuleClosureError({
+      operation: 'ModuleClosure.loadProject',
+      message: 'Project analysis requires at least one root module',
+      reason: { _tag: 'EmptyRoots' },
+    })
+  for (const module of [...new Set([...roots, ...additionalRoots])].sort())
+    if (!SourceResolver.isCanonicalModule(module))
+      return yield* new ModuleClosureError({
+        operation: 'ModuleClosure.loadProject',
+        message: `Root module identity ${module} is not canonical`,
+        reason: { _tag: 'InvalidRoot', module },
+      })
+  return Object.freeze([...new Set(roots)].sort())
+})
 
 const unavailableSyntax = (parent: SyntaxTree.Node): SyntaxTree.Element =>
   SyntaxTree.unavailableElement(parent.children, parent)
@@ -362,47 +367,19 @@ const cycleFacts = (modules: ReadonlyArray<Module>): ReadonlyArray<ReadonlyArray
  */
 export const loadProject = Effect.fn('ModuleClosure.loadProject')(function* (
   request: ProjectRequest,
-): Effect.fn.Return<ProjectClosure, never, SourceResolver.SourceResolver> {
+): Effect.fn.Return<ProjectClosure, ModuleClosureError, SourceResolver.SourceResolver> {
   yield* Effect.annotateCurrentSpan({
     'request.application': request.application,
-    'request.roots': request.roots.map((root) => root.id),
+    'request.roots': request.roots,
     'request.previous': request.previous?.modules.map((module) => module.name),
   })
-  const roots = canonicalRoots(request.roots)
-  const rootModules = Object.freeze(roots.map((root) => root.id))
+  const roots = yield* validateRoots(request.roots, request.additionalRoots)
   const previousModules = new Map(request.previous?.modules.map((module) => [module.name, module]))
   const loaded = new Map<string, Module>()
   const diagnostics: Array<ReadonlyArray<Diagnostic.Diagnostic>> = []
-  for (const root of roots) {
-    if (!Stdlib.isReserved(root.id)) continue
-    // Selected runtime roots arrive through the toolchain resolver. Verify the bytes and origin
-    // against that resolver rather than trusting a caller-provided provenance label. Embedded
-    // toolchain sources have Memory origins, while on-disk supplies have ToolchainFile origins.
-    {
-      const supplied = yield* Effect.result(SourceResolver.resolveStandardLibrary(root.id))
-      if (
-        Result.isSuccess(supplied) &&
-        Option.isSome(supplied.success) &&
-        SourceFile.equals(
-          root,
-          SourceFile.make(root.id, supplied.success.value.bytes, supplied.success.value.origin),
-        )
-      )
-        continue
-    }
-    const span = Option.getOrThrow(SourceSpan.make(root, 0, 0))
-    diagnostics.push(Object.freeze([Diagnostic.reservedModuleIdentity(root.id, span)]))
-  }
-  const resolutions = new Map<string, Resolution>(
-    roots.map((root) => [
-      root.id,
-      Object.freeze({
-        _tag: 'Found' as const,
-        source: SourceResolver.resolved(SourceFile.toUint8Array(root), root.origin),
-      }),
-    ]),
-  )
-  const pending: Array<string> = [...rootModules]
+  const resolutions = new Map<string, Resolution>()
+  const rootModules: Array<string> = [...roots]
+  const missingRoots: Array<string> = []
 
   const resolve = Effect.fn('ModuleClosure.resolve')(function* (
     module: string,
@@ -425,6 +402,30 @@ export const loadProject = Effect.fn('ModuleClosure.loadProject')(function* (
     resolutions.set(module, resolution)
     return resolution
   })
+
+  for (const module of roots) {
+    const outcome = yield* resolve(module)
+    if (outcome._tag === 'Absent')
+      return yield* new ModuleClosureError({
+        operation: 'ModuleClosure.loadProject',
+        message: `Root module ${module} is missing`,
+        reason: { _tag: 'MissingRoot', module },
+      })
+    if (outcome._tag === 'Failed')
+      return yield* new ModuleClosureError({
+        operation: 'ModuleClosure.loadProject',
+        message: `Cannot resolve root module ${module}: ${outcome.error.message}`,
+        reason: { _tag: 'RootResolutionFailed', module, error: outcome.error },
+      })
+  }
+  for (const module of [...new Set(request.additionalRoots ?? [])].sort()) {
+    if (roots.includes(module)) continue
+    const outcome = yield* resolve(module)
+    if (outcome._tag === 'Found') rootModules.push(module)
+    else if (outcome._tag === 'Absent') missingRoots.push(module)
+  }
+  rootModules.sort()
+  const pending: Array<string> = [...rootModules]
 
   while (pending.length > 0) {
     pending.sort()
@@ -457,7 +458,8 @@ export const loadProject = Effect.fn('ModuleClosure.loadProject')(function* (
 
   return Object.freeze({
     _tag: 'ProjectModuleClosure',
-    rootModules,
+    rootModules: Object.freeze(rootModules),
+    missingRoots: Object.freeze(missingRoots),
     modules,
     cycles: cycleFacts(modules),
     diagnostics: Diagnostic.merge(...diagnostics),
@@ -483,19 +485,21 @@ export const view = (self: ProjectClosure, rootModule: string): Closure | undefi
         diagnostics: self.diagnostics,
         sources: self.sources,
         resolutionFailures: self.resolutionFailures,
+        missingRoots: self.missingRoots,
       })
     : undefined
 
 /** Discovers the unconditional bootstrap closure of one compilation request. Use Analysis.make for profile-selected frontend facts. */
 export const load = Effect.fn('ModuleClosure.load')(function* (
   request: CompilationRequest,
-  additionalRoots: ReadonlyArray<SourceFile.SourceFile> = [],
-): Effect.fn.Return<Closure, never, SourceResolver.SourceResolver> {
+  additionalRoots: ReadonlyArray<string> = [],
+): Effect.fn.Return<Closure, ModuleClosureError, SourceResolver.SourceResolver> {
   const project = yield* loadProject({
-    roots: [request.root, ...additionalRoots],
-    application: request.root.id,
+    roots: [request.root],
+    additionalRoots,
+    application: request.root,
   })
-  const closure = view(project, request.root.id)
-  if (closure === undefined) throw new RangeError(`Project closure lost root ${request.root.id}`)
+  const closure = view(project, request.root)
+  if (closure === undefined) throw new RangeError(`Project closure lost root ${request.root}`)
   return closure
 })

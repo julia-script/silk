@@ -1,3 +1,4 @@
+import * as Layer from 'effect/Layer'
 import { assert, it } from '@effect/vitest'
 import * as Analysis from '@silklang/compiler/Analysis'
 import * as ProjectAnalysis from '@silklang/compiler/ProjectAnalysis'
@@ -43,9 +44,16 @@ static if Intrinsic.targetOperatingSystem() == "darwin" {
         'x86_64-unknown-linux-gnu',
         'wasm32-unknown-unknown',
       ]) {
-        const analysis = yield* ProjectAnalysis.make(roots, {
-          configuration: { profile: { target, artifact: 'object', entry: { kind: 'none' } } },
-        }).pipe(Effect.provide(SourceResolver.empty))
+        const analysis = yield* ProjectAnalysis.make(
+          roots.map((source) => source.id),
+          {
+            configuration: { profile: { target, artifact: 'object', entry: { kind: 'none' } } },
+          },
+        ).pipe(
+          Effect.provide(
+            SourceResolver.overlay(roots).pipe(Layer.provideMerge(SourceResolver.empty)),
+          ),
+        )
         const project = Project.fromProjectAnalysis(analysis)
         const alias = project.modules.find((module) => module.name === 'facade')?.items[0]
         assert.strictEqual(alias?.name, 'selected')
@@ -359,7 +367,7 @@ static if Intrinsic.targetOperatingSystem() == "darwin" {
   pub fn nativeOnly() -> i32 { return 1 }
 }`),
         ),
-      ],
+      ].map((source) => source.id),
       {
         configuration: {
           profile: {
@@ -369,7 +377,23 @@ static if Intrinsic.targetOperatingSystem() == "darwin" {
           },
         },
       },
-    ).pipe(Effect.provide(SourceResolver.empty))
+    ).pipe(
+      Effect.provide(
+        SourceResolver.overlay([
+          SourceFile.make(
+            'empty/platform',
+            encoder.encode(`//! Native API example.
+//! \`\`\`silk
+//! import empty.platform { nativeOnly }
+//! pub fn main() -> i32 { return nativeOnly() }
+//! \`\`\`
+static if Intrinsic.targetOperatingSystem() == "darwin" {
+  pub fn nativeOnly() -> i32 { return 1 }
+}`),
+          ),
+        ]).pipe(Layer.provideMerge(SourceResolver.empty)),
+      ),
+    )
     const module = Project.fromProjectAnalysis(analysis).modules.find(
       (module) => module.name === 'empty/platform',
     )

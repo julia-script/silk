@@ -140,7 +140,7 @@ export const run = Effect.fn('BuildExeCommand.run')(function* (
     }
     supplyRequest = decoded.success
   }
-  const loaded = yield* Effect.result(SourceEntry.read(options.source, options.sourceRoot))
+  const loaded = yield* Effect.result(SourceEntry.select(options.source, options.sourceRoot))
   if (Result.isFailure(loaded)) {
     yield* Console.error(loaded.failure.message)
     return 2

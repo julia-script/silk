@@ -1,3 +1,4 @@
+import * as Layer from 'effect/Layer'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
@@ -138,8 +139,12 @@ impl Shape for Rectangle {
 }
 pub fn main() -> i32 { return 0 }`),
     )
-    const self = yield* Analysis.make({ root }).pipe(
-      Effect.provide(SourceResolver.memory(new Map([['model', model]]))),
+    const self = yield* Analysis.make({ root: root.id }).pipe(
+      Effect.provide(
+        SourceResolver.overlay([root]).pipe(
+          Layer.provideMerge(SourceResolver.memory(new Map([['model', model]]))),
+        ),
+      ),
     )
     assert.include(
       messages(self),
@@ -161,8 +166,12 @@ impl Present for i32 {
 }
 pub fn main() -> i32 { return 0 }`),
     )
-    const self = yield* Analysis.make({ root }).pipe(
-      Effect.provide(SourceResolver.memory(new Map([['contracts', contracts]]))),
+    const self = yield* Analysis.make({ root: root.id }).pipe(
+      Effect.provide(
+        SourceResolver.overlay([root]).pipe(
+          Layer.provideMerge(SourceResolver.memory(new Map([['contracts', contracts]]))),
+        ),
+      ),
     )
     assert.include(
       messages(self),
@@ -198,8 +207,12 @@ impl<'text> Present for string<'text> {
 }
 pub fn main() -> i32 { return 0 }`),
     )
-    const self = yield* Analysis.make({ root }).pipe(
-      Effect.provide(SourceResolver.memory(new Map([['contracts', contracts]]))),
+    const self = yield* Analysis.make({ root: root.id }).pipe(
+      Effect.provide(
+        SourceResolver.overlay([root]).pipe(
+          Layer.provideMerge(SourceResolver.memory(new Map([['contracts', contracts]]))),
+        ),
+      ),
     )
     assert.deepEqual(
       Analysis.diagnostics(self).map((diagnostic) => diagnostic.code),

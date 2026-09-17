@@ -1,3 +1,4 @@
+import * as Layer from 'effect/Layer'
 import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
@@ -161,8 +162,14 @@ it.effect(
   () =>
     Effect.gen(function* () {
       const closure = yield* ModuleClosure.load({
-        root: SourceFile.make('silk/target', targetSource),
-      }).pipe(Effect.provide(SourceResolver.memory(new Map())))
+        root: 'silk/target',
+      }).pipe(
+        Effect.provide(
+          SourceResolver.overlay([SourceFile.make('silk/target', targetSource)]).pipe(
+            Layer.provideMerge(SourceResolver.memory(new Map())),
+          ),
+        ),
+      )
       const index = NameResolution.analyze(closure).index
       const module = index.modules.find((candidate) => candidate.module === 'silk/target')
 
@@ -634,8 +641,14 @@ it.effect('never consults a user resolver inside the reserved namespace', () =>
     // the compiler-shipped source instead.
     const hostile = new Map([['silk/vector', ascii('pub fn stolen() -> i32 { return 0 }')]])
     const closure = yield* ModuleClosure.load({
-      root: SourceFile.make('stdlib/hostile-importer', ascii(importing)),
-    }).pipe(Effect.provide(SourceResolver.memory(hostile)))
+      root: 'stdlib/hostile-importer',
+    }).pipe(
+      Effect.provide(
+        SourceResolver.overlay([SourceFile.make('stdlib/hostile-importer', ascii(importing))]).pipe(
+          Layer.provideMerge(SourceResolver.memory(hostile)),
+        ),
+      ),
+    )
     const library = closure.modules.find((module) => module.name === 'silk/vector')
     assert.isDefined(library)
     const librarySource = closure.sources.get('silk/vector')
@@ -649,33 +662,33 @@ it.effect('never consults a user resolver inside the reserved namespace', () =>
   }),
 )
 
-it.effect('rejects a user root claiming the reserved namespace', () =>
+it.effect('resolves reserved roots exclusively through toolchain authority', () =>
   Effect.gen(function* () {
-    const closure = yield* ModuleClosure.load({
-      root: SourceFile.make('silk/impostor', ascii('pub fn main() -> i32 { return 0 }')),
-    }).pipe(Effect.provide(SourceResolver.empty))
-    assert.include(
-      closure.diagnostics.map((diagnostic) => diagnostic.code),
-      'MOD0004',
-    )
-  }),
-)
-
-it.effect('admits exact toolchain roots without trusting a forged source origin', () =>
-  Effect.gen(function* () {
-    const bytes = Stdlib.sources.get('silk/bool') ?? unreachable('expected shipped bool source')
-    const supplied = yield* ModuleClosure.load({
-      root: SourceFile.make('silk/bool', bytes),
-    }).pipe(Effect.provide(SourceResolver.empty))
-    assert.isFalse(supplied.diagnostics.some((diagnostic) => diagnostic.code === 'MOD0004'))
-    const forged = yield* ModuleClosure.load({
-      root: SourceFile.make(
-        'silk/bool',
-        ascii('pub fn stolen() -> i32 { return 0 }'),
-        SourceOrigin.toolchainFile('silk/bool'),
+    const missing = yield* Effect.flip(
+      ModuleClosure.load({ root: 'silk/impostor' }).pipe(
+        Effect.provide(
+          SourceResolver.memory(
+            new Map([['silk/impostor', ascii('pub fn main() -> i32 { return 0 }')]]),
+          ),
+        ),
       ),
-    }).pipe(Effect.provide(SourceResolver.empty))
-    assert.isTrue(forged.diagnostics.some((diagnostic) => diagnostic.code === 'MOD0004'))
+    )
+    assert.deepEqual(missing.reason, { _tag: 'MissingRoot', module: 'silk/impostor' })
+    const supplied = yield* ModuleClosure.load({ root: 'silk/bool' }).pipe(
+      Effect.provide(
+        SourceResolver.overlay([
+          SourceFile.make(
+            'silk/bool',
+            ascii('pub fn stolen() -> i32 { return 0 }'),
+            SourceOrigin.toolchainFile('forged'),
+          ),
+        ]).pipe(Layer.provideMerge(SourceResolver.empty)),
+      ),
+    )
+    const source = supplied.sources.get('silk/bool') ?? unreachable('toolchain root')
+    assert.deepEqual(SourceFile.toUint8Array(source), Stdlib.sources.get('silk/bool'))
+    assert.strictEqual(source.origin._tag, 'Memory')
+    assert.deepEqual(supplied.diagnostics, [])
   }),
 )
 
@@ -767,11 +780,19 @@ pub fn main() -> i32 {
   return helped()
 }`
 
-const withHelper = (root: string): Effect.Effect<Analysis.Snapshot> =>
+const withHelper = (
+  root: string,
+): Effect.Effect<Analysis.Snapshot, ModuleClosure.ModuleClosureError> =>
   Analysis.makeRealized({
-    root: SourceFile.make('app/main', ascii(root)),
+    root: 'app/main',
     configuration: AnalysisFixture.configuration('app/main'),
-  }).pipe(Effect.provide(SourceResolver.memory(new Map([['app/helper', ascii(shadowedHelper)]]))))
+  }).pipe(
+    Effect.provide(
+      SourceResolver.overlay([SourceFile.make('app/main', ascii(root))]).pipe(
+        Layer.provideMerge(SourceResolver.memory(new Map([['app/helper', ascii(shadowedHelper)]]))),
+      ),
+    ),
+  )
 
 it.effect('keeps catalog declarations out of an importing sibling module', () =>
   Effect.gen(function* () {
@@ -849,11 +870,15 @@ it.effect(
       )
       for (const target of Target.all) {
         const selection = yield* SourceCatalog.analyze({
-          roots: [root, facade],
+          roots: [root, facade].map((source) => source.id),
           configuration: {
             profile: { target: target.id, artifact: 'object', runtime: { kind: 'none' } },
           },
-        }).pipe(Effect.provide(SourceResolver.empty))
+        }).pipe(
+          Effect.provide(
+            SourceResolver.overlay([root, facade]).pipe(Layer.provideMerge(SourceResolver.empty)),
+          ),
+        )
         assert.deepEqual(selection.closure.resolutionFailures, [])
         assert.deepEqual(selection.closure.diagnostics, [])
         for (const name of providers) {
@@ -889,11 +914,19 @@ pub fn portableProvider(value: MemoryTrustSource) -> () { return () }`
       const selected: Array<string> = []
       for (const target of Target.all) {
         const selection = yield* SourceCatalog.analyze({
-          roots: [SourceFile.make(`native-file-trust/${target.id}`, ascii(source))],
+          roots: [SourceFile.make(`native-file-trust/${target.id}`, ascii(source))].map(
+            (source) => source.id,
+          ),
           configuration: {
             profile: { target: target.id, artifact: 'object', runtime: { kind: 'none' } },
           },
-        }).pipe(Effect.provide(SourceResolver.empty))
+        }).pipe(
+          Effect.provide(
+            SourceResolver.overlay([
+              SourceFile.make(`native-file-trust/${target.id}`, ascii(source)),
+            ]).pipe(Layer.provideMerge(SourceResolver.empty)),
+          ),
+        )
         assert.deepEqual(selection.closure.resolutionFailures, [], target.id)
         const native = selection.catalog?.modules.get('silk/native_file_trust_source')
         const portable = selection.catalog?.modules.get('silk/memory_trust_source')
@@ -911,10 +944,7 @@ pub fn portableProvider(value: MemoryTrustSource) -> () { return () }`
       ]
       for (const profile of unavailable) {
         const snapshot = yield* Analysis.makeRealized({
-          root: SourceFile.make(
-            `native-file-trust/unavailable/${profile.target}/${profile.libc ?? 'default'}`,
-            ascii(source),
-          ),
+          root: `native-file-trust/unavailable/${profile.target}/${profile.libc ?? 'default'}`,
           configuration: {
             profile: {
               target: profile.target,
@@ -924,7 +954,16 @@ pub fn portableProvider(value: MemoryTrustSource) -> () { return () }`
               entry: { kind: 'none' },
             },
           },
-        }).pipe(Effect.provide(SourceResolver.empty))
+        }).pipe(
+          Effect.provide(
+            SourceResolver.overlay([
+              SourceFile.make(
+                `native-file-trust/unavailable/${profile.target}/${profile.libc ?? 'default'}`,
+                ascii(source),
+              ),
+            ]).pipe(Layer.provideMerge(SourceResolver.empty)),
+          ),
+        )
         assert.deepEqual(
           Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
           ['SEM0014'],

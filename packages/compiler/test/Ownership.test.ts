@@ -1,3 +1,4 @@
+import * as Layer from 'effect/Layer'
 import * as AnalysisFixture from './support/AnalysisFixture.js'
 import * as SourceResolver from '../src/SourceResolver.js'
 import { readFileSync } from 'node:fs'
@@ -2442,9 +2443,15 @@ pub fn main() -> i32 {
         'wasm32-unknown-unknown',
       )
       const front = yield* Analysis.make({
-        root: SourceFile.make(`ownership/reacquired-${name}`, ascii(source)),
+        root: `ownership/reacquired-${name}`,
         configuration: selected,
-      }).pipe(Effect.provide(SourceResolver.empty))
+      }).pipe(
+        Effect.provide(
+          SourceResolver.overlay([
+            SourceFile.make(`ownership/reacquired-${name}`, ascii(source)),
+          ]).pipe(Layer.provideMerge(SourceResolver.empty)),
+        ),
+      )
       assert.deepEqual(Analysis.diagnostics(front), [])
       const snapshot = yield* Analysis.realize(front, selected, {
         normalizeMir: false,

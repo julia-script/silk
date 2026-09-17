@@ -2,7 +2,6 @@ import * as Analysis from '@silklang/compiler/Analysis'
 import * as Diagnostic from '@silklang/compiler/Diagnostic'
 import * as FileSourceResolver from '@silklang/compiler/FileSourceResolver'
 import * as Project from '@silklang/compiler/Project'
-import * as SourceFile from '@silklang/compiler/SourceFile'
 import * as Json from '@silklang/docgen/Json'
 import * as DocumentationProject from '@silklang/docgen/Project'
 import * as Console from 'effect/Console'
@@ -55,9 +54,16 @@ export const run = Effect.fn('DocumentationWorkflow.run')(function* (
   }
   const project = loaded.success
   const resolver = FileSourceResolver.make(project.entry.sourceRoot)
-  const snapshot = yield* Analysis.make({
-    root: SourceFile.make(project.entry.module, project.entry.bytes),
-  }).pipe(Effect.provide(FileSourceResolver.layer(resolver)))
+  const attempted = yield* Effect.result(
+    Analysis.make({
+      root: project.entry.module,
+    }).pipe(Effect.provide(FileSourceResolver.layer(resolver))),
+  )
+  if (Result.isFailure(attempted)) {
+    yield* Console.error(attempted.failure.message)
+    return 2
+  }
+  const snapshot = attempted.success
   const catalog = Report.catalog(resolver, Analysis.sources(snapshot), path)
   const renderedDiagnostics = Report.diagnostics(Analysis.diagnostics(snapshot), catalog)
   const resolutionFailures = Report.resolutionFailures(Analysis.resolutionFailures(snapshot))

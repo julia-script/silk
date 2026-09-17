@@ -1,3 +1,4 @@
+import * as Layer from 'effect/Layer'
 import * as ArtifactComposition from '../src/ArtifactComposition.js'
 import * as CompilationProfile from '../src/CompilationProfile.js'
 import * as Target from '../src/Target.js'
@@ -17,9 +18,15 @@ it.effect('keeps explicit libraries and objects free of default startup and stor
     for (const target of ['aarch64-apple-darwin', 'wasm32-unknown-unknown']) {
       for (const artifact of ['object', 'loadable-module'] as const) {
         const snapshot = yield* Analysis.makeRealized({
-          root: SourceFile.make('library/empty', ascii('pub fn unused() -> i32 { return 42 }')),
+          root: 'library/empty',
           configuration: { profile: { target, artifact } },
-        }).pipe(Effect.provide(SourceResolver.empty))
+        }).pipe(
+          Effect.provide(
+            SourceResolver.overlay([
+              SourceFile.make('library/empty', ascii('pub fn unused() -> i32 { return 42 }')),
+            ]).pipe(Layer.provideMerge(SourceResolver.empty)),
+          ),
+        )
         assert.deepEqual(Analysis.diagnostics(snapshot), [])
         assert.deepEqual(
           Analysis.modules(snapshot).map((module) => module.name),
@@ -132,7 +139,11 @@ it.effect('loads default startup before realizing implicit-target convenience re
     const root = SourceFile.make('default/application', ascii('pub fn main() -> i32 { return 42 }'))
     for (const request of [
       Analysis.ofSourceRealized(root.id, Uint8Array.from(root.bytes)),
-      Analysis.makeRealized({ root }).pipe(Effect.provide(SourceResolver.empty)),
+      Analysis.makeRealized({ root: root.id }).pipe(
+        Effect.provide(
+          SourceResolver.overlay([root]).pipe(Layer.provideMerge(SourceResolver.empty)),
+        ),
+      ),
     ]) {
       const snapshot = yield* request
       assert.deepEqual(Analysis.diagnostics(snapshot), [])

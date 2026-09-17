@@ -1,3 +1,4 @@
+import * as Layer from 'effect/Layer'
 /**
  * The `<silk-snippet>` custom element.
  *
@@ -168,7 +169,7 @@ export class SilkSnippetElement extends HTMLElement {
     const bytes = encoder.encode(handle.value())
     const snapshot = Effect.runSync(
       Analysis.makeRealized({
-        root: SourceFile.make(this.#module, bytes),
+        root: this.#module,
         configuration: {
           profile: {
             target: this.getAttribute('target') ?? defaultTarget,
@@ -176,7 +177,13 @@ export class SilkSnippetElement extends HTMLElement {
             runtime: { kind: 'none' },
           },
         },
-      }).pipe(Effect.provide(SourceResolver.empty)),
+      }).pipe(
+        Effect.provide(
+          SourceResolver.overlay([SourceFile.make(this.#module, bytes)]).pipe(
+            Layer.provideMerge(SourceResolver.empty),
+          ),
+        ),
+      ),
     )
     handle.setSession(Editor.session(this.#module, bytes, snapshot))
     this.dispatchEvent(

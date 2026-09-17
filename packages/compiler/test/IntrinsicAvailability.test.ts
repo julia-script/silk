@@ -1,3 +1,4 @@
+import * as Layer from 'effect/Layer'
 import * as AnalysisFixture from './support/AnalysisFixture.js'
 import * as MirVerification from '../src/MirVerification.js'
 import * as NativeAssembly from '../src/NativeAssembly.js'
@@ -355,24 +356,30 @@ pub fn main() -> i32 { return 42 }`,
 const twoModules = (dependencyAbs: string) =>
   Analysis.makeRealized({
     configuration: AnalysisFixture.configuration('availability/foreign-root'),
-    root: SourceFile.make(
-      'availability/foreign-root',
-      encoder.encode(`import foreign_dep
-unsafe extern "C" fn abs(value: i32) -> i32
-pub fn main() -> i32 { return unsafe abs(-2) + foreign_dep.viaDep() }`),
-    ),
+    root: 'availability/foreign-root',
   }).pipe(
     Effect.provide(
-      SourceResolver.memory(
-        new Map([
-          [
-            'foreign_dep',
-            encoder.encode(`${dependencyAbs}
+      SourceResolver.overlay([
+        SourceFile.make(
+          'availability/foreign-root',
+          encoder.encode(`import foreign_dep
+unsafe extern "C" fn abs(value: i32) -> i32
+pub fn main() -> i32 { return unsafe abs(-2) + foreign_dep.viaDep() }`),
+        ),
+      ]).pipe(
+        Layer.provideMerge(
+          SourceResolver.memory(
+            new Map([
+              [
+                'foreign_dep',
+                encoder.encode(`${dependencyAbs}
 pub fn viaDep() -> i32 { let wide = unsafe abs(-1)
   drop wide
   return 0 }`),
-          ] as const,
-        ]),
+              ] as const,
+            ]),
+          ),
+        ),
       ),
     ),
   )
@@ -478,22 +485,28 @@ it.effect('seeds native discovery with an uncalled export and records it on MIR'
 const exportModules = (root: string, dependency: string, main = 'export_dep.viaDep()') =>
   Analysis.makeRealized({
     configuration: AnalysisFixture.configuration('availability/export-root'),
-    root: SourceFile.make(
-      'availability/export-root',
-      encoder.encode(`import export_dep
-${root}
-pub fn main() -> i32 { return ${main} }`),
-    ),
+    root: 'availability/export-root',
   }).pipe(
     Effect.provide(
-      SourceResolver.memory(
-        new Map([
-          [
-            'export_dep',
-            encoder.encode(`${dependency}
+      SourceResolver.overlay([
+        SourceFile.make(
+          'availability/export-root',
+          encoder.encode(`import export_dep
+${root}
+pub fn main() -> i32 { return ${main} }`),
+        ),
+      ]).pipe(
+        Layer.provideMerge(
+          SourceResolver.memory(
+            new Map([
+              [
+                'export_dep',
+                encoder.encode(`${dependency}
 pub fn viaDep() -> i32 { return 0 }`),
-          ] as const,
-        ]),
+              ] as const,
+            ]),
+          ),
+        ),
       ),
     ),
   )
@@ -762,15 +775,7 @@ pub fn main() -> i32 { unsafe { return first + second } }`)
 it.effect('lowers literal typed assembly through fixed and tied native registers', () =>
   Effect.gen(function* () {
     const analysis = yield* Analysis.makeRealized({
-      root: SourceFile.make(
-        'assembly',
-        encoder.encode(`
-unsafe fn add(left: u64, right: u64) -> u64 {
-  return unsafe Intrinsic.assembly<u64>("addq $2, $0", "={rax},0,{rdi}", "flags", "none", false, false, (left, right))
-}
-export "C" fn sum(left: u64, right: u64) -> u64 { return unsafe add(left, right) }
-`),
-      ),
+      root: 'assembly',
       configuration: {
         profile: {
           target: 'x86_64-unknown-linux-gnu',
@@ -778,7 +783,21 @@ export "C" fn sum(left: u64, right: u64) -> u64 { return unsafe add(left, right)
           runtime: { kind: 'none' },
         },
       },
-    }).pipe(Effect.provide(SourceResolver.empty))
+    }).pipe(
+      Effect.provide(
+        SourceResolver.overlay([
+          SourceFile.make(
+            'assembly',
+            encoder.encode(`
+unsafe fn add(left: u64, right: u64) -> u64 {
+  return unsafe Intrinsic.assembly<u64>("addq $2, $0", "={rax},0,{rdi}", "flags", "none", false, false, (left, right))
+}
+export "C" fn sum(left: u64, right: u64) -> u64 { return unsafe add(left, right) }
+`),
+          ),
+        ]).pipe(Layer.provideMerge(SourceResolver.empty)),
+      ),
+    )
     assert.deepEqual(Analysis.diagnostics(analysis), [])
     const artifact = yield* Analysis.codegen(analysis, { mode: 'release' })
     assert.match(artifact.ir, /asm "addq \$2, \$0", "=\{rax\},0,\{rdi\},~\{flags\}"/)
@@ -813,14 +832,7 @@ export "C" fn sum(left: u64, right: u64) -> u64 { return unsafe add(left, right)
 it.effect('emits a naked entry directly at its C symbol', () =>
   Effect.gen(function* () {
     const analysis = yield* Analysis.makeRealized({
-      root: SourceFile.make(
-        'entry',
-        encoder.encode(`
-unsafe export "C" fn entry() -> () as "native_entry" with Intrinsic.machine(naked: true, noReturn: true) {
-  return unsafe Intrinsic.assembly<()>("movq %rsp, %rdi\\njmp native_entry_probe", "", "", "readwrite", true, true, ())
-}
-`),
-      ),
+      root: 'entry',
       configuration: {
         profile: {
           target: 'x86_64-unknown-linux-gnu',
@@ -828,7 +840,20 @@ unsafe export "C" fn entry() -> () as "native_entry" with Intrinsic.machine(nake
           runtime: { kind: 'none' },
         },
       },
-    }).pipe(Effect.provide(SourceResolver.empty))
+    }).pipe(
+      Effect.provide(
+        SourceResolver.overlay([
+          SourceFile.make(
+            'entry',
+            encoder.encode(`
+unsafe export "C" fn entry() -> () as "native_entry" with Intrinsic.machine(naked: true, noReturn: true) {
+  return unsafe Intrinsic.assembly<()>("movq %rsp, %rdi\\njmp native_entry_probe", "", "", "readwrite", true, true, ())
+}
+`),
+          ),
+        ]).pipe(Layer.provideMerge(SourceResolver.empty)),
+      ),
+    )
     assert.deepEqual(Analysis.diagnostics(analysis), [])
     const artifact = yield* Analysis.codegen(analysis, { mode: 'release' })
     assert.match(artifact.ir, /define void @native_entry\(/)
@@ -915,12 +940,7 @@ it.effect('rejects compiler work in naked bodies and nonliteral machine properti
       ['naked: true', 'return ()'],
     ]) {
       const analysis = yield* Analysis.makeRealized({
-        root: SourceFile.make(
-          'invalid-entry',
-          encoder.encode(
-            `unsafe export "C" fn entry() -> () with Intrinsic.machine(${properties}) { ${body} }`,
-          ),
-        ),
+        root: 'invalid-entry',
         configuration: {
           profile: {
             target: 'x86_64-unknown-linux-gnu',
@@ -928,7 +948,18 @@ it.effect('rejects compiler work in naked bodies and nonliteral machine properti
             runtime: { kind: 'none' },
           },
         },
-      }).pipe(Effect.provide(SourceResolver.empty))
+      }).pipe(
+        Effect.provide(
+          SourceResolver.overlay([
+            SourceFile.make(
+              'invalid-entry',
+              encoder.encode(
+                `unsafe export "C" fn entry() -> () with Intrinsic.machine(${properties}) { ${body} }`,
+              ),
+            ),
+          ]).pipe(Layer.provideMerge(SourceResolver.empty)),
+        ),
+      )
       const diagnostic =
         Analysis.diagnostics(analysis).find((entry) => entry.code === 'SEM0214') ??
         unreachable('expected machine contract rejection')
@@ -942,12 +973,7 @@ it.effect('rejects naked instrumentation and unwind profiles before emission', (
   Effect.gen(function* () {
     for (const extra of [{ unwind: 'native' as const }, { sanitizers: ['address' as const] }]) {
       const analysis = yield* Analysis.makeRealized({
-        root: SourceFile.make(
-          'profile-entry',
-          encoder.encode(
-            `unsafe export "C" fn entry() -> () with Intrinsic.machine(naked: true, noReturn: true) { return unsafe Intrinsic.assembly<()>("ud2", "", "", "none", true, true, ()) }`,
-          ),
-        ),
+        root: 'profile-entry',
         configuration: {
           profile: {
             target: 'x86_64-unknown-linux-gnu',
@@ -956,7 +982,18 @@ it.effect('rejects naked instrumentation and unwind profiles before emission', (
             ...extra,
           },
         },
-      }).pipe(Effect.provide(SourceResolver.empty))
+      }).pipe(
+        Effect.provide(
+          SourceResolver.overlay([
+            SourceFile.make(
+              'profile-entry',
+              encoder.encode(
+                `unsafe export "C" fn entry() -> () with Intrinsic.machine(naked: true, noReturn: true) { return unsafe Intrinsic.assembly<()>("ud2", "", "", "none", true, true, ()) }`,
+              ),
+            ),
+          ]).pipe(Layer.provideMerge(SourceResolver.empty)),
+        ),
+      )
       assert.include(
         Analysis.diagnostics(analysis).map((entry) => entry.code),
         'SEM0214',
@@ -968,12 +1005,7 @@ it.effect('rejects naked instrumentation and unwind profiles before emission', (
 it.effect('rejects assembly in static functions at the source boundary', () =>
   Effect.gen(function* () {
     const analysis = yield* Analysis.makeRealized({
-      root: SourceFile.make(
-        'static-assembly',
-        encoder.encode(
-          `static fn machine() -> u64 { return unsafe Intrinsic.assembly<u64>("movq $$1, $0", "={rax}", "", "none", false, false, ()) }`,
-        ),
-      ),
+      root: 'static-assembly',
       configuration: {
         profile: {
           target: 'x86_64-unknown-linux-gnu',
@@ -981,7 +1013,18 @@ it.effect('rejects assembly in static functions at the source boundary', () =>
           runtime: { kind: 'none' },
         },
       },
-    }).pipe(Effect.provide(SourceResolver.empty))
+    }).pipe(
+      Effect.provide(
+        SourceResolver.overlay([
+          SourceFile.make(
+            'static-assembly',
+            encoder.encode(
+              `static fn machine() -> u64 { return unsafe Intrinsic.assembly<u64>("movq $$1, $0", "={rax}", "", "none", false, false, ()) }`,
+            ),
+          ),
+        ]).pipe(Layer.provideMerge(SourceResolver.empty)),
+      ),
+    )
     assert.include(
       Analysis.diagnostics(analysis).map((entry) => entry.code),
       'SEM0176',
@@ -998,12 +1041,7 @@ it.effect('reports source assembly constraints and target admission with call sp
       ['wasm32-unknown-unknown', '={rax},0', 'value', 'SEM0093'],
     ] as const) {
       const analysis = yield* Analysis.makeRealized({
-        root: SourceFile.make(
-          'bad-assembly',
-          encoder.encode(
-            `pub fn machine(value: u64) -> u64 { return unsafe Intrinsic.assembly<u64>("", "${constraint}", "", "none", false, false, (${operand},)) }`,
-          ),
-        ),
+        root: 'bad-assembly',
         configuration: {
           profile: { target, artifact: 'object', runtime: { kind: 'none' } },
           composition: {
@@ -1013,7 +1051,18 @@ it.effect('reports source assembly constraints and target admission with call sp
             retention: [{ module: 'bad-assembly', declaration: 'machine' }],
           },
         },
-      }).pipe(Effect.provide(SourceResolver.empty))
+      }).pipe(
+        Effect.provide(
+          SourceResolver.overlay([
+            SourceFile.make(
+              'bad-assembly',
+              encoder.encode(
+                `pub fn machine(value: u64) -> u64 { return unsafe Intrinsic.assembly<u64>("", "${constraint}", "", "none", false, false, (${operand},)) }`,
+              ),
+            ),
+          ]).pipe(Layer.provideMerge(SourceResolver.empty)),
+        ),
+      )
       assert.include(
         Analysis.diagnostics(analysis).map((entry) => entry.code),
         expected,
@@ -1036,11 +1085,17 @@ import silk.os_standard_input { OsStandardInput }
 pub fn main() -> i32 { return 42 }`
     for (const target of Target.native) {
       const self = yield* Analysis.makeRealized({
-        root: SourceFile.make('stream-selection/main', encoder.encode(source)),
+        root: 'stream-selection/main',
         configuration: {
           profile: { target: target.id, artifact: 'object', libc: 'none', entry: { kind: 'none' } },
         },
-      }).pipe(Effect.provide(SourceResolver.empty))
+      }).pipe(
+        Effect.provide(
+          SourceResolver.overlay([
+            SourceFile.make('stream-selection/main', encoder.encode(source)),
+          ]).pipe(Layer.provideMerge(SourceResolver.empty)),
+        ),
+      )
       assert.deepEqual(
         Analysis.diagnostics(self).map((value) => [value.code, value.span.start, value.span.end]),
         ['StdoutWriter', 'StdoutLogger', 'OsStandardInput'].map((name) => [
@@ -1102,11 +1157,17 @@ import silk.native_clock { NativeClock }
 pub fn main() -> i32 { return 42 }`
     for (const target of Target.native) {
       const self = yield* Analysis.makeRealized({
-        root: SourceFile.make('clock-selection/main', encoder.encode(source)),
+        root: 'clock-selection/main',
         configuration: {
           profile: { target: target.id, artifact: 'object', libc: 'none', entry: { kind: 'none' } },
         },
-      }).pipe(Effect.provide(SourceResolver.empty))
+      }).pipe(
+        Effect.provide(
+          SourceResolver.overlay([
+            SourceFile.make('clock-selection/main', encoder.encode(source)),
+          ]).pipe(Layer.provideMerge(SourceResolver.empty)),
+        ),
+      )
       assert.deepEqual(
         Analysis.diagnostics(self).map((value) => [value.code, value.span.start, value.span.end]),
         ['OsSystemClock', 'OsMonotonicClock', 'NativeClock'].map((name) => [

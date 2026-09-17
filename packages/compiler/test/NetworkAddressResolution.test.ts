@@ -1,3 +1,4 @@
+import * as Layer from 'effect/Layer'
 import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { readFileSync } from 'node:fs'
 import { assert, it } from '@effect/vitest'
@@ -104,11 +105,17 @@ it.effect(
             : `${implementation}\n${resolverImplementation}\n${nativeResolverImplementation}\n${entry}`
         const sourceId = `network-address/native-${target}`
         const snapshot = yield* Analysis.makeRealized({
-          root: SourceFile.make(sourceId, encoder.encode(source)),
+          root: sourceId,
           configuration: AnalysisFixture.configuration(sourceId, target, [
             target === 'wasm32-unknown-unknown' ? 'main' : 'nativeProgram',
           ]),
-        }).pipe(Effect.provide(SourceResolver.empty))
+        }).pipe(
+          Effect.provide(
+            SourceResolver.overlay([SourceFile.make(sourceId, encoder.encode(source))]).pipe(
+              Layer.provideMerge(SourceResolver.empty),
+            ),
+          ),
+        )
         assert.deepEqual(
           Analysis.diagnostics(snapshot).map((diagnostic) => ({
             code: diagnostic.code,

@@ -1,3 +1,5 @@
+import * as Option from 'effect/Option'
+import * as SourceOrigin from '../dist/SourceOrigin.js'
 // Writes the source-located standard-library documentation inventory used by documentation passes.
 //
 // Run after building the compiler and documentation packages:
@@ -100,9 +102,27 @@ const program = Effect.gen(function* () {
     sources.push({ manifest, bytes, root: SourceFile.make(manifest.module, bytes) })
   }
   const analysis = yield* ProjectAnalysis.make(
-    sources.map((entry) => entry.root),
+    sources.map((entry) => entry.root).map((source) => source.id),
     { configuration: { profile: { target: 'aarch64-apple-darwin' } } },
-  ).pipe(Effect.provide(SourceResolver.empty))
+  ).pipe(
+    Effect.provideService(SourceResolver.SourceResolver, {
+      resolve: () => Effect.succeedNone(),
+      resolveStandardLibrary: (module) =>
+        Effect.succeed(
+          Option.fromUndefinedOr(sources.find((entry) => entry.root.id === module)).pipe(
+            Option.map((entry) => SourceResolver.resolved(entry.bytes, SourceOrigin.memory())),
+          ),
+        ),
+      toolchainSources: Effect.succeed(
+        new Map(
+          sources.map((entry) => [
+            entry.root.id,
+            SourceResolver.resolved(entry.bytes, SourceOrigin.memory()),
+          ]),
+        ),
+      ),
+    }),
+  )
   const project = DocumentationProject.fromProjectAnalysis(analysis)
   const modules = []
   for (const source of sources) {

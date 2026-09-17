@@ -1,6 +1,5 @@
 import * as Effect from 'effect/Effect'
 import * as Option from 'effect/Option'
-import * as Result from 'effect/Result'
 import type * as CompilationProfile from './CompilationProfile.js'
 import * as ConfigurationError from './ConfigurationError.js'
 import * as Diagnostic from './Diagnostic.js'
@@ -268,49 +267,9 @@ export const select = Effect.fn('ModuleSelection.select')(function* (
     readonly closure: ModuleClosure.ProjectClosure
     readonly selection: ModuleSelection
   },
-  never,
+  ModuleClosure.ModuleClosureError,
   SourceResolver.SourceResolver
 > {
-  const resolver = yield* SourceResolver.SourceResolver
-  const resolved = new Map<
-    string,
-    Result.Result<Option.Option<SourceResolver.ResolvedSource>, SourceResolver.SourceResolverError>
-  >()
-
-  for (const module of initial.modules) {
-    resolved.set(
-      module.name,
-      Result.succeed(
-        Option.some(
-          SourceResolver.resolved(
-            SourceFile.toUint8Array(module.syntax.source),
-            module.syntax.source.origin,
-          ),
-        ),
-      ),
-    )
-    for (const imported of module.imports) {
-      if (imported.target._tag === 'Unknown')
-        resolved.set(imported.target.module, Result.succeed(Option.none()))
-      if (imported.target._tag === 'Failed')
-        resolved.set(imported.target.module, Result.fail(imported.target.error))
-    }
-  }
-  const memoized = (resolve: typeof resolver.resolve) =>
-    Effect.fnUntraced(function* (module: string) {
-      let result = resolved.get(module)
-      if (result === undefined) {
-        result = yield* Effect.result(resolve(module))
-        resolved.set(module, result)
-      }
-      if (Result.isFailure(result)) return yield* result.failure
-      return result.success
-    })
-  const supply = SourceResolver.SourceResolver.of({
-    ...resolver,
-    resolve: memoized(resolver.resolve),
-    resolveStandardLibrary: memoized(resolver.resolveStandardLibrary),
-  })
   const decisions = new Map<string, Map<number, boolean>>()
   const bootstrapModules = new Set(initial.modules.map((module) => module.name))
   const dependencies: Array<string> = []
@@ -368,7 +327,7 @@ export const select = Effect.fn('ModuleSelection.select')(function* (
       ...request,
       previous: closure,
       selection: decisions,
-    }).pipe(Effect.provideService(SourceResolver.SourceResolver, supply))
+    })
     const conditionalSchemas = closure.modules.flatMap((module) =>
       bootstrapModules.has(module.name)
         ? []

@@ -1,3 +1,4 @@
+import type * as ModuleClosure from '@silklang/compiler/ModuleClosure'
 import { assert, it } from '@effect/vitest'
 import * as Analysis from '@silklang/compiler/Analysis'
 import * as Lexer from '@silklang/compiler/Lexer'
@@ -22,10 +23,13 @@ const encoder = new TextEncoder()
 const open = (
   text: string,
   target?: string,
-): Effect.Effect<{
-  readonly document: Document.Document
-  readonly snapshot: Analysis.FrontendSnapshot
-}> =>
+): Effect.Effect<
+  {
+    readonly document: Document.Document
+    readonly snapshot: Analysis.FrontendSnapshot
+  },
+  ModuleClosure.ModuleClosureError
+> =>
   Effect.gen(function* () {
     const bytes = encoder.encode(text)
     const snapshot = yield* Analysis.ofSource('main', bytes, target)
@@ -1165,8 +1169,14 @@ it.effect('uses exact cross-module snapshot sources for qualified definition lin
     const root = 'import lib\npub fn main() -> i32 { return lib.answer() }'
     const lib = 'pub fn answer() -> i32 { return 42 }'
     const snapshot = yield* Analysis.make({
-      root: SourceFile.make('root', encoder.encode(root)),
-    }).pipe(Effect.provide(SourceResolver.memory(new Map([['lib', encoder.encode(lib)]]))))
+      root: 'root',
+    }).pipe(
+      Effect.provide(
+        SourceResolver.overlay([SourceFile.make('root', encoder.encode(root))]).pipe(
+          Layer.provideMerge(SourceResolver.memory(new Map([['lib', encoder.encode(lib)]]))),
+        ),
+      ),
+    )
     const document = Document.make({
       uri: 'file:///project/root.silk',
       version: 1,
@@ -1265,17 +1275,30 @@ const toolchainResolver = (
 const openProject = (
   modules: ReadonlyArray<ProjectModule>,
   focus: string,
-): Effect.Effect<{
-  readonly document: Document.Document
-  readonly snapshot: Analysis.FrontendSnapshot
-}> =>
+): Effect.Effect<
+  {
+    readonly document: Document.Document
+    readonly snapshot: Analysis.FrontendSnapshot
+  },
+  ModuleClosure.ModuleClosureError
+> =>
   Effect.gen(function* () {
     const bytes = new Map(
       modules.map(({ module, text }) => [module, encoder.encode(text)] as const),
     )
     const project = yield* ProjectAnalysis.make(
-      modules.map(({ module }) => SourceFile.make(module, bytes.get(module) ?? new Uint8Array())),
-    ).pipe(Effect.provide(toolchainResolver(bytes)))
+      modules
+        .map(({ module }) => SourceFile.make(module, bytes.get(module) ?? new Uint8Array()))
+        .map((source) => source.id),
+    ).pipe(
+      Effect.provide(
+        SourceResolver.overlay(
+          modules.map(({ module }) =>
+            SourceFile.make(module, bytes.get(module) ?? new Uint8Array()),
+          ),
+        ).pipe(Layer.provideMerge(toolchainResolver(bytes))),
+      ),
+    )
     const snapshot = ProjectAnalysis.view(project, focus)
     if (snapshot === undefined) throw new Error(`Project analysis lost focused root ${focus}`)
     return {
@@ -2823,11 +2846,20 @@ it.effect('marks compiler-selected inactive tokens without exposing inactive sym
     const source =
       'static if Intrinsic.targetOperatingSystem() == "darwin" { pub fn active() -> i32 { return 1 } } else { pub fn inactive() -> i32 { return 2 } }'
     const bytes = encoder.encode(source)
-    const project = yield* ProjectAnalysis.make([SourceFile.make('main', bytes)], {
-      configuration: {
-        profile: { target: 'aarch64-apple-darwin', artifact: 'object', entry: { kind: 'none' } },
+    const project = yield* ProjectAnalysis.make(
+      [SourceFile.make('main', bytes)].map((source) => source.id),
+      {
+        configuration: {
+          profile: { target: 'aarch64-apple-darwin', artifact: 'object', entry: { kind: 'none' } },
+        },
       },
-    }).pipe(Effect.provide(SourceResolver.empty))
+    ).pipe(
+      Effect.provide(
+        SourceResolver.overlay([SourceFile.make('main', bytes)]).pipe(
+          Layer.provideMerge(SourceResolver.empty),
+        ),
+      ),
+    )
     const snapshot = ProjectAnalysis.view(project, 'main')
     assert.ok(snapshot)
     const document = Document.make({

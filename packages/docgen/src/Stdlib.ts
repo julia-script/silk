@@ -1,5 +1,5 @@
+import type * as ModuleClosure from '@silklang/compiler/ModuleClosure'
 import * as ProjectAnalysis from '@silklang/compiler/ProjectAnalysis'
-import * as SourceFile from '@silklang/compiler/SourceFile'
 import * as SourceResolver from '@silklang/compiler/SourceResolver'
 import * as CompilerStdlib from '@silklang/compiler/Stdlib'
 import * as Effect from 'effect/Effect'
@@ -25,15 +25,8 @@ export const sources: Sources.Lookup = (sourceId) => CompilerStdlib.sources.get(
  */
 export const documentation = Effect.fn('Stdlib.documentation')(function* (
   target: string,
-): Effect.fn.Return<DocumentationProject.Project, never, never> {
-  const roots: Array<SourceFile.SourceFile> = []
-  for (const entry of CompilerStdlib.manifest) {
-    const bytes = CompilerStdlib.sources.get(entry.module)
-    if (bytes === undefined)
-      return yield* Effect.die(`Missing compiler-shipped stdlib source: ${entry.module}`)
-    roots.push(SourceFile.make(entry.module, bytes))
-  }
-  if (roots.length === 0) return yield* Effect.die('The stdlib manifest is empty')
+): Effect.fn.Return<DocumentationProject.Project, ModuleClosure.ModuleClosureError> {
+  const roots = CompilerStdlib.manifest.map((entry) => entry.module)
   const analysis = yield* ProjectAnalysis.make(roots, {
     configuration: { profile: { target } },
   }).pipe(Effect.provide(SourceResolver.empty))

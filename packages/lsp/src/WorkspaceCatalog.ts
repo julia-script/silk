@@ -1,3 +1,4 @@
+import type * as ModuleClosure from '@silklang/compiler/ModuleClosure'
 import * as Lexer from '@silklang/compiler/Lexer'
 import * as ModuleSummary from '@silklang/compiler/ModuleSummary'
 import * as Parser from '@silklang/compiler/Parser'
@@ -144,7 +145,7 @@ export const refresh = Effect.fn('WorkspaceCatalog.refresh')(function* (
   request: Request,
 ): Effect.fn.Return<
   WorkspaceInventory.WorkspaceInventory,
-  never,
+  ModuleClosure.ModuleClosureError,
   FileSystem.FileSystem | Path.Path | SourceResolver.SourceResolver
 > {
   const fileSystem = yield* FileSystem.FileSystem
@@ -204,7 +205,7 @@ export const refresh = Effect.fn('WorkspaceCatalog.refresh')(function* (
   const priorAnalysis = request.previous === undefined ? undefined : analyses.get(request.previous)
   const analysis = yield* SourceCatalog.analyze(
     {
-      roots,
+      roots: roots.map((source) => source.id),
       ...(request.configuration.application === undefined
         ? {}
         : { application: request.configuration.application }),
@@ -214,7 +215,7 @@ export const refresh = Effect.fn('WorkspaceCatalog.refresh')(function* (
       ...(priorAnalysis === undefined ? {} : { previous: priorAnalysis.closure }),
     },
     priorAnalysis?.catalog,
-  )
+  ).pipe(Effect.provide(SourceResolver.overlay(roots)))
   const catalog =
     request.configuration.configurationError === undefined ? analysis.catalog : undefined
   const selected = catalog?.modules ?? new Map<string, ModuleSummary.ModuleSummary>()
@@ -235,13 +236,16 @@ export const refresh = Effect.fn('WorkspaceCatalog.refresh')(function* (
 
 /** A generation's lazy catalog; only completed selections are retained for later revisions. */
 export interface DeferredInventory {
-  readonly get: Effect.Effect<WorkspaceInventory.WorkspaceInventory>
+  readonly get: Effect.Effect<
+    WorkspaceInventory.WorkspaceInventory,
+    ModuleClosure.ModuleClosureError
+  >
   readonly completed: Effect.Effect<Option.Option<WorkspaceInventory.WorkspaceInventory>>
 }
 
 /** Shares successful selection while allowing an interrupted query to retry. */
 export const defer = Effect.fn('WorkspaceCatalog.defer')(function* (
-  select: Effect.Effect<WorkspaceInventory.WorkspaceInventory>,
+  select: Effect.Effect<WorkspaceInventory.WorkspaceInventory, ModuleClosure.ModuleClosureError>,
 ): Effect.fn.Return<DeferredInventory> {
   const completed = yield* Ref.make(Option.none<WorkspaceInventory.WorkspaceInventory>())
   const permit = yield* Semaphore.make(1)
@@ -262,7 +266,11 @@ export const retain = Effect.fn('WorkspaceCatalog.retain')(function* (
   inventory: DeferredInventory,
   scope: Scope.Scope,
 ): Effect.fn.Return<DeferredInventory> {
-  const started = yield* Ref.make(Option.none<Fiber.Fiber<WorkspaceInventory.WorkspaceInventory>>())
+  const started = yield* Ref.make(
+    Option.none<
+      Fiber.Fiber<WorkspaceInventory.WorkspaceInventory, ModuleClosure.ModuleClosureError>
+    >(),
+  )
   const permit = yield* Semaphore.make(1)
   const start = permit
     .withPermit(

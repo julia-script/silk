@@ -155,7 +155,7 @@ pub fn main() -> i32 { let rooted = unsafe supply_archive_root()
         const destination = path.join(output, `${target}-${optimization}`)
         const outcome = yield* Driver.compile({
           compilation: {
-            root: SourceFile.make('fixture/main', new TextEncoder().encode(source)),
+            root: 'fixture/main',
             configuration: { profile: input },
           },
           toolchain: tools,
@@ -171,7 +171,13 @@ pub fn main() -> i32 { let rooted = unsafe supply_archive_root()
               target.includes('apple') ? 'Dynamic' : 'Static',
             ),
           ],
-        }).pipe(Effect.provide(SourceResolver.empty))
+        }).pipe(
+          Effect.provide(
+            SourceResolver.overlay([
+              SourceFile.make('fixture/main', new TextEncoder().encode(source)),
+            ]).pipe(Layer.provideMerge(SourceResolver.empty)),
+          ),
+        )
         if (outcome._tag !== 'Compiled' || outcome.linkPlan === undefined)
           return yield* new ConformanceError({
             message: `Required compilation failed: ${yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(outcome).pipe(Effect.orDie)}`,

@@ -139,9 +139,15 @@ const program = Effect.gen(function* () {
       'platform-conformance',
       Effect.fnUntraced(function* (scope) {
         const snapshot = yield* Analysis.makeRealized({
-          root: SourceFile.make('conformance/variadics', source),
+          root: 'conformance/variadics',
           configuration: { profile: input },
-        }).pipe(Effect.provide(SourceResolver.empty))
+        }).pipe(
+          Effect.provide(
+            SourceResolver.overlay([SourceFile.make('conformance/variadics', source)]).pipe(
+              Layer.provideMerge(SourceResolver.empty),
+            ),
+          ),
+        )
         if (Analysis.diagnostics(snapshot).length !== 0)
           return yield* new ConformanceError({
             message: yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(

@@ -1,3 +1,4 @@
+import * as Layer from 'effect/Layer'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
@@ -9,16 +10,24 @@ const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
 
 const analyze = (text: string) =>
-  Analysis.makeRealized({ root: SourceFile.make('main', ascii(text)) }).pipe(
-    Effect.provide(SourceResolver.memory(new Map())),
+  Analysis.makeRealized({ root: 'main' }).pipe(
+    Effect.provide(
+      SourceResolver.overlay([SourceFile.make('main', ascii(text))]).pipe(
+        Layer.provideMerge(SourceResolver.memory(new Map())),
+      ),
+    ),
   )
 
 const analyzeModules = (rootModule: string, entries: ReadonlyArray<readonly [string, string]>) => {
   const sources = new Map(entries.map(([module, text]) => [module, ascii(text)] as const))
   const root = sources.get(rootModule)
   if (root === undefined) throw new Error(`missing root module ${rootModule}`)
-  return Analysis.makeRealized({ root: SourceFile.make(rootModule, root) }).pipe(
-    Effect.provide(SourceResolver.memory(sources)),
+  return Analysis.makeRealized({ root: rootModule }).pipe(
+    Effect.provide(
+      SourceResolver.overlay([SourceFile.make(rootModule, root)]).pipe(
+        Layer.provideMerge(SourceResolver.memory(sources)),
+      ),
+    ),
   )
 }
 
@@ -255,8 +264,12 @@ pub fn main() -> i32 {
 )
 
 const analyzeFrontend = Effect.fnUntraced(function* (text: string) {
-  return yield* Analysis.make({ root: SourceFile.make('main', ascii(text)) }).pipe(
-    Effect.provide(SourceResolver.memory(new Map())),
+  return yield* Analysis.make({ root: 'main' }).pipe(
+    Effect.provide(
+      SourceResolver.overlay([SourceFile.make('main', ascii(text))]).pipe(
+        Layer.provideMerge(SourceResolver.memory(new Map())),
+      ),
+    ),
   )
 })
 

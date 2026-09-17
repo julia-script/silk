@@ -1,3 +1,4 @@
+import * as Layer from 'effect/Layer'
 import * as ConfigurationOrigin from '@silklang/compiler/ConfigurationOrigin'
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -481,7 +482,7 @@ it.effect(
       assert.ok(after)
       assert.notStrictEqual(before.identity, after.identity)
       const direct = yield* Analysis.make({
-        root: SourceFile.make('Main', bytes),
+        root: 'Main',
         configuration: {
           package: 'demo@0.1.0',
           profile: { target: 'wasm32-unknown-unknown' },
@@ -496,7 +497,13 @@ it.effect(
             },
           ],
         },
-      }).pipe(Effect.provide(SourceResolver.empty))
+      }).pipe(
+        Effect.provide(
+          SourceResolver.overlay([SourceFile.make('Main', bytes)]).pipe(
+            Layer.provideMerge(SourceResolver.empty),
+          ),
+        ),
+      )
       assert.strictEqual(after.identity, direct.profile?.identity)
       const session = next.get(right.uri)
       assert.ok(session)

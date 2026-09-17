@@ -1,3 +1,4 @@
+import * as Layer from 'effect/Layer'
 import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
@@ -23,9 +24,13 @@ const snapshot = (target?: string) =>
 const multiSnapshot = (rootModule: string, sources: ReadonlyMap<string, Uint8Array>) => {
   const root = sources.get(rootModule)
   if (root === undefined) throw new RangeError(`Fixture has no root source ${rootModule}`)
-  return Analysis.makeRealized({ root: SourceFile.make(rootModule, root) }).pipe(
+  return Analysis.makeRealized({ root: rootModule }).pipe(
     Effect.provide(
-      SourceResolver.memory(new Map([...sources].filter(([module]) => module !== rootModule))),
+      SourceResolver.overlay([SourceFile.make(rootModule, root)]).pipe(
+        Layer.provideMerge(
+          SourceResolver.memory(new Map([...sources].filter(([module]) => module !== rootModule))),
+        ),
+      ),
     ),
   )
 }

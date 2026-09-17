@@ -1,3 +1,4 @@
+import * as Layer from 'effect/Layer'
 import * as CompilerTrace from '../src/CompilerTrace.js'
 import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { assert, it } from '@effect/vitest'
@@ -91,9 +92,9 @@ static if Intrinsic.targetOperatingSystem() == "darwin" {
   pub fn value() -> i32 { return 2 }
 }`)
     const requests: ReadonlyArray<ModuleClosure.CompilationRequest> = [
-      { root: SourceFile.make('ordinary', ascii('pub fn value() -> i32 { return 0 }')) },
+      { root: 'ordinary' },
       {
-        root: SourceFile.make('selected', conditional),
+        root: 'selected',
         configuration: {
           profile: {
             target: 'aarch64-apple-darwin',
@@ -102,7 +103,7 @@ static if Intrinsic.targetOperatingSystem() == "darwin" {
           },
         },
       },
-      { root: SourceFile.make('incomplete', conditional) },
+      { root: 'incomplete' },
     ]
     for (const request of requests) {
       const spans: Array<Tracer.Span> = []
@@ -114,36 +115,45 @@ static if Intrinsic.targetOperatingSystem() == "darwin" {
         },
       })
       const frontend = yield* Frontend.frontend(request).pipe(
-        Effect.provide(SourceResolver.empty),
+        Effect.provide(
+          SourceResolver.memory(
+            new Map([
+              [
+                request.root,
+                request.root === 'ordinary'
+                  ? ascii('pub fn value() -> i32 { return 0 }')
+                  : conditional,
+              ],
+            ]),
+          ),
+        ),
         Effect.withTracer(tracer),
       )
       const root =
         spans.find((span) => span.name === 'Frontend.frontend') ?? unreachable('frontend span')
-      assert.strictEqual(root.attributes.get('frontend.root'), request.root.id)
+      assert.strictEqual(root.attributes.get('frontend.root'), request.root)
       assert.strictEqual(
         root.attributes.get('frontend.requiresSelection'),
-        request.root.id !== 'ordinary',
+        request.root !== 'ordinary',
       )
       for (const name of [
         'normalizeProfile',
         'decodeBindings',
         'snapshotConfiguration',
-        'loadAdditionalRoots',
-        'loadClosure',
         'assembleSnapshot',
       ]) {
         const span = spans.find((span) => span.name === `Frontend.${name}`) ?? unreachable(name)
         assert.strictEqual(Option.getOrUndefined(span.parent)?.spanId, root.spanId)
       }
       for (const span of spans) assert.strictEqual(span.status._tag, 'Ended', span.name)
-      if (request.root.id === 'incomplete') {
+      if (request.root === 'incomplete') {
         assert.isTrue(spans.some((span) => span.name === 'Frontend.diagnoseIncompleteProfile'))
         assert.isFalse(spans.some((span) => span.name === 'Frontend.analyzeFrontend'))
         assert.isAbove(frontend.diagnostics.length, 0)
       } else {
         assert.deepEqual(frontend.diagnostics, [])
         assert.isTrue(spans.some((span) => span.name === 'Frontend.analyzeSemantics'))
-        assert.strictEqual(frontend.selection !== undefined, request.root.id === 'selected')
+        assert.strictEqual(frontend.selection !== undefined, request.root === 'selected')
       }
     }
   }),
@@ -152,7 +162,7 @@ static if Intrinsic.targetOperatingSystem() == "darwin" {
 const snapshot = (
   rootModule: string,
   entries: ReadonlyArray<readonly [string, string]>,
-): Effect.Effect<Analysis.Snapshot> => {
+): Effect.Effect<Analysis.Snapshot, ModuleClosure.ModuleClosureError> => {
   const rootText = entries.find(([name]) => name === rootModule)?.[1]
   if (rootText === undefined) throw new RangeError(`Fixture has no root source ${rootModule}`)
   const imports = new Map(
@@ -161,9 +171,15 @@ const snapshot = (
       .map(([name, text]) => [name, ascii(text)] as const),
   )
   return Analysis.makeRealized({
-    root: SourceFile.make(rootModule, ascii(rootText)),
+    root: rootModule,
     configuration: AnalysisFixture.configuration(rootModule),
-  }).pipe(Effect.provide(SourceResolver.memory(imports)))
+  }).pipe(
+    Effect.provide(
+      SourceResolver.overlay([SourceFile.make(rootModule, ascii(rootText))]).pipe(
+        Layer.provideMerge(SourceResolver.memory(imports)),
+      ),
+    ),
+  )
 }
 
 it.effect('answers multi-module queries from one snapshot', () =>
@@ -204,8 +220,14 @@ it.effect('constructs frontend snapshots for deterministic damaged-source edits'
 
     for (const [ordinal, source] of damaged.entries()) {
       const self = yield* Analysis.make({
-        root: SourceFile.make(`damaged-${ordinal}`, ascii(source)),
-      }).pipe(Effect.provide(SourceResolver.empty))
+        root: `damaged-${ordinal}`,
+      }).pipe(
+        Effect.provide(
+          SourceResolver.overlay([SourceFile.make(`damaged-${ordinal}`, ascii(source))]).pipe(
+            Layer.provideMerge(SourceResolver.empty),
+          ),
+        ),
+      )
       assert.strictEqual(Analysis.rootAnalysis(self).syntax.source.id, `damaged-${ordinal}`)
     }
   }),
@@ -1092,16 +1114,20 @@ it.effect('resolves public foreign functions across modules under the unsafe rul
     const root = `import lib { abs }
 import lib
 pub fn main() -> i32 { return unsafe abs(1) + unsafe lib.abs(2) + lib.hidden(3) }`
-    const self = yield* Analysis.make({ root: SourceFile.make('root', ascii(root)) }).pipe(
+    const self = yield* Analysis.make({ root: 'root' }).pipe(
       Effect.provide(
-        SourceResolver.memory(
-          new Map([
-            [
-              'lib',
-              ascii(`pub unsafe extern "C" fn abs(value: i32) -> i32
+        SourceResolver.overlay([SourceFile.make('root', ascii(root))]).pipe(
+          Layer.provideMerge(
+            SourceResolver.memory(
+              new Map([
+                [
+                  'lib',
+                  ascii(`pub unsafe extern "C" fn abs(value: i32) -> i32
 unsafe extern "C" fn hidden(value: i32) -> i32`),
-            ],
-          ]),
+                ],
+              ]),
+            ),
+          ),
         ),
       ),
     )

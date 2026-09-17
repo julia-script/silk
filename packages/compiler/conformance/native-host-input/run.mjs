@@ -147,12 +147,18 @@ const program = Effect.gen(function* () {
         'platform-conformance',
         Effect.fnUntraced(function* (scope) {
           const snapshot = yield* Analysis.makeRealized({
-            root: SourceFile.make('input-conformance/root', fixture.source),
+            root: 'input-conformance/root',
             configuration: {
               profile: { ...input, artifact: 'object', entry: { kind: 'none' } },
               composition: {},
             },
-          }).pipe(Effect.provide(SourceResolver.empty))
+          }).pipe(
+            Effect.provide(
+              SourceResolver.overlay([
+                SourceFile.make('input-conformance/root', fixture.source),
+              ]).pipe(Layer.provideMerge(SourceResolver.empty)),
+            ),
+          )
           const diagnostics = Analysis.diagnostics(snapshot)
           if (diagnostics.length !== 0)
             return yield* new ConformanceError({

@@ -1,3 +1,4 @@
+import * as Layer from 'effect/Layer'
 import * as Effect from 'effect/Effect'
 import type * as DeclarationIndex from '../../src/DeclarationIndex.js'
 import * as FormattedDocument from '../../src/FormattedDocument.js'
@@ -27,8 +28,14 @@ export const descendants = (node: SyntaxTree.Node): ReadonlyArray<SyntaxTree.Ele
 /** Completes the declaration index for one in-memory module. */
 export const index = Effect.fnUntraced(function* (id: string, source: string) {
   const closure = yield* ModuleClosure.load({
-    root: SourceFile.make(id, encoder.encode(source)),
-  }).pipe(Effect.provide(SourceResolver.memory(new Map())))
+    root: id,
+  }).pipe(
+    Effect.provide(
+      SourceResolver.overlay([SourceFile.make(id, encoder.encode(source))]).pipe(
+        Layer.provideMerge(SourceResolver.memory(new Map())),
+      ),
+    ),
+  )
   return NameResolution.analyze(closure).index
 })
 
@@ -44,8 +51,14 @@ export const indexWithImports = Effect.fnUntraced(function* (
     ),
   )
   const closure = yield* ModuleClosure.load({
-    root: SourceFile.make(root, encoder.encode(rootSource)),
-  }).pipe(Effect.provide(SourceResolver.memory(imports)))
+    root: root,
+  }).pipe(
+    Effect.provide(
+      SourceResolver.overlay([SourceFile.make(root, encoder.encode(rootSource))]).pipe(
+        Layer.provideMerge(SourceResolver.memory(imports)),
+      ),
+    ),
+  )
   return NameResolution.analyze(closure).index
 })
 

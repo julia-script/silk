@@ -208,12 +208,12 @@ const returned = (value: number): Outcome =>
 const runNative = (id: string, source: string, destination: string) =>
   Effect.gen(function* () {
     const compiled = yield* Driver.compile({
-      compilation: { root: SourceFile.make(id, ascii(source)) },
+      compilation: { root: id },
       toolchain,
       optimization: 'release',
       artifactKind: 'NativeExecutable',
       destination,
-    })
+    }).pipe(Effect.provide(SourceResolver.overlay([SourceFile.make(id, ascii(source))])))
     assert.strictEqual(compiled._tag, 'Compiled', id)
     if (compiled._tag !== 'Compiled') return Object.freeze({ _tag: 'Failed' as const, detail: id })
     const run = spawnSync(compiled.path, [], { encoding: 'utf8' })

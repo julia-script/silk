@@ -1,3 +1,4 @@
+import * as Layer from 'effect/Layer'
 import { spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -251,7 +252,7 @@ it.effect(
       assert.deepEqual(Analysis.diagnostics(snapshot), [])
       const compiled = yield* Driver.compile({
         compilation: {
-          root: SourceFile.make('temporary-directory/native', ascii(nativeSource)),
+          root: 'temporary-directory/native',
         },
         toolchain: yield* TestToolchain.configured,
         // Release, so this also stands as the regression test for #130: the backend used to let
@@ -260,7 +261,13 @@ it.effect(
         optimization: 'release',
         artifactKind: 'NativeExecutable',
         destination: join(destinationRoot, 'native'),
-      }).pipe(Effect.provide(SourceResolver.empty))
+      }).pipe(
+        Effect.provide(
+          SourceResolver.overlay([
+            SourceFile.make('temporary-directory/native', ascii(nativeSource)),
+          ]).pipe(Layer.provideMerge(SourceResolver.empty)),
+        ),
+      )
       assert.strictEqual(compiled._tag, 'Compiled', Json.stringify(compiled).slice(0, 2500))
       if (compiled._tag !== 'Compiled') return
       const run = spawnSync(compiled.path, [], {
@@ -294,14 +301,20 @@ it.effect(
       assert.deepEqual(Analysis.diagnostics(snapshot), [])
       const compiled = yield* Driver.compile({
         compilation: {
-          root: SourceFile.make('temporary-directory/native-tree', ascii(nativeTreeSource)),
+          root: 'temporary-directory/native-tree',
         },
         toolchain: yield* TestToolchain.configured,
         // Release for the same reason as above — this is the walk #130 crashed on.
         optimization: 'release',
         artifactKind: 'NativeExecutable',
         destination: join(destinationRoot, 'native-tree'),
-      }).pipe(Effect.provide(SourceResolver.empty))
+      }).pipe(
+        Effect.provide(
+          SourceResolver.overlay([
+            SourceFile.make('temporary-directory/native-tree', ascii(nativeTreeSource)),
+          ]).pipe(Layer.provideMerge(SourceResolver.empty)),
+        ),
+      )
       assert.strictEqual(compiled._tag, 'Compiled', Json.stringify(compiled).slice(0, 2500))
       if (compiled._tag !== 'Compiled') return
       const run = spawnSync(compiled.path, [], {
@@ -327,13 +340,19 @@ it.effect(
       assert.deepEqual(Analysis.diagnostics(snapshot), [])
       const compiled = yield* Driver.compile({
         compilation: {
-          root: SourceFile.make('temporary-directory/native-many', ascii(nativeManySource)),
+          root: 'temporary-directory/native-many',
         },
         toolchain: yield* TestToolchain.configured,
         optimization: 'release',
         artifactKind: 'NativeExecutable',
         destination: join(destinationRoot, 'native-many'),
-      }).pipe(Effect.provide(SourceResolver.empty))
+      }).pipe(
+        Effect.provide(
+          SourceResolver.overlay([
+            SourceFile.make('temporary-directory/native-many', ascii(nativeManySource)),
+          ]).pipe(Layer.provideMerge(SourceResolver.empty)),
+        ),
+      )
       assert.strictEqual(compiled._tag, 'Compiled', Json.stringify(compiled).slice(0, 2500))
       if (compiled._tag !== 'Compiled') return
       const run = spawnSync(compiled.path, [], {

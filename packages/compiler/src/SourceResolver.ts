@@ -4,6 +4,7 @@ import * as Effect from 'effect/Effect'
 import * as Layer from 'effect/Layer'
 import * as Option from 'effect/Option'
 import * as SourceOrigin from './SourceOrigin.js'
+import * as SourceFile from './SourceFile.js'
 import * as Stdlib from './Stdlib.js'
 
 /** Exact resolved bytes together with the source location that supplied them. */
@@ -60,7 +61,7 @@ export const isCanonicalModule = (module: string): boolean =>
         /^[A-Za-z0-9_-]+$/.test(segment),
     )
 
-/** The replaceable capability used to resolve imported source bytes. */
+/** The replaceable capability used to resolve root and imported source bytes. */
 export class SourceResolver extends Context.Service<
   SourceResolver,
   {
@@ -169,3 +170,54 @@ export const memory = (sources: ReadonlyMap<string, Uint8Array>): Layer.Layer<So
 
 /** A resolver layer that authoritatively reports every imported module as absent. */
 export const empty: Layer.Layer<SourceResolver> = memory(new Map())
+
+/** Shares exact source outcomes across all discovery passes in one frontend invocation. */
+export const withSnapshot = Effect.fnUntraced(function* <A, E, R>(
+  effect: Effect.Effect<A, E, R>,
+): Effect.fn.Return<A, E, R | SourceResolver> {
+  const resolver = yield* SourceResolver
+  const memoize = (resolve: typeof resolver.resolve) => {
+    const outcomes = new Map<
+      string,
+      Effect.Effect<Option.Option<ResolvedSource>, SourceResolverError>
+    >()
+    return Effect.fnUntraced(function* (module: string) {
+      let outcome = outcomes.get(module)
+      if (outcome === undefined) {
+        outcome = yield* Effect.cached(resolve(module))
+        outcomes.set(module, outcome)
+      }
+      return yield* outcome
+    })
+  }
+  return yield* Effect.provideService(
+    effect,
+    SourceResolver,
+    SourceResolver.of({
+      ...resolver,
+      resolve: memoize(resolver.resolve),
+      resolveStandardLibrary: memoize(resolver.resolveStandardLibrary),
+    }),
+  )
+})
+
+/** Supplies immutable project source snapshots over a resolver, preserving toolchain authority. */
+export const overlay = (
+  sources: ReadonlyArray<SourceFile.SourceFile>,
+): Layer.Layer<SourceResolver, never, SourceResolver> => {
+  const snapshots = new Map(
+    sources.map((source) => [source.id, resolved(SourceFile.toUint8Array(source), source.origin)]),
+  )
+  return Layer.effect(
+    SourceResolver,
+    Effect.map(SourceResolver, (resolver) =>
+      SourceResolver.of({
+        ...resolver,
+        resolve: Effect.fnUntraced(function* (module: string) {
+          const source = snapshots.get(module)
+          return source === undefined ? yield* resolver.resolve(module) : Option.some(source)
+        }),
+      }),
+    ),
+  )
+}

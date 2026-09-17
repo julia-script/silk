@@ -1,3 +1,4 @@
+import type * as ModuleClosure from '@silklang/compiler/ModuleClosure'
 import * as Cause from 'effect/Cause'
 import * as Effect from 'effect/Effect'
 import * as Exit from 'effect/Exit'
@@ -25,7 +26,11 @@ export interface Options<R> {
       readonly rediscover: boolean
     },
     onProgress: (phase: string) => Effect.Effect<void>,
-  ) => Effect.Effect<ReadonlyMap<string, ProjectSnapshot.DocumentSnapshot>, never, R>
+  ) => Effect.Effect<
+    ReadonlyMap<string, ProjectSnapshot.DocumentSnapshot>,
+    ModuleClosure.ModuleClosureError,
+    R
+  >
   readonly emit: (message: WorkerProtocol.WorkerMessage) => Effect.Effect<void>
   readonly beforeQuery?: (query: EditorQuery.EditorQuery) => Effect.Effect<void, never, R>
 }
@@ -54,7 +59,7 @@ const execute = Effect.fnUntraced(function* (
   query: EditorQuery.EditorQuery,
   generation: ProjectGeneration.ProjectGeneration,
   epoch: WorkerEpoch.WorkerEpoch,
-): Effect.fn.Return<unknown> {
+): Effect.fn.Return<unknown, ModuleClosure.ModuleClosureError> {
   const uriOf = (module: string): string | undefined => session.moduleUris.get(module)
   switch (query._tag) {
     case 'Diagnostics':
@@ -211,6 +216,14 @@ export const make = Effect.fn('ProjectWorkerRuntime.make')(function* <R>(
           requestId: message.requestId,
           result: { _tag: 'Ready', value },
         }),
+      ),
+      Effect.catchTag('ModuleClosureError', (error) =>
+        emit({
+          _tag: 'Result',
+          generation: message.generation,
+          requestId: message.requestId,
+          result: { _tag: 'Unavailable' },
+        }).pipe(Effect.tap(() => Effect.logWarning(error.message))),
       ),
       Effect.ensuring(
         Effect.sync(() => {

@@ -63,10 +63,7 @@ const inspect = Effect.fnUntraced(function* () {
         packageName: 'p256-inspection',
         ...(wasm ? {} : { stage: 'llvm-bitcode' }),
         compilation: {
-          root: SourceFile.make(
-            'memory/p256-inspection',
-            new TextEncoder().encode(p256WasmAcceptanceSource),
-          ),
+          root: 'memory/p256-inspection',
           target,
         },
         toolchain,
@@ -75,7 +72,16 @@ const inspect = Effect.fnUntraced(function* () {
         // Executable roots retain main and its arithmetic. A rootless NativeObject is empty.
         artifactKind: wasm ? 'WebAssemblyModule' : 'NativeExecutable',
         cache: false,
-      })
+      }).pipe(
+        Effect.provide(
+          SourceResolver.overlay([
+            SourceFile.make(
+              'memory/p256-inspection',
+              new TextEncoder().encode(p256WasmAcceptanceSource),
+            ),
+          ]),
+        ),
+      )
       if (outcome._tag !== 'Compiled') return yield* new InspectionFailure({ outcome })
       const artifact = wasm ? outcome.path : `${stem}.o`
       if (!wasm) {
