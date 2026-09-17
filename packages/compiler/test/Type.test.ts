@@ -187,6 +187,8 @@ it('reuses outlives proofs only within the same immutable assumptions', () => {
   assert.isAbove(initialReads, 0)
   assert.isTrue(Lifetime.outlives(observed, Lifetime.bound(owner, 0, 'renamed'), c))
   assert.isFalse(Lifetime.outlives(observed, c, a))
+  assert.isTrue(Lifetime.outlives(observed, b, c))
+  assert.isFalse(Lifetime.outlives(observed, b, a))
   assert.strictEqual(reads, initialReads)
   assert.isFalse(Lifetime.outlives(Lifetime.assumptions([]), a, c))
   assert.isTrue(Lifetime.outlives(Lifetime.assumptions([{ longer: c, shorter: a }]), c, a))
@@ -249,6 +251,32 @@ it('canonicalizes finite environment intersections without promoting their valid
     Type.runtimeKey(effect),
     Type.runtimeKey(Type.substitute(effect, new Map([[Lifetime.key(a), Lifetime.staticLifetime]]))),
   )
+})
+
+it('requires grounded proofs when declared intersections participate in cycles', () => {
+  const owner = { module: 'lifetimes', name: 'meet-cycle' }
+  const a = Lifetime.bound(owner, 0, 'a')
+  const b = Lifetime.bound(owner, 1, 'b')
+  const c = Lifetime.bound(owner, 2, 'c')
+  const target = Lifetime.bound(owner, 3, 'target')
+  const meet = Lifetime.intersection([a, b])
+  const cycle = [
+    { longer: meet, shorter: c },
+    { longer: c, shorter: a },
+    { longer: a, shorter: target },
+  ]
+  const ungrounded = Lifetime.assumptions(cycle)
+  assert.isTrue(Lifetime.outlives(ungrounded, meet, target))
+  assert.isFalse(Lifetime.outlives(ungrounded, c, b))
+  assert.isFalse(Lifetime.outlives(ungrounded, meet, Lifetime.staticLifetime))
+  const grounded = Lifetime.assumptions([...cycle, { longer: a, shorter: Lifetime.staticLifetime }])
+  assert.isTrue(Lifetime.outlives(grounded, c, b))
+  assert.isTrue(Lifetime.outlives(grounded, meet, Lifetime.staticLifetime))
+  // A query introduces this intersection without adding it to either assumption set.
+  const query = Lifetime.intersection([c, target])
+  assert.isFalse(Lifetime.outlives(grounded, query, b))
+  assert.isTrue(Lifetime.outlives(grounded, query, target))
+  assert.isFalse(Lifetime.outlives(ungrounded, c, b))
 })
 
 it('propagates later lifetime requirements through finite cycles and reports expired sources', () => {
@@ -2658,4 +2686,48 @@ it('commits only the successful complete row inference alternative', () => {
     { longer: right, shorter: a },
     { longer: left, shorter: b },
   ])
+})
+
+it('merges lifetime assumptions without changing canonical order or duplicate precedence', () => {
+  const owner = { module: 'lifetimes/merge', name: 'body' }
+  const a = Lifetime.bound(owner, 0, 'a')
+  const renamedA = Lifetime.bound(owner, 0, 'renamed')
+  const b = Lifetime.bound(owner, 1, 'b')
+  const c = Lifetime.bound(owner, 2, 'c')
+  const left = Lifetime.assumptions([{ longer: a, shorter: b }])
+  const right = Lifetime.assumptions([
+    { longer: b, shorter: c },
+    { longer: renamedA, shorter: b },
+  ])
+  const merged = Lifetime.mergeAssumptions(left, right)
+  assert.deepStrictEqual(merged, Lifetime.assumptions([...left.bounds, ...right.bounds]))
+  assert.strictEqual(merged, right)
+  assert.isTrue(Lifetime.outlives(merged, a, c))
+  assert.isFalse(Lifetime.outlives(left, a, c))
+  assert.deepStrictEqual(
+    Lifetime.mergeAssumptions(right, left),
+    Lifetime.assumptions([...right.bounds, ...left.bounds]),
+  )
+  const extra = Lifetime.assumptions([{ longer: c, shorter: Lifetime.staticLifetime }])
+  assert.deepStrictEqual(
+    Lifetime.mergeAssumptions(right, extra),
+    Lifetime.assumptions([...right.bounds, ...extra.bounds]),
+  )
+  assert.strictEqual(Lifetime.mergeAssumptions(left, Lifetime.assumptions([])), left)
+  assert.strictEqual(Lifetime.mergeAssumptions(Lifetime.assumptions([]), left), left)
+})
+
+it('reuses canonical lifetime bounds while snapshotting caller-owned input', () => {
+  const owner = { module: 'lifetimes/merge', name: 'snapshot' }
+  const a = Lifetime.bound(owner, 0, 'a')
+  const b = Lifetime.bound(owner, 1, 'b')
+  const bounds: Array<Lifetime.Outlives> = [{ longer: a, shorter: b }]
+  const before = Lifetime.assumptions(bounds)
+  assert.strictEqual(Lifetime.assumptions(before.bounds), before)
+  bounds.push({ longer: b, shorter: a })
+  const after = Lifetime.assumptions(bounds)
+  assert.isFalse(Lifetime.outlives(before, b, a))
+  assert.isTrue(Lifetime.outlives(after, b, a))
+  assert.isTrue(Object.isFrozen(after.bounds))
+  assert.isTrue(after.bounds.every(Object.isFrozen))
 })

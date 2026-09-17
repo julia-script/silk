@@ -30,6 +30,272 @@ import * as Lifetime from '../src/Lifetime.js'
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
 
+const scalarShape = (type: Type.Builtin): Layout.CallingShapeNode => ({
+  _tag: 'ScalarShape',
+  type,
+  laneCount: 1,
+})
+
+it.effect('projects payload carrier types through every calling-shape kind', () =>
+  Effect.gen(function* () {
+    const nominal = Type.nominal('layout/payload', 'Record', [])
+    const product: Extract<Layout.CallingShapeNode, { readonly _tag: 'ProductShape' }> = {
+      _tag: 'ProductShape',
+      type: nominal,
+      laneCount: 2,
+      fields: ['u8', 'f64'].map((type, ordinal) => ({
+        field: {
+          _tag: 'FieldId',
+          ordinal,
+          owner: {
+            _tag: 'StructFieldOwnerId',
+            declaration: { _tag: 'DeclarationId', sourceId: 'layout/payload', ordinal: 0 },
+          },
+        },
+        shape: scalarShape(type === 'u8' ? 'u8' : 'f64'),
+      })),
+    }
+    const effect = Type.effect('u8', [], {
+      environment: Lifetime.staticLifetime,
+      lifetimeBinders: [],
+    })
+    const normalized = Type.union(['u8', 'f64'])
+    if (normalized._tag !== 'Normalized') return unreachable('expected normalized union')
+    const union = normalized.type
+    if (!Type.isUnion(union)) return unreachable('expected a structural union')
+    const tag = { type: 'i32', lane: 0 } as const
+    for (const target of [Target.wasm32UnknownUnknown, Target.aarch64AppleDarwin]) {
+      const address: Layout.AddressScalar = {
+        _tag: 'Address',
+        element: 'u8',
+        bits: target.pointerSize === 4 ? 32 : 64,
+      }
+      const cases: {
+        readonly [K in Layout.CallingShapeNode['_tag']]: {
+          readonly shape: Extract<Layout.CallingShapeNode, { readonly _tag: K }>
+          readonly expected: ReadonlyArray<Type.Builtin>
+        }
+      } = {
+        EmptyShape: { shape: { _tag: 'EmptyShape', type: 'never', laneCount: 0 }, expected: [] },
+        ScalarShape: { shape: { _tag: 'ScalarShape', type: 'u8', laneCount: 1 }, expected: ['u8'] },
+        ScalarEnumShape: {
+          shape: { _tag: 'ScalarEnumShape', type: nominal, lane: 'u16', laneCount: 1 },
+          expected: ['u16'],
+        },
+        ProductShape: { shape: product, expected: ['u8', 'f64'] },
+        RepeatedShape: {
+          shape: {
+            _tag: 'RepeatedShape',
+            type: Type.fixedArray(nominal, 2),
+            element: product,
+            length: 2,
+            laneCount: 4,
+          },
+          expected: ['u8', 'f64', 'u8', 'f64'],
+        },
+        SliceShape: {
+          shape: {
+            _tag: 'SliceShape',
+            type: Type.slice('Shared', 'u8', Lifetime.staticLifetime),
+            address: { type: address, lane: 0 },
+            length: { type: 'usize', lane: 1 },
+            laneCount: 2,
+          },
+          expected: ['usize', 'usize'],
+        },
+        StringShape: {
+          shape: {
+            _tag: 'StringShape',
+            type: Type.string(Lifetime.staticLifetime),
+            storage: { type: address, lane: 0 },
+            byteLength: { type: 'usize', lane: 1 },
+            laneCount: 2,
+          },
+          expected: ['usize', 'usize'],
+        },
+        ReferenceShape: {
+          shape: {
+            _tag: 'ReferenceShape',
+            type: Type.reference('Shared', 'u8', Lifetime.staticLifetime),
+            address: { type: address, lane: 0 },
+            laneCount: 1,
+          },
+          expected: ['usize'],
+        },
+        AddressShape: {
+          shape: {
+            _tag: 'AddressShape',
+            type: 'u8',
+            address: { type: address, lane: 0 },
+            laneCount: 1,
+          },
+          expected: ['usize'],
+        },
+        CallableEnvironmentShape: {
+          shape: {
+            _tag: 'CallableEnvironmentShape',
+            type: nominal,
+            fields: [{ capture: 0, shape: product }],
+            laneCount: 2,
+          },
+          expected: ['u8', 'f64'],
+        },
+        EffectEnvironmentShape: {
+          shape: {
+            _tag: 'EffectEnvironmentShape',
+            type: effect,
+            fields: [{ capture: 0, shape: product }],
+            laneCount: 2,
+          },
+          expected: ['u8', 'f64'],
+        },
+        SumShape: {
+          shape: {
+            _tag: 'SumShape',
+            type: union,
+            tag,
+            payloadLaneCount: 1,
+            payloadTypes: ['f64'],
+            zeroFill: true,
+            members: [
+              { member: 'u8', ordinal: 0, shape: scalarShape('u8'), payloadSlots: [0] },
+              { member: 'f64', ordinal: 1, shape: scalarShape('f64'), payloadSlots: [0] },
+            ],
+            laneCount: 2,
+          },
+          expected: ['i32', 'f64'],
+        },
+        NominalUnionShape: {
+          shape: {
+            _tag: 'NominalUnionShape',
+            type: nominal,
+            tag,
+            payloadLaneCount: 2,
+            payloadTypes: ['u8', 'f64'],
+            zeroFill: true,
+            variants: [
+              {
+                variant: {
+                  _tag: 'CanonicalUnionVariantId',
+                  union: {
+                    _tag: 'CanonicalDeclarationId',
+                    module: nominal.module,
+                    name: nominal.name,
+                  },
+                  name: 'Value',
+                },
+                ordinal: 0,
+                shape: product,
+                payloadSlots: [0, 1],
+              },
+            ],
+            laneCount: 3,
+          },
+          expected: ['i32', 'u8', 'f64'],
+        },
+        OutcomeShape: {
+          shape: {
+            _tag: 'OutcomeShape',
+            type: effect,
+            success: scalarShape('u8'),
+            failures: [],
+            payloadLaneCount: 1,
+            payloadTypes: ['u8'],
+            laneCount: 2,
+          },
+          expected: ['i32', 'u8'],
+        },
+        EffectCompositeShape: {
+          shape: {
+            _tag: 'EffectCompositeShape',
+            type: Type.represented(
+              effect,
+              effect,
+              Type.compositeEffectRepresentationArgument(effect, [
+                Type.exactRepresentationArgument(
+                  Type.effectIdentityArgument('layout/payload/first'),
+                  effect,
+                ),
+                Type.exactRepresentationArgument(
+                  Type.effectIdentityArgument('layout/payload/second'),
+                  effect,
+                ),
+              ]),
+            ),
+            alternativeLaneCounts: [1, 2],
+            payloadTypes: [address, 'f32'],
+            laneCount: 3,
+          },
+          expected: ['i32', 'usize', 'f32'],
+        },
+      }
+      for (const { shape, expected } of Object.values(cases)) {
+        assert.deepEqual(yield* Layout.unifyPayloadTypes([shape], target), expected, shape._tag)
+      }
+      assert.deepEqual(yield* Layout.unifyPayloadTypes([], target), [])
+      assert.deepEqual(
+        yield* Layout.unifyPayloadTypes(
+          [
+            {
+              ...cases.RepeatedShape.shape,
+              type: Type.fixedArray(nominal, 0),
+              length: 0,
+              laneCount: 0,
+            },
+          ],
+          target,
+        ),
+        [],
+      )
+    }
+  }),
+)
+
+it.effect('unifies unequal payloads by target width with stable equal-width ties', () =>
+  Effect.gen(function* () {
+    for (const target of [Target.wasm32UnknownUnknown, Target.aarch64AppleDarwin]) {
+      const address: Layout.CallingShapeNode = {
+        _tag: 'AddressShape',
+        type: 'u8',
+        address: {
+          type: { _tag: 'Address', element: 'u8', bits: target.pointerSize === 4 ? 32 : 64 },
+          lane: 0,
+        },
+        laneCount: 1,
+      }
+      const repeated: Layout.CallingShapeNode = {
+        _tag: 'RepeatedShape',
+        type: Type.fixedArray('u32', 2),
+        length: 2,
+        element: scalarShape('u32'),
+        laneCount: 2,
+      }
+      const empty: Layout.CallingShapeNode = { _tag: 'EmptyShape', type: 'never', laneCount: 0 }
+      const variants = [empty, address, repeated]
+      const expected: ReadonlyArray<Type.Builtin> = [
+        target.pointerSize === 4 ? 'u32' : 'usize',
+        'u32',
+      ]
+      const result = yield* Layout.unifyPayloadTypes(variants, target)
+      assert.deepEqual(result, expected)
+      assert.isTrue(Object.isFrozen(result))
+      assert.deepEqual(yield* Layout.unifyPayloadTypes(variants.toReversed(), target), expected)
+      assert.deepEqual(
+        yield* Layout.unifyPayloadTypes([scalarShape('i32'), scalarShape('f32')], target),
+        ['f32'],
+      )
+      assert.deepEqual(
+        yield* Layout.unifyPayloadTypes([scalarShape('f32'), scalarShape('i32')], target),
+        ['f32'],
+      )
+      assert.deepEqual(
+        yield* Layout.unifyPayloadTypes([scalarShape('f32'), scalarShape('u64')], target),
+        ['u64'],
+      )
+    }
+  }),
+)
+
 it.effect('plans outcome storage separately from the concrete captured environment', () =>
   Effect.gen(function* () {
     for (const target of [Target.wasm32UnknownUnknown, Target.aarch64AppleDarwin]) {
@@ -48,7 +314,16 @@ it.effect('plans outcome storage separately from the concrete captured environme
       const view =
         ValueStorage.find(module.layout, 'Outcome', outcome.type) ??
         unreachable('expected outcome storage')
-      assert.strictEqual(NativeType.addressLayout(module.layout, outcome), view)
+      const storedOutcome = ValueStorage.outcome(module.layout, outcome.type)
+      assert.strictEqual(NativeType.addressLayout(module.layout, outcome), storedOutcome)
+      assert.deepEqual(
+        [storedOutcome.size, storedOutcome.alignment, storedOutcome.payloadOffset],
+        [8, 4, 4],
+      )
+      assert.deepEqual(
+        storedOutcome.members.map((member) => member.storage),
+        [{ _tag: 'Value' }],
+      )
       assert.strictEqual(NativeValue.classify(module.layout, outcome), 'Place')
       assert.isUndefined(Layout.entry(module.layout, outcome.type))
       for (const environment of module.layout.effectEnvironments) {
@@ -66,7 +341,7 @@ it.effect('plans outcome storage separately from the concrete captured environme
         view.members.map((member) => [member.tag, member.lanes.map((lane) => lane.slot)]),
         [[0, [1]]],
       )
-      assert.deepEqual(ValueStorage.verify(module.layout), [])
+      assert.deepEqual(yield* ValueStorage.verify(module.layout), [])
       const shape =
         Layout.callingShape(module.layout, outcome.type) ?? unreachable('expected shape')
       const overflow = ValueStorage.carrier(target, 'Outcome', shape, view.members, 7)
@@ -94,18 +369,18 @@ it.effect('plans outcome storage separately from the concrete captured environme
       )
       assert.isTrue(ValueStorage.bind(view, target, 8).identicalOffsets)
       assert.deepEqual(
-        ValueStorage.verify({ ...module.layout, valueStorage: [] }).map(
+        (yield* ValueStorage.verify({ ...module.layout, valueStorage: [] })).map(
           (violation) => violation.rule,
         ),
         ['InvalidValueStorage'],
       )
       assert.deepEqual(
-        ValueStorage.verify({
+        (yield* ValueStorage.verify({
           ...module.layout,
           valueStorage: module.layout.valueStorage.map((candidate) =>
             candidate === view ? { ...view, size: view.size + 4 } : candidate,
           ),
-        }).map((violation) => violation.rule),
+        })).map((violation) => violation.rule),
         ['InvalidValueStorage'],
       )
     }
@@ -380,59 +655,63 @@ it('plans transport from its actual start without treating tail padding as paylo
     ),
   )
 })
-
-it('retains typed address and floating carriers and zero-byte outcome members', () => {
-  const string = Type.string(Lifetime.staticLifetime)
-  for (const target of [Target.wasm32UnknownUnknown, Target.aarch64AppleDarwin]) {
-    for (const success of ['u8', 'f64', string, Layout.neverEntry().type] as const) {
-      const effect = Type.effect(success, [], {
-        environment: Lifetime.staticLifetime,
-        lifetimeBinders: [],
-      })
-      const entries = [
-        Layout.scalarEntry(target, 'u8'),
-        Layout.scalarEntry(target, 'f64'),
-        Layout.stringEntry(target, string),
-        Layout.neverEntry(),
-      ]
-      const base = {
-        ...Layout.make(target, ['i32']),
-        entries,
-        callingShapes: Layout.callingShapes(target, entries, [
-          ...entries.map((entry) => entry.type),
-          effect,
-        ]),
+it.effect(
+  'retains typed address and floating carriers and zero-byte outcome members',
+  Effect.fnUntraced(function* () {
+    const string = Type.string(Lifetime.staticLifetime)
+    for (const target of [Target.wasm32UnknownUnknown, Target.aarch64AppleDarwin]) {
+      for (const success of ['u8', 'f64', string, Layout.neverEntry().type] as const) {
+        const effect = Type.effect(success, [], {
+          environment: Lifetime.staticLifetime,
+          lifetimeBinders: [],
+        })
+        const entries = [
+          Layout.scalarEntry(target, 'u8'),
+          Layout.scalarEntry(target, 'f64'),
+          Layout.stringEntry(target, string),
+          Layout.neverEntry(),
+        ]
+        const base = {
+          ...(yield* Layout.make(target, ['i32'])),
+          entries,
+          callingShapes: yield* Layout.planCallingShapes(target, entries, [
+            ...entries.map((entry) => entry.type),
+            effect,
+          ]),
+        }
+        const views = ValueStorage.plan(base)
+        const view =
+          views.find((view) => view.role === 'Outcome') ?? unreachable('expected outcome')
+        assert.strictEqual(view._tag, 'ValueStorage')
+        if (view._tag !== 'ValueStorage') continue
+        assert.deepEqual(yield* ValueStorage.verify({ ...base, valueStorage: views }), [])
+        const member = view.members.at(0) ?? unreachable('expected success member')
+        assert.deepEqual(
+          member.lanes.map((mapping) => mapping.lane),
+          Layout.callingShape(base, success)?.lanes,
+        )
+        for (const slot of view.slots) {
+          assert.strictEqual(slot.offset % slot.alignment, 0)
+          assert.isAtMost(slot.offset + slot.size, view.size)
+        }
+        if (Type.isNever(success)) {
+          assert.deepEqual(member.lanes, [])
+          assert.strictEqual(view.size, 4)
+        }
+        if (Type.isString(success))
+          assert.strictEqual(typeof member.lanes.at(0)?.lane.type, 'object')
+        if (success === 'f64') assert.strictEqual(view.slots.at(1)?.lane.type, 'f64')
+        assert.strictEqual(
+          ValueStorage.encode(view),
+          ValueStorage.encode(
+            ValueStorage.plan(base).find((candidate) => candidate.key === view.key) ??
+              unreachable('expected repeat'),
+          ),
+        )
       }
-      const views = ValueStorage.plan(base)
-      const view = views.find((view) => view.role === 'Outcome') ?? unreachable('expected outcome')
-      assert.strictEqual(view._tag, 'ValueStorage')
-      if (view._tag !== 'ValueStorage') continue
-      assert.deepEqual(ValueStorage.verify({ ...base, valueStorage: views }), [])
-      const member = view.members.at(0) ?? unreachable('expected success member')
-      assert.deepEqual(
-        member.lanes.map((mapping) => mapping.lane),
-        Layout.callingShape(base, success)?.lanes,
-      )
-      for (const slot of view.slots) {
-        assert.strictEqual(slot.offset % slot.alignment, 0)
-        assert.isAtMost(slot.offset + slot.size, view.size)
-      }
-      if (Type.isNever(success)) {
-        assert.deepEqual(member.lanes, [])
-        assert.strictEqual(view.size, 4)
-      }
-      if (Type.isString(success)) assert.strictEqual(typeof member.lanes.at(0)?.lane.type, 'object')
-      if (success === 'f64') assert.strictEqual(view.slots.at(1)?.lane.type, 'f64')
-      assert.strictEqual(
-        ValueStorage.encode(view),
-        ValueStorage.encode(
-          ValueStorage.plan(base).find((candidate) => candidate.key === view.key) ??
-            unreachable('expected repeat'),
-        ),
-      )
     }
-  }
-})
+  }),
+)
 
 class CLayoutOracleError extends Data.TaggedError('CLayoutOracleError')<{
   readonly message: string
@@ -595,14 +874,17 @@ it.effect('plans only concrete types reached through discovered instances', () =
       ascii(`pub fn unused(value: bool) -> bool { return value }
 pub fn main() -> i32 { return 42 }`),
     )
-    const catalog = Layout.catalog(Target.aarch64AppleDarwin, Analysis.declarationIndex(snapshot))
-    const plan = Layout.plan(catalog, Analysis.instancesOf(snapshot), snapshot.index)
+    const catalog = yield* Layout.catalog(
+      Target.aarch64AppleDarwin,
+      Analysis.declarationIndex(snapshot),
+    )
+    const plan = yield* Layout.plan(catalog, Analysis.instancesOf(snapshot), snapshot.index)
 
     assert.deepEqual(
       plan.entries.map((candidate) => candidate.type),
       ['i32'],
     )
-    assert.deepEqual(LayoutVerify.verify(plan), [])
+    assert.deepEqual(yield* LayoutVerify.verify(plan), [])
   }),
 )
 
@@ -627,7 +909,7 @@ pub fn main() -> i32 { consume(Token { value: 1 }) return 0 }`),
       plan.value.entries.map((entry) => Type.encode(entry.type)),
       'layout/evaluate.Token',
     )
-    assert.deepEqual(LayoutVerify.verify(plan.value), [])
+    assert.deepEqual(yield* LayoutVerify.verify(plan.value), [])
   }),
 )
 
@@ -655,7 +937,7 @@ it.effect('plans hidden Effect capture environments by construction site and tar
       assert.strictEqual(environment.fields.at(0)?.representation, 'Borrow')
       assert.strictEqual(environment.size, target.pointerSize)
       assert.strictEqual(environment.alignment, target.pointerAlignment)
-      assert.deepEqual(LayoutVerify.verify(plan.value), [])
+      assert.deepEqual(yield* LayoutVerify.verify(plan.value), [])
     }
   }),
 )
@@ -704,7 +986,7 @@ pub fn main() -> i32 {
         alignment: target.pointerAlignment,
         pointerBits: target.pointerSize === 4 ? 32 : 64,
       })
-      assert.deepEqual(LayoutVerify.verify(plan.value), [])
+      assert.deepEqual(yield* LayoutVerify.verify(plan.value), [])
     }
   }),
 )
@@ -758,7 +1040,7 @@ pub fn main() -> i32 { return 0 }`
         )
         assert.strictEqual('hiddenMetadata' in entry.representation, false)
         assert.isUndefined(entry.executable)
-        const shape = Layout.callingShapes(target, [entry]).at(0)
+        const shape = (yield* Layout.planCallingShapes(target, [entry])).at(0)
         assert.deepEqual(shape?.tree, {
           _tag: 'ScalarEnumShape',
           type: entry.type,
@@ -821,7 +1103,7 @@ pub fn main() -> i32 { let state = State.Ready drop state return 0 }`),
       callingShapes: malformedShape,
     }
     assert.deepEqual(
-      LayoutVerify.verify(malformed).map((violation) => violation.rule),
+      (yield* LayoutVerify.verify(malformed)).map((violation) => violation.rule),
       ['InvalidScalar', 'InvalidCallingShape'],
     )
   }),
@@ -851,48 +1133,52 @@ pub fn main() -> i32 { return 0 }`),
     )
   }),
 )
-
-it('orders and encodes canonical scalar entries identically on every target', () => {
-  for (const target of Target.all) {
-    const first = Layout.make(target, ['i32', 'bool', 'i32'])
-    const second = Layout.make(target, ['bool', 'i32'])
-    assert.deepEqual(
-      first.entries.map((candidate) => candidate.type),
-      ['bool', 'i32'],
-    )
-    assert.strictEqual(LayoutEncode.encode(first), LayoutEncode.encode(second))
-    assert.deepEqual(LayoutVerify.verify(first), [])
-  }
-})
-
-it('plans canonical IEEE storage and lanes on every target', () => {
-  for (const target of Target.all) {
-    const plan = Layout.make(target, ['f64', 'f32'])
-    assert.deepEqual(
-      plan.entries.map((entry) => ({
-        type: entry.type,
-        size: entry.size,
-        alignment: entry.alignment,
-        representation: entry.representation,
-      })),
-      [
-        {
-          type: 'f32',
-          size: 4,
-          alignment: 4,
-          representation: { _tag: 'Floating', bits: 32, ieee: true },
-        },
-        {
-          type: 'f64',
-          size: 8,
-          alignment: 8,
-          representation: { _tag: 'Floating', bits: 64, ieee: true },
-        },
-      ],
-    )
-    assert.deepEqual(LayoutVerify.verify(plan), [])
-  }
-})
+it.effect(
+  'orders and encodes canonical scalar entries identically on every target',
+  Effect.fnUntraced(function* () {
+    for (const target of Target.all) {
+      const first = yield* Layout.make(target, ['i32', 'bool', 'i32'])
+      const second = yield* Layout.make(target, ['bool', 'i32'])
+      assert.deepEqual(
+        first.entries.map((candidate) => candidate.type),
+        ['bool', 'i32'],
+      )
+      assert.strictEqual(LayoutEncode.encode(first), LayoutEncode.encode(second))
+      assert.deepEqual(yield* LayoutVerify.verify(first), [])
+    }
+  }),
+)
+it.effect(
+  'plans canonical IEEE storage and lanes on every target',
+  Effect.fnUntraced(function* () {
+    for (const target of Target.all) {
+      const plan = yield* Layout.make(target, ['f64', 'f32'])
+      assert.deepEqual(
+        plan.entries.map((entry) => ({
+          type: entry.type,
+          size: entry.size,
+          alignment: entry.alignment,
+          representation: entry.representation,
+        })),
+        [
+          {
+            type: 'f32',
+            size: 4,
+            alignment: 4,
+            representation: { _tag: 'Floating', bits: 32, ieee: true },
+          },
+          {
+            type: 'f64',
+            size: 8,
+            alignment: 8,
+            representation: { _tag: 'Floating', bits: 64, ieee: true },
+          },
+        ],
+      )
+      assert.deepEqual(yield* LayoutVerify.verify(plan), [])
+    }
+  }),
+)
 
 it.effect(
   'plans tagged effect outcomes for zero-lane success and target-sized failure payloads',
@@ -927,7 +1213,7 @@ pub fn main() -> i32 {
           assert.strictEqual(outcome.lanes.at(0)?.type, 'i32')
           assert.strictEqual(outcome.lanes.at(1)?.type, 'usize')
         }
-        assert.deepEqual(LayoutVerify.verify(planned.value), [])
+        assert.deepEqual(yield* LayoutVerify.verify(planned.value), [])
       }
     }),
 )
@@ -1020,29 +1306,31 @@ pub fn main() -> i32 { return run Effect.catchAll(risky(true), recover) }`),
     )
   }),
 )
+it.effect(
+  'reports malformed target, order, duplicates, and scalar facts as data',
+  Effect.fnUntraced(function* () {
+    const canonical = yield* Layout.make(Target.aarch64AppleDarwin, ['bool', 'i32'])
+    const bool = canonical.entries.at(0)
+    const i32 = canonical.entries.at(1)
+    if (bool === undefined || i32 === undefined) throw new Error('expected scalar layouts')
+    const malformed: Layout.Plan = {
+      ...canonical,
+      target: { ...Target.aarch64AppleDarwin, pointerSize: 4 },
+      entries: [i32, { ...bool, size: 1 }, bool],
+    }
 
-it('reports malformed target, order, duplicates, and scalar facts as data', () => {
-  const canonical = Layout.make(Target.aarch64AppleDarwin, ['bool', 'i32'])
-  const bool = canonical.entries.at(0)
-  const i32 = canonical.entries.at(1)
-  if (bool === undefined || i32 === undefined) throw new Error('expected scalar layouts')
-  const malformed: Layout.Plan = {
-    ...canonical,
-    target: { ...Target.aarch64AppleDarwin, pointerSize: 4 },
-    entries: [i32, { ...bool, size: 1 }, bool],
-  }
-
-  assert.deepEqual(
-    LayoutVerify.verify(malformed).map((violation) => violation.rule),
-    [
-      'NonCanonicalTarget',
-      'NonCanonicalOrder',
-      'InvalidScalar',
-      'DuplicateType',
-      'InvalidCallingShape',
-    ],
-  )
-})
+    assert.deepEqual(
+      (yield* LayoutVerify.verify(malformed)).map((violation) => violation.rule),
+      [
+        'NonCanonicalTarget',
+        'NonCanonicalOrder',
+        'InvalidScalar',
+        'DuplicateType',
+        'InvalidCallingShape',
+      ],
+    )
+  }),
+)
 
 it.effect(
   'catalogs empty and nested structs before reachability and reuses their exact entries',
@@ -1180,11 +1468,11 @@ pub fn main() -> i32 { return 0 }`),
       ],
     )
     const boxType = Type.nominal('layout/nominal-union', 'Box', ['i32'])
-    const boxShape = Layout.callingShapes(
+    const boxShape = (yield* Layout.planCallingShapes(
       Target.wasm32UnknownUnknown,
       catalog.value.entries.flatMap((entry) => (entry._tag === 'LayoutEntry' ? [entry] : [])),
       [boxType],
-    ).at(0)
+    )).at(0)
     assert.strictEqual(boxShape?.tree._tag, 'NominalUnionShape')
     assert.deepEqual(
       boxShape?.lanes.map((lane) => lane.path.at(0)?._tag),
@@ -1195,7 +1483,7 @@ pub fn main() -> i32 { return 0 }`),
       'repr=nominal-union layout/nominal-union.State',
     )
     assert.deepEqual(LayoutVerify.verifyCatalog(catalog.value, snapshot.index), [])
-    assert.deepEqual(LayoutVerify.verify(plan.value), [])
+    assert.deepEqual(yield* LayoutVerify.verify(plan.value), [])
   }),
 )
 
@@ -1358,7 +1646,7 @@ pub fn main() -> i32 { return 42 }`),
       [Target.aarch64AppleDarwin, 8, 64],
       [Target.wasm32UnknownUnknown, 4, 32],
     ] as const) {
-      const catalog = Layout.catalog(target, Analysis.declarationIndex(snapshot))
+      const catalog = yield* Layout.catalog(target, Analysis.declarationIndex(snapshot))
       const pointer = Type.pointer({
         mutable: true,
         pointee: Type.nominal('layout/pointer', 'Opaque'),
@@ -1371,7 +1659,7 @@ pub fn main() -> i32 { return 42 }`),
       assert.strictEqual(entry?._tag, 'LayoutEntry')
       if (entry?._tag !== 'LayoutEntry') return
       assert.deepEqual([entry.copy, entry.size, entry.alignment], [true, size, size])
-      const shape = Layout.callingShapes(target, [entry]).at(0)
+      const shape = (yield* Layout.planCallingShapes(target, [entry])).at(0)
       assert.strictEqual(shape?.tree._tag, 'AddressShape')
       assert.deepEqual(shape?.lanes, [
         {
@@ -1394,7 +1682,10 @@ pub fn main() -> i32 { return 42 }`),
         [qualifiedEntry.copy, qualifiedEntry.size, qualifiedEntry.alignment],
         [true, size, size],
       )
-      assert.deepEqual(Layout.callingShapes(target, [qualifiedEntry]).at(0)?.lanes, shape?.lanes)
+      assert.deepEqual(
+        (yield* Layout.planCallingShapes(target, [qualifiedEntry])).at(0)?.lanes,
+        shape?.lanes,
+      )
       const malformed = { ...qualifiedEntry, type: Type.pointer({ ...qualified, alignment: 3 }) }
       assert.include(
         LayoutVerify.verifyCatalog({ ...catalog, entries: [malformed] }, snapshot.index).map(

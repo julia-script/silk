@@ -266,7 +266,7 @@ pub fn main() -> i32 { let first = run partial() let second = run conditional(tr
     const self = yield* snapshot(source)
     assert.deepEqual(Analysis.diagnostics(self), [])
     const program = Analysis.loweredMir(self)
-    assert.deepEqual(MirVerification.verify(program), [])
+    assert.deepEqual(yield* MirVerification.verify(program), [])
     const plan = plansFor(available(self), 'partial').at(0)
     const owner = plan?.slots.find(
       (slot) => slot.type._tag === 'Nominal' && slot.type.type.name === 'Pair',
@@ -340,7 +340,7 @@ it.effect('retains conditional owners inside independently cancellable frames', 
     const self = yield* snapshot(partialSuspension)
     assert.deepEqual(Analysis.diagnostics(self), [])
     const program = Analysis.loweredMir(self)
-    assert.deepEqual(MirVerification.verify(program), [])
+    assert.deepEqual(yield* MirVerification.verify(program), [])
     const corrupted = {
       ...program,
       functions: program.functions.map((fn) =>
@@ -372,7 +372,7 @@ it.effect('retains conditional owners inside independently cancellable frames', 
       ),
     }
     assert.isTrue(
-      MirVerification.verify(corrupted).some(
+      (yield* MirVerification.verify(corrupted)).some(
         (violation) => violation.rule === 'InvalidCoroutineFrame',
       ),
     )
@@ -391,7 +391,7 @@ it.effect('retains conditional owners inside independently cancellable frames', 
       },
     }
     assert.isTrue(
-      MirVerification.verify(lostPayloadFlags).some(
+      (yield* MirVerification.verify(lostPayloadFlags)).some(
         (violation) => violation.rule === 'InvalidCoroutineFrame',
       ),
     )

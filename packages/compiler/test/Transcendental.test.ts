@@ -82,7 +82,7 @@ it.effect('rejects a mismatched transcendental MIR result before execution', () 
       }),
     }
     assert.include(
-      MirVerification.verify(malformed).map((violation) => violation.rule),
+      (yield* MirVerification.verify(malformed)).map((violation) => violation.rule),
       'InvalidIntegerOperation',
     )
   }),

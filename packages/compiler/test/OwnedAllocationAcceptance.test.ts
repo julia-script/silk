@@ -32,7 +32,7 @@ it.effect(
         [],
       )
       const mir = Analysis.loweredMir(snapshot)
-      assert.deepEqual(MirVerification.verify(mir), [])
+      assert.deepEqual(yield* MirVerification.verify(mir), [])
       const finalizers = mir.functions.flatMap((fn) =>
         (fn.suspension?.frame?.states ?? [])
           .flatMap((state) => state.slots)
@@ -246,7 +246,7 @@ pub fn main() -> i32 { return run Effect.catchAll(construct(), recover) }`)
       'wasm32-unknown-unknown',
     )
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
-    assert.deepEqual(MirVerification.verify(Analysis.loweredMir(snapshot)), [])
+    assert.deepEqual(yield* MirVerification.verify(Analysis.loweredMir(snapshot)), [])
   }),
 )
 
@@ -360,7 +360,7 @@ pub fn main() -> i32 { return run Effect.catchAll(construct(), recover) }`)
       'wasm32-unknown-unknown',
     )
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
-    assert.deepEqual(MirVerification.verify(Analysis.loweredMir(snapshot)), [])
+    assert.deepEqual(yield* MirVerification.verify(Analysis.loweredMir(snapshot)), [])
   }),
 )
 
@@ -715,6 +715,6 @@ pub fn main() -> i32 { return run Effect.catchAll(program(), failed) }`
           .flatMap(Mir.operationTree)
           .some((operation) => operation._tag === 'SharedFromAllocation'),
       )
-      assert.deepEqual(MirVerification.verify(mir), [])
+      assert.deepEqual(yield* MirVerification.verify(mir), [])
     }),
 )

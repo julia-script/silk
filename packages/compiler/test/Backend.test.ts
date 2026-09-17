@@ -1,3 +1,8 @@
+import * as MirVerification from '../src/MirVerification.js'
+import * as Result from 'effect/Result'
+import * as LlvmBackend from '../src/LlvmBackend.js'
+import * as Option from 'effect/Option'
+import * as Tracer from 'effect/Tracer'
 import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { selectedForeignDollarSource } from './support/foreignDollarSymbol.js'
 import * as ForeignContract from '../src/ForeignContract.js'
@@ -56,11 +61,81 @@ const emit = Effect.fnUntraced(function* (text: string, request: Backend.Codegen
     ascii(text),
     'aarch64-apple-darwin',
   )
-  return yield* Analysis.codegen(snapshot, request)
+  return yield* Analysis.codegen(snapshot, { ...request, verifyMir: true })
 })
 
 const golden = (name: string): string =>
   readFileSync(new URL(`./goldens/${name}`, import.meta.url), 'utf8')
+
+it.effect('traces discovery, lowering, and optional verification separately from emission', () =>
+  Effect.gen(function* () {
+    const spans: Array<Tracer.Span> = []
+    const tracer = Tracer.make({
+      span(options) {
+        const span = new Tracer.NativeSpan(options)
+        spans.push(span)
+        return span
+      },
+    })
+    const snapshot = yield* AnalysisFixture.retainingMain(
+      'trace/program',
+      ascii(nestedSource),
+      'aarch64-apple-darwin',
+    ).pipe(Effect.withTracer(tracer))
+    const program = Analysis.loweredMir(snapshot)
+    const artifact = yield* Backend.emit(LlvmBackend.LlvmBackend, program, {
+      mode: 'release',
+    }).pipe(Effect.withTracer(tracer))
+    assert.isFalse(spans.some((span) => span.name.startsWith('MirVerification.')))
+    const ordinary = yield* Analysis.codegen(snapshot, { mode: 'release' }).pipe(
+      Effect.withTracer(tracer),
+    )
+    assert.isFalse(spans.some((span) => span.name.startsWith('MirVerification.')))
+    const verified = yield* Analysis.codegen(snapshot, { mode: 'release', verifyMir: true }).pipe(
+      Effect.withTracer(tracer),
+    )
+    assert.deepEqual(artifact.bitcode, ordinary.bitcode)
+    assert.deepEqual(artifact.bitcode, verified.bitcode)
+    const rejected = yield* Effect.result(MirVerification.check({ ...program, functions: [] }))
+    assert.isTrue(Result.isFailure(rejected))
+    if (Result.isFailure(rejected)) {
+      assert.strictEqual(rejected.failure._tag, 'MirVerificationError')
+      assert.isTrue(
+        rejected.failure.violations.some((violation) => violation.rule === 'InvalidArtifactRoot'),
+      )
+    }
+    const span = (name: string) =>
+      (name === 'Analysis.codegen'
+        ? spans.findLast((item) => item.name === name)
+        : spans.find((item) => item.name === name)) ?? unreachable(name)
+    for (const [child, parent] of [
+      ['Instances.residualize', 'Instances.expandWorklist'],
+      ['Layout.planValueStorage', 'Layout.plan'],
+      ['Lower.lowerInstance', 'Lower.lowerInstances'],
+      ['Layout.planCallingShapes', 'Layout.plan'],
+      ['Layout.planCallingShape', 'Layout.planCallingShapes'],
+      ['MirVerification.check', 'Analysis.codegen'],
+      ['MirVerification.verify', 'MirVerification.check'],
+      ['MirVerification.verifyFunction', 'MirVerification.verify'],
+      ['MirVerification.verifyModule', 'MirVerification.verify'],
+      ['MirVerification.verifyNormalization', 'MirVerification.verify'],
+      ['MirVerification.verifyInitialization', 'MirVerification.verifyFunction'],
+      ['LayoutVerify.verifyEntries', 'LayoutVerify.verify'],
+      ['ForeignAvailability.select', 'Backend.selectForeign'],
+    ] as const) {
+      assert.strictEqual(
+        Option.getOrUndefined(span(child).parent)?.spanId,
+        span(parent).spanId,
+        child,
+      )
+    }
+    assert.strictEqual(
+      span('MirVerification.verifyFunction').attributes.get('function.module'),
+      'trace/program',
+    )
+    for (const item of spans) assert.strictEqual(item.status._tag, 'Ended', item.name)
+  }),
+)
 
 it.effect('reads match tags and proven variant fields without decoding unrelated payloads', () =>
   Effect.gen(function* () {
@@ -121,12 +196,11 @@ pub fn main() -> i32 { return constructors() + start(makeToken(1)) }`,
     const returned =
       artifact.ir.match(/define hidden [^\n]+@silk_golden_program_makeToken__[^]*?\n}/)?.at(0) ??
       unreachable('expected union-returning function')
-    assert.match(returned, /call void @llvm.memmove[^\n]+%completion_storage/)
-    assert.match(returned, /switch i32 %completion_value_/)
-    // All alternatives share one conversion at the return boundary. No branch may
-    // expand the union while moving its selected value into completion storage.
-    for (const line of returned.split('\n'))
-      if (/^\s+switch /.test(line)) assert.match(line, /switch i32 %completion_value_/)
+    // Private returns write directly into caller-owned storage; no carrier decoding occurs.
+    assert.match(returned, /^define hidden void [^\n]+\(i32 %v0, ptr %v1\)/)
+    assert.match(returned, /call void @llvm.memmove[^\n]+%v1,/)
+    assert.notMatch(returned, /switch i32|insertvalue|extractvalue/)
+    assert.match(returned, /completion:\n\s+ret void/)
   }),
 )
 
@@ -215,24 +289,26 @@ pub fn main() -> i32 { return run observing((), observer, Effect.catchAll(choose
       unreachable('expected effect runner')
     assert.match(choose, /completion:\n\s+%completion_lane0 = phi/)
     const stored =
-      choose.match(/store i32 7, ptr (%place\w+)/)?.at(1) ??
+      choose.match(/store i32 7, ptr (%effect_outcome\w+)/)?.at(1) ??
       unreachable('expected the return payload in canonical storage')
     const address =
       choose.match(new RegExp(`${stored} = getelementptr i8, ptr (%addr\\d+), i32 (\\d+)`)) ??
       unreachable('expected a planned payload offset')
+    const resultAddress =
+      choose.match(/^define hidden void [^\n]+, ptr (%v\d+)\)/)?.at(1) ??
+      unreachable('expected caller-owned result storage')
     assert.match(
       choose,
-      new RegExp(`call void @llvm.memmove[^\\n]+%completion_storage[^\\n]+${address.at(1)},`),
+      new RegExp(`call void @llvm.memmove[^\\n]+${resultAddress},[^\\n]+${address.at(1)},`),
     )
     assert.notMatch(choose, /phi i32[^\n]+%completion_exit/)
+    assert.notMatch(choose, /completion_value|completion_storage/)
+    assert.match(choose, /^define hidden void /)
+    assert.match(choose, /store \{[^\n]+\} %completion_lane0, ptr %completion_diagnostic_ptr/)
     assert.match(
       choose,
-      /completion:\n[^]*?%completion_value_0 = load i32, ptr %completion_storage/,
+      /%completion_diagnostic_ptr = getelementptr \{[^\n]+\}, ptr %[^,]+, i32 0, i32 1/,
     )
-    assert.match(choose, /^define hidden void /)
-    assert.match(choose, /store i32 %completion_value_0, ptr %completion_result_0_ptr/)
-    assert.match(choose, /store \{[^\n]+\} %completion_lane0, ptr %completion_result_2_ptr/)
-    assert.match(choose, /getelementptr \{[^\n]+\}, ptr %[^,]+, i32 0, i32 0/)
     assert.notMatch(choose, /insertvalue [^\n]+%completion_lane/)
   }),
 )
@@ -542,27 +618,52 @@ it.effect('does not reload unrelated mutable locals at a later control-flow join
   }),
 )
 
-it.effect('passes aggregate Effect arguments through canonical storage', () =>
-  Effect.gen(function* () {
-    const artifact = yield* emit(
-      `struct Payload {
+it.effect(
+  'preserves aggregate storage across callable arguments, captures, and Effect results',
+  () =>
+    Effect.gen(function* () {
+      const artifact = yield* emit(
+        `struct Payload {
   first: i32
   second: i32
   third: i32
   fourth: i32
 }
-effect fn inspect(value: Payload) -> i32 { return value.third }
+fn identity(value: Payload) -> Payload { return move value }
+fn apply(value: Payload) -> Payload {
+  let callback = identity
+  return callback(move value)
+}
+fn capture(value: Payload) -> Payload {
+  let callback = fn() -> Payload { return move value }
+  return callback()
+}
+effect fn produce(value: Payload) -> Payload { return capture(apply(move value)) }
+effect fn inspect(value: Payload) -> i32 {
+  let result = run produce(move value)
+  return result.third
+}
 pub effect fn main() -> i32 {
   return run inspect(Payload { first: 1, second: 2, third: 42, fourth: 4 })
 }`,
-      { mode: 'release' },
-    )
-    const runner =
-      artifact.ir.match(/define hidden [^\n]+@silk_golden_program_inspect_effect[^]*?\n}/)?.[0] ??
-      unreachable('expected the aggregate Effect runner')
-    assert.match(runner, /@silk_golden_program_inspect_effect[^\n(]*\(ptr /)
-    assert.include(runner, '@llvm.memmove')
-  }),
+        { mode: 'release' },
+      )
+      const runner =
+        artifact.ir.match(/define hidden [^\n]+@silk_golden_program_inspect_effect[^]*?\n}/)?.[0] ??
+        unreachable('expected the aggregate Effect runner')
+      assert.match(runner, /@silk_golden_program_inspect_effect[^\n(]*\(ptr /)
+      assert.include(runner, '@llvm.memmove')
+      for (const name of ['identity', 'apply', 'capture', 'produce_effect']) {
+        const body =
+          artifact.ir
+            .match(new RegExp(`define hidden [^\\n]+@silk_golden_program_${name}[^]*?\\n}`))
+            ?.at(0) ?? unreachable(`expected ${name} definition`)
+        assert.match(body, /^define hidden void [^\n]+\(ptr %v0, ptr %v1\)/)
+        assert.include(body, '@llvm.memmove')
+        assert.notMatch(body, /extractvalue|insertvalue|switch i32/)
+        assert.match(body, /completion:\n\s+ret void/)
+      }
+    }),
 )
 
 it.effect('avoids redundant failure payload selections and duplicate Effect result reloads', () =>

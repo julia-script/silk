@@ -90,7 +90,7 @@ pub fn main() -> i32 {
       'right',
     ])
     const mir = Analysis.loweredMir(self)
-    assert.deepEqual(MirVerification.verify(mir), [], MirEncoding.encode(mir))
+    assert.deepEqual(yield* MirVerification.verify(mir), [], MirEncoding.encode(mir))
   }),
 )
 
@@ -133,7 +133,7 @@ pub fn main() -> i32 {
     )
     assert.deepEqual(Analysis.diagnostics(self), [])
     const mir = Analysis.loweredMir(self)
-    assert.deepEqual(MirVerification.verify(mir), [])
+    assert.deepEqual(yield* MirVerification.verify(mir), [])
     const constructors = mir.functions.filter((fn) => fn.id.name === 'Vector.append')
     assert.isNotEmpty(constructors)
     const constructor = constructors.at(0)
@@ -148,7 +148,9 @@ pub fn main() -> i32 {
       functions: mir.functions.map((fn) => (fn === constructor ? wrongSite : fn)),
     }
     assert.isTrue(
-      MirVerification.verify(corrupted).some((violation) => violation.rule === 'InvalidCallShape'),
+      (yield* MirVerification.verify(corrupted)).some(
+        (violation) => violation.rule === 'InvalidCallShape',
+      ),
     )
   }),
 )
@@ -163,7 +165,7 @@ it.effect('preserves observed application closure parameters through native star
       configuration: { profile: { target: 'x86_64-unknown-linux-gnu', artifact: 'executable' } },
     }).pipe(Effect.provide(SourceResolver.empty))
     assert.deepEqual(Analysis.diagnostics(self), [])
-    assert.deepEqual(MirVerification.verify(Analysis.loweredMir(self)), [])
+    assert.deepEqual(yield* MirVerification.verify(Analysis.loweredMir(self)), [])
   }),
 )
 
@@ -207,7 +209,7 @@ pub fn main() -> i32 {
 `),
     )
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
-    assert.deepEqual(MirVerification.verify(Analysis.loweredMir(snapshot)), [])
+    assert.deepEqual(yield* MirVerification.verify(Analysis.loweredMir(snapshot)), [])
   }),
 )
 

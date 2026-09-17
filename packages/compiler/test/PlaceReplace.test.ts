@@ -84,7 +84,7 @@ pub fn main() -> i32 {
     )
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
     const mir = Analysis.loweredMir(snapshot)
-    assert.deepEqual(MirVerification.verify(mir), [])
+    assert.deepEqual(yield* MirVerification.verify(mir), [])
     const invalid: Mir.Module = {
       ...mir,
       functions: mir.functions.map((fn) => ({
@@ -107,7 +107,7 @@ pub fn main() -> i32 {
       })),
     }
     assert.include(
-      MirVerification.verify(invalid).map((violation) => violation.rule),
+      (yield* MirVerification.verify(invalid)).map((violation) => violation.rule),
       'InvalidAggregateOperation',
     )
   }),

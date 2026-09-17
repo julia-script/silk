@@ -67,7 +67,7 @@ pub fn main() -> i32 {
 }`)
     assert.deepEqual(codes(self), [])
     const module = Analysis.loweredMir(self)
-    assert.deepEqual(MirVerification.verify(module), [])
+    assert.deepEqual(yield* MirVerification.verify(module), [])
     const matches = module.functions.flatMap((fn) =>
       MirVerification.operations(fn).filter(
         (operation) =>
@@ -107,7 +107,7 @@ pub fn main() -> i32 {
       assert.isTrue(
         MirVerification.operations(owner).some((operation) => operation._tag === 'CatchEffect'),
       )
-    assert.deepEqual(MirVerification.verify(module), [])
+    assert.deepEqual(yield* MirVerification.verify(module), [])
   }),
 )
 
@@ -126,7 +126,7 @@ pub fn main() -> i32 {
 }`)
     assert.deepEqual(codes(self), [])
     const module = Analysis.loweredMir(self)
-    assert.deepEqual(MirVerification.verify(module), [])
+    assert.deepEqual(yield* MirVerification.verify(module), [])
     assert.isTrue(
       module.functions.some((fn) =>
         MirVerification.operations(fn).some(
@@ -155,7 +155,7 @@ pub fn main() -> i32 { return run Effect.catchAll(relay(A {}), recover) }`
     const accepted = yield* analyze(source)
     assert.deepEqual(codes(accepted), [])
     const module = Analysis.loweredMir(accepted)
-    assert.deepEqual(MirVerification.verify(module), [])
+    assert.deepEqual(yield* MirVerification.verify(module), [])
     assert.isTrue(
       module.functions.some((fn) =>
         MirVerification.operations(fn).some(
@@ -234,7 +234,7 @@ effect fn selective(flag: bool) -> i32 ! B {
 pub fn main() -> i32 { return run Effect.catchAll(selective(true), recoverB) }`)
     assert.deepEqual(codes(self), [])
     const module = Analysis.loweredMir(self)
-    assert.deepEqual(MirVerification.verify(module), [])
+    assert.deepEqual(yield* MirVerification.verify(module), [])
     let selectedApplications = 0
     let selectedRuns = 0
     let completedRecoveries = 0
@@ -287,7 +287,7 @@ pub fn main() -> i32 { return run Effect.catchAll(selective(true), recoverB) }`)
       return unreachable('expected unselected failure propagation')
     Reflect.set(propagation, 'outcome', propagation.source)
     assert.include(
-      MirVerification.verify(wrongPropagationOwner).map((violation) => violation.rule),
+      (yield* MirVerification.verify(wrongPropagationOwner)).map((violation) => violation.rule),
       'InvalidEffectOperation',
     )
     const forged = structuredClone(module)
@@ -299,7 +299,7 @@ pub fn main() -> i32 { return run Effect.catchAll(selective(true), recoverB) }`)
     if (selected === undefined) return unreachable('expected selected recovery execution')
     Reflect.set(selected.selected.execution, 'recoveryOutcome', { _tag: 'Local', ordinal: -1 })
     assert.include(
-      MirVerification.verify(forged).map((violation) => violation.rule),
+      (yield* MirVerification.verify(forged)).map((violation) => violation.rule),
       'InvalidMatchJoin',
     )
     const successScope = structuredClone(module)
@@ -320,7 +320,7 @@ pub fn main() -> i32 { return run Effect.catchAll(selective(true), recoverB) }`)
     }
     assert.isTrue(forgedSuccess)
     assert.include(
-      MirVerification.verify(successScope).map((violation) => violation.rule),
+      (yield* MirVerification.verify(successScope)).map((violation) => violation.rule),
       'InvalidEffectOperation',
     )
   }),
@@ -531,8 +531,8 @@ it.effect('rejects failure-only loan metadata on every infallible MIR run form',
         ? unreachable(`expected provisional MIR: ${provisional.error.message}`)
         : provisional.value,
     )
-    assert.deepEqual(MirVerification.verify(rawModule), [])
-    assert.deepEqual(MirVerification.verify(normalizedModule), [])
+    assert.deepEqual(yield* MirVerification.verify(rawModule), [])
+    assert.deepEqual(yield* MirVerification.verify(normalizedModule), [])
 
     const withFailureMetadata = (
       module: Mir.Module,
@@ -552,7 +552,9 @@ it.effect('rejects failure-only loan metadata on every infallible MIR run form',
           operation,
         ): operation is Extract<
           Mir.Operation,
-          { readonly _tag: 'RunEffectValue' | 'RunStaticEffect' }
+          {
+            readonly _tag: 'RunEffectValue' | 'RunStaticEffect'
+          }
         > => operation._tag === sourceTag,
       )
       if (candidate === undefined)
@@ -581,14 +583,14 @@ it.effect('rejects failure-only loan metadata on every infallible MIR run form',
       [normalizedModule, 'RunStaticEffect', 'InvalidNormalization'],
     ] as const) {
       assert.notInclude(
-        MirVerification.verify(withFailureMetadata(module, form, false)).map(
+        (yield* MirVerification.verify(withFailureMetadata(module, form, false))).map(
           (violation) => violation.rule,
         ),
         rule,
         `expected a valid infallible ${form} template`,
       )
       assert.include(
-        MirVerification.verify(withFailureMetadata(module, form, true)).map(
+        (yield* MirVerification.verify(withFailureMetadata(module, form, true))).map(
           (violation) => violation.rule,
         ),
         rule,
@@ -659,7 +661,7 @@ it.effect('rejects uncovered match endings and path-exclusive endings replayed b
     })
     assert.strictEqual(removed, true)
     assert.include(
-      MirVerification.verify(replaceChoose(uncovered)).map((violation) => violation.rule),
+      (yield* MirVerification.verify(replaceChoose(uncovered))).map((violation) => violation.rule),
       'InvalidLoan',
     )
 
@@ -670,8 +672,14 @@ it.effect('rejects uncovered match endings and path-exclusive endings replayed b
         ? beginningCandidate
         : unreachable('expected one loan beginning')
     const endings = operations.filter(
-      (operation): operation is Extract<Mir.Operation, { readonly _tag: 'EndLoan' }> =>
-        operation._tag === 'EndLoan',
+      (
+        operation,
+      ): operation is Extract<
+        Mir.Operation,
+        {
+          readonly _tag: 'EndLoan'
+        }
+      > => operation._tag === 'EndLoan',
     )
     const firstEnding = endings.at(0) ?? unreachable('expected first match-arm ending')
     const secondEnding = endings.at(1) ?? unreachable('expected second match-arm ending')
@@ -748,7 +756,9 @@ it.effect('rejects uncovered match endings and path-exclusive endings replayed b
       ]),
     })
     assert.include(
-      MirVerification.verify(replaceChoose(alternating)).map((violation) => violation.rule),
+      (yield* MirVerification.verify(replaceChoose(alternating))).map(
+        (violation) => violation.rule,
+      ),
       'InvalidLoan',
     )
   }),
@@ -784,7 +794,7 @@ pub fn main() -> i32 {
     )
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
     const module = Analysis.loweredMir(snapshot)
-    assert.deepEqual(MirVerification.verify(module), [])
+    assert.deepEqual(yield* MirVerification.verify(module), [])
     const chooseIndex = module.functions.findIndex((fn) => fn.id.name === 'choose$effect$-1')
     const choose =
       module.functions.at(chooseIndex) ?? unreachable('expected effectful choose runner')
@@ -878,7 +888,9 @@ pub fn main() -> i32 {
         ]),
       })
     assert.include(
-      MirVerification.verify(replaceChoose(forgedChoose)).map((violation) => violation.rule),
+      (yield* MirVerification.verify(replaceChoose(forgedChoose))).map(
+        (violation) => violation.rule,
+      ),
       'InvalidLoan',
     )
   }),

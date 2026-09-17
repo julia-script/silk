@@ -33,17 +33,19 @@ it('gives char a fixed 32-bit width and a 4-byte layout on every target', () => 
     alignment: 4,
   })
 })
-
-it('gives char a 32-bit unsigned representation on a 64-bit and a 32-bit target', () => {
-  for (const target of [Target.aarch64AppleDarwin, Target.wasm32UnknownUnknown]) {
-    const entry = Layout.make(target, ['char']).entries.at(0)
-    assert.strictEqual(entry?._tag, 'LayoutEntry')
-    if (entry?._tag !== 'LayoutEntry') return
-    assert.strictEqual(entry.size, 4)
-    assert.strictEqual(entry.alignment, 4)
-    assert.deepEqual(entry.representation, { _tag: 'UnsignedInteger', bits: 32 })
-  }
-})
+it.effect(
+  'gives char a 32-bit unsigned representation on a 64-bit and a 32-bit target',
+  Effect.fnUntraced(function* () {
+    for (const target of [Target.aarch64AppleDarwin, Target.wasm32UnknownUnknown]) {
+      const entry = (yield* Layout.make(target, ['char'])).entries.at(0)
+      assert.strictEqual(entry?._tag, 'LayoutEntry')
+      if (entry?._tag !== 'LayoutEntry') return
+      assert.strictEqual(entry.size, 4)
+      assert.strictEqual(entry.alignment, 4)
+      assert.deepEqual(entry.representation, { _tag: 'UnsignedInteger', bits: 32 })
+    }
+  }),
+)
 
 it.effect('accepts equality and ordering over two char operands', () =>
   Effect.gen(function* () {

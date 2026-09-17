@@ -1,3 +1,4 @@
+import * as Effect from 'effect/Effect'
 import * as CLayout from './CLayout.js'
 import * as DeclarationFacts from './DeclarationFacts.js'
 import type * as DeclarationIndex from './DeclarationIndex.js'
@@ -17,7 +18,7 @@ import type {
 } from './Layout.js'
 import {
   callingShape,
-  callingShapes,
+  planCallingShapes,
   catalogEntry,
   entry,
   foreignFunctionEntry,
@@ -1258,9 +1259,10 @@ const callingScalarEquals = (left: CallingScalar, right: CallingScalar): boolean
     : typeof right !== 'string' &&
       Type.equals(left.element, right.element) &&
       left.bits === right.bits
-
-const verifyCallingShapes = (self: Plan): ReadonlyArray<Violation> => {
-  const expected = callingShapes(
+const verifyCallingShapes = Effect.fn('LayoutVerify.verifyCallingShapes')(function* (
+  self: Plan,
+): Effect.fn.Return<ReadonlyArray<Violation>> {
+  const expected = yield* planCallingShapes(
     self.target,
     self.entries,
     self.entries.map((entry) => entry.type),
@@ -1308,9 +1310,11 @@ const verifyCallingShapes = (self: Plan): ReadonlyArray<Violation> => {
     )
   }
   return Object.freeze(violations)
-}
-
-const verifyLiteralVerdicts = (self: Plan): ReadonlyArray<Violation> => {
+})
+const verifyLiteralVerdicts = Effect.fn('LayoutVerify.verifyLiteralVerdicts')(function* (
+  self: Plan,
+): Effect.fn.Return<ReadonlyArray<Violation>> {
+  yield* Effect.annotateCurrentSpan({ 'entries.count': self.literalVerdicts.length })
   const bits: 32 | 64 = self.target.pointerSize === 4 ? 32 : 64
   const violations: Array<Violation> = []
   const unavailable = self.literalVerdicts.filter(
@@ -1360,9 +1364,11 @@ const verifyLiteralVerdicts = (self: Plan): ReadonlyArray<Violation> => {
     )
   }
   return Object.freeze(violations)
-}
-
-const verifyStaticData = (self: Plan): ReadonlyArray<Violation> => {
+})
+const verifyStaticData = Effect.fn('LayoutVerify.verifyStaticData')(function* (
+  self: Plan,
+): Effect.fn.Return<ReadonlyArray<Violation>> {
+  yield* Effect.annotateCurrentSpan({ 'entries.count': self.staticData?.length ?? 0 })
   const expectedBits = self.target.pointerSize === 4 ? 32 : 64
   const valid = (self.staticData ?? []).every((placement, ordinal, all) => {
     const previous = ordinal === 0 ? undefined : all.at(ordinal - 1)
@@ -1383,17 +1389,22 @@ const verifyStaticData = (self: Plan): ReadonlyArray<Violation> => {
           detail: 'static data placements are not canonical immutable target data',
         }),
       ])
-}
+})
 
 /** Verifies canonical target, ordering, uniqueness, representation, and ABI facts. */
-export const verify = (self: Plan): ReadonlyArray<Violation> =>
-  Object.freeze([
-    ...commonViolations(self.target, self.entries),
-    ...verifyCallingShapes(self),
-    ...ValueStorage.verify(self),
-    ...verifyLiteralVerdicts(self),
-    ...verifyStaticData(self),
-  ])
+export const verify = Effect.fn('LayoutVerify.verify')(function* (
+  self: Plan,
+): Effect.fn.Return<ReadonlyArray<Violation>> {
+  const entries = yield* verifyEntries(self)
+  const shapes = yield* verifyCallingShapes(self)
+  const storage = yield* ValueStorage.verify(self)
+  const literals = yield* verifyLiteralVerdicts(self)
+  const staticData = yield* verifyStaticData(self)
+  return Object.freeze([...entries, ...shapes, ...storage, ...literals, ...staticData])
+})
+const verifyEntries = Effect.fn('LayoutVerify.verifyEntries')((self: Plan) =>
+  Effect.sync(() => commonViolations(self.target, self.entries)),
+)
 
 /** Verifies all available entries and deterministic ordering within a nominal catalog. */
 export const verifyCatalog = (

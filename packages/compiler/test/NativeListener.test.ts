@@ -177,7 +177,7 @@ it.effect(
           target,
         )
         assert.deepEqual(Analysis.diagnostics(snapshot), [], target)
-        assert.deepEqual(MirVerification.verify(Analysis.loweredMir(snapshot)), [], target)
+        assert.deepEqual(yield* MirVerification.verify(Analysis.loweredMir(snapshot)), [], target)
         if (snapshot.mir._tag === 'Available') {
           assert.deepEqual(
             snapshot.mir.value.functions
@@ -194,7 +194,7 @@ it.effect(
         assert.include(symbols, target === 'aarch64-apple-darwin' ? 'accept' : 'accept4')
       }
     }),
-  120_000,
+  120000,
 )
 
 it.effect('rejects affine listener and accepted-owner violations in one analysis snapshot', () =>
@@ -292,7 +292,7 @@ pub effect fn main() -> i32 ! NativeSocketError {
       'x86_64-unknown-linux-gnu',
     )
     assert.deepEqual(Analysis.diagnostics(native), [])
-    assert.deepEqual(MirVerification.verify(Analysis.loweredMir(native)), [])
+    assert.deepEqual(yield* MirVerification.verify(Analysis.loweredMir(native)), [])
 
     const wasmSource = `import silk.native_socket {Accepted, AcceptedContext, BoundAddress, ListenOptions, Listener, PeerAddress, accept, listen, listenUnix, withAccepted, withAcceptedContext, withListener}
 pub fn main() -> i32 { return 42 }`
@@ -322,7 +322,7 @@ it.effect('emits no listener declarations or foreign symbols on WebAssembly', ()
       'wasm32-unknown-unknown',
     )
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
-    assert.deepEqual(MirVerification.verify(Analysis.loweredMir(snapshot)), [])
+    assert.deepEqual(yield* MirVerification.verify(Analysis.loweredMir(snapshot)), [])
     assert.deepEqual(Analysis.instancesOf(snapshot).foreignCalls, [])
   }),
 )

@@ -235,8 +235,7 @@ const failuresIn = (name: string, cases: ReadonlyArray<Case>) =>
         })),
         [],
       )
-    if (compiled._tag === 'BackendFailed' && compiled.error.reason._tag === 'InvalidMir')
-      assert.deepEqual(compiled.error.reason.violations, [])
+    if (compiled._tag === 'VerificationFailed') assert.deepEqual(compiled.error.violations, [])
     assert.strictEqual(compiled._tag, 'Compiled', `${name} did not compile`)
     if (compiled._tag !== 'Compiled') return Number.NaN
     const run = spawnSync(compiled.path, [], { encoding: 'utf8' })

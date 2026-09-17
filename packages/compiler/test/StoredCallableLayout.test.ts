@@ -19,8 +19,8 @@ const storedLayout = Effect.fnUntraced(function* (
 ) {
   const snapshot = yield* AnalysisFixture.retainingMain(name, ascii(source), target.id)
   assert.deepEqual(Analysis.diagnostics(snapshot), [])
-  const catalog = Layout.catalog(target, snapshot.index, snapshot.instances)
-  return Layout.plan(catalog, snapshot.instances, snapshot.index)
+  const catalog = yield* Layout.catalog(target, snapshot.index, snapshot.instances)
+  return yield* Layout.plan(catalog, snapshot.instances, snapshot.index)
 })
 
 const representedEntry = (plan: Layout.Plan): Layout.Entry =>
@@ -53,7 +53,7 @@ pub fn main() -> i32 {
     assert.strictEqual(parser.representation._tag, 'Aggregate')
     if (parser.representation._tag !== 'Aggregate') return
     assert.strictEqual(parser.representation.fields.at(0)?.size, 0)
-    assert.deepEqual(LayoutVerify.verify(plan), [])
+    assert.deepEqual(yield* LayoutVerify.verify(plan), [])
   }),
 )
 
@@ -84,7 +84,7 @@ pub fn main() -> i32 {
       )
       assert.strictEqual(represented.size, 4)
       assert.strictEqual(represented.alignment, 4)
-      assert.deepEqual(LayoutVerify.verify(plan), [])
+      assert.deepEqual(yield* LayoutVerify.verify(plan), [])
     }
   }),
 )
@@ -118,7 +118,7 @@ pub fn main() -> i32 {
     if (represented.representation._tag !== 'CallableEnvironment') return
     assert.deepEqual(represented.representation.fields, [])
     assert.strictEqual(LayoutEncode.encode(first), LayoutEncode.encode(second))
-    assert.deepEqual(LayoutVerify.verify(first), [])
+    assert.deepEqual(yield* LayoutVerify.verify(first), [])
   }),
 )
 
@@ -140,7 +140,7 @@ pub fn main() -> i32 {
       assert.strictEqual(represented.representation.fields.at(0)?.representation, 'Value')
       assert.strictEqual(represented.size, target.pointerSize * 2)
       assert.strictEqual(represented.alignment, target.pointerAlignment)
-      assert.deepEqual(LayoutVerify.verify(plan), [])
+      assert.deepEqual(yield* LayoutVerify.verify(plan), [])
     }
   }),
 )

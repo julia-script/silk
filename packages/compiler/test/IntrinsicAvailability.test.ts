@@ -632,78 +632,80 @@ pub fn main() -> i32 { unsafe install(silk_test_wait_v1) return 0 }`
     )
   }),
 )
-
-it('plans exports over MIR: symbol map, non-native rejection, and suspension', () => {
-  const sample = MirSamples.foreignCallSample(Target.aarch64AppleDarwin)
-  const key = sample.functions.at(0)?.instance ?? unreachable('expected a fixture function')
-  const i32 = Object.freeze({
-    _tag: 'Integer' as const,
-    bits: 32 as const,
-    signed: true,
-    extension: 'None' as const,
-  })
-  const record = (symbol: string, sourceId: string, start: number): Instances.ForeignExport =>
-    Object.freeze({
-      _tag: 'ForeignExport',
-      symbol,
-      type: Type.foreignFunction(['i32'], 'i32'),
-      signature: Object.freeze({
-        variadic: false,
-        contract: ForeignContract.conservative,
-        parameters: Object.freeze([i32]),
-        result: i32,
-      }),
-      key,
-      declaration: Object.freeze({
-        _tag: 'CanonicalDeclarationId',
-        module: sourceId,
-        name: symbol,
-      }),
-      declarationSpan: foreignEntry(symbol, [], sourceId, start).declarationSpan,
+it.effect(
+  'plans exports over MIR: symbol map, non-native rejection, and suspension',
+  Effect.fnUntraced(function* () {
+    const sample = yield* MirSamples.foreignCallSample(Target.aarch64AppleDarwin)
+    const key = sample.functions.at(0)?.instance ?? unreachable('expected a fixture function')
+    const i32 = Object.freeze({
+      _tag: 'Integer' as const,
+      bits: 32 as const,
+      signed: true,
+      extension: 'None' as const,
     })
-  const program: Mir.Module = Object.freeze({
-    ...sample,
-    foreignCalls: Object.freeze([foreignEntry('abs', [i32], 'planning/import', 0)]),
-    foreignExports: Object.freeze([
-      record('silk_test_v1', 'planning/a', 0),
-      record('abs', 'planning/b', 0),
-      record('silk_test_v1', 'planning/c', 0),
-      record('silk_test_ok', 'planning/d', 0),
-    ]),
-  })
-  const summarize = (diagnostics: ReadonlyArray<Diagnostic.Diagnostic>) =>
-    diagnostics.map((diagnostic) => [
-      diagnostic.code,
-      diagnostic.span.sourceId,
-      diagnostic.reason._tag === 'ForeignFunctionTargetUnavailable'
-        ? diagnostic.reason.surface
-        : diagnostic.relatedSpans?.map((related) => related.span.sourceId).join(','),
+    const record = (symbol: string, sourceId: string, start: number): Instances.ForeignExport =>
+      Object.freeze({
+        _tag: 'ForeignExport',
+        symbol,
+        type: Type.foreignFunction(['i32'], 'i32'),
+        signature: Object.freeze({
+          variadic: false,
+          contract: ForeignContract.conservative,
+          parameters: Object.freeze([i32]),
+          result: i32,
+        }),
+        key,
+        declaration: Object.freeze({
+          _tag: 'CanonicalDeclarationId',
+          module: sourceId,
+          name: symbol,
+        }),
+        declarationSpan: foreignEntry(symbol, [], sourceId, start).declarationSpan,
+      })
+    const program: Mir.Module = Object.freeze({
+      ...sample,
+      foreignCalls: Object.freeze([foreignEntry('abs', [i32], 'planning/import', 0)]),
+      foreignExports: Object.freeze([
+        record('silk_test_v1', 'planning/a', 0),
+        record('abs', 'planning/b', 0),
+        record('silk_test_v1', 'planning/c', 0),
+        record('silk_test_ok', 'planning/d', 0),
+      ]),
+    })
+    const summarize = (diagnostics: ReadonlyArray<Diagnostic.Diagnostic>) =>
+      diagnostics.map((diagnostic) => [
+        diagnostic.code,
+        diagnostic.span.sourceId,
+        diagnostic.reason._tag === 'ForeignFunctionTargetUnavailable'
+          ? diagnostic.reason.surface
+          : diagnostic.relatedSpans?.map((related) => related.span.sourceId).join(','),
+      ])
+    assert.deepEqual(summarize(ForeignPlanning.check(program, Target.aarch64AppleDarwin)), [
+      ['SEM0192', 'planning/b', 'planning/import'],
+      ['SEM0192', 'planning/c', 'planning/a'],
     ])
-  assert.deepEqual(summarize(ForeignPlanning.check(program, Target.aarch64AppleDarwin)), [
-    ['SEM0192', 'planning/b', 'planning/import'],
-    ['SEM0192', 'planning/c', 'planning/a'],
-  ])
-  assert.deepEqual(
-    summarize(
-      ForeignPlanning.check(
-        { ...program, foreignExports: program.foreignExports.slice(3) },
-        Target.wasm32UnknownUnknown,
+    assert.deepEqual(
+      summarize(
+        ForeignPlanning.check(
+          { ...program, foreignExports: program.foreignExports.slice(3) },
+          Target.wasm32UnknownUnknown,
+        ),
       ),
-    ),
-    [],
-  )
-  const suspending: Mir.Module = {
-    ...program,
-    foreignExports: program.foreignExports.slice(3),
-    functions: program.functions.map((fn) => ({
-      ...fn,
-      suspension: { classification: 'Suspendable' as const, regions: Object.freeze([]) },
-    })),
-  }
-  assert.deepEqual(summarize(ForeignPlanning.check(suspending, Target.aarch64AppleDarwin)), [
-    ['SEM0201', 'planning/d', undefined],
-  ])
-})
+      [],
+    )
+    const suspending: Mir.Module = {
+      ...program,
+      foreignExports: program.foreignExports.slice(3),
+      functions: program.functions.map((fn) => ({
+        ...fn,
+        suspension: { classification: 'Suspendable' as const, regions: Object.freeze([]) },
+      })),
+    }
+    assert.deepEqual(summarize(ForeignPlanning.check(suspending, Target.aarch64AppleDarwin)), [
+      ['SEM0201', 'planning/d', undefined],
+    ])
+  }),
+)
 
 it.effect('shares matching C data imports and rejects incompatible symbol claims', () =>
   Effect.gen(function* () {
@@ -802,7 +804,7 @@ export "C" fn sum(left: u64, right: u64) -> u64 { return unsafe add(left, right)
       })),
     }
     assert.include(
-      MirVerification.verify(corrupted).map((violation) => violation.rule),
+      (yield* MirVerification.verify(corrupted)).map((violation) => violation.rule),
       'InvalidNativeAssembly',
     )
   }),

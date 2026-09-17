@@ -290,7 +290,7 @@ pub fn main() -> i32 {
       Type.requirementMembers(run.outcomeType.type),
       stored.realization.rows.requirements,
     )
-    assert.deepEqual(MirVerification.verify(module), [])
+    assert.deepEqual(yield* MirVerification.verify(module), [])
     const alternate = operations.find(
       (operation) => operation._tag === 'RunEffectValue' && operation !== run,
     )
@@ -303,7 +303,7 @@ pub fn main() -> i32 {
       arguments: Object.freeze([run.effect]),
     })
     assert.include(
-      MirVerification.verify(replaceOperation(module, run, forged)).map(
+      (yield* MirVerification.verify(replaceOperation(module, run, forged))).map(
         (violation) => violation.rule,
       ),
       'InvalidEffectOperation',
@@ -348,7 +348,7 @@ pub fn main() -> i32 {
 
     assert.strictEqual(counter?._tag, 'RunEffectValue')
     assert.strictEqual(meter?._tag, 'RunEffectValue')
-    assert.deepEqual(MirVerification.verify(module), [])
+    assert.deepEqual(yield* MirVerification.verify(module), [])
     if (counter?._tag !== 'RunEffectValue' || meter?._tag !== 'RunEffectValue') return
     const wrongWrapper = Object.freeze({
       ...counter,
@@ -356,7 +356,7 @@ pub fn main() -> i32 {
       runnerTypeArguments: meter.runnerTypeArguments,
     })
     assert.include(
-      MirVerification.verify(replaceOperation(module, counter, wrongWrapper)).map(
+      (yield* MirVerification.verify(replaceOperation(module, counter, wrongWrapper))).map(
         (violation) => violation.rule,
       ),
       'InvalidEffectOperation',
@@ -371,7 +371,7 @@ pub fn main() -> i32 {
       ]),
     })
     assert.include(
-      MirVerification.verify(replaceOperation(module, counter, wrongWitness)).map(
+      (yield* MirVerification.verify(replaceOperation(module, counter, wrongWitness))).map(
         (violation) => violation.rule,
       ),
       'InvalidEffectOperation',
@@ -402,7 +402,7 @@ pub fn main() -> i32 {
 }`,
     )
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
-    assert.deepEqual(MirVerification.verify(module), [])
+    assert.deepEqual(yield* MirVerification.verify(module), [])
     assert.isTrue(module.functions.some((fn) => fn.id.name.startsWith('impl@0.get$effect$')))
     const run =
       module.functions
@@ -448,11 +448,11 @@ pub fn main() -> i32 {
     const proofContext = Type.nominal(provider.capability.module, 'Read', [
       Lifetime.local({ module: provider.capability.module, name: 'main' }, 'witness', 0),
     ])
-    assert.deepEqual(MirVerification.verify(withWitnessCapability(proofContext)), [])
+    assert.deepEqual(yield* MirVerification.verify(withWitnessCapability(proofContext)), [])
     assert.include(
-      MirVerification.verify(
+      (yield* MirVerification.verify(
         withWitnessCapability(Type.nominal(provider.capability.module, 'Read', ['i32'])),
-      ).map((violation) => violation.rule),
+      )).map((violation) => violation.rule),
       'InvalidEffectOperation',
     )
   }),
@@ -467,16 +467,20 @@ it.effect('retains provided runner contracts through typed-failure recovery', ()
       Target.aarch64AppleDarwin.id,
     )
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
-    assert.deepEqual(MirVerification.verify(module), [])
-
-    const providedRun = module.functions
-      .flatMap(MirVerification.operations)
-      .find(
-        (operation): operation is Extract<Mir.Operation, { readonly _tag: 'RunEffectValue' }> =>
-          operation._tag === 'RunEffectValue' &&
-          operation.runnerBase !== undefined &&
-          operation.runnerBase.declaration.name.includes('impl@0.writeAll'),
-      )
+    assert.deepEqual(yield* MirVerification.verify(module), [])
+    const providedRun = module.functions.flatMap(MirVerification.operations).find(
+      (
+        operation,
+      ): operation is Extract<
+        Mir.Operation,
+        {
+          readonly _tag: 'RunEffectValue'
+        }
+      > =>
+        operation._tag === 'RunEffectValue' &&
+        operation.runnerBase !== undefined &&
+        operation.runnerBase.declaration.name.includes('impl@0.writeAll'),
+    )
     assert.isDefined(providedRun)
     if (providedRun === undefined || providedRun.runnerBase === undefined) return
     assert.strictEqual(providedRun.providers.length, 1)
@@ -522,7 +526,7 @@ pub fn main() -> i32 {
 }`,
     )
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
-    assert.deepEqual(MirVerification.verify(module), [])
+    assert.deepEqual(yield* MirVerification.verify(module), [])
     const nestedRunners = module.functions.filter((fn) => fn.id.name.startsWith('nested$effect$'))
     const selected = nestedRunners.flatMap((fn) =>
       MirVerification.operations(fn).flatMap((operation) =>
@@ -573,7 +577,7 @@ pub fn main() -> i32 {
         ) ?? unreachable('expected intrinsic runner execution')
       assert.strictEqual(intrinsic.classification, 'Suspendable')
       assert.isTrue(intrinsic.regions.some((region) => region.outcome._tag === 'SuspendEffect'))
-      assert.deepEqual(MirVerification.verify(module), [])
+      assert.deepEqual(yield* MirVerification.verify(module), [])
     }),
 )
 
@@ -606,16 +610,20 @@ pub fn main() -> i32 {
       ),
       'EffectCleanup',
     )
-    assert.deepEqual(MirVerification.verify(module), [])
-
-    const drop = module.functions
-      .flatMap(MirVerification.operations)
-      .find(
-        (operation): operation is Extract<Mir.Operation, { readonly _tag: 'Drop' }> =>
-          operation._tag === 'Drop' &&
-          operation.cleanup._tag === 'StructCleanup' &&
-          operation.cleanup.fields.some((field) => field.cleanup._tag === 'EffectCleanup'),
-      )
+    assert.deepEqual(yield* MirVerification.verify(module), [])
+    const drop = module.functions.flatMap(MirVerification.operations).find(
+      (
+        operation,
+      ): operation is Extract<
+        Mir.Operation,
+        {
+          readonly _tag: 'Drop'
+        }
+      > =>
+        operation._tag === 'Drop' &&
+        operation.cleanup._tag === 'StructCleanup' &&
+        operation.cleanup.fields.some((field) => field.cleanup._tag === 'EffectCleanup'),
+    )
     assert.isDefined(drop)
     if (drop === undefined || drop.cleanup._tag !== 'StructCleanup') return
     const structCleanup = drop.cleanup
@@ -626,8 +634,18 @@ pub fn main() -> i32 {
     if (field?.cleanup._tag !== 'EffectCleanup') return
     const slot = field.cleanup.slots.at(0) ?? unreachable('expected owned stored Effect slot')
     const withEffectCleanup = (
-      cleanup: Extract<CleanupPlan.CleanupPlan, { readonly _tag: 'EffectCleanup' }>,
-    ): Extract<Mir.Operation, { readonly _tag: 'Drop' }> =>
+      cleanup: Extract<
+        CleanupPlan.CleanupPlan,
+        {
+          readonly _tag: 'EffectCleanup'
+        }
+      >,
+    ): Extract<
+      Mir.Operation,
+      {
+        readonly _tag: 'Drop'
+      }
+    > =>
       Object.freeze({
         ...drop,
         cleanup: Object.freeze({
@@ -661,7 +679,7 @@ pub fn main() -> i32 {
     ]
     for (const cleanup of malformed) {
       assert.include(
-        MirVerification.verify(replaceDrop(module, drop, withEffectCleanup(cleanup))).map(
+        (yield* MirVerification.verify(replaceDrop(module, drop, withEffectCleanup(cleanup)))).map(
           (violation) => violation.rule,
         ),
         'InvalidAggregateOperation',
@@ -733,7 +751,7 @@ pub fn main() -> i32 {
       ),
       'the reachable chain must terminate in an explicit suspension origin',
     )
-    assert.deepEqual(MirVerification.verify(module), [])
+    assert.deepEqual(yield* MirVerification.verify(module), [])
     assert.include(MirEncoding.encode(module), 'stored-effect-mir/suspending.main$effect$0')
   }),
 )
@@ -778,7 +796,7 @@ pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`,
     )
 
     assert.include(cleanupTags, 'EffectCleanup')
-    assert.deepEqual(MirVerification.verify(module), [])
+    assert.deepEqual(yield* MirVerification.verify(module), [])
     assert.isFalse(
       module.layout.entries.some(
         (entry) => Type.isEffect(entry.type) && entry.representation._tag !== 'Aggregate',

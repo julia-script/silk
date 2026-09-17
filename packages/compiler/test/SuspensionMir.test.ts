@@ -69,16 +69,19 @@ const replaceSuspensionRegion = (
       }),
     ),
   })
-
-const hasRule = (program: Mir.Module, rule: Mir.Violation['rule']): boolean =>
-  MirVerification.verify(program).some((violation) => violation.rule === rule)
+const hasRule = Effect.fnUntraced(function* (
+  program: Mir.Module,
+  rule: Mir.Violation['rule'],
+): Effect.fn.Return<boolean> {
+  return (yield* MirVerification.verify(program)).some((violation) => violation.rule === rule)
+})
 
 it.effect('keeps synchronous recovery out of its protected recipe suspension regions', () =>
   Effect.gen(function* () {
     const self = yield* snapshot(ownedAllocatorSuspensionFailure)
     assert.deepEqual(Analysis.diagnostics(self), [])
     const program = Analysis.loweredMir(self)
-    assert.deepEqual(MirVerification.verify(program), [])
+    assert.deepEqual(yield* MirVerification.verify(program), [])
     const regions = suspensionRegions(program)
     assert.isTrue(regions.some((region) => region._tag === 'SuspendEffectRegion'))
     assert.isFalse(
@@ -101,7 +104,7 @@ it.effect(
       assert.deepEqual(Analysis.diagnostics(first), [])
       const left = Analysis.loweredMir(first)
       const right = Analysis.loweredMir(second)
-      assert.deepEqual(MirVerification.verify(left), [], SuspensionMir.summary(left))
+      assert.deepEqual(yield* MirVerification.verify(left), [], SuspensionMir.summary(left))
       assert.strictEqual(MirEncoding.encode(left), MirEncoding.encode(right))
       assert.strictEqual(SuspensionMir.summary(left), SuspensionMir.summary(right))
       // A conservative discovery result for a synchronous constructor must not acquire a
@@ -170,7 +173,7 @@ it.effect('keeps final synchronous MIR free of suspension machinery', () =>
     )
     const program = Analysis.loweredMir(self)
     assert.deepEqual(Analysis.diagnostics(self), [])
-    assert.deepEqual(MirVerification.verify(program), [])
+    assert.deepEqual(yield* MirVerification.verify(program), [])
     assert.deepEqual(suspensionRegions(program), [])
     assert.notInclude(MirEncoding.encode(program), 'suspension-classification')
   }),
@@ -189,7 +192,7 @@ pub fn main() -> i32 {
 }`)
     assert.deepEqual(Analysis.diagnostics(self), [])
     const program = Analysis.loweredMir(self)
-    assert.deepEqual(MirVerification.verify(program), [])
+    assert.deepEqual(yield* MirVerification.verify(program), [])
   }),
 )
 
@@ -215,7 +218,10 @@ it.effect(
         }),
       })
       assert.isTrue(
-        hasRule(replaceSuspensionRegion(program, owner, relay, omitted), 'InvalidCoroutineFrame'),
+        yield* hasRule(
+          replaceSuspensionRegion(program, owner, relay, omitted),
+          'InvalidCoroutineFrame',
+        ),
       )
 
       const firstSlot = descriptor.slots.at(0)
@@ -239,7 +245,7 @@ it.effect(
           }),
         })
         assert.isTrue(
-          hasRule(
+          yield* hasRule(
             replaceSuspensionRegion(program, owner, relay, incompatibleAccess),
             'InvalidCoroutineFrame',
           ),
@@ -251,7 +257,10 @@ it.effect(
         liveLocals: Object.freeze([...relay.liveLocals, ...relay.liveLocals.slice(0, 1)]),
       })
       assert.isTrue(
-        hasRule(replaceSuspensionRegion(program, owner, relay, duplicate), 'InvalidCoroutineFrame'),
+        yield* hasRule(
+          replaceSuspensionRegion(program, owner, relay, duplicate),
+          'InvalidCoroutineFrame',
+        ),
       )
 
       const undeclared = Object.freeze({
@@ -262,7 +271,7 @@ it.effect(
         ]),
       })
       assert.isTrue(
-        hasRule(
+        yield* hasRule(
           replaceSuspensionRegion(program, owner, relay, undeclared),
           'InvalidCoroutineFrame',
         ),
@@ -282,7 +291,10 @@ it.effect(
         }),
       })
       assert.isTrue(
-        hasRule(replaceSuspensionRegion(program, owner, relay, badResume), 'InvalidCoroutineFrame'),
+        yield* hasRule(
+          replaceSuspensionRegion(program, owner, relay, badResume),
+          'InvalidCoroutineFrame',
+        ),
       )
 
       const badRunner = Object.freeze({
@@ -290,7 +302,10 @@ it.effect(
         runner: Object.freeze({ ...relay.runner, classification: 'Synchronous' as const }),
       })
       assert.isTrue(
-        hasRule(replaceSuspensionRegion(program, owner, relay, badRunner), 'InvalidSuspension'),
+        yield* hasRule(
+          replaceSuspensionRegion(program, owner, relay, badRunner),
+          'InvalidSuspension',
+        ),
       )
 
       const badOutcome = Object.freeze({
@@ -301,7 +316,10 @@ it.effect(
         }),
       })
       assert.isTrue(
-        hasRule(replaceSuspensionRegion(program, owner, relay, badOutcome), 'InvalidSuspension'),
+        yield* hasRule(
+          replaceSuspensionRegion(program, owner, relay, badOutcome),
+          'InvalidSuspension',
+        ),
       )
 
       const differentOwner = program.functions.find((fn) => fn !== owner)
@@ -312,7 +330,10 @@ it.effect(
           point: Object.freeze({ ...relay.point, owner: differentOwner.instance }),
         })
         assert.isTrue(
-          hasRule(replaceSuspensionRegion(program, owner, relay, badIdentity), 'InvalidSuspension'),
+          yield* hasRule(
+            replaceSuspensionRegion(program, owner, relay, badIdentity),
+            'InvalidSuspension',
+          ),
         )
       }
 
@@ -325,7 +346,7 @@ it.effect(
         }),
       })
       assert.isTrue(
-        hasRule(
+        yield* hasRule(
           replaceSuspensionRegion(program, owner, relay, noDescriptor),
           'InvalidCoroutineFrame',
         ),
@@ -351,7 +372,7 @@ it.effect(
           ),
         ),
       })
-      assert.isTrue(hasRule(orphan, 'OrphanSuspensionMachinery'))
+      assert.isTrue(yield* hasRule(orphan, 'OrphanSuspensionMachinery'))
       assert.notInclude(MirEncoding.encode(program), 'provisional-mir')
     }),
 )
@@ -365,7 +386,7 @@ it.effect('retains the caller continuation after a direct suspension primitive',
 pub fn main() -> i32 { return run application() }`)
     assert.deepEqual(Analysis.diagnostics(analysis), [])
     const program = Analysis.loweredMir(analysis)
-    assert.deepEqual(MirVerification.verify(program), [])
+    assert.deepEqual(yield* MirVerification.verify(program), [])
     const caller = program.functions.find((fn) => fn.id.name === 'application$effect$-1')
     assert.isDefined(caller)
     assert.isTrue(

@@ -1,3 +1,4 @@
+import { unreachable } from './support/raise.js'
 import * as TestToolchain from './support/TestToolchain.js'
 import { spawnSync } from 'node:child_process'
 import { mkdtempSync, rmSync } from 'node:fs'
@@ -181,7 +182,7 @@ pub fn main() -> i32 {
   }),
 )
 
-it.effect('realizes mixed usize and i32 union lanes for native and LLVM-to-Wasm targets', () =>
+it.effect('reads mixed usize and i32 union storage at native and Wasm widths', () =>
   Effect.gen(function* () {
     const program = `struct Wide { value: usize }
 struct Narrow { value: i32 }
@@ -204,9 +205,24 @@ pub fn main() -> i32 { return inspect(decode(true)) }`
 
     const nativeArtifact = yield* Analysis.codegen(native, { mode: 'release' })
     const wasmArtifact = yield* Analysis.codegen(wasm, { mode: 'release' })
-    assert.match(nativeArtifact.ir, /\{ i32, i64 \}/)
-    assert.include(nativeArtifact.ir, 'trunc i64')
-    assert.match(wasmArtifact.ir, /\{ i32, i32 \}/)
+    const inspectBody = /define[^\n]+@silk_usize_program_inspect__[^\n]+\n([\s\S]*?)\n}/
+    const nativeInspect =
+      nativeArtifact.ir.match(inspectBody)?.[1] ?? unreachable('expected native inspect')
+    const wasmInspect =
+      wasmArtifact.ir.match(inspectBody)?.[1] ?? unreachable('expected Wasm inspect')
+    // Union values travel by address; each branch reads its selected member's native layout.
+    assert.match(nativeInspect, /_payload = getelementptr i8, ptr %\w+, i32 8/)
+    assert.match(
+      nativeInspect,
+      /%(\w+) = load i64, ptr %\w+, align 8\n\s+%\w+ = icmp ugt i64 %\1, 2147483647/,
+    )
+    assert.match(nativeInspect, /copy\w+ = load i32, ptr %\w+, align 4/)
+    assert.match(wasmInspect, /_payload = getelementptr i8, ptr %\w+, i32 4/)
+    assert.match(
+      wasmInspect,
+      /%(\w+) = load i32, ptr %\w+, align 4\n\s+%\w+ = icmp ugt i32 %\1, 2147483647/,
+    )
+    assert.match(wasmInspect, /copy\w+ = load i32, ptr %\w+, align 4/)
     assert.strictEqual(wasmArtifact.target.id, 'wasm32-unknown-unknown')
   }),
 )
@@ -224,7 +240,7 @@ it.effect('rejects malformed usize target verdicts and MIR literals as verifier 
       literalVerdicts: [{ ...first, bits: 64 }],
     }
     assert.include(
-      LayoutVerify.verify(malformedLayout).map((violation) => violation.rule),
+      (yield* LayoutVerify.verify(malformedLayout)).map((violation) => violation.rule),
       'InvalidLiteralVerdict',
     )
 
@@ -246,7 +262,7 @@ it.effect('rejects malformed usize target verdicts and MIR literals as verifier 
       })),
     }
     assert.include(
-      MirVerification.verify(malformed).map((violation) => violation.rule),
+      (yield* MirVerification.verify(malformed)).map((violation) => violation.rule),
       'InvalidIntegerOperation',
     )
   }),

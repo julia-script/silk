@@ -21,11 +21,10 @@ export type NativeArgument =
 export const isIndirect = (layout: Layout.Plan, fn: Mir.MirFunction, type: Mir.Type): boolean =>
   fn.regions.length > 0 &&
   fn.machine === undefined &&
-  fn.result._tag === 'EffectOutcome' &&
   (fn.suspension === undefined || fn.suspension.classification === 'Synchronous') &&
   NativeValue.classify(layout, type) === 'Place'
 
-/** Synchronous Effect calls copy aggregate bytes on entry; suspension keeps its persistent ABI. */
+/** Synchronous source calls copy aggregate bytes on entry; suspension keeps its persistent ABI. */
 export const parameters = (
   layout: Layout.Plan,
   fn: Mir.MirFunction,

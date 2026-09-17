@@ -84,7 +84,7 @@ export const callSynchronous = Effect.fnUntraced(function* (
   target: DeclaredTarget,
   arguments_: NativeArgument.NativeArgument,
   name: string,
-): Effect.fn.Return<NativeResult.NativeResult, LlvmError.LlvmError> {
+): Effect.fn.Return<NativeResult.Received, LlvmError.LlvmError> {
   if (target.suspendable)
     throw new RangeError('LLVM synchronous helper selected a suspendable target')
   const resultAddress = yield* NativeResult.allocate(context.body, target, `${name}_result`)
@@ -100,7 +100,7 @@ export const callSynchronous = Effect.fnUntraced(function* (
   )
   for (const root of [...context.storage.addressRoots].sort((left, right) => left - right))
     yield* NativeStorage.reloadAddressRoot(context.storage, root)
-  const unpacked = yield* NativeResult.read(context.body, target, result, resultAddress, name)
+  const unpacked = yield* NativeResult.readValue(context.body, target, result, resultAddress, name)
   return unpacked
 })
 
@@ -327,7 +327,7 @@ export const callValues = Effect.fnUntraced(function* (
   yield* LlvmBlock.setInsertionPoint(body, nested)
   yield* NativeSuspension.returnStep(context.returns, 1n, Object.freeze([]), `${name}_relayed`)
   yield* LlvmBlock.setInsertionPoint(body, completed)
-  const unpacked = yield* NativeResult.read(
+  const unpacked = yield* NativeResult.readValue(
     body,
     target,
     result,

@@ -1,3 +1,5 @@
+import * as NativePlace from './NativePlace.js'
+import * as NativeResult from './NativeResult.js'
 import * as NativePayload from './NativePayload.js'
 import * as NativeArgument from './NativeArgument.js'
 import * as ValueStorage from './ValueStorage.js'
@@ -48,20 +50,33 @@ type Operation = Extract<
   }
 >
 
-/** Restores success lanes from the wider shared success/failure outcome representation. */
+/** Selects successful bytes without expanding the outcome's inactive alternatives. */
 const successPayload = Effect.fnUntraced(function* (
   context: Context,
-  values: ReadonlyArray<Value.Input>,
   outcome: Mir.LocalId,
   result: Mir.Type,
   name: string,
 ) {
   const source = context.storage.fn.localTypes.at(outcome.ordinal)
-  if (source === undefined) throw new RangeError('Effect success lost its outcome type')
+  if (source?._tag !== 'EffectOutcome') throw new RangeError('Effect success lost its outcome type')
+  const stored = NativeStorage.readLocal(context.storage, outcome)
+  if (
+    stored._tag === 'NativePlace' &&
+    ValueStorage.outcome(context.program.layout, source.type).members.find(
+      (member) => member.tag === 0,
+    )?.storage._tag === 'Value'
+  )
+    return yield* NativePlace.project(
+      stored,
+      context.storage,
+      result,
+      ValueStorage.outcome(context.program.layout, source.type).payloadOffset,
+      name,
+    )
+  const values = yield* NativeStorage.materialize(context.storage, outcome)
   const sourceLanes = NativeType.lanesFor(context.types, source).slice(1)
-  const resultLanes = NativeType.lanesFor(context.types, result)
   const payload: Array<Value.Input> = []
-  for (const [ordinal, lane] of resultLanes.entries()) {
+  for (const [ordinal, lane] of NativeType.lanesFor(context.types, result).entries()) {
     const value = values.at(ordinal + 1)
     const sourceLane = sourceLanes.at(ordinal)
     if (value === undefined || sourceLane === undefined)
@@ -76,7 +91,7 @@ const successPayload = Effect.fnUntraced(function* (
       ),
     )
   }
-  return Object.freeze(payload)
+  return { _tag: 'Direct' as const, values: payload }
 })
 
 /** Materializes only the selected logical member at an outcome/capture boundary. */
@@ -262,7 +277,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
       break
     }
     case 'PackEffectComposite': {
-      const source = [...(yield* NativeStorage.materialize(nativeStorage, operation.source))]
+      const source = yield* NativeStorage.materialize(nativeStorage, operation.source)
       const sourceType = entry.fn.localTypes.at(operation.source.ordinal)
       if (sourceType?._tag !== 'EffectValue')
         throw new RangeError('LLVM Effect composite lost its selected alternative')
@@ -294,11 +309,8 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
       break
     }
     case 'PackEffectOutcome': {
-      const source = [...(yield* NativeStorage.materialize(nativeStorage, operation.source))]
       const sourceType = entry.fn.localTypes.at(operation.source.ordinal)
       if (sourceType === undefined) throw new RangeError('LLVM effect outcome lost its source type')
-      const sourceLanes = NativeType.valueLanesFor(types, sourceType)
-      const targetLanes = NativeType.lanesFor(types, operation.type)
       const diagnostic = call.synchronous.diagnostic
       const diagnosticSlot = diagnostic?.outcomes.get(operation.destination.ordinal)
       if (diagnostic !== undefined && diagnosticSlot !== undefined) {
@@ -323,29 +335,62 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
             ),
           )
       }
-      const values: Array<Value.Input> = [
-        yield* Constant.integerSigned(builder, i32, BigInt(operation.tag)),
-      ]
-      for (const [ordinal, targetLane] of targetLanes.slice(1).entries()) {
-        const input = source.at(ordinal)
-        const sourceLane = sourceLanes.at(ordinal)
-        values.push(
-          input === undefined || sourceLane === undefined
-            ? yield* Constant.nullValue(builder, NativeType.laneType(types, targetLane))
-            : yield* NativeArith.coerceLane(
-                arith.lane,
-                input,
-                sourceLane,
-                targetLane,
-                `effect_outcome${operation.destination.ordinal}_${ordinal}_payload`,
-              ),
-        )
+      if (
+        ValueStorage.outcome(context.program.layout, operation.type.type).members.find(
+          (member) => member.tag === operation.tag,
+        )?.storage._tag === 'Transport'
+      ) {
+        const source = yield* NativeStorage.materialize(nativeStorage, operation.source)
+        const sourceLanes = NativeType.valueLanesFor(types, sourceType)
+        const values: Array<Value.Input> = [
+          yield* Constant.integerSigned(builder, i32, BigInt(operation.tag)),
+        ]
+        for (const [ordinal, lane] of NativeType.lanesFor(types, operation.type)
+          .slice(1)
+          .entries()) {
+          const value = source.at(ordinal)
+          const sourceLane = sourceLanes.at(ordinal)
+          values.push(
+            value === undefined || sourceLane === undefined
+              ? yield* Constant.nullValue(builder, NativeType.laneType(types, lane))
+              : yield* NativeArith.coerceLane(
+                  arith.lane,
+                  value,
+                  sourceLane,
+                  lane,
+                  `outcome_transport${operation.destination.ordinal}_${ordinal}`,
+                ),
+          )
+        }
+        yield* NativeStorage.writeLocal(nativeStorage, operation.destination.ordinal, values)
+        break
       }
-      yield* NativeStorage.writeLocal(
+      const destination = NativeStorage.readLocal(nativeStorage, operation.destination)
+      if (destination._tag !== 'NativePlace')
+        throw new RangeError('Effect outcome lost canonical storage')
+      yield* NativePlace.storeLane(
+        destination,
         nativeStorage,
-        operation.destination.ordinal,
-        Object.freeze(values),
+        0,
+        yield* Constant.integerSigned(builder, i32, BigInt(operation.tag)),
+        `effect_outcome${operation.destination.ordinal}_tag`,
       )
+      const payload = yield* NativePlace.project(
+        destination,
+        nativeStorage,
+        sourceType,
+        ValueStorage.outcome(context.program.layout, operation.type.type).payloadOffset,
+        `effect_outcome${operation.destination.ordinal}_payload`,
+      )
+      const source = NativeStorage.readLocal(nativeStorage, operation.source)
+      if (source._tag === 'NativePlace') yield* NativePlace.transfer(payload, nativeStorage, source)
+      else
+        yield* NativePlace.storeLanes(
+          payload,
+          nativeStorage,
+          source._tag === 'Empty' ? [] : source.values,
+          `effect_outcome${operation.destination.ordinal}_store`,
+        )
       break
     }
     case 'PackEffectFailureUnion': {
@@ -439,16 +484,32 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
       break
     }
     case 'UnpackEffectSuccess': {
-      yield* NativeStorage.writeLocal(
-        nativeStorage,
-        operation.destination.ordinal,
-        yield* memberPayload(
-          context,
-          operation.source,
-          0,
-          `effect_unpack${operation.destination.ordinal}`,
-        ),
-      )
+      const sourceType = entry.fn.localTypes.at(operation.source.ordinal)
+      if (sourceType?._tag === 'EffectOutcome') {
+        const destinationType = entry.fn.localTypes.at(operation.destination.ordinal)
+        if (destinationType === undefined)
+          throw new RangeError('Effect unpack lost its destination type')
+        yield* NativeStorage.writeValue(
+          nativeStorage,
+          operation.destination,
+          yield* successPayload(
+            context,
+            operation.source,
+            destinationType,
+            `effect_unpack${operation.destination.ordinal}`,
+          ),
+        )
+      } else
+        yield* NativeStorage.writeLocal(
+          nativeStorage,
+          operation.destination.ordinal,
+          yield* memberPayload(
+            context,
+            operation.source,
+            0,
+            `effect_unpack${operation.destination.ordinal}`,
+          ),
+        )
       break
     }
     case 'RunEffect': {
@@ -486,8 +547,8 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         ),
         `effect_run${operation.destination.ordinal}`,
       )
-      yield* NativeStorage.writeLocal(nativeStorage, operation.outcome.ordinal, outcomeValues)
-      const tag = outcomeValues.at(0)
+      yield* NativeStorage.writeValue(nativeStorage, operation.outcome, outcomeValues)
+      const tag = yield* NativeStorage.readLane(nativeStorage, operation.outcome, 0)
       if (tag === undefined) throw new RangeError('Effect outcome lost its tag')
       const zero = yield* Constant.integerSigned(builder, i32, 0n)
       const succeeded = yield* FunctionBody.integerCompare(
@@ -511,17 +572,17 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
       )
       yield* FunctionBody.conditionalBranch(body, succeeded, successBlock, failureBlock)
       yield* LlvmBlock.setInsertionPoint(body, successBlock)
-      yield* NativeStorage.writeJoin(
+      yield* NativeStorage.writeValue(
         nativeStorage,
         operation.destination,
         yield* successPayload(
           context,
-          outcomeValues,
           operation.outcome,
           operation.type,
           `effect_success${operation.destination.ordinal}`,
         ),
       )
+      yield* NativeStorage.commitLocal(nativeStorage, operation.destination)
       yield* FunctionBody.branch(body, followingBlock)
       yield* LlvmBlock.setInsertionPoint(body, failureBlock)
       yield* NativeTermination.storePropagated(
@@ -560,23 +621,14 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
           release.initialization,
         )
       }
-      const returned: Array<Value.Input> = [
-        mappedTag,
-        ...(yield* NativeAggregate.failurePayload(
-          failure,
-          outcomeValues,
-          operation.outcomeType.type,
-          tag,
-          operation.propagationType.type,
-          operation.tagMappings,
-          `effect_run${operation.destination.ordinal}_payload`,
-        )),
-      ]
-      yield* NativeReturn.complete(
+      yield* NativeReturn.propagateFailure(
         suspension.returns,
-        Object.freeze(returned.slice(0, operation.propagationLaneCount)),
-        'propagated_effect',
+        nativeStorage,
         operation.outcome,
+        tag,
+        mappedTag,
+        operation.tagMappings,
+        'propagated_effect',
       )
       yield* LlvmBlock.setInsertionPoint(body, followingBlock)
       // Both arms of this outcome dispatch reach here, so neither arm's cached
@@ -653,11 +705,16 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
             alternative.arguments,
           )).flat(),
         )
-        const called = yield* NativeCall.callValues(
+        const received = yield* NativeCall.callValues(
           call,
           target,
           NativeArgument.fromValues(effectArguments),
           `effect_composite${operation.destination.ordinal}_${alternativeOrdinal}`,
+        )
+        const called = yield* NativeResult.materialize(
+          nativeStorage,
+          received,
+          `composite${operation.destination.ordinal}_received`,
         )
         const sourceOutcomeType: Extract<Mir.Type, { readonly _tag: 'EffectOutcome' }> =
           Object.freeze({ _tag: 'EffectOutcome', type: alternative.type.type })
@@ -698,7 +755,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
                 ),
           )
         }
-        yield* NativeStorage.writeJoin(
+        yield* NativeStorage.writeValue(
           nativeStorage,
           operation.outcome,
           yield* NativeDiagnosticOutcome.accept(call.synchronous.diagnostic, operation.outcome, {
@@ -706,6 +763,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
             values: Object.freeze(joined),
           }),
         )
+        yield* NativeStorage.commitLocal(nativeStorage, operation.outcome)
         yield* FunctionBody.branch(body, following)
         yield* LlvmBlock.setInsertionPoint(body, otherwise)
       }
@@ -723,14 +781,12 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         `effect_composite${operation.destination.ordinal}_following`,
         operation.outcome,
       )
-      const outcomeValues = yield* NativeStorage.materialize(nativeStorage, operation.outcome)
       if (operation.propagationType === undefined) {
-        yield* NativeStorage.writeLocal(
+        yield* NativeStorage.writeValue(
           nativeStorage,
-          operation.destination.ordinal,
+          operation.destination,
           yield* successPayload(
             context,
-            outcomeValues,
             operation.outcome,
             operation.type,
             `effect_success${operation.destination.ordinal}`,
@@ -738,7 +794,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         )
         break
       }
-      const tag = outcomeValues.at(0)
+      const tag = yield* NativeStorage.readLane(nativeStorage, operation.outcome, 0)
       if (tag === undefined) throw new RangeError('Effect composite outcome lost its tag')
       const succeeded = yield* FunctionBody.integerCompare(
         body,
@@ -761,17 +817,17 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
       )
       yield* FunctionBody.conditionalBranch(body, succeeded, successBlock, failureBlock)
       yield* LlvmBlock.setInsertionPoint(body, successBlock)
-      yield* NativeStorage.writeJoin(
+      yield* NativeStorage.writeValue(
         nativeStorage,
         operation.destination,
         yield* successPayload(
           context,
-          outcomeValues,
           operation.outcome,
           operation.type,
           `effect_success${operation.destination.ordinal}`,
         ),
       )
+      yield* NativeStorage.commitLocal(nativeStorage, operation.destination)
       yield* FunctionBody.branch(body, completed)
       yield* LlvmBlock.setInsertionPoint(body, failureBlock)
       yield* NativeTermination.storePropagated(
@@ -807,23 +863,14 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
           release.initialization,
         )
       }
-      const returned: Array<Value.Input> = [
-        propagatedTag,
-        ...(yield* NativeAggregate.failurePayload(
-          failure,
-          outcomeValues,
-          operation.outcomeType.type,
-          tag,
-          operation.propagationType.type,
-          operation.tagMappings,
-          `effect_composite${operation.destination.ordinal}_payload`,
-        )),
-      ]
-      yield* NativeReturn.complete(
+      yield* NativeReturn.propagateFailure(
         suspension.returns,
-        Object.freeze(returned.slice(0, operation.propagationLaneCount)),
-        'propagated_effect_composite',
+        nativeStorage,
         operation.outcome,
+        tag,
+        propagatedTag,
+        operation.tagMappings,
+        'propagated_effect_composite',
       )
       yield* LlvmBlock.setInsertionPoint(body, completed)
       yield* NativeStorage.reloadRoots(
@@ -922,14 +969,13 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
               called,
               `effect_value_run${operation.destination.ordinal}`,
             )
-      yield* NativeStorage.writeLocal(nativeStorage, operation.outcome.ordinal, outcomeValues)
+      yield* NativeStorage.writeValue(nativeStorage, operation.outcome, outcomeValues)
       if (operation.propagationType === undefined) {
-        yield* NativeStorage.writeLocal(
+        yield* NativeStorage.writeValue(
           nativeStorage,
-          operation.destination.ordinal,
+          operation.destination,
           yield* successPayload(
             context,
-            outcomeValues,
             operation.outcome,
             operation.type,
             `effect_success${operation.destination.ordinal}`,
@@ -937,7 +983,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         )
         break
       }
-      const tag = outcomeValues.at(0)
+      const tag = yield* NativeStorage.readLane(nativeStorage, operation.outcome, 0)
       if (tag === undefined) throw new RangeError('Effect outcome lost its tag')
       const zero = yield* Constant.integerSigned(builder, i32, 0n)
       const succeeded = yield* FunctionBody.integerCompare(
@@ -961,17 +1007,17 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
       )
       yield* FunctionBody.conditionalBranch(body, succeeded, successBlock, failureBlock)
       yield* LlvmBlock.setInsertionPoint(body, successBlock)
-      yield* NativeStorage.writeJoin(
+      yield* NativeStorage.writeValue(
         nativeStorage,
         operation.destination,
         yield* successPayload(
           context,
-          outcomeValues,
           operation.outcome,
           operation.type,
           `effect_success${operation.destination.ordinal}`,
         ),
       )
+      yield* NativeStorage.commitLocal(nativeStorage, operation.destination)
       yield* FunctionBody.branch(body, followingBlock)
       yield* LlvmBlock.setInsertionPoint(body, failureBlock)
       yield* NativeTermination.storePropagated(
@@ -1010,23 +1056,14 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
           release.initialization,
         )
       }
-      const returned: Array<Value.Input> = [
-        mappedTag,
-        ...(yield* NativeAggregate.failurePayload(
-          failure,
-          outcomeValues,
-          operation.outcomeType.type,
-          tag,
-          operation.propagationType.type,
-          operation.tagMappings,
-          `effect_value${operation.destination.ordinal}_payload`,
-        )),
-      ]
-      yield* NativeReturn.complete(
+      yield* NativeReturn.propagateFailure(
         suspension.returns,
-        Object.freeze(returned.slice(0, operation.propagationLaneCount)),
-        'propagated_effect_value',
+        nativeStorage,
         operation.outcome,
+        tag,
+        mappedTag,
+        operation.tagMappings,
+        'propagated_effect_value',
       )
       yield* LlvmBlock.setInsertionPoint(body, followingBlock)
       // Both arms of this outcome dispatch reach here, so neither arm's cached
@@ -1082,8 +1119,8 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         ),
         `effect_result_run${operation.destination.ordinal}`,
       )
-      yield* NativeStorage.writeLocal(nativeStorage, operation.outcome.ordinal, outcomeValues)
-      const tag = outcomeValues.at(0)
+      yield* NativeStorage.writeValue(nativeStorage, operation.outcome, outcomeValues)
+      const tag = yield* NativeStorage.readLane(nativeStorage, operation.outcome, 0)
       if (tag === undefined) throw new RangeError('Effect result lost its outcome tag')
       const zero = yield* Constant.integerSigned(builder, i32, 0n)
       const succeeded = yield* FunctionBody.integerCompare(
@@ -1106,6 +1143,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
           ),
         ]),
       )
+      const outcomeLanesValues = yield* NativeStorage.materialize(nativeStorage, operation.outcome)
       const outcomeLanes = operation.outcomeShape.lanes
       const successLaneCount =
         operation.outcomeShape.tree._tag === 'OutcomeShape'
@@ -1136,7 +1174,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         return Object.freeze(coerced)
       })
       const successValues = yield* coerce(
-        Object.freeze(outcomeValues.slice(1, 1 + successLaneCount)),
+        Object.freeze(outcomeLanesValues.slice(1, 1 + successLaneCount)),
         Object.freeze(outcomeLanes.slice(1, 1 + successLaneCount)),
         operation.successShape.lanes,
         `effect_result${operation.destination.ordinal}_success`,
@@ -1160,7 +1198,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
           throw new RangeError('Effect result lost its failure-union tag lane')
         failureLanes.push(failureTagLane)
       }
-      failureValues.push(...outcomeValues.slice(1))
+      failureValues.push(...outcomeLanesValues.slice(1))
       failureLanes.push(...outcomeLanes.slice(1))
       const coercedFailureValues = yield* coerce(
         Object.freeze(failureValues),

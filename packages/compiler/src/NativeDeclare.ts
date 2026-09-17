@@ -1,3 +1,5 @@
+import * as NativeType from './NativeType.js'
+import type * as NativeLanePointer from './NativeLanePointer.js'
 import * as NativeResult from './NativeResult.js'
 import * as NativeValue from './NativeValue.js'
 import * as Attribute from '@silklang/llvm/Attribute'
@@ -24,6 +26,8 @@ import * as SilkType from './Type.js'
 import * as NativeArgument from './NativeArgument.js'
 
 export interface DeclarationContext {
+  readonly types: NativeType.LoweringContext
+  readonly lanePointers: NativeLanePointer.Context
   readonly support?: boolean
   readonly builder: Builder.Builder
   readonly program: Mir.Module
@@ -115,22 +119,48 @@ export const functions = Effect.fn('NativeDeclare.functions')(function* (
               ),
             ),
           })
-    const resultStorage =
+    const canonicalLayout = NativeType.addressLayout(context.program.layout, fn.result)
+    let resultStorage: NativeResult.Storage | undefined
+    if (
       fn.machine === undefined &&
       resultLaneCount > 0 &&
       NativeValue.classify(context.program.layout, fn.result) === 'Place'
-        ? {
-            type: yield* LlvmType.structure(context.builder, [
-              ...resultLanes.map(context.laneType),
-              ...(diagnosticResult === undefined ? [] : [diagnosticResult]),
-            ]),
-            fields: [
-              ...resultLanes.map(context.laneType),
-              ...(diagnosticResult === undefined ? [] : [diagnosticResult]),
-            ],
-            parameter: parameters.length,
-          }
-        : undefined
+    ) {
+      if (!suspendable && canonicalLayout !== undefined) {
+        const payload = yield* LlvmType.array(
+          context.builder,
+          context.lanePointers.byteType,
+          canonicalLayout.size,
+        )
+        resultStorage = {
+          _tag: 'Canonical',
+          type:
+            diagnosticResult === undefined
+              ? payload
+              : yield* LlvmType.structure(context.builder, [payload, diagnosticResult]),
+          parameter: parameters.length,
+          logicalType: fn.result,
+          alignment: Math.max(
+            canonicalLayout.alignment,
+            context.program.layout.target.pointerAlignment,
+          ),
+          types: context.types,
+          lanePointers: context.lanePointers,
+          ...(diagnosticResult === undefined ? {} : { diagnosticType: diagnosticResult }),
+        }
+      } else {
+        const fields = [
+          ...resultLanes.map(context.laneType),
+          ...(diagnosticResult === undefined ? [] : [diagnosticResult]),
+        ]
+        resultStorage = {
+          _tag: 'Lanes',
+          type: yield* LlvmType.structure(context.builder, fields),
+          fields,
+          parameter: parameters.length,
+        }
+      }
+    }
     const physicalParameters =
       resultStorage === undefined ? parameters : [...parameters, context.pointer]
     const directResultType =

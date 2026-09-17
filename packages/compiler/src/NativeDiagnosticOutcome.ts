@@ -1,9 +1,11 @@
+import type * as LlvmError from '@silklang/llvm/LlvmError'
 import * as Block from '@silklang/llvm/Block'
 import * as Constant from '@silklang/llvm/Constant'
 import * as FunctionBody from '@silklang/llvm/FunctionBody'
 import type * as Value from '@silklang/llvm/Value'
 import * as Effect from 'effect/Effect'
 import * as NativeDiagnosticFailure from './NativeDiagnosticFailure.js'
+import type * as NativeValue from './NativeValue.js'
 import type * as NativeResult from './NativeResult.js'
 import type * as Mir from './Mir.js'
 import * as NativeDiagnosticContext from './NativeDiagnosticContext.js'
@@ -86,19 +88,19 @@ export const produce = Effect.fnUntraced(function* (
   yield* Block.setInsertionPoint(context.body, following)
 })
 
-/** Transfers a complete call result into its owning local before exposing payload lanes. */
+/** Transfers a complete call result into its owning local before exposing its logical payload. */
 export const accept = Effect.fnUntraced(function* (
   context: Context | undefined,
   local: Mir.LocalId,
-  result: NativeResult.NativeResult,
-) {
+  result: NativeResult.Received,
+): Effect.fn.Return<NativeValue.NativeValue, LlvmError.LlvmError> {
   const outcome = context?.outcomes.get(local.ordinal)
   if (result.diagnostic !== undefined) {
     if (context === undefined || outcome === undefined)
       throw new RangeError('Native call result lost its diagnostic outcome owner')
     yield* replace(outcome, context, result.diagnostic)
   } else if (context !== undefined && outcome !== undefined) yield* release(outcome, context)
-  return result.values
+  return 'place' in result ? result.place : { _tag: 'Direct', values: result.values }
 })
 
 /** Releases a completed recovery's owned local; unobserved functions have no metadata storage. */

@@ -1,3 +1,4 @@
+import * as CompilerTrace from './CompilerTrace.js'
 import type * as ForeignContract from './ForeignContract.js'
 import * as Data from 'effect/Data'
 import * as Effect from 'effect/Effect'
@@ -8,7 +9,6 @@ import * as ForeignAvailability from './ForeignAvailability.js'
 import * as ForeignPlanning from './ForeignPlanning.js'
 import * as IntrinsicAvailability from './IntrinsicAvailability.js'
 import * as Mir from './Mir.js'
-import * as MirVerification from './MirVerification.js'
 import type * as SourceSpan from './SourceSpan.js'
 import * as StaticValue from './StaticValue.js'
 import type * as Target from './Target.js'
@@ -130,7 +130,6 @@ export class BackendError extends Data.TaggedError('BackendError')<{
   readonly backend: string
   readonly message: string
   readonly reason:
-    | { readonly _tag: 'InvalidMir'; readonly violations: ReadonlyArray<Mir.Violation> }
     | { readonly _tag: 'InvalidModule'; readonly violations: ReadonlyArray<ModuleViolation> }
     | { readonly _tag: 'UnsupportedMir'; readonly detail: string }
     | { readonly _tag: 'UnsupportedTarget'; readonly target: Target.Id }
@@ -154,22 +153,19 @@ export interface Backend<A extends Artifact = Artifact> {
   readonly emit: (program: Mir.Module, request: CodegenRequest) => Effect.Effect<A, BackendError>
 }
 
-/** Validates shared MIR/target invariants before dispatching to one backend implementation. */
+/** Emits internally consistent MIR after checking backend capabilities. Run MirVerification.check explicitly to audit compiler invariants. */
 export const emit = Effect.fn('Backend.emit')(function* <A extends Artifact>(
   self: Backend<A>,
   program: Mir.Module,
   request: CodegenRequest,
 ): Effect.fn.Return<A, BackendError> {
-  const violations = MirVerification.verify(program)
-  if (violations.length > 0) {
-    return yield* new BackendError({
-      operation: 'Backend.emit',
-      backend: self.name,
-      message: `${self.name} cannot emit invalid MIR`,
-      reason: { _tag: 'InvalidMir', violations },
-    })
-  }
-  const availability = IntrinsicAvailability.select(program.intrinsics, program.layout.target)
+  yield* Effect.annotateCurrentSpan({
+    'backend.name': self.name,
+    'module.name': program.module,
+    'functions.count': program.functions.length,
+    'target.id': program.layout.target.id,
+  })
+  const availability = yield* selectIntrinsics(program)
   if (availability._tag === 'Unavailable') {
     return yield* new BackendError({
       operation: 'Backend.emit',
@@ -178,14 +174,8 @@ export const emit = Effect.fn('Backend.emit')(function* <A extends Artifact>(
       reason: { _tag: 'UnsupportedIntrinsic', diagnostics: availability.diagnostics },
     })
   }
-  const foreign = ForeignAvailability.select(
-    program.foreignCalls,
-    program.layout.target,
-    program.foreignStatics,
-    ForeignAvailability.callbackAddresses(program),
-    ForeignAvailability.staticLoads(program),
-  )
-  const planning = ForeignPlanning.check(program, program.layout.target)
+  const foreign = yield* selectForeign(program)
+  const planning = yield* checkForeignPlanning(program)
   if (foreign.length > 0 || planning.length > 0) {
     return yield* new BackendError({
       operation: 'Backend.emit',
@@ -204,6 +194,31 @@ export const emit = Effect.fn('Backend.emit')(function* <A extends Artifact>(
   }
   return yield* self.emit(program, request)
 })
+
+const selectIntrinsics = Effect.fn('Backend.selectIntrinsics')((program: Mir.Module) =>
+  Effect.sync(() => IntrinsicAvailability.select(program.intrinsics, program.layout.target)),
+)
+const selectForeign = Effect.fn('Backend.selectForeign')(function* (program: Mir.Module) {
+  const trace = yield* CompilerTrace.capture()
+  const callbacks = trace('ForeignAvailability.callbackAddresses', () =>
+    ForeignAvailability.callbackAddresses(program),
+  )
+  const statics = trace('ForeignAvailability.staticLoads', () =>
+    ForeignAvailability.staticLoads(program),
+  )
+  return trace('ForeignAvailability.select', () =>
+    ForeignAvailability.select(
+      program.foreignCalls,
+      program.layout.target,
+      program.foreignStatics,
+      callbacks,
+      statics,
+    ),
+  )
+})
+const checkForeignPlanning = Effect.fn('Backend.checkForeignPlanning')((program: Mir.Module) =>
+  Effect.sync(() => ForeignPlanning.check(program, program.layout.target)),
+)
 
 export const sanitize = (name: string): string => name.replace(/[^A-Za-z0-9_]/g, '_')
 

@@ -74,6 +74,39 @@ pub fn main() -> i32 {
         MirVerification.operations(constructor).find(
           (operation) => operation._tag === 'MakeEffect',
         ) ?? unreachable()
+      // Narrowing constructor candidates must retain module identity, static specialization,
+      // and first-match semantics when more than one instance shares a declaration.
+      const normalizeWithCandidates = (candidates: ReadonlyArray<Mir.MirFunction>) =>
+        MirNormalization.normalize(
+          { ...program, functions: [...candidates, ...program.functions] },
+          provisional,
+        ).normalization?.filter(
+          (verdict) => verdict.function === main.id && verdict.local === call.destination,
+        ) ?? []
+      const complexConstructor = { ...constructor, regions: [] }
+      const unrelatedCandidates: ReadonlyArray<Mir.MirFunction> = [
+        {
+          ...complexConstructor,
+          id: { ...constructor.id, module: 'test/unrelated-module' },
+        },
+        {
+          ...complexConstructor,
+          instance: {
+            ...constructor.instance,
+            staticArguments: [{ _tag: 'BooleanValue', value: true }],
+          },
+        },
+      ]
+      assert.isTrue(
+        normalizeWithCandidates(unrelatedCandidates).some(
+          (verdict) => verdict._tag === 'Normalized' && verdict.kind === 'FoldedConstructor',
+        ),
+      )
+      assert.isTrue(
+        normalizeWithCandidates([complexConstructor]).some(
+          (verdict) => verdict._tag === 'Rejected' && verdict.reason === 'ComplexConstructor',
+        ),
+      )
       const construction = { ...definition, destination: call.destination }
       const run =
         region.operations.find((operation) => operation._tag === 'RunEffectValue') ??
@@ -163,7 +196,7 @@ pub fn main() -> i32 {
       ),
     )
     assert.include(ProvisionalMir.encode(provisional), 'relay=existing')
-    assert.deepEqual(MirVerification.verify(rejected), [])
+    assert.deepEqual(yield* MirVerification.verify(rejected), [])
   }),
 )
 
@@ -399,7 +432,7 @@ it.effect('verifier rejects dangling normalization identities', () =>
       ]),
     })
     assert.isTrue(
-      MirVerification.verify(malformed).some(
+      (yield* MirVerification.verify(malformed)).some(
         (violation) => violation.rule === 'InvalidNormalization',
       ),
     )
@@ -409,8 +442,14 @@ it.effect('verifier rejects dangling normalization identities', () =>
       (region): region is Mir.OperationRegion => region._tag === 'OperationRegion',
     )
     const run = mainRegion?.operations.find(
-      (operation): operation is Extract<Mir.Operation, { readonly _tag: 'RunStaticEffect' }> =>
-        operation._tag === 'RunStaticEffect',
+      (
+        operation,
+      ): operation is Extract<
+        Mir.Operation,
+        {
+          readonly _tag: 'RunStaticEffect'
+        }
+      > => operation._tag === 'RunStaticEffect',
     )
     assert.isDefined(main)
     assert.isDefined(mainRegion)
@@ -442,7 +481,7 @@ it.effect('verifier rejects dangling normalization identities', () =>
       ),
     })
     assert.isTrue(
-      MirVerification.verify(inconsistent).some(
+      (yield* MirVerification.verify(inconsistent)).some(
         (violation) => violation.rule === 'InvalidNormalization',
       ),
     )

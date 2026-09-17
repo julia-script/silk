@@ -36,12 +36,18 @@ export const release = Flag.boolean('release').pipe(
   Flag.withDefault(false),
 )
 
+export const verifyMir = Flag.boolean('verify-mir').pipe(
+  Flag.withDescription('Audit lowered MIR invariants before emission (compiler development).'),
+  Flag.withDefault(false),
+)
+
 export const watch = Flag.boolean('watch').pipe(
   Flag.withDescription('Run again after every change to a project source file.'),
   Flag.withDefault(false),
 )
 
 export interface Input {
+  readonly verifyMir?: boolean
   readonly manifestPath?: string
   readonly targets?: ReadonlyArray<string>
   readonly profile?: string
@@ -51,6 +57,7 @@ export interface Input {
 }
 
 export interface ProjectOptions {
+  readonly verifyMir?: boolean
   readonly manifestPath?: string
   readonly targets?: ReadonlyArray<string>
   readonly profile?: string
@@ -80,6 +87,7 @@ export const resolve = (input: Input): Result.Result<ProjectOptions, ProjectOpti
   if (input.release) optimization = 'release'
   return Result.succeed(
     Object.freeze({
+      ...(input.verifyMir === undefined ? {} : { verifyMir: input.verifyMir }),
       ...(input.manifestPath === undefined ? {} : { manifestPath: input.manifestPath }),
       ...(input.targets === undefined || input.targets.length === 0
         ? {}

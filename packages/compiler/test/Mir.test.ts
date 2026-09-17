@@ -88,7 +88,7 @@ pub fn main() -> i32 {
       )
       assert.deepEqual(Analysis.diagnostics(snapshot), [])
       const program = Analysis.loweredMir(snapshot)
-      assert.deepEqual(MirVerification.verify(program), [])
+      assert.deepEqual(yield* MirVerification.verify(program), [])
       const operations = program.functions.flatMap((fn) => MirVerification.operations(fn))
       assert.strictEqual(
         operations.filter((operation) => operation._tag === 'EnumConstant').length,
@@ -174,19 +174,20 @@ pub fn main() -> i32 {
         }
       }),
     })
-    const ruleSet = (candidate: Mir.Module) =>
-      MirVerification.verify(candidate).map((violation) => violation.rule)
+    const ruleSet = Effect.fnUntraced(function* (candidate: Mir.Module) {
+      return (yield* MirVerification.verify(candidate)).map((violation) => violation.rule)
+    })
 
     assert.include(
-      ruleSet(replace(stateReady, { ...stateReady, member: otherReady.member })),
+      yield* ruleSet(replace(stateReady, { ...stateReady, member: otherReady.member })),
       'InvalidEnumOperation',
     )
     assert.include(
-      ruleSet(replace(stateReady, { ...stateReady, discriminant: 99n })),
+      yield* ruleSet(replace(stateReady, { ...stateReady, discriminant: 99n })),
       'InvalidEnumOperation',
     )
     assert.include(
-      ruleSet(
+      yield* ruleSet(
         replace(equality, {
           ...equality,
           right: otherReady.destination,
@@ -195,7 +196,7 @@ pub fn main() -> i32 {
       'InvalidEnumOperation',
     )
     assert.include(
-      ruleSet(
+      yield* ruleSet(
         replace(projection, {
           ...projection,
           enum: otherReady.enum,
@@ -206,7 +207,7 @@ pub fn main() -> i32 {
     const wrongLane = 'u16' as const
     const wrongBits = 16 as const
     assert.include(
-      ruleSet(
+      yield* ruleSet(
         replace(stateDone, {
           ...stateDone,
           representation: {
@@ -245,295 +246,319 @@ pub fn main() -> i32 {
       ],
     })
     for (const malformed of [incomplete, duplicate, foreign]) {
-      assert.include(ruleSet(malformed), 'InvalidMatchDecision')
-      assert.deepEqual(MirVerification.verify(malformed), MirVerification.verify(malformed))
+      assert.include(yield* ruleSet(malformed), 'InvalidMatchDecision')
+      assert.deepEqual(
+        yield* MirVerification.verify(malformed),
+        yield* MirVerification.verify(malformed),
+      )
     }
   }),
 )
-
-it('verifies the hand-built samples clean', () => {
-  for (const sample of MirSamples.samples()) {
-    assert.deepEqual(MirVerification.verify(sample), [])
-  }
-})
-
-it('rejects nested unavailable values at the monomorphic MIR frontier', () => {
-  const [straight] = MirSamples.samples()
-  const sample = straight ?? raise('expected sample')
-  const fn = sample.functions.at(0) ?? raise('expected sample function')
-  const unavailable = Type.nominal('sample://unavailable.silk', 'Outer', [
-    Type.nominal('sample://unavailable.silk', 'Inner', [
-      Type.unavailableGenericArgument('Value', 'unresolved MIR argument'),
-    ]),
-  ])
-  const unavailableLocal: Mir.Module = {
-    ...sample,
-    functions: [
-      {
-        ...fn,
-        localTypes: [...fn.localTypes, { _tag: 'Nominal', type: unavailable }],
-      },
-    ],
-  }
-  assert.include(
-    MirVerification.verify(unavailableLocal).map((violation) => violation.rule),
-    'InvalidInstance',
-  )
-
-  const unavailableInstance = {
-    ...fn.instance,
-    typeArguments: [unavailable],
-  }
-  const unavailableIdentity: Mir.Module = {
-    ...sample,
-    retainedRoots: [unavailableInstance],
-    functions: [{ ...fn, instance: unavailableInstance }],
-  }
-  assert.include(
-    MirVerification.verify(unavailableIdentity).map((violation) => violation.rule),
-    'InvalidInstance',
-  )
-})
-
-it('retains invalid return types as a verifier invariant', () => {
-  const [straight] = MirSamples.samples()
-  const sample = straight ?? raise('expected sample')
-  const fn = sample.functions.at(0) ?? raise('expected sample function')
-  const invalid: Mir.Module = {
-    ...sample,
-    functions: [{ ...fn, result: { _tag: 'bool' } }],
-  }
-
-  assert.include(
-    MirVerification.verify(invalid).map((violation) => violation.rule),
-    'InvalidReturn',
-  )
-})
-
-it('reports broken graphs deterministically as data', () => {
-  const [straight] = MirSamples.samples()
-  const fn = straight?.functions.at(0) ?? raise('expected the sample function')
-  const first = operationRegion(fn.regions.at(0))
-  const broken: Mir.Module = {
-    _tag: 'MirModule',
-    module: 'sample://broken.silk',
-    intrinsics: straight?.intrinsics ?? raise('expected the sample intrinsic inventory'),
-    foreignCalls: Object.freeze([]),
-    foreignExports: Object.freeze([]),
-    foreignStatics: Object.freeze([]),
-    layout: straight?.layout ?? raise('expected the sample layout'),
-    executionTransitions: straight?.executionTransitions ?? Object.freeze([]),
-    functions: [
-      { ...fn, entry: { _tag: 'Region', ordinal: 9 } },
-      {
-        ...fn,
-        regions: [
-          {
-            ...first,
-            operations: first.operations.map((operation) =>
-              operation._tag === 'Literal'
-                ? { ...operation, destination: { _tag: 'Local' as const, ordinal: 7 } }
-                : operation,
-            ),
-            outcome: {
-              _tag: 'Forward',
-              target: { _tag: 'Region', ordinal: 9 },
-              provenance: { span: first.outcome.provenance.span, generated: true },
-            },
-          },
-        ],
-      },
-    ],
-  }
-
-  const violations = MirVerification.verify(broken)
-  assert.deepEqual(
-    violations.map((violation) => violation.rule),
-    [
-      'MissingEntryRegion',
+it.effect(
+  'verifies the hand-built samples clean',
+  Effect.fnUntraced(function* () {
+    for (const sample of yield* MirSamples.samples()) {
+      assert.deepEqual(yield* MirVerification.verify(sample), [])
+    }
+  }),
+)
+it.effect(
+  'rejects nested unavailable values at the monomorphic MIR frontier',
+  Effect.fnUntraced(function* () {
+    const [straight] = yield* MirSamples.samples()
+    const sample = straight ?? raise('expected sample')
+    const fn = sample.functions.at(0) ?? raise('expected sample function')
+    const unavailable = Type.nominal('sample://unavailable.silk', 'Outer', [
+      Type.nominal('sample://unavailable.silk', 'Inner', [
+        Type.unavailableGenericArgument('Value', 'unresolved MIR argument'),
+      ]),
+    ])
+    const unavailableLocal: Mir.Module = {
+      ...sample,
+      functions: [
+        {
+          ...fn,
+          localTypes: [...fn.localTypes, { _tag: 'Nominal', type: unavailable }],
+        },
+      ],
+    }
+    assert.include(
+      (yield* MirVerification.verify(unavailableLocal)).map((violation) => violation.rule),
       'InvalidInstance',
-      'UnknownRegionTarget',
-      'UndeclaredLocal',
-      'InvalidIntegerOperation',
-    ],
-  )
-  assert.deepEqual(MirVerification.verify(broken), violations)
-})
+    )
 
-it('rejects structural cycles without treating lexical repetition as an edge', () => {
-  const [straight] = MirSamples.samples()
-  const sample = straight ?? raise('expected sample')
-  const fn = sample.functions.at(0) ?? raise('expected sample function')
-  const first = operationRegion(fn.regions.at(0))
-  const cyclic: Mir.Module = {
-    ...sample,
-    functions: [
-      {
-        ...fn,
-        regions: [
-          {
-            ...first,
-            operations: [],
-            outcome: {
-              _tag: 'Forward',
-              target: first.id,
-              provenance: first.outcome.provenance,
+    const unavailableInstance = {
+      ...fn.instance,
+      typeArguments: [unavailable],
+    }
+    const unavailableIdentity: Mir.Module = {
+      ...sample,
+      retainedRoots: [unavailableInstance],
+      functions: [{ ...fn, instance: unavailableInstance }],
+    }
+    assert.include(
+      (yield* MirVerification.verify(unavailableIdentity)).map((violation) => violation.rule),
+      'InvalidInstance',
+    )
+  }),
+)
+it.effect(
+  'retains invalid return types as a verifier invariant',
+  Effect.fnUntraced(function* () {
+    const [straight] = yield* MirSamples.samples()
+    const sample = straight ?? raise('expected sample')
+    const fn = sample.functions.at(0) ?? raise('expected sample function')
+    const invalid: Mir.Module = {
+      ...sample,
+      functions: [{ ...fn, result: { _tag: 'bool' } }],
+    }
+
+    assert.include(
+      (yield* MirVerification.verify(invalid)).map((violation) => violation.rule),
+      'InvalidReturn',
+    )
+  }),
+)
+it.effect(
+  'reports broken graphs deterministically as data',
+  Effect.fnUntraced(function* () {
+    const [straight] = yield* MirSamples.samples()
+    const fn = straight?.functions.at(0) ?? raise('expected the sample function')
+    const first = operationRegion(fn.regions.at(0))
+    const broken: Mir.Module = {
+      _tag: 'MirModule',
+      module: 'sample://broken.silk',
+      intrinsics: straight?.intrinsics ?? raise('expected the sample intrinsic inventory'),
+      foreignCalls: Object.freeze([]),
+      foreignExports: Object.freeze([]),
+      foreignStatics: Object.freeze([]),
+      layout: straight?.layout ?? raise('expected the sample layout'),
+      executionTransitions: straight?.executionTransitions ?? Object.freeze([]),
+      functions: [
+        { ...fn, entry: { _tag: 'Region', ordinal: 9 } },
+        {
+          ...fn,
+          regions: [
+            {
+              ...first,
+              operations: first.operations.map((operation) =>
+                operation._tag === 'Literal'
+                  ? { ...operation, destination: { _tag: 'Local' as const, ordinal: 7 } }
+                  : operation,
+              ),
+              outcome: {
+                _tag: 'Forward',
+                target: { _tag: 'Region', ordinal: 9 },
+                provenance: { span: first.outcome.provenance.span, generated: true },
+              },
             },
-          },
-        ],
-      },
-    ],
-  }
-
-  assert.include(
-    MirVerification.verify(cyclic).map((violation) => violation.rule),
-    'StructuralCycle',
-  )
-})
-
-it('rejects repeat and exit ports that name no lexical loop owner', () => {
-  const [straight] = MirSamples.samples()
-  const sample = straight ?? raise('expected sample')
-  const fn = sample.functions.at(0) ?? raise('expected sample function')
-  const first = operationRegion(fn.regions.at(0))
-  const invalid: Mir.Module = {
-    ...sample,
-    functions: [
-      {
-        ...fn,
-        regions: [
-          {
-            ...first,
-            outcome: {
-              _tag: 'Repeat',
-              loop: { _tag: 'Loop', ordinal: 99 },
-              provenance: first.outcome.provenance,
+          ],
+        },
+      ],
+    }
+    const violations = yield* MirVerification.verify(broken)
+    assert.deepEqual(
+      violations.map((violation) => violation.rule),
+      [
+        'MissingEntryRegion',
+        'InvalidInstance',
+        'UnknownRegionTarget',
+        'UndeclaredLocal',
+        'InvalidIntegerOperation',
+      ],
+    )
+    assert.deepEqual(yield* MirVerification.verify(broken), violations)
+  }),
+)
+it.effect(
+  'rejects structural cycles without treating lexical repetition as an edge',
+  Effect.fnUntraced(function* () {
+    const [straight] = yield* MirSamples.samples()
+    const sample = straight ?? raise('expected sample')
+    const fn = sample.functions.at(0) ?? raise('expected sample function')
+    const first = operationRegion(fn.regions.at(0))
+    const cyclic: Mir.Module = {
+      ...sample,
+      functions: [
+        {
+          ...fn,
+          regions: [
+            {
+              ...first,
+              operations: [],
+              outcome: {
+                _tag: 'Forward',
+                target: first.id,
+                provenance: first.outcome.provenance,
+              },
             },
-          },
-        ],
-      },
-    ],
-  }
+          ],
+        },
+      ],
+    }
 
-  assert.include(
-    MirVerification.verify(invalid).map((violation) => violation.rule),
-    'InvalidLoopTarget',
-  )
-})
+    assert.include(
+      (yield* MirVerification.verify(cyclic)).map((violation) => violation.rule),
+      'StructuralCycle',
+    )
+  }),
+)
+it.effect(
+  'rejects repeat and exit ports that name no lexical loop owner',
+  Effect.fnUntraced(function* () {
+    const [straight] = yield* MirSamples.samples()
+    const sample = straight ?? raise('expected sample')
+    const fn = sample.functions.at(0) ?? raise('expected sample function')
+    const first = operationRegion(fn.regions.at(0))
+    const invalid: Mir.Module = {
+      ...sample,
+      functions: [
+        {
+          ...fn,
+          regions: [
+            {
+              ...first,
+              outcome: {
+                _tag: 'Repeat',
+                loop: { _tag: 'Loop', ordinal: 99 },
+                provenance: first.outcome.provenance,
+              },
+            },
+          ],
+        },
+      ],
+    }
 
-it('requires every yield to be one uniquely owned loop condition', () => {
-  const [, branching] = MirSamples.samples()
-  const sample = branching ?? raise('expected branching sample')
-  const fn = sample.functions.at(0) ?? raise('expected sample function')
-  const returned = operationRegion(fn.regions.at(1))
-  const provenance = returned.outcome.provenance
-  const region = (ordinal: number): Mir.RegionId => ({ _tag: 'Region', ordinal })
-  const loop = (ordinal: number): Mir.LoopId => ({ _tag: 'Loop', ordinal })
-  const loop0 = loop(0)
-  const condition: Mir.OperationRegion = {
-    _tag: 'OperationRegion',
-    id: region(1),
-    ownerLoop: loop0,
-    operations: [],
-    outcome: { _tag: 'Yield', provenance },
-  }
-  const body: Mir.OperationRegion = {
-    _tag: 'OperationRegion',
-    id: region(2),
-    ownerLoop: loop0,
-    operations: [],
-    outcome: { _tag: 'Exit', loop: loop0, provenance },
-  }
-  const following: Mir.OperationRegion = { ...returned, id: region(3) }
-  const owner: Mir.LoopRegion = {
-    _tag: 'LoopRegion',
-    id: region(0),
-    loop: loop0,
-    condition: condition.id,
-    conditionValue: { _tag: 'Local', ordinal: 0 },
-    body: body.id,
-    following: following.id,
-    provenance,
-  }
-  const withRegions = (regions: ReadonlyArray<Mir.Region>): Mir.Module => ({
-    ...sample,
-    functions: [{ ...fn, entry: owner.id, regions }],
-  })
-  const valid = withRegions([owner, condition, body, following])
-  assert.deepEqual(MirVerification.verify(valid), [])
+    assert.include(
+      (yield* MirVerification.verify(invalid)).map((violation) => violation.rule),
+      'InvalidLoopTarget',
+    )
+  }),
+)
+it.effect(
+  'requires every yield to be one uniquely owned loop condition',
+  Effect.fnUntraced(function* () {
+    const [, branching] = yield* MirSamples.samples()
+    const sample = branching ?? raise('expected branching sample')
+    const fn = sample.functions.at(0) ?? raise('expected sample function')
+    const returned = operationRegion(fn.regions.at(1))
+    const provenance = returned.outcome.provenance
+    const region = (ordinal: number): Mir.RegionId => ({ _tag: 'Region', ordinal })
+    const loop = (ordinal: number): Mir.LoopId => ({ _tag: 'Loop', ordinal })
+    const loop0 = loop(0)
+    const condition: Mir.OperationRegion = {
+      _tag: 'OperationRegion',
+      id: region(1),
+      ownerLoop: loop0,
+      operations: [],
+      outcome: { _tag: 'Yield', provenance },
+    }
+    const body: Mir.OperationRegion = {
+      _tag: 'OperationRegion',
+      id: region(2),
+      ownerLoop: loop0,
+      operations: [],
+      outcome: { _tag: 'Exit', loop: loop0, provenance },
+    }
+    const following: Mir.OperationRegion = { ...returned, id: region(3) }
+    const owner: Mir.LoopRegion = {
+      _tag: 'LoopRegion',
+      id: region(0),
+      loop: loop0,
+      condition: condition.id,
+      conditionValue: { _tag: 'Local', ordinal: 0 },
+      body: body.id,
+      following: following.id,
+      provenance,
+    }
+    const withRegions = (regions: ReadonlyArray<Mir.Region>): Mir.Module => ({
+      ...sample,
+      functions: [{ ...fn, entry: owner.id, regions }],
+    })
+    const valid = withRegions([owner, condition, body, following])
+    assert.deepEqual(yield* MirVerification.verify(valid), [])
 
-  const unownedYield = withRegions([
-    owner,
-    condition,
-    { ...body, outcome: { _tag: 'Yield', provenance } },
-    following,
-  ])
-  assert.include(
-    MirVerification.verify(unownedYield).map((violation) => violation.rule),
-    'InvalidLoopTarget',
-  )
+    const unownedYield = withRegions([
+      owner,
+      condition,
+      { ...body, outcome: { _tag: 'Yield', provenance } },
+      following,
+    ])
+    assert.include(
+      (yield* MirVerification.verify(unownedYield)).map((violation) => violation.rule),
+      'InvalidLoopTarget',
+    )
 
-  const nonYieldCondition = withRegions([
-    owner,
-    { ...condition, outcome: { _tag: 'Exit', loop: loop0, provenance } },
-    body,
-    following,
-  ])
-  assert.include(
-    MirVerification.verify(nonYieldCondition).map((violation) => violation.rule),
-    'InvalidLoopTarget',
-  )
+    const nonYieldCondition = withRegions([
+      owner,
+      { ...condition, outcome: { _tag: 'Exit', loop: loop0, provenance } },
+      body,
+      following,
+    ])
+    assert.include(
+      (yield* MirVerification.verify(nonYieldCondition)).map((violation) => violation.rule),
+      'InvalidLoopTarget',
+    )
 
-  const sharedCondition: Mir.LoopRegion = {
-    ...owner,
-    id: region(4),
-    loop: loop(1),
-  }
-  assert.include(
-    MirVerification.verify(withRegions([owner, condition, body, following, sharedCondition])).map(
-      (violation) => violation.rule,
-    ),
-    'InvalidLoopTarget',
-  )
-})
+    const sharedCondition: Mir.LoopRegion = {
+      ...owner,
+      id: region(4),
+      loop: loop(1),
+    }
+    assert.include(
+      (yield* MirVerification.verify(
+        withRegions([owner, condition, body, following, sharedCondition]),
+      )).map((violation) => violation.rule),
+      'InvalidLoopTarget',
+    )
+  }),
+)
+it.effect(
+  'carries and encodes exactly one compiler-owned target layout plan',
+  Effect.fnUntraced(function* () {
+    const [straight] = yield* MirSamples.samples()
+    const sample = straight ?? raise('expected sample')
 
-it('carries and encodes exactly one compiler-owned target layout plan', () => {
-  const [straight] = MirSamples.samples()
-  const sample = straight ?? raise('expected sample')
+    assert.strictEqual(sample.layout.entries.at(0)?.size, 4)
+    assert.include(MirEncoding.encode(sample), `target ${Target.encode(sample.layout.target)}`)
+    assert.include(MirEncoding.encode(sample), 'layout i32 size=4 align=4 repr=signed-i32')
+  }),
+)
+it.effect(
+  'marks generated outcomes and preserves programmer provenance',
+  Effect.fnUntraced(function* () {
+    const [, branching] = yield* MirSamples.samples()
+    const encoded = MirEncoding.encode(branching ?? raise('expected branching sample'))
 
-  assert.strictEqual(sample.layout.entries.at(0)?.size, 4)
-  assert.include(MirEncoding.encode(sample), `target ${Target.encode(sample.layout.target)}`)
-  assert.include(MirEncoding.encode(sample), 'layout i32 size=4 align=4 repr=signed-i32')
-})
+    assert.include(encoded, 'conditional condition=%0')
+    assert.include(encoded, 'trap "otherwise" [25, 34) generated')
+  }),
+)
+it.effect(
+  'matches the MIR golden encodings byte-for-byte',
+  Effect.fnUntraced(function* () {
+    const [straight, branching] = yield* MirSamples.samples()
 
-it('marks generated outcomes and preserves programmer provenance', () => {
-  const [, branching] = MirSamples.samples()
-  const encoded = MirEncoding.encode(branching ?? raise('expected branching sample'))
+    assert.strictEqual(
+      MirEncoding.encode(straight ?? raise('expected sample')),
+      golden('straight.mir.txt'),
+    )
+    assert.strictEqual(
+      MirEncoding.encode(branching ?? raise('expected sample')),
+      golden('branching.mir.txt'),
+    )
+  }),
+)
+it.effect(
+  'constructs and encodes byte-identically across repeated runs',
+  Effect.fnUntraced(function* () {
+    const first = yield* MirSamples.samples()
+    const second = yield* MirSamples.samples()
 
-  assert.include(encoded, 'conditional condition=%0')
-  assert.include(encoded, 'trap "otherwise" [25, 34) generated')
-})
-
-it('matches the MIR golden encodings byte-for-byte', () => {
-  const [straight, branching] = MirSamples.samples()
-
-  assert.strictEqual(
-    MirEncoding.encode(straight ?? raise('expected sample')),
-    golden('straight.mir.txt'),
-  )
-  assert.strictEqual(
-    MirEncoding.encode(branching ?? raise('expected sample')),
-    golden('branching.mir.txt'),
-  )
-})
-
-it('constructs and encodes byte-identically across repeated runs', () => {
-  const first = MirSamples.samples()
-  const second = MirSamples.samples()
-
-  assert.deepEqual(first, second)
-  assert.deepEqual(first.map(MirEncoding.encode), second.map(MirEncoding.encode))
-})
+    assert.deepEqual(first, second)
+    assert.deepEqual(first.map(MirEncoding.encode), second.map(MirEncoding.encode))
+  }),
+)
 
 it.effect('lowers a foreign call to one ForeignCall carrying the classified C signature', () =>
   Effect.gen(function* () {
@@ -572,7 +597,7 @@ pub fn main() -> i32 { return unsafe abs(-42) }`),
         },
       ],
     )
-    assert.deepEqual(MirVerification.verify(program), [])
+    assert.deepEqual(yield* MirVerification.verify(program), [])
     const encoded = MirEncoding.encode(program)
     assert.include(
       encoded,
@@ -585,17 +610,19 @@ pub fn main() -> i32 { return unsafe abs(-42) }`),
     assert.strictEqual(MirEncoding.encode(program), encoded)
   }),
 )
-
-it('verifies foreign call arity and C classes as structural violations', () => {
-  const valid = MirSamples.foreignCallSample(Target.aarch64AppleDarwin)
-  assert.deepEqual(MirVerification.verify(valid), [])
-  assert.strictEqual(MirEncoding.encode(valid), MirEncoding.encode(valid))
-  const arityMismatch = MirSamples.foreignCallSample(Target.aarch64AppleDarwin, [])
-  assert.deepEqual(
-    MirVerification.verify(arityMismatch).map((violation) => violation.rule),
-    ['InvalidForeignCall'],
-  )
-})
+it.effect(
+  'verifies foreign call arity and C classes as structural violations',
+  Effect.fnUntraced(function* () {
+    const valid = yield* MirSamples.foreignCallSample(Target.aarch64AppleDarwin)
+    assert.deepEqual(yield* MirVerification.verify(valid), [])
+    assert.strictEqual(MirEncoding.encode(valid), MirEncoding.encode(valid))
+    const arityMismatch = yield* MirSamples.foreignCallSample(Target.aarch64AppleDarwin, [])
+    assert.deepEqual(
+      (yield* MirVerification.verify(arityMismatch)).map((violation) => violation.rule),
+      ['InvalidForeignCall'],
+    )
+  }),
+)
 
 it.effect('verifies a foreign pointer argument against the declared pointee', () =>
   Effect.gen(function* () {
@@ -611,7 +638,7 @@ pub fn main() -> i32 {
     )
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
     const program = Analysis.loweredMir(snapshot)
-    assert.deepEqual(MirVerification.verify(program), [])
+    assert.deepEqual(yield* MirVerification.verify(program), [])
     // The same `*mut i32` argument against a `*const u8` parameter is one violation.
     const rewritten: Mir.Module = Object.freeze({
       ...program,
@@ -658,7 +685,7 @@ pub fn main() -> i32 {
       ),
     })
     assert.deepEqual(
-      MirVerification.verify(rewritten).map((violation) => violation.rule),
+      (yield* MirVerification.verify(rewritten)).map((violation) => violation.rule),
       ['InvalidForeignCall'],
     )
   }),
@@ -787,7 +814,7 @@ pub fn main() -> i32 {
     )
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
     const program = Analysis.loweredMir(snapshot)
-    assert.deepEqual(MirVerification.verify(program), [])
+    assert.deepEqual(yield* MirVerification.verify(program), [])
     const described = program.functions.flatMap((fn) =>
       MirVerification.operations(fn).flatMap((operation) => {
         if (operation._tag === 'PointerFromStorage')
@@ -837,7 +864,7 @@ pub fn main() -> i32 {
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
     const program = Analysis.loweredMir(snapshot)
     assert.deepEqual(
-      MirVerification.verify(program).map((violation) => violation.rule),
+      (yield* MirVerification.verify(program)).map((violation) => violation.rule),
       ['InvalidPointerOperation'],
     )
   }),
@@ -891,7 +918,7 @@ pub fn main() -> i32 { return inspect(Choice.Last) }`),
     )
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
     const program = Analysis.loweredMir(snapshot)
-    assert.deepEqual(MirVerification.verify(program), [])
+    assert.deepEqual(yield* MirVerification.verify(program), [])
     const fn = program.functions.find((fn) => fn.id.name === 'inspect') ?? raise('expected inspect')
     const match =
       MirVerification.operations(fn).find((operation) => operation._tag === 'Match') ??
@@ -931,7 +958,7 @@ pub fn main() -> i32 { return inspect(Choice.Last) }`),
       ],
     })
     assert.include(
-      MirVerification.verify(absent).map((violation) => violation.rule),
+      (yield* MirVerification.verify(absent)).map((violation) => violation.rule),
       'InvalidMatchJoin',
     )
     const invented = replace({
@@ -948,7 +975,7 @@ pub fn main() -> i32 { return inspect(Choice.Last) }`),
       ],
     })
     assert.include(
-      MirVerification.verify(invented).map((violation) => violation.rule),
+      (yield* MirVerification.verify(invented)).map((violation) => violation.rule),
       'InvalidMatchJoin',
     )
     const uninitialized: Mir.LocalId = { _tag: 'Local', ordinal: fn.localTypes.length }
@@ -966,14 +993,14 @@ pub fn main() -> i32 { return inspect(Choice.Last) }`),
       ],
     })
     assert.include(
-      MirVerification.verify({
+      (yield* MirVerification.verify({
         ...missingWrite,
         functions: missingWrite.functions.map((candidate) =>
           candidate.id.name === 'inspect'
             ? { ...candidate, localTypes: [...candidate.localTypes, { _tag: 'i32' }] }
             : candidate,
         ),
-      }).map((violation) => violation.rule),
+      })).map((violation) => violation.rule),
       'InvalidMatchJoin',
     )
   }),
@@ -987,7 +1014,7 @@ it.effect('forms an output slot address without reading or initializing its valu
     )
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
     const program = Analysis.loweredMir(snapshot)
-    assert.deepEqual(MirVerification.verify(program), [])
+    assert.deepEqual(yield* MirVerification.verify(program), [])
     const addressFunctions = program.functions.filter((fn) =>
       MirVerification.operations(fn).some((operation) => operation._tag === 'PointerFromStorage'),
     )
@@ -1026,7 +1053,7 @@ pub fn main() -> i32 { let ignored = inspect(Pointer.null<Record>()) return 42 }
       )
       assert.deepEqual(Analysis.diagnostics(snapshot), [])
       const program = Analysis.loweredMir(snapshot)
-      assert.deepEqual(MirVerification.verify(program), [])
+      assert.deepEqual(yield* MirVerification.verify(program), [])
       const operations = program.functions.flatMap(MirVerification.operations)
       assert.strictEqual(operations.filter((op) => op._tag === 'PointerBytes').length, 1)
       assert.strictEqual(operations.filter((op) => op._tag === 'PointerRead').length, 0)
@@ -1047,14 +1074,14 @@ pub fn main() -> i32 { let ignored = inspect(Pointer.null<Record>()) return 42 }
           })),
         }
         assert.include(
-          MirVerification.verify(forged).map((v) => v.rule),
+          (yield* MirVerification.verify(forged)).map((v) => v.rule),
           'InvalidPointerOperation',
         )
       }
     }),
 )
 
-it.effect('restores narrow success fields from widened Effect outcome lanes', () =>
+it.effect('reads narrow success fields from their stored Effect outcome payload', () =>
   Effect.gen(function* () {
     const snapshot = yield* AnalysisFixture.retainingMain(
       'mir/narrow-effect-record',
@@ -1062,7 +1089,21 @@ it.effect('restores narrow success fields from widened Effect outcome lanes', ()
     )
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
     const artifact = yield* Analysis.codegen(snapshot, { mode: 'debug' })
-    assert.match(artifact.ir, /effect_success\w+_width = trunc i64 .* to i16/)
-    assert.match(artifact.ir, /effect_success\w+_width = trunc i64 .* to i8/)
+    const check =
+      artifact.ir.match(
+        /define[^\n]+@silk_mir_narrow_effect_record_check_effect__[^\n]+\n([\s\S]*?)\n}/,
+      )?.[1] ?? raise('expected the check Effect runner')
+    // The success member keeps its four-byte struct layout even though the failure member
+    // needs two i64 fields. Read the selected fields at their own widths and offsets.
+    assert.match(check, /effect_success\w+ = getelementptr i8, ptr %\w+, i32 8/)
+    assert.match(check, /@llvm\.memmove[^\n]+%effect_success\w+, i32 4,/)
+    assert.match(
+      check,
+      /%(\w+) = getelementptr i8, ptr %\w+, i32 0\n\s+%\w+ = load i16, ptr %\1, align 2/,
+    )
+    assert.match(
+      check,
+      /%(\w+) = getelementptr i8, ptr %\w+, i32 2\n\s+%\w+ = load i8, ptr %\1, align 1/,
+    )
   }),
 )

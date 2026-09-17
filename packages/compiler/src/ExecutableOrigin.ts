@@ -302,6 +302,73 @@ export interface Operations {
   ) => Type.CallableEnvironmentIdentity
 }
 
+interface ProviderBinding {
+  readonly node: string
+  readonly execution: string
+  readonly protectedTargets: ReadonlyArray<string>
+  readonly selected: Type.Requirement
+  readonly witness: DeclarationFacts.ConformanceWitness
+  readonly providerAccess: 'Shared' | 'Exclusive' | 'Take'
+  readonly receiver: Type.Type
+}
+
+type ProviderEnvironment = ReadonlyArray<ProviderBinding>
+
+interface ProviderWorklist {
+  readonly pending: Array<{ readonly node: string; readonly environment: ProviderEnvironment }>
+  readonly queued: Map<string, Set<ProviderEnvironment>>
+  readonly extensions: WeakMap<ProviderEnvironment, Map<string, ProviderEnvironment>>
+}
+
+// The measured graph enqueued 89,033 traversals for 50,502 distinct states. Intern ordered
+// environments and deduplicate on enqueue, retaining FIFO order without rebuilding long keys.
+const enqueueProvider = (
+  self: ProviderWorklist,
+  node: string,
+  environment: ProviderEnvironment,
+): void => {
+  let environments = self.queued.get(node)
+  if (environments === undefined) {
+    environments = new Set()
+    self.queued.set(node, environments)
+  }
+  if (environments.has(environment)) return
+  environments.add(environment)
+  self.pending.push(Object.freeze({ node, environment }))
+}
+
+const enterProviderBinding = (
+  self: ProviderWorklist,
+  environment: ProviderEnvironment,
+  binding: ProviderBinding,
+): ProviderEnvironment => {
+  if (environment.some((candidate) => candidate.node === binding.node)) return environment
+  let extensions = self.extensions.get(environment)
+  if (extensions === undefined) {
+    extensions = new Map()
+    self.extensions.set(environment, extensions)
+  }
+  let extended = extensions.get(binding.node)
+  if (extended === undefined) {
+    extended = Object.freeze([...environment, binding])
+    extensions.set(binding.node, extended)
+  }
+  return extended
+}
+
+const providerWorklist = (bindings: Iterable<ProviderBinding>): ProviderWorklist => {
+  const self: ProviderWorklist = {
+    pending: [],
+    queued: new Map(),
+    extensions: new WeakMap(),
+  }
+  // Every path starts from the same empty environment, so identical binding sequences share
+  // identity. Binding order remains significant: service lookup selects the last matching one.
+  const empty: ProviderEnvironment = Object.freeze([])
+  for (const binding of bindings) enqueueProvider(self, binding.node, empty)
+  return self
+}
+
 export const make = (operations: Operations) => {
   const {
     specializeInstanceType,
@@ -976,7 +1043,7 @@ export const make = (operations: Operations) => {
       const forwarded = staticallyForwardedCallable(expression, context.fn, context.results)
       if (forwarded !== undefined && forwarded !== expression)
         return callableOriginOf(forwarded, context)
-      const targetKey = targetKeyOfCall(expression, context)
+      const targetKey = targetKeyOfInvocation(expression, context)
       const target =
         targetKey === undefined ? undefined : targetFunction(context.results, expression.target)
       return targetKey === undefined || target === undefined
@@ -1009,7 +1076,7 @@ export const make = (operations: Operations) => {
           )
     }
     if (expression._tag === 'CallableApply') {
-      const targetKey = targetKeyOfCallableApply(expression, context)
+      const targetKey = targetKeyOfInvocation(expression, context)
       if (targetKey === undefined) return undefined
       const target = targetFunction(context.results, targetKey.declaration)
       return target === undefined
@@ -1098,7 +1165,7 @@ export const make = (operations: Operations) => {
     return argumentOrdinal < 0 ? undefined : expression.arguments.at(argumentOrdinal)
   }
 
-  const targetKeyOfCallableApply = (
+  const resolveTargetKeyOfCallableApply = (
     expression: Extract<Hir.Expression, { readonly _tag: 'CallableApply' }>,
     context: EffectOriginContext,
   ): InstanceKey | undefined => {
@@ -1578,7 +1645,7 @@ export const make = (operations: Operations) => {
     if (expression._tag === 'UnionConvert')
       return compositeEffectRepresentationOf(expression.source, context)
     if (expression._tag === 'Call' || expression._tag === 'EffectConstruct') {
-      const targetKey = targetKeyOfCall(expression, context)
+      const targetKey = targetKeyOfInvocation(expression, context)
       const target =
         targetKey === undefined ? undefined : targetFunction(context.results, targetKey.declaration)
       const substitution =
@@ -1607,7 +1674,7 @@ export const make = (operations: Operations) => {
       )
     }
     if (expression._tag === 'CallableApply') {
-      const targetKey = targetKeyOfCallableApply(expression, context)
+      const targetKey = targetKeyOfInvocation(expression, context)
       const target =
         targetKey === undefined ? undefined : targetFunction(context.results, targetKey.declaration)
       const substitution =
@@ -1638,7 +1705,56 @@ export const make = (operations: Operations) => {
     return undefined
   }
 
-  const targetKeyOfCall = (
+  const callTargetCache = new WeakMap<
+    EffectOriginContext,
+    WeakMap<Hir.Expression, InstanceKey | undefined>
+  >()
+
+  const canCacheCallTarget = (context: EffectOriginContext): boolean => {
+    // Resolving a parameter can re-enter its caller. Preserve provider-selection bookkeeping
+    // and resolved-call recording throughout that chain, even if this context has no callback.
+    for (
+      let current: EffectOriginContext | undefined = context;
+      current !== undefined;
+      current = current.parameterArguments?.context
+    ) {
+      if (
+        current.recordResolvedCall !== undefined ||
+        current.resolveServiceEffectIdentity !== undefined
+      )
+        return false
+    }
+    return true
+  }
+
+  // Call-target resolution accounted for over a third of suspension-graph CPU samples.
+  // Callable applications share this cache: repeated queries retain the exact owner,
+  // substitution, and recursion state. Unresolved results are stable within that context too.
+  const targetKeyOfInvocation = (
+    expression: Extract<
+      Hir.Expression,
+      { readonly _tag: 'Call' | 'EffectConstruct' | 'CallableApply' }
+    >,
+    context: EffectOriginContext,
+  ): InstanceKey | undefined => {
+    const cacheable = canCacheCallTarget(context)
+    let targets = cacheable ? callTargetCache.get(context) : undefined
+    if (targets?.has(expression)) return targets.get(expression)
+    const target =
+      expression._tag === 'CallableApply'
+        ? resolveTargetKeyOfCallableApply(expression, context)
+        : resolveTargetKeyOfCall(expression, context)
+    if (cacheable) {
+      if (targets === undefined) {
+        targets = new WeakMap()
+        callTargetCache.set(context, targets)
+      }
+      targets.set(expression, target)
+    }
+    return target
+  }
+
+  const resolveTargetKeyOfCall = (
     expression: Extract<Hir.Expression, { readonly _tag: 'Call' | 'EffectConstruct' }>,
     context: EffectOriginContext,
   ): InstanceKey | undefined => {
@@ -2021,7 +2137,7 @@ export const make = (operations: Operations) => {
     if (expression._tag === 'ServiceEffectConstruct')
       return context.resolveServiceEffectIdentity?.(expression)
     if (expression._tag === 'CallableApply') {
-      const targetKey = targetKeyOfCallableApply(expression, context)
+      const targetKey = targetKeyOfInvocation(expression, context)
       if (targetKey === undefined) return undefined
       const target = targetFunction(context.results, targetKey.declaration)
       if (target === undefined) return undefined
@@ -2034,7 +2150,7 @@ export const make = (operations: Operations) => {
       )
     }
     if (expression._tag !== 'Call' && expression._tag !== 'EffectConstruct') return undefined
-    const targetKey = targetKeyOfCall(expression, context)
+    const targetKey = targetKeyOfInvocation(expression, context)
     const target =
       targetKey === undefined ? undefined : targetFunction(context.results, expression.target)
     if (targetKey === undefined || target === undefined) return undefined
@@ -2096,7 +2212,7 @@ export const make = (operations: Operations) => {
         : context.successOfIdentity?.(identity, context.resolving)
     }
     if (expression._tag !== 'Call' && expression._tag !== 'EffectConstruct') return undefined
-    const targetKey = targetKeyOfCall(expression, context)
+    const targetKey = targetKeyOfInvocation(expression, context)
     const target =
       targetKey === undefined ? undefined : targetFunction(context.results, expression.target)
     if (targetKey === undefined || target === undefined) return undefined
@@ -2313,11 +2429,11 @@ export const make = (operations: Operations) => {
         // Use the ordinary call-origin machinery to preserve executable operand identities.
         // The synthetic call shares its authored interface call's place in discovery order.
         expressionOrder.set(call, ordinal)
-        targetKeyOfCall(call, context)
+        targetKeyOfInvocation(call, context)
         return
       }
       if (expression._tag === 'CallableApply') {
-        targetKeyOfCallableApply(expression, context)
+        targetKeyOfInvocation(expression, context)
         return
       }
       if (expression._tag !== 'Call' && expression._tag !== 'EffectConstruct') return
@@ -2325,7 +2441,7 @@ export const make = (operations: Operations) => {
       // finite-specialization path. Resolving them here as well would bypass its
       // polymorphic-recursion guard.
       if (!carriesHiddenIdentity(expression, substitution)) return
-      targetKeyOfCall(expression, context)
+      targetKeyOfInvocation(expression, context)
     })
     return Object.freeze(
       [...calls.values()]
@@ -2454,7 +2570,7 @@ export const make = (operations: Operations) => {
     })
     for (const expression of callableExpressions(fn)) {
       if (expression._tag === 'CallableApply') {
-        const key = targetKeyOfCallableApply(expression, context)
+        const key = targetKeyOfInvocation(expression, context)
         if (key !== undefined) {
           targets.push(
             Object.freeze({ declaration: key.declaration, typeArguments: key.typeArguments }),
@@ -3287,15 +3403,6 @@ export const make = (operations: Operations) => {
         readonly context: EffectOriginContext
       }
     >()
-    interface ProviderBinding {
-      readonly node: string
-      readonly execution: string
-      readonly protectedTargets: ReadonlyArray<string>
-      readonly selected: Type.Requirement
-      readonly witness: DeclarationFacts.ConformanceWitness
-      readonly providerAccess: 'Shared' | 'Exclusive' | 'Take'
-      readonly receiver: Type.Type
-    }
     const providerBindings = new Map<string, ProviderBinding>()
     const resolveEffectIdentity = (identity: Type.EffectIdentityArgument): string | undefined => {
       const candidates = instances.flatMap((instance) =>
@@ -3370,10 +3477,13 @@ export const make = (operations: Operations) => {
         diagnosticDependencies.set(owner, inherited)
       }
     }
+    const instancesByKey = new Map<string, Instance>()
+    for (const instance of instances) {
+      const identity = keyText(instance.key)
+      if (!instancesByKey.has(identity)) instancesByKey.set(identity, instance)
+    }
     const executionNodeForKey = (key: InstanceKey): string => {
-      const result = instances.find(
-        (candidate) => keyText(candidate.key) === keyText(key),
-      )?.resultEffect
+      const result = instancesByKey.get(keyText(key))?.resultEffect
       return result === undefined ? instanceNode(key) : effectNode(result)
     }
     const serviceCallNode = (
@@ -3639,7 +3749,7 @@ export const make = (operations: Operations) => {
           }
         }
         if (expression._tag === 'EffectConstruct') {
-          const target = targetKeyOfCall(expression, context)
+          const target = targetKeyOfInvocation(expression, context)
           const targetFn =
             target === undefined ? undefined : targetFunction(results, target.declaration)
           const identity =
@@ -3782,7 +3892,7 @@ export const make = (operations: Operations) => {
         expression: Extract<Hir.Expression, { readonly _tag: 'Call' | 'EffectConstruct' }>,
         execution: string,
       ): void => {
-        const wrapperKey = targetKeyOfCall(expression, context)
+        const wrapperKey = targetKeyOfInvocation(expression, context)
         const wrapper =
           wrapperKey === undefined ? undefined : targetFunction(results, wrapperKey.declaration)
         const wrapperSubstitution =
@@ -3825,7 +3935,7 @@ export const make = (operations: Operations) => {
         expression: Extract<Hir.Expression, { readonly _tag: 'CallableApply' }>,
         execution: string,
       ): void => {
-        const wrapperKey = targetKeyOfCallableApply(expression, context)
+        const wrapperKey = targetKeyOfInvocation(expression, context)
         const wrapper =
           wrapperKey === undefined ? undefined : targetFunction(results, wrapperKey.declaration)
         const wrapperSubstitution =
@@ -4008,14 +4118,14 @@ export const make = (operations: Operations) => {
               }),
             )
         } else if (expression._tag === 'Call') {
-          const target = targetKeyOfCall(expression, context)
+          const target = targetKeyOfInvocation(expression, context)
           addDependency(
             execution,
             target === undefined ? deferredCallNode(expression) : instanceNode(target),
           )
           recordForwardedServiceTargets(expression, execution)
         } else if (expression._tag === 'EffectConstruct') {
-          const target = targetKeyOfCall(expression, context)
+          const target = targetKeyOfInvocation(expression, context)
           addDependency(
             execution,
             target === undefined ? deferredCallNode(expression) : instanceNode(target),
@@ -4029,7 +4139,7 @@ export const make = (operations: Operations) => {
         } else if (expression._tag === 'BuiltinCall') {
           const selectedCall = interfaceCallOf(expression, context)
           if (selectedCall !== undefined) {
-            const target = targetKeyOfCall(selectedCall, context)
+            const target = targetKeyOfInvocation(selectedCall, context)
             addDependency(
               execution,
               target === undefined ? deferredCallNode(selectedCall) : instanceNode(target),
@@ -4088,7 +4198,7 @@ export const make = (operations: Operations) => {
         } else if (expression._tag === 'InterfaceOperationCall') {
           const selectedCall = interfaceCallOf(expression, context)
           if (selectedCall !== undefined) {
-            const target = targetKeyOfCall(selectedCall, context)
+            const target = targetKeyOfInvocation(selectedCall, context)
             addDependency(
               execution,
               target === undefined ? deferredCallNode(selectedCall) : instanceNode(target),
@@ -4097,7 +4207,7 @@ export const make = (operations: Operations) => {
         } else if (expression._tag === 'ServiceEffectConstruct') {
           for (const target of executionTargets(expression)) addDependency(execution, target)
         } else if (expression._tag === 'CallableApply') {
-          const target = targetKeyOfCallableApply(expression, context)
+          const target = targetKeyOfInvocation(expression, context)
           if (target !== undefined) addDependency(execution, instanceNode(target))
           else unresolvedDiagnosticExecutions.add(execution)
           recordForwardedCallableServiceTargets(expression, execution)
@@ -4157,29 +4267,16 @@ export const make = (operations: Operations) => {
       }
     }
 
-    interface ProviderTraversal {
-      readonly node: string
-      readonly environment: ReadonlyArray<ProviderBinding>
-    }
-    const pendingProviders: Array<ProviderTraversal> = [...providerBindings.values()].map(
-      (binding) => Object.freeze({ node: binding.node, environment: Object.freeze([]) }),
-    )
-    const visitedProviders = new Set<string>()
+    const providers = providerWorklist(providerBindings.values())
     const selectedEdges: Array<readonly [string, string]> = []
-    while (pendingProviders.length > 0) {
-      const current = pendingProviders.shift()
+    for (let ordinal = 0; ordinal < providers.pending.length; ordinal += 1) {
+      const current = providers.pending[ordinal]
       if (current === undefined) continue
-      const traversalKey = `${current.node}\0${current.environment
-        .map((binding) => binding.node)
-        .join('\x01')}`
-      if (visitedProviders.has(traversalKey)) continue
-      visitedProviders.add(traversalKey)
       const entered = providerBindings.get(current.node)
       const environment =
-        entered === undefined ||
-        current.environment.some((binding) => binding.node === entered.node)
+        entered === undefined
           ? current.environment
-          : Object.freeze([...current.environment, entered])
+          : enterProviderBinding(providers, current.environment, entered)
       const deferredCall = deferredCalls.get(current.node)
       if (deferredCall !== undefined) {
         const selectedBindings = new Map<string, ProviderBinding>()
@@ -4214,7 +4311,7 @@ export const make = (operations: Operations) => {
               : resultEffectIdentity(fn, target, results, index)
           },
         }
-        const target = targetKeyOfCall(deferredCall.expression, context)
+        const target = targetKeyOfInvocation(deferredCall.expression, context)
         if (target !== undefined) {
           const span = deferredCall.expression.span
           providedTargets.set(
@@ -4241,7 +4338,7 @@ export const make = (operations: Operations) => {
           // Keep provider-selected suspension on its lexical invocation, not the shared open call.
           for (const binding of selectedBindings.values())
             selectedEdges.push(Object.freeze([binding.execution, targetNode]))
-          pendingProviders.push(Object.freeze({ node: targetNode, environment }))
+          enqueueProvider(providers, targetNode, environment)
         }
       }
       const serviceCall = serviceCalls.get(current.node)
@@ -4287,7 +4384,7 @@ export const make = (operations: Operations) => {
                 Object.freeze({ node: targetNode, span: serviceCall.expression.span }),
               )
             selectedEdges.push(Object.freeze([binding.execution, targetNode]))
-            pendingProviders.push(Object.freeze({ node: targetNode, environment }))
+            enqueueProvider(providers, targetNode, environment)
           } else if (serviceCall.nonParking) {
             const node = `nonparking-provider\u0000${serviceCall.expression.span.sourceId}:${serviceCall.expression.span.start}:${serviceCall.expression.span.end}`
             unavailable.add(node)
@@ -4299,7 +4396,7 @@ export const make = (operations: Operations) => {
         }
       }
       for (const target of dependencies.get(current.node) ?? [])
-        pendingProviders.push(Object.freeze({ node: target, environment }))
+        enqueueProvider(providers, target, environment)
     }
     for (const [owner, target] of selectedEdges) addDependency(owner, target)
 

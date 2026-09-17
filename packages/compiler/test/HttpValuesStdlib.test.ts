@@ -313,7 +313,7 @@ it.effect(
       }).pipe(Effect.provide(SourceResolver.empty))
       assert.deepEqual(diagnosticSummary(snapshot), [])
       const mir = Analysis.loweredMir(snapshot)
-      assert.deepEqual(MirVerification.verify(mir), [])
+      assert.deepEqual(yield* MirVerification.verify(mir), [])
       for (const operation of ['Config.defaults', 'ConnectionKey.direct', 'ConnectionKey.origin']) {
         assert.isTrue(
           mir.functions.some(
@@ -373,7 +373,7 @@ it.effect(
       )
     }),
   // This single full-program witness took 455 seconds on the contended compiler shard.
-  600_000,
+  600000,
 )
 
 it.effect(

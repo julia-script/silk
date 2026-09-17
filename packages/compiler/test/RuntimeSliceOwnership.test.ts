@@ -31,7 +31,7 @@ it.effect('constructs ordinary boxes with externally borrowed elements', () =>
     const source = borrowedBox
     const self = yield* snapshot(source)
     assert.deepEqual(Analysis.diagnostics(self), [])
-    assert.deepEqual(MirVerification.verify(Analysis.loweredMir(self)), [])
+    assert.deepEqual(yield* MirVerification.verify(Analysis.loweredMir(self)), [])
     const invalid = yield* analyze(
       source.replace('  let result = Box.into', '  drop value\n  let result = Box.into'),
     )
@@ -47,7 +47,7 @@ it.effect('implements fixed externally borrowed stream items with fresh operatio
     const source = borrowedStream
     const self = yield* snapshot(source)
     assert.deepEqual(Analysis.diagnostics(self), [])
-    assert.deepEqual(MirVerification.verify(Analysis.loweredMir(self)), [])
+    assert.deepEqual(yield* MirVerification.verify(Analysis.loweredMir(self)), [])
     const invalid = yield* analyze(source.replace('  drop stream', '  drop values\n  drop stream'))
     assert.include(
       Analysis.diagnostics(invalid).map((diagnostic) => diagnostic.code),
@@ -76,7 +76,7 @@ pub fn main() -> i32 {
 }`
     const self = yield* snapshot(source)
     assert.deepEqual(Analysis.diagnostics(self), [])
-    assert.deepEqual(MirVerification.verify(Analysis.loweredMir(self)), [])
+    assert.deepEqual(yield* MirVerification.verify(Analysis.loweredMir(self)), [])
     const invalid = yield* analyze(
       source
         .replace('  let result = run pending', '  drop provider\n  let result = run pending')
@@ -94,7 +94,7 @@ it.effect('transfers affine borrowed items out of an ordinary owning stream', ()
     const source = affineBorrowedStream
     const self = yield* snapshot(source)
     assert.deepEqual(Analysis.diagnostics(self), [])
-    assert.deepEqual(MirVerification.verify(Analysis.loweredMir(self)), [])
+    assert.deepEqual(yield* MirVerification.verify(Analysis.loweredMir(self)), [])
     const invalid = yield* analyze(source.replace('  drop item', '  value = 1\n  drop item'))
     assert.isTrue(
       Analysis.diagnostics(invalid).some((diagnostic) =>
@@ -125,7 +125,7 @@ pub fn main() -> i32 {
 }`
     const self = yield* snapshot(source)
     assert.deepEqual(Analysis.diagnostics(self), [])
-    assert.deepEqual(MirVerification.verify(Analysis.loweredMir(self)), [])
+    assert.deepEqual(yield* MirVerification.verify(Analysis.loweredMir(self)), [])
     const invalid = yield* analyze(source.replace('  drop first', '  drop value\n  drop first'))
     assert.include(
       Analysis.diagnostics(invalid).map((d) => d.code),
@@ -170,7 +170,7 @@ pub fn main() -> i32 {
 }`
     const self = yield* snapshot(source)
     assert.deepEqual(Analysis.diagnostics(self), [])
-    assert.deepEqual(MirVerification.verify(Analysis.loweredMir(self)), [])
+    assert.deepEqual(yield* MirVerification.verify(Analysis.loweredMir(self)), [])
     const invalid = yield* analyze(
       source.replace('  let second =', '  holder.count = 4\n  let second ='),
     )
@@ -199,7 +199,7 @@ pub fn main() -> i32 {
 }`
     const self = yield* snapshot(source)
     assert.deepEqual(Analysis.diagnostics(self), [])
-    assert.deepEqual(MirVerification.verify(Analysis.loweredMir(self)), [])
+    assert.deepEqual(yield* MirVerification.verify(Analysis.loweredMir(self)), [])
     const invalid = yield* analyze(source.replace('  drop holder', '  drop value\n  drop holder'))
     assert.include(
       Analysis.diagnostics(invalid).map((diagnostic) => diagnostic.code),
@@ -239,7 +239,7 @@ it.effect('propagates nested borrowed failures through ordinary recovery', () =>
     const source = borrowedFailure
     const self = yield* snapshot(source)
     assert.deepEqual(Analysis.diagnostics(self), [])
-    assert.deepEqual(MirVerification.verify(Analysis.loweredMir(self)), [])
+    assert.deepEqual(yield* MirVerification.verify(Analysis.loweredMir(self)), [])
     const invalid = yield* analyze(
       source.replace('  return result.*', '  drop value\n  return result.*'),
     )
@@ -287,7 +287,7 @@ pub fn main() -> i32 {
       )
     assert.isDefined(remainder)
     const program = Analysis.loweredMir(self)
-    assert.deepEqual(MirVerification.verify(program), [])
+    assert.deepEqual(yield* MirVerification.verify(program), [])
     const hook =
       program.functions.find((fn) =>
         MirVerification.operations(fn).some(
@@ -324,7 +324,7 @@ pub fn main() -> i32 {
       ),
     }
     assert.isTrue(
-      MirVerification.verify(corrupted).some(
+      (yield* MirVerification.verify(corrupted)).some(
         (violation) => violation.rule === 'InvalidAggregateOperation',
       ),
     )
@@ -793,7 +793,7 @@ pub fn main() -> i32 {
   return result
 }`)
     assert.deepEqual(Analysis.diagnostics(self), [])
-    assert.deepEqual(MirVerification.verify(Analysis.loweredMir(self)), [])
+    assert.deepEqual(yield* MirVerification.verify(Analysis.loweredMir(self)), [])
     const main =
       Analysis.loweredMir(self).functions.find((fn) => fn.id.name === 'main') ??
       unreachable('expected main')
@@ -1258,7 +1258,7 @@ pub fn main() -> i32 {
       assert.deepEqual(cleanup.fields, [])
     }
     const mir = self.mir._tag === 'Available' ? self.mir.value : unreachable('replacement MIR')
-    assert.deepEqual(MirVerification.verify(mir), [])
+    assert.deepEqual(yield* MirVerification.verify(mir), [])
     const replace = mir.functions.find((fn) => fn.id.name === 'replace') ?? unreachable('replace')
     const corrupted = {
       ...mir,
@@ -1281,7 +1281,7 @@ pub fn main() -> i32 {
       ),
     }
     assert.deepEqual(
-      MirVerification.verify(corrupted).map((violation) => violation.rule),
+      (yield* MirVerification.verify(corrupted)).map((violation) => violation.rule),
       ['InvalidSliceOperation'],
     )
   }),

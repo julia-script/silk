@@ -176,7 +176,7 @@ it.effect('plans reclaim after repeated shared Copy reads', () =>
     )
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
     const mir = Analysis.loweredMir(snapshot)
-    assert.deepEqual(MirVerification.verify(mir), [])
+    assert.deepEqual(yield* MirVerification.verify(mir), [])
     const operations = mir.functions.flatMap(MirVerification.operations)
     assert.strictEqual(
       operations.filter((operation) => operation._tag === 'RawBufferRead').length,

@@ -27,15 +27,35 @@ const nominalKey = (type: Type.Nominal): string => Type.key(Type.specializeNomin
 const applicationBounds = (
   parameter: DeclarationFacts.TypeParameterFact,
   contract: boolean,
-  bounds: ReadonlyArray<Lifetime.Outlives>,
+  bounds: ReadonlyMap<string, ReadonlyArray<Lifetime.Lifetime>>,
   parameterBounds: ReadonlyMap<string, ReadonlyArray<Lifetime.Lifetime>>,
 ): ReadonlyArray<Lifetime.Lifetime> => {
   if (contract) return parameter.lifetimeBounds ?? []
-  if (parameter.type.kind === 'Lifetime')
-    return bounds
-      .filter((bound) => Lifetime.key(bound.longer) === Type.key(parameter.type))
-      .map((bound) => bound.shorter)
+  if (parameter.type.kind === 'Lifetime') return bounds.get(Type.key(parameter.type)) ?? []
   return parameterBounds.get(Type.key(parameter.type)) ?? []
+}
+
+// Each application asks about one binder, while elaboration contexts can contain thousands
+// of unrelated bounds. Cache immutable contexts; construction maintains its own growing index.
+const lifetimeBoundIndices = new WeakMap<
+  Lifetime.Assumptions,
+  ReadonlyMap<string, ReadonlyArray<Lifetime.Lifetime>>
+>()
+
+const indexLifetimeBounds = (
+  assumptions: Lifetime.Assumptions,
+): ReadonlyMap<string, ReadonlyArray<Lifetime.Lifetime>> => {
+  const previous = lifetimeBoundIndices.get(assumptions)
+  if (previous !== undefined) return previous
+  const index = new Map<string, Array<Lifetime.Lifetime>>()
+  for (const bound of assumptions.bounds) {
+    const identity = Lifetime.key(bound.longer)
+    const entries = index.get(identity)
+    if (entries === undefined) index.set(identity, [bound.shorter])
+    else entries.push(bound.shorter)
+  }
+  lifetimeBoundIndices.set(assumptions, index)
+  return index
 }
 
 /** Indexes immutable declaration assumptions by canonical owner, never by binder spelling. */
@@ -128,6 +148,7 @@ export const context = (modules: ReadonlyArray<DeclarationFacts.ModuleHeaders>):
     }
   }
   const bounds: Array<Lifetime.Outlives> = []
+  const boundsByLonger = new Map<string, Array<Lifetime.Lifetime>>()
   const boundKeys = new Set<string>()
   const parameterBounds = new Map<string, ReadonlyArray<Lifetime.Lifetime>>()
   const add = (argument: Type.GenericArgument, shorter: Lifetime.Lifetime): boolean => {
@@ -136,6 +157,10 @@ export const context = (modules: ReadonlyArray<DeclarationFacts.ModuleHeaders>):
       if (boundKeys.has(identity)) return false
       boundKeys.add(identity)
       bounds.push({ longer: argument, shorter })
+      const identityOfLonger = Lifetime.key(argument)
+      const previous = boundsByLonger.get(identityOfLonger)
+      if (previous === undefined) boundsByLonger.set(identityOfLonger, [shorter])
+      else previous.push(shorter)
       work.lifetimeObligations += 1
       return true
     }
@@ -181,12 +206,16 @@ export const context = (modules: ReadonlyArray<DeclarationFacts.ModuleHeaders>):
         for (const [ordinal, parameter] of declared.entries()) {
           const argument = nominal.arguments.at(ordinal)
           if (argument === undefined) continue
-          const implied = applicationBounds(
-            parameter,
-            contractNominals.has(nominalKey(nominal)),
-            bounds,
-            parameterBounds,
-          )
+          // Adding a bound may extend this same binder's bucket. Process the current snapshot;
+          // newly inferred bounds participate in the next fixed-point iteration.
+          const implied = [
+            ...applicationBounds(
+              parameter,
+              contractNominals.has(nominalKey(nominal)),
+              boundsByLonger,
+              parameterBounds,
+            ),
+          ]
           for (const shorter of implied)
             changed = add(argument, Type.substituteLifetime(shorter, substitution)) || changed
         }
@@ -269,7 +298,7 @@ export const inputLifetimes = (
 /** Extends a hidden body's context without publishing its invocation-local assumptions. */
 export const withInputs = (scope: Context, inputs: ReadonlyArray<Type.Type>): Context => {
   const implied = inputLifetimes(inputs, scope)
-  const bounds = [...scope.assumptions.bounds, ...(implied.lifetimeBounds ?? [])]
+  const bounds = [...(implied.lifetimeBounds ?? [])]
   const parameterBounds = new Map(scope.parameterBounds)
   for (const bound of implied.typeOutlives ?? []) {
     for (const longer of Type.storageLifetimes(bound.type))
@@ -281,7 +310,11 @@ export const withInputs = (scope: Context, inputs: ReadonlyArray<Type.Type>): Co
         parameterBounds.set(key, [...previous, bound.lifetime])
     }
   }
-  return { ...scope, assumptions: Lifetime.assumptions(bounds), parameterBounds }
+  return {
+    ...scope,
+    assumptions: Lifetime.mergeAssumptions(scope.assumptions, Lifetime.assumptions(bounds)),
+    parameterBounds,
+  }
 }
 
 const obligations = (self: Type.Nominal, scope: Context): ReadonlyArray<Failure> => {
@@ -299,7 +332,7 @@ const obligations = (self: Type.Nominal, scope: Context): ReadonlyArray<Failure>
     const requiredBounds = applicationBounds(
       parameter,
       scope.contractNominals.has(nominalKey(self)),
-      scope.assumptions.bounds,
+      indexLifetimeBounds(scope.assumptions),
       scope.parameterBounds,
     )
     return requiredBounds.map((bound) => ({

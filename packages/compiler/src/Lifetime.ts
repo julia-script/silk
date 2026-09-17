@@ -181,18 +181,75 @@ export interface Assumptions {
 const outlivesKey = (self: Outlives): string =>
   Canonical.record('Outlives', [key(self.longer), key(self.shorter)])
 
+const canonicalBounds = new WeakMap<ReadonlyArray<Outlives>, Assumptions>()
+const assumptionEntries = new WeakMap<Assumptions, ReadonlyArray<readonly [string, Outlives]>>()
+
+const fromAssumptionEntries = (
+  entries: ReadonlyArray<readonly [string, Outlives]>,
+): Assumptions => {
+  const result = Object.freeze({
+    bounds: Object.freeze(entries.map(([, entry]) => entry)),
+    key: Canonical.array(entries.map(([identity]) => identity)),
+  })
+  canonicalBounds.set(result.bounds, result)
+  assumptionEntries.set(result, entries)
+  return result
+}
+
+const emptyAssumptions = fromAssumptionEntries([])
+
 /** Canonicalizes declared and implied assumptions before contextual comparison memoization. */
 export const assumptions = (bounds: ReadonlyArray<Outlives>): Assumptions => {
+  if (bounds.length === 0) return emptyAssumptions
+  const cached = canonicalBounds.get(bounds)
+  if (cached !== undefined) return cached
   const entries = new Map(bounds.map((entry) => [outlivesKey(entry), Object.freeze({ ...entry })]))
   const ordered = [...entries].sort(([left], [right]) => {
     if (left < right) return -1
     if (left > right) return 1
     return 0
   })
-  return Object.freeze({
-    bounds: Object.freeze(ordered.map(([, entry]) => entry)),
-    key: Canonical.array(ordered.map(([identity]) => identity)),
-  })
+  return fromAssumptionEntries(ordered)
+}
+
+const entriesOfAssumptions = (self: Assumptions): ReadonlyArray<readonly [string, Outlives]> =>
+  assumptionEntries.get(self) ??
+  self.bounds
+    .map((entry): readonly [string, Outlives] => [outlivesKey(entry), entry])
+    .sort(([left], [right]) => {
+      if (left < right) return -1
+      if (left > right) return 1
+      return 0
+    })
+
+/** Merges canonical assumption sets, retaining the right-hand bound on duplicate identities. */
+export const mergeAssumptions = (self: Assumptions, other: Assumptions): Assumptions => {
+  if (self === other || other.bounds.length === 0) return self
+  if (self.bounds.length === 0) return other
+  // Body elaboration repeatedly extends the same large module-wide set with a few local bounds.
+  // Merge its sorted entries without copying/freezing every bound or sorting the entire set again.
+  const left = entriesOfAssumptions(self)
+  const right = entriesOfAssumptions(other)
+  const merged: Array<readonly [string, Outlives]> = []
+  let i = 0
+  let j = 0
+  while (i < left.length || j < right.length) {
+    const a = left.at(i)
+    const b = right.at(j)
+    if (a !== undefined && (b === undefined || a[0] < b[0])) {
+      merged.push(a)
+      i += 1
+    } else if (b !== undefined) {
+      merged.push(b)
+      j += 1
+      if (a?.[0] === b[0]) i += 1
+    }
+  }
+  if (merged.length === right.length && merged.every((entry, index) => entry === right.at(index)))
+    return other
+  if (merged.length === left.length && merged.every((entry, index) => entry === left.at(index)))
+    return self
+  return fromAssumptionEntries(merged)
 }
 
 const outlivesProofs = new WeakMap<Assumptions, Map<string, Map<string, boolean>>>()
@@ -213,69 +270,86 @@ export const outlives = (self: Assumptions, longer: Lifetime, shorter: Lifetime)
   return proven
 }
 
-const proveOutlives = (self: Assumptions, longer: Lifetime, shorter: Lifetime): boolean => {
-  const destination = key(shorter)
-  const edges = new Map<string, Array<string>>()
-  const intersections = new Map<string, Intersection>()
-  for (const region of [
-    longer,
-    shorter,
-    ...self.bounds.flatMap((bound) => [bound.longer, bound.shorter]),
-  ]) {
+interface OutlivesGraph {
+  readonly predecessors: ReadonlyMap<string, ReadonlyArray<string>>
+  readonly meetsByMember: ReadonlyMap<string, ReadonlyArray<string>>
+  readonly meetSizes: ReadonlyMap<string, number>
+}
+
+const appendGraphEdge = (edges: Map<string, Array<string>>, from: string, to: string): void => {
+  const entries = edges.get(from)
+  if (entries === undefined) edges.set(from, [to])
+  else entries.push(to)
+}
+
+const outlivesGraph = (
+  bounds: ReadonlyArray<Outlives>,
+  queries: ReadonlyArray<Lifetime> = [],
+  existing?: OutlivesGraph,
+): OutlivesGraph => {
+  const predecessors = new Map<string, Array<string>>()
+  const meetsByMember = new Map<string, Array<string>>()
+  const meetSizes = new Map<string, number>()
+  for (const region of [...queries, ...bounds.flatMap((bound) => [bound.longer, bound.shorter])]) {
     if (region._tag !== 'IntersectionLifetime') continue
-    intersections.set(key(region), region)
+    const identity = key(region)
+    if (meetSizes.has(identity) || existing?.meetSizes.has(identity)) continue
+    meetSizes.set(identity, region.members.length)
     for (const member of region.members) {
-      const from = key(member)
-      edges.set(from, [...(edges.get(from) ?? []), key(region)])
+      const constituent = key(member)
+      appendGraphEdge(predecessors, identity, constituent)
+      appendGraphEdge(meetsByMember, constituent, identity)
     }
   }
-  for (const bound of self.bounds) {
-    const from = key(bound.longer)
-    const next = edges.get(from) ?? []
-    next.push(key(bound.shorter))
-    edges.set(from, next)
+  for (const bound of bounds) appendGraphEdge(predecessors, key(bound.shorter), key(bound.longer))
+  return { predecessors, meetsByMember, meetSizes }
+}
+
+// Module elaboration asks thousands of questions against large immutable assumption sets.
+// Reuse their reverse edges; query-only intersections stay in a separate graph so a proof
+// never changes the assumptions seen by a later query.
+const assumptionGraphs = new WeakMap<Assumptions, OutlivesGraph>()
+const emptyOutlivesGraph = outlivesGraph([])
+
+const proveOutlives = (self: Assumptions, longer: Lifetime, shorter: Lifetime): boolean => {
+  let graph = assumptionGraphs.get(self)
+  if (graph === undefined) {
+    graph = self.bounds.length === 0 ? emptyOutlivesGraph : outlivesGraph(self.bounds)
+    assumptionGraphs.set(self, graph)
   }
-  const allNodes = new Set([
-    key(longer),
-    key(shorter),
-    ...edges.keys(),
-    ...[...edges.values()].flat(),
-  ])
-  const reachable = (source: string): Set<string> => {
-    const pending = [source]
-    const visited = new Set(pending)
-    for (let index = 0; index < pending.length; index += 1) {
-      const current = pending.at(index)
-      if (current === undefined) continue
-      for (const next of edges.get(current) ?? []) {
-        if (visited.has(next)) continue
-        visited.add(next)
-        pending.push(next)
+  const query =
+    longer._tag === 'IntersectionLifetime' || shorter._tag === 'IntersectionLifetime'
+      ? outlivesGraph([], [longer, shorter], graph)
+      : emptyOutlivesGraph
+  const source = key(longer)
+  const proven = new Set([key(shorter), key(staticLifetime)])
+  const pending = [...proven]
+  const remaining = new Map<string, number>()
+  // Work backwards from the requested shorter region. A bound propagates a proof to its
+  // longer endpoint; a meet is proven only after all its constituents are proven. Static
+  // validity is a seed for every query. Cycles cannot create a proof without a seed.
+  for (let cursor = 0; cursor < pending.length; cursor += 1) {
+    const current = pending.at(cursor)
+    if (current === undefined) continue
+    if (current === source) return true
+    for (const selected of [graph, query]) {
+      for (const predecessor of selected.predecessors.get(current) ?? []) {
+        if (proven.has(predecessor)) continue
+        proven.add(predecessor)
+        pending.push(predecessor)
+      }
+      for (const meet of selected.meetsByMember.get(current) ?? []) {
+        if (proven.has(meet)) continue
+        const count = remaining.get(meet) ?? selected.meetSizes.get(meet)
+        if (count === undefined) throw new RangeError('Lifetime meet lost its constituents')
+        remaining.set(meet, count - 1)
+        if (count !== 1) continue
+        proven.add(meet)
+        pending.push(meet)
       }
     }
-    return visited.has(key(staticLifetime)) ? new Set(allNodes) : visited
   }
-  // Each added edge is justified by every constituent and there are only finitely many region
-  // pairs. Keeping declared meet edges in this graph also handles cyclic assumptions soundly.
-  while (true) {
-    const reached = reachable(key(longer))
-    if (reached.has(destination) || reached.has(key(staticLifetime))) return true
-    let changed = false
-    for (const [identity, region] of intersections) {
-      const closures = region.members.map((member) => reachable(key(member)))
-      const first = closures.at(0)
-      const successors = edges.get(identity) ?? []
-      for (const target of first ?? []) {
-        if (target === identity || successors.includes(target)) continue
-        if (!closures.every((closure) => closure.has(target) || closure.has(key(staticLifetime))))
-          continue
-        successors.push(target)
-        changed = true
-      }
-      edges.set(identity, successors)
-    }
-    if (!changed) return false
-  }
+  return false
 }
 
 /** A finite local region's permitted points and the uses which demand its validity. */

@@ -346,7 +346,7 @@ pub fn main() -> i32 { let pair = make() return pair.left }`),
           })
 
     assert.deepEqual(calls, ['right', 'left'])
-    assert.deepEqual(MirVerification.verify(Analysis.loweredMir(self)), [])
+    assert.deepEqual(yield* MirVerification.verify(Analysis.loweredMir(self)), [])
   }),
 )
 

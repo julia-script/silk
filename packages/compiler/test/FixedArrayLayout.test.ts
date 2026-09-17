@@ -66,7 +66,7 @@ pub fn main() -> i32 {
         ['element:1', 'field:1'],
       ],
     )
-    assert.deepEqual(LayoutVerify.verify(selected.value), [])
+    assert.deepEqual(yield* LayoutVerify.verify(selected.value), [])
   }),
 )
 

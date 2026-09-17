@@ -52,6 +52,7 @@ export interface ProjectSelection extends ProjectOptions.ProjectOptions {
 }
 
 export interface CompileOptions {
+  readonly verifyMir?: boolean
   readonly nativeBindings?: ReadonlyArray<NativeRequirementBinding.NativeRequirementBinding>
   readonly stage?: ArtifactPlan.Stage
   readonly entry: SourceEntry.SourceEntry
@@ -109,6 +110,7 @@ const outcomeStatus = (outcome: Exclude<Driver.Outcome, { readonly _tag: 'Compil
   switch (outcome._tag) {
     case 'Rejected':
     case 'BackendFailed':
+    case 'VerificationFailed':
       return 1
     case 'TargetFailed':
     case 'ToolchainFailed':
@@ -158,6 +160,7 @@ export const compile = Effect.fn('Workflow.compile')(function* (
       destination: options.destination,
       scopeName: options.scopeName,
       saveTemps: options.saveTemps ?? false,
+      verifyMir: options.verifyMir ?? false,
     }).pipe(Effect.provide(FileSourceResolver.layer(resolver))),
   )
 
@@ -290,6 +293,7 @@ export const buildProject = Effect.fn('Workflow.buildProject')(function* (
     planned.success.plans,
     (plan) =>
       compile({
+        verifyMir: options.verifyMir ?? false,
         entry: plan.project.entry,
         target: plan.target.id,
         configuration: BuildPlan.compilationConfiguration(plan),
@@ -584,6 +588,7 @@ export const run = Effect.fn('Workflow.run')(function* (
   if (Result.isFailure(planned)) return yield* reportPreparationFailure(planned.failure)
   const plan = planned.success.plans[0]
   const attempted = yield* compile({
+    verifyMir: options.verifyMir ?? false,
     entry: plan.project.entry,
     target: plan.target.id,
     configuration: BuildPlan.compilationConfiguration(plan),

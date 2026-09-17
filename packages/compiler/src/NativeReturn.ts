@@ -11,6 +11,7 @@ import type * as Mir from './Mir.js'
 import * as NativePlace from './NativePlace.js'
 import * as NativeStorage from './NativeStorage.js'
 import * as NativeValue from './NativeValue.js'
+import * as NativeAggregate from './NativeAggregate.js'
 import type * as NativeLoweringContext from './NativeLoweringContext.js'
 
 /** Pending normal exits sharing one stored result conversion and diagnostic cleanup. */
@@ -31,9 +32,14 @@ export const makeCompletion = Effect.fnUntraced(function* (
 ): Effect.fn.Return<Completion | undefined, LlvmError.LlvmError> {
   const stored = NativeValue.classify(context.types.program.layout, entry.fn.result) === 'Place'
   if (!stored && !hasOutcomes) return undefined
-  const place = stored
-    ? yield* NativePlace.allocate(context, entry.fn.result, 'completion_storage', 'entry')
-    : undefined
+  let place: NativePlace.NativePlace | undefined
+  if (entry.resultStorage?._tag === 'Canonical')
+    place = NativeResult.place(
+      entry,
+      yield* Value.argument(context.body, entry.resultStorage.parameter),
+    )
+  else if (stored)
+    place = yield* NativePlace.allocate(context, entry.fn.result, 'completion_storage', 'entry')
   return {
     block: yield* Block.make(context.body, 'completion'),
     ...(place === undefined ? {} : { place }),
@@ -85,6 +91,54 @@ const enqueue = Effect.fnUntraced(function* (
   return yield* FunctionBody.branch(context.body, completion.block)
 })
 
+/** Propagates an outcome while preserving canonical error storage and diagnostic ownership. */
+export const propagateFailure = Effect.fnUntraced(function* (
+  context: NativeSuspension.ReturnContext,
+  storage: NativeStorage.Context,
+  source: Mir.LocalId,
+  sourceTag: Value.Input,
+  mappedTag: Value.Input,
+  mappings: ReadonlyArray<{ readonly source: number; readonly target: number }>,
+  name: string,
+) {
+  const sourceType = storage.fn.localTypes.at(source.ordinal)
+  const targetType = context.entry.fn.result
+  if (sourceType?._tag !== 'EffectOutcome' || targetType._tag !== 'EffectOutcome')
+    throw new RangeError('Failure propagation requires outcome types')
+  const value = NativeStorage.readLocal(storage, source)
+  const completion = context.completion
+  if (value._tag === 'NativePlace' && completion?.place !== undefined) {
+    yield* NativePlace.copyFailure(completion.place, context, value, mappings)
+    yield* NativePlace.storeLane(completion.place, context, 0, mappedTag, `${name}_tag`)
+    const diagnostic = yield* takeDiagnostic(context, source)
+    return yield* enqueue(context, completion, diagnostic === undefined ? [] : [diagnostic])
+  }
+  const values = yield* NativeStorage.materialize(storage, source)
+  const payload = yield* NativeAggregate.failurePayload(
+    {
+      builder: context.builder,
+      body: context.body,
+      program: context.types.program,
+      i32: context.i32,
+      types: context.types,
+      arith: {
+        body: context.body,
+        pointerBits: context.types.program.layout.target.pointerSize === 4 ? 32 : 64,
+        i32: context.i32,
+        integerTypes: context.types.integerTypes,
+        types: context.types,
+      },
+    },
+    values,
+    sourceType.type,
+    sourceTag,
+    targetType.type,
+    mappings,
+    `${name}_payload`,
+  )
+  return yield* complete(context, [mappedTag, ...payload], name, source)
+})
+
 /** Completes one invocation through its declared synchronous or suspension result ABI. */
 export const complete = Effect.fnUntraced(function* (
   context: NativeSuspension.ReturnContext,
@@ -105,9 +159,20 @@ export const complete = Effect.fnUntraced(function* (
 /** Consumes an already owned result and releases the invocation's remaining outcome references. */
 export const completeResult = Effect.fnUntraced(function* (
   context: NativeSuspension.ReturnContext,
-  result: NativeResult.NativeResult,
+  incoming: NativeResult.Received,
   name: string,
 ): Effect.fn.Return<FunctionBody.Instruction, LlvmError.LlvmError> {
+  if ('place' in incoming && context.completion?.place !== undefined) {
+    if ((incoming.diagnostic !== undefined) !== (context.entry.diagnosticResult !== undefined))
+      throw new RangeError('Completion lost diagnostic ownership')
+    yield* NativePlace.transfer(context.completion.place, context, incoming.place)
+    return yield* enqueue(
+      context,
+      context.completion,
+      incoming.diagnostic === undefined ? [] : [incoming.diagnostic],
+    )
+  }
+  const result = yield* NativeResult.materialize(context, incoming, name)
   if (
     result.values.length !== context.entry.resultLaneCount ||
     (result.diagnostic !== undefined) !== (context.entry.diagnosticResult !== undefined)
@@ -166,6 +231,24 @@ export const emitCompletion = Effect.fnUntraced(function* (
     }
     yield* FunctionBody.sealPhi(context.body, phi)
     fields.push(yield* FunctionBody.phiValue(context.body, phi))
+  }
+  if (context.entry.resultStorage?._tag === 'Canonical') {
+    if (context.entry.diagnosticResult !== undefined) {
+      const diagnostic = fields.at(0)
+      if (diagnostic === undefined) throw new RangeError('Completion lost its diagnostic result')
+      yield* NativeResult.storeDiagnostic(
+        context.body,
+        context.entry.resultStorage,
+        yield* Value.argument(context.body, context.entry.resultStorage.parameter),
+        diagnostic,
+        'completion',
+      )
+    }
+    if (context.diagnostic !== undefined)
+      for (const outcome of context.diagnostic.outcomes.values())
+        yield* NativeDiagnosticOutcome.release(outcome, context.diagnostic)
+    yield* FunctionBody.returnVoid(context.body)
+    return
   }
   const values =
     completion.place === undefined

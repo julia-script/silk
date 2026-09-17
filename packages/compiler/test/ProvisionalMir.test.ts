@@ -320,11 +320,7 @@ pub fn main() -> i32 {
     assert.strictEqual(self.layout._tag, 'Available')
     if (self.layout._tag !== 'Available') return
 
-    const forward = ProvisionalMir.build(
-      self.instances,
-      self.layout.value,
-      Analysis.declarationIndex(self),
-    )
+    const forward = available(self)
     const reversed = ProvisionalMir.build(
       Object.freeze({
         ...self.instances,
@@ -340,11 +336,12 @@ pub fn main() -> i32 {
       if (left > right) return 1
       return 0
     }
-    const classifications = (module_: ProvisionalMir.Module) =>
-      module_.executions
-        .map((execution) => [execution.key.identity, execution.classification] as const)
-        .sort(([left], [right]) => compareIdentities(left, right))
-    assert.deepEqual(classifications(forward), classifications(reversed))
+    const executions = (module_: ProvisionalMir.Module) =>
+      [...module_.executions].sort((left, right) =>
+        compareIdentities(left.key.identity, right.key.identity),
+      )
+    // Reusing a body must preserve every control region and nested runner, not just its label.
+    assert.deepEqual(executions(forward), executions(reversed))
     assert.isAtLeast(
       outcomes(forward).filter((outcome) => outcome._tag === 'RunSuspendableEffect').length,
       8,
@@ -431,7 +428,7 @@ pub fn main() -> i32 {
       const provisional = available(self)
       assert.deepEqual(ProvisionalMir.verify(provisional), [])
       const program = Analysis.loweredMir(self)
-      assert.deepEqual(MirVerification.verify(program), [])
+      assert.deepEqual(yield* MirVerification.verify(program), [])
       const ownership = Projections.suspensionOwnershipOf(self)
       assert.strictEqual(ownership._tag, 'Available')
       if (ownership._tag === 'Available') {
@@ -524,7 +521,7 @@ pub fn main() -> i32 { return run Effect.catchAll(all(), recover) }
     const provisional = available(self)
     assert.deepEqual(ProvisionalMir.verify(provisional), [])
     const program = Analysis.loweredMir(self)
-    assert.deepEqual(MirVerification.verify(program), [])
+    assert.deepEqual(yield* MirVerification.verify(program), [])
     const flushes = program.functions.filter((fn) =>
       fn.id.name.startsWith('Transport.flush$effect$'),
     )

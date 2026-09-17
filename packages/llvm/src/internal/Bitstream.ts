@@ -2,7 +2,7 @@ import { invalidInput, type LlvmError } from '../LlvmError.js'
 
 export interface Writer {
   readonly words: Array<number>
-  bitBuffer: bigint
+  bitBuffer: number
   bitCount: number
 }
 
@@ -59,12 +59,30 @@ const width = (value: number, operation: string, minimum: number): void => {
 }
 
 /** @internal */
-export const make = (): Writer => ({ words: [], bitBuffer: 0n, bitCount: 0 })
+export const make = (): Writer => ({ words: [], bitBuffer: 0, bitCount: 0 })
+
+// Packs up to one word; a write may straddle two output words. Mask before shifting so
+// excess input bits cannot leak into the following record. Handle full words explicitly:
+// JavaScript shifts by 32 wrap back to zero.
+const writeWord = (self: Writer, input: number, bits: number): void => {
+  const value = input & (0xffff_ffff >>> (32 - bits))
+  const available = 32 - self.bitCount
+  self.bitBuffer |= value << self.bitCount
+  if (bits < available) {
+    self.bitCount += bits
+    return
+  }
+  self.words.push(self.bitBuffer >>> 0)
+  self.bitCount = bits - available
+  self.bitBuffer = self.bitCount === 0 ? 0 : value >>> available
+}
 
 /**
  * The bit writer is deliberately imperative: `pnpm parity:bench` measures this per-bit loop and
  * the large-blob path. Allocating an Effect node per bit would scale allocation with encoded bit
  * count, so the loop remains contained behind Bitcode.encode's typed Effect boundary.
+ * Compiler replays also identified BigInt conversion/shifting for small record operands as a
+ * bottleneck. Pack numeric operands into 32-bit words directly; retain bigint for wide inputs.
  *
  * @internal
  */
@@ -72,22 +90,28 @@ export const writeBits = (self: Writer, input: Scalar, bits: number): void => {
   if (!Number.isInteger(bits) || bits < 0) {
     throw failure('Bitstream.writeBits', 'Expected a non-negative bit count', bits)
   }
-  let value = integer(input, 'Bitstream.writeBits')
   let remaining = bits
-
-  while (remaining > 0) {
-    const available = 32 - self.bitCount
-    const taken = Math.min(available, remaining)
-    const mask = (1n << BigInt(taken)) - 1n
-    self.bitBuffer |= (value & mask) << BigInt(self.bitCount)
-    self.bitCount += taken
-    remaining -= taken
-    value >>= BigInt(taken)
-
-    if (self.bitCount === 32) {
-      self.words.push(Number(self.bitBuffer & 0xffff_ffffn) >>> 0)
-      self.bitBuffer = 0n
-      self.bitCount = 0
+  if (typeof input === 'number') {
+    if (!Number.isSafeInteger(input) || input < 0)
+      throw failure(
+        'Bitstream.writeBits',
+        'Use bigint for integers outside the safe number range',
+        input,
+      )
+    let value = input
+    while (remaining > 0) {
+      const taken = Math.min(32, remaining)
+      writeWord(self, value, taken)
+      value = Math.floor(value / 2 ** taken)
+      remaining -= taken
+    }
+  } else {
+    let value = integer(input, 'Bitstream.writeBits')
+    while (remaining > 0) {
+      const taken = Math.min(32, remaining)
+      writeWord(self, Number(value & 0xffff_ffffn), taken)
+      value >>= BigInt(taken)
+      remaining -= taken
     }
   }
 }
@@ -95,14 +119,31 @@ export const writeBits = (self: Writer, input: Scalar, bits: number): void => {
 /** @internal */
 export const alignTo32 = (self: Writer): void => {
   if (self.bitCount === 0) return
-  self.words.push(Number(self.bitBuffer & 0xffff_ffffn) >>> 0)
-  self.bitBuffer = 0n
+  self.words.push(self.bitBuffer >>> 0)
+  self.bitBuffer = 0
   self.bitCount = 0
 }
 
 /** @internal */
 export const writeVbr = (self: Writer, input: Scalar, bits: number): void => {
   width(bits, 'Bitstream.writeVbr', 2)
+  if (typeof input === 'number') {
+    if (!Number.isSafeInteger(input) || input < 0)
+      throw failure(
+        'Bitstream.writeVbr',
+        'Use bigint for integers outside the safe number range',
+        input,
+      )
+    const base = 2 ** (bits - 1)
+    const mask = base - 1
+    let value = input
+    do {
+      const payload = value & mask
+      value = Math.floor(value / base)
+      writeWord(self, value === 0 ? payload : payload | base, bits)
+    } while (value !== 0)
+    return
+  }
   let value = integer(input, 'Bitstream.writeVbr')
   const payloadBits = BigInt(bits - 1)
   const payloadMask = (1n << payloadBits) - 1n
@@ -111,7 +152,7 @@ export const writeVbr = (self: Writer, input: Scalar, bits: number): void => {
   do {
     const payload = value & payloadMask
     value >>= payloadBits
-    writeBits(self, value === 0n ? payload : payload | continuation, bits)
+    writeWord(self, Number(value === 0n ? payload : payload | continuation), bits)
   } while (value !== 0n)
 }
 

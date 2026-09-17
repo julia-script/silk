@@ -159,17 +159,12 @@ const mirViolation = (violation: Mir.Violation, sources: SourceCatalog): string 
 
 /**
  * Renders a backend failure with its structured reason. The backend records exactly which MIR
- * violations or intrinsic diagnostics stopped emission; printing only the summary message would
+ * capability diagnostics stopped emission; printing only the summary message would
  * leave the user with nothing actionable.
  */
 export const backendError = (self: Backend.BackendError, sources: SourceCatalog): string => {
   const head = `Backend error: ${self.message}`
   switch (self.reason._tag) {
-    case 'InvalidMir':
-      return [
-        head,
-        ...self.reason.violations.map((violation) => mirViolation(violation, sources)),
-      ].join('\n')
     case 'UnsupportedIntrinsic':
     case 'UnsupportedForeignFunction': {
       const rendered = diagnostics(self.reason.diagnostics, sources)
@@ -205,6 +200,14 @@ export const outcome = (
       return [
         ...(rendered.length > 0 ? [rendered] : []),
         `Target error: ${self.error.message}`,
+      ].join('\n')
+    }
+    case 'VerificationFailed': {
+      const rendered = diagnostics(self.diagnostics, sources)
+      return [
+        ...(rendered.length > 0 ? [rendered] : []),
+        `Verification error: ${self.error.message}`,
+        ...self.error.violations.map((violation) => mirViolation(violation, sources)),
       ].join('\n')
     }
     case 'BackendFailed': {

@@ -110,11 +110,15 @@ const applyCallable = Effect.fnUntraced(function* (
     return Object.freeze({ parameterOrdinal: field.parameterOrdinal, items: selected })
   })
   return NativeResult.sourceValues(
-    yield* NativeCall.callValues(
-      context.call,
-      target,
-      NativeArgument.fromValues(Mir.applyOperands(captures, arguments_)),
-      tag,
+    yield* NativeResult.materialize(
+      context.storage,
+      yield* NativeCall.callValues(
+        context.call,
+        target,
+        NativeArgument.fromValues(Mir.applyOperands(captures, arguments_)),
+        tag,
+      ),
+      `${tag}_source_result`,
     ),
   )
 })
@@ -327,11 +331,15 @@ const notifyReady = Effect.fnUntraced(function* (
     `${tag}_endpoint`,
   )
   NativeResult.sourceValues(
-    yield* NativeCall.callValues(
-      context.call,
-      target,
-      NativeArgument.fromValues(Mir.applyOperands(captures, [[endpoint]])),
-      tag,
+    yield* NativeResult.materialize(
+      context.storage,
+      yield* NativeCall.callValues(
+        context.call,
+        target,
+        NativeArgument.fromValues(Mir.applyOperands(captures, [[endpoint]])),
+        tag,
+      ),
+      `${tag}_source_result`,
     ),
   )
 })
@@ -629,7 +637,9 @@ const runCancellationFinalizer = Effect.fnUntraced(function* (
       ),
       `${tag}_build`,
     )
-    effectValues = NativeResult.sourceValues(releaseResult)
+    effectValues = NativeResult.sourceValues(
+      yield* NativeResult.materialize(context.storage, releaseResult, `${tag}_source_result`),
+    )
   }
   const inputs = [
     ...effectValues,

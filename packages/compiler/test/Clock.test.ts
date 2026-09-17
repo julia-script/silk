@@ -66,7 +66,7 @@ pub fn main() -> i32 {
   return 0
 }`)
     assert.deepEqual(Analysis.diagnostics(monotonic), [])
-    assert.deepEqual(MirVerification.verify(Analysis.loweredMir(monotonic)), [])
+    assert.deepEqual(yield* MirVerification.verify(Analysis.loweredMir(monotonic)), [])
     assert.deepEqual(
       monotonic.instances.foreignCalls.map((call) => call.symbol),
       ['__error', 'clock_getres', 'clock_gettime', 'nanosleep'],

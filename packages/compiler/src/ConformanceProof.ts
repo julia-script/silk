@@ -51,6 +51,51 @@ interface ConformanceCandidate {
   readonly substitution: Type.Substitution
 }
 
+interface IndexedConformance {
+  readonly module: string
+  readonly conformance: ConformanceFact
+}
+
+type ConformanceIndex = ReadonlyMap<string, ReadonlyMap<string, ReadonlyArray<IndexedConformance>>>
+// A resolved nominal capability can only match its canonical module and name. Index those
+// heads once per immutable module collection, retaining declaration order within each bucket.
+// Admission and generic inference still run for each query against its selected candidates.
+const conformanceIndices = new WeakMap<Index['modules'], ConformanceIndex>()
+
+const candidatesByCapability = (
+  self: Index,
+  capability: Type.Nominal,
+): ReadonlyArray<IndexedConformance> => {
+  let index = conformanceIndices.get(self.modules)
+  if (index === undefined) {
+    const modules = new Map<string, Map<string, Array<IndexedConformance>>>()
+    for (const module of self.modules) {
+      for (const conformance of module.conformances) {
+        if (
+          conformance.capability._tag !== 'Resolved' ||
+          !Type.isNominal(conformance.capability.type)
+        )
+          continue
+        const head = conformance.capability.type
+        let names = modules.get(head.module)
+        if (names === undefined) {
+          names = new Map()
+          modules.set(head.module, names)
+        }
+        let entries = names.get(head.name)
+        if (entries === undefined) {
+          entries = []
+          names.set(head.name, entries)
+        }
+        entries.push({ module: module.module, conformance })
+      }
+    }
+    index = modules
+    conformanceIndices.set(self.modules, index)
+  }
+  return index.get(capability.module)?.get(capability.name) ?? []
+}
+
 /** Returns every admitted conformance whose head covers one closed or explicitly symbolic goal. */
 export const conformanceCandidates = (
   self: Index,
@@ -66,8 +111,8 @@ export const conformanceCandidates = (
     'ConformanceDiscovery',
   )
   return Object.freeze(
-    self.modules.flatMap((module) =>
-      module.conformances.flatMap((conformance): ReadonlyArray<ConformanceCandidate> => {
+    candidatesByCapability(self, goal.capability).flatMap(
+      ({ module, conformance }): ReadonlyArray<ConformanceCandidate> => {
         ResolutionWork.visit(work)
         if (
           conformance.capability._tag !== 'Resolved' ||
@@ -90,10 +135,8 @@ export const conformanceCandidates = (
         const capabilityPattern = Type.substitute(conformance.capability.type, inferred)
         if (!inferHead(capabilityPattern, goal.capability)) return []
         ResolutionWork.accept(work)
-        return Object.freeze([
-          Object.freeze({ module: module.module, conformance, substitution: inferred }),
-        ])
-      }),
+        return Object.freeze([Object.freeze({ module, conformance, substitution: inferred })])
+      },
     ),
   )
 }

@@ -72,13 +72,13 @@ const terminalLocals = (
 
 /**
  * Finds single-definition run outcomes whose payload never needs a local home. The native
- * emitter can consume their returned lanes directly and retain only the separately owned
+ * emitter can consume their caller-owned result storage directly and retain only the separately owned
  * diagnostic slot. Eagerly storing these temporary payloads added per-lane GEP/store pairs
  * to every run in the self-hosted parser despite having no later payload consumer.
  *
  * This is whole-function dead-storage analysis, not an SSA cache: any value reference,
  * address use, repeated definition, or suspension dependency keeps canonical storage.
- * Diagnostic recovery/release metadata alone does not. No returned lanes survive a join
+ * Diagnostic recovery/release metadata alone does not. No returned SSA lanes survive a join
  * in a compiler-side cache, and diagnostic ownership is never removed by this analysis.
  */
 export const transientLocals = (

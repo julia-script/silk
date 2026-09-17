@@ -1,3 +1,4 @@
+import type * as NativeValue from './NativeValue.js'
 import * as NativeResult from './NativeResult.js'
 import * as NativeArgument from './NativeArgument.js'
 import * as NativeCallable from './NativeCallable.js'
@@ -18,7 +19,6 @@ import * as NativeScalarOperation from './NativeScalarOperation.js'
 import * as NativeStorage from './NativeStorage.js'
 import * as NativeType from './NativeType.js'
 import * as Scalar from './Scalar.js'
-import * as SilkType from './Type.js'
 
 type Operation = Extract<LinearOperation, { readonly _tag: 'ApplyCallable' | 'Call' }>
 
@@ -50,52 +50,73 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         operation.target ?? (sourceType?._tag === 'CallableValue' ? sourceType.target : undefined)
       if (target === undefined)
         throw new RangeError('Backend callable application lost its hidden identity')
+      const callableTarget =
+        target._tag === 'BuiltinCallableTarget'
+          ? undefined
+          : FunctionIndex.nativeCandidates(declared, target.declaration).find((candidate) =>
+              Mir.matchesInstance(candidate.fn, target.declaration, operation.typeArguments),
+            )
+      if (target._tag !== 'BuiltinCallableTarget' && callableTarget === undefined)
+        throw new RangeError(
+          `Backend cannot resolve callable target ${target.declaration.module}.${target.declaration.name}`,
+        )
       const targetUsesEnvironmentBorrows =
         target._tag === 'DeclarationCallableTarget' && Hir.isAnonymousCallableId(target.declaration)
       const captureGroups: Array<{
         readonly parameterOrdinal: number
-        readonly values: ReadonlyArray<Value.Input>
+        readonly value: NativeValue.NativeValue
       }> = []
       if (operation.callable !== undefined) {
         if (sourceType?._tag !== 'CallableValue')
           throw new RangeError('Stored callable application lost its identity')
+        if (callableTarget === undefined)
+          throw new RangeError('Stored callable has no source declaration')
         captureGroups.push(
-          ...(yield* NativeCallable.capturedArguments(
+          ...(yield* NativeCallable.capturedValues(
             context,
             sourceType,
-            yield* NativeStorage.materialize(nativeStorage, operation.callable),
+            operation.callable,
+            callableTarget.argumentParameters,
             `callable${operation.destination.ordinal}`,
           )),
         )
       } else {
         for (const capture of operation.captures) {
-          let values: ReadonlyArray<Value.Input>
+          let value: NativeValue.NativeValue
           if (
             targetUsesEnvironmentBorrows &&
             (capture.access === 'Shared' || capture.access === 'Exclusive')
           ) {
             yield* NativeStorage.ensureAddressRoot(nativeStorage, capture.source)
             const base = yield* NativeStorage.addressOf(nativeStorage, capture.source)
-            values = Object.freeze([base])
+            value = { _tag: 'Direct', values: [base] }
           } else {
-            values = yield* NativeStorage.materialize(nativeStorage, capture.source)
+            value = NativeStorage.readLocal(nativeStorage, capture.source)
           }
           captureGroups.push(
             Object.freeze({
               parameterOrdinal: capture.parameterOrdinal,
-              values,
+              value,
             }),
           )
         }
       }
-      const operands = Mir.applyOperands(
-        captureGroups.map((capture) =>
-          Object.freeze({ parameterOrdinal: capture.parameterOrdinal, items: capture.values }),
+      const arguments_: NativeArgument.NativeArgument = {
+        _tag: 'Values',
+        values: Mir.applyOperands(
+          captureGroups.map((capture) => ({
+            parameterOrdinal: capture.parameterOrdinal,
+            items: [capture.value],
+          })),
+          operation.arguments.map((local) => [NativeStorage.readLocal(nativeStorage, local)]),
         ),
-        yield* NativeStorage.materializeArguments(nativeStorage, operation.arguments),
-      )
+      }
       if (target._tag === 'BuiltinCallableTarget') {
-        const supplied = operands
+        const supplied = yield* NativeArgument.materialize(
+          nativeStorage,
+          arguments_,
+          `builtin${operation.destination.ordinal}`,
+        )
         const first = supplied.at(0)
         const firstLocal = operation.arguments.at(0)
         const firstType =
@@ -288,14 +309,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         yield* NativeStorage.writeLocal(nativeStorage, operation.destination.ordinal, values)
         break
       }
-      const callableTarget = FunctionIndex.nativeCandidates(declared, target.declaration).find(
-        (candidate) =>
-          Mir.matchesInstance(candidate.fn, target.declaration, operation.typeArguments),
-      )
-      if (callableTarget === undefined)
-        throw new RangeError(
-          `Backend cannot resolve callable target ${target.declaration.module}.${target.declaration.name}<${operation.typeArguments.map(SilkType.encodeGenericArgument).join(', ')}>`,
-        )
+      if (callableTarget === undefined) throw new RangeError('Callable target lost its declaration')
       // Callable application has the same completion boundary as an ordinary source call.
       const handle = callableTarget.suspendable ? callableTarget.driver : callableTarget.handle
       if (handle === undefined)
@@ -310,11 +324,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         handle,
         NativeResult.argumentsFor(
           callableTarget,
-          yield* NativeCall.lowerArguments(
-            call.synchronous,
-            callableTarget,
-            NativeArgument.fromValues(operands),
-          ),
+          yield* NativeCall.lowerArguments(call.synchronous, callableTarget, arguments_),
           resultAddress,
         ),
         `callable${operation.destination.ordinal}`,
@@ -322,7 +332,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
       // A never-returning callback may inhabit a wider join result type. It produces no
       // payload to store; the enclosing MIR control flow owns its unreachable terminator.
       if (callableTarget.fn.result._tag === 'Bottom') break
-      const result = yield* NativeResult.read(
+      const result = yield* NativeResult.readValue(
         body,
         callableTarget,
         called,
@@ -332,9 +342,9 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
       for (const root of [...nativeStorage.addressRoots].sort((left, right) => left - right)) {
         yield* NativeStorage.reloadAddressRoot(nativeStorage, root)
       }
-      yield* NativeStorage.writeLocal(
+      yield* NativeStorage.writeValue(
         nativeStorage,
-        operation.destination.ordinal,
+        operation.destination,
         yield* NativeDiagnosticOutcome.accept(
           call.synchronous.diagnostic,
           operation.destination,
@@ -399,16 +409,16 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         const instruction = yield* Value.instruction(body, result)
         yield* NativeDebug.locate(debug, operation.provenance.span, instruction)
       }
-      const unpacked = yield* NativeResult.read(
+      const unpacked = yield* NativeResult.readValue(
         body,
         target,
         result,
         resultAddress,
         `t${operation.destination.ordinal}`,
       )
-      yield* NativeStorage.writeLocal(
+      yield* NativeStorage.writeValue(
         nativeStorage,
-        operation.destination.ordinal,
+        operation.destination,
         yield* NativeDiagnosticOutcome.accept(
           call.synchronous.diagnostic,
           operation.destination,

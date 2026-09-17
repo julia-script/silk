@@ -76,7 +76,7 @@ it.effect('keeps byte literals as shared u8 slices through semantic facts, HIR, 
     assert.isTrue(expressions.some((expression) => expression._tag === 'SliceLength'))
 
     const mir = Analysis.loweredMir(first)
-    assert.deepEqual(MirVerification.verify(mir), [])
+    assert.deepEqual(yield* MirVerification.verify(mir), [])
     assert.strictEqual(MirEncoding.encode(mir), MirEncoding.encode(Analysis.loweredMir(second)))
     assert.deepEqual(
       mir.staticData?.map((data) => data.bytes),
@@ -116,17 +116,36 @@ it.effect('accepts canonical static selectors and rejects malformed roots, indic
     if (fn === undefined) throw new RangeError('expected static-view main MIR')
     const operations = MirVerification.operations(fn)
     const staticView = operations.find(
-      (operation): operation is Extract<Mir.Operation, { readonly _tag: 'StaticView' }> =>
-        operation._tag === 'StaticView',
+      (
+        operation,
+      ): operation is Extract<
+        Mir.Operation,
+        {
+          readonly _tag: 'StaticView'
+        }
+      > => operation._tag === 'StaticView',
     )
     const read = operations.find(
-      (operation): operation is Extract<Mir.Operation, { readonly _tag: 'ReadPlace' }> =>
+      (
+        operation,
+      ): operation is Extract<
+        Mir.Operation,
+        {
+          readonly _tag: 'ReadPlace'
+        }
+      > =>
         operation._tag === 'ReadPlace' &&
         operation.selectors.some((selector) => selector._tag === 'SliceElementSelector'),
     )
     const aggregate = operations.find(
-      (operation): operation is Extract<Mir.Operation, { readonly _tag: 'ConstructArray' }> =>
-        operation._tag === 'ConstructArray',
+      (
+        operation,
+      ): operation is Extract<
+        Mir.Operation,
+        {
+          readonly _tag: 'ConstructArray'
+        }
+      > => operation._tag === 'ConstructArray',
     )
     if (staticView === undefined || read === undefined || aggregate === undefined) {
       throw new RangeError('expected static view, aggregate, and indexed read')
@@ -134,8 +153,12 @@ it.effect('accepts canonical static selectors and rejects malformed roots, indic
     const sliceSelector = read.selectors.find(
       (
         selector,
-      ): selector is Extract<Mir.PlaceSelector, { readonly _tag: 'SliceElementSelector' }> =>
-        selector._tag === 'SliceElementSelector',
+      ): selector is Extract<
+        Mir.PlaceSelector,
+        {
+          readonly _tag: 'SliceElementSelector'
+        }
+      > => selector._tag === 'SliceElementSelector',
     )
     if (sliceSelector === undefined) throw new RangeError('expected static slice selector')
 
@@ -143,7 +166,7 @@ it.effect('accepts canonical static selectors and rejects malformed roots, indic
       operation === read ? Object.freeze({ ...read, root: sliceSelector.index }) : operation,
     )
     assert.include(
-      MirVerification.verify(replaceFunction(mir, fnIndex, wrongRoot)).map(
+      (yield* MirVerification.verify(replaceFunction(mir, fnIndex, wrongRoot))).map(
         (violation) => violation.rule,
       ),
       'InvalidSliceOperation',
@@ -153,7 +176,7 @@ it.effect('accepts canonical static selectors and rejects malformed roots, indic
       operation === read ? Object.freeze({ ...read, root: aggregate.destination }) : operation,
     )
     assert.include(
-      MirVerification.verify(replaceFunction(mir, fnIndex, aggregateRoot)).map(
+      (yield* MirVerification.verify(replaceFunction(mir, fnIndex, aggregateRoot))).map(
         (violation) => violation.rule,
       ),
       'InvalidSliceOperation',
@@ -172,7 +195,7 @@ it.effect('accepts canonical static selectors and rejects malformed roots, indic
       })
     })
     assert.include(
-      MirVerification.verify(replaceFunction(mir, fnIndex, wrongIndex)).map(
+      (yield* MirVerification.verify(replaceFunction(mir, fnIndex, wrongIndex))).map(
         (violation) => violation.rule,
       ),
       'InvalidSliceOperation',
@@ -184,7 +207,7 @@ it.effect('accepts canonical static selectors and rejects malformed roots, indic
         : operation,
     )
     assert.include(
-      MirVerification.verify(replaceFunction(mir, fnIndex, wrongData)).map(
+      (yield* MirVerification.verify(replaceFunction(mir, fnIndex, wrongData))).map(
         (violation) => violation.rule,
       ),
       'InvalidSliceOperation',

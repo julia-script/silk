@@ -1,3 +1,6 @@
+import * as NativeStorage from './NativeStorage.js'
+import type * as NativeArgument from './NativeArgument.js'
+import type * as NativeValue from './NativeValue.js'
 import * as FunctionBody from '@silklang/llvm/FunctionBody'
 import type * as Value from '@silklang/llvm/Value'
 import * as Effect from 'effect/Effect'
@@ -54,4 +57,55 @@ export const capturedArguments = Effect.fnUntraced(function* (
     groups.push({ parameterOrdinal: field.parameterOrdinal, values: Object.freeze(captured) })
   }
   return Object.freeze(groups)
+})
+
+/** Keeps captured values in their canonical places until the selected callee needs ABI lanes. */
+export const capturedValues = Effect.fnUntraced(function* (
+  context: Context & { readonly storage: NativeStorage.Context },
+  type: Extract<Mir.Type, { readonly _tag: 'CallableValue' }>,
+  local: Mir.LocalId,
+  parameters: ReadonlyArray<NativeArgument.Parameter>,
+  tag: string,
+) {
+  const source = NativeStorage.readLocal(context.storage, local)
+  const groups: Array<{
+    readonly parameterOrdinal: number
+    readonly value: NativeValue.NativeValue
+  }> = []
+  if ((type.environment?.fields.length ?? 0) === 0) return groups
+  if (source._tag === 'Empty')
+    return (type.environment?.fields ?? []).map((field) => ({
+      parameterOrdinal: field.parameterOrdinal,
+      value: source,
+    }))
+  if (source._tag !== 'NativePlace')
+    throw new RangeError('Callable captures lost their canonical storage')
+  let cursor = 0
+  for (const field of type.environment?.fields ?? []) {
+    const parameter = parameters.at(field.parameterOrdinal)
+    if (parameter === undefined) throw new RangeError('Callable capture lost its parameter')
+    let value: NativeValue.NativeValue
+    if (field.representation === 'Borrow') {
+      const base = yield* NativePlace.loadLane(
+        source,
+        context,
+        cursor,
+        `${tag}_borrow${field.ordinal}`,
+      )
+      value =
+        parameter.type._tag === 'EnvironmentBorrow'
+          ? { _tag: 'Direct', values: [base] }
+          : NativePlace.make(context.program.layout, parameter.type, base)
+    } else
+      value = yield* NativePlace.project(
+        source,
+        context,
+        parameter.type,
+        field.offset,
+        `${tag}_capture${field.ordinal}`,
+      )
+    groups.push({ parameterOrdinal: field.parameterOrdinal, value })
+    cursor += Layout.callableFieldLanes(context.program.layout, field).length
+  }
+  return groups
 })

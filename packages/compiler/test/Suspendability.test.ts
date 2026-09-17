@@ -48,7 +48,7 @@ pub fn main() -> i32 {
       'wasm32-unknown-unknown',
     )
     assert.deepEqual(Analysis.diagnostics(self), [])
-    assert.deepEqual(MirVerification.verify(Analysis.loweredMir(self)), [])
+    assert.deepEqual(yield* MirVerification.verify(Analysis.loweredMir(self)), [])
   }),
 )
 
@@ -379,7 +379,7 @@ pub fn main() -> i32 {
     assert.isTrue(
       self.instances.instances.some((instance) => instance.key.declaration.name === 'consume'),
     )
-    assert.deepEqual(MirVerification.verify(Analysis.loweredMir(self)), [])
+    assert.deepEqual(yield* MirVerification.verify(Analysis.loweredMir(self)), [])
   }),
 )
 
@@ -700,7 +700,7 @@ pub fn main() -> i32 { return invoke(nested) }`)
         SuspensionMode.has(Instances.suspensionOf(self.instances, invoke.key), 'NestedTransfer'),
       )
     assert.include(names(self), 'suspendability/main.main<>')
-    assert.deepEqual(MirVerification.verify(Analysis.loweredMir(self)), [])
+    assert.deepEqual(yield* MirVerification.verify(Analysis.loweredMir(self)), [])
     const artifact = yield* Analysis.codegen(self, { mode: 'debug' })
     assert.include(artifact.ir, '$suspend_step')
   }),
@@ -789,7 +789,7 @@ pub fn main() -> i32 {
 }`)
     assert.deepEqual(Analysis.diagnostics(self), [])
     const mir = Analysis.loweredMir(self)
-    assert.deepEqual(MirVerification.verify(mir), [])
+    assert.deepEqual(yield* MirVerification.verify(mir), [])
     const bracket = mir.functions
       .flatMap((fn) => Mir.regionsTree(fn.regions).flatMap(Mir.operationsOf))
       .find(
@@ -973,7 +973,7 @@ pub fn main() -> i32 {
 }`)
     assert.deepEqual(Analysis.diagnostics(self), [])
     const mir = Analysis.loweredMir(self)
-    assert.deepEqual(MirVerification.verify(mir), [])
+    assert.deepEqual(yield* MirVerification.verify(mir), [])
     const states = mir.functions.flatMap((fn) => fn.suspension?.frame?.states ?? [])
     const armed = states.filter((state) => state.cancellationFinalizer !== undefined)
     assert.lengthOf(armed, 1)
@@ -1123,6 +1123,50 @@ pub fn main() -> i32 { return run Effect.catchAll(program(), recover) }`)
   }),
 )
 
+it.effect('keeps suspension local to the selected provider through nested bindings', () =>
+  Effect.gen(function* () {
+    const self = yield* snapshot(`import silk.effect { Effect }
+service Work { effect fn perform() -> i32 ? &mut Work }
+struct Suspending {}
+effect fn suspendingWork(self: &mut Suspending) -> i32 {
+  return run Effect.suspend(effect { return 42 })
+}
+impl Work for Suspending { perform: Suspending.suspendingWork }
+struct Immediate {}
+effect fn immediateWork(self: &mut Immediate) -> i32 { return 1 }
+impl Work for Immediate { perform: Immediate.immediateWork }
+effect fn read() -> i32 ? &mut Work { return run Work.perform() }
+effect fn nested() -> i32 ? &mut Work {
+  let mut inner = Immediate {}
+  return run read() |> Effect.provideMut<Work>(&mut inner)
+}
+pub fn main() -> i32 {
+  let mut outer = Suspending {}
+  let first = run read() |> Effect.provideMut<Work>(&mut outer)
+  return first + (run nested() |> Effect.provideMut<Work>(&mut outer))
+}`)
+    assert.deepEqual(Analysis.diagnostics(self), [])
+    const targets = self.instances.calls.map((call) => call.target.declaration.name)
+    assert.include(targets, 'suspendingWork')
+    assert.include(targets, 'immediateWork')
+    for (const [name, suspends] of [
+      ['main', true],
+      ['nested', false],
+    ] as const) {
+      const instance = self.instances.instances.find(
+        (candidate) => candidate.key.declaration.name === name,
+      )
+      assert.isDefined(instance)
+      if (instance === undefined) continue
+      assert.strictEqual(
+        SuspensionMode.has(Instances.suspensionOf(self.instances, instance.key), 'NestedTransfer'),
+        suspends,
+        name,
+      )
+    }
+  }),
+)
+
 it.effect('ignores unused suspending operations on the selected provider witness', () =>
   Effect.gen(function* () {
     const self = yield* snapshot(`import silk.effect { Effect }
@@ -1249,7 +1293,7 @@ pub fn main() -> i32 {
       }
       if (name !== 'escape') {
         const mir = Analysis.loweredMir(self)
-        assert.deepEqual(MirVerification.verify(mir), [])
+        assert.deepEqual(yield* MirVerification.verify(mir), [])
         if (name === 'borrowed-generic-resource') {
           let changed = 0
           const withSourceArgument = (argument: Type.GenericArgument): Mir.Module => ({
@@ -1291,12 +1335,12 @@ pub fn main() -> i32 {
           const equivalent = withSourceArgument(Lifetime.staticLifetime)
           assert.isAbove(changed, 0)
           assert.notInclude(
-            MirVerification.verify(equivalent).map((violation) => violation.rule),
+            (yield* MirVerification.verify(equivalent)).map((violation) => violation.rule),
             'InvalidLoan',
           )
           const different = withSourceArgument('bool')
           assert.include(
-            MirVerification.verify(different).map((violation) => violation.rule),
+            (yield* MirVerification.verify(different)).map((violation) => violation.rule),
             'InvalidLoan',
           )
         }
@@ -1339,7 +1383,7 @@ where &'env mut P provides &Transport from &mut Transport {
 pub fn main() -> i32 { let mut provider = Provider {} return run scoped(&mut provider) }`
     const self = yield* snapshot(source)
     assert.deepEqual(Analysis.diagnostics(self), [])
-    assert.deepEqual(MirVerification.verify(Analysis.loweredMir(self)), [])
+    assert.deepEqual(yield* MirVerification.verify(Analysis.loweredMir(self)), [])
   }),
 )
 
@@ -1375,18 +1419,22 @@ pub fn main() -> i32 { return run scoped<Provider>(Provider {}) }`
     const self = yield* snapshot(source)
     assert.deepEqual(Analysis.diagnostics(self), [])
     const module = Analysis.loweredMir(self)
-    assert.deepEqual(MirVerification.verify(module), [])
+    assert.deepEqual(yield* MirVerification.verify(module), [])
     const callbackRunners = module.functions.filter(
       (fn) => fn.id.name === 'scoped$callable$0$effect$-1',
     )
     assert.lengthOf(callbackRunners, 1)
-    const providedRuns = callbackRunners
-      .flatMap(MirVerification.operations)
-      .filter(
-        (operation): operation is Extract<Mir.Operation, { readonly _tag: 'RunEffectValue' }> =>
-          operation._tag === 'RunEffectValue' &&
-          operation.runner.name === 'Provider.work$effect$-1',
-      )
+    const providedRuns = callbackRunners.flatMap(MirVerification.operations).filter(
+      (
+        operation,
+      ): operation is Extract<
+        Mir.Operation,
+        {
+          readonly _tag: 'RunEffectValue'
+        }
+      > =>
+        operation._tag === 'RunEffectValue' && operation.runner.name === 'Provider.work$effect$-1',
+    )
     assert.lengthOf(providedRuns, 1)
     assert.isFalse(module.functions.some((fn) => fn.id.name === 'UnusedProvider.work$effect$-1'))
   }),
@@ -1436,7 +1484,7 @@ pub fn main() -> i32 {
 }`
     const self = yield* snapshot(source)
     assert.deepEqual(Analysis.diagnostics(self), [])
-    assert.deepEqual(MirVerification.verify(Analysis.loweredMir(self)), [])
+    assert.deepEqual(yield* MirVerification.verify(Analysis.loweredMir(self)), [])
   }),
 )
 
@@ -1515,7 +1563,7 @@ pub effect fn main() -> i32 ! Fault {
 }`)
       assert.deepEqual(Analysis.diagnostics(self), [], order.name)
       const mir = Analysis.loweredMir(self)
-      assert.deepEqual(MirVerification.verify(mir), [], order.name)
+      assert.deepEqual(yield* MirVerification.verify(mir), [], order.name)
       const runners = mir.functions.filter(
         (fn) => fn.effectRunner?.base.declaration.name === 'Connection.read$effect$-1',
       )
@@ -1533,8 +1581,14 @@ pub effect fn main() -> i32 ! Fault {
         assert.isDefined(caller, `${order.name}: ${callerName} caller`)
         if (caller === undefined) continue
         const [constructed] = MirVerification.operations(caller).filter(
-          (operation): operation is Extract<Mir.Operation, { readonly _tag: 'MakeEffect' }> =>
-            operation._tag === 'MakeEffect',
+          (
+            operation,
+          ): operation is Extract<
+            Mir.Operation,
+            {
+              readonly _tag: 'MakeEffect'
+            }
+          > => operation._tag === 'MakeEffect',
         )
         assert.isDefined(constructed, `${order.name}: ${callerName} Effect construction`)
         if (constructed === undefined) continue
@@ -1558,7 +1612,14 @@ pub effect fn main() -> i32 ! Fault {
         assert.strictEqual(callerProvider?.capability.name, 'Audit', order.name)
         assert.strictEqual(callerProvider?.providerType.name, 'Recorder', order.name)
         const [providedRun] = MirVerification.operations(callerRunner).filter(
-          (operation): operation is Extract<Mir.Operation, { readonly _tag: 'RunEffectValue' }> =>
+          (
+            operation,
+          ): operation is Extract<
+            Mir.Operation,
+            {
+              readonly _tag: 'RunEffectValue'
+            }
+          > =>
             operation._tag === 'RunEffectValue' &&
             operation.runnerBase?.declaration.name === 'Connection.read$effect$-1',
         )
@@ -1648,7 +1709,7 @@ pub effect fn main() -> i32 ! Fault {
         ),
       }
       assert.isTrue(
-        MirVerification.verify(corrupted).some(
+        (yield* MirVerification.verify(corrupted)).some(
           (failure) => failure.rule === 'InvalidEffectOperation',
         ),
         order.name,
@@ -1733,7 +1794,7 @@ pub fn main() -> i32 {
   return run Effect.catchAll(canceled(), failed) |> Effect.provideMut<Allocator>(&mut allocator)
 }`)
     assert.deepEqual(Analysis.diagnostics(self), [])
-    assert.deepEqual(MirVerification.verify(Analysis.loweredMir(self)), [])
+    assert.deepEqual(yield* MirVerification.verify(Analysis.loweredMir(self)), [])
     for (const name of ['.read$effect$', 'recovered$effect$']) {
       const readers = Analysis.loweredMir(self).functions.filter(
         (fn) =>
@@ -1790,6 +1851,6 @@ pub fn main() -> i32 { return run bracket(Box {value: 42}, true, read) }
     )
     const mir = Analysis.loweredMir(self)
     assert.isTrue(mir.functions.some((fn) => fn.id.name === 'main'))
-    assert.deepEqual(MirVerification.verify(mir), [])
+    assert.deepEqual(yield* MirVerification.verify(mir), [])
   }),
 )

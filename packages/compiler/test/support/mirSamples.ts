@@ -1,3 +1,4 @@
+import * as Effect from 'effect/Effect'
 import * as ForeignContract from '../../src/ForeignContract.js'
 import type * as DeclarationFacts from '../../src/DeclarationFacts.js'
 import type * as Instances from '../../src/Instances.js'
@@ -31,8 +32,9 @@ const instance = (declaration: DeclarationFacts.CanonicalId): Instances.Instance
     staticArguments: Object.freeze([]),
     contractRow: Object.freeze([]),
   })
-
-export const samples = (): ReadonlyArray<Module> => {
+export const samples = Effect.fn('mirSamples.samples')(function* (): Effect.fn.Return<
+  ReadonlyArray<Module>
+> {
   const source = SourceFile.make(
     'sample://regions.silk',
     Uint8Array.from('pub fn answer() -> i32 { return 42 }', (char) => char.charCodeAt(0)),
@@ -47,7 +49,7 @@ export const samples = (): ReadonlyArray<Module> => {
     foreignExports: Object.freeze([]),
     foreignStatics: Object.freeze([]),
     retainedRoots: Object.freeze([instance(canonical(source.id, 'answer'))]),
-    layout: Layout.make(Target.aarch64AppleDarwin, ['i32']),
+    layout: yield* Layout.make(Target.aarch64AppleDarwin, ['i32']),
     executionTransitions: Object.freeze([]),
     functions: Object.freeze([
       Object.freeze({
@@ -89,7 +91,7 @@ export const samples = (): ReadonlyArray<Module> => {
     foreignExports: Object.freeze([]),
     foreignStatics: Object.freeze([]),
     retainedRoots: Object.freeze([instance(canonical(source.id, 'choose'))]),
-    layout: Layout.make(Target.aarch64AppleDarwin, ['i32', 'bool']),
+    layout: yield* Layout.make(Target.aarch64AppleDarwin, ['i32', 'bool']),
     executionTransitions: Object.freeze([]),
     functions: Object.freeze([
       Object.freeze({
@@ -142,16 +144,16 @@ export const samples = (): ReadonlyArray<Module> => {
     ]),
   })
   return Object.freeze([straight, conditional])
-}
+})
 
 /**
  * `answer` returning `abs(42)` through one foreign call; `arguments_` lets a test break arity.
  * The module carries an empty foreign inventory so availability lets the operation through.
  */
-export const foreignCallSample = (
+export const foreignCallSample = Effect.fn('mirSamples.foreignCallSample')(function* (
   target: Target.Target,
   arguments_: ReadonlyArray<LocalId> = [local(0)],
-): Module => {
+): Effect.fn.Return<Module> {
   const source = SourceFile.make(
     'sample://foreign.silk',
     Uint8Array.from('pub fn answer() -> i32 { return unsafe abs(42) }', (char) =>
@@ -186,7 +188,7 @@ export const foreignCallSample = (
     foreignExports: Object.freeze([]),
     foreignStatics: Object.freeze([]),
     retainedRoots: Object.freeze([instance(canonical(source.id, 'answer'))]),
-    layout: Layout.make(target, ['i32']),
+    layout: yield* Layout.make(target, ['i32']),
     executionTransitions: Object.freeze([]),
     functions: Object.freeze([
       Object.freeze({
@@ -231,4 +233,4 @@ export const foreignCallSample = (
       }),
     ]),
   })
-}
+})

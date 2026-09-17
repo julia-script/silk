@@ -96,7 +96,9 @@ interface Proof {
   readonly result: Compatibility
   readonly obligations: ReadonlyArray<() => void>
 }
-const comparisons = new WeakMap<Context, Map<string, Proof>>()
+// Context identity already fixes the assumptions. Keep canonical type keys separate instead
+// of serializing the full (potentially thousands of bounds) environment into every lookup.
+const comparisons = new WeakMap<Context, Map<string, Map<string, Proof>>>()
 const proofFrames = new WeakMap<Work, Array<Array<() => void>>>()
 
 const retain = (self: Context, obligations: ReadonlyArray<() => void>): void => {
@@ -309,11 +311,13 @@ const callableCompatible = (
       ...substituteTypeBounds(target.typeOutlives, targetSubstitution),
       ...formation.typeOutlives,
     ],
-    assumptions: Lifetime.assumptions([
-      ...self.assumptions.bounds,
-      ...substitutedBounds(target.lifetimeBounds, targetSubstitution),
-      ...formation.lifetimeBounds,
-    ]),
+    assumptions: Lifetime.mergeAssumptions(
+      self.assumptions,
+      Lifetime.assumptions([
+        ...substitutedBounds(target.lifetimeBounds, targetSubstitution),
+        ...formation.lifetimeBounds,
+      ]),
+    ),
   })
   if (
     !substitutedBounds(source.lifetimeBounds, sourceSubstitution).every((bound) =>
@@ -356,14 +360,19 @@ export const check = (
   target: Type.Type,
   self: Context = context(),
 ): Compatibility => {
-  const identity = Canonical.record('Comparison', [
-    Type.key(source),
-    Type.key(target),
-    self.assumptions.key,
-  ])
-  const cache = comparisons.get(self) ?? new Map<string, Proof>()
-  comparisons.set(self, cache)
-  const previous = cache.get(identity)
+  const sourceKey = Type.key(source)
+  const targetKey = Type.key(target)
+  let cache = comparisons.get(self)
+  if (cache === undefined) {
+    cache = new Map<string, Map<string, Proof>>()
+    comparisons.set(self, cache)
+  }
+  let targets = cache.get(sourceKey)
+  if (targets === undefined) {
+    targets = new Map<string, Proof>()
+    cache.set(sourceKey, targets)
+  }
+  const previous = targets.get(targetKey)
   if (previous !== undefined) {
     self.work.cacheHits += 1
     retain(self, previous.obligations)
@@ -377,7 +386,7 @@ export const check = (
       const obligations = isCompatible(result)
         ? [...(proofFrames.get(self.work)?.at(-1) ?? [])]
         : []
-      cache.set(identity, { result, obligations })
+      targets.set(targetKey, { result, obligations })
       return result
     },
     isCompatible,
@@ -505,11 +514,10 @@ const compareSelected = (source: Type.Type, target: Type.Type, self: Context): C
     const boundsContext = Object.freeze({
       ...self,
       typeBounds: [...self.typeBounds, ...target.typeOutlives, ...formation.typeOutlives],
-      assumptions: Lifetime.assumptions([
-        ...self.assumptions.bounds,
-        ...target.lifetimeBounds,
-        ...formation.lifetimeBounds,
-      ]),
+      assumptions: Lifetime.mergeAssumptions(
+        self.assumptions,
+        Lifetime.assumptions([...target.lifetimeBounds, ...formation.lifetimeBounds]),
+      ),
     })
     if (
       source.lifetimeBinders.length === 0 &&

@@ -1896,10 +1896,12 @@ export const analyzeFunctionBody = (
     bodyLifetimes,
     lifetimeCompatibility: BodyLifetime.compatibility(
       bodyLifetimes,
-      Lifetime.assumptions([
-        ...(DeclarationFacts.executableLifetimes(declaration).lifetimeBounds ?? []),
-        ...outlivesScope.assumptions.bounds,
-      ]),
+      Lifetime.mergeAssumptions(
+        Lifetime.assumptions(
+          DeclarationFacts.executableLifetimes(declaration).lifetimeBounds ?? [],
+        ),
+        outlivesScope.assumptions,
+      ),
       NominalVariance.derive(resolution.index).summaries,
     ),
     writtenCallableBindings: new Set<number>(),

@@ -1,3 +1,8 @@
+import * as Alignment from '@silklang/llvm/Alignment'
+import * as NativePlace from './NativePlace.js'
+import type * as Mir from './Mir.js'
+import type * as NativeType from './NativeType.js'
+import type * as NativeLanePointer from './NativeLanePointer.js'
 import * as FunctionBody from '@silklang/llvm/FunctionBody'
 import type * as LlvmError from '@silklang/llvm/LlvmError'
 import type * as LlvmType from '@silklang/llvm/Type'
@@ -9,6 +14,23 @@ export interface NativeResult {
   readonly values: ReadonlyArray<Value.Input>
   readonly diagnostic?: Value.Input
 }
+
+/** A private call preserves canonical memory; explicit transports still deliver scalar lanes. */
+export type Received =
+  | NativeResult
+  | { readonly place: NativePlace.NativePlace; readonly diagnostic?: Value.Input }
+
+export const materialize = Effect.fnUntraced(function* (
+  context: NativePlace.Context,
+  self: Received,
+  name: string,
+): Effect.fn.Return<NativeResult, LlvmError.LlvmError> {
+  if (!('place' in self)) return self
+  return {
+    values: yield* NativePlace.loadLanes(self.place, context, name),
+    ...(self.diagnostic === undefined ? {} : { diagnostic: self.diagnostic }),
+  }
+})
 
 /** The private metadata aggregate follows source lanes without changing their layout. */
 export interface Shape {
@@ -83,11 +105,23 @@ export const pack = Effect.fnUntraced(function* (
 })
 
 /** Caller-owned storage for a recursively growing private result and its failure metadata. */
-export interface Storage {
-  readonly type: LlvmType.Type
-  readonly fields: ReadonlyArray<LlvmType.Type>
-  readonly parameter: number
-}
+export type Storage =
+  | {
+      readonly _tag: 'Lanes'
+      readonly type: LlvmType.Type
+      readonly fields: ReadonlyArray<LlvmType.Type>
+      readonly parameter: number
+    }
+  | {
+      readonly _tag: 'Canonical'
+      readonly diagnosticType?: LlvmType.Type
+      readonly type: LlvmType.Type
+      readonly parameter: number
+      readonly logicalType: Mir.Type
+      readonly alignment: number
+      readonly types: NativeType.LoweringContext
+      readonly lanePointers: NativeLanePointer.Context
+    }
 
 export interface Transport {
   readonly resultLaneCount: number
@@ -103,7 +137,12 @@ export const allocate = Effect.fnUntraced(function* (
 ) {
   return target.resultStorage === undefined
     ? undefined
-    : yield* FunctionBody.alloca(body, target.resultStorage.type, name, { placement: 'entry' })
+    : yield* FunctionBody.alloca(body, target.resultStorage.type, name, {
+        placement: 'entry',
+        ...(target.resultStorage._tag === 'Canonical'
+          ? { alignment: yield* Alignment.fromByteUnits(target.resultStorage.alignment) }
+          : {}),
+      })
 })
 
 /** Appends the temporary result destination after source and observation arguments. */
@@ -129,6 +168,20 @@ export const store = Effect.fnUntraced(function* (
   values: ReadonlyArray<Value.Input>,
   name: string,
 ) {
+  if (storage._tag === 'Canonical') {
+    if (storage.diagnosticType !== undefined) {
+      const diagnostic = values.at(-1)
+      if (diagnostic === undefined)
+        throw new RangeError('Canonical result lost its diagnostic owner')
+      yield* storeDiagnostic(body, storage, address, diagnostic, name)
+    }
+    return yield* NativePlace.storeLanes(
+      NativePlace.make(storage.types.program.layout, storage.logicalType, address),
+      { body, types: storage.types, lanePointers: storage.lanePointers },
+      storage.diagnosticType === undefined ? values : values.slice(0, -1),
+      name,
+    )
+  }
   if (values.length !== storage.fields.length)
     throw new RangeError('Indirect native result does not match its storage fields')
   for (const [ordinal, value] of values.entries()) {
@@ -167,8 +220,15 @@ export const read = Effect.fnUntraced(function* (
       status,
     )
   if (address === undefined) throw new RangeError('Indirect native result lost its storage')
+  const storage = target.resultStorage
+  if (storage._tag === 'Canonical')
+    return yield* materialize(
+      { body, types: storage.types, lanePointers: storage.lanePointers },
+      yield* readValue(body, target, value, address, name, status),
+      name,
+    )
   const values: Array<Value.Input> = []
-  for (const [ordinal, type] of target.resultStorage.fields.entries()) {
+  for (const [ordinal, type] of storage.fields.entries()) {
     values.push(
       yield* FunctionBody.load(
         body,
@@ -204,4 +264,69 @@ export const status = Effect.fnUntraced(function* (
   return target.resultStorage === undefined
     ? yield* FunctionBody.extractValue(body, value, [0], name)
     : value
+})
+
+/** Receives canonical private results without crossing a scalar-lane boundary. */
+export const place = (
+  target: Transport,
+  address: Value.Input | undefined,
+): NativePlace.NativePlace | undefined => {
+  const storage = target.resultStorage
+  if (storage?._tag !== 'Canonical') return undefined
+  if (address === undefined) throw new RangeError('Canonical result lost its destination')
+  return NativePlace.make(storage.types.program.layout, storage.logicalType, address)
+}
+
+/** Reads the logical private result, retaining stored aggregates instead of flattening them. */
+export const readValue = Effect.fnUntraced(function* (
+  body: FunctionBody.FunctionBody,
+  target: Transport,
+  value: Value.Input | undefined,
+  address: Value.Input | undefined,
+  name: string,
+  status: 'Synchronous' | 'SuspensionStep' = 'Synchronous',
+): Effect.fn.Return<Received, LlvmError.LlvmError> {
+  const storage = target.resultStorage
+  if (storage?._tag !== 'Canonical') return yield* read(body, target, value, address, name, status)
+  const stored = place(target, address)
+  if (stored === undefined || address === undefined)
+    throw new RangeError('Canonical result lost its place')
+  const diagnostic =
+    storage.diagnosticType === undefined
+      ? undefined
+      : yield* FunctionBody.load(
+          body,
+          storage.diagnosticType,
+          yield* FunctionBody.structuredGetElementPtr(
+            body,
+            storage.type,
+            address,
+            [1],
+            `${name}_diagnostic_ptr`,
+          ),
+          `${name}_diagnostic`,
+        )
+  return { place: stored, ...(diagnostic === undefined ? {} : { diagnostic }) }
+})
+
+export const storeDiagnostic = Effect.fnUntraced(function* (
+  body: FunctionBody.FunctionBody,
+  storage: Extract<Storage, { readonly _tag: 'Canonical' }>,
+  address: Value.Input,
+  diagnostic: Value.Input,
+  name: string,
+) {
+  if (storage.diagnosticType === undefined)
+    throw new RangeError('Canonical result has no diagnostic field')
+  yield* FunctionBody.store(
+    body,
+    diagnostic,
+    yield* FunctionBody.structuredGetElementPtr(
+      body,
+      storage.type,
+      address,
+      [1],
+      `${name}_diagnostic_ptr`,
+    ),
+  )
 })

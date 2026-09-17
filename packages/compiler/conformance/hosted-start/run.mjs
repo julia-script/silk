@@ -269,7 +269,7 @@ pub effect fn main() -> () ! Problem { let value = run Effect.ensuring(failing()
               message: diagnostics.map((value) => `${value.code}: ${value.message}`).join('\n'),
             })
           if (snapshot.mir._tag === 'Available') {
-            const violations = MirVerification.verify(snapshot.mir.value)
+            const violations = yield* MirVerification.verify(snapshot.mir.value)
             if (violations.length > 0) {
               const encoded = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(
                 violations,
