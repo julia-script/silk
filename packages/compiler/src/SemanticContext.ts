@@ -158,3 +158,12 @@ export const registry = (contexts: Iterable<SemanticContext>): Registry => {
     },
   }
 }
+
+/** The registry of every loaded module of a closure, built from the authored artifacts it carries. */
+export const fromModules = (
+  modules: Iterable<{ readonly authored: AuthoredLowering.Lowered }>,
+): Registry => {
+  const contexts: SemanticContext[] = []
+  for (const module of modules) contexts.push(make(module.authored))
+  return registry(contexts)
+}
