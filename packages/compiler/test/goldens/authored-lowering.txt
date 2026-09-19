@@ -1,0 +1,4253 @@
+{
+  _tag: "AuthoredModule"
+  owner: {
+    _tag: "AuthoredIdentity"
+    namespace: "fixture"
+    module: "app/Main"
+    path: []
+  }
+  pool: {
+    _tag: "AuthoredPool"
+    texts: [
+      {
+        _tag: "PoolText"
+        value: "platform"
+        byteLength: 8
+      }
+      {
+        _tag: "PoolText"
+        value: "clock"
+        byteLength: 5
+      }
+      {
+        _tag: "PoolText"
+        value: "inactive"
+        byteLength: 8
+      }
+      {
+        _tag: "PoolText"
+        value: "alternative"
+        byteLength: 11
+      }
+      {
+        _tag: "PoolText"
+        value: "unused"
+        byteLength: 6
+      }
+      {
+        _tag: "PoolText"
+        value: "i32"
+        byteLength: 3
+      }
+      {
+        _tag: "PoolText"
+        value: "missing"
+        byteLength: 7
+      }
+      {
+        _tag: "PoolText"
+        value: "size"
+        byteLength: 4
+      }
+      {
+        _tag: "PoolText"
+        value: "u64"
+        byteLength: 3
+      }
+      {
+        _tag: "PoolText"
+        value: "answer"
+        byteLength: 6
+      }
+      {
+        _tag: "PoolText"
+        value: "seed"
+        byteLength: 4
+      }
+      {
+        _tag: "PoolText"
+        value: "now"
+        byteLength: 3
+      }
+      {
+        _tag: "PoolText"
+        value: "text"
+        byteLength: 4
+      }
+      {
+        _tag: "PoolText"
+        value: "value"
+        byteLength: 5
+      }
+      {
+        _tag: "PoolText"
+        value: "broken"
+        byteLength: 6
+      }
+      {
+        _tag: "PoolText"
+        value: "healthy"
+        byteLength: 7
+      }
+    ]
+    bytes: [
+      {
+        _tag: "PoolBytes"
+        value: [
+          0
+        ]
+        byteLength: 1
+      }
+    ]
+  }
+  declarations: [
+    {
+      _tag: "Declaration"
+      owner: {
+        _tag: "AuthoredIdentity"
+        namespace: "fixture"
+        module: "app/Main"
+        path: [
+          {
+            _tag: "OwnerSegment"
+            kind: "import"
+            name: "platform.clock"
+            role: "clock"
+            occurrence: 0
+          }
+        ]
+      }
+      header: {
+        anchor: {
+          _tag: "AuthoredAnchor"
+          owner: {
+            _tag: "AuthoredIdentity"
+            namespace: "fixture"
+            module: "app/Main"
+            path: [
+              {
+                _tag: "OwnerSegment"
+                kind: "import"
+                name: "platform.clock"
+                role: "clock"
+                occurrence: 0
+              }
+            ]
+          }
+          path: [
+            {
+              _tag: "LocalSegment"
+              role: "header"
+              occurrence: 0
+            }
+          ]
+        }
+        origin: {
+          _tag: "Authored"
+        }
+        causes: []
+        _tag: "ImportHeader"
+        public: false
+        path: {
+          anchor: {
+            _tag: "AuthoredAnchor"
+            owner: {
+              _tag: "AuthoredIdentity"
+              namespace: "fixture"
+              module: "app/Main"
+              path: [
+                {
+                  _tag: "OwnerSegment"
+                  kind: "import"
+                  name: "platform.clock"
+                  role: "clock"
+                  occurrence: 0
+                }
+              ]
+            }
+            path: [
+              {
+                _tag: "LocalSegment"
+                role: "header"
+                occurrence: 0
+              }
+              {
+                _tag: "LocalSegment"
+                role: "path"
+                occurrence: 0
+              }
+            ]
+          }
+          origin: {
+            _tag: "Authored"
+          }
+          causes: []
+          _tag: "Path"
+          segments: [
+            {
+              anchor: {
+                _tag: "AuthoredAnchor"
+                owner: {
+                  _tag: "AuthoredIdentity"
+                  namespace: "fixture"
+                  module: "app/Main"
+                  path: [
+                    {
+                      _tag: "OwnerSegment"
+                      kind: "import"
+                      name: "platform.clock"
+                      role: "clock"
+                      occurrence: 0
+                    }
+                  ]
+                }
+                path: [
+                  {
+                    _tag: "LocalSegment"
+                    role: "header"
+                    occurrence: 0
+                  }
+                  {
+                    _tag: "LocalSegment"
+                    role: "path"
+                    occurrence: 0
+                  }
+                  {
+                    _tag: "LocalSegment"
+                    role: "segment"
+                    occurrence: 0
+                  }
+                ]
+              }
+              origin: {
+                _tag: "Authored"
+              }
+              causes: []
+              _tag: "Name"
+              text: {
+                _tag: "TextRef"
+                index: 0
+              }
+            }
+            {
+              anchor: {
+                _tag: "AuthoredAnchor"
+                owner: {
+                  _tag: "AuthoredIdentity"
+                  namespace: "fixture"
+                  module: "app/Main"
+                  path: [
+                    {
+                      _tag: "OwnerSegment"
+                      kind: "import"
+                      name: "platform.clock"
+                      role: "clock"
+                      occurrence: 0
+                    }
+                  ]
+                }
+                path: [
+                  {
+                    _tag: "LocalSegment"
+                    role: "header"
+                    occurrence: 0
+                  }
+                  {
+                    _tag: "LocalSegment"
+                    role: "path"
+                    occurrence: 0
+                  }
+                  {
+                    _tag: "LocalSegment"
+                    role: "segment"
+                    occurrence: 1
+                  }
+                ]
+              }
+              origin: {
+                _tag: "Authored"
+              }
+              causes: []
+              _tag: "Name"
+              text: {
+                _tag: "TextRef"
+                index: 1
+              }
+            }
+          ]
+        }
+        alias: {
+          anchor: {
+            _tag: "AuthoredAnchor"
+            owner: {
+              _tag: "AuthoredIdentity"
+              namespace: "fixture"
+              module: "app/Main"
+              path: [
+                {
+                  _tag: "OwnerSegment"
+                  kind: "import"
+                  name: "platform.clock"
+                  role: "clock"
+                  occurrence: 0
+                }
+              ]
+            }
+            path: [
+              {
+                _tag: "LocalSegment"
+                role: "header"
+                occurrence: 0
+              }
+              {
+                _tag: "LocalSegment"
+                role: "alias"
+                occurrence: 0
+              }
+            ]
+          }
+          origin: {
+            _tag: "Authored"
+          }
+          causes: []
+          _tag: "Name"
+          text: {
+            _tag: "TextRef"
+            index: 1
+          }
+        }
+        members: undefined
+      }
+      body: {
+        _tag: "NoBody"
+      }
+    }
+    {
+      _tag: "Declaration"
+      owner: {
+        _tag: "AuthoredIdentity"
+        namespace: "fixture"
+        module: "app/Main"
+        path: [
+          {
+            _tag: "OwnerSegment"
+            kind: "conditional"
+            occurrence: 0
+          }
+        ]
+      }
+      header: {
+        anchor: {
+          _tag: "AuthoredAnchor"
+          owner: {
+            _tag: "AuthoredIdentity"
+            namespace: "fixture"
+            module: "app/Main"
+            path: [
+              {
+                _tag: "OwnerSegment"
+                kind: "conditional"
+                occurrence: 0
+              }
+            ]
+          }
+          path: [
+            {
+              _tag: "LocalSegment"
+              role: "header"
+              occurrence: 0
+            }
+          ]
+        }
+        origin: {
+          _tag: "Authored"
+        }
+        causes: []
+        _tag: "ConditionalHeader"
+        condition: {
+          anchor: {
+            _tag: "AuthoredAnchor"
+            owner: {
+              _tag: "AuthoredIdentity"
+              namespace: "fixture"
+              module: "app/Main"
+              path: [
+                {
+                  _tag: "OwnerSegment"
+                  kind: "conditional"
+                  occurrence: 0
+                }
+              ]
+            }
+            path: [
+              {
+                _tag: "LocalSegment"
+                role: "header"
+                occurrence: 0
+              }
+              {
+                _tag: "LocalSegment"
+                role: "condition"
+                occurrence: 0
+              }
+            ]
+          }
+          origin: {
+            _tag: "Authored"
+          }
+          causes: []
+          _tag: "BooleanLiteral"
+          value: false
+        }
+      }
+      body: {
+        _tag: "ConditionalBody"
+        thenBranch: {
+          _tag: "Declaration"
+          owner: {
+            _tag: "AuthoredIdentity"
+            namespace: "fixture"
+            module: "app/Main"
+            path: [
+              {
+                _tag: "OwnerSegment"
+                kind: "conditional"
+                occurrence: 0
+              }
+              {
+                _tag: "OwnerSegment"
+                kind: "group"
+                role: "then"
+                occurrence: 0
+              }
+            ]
+          }
+          header: {
+            anchor: {
+              _tag: "AuthoredAnchor"
+              owner: {
+                _tag: "AuthoredIdentity"
+                namespace: "fixture"
+                module: "app/Main"
+                path: [
+                  {
+                    _tag: "OwnerSegment"
+                    kind: "conditional"
+                    occurrence: 0
+                  }
+                  {
+                    _tag: "OwnerSegment"
+                    kind: "group"
+                    role: "then"
+                    occurrence: 0
+                  }
+                ]
+              }
+              path: [
+                {
+                  _tag: "LocalSegment"
+                  role: "header"
+                  occurrence: 0
+                }
+              ]
+            }
+            origin: {
+              _tag: "Authored"
+            }
+            causes: []
+            _tag: "GroupHeader"
+            branch: "Then"
+          }
+          body: {
+            _tag: "MembersBody"
+            members: [
+              {
+                _tag: "Declaration"
+                owner: {
+                  _tag: "AuthoredIdentity"
+                  namespace: "fixture"
+                  module: "app/Main"
+                  path: [
+                    {
+                      _tag: "OwnerSegment"
+                      kind: "conditional"
+                      occurrence: 0
+                    }
+                    {
+                      _tag: "OwnerSegment"
+                      kind: "group"
+                      role: "then"
+                      occurrence: 0
+                    }
+                    {
+                      _tag: "OwnerSegment"
+                      kind: "import"
+                      name: "inactive.alternative"
+                      occurrence: 0
+                    }
+                  ]
+                }
+                header: {
+                  anchor: {
+                    _tag: "AuthoredAnchor"
+                    owner: {
+                      _tag: "AuthoredIdentity"
+                      namespace: "fixture"
+                      module: "app/Main"
+                      path: [
+                        {
+                          _tag: "OwnerSegment"
+                          kind: "conditional"
+                          occurrence: 0
+                        }
+                        {
+                          _tag: "OwnerSegment"
+                          kind: "group"
+                          role: "then"
+                          occurrence: 0
+                        }
+                        {
+                          _tag: "OwnerSegment"
+                          kind: "import"
+                          name: "inactive.alternative"
+                          occurrence: 0
+                        }
+                      ]
+                    }
+                    path: [
+                      {
+                        _tag: "LocalSegment"
+                        role: "header"
+                        occurrence: 0
+                      }
+                    ]
+                  }
+                  origin: {
+                    _tag: "Authored"
+                  }
+                  causes: []
+                  _tag: "ImportHeader"
+                  public: false
+                  path: {
+                    anchor: {
+                      _tag: "AuthoredAnchor"
+                      owner: {
+                        _tag: "AuthoredIdentity"
+                        namespace: "fixture"
+                        module: "app/Main"
+                        path: [
+                          {
+                            _tag: "OwnerSegment"
+                            kind: "conditional"
+                            occurrence: 0
+                          }
+                          {
+                            _tag: "OwnerSegment"
+                            kind: "group"
+                            role: "then"
+                            occurrence: 0
+                          }
+                          {
+                            _tag: "OwnerSegment"
+                            kind: "import"
+                            name: "inactive.alternative"
+                            occurrence: 0
+                          }
+                        ]
+                      }
+                      path: [
+                        {
+                          _tag: "LocalSegment"
+                          role: "header"
+                          occurrence: 0
+                        }
+                        {
+                          _tag: "LocalSegment"
+                          role: "path"
+                          occurrence: 0
+                        }
+                      ]
+                    }
+                    origin: {
+                      _tag: "Authored"
+                    }
+                    causes: []
+                    _tag: "Path"
+                    segments: [
+                      {
+                        anchor: {
+                          _tag: "AuthoredAnchor"
+                          owner: {
+                            _tag: "AuthoredIdentity"
+                            namespace: "fixture"
+                            module: "app/Main"
+                            path: [
+                              {
+                                _tag: "OwnerSegment"
+                                kind: "conditional"
+                                occurrence: 0
+                              }
+                              {
+                                _tag: "OwnerSegment"
+                                kind: "group"
+                                role: "then"
+                                occurrence: 0
+                              }
+                              {
+                                _tag: "OwnerSegment"
+                                kind: "import"
+                                name: "inactive.alternative"
+                                occurrence: 0
+                              }
+                            ]
+                          }
+                          path: [
+                            {
+                              _tag: "LocalSegment"
+                              role: "header"
+                              occurrence: 0
+                            }
+                            {
+                              _tag: "LocalSegment"
+                              role: "path"
+                              occurrence: 0
+                            }
+                            {
+                              _tag: "LocalSegment"
+                              role: "segment"
+                              occurrence: 0
+                            }
+                          ]
+                        }
+                        origin: {
+                          _tag: "Authored"
+                        }
+                        causes: []
+                        _tag: "Name"
+                        text: {
+                          _tag: "TextRef"
+                          index: 2
+                        }
+                      }
+                      {
+                        anchor: {
+                          _tag: "AuthoredAnchor"
+                          owner: {
+                            _tag: "AuthoredIdentity"
+                            namespace: "fixture"
+                            module: "app/Main"
+                            path: [
+                              {
+                                _tag: "OwnerSegment"
+                                kind: "conditional"
+                                occurrence: 0
+                              }
+                              {
+                                _tag: "OwnerSegment"
+                                kind: "group"
+                                role: "then"
+                                occurrence: 0
+                              }
+                              {
+                                _tag: "OwnerSegment"
+                                kind: "import"
+                                name: "inactive.alternative"
+                                occurrence: 0
+                              }
+                            ]
+                          }
+                          path: [
+                            {
+                              _tag: "LocalSegment"
+                              role: "header"
+                              occurrence: 0
+                            }
+                            {
+                              _tag: "LocalSegment"
+                              role: "path"
+                              occurrence: 0
+                            }
+                            {
+                              _tag: "LocalSegment"
+                              role: "segment"
+                              occurrence: 1
+                            }
+                          ]
+                        }
+                        origin: {
+                          _tag: "Authored"
+                        }
+                        causes: []
+                        _tag: "Name"
+                        text: {
+                          _tag: "TextRef"
+                          index: 3
+                        }
+                      }
+                    ]
+                  }
+                  alias: undefined
+                  members: undefined
+                }
+                body: {
+                  _tag: "NoBody"
+                }
+              }
+              {
+                _tag: "Declaration"
+                owner: {
+                  _tag: "AuthoredIdentity"
+                  namespace: "fixture"
+                  module: "app/Main"
+                  path: [
+                    {
+                      _tag: "OwnerSegment"
+                      kind: "conditional"
+                      occurrence: 0
+                    }
+                    {
+                      _tag: "OwnerSegment"
+                      kind: "group"
+                      role: "then"
+                      occurrence: 0
+                    }
+                    {
+                      _tag: "OwnerSegment"
+                      kind: "function"
+                      name: "unused"
+                      occurrence: 0
+                    }
+                  ]
+                }
+                header: {
+                  anchor: {
+                    _tag: "AuthoredAnchor"
+                    owner: {
+                      _tag: "AuthoredIdentity"
+                      namespace: "fixture"
+                      module: "app/Main"
+                      path: [
+                        {
+                          _tag: "OwnerSegment"
+                          kind: "conditional"
+                          occurrence: 0
+                        }
+                        {
+                          _tag: "OwnerSegment"
+                          kind: "group"
+                          role: "then"
+                          occurrence: 0
+                        }
+                        {
+                          _tag: "OwnerSegment"
+                          kind: "function"
+                          name: "unused"
+                          occurrence: 0
+                        }
+                      ]
+                    }
+                    path: [
+                      {
+                        _tag: "LocalSegment"
+                        role: "header"
+                        occurrence: 1
+                      }
+                    ]
+                  }
+                  origin: {
+                    _tag: "Authored"
+                  }
+                  causes: []
+                  name: {
+                    anchor: {
+                      _tag: "AuthoredAnchor"
+                      owner: {
+                        _tag: "AuthoredIdentity"
+                        namespace: "fixture"
+                        module: "app/Main"
+                        path: [
+                          {
+                            _tag: "OwnerSegment"
+                            kind: "conditional"
+                            occurrence: 0
+                          }
+                          {
+                            _tag: "OwnerSegment"
+                            kind: "group"
+                            role: "then"
+                            occurrence: 0
+                          }
+                          {
+                            _tag: "OwnerSegment"
+                            kind: "function"
+                            name: "unused"
+                            occurrence: 0
+                          }
+                        ]
+                      }
+                      path: [
+                        {
+                          _tag: "LocalSegment"
+                          role: "header"
+                          occurrence: 1
+                        }
+                        {
+                          _tag: "LocalSegment"
+                          role: "name"
+                          occurrence: 0
+                        }
+                      ]
+                    }
+                    origin: {
+                      _tag: "Authored"
+                    }
+                    causes: []
+                    _tag: "Name"
+                    text: {
+                      _tag: "TextRef"
+                      index: 4
+                    }
+                  }
+                  public: false
+                  _tag: "FunctionHeader"
+                  contract: {
+                    anchor: {
+                      _tag: "AuthoredAnchor"
+                      owner: {
+                        _tag: "AuthoredIdentity"
+                        namespace: "fixture"
+                        module: "app/Main"
+                        path: [
+                          {
+                            _tag: "OwnerSegment"
+                            kind: "conditional"
+                            occurrence: 0
+                          }
+                          {
+                            _tag: "OwnerSegment"
+                            kind: "group"
+                            role: "then"
+                            occurrence: 0
+                          }
+                          {
+                            _tag: "OwnerSegment"
+                            kind: "function"
+                            name: "unused"
+                            occurrence: 0
+                          }
+                        ]
+                      }
+                      path: [
+                        {
+                          _tag: "LocalSegment"
+                          role: "header"
+                          occurrence: 1
+                        }
+                        {
+                          _tag: "LocalSegment"
+                          role: "contract"
+                          occurrence: 0
+                        }
+                      ]
+                    }
+                    origin: {
+                      _tag: "Authored"
+                    }
+                    causes: []
+                    _tag: "CallableContract"
+                    generics: []
+                    parameters: []
+                    variadic: false
+                    result: {
+                      anchor: {
+                        _tag: "AuthoredAnchor"
+                        owner: {
+                          _tag: "AuthoredIdentity"
+                          namespace: "fixture"
+                          module: "app/Main"
+                          path: [
+                            {
+                              _tag: "OwnerSegment"
+                              kind: "conditional"
+                              occurrence: 0
+                            }
+                            {
+                              _tag: "OwnerSegment"
+                              kind: "group"
+                              role: "then"
+                              occurrence: 0
+                            }
+                            {
+                              _tag: "OwnerSegment"
+                              kind: "function"
+                              name: "unused"
+                              occurrence: 0
+                            }
+                          ]
+                        }
+                        path: [
+                          {
+                            _tag: "LocalSegment"
+                            role: "header"
+                            occurrence: 1
+                          }
+                          {
+                            _tag: "LocalSegment"
+                            role: "contract"
+                            occurrence: 0
+                          }
+                          {
+                            _tag: "LocalSegment"
+                            role: "result"
+                            occurrence: 0
+                          }
+                          {
+                            _tag: "LocalSegment"
+                            role: "type"
+                            occurrence: 0
+                          }
+                        ]
+                      }
+                      origin: {
+                        _tag: "Authored"
+                      }
+                      causes: []
+                      _tag: "NamedType"
+                      path: {
+                        anchor: {
+                          _tag: "AuthoredAnchor"
+                          owner: {
+                            _tag: "AuthoredIdentity"
+                            namespace: "fixture"
+                            module: "app/Main"
+                            path: [
+                              {
+                                _tag: "OwnerSegment"
+                                kind: "conditional"
+                                occurrence: 0
+                              }
+                              {
+                                _tag: "OwnerSegment"
+                                kind: "group"
+                                role: "then"
+                                occurrence: 0
+                              }
+                              {
+                                _tag: "OwnerSegment"
+                                kind: "function"
+                                name: "unused"
+                                occurrence: 0
+                              }
+                            ]
+                          }
+                          path: [
+                            {
+                              _tag: "LocalSegment"
+                              role: "header"
+                              occurrence: 1
+                            }
+                            {
+                              _tag: "LocalSegment"
+                              role: "contract"
+                              occurrence: 0
+                            }
+                            {
+                              _tag: "LocalSegment"
+                              role: "result"
+                              occurrence: 0
+                            }
+                            {
+                              _tag: "LocalSegment"
+                              role: "type"
+                              occurrence: 0
+                            }
+                            {
+                              _tag: "LocalSegment"
+                              role: "path"
+                              occurrence: 0
+                            }
+                          ]
+                        }
+                        origin: {
+                          _tag: "Authored"
+                        }
+                        causes: []
+                        _tag: "Path"
+                        segments: [
+                          {
+                            anchor: {
+                              _tag: "AuthoredAnchor"
+                              owner: {
+                                _tag: "AuthoredIdentity"
+                                namespace: "fixture"
+                                module: "app/Main"
+                                path: [
+                                  {
+                                    _tag: "OwnerSegment"
+                                    kind: "conditional"
+                                    occurrence: 0
+                                  }
+                                  {
+                                    _tag: "OwnerSegment"
+                                    kind: "group"
+                                    role: "then"
+                                    occurrence: 0
+                                  }
+                                  {
+                                    _tag: "OwnerSegment"
+                                    kind: "function"
+                                    name: "unused"
+                                    occurrence: 0
+                                  }
+                                ]
+                              }
+                              path: [
+                                {
+                                  _tag: "LocalSegment"
+                                  role: "header"
+                                  occurrence: 1
+                                }
+                                {
+                                  _tag: "LocalSegment"
+                                  role: "contract"
+                                  occurrence: 0
+                                }
+                                {
+                                  _tag: "LocalSegment"
+                                  role: "result"
+                                  occurrence: 0
+                                }
+                                {
+                                  _tag: "LocalSegment"
+                                  role: "type"
+                                  occurrence: 0
+                                }
+                                {
+                                  _tag: "LocalSegment"
+                                  role: "path"
+                                  occurrence: 0
+                                }
+                                {
+                                  _tag: "LocalSegment"
+                                  role: "segment"
+                                  occurrence: 0
+                                }
+                              ]
+                            }
+                            origin: {
+                              _tag: "Authored"
+                            }
+                            causes: []
+                            _tag: "Name"
+                            text: {
+                              _tag: "TextRef"
+                              index: 5
+                            }
+                          }
+                        ]
+                      }
+                      mode: undefined
+                    }
+                    failures: undefined
+                    requirements: undefined
+                    constraints: []
+                    effect: false
+                    environment: undefined
+                    unsafe: false
+                    static: false
+                  }
+                  linkage: undefined
+                  properties: []
+                }
+                body: {
+                  _tag: "CallableBody"
+                  block: {
+                    anchor: {
+                      _tag: "AuthoredAnchor"
+                      owner: {
+                        _tag: "AuthoredIdentity"
+                        namespace: "fixture"
+                        module: "app/Main"
+                        path: [
+                          {
+                            _tag: "OwnerSegment"
+                            kind: "conditional"
+                            occurrence: 0
+                          }
+                          {
+                            _tag: "OwnerSegment"
+                            kind: "group"
+                            role: "then"
+                            occurrence: 0
+                          }
+                          {
+                            _tag: "OwnerSegment"
+                            kind: "function"
+                            name: "unused"
+                            occurrence: 0
+                          }
+                        ]
+                      }
+                      path: [
+                        {
+                          _tag: "LocalSegment"
+                          role: "body"
+                          occurrence: 0
+                        }
+                      ]
+                    }
+                    origin: {
+                      _tag: "Authored"
+                    }
+                    causes: []
+                    _tag: "Block"
+                    statements: [
+                      {
+                        anchor: {
+                          _tag: "AuthoredAnchor"
+                          owner: {
+                            _tag: "AuthoredIdentity"
+                            namespace: "fixture"
+                            module: "app/Main"
+                            path: [
+                              {
+                                _tag: "OwnerSegment"
+                                kind: "conditional"
+                                occurrence: 0
+                              }
+                              {
+                                _tag: "OwnerSegment"
+                                kind: "group"
+                                role: "then"
+                                occurrence: 0
+                              }
+                              {
+                                _tag: "OwnerSegment"
+                                kind: "function"
+                                name: "unused"
+                                occurrence: 0
+                              }
+                            ]
+                          }
+                          path: [
+                            {
+                              _tag: "LocalSegment"
+                              role: "body"
+                              occurrence: 0
+                            }
+                            {
+                              _tag: "LocalSegment"
+                              role: "statement"
+                              occurrence: 0
+                            }
+                          ]
+                        }
+                        origin: {
+                          _tag: "Authored"
+                        }
+                        causes: []
+                        _tag: "ReturnStatement"
+                        value: {
+                          anchor: {
+                            _tag: "AuthoredAnchor"
+                            owner: {
+                              _tag: "AuthoredIdentity"
+                              namespace: "fixture"
+                              module: "app/Main"
+                              path: [
+                                {
+                                  _tag: "OwnerSegment"
+                                  kind: "conditional"
+                                  occurrence: 0
+                                }
+                                {
+                                  _tag: "OwnerSegment"
+                                  kind: "group"
+                                  role: "then"
+                                  occurrence: 0
+                                }
+                                {
+                                  _tag: "OwnerSegment"
+                                  kind: "function"
+                                  name: "unused"
+                                  occurrence: 0
+                                }
+                              ]
+                            }
+                            path: [
+                              {
+                                _tag: "LocalSegment"
+                                role: "body"
+                                occurrence: 0
+                              }
+                              {
+                                _tag: "LocalSegment"
+                                role: "statement"
+                                occurrence: 0
+                              }
+                              {
+                                _tag: "LocalSegment"
+                                role: "value"
+                                occurrence: 0
+                              }
+                            ]
+                          }
+                          origin: {
+                            _tag: "Authored"
+                          }
+                          causes: []
+                          _tag: "CallExpression"
+                          callee: {
+                            anchor: {
+                              _tag: "AuthoredAnchor"
+                              owner: {
+                                _tag: "AuthoredIdentity"
+                                namespace: "fixture"
+                                module: "app/Main"
+                                path: [
+                                  {
+                                    _tag: "OwnerSegment"
+                                    kind: "conditional"
+                                    occurrence: 0
+                                  }
+                                  {
+                                    _tag: "OwnerSegment"
+                                    kind: "group"
+                                    role: "then"
+                                    occurrence: 0
+                                  }
+                                  {
+                                    _tag: "OwnerSegment"
+                                    kind: "function"
+                                    name: "unused"
+                                    occurrence: 0
+                                  }
+                                ]
+                              }
+                              path: [
+                                {
+                                  _tag: "LocalSegment"
+                                  role: "body"
+                                  occurrence: 0
+                                }
+                                {
+                                  _tag: "LocalSegment"
+                                  role: "statement"
+                                  occurrence: 0
+                                }
+                                {
+                                  _tag: "LocalSegment"
+                                  role: "value"
+                                  occurrence: 0
+                                }
+                                {
+                                  _tag: "LocalSegment"
+                                  role: "callee"
+                                  occurrence: 0
+                                }
+                              ]
+                            }
+                            origin: {
+                              _tag: "Authored"
+                            }
+                            causes: []
+                            _tag: "IdentifierExpression"
+                            name: {
+                              anchor: {
+                                _tag: "AuthoredAnchor"
+                                owner: {
+                                  _tag: "AuthoredIdentity"
+                                  namespace: "fixture"
+                                  module: "app/Main"
+                                  path: [
+                                    {
+                                      _tag: "OwnerSegment"
+                                      kind: "conditional"
+                                      occurrence: 0
+                                    }
+                                    {
+                                      _tag: "OwnerSegment"
+                                      kind: "group"
+                                      role: "then"
+                                      occurrence: 0
+                                    }
+                                    {
+                                      _tag: "OwnerSegment"
+                                      kind: "function"
+                                      name: "unused"
+                                      occurrence: 0
+                                    }
+                                  ]
+                                }
+                                path: [
+                                  {
+                                    _tag: "LocalSegment"
+                                    role: "body"
+                                    occurrence: 0
+                                  }
+                                  {
+                                    _tag: "LocalSegment"
+                                    role: "statement"
+                                    occurrence: 0
+                                  }
+                                  {
+                                    _tag: "LocalSegment"
+                                    role: "value"
+                                    occurrence: 0
+                                  }
+                                  {
+                                    _tag: "LocalSegment"
+                                    role: "callee"
+                                    occurrence: 0
+                                  }
+                                  {
+                                    _tag: "LocalSegment"
+                                    role: "name"
+                                    occurrence: 0
+                                  }
+                                ]
+                              }
+                              origin: {
+                                _tag: "Authored"
+                              }
+                              causes: []
+                              _tag: "Name"
+                              text: {
+                                _tag: "TextRef"
+                                index: 6
+                              }
+                            }
+                            binding: undefined
+                          }
+                          generics: undefined
+                          arguments: []
+                        }
+                      }
+                    ]
+                  }
+                }
+              }
+            ]
+          }
+        }
+        elseBranch: undefined
+      }
+    }
+    {
+      _tag: "Declaration"
+      owner: {
+        _tag: "AuthoredIdentity"
+        namespace: "fixture"
+        module: "app/Main"
+        path: [
+          {
+            _tag: "OwnerSegment"
+            kind: "function"
+            name: "size"
+            occurrence: 0
+          }
+        ]
+      }
+      header: {
+        anchor: {
+          _tag: "AuthoredAnchor"
+          owner: {
+            _tag: "AuthoredIdentity"
+            namespace: "fixture"
+            module: "app/Main"
+            path: [
+              {
+                _tag: "OwnerSegment"
+                kind: "function"
+                name: "size"
+                occurrence: 0
+              }
+            ]
+          }
+          path: [
+            {
+              _tag: "LocalSegment"
+              role: "header"
+              occurrence: 1
+            }
+          ]
+        }
+        origin: {
+          _tag: "Authored"
+        }
+        causes: []
+        name: {
+          anchor: {
+            _tag: "AuthoredAnchor"
+            owner: {
+              _tag: "AuthoredIdentity"
+              namespace: "fixture"
+              module: "app/Main"
+              path: [
+                {
+                  _tag: "OwnerSegment"
+                  kind: "function"
+                  name: "size"
+                  occurrence: 0
+                }
+              ]
+            }
+            path: [
+              {
+                _tag: "LocalSegment"
+                role: "header"
+                occurrence: 1
+              }
+              {
+                _tag: "LocalSegment"
+                role: "name"
+                occurrence: 0
+              }
+            ]
+          }
+          origin: {
+            _tag: "Authored"
+          }
+          causes: []
+          _tag: "Name"
+          text: {
+            _tag: "TextRef"
+            index: 7
+          }
+        }
+        public: false
+        _tag: "FunctionHeader"
+        contract: {
+          anchor: {
+            _tag: "AuthoredAnchor"
+            owner: {
+              _tag: "AuthoredIdentity"
+              namespace: "fixture"
+              module: "app/Main"
+              path: [
+                {
+                  _tag: "OwnerSegment"
+                  kind: "function"
+                  name: "size"
+                  occurrence: 0
+                }
+              ]
+            }
+            path: [
+              {
+                _tag: "LocalSegment"
+                role: "header"
+                occurrence: 1
+              }
+              {
+                _tag: "LocalSegment"
+                role: "contract"
+                occurrence: 0
+              }
+            ]
+          }
+          origin: {
+            _tag: "Authored"
+          }
+          causes: []
+          _tag: "CallableContract"
+          generics: []
+          parameters: []
+          variadic: false
+          result: {
+            anchor: {
+              _tag: "AuthoredAnchor"
+              owner: {
+                _tag: "AuthoredIdentity"
+                namespace: "fixture"
+                module: "app/Main"
+                path: [
+                  {
+                    _tag: "OwnerSegment"
+                    kind: "function"
+                    name: "size"
+                    occurrence: 0
+                  }
+                ]
+              }
+              path: [
+                {
+                  _tag: "LocalSegment"
+                  role: "header"
+                  occurrence: 1
+                }
+                {
+                  _tag: "LocalSegment"
+                  role: "contract"
+                  occurrence: 0
+                }
+                {
+                  _tag: "LocalSegment"
+                  role: "result"
+                  occurrence: 0
+                }
+                {
+                  _tag: "LocalSegment"
+                  role: "type"
+                  occurrence: 0
+                }
+              ]
+            }
+            origin: {
+              _tag: "Authored"
+            }
+            causes: []
+            _tag: "NamedType"
+            path: {
+              anchor: {
+                _tag: "AuthoredAnchor"
+                owner: {
+                  _tag: "AuthoredIdentity"
+                  namespace: "fixture"
+                  module: "app/Main"
+                  path: [
+                    {
+                      _tag: "OwnerSegment"
+                      kind: "function"
+                      name: "size"
+                      occurrence: 0
+                    }
+                  ]
+                }
+                path: [
+                  {
+                    _tag: "LocalSegment"
+                    role: "header"
+                    occurrence: 1
+                  }
+                  {
+                    _tag: "LocalSegment"
+                    role: "contract"
+                    occurrence: 0
+                  }
+                  {
+                    _tag: "LocalSegment"
+                    role: "result"
+                    occurrence: 0
+                  }
+                  {
+                    _tag: "LocalSegment"
+                    role: "type"
+                    occurrence: 0
+                  }
+                  {
+                    _tag: "LocalSegment"
+                    role: "path"
+                    occurrence: 0
+                  }
+                ]
+              }
+              origin: {
+                _tag: "Authored"
+              }
+              causes: []
+              _tag: "Path"
+              segments: [
+                {
+                  anchor: {
+                    _tag: "AuthoredAnchor"
+                    owner: {
+                      _tag: "AuthoredIdentity"
+                      namespace: "fixture"
+                      module: "app/Main"
+                      path: [
+                        {
+                          _tag: "OwnerSegment"
+                          kind: "function"
+                          name: "size"
+                          occurrence: 0
+                        }
+                      ]
+                    }
+                    path: [
+                      {
+                        _tag: "LocalSegment"
+                        role: "header"
+                        occurrence: 1
+                      }
+                      {
+                        _tag: "LocalSegment"
+                        role: "contract"
+                        occurrence: 0
+                      }
+                      {
+                        _tag: "LocalSegment"
+                        role: "result"
+                        occurrence: 0
+                      }
+                      {
+                        _tag: "LocalSegment"
+                        role: "type"
+                        occurrence: 0
+                      }
+                      {
+                        _tag: "LocalSegment"
+                        role: "path"
+                        occurrence: 0
+                      }
+                      {
+                        _tag: "LocalSegment"
+                        role: "segment"
+                        occurrence: 0
+                      }
+                    ]
+                  }
+                  origin: {
+                    _tag: "Authored"
+                  }
+                  causes: []
+                  _tag: "Name"
+                  text: {
+                    _tag: "TextRef"
+                    index: 8
+                  }
+                }
+              ]
+            }
+            mode: undefined
+          }
+          failures: undefined
+          requirements: undefined
+          constraints: []
+          effect: false
+          environment: undefined
+          unsafe: false
+          static: true
+        }
+        linkage: undefined
+        properties: []
+      }
+      body: {
+        _tag: "CallableBody"
+        block: {
+          anchor: {
+            _tag: "AuthoredAnchor"
+            owner: {
+              _tag: "AuthoredIdentity"
+              namespace: "fixture"
+              module: "app/Main"
+              path: [
+                {
+                  _tag: "OwnerSegment"
+                  kind: "function"
+                  name: "size"
+                  occurrence: 0
+                }
+              ]
+            }
+            path: [
+              {
+                _tag: "LocalSegment"
+                role: "body"
+                occurrence: 0
+              }
+            ]
+          }
+          origin: {
+            _tag: "Authored"
+          }
+          causes: []
+          _tag: "Block"
+          statements: [
+            {
+              anchor: {
+                _tag: "AuthoredAnchor"
+                owner: {
+                  _tag: "AuthoredIdentity"
+                  namespace: "fixture"
+                  module: "app/Main"
+                  path: [
+                    {
+                      _tag: "OwnerSegment"
+                      kind: "function"
+                      name: "size"
+                      occurrence: 0
+                    }
+                  ]
+                }
+                path: [
+                  {
+                    _tag: "LocalSegment"
+                    role: "body"
+                    occurrence: 0
+                  }
+                  {
+                    _tag: "LocalSegment"
+                    role: "statement"
+                    occurrence: 0
+                  }
+                ]
+              }
+              origin: {
+                _tag: "Authored"
+              }
+              causes: []
+              _tag: "ReturnStatement"
+              value: {
+                anchor: {
+                  _tag: "AuthoredAnchor"
+                  owner: {
+                    _tag: "AuthoredIdentity"
+                    namespace: "fixture"
+                    module: "app/Main"
+                    path: [
+                      {
+                        _tag: "OwnerSegment"
+                        kind: "function"
+                        name: "size"
+                        occurrence: 0
+                      }
+                    ]
+                  }
+                  path: [
+                    {
+                      _tag: "LocalSegment"
+                      role: "body"
+                      occurrence: 0
+                    }
+                    {
+                      _tag: "LocalSegment"
+                      role: "statement"
+                      occurrence: 0
+                    }
+                    {
+                      _tag: "LocalSegment"
+                      role: "value"
+                      occurrence: 0
+                    }
+                  ]
+                }
+                origin: {
+                  _tag: "Authored"
+                }
+                causes: []
+                _tag: "IntegerLiteral"
+                value: 18446744073709551616n
+                radix: 10
+                suffix: undefined
+              }
+            }
+          ]
+        }
+      }
+    }
+    {
+      _tag: "Declaration"
+      owner: {
+        _tag: "AuthoredIdentity"
+        namespace: "fixture"
+        module: "app/Main"
+        path: [
+          {
+            _tag: "OwnerSegment"
+            kind: "function"
+            name: "answer"
+            occurrence: 0
+          }
+        ]
+      }
+      header: {
+        anchor: {
+          _tag: "AuthoredAnchor"
+          owner: {
+            _tag: "AuthoredIdentity"
+            namespace: "fixture"
+            module: "app/Main"
+            path: [
+              {
+                _tag: "OwnerSegment"
+                kind: "function"
+                name: "answer"
+                occurrence: 0
+              }
+            ]
+          }
+          path: [
+            {
+              _tag: "LocalSegment"
+              role: "header"
+              occurrence: 1
+            }
+          ]
+        }
+        origin: {
+          _tag: "Authored"
+        }
+        causes: []
+        name: {
+          anchor: {
+            _tag: "AuthoredAnchor"
+            owner: {
+              _tag: "AuthoredIdentity"
+              namespace: "fixture"
+              module: "app/Main"
+              path: [
+                {
+                  _tag: "OwnerSegment"
+                  kind: "function"
+                  name: "answer"
+                  occurrence: 0
+                }
+              ]
+            }
+            path: [
+              {
+                _tag: "LocalSegment"
+                role: "header"
+                occurrence: 1
+              }
+              {
+                _tag: "LocalSegment"
+                role: "name"
+                occurrence: 0
+              }
+            ]
+          }
+          origin: {
+            _tag: "Authored"
+          }
+          causes: []
+          _tag: "Name"
+          text: {
+            _tag: "TextRef"
+            index: 9
+          }
+        }
+        public: false
+        _tag: "FunctionHeader"
+        contract: {
+          anchor: {
+            _tag: "AuthoredAnchor"
+            owner: {
+              _tag: "AuthoredIdentity"
+              namespace: "fixture"
+              module: "app/Main"
+              path: [
+                {
+                  _tag: "OwnerSegment"
+                  kind: "function"
+                  name: "answer"
+                  occurrence: 0
+                }
+              ]
+            }
+            path: [
+              {
+                _tag: "LocalSegment"
+                role: "header"
+                occurrence: 1
+              }
+              {
+                _tag: "LocalSegment"
+                role: "contract"
+                occurrence: 0
+              }
+            ]
+          }
+          origin: {
+            _tag: "Authored"
+          }
+          causes: []
+          _tag: "CallableContract"
+          generics: []
+          parameters: [
+            {
+              anchor: {
+                _tag: "AuthoredAnchor"
+                owner: {
+                  _tag: "AuthoredIdentity"
+                  namespace: "fixture"
+                  module: "app/Main"
+                  path: [
+                    {
+                      _tag: "OwnerSegment"
+                      kind: "function"
+                      name: "answer"
+                      occurrence: 0
+                    }
+                  ]
+                }
+                path: [
+                  {
+                    _tag: "LocalSegment"
+                    role: "header"
+                    occurrence: 1
+                  }
+                  {
+                    _tag: "LocalSegment"
+                    role: "contract"
+                    occurrence: 0
+                  }
+                  {
+                    _tag: "LocalSegment"
+                    role: "parameters"
+                    occurrence: 0
+                  }
+                  {
+                    _tag: "LocalSegment"
+                    role: "parameter"
+                    occurrence: 0
+                  }
+                ]
+              }
+              origin: {
+                _tag: "Authored"
+              }
+              causes: []
+              _tag: "Parameter"
+              name: {
+                anchor: {
+                  _tag: "AuthoredAnchor"
+                  owner: {
+                    _tag: "AuthoredIdentity"
+                    namespace: "fixture"
+                    module: "app/Main"
+                    path: [
+                      {
+                        _tag: "OwnerSegment"
+                        kind: "function"
+                        name: "answer"
+                        occurrence: 0
+                      }
+                    ]
+                  }
+                  path: [
+                    {
+                      _tag: "LocalSegment"
+                      role: "header"
+                      occurrence: 1
+                    }
+                    {
+                      _tag: "LocalSegment"
+                      role: "contract"
+                      occurrence: 0
+                    }
+                    {
+                      _tag: "LocalSegment"
+                      role: "parameters"
+                      occurrence: 0
+                    }
+                    {
+                      _tag: "LocalSegment"
+                      role: "parameter"
+                      occurrence: 0
+                    }
+                    {
+                      _tag: "LocalSegment"
+                      role: "name"
+                      occurrence: 0
+                    }
+                  ]
+                }
+                origin: {
+                  _tag: "Authored"
+                }
+                causes: []
+                _tag: "Name"
+                text: {
+                  _tag: "TextRef"
+                  index: 10
+                }
+              }
+              type: {
+                anchor: {
+                  _tag: "AuthoredAnchor"
+                  owner: {
+                    _tag: "AuthoredIdentity"
+                    namespace: "fixture"
+                    module: "app/Main"
+                    path: [
+                      {
+                        _tag: "OwnerSegment"
+                        kind: "function"
+                        name: "answer"
+                        occurrence: 0
+                      }
+                    ]
+                  }
+                  path: [
+                    {
+                      _tag: "LocalSegment"
+                      role: "header"
+                      occurrence: 1
+                    }
+                    {
+                      _tag: "LocalSegment"
+                      role: "contract"
+                      occurrence: 0
+                    }
+                    {
+                      _tag: "LocalSegment"
+                      role: "parameters"
+                      occurrence: 0
+                    }
+                    {
+                      _tag: "LocalSegment"
+                      role: "parameter"
+                      occurrence: 0
+                    }
+                    {
+                      _tag: "LocalSegment"
+                      role: "type"
+                      occurrence: 0
+                    }
+                    {
+                      _tag: "LocalSegment"
+                      role: "type"
+                      occurrence: 0
+                    }
+                  ]
+                }
+                origin: {
+                  _tag: "Authored"
+                }
+                causes: []
+                _tag: "NamedType"
+                path: {
+                  anchor: {
+                    _tag: "AuthoredAnchor"
+                    owner: {
+                      _tag: "AuthoredIdentity"
+                      namespace: "fixture"
+                      module: "app/Main"
+                      path: [
+                        {
+                          _tag: "OwnerSegment"
+                          kind: "function"
+                          name: "answer"
+                          occurrence: 0
+                        }
+                      ]
+                    }
+                    path: [
+                      {
+                        _tag: "LocalSegment"
+                        role: "header"
+                        occurrence: 1
+                      }
+                      {
+                        _tag: "LocalSegment"
+                        role: "contract"
+                        occurrence: 0
+                      }
+                      {
+                        _tag: "LocalSegment"
+                        role: "parameters"
+                        occurrence: 0
+                      }
+                      {
+                        _tag: "LocalSegment"
+                        role: "parameter"
+                        occurrence: 0
+                      }
+                      {
+                        _tag: "LocalSegment"
+                        role: "type"
+                        occurrence: 0
+                      }
+                      {
+                        _tag: "LocalSegment"
+                        role: "type"
+                        occurrence: 0
+                      }
+                      {
+                        _tag: "LocalSegment"
+                        role: "path"
+                        occurrence: 0
+                      }
+                    ]
+                  }
+                  origin: {
+                    _tag: "Authored"
+                  }
+                  causes: []
+                  _tag: "Path"
+                  segments: [
+                    {
+                      anchor: {
+                        _tag: "AuthoredAnchor"
+                        owner: {
+                          _tag: "AuthoredIdentity"
+                          namespace: "fixture"
+                          module: "app/Main"
+                          path: [
+                            {
+                              _tag: "OwnerSegment"
+                              kind: "function"
+                              name: "answer"
+                              occurrence: 0
+                            }
+                          ]
+                        }
+                        path: [
+                          {
+                            _tag: "LocalSegment"
+                            role: "header"
+                            occurrence: 1
+                          }
+                          {
+                            _tag: "LocalSegment"
+                            role: "contract"
+                            occurrence: 0
+                          }
+                          {
+                            _tag: "LocalSegment"
+                            role: "parameters"
+                            occurrence: 0
+                          }
+                          {
+                            _tag: "LocalSegment"
+                            role: "parameter"
+                            occurrence: 0
+                          }
+                          {
+                            _tag: "LocalSegment"
+                            role: "type"
+                            occurrence: 0
+                          }
+                          {
+                            _tag: "LocalSegment"
+                            role: "type"
+                            occurrence: 0
+                          }
+                          {
+                            _tag: "LocalSegment"
+                            role: "path"
+                            occurrence: 0
+                          }
+                          {
+                            _tag: "LocalSegment"
+                            role: "segment"
+                            occurrence: 0
+                          }
+                        ]
+                      }
+                      origin: {
+                        _tag: "Authored"
+                      }
+                      causes: []
+                      _tag: "Name"
+                      text: {
+                        _tag: "TextRef"
+                        index: 5
+                      }
+                    }
+                  ]
+                }
+                mode: undefined
+              }
+              mode: "Value"
+            }
+          ]
+          variadic: false
+          result: {
+            anchor: {
+              _tag: "AuthoredAnchor"
+              owner: {
+                _tag: "AuthoredIdentity"
+                namespace: "fixture"
+                module: "app/Main"
+                path: [
+                  {
+                    _tag: "OwnerSegment"
+                    kind: "function"
+                    name: "answer"
+                    occurrence: 0
+                  }
+                ]
+              }
+              path: [
+                {
+                  _tag: "LocalSegment"
+                  role: "header"
+                  occurrence: 1
+                }
+                {
+                  _tag: "LocalSegment"
+                  role: "contract"
+                  occurrence: 0
+                }
+                {
+                  _tag: "LocalSegment"
+                  role: "result"
+                  occurrence: 0
+                }
+                {
+                  _tag: "LocalSegment"
+                  role: "type"
+                  occurrence: 0
+                }
+              ]
+            }
+            origin: {
+              _tag: "Authored"
+            }
+            causes: []
+            _tag: "NamedType"
+            path: {
+              anchor: {
+                _tag: "AuthoredAnchor"
+                owner: {
+                  _tag: "AuthoredIdentity"
+                  namespace: "fixture"
+                  module: "app/Main"
+                  path: [
+                    {
+                      _tag: "OwnerSegment"
+                      kind: "function"
+                      name: "answer"
+                      occurrence: 0
+                    }
+                  ]
+                }
+                path: [
+                  {
+                    _tag: "LocalSegment"
+                    role: "header"
+                    occurrence: 1
+                  }
+                  {
+                    _tag: "LocalSegment"
+                    role: "contract"
+                    occurrence: 0
+                  }
+                  {
+                    _tag: "LocalSegment"
+                    role: "result"
+                    occurrence: 0
+                  }
+                  {
+                    _tag: "LocalSegment"
+                    role: "type"
+                    occurrence: 0
+                  }
+                  {
+                    _tag: "LocalSegment"
+                    role: "path"
+                    occurrence: 0
+                  }
+                ]
+              }
+              origin: {
+                _tag: "Authored"
+              }
+              causes: []
+              _tag: "Path"
+              segments: [
+                {
+                  anchor: {
+                    _tag: "AuthoredAnchor"
+                    owner: {
+                      _tag: "AuthoredIdentity"
+                      namespace: "fixture"
+                      module: "app/Main"
+                      path: [
+                        {
+                          _tag: "OwnerSegment"
+                          kind: "function"
+                          name: "answer"
+                          occurrence: 0
+                        }
+                      ]
+                    }
+                    path: [
+                      {
+                        _tag: "LocalSegment"
+                        role: "header"
+                        occurrence: 1
+                      }
+                      {
+                        _tag: "LocalSegment"
+                        role: "contract"
+                        occurrence: 0
+                      }
+                      {
+                        _tag: "LocalSegment"
+                        role: "result"
+                        occurrence: 0
+                      }
+                      {
+                        _tag: "LocalSegment"
+                        role: "type"
+                        occurrence: 0
+                      }
+                      {
+                        _tag: "LocalSegment"
+                        role: "path"
+                        occurrence: 0
+                      }
+                      {
+                        _tag: "LocalSegment"
+                        role: "segment"
+                        occurrence: 0
+                      }
+                    ]
+                  }
+                  origin: {
+                    _tag: "Authored"
+                  }
+                  causes: []
+                  _tag: "Name"
+                  text: {
+                    _tag: "TextRef"
+                    index: 5
+                  }
+                }
+              ]
+            }
+            mode: undefined
+          }
+          failures: undefined
+          requirements: undefined
+          constraints: []
+          effect: false
+          environment: undefined
+          unsafe: false
+          static: false
+        }
+        linkage: undefined
+        properties: []
+      }
+      body: {
+        _tag: "CallableBody"
+        block: {
+          anchor: {
+            _tag: "AuthoredAnchor"
+            owner: {
+              _tag: "AuthoredIdentity"
+              namespace: "fixture"
+              module: "app/Main"
+              path: [
+                {
+                  _tag: "OwnerSegment"
+                  kind: "function"
+                  name: "answer"
+                  occurrence: 0
+                }
+              ]
+            }
+            path: [
+              {
+                _tag: "LocalSegment"
+                role: "body"
+                occurrence: 0
+              }
+            ]
+          }
+          origin: {
+            _tag: "Authored"
+          }
+          causes: []
+          _tag: "Block"
+          statements: [
+            {
+              anchor: {
+                _tag: "AuthoredAnchor"
+                owner: {
+                  _tag: "AuthoredIdentity"
+                  namespace: "fixture"
+                  module: "app/Main"
+                  path: [
+                    {
+                      _tag: "OwnerSegment"
+                      kind: "function"
+                      name: "answer"
+                      occurrence: 0
+                    }
+                  ]
+                }
+                path: [
+                  {
+                    _tag: "LocalSegment"
+                    role: "body"
+                    occurrence: 0
+                  }
+                  {
+                    _tag: "LocalSegment"
+                    role: "statement"
+                    occurrence: 0
+                  }
+                ]
+              }
+              origin: {
+                _tag: "Authored"
+              }
+              causes: []
+              _tag: "BindingStatement"
+              name: {
+                anchor: {
+                  _tag: "AuthoredAnchor"
+                  owner: {
+                    _tag: "AuthoredIdentity"
+                    namespace: "fixture"
+                    module: "app/Main"
+                    path: [
+                      {
+                        _tag: "OwnerSegment"
+                        kind: "function"
+                        name: "answer"
+                        occurrence: 0
+                      }
+                    ]
+                  }
+                  path: [
+                    {
+                      _tag: "LocalSegment"
+                      role: "body"
+                      occurrence: 0
+                    }
+                    {
+                      _tag: "LocalSegment"
+                      role: "statement"
+                      occurrence: 0
+                    }
+                    {
+                      _tag: "LocalSegment"
+                      role: "name"
+                      occurrence: 0
+                    }
+                  ]
+                }
+                origin: {
+                  _tag: "Authored"
+                }
+                causes: []
+                _tag: "Name"
+                text: {
+                  _tag: "TextRef"
+                  index: 13
+                }
+              }
+              mutable: false
+              static: false
+              type: undefined
+              initializer: {
+                anchor: {
+                  _tag: "AuthoredAnchor"
+                  owner: {
+                    _tag: "AuthoredIdentity"
+                    namespace: "fixture"
+                    module: "app/Main"
+                    path: [
+                      {
+                        _tag: "OwnerSegment"
+                        kind: "function"
+                        name: "answer"
+                        occurrence: 0
+                      }
+                    ]
+                  }
+                  path: [
+                    {
+                      _tag: "LocalSegment"
+                      role: "body"
+                      occurrence: 0
+                    }
+                    {
+                      _tag: "LocalSegment"
+                      role: "statement"
+                      occurrence: 0
+                    }
+                    {
+                      _tag: "LocalSegment"
+                      role: "initializer"
+                      occurrence: 0
+                    }
+                  ]
+                }
+                origin: {
+                  _tag: "Authored"
+                }
+                causes: []
+                _tag: "CallExpression"
+                callee: {
+                  anchor: {
+                    _tag: "AuthoredAnchor"
+                    owner: {
+                      _tag: "AuthoredIdentity"
+                      namespace: "fixture"
+                      module: "app/Main"
+                      path: [
+                        {
+                          _tag: "OwnerSegment"
+                          kind: "function"
+                          name: "answer"
+                          occurrence: 0
+                        }
+                      ]
+                    }
+                    path: [
+                      {
+                        _tag: "LocalSegment"
+                        role: "body"
+                        occurrence: 0
+                      }
+                      {
+                        _tag: "LocalSegment"
+                        role: "statement"
+                        occurrence: 0
+                      }
+                      {
+                        _tag: "LocalSegment"
+                        role: "initializer"
+                        occurrence: 0
+                      }
+                      {
+                        _tag: "LocalSegment"
+                        role: "callee"
+                        occurrence: 0
+                      }
+                    ]
+                  }
+                  origin: {
+                    _tag: "Authored"
+                  }
+                  causes: []
+                  _tag: "FieldExpression"
+                  subject: {
+                    anchor: {
+                      _tag: "AuthoredAnchor"
+                      owner: {
+                        _tag: "AuthoredIdentity"
+                        namespace: "fixture"
+                        module: "app/Main"
+                        path: [
+                          {
+                            _tag: "OwnerSegment"
+                            kind: "function"
+                            name: "answer"
+                            occurrence: 0
+                          }
+                        ]
+                      }
+                      path: [
+                        {
+                          _tag: "LocalSegment"
+                          role: "body"
+                          occurrence: 0
+                        }
+                        {
+                          _tag: "LocalSegment"
+                          role: "statement"
+                          occurrence: 0
+                        }
+                        {
+                          _tag: "LocalSegment"
+                          role: "initializer"
+                          occurrence: 0
+                        }
+                        {
+                          _tag: "LocalSegment"
+                          role: "callee"
+                          occurrence: 0
+                        }
+                        {
+                          _tag: "LocalSegment"
+                          role: "subject"
+                          occurrence: 0
+                        }
+                      ]
+                    }
+                    origin: {
+                      _tag: "Authored"
+                    }
+                    causes: []
+                    _tag: "IdentifierExpression"
+                    name: {
+                      anchor: {
+                        _tag: "AuthoredAnchor"
+                        owner: {
+                          _tag: "AuthoredIdentity"
+                          namespace: "fixture"
+                          module: "app/Main"
+                          path: [
+                            {
+                              _tag: "OwnerSegment"
+                              kind: "function"
+                              name: "answer"
+                              occurrence: 0
+                            }
+                          ]
+                        }
+                        path: [
+                          {
+                            _tag: "LocalSegment"
+                            role: "body"
+                            occurrence: 0
+                          }
+                          {
+                            _tag: "LocalSegment"
+                            role: "statement"
+                            occurrence: 0
+                          }
+                          {
+                            _tag: "LocalSegment"
+                            role: "initializer"
+                            occurrence: 0
+                          }
+                          {
+                            _tag: "LocalSegment"
+                            role: "callee"
+                            occurrence: 0
+                          }
+                          {
+                            _tag: "LocalSegment"
+                            role: "subject"
+                            occurrence: 0
+                          }
+                          {
+                            _tag: "LocalSegment"
+                            role: "name"
+                            occurrence: 0
+                          }
+                        ]
+                      }
+                      origin: {
+                        _tag: "Authored"
+                      }
+                      causes: []
+                      _tag: "Name"
+                      text: {
+                        _tag: "TextRef"
+                        index: 1
+                      }
+                    }
+                    binding: undefined
+                  }
+                  field: {
+                    anchor: {
+                      _tag: "AuthoredAnchor"
+                      owner: {
+                        _tag: "AuthoredIdentity"
+                        namespace: "fixture"
+                        module: "app/Main"
+                        path: [
+                          {
+                            _tag: "OwnerSegment"
+                            kind: "function"
+                            name: "answer"
+                            occurrence: 0
+                          }
+                        ]
+                      }
+                      path: [
+                        {
+                          _tag: "LocalSegment"
+                          role: "body"
+                          occurrence: 0
+                        }
+                        {
+                          _tag: "LocalSegment"
+                          role: "statement"
+                          occurrence: 0
+                        }
+                        {
+                          _tag: "LocalSegment"
+                          role: "initializer"
+                          occurrence: 0
+                        }
+                        {
+                          _tag: "LocalSegment"
+                          role: "callee"
+                          occurrence: 0
+                        }
+                        {
+                          _tag: "LocalSegment"
+                          role: "field"
+                          occurrence: 0
+                        }
+                      ]
+                    }
+                    origin: {
+                      _tag: "Authored"
+                    }
+                    causes: []
+                    _tag: "Name"
+                    text: {
+                      _tag: "TextRef"
+                      index: 11
+                    }
+                  }
+                }
+                generics: undefined
+                arguments: [
+                  {
+                    anchor: {
+                      _tag: "AuthoredAnchor"
+                      owner: {
+                        _tag: "AuthoredIdentity"
+                        namespace: "fixture"
+                        module: "app/Main"
+                        path: [
+                          {
+                            _tag: "OwnerSegment"
+                            kind: "function"
+                            name: "answer"
+                            occurrence: 0
+                          }
+                        ]
+                      }
+                      path: [
+                        {
+                          _tag: "LocalSegment"
+                          role: "body"
+                          occurrence: 0
+                        }
+                        {
+                          _tag: "LocalSegment"
+                          role: "statement"
+                          occurrence: 0
+                        }
+                        {
+                          _tag: "LocalSegment"
+                          role: "initializer"
+                          occurrence: 0
+                        }
+                        {
+                          _tag: "LocalSegment"
+                          role: "arguments-list"
+                          occurrence: 0
+                        }
+                        {
+                          _tag: "LocalSegment"
+                          role: "argument"
+                          occurrence: 0
+                        }
+                      ]
+                    }
+                    origin: {
+                      _tag: "Authored"
+                    }
+                    causes: []
+                    _tag: "IdentifierExpression"
+                    name: {
+                      anchor: {
+                        _tag: "AuthoredAnchor"
+                        owner: {
+                          _tag: "AuthoredIdentity"
+                          namespace: "fixture"
+                          module: "app/Main"
+                          path: [
+                            {
+                              _tag: "OwnerSegment"
+                              kind: "function"
+                              name: "answer"
+                              occurrence: 0
+                            }
+                          ]
+                        }
+                        path: [
+                          {
+                            _tag: "LocalSegment"
+                            role: "body"
+                            occurrence: 0
+                          }
+                          {
+                            _tag: "LocalSegment"
+                            role: "statement"
+                            occurrence: 0
+                          }
+                          {
+                            _tag: "LocalSegment"
+                            role: "initializer"
+                            occurrence: 0
+                          }
+                          {
+                            _tag: "LocalSegment"
+                            role: "arguments-list"
+                            occurrence: 0
+                          }
+                          {
+                            _tag: "LocalSegment"
+                            role: "argument"
+                            occurrence: 0
+                          }
+                          {
+                            _tag: "LocalSegment"
+                            role: "name"
+                            occurrence: 0
+                          }
+                        ]
+                      }
+                      origin: {
+                        _tag: "Authored"
+                      }
+                      causes: []
+                      _tag: "Name"
+                      text: {
+                        _tag: "TextRef"
+                        index: 10
+                      }
+                    }
+                    binding: {
+                      _tag: "LexicalReference"
+                      owner: {
+                        _tag: "AuthoredIdentity"
+                        namespace: "fixture"
+                        module: "app/Main"
+                        path: [
+                          {
+                            _tag: "OwnerSegment"
+                            kind: "function"
+                            name: "answer"
+                            occurrence: 0
+                          }
+                        ]
+                      }
+                      path: [
+                        {
+                          _tag: "LocalSegment"
+                          role: "header"
+                          occurrence: 1
+                        }
+                        {
+                          _tag: "LocalSegment"
+                          role: "contract"
+                          occurrence: 0
+                        }
+                        {
+                          _tag: "LocalSegment"
+                          role: "parameters"
+                          occurrence: 0
+                        }
+                        {
+                          _tag: "LocalSegment"
+                          role: "parameter"
+                          occurrence: 0
+                        }
+                      ]
+                    }
+                  }
+                  {
+                    anchor: {
+                      _tag: "AuthoredAnchor"
+                      owner: {
+                        _tag: "AuthoredIdentity"
+                        namespace: "fixture"
+                        module: "app/Main"
+                        path: [
+                          {
+                            _tag: "OwnerSegment"
+                            kind: "function"
+                            name: "answer"
+                            occurrence: 0
+                          }
+                        ]
+                      }
+                      path: [
+                        {
+                          _tag: "LocalSegment"
+                          role: "body"
+                          occurrence: 0
+                        }
+                        {
+                          _tag: "LocalSegment"
+                          role: "statement"
+                          occurrence: 0
+                        }
+                        {
+                          _tag: "LocalSegment"
+                          role: "initializer"
+                          occurrence: 0
+                        }
+                        {
+                          _tag: "LocalSegment"
+                          role: "arguments-list"
+                          occurrence: 0
+                        }
+                        {
+                          _tag: "LocalSegment"
+                          role: "argument"
+                          occurrence: 1
+                        }
+                      ]
+                    }
+                    origin: {
+                      _tag: "Authored"
+                    }
+                    causes: []
+                    _tag: "FloatingLiteral"
+                    sign: "Positive"
+                    coefficient: 15n
+                    exponent: 299n
+                    suffix: undefined
+                  }
+                  {
+                    anchor: {
+                      _tag: "AuthoredAnchor"
+                      owner: {
+                        _tag: "AuthoredIdentity"
+                        namespace: "fixture"
+                        module: "app/Main"
+                        path: [
+                          {
+                            _tag: "OwnerSegment"
+                            kind: "function"
+                            name: "answer"
+                            occurrence: 0
+                          }
+                        ]
+                      }
+                      path: [
+                        {
+                          _tag: "LocalSegment"
+                          role: "body"
+                          occurrence: 0
+                        }
+                        {
+                          _tag: "LocalSegment"
+                          role: "statement"
+                          occurrence: 0
+                        }
+                        {
+                          _tag: "LocalSegment"
+                          role: "initializer"
+                          occurrence: 0
+                        }
+                        {
+                          _tag: "LocalSegment"
+                          role: "arguments-list"
+                          occurrence: 0
+                        }
+                        {
+                          _tag: "LocalSegment"
+                          role: "argument"
+                          occurrence: 2
+                        }
+                      ]
+                    }
+                    origin: {
+                      _tag: "Authored"
+                    }
+                    causes: []
+                    _tag: "CharacterLiteral"
+                    scalar: 122
+                  }
+                  {
+                    anchor: {
+                      _tag: "AuthoredAnchor"
+                      owner: {
+                        _tag: "AuthoredIdentity"
+                        namespace: "fixture"
+                        module: "app/Main"
+                        path: [
+                          {
+                            _tag: "OwnerSegment"
+                            kind: "function"
+                            name: "answer"
+                            occurrence: 0
+                          }
+                        ]
+                      }
+                      path: [
+                        {
+                          _tag: "LocalSegment"
+                          role: "body"
+                          occurrence: 0
+                        }
+                        {
+                          _tag: "LocalSegment"
+                          role: "statement"
+                          occurrence: 0
+                        }
+                        {
+                          _tag: "LocalSegment"
+                          role: "initializer"
+                          occurrence: 0
+                        }
+                        {
+                          _tag: "LocalSegment"
+                          role: "arguments-list"
+                          occurrence: 0
+                        }
+                        {
+                          _tag: "LocalSegment"
+                          role: "argument"
+                          occurrence: 3
+                        }
+                      ]
+                    }
+                    origin: {
+                      _tag: "Authored"
+                    }
+                    causes: []
+                    _tag: "TextLiteral"
+                    value: {
+                      _tag: "TextRef"
+                      index: 12
+                    }
+                  }
+                  {
+                    anchor: {
+                      _tag: "AuthoredAnchor"
+                      owner: {
+                        _tag: "AuthoredIdentity"
+                        namespace: "fixture"
+                        module: "app/Main"
+                        path: [
+                          {
+                            _tag: "OwnerSegment"
+                            kind: "function"
+                            name: "answer"
+                            occurrence: 0
+                          }
+                        ]
+                      }
+                      path: [
+                        {
+                          _tag: "LocalSegment"
+                          role: "body"
+                          occurrence: 0
+                        }
+                        {
+                          _tag: "LocalSegment"
+                          role: "statement"
+                          occurrence: 0
+                        }
+                        {
+                          _tag: "LocalSegment"
+                          role: "initializer"
+                          occurrence: 0
+                        }
+                        {
+                          _tag: "LocalSegment"
+                          role: "arguments-list"
+                          occurrence: 0
+                        }
+                        {
+                          _tag: "LocalSegment"
+                          role: "argument"
+                          occurrence: 4
+                        }
+                      ]
+                    }
+                    origin: {
+                      _tag: "Authored"
+                    }
+                    causes: []
+                    _tag: "BytesLiteral"
+                    value: {
+                      _tag: "BytesRef"
+                      index: 0
+                    }
+                  }
+                  {
+                    anchor: {
+                      _tag: "AuthoredAnchor"
+                      owner: {
+                        _tag: "AuthoredIdentity"
+                        namespace: "fixture"
+                        module: "app/Main"
+                        path: [
+                          {
+                            _tag: "OwnerSegment"
+                            kind: "function"
+                            name: "answer"
+                            occurrence: 0
+                          }
+                        ]
+                      }
+                      path: [
+                        {
+                          _tag: "LocalSegment"
+                          role: "body"
+                          occurrence: 0
+                        }
+                        {
+                          _tag: "LocalSegment"
+                          role: "statement"
+                          occurrence: 0
+                        }
+                        {
+                          _tag: "LocalSegment"
+                          role: "initializer"
+                          occurrence: 0
+                        }
+                        {
+                          _tag: "LocalSegment"
+                          role: "arguments-list"
+                          occurrence: 0
+                        }
+                        {
+                          _tag: "LocalSegment"
+                          role: "argument"
+                          occurrence: 5
+                        }
+                      ]
+                    }
+                    origin: {
+                      _tag: "Authored"
+                    }
+                    causes: []
+                    _tag: "DurationLiteral"
+                    components: [
+                      {
+                        anchor: {
+                          _tag: "AuthoredAnchor"
+                          owner: {
+                            _tag: "AuthoredIdentity"
+                            namespace: "fixture"
+                            module: "app/Main"
+                            path: [
+                              {
+                                _tag: "OwnerSegment"
+                                kind: "function"
+                                name: "answer"
+                                occurrence: 0
+                              }
+                            ]
+                          }
+                          path: [
+                            {
+                              _tag: "LocalSegment"
+                              role: "body"
+                              occurrence: 0
+                            }
+                            {
+                              _tag: "LocalSegment"
+                              role: "statement"
+                              occurrence: 0
+                            }
+                            {
+                              _tag: "LocalSegment"
+                              role: "initializer"
+                              occurrence: 0
+                            }
+                            {
+                              _tag: "LocalSegment"
+                              role: "arguments-list"
+                              occurrence: 0
+                            }
+                            {
+                              _tag: "LocalSegment"
+                              role: "argument"
+                              occurrence: 5
+                            }
+                            {
+                              _tag: "LocalSegment"
+                              role: "component"
+                              occurrence: 0
+                            }
+                          ]
+                        }
+                        origin: {
+                          _tag: "Authored"
+                        }
+                        causes: []
+                        _tag: "DurationComponent"
+                        magnitude: 2n
+                        unit: "h"
+                      }
+                    ]
+                  }
+                ]
+              }
+            }
+            {
+              anchor: {
+                _tag: "AuthoredAnchor"
+                owner: {
+                  _tag: "AuthoredIdentity"
+                  namespace: "fixture"
+                  module: "app/Main"
+                  path: [
+                    {
+                      _tag: "OwnerSegment"
+                      kind: "function"
+                      name: "answer"
+                      occurrence: 0
+                    }
+                  ]
+                }
+                path: [
+                  {
+                    _tag: "LocalSegment"
+                    role: "body"
+                    occurrence: 0
+                  }
+                  {
+                    _tag: "LocalSegment"
+                    role: "statement"
+                    occurrence: 1
+                  }
+                ]
+              }
+              origin: {
+                _tag: "Authored"
+              }
+              causes: []
+              _tag: "ReturnStatement"
+              value: {
+                anchor: {
+                  _tag: "AuthoredAnchor"
+                  owner: {
+                    _tag: "AuthoredIdentity"
+                    namespace: "fixture"
+                    module: "app/Main"
+                    path: [
+                      {
+                        _tag: "OwnerSegment"
+                        kind: "function"
+                        name: "answer"
+                        occurrence: 0
+                      }
+                    ]
+                  }
+                  path: [
+                    {
+                      _tag: "LocalSegment"
+                      role: "body"
+                      occurrence: 0
+                    }
+                    {
+                      _tag: "LocalSegment"
+                      role: "statement"
+                      occurrence: 1
+                    }
+                    {
+                      _tag: "LocalSegment"
+                      role: "value"
+                      occurrence: 0
+                    }
+                  ]
+                }
+                origin: {
+                  _tag: "Authored"
+                }
+                causes: []
+                _tag: "IdentifierExpression"
+                name: {
+                  anchor: {
+                    _tag: "AuthoredAnchor"
+                    owner: {
+                      _tag: "AuthoredIdentity"
+                      namespace: "fixture"
+                      module: "app/Main"
+                      path: [
+                        {
+                          _tag: "OwnerSegment"
+                          kind: "function"
+                          name: "answer"
+                          occurrence: 0
+                        }
+                      ]
+                    }
+                    path: [
+                      {
+                        _tag: "LocalSegment"
+                        role: "body"
+                        occurrence: 0
+                      }
+                      {
+                        _tag: "LocalSegment"
+                        role: "statement"
+                        occurrence: 1
+                      }
+                      {
+                        _tag: "LocalSegment"
+                        role: "value"
+                        occurrence: 0
+                      }
+                      {
+                        _tag: "LocalSegment"
+                        role: "name"
+                        occurrence: 0
+                      }
+                    ]
+                  }
+                  origin: {
+                    _tag: "Authored"
+                  }
+                  causes: []
+                  _tag: "Name"
+                  text: {
+                    _tag: "TextRef"
+                    index: 13
+                  }
+                }
+                binding: {
+                  _tag: "LexicalReference"
+                  owner: {
+                    _tag: "AuthoredIdentity"
+                    namespace: "fixture"
+                    module: "app/Main"
+                    path: [
+                      {
+                        _tag: "OwnerSegment"
+                        kind: "function"
+                        name: "answer"
+                        occurrence: 0
+                      }
+                    ]
+                  }
+                  path: [
+                    {
+                      _tag: "LocalSegment"
+                      role: "body"
+                      occurrence: 0
+                    }
+                    {
+                      _tag: "LocalSegment"
+                      role: "statement"
+                      occurrence: 0
+                    }
+                  ]
+                }
+              }
+            }
+          ]
+        }
+      }
+    }
+    {
+      _tag: "Declaration"
+      owner: {
+        _tag: "AuthoredIdentity"
+        namespace: "fixture"
+        module: "app/Main"
+        path: [
+          {
+            _tag: "OwnerSegment"
+            kind: "constant"
+            name: "broken"
+            occurrence: 0
+          }
+        ]
+      }
+      header: {
+        anchor: {
+          _tag: "AuthoredAnchor"
+          owner: {
+            _tag: "AuthoredIdentity"
+            namespace: "fixture"
+            module: "app/Main"
+            path: [
+              {
+                _tag: "OwnerSegment"
+                kind: "constant"
+                name: "broken"
+                occurrence: 0
+              }
+            ]
+          }
+          path: [
+            {
+              _tag: "LocalSegment"
+              role: "header"
+              occurrence: 0
+            }
+          ]
+        }
+        origin: {
+          _tag: "Authored"
+        }
+        causes: []
+        name: {
+          anchor: {
+            _tag: "AuthoredAnchor"
+            owner: {
+              _tag: "AuthoredIdentity"
+              namespace: "fixture"
+              module: "app/Main"
+              path: [
+                {
+                  _tag: "OwnerSegment"
+                  kind: "constant"
+                  name: "broken"
+                  occurrence: 0
+                }
+              ]
+            }
+            path: [
+              {
+                _tag: "LocalSegment"
+                role: "header"
+                occurrence: 0
+              }
+              {
+                _tag: "LocalSegment"
+                role: "name"
+                occurrence: 0
+              }
+            ]
+          }
+          origin: {
+            _tag: "Authored"
+          }
+          causes: []
+          _tag: "Name"
+          text: {
+            _tag: "TextRef"
+            index: 14
+          }
+        }
+        public: false
+        _tag: "ConstantHeader"
+        type: {
+          anchor: {
+            _tag: "AuthoredAnchor"
+            owner: {
+              _tag: "AuthoredIdentity"
+              namespace: "fixture"
+              module: "app/Main"
+              path: [
+                {
+                  _tag: "OwnerSegment"
+                  kind: "constant"
+                  name: "broken"
+                  occurrence: 0
+                }
+              ]
+            }
+            path: [
+              {
+                _tag: "LocalSegment"
+                role: "header"
+                occurrence: 0
+              }
+              {
+                _tag: "LocalSegment"
+                role: "type"
+                occurrence: 0
+              }
+              {
+                _tag: "LocalSegment"
+                role: "type"
+                occurrence: 0
+              }
+            ]
+          }
+          origin: {
+            _tag: "Authored"
+          }
+          causes: [
+            {
+              _tag: "Cause"
+              anchor: {
+                _tag: "AuthoredAnchor"
+                owner: {
+                  _tag: "AuthoredIdentity"
+                  namespace: "fixture"
+                  module: "app/Main"
+                  path: [
+                    {
+                      _tag: "OwnerSegment"
+                      kind: "constant"
+                      name: "broken"
+                      occurrence: 0
+                    }
+                  ]
+                }
+                path: [
+                  {
+                    _tag: "LocalSegment"
+                    role: "header"
+                    occurrence: 0
+                  }
+                  {
+                    _tag: "LocalSegment"
+                    role: "type"
+                    occurrence: 0
+                  }
+                  {
+                    _tag: "LocalSegment"
+                    role: "type"
+                    occurrence: 0
+                  }
+                ]
+              }
+              code: "PAR0001"
+            }
+          ]
+          _tag: "NamedType"
+          path: {
+            anchor: {
+              _tag: "AuthoredAnchor"
+              owner: {
+                _tag: "AuthoredIdentity"
+                namespace: "fixture"
+                module: "app/Main"
+                path: [
+                  {
+                    _tag: "OwnerSegment"
+                    kind: "constant"
+                    name: "broken"
+                    occurrence: 0
+                  }
+                ]
+              }
+              path: [
+                {
+                  _tag: "LocalSegment"
+                  role: "header"
+                  occurrence: 0
+                }
+                {
+                  _tag: "LocalSegment"
+                  role: "type"
+                  occurrence: 0
+                }
+                {
+                  _tag: "LocalSegment"
+                  role: "type"
+                  occurrence: 0
+                }
+                {
+                  _tag: "LocalSegment"
+                  role: "path"
+                  occurrence: 0
+                }
+              ]
+            }
+            origin: {
+              _tag: "Authored"
+            }
+            causes: [
+              {
+                _tag: "Cause"
+                anchor: {
+                  _tag: "AuthoredAnchor"
+                  owner: {
+                    _tag: "AuthoredIdentity"
+                    namespace: "fixture"
+                    module: "app/Main"
+                    path: [
+                      {
+                        _tag: "OwnerSegment"
+                        kind: "constant"
+                        name: "broken"
+                        occurrence: 0
+                      }
+                    ]
+                  }
+                  path: [
+                    {
+                      _tag: "LocalSegment"
+                      role: "header"
+                      occurrence: 0
+                    }
+                    {
+                      _tag: "LocalSegment"
+                      role: "type"
+                      occurrence: 0
+                    }
+                    {
+                      _tag: "LocalSegment"
+                      role: "type"
+                      occurrence: 0
+                    }
+                    {
+                      _tag: "LocalSegment"
+                      role: "path"
+                      occurrence: 0
+                    }
+                  ]
+                }
+                code: "PAR0001"
+              }
+            ]
+            _tag: "Path"
+            segments: [
+              {
+                anchor: {
+                  _tag: "AuthoredAnchor"
+                  owner: {
+                    _tag: "AuthoredIdentity"
+                    namespace: "fixture"
+                    module: "app/Main"
+                    path: [
+                      {
+                        _tag: "OwnerSegment"
+                        kind: "constant"
+                        name: "broken"
+                        occurrence: 0
+                      }
+                    ]
+                  }
+                  path: [
+                    {
+                      _tag: "LocalSegment"
+                      role: "header"
+                      occurrence: 0
+                    }
+                    {
+                      _tag: "LocalSegment"
+                      role: "type"
+                      occurrence: 0
+                    }
+                    {
+                      _tag: "LocalSegment"
+                      role: "type"
+                      occurrence: 0
+                    }
+                    {
+                      _tag: "LocalSegment"
+                      role: "path"
+                      occurrence: 0
+                    }
+                    {
+                      _tag: "LocalSegment"
+                      role: "segment"
+                      occurrence: 0
+                    }
+                  ]
+                }
+                origin: {
+                  _tag: "Authored"
+                }
+                causes: [
+                  {
+                    _tag: "Cause"
+                    anchor: {
+                      _tag: "AuthoredAnchor"
+                      owner: {
+                        _tag: "AuthoredIdentity"
+                        namespace: "fixture"
+                        module: "app/Main"
+                        path: [
+                          {
+                            _tag: "OwnerSegment"
+                            kind: "constant"
+                            name: "broken"
+                            occurrence: 0
+                          }
+                        ]
+                      }
+                      path: [
+                        {
+                          _tag: "LocalSegment"
+                          role: "header"
+                          occurrence: 0
+                        }
+                        {
+                          _tag: "LocalSegment"
+                          role: "type"
+                          occurrence: 0
+                        }
+                        {
+                          _tag: "LocalSegment"
+                          role: "type"
+                          occurrence: 0
+                        }
+                        {
+                          _tag: "LocalSegment"
+                          role: "path"
+                          occurrence: 0
+                        }
+                        {
+                          _tag: "LocalSegment"
+                          role: "segment"
+                          occurrence: 0
+                        }
+                      ]
+                    }
+                    code: "PAR0001"
+                  }
+                ]
+                _tag: "MissingName"
+              }
+            ]
+          }
+          mode: undefined
+        }
+      }
+      body: {
+        _tag: "InitializerBody"
+        value: {
+          anchor: {
+            _tag: "AuthoredAnchor"
+            owner: {
+              _tag: "AuthoredIdentity"
+              namespace: "fixture"
+              module: "app/Main"
+              path: [
+                {
+                  _tag: "OwnerSegment"
+                  kind: "constant"
+                  name: "broken"
+                  occurrence: 0
+                }
+              ]
+            }
+            path: [
+              {
+                _tag: "LocalSegment"
+                role: "body"
+                occurrence: 0
+              }
+            ]
+          }
+          origin: {
+            _tag: "Authored"
+          }
+          causes: []
+          _tag: "IntegerLiteral"
+          value: 1n
+          radix: 10
+          suffix: undefined
+        }
+      }
+    }
+    {
+      _tag: "Declaration"
+      owner: {
+        _tag: "AuthoredIdentity"
+        namespace: "fixture"
+        module: "app/Main"
+        path: [
+          {
+            _tag: "OwnerSegment"
+            kind: "function"
+            name: "healthy"
+            occurrence: 0
+          }
+        ]
+      }
+      header: {
+        anchor: {
+          _tag: "AuthoredAnchor"
+          owner: {
+            _tag: "AuthoredIdentity"
+            namespace: "fixture"
+            module: "app/Main"
+            path: [
+              {
+                _tag: "OwnerSegment"
+                kind: "function"
+                name: "healthy"
+                occurrence: 0
+              }
+            ]
+          }
+          path: [
+            {
+              _tag: "LocalSegment"
+              role: "header"
+              occurrence: 1
+            }
+          ]
+        }
+        origin: {
+          _tag: "Authored"
+        }
+        causes: []
+        name: {
+          anchor: {
+            _tag: "AuthoredAnchor"
+            owner: {
+              _tag: "AuthoredIdentity"
+              namespace: "fixture"
+              module: "app/Main"
+              path: [
+                {
+                  _tag: "OwnerSegment"
+                  kind: "function"
+                  name: "healthy"
+                  occurrence: 0
+                }
+              ]
+            }
+            path: [
+              {
+                _tag: "LocalSegment"
+                role: "header"
+                occurrence: 1
+              }
+              {
+                _tag: "LocalSegment"
+                role: "name"
+                occurrence: 0
+              }
+            ]
+          }
+          origin: {
+            _tag: "Authored"
+          }
+          causes: []
+          _tag: "Name"
+          text: {
+            _tag: "TextRef"
+            index: 15
+          }
+        }
+        public: false
+        _tag: "FunctionHeader"
+        contract: {
+          anchor: {
+            _tag: "AuthoredAnchor"
+            owner: {
+              _tag: "AuthoredIdentity"
+              namespace: "fixture"
+              module: "app/Main"
+              path: [
+                {
+                  _tag: "OwnerSegment"
+                  kind: "function"
+                  name: "healthy"
+                  occurrence: 0
+                }
+              ]
+            }
+            path: [
+              {
+                _tag: "LocalSegment"
+                role: "header"
+                occurrence: 1
+              }
+              {
+                _tag: "LocalSegment"
+                role: "contract"
+                occurrence: 0
+              }
+            ]
+          }
+          origin: {
+            _tag: "Authored"
+          }
+          causes: []
+          _tag: "CallableContract"
+          generics: []
+          parameters: []
+          variadic: false
+          result: {
+            anchor: {
+              _tag: "AuthoredAnchor"
+              owner: {
+                _tag: "AuthoredIdentity"
+                namespace: "fixture"
+                module: "app/Main"
+                path: [
+                  {
+                    _tag: "OwnerSegment"
+                    kind: "function"
+                    name: "healthy"
+                    occurrence: 0
+                  }
+                ]
+              }
+              path: [
+                {
+                  _tag: "LocalSegment"
+                  role: "header"
+                  occurrence: 1
+                }
+                {
+                  _tag: "LocalSegment"
+                  role: "contract"
+                  occurrence: 0
+                }
+                {
+                  _tag: "LocalSegment"
+                  role: "result"
+                  occurrence: 0
+                }
+                {
+                  _tag: "LocalSegment"
+                  role: "type"
+                  occurrence: 0
+                }
+              ]
+            }
+            origin: {
+              _tag: "Authored"
+            }
+            causes: []
+            _tag: "NamedType"
+            path: {
+              anchor: {
+                _tag: "AuthoredAnchor"
+                owner: {
+                  _tag: "AuthoredIdentity"
+                  namespace: "fixture"
+                  module: "app/Main"
+                  path: [
+                    {
+                      _tag: "OwnerSegment"
+                      kind: "function"
+                      name: "healthy"
+                      occurrence: 0
+                    }
+                  ]
+                }
+                path: [
+                  {
+                    _tag: "LocalSegment"
+                    role: "header"
+                    occurrence: 1
+                  }
+                  {
+                    _tag: "LocalSegment"
+                    role: "contract"
+                    occurrence: 0
+                  }
+                  {
+                    _tag: "LocalSegment"
+                    role: "result"
+                    occurrence: 0
+                  }
+                  {
+                    _tag: "LocalSegment"
+                    role: "type"
+                    occurrence: 0
+                  }
+                  {
+                    _tag: "LocalSegment"
+                    role: "path"
+                    occurrence: 0
+                  }
+                ]
+              }
+              origin: {
+                _tag: "Authored"
+              }
+              causes: []
+              _tag: "Path"
+              segments: [
+                {
+                  anchor: {
+                    _tag: "AuthoredAnchor"
+                    owner: {
+                      _tag: "AuthoredIdentity"
+                      namespace: "fixture"
+                      module: "app/Main"
+                      path: [
+                        {
+                          _tag: "OwnerSegment"
+                          kind: "function"
+                          name: "healthy"
+                          occurrence: 0
+                        }
+                      ]
+                    }
+                    path: [
+                      {
+                        _tag: "LocalSegment"
+                        role: "header"
+                        occurrence: 1
+                      }
+                      {
+                        _tag: "LocalSegment"
+                        role: "contract"
+                        occurrence: 0
+                      }
+                      {
+                        _tag: "LocalSegment"
+                        role: "result"
+                        occurrence: 0
+                      }
+                      {
+                        _tag: "LocalSegment"
+                        role: "type"
+                        occurrence: 0
+                      }
+                      {
+                        _tag: "LocalSegment"
+                        role: "path"
+                        occurrence: 0
+                      }
+                      {
+                        _tag: "LocalSegment"
+                        role: "segment"
+                        occurrence: 0
+                      }
+                    ]
+                  }
+                  origin: {
+                    _tag: "Authored"
+                  }
+                  causes: []
+                  _tag: "Name"
+                  text: {
+                    _tag: "TextRef"
+                    index: 5
+                  }
+                }
+              ]
+            }
+            mode: undefined
+          }
+          failures: undefined
+          requirements: undefined
+          constraints: []
+          effect: false
+          environment: undefined
+          unsafe: false
+          static: false
+        }
+        linkage: undefined
+        properties: []
+      }
+      body: {
+        _tag: "CallableBody"
+        block: {
+          anchor: {
+            _tag: "AuthoredAnchor"
+            owner: {
+              _tag: "AuthoredIdentity"
+              namespace: "fixture"
+              module: "app/Main"
+              path: [
+                {
+                  _tag: "OwnerSegment"
+                  kind: "function"
+                  name: "healthy"
+                  occurrence: 0
+                }
+              ]
+            }
+            path: [
+              {
+                _tag: "LocalSegment"
+                role: "body"
+                occurrence: 0
+              }
+            ]
+          }
+          origin: {
+            _tag: "Authored"
+          }
+          causes: []
+          _tag: "Block"
+          statements: [
+            {
+              anchor: {
+                _tag: "AuthoredAnchor"
+                owner: {
+                  _tag: "AuthoredIdentity"
+                  namespace: "fixture"
+                  module: "app/Main"
+                  path: [
+                    {
+                      _tag: "OwnerSegment"
+                      kind: "function"
+                      name: "healthy"
+                      occurrence: 0
+                    }
+                  ]
+                }
+                path: [
+                  {
+                    _tag: "LocalSegment"
+                    role: "body"
+                    occurrence: 0
+                  }
+                  {
+                    _tag: "LocalSegment"
+                    role: "statement"
+                    occurrence: 0
+                  }
+                ]
+              }
+              origin: {
+                _tag: "Authored"
+              }
+              causes: []
+              _tag: "ReturnStatement"
+              value: {
+                anchor: {
+                  _tag: "AuthoredAnchor"
+                  owner: {
+                    _tag: "AuthoredIdentity"
+                    namespace: "fixture"
+                    module: "app/Main"
+                    path: [
+                      {
+                        _tag: "OwnerSegment"
+                        kind: "function"
+                        name: "healthy"
+                        occurrence: 0
+                      }
+                    ]
+                  }
+                  path: [
+                    {
+                      _tag: "LocalSegment"
+                      role: "body"
+                      occurrence: 0
+                    }
+                    {
+                      _tag: "LocalSegment"
+                      role: "statement"
+                      occurrence: 0
+                    }
+                    {
+                      _tag: "LocalSegment"
+                      role: "value"
+                      occurrence: 0
+                    }
+                  ]
+                }
+                origin: {
+                  _tag: "Authored"
+                }
+                causes: []
+                _tag: "CallExpression"
+                callee: {
+                  anchor: {
+                    _tag: "AuthoredAnchor"
+                    owner: {
+                      _tag: "AuthoredIdentity"
+                      namespace: "fixture"
+                      module: "app/Main"
+                      path: [
+                        {
+                          _tag: "OwnerSegment"
+                          kind: "function"
+                          name: "healthy"
+                          occurrence: 0
+                        }
+                      ]
+                    }
+                    path: [
+                      {
+                        _tag: "LocalSegment"
+                        role: "body"
+                        occurrence: 0
+                      }
+                      {
+                        _tag: "LocalSegment"
+                        role: "statement"
+                        occurrence: 0
+                      }
+                      {
+                        _tag: "LocalSegment"
+                        role: "value"
+                        occurrence: 0
+                      }
+                      {
+                        _tag: "LocalSegment"
+                        role: "callee"
+                        occurrence: 0
+                      }
+                    ]
+                  }
+                  origin: {
+                    _tag: "Authored"
+                  }
+                  causes: []
+                  _tag: "IdentifierExpression"
+                  name: {
+                    anchor: {
+                      _tag: "AuthoredAnchor"
+                      owner: {
+                        _tag: "AuthoredIdentity"
+                        namespace: "fixture"
+                        module: "app/Main"
+                        path: [
+                          {
+                            _tag: "OwnerSegment"
+                            kind: "function"
+                            name: "healthy"
+                            occurrence: 0
+                          }
+                        ]
+                      }
+                      path: [
+                        {
+                          _tag: "LocalSegment"
+                          role: "body"
+                          occurrence: 0
+                        }
+                        {
+                          _tag: "LocalSegment"
+                          role: "statement"
+                          occurrence: 0
+                        }
+                        {
+                          _tag: "LocalSegment"
+                          role: "value"
+                          occurrence: 0
+                        }
+                        {
+                          _tag: "LocalSegment"
+                          role: "callee"
+                          occurrence: 0
+                        }
+                        {
+                          _tag: "LocalSegment"
+                          role: "name"
+                          occurrence: 0
+                        }
+                      ]
+                    }
+                    origin: {
+                      _tag: "Authored"
+                    }
+                    causes: []
+                    _tag: "Name"
+                    text: {
+                      _tag: "TextRef"
+                      index: 9
+                    }
+                  }
+                  binding: undefined
+                }
+                generics: undefined
+                arguments: [
+                  {
+                    anchor: {
+                      _tag: "AuthoredAnchor"
+                      owner: {
+                        _tag: "AuthoredIdentity"
+                        namespace: "fixture"
+                        module: "app/Main"
+                        path: [
+                          {
+                            _tag: "OwnerSegment"
+                            kind: "function"
+                            name: "healthy"
+                            occurrence: 0
+                          }
+                        ]
+                      }
+                      path: [
+                        {
+                          _tag: "LocalSegment"
+                          role: "body"
+                          occurrence: 0
+                        }
+                        {
+                          _tag: "LocalSegment"
+                          role: "statement"
+                          occurrence: 0
+                        }
+                        {
+                          _tag: "LocalSegment"
+                          role: "value"
+                          occurrence: 0
+                        }
+                        {
+                          _tag: "LocalSegment"
+                          role: "arguments-list"
+                          occurrence: 0
+                        }
+                        {
+                          _tag: "LocalSegment"
+                          role: "argument"
+                          occurrence: 0
+                        }
+                      ]
+                    }
+                    origin: {
+                      _tag: "Authored"
+                    }
+                    causes: []
+                    _tag: "IntegerLiteral"
+                    value: 0n
+                    radix: 10
+                    suffix: undefined
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

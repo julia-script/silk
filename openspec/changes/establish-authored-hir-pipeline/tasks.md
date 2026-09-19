@@ -9,8 +9,8 @@
 
 ## 2. A2 — JUL-206 complete local lowering (separate work package)
 
-- [ ] 2.1 Extend existing syntax/recovery specification deltas and implement all-form local lowering, preserving inactive arms, static bodies, lexical relationships, exact values and current presentation.
-- [ ] 2.2 Migrate representative structural source fixtures to the authored boundary, including recovery and source-release evidence; preserve syntax-only formatting.
+- [x] 2.1 Extend existing syntax/recovery specification deltas and implement all-form local lowering, preserving inactive arms, static bodies, lexical relationships, exact values and current presentation.
+- [x] 2.2 Migrate representative structural source fixtures to the authored boundary, including recovery and source-release evidence; preserve syntax-only formatting.
 
 ## 3. A3 — JUL-207 HIR-to-TIR semantics (separate work package)
 

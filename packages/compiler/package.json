@@ -62,6 +62,10 @@
       "types": "./dist/AuthoredIdentity.d.ts",
       "import": "./dist/AuthoredIdentity.js"
     },
+    "./AuthoredLowering": {
+      "types": "./dist/AuthoredLowering.d.ts",
+      "import": "./dist/AuthoredLowering.js"
+    },
     "./AuthoredModule": {
       "types": "./dist/AuthoredModule.d.ts",
       "import": "./dist/AuthoredModule.js"
