@@ -9,16 +9,16 @@ calling i32 lanes=1 i32[]
 fn golden/program.main params=0 locals=5 -> i32 entry=r0
   r0 operation:
     %0 = literal 1 : bool [113, 117)
-    %1 = make-callable golden/program.select captures=#0->p1:%0:copy : fn<'static>(i32) -> i32 [105, 118)
-    %2 = move %1 [87, 118)
-    forward r1 [87, 118) generated
+    %1 = make-callable golden/program.select captures=#0->p1:%0:copy : fn<'static>(i32) -> i32 [106, 118)
+    %2 = move %1 [88, 118)
+    forward r1 [88, 118) generated
   r1 operation:
     %3 = literal 42 : i32 [138, 140)
-    %4 = apply-callable %2(%3) captures=none access=shared evaluation=CalleeThenArguments realization=Environment : i32 [125, 141)
-    forward r2 [125, 141) generated
+    %4 = apply-callable %2(%3) captures=none access=shared evaluation=CalleeThenArguments realization=Environment : i32 [126, 141)
+    forward r2 [126, 141) generated
   r2 cleanup:
-    drop %2 cleanup=CallableCleanup [87, 118) generated
-    return %4 [125, 141)
+    drop %2 cleanup=CallableCleanup [88, 118) generated
+    return %4 [126, 141)
 fn golden/program.select<i32> params=2 locals=2 -> i32 entry=r0
   r0 operation:
-    return %0 [51, 62)
+    return %0 [52, 62)

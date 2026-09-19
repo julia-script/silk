@@ -7,30 +7,30 @@ calling bool lanes=1 bool[]
 calling i32 lanes=1 i32[]
 fn golden/program.main params=0 locals=8 -> i32 entry=r0
   r0 operation:
-    %0 = literal 40 : i32 [33, 36)
-    %1 = move %0 [22, 36)
-    forward r1 [22, 36) generated
+    %0 = literal 40 : i32 [34, 36)
+    %1 = move %0 [23, 36)
+    forward r1 [23, 36) generated
   r1 operation:
-    %2 = literal 40 : i32 [47, 50)
-    %3 = equals %1, %2 : bool [39, 50)
-    forward r2 [36, 88) generated
-  r2 conditional condition=%3 taken=r3 otherwise=r4 following=r5 [36, 88)
+    %2 = literal 40 : i32 [48, 50)
+    %3 = equals %1, %2 : bool [40, 50)
+    forward r2 [37, 88) generated
+  r2 conditional condition=%3 taken=r3 otherwise=r4 following=r5 [37, 88)
   r3 operation:
-    %4 = literal 2 : i32 [64, 66)
-    %5 = move %4 [52, 66)
-    forward r6 [52, 66) generated
+    %4 = literal 2 : i32 [65, 66)
+    %5 = move %4 [53, 66)
+    forward r6 [53, 66) generated
   r6 operation:
-    %6 = add %1, %5 : i32 [73, 86)
-    forward r7 [73, 86) generated
+    %6 = add %1, %5 : i32 [74, 86)
+    forward r7 [74, 86) generated
   r7 cleanup:
-    drop %5 [52, 66) generated
-    drop %1 [22, 36) generated
-    return %6 [73, 86)
+    drop %5 [53, 66) generated
+    drop %1 [23, 36) generated
+    return %6 [74, 86)
   r4 operation:
-    forward r5 [36, 88) generated
+    forward r5 [37, 88) generated
   r5 operation:
-    %7 = literal 0 : i32 [95, 97)
-    forward r8 [95, 97) generated
+    %7 = literal 0 : i32 [96, 97)
+    forward r8 [96, 97) generated
   r8 cleanup:
-    drop %1 [22, 36) generated
-    return %7 [95, 97)
+    drop %1 [23, 36) generated
+    return %7 [96, 97)

@@ -6,20 +6,20 @@ calling i32 lanes=1 i32[]
 fn golden/program.main params=0 locals=6 -> i32 entry=r0
   r0 operation:
     %0 = literal 42 : i32 [96, 98)
-    %1 = call golden/program.identity(%0) : i32 [86, 99)
-    %2 = move %1 [74, 99)
-    forward r1 [74, 99) generated
+    %1 = call golden/program.identity(%0) : i32 [87, 99)
+    %2 = move %1 [75, 99)
+    forward r1 [75, 99) generated
   r1 operation:
-    %3 = literal 1 : i32 [111, 113)
-    %4 = move %3 [99, 113)
-    forward r2 [99, 113) generated
+    %3 = literal 1 : i32 [112, 113)
+    %4 = move %3 [100, 113)
+    forward r2 [100, 113) generated
   r2 operation:
-    %5 = move %2 [120, 126)
-    forward r3 [120, 126) generated
+    %5 = move %2 [121, 126)
+    forward r3 [121, 126) generated
   r3 cleanup:
-    drop %4 [99, 113) generated
-    drop %2 [74, 99) generated
-    return %5 [120, 126)
+    drop %4 [100, 113) generated
+    drop %2 [75, 99) generated
+    return %5 [121, 126)
 fn golden/program.identity params=1 locals=1 -> i32 entry=r0
   r0 operation:
-    return %0 [43, 49)
+    return %0 [44, 49)
