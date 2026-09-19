@@ -744,7 +744,7 @@ export const resolveDeclaredType = (
         fact.spelling,
         expected,
         suppliedCount,
-        spanOf(fact.anchor),
+        spanOf(fact.target.anchor),
       )
       diagnostics.push(diagnostic)
       return Object.freeze({
@@ -758,7 +758,7 @@ export const resolveDeclaredType = (
         fact.spelling,
         0,
         fact.arguments.length,
-        spanOf(fact.anchor),
+        spanOf(fact.target.anchor),
       )
       diagnostics.push(diagnostic)
       return Object.freeze({
