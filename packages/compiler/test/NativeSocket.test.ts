@@ -192,7 +192,7 @@ pub fn main() -> i32 { return 42 }
     if (diagnostic !== undefined)
       assert.strictEqual(
         source.slice(diagnostic.span.start, diagnostic.span.end),
-        ' move connection.*',
+        'move connection.*',
       )
   }),
 )

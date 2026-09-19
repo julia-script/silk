@@ -710,7 +710,7 @@ pub fn main() -> i32 {
         )
         assert.deepEqual(
           diagnostics.map((entry) => source.slice(entry.span.start, entry.span.end)),
-          [` ${call}`],
+          [call],
         )
       }
     }),

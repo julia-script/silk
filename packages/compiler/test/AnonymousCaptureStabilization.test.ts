@@ -147,12 +147,12 @@ pub effect fn main() -> i32 ? &Probe { return run outer(Probe.read()) }`
           name === 'allowed' ? [] : [name === 'ambient' ? 'SEM0074' : 'SEM0071'],
         )
         if (name === 'ambient') {
-          const call = ' outer(ByteDuplex.read())'
+          const call = 'outer(ByteDuplex.read())'
           assert.strictEqual(diagnostics.at(0)?.span.start, program.indexOf(call))
           assert.strictEqual(diagnostics.at(0)?.span.end, program.indexOf(call) + call.length)
         }
         if (name === 'missing') {
-          const run = ' run outer(Probe.read())'
+          const run = 'run outer(Probe.read())'
           assert.strictEqual(diagnostics.at(0)?.span.start, program.indexOf(run))
           assert.strictEqual(diagnostics.at(0)?.span.end, program.indexOf(run) + run.length)
         }

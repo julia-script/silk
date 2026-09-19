@@ -884,10 +884,7 @@ pub effect fn main() -> i32 ? &FinalizerSource {
         diagnostics.map((diagnostic) => diagnostic.code),
         ['SEM0139'],
       )
-      assert.strictEqual(
-        diagnostics.at(0)?.span.start,
-        source.indexOf('Effect.ensuringNonParking'),
-      )
+      assert.strictEqual(diagnostics.at(0)?.span.start, source.indexOf('Effect.ensuringNonParking'))
     }
   }),
 )

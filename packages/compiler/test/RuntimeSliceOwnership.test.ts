@@ -1359,7 +1359,7 @@ fn invalidTag(key: &[u8], nonce: &[u8], aad: &[u8], bytes: &[u8], output: &mut [
 }`
     const self = yield* analyze(source)
     const diagnostics = Analysis.diagnostics(self)
-    const spans = [' &mut bytes, &mut tag', ' &mut bytes)', ' &mut output)'].map((text) =>
+    const spans = ['&mut bytes, &mut tag', '&mut bytes)', '&mut output)'].map((text) =>
       source.indexOf(text),
     )
     assert.deepEqual(

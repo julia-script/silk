@@ -49,7 +49,7 @@ pub fn main() -> i32 { return 0 }`
     const self = yield* Analysis.ofSource('conditional-provider', ascii(source))
     assert.deepEqual(codes(self), ['SEM0123'])
     const diagnostic = Analysis.diagnostics(self).at(0)
-    assert.strictEqual(diagnostic?.span.start, source.lastIndexOf(' acquire<P, A, E | Problem'))
+    assert.strictEqual(diagnostic?.span.start, source.lastIndexOf('acquire<P, A, E | Problem'))
   }),
 )
 

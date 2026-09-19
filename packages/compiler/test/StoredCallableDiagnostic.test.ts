@@ -273,9 +273,9 @@ it.effect('rejects a nested anonymous body without publishing an inner executabl
 }`
     const snapshot = yield* Analysis.ofSource('stored-callable/nested-anonymous', ascii(source))
     const rejected = 'fn() -> i32 { return 1 }'
-    const start = source.indexOf(rejected) - 1
+    const start = source.indexOf(rejected)
     assert.deepEqual(diagnosticView(snapshot), [
-      { code: 'SEM0199', start, end: start + rejected.length + 1 },
+      { code: 'SEM0199', start, end: start + rejected.length },
     ])
     assert.strictEqual(
       snapshot.results.get('stored-callable/nested-anonymous')?.hiddenFunctions.length,
@@ -308,14 +308,14 @@ pub fn main() -> i32 {
     assert.deepEqual(diagnosticView(resultMismatch), [
       {
         code: 'SEM0052',
-        start: resultSource.lastIndexOf('accept(') - 1,
+        start: resultSource.lastIndexOf('accept('),
         end: resultSource.indexOf(resultCallable) + resultCallable.length + 1,
       },
     ])
     assert.deepEqual(diagnosticView(consumingMismatch), [
       {
         code: 'SEM0052',
-        start: modeSource.lastIndexOf('reusable(') - 1,
+        start: modeSource.lastIndexOf('reusable('),
         end: modeSource.indexOf(modeCallable) + modeCallable.length + 1,
       },
     ])
@@ -378,23 +378,22 @@ pub fn main() -> i32 {
       ascii(effectSource),
     )
     const capturedCell = borrowSource.indexOf('cell', borrowSource.indexOf('return fn'))
-    const capturedExpression = borrowSource.indexOf('\n    cell', borrowSource.indexOf('return fn'))
     const firstInvocation = effectSource.indexOf('deferred()')
     const secondInvocation = effectSource.indexOf('deferred()', firstInvocation + 1)
     const returnedClosure = borrowSource.indexOf('fn() -> i32', borrowSource.indexOf('return fn'))
     assert.deepEqual(diagnosticView(borrowed), [
       {
         code: 'OWN0019',
-        start: returnedClosure - 1,
+        start: returnedClosure,
         end: borrowSource.indexOf('\n  }', returnedClosure) + 4,
       },
-      { code: 'OWN0018', start: capturedExpression, end: capturedCell + 'cell'.length },
-      { code: 'SEM0212', start: capturedExpression, end: capturedCell + 'cell'.length },
+      { code: 'OWN0018', start: capturedCell, end: capturedCell + 'cell'.length },
+      { code: 'SEM0212', start: capturedCell, end: capturedCell + 'cell'.length },
     ])
     assert.deepEqual(diagnosticView(repeated), [
       {
         code: 'OWN0001',
-        start: secondInvocation - 1,
+        start: secondInvocation,
         end: secondInvocation + 'deferred'.length,
       },
     ])
