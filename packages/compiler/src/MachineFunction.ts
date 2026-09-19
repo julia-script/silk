@@ -118,6 +118,9 @@ const calleePath = (
   context: SemanticContext.SemanticContext,
   callee: AuthoredHir.Expression,
 ): string | undefined => {
+  // `Intrinsic.assembly` lowers as a field of the `Intrinsic` name when nothing marks it a type.
+  if (callee._tag === 'FieldExpression' && callee.subject._tag === 'IdentifierExpression')
+    return `${nameText(context, callee.subject.name)}.${nameText(context, callee.field)}`
   if (callee._tag !== 'MemberExpression') return undefined
   const subject = callee.selector.subject
   if (subject._tag !== 'NamedType') return undefined
