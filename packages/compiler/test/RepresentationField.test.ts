@@ -318,8 +318,8 @@ it.effect('retains explicit open recovery facts after the source specialization 
     assert.strictEqual(resolution?._tag, 'UnavailableRepresentationField')
     if (resolution?._tag !== 'UnavailableRepresentationField') return
     assert.strictEqual(resolution.reason._tag, 'OpenRepresentationArgument')
-    assert.strictEqual(resolution.provenance.field.sourceId, module)
-    assert.strictEqual(resolution.provenance.parameter.sourceId, module)
+    assert.strictEqual(resolution.provenance.field.owner.module, module)
+    assert.strictEqual(resolution.provenance.parameter.owner.module, module)
   }),
 )
 

@@ -30,7 +30,9 @@ it.effect('keeps assignment and equality tokens distinct beside mutable loops', 
     const self = yield* snapshot(
       'pub fn main() -> i32 { let mut value = 0 while value == 0 { value = 42 } return value }',
     )
-    const kinds = Analysis.rootAnalysis(self).syntax.tokens.map((token) => token.kind)
+    const kinds = (Projections.syntaxOf(self, 'mutable-loops/main')?.tokens ?? []).map(
+      (token) => token.kind,
+    )
     assert.strictEqual(kinds.filter((kind) => kind === 'Equals').length, 2)
     assert.strictEqual(kinds.filter((kind) => kind === 'EqualEqual').length, 1)
     assert.deepEqual(Analysis.diagnostics(self), [])
@@ -46,7 +48,8 @@ it.effect('recovers damaged mutable statements without losing following declarat
 }
 pub fn main() -> i32 { return 42 }`)
     const analysis = Analysis.rootAnalysis(self)
-    assert.isAbove(analysis.syntax.parserDiagnostics.length, 0)
+    const syntax = Projections.syntaxOf(self, 'mutable-loops/main')
+    assert.isAbove(syntax?.parserDiagnostics.length ?? 0, 0)
     assert.strictEqual(analysis.functions.length, 2)
     const name = analysis.functions.at(1)?.declaration.name
     assert.strictEqual(name?._tag, 'Present')

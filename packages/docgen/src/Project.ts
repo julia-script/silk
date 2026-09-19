@@ -143,7 +143,6 @@ const rangeOf = (
 const parsedDocumentation = (
   snapshot: Analysis.FrontendSnapshot,
   source: SourceFile.SourceFile,
-  spans: SemanticContext.Registry,
   anchor: AuthoredHir.Anchor,
 ): Document.Document | undefined => {
   const raw = Analysis.documentationOfAnchor(snapshot, anchor)
@@ -709,7 +708,7 @@ const moduleModel = (
     .filter((item) => options.includePrivate === true || item.visibility !== 'Private')
   return Object.freeze({
     name: headers.module,
-    sourceId: syntax.source.id,
+    sourceId: source.id,
     ...(documentation === undefined ? {} : { documentation }),
     items: Object.freeze([...members, ...publications, ...conformances]),
   })

@@ -13,13 +13,20 @@ import * as Match from '../src/Match.js'
 import * as OwnershipEncoding from '../src/OwnershipEncoding.js'
 import * as Parser from '../src/Parser.js'
 import * as StatementAnalysis from '../src/StatementAnalysis.js'
+import * as SemanticContext from '../src/SemanticContext.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as Type from '../src/Type.js'
 import { elaborate, ownership } from './support/elaborate.js'
 import { raise } from './support/raise.js'
 
-const analyze = (id: string, source: string): Elaboration.Result =>
-  elaborate(Parser.parse(Lexer.lex(SourceFile.make(id, new TextEncoder().encode(source)))))
+const parse = (id: string, source: string) =>
+  Parser.parse(Lexer.lex(SourceFile.make(id, new TextEncoder().encode(source))))
+
+const analyze = (id: string, source: string): Elaboration.Result => elaborate(parse(id, source))
+
+/** The elaboration's own span source: presentation spans of the authored module it consumed. */
+const spansOf = (result: Elaboration.Result): SemanticContext.SemanticContext =>
+  SemanticContext.make(result.authored)
 
 const returnedMatch = (
   result: Elaboration.Result,
@@ -650,8 +657,10 @@ fn bare(value: Choice) { match value { Choice.First => { 42 } Choice.Last => {} 
 fn outside(value: Choice) { match value { Choice.First => { break } Choice.Last => { continue } } }
 fn scope(value: Choice) { match value { Choice.First => { let inner = 1 drop inner } Choice.Last => {} } drop inner }
 `
-  const result = analyze('ordinary-errors', source)
-  assert.deepEqual([...result.syntax.lexicalDiagnostics, ...result.syntax.parserDiagnostics], [])
+  const syntax = parse('ordinary-errors', source)
+  const result = elaborate(syntax)
+  const spans = spansOf(result)
+  assert.deepEqual([...syntax.lexicalDiagnostics, ...syntax.parserDiagnostics], [])
   const selected = result.diagnostics.filter((diagnostic) =>
     ['SEM0049', 'SEM0087', 'SEM0038'].includes(diagnostic.code),
   )
@@ -665,9 +674,10 @@ fn scope(value: Choice) { match value { Choice.First => { let inner = 1 drop inn
   assert.deepEqual(
     selected.map((diagnostic) => [diagnostic.code, diagnostic.span.start, diagnostic.span.end]),
     [
-      ...matches
-        .slice(0, 2)
-        .map((match) => ['SEM0049', match.syntax.span.start, match.syntax.span.end]),
+      ...matches.slice(0, 2).map((match) => {
+        const span = spans.spanOf(match.anchor)
+        return ['SEM0049', span.start, span.end]
+      }),
       ['SEM0087', source.indexOf('42') - 1, source.indexOf('42') + 2],
       ['SEM0038', source.indexOf('break') - 1, source.indexOf('break') + 5],
       ['SEM0038', source.indexOf('continue') - 1, source.indexOf('continue') + 8],
@@ -687,8 +697,10 @@ fn guarded(value: Choice) -> i32 { return match value { Choice.First if match va
 fn borrowed(values: &[i32], value: Choice) -> &[i32] { return match value { Choice.First => { return values } Choice.Last => values } }
 fn invalidBorrow(values: &[i32], value: Choice) -> &[i32] { return match value { Choice.First => { let local = [1] return &local } Choice.Last => values } }
 `
-  const result = analyze('ordinary-returns', source)
-  assert.deepEqual([...result.syntax.lexicalDiagnostics, ...result.syntax.parserDiagnostics], [])
+  const syntax = parse('ordinary-returns', source)
+  const result = elaborate(syntax)
+  const spans = spansOf(result)
+  assert.deepEqual([...syntax.lexicalDiagnostics, ...syntax.parserDiagnostics], [])
   assert.deepEqual(
     result.diagnostics.map((diagnostic) => [
       diagnostic.code,
@@ -710,10 +722,12 @@ fn invalidBorrow(values: &[i32], value: Choice) -> &[i32] { return match value {
   const flow = StatementAnalysis.returnFlowOf(operand.statements)
   assert.strictEqual(flow.fallsThrough, false)
   assert.deepEqual(
-    flow.returns.map((returned) =>
-      source.slice(returned.expression.syntax.span.start, returned.expression.syntax.span.end),
-    ),
-    [' 2', ' 3'],
+    flow.returns.map((returned) => {
+      const span = spans.spanOf(returned.expression.anchor)
+      return source.slice(span.start, span.end)
+    }),
+    // Presentation spans are trivia-free: the returned literals no longer carry a leading space.
+    ['2', '3'],
   )
   const guarded =
     result.tir.functions.find(
@@ -743,8 +757,10 @@ fn illegal(value: Choice) { match value { Choice.First => { fail Problem {} } Ch
 struct Holder { item: i32 }
 fn conflict(value: Holder) { match value { Holder { item } => { let item = 1 drop item } } }
 `
-  const result = analyze('ordinary-boundaries', source)
-  assert.deepEqual([...result.syntax.lexicalDiagnostics, ...result.syntax.parserDiagnostics], [])
+  const syntax = parse('ordinary-boundaries', source)
+  const result = elaborate(syntax)
+  const spans = spansOf(result)
+  assert.deepEqual([...syntax.lexicalDiagnostics, ...syntax.parserDiagnostics], [])
   const loops =
     result.functions.find(
       (fn) => fn.declaration.name._tag === 'Present' && fn.declaration.name.spelling === 'loops',
@@ -777,7 +793,7 @@ fn conflict(value: Holder) { match value { Holder { item } => { let item = 1 dro
     result.functions.find(
       (fn) => fn.declaration.name._tag === 'Present' && fn.declaration.name.spelling === 'eager',
     ) ?? raise('expected eager')
-  const eagerSpan = eager.declaration.syntax.span
+  const eagerSpan = spans.spanOf(eager.declaration.anchor)
   assert.deepEqual(
     result.diagnostics.filter(
       (diagnostic) =>

@@ -1,6 +1,7 @@
 import * as Diagnostic from './Diagnostic.js'
 import type * as AuthoredHir from './AuthoredHir.js'
 import * as AuthoredIdentity from './AuthoredIdentity.js'
+import * as AuthoredWalk from './AuthoredWalk.js'
 import * as BodyLifetime from './BodyLifetime.js'
 import * as Lifetime from './Lifetime.js'
 import type * as SemanticContext from './SemanticContext.js'
@@ -547,6 +548,14 @@ export const forHeader = (
       if (contract.requirements !== undefined)
         for (const member of contract.requirements.members)
           walkOperand(member, bindings, false, undefined, fresh, false)
+    }
+    // A body writes annotations of its own — explicit call type arguments, binding and pattern
+    // types — and each can elide a region. Elaborating only the header would leave those anchors
+    // without one, so an elided `string` inside a body would read as an ambiguous output.
+    if (body !== undefined && declaration.body._tag === 'CallableBody') {
+      const block = declaration.body.block
+      if (block !== undefined)
+        for (const type of AuthoredWalk.bodyTypes(block)) walkType(type, bindings)
     }
   } else {
     const candidates: Array<Lifetime.Lifetime> = []

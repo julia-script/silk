@@ -10,13 +10,19 @@ import type * as SyntaxFile from '../../src/SyntaxFile.js'
 
 const indices = new WeakMap<Elaboration.Result, DeclarationIndex.Index>()
 
+/** `fixture://semantic-accepted.silk` becomes `fixture/semantic-accepted.silk`. */
+export const canonicalName = (sourceId: string): string => sourceId.replace(/:\/*/g, '/')
+
 export const elaborate = (syntax: SyntaxFile.SyntaxFile): Elaboration.Result => {
+  // Fixture ids such as `fixture://x.silk` are not canonical module names, so the closure module,
+  // its authored owner and every declaration identity share one canonical name derived from the id.
+  const name = canonicalName(syntax.source.id)
   const authored = Effect.runSync(
-    AuthoredLowering.lower(syntax, AuthoredIdentity.module('memory', 'fixture/module')),
+    AuthoredLowering.lower(syntax, AuthoredIdentity.module('memory', name)),
   )
   const module = Object.freeze({
     _tag: 'Module' as const,
-    name: syntax.source.id,
+    name,
     syntax,
     authored,
     declarations: ModuleClosure.selectedDeclarations(authored.module, new Map()),
@@ -24,18 +30,18 @@ export const elaborate = (syntax: SyntaxFile.SyntaxFile): Elaboration.Result => 
   })
   const closure: ModuleClosure.Closure = Object.freeze({
     _tag: 'ModuleClosure',
-    rootModule: syntax.source.id,
+    rootModule: name,
     modules: Object.freeze([module]),
     cycles: Object.freeze([]),
     diagnostics: Object.freeze([]),
-    sources: new Map([[syntax.source.id, syntax.source]]),
+    sources: new Map([[name, syntax.source]]),
     missingRoots: Object.freeze([]),
     resolutionFailures: Object.freeze([]),
   })
   const analyzed = NameResolution.analyze(closure)
   const index = analyzed.index
   const headers = index.modules.at(0)
-  const scope = NameResolution.scopeOf(analyzed.resolution, syntax.source.id)
+  const scope = NameResolution.scopeOf(analyzed.resolution, name)
   if (headers === undefined || scope === undefined)
     throw new RangeError('Single-module elaboration fixture lost its module')
   const result = Elaboration.elaborateModule({ authored, headers, scope, index })

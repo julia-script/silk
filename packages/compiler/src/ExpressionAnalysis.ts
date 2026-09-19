@@ -836,6 +836,12 @@ export const nameSegments = (
       return node.path.segments
     case 'NominalPattern':
       return nameSegments(node.type)
+    case 'StructExpression':
+      return nameSegments(node.type)
+    // A call and a type application spell their target through a nested node, so a constructor
+    // call names its aggregate the same way a written literal does.
+    case 'CallExpression':
+      return nameSegments(node.callee)
     case 'MemberExpression':
       return Object.freeze([...nameSegments(node.selector.subject), node.selector.member])
     case 'VariantPattern':
@@ -970,7 +976,6 @@ export const analyzeForeignStaticReference = (
     fact: Object.freeze({
       _tag: 'ForeignStatic',
       declaration: lookup.declaration,
-      token: second ?? first,
       type,
       anchor: node.anchor,
     }),
@@ -2456,7 +2461,13 @@ export const analyzePattern = (
       state = Object.freeze({ _tag: 'Unknown', cause: Diagnostic.identity(diagnostic) })
     }
 
-    const nestedNode = fieldNode.pattern
+    // Lowering always synthesizes a `BindingPattern` for a field that writes no nested pattern,
+    // so a shorthand `{ x }` and a rebinding `{ x: y }` both bind the field directly here; only a
+    // written nested pattern destructures further.
+    const nestedNode =
+      fieldNode.pattern._tag === 'BindingPattern' && fieldNode.pattern.type === undefined
+        ? undefined
+        : fieldNode.pattern
     let nested: PatternFact | undefined
     let binding: PatternBindingFact | undefined
     if (nestedNode !== undefined) {
@@ -3603,7 +3614,15 @@ export const analyzeAggregateLiteral = (
   if (accessDiagnostic !== undefined) diagnostics.push(accessDiagnostic)
 
   const seen = new Map<string, StructInitializerFact>()
-  const initializers = (node._tag === 'StructExpression' ? node.fields : []).map(
+  // A variant literal (`R<A, F>.Success { value: ... }`) carries its initializers on the member
+  // expression, not on a struct expression, so both node shapes supply the written fields.
+  const writtenFields =
+    node._tag === 'StructExpression'
+      ? node.fields
+      : node._tag === 'MemberExpression'
+        ? (node.fields ?? [])
+        : []
+  const initializers = writtenFields.map(
     (initializer): StructInitializerFact => {
       const nameToken = initializer.name
       const name =
@@ -6034,7 +6053,9 @@ const analyzeAggregateElements = (
         _tag: 'Resolved',
         struct,
         type: nominal,
-        ...(token === undefined || struct.aggregateKind.startsWith('Anonymous') ? {} : { token }),
+        ...(token === undefined || struct.aggregateKind.startsWith('Anonymous')
+          ? {}
+          : { anchor: token }),
       }),
       authorized,
       typeArguments: Object.freeze([]),

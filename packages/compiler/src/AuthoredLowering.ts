@@ -1244,13 +1244,20 @@ const type = (draft: Draft, cursor: Cursor, syntax: SyntaxTree.Node): AuthoredHi
       const [target, argumentList] = nodes(syntax)
       const argumentsSyntax = nodes(syntax).find((n) => n.kind === 'TypeArgumentList')
       const targetSyntax = target?.kind === 'TypeArgumentList' ? undefined : target
+      // The parser attaches `once`/`mut` of `once Effect<...>` to the applied node; the mode belongs
+      // to the named target the arguments apply to.
+      const mode = callableMode(syntax)
+      const lowered =
+        targetSyntax === undefined
+          ? missingType(draft, child(own, 'target'), spanOf(syntax))
+          : type(draft, child(own, 'target'), targetSyntax)
       return done({
         ...node(draft, own, spanOf(syntax)),
         _tag: 'AppliedType',
         target:
-          targetSyntax === undefined
-            ? missingType(draft, child(own, 'target'), spanOf(syntax))
-            : type(draft, child(own, 'target'), targetSyntax),
+          mode !== undefined && lowered._tag === 'NamedType' && lowered.mode === undefined
+            ? { ...lowered, mode }
+            : lowered,
         arguments:
           argumentsSyntax === undefined
             ? {
@@ -2651,7 +2658,8 @@ const callableParts = (
   if (operation) {
     const marker = nodes(syntax).find((n) => n.kind === 'OperatorMarker')
     const operatorToken = marker?.children.find(
-      (element): element is Token.Token => isToken(element) && element.kind !== 'Identifier',
+      (element): element is Token.Token =>
+        isToken(element) && Operator.isDeclarationToken(element.kind),
     )
     const operatorOf = (): AuthoredHir.Name | undefined => {
       if (marker === undefined) return undefined

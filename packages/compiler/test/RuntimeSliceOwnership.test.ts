@@ -13,6 +13,7 @@ import * as ExecutableProperty from '../src/ExecutableProperty.js'
 import * as Lifetime from '../src/Lifetime.js'
 import * as MirVerification from '../src/MirVerification.js'
 import * as ModuleSurface from '../src/ModuleSurface.js'
+import * as SemanticContext from '../src/SemanticContext.js'
 import * as NominalVariance from '../src/NominalVariance.js'
 import * as OwnershipEncoding from '../src/OwnershipEncoding.js'
 import * as Type from '../src/Type.js'
@@ -216,17 +217,19 @@ effect fn captured<'a>(owner: Owner) -> &'a i32 { return &owner.value }
 effect fn failure<'a>() -> i32 ! &'a i32 { let value = 1 fail &value }
 pub fn main() -> i32 { return 0 }`)
     const diagnostics = Analysis.diagnostics(self)
+    const spans = SemanticContext.fromModules(self.closure.modules)
     for (const name of ['local', 'captured', 'failure']) {
       const fn =
         Analysis.ownershipOf(self, 'slices/Ownership')?.functions.find(
           (fn) => fn.declaration.name._tag === 'Present' && fn.declaration.name.spelling === name,
         ) ?? unreachable(name)
+      const declared = spans.spanOf(fn.declaration.anchor)
       assert.isTrue(
         diagnostics.some(
           (diagnostic) =>
             diagnostic.code === 'OWN0019' &&
-            diagnostic.span.start >= fn.declaration.syntax.span.start &&
-            diagnostic.span.end <= fn.declaration.syntax.span.end,
+            diagnostic.span.start >= declared.start &&
+            diagnostic.span.end <= declared.end,
         ),
         name,
       )

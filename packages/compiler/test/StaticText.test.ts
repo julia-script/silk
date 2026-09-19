@@ -1921,6 +1921,7 @@ static fn computed() -> i32 {
     const result = completedValue(
       StaticEvaluation.evaluateStatements(computed.statements, {
         environment: StaticEvaluation.targetEnvironment(profilewasm32UnknownUnknown),
+        spanOf: snapshot.resolution.contexts.spanOf,
         values: new Map(),
         valueSpans: new Map(),
         valueOrigins: new Map(),
@@ -2122,6 +2123,7 @@ const bootstrapSource = (
   snapshot: Analysis.SingleRootFrontendSnapshot,
 ): ProfileBootstrap.Source => ({
   index: snapshot.index,
+  contexts: snapshot.resolution.contexts,
   results: snapshot.results,
   resolution: snapshot.resolution,
   modules: snapshot.closure.modules.map((module) => ({

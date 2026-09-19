@@ -568,26 +568,37 @@ const anchorForIdentity = (
   return undefined
 }
 
+/** Returns raw documentation for one authored anchor. */
+export const documentationOfAnchor = (
+  self: FrontendSnapshot,
+  anchor: AuthoredHir.Anchor,
+): DocBlock.DocBlock | undefined => {
+  const span = self.resolution.contexts.spanOf(anchor)
+  const syntax = syntaxOf(self, anchor.owner.module)
+  if (syntax === undefined) return undefined
+  // Documentation is the direct leading trivia of the innermost *documentable* node covering the
+  // span. An enclosing node's block never stands in for an undocumented inner one: a parameter
+  // with no `///` of its own must not inherit its operation's documentation.
+  const covers = (node: SyntaxTree.Node): boolean =>
+    node.span.start <= span.start && node.span.end >= span.end
+  let innermost: SyntaxTree.Node | undefined
+  let node: SyntaxTree.Node | undefined = covers(syntax.root) ? syntax.root : undefined
+  while (node !== undefined) {
+    if (DocBlock.isDocumentableKind(node.kind)) innermost = node
+    node = node.children.find(
+      (child): child is SyntaxTree.Node => SyntaxTree.isNode(child) && covers(child),
+    )
+  }
+  return innermost === undefined ? undefined : DocBlock.ofNode(syntax, innermost)
+}
+
 /** Returns raw documentation for one source-backed semantic identity. */
 export const documentationOfIdentity = (
   self: FrontendSnapshot,
   identity: SemanticOccurrence.Identity,
 ): DocBlock.DocBlock | undefined => {
   const anchor = anchorForIdentity(self, identity)
-  if (anchor === undefined) return undefined
-  const span = self.resolution.contexts.spanOf(anchor)
-  const syntax = syntaxOf(self, anchor.owner.module)
-  if (syntax === undefined) return undefined
-  // Documentation is leading trivia of the syntax node the header presents at: take the
-  // innermost documented node still covering the span.
-  let found: DocBlock.DocBlock | undefined
-  const visit = (node: SyntaxTree.Node): void => {
-    if (node.span.start > span.start || node.span.end < span.end) return
-    found = DocBlock.ofNode(syntax, node) ?? found
-    for (const child of node.children) if (SyntaxTree.isNode(child)) visit(child)
-  }
-  visit(syntax.root)
-  return found
+  return anchor === undefined ? undefined : documentationOfAnchor(self, anchor)
 }
 
 /** Resolves one source position and returns the selected declaration's raw documentation. */

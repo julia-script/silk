@@ -3,6 +3,7 @@ import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import { pipe } from 'effect/Function'
 import * as Analysis from '../src/Analysis.js'
+import * as AuthoredIdentity from '../src/AuthoredIdentity.js'
 import * as CallableContract from '../src/CallableContract.js'
 import * as DeclarationFacts from '../src/DeclarationFacts.js'
 import * as Diagnostic from '../src/Diagnostic.js'
@@ -10,10 +11,9 @@ import * as Elaboration from '../src/Elaboration.js'
 import * as Tir from '../src/Tir.js'
 import * as Lexer from '../src/Lexer.js'
 import * as Parser from '../src/Parser.js'
+import * as SemanticContext from '../src/SemanticContext.js'
 import * as SourceFile from '../src/SourceFile.js'
 import type * as SyntaxFile from '../src/SyntaxFile.js'
-import * as SyntaxTree from '../src/SyntaxTree.js'
-import type * as Token from '../src/Token.js'
 import * as Type from '../src/Type.js'
 import {
   acceptedSource,
@@ -74,8 +74,23 @@ const ascii = (value: string): Uint8Array =>
 const parseText = (id: string, source: string): SyntaxFile.SyntaxFile =>
   Parser.parse(Lexer.lex(SourceFile.make(id, ascii(source))))
 
-const analyzeText = (id: string, source: string): Elaboration.Result =>
-  elaborate(parseText(id, source))
+// The elaboration result no longer carries its syntax; these fixtures still assert on the
+// parser's own diagnostics, so the parse that produced each result is retained beside it.
+const parses = new WeakMap<Elaboration.Result, SyntaxFile.SyntaxFile>()
+
+const analyzeText = (id: string, source: string): Elaboration.Result => {
+  const syntax = parseText(id, source)
+  const result = elaborate(syntax)
+  parses.set(result, syntax)
+  return result
+}
+
+const syntaxOf = (result: Elaboration.Result): SyntaxFile.SyntaxFile =>
+  parses.get(result) ?? raise('expected the parse behind this elaboration')
+
+/** The elaboration's own span source: presentation spans of the authored module it consumed. */
+const spansOf = (result: Elaboration.Result): SemanticContext.SemanticContext =>
+  SemanticContext.make(result.authored)
 
 const analyzeWithStdlib = Effect.fnUntraced(function* (id: string, source: string) {
   const module = id.replace('://', '/').replace(/\.silk$/, '')
@@ -93,7 +108,7 @@ it('keeps damaged pattern type prefixes parser-owned and semantically unavailabl
 }`,
     )
     assert.deepEqual(
-      result.syntax.parserDiagnostics.map((diagnostic) => diagnostic.code),
+      syntaxOf(result).parserDiagnostics.map((diagnostic) => diagnostic.code),
       ['PAR0002'],
     )
     assert.deepEqual(result.diagnostics, [])
@@ -775,11 +790,6 @@ const diagnosticView = (result: Elaboration.Result) =>
     reason: diagnostic.reason,
   }))
 
-const directToken = (node: SyntaxTree.Node, kind: Token.TokenKind): Token.Token | undefined =>
-  node.children.find(
-    (element): element is Token.Token => SyntaxTree.isToken(element) && element.kind === kind,
-  )
-
 it('publishes one immutable function fact with exact accepted provenance', () => {
   const parse = parseText('fixture://semantic-accepted.silk', acceptedSource)
   const result = elaborate(parse)
@@ -789,11 +799,12 @@ it('publishes one immutable function fact with exact accepted provenance', () =>
   const returnType = declaration.returnType
   const integer = integerFact(fact)
 
-  assert.strictEqual(result.syntax, parse)
+  const spans = spansOf(result)
+  assert.strictEqual(result.authored.presentation.sourceId, parse.source.id)
   assert.strictEqual(result.functions.length, 1)
   assert.deepEqual(declaration.id, {
     _tag: 'DeclarationId',
-    sourceId: 'fixture://semantic-accepted.silk',
+    sourceId: 'fixture/semantic-accepted.silk',
     ordinal: 0,
   })
   assert.strictEqual(declaration.visibility, 'Public')
@@ -801,7 +812,9 @@ it('publishes one immutable function fact with exact accepted provenance', () =>
   assert.strictEqual(name._tag, 'Present')
   if (name._tag !== 'Present') return
   assert.strictEqual(name.spelling, 'main')
-  assert.strictEqual(name.token, directToken(declaration.syntax, 'Identifier'))
+  // The declared name's anchor resolves to exactly the identifier it was authored as.
+  const nameSpan = spans.spanOf(name.anchor)
+  assert.strictEqual(acceptedSource.slice(nameSpan.start, nameSpan.end), 'main')
   assert.strictEqual(returnType._tag, 'Resolved')
   if (returnType._tag !== 'Resolved') return
   assert.strictEqual(returnType.type, 'i32')
@@ -858,9 +871,10 @@ it('collects two and three declarations with deterministic source-order identiti
     }),
     [1n, 2n, 3n],
   )
+  const twoSpans = spansOf(two)
   assert.strictEqual(
-    functionAt(two, 0).declaration.syntax.span.start <
-      functionAt(two, 1).declaration.syntax.span.start,
+    twoSpans.orderOf(functionAt(two, 0).declaration.anchor) <
+      twoSpans.orderOf(functionAt(two, 1).declaration.anchor),
     true,
   )
 })
@@ -882,7 +896,7 @@ it('collects typed parameters and resolves returned identifiers', () => {
   assert.deepEqual(returnedCall.type, { _tag: 'Available', type: 'i32' })
   assert.deepEqual(main.returnCompatibility, { _tag: 'Compatible' })
   assert.deepEqual(identity.diagnostics, [])
-  assert.deepEqual(identity.syntax.parserDiagnostics, [])
+  assert.deepEqual(syntaxOf(identity).parserDiagnostics, [])
 })
 
 it('publishes ordered function-local parameter identities, types, and lookup', () => {
@@ -907,7 +921,7 @@ it('publishes ordered function-local parameter identities, types, and lookup', (
   assert.notDeepEqual(firstParameter.id.function, secondParameter.id.function)
   assert.strictEqual(firstParameter.name._tag, 'Present')
   assert.strictEqual(firstParameter.declaredType._tag, 'Resolved')
-  assert.strictEqual(firstParameter.syntax.kind, 'ParameterDeclaration')
+  assert.strictEqual(firstParameter.anchor.path.at(-1)?.role, 'parameter')
   assert.strictEqual(directLookup._tag, 'Resolved')
   assert.strictEqual(pipedLookup._tag, 'Resolved')
   if (directLookup._tag !== 'Resolved' || pipedLookup._tag !== 'Resolved') return
@@ -948,11 +962,12 @@ it('publishes ordered argument identities, expressions, mappings, and compatible
   const oneCall = callFact(functionAt(one, 1))
   const twoCall = callFact(functionAt(two, 1))
   const firstArgument = oneCall.arguments.at(0) ?? raise('expected first argument')
+  const oneSpans = spansOf(one)
 
   assert.deepEqual(firstArgument.id, {
     _tag: 'ArgumentId',
     function: functionAt(one, 1).declaration.id,
-    callSpan: oneCall.syntax.span,
+    callSpan: oneSpans.spanOf(oneCall.anchor),
     ordinal: 0,
   })
   assert.strictEqual(firstArgument.expression._tag, 'Integer')
@@ -961,7 +976,10 @@ it('publishes ordered argument identities, expressions, mappings, and compatible
   if (firstArgument.expression.integer._tag !== 'Available') return
   assert.strictEqual(firstArgument.expression.integer.value, 42n)
   assert.deepEqual(firstArgument.type, { _tag: 'Available', type: 'i32' })
-  assert.strictEqual(firstArgument.syntax, firstArgument.expression.syntax)
+  assert.strictEqual(
+    AuthoredIdentity.anchorKey(firstArgument.anchor),
+    AuthoredIdentity.anchorKey(firstArgument.expression.anchor),
+  )
   assert.strictEqual(oneCall.mappings.at(0)?.argument, firstArgument)
   assert.strictEqual(
     oneCall.mappings.at(0)?.parameter,
@@ -1014,7 +1032,11 @@ it('analyzes nested call arguments recursively from their leaves outward', () =>
   if (argument.expression._tag !== 'Call') return
   const inner = argument.expression
   const innerArgument = inner.arguments.at(0) ?? raise('expected inner argument')
-  assert.strictEqual(argument.syntax, inner.syntax)
+  const spans = spansOf(result)
+  assert.strictEqual(
+    AuthoredIdentity.anchorKey(argument.anchor),
+    AuthoredIdentity.anchorKey(inner.anchor),
+  )
   assert.strictEqual(innerArgument.expression._tag, 'Integer')
   assert.deepEqual(innerArgument.type, { _tag: 'Available', type: 'i32' })
   assert.strictEqual(inner.reference._tag, 'Resolved')
@@ -1026,10 +1048,10 @@ it('analyzes nested call arguments recursively from their leaves outward', () =>
   assert.strictEqual(call.contract._tag, 'Compatible')
   assert.deepEqual(call.type, { _tag: 'Available', type: 'i32' })
   assert.deepEqual(main.returnCompatibility, { _tag: 'Compatible' })
-  assert.notDeepEqual(inner.syntax.span, call.syntax.span)
-  assert.deepEqual(argument.id.callSpan, call.syntax.span)
-  assert.deepEqual(innerArgument.id.callSpan, inner.syntax.span)
-  assert.deepEqual(result.syntax.parserDiagnostics, [])
+  assert.notDeepEqual(spans.spanOf(inner.anchor), spans.spanOf(call.anchor))
+  assert.deepEqual(argument.id.callSpan, spans.spanOf(call.anchor))
+  assert.deepEqual(innerArgument.id.callSpan, spans.spanOf(inner.anchor))
+  assert.deepEqual(syntaxOf(result).parserDiagnostics, [])
   assert.deepEqual(result.diagnostics, [])
 })
 
@@ -1049,7 +1071,8 @@ it('preserves nested sibling order and call-local argument identities', () => {
   const left = expressions.at(0) ?? raise('expected left nested call')
   const right = expressions.at(1) ?? raise('expected right nested call')
   if (left._tag !== 'Call' || right._tag !== 'Call') return
-  assert.ok(left.syntax.span.start < right.syntax.span.start)
+  const spans = spansOf(result)
+  assert.ok(spans.orderOf(left.anchor) < spans.orderOf(right.anchor))
   assert.deepEqual(
     left.arguments.map((argument) => argument.id.ordinal),
     [0],
@@ -1058,8 +1081,8 @@ it('preserves nested sibling order and call-local argument identities', () => {
     right.arguments.map((argument) => argument.id.ordinal),
     [0],
   )
-  assert.deepEqual(left.arguments.at(0)?.id.callSpan, left.syntax.span)
-  assert.deepEqual(right.arguments.at(0)?.id.callSpan, right.syntax.span)
+  assert.deepEqual(left.arguments.at(0)?.id.callSpan, spans.spanOf(left.anchor))
+  assert.deepEqual(right.arguments.at(0)?.id.callSpan, spans.spanOf(right.anchor))
   assert.strictEqual(left.contract._tag, 'Compatible')
   assert.strictEqual(right.contract._tag, 'Compatible')
   assert.strictEqual(outer.contract._tag, 'Compatible')
@@ -1142,7 +1165,7 @@ it('keeps damaged nested syntax parser-owned while retaining recursive facts', (
   if (call.contract._tag !== 'Unavailable') return
   assert.strictEqual(call.contract.reason._tag, 'UnavailableBuiltinArgument')
   assert.deepEqual(
-    result.syntax.parserDiagnostics.map((diagnostic) => diagnostic.code),
+    syntaxOf(result).parserDiagnostics.map((diagnostic) => diagnostic.code),
     ['PAR0002'],
   )
   assert.deepEqual(result.diagnostics, [])
@@ -1242,7 +1265,7 @@ it('forms every non-empty trailing section and diagnoses only over-application',
     tooMany.diagnostics.map((diagnostic) => diagnostic.code),
     ['SEM0007'],
   )
-  assert.strictEqual(tooMany.diagnostics.at(0)?.span, manyCall.syntax.span)
+  assert.deepEqual(tooMany.diagnostics.at(0)?.span, spansOf(tooMany).spanOf(manyCall.anchor))
 })
 
 it('withholds contracts without cascading when a prerequisite is unavailable', () => {
@@ -1290,7 +1313,7 @@ it('withholds contracts without cascading when a prerequisite is unavailable', (
     ['SEM0004'],
   )
   assert.deepEqual(
-    recovered.syntax.parserDiagnostics.map((diagnostic) => diagnostic.code),
+    syntaxOf(recovered).parserDiagnostics.map((diagnostic) => diagnostic.code),
     ['PAR0002'],
   )
   assert.deepEqual(recovered.diagnostics, [])
@@ -1332,11 +1355,12 @@ it('diagnoses unknown local names at their exact reference spans', () => {
 
   assert.strictEqual(reference._tag, 'Missing')
   if (reference._tag !== 'Missing') return
+  const referenceSpan = spansOf(result).spanOf(reference.anchor)
   assert.deepEqual(diagnosticView(result), [
     {
       code: 'SEM0006',
-      start: reference.token.span.start,
-      end: reference.token.span.end,
+      start: referenceSpan.start,
+      end: referenceSpan.end,
       reason: { _tag: 'UnknownValueReference', spelling: 'missing' },
     },
   ])
@@ -1436,7 +1460,7 @@ it('resolves parameter types and preserves parser-owned damaged states', () => {
   assert.strictEqual(identifierFact(functionAt(damagedReference, 0)).reference._tag, 'Unavailable')
   assert.deepEqual(damagedReference.diagnostics, [])
   assert.deepEqual(
-    damagedReference.syntax.parserDiagnostics.map((diagnostic) => diagnostic.code),
+    syntaxOf(damagedReference).parserDiagnostics.map((diagnostic) => diagnostic.code),
     ['PAR0002'],
   )
 })
@@ -1459,20 +1483,18 @@ it('resolves a call to an earlier declaration and propagates its type', () => {
   assert.strictEqual(answer.returnedExpression._tag, 'Integer')
   assert.strictEqual(integerFact(answer)._tag, 'Available')
   assert.deepEqual(answer.returnCompatibility, { _tag: 'Compatible' })
-  assert.strictEqual(returned.syntax.kind, 'CallExpression')
+  assert.strictEqual(returned._tag, 'Call')
   assert.strictEqual(returned.reference._tag, 'Resolved')
   if (returned.reference._tag !== 'Resolved') return
   assert.strictEqual(returned.reference.spelling, 'answer')
-  const callee = SyntaxTree.directNode(returned.syntax, 'IdentifierExpression')
-  assert.strictEqual(
-    returned.reference.token,
-    callee === undefined ? undefined : directToken(callee, 'Identifier'),
-  )
+  // The resolved reference's anchor resolves to exactly the callee identifier.
+  const calleeSpan = spansOf(result).spanOf(returned.reference.anchor)
+  assert.strictEqual(validCallSource.slice(calleeSpan.start, calleeSpan.end), 'answer')
   assert.strictEqual(returned.reference.declaration, answer.declaration)
   assert.deepEqual(returned.type, { _tag: 'Available', type: 'i32' })
   assert.deepEqual(main.returnCompatibility, { _tag: 'Compatible' })
   assert.deepEqual(result.diagnostics, [])
-  assert.deepEqual(result.syntax.parserDiagnostics, [])
+  assert.deepEqual(syntaxOf(result).parserDiagnostics, [])
   assert.strictEqual(Object.isFrozen(returned), true)
   assert.strictEqual(Object.isFrozen(returned.reference), true)
 })
@@ -1506,11 +1528,12 @@ it('diagnoses an unknown call target at the exact callee span', () => {
   assert.strictEqual(returned.reference.spelling, 'missing')
   assert.deepEqual(returned.type, { _tag: 'Unavailable' })
   assert.deepEqual(fact.returnCompatibility, { _tag: 'Unavailable' })
+  const calleeSpan = spansOf(result).spanOf(returned.reference.anchor)
   assert.deepEqual(diagnosticView(result), [
     {
       code: 'SEM0004',
-      start: returned.reference.token.span.start,
-      end: returned.reference.token.span.end,
+      start: calleeSpan.start,
+      end: calleeSpan.end,
       reason: { _tag: 'UnknownFunction', spelling: 'missing' },
     },
   ])
@@ -1573,7 +1596,7 @@ it('types empty parentheses as unit', () => {
 
   assert.strictEqual(returned._tag, 'Unit')
   assert.deepEqual(fact.returnCompatibility, { _tag: 'Unavailable' })
-  assert.deepEqual(result.syntax.parserDiagnostics, [])
+  assert.deepEqual(syntaxOf(result).parserDiagnostics, [])
   assert.deepEqual(
     result.diagnostics.map((diagnostic) => diagnostic.code),
     ['SEM0129'],
@@ -1602,11 +1625,11 @@ it('resolves present callees, accepts unchecked arguments, and withholds damaged
   assert.strictEqual(uncheckedCall.reference._tag, 'Resolved')
   assert.deepEqual(uncheckedCall.type, { _tag: 'Available', type: 'i32' })
   assert.deepEqual(uncheckedFact.returnCompatibility, { _tag: 'Compatible' })
-  assert.deepEqual(uncheckedArgument.syntax.parserDiagnostics, [])
+  assert.deepEqual(syntaxOf(uncheckedArgument).parserDiagnostics, [])
   assert.deepEqual(uncheckedArgument.diagnostics, [])
 
   assert.deepEqual(
-    missingParenthesis.syntax.parserDiagnostics.map((diagnostic) => diagnostic.code),
+    syntaxOf(missingParenthesis).parserDiagnostics.map((diagnostic) => diagnostic.code),
     ['PAR0001'],
   )
 })
@@ -1626,7 +1649,7 @@ it('orders type, integer, duplicate, and unknown-call diagnostics by source span
     result.diagnostics.map((diagnostic) => diagnostic.code),
     ['SEM0001', 'SEM0002', 'SEM0003', 'SEM0004'],
   )
-  assert.deepEqual(result.syntax.parserDiagnostics, [])
+  assert.deepEqual(syntaxOf(result).parserDiagnostics, [])
 })
 
 it('uses deterministic source-local identities across fresh results', () => {
@@ -1657,7 +1680,7 @@ it('keeps missing declaration names unavailable and out of lookup', () => {
   assert.deepEqual(single.diagnostics, [])
   assert.deepEqual(multiple.diagnostics, [])
   assert.deepEqual(
-    multiple.syntax.parserDiagnostics.map((diagnostic) => diagnostic.code),
+    syntaxOf(multiple).parserDiagnostics.map((diagnostic) => diagnostic.code),
     ['PAR0001'],
   )
 })
@@ -1693,12 +1716,13 @@ it('diagnoses later duplicate names at their exact spans with original provenanc
   if (firstName._tag !== 'Present' || secondName._tag !== 'Present') return
   assert.strictEqual(result.diagnostics.length, 1)
   const diagnostic = result.diagnostics.at(0) ?? raise('expected duplicate diagnostic')
+  const spans = spansOf(result)
   assert.strictEqual(diagnostic.code, 'SEM0003')
-  assert.strictEqual(diagnostic.span, secondName.token.span)
+  assert.deepEqual(diagnostic.span, spans.spanOf(secondName.anchor))
   assert.deepEqual(diagnostic.reason, {
     _tag: 'DuplicateDeclarationName',
     spelling: 'same',
-    originalSpan: firstName.token.span,
+    originalSpan: spans.spanOf(firstName.anchor),
   })
   assert.strictEqual(Object.isFrozen(diagnostic), true)
   assert.strictEqual(Object.isFrozen(diagnostic.reason), true)
@@ -1809,7 +1833,7 @@ it('preserves existing type and integer edge behavior per function', () => {
   assert.strictEqual(functionAt(damaged, 0).declaration.returnType._tag, 'Unavailable')
   assert.deepEqual(damaged.diagnostics, [])
   assert.deepEqual(
-    damaged.syntax.parserDiagnostics.map((diagnostic) => diagnostic.code),
+    syntaxOf(damaged).parserDiagnostics.map((diagnostic) => diagnostic.code),
     ['PAR0002'],
   )
   const boundaryInteger = integerFact(boundary)
@@ -1845,7 +1869,7 @@ it('keeps parser and semantic diagnostics in their owning ordered collections', 
   )
 
   assert.deepEqual(
-    result.syntax.parserDiagnostics.map((diagnostic) => diagnostic.code),
+    syntaxOf(result).parserDiagnostics.map((diagnostic) => diagnostic.code),
     ['PAR0001'],
   )
   assert.deepEqual(
@@ -1902,10 +1926,13 @@ it('surfaces duplicate originals as labeled related spans', () => {
   assert.strictEqual(firstParameterName?._tag, 'Present')
   if (firstName._tag !== 'Present' || firstParameterName?._tag !== 'Present') return
   assert.deepEqual(declarations.diagnostics.at(0)?.relatedSpans, [
-    { label: 'first declared here', span: firstName.token.span },
+    { label: 'first declared here', span: spansOf(declarations).spanOf(firstName.anchor) },
   ])
   assert.deepEqual(parameters.diagnostics.at(0)?.relatedSpans, [
-    { label: 'first declared here', span: firstParameterName.token.span },
+    {
+      label: 'first declared here',
+      span: spansOf(parameters).spanOf(firstParameterName.anchor),
+    },
   ])
 })
 
@@ -1974,12 +2001,11 @@ it('canonicalizes operator facts with typed builtin operand mappings', () => {
     returned.mappings.map((mapping) => [mapping.ordinal, mapping.expected]),
     [[0, 'bool']],
   )
-  const grouped = returned.arguments.at(0)?.expression
-  assert.strictEqual(grouped?._tag, 'Grouped')
-  if (grouped?._tag !== 'Grouped') return
-  assert.strictEqual(grouped.expression._tag, 'Operator')
-  if (grouped.expression._tag !== 'Operator') return
-  assert.strictEqual(grouped.expression.operator, 'Equals')
+  // Authored HIR carries no grouping node: the parenthesized comparison is the direct operand.
+  const operand = returned.arguments.at(0)?.expression
+  assert.strictEqual(operand?._tag, 'Operator')
+  if (operand?._tag !== 'Operator') return
+  assert.strictEqual(operand.operator, 'Equals')
 })
 
 it('applies pipeline callables left-to-right without inserted call arguments', () => {

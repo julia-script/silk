@@ -275,6 +275,88 @@ export const callableExpressions = (
   return Object.freeze(found)
 }
 
+/** The types one pattern writes, including the annotations its nested fields write. */
+const patternTypes = (pattern: AuthoredHir.Pattern): ReadonlyArray<AuthoredHir.Type> => {
+  const found: Array<AuthoredHir.Type> = []
+  const visit = (current: AuthoredHir.Pattern): void => {
+    switch (current._tag) {
+      case 'NominalPattern':
+        found.push(current.type)
+        for (const field of current.fields)
+          if (field._tag === 'PatternField') visit(field.pattern)
+        return
+      case 'BindingPattern':
+        if (current.type !== undefined) found.push(current.type)
+        return
+      case 'VariantPattern':
+        found.push(current.selector.subject)
+        for (const field of current.fields ?? [])
+          if (field._tag === 'PatternField') visit(field.pattern)
+        return
+      case 'InvalidPattern':
+        for (const retained of current.retained)
+          if (retained._tag !== 'Name' && 'statements' in retained === false) {
+            if (isPattern(retained)) visit(retained)
+            else if (isType(retained)) found.push(retained)
+          }
+        return
+      default:
+        return
+    }
+  }
+  visit(pattern)
+  return Object.freeze(found)
+}
+
+const patternTags: ReadonlySet<string> = new Set([
+  'EnumPattern',
+  'IntegerPattern',
+  'NominalPattern',
+  'BindingPattern',
+  'UniversalPattern',
+  'VariantPattern',
+  'MissingPattern',
+  'InvalidPattern',
+])
+
+const isPattern = (node: {
+  readonly _tag: string
+}): node is AuthoredHir.Pattern => patternTags.has(node._tag)
+
+const isType = (node: { readonly _tag: string }): node is AuthoredHir.Type =>
+  !patternTags.has(node._tag) && node._tag !== 'Name'
+
+/**
+ * Every type one authored body writes, in document order.
+ *
+ * Lifetime elaboration must reach the annotations a body writes — a call's explicit type
+ * arguments, a binding's declared type, a pattern's named type — because each one can elide a
+ * region the body owns. Header traversal alone leaves those anchors without a region.
+ */
+export const bodyTypes = (block: AuthoredHir.Block): ReadonlyArray<AuthoredHir.Type> => {
+  const found: Array<AuthoredHir.Type> = []
+  const visitExpression = (expression: AuthoredHir.Expression): void => {
+    if (expression._tag === 'CallExpression' && expression.generics !== undefined)
+      for (const argument of expression.generics.arguments)
+        if (argument._tag === 'RequirementSelector') found.push(argument.subject)
+        else if (argument._tag !== 'Lifetime') found.push(argument)
+    if (expression._tag === 'StructExpression') found.push(expression.type)
+    if (expression._tag === 'MemberExpression') found.push(expression.selector.subject)
+    if (expression._tag === 'MatchExpression')
+      for (const arm of expression.arms) found.push(...patternTypes(arm.pattern))
+    for (const child of expressionChildren(expression)) visitExpression(child)
+  }
+  for (const statement of statements(block)) {
+    if (statement._tag === 'BindingStatement' && statement.type !== undefined)
+      found.push(statement.type)
+    if (statement._tag === 'PatternBindingStatement') found.push(...patternTypes(statement.pattern))
+    if (statement._tag === 'PatternConditionalStatement')
+      found.push(...patternTypes(statement.pattern))
+    for (const expression of statementExpressions(statement)) visitExpression(expression)
+  }
+  return Object.freeze(found)
+}
+
 /** True when an authored node is not a lexical-recovery placeholder. */
 export const isAvailable = (
   node: AuthoredHir.Expression | AuthoredHir.Pattern | AuthoredHir.Type,

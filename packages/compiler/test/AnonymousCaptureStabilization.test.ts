@@ -39,7 +39,7 @@ pub fn main() -> i32 {
       )
       assert.deepEqual(Analysis.diagnostics(snapshot), [])
       const anonymous = Analysis.expressionsOf(snapshot, 'anonymous-capture/quantified-input').find(
-        (expression) => expression.syntax.kind === 'AnonymousCallableExpression',
+        (expression) => expression._tag === 'CallableSection' && expression.anonymous !== undefined,
       )
       const type = anonymous?.type._tag === 'Available' ? anonymous.type.type : undefined
       assert.isTrue(type !== undefined && Type.isCallable(type))
