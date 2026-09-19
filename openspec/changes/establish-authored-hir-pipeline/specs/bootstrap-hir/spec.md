@@ -86,10 +86,14 @@ execute. No decision may be represented both on a node and in a table.
 
 Provenance of a static text or bytes value SHALL be expressed in byte offsets of decoded values, as
 ordered segments referring either to a literal by authored anchor or to a static parameter by
-ordinal. Slicing and concatenation SHALL restrict and rebase segments. A shared outcome or residual
-artifact SHALL refer to its parameters only. At a call, parameter references SHALL be substituted
-with the argument's provenance. Offsets into source spelling MUST NOT appear in any artifact; they
-SHALL be derived at publication from the literal's presented spelling.
+ordinal. Slicing and concatenation SHALL restrict and rebase segments. Provenance shared between call
+sites SHALL parameterize everything that depends on the caller and SHALL keep literal segments
+anchored in the callee's own body, which are the same for every caller. At a call, parameter segments
+SHALL be substituted with the argument's provenance and literal segments SHALL be preserved. A
+location covering several segments SHALL publish the first as its span and the rest as related
+spans, each through the presentation of its anchor's own module. Offsets into source spelling MUST
+NOT appear in any artifact or outcome; they SHALL be derived at publication from the literal's
+presented spelling.
 
 #### Scenario: An escape spans more source than value
 
@@ -101,25 +105,84 @@ SHALL be derived at publication from the literal's presented spelling.
 - **WHEN** a static text is sliced inside one helper and sliced again inside another before it is rejected
 - **THEN** the published span covers exactly the source spelling of the surviving bytes in the caller's literal
 
+#### Scenario: A helper returns its own literal
+
+- **WHEN** a static helper returns a literal written in its body and a caller rejects part of it
+- **THEN** the shared outcome keeps the literal's anchor, and the published span lies inside the helper's literal
+
+#### Scenario: A result mixes a callee literal and an argument
+
+- **WHEN** a helper returns `"prefix:" + value` and a caller rejects a range covering the end of the prefix and the start of its argument
+- **THEN** the shared outcome holds one literal segment and one parameter segment, the caller substitutes only the parameter segment, and the diagnostic's span lies in the helper's literal with a related span in the caller's argument
+
 #### Scenario: Shared results report per call site
 
 - **WHEN** two calls select the same residual artifact whose body rejects part of its static argument
 - **THEN** one diagnostic is published for each call, each inside that call's own argument, including when the two arguments spell the same value differently
 
+### Requirement: Body identity and evaluation identity are separate
+
+A body request SHALL identify which typed body is needed. An evaluation request SHALL identify one
+execution: the body that runs, the canonical type substitution and selected evidence of the call
+where the body does not already fix them, the canonical value of every parameter and every captured
+local, and the compilation and target context the evaluator can observe. Call-site provenance, the
+caller's identity and source positions MUST NOT participate in either identity. Outcomes SHALL be
+recorded by evaluation identity outside every artifact, and an evaluation MUST NOT require a new
+typed body. Re-entering an artifact under construction SHALL be an availability cycle; re-entering a
+body under evaluation with a different evaluation identity SHALL be ordinary recursion bounded by the
+evaluation budgets; re-entering the same evaluation identity SHALL be rejected as non-terminating.
+
+#### Scenario: Two evaluations share one checked body
+
+- **WHEN** `static fn next(value: i32) -> i32 { return value + 1 }` is evaluated as `next(1)` and `next(2)`
+- **THEN** one artifact exists for `next`, two outcomes `2` and `3` are recorded under two evaluation identities, and the artifact is unchanged
+
+#### Scenario: Recursion is not an availability cycle
+
+- **WHEN** a static function calls itself with a smaller argument until a base case
+- **THEN** evaluation completes within its budgets and no availability cycle is reported
+
 ### Requirement: Artifacts are built privately and published immutable
 
-Elaboration SHALL construct a body through a builder private to that build. Static evaluation during
-construction SHALL consume finished typed nodes, an environment of static bindings and local values,
-and an evaluation session, and MUST NOT require the artifact under construction. A call to another
-static function SHALL request that function's own artifact. The outcome of an application SHALL be
-recorded against that application's artifact identity outside any artifact. An artifact SHALL become
-reusable only after validation and freezing, and MUST NOT be modified afterwards; a failed or
-interrupted build SHALL publish nothing.
+Elaboration SHALL construct a body through a builder private to that build. Static evaluation SHALL
+receive a finished typed node, a read-only view resolving the local definitions, evidence and causes
+that nodes reference, an environment of values, and the evaluation session. During construction that
+view SHALL expose only completed rows, MUST NOT require the surrounding artifact to be finished, and
+MUST NOT permit writing. A call to another static function SHALL request that function's own
+published artifact before evaluating it. An artifact SHALL become reusable only after validation and
+freezing and MUST NOT be modified afterwards.
 
 #### Scenario: Evaluation does not mutate a published body
 
-- **WHEN** one static function is applied to two different static arguments
-- **THEN** two outcomes are recorded under two artifact identities and the function's checked artifact is unchanged
+- **WHEN** one static function is applied to two different arguments
+- **THEN** its checked artifact is byte-identical before and after both evaluations
+
+#### Scenario: A reference resolves during construction
+
+- **WHEN** a `static if` condition calls an interface operation whose evidence row was appended earlier in the same build
+- **THEN** the evaluator reads that evidence through the view while the enclosing body is still unfinished
+
+### Requirement: Completed rejections are published and aborted requests are not
+
+A construction that completes with source errors SHALL publish an immutable artifact carrying its
+diagnostics, with damaged nodes unavailable and healthy structure preserved, and that artifact MUST
+NOT be executed. An evaluation that completes with a semantic rejection — a compile error, a phase
+violation, an exhausted deterministic budget or a non-terminating evaluation — SHALL be recorded as
+an outcome. A cancelled, interrupted or internally failed construction or evaluation SHALL publish
+no artifact, no partial artifact and no outcome. Whether a completed diagnostic-bearing result may
+be reused SHALL be an explicit validity policy; this change keeps the existing policy, under which
+it is reusable subject to ordinary validation and an owner with parser recovery damage only while
+its authored content is byte-identical.
+
+#### Scenario: A rejected body remains inspectable
+
+- **WHEN** a body calls an unknown function beside a valid statement
+- **THEN** an artifact is published with the diagnostic, the valid statement's nodes, and an unavailable node for the call, and executable admission rejects it
+
+#### Scenario: An interrupted build leaves nothing
+
+- **WHEN** construction is interrupted before it finishes
+- **THEN** no artifact and no outcome exist for the request, and asking again builds it from the start
 
 ### Requirement: Occurrences are a supplementary authored index
 

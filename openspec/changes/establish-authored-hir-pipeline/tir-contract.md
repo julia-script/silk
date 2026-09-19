@@ -92,10 +92,57 @@ Validity = { header:   canonical semantic signature of the owner   (stable under
 
 `BodyQuery.request(request)` looks a candidate up by `Request`, then re-validates its `Validity`
 against the current index: each `Observation` (a lookup with its answer, *including misses*; a
-callee signature; a conformance answer; an application's outcome key) is asked again and must
+callee signature; a conformance answer; an evaluation's key and outcome key) is asked again and must
 answer the same. All valid → the candidate object itself is returned. Anything else → rebuild. Equal
 bytes alone never authorize reuse. This is the whole boundary: no general query engine, no
 invalidation graph. A later engine or disk cache replaces the lookup and the store, not the split.
+
+## Evaluation identity
+
+A reusable representation of a function and a cached execution of that function are different
+things. They have different identities and different stores.
+
+```text
+Body request        which typed body is needed?
+                    { profile/origin, ArtifactId }                       → CheckedBody
+
+Evaluation request  which body is executed, with which values, in which context?
+EvaluationKey = { body:        ArtifactId                    the typed body that runs
+                  instance:    canonical type substitution and selected evidence of this call,
+                               when the body is generic and not already fixed by its application
+                  arguments:   canonical value of every parameter, declared order
+                  captures:    canonical value of every captured local, capture order
+                  context:     compilation and target identity the evaluator can observe }
+                                                                          → Outcome
+```
+
+Everything that can change the result participates; nothing else does. Call-site provenance, the
+caller's identity and source positions are excluded, exactly as they are excluded from `ArtifactId`.
+An evaluation never requires another TIR body: `next(1)` and `next(2)` run the *same* checked body
+under two keys.
+
+```silk
+static fn next(value: i32) -> i32 { return value + 1 }
+```
+
+```text
+body        { owner: …/function=next#0, request: Check }        built once
+evaluation  { body: ↑, arguments: [Integer(1 : i32)], … }  →  Value Integer(2 : i32)
+evaluation  { body: ↑, arguments: [Integer(2 : i32)], … }  →  Value Integer(3 : i32)
+```
+
+A `Specialize` artifact already fixes its static arguments, so its evaluation key lists only what
+is left: ordinary parameters, captures, instance and context.
+
+**Two kinds of re-entry.** They are different conditions with different answers:
+
+| Re-entered while in progress | Meaning | Answer |
+|---|---|---|
+| the same `ArtifactId` under **construction** | building this body needs this body: an availability cycle | the existing availability-cycle rejection |
+| the same `ArtifactId` under **evaluation**, different `EvaluationKey` | ordinary recursion (`fact(n)` calls `fact(n - 1)`) | legal; bounded by the evaluation depth and step budgets |
+| the same `EvaluationKey` under evaluation | this execution needs its own result | a non-terminating evaluation: a semantic rejection, not an availability cycle |
+
+The session keeps two in-progress sets, one keyed by `ArtifactId` and one by `EvaluationKey`.
 
 ## Node and table ownership
 
@@ -147,7 +194,7 @@ authored vocabulary: `Authored(anchor)` or `Synthetic(anchor, role, occurrence)`
 | Consumer | Complete input |
 |---|---|
 | Analysis (`ExpressionAnalysis`, `StatementAnalysis`, `CallResolution`) | authored declaration, `SemanticContext`, declaration index, scope, `BodyBuilder`, evaluation session |
-| `StaticEvaluation` | typed nodes, an `Environment` (static bindings, local values), the evaluation session |
+| `StaticEvaluation` | typed nodes, a read-only `BodyView` (locals, evidence, causes), an `Environment`, the session |
 | `Residualization`, `ModuleSelection` | a `Request` for `Specialize(application)`; they hold the returned artifact and nothing else |
 | `LifetimeFlow`, `BodyControlFlow`, `TypeOutlives` | `function`, `results.lifetimes` |
 | `Ownership`, `CleanupPlan`, `ResidualOwnership`, `SuspensionOwnership` | `function`, `results.evidence`, declaration index (headers by id) |
@@ -155,7 +202,7 @@ authored vocabulary: `Authored(anchor)` or `Synthetic(anchor, role, occurrence)`
 | `FunctionLowering`, `Lower`, `EffectLowering` | `function`, `results.evidence`, layout; presentation registry only to stamp MIR provenance |
 | `SemanticOccurrence` | `results.occurrences` of each artifact, header occurrences from the declaration index |
 | `Completion`, `TypeHint`, `InspectorFlowModel` | `results.scopes`, `function.locals`, node types, `results.occurrences` |
-| Publication (`Analysis`, `Frontend`) | `results.diagnostics`, `results.provenance`, application outcomes, presentation registry |
+| Publication (`Analysis`, `Frontend`) | `results.diagnostics`, `results.provenance`, rejected evaluation outcomes, presentation registry |
 
 ## Text provenance and diagnostic locations
 
@@ -173,12 +220,15 @@ Provenance = Segment[]                 ordered; covers the value, gaps allowed
 Segment    = { value: Range            where in this value
                from:  Source }
 Source     = Literal   { at: Anchor, range: Range }      decoded bytes of the literal at this anchor
-           | Parameter { ordinal, range: Range }         decoded bytes of static parameter `ordinal`
+           | Parameter { ordinal, range: Range }         decoded bytes of parameter `ordinal`
 ```
 
 `Literal` names an authored anchor, not a node: an anchor already carries its module and owner, is
-revision-free, and is what a presentation resolves. `Parameter` is relative to the enclosing
-application's parameters and is the only form a shared result may contain.
+revision-free, and is what a presentation resolves. The rule for anything shared between call sites
+(an evaluation outcome, a `Specialize` artifact) is: **caller-specific provenance is parameterized;
+caller-independent provenance is kept as it is.** A literal written inside the callee's own body is
+the same literal for every caller, so its `Literal` segment stays in the shared outcome. A literal
+that arrived through an argument is caller-specific and appears only as `Parameter`.
 
 Operations are total and mechanical: **slice** restricts segments to a range and rebases them;
 **concat** appends the right operand's segments shifted by the left length; a value that was
@@ -186,34 +236,41 @@ computed rather than copied (a formatted number) has no segment for those bytes.
 
 **Composition at a call.** Evaluating `g(a)` inside some body:
 
-1. The callee's outcome (§ Evaluation) is shared and its provenance mentions only `Parameter`.
-2. The caller substitutes: each `Parameter { ordinal: k, range }` becomes the segments of argument
-   `k`'s provenance restricted to `range`. The result is provenance in the *caller's* terms.
-3. In a `Check` body that ends at `Literal`s. In a `Specialize` body it may still mention the
-   caller's own `Parameter`s, and is resolved by *its* callers in turn.
+1. The outcome of `g` is shared. Its provenance mentions `Parameter`s of `g` and `Literal`s that do
+   not depend on the caller.
+2. The caller substitutes each `Parameter { ordinal: k, range }` with the segments of argument `k`'s
+   provenance restricted to `range`, and **preserves every `Literal` segment unchanged**. The result
+   is provenance in the *caller's* terms.
+3. In a `Check` body of an ordinary function that ends at `Literal`s. Inside another shared body it
+   may mention that body's own `Parameter`s, resolved by *its* callers in turn.
 
 **Locations.**
 
 ```text
-Location = At        { origin: Origin }                       a node or authored position
-         | Within    { at: Anchor, range: Range }             value range inside one literal
-         | Through   { ordinal, range: Range }                value range inside a static parameter
+Location = At { origin: Origin }              a node or authored position
+         | In { parts: Source[] }             a value range, as the ordered sources that cover it
 ```
 
-`Through` appears only in artifacts and outcomes that are shared across call sites.
+A rejected range can straddle segments (part of a callee literal and part of an argument), so a
+value location is a list of sources, not one. `Parameter` sources appear only in `Specialize`
+artifacts and in evaluation outcomes.
 
-**Publication** runs once per revision, outside every artifact:
+**Publication** runs once per revision, outside every artifact and outcome:
 
 1. `At` → the presentation's span for the origin.
-2. `Within` → the literal's presented spelling is decoded once to obtain its *spelling map* (for
-   each decoded byte, its spelling range — what `StaticText.decode` already computes as
-   `sourceRanges`). The value range maps to the union of the spelling ranges of its bytes, offset by
-   the literal's span start. The map is a function of the spelling, so it lives with presentation and
-   is never stored in an artifact.
-3. `Through` → for **each call site** that selected the application, substitute that call's argument
-   provenance (from the caller's `results.provenance`) and continue with step 2 or, if the caller is
-   itself shared, step 3 one level up. A location that cannot be resolved to a literal (the argument
-   was computed) falls back to the call node's origin.
+2. A `Literal` part → the presentation of *the anchor's own module* (which may be the callee's, or a
+   standard library module). The literal's presented spelling is decoded once to obtain its
+   *spelling map* (for each decoded byte, its spelling range — what `StaticText.decode` already
+   computes as `sourceRanges`). The value range maps to the union of the spelling ranges of its
+   bytes, offset by the literal's span start. The map is a function of the spelling, so it lives with
+   presentation and is never stored in an artifact.
+3. A `Parameter` part → for **each call site** that selected the shared result, substitute that
+   call's argument provenance (from the caller's `results.provenance`) and continue with step 2 or,
+   if the caller is itself shared, step 3 one level up. A part that cannot be resolved to a literal
+   (the argument was computed) falls back to the call node's origin.
+4. The first resolved part is the diagnostic's span; the remaining parts are related spans. A
+   location with no `Parameter` part is caller-independent and is published once, naming the
+   selecting call sites as related positions.
 
 **Behaviour decision.** Today a shared residual failure is reported once, at the first caller in
 canonical order. Under this contract every selected call site reports at its own argument. The
@@ -236,8 +293,8 @@ spelling map (decoded byte → spelling range, relative to the token)
 check @f    n2 StaticTextLiteral              provenance [ {value 0..5, from Literal(L, 0..5)} ]
             n1 Call slice(n2, 1, 2)           outcome    [ {value 0..1, from Parameter(0, 1..2)} ]
                                               composed   [ {value 0..1, from Literal(L, 1..2)} ]
-            n0 CompileError(n1)               diagnostic SEM0177 at Within(L, 1..2)
-publication Within(L, 1..2) → spelling [2,6) → the four source bytes `\x41`
+            n0 CompileError(n1)               diagnostic SEM0177 at In[Literal(L, 1..2)]
+publication Literal(L, 1..2) → spelling [2,6) → the four source bytes `\x41`
 ```
 
 One decoded byte, four source bytes, and nothing in the artifact knows it.
@@ -252,14 +309,14 @@ pub fn main() -> i32 { return reject("aéz") }        // 61 c3 a9 7a
 ```
 
 ```text
-outcome specialize @inner<"aéz">   value "éz"   [ {0..3 from Parameter(0, 1..4)} ]
-outcome specialize @outer<"aéz">   inner(value) composed with value=Parameter(0, 0..4)
+outcome eval(check @inner, ["aéz"]) value "éz"   [ {0..3 from Parameter(0, 1..4)} ]
+outcome eval(check @outer, ["aéz"]) inner(value) composed with value=Parameter(0, 0..4)
                                    → [ {0..3 from Parameter(0, 1..4)} ]; slice 0..2
                                    value "é"    [ {0..2 from Parameter(0, 1..3)} ]
-artifact specialize @reject<"aéz"> n0 CompileError   diagnostic SEM0177 at Through(0, 1..3)
+artifact specialize @reject<"aéz"> n0 CompileError   diagnostic SEM0177 at In[Parameter(0, 1..3)]
 check @main                        n1 Call reject  application = specialize @reject<"aéz">
                                    provenance row  n1.arg0 → [ {0..4 from Literal(M, 0..4)} ]
-publication Through(0, 1..3) ∘ n1.arg0 → Within(M, 1..3) → spelling of `é` in main's literal
+publication Parameter(0, 1..3) ∘ n1.arg0 → Literal(M, 1..3) → spelling of `é` in main's literal
 ```
 
 No helper ever saw a source position; each only restricted ranges of its own parameter.
@@ -275,14 +332,48 @@ pub fn main() -> i32 {
 
 ```text
 both calls select   specialize @reject<"aéz">          one artifact, built once
-its diagnostic      SEM0177 at Through(0, 1..3)
+its diagnostic      SEM0177 at In[Parameter(0, 1..3)]
 check @main         n1 Call … provenance arg0 → Literal(M1, 0..4)
                     n4 Call … provenance arg0 → Literal(M2, 0..4)
-publication         n1 → Within(M1, 1..3) → the 2 source bytes `é`
-                    n4 → Within(M2, 1..3) → the 6 source bytes `\u{e9}`
+publication         n1 → Literal(M1, 1..3) → the 2 source bytes `é`
+                    n4 → Literal(M2, 1..3) → the 6 source bytes `\u{e9}`
 ```
 
 Same value, same artifact, same value range; two reports, each at its own spelling.
+
+**4. A literal owned by the callee.**
+
+```silk
+static fn tag() -> string { return "prefix" }                    // literal T in tag's body
+fn f() -> i32 { compileError(StaticText.slice(tag(), 0, 3)) }
+```
+
+```text
+outcome eval(check @tag, [])    value "prefix"   [ {0..6 from Literal(T, 0..6)} ]      shared as is
+check @f    n1 Call tag         composed         [ {0..6 from Literal(T, 0..6)} ]      nothing to substitute
+            n0 CompileError     diagnostic SEM0177 at In[Literal(T, 0..3)]
+publication Literal(T, 0..3) → `pre` inside tag's own body, through tag's module presentation
+```
+
+**5. Callee literal and argument, mixed.**
+
+```silk
+static fn helper(value: string) -> string { return "prefix:" + value }     // literal H
+fn g() -> i32 { compileError(StaticText.slice(helper("aéz"), 5, 10)) }     // literal M
+```
+
+```text
+outcome eval(check @helper, ["aéz"])   value "prefix:aéz"
+                                       [ {0..7  from Literal(H, 0..7)},
+                                         {7..11 from Parameter(0, 0..4)} ]
+check @g    n1 Call helper             composed: Literal kept, Parameter substituted
+                                       [ {0..7  from Literal(H, 0..7)},
+                                         {7..11 from Literal(M, 0..4)} ]
+            slice 5..10                [ {0..2 from Literal(H, 5..7)}, {2..5 from Literal(M, 0..3)} ]
+            n0 CompileError            diagnostic SEM0177 at In[Literal(H, 5..7), Literal(M, 0..3)]
+publication span `x:` in helper's literal (helper's module presentation);
+            related span `aé` in g's literal
+```
 
 ## Construction, evaluation and publication
 
@@ -295,34 +386,69 @@ It allocates `NodeId`/`LocalId`, appends finished nodes and table rows, and reco
 Nodes are immutable values from the moment they are created; the builder only appends. It is never
 cached, exported or shared between artifacts.
 
-**What the evaluator consumes.** `evaluate(node, environment, session) → Outcome`. A finished typed
-node (a subtree the builder has already produced), an `Environment` (the static bindings of a
-`Specialize` request and the values of locals evaluated so far), and the session. It reads node
-fields only. It never takes a `CheckedBody` as input for the body being built.
+**What the evaluator consumes.** Its complete input is four things:
 
-**Calls during evaluation.** A call to another static function asks the session for
-`specialize @callee<application>` (or `check @callee` when nothing is static). That is a *different*
-artifact; the session builds or reuses it through `BodyQuery` and it is published and immutable
-before its nodes are evaluated in a fresh environment frame. The session owns the in-progress set by
-`ArtifactId`, which is where recursion limits, budgets and availability cycles already live.
+```text
+evaluate(node, view, environment, session) → Outcome
+
+BodyView (read-only)   local(LocalId)       → Local definition (kind, type, mutability, capture source)
+                       evidence(EvidenceRef) → selected evidence payload
+                       cause(CauseRef)       → unavailability cause
+Environment            values of parameters, captures and locals evaluated so far; static bindings
+Session                body requests, evaluation outcomes, budgets, the two in-progress sets
+```
+
+A node can hold `LocalId`, `EvidenceRef` and `CauseRef`, whose payloads are outside the subtree; the
+view is how the evaluator reads them. It is an interface, not another representation. Over a
+published artifact the view reads the frozen tables. During construction the builder supplies a view
+over its **completed rows only**: rows are appended before any node that references them is created,
+so every reference a finished node holds already resolves. The view exposes no way to write, does not
+require the surrounding artifact to be finished, and never reaches a row that is still being built.
+
+**Calls during evaluation.** A call to another static function makes two requests: a *body request*
+for the callee's artifact (`check @callee`, or `specialize @callee<application>` when selection
+requires it), which is published and immutable before any of its nodes run; then an *evaluation
+request* under the `EvaluationKey` built from that artifact and the argument values. A recorded
+outcome answers it; otherwise the callee's nodes are evaluated through a view of the callee's
+artifact in a fresh environment.
 
 **Where results live.**
 
 | Result | Home |
 |---|---|
 | A value the body under construction depends on | becomes nodes of *that* artifact before it is finished (selected branch, literal, type length) |
-| The outcome of an application (`value`, provenance in `Parameter` terms, or failure with `Through` locations) | `session.outcomes[ArtifactId]`: a separate product keyed by artifact identity, never a field of the artifact |
-| What one call site passed | the caller's artifact: the `Call` node's `application`, and a `results.provenance` row for its static arguments |
+| The outcome of one execution | `session.outcomes[EvaluationKey]`: a separate product, never a field of an artifact |
+| What one call site passed | the caller's artifact: the `Call` node, and a `results.provenance` row for its arguments |
 
 So "static evaluation writes statics" means exactly: the evaluator returns values to the builder of
-the artifact being built, and records application outcomes in the session. One node never has
-different results for different applications, because different applications are different
-artifacts with their own nodes.
+the artifact being built, and records outcomes in the session under evaluation keys. A node never has
+different results for different executions, because results are not stored on nodes at all.
+
+**Completed versus aborted.** A result that reports a problem in the source is a *completed* result.
+It is not a failure of the compiler.
+
+| | Construction | Evaluation |
+|---|---|---|
+| **Completed, accepted** | artifact with no diagnostics; executable | `Value { value, provenance }` |
+| **Completed, rejected** | immutable artifact **with** diagnostics; damaged nodes are `Unavailable`, healthy structure is preserved; inspectable by tooling, **never executable** | `Rejected { failure, locations }`: `compileError`, a phase violation, an exhausted deterministic budget, a non-terminating evaluation |
+| **Aborted** | cancellation, interruption, an internal defect: **no artifact, no partial artifact** | cancellation or a transient or internal failure: **no outcome recorded** |
+
+A completed rejection is deterministic for its request, so it is published and recorded like any
+other completed result; the residual `compileError` artifacts in the examples above are completed
+rejections. An aborted request leaves nothing behind and can simply be asked again.
+
+**Reuse policy is explicit.** Whether a completed, diagnostic-bearing result may be reused is a
+validity policy, stated with the rest of `Validity` rather than implied by publication. The policy
+for this milestone keeps today's behaviour: a completed artifact is reusable under the ordinary
+validity check whether or not it carries diagnostics; an artifact whose authored owner carries parser
+recovery damage is reusable only while that authored content is byte-identical, which its body
+fingerprint already enforces; nothing is ever reusable from an aborted request. Changing any of this
+later is a policy change, not a schema change.
 
 **Publication.** `builder.finish()` validates (dense ids, references in range, closed vocabulary,
-no `Through` outside a `Specialize` artifact), freezes, fingerprints through the canonical codec, and
-returns the `CheckedBody`. `BodyQuery` stores it under its `Request` only then. A failed or
-interrupted build publishes nothing and leaves no reusable outcome.
+`Parameter` sources only where the artifact has parameters to name), freezes, fingerprints through
+the canonical codec, and returns the `CheckedBody`. `BodyQuery` stores it under its `Request` only
+then.
 
 ## Semantic occurrences
 
@@ -372,7 +498,7 @@ validity  header 9a1c…  body 5e07…  scope 11d2…
           observed  Lookup(scope, "limit")    → demo:app/Main::limit
                     Lookup(scope, "identity") → demo:app/Value::identity
                     Signature(demo:app/Value::identity) → 3f9c…
-                    Outcome({demo:app/Main/function=limit#0, Check}) → Integer(40 : i32)
+                    Evaluation({body: {…/function=limit#0, Check}, arguments: []}) → Integer(40 : i32)
 function  contract fn() -> i32     regions [r0]
           locals   l0 base : i32 let
           n0 Bind l0 r0                                         origin body#0|statement#0
@@ -405,7 +531,7 @@ except where stated.
    calls, one publication point with the spelling map, per-call-site reporting. `Diagnostic` becomes
    generic over its location so body products hold `Location`s. Span-derived identities rebuilt from
    anchors.
-2. **Identities and artifacts.** `ArtifactId`, `Application`, `NodeRef`; declarations, fields and
+2. **Identities and artifacts.** `ArtifactId`, `Application`, `NodeRef`, `EvaluationKey`; declarations, fields and
    members by id throughout TIR and cached products; `Request` separated from `Validity` in
    `BodyQuery`; a hit returns the cached object. **Delete `SemanticRebinding`.**
 3. **The TIR schema.** Node and local ids, origins, resolved operations and explicit conversions on
@@ -415,8 +541,9 @@ except where stated.
    `BodyControlFlow`, `TypeOutlives`, `Ownership`, `OpaqueRealization`, `Instances`, then
    occurrences, completion, type hints, inspector, LSP and docgen callers. After this step only
    analysis and the evaluator read facts.
-5. **The evaluator onto nodes.** `StaticEvaluation` interprets typed nodes with an environment and a
-   session; outcomes keyed by `ArtifactId`; `Residualization` and `ModuleSelection` request
+5. **The evaluator onto nodes.** `StaticEvaluation` interprets typed nodes through a read-only view,
+   with an environment and a session; outcomes keyed by `EvaluationKey`, separate in-progress sets for
+   construction and evaluation; `Residualization` and `ModuleSelection` request
    `Specialize` artifacts. This works before step 6 because `TirLowering` is already compositional
    per expression: during construction the analysis lowers the subexpression it has just checked and
    hands that node to the evaluator. The evaluator's input does not change again.
