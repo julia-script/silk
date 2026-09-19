@@ -8,6 +8,11 @@ import * as ConformanceProof from '../src/ConformanceProof.js'
 import * as DeclarationFacts from '../src/DeclarationFacts.js'
 import type * as DeclarationIndex from '../src/DeclarationIndex.js'
 import * as LifetimeElision from '../src/LifetimeElision.js'
+import type * as AuthoredHir from '../src/AuthoredHir.js'
+import * as AuthoredWalk from '../src/AuthoredWalk.js'
+import type * as DeclarationLifetime from '../src/DeclarationLifetime.js'
+import * as SemanticContext from '../src/SemanticContext.js'
+import type * as SyntaxFile from '../src/SyntaxFile.js'
 import * as Option from 'effect/Option'
 import * as Lifetime from '../src/Lifetime.js'
 import * as ModuleClosure from '../src/ModuleClosure.js'
@@ -87,6 +92,27 @@ const rootSyntax = (closure: ModuleClosure.Facts) => {
   const found = closure.modules.find((module) => module.name === 'root')?.syntax
   if (found === undefined) throw new RangeError('Fixture closure has no root module')
   return found
+}
+
+/**
+ * Plans one header expansion.
+ *
+ * The elaboration is plain data, so the refactor takes the semantic context and the authored
+ * declaration beside it; both come from the closure the index was collected from.
+ */
+const planExplicit = (
+  closure: ModuleClosure.Facts,
+  syntax: SyntaxFile.SyntaxFile,
+  member: { readonly anchor: AuthoredHir.Anchor },
+  context: DeclarationLifetime.Context,
+  executable?: Type.ExecutableLifetimes,
+) => {
+  const registry = SemanticContext.fromModules(closure.modules)
+  const semantic = registry.of(member.anchor)
+  if (semantic === undefined) throw new RangeError('Fixture closure has no semantic context')
+  const declaration = AuthoredWalk.declarationOf(semantic.module, member.anchor.owner)
+  if (declaration === undefined) throw new RangeError('Fixture closure has no authored declaration')
+  return LifetimeElision.makeExplicit(syntax, semantic, declaration, context, executable)
 }
 
 it.effect('indexes canonical scalar enums with exact representations and bigint sequences', () =>
@@ -2350,11 +2376,11 @@ fn apply<T>(value: &T, callback: fn(&T) -> &T) -> &T { return value }`
         .at(0)
         ?.members.flatMap((member) =>
           'lifetimeElaboration' in member && member.lifetimeElaboration !== undefined
-            ? [member.lifetimeElaboration]
+            ? [{ member, context: member.lifetimeElaboration }]
             : [],
         ) ?? []
-    const plans = contexts.map((context) =>
-      Option.getOrThrow(LifetimeElision.makeExplicit(syntax, context)),
+    const plans = contexts.map(({ member, context }) =>
+      Option.getOrThrow(planExplicit(collected.closure, syntax, member, context)),
     )
     const edits = plans
       .flatMap((plan) => plan.plan.changes.get('root') ?? [])
@@ -2405,7 +2431,9 @@ fn apply<T>(value: &T, callback: fn(&T) -> &T) -> &T { return value }`
           (member) =>
             !('lifetimeElaboration' in member) ||
             member.lifetimeElaboration === undefined ||
-            Option.isNone(LifetimeElision.makeExplicit(explicitSyntax, member.lifetimeElaboration)),
+            Option.isNone(
+              planExplicit(reparsed.closure, explicitSyntax, member, member.lifetimeElaboration),
+            ),
         ),
     )
   }),
@@ -2427,8 +2455,10 @@ service Work { effect<'static> fn tick() -> i32 }`
         const context = declaration.lifetimeElaboration
         if (context === undefined) return []
         const expansion = Option.getOrThrow(
-          LifetimeElision.makeExplicit(
+          planExplicit(
+            collected.closure,
             syntax,
+            declaration,
             context,
             DeclarationFacts.executableLifetimes(declaration),
           ),
@@ -2460,8 +2490,10 @@ service Work { effect<'static> fn tick() -> i32 }`
       if (context !== undefined)
         assert.isTrue(
           Option.isNone(
-            LifetimeElision.makeExplicit(
+            planExplicit(
+              reparsed.closure,
               explicitSyntax,
+              declaration,
               context,
               DeclarationFacts.executableLifetimes(declaration),
             ),
