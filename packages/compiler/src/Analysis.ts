@@ -604,6 +604,8 @@ export const documentationOfAnchor = (
   let node: SyntaxTree.Node | undefined = covers(syntax.root) ? syntax.root : undefined
   while (node !== undefined) {
     if (DocBlock.isDocumentableKind(node.kind)) innermost = node
+    // A lifetime binder takes no `///` of its own, and must not borrow its declaration's either.
+    else if (node.kind === 'LifetimeParameter') innermost = undefined
     node = node.children.find(
       (child): child is SyntaxTree.Node => SyntaxTree.isNode(child) && covers(child),
     )

@@ -1387,15 +1387,52 @@ const appliedSpelling = (
   const arguments_ = type.arguments.arguments
     .map((argument) => argumentSpelling(context, argument))
     .join(',')
-  return `${target}<${arguments_}>`
+  const failures =
+    type.arguments.failures === undefined
+      ? ''
+      : `!${operandSpelling(context, type.arguments.failures)}`
+  const requirements =
+    type.arguments.requirements === undefined
+      ? ''
+      : `?${type.arguments.requirements.members.map((member) => operandSpelling(context, member)).join('|')}`
+  return `${target}<${arguments_}${failures}${requirements}>`
+}
+
+/** A borrow marker as it is written, without the space a formatter would add. */
+const borrowSpelling = (
+  context: Context,
+  access: AuthoredHir.Access | undefined,
+  lifetime: AuthoredHir.Lifetime | undefined,
+): string => {
+  if (access === undefined) return ''
+  const region = lifetime === undefined ? '' : (nameText(context, lifetime.name) ?? '')
+  return `&${region}${access === 'Mutable' ? 'mut' : ''}`
+}
+
+/** One row member or type argument in the compact form a declaration head is quoted with. */
+const operandSpelling = (context: Context, operand: AuthoredHir.RowOperand): string => {
+  switch (operand._tag) {
+    case 'Requirement':
+      return `${borrowSpelling(context, operand.access, undefined)}${operandSpelling(context, operand.capability)}`
+    case 'NamedType':
+      return typePathOf(context, operand.path)?.spelling ?? ''
+    case 'AppliedType':
+      return appliedSpelling(context, operand)
+    case 'ReferenceType':
+      return `${borrowSpelling(context, operand.access, operand.lifetime)}${operandSpelling(context, operand.referent)}`
+    case 'UnionType':
+      return operand.members.map((member) => operandSpelling(context, member)).join('|')
+    case 'UnitType':
+      return '()'
+    default:
+      return operand._tag
+  }
 }
 
 const argumentSpelling = (context: Context, argument: AuthoredHir.GenericArgument): string => {
   if (argument._tag === 'Lifetime') return nameText(context, argument.name) ?? ''
   if (argument._tag === 'RequirementSelector') return ''
-  if (argument._tag === 'NamedType') return typePathOf(context, argument.path)?.spelling ?? ''
-  if (argument._tag === 'AppliedType') return appliedSpelling(context, argument)
-  return argument._tag
+  return operandSpelling(context, argument)
 }
 
 const analyzeParameter = (
@@ -4722,13 +4759,16 @@ const mentionedNames = (context: Context, member: AuthoredHir.Declaration): Read
   const found = new Set<string>()
   const addName = (name: AuthoredHir.Name): void => {
     const spelling = nameText(context, name)
-    if (spelling === undefined) return
-    found.add(spelling)
-    if (spelling.startsWith("'")) found.add(spelling)
-    else found.add(`'${spelling}`)
+    if (spelling !== undefined) found.add(spelling)
+  }
+  // A lifetime is mentioned under its ticked spelling only: a value or type named `text` says
+  // nothing about `'text`.
+  const addLifetime = (name: AuthoredHir.Name): void => {
+    const spelling = nameText(context, name)
+    if (spelling !== undefined) found.add(spelling.startsWith("'") ? spelling : `'${spelling}`)
   }
   const visitType = (type: AuthoredHir.Type | AuthoredHir.Lifetime): void => {
-    if (type._tag === 'Lifetime') return addName(type.name)
+    if (type._tag === 'Lifetime') return addLifetime(type.name)
     switch (type._tag) {
       case 'NamedType':
         for (const segment of type.path.segments) addName(segment)
@@ -4794,7 +4834,8 @@ const mentionedNames = (context: Context, member: AuthoredHir.Declaration): Read
     for (const operand of row.members) visitRowOperand(operand)
   }
   const visitGeneric = (generic: AuthoredHir.GenericParameter): void => {
-    addName(generic.name)
+    if (generic._tag === 'LifetimeParameter') addLifetime(generic.name)
+    else addName(generic.name)
     if (generic._tag === 'RowParameter') return
     for (const bound of generic.bounds) visitType(bound)
   }
