@@ -249,6 +249,8 @@ interface Draft {
     readonly span: SourceSpan.SourceSpan
     readonly anchor: AuthoredHir.Anchor
   }>
+  /** Why a literal failed to decode, presented at its own anchor for the semantic diagnostic. */
+  readonly literalDiagnostics: AuthoredPresentation.Diagnostic[]
 }
 
 const decoder = new TextDecoder()
@@ -622,6 +624,26 @@ const invalidExpression = (
   retained,
 })
 
+/**
+ * A literal whose spelling lexes but does not decode. The lexer accepted it, so no frontend
+ * diagnostic explains the damage: the decoder's reason is presented for elaboration to report.
+ */
+const undecodableLiteral = (
+  draft: Draft,
+  cursor: Cursor,
+  span: SourceSpan.SourceSpan,
+  detail: string,
+): AuthoredHir.InvalidExpression => {
+  const invalid = invalidExpression(draft, cursor, span, Diagnostic.invalidStaticLiteralCode)
+  draft.literalDiagnostics.push({
+    anchor: invalid.anchor,
+    span: { start: span.start, end: span.end },
+    code: Diagnostic.invalidStaticLiteralCode,
+    message: detail,
+  })
+  return invalid
+}
+
 const decimalFloat = /^(\d+)(?:\.(\d+))?(?:[eE]([+-]?\d+))?$/
 
 const floatingLiteral = (
@@ -688,6 +710,8 @@ const staticTextLiteral = (
   const raw = Array.from(slice(draft, literal.span))
   const form = LiteralForm.recognize(raw)
   const decoded = form === undefined ? undefined : StaticText.decode(raw, form)
+  if (decoded?._tag === 'Invalid')
+    return undecodableLiteral(draft, cursor, literal.span, decoded.detail)
   if (decoded === undefined || decoded._tag !== 'Decoded')
     return invalidExpression(draft, cursor, literal.span, Diagnostic.unterminatedStaticLiteralCode)
   const base = node(draft, cursor, literal.span, { spelling: spellingOf(draft, literal.span) })
@@ -710,6 +734,8 @@ const characterLiteral = (
   const raw = Array.from(slice(draft, literal.span))
   const form = LiteralForm.recognize(raw)
   const decoded = form === undefined ? undefined : StaticText.decodeScalar(raw, form)
+  if (decoded?._tag === 'Invalid')
+    return undecodableLiteral(draft, cursor, literal.span, decoded.detail)
   if (decoded === undefined || decoded._tag !== 'Scalar')
     return invalidExpression(
       draft,
@@ -3225,6 +3251,7 @@ export const lower = Effect.fn('AuthoredLowering.lower')(function* (
     codesBySpan,
     frontendDiagnostics,
     declarationAnchors: [],
+    literalDiagnostics: [],
   }
   const moduleDocumentation = DocBlock.ofModule(syntax)
   if (moduleDocumentation !== undefined) {
@@ -3241,7 +3268,7 @@ export const lower = Effect.fn('AuthoredLowering.lower')(function* (
     syntax.source.id,
     revisionOf(syntax.source),
     draft.entries,
-    presentationDiagnostics(draft, owner),
+    [...presentationDiagnostics(draft, owner), ...draft.literalDiagnostics],
   )
   return Object.freeze({ _tag: 'AuthoredLowering', module, presentation })
 })

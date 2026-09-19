@@ -9335,12 +9335,24 @@ export function analyzeExpression(
 ): ExpressionResult | undefined {
   // A recovery node carries no meaning to check. The parser already reported why it is damaged, so
   // analysis yields the unavailable fact rather than leaving callers with nothing to record.
-  if (!AuthoredWalk.isAvailable(node))
+  if (!AuthoredWalk.isAvailable(node)) {
+    // The one damage the parser does not report: a literal that lexes but does not decode.
+    const key = AuthoredIdentity.anchorKey(node.anchor)
+    const undecodable = context.presentation.diagnostics.filter(
+      (entry) =>
+        entry.code === Diagnostic.invalidStaticLiteralCode &&
+        AuthoredIdentity.anchorKey(entry.anchor) === key,
+    )
     return Object.freeze({
       fact: unavailableExpression(node.anchor),
-      diagnostics: Object.freeze([]),
+      diagnostics: Object.freeze(
+        undecodable.map((entry) =>
+          Diagnostic.invalidStaticLiteral(entry.message, context.spanOf(node.anchor)),
+        ),
+      ),
       type: undefined,
     })
+  }
   if (
     declaration.phase === 'Static' &&
     resolution.staticContext !== undefined &&
