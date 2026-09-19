@@ -363,6 +363,12 @@ export const forHeader = (
       walkType(operand.capability, scope, output, defaultOutput, allocate, quantified)
       return
     }
+    if (operand._tag === 'ReferenceType' && operand.lifetime === undefined) {
+      // A row position that parses as a type spells the same access marker as a reference type.
+      setRegion(operand.anchor, Lifetime.staticLifetime)
+      walkType(operand.referent, scope, output, defaultOutput, allocate, quantified)
+      return
+    }
     walkType(operand, scope, output, defaultOutput, allocate, quantified)
   }
 
