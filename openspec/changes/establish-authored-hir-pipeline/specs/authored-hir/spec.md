@@ -120,3 +120,17 @@ byte offset. The typed executable representation is named TIR; authored HIR is t
 
 - **WHEN** a declaration is inserted above a function that owns an anonymous callable
 - **THEN** the hidden body's identity moves with its enclosing declaration ordinal and the cached body is rebound without re-checking
+
+### Requirement: Preparation seals intent-specific bundles
+
+One preparation request SHALL name its intent. Analysis intent SHALL seal the required roots, normalized configuration and selected frontend closure. Executable intent SHALL additionally normalize the target profile, close runtime component demand to a fixed point and record the final realization product. Every bundle SHALL publish a manifest with its intent, root, identity, profile identity, target, loaded modules with origins, presentation revisions and resolved imports, component roots with reasons, source-closed or partial status, and diagnostic count. Executable consumers SHALL accept only executable bundles, and the operations downstream of a bundle SHALL carry no source-resolver requirement.
+
+#### Scenario: Reject analysis-only input
+
+- **WHEN** a Driver or realization consumer receives an analysis bundle
+- **THEN** the operation is unavailable by type; no executable work runs on analysis-only input
+
+#### Scenario: Record component reasons
+
+- **WHEN** an executable bundle admitted a composition root and a demanded storage provider
+- **THEN** its manifest lists both with reasons `composition` and `execution-storage`

@@ -21,6 +21,6 @@
 
 ## 4. A4 — JUL-208 sealed preparation (separate work package)
 
-- [ ] 4.1 Extend preparation/selection specification deltas and implement intent-specific manifests, normalized configuration and shared selected source-outcome discovery.
-- [ ] 4.2 Close executable component demand to a monotone fixed point and seal bundles; preserve analysis-only work bounds, partial queries, required-root failures and unused-component exclusion.
-- [ ] 4.3 Migrate public/compiler/tooling entry points and separate helper requests, removing downstream source reopening; provide poisoned-resolver/parser structural evidence.
+- [x] 4.1 Extend preparation/selection specification deltas and implement intent-specific manifests, normalized configuration and shared selected source-outcome discovery.
+- [x] 4.2 Close executable component demand to a monotone fixed point and seal bundles; preserve analysis-only work bounds, partial queries, required-root failures and unused-component exclusion.
+- [x] 4.3 Migrate public/compiler/tooling entry points and separate helper requests, removing downstream source reopening; provide resolver-free downstream evidence with a counting resolver.

@@ -40,7 +40,8 @@ export interface ProjectRequest {
   readonly roots: ReadonlyArray<string>
   /** Composition roots retain recoverable absence/failure facts. */
   readonly additionalRoots?: ReadonlyArray<string>
-  readonly previous?: ProjectClosure
+  /** Prior loaded facts whose unchanged modules keep their syntax and authored artifacts. */
+  readonly previous?: Facts
   /** Completed condition decisions for this discovery pass; absent decisions admit neither arm. */
   readonly selection?: ReadonlyMap<string, ReadonlyMap<number, boolean>>
 }
@@ -502,11 +503,13 @@ export const view = (self: ProjectClosure, rootModule: string): Closure | undefi
 export const load = Effect.fn('ModuleClosure.load')(function* (
   request: CompilationRequest,
   additionalRoots: ReadonlyArray<string> = [],
+  previous?: Facts,
 ): Effect.fn.Return<Closure, ModuleClosureError, SourceResolver.SourceResolver> {
   const project = yield* loadProject({
     roots: [request.root],
     additionalRoots,
     application: request.root,
+    ...(previous === undefined ? {} : { previous }),
   })
   const closure = view(project, request.root)
   if (closure === undefined) throw new RangeError(`Project closure lost root ${request.root}`)
