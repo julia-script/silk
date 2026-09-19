@@ -596,7 +596,7 @@ pub fn main() -> i32 {
       })),
       [
         { code: 'SEM0056', span: 'wrong' },
-        { code: 'OWN0010', span: ' &mut secret' },
+        { code: 'OWN0010', span: '&mut secret' },
       ],
     )
   }),

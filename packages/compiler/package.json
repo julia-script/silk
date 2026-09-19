@@ -422,9 +422,9 @@
       "types": "./dist/Preparation.d.ts",
       "import": "./dist/Preparation.js"
     },
-    "./Presentation": {
-      "types": "./dist/Presentation.d.ts",
-      "import": "./dist/Presentation.js"
+    "./SemanticContext": {
+      "types": "./dist/SemanticContext.d.ts",
+      "import": "./dist/SemanticContext.js"
     },
     "./ProfileBootstrap": {
       "types": "./dist/ProfileBootstrap.d.ts",
@@ -465,6 +465,10 @@
     "./Scalar": {
       "types": "./dist/Scalar.d.ts",
       "import": "./dist/Scalar.js"
+    },
+    "./SemanticDisplay": {
+      "types": "./dist/SemanticDisplay.d.ts",
+      "import": "./dist/SemanticDisplay.js"
     },
     "./SemanticInvalidation": {
       "types": "./dist/SemanticInvalidation.d.ts",
@@ -517,10 +521,6 @@
     "./SuspensionMode": {
       "types": "./dist/SuspensionMode.d.ts",
       "import": "./dist/SuspensionMode.js"
-    },
-    "./SyntaxCorrespondence": {
-      "types": "./dist/SyntaxCorrespondence.d.ts",
-      "import": "./dist/SyntaxCorrespondence.js"
     },
     "./SyntaxFile": {
       "types": "./dist/SyntaxFile.d.ts",

@@ -1,5 +1,5 @@
 import * as OpaqueRealization from '../../src/OpaqueRealization.js'
-import type * as Analysis from '../../src/Analysis.js'
+import * as Analysis from '../../src/Analysis.js'
 import type * as Backend from '../../src/Backend.js'
 import type * as DeclarationFacts from '../../src/DeclarationFacts.js'
 import type * as Elaboration from '../../src/Elaboration.js'
@@ -12,7 +12,7 @@ import * as SuspensionOwnership from '../../src/SuspensionOwnership.js'
 import * as Type from '../../src/Type.js'
 
 export const syntaxOf = (self: Analysis.FrontendSnapshot, module: string) =>
-  self.results.get(module)?.syntax
+  Analysis.moduleSyntax(self, module)
 
 const nestedStatementFacts = (
   statement: Elaboration.StatementFact,

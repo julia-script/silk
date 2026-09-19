@@ -249,6 +249,8 @@ interface Draft {
     readonly span: SourceSpan.SourceSpan
     readonly anchor: AuthoredHir.Anchor
   }>
+  /** Why a literal failed to decode, presented at its own anchor for the semantic diagnostic. */
+  readonly literalDiagnostics: AuthoredPresentation.Diagnostic[]
 }
 
 const decoder = new TextDecoder()
@@ -263,7 +265,8 @@ const triviaKinds: ReadonlySet<Token.TokenKind> = new Set<Token.TokenKind>([
   'ModuleDocComment',
 ])
 
-const firstSignificantStart = (element: SyntaxTree.Element): number | undefined => {
+/** Where a syntax element is presented from: its first byte that is not leading trivia. */
+export const firstSignificantStart = (element: SyntaxTree.Element): number | undefined => {
   if (SyntaxTree.isToken(element))
     return triviaKinds.has(element.kind) ? undefined : element.span.start
   if (SyntaxTree.isMissingToken(element)) return element.span.start
@@ -396,6 +399,21 @@ const missing = (
 
 const hasToken = (parent: SyntaxTree.Node, kind: Token.TokenKind): boolean =>
   token(parent, kind) !== undefined
+
+/**
+ * Presents one written modifier keyword at its own cursor, so a diagnostic about that modifier can
+ * name the keyword alone. Absent when the header does not spell it.
+ */
+const modifierAnchor = (
+  draft: Draft,
+  cursor: Cursor,
+  parent: SyntaxTree.Node,
+  kind: Token.TokenKind,
+  role: string,
+): AuthoredHir.Anchor | undefined => {
+  const marker = token(parent, kind)
+  return marker === undefined ? undefined : node(draft, child(cursor, role), marker.span).anchor
+}
 
 const spelled = (
   draft: Draft,
@@ -607,6 +625,26 @@ const invalidExpression = (
   retained,
 })
 
+/**
+ * A literal whose spelling lexes but does not decode. The lexer accepted it, so no frontend
+ * diagnostic explains the damage: the decoder's reason is presented for elaboration to report.
+ */
+const undecodableLiteral = (
+  draft: Draft,
+  cursor: Cursor,
+  span: SourceSpan.SourceSpan,
+  detail: string,
+): AuthoredHir.InvalidExpression => {
+  const invalid = invalidExpression(draft, cursor, span, Diagnostic.invalidStaticLiteralCode)
+  draft.literalDiagnostics.push({
+    anchor: invalid.anchor,
+    span: { start: span.start, end: span.end },
+    code: Diagnostic.invalidStaticLiteralCode,
+    message: detail,
+  })
+  return invalid
+}
+
 const decimalFloat = /^(\d+)(?:\.(\d+))?(?:[eE]([+-]?\d+))?$/
 
 const floatingLiteral = (
@@ -673,6 +711,8 @@ const staticTextLiteral = (
   const raw = Array.from(slice(draft, literal.span))
   const form = LiteralForm.recognize(raw)
   const decoded = form === undefined ? undefined : StaticText.decode(raw, form)
+  if (decoded?._tag === 'Invalid')
+    return undecodableLiteral(draft, cursor, literal.span, decoded.detail)
   if (decoded === undefined || decoded._tag !== 'Decoded')
     return invalidExpression(draft, cursor, literal.span, Diagnostic.unterminatedStaticLiteralCode)
   const base = node(draft, cursor, literal.span, { spelling: spellingOf(draft, literal.span) })
@@ -695,6 +735,8 @@ const characterLiteral = (
   const raw = Array.from(slice(draft, literal.span))
   const form = LiteralForm.recognize(raw)
   const decoded = form === undefined ? undefined : StaticText.decodeScalar(raw, form)
+  if (decoded?._tag === 'Invalid')
+    return undecodableLiteral(draft, cursor, literal.span, decoded.detail)
   if (decoded === undefined || decoded._tag !== 'Scalar')
     return invalidExpression(
       draft,
@@ -1147,11 +1189,8 @@ const callableContract = (
   const own = child(cursor, 'contract')
   const base = node(draft, own, header.span)
   const parts = nodes(header)
-  const generics = genericParameters(
-    draft,
-    own,
-    parts.find((n) => n.kind === 'TypeParameterList'),
-  )
+  const genericList = parts.find((n) => n.kind === 'TypeParameterList')
+  const generics = genericParameters(draft, own, genericList)
   const { parameters, variadic } = parameterList(
     draft,
     own,
@@ -1183,6 +1222,21 @@ const callableContract = (
         : lifetimesIn(draft, child(own, 'environment'), environment),
     unsafe: hasToken(header, 'UnsafeKeyword'),
     static: hasToken(header, 'StaticKeyword'),
+    effectAnchor: modifierAnchor(draft, own, header, 'EffectKeyword', 'effectMarker'),
+    unsafeAnchor: modifierAnchor(draft, own, header, 'UnsafeKeyword', 'unsafeMarker'),
+    staticAnchor: modifierAnchor(draft, own, header, 'StaticKeyword', 'staticMarker'),
+    genericsAnchor:
+      genericList === undefined
+        ? undefined
+        : node(draft, child(own, 'genericList'), spanOf(genericList)).anchor,
+    failuresAnchor:
+      failures === undefined
+        ? undefined
+        : node(draft, child(own, 'failureRow'), spanOf(failures)).anchor,
+    constraintsAnchor:
+      where === undefined
+        ? undefined
+        : node(draft, child(own, 'whereClause'), spanOf(where)).anchor,
   }
 }
 
@@ -1203,20 +1257,27 @@ const constraints = (
         ? missingType(draft, child(own, role), spanOf(constraint))
         : type(draft, child(own, role), operandSyntax)
     }
+    // A row position admits a written requirement such as `&Work`, which is not a type.
+    const row = (index: number, role: string): AuthoredHir.RowOperand => {
+      const operandSyntax = operands[index]
+      return operandSyntax === undefined
+        ? missingType(draft, child(own, role), spanOf(constraint))
+        : rowOperand(draft, child(own, role), operandSyntax)
+    }
     const lowered: AuthoredHir.Constraint =
       constraint.kind === 'MembershipConstraint'
         ? {
             ...base,
             _tag: 'MembershipConstraint',
-            subject: operand(0, 'subject'),
-            source: operand(1, 'source'),
+            subject: row(0, 'subject'),
+            source: row(1, 'source'),
           }
         : {
             ...base,
             _tag: 'ProviderConstraint',
             provider: operand(0, 'provider'),
-            selected: operand(1, 'selected'),
-            source: operand(2, 'source'),
+            selected: row(1, 'selected'),
+            source: row(2, 'source'),
           }
     return withCauses(lowered, damage(draft, own, constraint))
   })
@@ -1244,13 +1305,20 @@ const type = (draft: Draft, cursor: Cursor, syntax: SyntaxTree.Node): AuthoredHi
       const [target, argumentList] = nodes(syntax)
       const argumentsSyntax = nodes(syntax).find((n) => n.kind === 'TypeArgumentList')
       const targetSyntax = target?.kind === 'TypeArgumentList' ? undefined : target
+      // The parser attaches `once`/`mut` of `once Effect<...>` to the applied node; the mode belongs
+      // to the named target the arguments apply to.
+      const mode = callableMode(syntax)
+      const lowered =
+        targetSyntax === undefined
+          ? missingType(draft, child(own, 'target'), spanOf(syntax))
+          : type(draft, child(own, 'target'), targetSyntax)
       return done({
         ...node(draft, own, spanOf(syntax)),
         _tag: 'AppliedType',
         target:
-          targetSyntax === undefined
-            ? missingType(draft, child(own, 'target'), spanOf(syntax))
-            : type(draft, child(own, 'target'), targetSyntax),
+          mode !== undefined && lowered._tag === 'NamedType' && lowered.mode === undefined
+            ? { ...lowered, mode }
+            : lowered,
         arguments:
           argumentsSyntax === undefined
             ? {
@@ -1666,6 +1734,24 @@ const prefixOperator = (syntax: SyntaxTree.Node): AuthoredHir.PrefixOperator => 
   return 'Negate'
 }
 
+/**
+ * The anchor of the operator token an expression is written with. A damaged expression whose
+ * operator is gone falls back to the expression itself.
+ */
+const operatorAnchor = (
+  draft: Draft,
+  cursor: Cursor,
+  syntax: SyntaxTree.Node,
+  own: AuthoredHir.Anchor,
+): AuthoredHir.Anchor => {
+  const written = syntax.children.find(
+    (element): element is Token.Token =>
+      isToken(element) &&
+      (Operator.infix(element.kind) !== undefined || Operator.prefix(element.kind) !== undefined),
+  )
+  return written === undefined ? own : node(draft, child(cursor, 'operator'), written.span).anchor
+}
+
 const infixOperator = (syntax: SyntaxTree.Node): AuthoredHir.InfixOperator | undefined => {
   for (const element of syntax.children) {
     if (!isToken(element)) continue
@@ -1894,13 +1980,16 @@ const expression = (
               ),
       })
     }
-    case 'PrefixExpression':
+    case 'PrefixExpression': {
+      const base = node(draft, cursor, spanOf(syntax))
       return done({
-        ...node(draft, cursor, spanOf(syntax)),
+        ...base,
         _tag: 'PrefixExpression',
         operator: prefixOperator(syntax),
+        operatorAnchor: operatorAnchor(draft, cursor, syntax, base.anchor),
         operand: operandAt(draft, cursor, syntax, 0, 'operand', frame),
       })
+    }
     case 'InfixExpression': {
       const operator = infixOperator(syntax)
       const left = operandAt(draft, cursor, syntax, 0, 'left', frame)
@@ -1910,10 +1999,12 @@ const expression = (
           left,
           right,
         ])
+      const base = node(draft, cursor, spanOf(syntax))
       return done({
-        ...node(draft, cursor, spanOf(syntax)),
+        ...base,
         _tag: 'InfixExpression',
         operator,
+        operatorAnchor: operatorAnchor(draft, cursor, syntax, base.anchor),
         left,
         right,
       })
@@ -2651,7 +2742,8 @@ const callableParts = (
   if (operation) {
     const marker = nodes(syntax).find((n) => n.kind === 'OperatorMarker')
     const operatorToken = marker?.children.find(
-      (element): element is Token.Token => isToken(element) && element.kind !== 'Identifier',
+      (element): element is Token.Token =>
+        isToken(element) && Operator.isDeclarationToken(element.kind),
     )
     const operatorOf = (): AuthoredHir.Name | undefined => {
       if (marker === undefined) return undefined
@@ -2728,6 +2820,12 @@ const declarationParts = (
       header,
       nodes(syntax).find((n) => n.kind === 'TypeParameterList'),
     )
+  const genericsAnchor = (): AuthoredHir.Anchor | undefined => {
+    const list = nodes(syntax).find((n) => n.kind === 'TypeParameterList')
+    return list === undefined
+      ? undefined
+      : node(draft, child(header, 'genericList'), spanOf(list)).anchor
+  }
   const firstType = (role: string): AuthoredHir.Type => {
     const typed = typeChildren(syntax)[0]
     return typed === undefined
@@ -2969,6 +3067,7 @@ const declarationParts = (
             ...named(),
             _tag: 'StructHeader',
             generics: generics(),
+            genericsAnchor: genericsAnchor(),
             fields: fields(draft, header, syntax, 'StructField'),
             abi: hasToken(syntax, 'ExternKeyword')
               ? textLiteralToken(draft, header, syntax, 'abi')
@@ -3012,6 +3111,7 @@ const declarationParts = (
                     _tag: 'Variant',
                     name: nameIn(draft, own, variant, identifierKinds),
                     fields: fields(draft, own, variant, 'UnionVariantField'),
+                    braces: hasToken(variant, 'LeftBrace'),
                   },
                   damage(draft, own, variant),
                 )
@@ -3182,6 +3282,7 @@ export const lower = Effect.fn('AuthoredLowering.lower')(function* (
     codesBySpan,
     frontendDiagnostics,
     declarationAnchors: [],
+    literalDiagnostics: [],
   }
   const moduleDocumentation = DocBlock.ofModule(syntax)
   if (moduleDocumentation !== undefined) {
@@ -3198,7 +3299,7 @@ export const lower = Effect.fn('AuthoredLowering.lower')(function* (
     syntax.source.id,
     revisionOf(syntax.source),
     draft.entries,
-    presentationDiagnostics(draft, owner),
+    [...presentationDiagnostics(draft, owner), ...draft.literalDiagnostics],
   )
   return Object.freeze({ _tag: 'AuthoredLowering', module, presentation })
 })
@@ -3235,32 +3336,24 @@ const allDeclarations = (module: AuthoredHir.Module): ReadonlyArray<AuthoredHir.
   return found
 }
 
-const headerSpans = new WeakMap<Lowered, ReadonlyMap<string, AuthoredHir.Declaration>>()
+const byOwner = new WeakMap<Lowered, ReadonlyMap<string, AuthoredHir.Declaration>>()
 
-/** Finds the authored declaration whose header presents at one declaration syntax node. */
-export const declarationFor = (
+/** The authored declaration one owner identity names, at any nesting depth of the module. */
+export const declarationOf = (
   self: Lowered,
-  syntax: SyntaxTree.Node,
+  owner: AuthoredIdentity.Identity,
 ): AuthoredHir.Declaration | undefined => {
-  let index = headerSpans.get(self)
+  let index = byOwner.get(self)
   if (index === undefined) {
-    const byOwner = new Map(
+    index = new Map(
       allDeclarations(self.module).map((declaration) => [
         identityKey(declaration.owner),
         declaration,
       ]),
     )
-    const built = new Map<string, AuthoredHir.Declaration>()
-    for (const entry of self.presentation.entries) {
-      const [segment] = entry.anchor.path
-      if (entry.anchor.path.length !== 1 || segment?.role !== 'header') continue
-      const declaration = byOwner.get(identityKey(entry.anchor.owner))
-      if (declaration !== undefined) built.set(spanKey(entry.span), declaration)
-    }
-    index = built
-    headerSpans.set(self, built)
+    byOwner.set(self, index)
   }
-  return index.get(spanKey(spanOf(syntax)))
+  return index.get(identityKey(owner))
 }
 
 const textOf = (module: AuthoredHir.Module, reference: AuthoredPool.TextRef): string =>

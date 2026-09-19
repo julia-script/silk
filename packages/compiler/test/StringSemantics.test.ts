@@ -6,6 +6,7 @@ import * as Tir from '../src/Tir.js'
 import * as Lexer from '../src/Lexer.js'
 import * as Lifetime from '../src/Lifetime.js'
 import * as Parser from '../src/Parser.js'
+import * as SemanticContext from '../src/SemanticContext.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as Type from '../src/Type.js'
 import { elaborate } from './support/elaborate.js'
@@ -68,12 +69,11 @@ it.effect('elaborates text and byte literals with distinct semantic types', () =
     if (text?.type._tag === 'Available') {
       assert.isTrue(Type.isString(text.type.type))
       assert.deepEqual(text.data?.bytes, [104, 195, 169])
-      assert.strictEqual(text.syntax.span.sourceId, 'string/literals')
-      assert.strictEqual(text.syntax.span.start, source.indexOf('"hé"') - 1)
-      assert.strictEqual(
-        text.syntax.span.end,
-        source.indexOf('"hé"') + new TextEncoder().encode('"hé"').length,
-      )
+      // Presentation spans are trivia-free: the literal starts at its own opening quote.
+      const span = SemanticContext.fromModules(snapshot.closure.modules).spanOf(text.anchor)
+      assert.strictEqual(span.sourceId, 'string/literals')
+      assert.strictEqual(span.start, source.indexOf('"hé"'))
+      assert.strictEqual(span.end, source.indexOf('"hé"') + new TextEncoder().encode('"hé"').length)
     }
     if (bytes?.type._tag === 'Available') {
       assert.strictEqual(

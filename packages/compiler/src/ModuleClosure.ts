@@ -6,18 +6,19 @@ import * as Effect from 'effect/Effect'
 import * as Data from 'effect/Data'
 import * as Option from 'effect/Option'
 import * as Result from 'effect/Result'
+import type * as AuthoredHir from './AuthoredHir.js'
+import * as AuthoredIdentity from './AuthoredIdentity.js'
 import * as AuthoredLowering from './AuthoredLowering.js'
 import * as Diagnostic from './Diagnostic.js'
 import * as ImportPath from './ImportPath.js'
 import * as Graph from './internal/Graph.js'
 import * as Lexer from './Lexer.js'
 import * as Parser from './Parser.js'
+import * as SemanticContext from './SemanticContext.js'
 import * as SourceFile from './SourceFile.js'
 import * as SourceResolver from './SourceResolver.js'
 import * as Stdlib from './Stdlib.js'
 import type * as SyntaxFile from './SyntaxFile.js'
-import * as SyntaxTree from './SyntaxTree.js'
-import type * as Token from './Token.js'
 
 /** One compilation request: a canonical root identity plus optional target selection. */
 export interface CompilationRequest {
@@ -42,45 +43,49 @@ export interface ProjectRequest {
   readonly additionalRoots?: ReadonlyArray<string>
   /** Prior loaded facts whose unchanged modules keep their syntax and authored artifacts. */
   readonly previous?: Facts
-  /** Completed condition decisions for this discovery pass; absent decisions admit neither arm. */
-  readonly selection?: ReadonlyMap<string, ReadonlyMap<number, boolean>>
+  /**
+   * Completed condition decisions for this discovery pass, keyed by module name and then by the
+   * owner key of the authored conditional declaration; absent decisions admit neither arm.
+   */
+  readonly selection?: ReadonlyMap<string, ReadonlyMap<string, boolean>>
 }
 
-/** The resolved, diagnosed, or syntax-unavailable target of one import declaration. */
+/** The resolved, diagnosed, or unspelled target of one authored import declaration. */
 export type ImportTarget =
   | {
       readonly _tag: 'Resolved'
       readonly module: string
-      readonly token: Token.Token
+      readonly anchor: AuthoredHir.Anchor
     }
   | {
       readonly _tag: 'Unknown'
       readonly module: string
-      readonly token: Token.Token
+      readonly anchor: AuthoredHir.Anchor
       readonly cause: Diagnostic.Identity
     }
   | {
       readonly _tag: 'Self'
       readonly module: string
-      readonly token: Token.Token
+      readonly anchor: AuthoredHir.Anchor
       readonly cause: Diagnostic.Identity
     }
   | {
       readonly _tag: 'Failed'
       readonly module: string
-      readonly token: Token.Token
+      readonly anchor: AuthoredHir.Anchor
       readonly error: SourceResolver.SourceResolverError
     }
   | {
       readonly _tag: 'Unavailable'
-      readonly syntax: SyntaxTree.Element
+      readonly anchor: AuthoredHir.Anchor
     }
 
-/** One import declaration of a loaded module with its exact concrete provenance. */
+/** One authored import declaration of a loaded module with its exact concrete provenance. */
 export interface ImportFact {
   readonly _tag: 'Import'
-  readonly syntax: SyntaxTree.Node
-  readonly path: SyntaxTree.Node
+  /** The authored import declaration; its header carries the path, alias and member list. */
+  readonly declaration: AuthoredHir.Declaration
+  readonly header: Extract<AuthoredHir.DeclarationHeader, { readonly _tag: 'ImportHeader' }>
   readonly sourceSpelling?: string
   readonly canonicalTarget?: string
   readonly target: ImportTarget
@@ -90,12 +95,13 @@ export interface ImportFact {
 export interface Module {
   readonly _tag: 'Module'
   readonly name: string
+  /** Retained for the formatter, the syntax inspector and source-edit tooling only. */
   readonly syntax: SyntaxFile.SyntaxFile
   /** The source-free authored module and its current presentation, lowered once per parse. */
   readonly authored: AuthoredLowering.Lowered
   readonly imports: ReadonlyArray<ImportFact>
-  /** Selected module declarations, retaining their identities in the complete parsed syntax. */
-  readonly declarations: ReadonlyArray<SyntaxTree.Node>
+  /** Selected authored declarations in authored order, with selected conditional groups flattened. */
+  readonly declarations: ReadonlyArray<AuthoredHir.Declaration>
 }
 
 /** Immutable facts shared by single-root and multi-root module closures. */
@@ -162,20 +168,16 @@ export const validateRoots = Effect.fn('ModuleClosure.validateRoots')(function* 
   return Object.freeze([...new Set(roots)].sort())
 })
 
-const unavailableSyntax = (parent: SyntaxTree.Node): SyntaxTree.Element =>
-  SyntaxTree.unavailableElement(parent.children, parent)
-
 interface ParsedModule {
   readonly name: string
   readonly syntax: SyntaxFile.SyntaxFile
   readonly authored: AuthoredLowering.Lowered
-  readonly declarations: ReadonlyArray<SyntaxTree.Node>
+  readonly declarations: ReadonlyArray<AuthoredHir.Declaration>
   readonly imports: ReadonlyArray<{
-    readonly syntax: SyntaxTree.Node
-    readonly path: SyntaxTree.Node
+    readonly declaration: AuthoredHir.Declaration
+    readonly header: ImportFact['header']
     readonly sourceSpelling?: string
     readonly canonicalTarget?: string
-    readonly token?: Token.Token
   }>
 }
 
@@ -188,7 +190,7 @@ const parseModule = Effect.fnUntraced(function* (
   name: string,
   source: SourceResolver.ResolvedSource,
   previous?: Module,
-  selection: ReadonlyMap<number, boolean> = new Map(),
+  selection: ReadonlyMap<string, boolean> = new Map(),
   application?: string,
 ): Effect.fn.Return<ParsedModule> {
   const currentSource = SourceFile.make(name, source.bytes, source.origin)
@@ -200,47 +202,47 @@ const parseModule = Effect.fnUntraced(function* (
     : yield* Effect.orDie(
         AuthoredLowering.lower(syntax, AuthoredLowering.moduleOwner(name, currentSource.origin)),
       )
-  const declarations = selectedDeclarations(syntax.root, selection)
-  const imports = declarations.flatMap((element): ParsedModule['imports'] => {
-    if (!SyntaxTree.isNode(element) || element.kind !== 'ImportDeclaration') return []
-    const path = SyntaxTree.directNode(element, 'ImportPath')
-    if (path === undefined || !SyntaxTree.isAvailableSyntax(path)) {
-      return [Object.freeze({ syntax: element, path: path ?? element })]
-    }
-    const sourceSpelling = ImportPath.spelling(syntax.source, path)
+  const context = SemanticContext.make(authored)
+  const declarations = selectedDeclarations(authored.module, selection)
+  const imports = declarations.flatMap((declaration): ParsedModule['imports'] => {
+    const header = declaration.header
+    if (header._tag !== 'ImportHeader') return []
+    const sourceSpelling = ImportPath.authoredSpelling(context, header.path)
     const canonicalTarget =
       sourceSpelling === 'Intrinsic.application' && application !== undefined
         ? application
-        : ImportPath.canonicalTarget(syntax.source, path)
-    if (sourceSpelling === undefined || canonicalTarget === undefined) {
-      return [Object.freeze({ syntax: element, path })]
-    }
-    const tokens = ImportPath.segments(path)
-    const token = tokens.at(0)
-    if (token === undefined) throw new RangeError('Available import path lost its first segment')
-    return [Object.freeze({ syntax: element, path, sourceSpelling, canonicalTarget, token })]
+        : ImportPath.authoredTarget(context, header.path)
+    if (sourceSpelling === undefined || canonicalTarget === undefined)
+      return [Object.freeze({ declaration, header })]
+    return [Object.freeze({ declaration, header, sourceSpelling, canonicalTarget })]
   })
   return Object.freeze({ name, syntax, authored, declarations, imports: Object.freeze(imports) })
 })
 
-/** Flattens only decided declaration groups without changing the lossless syntax artifact. */
+/**
+ * The authored declarations one completed selection admits, with the groups of decided conditions
+ * flattened in authored order. Selection keys are the owner keys of conditional declarations; an
+ * undecided condition admits neither arm.
+ */
 export const selectedDeclarations = (
-  node: SyntaxTree.Node,
-  selection: ReadonlyMap<number, boolean>,
-): ReadonlyArray<SyntaxTree.Node> => {
-  if (node.kind === 'StaticConditionalDeclaration') {
-    const selected = selection.get(node.span.start)
-    if (selected === undefined) return Object.freeze([])
-    const children = node.children.filter(SyntaxTree.isNode)
-    const arm = children[selected ? 1 : 2]
-    return arm === undefined ? Object.freeze([]) : selectedDeclarations(arm, selection)
+  module: AuthoredHir.Module,
+  selection: ReadonlyMap<string, boolean>,
+): ReadonlyArray<AuthoredHir.Declaration> => {
+  const found: Array<AuthoredHir.Declaration> = []
+  const visit = (declaration: AuthoredHir.Declaration): void => {
+    const header = declaration.header
+    if (header._tag === 'GroupHeader') {
+      if (declaration.body._tag === 'MembersBody') declaration.body.members.forEach(visit)
+      return
+    }
+    if (header._tag !== 'ConditionalHeader') return void found.push(declaration)
+    const decision = selection.get(AuthoredIdentity.key(declaration.owner))
+    if (decision === undefined || declaration.body._tag !== 'ConditionalBody') return
+    const arm = decision ? declaration.body.thenBranch : declaration.body.elseBranch
+    if (arm !== undefined) visit(arm)
   }
-  if (node.kind !== 'SourceFile' && node.kind !== 'DeclarationGroup') return Object.freeze([node])
-  return Object.freeze(
-    node.children
-      .filter(SyntaxTree.isNode)
-      .flatMap((child) => selectedDeclarations(child, selection)),
-  )
+  module.declarations.forEach(visit)
+  return Object.freeze(found)
 }
 
 type Resolution =
@@ -254,17 +256,17 @@ const analyzeModule = Effect.fnUntraced(function* (
 ): Effect.fn.Return<ModuleAnalysis, never, SourceResolver.SourceResolver> {
   const diagnostics: Array<Diagnostic.Diagnostic> = []
   const imports: Array<ImportFact> = []
+  const context = SemanticContext.make(parsed.authored)
   for (const imported of parsed.imports) {
-    if (imported.canonicalTarget === undefined || imported.token === undefined) {
+    const { declaration, header } = imported
+    const anchor = header.path.anchor
+    if (imported.canonicalTarget === undefined) {
       imports.push(
         Object.freeze({
           _tag: 'Import',
-          syntax: imported.syntax,
-          path: imported.path,
-          target: Object.freeze({
-            _tag: 'Unavailable',
-            syntax: unavailableSyntax(imported.path),
-          }),
+          declaration,
+          header,
+          target: Object.freeze({ _tag: 'Unavailable', anchor }),
         }),
       )
       continue
@@ -273,20 +275,21 @@ const analyzeModule = Effect.fnUntraced(function* (
     const sourceSpelling = imported.sourceSpelling
     if (sourceSpelling === undefined)
       throw new RangeError('Available import path lost its source spelling')
+    const span = context.spanOf(anchor)
     if (module === parsed.name) {
-      const diagnostic = Diagnostic.selfImport(module, imported.path.span)
+      const diagnostic = Diagnostic.selfImport(module, span)
       diagnostics.push(diagnostic)
       imports.push(
         Object.freeze({
           _tag: 'Import',
-          syntax: imported.syntax,
-          path: imported.path,
+          declaration,
+          header,
           sourceSpelling,
           canonicalTarget: module,
           target: Object.freeze({
             _tag: 'Self',
             module,
-            token: imported.token,
+            anchor,
             cause: Diagnostic.identity(diagnostic),
           }),
         }),
@@ -295,19 +298,19 @@ const analyzeModule = Effect.fnUntraced(function* (
     }
     const resolution = yield* resolve(module)
     if (resolution._tag === 'Absent') {
-      const diagnostic = Diagnostic.unknownModule(module, imported.path.span)
+      const diagnostic = Diagnostic.unknownModule(module, span)
       diagnostics.push(diagnostic)
       imports.push(
         Object.freeze({
           _tag: 'Import',
-          syntax: imported.syntax,
-          path: imported.path,
+          declaration,
+          header,
           sourceSpelling,
           canonicalTarget: module,
           target: Object.freeze({
             _tag: 'Unknown',
             module,
-            token: imported.token,
+            anchor,
             cause: Diagnostic.identity(diagnostic),
           }),
         }),
@@ -317,17 +320,17 @@ const analyzeModule = Effect.fnUntraced(function* (
     imports.push(
       Object.freeze({
         _tag: 'Import',
-        syntax: imported.syntax,
-        path: imported.path,
+        declaration,
+        header,
         sourceSpelling,
         canonicalTarget: module,
         target:
           resolution._tag === 'Found'
-            ? Object.freeze({ _tag: 'Resolved' as const, module, token: imported.token })
+            ? Object.freeze({ _tag: 'Resolved' as const, module, anchor })
             : Object.freeze({
                 _tag: 'Failed' as const,
                 module,
-                token: imported.token,
+                anchor,
                 error: resolution.error,
               }),
       }),

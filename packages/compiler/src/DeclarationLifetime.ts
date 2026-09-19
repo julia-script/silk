@@ -1,42 +1,62 @@
 import * as Diagnostic from './Diagnostic.js'
+import type * as AuthoredHir from './AuthoredHir.js'
+import * as AuthoredIdentity from './AuthoredIdentity.js'
+import * as AuthoredWalk from './AuthoredWalk.js'
 import * as BodyLifetime from './BodyLifetime.js'
 import * as Lifetime from './Lifetime.js'
-import type * as SourceFile from './SourceFile.js'
-import * as SyntaxTree from './SyntaxTree.js'
-import type * as Token from './Token.js'
+import type * as SemanticContext from './SemanticContext.js'
 import * as Type from './Type.js'
 
 /** One implicit declaration parameter with the exact annotation which introduced it. */
 export interface ImplicitBinder {
   readonly parameter: Type.Parameter
-  readonly syntax: SyntaxTree.Node
-  readonly token: Token.Token
+  readonly anchor: AuthoredHir.Anchor
 }
 
-/** Header-only region elaboration shared by declaration collection and source presentation. */
+/**
+ * Header-only region elaboration shared by declaration collection and source presentation.
+ *
+ * This is plain data: anchors are keyed by `AuthoredIdentity.anchorKey`, and nothing here closes
+ * over a `SemanticContext` or retains an authored node. Two fresh analyses of one source must
+ * compare equal, so a consumer that needs spans or the authored declaration receives them as
+ * arguments instead of reading them back off this record.
+ */
 export interface Context {
   readonly owner: Lifetime.Owner
-  readonly source: SourceFile.SourceFile
-  readonly syntax: SyntaxTree.Node
   readonly parameters: ReadonlyMap<string, Type.Parameter>
-  readonly nominalArguments: ReadonlyMap<SyntaxTree.Node, ReadonlyArray<Lifetime.Lifetime>>
-  readonly regions: ReadonlyMap<SyntaxTree.Node, Lifetime.Lifetime>
-  readonly callables: ReadonlyMap<SyntaxTree.Node, Type.ExecutableLifetimes>
+  /** Keyed by `AuthoredIdentity.anchorKey`, since authored positions have no object identity. */
+  readonly nominalArguments: ReadonlyMap<string, ReadonlyArray<Lifetime.Lifetime>>
+  readonly regions: ReadonlyMap<string, Lifetime.Lifetime>
+  readonly callables: ReadonlyMap<string, Type.ExecutableLifetimes>
   readonly implicit: ReadonlyArray<ImplicitBinder>
   readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
   readonly explicitEnvironment?: Lifetime.Lifetime
 }
 
-const spelling = (source: SourceFile.SourceFile, token: Token.Token): string =>
-  String.fromCharCode(...source.bytes.slice(token.span.start, token.span.end))
+/** The region assigned to one authored position, if elaboration reached it. */
+export const regionOf = (
+  self: Context,
+  anchor: AuthoredHir.Anchor,
+): Lifetime.Lifetime | undefined => self.regions.get(AuthoredIdentity.anchorKey(anchor))
+
+/** The executable contract elaborated for one authored callable type. */
+export const callableOf = (
+  self: Context,
+  anchor: AuthoredHir.Anchor,
+): Type.ExecutableLifetimes | undefined => self.callables.get(AuthoredIdentity.anchorKey(anchor))
+
+/** The implicit nominal lifetime arguments elaborated for one authored type occurrence. */
+export const nominalArgumentsOf = (
+  self: Context,
+  anchor: AuthoredHir.Anchor,
+): ReadonlyArray<Lifetime.Lifetime> | undefined =>
+  self.nominalArguments.get(AuthoredIdentity.anchorKey(anchor))
 
 /** Resolves only lexical lifetime names; ordinary type names never enter this lookup. */
 export const named = (
-  source: SourceFile.SourceFile,
-  token: Token.Token,
+  name: string,
   parameters: ReadonlyMap<string, Type.Parameter>,
 ): Lifetime.Lifetime | undefined => {
-  const name = spelling(source, token)
   if (name === "'static") return Lifetime.staticLifetime
   const parameter = parameters.get(name)
   return parameter?.kind === 'Lifetime'
@@ -44,36 +64,116 @@ export const named = (
     : undefined
 }
 
-const typeChild = (node: SyntaxTree.Node): SyntaxTree.Node | undefined =>
-  node.children.find(
-    (child): child is SyntaxTree.Node =>
-      SyntaxTree.isNode(child) &&
-      child.kind !== 'TypeParameterList' &&
-      child.kind !== 'LifetimeBinderList',
-  )
+/** A lifetime name's spelling, normalized to include its leading tick. */
+const tickedName = (
+  context: SemanticContext.SemanticContext,
+  name: AuthoredHir.Name,
+): string | undefined => {
+  const text = nameText(context, name)
+  if (text === undefined) return undefined
+  return text.startsWith("'") ? text : `'${text}`
+}
 
-const isString = (source: SourceFile.SourceFile, node: SyntaxTree.Node): boolean => {
-  if (node.kind !== 'TypePath') return false
-  const tokens = SyntaxTree.tokens(node).filter((token) => token.kind === 'Identifier')
-  const token = tokens.at(0)
-  return tokens.length === 1 && token !== undefined && spelling(source, token) === 'string'
+/** The authored spelling of a lifetime, including its leading tick. */
+const lifetimeName = (
+  context: SemanticContext.SemanticContext,
+  lifetime: AuthoredHir.Lifetime,
+): string | undefined => tickedName(context, lifetime.name)
+
+const nameText = (
+  context: SemanticContext.SemanticContext,
+  name: AuthoredHir.Name,
+): string | undefined => {
+  if (name._tag === 'Name') return context.textOf(name.text)
+  if (name._tag === 'InvalidName') return context.textOf(name.spelling)
+  return undefined
+}
+
+/** The sole segment of a one-segment path, when the type names one. */
+const soleSegment = (type: AuthoredHir.Type): AuthoredHir.Name | undefined =>
+  type._tag === 'NamedType' && type.path.segments.length === 1 ? type.path.segments[0] : undefined
+
+/** The `string` type is borrowed like a slice, so it takes part in elision. */
+const isStringType = (
+  context: SemanticContext.SemanticContext,
+  type: AuthoredHir.Type,
+): boolean => {
+  const segment = soleSegment(type)
+  return segment !== undefined && nameText(context, segment) === 'string'
+}
+
+/** The header's contract, when the declaration carries one. */
+const contractOf = (
+  declaration: AuthoredHir.Declaration,
+): AuthoredHir.CallableContract | undefined => {
+  const header = declaration.header
+  return header._tag === 'FunctionHeader' || header._tag === 'OperationHeader'
+    ? header.contract
+    : undefined
+}
+
+/** Every type written directly in one header, in authored order. */
+const headerTypes = (declaration: AuthoredHir.Declaration): ReadonlyArray<AuthoredHir.Type> => {
+  const header = declaration.header
+  switch (header._tag) {
+    case 'StructHeader':
+      return header.fields.map((field) => field.type)
+    case 'TupleHeader':
+      return header.elements
+    case 'UnionHeader':
+      return header.variants.flatMap((variant) => variant.fields.map((field) => field.type))
+    case 'AliasHeader':
+      return [header.target]
+    case 'ConstantHeader':
+      return header.type === undefined ? [] : [header.type]
+    case 'StaticHeader':
+    case 'PackageParameterHeader':
+      return [header.type]
+    case 'ImplHeader':
+      return header.target === undefined ? [header.subject] : [header.subject, header.target]
+    case 'EnumHeader':
+      return header.representation === undefined ? [] : [header.representation]
+    default:
+      return []
+  }
+}
+
+/** The generic parameters a header binds, in authored order. */
+const headerGenerics = (
+  declaration: AuthoredHir.Declaration,
+): ReadonlyArray<AuthoredHir.GenericParameter> => {
+  const header = declaration.header
+  const contract = contractOf(declaration)
+  if (contract !== undefined) return contract.generics
+  switch (header._tag) {
+    case 'StructHeader':
+    case 'TupleHeader':
+    case 'UnionHeader':
+    case 'ServiceHeader':
+    case 'InterfaceHeader':
+    case 'AliasHeader':
+    case 'ImplHeader':
+      return header.generics
+    default:
+      return Object.freeze([])
+  }
 }
 
 /**
- * Assigns regions using only a declaration header. Syntax-node keys locate authored occurrences;
- * semantic identities use owner and traversal ordinal and never contain source offsets.
+ * Assigns regions using only a declaration header. Anchors locate authored occurrences; semantic
+ * identities use owner and traversal ordinal and never contain source offsets.
  */
 export const forHeader = (
-  source: SourceFile.SourceFile,
+  context: SemanticContext.SemanticContext,
   owner: Lifetime.Owner,
-  syntax: SyntaxTree.Node,
+  declaration: AuthoredHir.Declaration,
   parameters: ReadonlyMap<string, Type.Parameter>,
   body?: BodyLifetime.BodyLifetime,
-  nominalParameters?: (path: SyntaxTree.Node) => ReadonlyArray<Type.Parameter> | undefined,
+  nominalParameters?: (type: AuthoredHir.Type) => ReadonlyArray<Type.Parameter> | undefined,
 ): Context => {
-  const nominalArguments = new Map<SyntaxTree.Node, ReadonlyArray<Lifetime.Lifetime>>()
-  const regions = new Map<SyntaxTree.Node, Lifetime.Lifetime>()
-  const callables = new Map<SyntaxTree.Node, Type.ExecutableLifetimes>()
+  const nominalArguments = new Map<string, ReadonlyArray<Lifetime.Lifetime>>()
+  const regions = new Map<string, Lifetime.Lifetime>()
+  const callables = new Map<string, Type.ExecutableLifetimes>()
   const implicit: Array<ImplicitBinder> = []
   const diagnostics: Array<Diagnostic.Diagnostic> = []
   const names = new Set(parameters.keys())
@@ -85,334 +185,423 @@ export const forHeader = (
   let ordinal = Math.max(-1, ...[...parameters.values()].map((parameter) => parameter.ordinal)) + 1
   let callableOrdinal = 0
 
-  const fresh = (node: SyntaxTree.Node): Lifetime.Lifetime | undefined => {
+  const setRegion = (anchor: AuthoredHir.Anchor, value: Lifetime.Lifetime): void => {
+    regions.set(AuthoredIdentity.anchorKey(anchor), value)
+  }
+  const getRegion = (anchor: AuthoredHir.Anchor): Lifetime.Lifetime | undefined =>
+    regions.get(AuthoredIdentity.anchorKey(anchor))
+
+  const fresh = (anchor: AuthoredHir.Anchor): Lifetime.Lifetime | undefined => {
     const position = ordinal++
-    if (body !== undefined) return BodyLifetime.region(body, node, 'Annotation')
+    if (body !== undefined) return BodyLifetime.region(body, anchor, 'Annotation')
     let name = `'life${position}`
     while (names.has(name)) name += '_'
     names.add(name)
     const parameter = Type.parameter(owner, position, name, 'Lifetime')
-    const token = SyntaxTree.tokens(node).find((candidate) => candidate.kind !== 'Whitespace')
-    if (token !== undefined) implicit.push(Object.freeze({ parameter, syntax: node, token }))
+    implicit.push(Object.freeze({ parameter, anchor }))
     return Lifetime.bound(owner, position, name)
   }
+
   const resolve = (
-    node: SyntaxTree.Node,
-    token: Token.Token,
-    scope: ReadonlyMap<string, Lifetime.Lifetime>,
-  ) => {
-    const name = spelling(source, token)
-    const lifetime = scope.get(name)
-    if (lifetime === undefined) diagnostics.push(Diagnostic.unknownLifetime(name, token.span))
-    else regions.set(node, lifetime)
-    return lifetime
-  }
-  const resolveEnvironment = (
-    node: SyntaxTree.Node,
+    anchor: AuthoredHir.Anchor,
+    lifetime: AuthoredHir.Lifetime,
     scope: ReadonlyMap<string, Lifetime.Lifetime>,
   ): Lifetime.Lifetime | undefined => {
-    const tokens = node.children
-      .filter(SyntaxTree.isToken)
-      .filter((token) => token.kind === 'Lifetime')
-    const members = tokens.flatMap((token) => {
-      const member = resolve(node, token, scope)
+    const name = lifetimeName(context, lifetime)
+    if (name === undefined) {
+      diagnostics.push(Diagnostic.ambiguousLifetimeElision(context.spanOf(lifetime.anchor)))
+      return undefined
+    }
+    const value = scope.get(name)
+    if (value === undefined)
+      diagnostics.push(Diagnostic.unknownLifetime(name, context.spanOf(lifetime.anchor)))
+    else setRegion(anchor, value)
+    return value
+  }
+
+  /** An effect environment is the intersection of every lifetime it names. */
+  const resolveEnvironment = (
+    anchor: AuthoredHir.Anchor,
+    environment: ReadonlyArray<AuthoredHir.Lifetime>,
+    scope: ReadonlyMap<string, Lifetime.Lifetime>,
+  ): Lifetime.Lifetime | undefined => {
+    const members = environment.flatMap((lifetime) => {
+      const member = resolve(anchor, lifetime, scope)
       return member === undefined ? [] : [member]
     })
-    if (members.length === 0 || members.length !== tokens.length) return undefined
+    if (members.length === 0 || members.length !== environment.length) return undefined
     const value = Lifetime.intersection(members)
-    regions.set(node, value)
+    setRegion(anchor, value)
     return value
   }
+
+  /** Takes the written lifetime when present, else elides one. */
   const region = (
-    node: SyntaxTree.Node,
+    anchor: AuthoredHir.Anchor,
+    written: AuthoredHir.Lifetime | undefined,
     scope: ReadonlyMap<string, Lifetime.Lifetime>,
     output: boolean,
     defaultOutput: Lifetime.Lifetime | undefined,
-    allocate: (node: SyntaxTree.Node) => Lifetime.Lifetime | undefined,
+    allocate: (anchor: AuthoredHir.Anchor) => Lifetime.Lifetime | undefined,
   ): Lifetime.Lifetime | undefined => {
-    const explicit = SyntaxTree.directToken(node, 'Lifetime')
-    if (explicit !== undefined)
-      return node.kind === 'EffectEnvironment'
-        ? resolveEnvironment(node, scope)
-        : resolve(node, explicit, scope)
-    const value = output && body === undefined ? defaultOutput : allocate(node)
-    if (value === undefined) diagnostics.push(Diagnostic.ambiguousLifetimeElision(node.span))
-    else regions.set(node, value)
+    if (written !== undefined) return resolve(anchor, written, scope)
+    const value = output && body === undefined ? defaultOutput : allocate(anchor)
+    if (value === undefined)
+      diagnostics.push(Diagnostic.ambiguousLifetimeElision(context.spanOf(anchor)))
+    else setRegion(anchor, value)
     return value
   }
+
+  /** Supplies the lifetime arguments a nominal leaves unwritten. */
   const nominal = (
-    node: SyntaxTree.Node,
-    path: SyntaxTree.Node,
+    type: AuthoredHir.Type,
     scope: ReadonlyMap<string, Lifetime.Lifetime>,
     output: boolean,
     defaultOutput: Lifetime.Lifetime | undefined,
-    allocate: (node: SyntaxTree.Node) => Lifetime.Lifetime | undefined,
+    allocate: (anchor: AuthoredHir.Anchor) => Lifetime.Lifetime | undefined,
+    written: ReadonlyArray<AuthoredHir.GenericArgument> = Object.freeze([]),
   ): void => {
     const binders =
-      nominalParameters?.(path)?.filter((parameter) => parameter.kind === 'Lifetime') ?? []
+      nominalParameters?.(type)?.filter((parameter) => parameter.kind === 'Lifetime') ?? []
     if (binders.length === 0) return
-    const list = SyntaxTree.directNode(node, 'TypeArgumentList')
-    if (list !== undefined && SyntaxTree.directNodes(list, 'LifetimeType').length > 0) return
+    if (written.some((argument) => argument._tag === 'Lifetime')) return
     const arguments_ = binders.flatMap(() => {
-      const value = region(node, scope, output, defaultOutput, allocate)
+      const value = region(type.anchor, undefined, scope, output, defaultOutput, allocate)
       return value === undefined ? [] : [value]
     })
-    if (arguments_.length === binders.length) nominalArguments.set(node, Object.freeze(arguments_))
+    if (arguments_.length === binders.length)
+      nominalArguments.set(AuthoredIdentity.anchorKey(type.anchor), Object.freeze(arguments_))
   }
-  const walk = (
-    node: SyntaxTree.Node,
+
+  const walkType = (
+    type: AuthoredHir.Type,
     scope: ReadonlyMap<string, Lifetime.Lifetime>,
     output = false,
     defaultOutput?: Lifetime.Lifetime,
-    allocate: (node: SyntaxTree.Node) => Lifetime.Lifetime | undefined = fresh,
+    allocate: (anchor: AuthoredHir.Anchor) => Lifetime.Lifetime | undefined = fresh,
     quantified = false,
   ): void => {
-    if (node.kind === 'Block' || node.kind === 'TypeParameterList') return
-    if (
-      node !== syntax &&
-      (node.kind === 'ServiceOperation' ||
-        node.kind === 'FunctionDeclaration' ||
-        node.kind === 'ImplOperation')
-    )
-      return
-    if (node.kind === 'EffectEnvironment') {
-      resolveEnvironment(node, scope)
-      return
-    }
-    if (node.kind === 'LifetimeType') {
-      const token = SyntaxTree.directToken(node, 'Lifetime')
-      if (token !== undefined) resolve(node, token, scope)
-      return
-    }
-    if (node.kind === 'CallableType' || node.kind === 'ForeignFunctionType') {
-      const annotation = SyntaxTree.directNode(node, 'CallableEnvironment')
-      const environment =
-        node.kind === 'ForeignFunctionType'
-          ? Lifetime.staticLifetime
-          : region(annotation ?? node, scope, output, defaultOutput, allocate)
-      if (environment !== undefined) regions.set(node, environment)
-      const binderPath = [callableOrdinal++]
-      const scopeBindings = new Map(scope)
-      const binders: Array<Lifetime.Bound> = []
-      const lists = SyntaxTree.directNodes(node, 'LifetimeBinderList')
-      if (lists.length > 1 || (quantified && lists.length > 0))
-        diagnostics.push(
-          Diagnostic.invalidLifetimeBinder(
-            'Nested quantified callable contracts are not supported',
-            node.span,
-          ),
-        )
-      for (const list of lists) {
-        for (const parameter of list.children.filter(SyntaxTree.isNode)) {
-          const token = SyntaxTree.directToken(parameter, 'Lifetime')
-          if (token === undefined || parameter.kind !== 'LifetimeParameter') {
-            diagnostics.push(
-              Diagnostic.invalidLifetimeBinder(
-                'A callable lifetime binder accepts only lifetime parameters',
-                parameter.span,
-              ),
-            )
-            continue
-          }
-          const name = spelling(source, token)
-          if (name === "'static" || binders.some((binder) => Lifetime.display(binder) === name)) {
-            diagnostics.push(
-              Diagnostic.invalidLifetimeBinder(
-                'Lifetime binders must have distinct names other than static',
-                token.span,
-              ),
-            )
-            continue
-          }
-          const binder = Lifetime.bound(owner, binders.length, name, binderPath)
-          binders.push(binder)
-          scopeBindings.set(name, binder)
-        }
-      }
-      const lifetimeBounds: Array<Lifetime.Outlives> = []
-      for (const list of lists)
-        for (const parameter of list.children.filter(SyntaxTree.isNode)) {
-          const token = SyntaxTree.directToken(parameter, 'Lifetime')
-          const longer =
-            token === undefined ? undefined : scopeBindings.get(spelling(source, token))
-          if (longer === undefined) continue
-          for (const bound of SyntaxTree.directNodes(parameter, 'LifetimeType')) {
-            const token = SyntaxTree.directToken(bound, 'Lifetime')
-            const shorter = token === undefined ? undefined : resolve(bound, token, scopeBindings)
-            if (shorter !== undefined) lifetimeBounds.push({ longer, shorter })
-          }
-        }
-      const invocationRegion = (_node: SyntaxTree.Node): Lifetime.Lifetime => {
-        let name = `call${binders.length}`
-        while (scopeBindings.has(`'${name}`)) name += '_'
-        const binder = Lifetime.bound(owner, binders.length, name, binderPath)
-        scopeBindings.set(`'${name}`, binder)
-        binders.push(binder)
-        return binder
-      }
-      const types = node.children.filter(
-        (child): child is SyntaxTree.Node =>
-          SyntaxTree.isNode(child) &&
-          child.kind !== 'LifetimeBinderList' &&
-          child.kind !== 'CallableEnvironment' &&
-          child.kind !== 'FunctionPropertyClause',
-      )
-      const inputs = types.slice(0, -1)
-      for (const input of inputs)
-        walk(input, scopeBindings, false, undefined, invocationRegion, true)
-      const candidates = inputs.flatMap((input) => {
-        const value = regions.get(input)
-        return value === undefined ? [] : [value]
-      })
-      const result = types.at(-1)
-      if (result !== undefined)
-        walk(
-          result,
-          scopeBindings,
-          true,
-          candidates.length === 1 ? candidates.at(0) : undefined,
-          invocationRegion,
-          true,
-        )
-      if (quantified && lists.length === 0 && binders.length > 0)
-        diagnostics.push(
-          Diagnostic.invalidLifetimeBinder(
-            'Nested quantified callable contracts are not supported',
-            node.span,
-          ),
-        )
-      if (environment !== undefined)
-        callables.set(
-          node,
-          Object.freeze({
-            environment,
-            lifetimeBinders: Object.freeze(binders),
-            lifetimeBounds: Lifetime.assumptions(lifetimeBounds).bounds,
-          }),
-        )
-      return
-    }
-    if (node.kind === 'ReferenceType' || node.kind === 'SliceType' || isString(source, node))
-      region(node, scope, output, defaultOutput, allocate)
-    if (node.kind === 'AppliedType') {
-      const path = SyntaxTree.directNode(node, 'TypePath')
-      const list = SyntaxTree.directNode(node, 'TypeArgumentList')
-      const pathToken = path === undefined ? undefined : SyntaxTree.directToken(path, 'Identifier')
-      const builtin = pathToken === undefined ? undefined : spelling(source, pathToken)
-      if (list !== undefined && (builtin === 'Effect' || builtin === 'string')) {
-        const annotation =
-          builtin === 'Effect'
-            ? SyntaxTree.directNode(list, 'EffectEnvironment')
-            : SyntaxTree.directNode(list, 'LifetimeType')
-        const value =
-          annotation === undefined
-            ? region(node, scope, output, defaultOutput, allocate)
-            : region(annotation, scope, output, defaultOutput, allocate)
-        if (value !== undefined) regions.set(node, value)
-        for (const child of list.children.filter(SyntaxTree.isNode))
-          if (child !== annotation) walk(child, scope, output, defaultOutput, allocate, quantified)
+    switch (type._tag) {
+      case 'ReferenceType': {
+        region(type.anchor, type.lifetime, scope, output, defaultOutput, allocate)
+        walkType(type.referent, scope, output, defaultOutput, allocate, quantified)
         return
       }
-      if (path !== undefined) nominal(node, path, scope, output, defaultOutput, allocate)
-      // The path names a nominal; it is not itself a separate borrowed occurrence.
-      if (list !== undefined) {
-        const ordinaryParameters =
-          path === undefined
-            ? []
-            : (nominalParameters?.(path)?.filter((parameter) => parameter.kind !== 'Lifetime') ??
-              [])
-        let argumentOrdinal = 0
-        const requirement = (argument: SyntaxTree.Node): void => {
-          if (argument.kind === 'UnionType') {
-            for (const member of argument.children.filter(SyntaxTree.isNode)) requirement(member)
-          } else if (argument.kind === 'ReferenceType') {
-            // A row's outer reference denotes service access, not a stored borrow. Nested
-            // capability arguments still carry ordinary lifetimes and must be elaborated.
-            const explicit = SyntaxTree.directToken(argument, 'Lifetime')
-            if (explicit !== undefined) resolve(argument, explicit, scope)
-            regions.set(argument, Lifetime.staticLifetime)
-            for (const member of argument.children.filter(SyntaxTree.isNode))
-              walk(member, scope, output, defaultOutput, allocate, quantified)
-          } else walk(argument, scope, output, defaultOutput, allocate, quantified)
-        }
-        for (const argument of list.children.filter(SyntaxTree.isNode)) {
-          if (argument.kind === 'LifetimeType') {
-            walk(argument, scope, output, defaultOutput, allocate, quantified)
-            continue
-          }
-          const parameter = ordinaryParameters.at(argumentOrdinal++)
-          if (parameter?.kind === 'RequirementRow') requirement(argument)
-          else walk(argument, scope, output, defaultOutput, allocate, quantified)
-        }
+      case 'SliceType': {
+        region(type.anchor, type.lifetime, scope, output, defaultOutput, allocate)
+        walkType(type.element, scope, output, defaultOutput, allocate, quantified)
+        return
       }
-      return
+      case 'NamedType': {
+        if (isStringType(context, type))
+          region(type.anchor, undefined, scope, output, defaultOutput, allocate)
+        else nominal(type, scope, output, defaultOutput, allocate)
+        return
+      }
+      case 'AppliedType': {
+        walkApplied(type, scope, output, defaultOutput, allocate, quantified)
+        return
+      }
+      case 'CallableType':
+      case 'ForeignFunctionType': {
+        walkCallable(type, scope, output, defaultOutput, allocate, quantified)
+        return
+      }
+      case 'FixedArrayType': {
+        walkType(type.element, scope, output, defaultOutput, allocate, quantified)
+        return
+      }
+      case 'PointerType': {
+        walkType(type.pointee, scope, output, defaultOutput, allocate, quantified)
+        return
+      }
+      case 'ExactRepresentationType': {
+        walkType(type.subject, scope, output, defaultOutput, allocate, quantified)
+        return
+      }
+      case 'OpaqueResultType': {
+        for (const parameter of type.binders) {
+          if (parameter._tag === 'RowParameter') continue
+          // A binder's bound is a contract of its own, not part of the output it sits in: it
+          // elides like any other generic bound rather than taking the output's default region.
+          for (const bound of parameter.bounds)
+            if (bound._tag !== 'Lifetime') walkType(bound, scope)
+        }
+        walkType(type.result, scope, output, defaultOutput, allocate, quantified)
+        return
+      }
+      case 'UnionType': {
+        for (const member of type.members)
+          walkOperand(member, scope, output, defaultOutput, allocate, quantified)
+        return
+      }
+      case 'RowWithout': {
+        walkOperand(type.source, scope, output, defaultOutput, allocate, quantified)
+        walkOperand(type.removed, scope, output, defaultOutput, allocate, quantified)
+        return
+      }
+      case 'InvalidType': {
+        for (const retained of type.retained)
+          walkType(retained, scope, output, defaultOutput, allocate, quantified)
+        return
+      }
+      default:
+        return
     }
-    if (node.kind === 'TypePath' && !isString(source, node))
-      nominal(node, node, scope, output, defaultOutput, allocate)
-    for (const child of node.children.filter(SyntaxTree.isNode))
-      walk(child, scope, output, defaultOutput, allocate, quantified)
   }
 
-  const candidate = (node: SyntaxTree.Node): boolean =>
-    node.kind === 'ReferenceType' ||
-    node.kind === 'SliceType' ||
-    isString(source, node) ||
-    (node.kind === 'AppliedType' &&
-      (() => {
-        const path = SyntaxTree.directNode(node, 'TypePath')
-        return path !== undefined && isString(source, path)
-      })())
-  const parameterList = SyntaxTree.directNode(syntax, 'ParameterList')
-  const genericList = SyntaxTree.directNode(syntax, 'TypeParameterList')
-  if (genericList !== undefined)
-    for (const parameter of genericList.children.filter(SyntaxTree.isNode))
-      for (const bound of parameter.children.filter(SyntaxTree.isNode)) walk(bound, bindings)
-  if (parameterList === undefined || body !== undefined) walk(syntax, bindings)
-  else {
-    const inputs = SyntaxTree.directNodes(parameterList, 'ParameterDeclaration')
+  const walkOperand = (
+    operand: AuthoredHir.RowOperand,
+    scope: ReadonlyMap<string, Lifetime.Lifetime>,
+    output: boolean,
+    defaultOutput: Lifetime.Lifetime | undefined,
+    allocate: (anchor: AuthoredHir.Anchor) => Lifetime.Lifetime | undefined,
+    quantified: boolean,
+  ): void => {
+    if (operand._tag === 'Requirement') {
+      // A requirement's own access marker denotes service access, not a stored borrow.
+      setRegion(operand.anchor, Lifetime.staticLifetime)
+      walkType(operand.capability, scope, output, defaultOutput, allocate, quantified)
+      return
+    }
+    if (operand._tag === 'ReferenceType' && operand.lifetime === undefined) {
+      // A row position that parses as a type spells the same access marker as a reference type.
+      setRegion(operand.anchor, Lifetime.staticLifetime)
+      walkType(operand.referent, scope, output, defaultOutput, allocate, quantified)
+      return
+    }
+    walkType(operand, scope, output, defaultOutput, allocate, quantified)
+  }
+
+  const walkApplied = (
+    type: Extract<AuthoredHir.Type, { readonly _tag: 'AppliedType' }>,
+    scope: ReadonlyMap<string, Lifetime.Lifetime>,
+    output: boolean,
+    defaultOutput: Lifetime.Lifetime | undefined,
+    allocate: (anchor: AuthoredHir.Anchor) => Lifetime.Lifetime | undefined,
+    quantified: boolean,
+  ): void => {
+    const target = type.target
+    const targetSegment = soleSegment(target)
+    const builtin = targetSegment === undefined ? undefined : nameText(context, targetSegment)
+    const environment = type.arguments.environment
+    if (builtin === 'Effect' || builtin === 'string') {
+      // The written environment, a single written lifetime argument, or an elided region.
+      const writtenLifetime = type.arguments.arguments.find(
+        (argument): argument is AuthoredHir.Lifetime => argument._tag === 'Lifetime',
+      )
+      const value =
+        environment !== undefined && environment.length > 0
+          ? resolveEnvironment(type.anchor, environment, scope)
+          : region(type.anchor, writtenLifetime, scope, output, defaultOutput, allocate)
+      if (value !== undefined) setRegion(type.anchor, value)
+      for (const argument of type.arguments.arguments)
+        if (argument !== writtenLifetime)
+          walkArgument(argument, scope, output, defaultOutput, allocate, quantified)
+      if (type.arguments.failures !== undefined)
+        walkType(type.arguments.failures, scope, output, defaultOutput, allocate, quantified)
+      if (type.arguments.requirements !== undefined)
+        for (const member of type.arguments.requirements.members)
+          walkOperand(member, scope, output, defaultOutput, allocate, quantified)
+      return
+    }
+    nominal(type, scope, output, defaultOutput, allocate, type.arguments.arguments)
+    // The target names a nominal; it is not itself a separate borrowed occurrence.
+    const ordinaryParameters =
+      nominalParameters?.(type)?.filter((parameter) => parameter.kind !== 'Lifetime') ?? []
+    let argumentOrdinal = 0
+    for (const argument of type.arguments.arguments) {
+      if (argument._tag === 'Lifetime') {
+        resolve(argument.anchor, argument, scope)
+        continue
+      }
+      const parameter = ordinaryParameters.at(argumentOrdinal++)
+      if (parameter?.kind === 'RequirementRow' && argument._tag !== 'RequirementSelector')
+        walkOperand(argument, scope, output, defaultOutput, allocate, quantified)
+      else walkArgument(argument, scope, output, defaultOutput, allocate, quantified)
+    }
+    if (type.arguments.failures !== undefined)
+      walkType(type.arguments.failures, scope, output, defaultOutput, allocate, quantified)
+    if (type.arguments.requirements !== undefined)
+      for (const member of type.arguments.requirements.members)
+        walkOperand(member, scope, output, defaultOutput, allocate, quantified)
+  }
+
+  const walkArgument = (
+    argument: AuthoredHir.GenericArgument,
+    scope: ReadonlyMap<string, Lifetime.Lifetime>,
+    output: boolean,
+    defaultOutput: Lifetime.Lifetime | undefined,
+    allocate: (anchor: AuthoredHir.Anchor) => Lifetime.Lifetime | undefined,
+    quantified: boolean,
+  ): void => {
+    if (argument._tag === 'Lifetime') {
+      resolve(argument.anchor, argument, scope)
+      return
+    }
+    if (argument._tag === 'RequirementSelector') {
+      walkType(argument.subject, scope, output, defaultOutput, allocate, quantified)
+      return
+    }
+    walkType(argument, scope, output, defaultOutput, allocate, quantified)
+  }
+
+  const walkCallable = (
+    type: Extract<AuthoredHir.Type, { readonly _tag: 'CallableType' | 'ForeignFunctionType' }>,
+    scope: ReadonlyMap<string, Lifetime.Lifetime>,
+    output: boolean,
+    defaultOutput: Lifetime.Lifetime | undefined,
+    allocate: (anchor: AuthoredHir.Anchor) => Lifetime.Lifetime | undefined,
+    quantified: boolean,
+  ): void => {
+    const environment =
+      type._tag === 'ForeignFunctionType'
+        ? Lifetime.staticLifetime
+        : region(type.anchor, type.environment, scope, output, defaultOutput, allocate)
+    if (environment !== undefined) setRegion(type.anchor, environment)
+    const binderPath = [callableOrdinal++]
+    const scopeBindings = new Map(scope)
+    const binders: Array<Lifetime.Bound> = []
+    if (quantified && type.binders.length > 0)
+      diagnostics.push(
+        Diagnostic.invalidLifetimeBinder(
+          'Nested quantified callable contracts are not supported',
+          context.spanOf(type.anchor),
+        ),
+      )
+    for (const parameter of type.binders) {
+      if (parameter._tag !== 'LifetimeParameter') {
+        diagnostics.push(
+          Diagnostic.invalidLifetimeBinder(
+            'A callable lifetime binder accepts only lifetime parameters',
+            context.spanOf(parameter.anchor),
+          ),
+        )
+        continue
+      }
+      const spelled = tickedName(context, parameter.name)
+      if (
+        spelled === undefined ||
+        spelled === "'static" ||
+        binders.some((binder) => Lifetime.display(binder) === spelled)
+      ) {
+        diagnostics.push(
+          Diagnostic.invalidLifetimeBinder(
+            'Lifetime binders must have distinct names other than static',
+            context.spanOf(parameter.anchor),
+          ),
+        )
+        continue
+      }
+      const binder = Lifetime.bound(owner, binders.length, spelled, binderPath)
+      binders.push(binder)
+      scopeBindings.set(spelled, binder)
+    }
+    const lifetimeBounds: Array<Lifetime.Outlives> = []
+    for (const parameter of type.binders) {
+      if (parameter._tag !== 'LifetimeParameter') continue
+      const spelled = tickedName(context, parameter.name)
+      const longer = spelled === undefined ? undefined : scopeBindings.get(spelled)
+      if (longer === undefined) continue
+      for (const bound of parameter.bounds) {
+        if (bound._tag !== 'Lifetime') continue
+        const shorter = resolve(bound.anchor, bound, scopeBindings)
+        if (shorter !== undefined) lifetimeBounds.push({ longer, shorter })
+      }
+    }
+    const invocationRegion = (): Lifetime.Lifetime => {
+      let name = `call${binders.length}`
+      while (scopeBindings.has(`'${name}`)) name += '_'
+      const binder = Lifetime.bound(owner, binders.length, name, binderPath)
+      scopeBindings.set(`'${name}`, binder)
+      binders.push(binder)
+      return binder
+    }
+    for (const parameter of type.parameters)
+      walkType(parameter, scopeBindings, false, undefined, invocationRegion, true)
+    const candidates = type.parameters.flatMap((parameter) => {
+      const value = getRegion(parameter.anchor)
+      return value === undefined ? [] : [value]
+    })
+    walkType(
+      type.result,
+      scopeBindings,
+      true,
+      candidates.length === 1 ? candidates.at(0) : undefined,
+      invocationRegion,
+      true,
+    )
+    if (environment !== undefined)
+      callables.set(
+        AuthoredIdentity.anchorKey(type.anchor),
+        Object.freeze({
+          environment,
+          lifetimeBinders: Object.freeze(binders),
+          lifetimeBounds: Lifetime.assumptions(lifetimeBounds).bounds,
+        }),
+      )
+  }
+
+  /** A position that can supply the elided output region. */
+  const isCandidate = (type: AuthoredHir.Type): boolean =>
+    type._tag === 'ReferenceType' ||
+    type._tag === 'SliceType' ||
+    isStringType(context, type) ||
+    (type._tag === 'AppliedType' && isStringType(context, type.target))
+
+  for (const parameter of headerGenerics(declaration)) {
+    if (parameter._tag === 'RowParameter') continue
+    for (const bound of parameter.bounds)
+      if (bound._tag === 'Lifetime') resolve(bound.anchor, bound, bindings)
+      else walkType(bound, bindings)
+  }
+
+  const contract = contractOf(declaration)
+  if (contract === undefined || body !== undefined) {
+    for (const type of headerTypes(declaration)) walkType(type, bindings)
+    if (contract !== undefined) {
+      for (const parameter of contract.parameters) walkType(parameter.type, bindings)
+      if (contract.result !== undefined) walkType(contract.result, bindings)
+      if (contract.failures !== undefined) walkType(contract.failures, bindings)
+      if (contract.requirements !== undefined)
+        for (const member of contract.requirements.members)
+          walkOperand(member, bindings, false, undefined, fresh, false)
+    }
+    // A body writes annotations of its own — explicit call type arguments, binding and pattern
+    // types — and each can elide a region. Elaborating only the header would leave those anchors
+    // without one, so an elided `string` inside a body would read as an ambiguous output.
+    if (body !== undefined && declaration.body._tag === 'CallableBody') {
+      const block = declaration.body.block
+      if (block !== undefined)
+        for (const type of AuthoredWalk.bodyTypes(block)) walkType(type, bindings)
+    }
+  } else {
     const candidates: Array<Lifetime.Lifetime> = []
     let receiver: Lifetime.Lifetime | undefined
-    for (const input of inputs) {
-      const type = typeChild(input)
-      if (type === undefined) continue
-      walk(type, bindings)
-      const value = regions.get(type)
+    for (const parameter of contract.parameters) {
+      walkType(parameter.type, bindings)
+      const value = getRegion(parameter.type.anchor)
       if (value === undefined) continue
-      if (candidate(type)) candidates.push(value)
-      const token = SyntaxTree.directToken(input, 'Identifier')
-      if (candidate(type) && token !== undefined && spelling(source, token) === 'self')
+      if (isCandidate(parameter.type)) candidates.push(value)
+      if (isCandidate(parameter.type) && nameText(context, parameter.name) === 'self')
         receiver = value
     }
-    const result = SyntaxTree.directNode(syntax, 'ReturnType')
-    if (result !== undefined)
-      walk(
-        result,
-        bindings,
-        true,
-        receiver ?? (candidates.length === 1 ? candidates.at(0) : undefined),
-      )
-    for (const kind of ['FailureRow', 'RequirementRow'] as const) {
-      const row = SyntaxTree.directNode(syntax, kind)
-      if (row !== undefined)
-        walk(
-          row,
-          bindings,
-          true,
-          receiver ?? (candidates.length === 1 ? candidates.at(0) : undefined),
-        )
-    }
+    const defaultOutput = receiver ?? (candidates.length === 1 ? candidates.at(0) : undefined)
+    if (contract.result !== undefined) walkType(contract.result, bindings, true, defaultOutput)
+    if (contract.failures !== undefined) walkType(contract.failures, bindings, true, defaultOutput)
+    if (contract.requirements !== undefined)
+      for (const member of contract.requirements.members)
+        walkOperand(member, bindings, true, defaultOutput, fresh, false)
   }
-  const environmentNode = SyntaxTree.directNode(syntax, 'EffectEnvironment')
-  const environmentToken =
-    environmentNode === undefined ? undefined : SyntaxTree.directToken(environmentNode, 'Lifetime')
+
+  const written = contract?.environment
   const explicitEnvironment =
-    environmentNode !== undefined && environmentToken !== undefined
-      ? resolveEnvironment(environmentNode, bindings)
-      : undefined
+    written === undefined || written.length === 0
+      ? undefined
+      : resolveEnvironment(declaration.header.anchor, written, bindings)
+
   return Object.freeze({
     owner,
-    source,
-    syntax,
     ...(explicitEnvironment === undefined ? {} : { explicitEnvironment }),
     parameters: new Map(parameters),
     nominalArguments,
@@ -425,8 +614,9 @@ export const forHeader = (
 
 /** Assigns local annotation variables in the enclosing body's canonical declaration scope. */
 export const forBody = (
-  source: SourceFile.SourceFile,
+  context: SemanticContext.SemanticContext,
   body: BodyLifetime.BodyLifetime,
-  syntax: SyntaxTree.Node,
+  declaration: AuthoredHir.Declaration,
   parameters: ReadonlyMap<string, Type.Parameter>,
-): Context => forHeader(source, body.owner, syntax, parameters, body)
+  nominalParameters?: (type: AuthoredHir.Type) => ReadonlyArray<Type.Parameter> | undefined,
+): Context => forHeader(context, body.owner, declaration, parameters, body, nominalParameters)

@@ -30,7 +30,7 @@ fn make() -> Effect<'static; i32> {
 pub fn main() -> i32 { return run make() }`,
       ),
       [
-        ['OWN0019', 121, 133],
+        ['OWN0019', 122, 133],
         ['OWN0018', 130, 132],
         ['SEM0212', 130, 132],
       ],
@@ -47,8 +47,8 @@ pub fn main() -> i32 { let e = make() return run e }`,
       ),
       [
         ['SEM0212', 114, 121],
-        ['OWN0019', 131, 157],
-        ['OWN0018', 147, 152],
+        ['OWN0019', 132, 157],
+        ['OWN0018', 148, 152],
       ],
     )
     assert.deepEqual(
@@ -65,7 +65,7 @@ pub fn main() -> i32 { return run make() }`,
       [
         ['OWN0018', 131, 133],
         ['SEM0212', 131, 133],
-        ['OWN0019', 143, 145],
+        ['OWN0019', 144, 145],
       ],
     )
   }),

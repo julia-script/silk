@@ -2,14 +2,19 @@ import * as Effect from 'effect/Effect'
 import * as Result from 'effect/Result'
 import * as ConfigurationError from './ConfigurationError.js'
 import * as ConfigurationOrigin from './ConfigurationOrigin.js'
-import * as DeclarationProperty from './DeclarationProperty.js'
 import * as Diagnostic from './Diagnostic.js'
 import type * as Elaboration from './Elaboration.js'
-import type * as SourceFile from './SourceFile.js'
+import type * as SemanticContext from './SemanticContext.js'
 import type * as SourceSpan from './SourceSpan.js'
 import type * as Target from './Target.js'
 import * as Type from './Type.js'
 import * as Canonical from './internal/Canonical.js'
+
+/** The exact text one elaborated literal operand denotes, decoded when the fact was built. */
+const literalText = (expression: Elaboration.ExpressionFact): string | undefined =>
+  expression._tag === 'StaticText' && expression.data !== undefined
+    ? new TextDecoder().decode(Uint8Array.from(expression.data.bytes))
+    : undefined
 
 /** Validated function-local machine text and its exact register/effect contract. */
 export interface NativeAssembly {
@@ -169,7 +174,7 @@ export const llvmConstraints = (self: NativeAssembly, target: Target.Target): st
 
 /** Checks literal source arguments before residualization; unsafe acknowledgement is checked by calls. */
 export const analyze = (
-  source: SourceFile.SourceFile,
+  context: SemanticContext.SemanticContext,
   arguments_: ReadonlyArray<Elaboration.ArgumentFact>,
   result: Type.Type,
   span: SourceSpan.SourceSpan,
@@ -182,16 +187,14 @@ export const analyze = (
     diagnostics: [
       Diagnostic.invalidConfiguration(
         ConfigurationError.make('NativeAssembly.analyze', 'InvalidInput', detail, [
-          { ...ConfigurationOrigin.literal(source.id), span: at },
+          { ...ConfigurationOrigin.literal(span.sourceId), span: at },
         ]),
         at,
       ),
     ],
   })
   if (arguments_.length !== 7) return reject('assembly argument cardinality')
-  const texts = arguments_
-    .slice(0, 4)
-    .map((argument) => DeclarationProperty.text(source, argument.expression.syntax))
+  const texts = arguments_.slice(0, 4).map((argument) => literalText(argument.expression))
   const template = texts[0],
     constraints = texts[1],
     clobbers = texts[2],
@@ -209,11 +212,16 @@ export const analyze = (
   )
     return reject('assembly metadata must be literal')
   const operands: Array<Type.Type> = []
-  if (tuple?._tag === 'StructLiteral' && tuple.syntax.kind === 'TupleLiteralExpression') {
+  // A tuple literal is an occurrence-generated struct: it names no source constructor.
+  if (
+    tuple?._tag === 'StructLiteral' &&
+    tuple.target._tag === 'Resolved' &&
+    tuple.target.anchor === undefined
+  ) {
     for (const field of tuple.fields) {
       const type = field.initializer.expression.type
       if (type._tag !== 'Available')
-        return reject('assembly operand type', field.initializer.expression.syntax.span)
+        return reject('assembly operand type', context.spanOf(field.initializer.expression.anchor))
       operands.push(type.type)
     }
   } else if (tuple?._tag !== 'Unit') return reject('assembly inputs require a tuple literal')

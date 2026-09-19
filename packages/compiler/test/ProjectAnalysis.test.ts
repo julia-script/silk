@@ -9,6 +9,7 @@ import * as FrontendTooling from '../src/FrontendTooling.js'
 import * as Tir from '../src/Tir.js'
 import * as ProjectAnalysis from '../src/ProjectAnalysis.js'
 import * as SourceCatalog from '../src/SourceCatalog.js'
+import * as NameResolution from '../src/NameResolution.js'
 import * as Ownership from '../src/Ownership.js'
 import * as ResidualOwnership from '../src/ResidualOwnership.js'
 import * as SourceFile from '../src/SourceFile.js'
@@ -423,8 +424,10 @@ pub fn value() -> i32 { return privateValue() }`
       assert.deepEqual(selectedNames, ["'long"])
       const functions = view.results.get('shared/Core')?.functions ?? raise('library facts')
       const value = functions.at(-1) ?? raise('last library function')
+      // The presented header span is trivia-free, so it slices the declaration exactly.
+      const valueSpan = view.resolution.contexts.spanOf(value.declaration.anchor)
       assert.strictEqual(
-        alpha.slice(value.declaration.syntax.span.start, value.declaration.syntax.span.end).trim(),
+        alpha.slice(valueSpan.start, valueSpan.end),
         'pub fn value() -> i32 { return privateValue() }',
       )
       const additionalRoot = SourceFile.make(
@@ -644,8 +647,8 @@ fn broken() -> i32 { return missing() }`
       Elaboration.visitStatementFacts(callback.statements, {
         expression: (expression) => {
           if (expression._tag === 'Identifier' && expression.reference._tag === 'ResolvedPattern') {
-            const span = expression.reference.binding.syntax.span
-            assert.strictEqual(currentSource.slice(span.start, span.end).trim(), 'value')
+            const span = view.resolution.contexts.spanOf(expression.reference.binding.name.anchor)
+            assert.strictEqual(currentSource.slice(span.start, span.end), 'value')
           }
         },
       })
@@ -916,6 +919,8 @@ it.effect('reuses exact unchanged syntax and module semantics inside one coheren
       retainedFact,
       currentView.index,
       Ownership.localSharedAccessBoundaryPlan(currentView.results),
+      NameResolution.scopeOf(currentView.resolution, 'shared/Core')?.context ??
+        raise('retained library context'),
     )
     const sourceProof = Ownership.sourceProof(ownershipInput) ?? raise('current-index source proof')
     const residual = ResidualOwnership.make()
@@ -1134,12 +1139,16 @@ unsafe fn probe(core: &Intrinsic.SharedCore<i32>) -> i32 { return 1 }`
         fact,
         before.index,
         Ownership.localSharedAccessBoundaryPlan(before.results),
+        NameResolution.scopeOf(before.resolution, 'shared/Callbacks')?.context ??
+          raise('previous callbacks context'),
       )
       const currentInput = Ownership.input(
         fn,
         fact,
         after.index,
         Ownership.localSharedAccessBoundaryPlan(after.results),
+        NameResolution.scopeOf(after.resolution, 'shared/Callbacks')?.context ??
+          raise('current callbacks context'),
       )
       assert.lengthOf(previousInput.boundaries, 0)
       assert.lengthOf(currentInput.boundaries, 1)

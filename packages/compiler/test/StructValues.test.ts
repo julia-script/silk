@@ -386,7 +386,7 @@ pub fn main() -> i32 { return 0 }`
       assert.strictEqual(
         Analysis.diagnostics(invalid).find((diagnostic) => diagnostic.code === 'OWN0002')?.span
           .start,
-        source.lastIndexOf(' move value.pair'),
+        source.lastIndexOf('move value.pair'),
       )
       const functions = Analysis.rootAnalysis(invalid).functions
       for (const ordinal of [0, 1, 2, 3]) {

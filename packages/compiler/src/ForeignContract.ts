@@ -1,10 +1,7 @@
 import * as Diagnostic from './Diagnostic.js'
-import * as LiteralForm from './LiteralForm.js'
-import * as Option from 'effect/Option'
-import * as SourceFile from './SourceFile.js'
+import type * as AuthoredHir from './AuthoredHir.js'
+import * as SemanticContext from './SemanticContext.js'
 import type * as SourceSpan from './SourceSpan.js'
-import * as StaticText from './StaticText.js'
-import * as SyntaxTree from './SyntaxTree.js'
 import * as Type from './Type.js'
 
 /** Unsafe behavioral promises attached to one immediate foreign C call. */
@@ -53,25 +50,30 @@ const parameterKind = (name: 'noCapture' | 'borrow' | 'callbacks', type: Type.Ty
   return Type.isPointer(type)
 }
 
-const decoder = new TextDecoder()
-const spelling = (source: SourceFile.SourceFile, span: SourceSpan.SourceSpan): string =>
-  Option.getOrElse(SourceFile.spelling(source, span), () => '')
-const text = (source: SourceFile.SourceFile, node: SyntaxTree.Node): string | undefined => {
-  const token = SyntaxTree.directToken(node, 'TextLiteral')
-  if (token === undefined) return undefined
-  const bytes = Option.getOrUndefined(SourceFile.slice(source, token.span))
-  const form = bytes === undefined ? undefined : LiteralForm.recognize(bytes)
-  if (bytes === undefined || form === undefined) return undefined
-  const decoded = StaticText.decode(Array.from(bytes), form)
-  return decoded._tag === 'Decoded'
-    ? decoder.decode(Uint8Array.from(decoded.data.bytes))
-    : undefined
+/** The authored spelling of a name, when the author supplied one. */
+const nameText = (
+  context: SemanticContext.SemanticContext,
+  name: AuthoredHir.Name,
+): string | undefined => SemanticContext.nameText(context, name)
+
+/** The elements of an authored tuple operand, treating the unit literal as the empty tuple. */
+const tupleElements = (
+  value: AuthoredHir.Expression,
+): ReadonlyArray<AuthoredHir.Expression> | undefined => {
+  if (value._tag === 'TupleExpression') return value.elements
+  return value._tag === 'UnitLiteral' ? Object.freeze([]) : undefined
 }
 
-/** Validates the sealed source property and resolved parameter types without executing source. */
+/** A text operand's exact value; interpolated or computed expressions are unavailable. */
+const textValue = (
+  context: SemanticContext.SemanticContext,
+  value: AuthoredHir.Expression,
+): string | undefined => (value._tag === 'TextLiteral' ? context.textOf(value.value) : undefined)
+
+/** Validates the sealed authored property and resolved parameter types without executing source. */
 export const analyze = (
-  source: SourceFile.SourceFile,
-  clause: SyntaxTree.Node | undefined,
+  context: SemanticContext.SemanticContext,
+  clause: AuthoredHir.PropertyClause | undefined,
   parameters: ReadonlyArray<Parameter>,
   result: Type.Type | undefined,
 ): Analysis => {
@@ -82,30 +84,24 @@ export const analyze = (
       Diagnostic.foreignDeclarationRestriction(`foreign contract ${name}: ${problem}`, span),
     )
   }
-  const names = clause.children
-    .filter(SyntaxTree.isToken)
-    .filter((token) => token.kind === 'Identifier')
-    .map((token) => spelling(source, token.span))
-  if (names[1] !== 'Intrinsic' || names[2] !== 'foreign')
-    reject('owner', 'expected Intrinsic.foreign', clause.span)
-  const properties = new Map<
-    string,
-    { readonly value: SyntaxTree.Node; readonly span: SourceSpan.SourceSpan }
-  >()
-  for (const node of clause.children.filter(SyntaxTree.isNode)) {
-    if (node.kind !== 'FunctionProperty') continue
-    const nameToken = SyntaxTree.directToken(node, 'Identifier')
-    const value = node.children.find(SyntaxTree.isNode)
-    if (nameToken === undefined || value === undefined) continue
-    const name = spelling(source, nameToken.span)
-    if (properties.has(name)) reject(name, 'duplicate property', nameToken.span)
+  if (
+    nameText(context, clause.namespace) !== 'Intrinsic' ||
+    nameText(context, clause.operation) !== 'foreign'
+  )
+    reject('owner', 'expected Intrinsic.foreign', context.spanOf(clause.anchor))
+  const properties = new Map<string, AuthoredHir.Property>()
+  for (const property of clause.properties) {
+    const name = nameText(context, property.name)
+    if (name === undefined) continue
+    if (properties.has(name))
+      reject(name, 'duplicate property', context.spanOf(property.name.anchor))
     if (
       !['memory', 'locality', 'noCapture', 'borrow', 'callbacks', 'returned', 'noReturn'].includes(
         name,
       )
     )
-      reject(name, 'unsupported property', nameToken.span)
-    properties.set(name, { value, span: nameToken.span })
+      reject(name, 'unsupported property', context.spanOf(property.name.anchor))
+    properties.set(name, property)
   }
   const choice = <const Choices extends ReadonlyArray<string>>(
     name: string,
@@ -114,10 +110,10 @@ export const analyze = (
   ): Choices[number] => {
     const property = properties.get(name)
     if (property === undefined) return fallback
-    const value = text(source, property.value)
+    const value = textValue(context, property.value)
     const found = values.find((candidate) => candidate === value)
     if (found !== undefined) return found
-    reject(name, `expected ${values.join(' or ')}`, property.value.span)
+    reject(name, `expected ${values.join(' or ')}`, context.spanOf(property.value.anchor))
     return fallback
   }
   const memory = choice('memory', ['none', 'read', 'write', 'readwrite'], 'readwrite')
@@ -126,24 +122,29 @@ export const analyze = (
     const property = properties.get(name)
     if (property === undefined) return []
     const tuple = property.value
-    if (tuple.kind !== 'TupleLiteralExpression' && tuple.kind !== 'UnitExpression') {
-      reject(name, 'expected a tuple of parameter names', tuple.span)
+    // A unit literal is the empty tuple; anything else must be an authored tuple of names.
+    const elements = tupleElements(tuple)
+    if (elements === undefined) {
+      reject(name, 'expected a tuple of parameter names', context.spanOf(tuple.anchor))
       return []
     }
     const ordinals: Array<number> = []
-    for (const element of tuple.children.filter(SyntaxTree.isNode)) {
-      const name_ = text(source, element)
-      const ordinal = parameters.findIndex((parameter) => parameter.name === name_)
+    for (const element of elements) {
+      const spelled =
+        element._tag === 'IdentifierExpression'
+          ? nameText(context, element.name)
+          : textValue(context, element)
+      const ordinal = parameters.findIndex((parameter) => parameter.name === spelled)
       const parameter = parameters[ordinal]
       if (parameter === undefined || ordinals.includes(ordinal)) {
-        reject(name, 'expected unique existing parameter names', element.span)
+        reject(name, 'expected unique existing parameter names', context.spanOf(element.anchor))
         continue
       }
       if (parameter.type !== undefined && !parameterKind(name, parameter.type))
         reject(
           name,
           `requires a ${{ callbacks: 'native function pointer', borrow: 'single-value reference', noCapture: 'raw pointer' }[name]} parameter`,
-          element.span,
+          context.spanOf(element.anchor),
         )
       ordinals.push(ordinal)
     }
@@ -155,8 +156,12 @@ export const analyze = (
   const returnedProperty = properties.get('returned')
   let returned: number | undefined
   if (returnedProperty !== undefined) {
-    const name = text(source, returnedProperty.value)
-    const ordinal = parameters.findIndex((parameter) => parameter.name === name)
+    const value = returnedProperty.value
+    const spelled =
+      value._tag === 'IdentifierExpression'
+        ? nameText(context, value.name)
+        : textValue(context, value)
+    const ordinal = parameters.findIndex((parameter) => parameter.name === spelled)
     const parameter = parameters[ordinal]
     if (
       parameter === undefined ||
@@ -167,25 +172,23 @@ export const analyze = (
       reject(
         'returned',
         'requires a raw pointer parameter identical to the result type',
-        returnedProperty.value.span,
+        context.spanOf(value.anchor),
       )
     else if (noCapture.includes(ordinal))
       reject(
         'returned',
         'cannot capture a noCapture parameter through the result',
-        returnedProperty.value.span,
+        context.spanOf(value.anchor),
       )
     else returned = ordinal
   }
   const noReturnProperty = properties.get('noReturn')
   let noReturn = false
   if (noReturnProperty !== undefined) {
-    const token =
-      SyntaxTree.directToken(noReturnProperty.value, 'TrueKeyword') ??
-      SyntaxTree.directToken(noReturnProperty.value, 'FalseKeyword')
-    if (token === undefined)
-      reject('noReturn', 'expected a Boolean literal', noReturnProperty.value.span)
-    else noReturn = token.kind === 'TrueKeyword'
+    const value = noReturnProperty.value
+    if (value._tag !== 'BooleanLiteral')
+      reject('noReturn', 'expected a Boolean literal', context.spanOf(value.anchor))
+    else noReturn = value.value
     if (
       noReturn &&
       ((result !== undefined && !Type.equals(result, Type.unit)) || returnedProperty !== undefined)
@@ -193,7 +196,7 @@ export const analyze = (
       reject(
         'noReturn',
         'requires a unit result without a returned alias',
-        noReturnProperty.value.span,
+        context.spanOf(value.anchor),
       )
   }
   return Object.freeze({

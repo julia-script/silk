@@ -4,6 +4,7 @@ import type * as CleanupPlan from './CleanupPlan.js'
 import * as Constraint from './Constraint.js'
 import type * as DeclarationFacts from './DeclarationFacts.js'
 import type * as DeclarationIndex from './DeclarationIndex.js'
+import type * as SemanticContext from './SemanticContext.js'
 import type * as Tir from './Tir.js'
 import * as Instances from './Instances.js'
 import type * as Layout from './Layout.js'
@@ -211,6 +212,7 @@ export class FunctionLowering {
   constructor(
     readonly layout: Layout.Plan,
     readonly index: DeclarationIndex.Index,
+    readonly registry: SemanticContext.Registry,
     parameterTypes: ReadonlyArray<Mir.Type>,
     readonly ownership: Ownership.FunctionOwnership | undefined,
     readonly substitution: Type.Substitution,

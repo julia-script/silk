@@ -4,7 +4,7 @@ import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as Lifetime from '../src/Lifetime.js'
 import * as NameResolution from '../src/NameResolution.js'
-import * as Presentation from '../src/Presentation.js'
+import * as Presentation from '../src/SemanticDisplay.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
 import * as Type from '../src/Type.js'
@@ -167,9 +167,7 @@ pub fn main() -> i32 {
 it.effect('indexes allocator tokens as source binding, actor, and function identities', () =>
   Analysis.ofSource('main', encoder.encode(allocatorSource)).pipe(
     Effect.map((snapshot) => {
-      const source = new TextDecoder().decode(
-        SourceFile.toUint8Array(Analysis.rootAnalysis(snapshot).syntax.source),
-      )
+      const source = allocatorSource
       const binding = occurrenceAt(snapshot, source, 'allocator', 2)
       const actor = occurrenceAt(snapshot, source, 'Allocator', 2)
       const operation = occurrenceAt(snapshot, source, 'systemAllocatorProvider')
@@ -1004,9 +1002,7 @@ pub fn local() -> i32 { let counter = Counter. return 0 }`
 it.effect('answers deterministic inferred hints and recovered completions', () =>
   Analysis.ofSource('main', encoder.encode(recoveredMemberSource)).pipe(
     Effect.map((snapshot) => {
-      const source = new TextDecoder().decode(
-        SourceFile.toUint8Array(Analysis.rootAnalysis(snapshot).syntax.source),
-      )
+      const source = recoveredMemberSource
       const hints = Analysis.typeHints(snapshot, 'main', 0, encoder.encode(source).length)
       assert.deepEqual(
         hints.map((hint) => hint.presentation.text),
@@ -1435,38 +1431,39 @@ fn pick() -> i32 {
         const literal = expressions.find((expression) => expression._tag === 'StructLiteral')
         const projection = expressions.find((expression) => expression._tag === 'FieldProjection')
         assert.strictEqual(call?._tag === 'Call' ? call.path._tag : undefined, 'ReferencePath')
+        const spans = snapshot.resolution.contexts
         assert.isTrue(
           call?._tag === 'Call' &&
             call.path._tag === 'ReferencePath' &&
-            call.path.qualifier !== undefined &&
-            call.path.qualifier.span.end <= call.path.member.span.start,
+            call.path.qualifierAnchor !== undefined &&
+            spans.spanOf(call.path.qualifierAnchor).end <=
+              spans.spanOf(call.path.memberAnchor).start,
         )
         assert.isDefined(
           literal?._tag === 'StructLiteral' && literal.target._tag === 'Resolved'
-            ? literal.target.token
+            ? literal.target.anchor
             : undefined,
         )
         assert.isDefined(
-          literal?._tag === 'StructLiteral' ? literal.initializers.at(0)?.token : undefined,
+          literal?._tag === 'StructLiteral' ? literal.initializers.at(0)?.anchor : undefined,
         )
-        assert.isDefined(projection?._tag === 'FieldProjection' ? projection.fieldToken : undefined)
+        assert.isDefined(
+          projection?._tag === 'FieldProjection' ? projection.fieldAnchor : undefined,
+        )
         return undefined
       }),
     ),
 )
 
-it.effect('recursively indexes generic nominal and type-parameter references', () =>
-  Analysis.ofSource(
-    'main',
-    encoder.encode(`struct Problem {}
+const genericNominalSource = `struct Problem {}
 struct Box<T> { value: T }
 fn unwrap(box: Box<Problem>) -> Problem { return box.value }
-pub fn main() -> i32 { return 0 }`),
-  ).pipe(
+pub fn main() -> i32 { return 0 }`
+
+it.effect('recursively indexes generic nominal and type-parameter references', () =>
+  Analysis.ofSource('main', encoder.encode(genericNominalSource)).pipe(
     Effect.map((snapshot) => {
-      const source = new TextDecoder().decode(
-        SourceFile.toUint8Array(Analysis.rootAnalysis(snapshot).syntax.source),
-      )
+      const source = genericNominalSource
       const typeParameterUse = occurrenceAt(snapshot, source, 'T', 1)
       const appliedTarget = occurrenceAt(snapshot, source, 'Box', 1)
       const appliedArgument = occurrenceAt(snapshot, source, 'Problem', 1)

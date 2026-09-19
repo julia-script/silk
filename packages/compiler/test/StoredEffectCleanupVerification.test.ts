@@ -27,6 +27,7 @@ const lowerStored = Effect.fnUntraced(function* (name: string, source: string) {
   const catalog = yield* Layout.catalog(
     Target.wasm32UnknownUnknown,
     snapshot.index,
+    snapshot.resolution.contexts,
     snapshot.instances,
   )
   const layout = yield* Layout.plan(catalog, snapshot.instances, snapshot.index)

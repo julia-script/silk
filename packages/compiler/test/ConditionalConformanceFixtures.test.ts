@@ -2,7 +2,6 @@ import { NodeServices } from '@effect/platform-node'
 import { assert, layer } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as FileSystem from 'effect/FileSystem'
-import * as Option from 'effect/Option'
 import * as Path from 'effect/Path'
 import * as Analysis from '../src/Analysis.js'
 import * as ConformanceProof from '../src/ConformanceProof.js'
@@ -10,9 +9,7 @@ import * as FormattedDocument from '../src/FormattedDocument.js'
 import * as Lexer from '../src/Lexer.js'
 import * as Parser from '../src/Parser.js'
 import * as SourceFile from '../src/SourceFile.js'
-import * as SyntaxCorrespondence from '../src/SyntaxCorrespondence.js'
 import * as SyntaxFormatter from '../src/SyntaxFormatter.js'
-import * as SyntaxTree from '../src/SyntaxTree.js'
 import * as Type from '../src/Type.js'
 
 const decoder = new TextDecoder()
@@ -27,10 +24,6 @@ const fixture = Effect.fnUntraced(function* (name: string) {
 const parse = Effect.fnUntraced(function* (name: string) {
   const source = yield* fixture(name)
   return Parser.parse(Lexer.lex(SourceFile.make(`conditional-conformance/${name}`, source)))
-})
-const parseAs = Effect.fnUntraced(function* (id: string, name: string) {
-  const source = yield* fixture(name)
-  return Parser.parse(Lexer.lex(SourceFile.make(id, source)))
 })
 const analyze = Effect.fnUntraced(function* (name: string) {
   const source = yield* fixture(name)
@@ -73,29 +66,6 @@ impl<S: Decoder> Decoder for Wrapper<S> {
       assert.deepEqual(second.bytes, first.bytes)
       assert.strictEqual(second.changed, false)
     }),
-  )
-
-  it.effect(
-    'keeps an unchanged bounded impl corresponding after an earlier declaration is inserted',
-    () =>
-      Effect.gen(function* () {
-        const previous = yield* parseAs('conditional-conformance/syntax', 'syntax-original')
-        const current = yield* parseAs('conditional-conformance/syntax', 'syntax-shifted')
-        const previousImpl = SyntaxTree.directNode(previous.root, 'ImplDeclaration')
-        const currentImpl = SyntaxTree.directNode(current.root, 'ImplDeclaration')
-        assert.isDefined(previousImpl)
-        assert.isDefined(currentImpl)
-        const correspondence = Option.getOrThrow(SyntaxCorrespondence.between(previous, current))
-        assert.strictEqual(
-          Option.getOrThrow(
-            SyntaxCorrespondence.currentOf(
-              correspondence,
-              previousImpl ?? assert.fail('expected previous impl'),
-            ),
-          ),
-          currentImpl,
-        )
-      }),
   )
 
   it.effect('accepts mapped and recursively nested optional schema fixtures', () =>

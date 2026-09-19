@@ -1,11 +1,11 @@
+import type * as AuthoredHir from './AuthoredHir.js'
+import * as AuthoredWalk from './AuthoredWalk.js'
 import * as ConfigurationError from './ConfigurationError.js'
 import * as ConfigurationOrigin from './ConfigurationOrigin.js'
-import * as DeclarationProperty from './DeclarationProperty.js'
 import type * as DeclarationFacts from './DeclarationFacts.js'
 import * as Diagnostic from './Diagnostic.js'
-import type * as SourceFile from './SourceFile.js'
+import type * as SemanticContext from './SemanticContext.js'
 import type * as SourceSpan from './SourceSpan.js'
-import * as SyntaxTree from './SyntaxTree.js'
 import * as Type from './Type.js'
 
 /** A compiler-work-free entry body. Both guarantees are inseparable in this initial subset. */
@@ -23,83 +23,114 @@ const diagnostic = (detail: string, span: SourceSpan.SourceSpan): Diagnostic.Dia
     span,
   )
 
+/** The authored property clauses one declaration header carries, empty when it admits none. */
+const clausesOf = (
+  header: AuthoredHir.DeclarationHeader,
+): ReadonlyArray<AuthoredHir.PropertyClause> =>
+  header._tag === 'FunctionHeader' ||
+  header._tag === 'OperationHeader' ||
+  header._tag === 'ModulePropertyHeader'
+    ? header.properties
+    : []
+
+/** `namespace.operation` of one authored clause, using the pool text behind each name. */
+export const clauseOwner = (
+  context: SemanticContext.SemanticContext,
+  clause: AuthoredHir.PropertyClause,
+): string => `${nameText(context, clause.namespace)}.${nameText(context, clause.operation)}`
+
+const nameText = (context: SemanticContext.SemanticContext, name: AuthoredHir.Name): string => {
+  if (name._tag === 'Name') return context.textOf(name.text)
+  if (name._tag === 'InvalidName') return context.textOf(name.spelling)
+  return ''
+}
+
 /** Validates the sealed property clause independently of declaration spelling or library ownership. */
 export const analyze = (
-  source: SourceFile.SourceFile,
-  node: SyntaxTree.Node,
+  context: SemanticContext.SemanticContext,
+  declaration: AuthoredHir.Declaration,
 ): {
   readonly properties?: MachineFunction
   readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
 } => {
-  const clauses = DeclarationProperty.clauses(node).filter(
-    (clause) => DeclarationProperty.owner(source, clause) === 'Intrinsic.machine',
+  const clauses = clausesOf(declaration.header).filter(
+    (clause) => clauseOwner(context, clause) === 'Intrinsic.machine',
   )
   const clause = clauses[0]
   if (clause === undefined) return { diagnostics: [] }
-  const properties = new Map<string, boolean>()
+  const properties = new Set<string>()
   const diagnostics: Array<Diagnostic.Diagnostic> = []
   if (clauses.length !== 1)
     diagnostics.push(
-      ...clauses.map((entry) => diagnostic('duplicate machine function clause', entry.span)),
+      ...clauses.map((entry) =>
+        diagnostic('duplicate machine function clause', context.spanOf(entry.anchor)),
+      ),
     )
-  for (const property of clause.children
-    .filter(SyntaxTree.isNode)
-    .filter((child) => child.kind === 'FunctionProperty')) {
-    const name = SyntaxTree.directToken(property, 'Identifier')
-    const expression = property.children.find(SyntaxTree.isNode)
-    const spelling = name === undefined ? '' : DeclarationProperty.spelling(source, name.span)
-    const token =
-      expression === undefined
-        ? undefined
-        : SyntaxTree.tokens(expression).filter(
-            (token) =>
-              !['Whitespace', 'LineComment', 'DocComment', 'ModuleDocComment'].includes(token.kind),
-          )[0]
+  for (const property of clause.properties) {
+    const spelling = nameText(context, property.name)
+    // Authored HIR carries the literal's exact value, so admission never re-reads source bytes.
     if (
       (spelling !== 'naked' && spelling !== 'noReturn') ||
       properties.has(spelling) ||
-      token?.kind !== 'TrueKeyword' ||
-      expression === undefined ||
-      SyntaxTree.tokens(expression).filter(
-        (token) =>
-          !['Whitespace', 'LineComment', 'DocComment', 'ModuleDocComment'].includes(token.kind),
-      ).length !== 1
+      property.value._tag !== 'BooleanLiteral' ||
+      !property.value.value
     )
       diagnostics.push(
-        diagnostic('machine properties require naked: true and noReturn: true', property.span),
+        diagnostic(
+          'machine properties require naked: true and noReturn: true',
+          context.spanOf(property.anchor),
+        ),
       )
-    properties.set(spelling, true)
+    properties.add(spelling)
   }
   if (!properties.has('naked') || !properties.has('noReturn'))
-    diagnostics.push(diagnostic('machine properties require naked and noReturn', clause.span))
+    diagnostics.push(
+      diagnostic('machine properties require naked and noReturn', context.spanOf(clause.anchor)),
+    )
   return diagnostics.length > 0
     ? { diagnostics }
     : {
-        properties: Object.freeze({ naked: true, noReturn: true, span: clause.span }),
+        properties: Object.freeze({
+          naked: true,
+          noReturn: true,
+          span: context.spanOf(clause.anchor),
+        }),
         diagnostics: [],
       }
 }
 
-const terminalCall = (node: SyntaxTree.Node): SyntaxTree.Node | undefined => {
-  if (node.kind === 'CallExpression') return node
-  if (
-    ![
-      'Block',
-      'ReturnStatement',
-      'UnsafeStatement',
-      'UnsafeExpression',
-      'ExpressionStatement',
-    ].includes(node.kind)
-  )
-    return undefined
-  const children = node.children.filter(SyntaxTree.isNode)
-  const child = children[0]
-  return children.length === 1 && child !== undefined ? terminalCall(child) : undefined
+/** The single call one terminal body reduces to, unwrapping the statement forms that only nest. */
+const terminalCall = (
+  block: AuthoredHir.Block,
+): Extract<AuthoredHir.Expression, { readonly _tag: 'CallExpression' }> | undefined => {
+  const statement = block.statements.length === 1 ? block.statements[0] : undefined
+  if (statement === undefined) return undefined
+  if (statement._tag === 'UnsafeStatement') return terminalCall(statement.body)
+  let current: AuthoredHir.Expression | undefined
+  if (statement._tag === 'ExpressionStatement') current = statement.expression
+  else if (statement._tag === 'ReturnStatement') current = statement.value
+  while (current?._tag === 'UnsafeExpression') current = current.operand
+  return current?._tag === 'CallExpression' ? current : undefined
+}
+
+/** The `Namespace.member` a callee names, or `undefined` when it selects nothing nameable. */
+const calleePath = (
+  context: SemanticContext.SemanticContext,
+  callee: AuthoredHir.Expression,
+): string | undefined => {
+  // `Intrinsic.assembly` lowers as a field of the `Intrinsic` name when nothing marks it a type.
+  if (callee._tag === 'FieldExpression' && callee.subject._tag === 'IdentifierExpression')
+    return `${nameText(context, callee.subject.name)}.${nameText(context, callee.field)}`
+  if (callee._tag !== 'MemberExpression') return undefined
+  const subject = callee.selector.subject
+  if (subject._tag !== 'NamedType') return undefined
+  const namespace = subject.path.segments.map((segment) => nameText(context, segment)).join('.')
+  return `${namespace}.${nameText(context, callee.selector.member)}`
 }
 
 /** Rejects bodies that could require compiler-created stack state before any lowering occurs. */
 export const bodyDiagnostics = (
-  source: SourceFile.SourceFile,
+  context: SemanticContext.SemanticContext,
   declaration: DeclarationFacts.DeclarationFact,
 ): ReadonlyArray<Diagnostic.Diagnostic> => {
   const properties = declaration.machine
@@ -115,20 +146,10 @@ export const bodyDiagnostics = (
     !Type.equals(declaration.returnType.type, Type.unit)
   )
     return rejected('naked functions require an unsafe monomorphic zero-argument unit signature')
-  const body = declaration.syntax.children
-    .filter(SyntaxTree.isNode)
-    .find((child) => child.kind === 'Block')
-  const call = body === undefined ? undefined : terminalCall(body)
+  const call = terminalCall(AuthoredWalk.bodyBlock(context, declaration))
   if (call === undefined)
     return rejected('naked bodies require one terminal operand-free assembly invocation')
-  const tokens = SyntaxTree.tokens(call)
-    .filter(
-      (token) =>
-        !['Whitespace', 'LineComment', 'DocComment', 'ModuleDocComment'].includes(token.kind),
-    )
-    .slice(0, 3)
-    .map((token) => DeclarationProperty.spelling(source, token.span))
-  if (tokens.join('') !== 'Intrinsic.assembly')
+  if (calleePath(context, call.callee) !== 'Intrinsic.assembly')
     return rejected('naked bodies admit only Intrinsic.assembly')
   return []
 }

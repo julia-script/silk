@@ -186,10 +186,10 @@ pub fn main() -> i32 { return run Effect.catchAll(relay(A {}), recover) }`
     const diagnostic =
       Analysis.diagnostics(rejected).find((entry) => entry.code === 'SEM0064') ??
       unreachable('expected the undeclared union member diagnostic')
-    const start = rejectedSource.indexOf(' problem }')
+    const start = rejectedSource.indexOf(' problem }') + 1
     assert.deepEqual(
       [diagnostic.span.start, diagnostic.span.end],
-      [start, start + ' problem'.length],
+      [start, start + 'problem'.length],
     )
   }),
 )
@@ -516,7 +516,7 @@ pub fn main() -> i32 { return run handleA(risky(true)) }`
         code: diagnostic.code,
         source: source.slice(diagnostic.span.start, diagnostic.span.end),
       })),
-      [{ code: 'SEM0052', source: ' handleA(risky(true))' }],
+      [{ code: 'SEM0052', source: 'handleA(risky(true))' }],
     )
   }),
 )

@@ -17,7 +17,10 @@ import * as SourceSpan from './SourceSpan.js'
 import { analyzeFunctionBody } from './StatementAnalysis.js'
 import * as StaticEvaluation from './StaticEvaluation.js'
 import * as StaticValue from './StaticValue.js'
-import * as SyntaxTree from './SyntaxTree.js'
+import type * as AuthoredHir from './AuthoredHir.js'
+import * as AuthoredIdentity from './AuthoredIdentity.js'
+import * as AuthoredWalk from './AuthoredWalk.js'
+import * as SemanticContext from './SemanticContext.js'
 import type * as Target from './Target.js'
 import * as Type from './Type.js'
 
@@ -99,6 +102,8 @@ interface State {
   readonly parameters: ReadonlyMap<string, StaticValue.Value>
   readonly environment: StaticEvaluation.TargetEnvironment
   readonly results: ReadonlyMap<string, Elaboration.Result>
+  /** Anchor-to-span resolution for every elaborated module of this closure. */
+  readonly spans: SemanticContext.Registry
   readonly resolution: NameResolution.Resolution
   readonly index: DeclarationIndex.Index
   readonly evaluation: StaticEvaluation.Evaluation<StaticValue.Value>
@@ -140,7 +145,9 @@ const makeState = (
         .toSorted(([a], [b]) => Canonical.compare(a, b))
         .map(([module, result]) =>
           Canonical.record(module, [
-            ToolchainIntegrity.contentDigest(Uint8Array.from(result.syntax.source.bytes)),
+            ToolchainIntegrity.contentDigest(
+              new TextEncoder().encode(result.authored.presentation.revision),
+            ),
           ]),
         ),
     ),
@@ -151,6 +158,7 @@ const makeState = (
     dependencies: new Map(),
     environment: StaticEvaluation.targetEnvironment(compilation, sourceIdentity),
     results,
+    spans: SemanticContext.fromModules([...results.values()]),
     resolution,
     index,
     evaluation: StaticEvaluation.make<StaticValue.Value>(compilation, limits, sourceIdentity),
@@ -307,6 +315,7 @@ const reflectAggregate = (
                 field.declaredType._tag !== 'Resolved'
               )
                 return []
+              const fieldSpan = self[stateSymbol].spans.spanOf(field.anchor)
               const member: StaticValue.ReflectedMember =
                 field.member._tag === 'LabeledAggregateMember'
                   ? Object.freeze({ _tag: 'LabeledField', label: field.member.label })
@@ -320,9 +329,9 @@ const reflectAggregate = (
                   valueType: Type.substitute(field.declaredType.type, substitution),
                   authorization: authorizationId,
                   provenance: Object.freeze({
-                    sourceId: field.syntax.span.sourceId,
-                    start: field.syntax.span.start,
-                    end: field.syntax.span.end,
+                    sourceId: fieldSpan.sourceId,
+                    start: fieldSpan.start,
+                    end: fieldSpan.end,
                   }),
                 }),
               ]
@@ -411,7 +420,8 @@ const constantHost = (
     requirementRow: emptyRequirementRow(),
     constraints: Object.freeze([]),
     constraintContracts: Object.freeze([]),
-    syntax: declaration.syntax,
+    anchor: declaration.anchor,
+    owner: declaration.anchor.owner,
   })
 
 const bindStaticParameters = (
@@ -598,6 +608,7 @@ const evaluateStaticFunction = (
         values: bindings.values,
         valueSpans: bindings.valueSpans,
         valueOrigins: bindings.valueOrigins,
+        spanOf: self[stateSymbol].spans.spanOf,
         expressionSpans: new Map<Elaboration.ExpressionFact, SourceSpan.SourceSpan>(),
         expressionOrigins: new Map<Elaboration.ExpressionFact, StaticEvaluation.TextOrigin>(),
         returnedTextSpan: { value: undefined },
@@ -618,7 +629,7 @@ const evaluateStaticFunction = (
         ) => evaluateConstantValue(self, constant, constantSpan, trace),
       }
       const analyzed = analyzeFunctionBody(
-        input.result.syntax.source,
+        SemanticContext.make(input.result.authored),
         declaration,
         input.declarations,
         Object.freeze({ scope: input.scope, index: self[stateSymbol].index }),
@@ -704,7 +715,7 @@ function evaluateConstantValue(
   declaration: DeclarationFacts.ConstantFact,
   span: SourceSpan.SourceSpan,
   parentTrace: StaticEvaluation.Trace,
-  predicate?: SyntaxTree.Node,
+  predicate?: AuthoredHir.Expression,
 ): StaticEvaluation.Outcome<StaticValue.Value> {
   if (declaration.canonical._tag !== 'Canonical')
     return StaticEvaluation.failed(
@@ -767,7 +778,7 @@ function evaluateConstantValue(
           StaticEvaluation.phaseViolation(
             'StaticEvaluation.constant',
             'constant declaration is unavailable',
-            initializer.span,
+            self[stateSymbol].spans.spanOf(initializer.anchor),
             evaluation.trace,
           ),
         )
@@ -800,6 +811,7 @@ function evaluateConstantValue(
         values: new Map<string, StaticValue.Value>(),
         valueSpans: new Map<string, SourceSpan.SourceSpan>(),
         valueOrigins: new Map<string, StaticEvaluation.TextOrigin>(),
+        spanOf: self[stateSymbol].spans.spanOf,
         expressionSpans: new Map<Elaboration.ExpressionFact, SourceSpan.SourceSpan>(),
         expressionOrigins: new Map<Elaboration.ExpressionFact, StaticEvaluation.TextOrigin>(),
         trace: evaluation.trace,
@@ -813,7 +825,7 @@ function evaluateConstantValue(
         constant,
       })
       const analyzed = analyzeExpression(
-        input.result.syntax.source,
+        SemanticContext.make(input.result.authored),
         initializer,
         input.declarations,
         constantHost(declaration),
@@ -827,7 +839,7 @@ function evaluateConstantValue(
       )
       if (analyzed !== undefined)
         self[stateSymbol].conditionDiagnostics?.push(...analyzed.diagnostics)
-      if (analyzed !== undefined && declaration.syntax.kind === 'StaticConditionalDeclaration')
+      if (analyzed !== undefined && predicate === undefined)
         self[stateSymbol].conditionExpression = analyzed.fact
       let nestedFailure: StaticEvaluation.StaticFailure | undefined
       if (analyzed !== undefined)
@@ -848,7 +860,7 @@ function evaluateConstantValue(
           StaticEvaluation.phaseViolation(
             'StaticEvaluation.constant',
             firstError?.message ?? 'constant initializer cannot be analyzed',
-            firstError?.span ?? initializer.span,
+            firstError?.span ?? self[stateSymbol].spans.spanOf(initializer.anchor),
             evaluation.trace,
           ),
         )
@@ -866,7 +878,7 @@ function evaluateConstantValue(
           StaticEvaluation.phaseViolation(
             'StaticEvaluation.constant',
             `initializer produced ${actual === undefined ? 'an unsupported aggregate' : Type.display(actual)} instead of ${Type.display(declaration.declaredType.type)}`,
-            initializer.span,
+            self[stateSymbol].spans.spanOf(initializer.anchor),
             evaluation.trace,
           ),
         )
@@ -884,65 +896,69 @@ export const evaluateConstant = (
   self: EvaluationCoordinator,
   declaration: DeclarationFacts.ConstantFact,
 ): StaticEvaluation.Outcome<StaticValue.Value> =>
-  evaluateConstantValue(self, declaration, declaration.initializer.span, Object.freeze([]))
+  evaluateConstantValue(
+    self,
+    declaration,
+    self[stateSymbol].spans.spanOf(declaration.initializer.anchor),
+    Object.freeze([]),
+  )
 
 /** Checks and evaluates a module condition through ordinary static expression and helper semantics. */
 export const evaluateModuleCondition = Effect.fn('Residualization.evaluateModuleCondition')(
   (
     self: Coordinator,
-    syntax: SyntaxTree.Node,
+    declaration: AuthoredHir.Declaration,
   ): Effect.Effect<{
     readonly outcome: StaticEvaluation.Outcome<StaticValue.Value>
     readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
     readonly expression?: Elaboration.ExpressionFact
   }> =>
     Effect.sync(() => {
-      const expression = syntax.children.find(SyntaxTree.isNode)
-      const token = SyntaxTree.directToken(syntax, 'StaticKeyword')
-      if (expression === undefined || token === undefined)
+      const anchor: AuthoredHir.Anchor = {
+        _tag: 'AuthoredAnchor',
+        owner: declaration.owner,
+        path: [],
+      }
+      const span = self[stateSymbol].spans.spanOf(anchor)
+      if (declaration.header._tag !== 'ConditionalHeader')
         return {
           outcome: StaticEvaluation.failed(
             StaticEvaluation.phaseViolation(
               'ModuleSelection.condition',
-              'condition syntax is unavailable',
-              syntax.span,
+              'declaration does not own a module condition',
+              span,
               [],
             ),
           ),
           diagnostics: Object.freeze([]),
         }
-      const name = `#module-condition:${syntax.span.start}`
+      const expression = declaration.header.condition
+      const name = `#module-condition:${AuthoredIdentity.key(declaration.owner)}`
       const canonical: DeclarationFacts.CanonicalId = {
         _tag: 'CanonicalDeclarationId',
-        module: syntax.span.sourceId,
+        module: declaration.owner.module,
         name,
       }
-      const declaration: DeclarationFacts.ConstantDeclaration = {
+      const constant: DeclarationFacts.ConstantDeclaration = {
         _tag: 'ConstantDeclaration',
-        id: { _tag: 'DeclarationId', sourceId: syntax.span.sourceId, ordinal: syntax.span.start },
+        id: { _tag: 'DeclarationId', sourceId: declaration.owner.module, ordinal: span.start },
         canonical: { _tag: 'Canonical', id: canonical },
         visibility: 'Private',
         typeParameters: [],
-        name: { _tag: 'Present', spelling: name, token },
-        declaredType: {
-          _tag: 'Resolved',
-          type: 'bool',
-          spelling: 'bool',
-          token,
-          syntax: expression,
-        },
+        name: { _tag: 'Present', spelling: name, anchor },
+        declaredType: { _tag: 'Resolved', type: 'bool', spelling: 'bool', anchor },
         initializerTemplate: {
           _tag: 'StaticExpressionTemplate',
-          syntax: expression,
+          anchor: expression.anchor,
           canonical: name,
         },
-        literal: { _tag: 'Unavailable', syntax: expression },
+        literal: { _tag: 'Unavailable', anchor: expression.anchor },
         initializer: expression,
-        syntax,
+        anchor,
       }
       const diagnostics: Array<Diagnostic.Diagnostic> = []
       self[stateSymbol].conditionDiagnostics = diagnostics
-      const outcome = evaluateConstant(self, declaration)
+      const outcome = evaluateConstant(self, constant)
       const expressionFact = self[stateSymbol].conditionExpression
       delete self[stateSymbol].conditionDiagnostics
       delete self[stateSymbol].conditionExpression
@@ -964,14 +980,31 @@ export const evaluateParameterPredicate = (
     : evaluateConstantValue(
         self,
         declaration,
-        declaration.predicate.span,
+        self[stateSymbol].spans.spanOf(declaration.predicate.anchor),
         Object.freeze([]),
         declaration.predicate,
       )
 
-const containsSyntaxKind = (node: SyntaxTree.Node, kind: SyntaxTree.NodeKind): boolean =>
-  node.kind === kind ||
-  node.children.some((child) => SyntaxTree.isNode(child) && containsSyntaxKind(child, kind))
+/**
+ * Whether one authored block nests a static conditional or static iteration at any depth,
+ * including inside match arms and effect blocks, which hold statements without being statements.
+ */
+const blockHasStaticControlFlow = (block: AuthoredHir.Block): boolean =>
+  AuthoredWalk.statements(block).some(
+    (statement) =>
+      statement._tag === 'StaticConditionalStatement' || statement._tag === 'StaticForStatement',
+  )
+
+/** Whether the authored body behind one declaration fact selects on static control flow. */
+const hasStaticControlFlow = (
+  module: AuthoredHir.Module,
+  declaration: DeclarationFacts.DeclarationFact,
+): boolean => {
+  const authored = AuthoredWalk.declarationOf(module, declaration.owner)
+  return authored?.body._tag === 'CallableBody' && authored.body.block !== undefined
+    ? blockHasStaticControlFlow(authored.body.block)
+    : false
+}
 
 /** Explains static selection without re-walking one declaration for each ordinary specialization. */
 export const selectionReason = (
@@ -986,10 +1019,9 @@ export const selectionReason = (
   const reason = (): SelectionReason | undefined => {
     if (declaration.parameters.some((parameter) => parameter.phase === 'Static'))
       return 'StaticParameter'
-    if (
-      containsSyntaxKind(declaration.syntax, 'StaticConditionalStatement') ||
-      containsSyntaxKind(declaration.syntax, 'StaticForStatement')
-    )
+    // The authored body decides static control flow before any elaboration result exists.
+    const scope = NameResolution.scopeOf(self[stateSymbol].resolution, declaration.id.sourceId)
+    if (scope !== undefined && hasStaticControlFlow(scope.context.module, declaration))
       return 'StaticControlFlow'
     const input = moduleInput(self, declaration)
     const fact =
@@ -1046,14 +1078,10 @@ export const residualize = (self: Coordinator, key: ApplicationKey): Result => {
           key.staticArgumentOrigins,
         )
   if (declaration === undefined || input === undefined || bindings === undefined) {
-    const fallbackSource = self[stateSymbol].results.get(key.declaration.module)?.syntax.source
     const span =
-      declaration?.syntax.span ??
-      (fallbackSource === undefined
-        ? undefined
-        : SourceSpan.make(fallbackSource, 0, 0).pipe((value) =>
-            value._tag === 'Some' ? value.value : undefined,
-          ))
+      declaration === undefined
+        ? SourceSpan.fromOffsets(key.declaration.module, 0, 0)
+        : self[stateSymbol].spans.spanOf(declaration.anchor)
     if (span === undefined)
       throw new RangeError(`Residualization lost source ${key.declaration.module}`)
     const failure = StaticEvaluation.phaseViolation(
@@ -1093,7 +1121,7 @@ export const residualize = (self: Coordinator, key: ApplicationKey): Result => {
     evidence: key.evidence,
     contractRow: key.contractRow,
     staticArguments: key.staticArguments,
-    span: declaration.syntax.span,
+    span: self[stateSymbol].spans.spanOf(declaration.anchor),
   })
   let executed = false
   const evaluated = StaticEvaluation.evaluateApplication(
@@ -1110,7 +1138,7 @@ export const residualize = (self: Coordinator, key: ApplicationKey): Result => {
           StaticEvaluation.phaseViolation(
             'Residualization.residualize',
             'runtime application does not completely specialize its declaration',
-            declaration.syntax.span,
+            self[stateSymbol].spans.spanOf(declaration.anchor),
             evaluation.trace,
           ),
         )
@@ -1140,7 +1168,7 @@ export const residualize = (self: Coordinator, key: ApplicationKey): Result => {
       ) => evaluateConstantValue(self, declaration, span, trace)
       const chargedStaticIterationNodes = { value: 0 }
       const analyzed = analyzeFunctionBody(
-        input.result.syntax.source,
+        SemanticContext.make(input.result.authored),
         declaration,
         input.declarations,
         Object.freeze({ scope: input.scope, index: self[stateSymbol].index }),
@@ -1150,6 +1178,7 @@ export const residualize = (self: Coordinator, key: ApplicationKey): Result => {
           values: bindings.values,
           valueSpans: bindings.valueSpans,
           valueOrigins: bindings.valueOrigins,
+          spanOf: self[stateSymbol].spans.spanOf,
           expressionSpans: new Map<Elaboration.ExpressionFact, SourceSpan.SourceSpan>(),
           expressionOrigins: new Map<Elaboration.ExpressionFact, StaticEvaluation.TextOrigin>(),
           trace: evaluation.trace,
@@ -1185,7 +1214,11 @@ export const residualize = (self: Coordinator, key: ApplicationKey): Result => {
       return StaticEvaluation.complete(
         Object.freeze({
           _tag: 'ResidualBody' as const,
-          function: Elaboration.residualTirFunction(analyzed.fact, self[stateSymbol].index),
+          function: Elaboration.residualTirFunction(
+            SemanticContext.make(input.result.authored),
+            analyzed.fact,
+            self[stateSymbol].index,
+          ),
           fact: analyzed.fact,
           diagnostics: analyzed.diagnostics,
         }),

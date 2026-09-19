@@ -11,33 +11,33 @@ calling golden/program.Token lanes=1 i32[struct:golden/program:0:0]
 calling i32 lanes=1 i32[]
 fn golden/program.main params=0 locals=9 -> i32 entry=r0
   r0 operation:
-    %0 = literal 41 : i32 [180, 183)
-    %1 = construct golden/program.Token { #0: %0 } [166, 185)
-    %2 = construct golden/program.Box { #0: %1 } [153, 187)
-    %3 = move %2 [139, 187)
-    forward r1 [139, 187) generated
+    %0 = literal 41 : i32 [181, 183)
+    %1 = construct golden/program.Token { #0: %0 } [167, 185)
+    %2 = construct golden/program.Box { #0: %1 } [154, 187)
+    %3 = move %2 [142, 187)
+    forward r1 [142, 187) generated
   r1 operation:
-    %8 = match#196 move %3 : golden/program.Box -> i32 [196, 312)
+    %8 = match#197 move %3 : golden/program.Box -> i32 [197, 312)
       members golden/program.Box
       decision golden/program.Box candidates=#0
-      arm #0 golden/program.Box before=golden/program.Box after=empty [215, 308)
-        bind #0 %4 <- #0 : golden/program.Token access=Move [225, 231)
+      arm #0 golden/program.Box before=golden/program.Box after=empty [220, 308)
+        bind #0 %4 <- #0 : golden/program.Token access=Move [226, 231)
         selected access=Move result=%7 end-borrow=false
           r2 operation:
-            %7 = match#236 move %4 : golden/program.Token -> i32 [236, 308)
+            %7 = match#237 move %4 : golden/program.Token -> i32 [237, 308)
               members golden/program.Token
               decision golden/program.Token candidates=#0
-              arm #0 golden/program.Token before=golden/program.Token after=empty [255, 302)
-                bind #0 %5 <- #0 : i32 access=Move [269, 282)
+              arm #0 golden/program.Token before=golden/program.Token after=empty [262, 302)
+                bind #0 %5 <- #0 : i32 access=Move [270, 282)
                 selected access=Move result=%6 end-borrow=false
                   r3 operation:
-                    %6 = call golden/program.adjust(%5) : i32 [287, 302)
-                    drop %5 [269, 282) generated
-                    complete [287, 302) generated
-            complete [236, 308) generated
-    return %8 [196, 312)
+                    %6 = call golden/program.adjust(%5) : i32 [288, 302)
+                    drop %5 [270, 282) generated
+                    complete [288, 302) generated
+            complete [237, 308) generated
+    return %8 [197, 312)
 fn golden/program.adjust params=1 locals=3 -> i32 entry=r0
   r0 operation:
-    %1 = literal 1 : i32 [112, 114)
-    %2 = add %0, %1 : i32 [104, 114)
-    return %2 [104, 114)
+    %1 = literal 1 : i32 [113, 114)
+    %2 = add %0, %1 : i32 [105, 114)
+    return %2 [105, 114)

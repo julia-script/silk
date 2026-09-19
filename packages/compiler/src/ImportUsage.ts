@@ -80,6 +80,7 @@ const removal = (
   syntax: SyntaxFile.SyntaxFile,
   declaration: SyntaxTree.Node,
   binding: ImportBinding,
+  memberSpan: SourceSpan.SourceSpan | undefined,
   siblings: ReadonlyArray<NameResolution.Binding>,
 ): SourceAction.ChangePlan | undefined => {
   const list = SyntaxTree.directNode(declaration, 'ImportMemberList')
@@ -102,17 +103,24 @@ const removal = (
         span = clauseSpan(syntax, left.span.start, right.span.end)
     } else span = lineSpan(syntax, declaration)
   } else {
-    const ordinal = members.indexOf(binding.syntax)
-    if (ordinal < 0) return undefined
+    // The authored member presents inside exactly one syntax member; its span locates the node.
+    const ordinal =
+      memberSpan === undefined
+        ? -1
+        : members.findIndex(
+            (member) => member.span.start <= memberSpan.start && member.span.end >= memberSpan.end,
+          )
+    const own = members[ordinal]
+    if (ordinal < 0 || own === undefined) return undefined
     const next = members.at(ordinal + 1)
-    const previous = members.at(ordinal - 1)
-    const start = next === undefined ? previous?.span.end : binding.syntax.span.start
-    const end = next?.span.start ?? binding.syntax.span.end
+    const previous = ordinal === 0 ? undefined : members.at(ordinal - 1)
+    const start = next === undefined ? previous?.span.end : own.span.start
+    const end = next?.span.start ?? own.span.end
     if (start === undefined) return undefined
     const left = SyntaxTree.directToken(list ?? declaration, 'LeftBrace')
     const right = SyntaxTree.directToken(list ?? declaration, 'RightBrace')
-    const guardStart = previous?.span.end ?? left?.span.end ?? binding.syntax.span.start
-    const guardEnd = next?.span.start ?? right?.span.start ?? binding.syntax.span.end
+    const guardStart = previous?.span.end ?? left?.span.end ?? own.span.start
+    const guardEnd = next?.span.start ?? right?.span.start ?? own.span.end
     if (hasComment(syntax, guardStart, guardEnd)) return undefined
     span = Option.getOrUndefined(SourceSpan.make(syntax.source, start, end))
   }
@@ -140,35 +148,46 @@ export const unused = (
       seen.add(binding.spelling)
       effective.add(binding)
     }
+  const context = scope.context
+  // Editing an import rewrites source, so each authored declaration is matched back to the one
+  // syntax declaration that presents it. Spans are the only bridge a semantic fact offers.
+  const declarations = SyntaxTree.directNodes(syntax.root, 'ImportDeclaration')
   const result: Array<UnusedBinding> = []
   for (const imported of scope.imports) {
-    if (imported._tag !== 'Available' || !SyntaxTree.isAvailableSyntax(imported.import.syntax))
-      continue
+    if (imported._tag !== 'Available') continue
+    const headerSpan = context.spanOf(imported.import.header.anchor)
+    const declaration = declarations.find(
+      (candidate) =>
+        candidate.span.start <= headerSpan.start && candidate.span.end >= headerSpan.end,
+    )
+    if (declaration === undefined || !SyntaxTree.isAvailableSyntax(declaration)) continue
     for (const binding of imported.bindings) {
-      if (
-        binding._tag === 'ImportedMember' &&
-        SyntaxTree.directToken(imported.import.syntax, 'PubKeyword') !== undefined
-      )
-        continue
+      if (binding._tag === 'ImportedMember' && imported.import.header.public) continue
       if (conflicted.has(binding) || !effective.has(binding)) continue
       if (binding._tag !== 'ModuleNamespace' && binding._tag !== 'ImportedMember') continue
-      const authored =
-        binding._tag === 'ModuleNamespace' ? binding.token.span : binding.localToken.span
+      const authored = context.spanOf(
+        binding._tag === 'ModuleNamespace' ? binding.anchor : binding.localAnchor,
+      )
       const used = occurrences.occurrences.some(
         (occurrence) =>
-          occurrence.importBinding?.sourceId === authored.sourceId &&
+          occurrence.importBinding !== undefined &&
+          occurrence.importBinding.sourceId === authored.sourceId &&
           occurrence.importBinding.start === authored.start &&
           occurrence.importBinding.end === authored.end,
       )
       if (used) continue
-      const declaration =
-        binding._tag === 'ModuleNamespace' ? binding.syntax : imported.import.syntax
-      const change = removal(syntax, declaration, binding, imported.bindings)
+      const change = removal(
+        syntax,
+        declaration,
+        binding,
+        binding._tag === 'ImportedMember' ? context.spanOf(binding.member.anchor) : undefined,
+        imported.bindings,
+      )
       result.push(
         Object.freeze({
           _tag: 'UnusedImportBinding',
           spelling: binding.spelling,
-          span: binding._tag === 'ModuleNamespace' ? binding.token.span : binding.localToken.span,
+          span: authored,
           declarationSpan: declaration.span,
           ...(change === undefined ? {} : { change }),
         }),

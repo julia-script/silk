@@ -13,8 +13,17 @@ export interface Snapshot {
   readonly index: Parameters<typeof NameResolution.lookup>[1]
   readonly resolution: NameResolution.Resolution
   readonly semanticOccurrences: SemanticOccurrence.Index
-  readonly results: ReadonlyMap<string, { readonly syntax: SyntaxFile.SyntaxFile }>
+  /** Import edits rewrite source, so the plan needs the closure's parsed syntax. */
+  readonly closure: {
+    readonly modules: ReadonlyArray<{
+      readonly name: string
+      readonly syntax: SyntaxFile.SyntaxFile
+    }>
+  }
 }
+
+const syntaxOf = (snapshot: Snapshot, module: string): SyntaxFile.SyntaxFile | undefined =>
+  snapshot.closure.modules.find((candidate) => candidate.name === module)?.syntax
 
 /** Serializable compiler-owned identity of one candidate choice. */
 export interface CandidateKey {
@@ -81,7 +90,7 @@ export const discover = (request: Request): ReadonlyArray<Action> => {
     request.byteOffset,
   )
   if (occurrence?.resolution._tag !== 'Missing') return Object.freeze([])
-  const syntax = request.snapshot.results.get(request.module)?.syntax
+  const syntax = syntaxOf(request.snapshot, request.module)
   if (syntax === undefined) return Object.freeze([])
   const spelling = Option.getOrUndefined(SourceFile.spelling(syntax.source, occurrence.span))
   if (spelling === undefined) return Object.freeze([])
@@ -141,7 +150,7 @@ export const resolve = (request: ResolveRequest): Option.Option<SourceAction.Cha
   const applicable = discover(request).find((action) =>
     sameCandidate(action.candidate, request.candidate),
   )
-  const syntax = request.snapshot.results.get(request.module)?.syntax
+  const syntax = syntaxOf(request.snapshot, request.module)
   if (applicable === undefined || syntax === undefined) return Option.none()
   return ImportPlan.make({
     syntax,

@@ -12,6 +12,7 @@ import type * as Tir from './Tir.js'
 import type { FlowModel } from './InspectorFlowModel.js'
 import type { RowModel, RowTone, Span } from './InspectorRow.js'
 import { spanOf as asSpan } from './InspectorRow.js'
+import type * as SemanticContext from './SemanticContext.js'
 import * as Match from './Match.js'
 import type * as SyntaxFile from './SyntaxFile.js'
 import * as SyntaxTree from './SyntaxTree.js'
@@ -251,7 +252,10 @@ const tirExpressionLabel = (expression: Tir.Expression): string => {
   }
 }
 
-export const tirRows = (tir: Tir.Module): ReadonlyArray<RowModel> => {
+export const tirRows = (
+  tir: Tir.Module,
+  spans: SemanticContext.Registry,
+): ReadonlyArray<RowModel> => {
   const rows: Array<RowModel> = []
 
   const expression = (node: Tir.Expression, depth: number, path: string): void => {
@@ -507,7 +511,7 @@ export const tirRows = (tir: Tir.Module): ReadonlyArray<RowModel> => {
   }
 
   tir.functions.forEach((fn, index) => {
-    const span = asSpan(fn.declaration.syntax.span)
+    const span = asSpan(spans.spanOf(fn.declaration.anchor))
     rows.push({
       key: `fn-${index}`,
       label: `fn#${fn.declaration.id.ordinal} ${tirIdentity(fn.declaration)}`,

@@ -50,6 +50,7 @@ export const make = Effect.fn('FrontendTooling.make')(function* (
         ModuleTooling.semanticOccurrenceIndex(
           semantics,
           frontend.index,
+          frontend.resolution.contexts,
           frontend.resolution,
           frontend.selection?.conditions.get(module),
         ),

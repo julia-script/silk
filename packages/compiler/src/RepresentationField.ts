@@ -1,7 +1,7 @@
 import * as DeclarationFacts from './DeclarationFacts.js'
 import type * as DeclarationIndex from './DeclarationIndex.js'
 import * as TypeInference from './internal/TypeInference.js'
-import type * as SourceSpan from './SourceSpan.js'
+import type * as AuthoredHir from './AuthoredHir.js'
 import * as Type from './Type.js'
 
 /** Stable identity of one represented use rooted in a nominal field. */
@@ -23,8 +23,8 @@ export interface Plan {
 
 /** Source-only context for an unavailable resolution; never part of identity or lookup keys. */
 export interface Provenance {
-  readonly field: SourceSpan.SourceSpan
-  readonly parameter: SourceSpan.SourceSpan
+  readonly field: AuthoredHir.Anchor
+  readonly parameter: AuthoredHir.Anchor
 }
 
 /** Why one symbolic represented field did not become a concrete specialization fact. */
@@ -222,7 +222,7 @@ const provenanceOf = (declarations: DeclarationIndex.Index, plan: Plan): Provena
   )
   return field === undefined || parameter === undefined
     ? undefined
-    : Object.freeze({ field: field.syntax.span, parameter: parameter.syntax.span })
+    : Object.freeze({ field: field.anchor, parameter: parameter.anchor })
 }
 
 const resolvePlan = (

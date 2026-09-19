@@ -8,7 +8,7 @@ import * as Effect from 'effect/Effect'
 import * as Schema from 'effect/Schema'
 import * as Analysis from '../src/Analysis.js'
 import * as ForeignContract from '../src/ForeignContract.js'
-import * as Presentation from '../src/Presentation.js'
+import * as SemanticDisplay from '../src/SemanticDisplay.js'
 import { assert, it } from '@effect/vitest'
 import * as AbiManifest from '../src/AbiManifest.js'
 import type * as Backend from '../src/Backend.js'
@@ -691,7 +691,7 @@ pub fn main() -> i32 {
     assert.deepEqual(inspect?.foreign?.contract.borrow, [0])
     assert.strictEqual(inspect?.foreign?.contract.memory, 'read')
     if (inspect !== undefined)
-      assert.include(Presentation.functionDeclaration(inspect).text, 'borrow: ("p",)')
+      assert.include(SemanticDisplay.functionDeclaration(inspect).text, 'borrow: ("p",)')
     const call = Analysis.instancesOf(snapshot).foreignCalls[0]
     assert.deepEqual(call?.signature.contract.borrow, [0])
     const artifact = yield* Analysis.codegen(snapshot, { mode: 'release' })

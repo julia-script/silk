@@ -6,6 +6,7 @@ import * as Analysis from '../src/Analysis.js'
 import * as InspectorProjectSyntax from '../src/InspectorProjectSyntax.js'
 import * as Lexer from '../src/Lexer.js'
 import * as Parser from '../src/Parser.js'
+import * as SemanticContext from '../src/SemanticContext.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SyntaxFile from '../src/SyntaxFile.js'
 import * as SyntaxTree from '../src/SyntaxTree.js'
@@ -132,7 +133,10 @@ it.effect('encodes and projects raw pointer type syntax and contracts', () =>
     assert.deepEqual(syntax.parserDiagnostics, [])
 
     const snapshot = yield* Analysis.ofSource('memory/pointer-inspection', ascii(source))
-    const tirRows = InspectorProjectSyntax.tirRows(Analysis.rootAnalysis(snapshot).tir)
+    const tirRows = InspectorProjectSyntax.tirRows(
+      Analysis.rootAnalysis(snapshot).tir,
+      SemanticContext.fromModules(snapshot.closure.modules),
+    )
     assert.strictEqual(
       tirRows.find((row) => row.head === true)?.detail,
       '(*mut u8, usize) -> *const u8',

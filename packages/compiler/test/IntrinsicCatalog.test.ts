@@ -710,7 +710,7 @@ pub fn main() -> i32 {
         )
         assert.deepEqual(
           diagnostics.map((entry) => source.slice(entry.span.start, entry.span.end)),
-          [` ${call}`],
+          [call],
         )
       }
     }),
@@ -1513,7 +1513,7 @@ it.effect('rejects numeric operands to raw pointer address observation at the ca
     )
     assert.deepEqual(
       Analysis.diagnostics(snapshot).map((entry) => [entry.code, entry.span.start, entry.span.end]),
-      [['SEM0215', 30, 63]],
+      [['SEM0215', 31, 63]],
     )
   }),
 )

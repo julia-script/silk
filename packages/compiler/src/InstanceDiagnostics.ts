@@ -369,7 +369,7 @@ export const copyDropViolations = (
         ? [
             Diagnostic.invalidDropHook(
               `Copy type ${Type.encode(selfType.target)} cannot implement Drop`,
-              instance.function.declaration.syntax.span,
+              self.registry.spanOf(instance.function.declaration.anchor),
             ),
           ]
         : []
@@ -494,7 +494,7 @@ export const violationDiagnostics = (
         Diagnostic.polymorphicRecursion(
           callerText,
           targetText,
-          caller.function.declaration.syntax.span,
+          self.registry.spanOf(caller.function.declaration.anchor),
         ),
       ]
     }),

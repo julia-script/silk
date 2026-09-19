@@ -5,10 +5,10 @@ import type * as DeclarationIndex from './DeclarationIndex.js'
 import * as Elaboration from './Elaboration.js'
 import * as Intrinsic from './Intrinsic.js'
 import * as NameResolution from './NameResolution.js'
-import type * as Presentation from './Presentation.js'
-import * as PresentationRenderer from './Presentation.js'
+import * as SemanticDisplay from './SemanticDisplay.js'
 import * as Scalar from './Scalar.js'
 import type * as SemanticOccurrence from './SemanticOccurrence.js'
+import * as SemanticContext from './SemanticContext.js'
 import * as SourceFile from './SourceFile.js'
 import type * as SourceSpan from './SourceSpan.js'
 import * as SourceSpanFactory from './SourceSpan.js'
@@ -49,7 +49,7 @@ export interface Candidate {
   readonly kind: Kind
   readonly label: string
   readonly insertText: string
-  readonly detail?: Presentation.Presentation
+  readonly detail?: SemanticDisplay.Presentation
   readonly sortGroup: number
 }
 
@@ -118,28 +118,30 @@ const declarationKind = (
   }
 }
 
-const declarationDetail = (declaration: DeclarationFacts.MemberFact): Presentation.Presentation => {
+const declarationDetail = (
+  declaration: DeclarationFacts.MemberFact,
+): SemanticDisplay.Presentation => {
   switch (declaration._tag) {
     case 'FunctionDeclaration':
-      return PresentationRenderer.functionDeclaration(declaration)
+      return SemanticDisplay.functionDeclaration(declaration)
     case 'PackageParameterDeclaration':
     case 'ConstantDeclaration':
-      return PresentationRenderer.constantDeclaration(declaration)
+      return SemanticDisplay.constantDeclaration(declaration)
     case 'ForeignStaticDeclaration':
-      return PresentationRenderer.foreignStaticDeclaration(declaration)
+      return SemanticDisplay.foreignStaticDeclaration(declaration)
     case 'ServiceDeclaration':
     case 'InterfaceDeclaration':
-      return PresentationRenderer.serviceDeclaration(declaration)
+      return SemanticDisplay.serviceDeclaration(declaration)
     case 'RoleDeclaration':
-      return PresentationRenderer.roleDeclaration(declaration)
+      return SemanticDisplay.roleDeclaration(declaration)
     case 'EnumDeclaration':
-      return PresentationRenderer.enumDeclaration(declaration)
+      return SemanticDisplay.enumDeclaration(declaration)
     case 'StructDeclaration':
-      return PresentationRenderer.structDeclaration(declaration)
+      return SemanticDisplay.structDeclaration(declaration)
     case 'UnionDeclaration':
-      return PresentationRenderer.unionDeclaration(declaration)
+      return SemanticDisplay.unionDeclaration(declaration)
     case 'AliasDeclaration':
-      return PresentationRenderer.aliasDeclaration(declaration)
+      return SemanticDisplay.aliasDeclaration(declaration)
   }
 }
 
@@ -159,7 +161,7 @@ const candidate = (options: {
   readonly identity: CandidateIdentity
   readonly kind: Kind
   readonly label: string
-  readonly detail?: Presentation.Presentation
+  readonly detail?: SemanticDisplay.Presentation
   readonly sortGroup: number
 }): Candidate =>
   Object.freeze({
@@ -173,21 +175,22 @@ const candidate = (options: {
   })
 
 const enclosingFunction = (
+  context: SemanticContext.SemanticContext,
   result: Elaboration.Result,
   offset: number,
-): Elaboration.FunctionFact | undefined =>
-  Elaboration.executableFunctions(result)
-    .filter(
-      (fn) =>
-        fn.declaration.syntax.span.start <= offset && offset <= fn.declaration.syntax.span.end,
-    )
-    .sort(
-      (left, right) =>
-        left.declaration.syntax.span.end -
-        left.declaration.syntax.span.start -
-        (right.declaration.syntax.span.end - right.declaration.syntax.span.start),
-    )
+): Elaboration.FunctionFact | undefined => {
+  const width = (fn: Elaboration.FunctionFact): number => {
+    const span = context.spanOf(fn.declaration.anchor)
+    return span.end - span.start
+  }
+  return Elaboration.executableFunctions(result)
+    .filter((fn) => {
+      const span = context.spanOf(fn.declaration.anchor)
+      return span.start <= offset && offset <= span.end
+    })
+    .sort((left, right) => width(left) - width(right))
     .at(0)
+}
 
 const sameDeclaration = (
   left: Elaboration.DeclarationId,
@@ -227,6 +230,7 @@ const scopeChain = (
 }
 
 const visibleBindings = (
+  context: SemanticContext.SemanticContext,
   result: Elaboration.Result,
   fn: Elaboration.FunctionFact | undefined,
   offset: number,
@@ -236,16 +240,19 @@ const visibleBindings = (
     for (const binding of scope.bindings.toReversed())
       if (
         binding.name._tag === 'Present' &&
-        binding.name.token.span.start < offset &&
+        context.spanOf(binding.name.anchor).start < offset &&
         !selected.has(binding.name.spelling)
       )
         selected.set(binding.name.spelling, binding)
   return Object.freeze(
-    [...selected.values()].sort((left, right) => left.syntax.span.start - right.syntax.span.start),
+    [...selected.values()].sort(
+      (left, right) => context.spanOf(left.anchor).start - context.spanOf(right.anchor).start,
+    ),
   )
 }
 
 const visiblePatternBindings = (
+  context: SemanticContext.SemanticContext,
   result: Elaboration.Result,
   fn: Elaboration.FunctionFact | undefined,
   offset: number,
@@ -255,7 +262,7 @@ const visiblePatternBindings = (
     for (const binding of scope.patternBindings.toReversed())
       if (
         binding.name._tag === 'Present' &&
-        binding.name.token.span.start <= offset &&
+        context.spanOf(binding.name.anchor).start <= offset &&
         !selected.has(binding.name.spelling)
       )
         selected.set(binding.name.spelling, binding)
@@ -268,7 +275,7 @@ const actorCandidates = (actor: Intrinsic.Actor): ReadonlyArray<Candidate> =>
       identity: semantic(Object.freeze({ _tag: 'IntrinsicOperationIdentity', id: operation.id })),
       kind: 'Operation',
       label: operation.spelling,
-      detail: PresentationRenderer.intrinsicOperation(operation),
+      detail: SemanticDisplay.intrinsicOperation(operation),
       sortGroup: 0,
     }),
   )
@@ -285,7 +292,7 @@ const enumCandidates = (enum_: DeclarationFacts.EnumFact): ReadonlyArray<Candida
               ),
               kind: 'Constant',
               label: member.name.spelling,
-              detail: PresentationRenderer.enumMember(enum_, member),
+              detail: SemanticDisplay.enumMember(enum_, member),
               sortGroup: 0,
             }),
           ],
@@ -297,7 +304,7 @@ const enumCandidates = (enum_: DeclarationFacts.EnumFact): ReadonlyArray<Candida
         ),
         kind: 'Operation',
         label: operation.name,
-        detail: PresentationRenderer.enumAssociatedOperation(operation),
+        detail: SemanticDisplay.enumAssociatedOperation(operation),
         sortGroup: 1,
       }),
     ),
@@ -315,7 +322,7 @@ const unionCandidates = (union: DeclarationFacts.UnionFact): ReadonlyArray<Candi
               ),
               kind: 'Constructor',
               label: variant.name.spelling,
-              detail: PresentationRenderer.unionVariant(union, variant),
+              detail: SemanticDisplay.unionVariant(union, variant),
               sortGroup: 0,
             }),
           ],
@@ -334,7 +341,7 @@ const serviceCandidates = (service: DeclarationFacts.ServiceFact): ReadonlyArray
               ),
               kind: 'Operation',
               label: operation.name.spelling,
-              detail: PresentationRenderer.serviceOperation(operation),
+              detail: SemanticDisplay.serviceOperation(operation),
               sortGroup: 0,
             }),
           ],
@@ -369,7 +376,7 @@ const inherentCandidates = (
           identity: semantic(declarationIdentity(lookup.declaration)),
           kind: lookup.declaration.associatedMember?.receiver ? 'Method' : 'AssociatedFunction',
           label: name,
-          detail: PresentationRenderer.functionDeclaration(lookup.declaration),
+          detail: SemanticDisplay.functionDeclaration(lookup.declaration),
           sortGroup: 1,
         }),
       ]
@@ -421,12 +428,13 @@ interface ValueLookup {
 }
 
 const valueLookup = (
+  context: SemanticContext.SemanticContext,
   spelling: string,
   result: Elaboration.Result,
   fn: Elaboration.FunctionFact | undefined,
   offset: number,
 ): ValueLookup => {
-  const binding = visibleBindings(result, fn, offset).find(
+  const binding = visibleBindings(context, result, fn, offset).find(
     (candidate) => candidate.name._tag === 'Present' && candidate.name.spelling === spelling,
   )
   if (binding !== undefined)
@@ -434,7 +442,7 @@ const valueLookup = (
       found: true,
       ...(binding.inferredType._tag === 'Available' ? { type: binding.inferredType.type } : {}),
     })
-  const patternBinding = visiblePatternBindings(result, fn, offset).find(
+  const patternBinding = visiblePatternBindings(context, result, fn, offset).find(
     (candidate) => candidate.name._tag === 'Present' && candidate.name.spelling === spelling,
   )
   if (patternBinding !== undefined)
@@ -498,9 +506,9 @@ const receiverMethodCandidates = (
               identity: member.identity,
               kind: 'Method',
               label: member.label,
-              detail: PresentationRenderer.receiverMethod(
+              detail: SemanticDisplay.receiverMethod(
                 declaration,
-                PresentationRenderer.receiverSubstitution(declaration, type),
+                SemanticDisplay.receiverSubstitution(declaration, type),
                 module,
                 scope,
               ),
@@ -559,7 +567,7 @@ const suppliedOperationCandidates = (
               ),
               kind: 'Method',
               label,
-              detail: PresentationRenderer.receiverOperation(operation),
+              detail: SemanticDisplay.receiverOperation(operation),
               sortGroup: 1,
             }),
           ],
@@ -596,7 +604,7 @@ const boundOperationCandidates = (
                     ),
                     kind: 'Method',
                     label: operation.declaration.name.spelling,
-                    detail: PresentationRenderer.receiverOperation(operation),
+                    detail: SemanticDisplay.receiverOperation(operation),
                     sortGroup: 1,
                   }),
                 ],
@@ -629,7 +637,7 @@ const fieldCandidates = (
               identity: semantic(Object.freeze({ _tag: 'FieldIdentity', id: field.id })),
               kind: 'Field',
               label: field.name.spelling,
-              detail: PresentationRenderer.field(field),
+              detail: SemanticDisplay.field(field),
               sortGroup: 0,
             }),
           ],
@@ -677,7 +685,7 @@ const typeCandidates = (
           identity: semantic(Object.freeze({ _tag: 'IntrinsicActorIdentity', id: actor.id })),
           kind: 'Type',
           label: actor.spelling,
-          detail: PresentationRenderer.intrinsicActor(actor),
+          detail: SemanticDisplay.intrinsicActor(actor),
           sortGroup: 1,
         }),
       )
@@ -710,7 +718,7 @@ const typeCandidates = (
           identity: semantic(Object.freeze({ _tag: 'TypeParameterIdentity', id: parameter.type })),
           kind: 'Type',
           label: parameter.name.spelling,
-          detail: PresentationRenderer.typeParameter(parameter),
+          detail: SemanticDisplay.typeParameter(parameter),
           sortGroup: 0,
         }),
       )
@@ -740,6 +748,7 @@ const typeCandidates = (
 }
 
 const expressionCandidates = (
+  context: SemanticContext.SemanticContext,
   module: string,
   index: DeclarationIndex.Index,
   scope: NameResolution.ModuleScope | undefined,
@@ -748,12 +757,12 @@ const expressionCandidates = (
   offset: number,
 ): ReadonlyArray<Candidate> => {
   const candidates: Array<Candidate> = []
-  for (const binding of visibleBindings(result, fn, offset))
+  for (const binding of visibleBindings(context, result, fn, offset))
     if (binding.name._tag === 'Present')
       candidates.push(
         candidate(
           (() => {
-            const detail = PresentationRenderer.binding(binding, module, scope)
+            const detail = SemanticDisplay.binding(binding, module, scope)
             return {
               identity: semantic(Object.freeze({ _tag: 'BindingIdentity', id: binding.id })),
               kind: 'Binding',
@@ -764,9 +773,9 @@ const expressionCandidates = (
           })(),
         ),
       )
-  for (const binding of visiblePatternBindings(result, fn, offset))
+  for (const binding of visiblePatternBindings(context, result, fn, offset))
     if (binding.name._tag === 'Present') {
-      const detail = PresentationRenderer.patternBinding(binding, module, scope)
+      const detail = SemanticDisplay.patternBinding(binding, module, scope)
       candidates.push(
         candidate({
           identity: semantic(Object.freeze({ _tag: 'PatternBindingIdentity', id: binding.id })),
@@ -784,7 +793,7 @@ const expressionCandidates = (
           identity: semantic(Object.freeze({ _tag: 'ParameterIdentity', id: parameter.id })),
           kind: 'Parameter',
           label: parameter.name.spelling,
-          detail: PresentationRenderer.parameter(parameter),
+          detail: SemanticDisplay.parameter(parameter),
           sortGroup: 1,
         }),
       )
@@ -825,7 +834,7 @@ const expressionCandidates = (
           ),
           kind: 'Actor',
           label: binding.spelling,
-          detail: PresentationRenderer.importBinding(binding.spelling, binding.module),
+          detail: SemanticDisplay.importBinding(binding.spelling, binding.module),
           sortGroup: 3,
         }),
       )
@@ -836,7 +845,7 @@ const expressionCandidates = (
         identity: semantic(Object.freeze({ _tag: 'IntrinsicActorIdentity', id: actor.id })),
         kind: actor.kind === 'Type' ? 'Constructor' : 'Actor',
         label: actor.spelling,
-        detail: PresentationRenderer.intrinsicActor(actor),
+        detail: SemanticDisplay.intrinsicActor(actor),
         sortGroup: 4,
       }),
     )
@@ -885,18 +894,19 @@ export const complete = (options: {
   readonly resolution: NameResolution.Resolution
   readonly result: Elaboration.Result
 }): Result => {
+  const context = SemanticContext.make(options.result.authored)
   const replacement = replacementSpan(options.source, options.offset)
   const bytes = SourceFile.toUint8Array(options.source)
   const before = decoder.decode(bytes.subarray(0, replacement.start))
   const scope = NameResolution.scopeOf(options.resolution, options.module)
-  const fn = enclosingFunction(options.result, options.offset)
+  const fn = enclosingFunction(context, options.result, options.offset)
   const memberMatch = before.match(/([A-Za-z_][A-Za-z0-9_]*)\.\s*$/)
   if (memberMatch !== null) {
     const qualifier = memberMatch[1]
     const value =
       qualifier === undefined
         ? Object.freeze({ found: false })
-        : valueLookup(qualifier, options.result, fn, options.offset)
+        : valueLookup(context, qualifier, options.result, fn, options.offset)
     if (value.found) {
       const subject = nominalSubject(value.type)
       const parameterSubject = parameterSubjectOf(value.type)
@@ -1048,6 +1058,7 @@ export const complete = (options: {
     replacement: replacement.span,
     candidates: stable([
       ...expressionCandidates(
+        context,
         options.module,
         options.index,
         scope,

@@ -10,7 +10,9 @@ import * as Lifetime from './Lifetime.js'
 import type * as MovePath from './MovePath.js'
 import * as Ownership from './Ownership.js'
 import type * as SourceSpan from './SourceSpan.js'
-import * as SyntaxTree from './SyntaxTree.js'
+import type * as AuthoredHir from './AuthoredHir.js'
+import * as AuthoredIdentity from './AuthoredIdentity.js'
+import type * as SemanticContext from './SemanticContext.js'
 import * as Type from './Type.js'
 import * as TypeOutlives from './TypeOutlives.js'
 import * as TypeInference from './internal/TypeInference.js'
@@ -22,6 +24,8 @@ export interface Origin {
   readonly path?: ReadonlyArray<Elaboration.BorrowSelectorFact>
   readonly parent?: Lifetime.Lifetime
   readonly span: SourceSpan.SourceSpan
+  /** The authored position this borrow was created at, for structural containment tests. */
+  readonly anchor?: AuthoredHir.Anchor
 }
 
 /** Inspectable finite region proof retained independently of TIR and runtime specialization. */
@@ -43,8 +47,35 @@ interface Region {
   readonly required: Set<number>
 }
 
-const encloses = (outer: SourceSpan.SourceSpan, inner: SourceSpan.SourceSpan): boolean =>
-  outer.sourceId === inner.sourceId && outer.start <= inner.start && inner.end <= outer.end
+/**
+ * Structural enclosure: an authored anchor's local path extends its parent's, so an outer position
+ * encloses an inner one exactly when it owns it and its path is a prefix.
+ *
+ * A nested callable is its own owner, so its positions carry no path below the body that wrote
+ * it. Those fall back to presented containment, the only record of where the nested owner sits.
+ */
+const encloses = (
+  context: SemanticContext.SemanticContext,
+  outer: AuthoredHir.Anchor,
+  inner: AuthoredHir.Anchor,
+): boolean => {
+  if (AuthoredIdentity.key(outer.owner) !== AuthoredIdentity.key(inner.owner)) {
+    const outerSpan = context.spanOf(outer)
+    const innerSpan = context.spanOf(inner)
+    return outerSpan.start <= innerSpan.start && innerSpan.end <= outerSpan.end
+  }
+  return (
+    outer.path.length <= inner.path.length &&
+    outer.path.every((segment, index) => {
+      const candidate = inner.path[index]
+      return (
+        candidate !== undefined &&
+        segment.role === candidate.role &&
+        segment.occurrence === candidate.occurrence
+      )
+    })
+  )
+}
 
 const rootSite = (root: Elaboration.BorrowRootFact): Ownership.BindingSite => {
   switch (root._tag) {
@@ -61,6 +92,7 @@ const rootSite = (root: Elaboration.BorrowRootFact): Ownership.BindingSite => {
 
 const expressionRoot = (
   expression: Elaboration.ExpressionFact,
+  context: SemanticContext.SemanticContext,
   throughBorrow = false,
 ): Elaboration.BorrowRootFact | undefined => {
   if (expression._tag === 'Identifier') {
@@ -71,8 +103,7 @@ const expressionRoot = (
     if (expression.reference._tag === 'ResolvedPattern')
       return { _tag: 'PatternRoot', binding: expression.reference.binding, path: [] }
   }
-  if (expression._tag === 'Grouped') return expressionRoot(expression.expression, throughBorrow)
-  if (expression._tag === 'Move') return expressionRoot(expression.subject, throughBorrow)
+  if (expression._tag === 'Move') return expressionRoot(expression.subject, context, throughBorrow)
   if (expression._tag === 'FieldProjection' && expression.state._tag === 'Resolved') {
     if (
       !throughBorrow &&
@@ -80,14 +111,18 @@ const expressionRoot = (
       Type.isReference(expression.subject.type.type)
     )
       return undefined
-    const root = expressionRoot(expression.subject, throughBorrow)
+    const root = expressionRoot(expression.subject, context, throughBorrow)
     return root === undefined
       ? undefined
       : {
           ...root,
           path: [
             ...root.path,
-            { _tag: 'Field', field: expression.state.field.id, span: expression.syntax.span },
+            {
+              _tag: 'Field',
+              field: expression.state.field.id,
+              span: context.spanOf(expression.anchor),
+            },
           ],
         }
   }
@@ -96,7 +131,7 @@ const expressionRoot = (
     expression.array !== undefined &&
     (expression.bounds._tag === 'Proven' || expression.bounds._tag === 'Runtime')
   ) {
-    const root = expressionRoot(expression.subject, throughBorrow)
+    const root = expressionRoot(expression.subject, context, throughBorrow)
     return root === undefined
       ? undefined
       : {
@@ -108,13 +143,13 @@ const expressionRoot = (
               index: expression.index,
               array: expression.array,
               bounds: expression.bounds,
-              span: expression.syntax.span,
+              span: context.spanOf(expression.anchor),
             },
           ],
         }
   }
   if (throughBorrow && expression._tag === 'ReferentProjection')
-    return expressionRoot(expression.subject, true)
+    return expressionRoot(expression.subject, context, true)
   if (expression._tag === 'Borrow' && expression.formation._tag !== 'Unavailable')
     return expression.formation.root
   return undefined
@@ -123,7 +158,6 @@ const expressionRoot = (
 // A referent read still demands the lifetime stored in its reference or slice carrier.
 // Keep this distinct from expressionRoot: a write through a borrow does not replace its carrier.
 const carrierExpression = (expression: Elaboration.ExpressionFact): Elaboration.ExpressionFact => {
-  if (expression._tag === 'Grouped') return carrierExpression(expression.expression)
   if (
     expression._tag === 'Borrow' ||
     expression._tag === 'Move' ||
@@ -168,32 +202,36 @@ export const analyze = (
   statements: ReadonlyArray<Elaboration.StatementFact>,
   body: BodyLifetime.BodyLifetime,
   index: DeclarationIndex.Index,
+  context: SemanticContext.SemanticContext,
   outlivesScope: TypeOutlives.Context = TypeOutlives.context(index.modules),
 ): LifetimeFlow => {
   const applicationDiagnostics = new Map<string, Diagnostic.Diagnostic>()
-  const entries = [...body.points]
-  const root = entries.at(0)?.[0] ?? declaration.syntax
-  const controlFlow = BodyControlFlow.make(statements, root)
-  const boundaries = new Map<SyntaxTree.Node, number>()
-  const bindingInitializers = new Set<SyntaxTree.Node>()
+  // Points are the authored positions BodyLifetime enumerated, addressed by anchor key.
+  const entries = [...body.points].flatMap(([key, point]) => {
+    const anchor = body.anchors.get(key)
+    return anchor === undefined ? [] : [[anchor, point] as const]
+  })
+  const root = entries.at(0)?.[0] ?? declaration.anchor
+  const controlFlow = BodyControlFlow.make(context, statements, root)
+  const boundaries = new Map<string, number>()
+  const bindingInitializers = new Set<string>()
   const terminalSpans = new Map<number, SourceSpan.SourceSpan>()
   Elaboration.visitStatementFacts(statements, {
     statement: (statement) => {
-      if (statement._tag === 'BindStatement') bindingInitializers.add(statement.binding.syntax)
+      if (statement._tag === 'BindStatement')
+        bindingInitializers.add(AuthoredIdentity.anchorKey(statement.binding.anchor))
       if (statement._tag !== 'ReturnStatement' && statement._tag !== 'FailStatement') return
-      if (boundaries.has(statement.syntax)) return
-      const point = entries.length + boundaries.size
-      boundaries.set(statement.syntax, point)
-      terminalSpans.set(point, statement.expression.syntax.span)
+      const key = AuthoredIdentity.anchorKey(statement.anchor)
+      if (boundaries.has(key)) return
+      const point = body.points.size + boundaries.size
+      boundaries.set(key, point)
+      terminalSpans.set(point, context.spanOf(statement.expression.anchor))
     },
   })
-  const pointCount = entries.length + boundaries.size
+  const pointCount = body.points.size + boundaries.size
   const allPoints = Array.from({ length: pointCount }, (_, ordinal) => ordinal)
-  const parents = new Map<SyntaxTree.Node, SyntaxTree.Node>()
-  const spans = new Map(entries.map(([node, point]) => [point, node.span]))
+  const spans = new Map(entries.map(([anchor, point]) => [point, context.spanOf(anchor)]))
   for (const [point, span] of terminalSpans) spans.set(point, span)
-  for (const [node] of entries)
-    for (const child of node.children) if (SyntaxTree.isNode(child)) parents.set(child, node)
   const regions = new Map<string, Region>()
   const origins = new Map<string, Origin>()
   const constraints = new Map(body.constraints)
@@ -206,26 +244,29 @@ export const analyze = (
   const variantBranches: Array<{
     readonly root: Elaboration.BorrowRootFact
     readonly variant: number
-    readonly syntax: SyntaxTree.Node
+    readonly anchor: AuthoredHir.Anchor
   }> = []
   const expressionUses = new Map<string, Elaboration.ExpressionFact>()
   const replacements: Array<{
     readonly root: Ownership.BindingSite
     readonly path: ReadonlyArray<Elaboration.BorrowSelectorFact>
     readonly lifetimes: ReadonlyArray<Lifetime.Lifetime>
-    readonly syntax: SyntaxTree.Node
+    readonly anchor: AuthoredHir.Anchor
   }> = []
   const invalidations: Array<{
     readonly root: Ownership.BindingSite
     readonly path: ReadonlyArray<Elaboration.BorrowSelectorFact>
     readonly expression: Elaboration.ExpressionFact
-    readonly after?: SyntaxTree.Node
+    readonly after?: AuthoredHir.Anchor
   }> = []
-  const scopeOf = (syntax: SyntaxTree.Node): SyntaxTree.Node => {
-    let current = parents.get(syntax)
-    while (current !== undefined) {
-      if (current.kind === 'Block' || current.kind === 'MatchArm') return current
-      current = parents.get(current)
+  // A block or match arm introduces a scope; the nearest such ancestor of an authored position is
+  // the longest prefix of its own path that a scope-introducing role terminates.
+  const scopeRoles = new Set(['body', 'then', 'else', 'arm', 'block'])
+  const scopeOf = (anchor: AuthoredHir.Anchor): AuthoredHir.Anchor => {
+    for (let length = anchor.path.length - 1; length > 0; length -= 1) {
+      const segment = anchor.path[length - 1]
+      if (segment !== undefined && scopeRoles.has(segment.role))
+        return { _tag: 'AuthoredAnchor', owner: anchor.owner, path: anchor.path.slice(0, length) }
     }
     return root
   }
@@ -265,16 +306,23 @@ export const analyze = (
   const anchor = (
     lifetime: Lifetime.Lifetime,
     source: Elaboration.BorrowRootFact,
-    statement: SyntaxTree.Node,
-    span: SourceSpan.SourceSpan,
+    statement: AuthoredHir.Anchor,
+    position: AuthoredHir.Anchor,
     referent = false,
   ): void => {
+    const span = context.spanOf(position)
     const alias =
       source._tag === 'PatternRoot'
         ? patternRoots.get(Ownership.siteKey(rootSite(source)))
         : undefined
     if (alias !== undefined) {
-      anchor(lifetime, { ...alias, path: [...alias.path, ...source.path] }, statement, span, true)
+      anchor(
+        lifetime,
+        { ...alias, path: [...alias.path, ...source.path] },
+        statement,
+        position,
+        true,
+      )
       return
     }
     // Indexing a stored slice borrows its backing allocation, whose validity is
@@ -288,6 +336,7 @@ export const analyze = (
         path: source.path,
         parent: sliceIndex.slice.lifetime,
         span,
+        anchor: position,
       })
       return
     }
@@ -310,40 +359,48 @@ export const analyze = (
         path: source.path,
         parent: rootType.lifetime,
         span,
+        anchor: position,
       })
       return
     }
-    let syntax = root
+    let origin = root
     if (source._tag === 'BindingRoot' || source._tag === 'PatternRoot')
-      syntax = source.binding.syntax
-    else if (source._tag === 'TemporaryRoot') syntax = statement
+      origin = source.binding.anchor
+    else if (source._tag === 'TemporaryRoot') origin = statement
     // Array producers already lower to stable hidden locals and loan-ordered cleanup. A binding
     // initializer gives that owner the same lexical validity as a named local; calls and other
     // statement temporaries keep their immediate lifetime. Never hoist across an inner branch.
     const retainedArray =
       source._tag === 'TemporaryRoot' &&
-      bindingInitializers.has(statement) &&
+      bindingInitializers.has(AuthoredIdentity.anchorKey(statement)) &&
       source.value.type._tag === 'Available' &&
       Type.isFixedArray(source.value.type.type)
-    let scope = scopeOf(syntax)
+    let scope = scopeOf(origin)
     if (source._tag === 'TemporaryRoot') {
-      scope = retainedArray ? scopeOf(source.value.syntax) : statement
+      scope = retainedArray ? scopeOf(source.value.anchor) : statement
     }
+    const bindingOrder = context.orderOf(origin)
     const available = entries
       .filter(
-        ([node]) =>
-          encloses(scope.span, node.span) &&
-          (source._tag !== 'BindingRoot' || node.span.start >= syntax.span.start),
+        ([position]) =>
+          encloses(context, scope, position) &&
+          (source._tag !== 'BindingRoot' || context.orderOf(position) >= bindingOrder),
       )
       .map(([, point]) => point)
-    restrict(lifetime, available, { lifetime, root: rootSite(source), path: source.path, span })
+    restrict(lifetime, available, {
+      lifetime,
+      root: rootSite(source),
+      path: source.path,
+      span,
+      anchor: position,
+    })
   }
   const borrowedCapture = (
     expression: Elaboration.ExpressionFact,
-    statement: SyntaxTree.Node,
+    statement: AuthoredHir.Anchor,
   ): void => {
-    const source = expressionRoot(expression)
-    const lifetime = BodyLifetime.region(body, expression.syntax, 'Borrow')
+    const source = expressionRoot(expression, context)
+    const lifetime = BodyLifetime.region(body, expression.anchor, 'Borrow')
     if (source === undefined || lifetime === undefined) return
     const type = expression.type._tag === 'Available' ? expression.type.type : undefined
     if (type !== undefined && (Type.isReference(type) || Type.isSlice(type))) {
@@ -353,9 +410,10 @@ export const analyze = (
         root: rootSite(source),
         path: source.path,
         parent: type.lifetime,
-        span: expression.syntax.span,
+        span: context.spanOf(expression.anchor),
+        anchor: expression.anchor,
       })
-    } else anchor(lifetime, source, statement, expression.syntax.span)
+    } else anchor(lifetime, source, statement, expression.anchor)
   }
   const bindPatterns = (
     bindings: ReadonlyArray<Elaboration.PatternBindingFact>,
@@ -363,7 +421,7 @@ export const analyze = (
     access: Elaboration.PatternSelectionFact['access'],
   ): void => {
     if (access === 'Move' || access === 'Copy') return
-    const root = expressionRoot(source, true)
+    const root = expressionRoot(source, context, true)
     if (root !== undefined)
       for (const binding of bindings)
         patternRoots.set(Ownership.siteKey({ _tag: 'Pattern', binding: binding.id }), {
@@ -373,21 +431,18 @@ export const analyze = (
             ...binding.path.map((field): Elaboration.BorrowSelectorFact => ({
               _tag: 'Field',
               field,
-              span: binding.syntax.span,
+              span: context.spanOf(binding.anchor),
             })),
           ],
         })
   }
   const visitExpression = (
     expression: Elaboration.ExpressionFact,
-    statement: SyntaxTree.Node,
+    statement: AuthoredHir.Anchor,
     place = false,
   ): void => {
-    expressionUses.set(
-      `${expression.syntax.span.sourceId}:${expression.syntax.span.start}:${expression.syntax.span.end}`,
-      expression,
-    )
-    const point = body.points.get(expression.syntax)
+    expressionUses.set(AuthoredIdentity.anchorKey(expression.anchor), expression)
+    const point = body.points.get(AuthoredIdentity.anchorKey(expression.anchor))
     if (expression.type._tag === 'Available') {
       const value = Type.isRepresented(expression.type.type)
         ? expression.type.type.contract
@@ -441,10 +496,10 @@ export const analyze = (
           const diagnostic = Diagnostic.unsatisfiedLifetimeBound(
             Type.encodeGenericArgument(failure.argument),
             Lifetime.display(failure.required),
-            expression.syntax.span,
+            context.spanOf(expression.anchor),
           )
           applicationDiagnostics.set(
-            `${Type.key(nominal)}:${failure.ordinal}:${Lifetime.key(failure.required)}:${expression.syntax.span.start}`,
+            `${Type.key(nominal)}:${failure.ordinal}:${Lifetime.key(failure.required)}:${context.spanOf(expression.anchor).start}`,
             diagnostic,
           )
         }
@@ -467,20 +522,21 @@ export const analyze = (
             root: rootSite(formation.root),
             path: formation.root.path,
             parent: formation.parent.lifetime,
-            span: expression.syntax.span,
+            span: context.spanOf(expression.anchor),
+            anchor: expression.anchor,
           })
-        } else anchor(type.lifetime, formation.root, statement, expression.syntax.span)
+        } else anchor(type.lifetime, formation.root, statement, expression.anchor)
       }
       visitExpression(expression.subject, statement, true)
       return
     }
     if (expression._tag === 'PlaceReplace') {
-      const source = expressionRoot(expression.destination)
+      const source = expressionRoot(expression.destination, context)
       if (source !== undefined)
         invalidations.push({ root: rootSite(source), path: source.path, expression })
     }
     if (expression._tag === 'Move') {
-      const source = expressionRoot(expression.subject)
+      const source = expressionRoot(expression.subject, context)
       if (source !== undefined)
         invalidations.push({ root: rootSite(source), path: source.path, expression })
     }
@@ -508,7 +564,7 @@ export const analyze = (
       for (const arm of expression.arms) {
         if (!arm.reachable) continue
         bindPatterns(arm.bindings, expression.scrutinee, expression.access)
-        const selectedRoot = expressionRoot(expression.scrutinee)
+        const selectedRoot = expressionRoot(expression.scrutinee, context)
         if (
           expression.access === 'Place' &&
           selectedRoot !== undefined &&
@@ -518,7 +574,7 @@ export const analyze = (
           variantBranches.push({
             root: canonicalRoot(selectedRoot),
             variant: arm.pattern.coverage.variantOrdinal,
-            syntax: arm.syntax,
+            anchor: arm.anchor,
           })
         if (arm.guard !== undefined) visitExpression(arm.guard, statement)
         if (arm.body._tag === 'Expression') visitExpression(arm.body.expression, statement)
@@ -547,7 +603,7 @@ export const analyze = (
   const visitStatements = (statements: ReadonlyArray<Elaboration.StatementFact>): void => {
     for (const statement of statements) {
       const syntax =
-        statement._tag === 'BindStatement' ? statement.binding.syntax : statement.syntax
+        statement._tag === 'BindStatement' ? statement.binding.anchor : statement.anchor
       if (statement._tag === 'PatternBindStatement' || statement._tag === 'IfLetStatement')
         bindPatterns(
           statement.selection.bindings,
@@ -561,7 +617,7 @@ export const analyze = (
           statement._tag === 'WriteStatement' && expression === statement.destination,
         )
       if (statement._tag === 'WriteStatement') {
-        const destination = expressionRoot(statement.destination)
+        const destination = expressionRoot(statement.destination, context)
         const source = destination === undefined ? undefined : canonicalRoot(destination)
         if (source !== undefined) {
           if (statement.compatible && statement.destination.type._tag === 'Available') {
@@ -571,23 +627,23 @@ export const analyze = (
                 root: rootSite(source),
                 path: source.path,
                 lifetimes,
-                syntax: statement.syntax,
+                anchor: statement.anchor,
               })
           }
           invalidations.push({
             root: rootSite(source),
             path: source.path,
             expression: statement.value,
-            after: statement.syntax,
+            after: statement.anchor,
           })
         }
       }
       if (statement._tag === 'ReturnStatement' || statement._tag === 'FailStatement') {
-        const boundary = boundaries.get(statement.syntax)
+        const boundary = boundaries.get(AuthoredIdentity.anchorKey(statement.anchor))
         if (statement.expression.type._tag === 'Available' && boundary !== undefined)
           requireType(statement.expression.type.type, boundary)
       } else if (statement._tag === 'DropStatement') {
-        const source = expressionRoot(statement.expression)
+        const source = expressionRoot(statement.expression, context)
         if (source !== undefined)
           invalidations.push({
             root: rootSite(source),
@@ -619,17 +675,16 @@ export const analyze = (
         !pathsOverlap(origin.path ?? [], event.path)
       )
         continue
-      const invalidated = BodyControlFlow.at(
-        controlFlow,
-        (event.after ?? event.expression.syntax).span,
+      const invalidated = controlFlow.boundaries.get(
+        AuthoredIdentity.anchorKey(event.after ?? event.expression.anchor),
       )
       if (
         invalidated === undefined ||
         !BodyControlFlow.reaches(controlFlow, created.after, invalidated.after, created.before)
       )
         continue
-      for (const [node, point] of entries) {
-        const use = BodyControlFlow.at(controlFlow, node.span)
+      for (const [position, point] of entries) {
+        const use = controlFlow.boundaries.get(AuthoredIdentity.anchorKey(position))
         if (
           use !== undefined &&
           BodyControlFlow.reaches(controlFlow, invalidated.after, use.after, created.before)
@@ -707,12 +762,13 @@ export const analyze = (
       const created = BodyControlFlow.at(controlFlow, origin.span)
       if (created === undefined || origin.parent !== undefined) continue
       const retired = new Set<number>()
-      for (const [point, span] of spans) {
-        const expression = expressionUses.get(`${span.sourceId}:${span.start}:${span.end}`)
+      for (const [position, point] of entries) {
+        const span = context.spanOf(position)
+        const expression = expressionUses.get(AuthoredIdentity.anchorKey(position))
         const value = expression === undefined ? undefined : carrierExpression(expression)
-        const selected = value === undefined ? undefined : expressionRoot(value)
+        const selected = value === undefined ? undefined : expressionRoot(value, context)
         const carrier = selected === undefined ? undefined : canonicalRoot(selected)
-        const use = BodyControlFlow.at(controlFlow, span)
+        const use = controlFlow.boundaries.get(AuthoredIdentity.anchorKey(position))
         if (carrier === undefined || use === undefined || value?.type._tag !== 'Available') continue
         const prefix = (
           left: ReadonlyArray<Elaboration.BorrowSelectorFact>,
@@ -736,7 +792,9 @@ export const analyze = (
           })
         const relevant = replacements.filter(
           (replacement) =>
-            !encloses(replacement.syntax.span, origin.span) &&
+            !(
+              origin.anchor !== undefined && encloses(context, replacement.anchor, origin.anchor)
+            ) &&
             Ownership.siteKey(replacement.root) === Ownership.siteKey(rootSite(carrier)) &&
             replacement.lifetimes.some((lifetime) => storageOutlives(origin.lifetime, lifetime)),
         )
@@ -746,7 +804,7 @@ export const analyze = (
         ): boolean => {
           const barriers = relevant.flatMap((replacement) => {
             if (!prefix(replacement.path, path)) return []
-            const installed = BodyControlFlow.at(controlFlow, replacement.syntax.span)
+            const installed = BodyControlFlow.at(controlFlow, context.spanOf(replacement.anchor))
             return installed === undefined ? [] : [installed.after]
           })
           for (const branch of variantBranches) {
@@ -762,7 +820,7 @@ export const analyze = (
               field.field.owner.variant.ordinal === branch.variant
             )
               continue
-            const entered = BodyControlFlow.at(controlFlow, branch.syntax.span)
+            const entered = BodyControlFlow.at(controlFlow, context.spanOf(branch.anchor))
             if (entered !== undefined) barriers.push(entered.before)
           }
           if (
@@ -853,7 +911,7 @@ export const analyze = (
           const diagnostic = Diagnostic.unsatisfiedLifetimeBound(
             Type.encode(parameter),
             Lifetime.display(required),
-            root.span,
+            context.spanOf(declaration.anchor),
           )
           universalDiagnostics.set(`${Type.key(parameter)}:${Lifetime.key(required)}`, diagnostic)
         }
@@ -862,7 +920,7 @@ export const analyze = (
     }
     const available = entries.map(([, point]) => point)
     if (allProven && publicObligations > 0) available.push(...boundaries.values())
-    restrict(lifetime, available, { lifetime, span: root.span })
+    restrict(lifetime, available, { lifetime, span: context.spanOf(declaration.anchor) })
   }
   for (const target of regions.values()) {
     if (
@@ -891,7 +949,7 @@ export const analyze = (
         const diagnostic = Diagnostic.unsatisfiedLifetimeBound(
           Lifetime.display(source),
           Lifetime.display(target.lifetime),
-          finiteStorage ? origin.span : root.span,
+          finiteStorage ? origin.span : context.spanOf(declaration.anchor),
         )
         universalDiagnostics.set(
           `${Lifetime.key(source)}:${Lifetime.key(target.lifetime)}`,
@@ -904,10 +962,12 @@ export const analyze = (
   const activatedConstraints = body.activatedConstraints.flatMap(({ bound, installed, owner }) => {
     ensure(bound.longer)
     ensure(bound.shorter)
-    const installation = BodyControlFlow.at(controlFlow, installed.span)
+    const installation = controlFlow.boundaries.get(AuthoredIdentity.anchorKey(installed))
     if (installation === undefined) return []
     const ownerBoundary =
-      owner === undefined ? undefined : BodyControlFlow.at(controlFlow, owner.span)
+      owner === undefined
+        ? undefined
+        : controlFlow.boundaries.get(AuthoredIdentity.anchorKey(owner))
     const barriers = [
       installation.before,
       ...(ownerBoundary === undefined ? [] : [ownerBoundary.before]),
@@ -933,7 +993,7 @@ export const analyze = (
   const diagnostics = Object.freeze([
     ...applicationDiagnostics.values(),
     ...universalDiagnostics.values(),
-    ...diagnosticsOf(solution, origins, spans, root.span),
+    ...diagnosticsOf(solution, origins, spans, context.spanOf(declaration.anchor)),
   ])
   return Object.freeze({
     controlFlow,
@@ -1154,6 +1214,7 @@ export const withCleanupUses = (
 export const validateCleanup = (
   self: LifetimeFlow,
   ownership: Ownership.FunctionOwnership,
+  context: SemanticContext.SemanticContext,
 ): {
   readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
   readonly work?: Lifetime.Work
@@ -1202,7 +1263,12 @@ export const validateCleanup = (
     activatedConstraints,
   })
   return {
-    diagnostics: diagnosticsOf(solution, self.origins, spans, ownership.declaration.syntax.span),
+    diagnostics: diagnosticsOf(
+      solution,
+      self.origins,
+      spans,
+      context.spanOf(ownership.declaration.anchor),
+    ),
     ...(solution._tag === 'Solved' ? { work: solution.work } : {}),
   }
 }

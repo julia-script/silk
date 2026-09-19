@@ -265,7 +265,7 @@ fn missing<T>(value: T) -> () {
         code: diagnostic.code,
         start: diagnostic.span.start,
       })),
-      [{ code: 'SEM0121', start: source.lastIndexOf(' accept(') }],
+      [{ code: 'SEM0121', start: source.lastIndexOf('accept(') }],
     )
   }),
 )
@@ -439,7 +439,7 @@ pub fn main() -> i32 { return 0 }`
       'conditional-conformance/effect-context-invalid',
       negativeSource,
     )
-    const responsibleExpression = ' acquire(move provider, move context)'
+    const responsibleExpression = 'acquire(move provider, move context)'
     const missingCallStart = negativeSource.indexOf(responsibleExpression)
     const mismatchedCallStart = negativeSource.lastIndexOf(responsibleExpression)
     assert.deepEqual(

@@ -2,6 +2,7 @@ import type * as ArtifactPlan from './ArtifactPlan.js'
 import type * as ArtifactComposition from './ArtifactComposition.js'
 import type * as ConfigurationError from './ConfigurationError.js'
 import type * as CompilationProfile from './CompilationProfile.js'
+import * as AuthoredLowering from './AuthoredLowering.js'
 import * as Data from 'effect/Data'
 import * as Effect from 'effect/Effect'
 import * as DeclarationFacts from './DeclarationFacts.js'
@@ -42,7 +43,7 @@ import * as NameResolution from './NameResolution.js'
 import * as OpaqueRealization from './OpaqueRealization.js'
 import type * as Ownership from './Ownership.js'
 import type * as PhaseReport from './PhaseReport.js'
-import * as Presentation from './Presentation.js'
+import * as SemanticDisplay from './SemanticDisplay.js'
 import * as Preparation from './Preparation.js'
 
 import type * as SemanticInvalidation from './SemanticInvalidation.js'
@@ -50,9 +51,12 @@ import * as SemanticOccurrence from './SemanticOccurrence.js'
 import * as SourceFile from './SourceFile.js'
 import * as SourceResolver from './SourceResolver.js'
 import type * as SourceSpan from './SourceSpan.js'
+import type * as AuthoredHir from './AuthoredHir.js'
+import * as AuthoredWalk from './AuthoredWalk.js'
+import type * as SemanticContext from './SemanticContext.js'
+import type * as SyntaxFile from './SyntaxFile.js'
 import * as SyntaxTree from './SyntaxTree.js'
 import * as Target from './Target.js'
-import type * as Token from './Token.js'
 import * as Type from './Type.js'
 import * as TypeHint from './TypeHint.js'
 import type * as WorkspaceInventory from './WorkspaceInventory.js'
@@ -127,14 +131,14 @@ export type HoverSubject =
   | {
       readonly _tag: 'OccurrenceHoverSubject'
       readonly occurrence: SemanticOccurrence.SemanticOccurrence
-      readonly presentation: Presentation.Presentation
-      readonly implementedContracts: ReadonlyArray<Presentation.Presentation>
+      readonly presentation: SemanticDisplay.Presentation
+      readonly implementedContracts: ReadonlyArray<SemanticDisplay.Presentation>
     }
   | {
       readonly _tag: 'ExpressionHoverSubject'
       readonly expression: AnonymousExpression
-      readonly presentation: Presentation.Presentation
-      readonly implementedContracts: ReadonlyArray<Presentation.Presentation>
+      readonly presentation: SemanticDisplay.Presentation
+      readonly implementedContracts: ReadonlyArray<SemanticDisplay.Presentation>
     }
 
 /** Source facts that make backend emission unavailable while keeping analysis queryable. */
@@ -295,12 +299,24 @@ export const resolutionFailures = (
 export const declarationIndex = (self: FrontendSnapshot): DeclarationIndex.Index => self.index
 
 export const nameResolution = (self: FrontendSnapshot): NameResolution.Resolution => self.resolution
+
+/**
+ * One module's parsed syntax, for the syntax-only tooling this facade exposes (documentation,
+ * import edits, receiver navigation). Semantic queries take spans from the semantic context.
+ */
+export const moduleSyntax = (
+  self: FrontendSnapshot,
+  module: string,
+): SyntaxFile.SyntaxFile | undefined =>
+  self.closure.modules.find((candidate) => candidate.name === module)?.syntax
+
+const syntaxOf = moduleSyntax
 /** Returns valid authored import bindings that have no semantic use in their module. */
 export const unusedImports = (
   self: FrontendSnapshot,
   module: string,
 ): ReadonlyArray<ImportUsage.UnusedBinding> => {
-  const syntax = self.results.get(module)?.syntax
+  const syntax = syntaxOf(self, module)
   if (syntax === undefined) return []
   return ImportUsage.unused(
     syntax,
@@ -322,19 +338,6 @@ export const lookupName = (
     ? Object.freeze({ _tag: 'Missing', spelling })
     : NameResolution.lookup(scope, self.index, spelling)
 }
-export const lookupQualifiedName = (
-  self: FrontendSnapshot,
-  module: string,
-  namespace: string,
-  member: string,
-  token: Token.Token,
-): NameResolution.Lookup => {
-  const scope = moduleScope(self, module)
-  return scope === undefined
-    ? Object.freeze({ _tag: 'Missing', spelling: `${namespace}.${member}` })
-    : NameResolution.lookupQualified(scope, self.index, namespace, member, token)
-}
-
 /** Discovers compiler-owned auto-import actions for one unresolved source occurrence. */
 export const autoImportsAt = (
   self: FrontendSnapshot,
@@ -358,7 +361,7 @@ export const moduleDocumentation = (
   self: FrontendSnapshot,
   module: string,
 ): DocBlock.DocBlock | undefined => {
-  const syntax = self.results.get(module)?.syntax
+  const syntax = syntaxOf(self, module)
   return syntax === undefined ? undefined : DocBlock.ofModule(syntax)
 }
 
@@ -368,7 +371,7 @@ export const documentationOfSyntax = (
   module: string,
   node: SyntaxTree.Node,
 ): DocBlock.DocBlock | undefined => {
-  const syntax = self.results.get(module)?.syntax
+  const syntax = syntaxOf(self, module)
   return syntax === undefined ? undefined : DocBlock.ofNode(syntax, node)
 }
 
@@ -386,6 +389,7 @@ export const explicitLifetimes = (
   end = start,
 ): ReadonlyArray<LifetimeElision.LifetimeElision> => {
   const headers = self.index.modules.find((candidate) => candidate.module === module)
+  const spans = self.resolution.contexts
   const contexts =
     headers?.members.flatMap((member) => {
       const declarations =
@@ -397,38 +401,65 @@ export const explicitLifetimes = (
           declaration,
         ): ReadonlyArray<{
           readonly context: DeclarationLifetime.Context
+          readonly semantic: SemanticContext.SemanticContext
+          readonly authored: AuthoredHir.Declaration
+          readonly header: SourceSpan.SourceSpan
+          readonly body: SourceSpan.SourceSpan | undefined
           readonly executable: Type.ExecutableLifetimes | undefined
-        }> =>
-          'lifetimeElaboration' in declaration && declaration.lifetimeElaboration !== undefined
-            ? [
-                {
-                  context: declaration.lifetimeElaboration,
-                  executable:
-                    declaration._tag === 'FunctionDeclaration' ||
-                    declaration._tag === 'ServiceOperation'
-                      ? DeclarationFacts.executableLifetimes(declaration)
-                      : undefined,
-                },
-              ]
-            : [],
+        }> => {
+          if (
+            !('lifetimeElaboration' in declaration) ||
+            declaration.lifetimeElaboration === undefined
+          )
+            return []
+          const semantic = spans.of(declaration.anchor)
+          const authored =
+            semantic === undefined
+              ? undefined
+              : AuthoredWalk.declarationOf(semantic.module, declaration.anchor.owner)
+          if (semantic === undefined || authored === undefined) return []
+          return [
+            {
+              context: declaration.lifetimeElaboration,
+              semantic,
+              authored,
+              header: spans.spanOf(declaration.anchor),
+              body:
+                'bodyTemplate' in declaration && declaration.bodyTemplate !== undefined
+                  ? spans.spanOf(declaration.bodyTemplate.anchor)
+                  : undefined,
+              executable:
+                declaration._tag === 'FunctionDeclaration' ||
+                declaration._tag === 'ServiceOperation'
+                  ? DeclarationFacts.executableLifetimes(declaration)
+                  : undefined,
+            },
+          ]
+        },
       )
     }) ?? []
-  return contexts.flatMap(({ context, executable }) => {
-    if (context.syntax.span.start > end || context.syntax.span.end < start) return []
-    const body = SyntaxTree.directNode(context.syntax, 'Block')
-    if (body !== undefined && start >= body.span.start && end <= body.span.end) return []
-    const headerEnd = body?.span.start ?? context.syntax.span.end
+  return contexts.flatMap(({ context, semantic, authored, header, body, executable }) => {
+    // The header anchor presents the declaration head; the body anchor presents its block.
+    const declarationEnd = body?.end ?? header.end
+    if (header.start > end || declarationEnd < start) return []
+    if (body !== undefined && start >= body.start && end <= body.end) return []
+    const headerEnd = body?.start ?? header.end
     if (
       self.index.diagnostics.some(
         (diagnostic) =>
           diagnostic.severity === 'error' &&
-          diagnostic.span.sourceId === context.source.id &&
-          diagnostic.span.start >= context.syntax.span.start &&
+          diagnostic.span.sourceId === header.sourceId &&
+          diagnostic.span.start >= header.start &&
           diagnostic.span.start < headerEnd,
       )
     )
       return []
-    return Option.toArray(LifetimeElision.makeExplicit(context, executable))
+    const syntax = moduleSyntax(self, module)
+    return syntax === undefined
+      ? []
+      : Option.toArray(
+          LifetimeElision.makeExplicit(syntax, semantic, authored, context, executable),
+        )
   })
 }
 
@@ -483,13 +514,13 @@ const unionVariantForIdentity = (
   return variant === undefined ? undefined : Object.freeze([union, variant] as const)
 }
 
-const syntaxForIdentity = (
+const anchorForIdentity = (
   self: FrontendSnapshot,
   identity: SemanticOccurrence.Identity,
-): SyntaxTree.Node | undefined => {
-  if (identity._tag === 'DeclarationIdentity') return declarationForIdentity(self, identity)?.syntax
+): AuthoredHir.Anchor | undefined => {
+  if (identity._tag === 'DeclarationIdentity') return declarationForIdentity(self, identity)?.anchor
   if (identity._tag === 'ServiceOperationIdentity')
-    return serviceOperationForIdentity(self, identity)?.syntax
+    return serviceOperationForIdentity(self, identity)?.anchor
   if (identity._tag === 'EnumMemberIdentity')
     return self.index.modules
       .flatMap((module) => module.enums)
@@ -502,24 +533,24 @@ const syntaxForIdentity = (
       ?.members.find(
         (member) =>
           member.canonical._tag === 'Canonical' && member.canonical.id.name === identity.id.name,
-      )?.syntax
+      )?.anchor
   if (identity._tag === 'UnionVariantIdentity')
-    return unionVariantForIdentity(self, identity)?.[1].syntax
+    return unionVariantForIdentity(self, identity)?.[1].anchor
   if (identity._tag === 'EnumAssociatedOperationIdentity')
-    return DeclarationFacts.byCanonical(self.index, identity.id.enum)?.syntax
+    return DeclarationFacts.byCanonical(self.index, identity.id.enum)?.anchor
   if (identity._tag === 'TypeParameterIdentity') {
     for (const headers of self.index.modules)
       for (const member of [...headers.members, ...headers.inherentImpls]) {
         const parameter = member.typeParameters.find((candidate) =>
           Type.equals(candidate.type, identity.id),
         )
-        if (parameter !== undefined) return parameter.syntax
+        if (parameter !== undefined) return parameter.anchor
         if (member._tag === 'ServiceDeclaration')
           for (const operation of member.operations) {
             const operationParameter = operation.typeParameters.find((candidate) =>
               Type.equals(candidate.type, identity.id),
             )
-            if (operationParameter !== undefined) return operationParameter.syntax
+            if (operationParameter !== undefined) return operationParameter.anchor
           }
       }
     return undefined
@@ -536,7 +567,7 @@ const syntaxForIdentity = (
             candidate.id.function.ordinal === identity.id.function.ordinal &&
             candidate.id.ordinal === identity.id.ordinal,
         )
-        if (parameter !== undefined) return parameter.syntax
+        if (parameter !== undefined) return parameter.anchor
       }
     return undefined
   }
@@ -549,11 +580,37 @@ const syntaxForIdentity = (
         ),
       ]
       for (const field of fields) {
-        if (DeclarationFacts.sameFieldId(field.id, identity.id)) return field.syntax
+        if (DeclarationFacts.sameFieldId(field.id, identity.id)) return field.anchor
       }
     }
   }
   return undefined
+}
+
+/** Returns raw documentation for one authored anchor. */
+export const documentationOfAnchor = (
+  self: FrontendSnapshot,
+  anchor: AuthoredHir.Anchor,
+): DocBlock.DocBlock | undefined => {
+  const span = self.resolution.contexts.spanOf(anchor)
+  const syntax = syntaxOf(self, anchor.owner.module)
+  if (syntax === undefined) return undefined
+  // Documentation is the direct leading trivia of the innermost *documentable* node covering the
+  // span. An enclosing node's block never stands in for an undocumented inner one: a parameter
+  // with no `///` of its own must not inherit its operation's documentation.
+  const covers = (node: SyntaxTree.Node): boolean =>
+    node.span.start <= span.start && node.span.end >= span.end
+  let innermost: SyntaxTree.Node | undefined
+  let node: SyntaxTree.Node | undefined = covers(syntax.root) ? syntax.root : undefined
+  while (node !== undefined) {
+    if (DocBlock.isDocumentableKind(node.kind)) innermost = node
+    // A lifetime binder takes no `///` of its own, and must not borrow its declaration's either.
+    else if (node.kind === 'LifetimeParameter') innermost = undefined
+    node = node.children.find(
+      (child): child is SyntaxTree.Node => SyntaxTree.isNode(child) && covers(child),
+    )
+  }
+  return innermost === undefined ? undefined : DocBlock.ofNode(syntax, innermost)
 }
 
 /** Returns raw documentation for one source-backed semantic identity. */
@@ -561,8 +618,8 @@ export const documentationOfIdentity = (
   self: FrontendSnapshot,
   identity: SemanticOccurrence.Identity,
 ): DocBlock.DocBlock | undefined => {
-  const node = syntaxForIdentity(self, identity)
-  return node === undefined ? undefined : documentationOfSyntax(self, node.span.sourceId, node)
+  const anchor = anchorForIdentity(self, identity)
+  return anchor === undefined ? undefined : documentationOfAnchor(self, anchor)
 }
 
 /** Resolves one source position and returns the selected declaration's raw documentation. */
@@ -578,12 +635,12 @@ export const documentationAt = (
 }
 
 interface HoverPresentation {
-  readonly presentation: Presentation.Presentation
+  readonly presentation: SemanticDisplay.Presentation
   readonly type?: Type.Type
 }
 
 const hoverPresentation = (
-  presentation: Presentation.Presentation | undefined,
+  presentation: SemanticDisplay.Presentation | undefined,
   type?: Type.Type,
 ): HoverPresentation | undefined => {
   if (presentation === undefined) {
@@ -616,7 +673,7 @@ const receiverTypeAt = (
   module: string,
   memberStart: number,
 ): Type.Type | undefined => {
-  const root = self.results.get(module)?.syntax.root
+  const root = syntaxOf(self, module)?.root
   if (root === undefined) return undefined
   let subject: SyntaxTree.Node | undefined
   const visit = (node: SyntaxTree.Node): void => {
@@ -634,7 +691,12 @@ const receiverTypeAt = (
   visit(root)
   return subject === undefined
     ? undefined
-    : anonymousExpressionAt(self, module, subject.span.start)?.type
+    : // Facts are presented without the leading trivia a syntax node's span carries.
+      anonymousExpressionAt(
+        self,
+        module,
+        AuthoredLowering.firstSignificantStart(subject) ?? subject.span.start,
+      )?.type
 }
 
 /** The receiver-bound presentation of a member reached through receiver syntax. */
@@ -651,12 +713,12 @@ const receiverMethodPresentation = (
     declaration.associatedMember?.receiver !== true
   )
     return undefined
-  const substitution = Presentation.receiverSubstitution(
+  const substitution = SemanticDisplay.receiverSubstitution(
     declaration,
     receiverTypeAt(self, module, occurrence.span.start),
   )
   return hoverPresentation(
-    Presentation.receiverMethod(
+    SemanticDisplay.receiverMethod(
       declaration,
       substitution,
       module,
@@ -676,37 +738,37 @@ const presentationOfIdentity = (
     const declaration = declarationForIdentity(self, identity)
     if (declaration?._tag === 'FunctionDeclaration')
       return hoverPresentation(
-        Presentation.functionDeclaration(declaration),
+        SemanticDisplay.functionDeclaration(declaration),
         declaredType(declaration.returnType),
       )
     if (declaration?._tag === 'StructDeclaration')
       return hoverPresentation(
-        Presentation.structDeclaration(declaration),
+        SemanticDisplay.structDeclaration(declaration),
         nominalDeclarationType(declaration),
       )
     if (declaration?._tag === 'EnumDeclaration')
       return hoverPresentation(
-        Presentation.enumDeclaration(declaration),
+        SemanticDisplay.enumDeclaration(declaration),
         nominalDeclarationType(declaration),
       )
     if (declaration?._tag === 'UnionDeclaration')
       return hoverPresentation(
-        Presentation.unionDeclaration(declaration),
+        SemanticDisplay.unionDeclaration(declaration),
         nominalDeclarationType(declaration),
       )
     if (declaration?._tag === 'ServiceDeclaration')
       return hoverPresentation(
-        Presentation.serviceDeclaration(declaration),
+        SemanticDisplay.serviceDeclaration(declaration),
         nominalDeclarationType(declaration),
       )
     if (declaration?._tag === 'InterfaceDeclaration')
       return hoverPresentation(
-        Presentation.serviceDeclaration(declaration),
+        SemanticDisplay.serviceDeclaration(declaration),
         nominalDeclarationType(declaration),
       )
     if (declaration?._tag === 'AliasDeclaration')
       return hoverPresentation(
-        Presentation.aliasDeclaration(declaration),
+        SemanticDisplay.aliasDeclaration(declaration),
         declaredType(declaration.target),
       )
     if (
@@ -714,12 +776,12 @@ const presentationOfIdentity = (
       declaration?._tag === 'PackageParameterDeclaration'
     )
       return hoverPresentation(
-        Presentation.constantDeclaration(declaration),
+        SemanticDisplay.constantDeclaration(declaration),
         declaredType(declaration.declaredType),
       )
     return declaration?._tag === 'ForeignStaticDeclaration'
       ? hoverPresentation(
-          Presentation.foreignStaticDeclaration(declaration),
+          SemanticDisplay.foreignStaticDeclaration(declaration),
           declaredType(declaration.declaredType),
         )
       : undefined
@@ -730,14 +792,15 @@ const presentationOfIdentity = (
         const parameter = member.typeParameters.find((candidate) =>
           Type.equals(candidate.type, identity.id),
         )
-        if (parameter !== undefined) return hoverPresentation(Presentation.typeParameter(parameter))
+        if (parameter !== undefined)
+          return hoverPresentation(SemanticDisplay.typeParameter(parameter))
         if (member._tag === 'ServiceDeclaration')
           for (const operation of member.operations) {
             const operationParameter = operation.typeParameters.find((candidate) =>
               Type.equals(candidate.type, identity.id),
             )
             if (operationParameter !== undefined)
-              return hoverPresentation(Presentation.typeParameter(operationParameter))
+              return hoverPresentation(SemanticDisplay.typeParameter(operationParameter))
           }
       }
     return undefined
@@ -756,7 +819,7 @@ const presentationOfIdentity = (
         )
         if (parameter !== undefined)
           return hoverPresentation(
-            Presentation.parameter(parameter),
+            SemanticDisplay.parameter(parameter),
             declaredType(parameter.declaredType),
           )
       }
@@ -772,7 +835,7 @@ const presentationOfIdentity = (
       ]
       for (const field of fields)
         if (DeclarationFacts.sameFieldId(field.id, identity.id))
-          return hoverPresentation(Presentation.field(field), declaredType(field.declaredType))
+          return hoverPresentation(SemanticDisplay.field(field), declaredType(field.declaredType))
     }
     return undefined
   }
@@ -787,7 +850,7 @@ const presentationOfIdentity = (
         )
         if (binding !== undefined)
           return hoverPresentation(
-            Presentation.binding(binding, module, scope),
+            SemanticDisplay.binding(binding, module, scope),
             binding.inferredType._tag === 'Available' ? binding.inferredType.type : undefined,
           )
       }
@@ -827,7 +890,7 @@ const presentationOfIdentity = (
         const statementBinding = findStatementBinding(fn.statements)
         if (statementBinding !== undefined)
           return hoverPresentation(
-            Presentation.patternBinding(statementBinding, module, scope),
+            SemanticDisplay.patternBinding(statementBinding, module, scope),
             statementBinding.type._tag === 'Available' ? statementBinding.type.type : undefined,
           )
       }
@@ -844,19 +907,19 @@ const presentationOfIdentity = (
                     ) === key
                   )
                     return hoverPresentation(
-                      Presentation.patternBinding(binding, module, scope),
+                      SemanticDisplay.patternBinding(binding, module, scope),
                       binding.type._tag === 'Available' ? binding.type.type : undefined,
                     )
     return undefined
   }
   if (identity._tag === 'ImportNamespaceIdentity')
-    return hoverPresentation(Presentation.importBinding(identity.spelling, identity.module))
+    return hoverPresentation(SemanticDisplay.importBinding(identity.spelling, identity.module))
   if (identity._tag === 'ServiceOperationIdentity') {
     const operation = serviceOperationForIdentity(self, identity)
     return operation === undefined
       ? undefined
       : hoverPresentation(
-          Presentation.serviceOperation(operation),
+          SemanticDisplay.serviceOperation(operation),
           declaredType(operation.returnType),
         )
   }
@@ -870,14 +933,14 @@ const presentationOfIdentity = (
     )
     return member === undefined
       ? undefined
-      : hoverPresentation(Presentation.enumMember(enum_, member), nominalDeclarationType(enum_))
+      : hoverPresentation(SemanticDisplay.enumMember(enum_, member), nominalDeclarationType(enum_))
   }
   if (identity._tag === 'UnionVariantIdentity') {
     const selected = unionVariantForIdentity(self, identity)
     return selected === undefined
       ? undefined
       : hoverPresentation(
-          Presentation.unionVariant(selected[0], selected[1]),
+          SemanticDisplay.unionVariant(selected[0], selected[1]),
           nominalDeclarationType(selected[0]),
         )
   }
@@ -890,7 +953,7 @@ const presentationOfIdentity = (
     return operation === undefined
       ? undefined
       : hoverPresentation(
-          Presentation.enumAssociatedOperation(operation),
+          SemanticDisplay.enumAssociatedOperation(operation),
           operation.result.spelling,
         )
   }
@@ -898,12 +961,12 @@ const presentationOfIdentity = (
     const intrinsic = Intrinsic.findActor(identity.id.name)
     return intrinsic === undefined
       ? undefined
-      : hoverPresentation(Presentation.intrinsicActor(intrinsic))
+      : hoverPresentation(SemanticDisplay.intrinsicActor(intrinsic))
   }
   const intrinsic = Intrinsic.findOperation(identity.id.actor, identity.id.name)
   return intrinsic === undefined
     ? undefined
-    : hoverPresentation(Presentation.intrinsicOperation(intrinsic))
+    : hoverPresentation(SemanticDisplay.intrinsicOperation(intrinsic))
 }
 
 /** Lazily presents one available occurrence through declaration and scope facts. */
@@ -911,7 +974,7 @@ export const occurrencePresentation = (
   self: FrontendSnapshot,
   module: string,
   occurrence: SemanticOccurrence.SemanticOccurrence,
-): Presentation.Presentation | undefined =>
+): SemanticDisplay.Presentation | undefined =>
   occurrence.resolution._tag === 'Available'
     ? presentationOfIdentity(self, module, occurrence.resolution.identity)?.presentation
     : undefined
@@ -920,12 +983,12 @@ const implementedContractPresentations = (
   self: FrontendSnapshot,
   module: string,
   type: Type.Type | undefined,
-): ReadonlyArray<Presentation.Presentation> => {
+): ReadonlyArray<SemanticDisplay.Presentation> => {
   if (type === undefined) return Object.freeze([])
   const scope = NameResolution.scopeOf(self.resolution, module)
   return Object.freeze(
     ConformanceProof.implementedContracts(self.index, module, type).map((contract) =>
-      Presentation.scopedNominal(contract, module, scope),
+      SemanticDisplay.scopedNominal(contract, module, scope),
     ),
   )
 }
@@ -975,7 +1038,7 @@ export const hoverSubjectAt = (
     expression,
     presentation:
       expression.presentation ??
-      Presentation.expressionType(
+      SemanticDisplay.expressionType(
         expression.type,
         module,
         NameResolution.scopeOf(self.resolution, module),
@@ -990,14 +1053,19 @@ export const typeHints = (
   module: string,
   start: number,
   end: number,
-): ReadonlyArray<TypeHint.TypeHint> =>
-  TypeHint.make(
-    self.results.get(module)?.functions ?? Object.freeze([]),
-    module,
-    NameResolution.scopeOf(self.resolution, module),
-    start,
-    end,
-  )
+): ReadonlyArray<TypeHint.TypeHint> => {
+  const scope = NameResolution.scopeOf(self.resolution, module)
+  return scope === undefined
+    ? Object.freeze([])
+    : TypeHint.make(
+        scope.context,
+        self.results.get(module)?.functions ?? Object.freeze([]),
+        module,
+        scope,
+        start,
+        end,
+      )
+}
 
 /** Returns deterministic recovery-aware completion for one module byte offset. */
 export const completionAt = (

@@ -7,8 +7,8 @@ fn golden/program.main params=0 locals=3 -> i32 entry=r0
   r0 operation:
     %0 = literal 42 : i32 [100, 102)
     %1 = call golden/program.identity(%0) : i32 [91, 103)
-    %2 = call golden/program.identity(%1) : i32 [81, 104)
-    return %2 [81, 104)
+    %2 = call golden/program.identity(%1) : i32 [82, 104)
+    return %2 [82, 104)
 fn golden/program.identity params=1 locals=1 -> i32 entry=r0
   r0 operation:
-    return %0 [43, 49)
+    return %0 [44, 49)
