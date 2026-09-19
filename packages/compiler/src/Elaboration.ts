@@ -1452,7 +1452,9 @@ export interface LexicalScopeFact {
   readonly _tag: 'LexicalScope'
   readonly id: LexicalScopeId
   readonly parent?: LexicalScopeId
-  readonly span: SourceSpan.SourceSpan
+  /** The scope reaches from the start of `first` to the end of `last`: authored nodes, no offsets. */
+  readonly first: AuthoredHir.Anchor
+  readonly last: AuthoredHir.Anchor
   readonly parameters: ReadonlyArray<ParameterFact>
   readonly bindings: ReadonlyArray<BindingDeclarationFact>
   readonly patternBindings: ReadonlyArray<PatternBindingFact>
@@ -1957,7 +1959,8 @@ const lexicalScopesOf = (
     let ordinal = 0
     const add = (options: {
       readonly parent?: LexicalScopeId
-      readonly span: SourceSpan.SourceSpan
+      readonly first: AuthoredHir.Anchor
+      readonly last?: AuthoredHir.Anchor
       readonly parameters?: ReadonlyArray<ParameterFact>
       readonly bindings?: ReadonlyArray<BindingDeclarationFact>
       readonly patternBindings?: ReadonlyArray<PatternBindingFact>
@@ -1973,7 +1976,8 @@ const lexicalScopesOf = (
           _tag: 'LexicalScope',
           id,
           ...(options.parent === undefined ? {} : { parent: options.parent }),
-          span: options.span,
+          first: options.first,
+          last: options.last ?? options.first,
           parameters: Object.freeze(Array.from(options.parameters ?? [])),
           bindings: Object.freeze(Array.from(options.bindings ?? [])),
           patternBindings: Object.freeze(Array.from(options.patternBindings ?? [])),
@@ -1981,24 +1985,22 @@ const lexicalScopesOf = (
       )
       return id
     }
-    const spanOf = (
+    const anchorOf = (statement: StatementFact): AuthoredHir.Anchor =>
+      statement._tag === 'BindStatement' ? statement.binding.anchor : statement.anchor
+    const extentOf = (
       statements: ReadonlyArray<StatementFact>,
-      fallback: SourceSpan.SourceSpan,
-    ): SourceSpan.SourceSpan => {
+      fallback: AuthoredHir.Anchor,
+    ): { readonly first: AuthoredHir.Anchor; readonly last: AuthoredHir.Anchor } => {
       const first = statements.at(0)
       const last = statements.at(-1)
       return first === undefined || last === undefined
-        ? fallback
-        : (SourceSpan.fromOffsets(
-            context.presentation.sourceId,
-            statementSpan(context, first).start,
-            statementSpan(context, last).end,
-          ) ?? fallback)
+        ? { first: fallback, last: fallback }
+        : { first: anchorOf(first), last: anchorOf(last) }
     }
     let visitStatements: (
       statements: ReadonlyArray<StatementFact>,
       parent: LexicalScopeId | undefined,
-      fallback: SourceSpan.SourceSpan,
+      fallback: AuthoredHir.Anchor,
     ) => LexicalScopeId
     const visitExpression = (expression: ExpressionFact, parent: LexicalScopeId): void => {
       if (expression._tag === 'Match') {
@@ -2006,17 +2008,17 @@ const lexicalScopesOf = (
         for (const arm of expression.arms) {
           const armScope = add({
             parent,
-            span: context.spanOf(arm.anchor),
+            first: arm.anchor,
             patternBindings: arm.bindings,
           })
           if (arm.guard !== undefined) visitExpression(arm.guard, armScope)
           if (arm.body._tag === 'Expression') visitExpression(arm.body.expression, armScope)
-          else visitStatements(arm.body.statements, armScope, context.spanOf(arm.body.anchor))
+          else visitStatements(arm.body.statements, armScope, arm.body.anchor)
         }
         return
       }
       if (expression._tag === 'EffectBlock') {
-        visitStatements(expression.statements, parent, context.spanOf(expression.anchor))
+        visitStatements(expression.statements, parent, expression.anchor)
         return
       }
       for (const child of directExpressionChildren(expression)) visitExpression(child, parent)
@@ -2024,11 +2026,11 @@ const lexicalScopesOf = (
     visitStatements = (
       statements: ReadonlyArray<StatementFact>,
       parent: LexicalScopeId | undefined,
-      fallback: SourceSpan.SourceSpan,
+      fallback: AuthoredHir.Anchor,
     ): LexicalScopeId => {
       const current = add({
         ...(parent === undefined ? {} : { parent }),
-        span: spanOf(statements, fallback),
+        ...extentOf(statements, fallback),
         ...(parent === undefined ? { parameters: fn.declaration.parameters } : {}),
         bindings: statements.flatMap((statement) =>
           statement._tag === 'BindStatement' ? [statement.binding] : [],
@@ -2041,24 +2043,24 @@ const lexicalScopesOf = (
         for (const expression of directStatementExpressions(statement))
           visitExpression(expression, current)
         if (statement._tag === 'UnsafeStatement')
-          visitStatements(statement.statements, current, context.spanOf(statement.anchor))
+          visitStatements(statement.statements, current, statement.anchor)
         else if (statement._tag === 'IfStatement') {
-          visitStatements(statement.taken, current, context.spanOf(statement.anchor))
-          visitStatements(statement.otherwise, current, context.spanOf(statement.anchor))
+          visitStatements(statement.taken, current, statement.anchor)
+          visitStatements(statement.otherwise, current, statement.anchor)
         } else if (statement._tag === 'IfLetStatement') {
           const takenScope = add({
             parent: current,
-            span: context.spanOf(statement.anchor),
+            first: statement.anchor,
             patternBindings: statement.selection.bindings,
           })
-          visitStatements(statement.taken, takenScope, context.spanOf(statement.anchor))
-          visitStatements(statement.otherwise, current, context.spanOf(statement.anchor))
+          visitStatements(statement.taken, takenScope, statement.anchor)
+          visitStatements(statement.otherwise, current, statement.anchor)
         } else if (statement._tag === 'WhileStatement')
-          visitStatements(statement.body, current, context.spanOf(statement.anchor))
+          visitStatements(statement.body, current, statement.anchor)
       }
       return current
     }
-    visitStatements(fn.statements, undefined, context.spanOf(fn.declaration.anchor))
+    visitStatements(fn.statements, undefined, fn.declaration.anchor)
   }
   return Object.freeze(scopes)
 }

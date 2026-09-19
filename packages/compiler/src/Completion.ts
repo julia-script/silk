@@ -198,23 +198,26 @@ const sameDeclaration = (
 ): boolean => left.sourceId === right.sourceId && left.ordinal === right.ordinal
 
 const scopeChain = (
+  context: SemanticContext.SemanticContext,
   result: Elaboration.Result,
   fn: Elaboration.FunctionFact | undefined,
   offset: number,
 ): ReadonlyArray<Elaboration.LexicalScopeFact> => {
   if (fn === undefined) return Object.freeze([])
   const candidates = result.lexicalScopes
-    .filter(
-      (scope) =>
-        sameDeclaration(scope.id.function, fn.declaration.id) &&
-        scope.span.start <= offset &&
-        offset <= scope.span.end,
-    )
+    .filter((scope) => sameDeclaration(scope.id.function, fn.declaration.id))
+    .map((scope) => ({
+      scope,
+      start: context.spanOf(scope.first).start,
+      end: context.spanOf(scope.last).end,
+    }))
+    .filter(({ start, end }) => start <= offset && offset <= end)
     .sort(
       (left, right) =>
-        left.span.end - left.span.start - (right.span.end - right.span.start) ||
-        right.id.ordinal - left.id.ordinal,
+        left.end - left.start - (right.end - right.start) ||
+        right.scope.id.ordinal - left.scope.id.ordinal,
     )
+    .map(({ scope }) => scope)
   const byOrdinal = new Map(
     result.lexicalScopes
       .filter((scope) => sameDeclaration(scope.id.function, fn.declaration.id))
@@ -236,7 +239,7 @@ const visibleBindings = (
   offset: number,
 ): ReadonlyArray<Elaboration.BindingDeclarationFact> => {
   const selected = new Map<string, Elaboration.BindingDeclarationFact>()
-  for (const scope of scopeChain(result, fn, offset))
+  for (const scope of scopeChain(context, result, fn, offset))
     for (const binding of scope.bindings.toReversed())
       if (
         binding.name._tag === 'Present' &&
@@ -258,7 +261,7 @@ const visiblePatternBindings = (
   offset: number,
 ): ReadonlyArray<Elaboration.PatternBindingFact> => {
   const selected = new Map<string, Elaboration.PatternBindingFact>()
-  for (const scope of scopeChain(result, fn, offset))
+  for (const scope of scopeChain(context, result, fn, offset))
     for (const binding of scope.patternBindings.toReversed())
       if (
         binding.name._tag === 'Present' &&

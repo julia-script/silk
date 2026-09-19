@@ -1,5 +1,4 @@
 import type * as CompilationProfile from './CompilationProfile.js'
-import * as Constraint from './Constraint.js'
 import type * as AuthoredHir from './AuthoredHir.js'
 import type * as DeclarationFacts from './DeclarationFacts.js'
 import * as Diagnostic from './Diagnostic.js'
