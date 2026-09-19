@@ -2,6 +2,12 @@ import { readFileSync } from 'node:fs'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
+import * as AuthoredEncoding from '../src/AuthoredEncoding.js'
+import type * as AuthoredHir from '../src/AuthoredHir.js'
+import * as AuthoredIdentity from '../src/AuthoredIdentity.js'
+import * as AuthoredModule from '../src/AuthoredModule.js'
+import * as AuthoredPool from '../src/AuthoredPool.js'
+import * as AuthoredPresentation from '../src/AuthoredPresentation.js'
 import type * as Elaboration from '../src/Elaboration.js'
 import * as Hir from '../src/Hir.js'
 import * as Lexer from '../src/Lexer.js'
@@ -9,9 +15,346 @@ import * as Parser from '../src/Parser.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as Type from '../src/Type.js'
 import { elaborate as elaborateSyntax } from './support/elaborate.js'
+import { unreachable } from './support/raise.js'
+import * as AuthoredFunction from './support/authoredFunction.js'
+import { broadModule } from './support/authoredFixture.js'
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
+
+const hex = (bytes: readonly number[]): string =>
+  (
+    Buffer.from(bytes)
+      .toString('hex')
+      .match(/.{1,64}/g) ?? []
+  ).join('\n') + '\n'
+
+it.effect('publishes the authored vocabulary without source or semantic construction', () =>
+  Effect.gen(function* () {
+    const module = yield* AuthoredModule.make(yield* broadModule())
+    for (const declaration of module.declarations) {
+      yield* AuthoredEncoding.header(module.pool, declaration)
+      yield* AuthoredEncoding.body(module.pool, declaration)
+    }
+    assert.isTrue(
+      module.declarations.some((declaration) => declaration.header._tag === 'ConditionalHeader'),
+    )
+    // Inspect exact payloads in the same fixture, without executing a compiler pipeline.
+    const pending: unknown[] = [module]
+    const values: Array<bigint | string | number> = []
+    while (pending.length > 0) {
+      const value = pending.pop()
+      if (value === null || typeof value !== 'object') continue
+      if (
+        '_tag' in value &&
+        value._tag === 'FloatingLiteral' &&
+        'coefficient' in value &&
+        'exponent' in value &&
+        'sign' in value
+      ) {
+        assert.strictEqual(typeof value.coefficient, 'bigint')
+        assert.strictEqual(typeof value.exponent, 'bigint')
+        if (typeof value.coefficient === 'bigint' && typeof value.sign === 'string') {
+          values.push(value.coefficient, value.sign)
+        }
+      }
+      for (const child of Object.values(value)) pending.push(child)
+    }
+    assert.include(values, 'Negative')
+    assert.include(values, 0n)
+    assert.include(values, 1000000000000000000000001n)
+  }),
+)
+
+it.effect('rejects publication that would lose data or retain executable object behavior', () =>
+  Effect.gen(function* () {
+    const fixture = yield* AuthoredFunction.make()
+    const nonEnumerable = { ...fixture.module }
+    Object.defineProperty(nonEnumerable, 'declarations', { enumerable: false })
+    const missingData = yield* Effect.flip(AuthoredModule.make(nonEnumerable))
+    assert.strictEqual(missingData._tag, 'AuthoredEncodingError')
+    let invoked = false
+    const accessor = { ...fixture.module }
+    Object.defineProperty(accessor, 'pool', {
+      get: () => {
+        invoked = true
+        return fixture.module.pool
+      },
+    })
+    const executable = yield* Effect.flip(AuthoredModule.make(accessor))
+    assert.strictEqual(executable._tag, 'AuthoredEncodingError')
+    assert.isFalse(invoked)
+    const invalidPool = {
+      ...fixture.module.pool,
+      bytes: [{ _tag: 'PoolBytes' as const, value: [256], byteLength: 1 }],
+    }
+    const byteFailure = yield* Effect.flip(
+      AuthoredModule.make({ ...fixture.module, pool: invalidPool }),
+    )
+    assert.strictEqual(byteFailure._tag, 'AuthoredEncodingError')
+    const invalidDigest = yield* Effect.flip(AuthoredEncoding.digest([256]))
+    assert.strictEqual(invalidDigest.reason._tag, 'InvalidArtifact')
+    const sparse: number[] = []
+    sparse.length = 1
+    const sparseDigest = yield* Effect.flip(AuthoredEncoding.digest(sparse))
+    assert.strictEqual(sparseDigest.reason._tag, 'InvalidArtifact')
+    const duplicated = yield* Effect.flip(
+      AuthoredModule.make({
+        ...fixture.module,
+        declarations: [fixture.declaration, fixture.declaration],
+      }),
+    )
+    assert.strictEqual(duplicated._tag, 'AuthoredEncodingError')
+    const foreignOwner = yield* Effect.flip(
+      AuthoredModule.make({
+        ...fixture.module,
+        owner: AuthoredIdentity.module('another-origin', 'app/Value'),
+      }),
+    )
+    assert.strictEqual(foreignOwner._tag, 'AuthoredEncodingError')
+    const header = fixture.declaration.header
+    if (header._tag !== 'FunctionHeader') return yield* Effect.die('Expected a function fixture')
+    const binding = fixture.literal.anchor
+    const reference: AuthoredHir.Expression = {
+      _tag: 'IdentifierExpression',
+      anchor: header.anchor,
+      origin: { _tag: 'Authored' },
+      causes: [],
+      name: header.name,
+      binding: { _tag: 'LexicalReference', owner: binding.owner, path: binding.path },
+    }
+    const linked: AuthoredHir.Declaration = {
+      ...fixture.declaration,
+      header: {
+        ...header,
+        contract: {
+          ...header.contract,
+          parameters: [
+            {
+              _tag: 'Parameter',
+              anchor: binding,
+              origin: { _tag: 'Authored' },
+              causes: [],
+              name: header.name,
+              type: header.contract.result ?? unreachable(),
+              mode: 'Value',
+            },
+          ],
+        },
+      },
+      body: { _tag: 'InitializerBody', value: reference },
+    }
+    yield* AuthoredModule.make({ ...fixture.module, declarations: [linked] })
+    const dangling = yield* Effect.flip(
+      AuthoredModule.make({ ...fixture.module, declarations: [{ ...linked, header }] }),
+    )
+    assert.strictEqual(dangling._tag, 'AuthoredEncodingError')
+  }),
+)
+
+it.effect('publishes source-free authored content with canonical header and body goldens', () =>
+  Effect.gen(function* () {
+    const original = yield* AuthoredFunction.make()
+    const module = yield* AuthoredModule.make(original.module)
+    const declaration = module.declarations[0] ?? unreachable()
+    original.statements.length = 0
+    assert.strictEqual(declaration.body._tag, 'CallableBody')
+    if (declaration.body._tag !== 'CallableBody') return yield* Effect.die('Expected callable body')
+    assert.strictEqual(declaration.body.block?.statements.length, 1)
+    assert.isTrue(Object.isFrozen(declaration.body.block?.statements))
+    assert.isTrue(AuthoredModule.isUndamaged(declaration))
+    const header = yield* AuthoredEncoding.header(module.pool, declaration)
+    const body = yield* AuthoredEncoding.body(module.pool, declaration)
+    assert.strictEqual(hex(header), golden('authored-header.hex'))
+    assert.strictEqual(hex(body), golden('authored-body.hex'))
+    assert.notDeepEqual(header, body)
+    assert.strictEqual((yield* AuthoredEncoding.digest(body)).length, 64)
+    // The known SHA-256 vector also checks the platform boundary independently of our framing.
+    assert.strictEqual(
+      yield* AuthoredEncoding.digest([97, 98, 99]),
+      'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad',
+    )
+    const reordered = yield* AuthoredFunction.make(['unrelated', 'value', 'identity', 'i32'])
+    assert.deepEqual(
+      header,
+      yield* AuthoredEncoding.header(reordered.module.pool, reordered.declaration),
+    )
+    assert.deepEqual(
+      body,
+      yield* AuthoredEncoding.body(reordered.module.pool, reordered.declaration),
+    )
+    const edited = yield* AuthoredFunction.make(undefined, 9007199254740994n)
+    assert.deepEqual(declaration.owner, edited.declaration.owner)
+    assert.deepEqual(header, yield* AuthoredEncoding.header(edited.module.pool, edited.declaration))
+    assert.notDeepEqual(body, yield* AuthoredEncoding.body(edited.module.pool, edited.declaration))
+    const anchor = declaration.header.anchor
+    const before = yield* AuthoredPresentation.make(
+      'old/path.silk',
+      'revision-a',
+      [{ anchor, span: { start: 0, end: 10 }, spelling: 'identity', documentation: 'old docs' }],
+      [],
+    )
+    const after = yield* AuthoredPresentation.make(
+      'moved/path.silk',
+      'revision-b',
+      [{ anchor, span: { start: 30, end: 40 }, spelling: 'identity', documentation: 'new docs' }],
+      [],
+    )
+    assert.notDeepEqual(before, after)
+    assert.deepEqual(header, yield* AuthoredEncoding.header(module.pool, declaration))
+    assert.deepEqual(body, yield* AuthoredEncoding.body(module.pool, declaration))
+    const pending: unknown[] = [module]
+    while (pending.length > 0) {
+      const value = pending.pop()
+      if (value === null || typeof value !== 'object') continue
+      assert.isTrue(Object.isFrozen(value))
+      assert.notInstanceOf(value, Map)
+      if ('_tag' in value) {
+        assert.notInclude(
+          ['SyntaxNode', 'Token', 'SyntaxFile', 'SourceFile', 'DeclarationFact'],
+          value._tag,
+        )
+      }
+      assert.isFalse('span' in value)
+      for (const child of Object.values(value)) pending.push(child)
+    }
+  }),
+)
+
+it.effect('keeps authored recovery explicit and excludes damaged owners from reuse', () =>
+  Effect.gen(function* () {
+    const texts = ['identity', 'i32', 'value', 'healthy']
+    const fixture = yield* AuthoredFunction.make(texts)
+    const healthy = yield* AuthoredFunction.make(texts, 42n, 'healthy')
+    const missing: AuthoredHir.MissingExpression = {
+      _tag: 'MissingExpression',
+      anchor: fixture.literal.anchor,
+      origin: { _tag: 'Authored' },
+      causes: [{ _tag: 'Cause', anchor: fixture.literal.anchor, code: 'PAR0001' }],
+    }
+    const damaged: AuthoredHir.Declaration = {
+      ...fixture.declaration,
+      body: { _tag: 'InitializerBody', value: missing },
+    }
+    const repaired: AuthoredHir.Declaration = {
+      ...damaged,
+      body: { _tag: 'InitializerBody', value: fixture.literal },
+    }
+    const module = yield* AuthoredModule.make({
+      ...fixture.module,
+      declarations: [damaged, healthy.declaration],
+    })
+    assert.isFalse(AuthoredModule.isUndamaged(module.declarations[0] ?? unreachable()))
+    assert.isTrue(AuthoredModule.isUndamaged(repaired))
+    const following = module.declarations[1] ?? unreachable()
+    assert.isTrue(AuthoredModule.isUndamaged(following))
+    assert.deepEqual(
+      yield* AuthoredEncoding.body(module.pool, following),
+      yield* AuthoredEncoding.body(healthy.module.pool, healthy.declaration),
+    )
+    assert.notDeepEqual(
+      yield* AuthoredEncoding.body(module.pool, damaged),
+      yield* AuthoredEncoding.body(module.pool, repaired),
+    )
+    assert.deepEqual(
+      yield* AuthoredEncoding.header(module.pool, damaged),
+      yield* AuthoredEncoding.header(module.pool, repaired),
+    )
+    const badRef: AuthoredHir.Declaration = {
+      ...damaged,
+      body: {
+        _tag: 'InitializerBody',
+        value: {
+          _tag: 'TextLiteral',
+          anchor: fixture.literal.anchor,
+          origin: fixture.literal.origin,
+          causes: [],
+          value: { _tag: 'TextRef', index: 99 },
+        },
+      },
+    }
+    const rejected = yield* Effect.flip(
+      AuthoredModule.make({
+        ...fixture.module,
+        declarations: [badRef],
+      }),
+    )
+    assert.strictEqual(rejected._tag, 'AuthoredEncodingError')
+  }),
+)
+
+it('keeps authored owners stable by logical parent and same-key occurrence', () => {
+  const module = AuthoredIdentity.module('demo', 'app/Value')
+  const keys = [
+    { kind: 'function', name: 'identity' },
+    { kind: 'function', name: 'other' },
+    { kind: 'function', name: 'identity' },
+    { kind: 'struct', name: 'identity' },
+  ]
+  const owners = AuthoredIdentity.children(module, keys)
+  const identity = owners[0] ?? unreachable()
+  const reordered = AuthoredIdentity.children(module, [
+    { kind: 'function', name: 'inserted' },
+    ...keys.slice(1, 2),
+    keys[0] ?? unreachable(),
+  ])
+  assert.isTrue(AuthoredIdentity.equals(identity, reordered[2] ?? unreachable()))
+  assert.isFalse(AuthoredIdentity.equals(identity, owners[2] ?? unreachable()))
+  assert.isFalse(AuthoredIdentity.equals(identity, owners[3] ?? unreachable()))
+  assert.isFalse(AuthoredIdentity.equals(identity, owners[1] ?? unreachable()))
+  const group =
+    AuthoredIdentity.children(module, [{ kind: 'conditional', role: 'group' }])[0] ?? unreachable()
+  const arms = AuthoredIdentity.children(group, [
+    { kind: 'branch', role: 'then' },
+    { kind: 'branch', role: 'else' },
+  ])
+  const thenOwner =
+    AuthoredIdentity.children(arms[0] ?? unreachable(), keys.slice(0, 1))[0] ?? unreachable()
+  const elseOwner =
+    AuthoredIdentity.children(arms[1] ?? unreachable(), keys.slice(0, 1))[0] ?? unreachable()
+  assert.isFalse(AuthoredIdentity.equals(thenOwner, elseOwner))
+  assert.isFalse(AuthoredIdentity.equals(identity, thenOwner))
+  const ambiguousInsertion = AuthoredIdentity.children(module, [keys[0] ?? unreachable(), ...keys])
+  assert.isFalse(AuthoredIdentity.equals(identity, ambiguousInsertion[1] ?? unreachable()))
+  assert.isTrue(Object.isFrozen(identity.path))
+  // Authored kind distinctions never change the language's shared declaration namespace.
+  const duplicate = elaborate(
+    'owners://duplicate.silk',
+    'struct Value {} fn Value() -> i32 { return 0 }',
+  )
+  assert.isTrue(duplicate.diagnostics.some((diagnostic) => diagnostic.code === 'SEM0003'))
+})
+
+it.effect('owns exact text and byte pools and rejects invalid references and payloads', () =>
+  Effect.gen(function* () {
+    const bytes = [65, 0, 255]
+    const pool = yield* AuthoredPool.make(['é\u0000𝄞'], [bytes])
+    bytes[0] = 90
+    assert.deepEqual(yield* AuthoredPool.text(pool, { _tag: 'TextRef', index: 0 }), {
+      _tag: 'PoolText',
+      value: 'é\u0000𝄞',
+      byteLength: 7,
+    })
+    assert.deepEqual(yield* AuthoredPool.bytes(pool, { _tag: 'BytesRef', index: 0 }), {
+      _tag: 'PoolBytes',
+      value: [65, 0, 255],
+      byteLength: 3,
+    })
+    assert.isTrue(Object.isFrozen(pool.bytes[0]?.value))
+    const invalidByte = yield* Effect.flip(AuthoredPool.make([], [[256]]))
+    assert.strictEqual(invalidByte.reason._tag, 'InvalidByte')
+    const invalidText = yield* Effect.flip(AuthoredPool.make(['\ud800'], []))
+    assert.strictEqual(invalidText.reason._tag, 'InvalidText')
+    const invalidRef = yield* Effect.flip(AuthoredPool.text(pool, { _tag: 'TextRef', index: -1 }))
+    assert.strictEqual(invalidRef.reason._tag, 'InvalidReference')
+    const invalidAnchor = yield* Effect.flip(
+      AuthoredIdentity.anchor(AuthoredIdentity.module('demo', 'app/Value'), [
+        { role: 'operand', occurrence: 0.5 },
+      ]),
+    )
+    assert.strictEqual(invalidAnchor.reason._tag, 'InvalidLocalOccurrence')
+  }),
+)
 
 const acceptedSource = `pub fn identity(value: i32) -> i32 { return value }
 pub fn main() -> i32 { return identity(identity(42)) }`
