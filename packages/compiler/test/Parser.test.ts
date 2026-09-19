@@ -2059,7 +2059,7 @@ it('parses namespace, selective, member-alias, and hybrid imports losslessly', (
   const source = `import compiler.Syntax
 import compiler.Tree as Ast
 import compiler.Parse { Node, parse, encode as encodeSyntax }
-import compiler.Hir as Ir { lower, inspect as show }
+import compiler.Tir as Ir { lower, inspect as show }
 pub fn main() -> i32 { return 42 }`
   const result = parseText('fixture://full-imports.silk', source)
   const imports = SyntaxTree.directNodes(result.root, 'ImportDeclaration')

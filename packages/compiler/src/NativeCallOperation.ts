@@ -6,7 +6,7 @@ import * as Constant from '@silklang/llvm/Constant'
 import * as FunctionBody from '@silklang/llvm/FunctionBody'
 import * as Value from '@silklang/llvm/Value'
 import * as Effect from 'effect/Effect'
-import * as Hir from './Hir.js'
+import * as Tir from './Tir.js'
 import * as Mir from './Mir.js'
 import * as FunctionIndex from './internal/FunctionIndex.js'
 import type { LinearOperation } from './MirLinearization.js'
@@ -61,7 +61,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
           `Backend cannot resolve callable target ${target.declaration.module}.${target.declaration.name}`,
         )
       const targetUsesEnvironmentBorrows =
-        target._tag === 'DeclarationCallableTarget' && Hir.isAnonymousCallableId(target.declaration)
+        target._tag === 'DeclarationCallableTarget' && Tir.isAnonymousCallableId(target.declaration)
       const captureGroups: Array<{
         readonly parameterOrdinal: number
         readonly value: NativeValue.NativeValue

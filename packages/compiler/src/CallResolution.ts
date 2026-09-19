@@ -1,4 +1,8 @@
 import * as CAbi from './CAbi.js'
+import type * as AuthoredHir from './AuthoredHir.js'
+import * as AuthoredIdentity from './AuthoredIdentity.js'
+import * as AuthoredWalk from './AuthoredWalk.js'
+import * as SemanticContext from './SemanticContext.js'
 import * as BodyLifetime from './BodyLifetime.js'
 import * as Lifetime from './Lifetime.js'
 import * as ForeignContract from './ForeignContract.js'
@@ -33,19 +37,12 @@ import {
   argumentFact,
   availableExpressionType,
   callCallee,
-  callReferenceTokens,
-  childNode,
   contextualIntegerCompatible,
-  isAvailableSyntax,
-  isExpressionNode,
-  isRecursiveArgumentNode,
   lookupDeclaration,
-  pipelineCallable,
+  referenceNames,
   referencePath,
-  spelling,
   typesCompatible,
   unavailableExpressionType,
-  unavailableSyntax,
   unionConversionDiagnostic,
 } from './Elaboration.js'
 import type { ResolutionContext, Scope } from './ExpressionAnalysis.js'
@@ -60,7 +57,7 @@ import {
   strongestEffectAccess,
   unavailableExpression,
 } from './ExpressionAnalysis.js'
-import type * as Hir from './Hir.js'
+import type * as Tir from './Tir.js'
 import * as Intrinsic from './Intrinsic.js'
 import * as TypeInference from './internal/TypeInference.js'
 import * as NameResolution from './NameResolution.js'
@@ -68,18 +65,15 @@ import * as ProviderSelection from './ProviderSelection.js'
 import * as ResolutionWork from './ResolutionWork.js'
 import * as RequirementRow from './RequirementRow.js'
 import * as RowAlgebra from './RowAlgebra.js'
-import type * as SourceFile from './SourceFile.js'
 import type * as SourceSpan from './SourceSpan.js'
 import { unsafeCallDiagnostic } from './StatementAnalysis.js'
-import * as SyntaxTree from './SyntaxTree.js'
-import type * as Token from './Token.js'
 import * as Type from './Type.js'
 import * as TypeCompatibility from './TypeCompatibility.js'
 
 export const analyzeArgumentNodes = (
-  source: SourceFile.SourceFile,
-  site: SyntaxTree.Node,
-  nodes: ReadonlyArray<SyntaxTree.Node>,
+  context: SemanticContext.SemanticContext,
+  site: AuthoredHir.Expression,
+  nodes: ReadonlyArray<AuthoredHir.Expression>,
   declarations: ReadonlyArray<DeclarationFact>,
   declaration: DeclarationFact,
   scope: Scope,
@@ -88,11 +82,17 @@ export const analyzeArgumentNodes = (
 ): ArgumentsResult => {
   const inferred = new Map<string, Type.GenericArgument>()
   const lifetimes = selectedCallLifetimes(site, [], resolution)
-  const analyzed = nodes.flatMap((element, ordinal): ReadonlyArray<ExpressionResult> => {
+  // An operand recovery invented to fill an empty position is not an argument the author wrote.
+  const written = nodes.filter(
+    (element) =>
+      element._tag !== 'MissingExpression' &&
+      !(element._tag === 'IdentifierExpression' && element.name._tag !== 'Name'),
+  )
+  const analyzed = written.flatMap((element, ordinal): ReadonlyArray<ExpressionResult> => {
     const pattern = expectedTypes.at(ordinal)
     const expected = pattern === undefined ? undefined : Type.substitute(pattern, inferred)
     const result = analyzeExpression(
-      source,
+      context,
       element,
       declarations,
       declaration,
@@ -108,7 +108,7 @@ export const analyzeArgumentNodes = (
     return result === undefined ? [] : [result]
   })
   const facts = analyzed.map((result, ordinal) =>
-    argumentFact(declaration, site.span, result.fact, ordinal),
+    argumentFact(declaration, context.spanOf(site.anchor), result.fact, ordinal),
   )
 
   return Object.freeze({
@@ -118,17 +118,16 @@ export const analyzeArgumentNodes = (
 }
 
 export function analyzeArguments(
-  source: SourceFile.SourceFile,
-  call: SyntaxTree.Node,
+  context: SemanticContext.SemanticContext,
+  call: AuthoredHir.Expression,
   declarations: ReadonlyArray<DeclarationFact>,
   declaration: DeclarationFact,
   scope: Scope,
   resolution: ResolutionContext,
   callTypeArguments?: CallTypeArgumentsResult,
 ): ArgumentsResult {
-  const argumentList = childNode(call, 'ArgumentList')
-  const argumentNodes = argumentList.children.filter(isRecursiveArgumentNode)
-  const identifiers = callReferenceTokens(call)
+  const argumentNodes = call._tag === 'CallExpression' ? call.arguments : Object.freeze([])
+  const identifiers = referenceNames(call)
   const first = identifiers.at(0)
   const second = identifiers.at(1)
   let target: SourceCallable | undefined
@@ -138,7 +137,7 @@ export function analyzeArguments(
   let builtinLifetimes: ReadonlyArray<Lifetime.Bound> = Object.freeze([])
   let boundParameters: ReadonlyArray<SemanticType> = Object.freeze([])
   if (first !== undefined && second === undefined) {
-    const name = spelling(source, first)
+    const name = SemanticContext.nameText(context, first) ?? ''
     const resolved = NameResolution.lookup(resolution.scope, resolution.index, name)
     const local = lookupDeclaration(declarations, name)
     if (resolved._tag === 'Resolved' && resolved.declaration._tag === 'FunctionDeclaration') {
@@ -147,8 +146,8 @@ export function analyzeArguments(
       target = local.declaration
     }
   } else if (first !== undefined && second !== undefined) {
-    const qualifierSpelling = spelling(source, first)
-    const memberSpelling = spelling(source, second)
+    const qualifierSpelling = SemanticContext.nameText(context, first) ?? ''
+    const memberSpelling = SemanticContext.nameText(context, second) ?? ''
     const qualifier = NameResolution.lookup(resolution.scope, resolution.index, qualifierSpelling)
     const associated =
       qualifier._tag === 'Resolved'
@@ -208,7 +207,12 @@ export function analyzeArguments(
     }
   }
   if (first !== undefined && second === undefined) {
-    const callee = resolveValueName(scope, spelling(source, first), first)
+    const callee = resolveValueName(
+      context,
+      scope,
+      SemanticContext.nameText(context, first) ?? '',
+      first.anchor,
+    )
     if (callee.type._tag === 'Available' && Type.isForeignFunction(callee.type.type)) {
       target = undefined
       const selected = selectedCallLifetimes(call, callee.type.type.lifetimeBinders, resolution)
@@ -274,7 +278,7 @@ export function analyzeArguments(
   }
   const expectedTypes = Object.freeze(selectedParameters)
   return analyzeArgumentNodes(
-    source,
+    context,
     call,
     argumentNodes,
     declarations,
@@ -297,22 +301,6 @@ export interface CallTypeArgumentsResult {
   readonly types?: ReadonlyArray<Type.GenericArgument>
   readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
 }
-
-const isTypeArgumentNode = (element: SyntaxTree.Element): element is SyntaxTree.Node =>
-  SyntaxTree.isNode(element) &&
-  (element.kind === 'UnitType' ||
-    element.kind === 'LifetimeType' ||
-    element.kind === 'RequirementSelector' ||
-    element.kind === 'TypePath' ||
-    element.kind === 'AppliedType' ||
-    element.kind === 'FixedArrayType' ||
-    element.kind === 'SliceType' ||
-    element.kind === 'ReferenceType' ||
-    element.kind === 'PointerType' ||
-    element.kind === 'CallableType' ||
-    element.kind === 'ForeignFunctionType' ||
-    element.kind === 'ParenthesizedType' ||
-    element.kind === 'UnionType')
 
 const requirementArgumentOfType = (
   type: Type.Type,
@@ -345,11 +333,11 @@ const requirementArgumentOfType = (
 }
 
 const explicitSourceCallTypeParameters = (
-  source: SourceFile.SourceFile,
-  call: SyntaxTree.Node,
+  context: SemanticContext.SemanticContext,
+  call: AuthoredHir.Expression,
   resolution: ResolutionContext,
 ): ReadonlyArray<Type.Parameter> => {
-  const identifiers = callReferenceTokens(call)
+  const identifiers = referenceNames(call)
   const first = identifiers.at(0)
   const second = identifiers.at(1)
   let target: SourceCallable | undefined
@@ -357,7 +345,7 @@ const explicitSourceCallTypeParameters = (
     const resolved = NameResolution.lookup(
       resolution.scope,
       resolution.index,
-      spelling(source, first),
+      SemanticContext.nameText(context, first) ?? '',
     )
     if (resolved._tag === 'Resolved' && resolved.declaration._tag === 'FunctionDeclaration')
       target = resolved.declaration
@@ -365,9 +353,9 @@ const explicitSourceCallTypeParameters = (
     const qualifier = NameResolution.lookup(
       resolution.scope,
       resolution.index,
-      spelling(source, first),
+      SemanticContext.nameText(context, first) ?? '',
     )
-    const member = spelling(source, second)
+    const member = SemanticContext.nameText(context, second) ?? ''
     if (qualifier._tag === 'Namespace') {
       const selected = DeclarationFacts.lookup(resolution.index, qualifier.module, member)
       if (selected._tag === 'Resolved' && selected.declaration._tag === 'FunctionDeclaration')
@@ -397,26 +385,22 @@ const explicitSourceCallTypeParameters = (
  * explicit prefix reads as `Option.map<i32, i64>`.
  */
 export const appliedOwnerTypeArgumentNodes = (
-  call: SyntaxTree.Node,
-): ReadonlyArray<SyntaxTree.Node> => {
+  call: AuthoredHir.Expression,
+): ReadonlyArray<AuthoredHir.GenericArgument> => {
   const callee = callCallee(call)
-  if (callee.kind !== 'AppliedMemberExpression') return Object.freeze([])
-  const selector = SyntaxTree.directNode(callee, 'AppliedMemberSelector')
-  const owner = selector === undefined ? undefined : SyntaxTree.directNode(selector, 'AppliedType')
-  const list = owner === undefined ? undefined : SyntaxTree.directNode(owner, 'TypeArgumentList')
-  return list === undefined
-    ? Object.freeze([])
-    : Object.freeze(list.children.filter(isTypeArgumentNode))
+  if (callee._tag !== 'MemberExpression') return Object.freeze([])
+  const owner = callee.selector.subject
+  return owner._tag === 'AppliedType' ? owner.arguments.arguments : Object.freeze([])
 }
 
 export const analyzeCallTypeArguments = (
-  source: SourceFile.SourceFile,
-  call: SyntaxTree.Node,
+  context: SemanticContext.SemanticContext,
+  call: AuthoredHir.Expression,
   caller: DeclarationFact | undefined,
   resolution: ResolutionContext,
-  leading: ReadonlyArray<SyntaxTree.Node> = Object.freeze([]),
+  leading: ReadonlyArray<AuthoredHir.GenericArgument> = Object.freeze([]),
 ): CallTypeArgumentsResult => {
-  const list = SyntaxTree.directNode(call, 'CallTypeArgumentList')
+  const list = call._tag === 'CallExpression' ? call.generics : undefined
   if (list === undefined && leading.length === 0) {
     return Object.freeze({
       explicit: false,
@@ -432,34 +416,28 @@ export const analyzeCallTypeArguments = (
   const nameResolution: NameResolution.Resolution = Object.freeze({
     _tag: 'NameResolution',
     modules: Object.freeze([resolution.scope]),
+    contexts: SemanticContext.registry([context]),
     diagnostics: Object.freeze([]),
   })
-  const nodes = [
-    ...leading,
-    ...(list === undefined ? [] : list.children.filter(isTypeArgumentNode)),
-  ]
-  const targetParameters = explicitSourceCallTypeParameters(source, call, resolution)
+  const nodes = [...leading, ...(list === undefined ? [] : list.arguments)]
+  const targetParameters = explicitSourceCallTypeParameters(context, call, resolution)
   const lifetimeParameters = targetParameters.filter((parameter) => parameter.kind === 'Lifetime')
   const ordinaryParameters = targetParameters.filter((parameter) => parameter.kind !== 'Lifetime')
   let lifetimeOrdinal = 0
   let ordinaryOrdinal = 0
   const analyzed = nodes.map((node, ordinal) => {
     const targetParameter =
-      node.kind === 'LifetimeType'
+      node._tag === 'Lifetime'
         ? lifetimeParameters.at(lifetimeOrdinal++)
         : ordinaryParameters.at(ordinaryOrdinal++)
-    const selectorNodes =
-      node.kind === 'RequirementSelector'
-        ? node.children.filter(SyntaxTree.isNode)
-        : Object.freeze<ReadonlyArray<SyntaxTree.Node>>([])
-    const argumentNode = selectorNodes.at(0) ?? node
-    const roleNode = selectorNodes.at(1)
+    const argumentNode = node._tag === 'RequirementSelector' ? node.subject : node
+    const roleNode = node._tag === 'RequirementSelector' ? node.role : undefined
     const directToken =
-      argumentNode.kind === 'TypePath'
-        ? SyntaxTree.tokens(argumentNode).find((token) => token.kind === 'Identifier')
-        : undefined
+      argumentNode._tag === 'NamedType' ? argumentNode.path.segments.at(0) : undefined
+    const directSpelling =
+      directToken === undefined ? undefined : SemanticContext.nameText(context, directToken)
     const directParameter =
-      directToken === undefined ? undefined : environment.get(spelling(source, directToken))
+      directSpelling === undefined ? undefined : environment.get(directSpelling)
     if (
       directToken !== undefined &&
       directParameter !== undefined &&
@@ -469,37 +447,44 @@ export const analyzeCallTypeArguments = (
         fact: Object.freeze({
           _tag: 'TypeArgument' as const,
           ordinal,
-          syntax: node,
+          anchor: node.anchor,
           declared: Object.freeze({
             _tag: 'Resolved' as const,
             type: directParameter,
             spelling: directParameter.name,
-            token: directToken,
-            syntax: node,
+            anchor: directToken.anchor,
           }),
           type: directParameter,
         }),
         diagnostics: Object.freeze([]),
       })
     const roleSegments =
-      roleNode?.kind === 'TypePath'
-        ? SyntaxTree.tokens(roleNode)
-            .filter((token) => token.kind === 'Identifier')
-            .map((token) => Object.freeze({ spelling: spelling(source, token), token }))
-        : []
+      roleNode === undefined
+        ? []
+        : roleNode.segments.map((segment) =>
+            Object.freeze({
+              spelling: SemanticContext.nameText(context, segment) ?? '',
+              anchor: segment.anchor,
+            }),
+          )
     const rolePath =
-      roleNode?.kind === 'TypePath' && roleSegments.length > 0
+      roleSegments.length > 0 && roleNode !== undefined
         ? Object.freeze({
             _tag: 'TypePath' as const,
             spelling: roleSegments.map((segment) => segment.spelling).join('.'),
             segments: Object.freeze(roleSegments),
-            syntax: roleNode,
+            anchor: roleNode.anchor,
           })
         : undefined
     const roleResolution =
       rolePath === undefined
         ? undefined
-        : NameResolution.resolveItem(nameResolution, resolution.index, source.id, rolePath)
+        : NameResolution.resolveItem(
+            nameResolution,
+            resolution.index,
+            AuthoredWalk.moduleName(context),
+            rolePath,
+          )
     const roleDeclaration =
       roleResolution?._tag === 'Resolved' && roleResolution.declaration._tag === 'RoleDeclaration'
         ? roleResolution.declaration
@@ -515,21 +500,25 @@ export const analyzeCallTypeArguments = (
       rolePath === undefined || requirementRole !== undefined
         ? Object.freeze<ReadonlyArray<Diagnostic.Diagnostic>>([])
         : Object.freeze([
-            Diagnostic.invalidRequirementType(`role ${rolePath.spelling}`, rolePath.syntax.span),
+            Diagnostic.invalidRequirementType(
+              `role ${rolePath.spelling}`,
+              context.spanOf(rolePath.anchor),
+            ),
           ])
     const body = resolution.bodyLifetimes
+    const owningDeclaration = resolution.authoredDeclaration
     const lifetimeContext =
-      body === undefined
+      body === undefined || owningDeclaration === undefined
         ? undefined
         : DeclarationLifetime.forHeader(
-            source,
+            context,
             body.owner,
-            argumentNode,
+            owningDeclaration,
             environment,
             body,
             (path) => {
               const rawPath = DeclarationCollection.analyzeDeclaredType(
-                source,
+                context,
                 path,
                 environment,
                 true,
@@ -538,7 +527,7 @@ export const analyzeCallTypeArguments = (
               const target = NameResolution.resolveType(
                 nameResolution,
                 resolution.index,
-                source.id,
+                AuthoredWalk.moduleName(context),
                 rawPath.path,
               ).fact
               return target._tag === 'Resolved' && Type.isNominal(target.type)
@@ -550,7 +539,7 @@ export const analyzeCallTypeArguments = (
             },
           )
     const raw = DeclarationCollection.analyzeDeclaredType(
-      source,
+      context,
       argumentNode,
       environment,
       true,
@@ -558,8 +547,13 @@ export const analyzeCallTypeArguments = (
     )
     if (targetParameter?.kind === 'RequirementRow' && raw.fact._tag === 'Union') {
       const members = raw.fact.members.map((member) =>
-        DeclarationResolution.resolveTypeFact(resolution.index, source.id, member, (module, path) =>
-          NameResolution.resolveType(nameResolution, resolution.index, module, path),
+        DeclarationResolution.resolveTypeFact(
+          context.spanOf,
+          resolution.index,
+          AuthoredWalk.moduleName(context),
+          member,
+          (module, path) =>
+            NameResolution.resolveType(nameResolution, resolution.index, module, path),
         ),
       )
       const arguments_ = members.map((member) =>
@@ -587,7 +581,7 @@ export const analyzeCallTypeArguments = (
         fact: Object.freeze({
           _tag: 'TypeArgument' as const,
           ordinal,
-          syntax: node,
+          anchor: node.anchor,
           declared: Object.freeze({
             ...raw.fact,
             members: Object.freeze(members.map((member) => member.fact)),
@@ -599,8 +593,9 @@ export const analyzeCallTypeArguments = (
       })
     }
     const resolved = DeclarationResolution.resolveTypeFact(
+      context.spanOf,
       resolution.index,
-      source.id,
+      AuthoredWalk.moduleName(context),
       raw.fact,
       (module, path) => NameResolution.resolveType(nameResolution, resolution.index, module, path),
     )
@@ -608,7 +603,7 @@ export const analyzeCallTypeArguments = (
       fact: Object.freeze({
         _tag: 'TypeArgument' as const,
         ordinal,
-        syntax: node,
+        anchor: node.anchor,
         declared: resolved.fact,
         ...(requirementRole === undefined ? {} : { requirementRole }),
         ...((resolved.fact._tag === 'Resolved' || resolved.fact._tag === 'Lifetime') &&
@@ -635,17 +630,11 @@ export const analyzeCallTypeArguments = (
   })
 }
 
-export const hasAvailableCallSyntax = (call: SyntaxTree.Node): boolean => {
-  const argumentList = childNode(call, 'ArgumentList')
-  const callHeadAvailable = call.children.every(
-    (element) =>
-      (SyntaxTree.isNode(element) && element.kind === 'ArgumentList') || isAvailableSyntax(element),
-  )
-  const listStructureAvailable = argumentList.children.every(
-    (element) => isRecursiveArgumentNode(element) || isAvailableSyntax(element),
-  )
-  return callHeadAvailable && listStructureAvailable
-}
+/** True when neither the callee nor any argument of a call is a lexical-recovery placeholder. */
+export const hasAvailableCallSyntax = (call: AuthoredHir.Expression): boolean =>
+  call._tag === 'CallExpression' &&
+  AuthoredWalk.isAvailable(call.callee) &&
+  call.arguments.every(AuthoredWalk.isAvailable)
 
 export const isSectionArity = (expectedCount: number, actualCount: number): boolean =>
   actualCount > 0 && actualCount < expectedCount
@@ -833,7 +822,7 @@ interface SelectedCallLifetimes {
 /** Opens an inherent member's header lifetimes before contextual argument checking. */
 export const instantiateSourceParameters = (
   declaration: SourceCallable,
-  call: SyntaxTree.Node,
+  call: AuthoredHir.Expression,
   resolution: ResolutionContext,
 ): ReadonlyArray<SemanticType | undefined> => {
   const selected = selectedCallLifetimes(
@@ -850,7 +839,7 @@ export const instantiateSourceParameters = (
 
 /** Instantiates only the already selected contract's binders, at one declaration-local call site. */
 const selectedCallLifetimes = (
-  call: SyntaxTree.Node,
+  call: AuthoredHir.Expression,
   binders: ReadonlyArray<Lifetime.Bound>,
   resolution: ResolutionContext | undefined,
   initial: Type.Substitution = new Map(),
@@ -860,7 +849,7 @@ const selectedCallLifetimes = (
   if (body !== undefined) {
     for (const [ordinal, binder] of binders.entries()) {
       if (substitution.has(Lifetime.key(binder))) continue
-      const region = BodyLifetime.region(body, call, 'Call', ordinal)
+      const region = BodyLifetime.region(body, call.anchor, 'Call', ordinal)
       if (region !== undefined) substitution.set(Lifetime.key(binder), region)
     }
   }
@@ -929,6 +918,7 @@ const selectedLifetimeBoundDiagnostics = (
  * arguments determines them, which is how a callable section keeps its captured parameter generic.
  */
 export const seededSpecialization = (
+  context: SemanticContext.SemanticContext,
   target: string,
   declared: ReadonlyArray<Type.Parameter>,
   explicit: ReadonlyArray<TypeArgumentFact>,
@@ -984,7 +974,7 @@ export const seededSpecialization = (
             parameter.name,
             parameter.kind,
             suppliedKind,
-            fact.syntax.span,
+            context.spanOf(fact.anchor),
           ),
         }),
       )
@@ -1035,7 +1025,7 @@ export const seededSpecialization = (
             selectedParameters.get(fact)?.name ?? fact.ordinal.toString(),
             Type.encodeGenericArgument(explicitArgument),
             Type.encodeGenericArgument(suppliedArgument),
-            fact.syntax.span,
+            context.spanOf(fact.anchor),
           ),
         }),
       )
@@ -1135,6 +1125,7 @@ const instantiateKnownProviderContract = (
  * interface identity, so this cannot become backwards provider inference.
  */
 const inferKnownProviderBounds = (
+  context: SemanticContext.SemanticContext,
   target: string,
   parameters: ReadonlyArray<DeclarationFacts.TypeParameterFact>,
   initial: Type.Substitution,
@@ -1302,7 +1293,7 @@ const inferKnownProviderBounds = (
             Type.encodeGenericArgument(existing),
             Type.encodeGenericArgument(inferred),
             span,
-            bound.path.syntax.span,
+            context.spanOf(bound.path.anchor),
           ),
         })
       }
@@ -1343,9 +1334,10 @@ export interface ConstraintSolveResult {
 }
 
 export const constraintOrigins = (
+  context: SemanticContext.SemanticContext,
   callable: SourceCallable | undefined,
 ): ReadonlyArray<SourceSpan.SourceSpan> =>
-  Object.freeze(callable?.constraints.map((constraint) => constraint.syntax.span) ?? [])
+  Object.freeze(callable?.constraints.map((constraint) => context.spanOf(constraint.anchor)) ?? [])
 
 /** Solves provider relations only after arguments have independently established their operands. */
 export const solveCallableConstraints = (
@@ -1493,7 +1485,8 @@ export const solveCallableConstraints = (
 }
 
 export const analyzeCallContract = (
-  call: SyntaxTree.Node,
+  context: SemanticContext.SemanticContext,
+  call: AuthoredHir.Expression,
   reference: CallReferenceFact,
   argumentsList: ReadonlyArray<ArgumentFact>,
   syntaxAvailable = hasAvailableCallSyntax(call),
@@ -1506,7 +1499,7 @@ export const analyzeCallContract = (
       mappings: Object.freeze([]),
       fact: Object.freeze({
         _tag: 'Unavailable',
-        reason: Object.freeze({ _tag: 'UnavailableCallSyntax', syntax: call }),
+        reason: Object.freeze({ _tag: 'UnavailableCallSyntax', anchor: call.anchor }),
       }),
       diagnostics: Object.freeze([]),
     })
@@ -1541,26 +1534,26 @@ export const analyzeCallContract = (
           mismatch = Diagnostic.invalidForeignCallback(
             Type.encode(argument.type.type),
             'capturing and anonymous Silk callables do not have an exported C address',
-            argument.syntax.span,
+            context.spanOf(argument.anchor),
           )
         else if (Type.isCallable(expected) && Type.isCallable(argument.type.type))
           mismatch = Diagnostic.incompatibleCallableSignature(
             Type.encode(expected),
             Type.encode(argument.type.type),
-            argument.syntax.span,
+            context.spanOf(argument.anchor),
           )
         else
           mismatch =
             unionConversionDiagnostic(
               argument.type.type,
               expected,
-              argument.syntax.span,
+              context.spanOf(argument.anchor),
               resolution?.lifetimeCompatibility,
             ) ??
             Diagnostic.argumentTypeMismatch(
               Type.encode(expected),
               Type.encode(argument.type.type),
-              argument.syntax.span,
+              context.spanOf(argument.anchor),
             )
         return Object.freeze({
           mappings: Object.freeze([]),
@@ -1580,7 +1573,7 @@ export const analyzeCallContract = (
         mappings: Object.freeze([]),
         fact: Object.freeze({ _tag: 'ArityMismatch', expectedCount, actualCount }),
         diagnostics: Object.freeze([
-          callArityDiagnostic(reference, expectedCount, actualCount, call.span),
+          callArityDiagnostic(reference, expectedCount, actualCount, context.spanOf(call.anchor)),
         ]),
       })
     }
@@ -1670,7 +1663,10 @@ export const analyzeCallContract = (
     const expected = implicitDecay.pattern
     const argument = argumentsList.at(implicitDecay.ordinal)
     if (argument === undefined) throw new RangeError('specialization site lost its argument')
-    const diagnostic = Diagnostic.implicitSliceDecay(Type.encode(expected), argument.syntax.span)
+    const diagnostic = Diagnostic.implicitSliceDecay(
+      Type.encode(expected),
+      context.spanOf(argument.anchor),
+    )
     return Object.freeze({
       mappings,
       fact: Object.freeze({
@@ -1706,13 +1702,13 @@ export const analyzeCallContract = (
         reference.spelling,
         declaredTypeParameters.length,
         callTypeArguments.facts.length,
-        call.span,
+        context.spanOf(call.anchor),
       )
       return Object.freeze({
         mappings,
         fact: Object.freeze({
           _tag: 'Unavailable',
-          reason: Object.freeze({ _tag: 'UnavailableCallSyntax', syntax: call }),
+          reason: Object.freeze({ _tag: 'UnavailableCallSyntax', anchor: call.anchor }),
           cause: Diagnostic.identity(diagnostic),
         }),
         diagnostics: Object.freeze([diagnostic]),
@@ -1728,7 +1724,7 @@ export const analyzeCallContract = (
         mappings,
         fact: Object.freeze({
           _tag: 'Unavailable',
-          reason: Object.freeze({ _tag: 'UnavailableCallSyntax', syntax: call }),
+          reason: Object.freeze({ _tag: 'UnavailableCallSyntax', anchor: call.anchor }),
           ...(cause === undefined ? {} : { cause }),
         }),
         diagnostics: Object.freeze([]),
@@ -1736,11 +1732,12 @@ export const analyzeCallContract = (
       })
     }
     const seeded = seededSpecialization(
+      context,
       reference.spelling,
       declaredTypeParameters,
       callTypeArguments.facts,
       sites,
-      call.span,
+      context.spanOf(call.anchor),
       constraintDeferred,
       resolution?.staticContext?.typeSubstitution,
       callLifetimes,
@@ -1751,7 +1748,7 @@ export const analyzeCallContract = (
         mappings,
         fact: Object.freeze({
           _tag: 'Unavailable',
-          reason: Object.freeze({ _tag: 'UnavailableCallSyntax', syntax: call }),
+          reason: Object.freeze({ _tag: 'UnavailableCallSyntax', anchor: call.anchor }),
           cause: Diagnostic.identity(conflict.diagnostic),
         }),
         diagnostics: Object.freeze([conflict.diagnostic]),
@@ -1785,7 +1782,7 @@ export const analyzeCallContract = (
           !Type.isRepresented(supplied) &&
           (Type.isCallable(supplied) || Type.isEffect(supplied))
             ? (() => {
-                const representation = representationOfExpression(argument.expression)
+                const representation = representationOfExpression(context, argument.expression)
                 return representation === undefined
                   ? undefined
                   : Type.represented(supplied, pattern.representation.requiredBound, representation)
@@ -1802,7 +1799,7 @@ export const analyzeCallContract = (
             representationFailure = Diagnostic.unsatisfiedExecutableProperty(
               'Intrinsic.NonParking',
               ['Unavailable:exact execution target'],
-              call.span,
+              context.spanOf(call.anchor),
             )
           else
             rowFailure = TypeInference.inferenceFailure(
@@ -1849,13 +1846,13 @@ export const analyzeCallContract = (
       const diagnostic =
         representationFailure ??
         (rowFailure === undefined
-          ? Diagnostic.typeArgumentInference(reference.spelling, call.span)
-          : Diagnostic.inferenceFailure(rowFailure, call.span))
+          ? Diagnostic.typeArgumentInference(reference.spelling, context.spanOf(call.anchor))
+          : Diagnostic.inferenceFailure(rowFailure, context.spanOf(call.anchor)))
       return Object.freeze({
         mappings,
         fact: Object.freeze({
           _tag: 'Unavailable',
-          reason: Object.freeze({ _tag: 'UnavailableCallSyntax', syntax: call }),
+          reason: Object.freeze({ _tag: 'UnavailableCallSyntax', anchor: call.anchor }),
           cause: Diagnostic.identity(diagnostic),
         }),
         diagnostics: Object.freeze([diagnostic]),
@@ -1881,12 +1878,13 @@ export const analyzeCallContract = (
     Object.freeze([])
   if (reference._tag === 'Resolved' && resolution !== undefined && mayInferFromKnownProvider) {
     const inferredFromBounds = inferKnownProviderBounds(
+      context,
       reference.spelling,
       reference.declaration.typeParameters,
       substitution,
       resolution,
       caller,
-      call.span,
+      context.spanOf(call.anchor),
     )
     substitution = inferredFromBounds.substitution
     symbolicConformances = inferredFromBounds.symbolicConformances
@@ -1896,7 +1894,7 @@ export const analyzeCallContract = (
         mappings,
         fact: Object.freeze({
           _tag: 'Unavailable',
-          reason: Object.freeze({ _tag: 'UnavailableCallSyntax', syntax: call }),
+          reason: Object.freeze({ _tag: 'UnavailableCallSyntax', anchor: call.anchor }),
           cause: Diagnostic.identity(diagnostic),
         }),
         diagnostics: Object.freeze([diagnostic]),
@@ -1920,12 +1918,15 @@ export const analyzeCallContract = (
         !substitution.has(Type.key(parameter)) && !constraintDeferred.has(Type.key(parameter)),
     )
     if (missingAfterKnownProviderInference !== undefined) {
-      const diagnostic = Diagnostic.typeArgumentInference(reference.spelling, call.span)
+      const diagnostic = Diagnostic.typeArgumentInference(
+        reference.spelling,
+        context.spanOf(call.anchor),
+      )
       return Object.freeze({
         mappings,
         fact: Object.freeze({
           _tag: 'Unavailable',
-          reason: Object.freeze({ _tag: 'UnavailableCallSyntax', syntax: call }),
+          reason: Object.freeze({ _tag: 'UnavailableCallSyntax', anchor: call.anchor }),
           cause: Diagnostic.identity(diagnostic),
         }),
         diagnostics: Object.freeze([diagnostic]),
@@ -1937,11 +1938,11 @@ export const analyzeCallContract = (
   if (resolution !== undefined && contract.constraints.length > 0) {
     const solved = solveCallableConstraints(
       contract.constraints,
-      constraintOrigins(callable),
+      constraintOrigins(context, callable),
       substitution,
       caller,
       resolution,
-      call.span,
+      context.spanOf(call.anchor),
     )
     substitution = solved.substitution
     evidence = solved.evidence
@@ -1952,7 +1953,7 @@ export const analyzeCallContract = (
         mappings,
         fact: Object.freeze({
           _tag: 'Unavailable',
-          reason: Object.freeze({ _tag: 'UnavailableCallSyntax', syntax: call }),
+          reason: Object.freeze({ _tag: 'UnavailableCallSyntax', anchor: call.anchor }),
           cause: Diagnostic.identity(firstConstraintDiagnostic),
         }),
         diagnostics: solved.diagnostics,
@@ -1971,7 +1972,7 @@ export const analyzeCallContract = (
     unresolvedSpecialization ??= Diagnostic.uninferredTypeParameter(
       reference.spelling,
       remainingOpen.name,
-      call.span,
+      context.spanOf(call.anchor),
     )
   for (const site of sites) {
     const argument = argumentsList.at(site.ordinal)
@@ -1988,28 +1989,31 @@ export const analyzeCallContract = (
         mismatch = Diagnostic.invalidForeignCallback(
           Type.encode(suppliedValue),
           'capturing and anonymous Silk callables do not have an exported C address',
-          argument.syntax.span,
+          context.spanOf(argument.anchor),
         )
       } else if (Type.isCallable(expectedValue) && Type.isCallable(suppliedValue)) {
         mismatch = Diagnostic.incompatibleCallableSignature(
           Type.encode(expectedValue),
           Type.encode(suppliedValue),
-          argument.syntax.span,
+          context.spanOf(argument.anchor),
         )
       } else if (Type.isSlice(expectedValue) && Type.isFixedArray(suppliedValue)) {
-        mismatch = Diagnostic.implicitSliceDecay(Type.encode(expectedValue), argument.syntax.span)
+        mismatch = Diagnostic.implicitSliceDecay(
+          Type.encode(expectedValue),
+          context.spanOf(argument.anchor),
+        )
       } else {
         mismatch =
           unionConversionDiagnostic(
             suppliedValue,
             expectedValue,
-            argument.syntax.span,
+            context.spanOf(argument.anchor),
             resolution?.lifetimeCompatibility,
           ) ??
           Diagnostic.argumentTypeMismatch(
             Type.encode(expectedValue),
             Type.encode(suppliedValue),
-            argument.syntax.span,
+            context.spanOf(argument.anchor),
           )
       }
       return Object.freeze({
@@ -2042,13 +2046,13 @@ export const analyzeCallContract = (
       const diagnostic = Diagnostic.foreignTypeNotAdmitted(
         Type.encode(invalid.type.type),
         'C variadic tail',
-        invalid.syntax.span,
+        context.spanOf(invalid.anchor),
       )
       return Object.freeze({
         mappings,
         fact: Object.freeze({
           _tag: 'Unavailable',
-          reason: Object.freeze({ _tag: 'UnavailableCallSyntax', syntax: call }),
+          reason: Object.freeze({ _tag: 'UnavailableCallSyntax', anchor: call.anchor }),
           cause: Diagnostic.identity(diagnostic),
         }),
         diagnostics: Object.freeze([diagnostic]),
@@ -2060,7 +2064,7 @@ export const analyzeCallContract = (
       mappings,
       fact: Object.freeze({ _tag: 'ArityMismatch', expectedCount, actualCount }),
       diagnostics: Object.freeze([
-        callArityDiagnostic(reference, expectedCount, actualCount, call.span),
+        callArityDiagnostic(reference, expectedCount, actualCount, context.spanOf(call.anchor)),
       ]),
     })
   }
@@ -2071,7 +2075,7 @@ export const analyzeCallContract = (
       mappings,
       fact: Object.freeze({
         _tag: 'Unavailable',
-        reason: Object.freeze({ _tag: 'UnavailableCallSyntax', syntax: call }),
+        reason: Object.freeze({ _tag: 'UnavailableCallSyntax', anchor: call.anchor }),
         cause: Diagnostic.identity(unresolvedSpecialization),
       }),
       diagnostics: Object.freeze([unresolvedSpecialization]),
@@ -2082,7 +2086,7 @@ export const analyzeCallContract = (
     contract.lifetimeBounds,
     substitution,
     resolution?.lifetimeCompatibility,
-    call.span,
+    context.spanOf(call.anchor),
     contract.typeOutlives,
   )
   const lifetimeFailure = lifetimeDiagnostics.at(0)
@@ -2091,7 +2095,7 @@ export const analyzeCallContract = (
       mappings,
       fact: Object.freeze({
         _tag: 'Unavailable',
-        reason: Object.freeze({ _tag: 'UnavailableCallSyntax', syntax: call }),
+        reason: Object.freeze({ _tag: 'UnavailableCallSyntax', anchor: call.anchor }),
         cause: Diagnostic.identity(lifetimeFailure),
       }),
       diagnostics: lifetimeDiagnostics,
@@ -2127,6 +2131,7 @@ export const interfaceEvidence = (
 }
 
 export const interfaceConstraints = (
+  context: SemanticContext.SemanticContext,
   reference: CallReferenceFact,
   substitution: Type.Substitution | undefined,
   index: DeclarationIndex.Index,
@@ -2153,7 +2158,7 @@ export const interfaceConstraints = (
           return [
             Diagnostic.invalidConformance(
               `unknown interface constraint ${bound.spelling}`,
-              parameter.syntax.span,
+              context.spanOf(parameter.anchor),
             ),
           ]
         const capability = substitutedCapability
@@ -2167,7 +2172,7 @@ export const interfaceConstraints = (
           return [
             Diagnostic.invalidConformance(
               `${bound.spelling} cannot bind Self to ${Type.encode(provider)}`,
-              parameter.syntax.span,
+              context.spanOf(parameter.anchor),
             ),
           ]
         // Selection excludes rejected declarations, but a partial declaration still carries the most
@@ -2249,7 +2254,7 @@ export const copyAssumptionsOf = (declaration: DeclarationFact): ReadonlySet<str
 
 export interface BuiltinSignature {
   readonly id: Intrinsic.OperationId
-  readonly operation: Hir.BuiltinOperation
+  readonly operation: Tir.BuiltinOperation
   readonly typeParameters?: ReadonlyArray<Type.Parameter>
   readonly parameters: ReadonlyArray<SemanticType>
   readonly result: SemanticType
@@ -2287,7 +2292,7 @@ const freeLifetimeBinders = (types: ReadonlyArray<Type.Type>): ReadonlyArray<Lif
 /** Opens an intrinsic's free template lifetimes in the selected caller's finite region domain. */
 export const instantiateBuiltinSignature = (
   signature: BuiltinSignature,
-  call: SyntaxTree.Node,
+  call: AuthoredHir.Expression,
   resolution: ResolutionContext,
 ): BuiltinSignature => {
   const binders = freeLifetimeBinders([...signature.parameters, signature.result])
@@ -2314,6 +2319,7 @@ export const callableResultType = (declaration: SourceCallable): SemanticType | 
 }
 
 export const callableTypeOfReference = (
+  context: SemanticContext.SemanticContext,
   reference: CallReferenceFact,
 ): Type.Callable | undefined => {
   if (reference._tag === 'ResolvedBuiltin')
@@ -2362,7 +2368,7 @@ export const callableTypeOfReference = (
           contractKey: CallableContract.key(contract),
           constraintKeys: Object.freeze(contract.constraints.map(Constraint.key)),
           evidenceKeys: Object.freeze([]),
-          origins: constraintOrigins(callable),
+          origins: constraintOrigins(context, callable),
         }),
     callable.unsafe,
   )
@@ -2428,7 +2434,7 @@ export const interfaceOperationContract = (
 /** Opens only the selected interface operation's invocation lifetime binders at this call. */
 export const instantiateInterfaceReference = (
   reference: Extract<CallReferenceFact, { readonly _tag: 'ResolvedInterfaceOperation' }>,
-  call: SyntaxTree.Node,
+  call: AuthoredHir.Expression,
   resolution: ResolutionContext,
 ): typeof reference => {
   const declared = DeclarationFacts.executableLifetimes(reference.declaration)
@@ -2464,7 +2470,7 @@ export const boundOperationReference = (
   interface_: DeclarationFacts.ContractFact,
   qualifier: string,
   member: string,
-  memberToken: Token.Token,
+  memberToken: AuthoredHir.Name,
 ):
   | {
       readonly _tag: 'BoundOperation'
@@ -2517,7 +2523,7 @@ export const boundOperationReference = (
     reference: Object.freeze({
       _tag: 'ResolvedInterfaceOperation' as const,
       spelling: `${qualifier}.${member}`,
-      token: memberToken,
+      anchor: memberToken.anchor,
       capability: bound.application.capability,
       provider: parameter.type,
       operation: member,
@@ -2530,17 +2536,17 @@ export const boundOperationReference = (
 }
 
 export const resolvedFunctionReference = (
-  source: SourceFile.SourceFile,
-  node: SyntaxTree.Node,
+  context: SemanticContext.SemanticContext,
+  node: AuthoredHir.Expression,
   declarations: ReadonlyArray<DeclarationFact>,
   resolution: ResolutionContext,
 ): CallReferenceFact | undefined => {
-  const identifiers = callReferenceTokens(node)
+  const identifiers = referenceNames(node)
   const first = identifiers.at(0)
   const second = identifiers.at(1)
   if (first === undefined) return undefined
   if (second === undefined) {
-    const name = spelling(source, first)
+    const name = SemanticContext.nameText(context, first) ?? ''
     const resolved = NameResolution.lookup(resolution.scope, resolution.index, name)
     const local = lookupDeclaration(declarations, name)
     let declaration: DeclarationFacts.DeclarationFact | undefined
@@ -2556,12 +2562,12 @@ export const resolvedFunctionReference = (
       : Object.freeze({
           _tag: 'Resolved',
           spelling: name,
-          token: first,
+          anchor: first.anchor,
           declaration,
         })
   }
-  const qualifier = spelling(source, first)
-  const member = spelling(source, second)
+  const qualifier = SemanticContext.nameText(context, first) ?? ''
+  const member = SemanticContext.nameText(context, second) ?? ''
   const qualifierLookup = NameResolution.lookup(resolution.scope, resolution.index, qualifier)
   if (qualifierLookup._tag === 'Intrinsic') {
     const signature = builtinSignature(qualifier, member)
@@ -2571,7 +2577,7 @@ export const resolvedFunctionReference = (
     return Object.freeze({
       _tag: 'ResolvedBuiltin',
       spelling: `${qualifier}.${member}`,
-      token: second,
+      anchor: second.anchor,
       actor: qualifier,
       operation: signature.operation,
       intrinsic: signature.id,
@@ -2591,7 +2597,7 @@ export const resolvedFunctionReference = (
       ? Object.freeze({
           _tag: 'Resolved',
           spelling: `${qualifier}.${member}`,
-          token: second,
+          anchor: second.anchor,
           declaration: associated.declaration,
         })
       : undefined
@@ -2607,27 +2613,27 @@ export const resolvedFunctionReference = (
   return Object.freeze({
     _tag: 'Resolved',
     spelling: `${qualifier}.${member}`,
-    token: second,
+    anchor: second.anchor,
     declaration: memberLookup.declaration,
   })
 }
 
 export const analyzeFunctionItem = (
-  source: SourceFile.SourceFile,
-  node: SyntaxTree.Node,
+  context: SemanticContext.SemanticContext,
+  node: AuthoredHir.Expression,
   declarations: ReadonlyArray<DeclarationFact>,
   resolution: ResolutionContext,
   caller: DeclarationFact,
   expected?: SemanticType,
 ): ExpressionResult | undefined => {
-  const reference = resolvedFunctionReference(source, node, declarations, resolution)
+  const reference = resolvedFunctionReference(context, node, declarations, resolution)
   if (reference === undefined) {
-    const identifiers = callReferenceTokens(node)
+    const identifiers = referenceNames(node)
     const qualifierToken = identifiers.at(0)
     const memberToken = identifiers.at(1)
     if (qualifierToken === undefined || memberToken === undefined) return undefined
-    const qualifier = spelling(source, qualifierToken)
-    const member = spelling(source, memberToken)
+    const qualifier = SemanticContext.nameText(context, qualifierToken) ?? ''
+    const member = SemanticContext.nameText(context, memberToken) ?? ''
     const qualifierLookup = NameResolution.lookup(resolution.scope, resolution.index, qualifier)
     if (qualifierLookup._tag !== 'Namespace') return undefined
     const memberLookup = DeclarationFacts.lookup(resolution.index, qualifierLookup.module, member)
@@ -2636,13 +2642,13 @@ export const analyzeFunctionItem = (
       diagnostic = Diagnostic.unknownImportedMember(
         qualifierLookup.module,
         member,
-        memberToken.span,
+        context.spanOf(memberToken.anchor),
       )
     } else if (memberLookup.declaration.visibility !== 'Public') {
       diagnostic = Diagnostic.inaccessibleImportedMember(
         qualifierLookup.module,
         member,
-        memberToken.span,
+        context.spanOf(memberToken.anchor),
       )
     } else {
       diagnostic = undefined
@@ -2651,23 +2657,23 @@ export const analyzeFunctionItem = (
     const missing: CallReferenceFact = Object.freeze({
       _tag: 'Missing',
       spelling: `${qualifier}.${member}`,
-      token: memberToken,
+      anchor: memberToken.anchor,
       cause: Diagnostic.identity(diagnostic),
     })
     return Object.freeze({
       fact: Object.freeze({
         _tag: 'FunctionItem',
         reference: missing,
-        path: referencePath(node),
+        path: referencePath(context, node),
         typeArguments: Object.freeze([]),
         type: unavailableExpressionType,
-        syntax: node,
+        anchor: node.anchor,
       }),
       diagnostics: Object.freeze([diagnostic]),
       type: undefined,
     })
   }
-  const unresolvedCallable = callableTypeOfReference(reference)
+  const unresolvedCallable = callableTypeOfReference(context, reference)
   if (expected !== undefined && Type.isForeignFunction(expected)) {
     const declaration = reference._tag === 'Resolved' ? reference.declaration : undefined
     let detail: string | undefined
@@ -2704,15 +2710,19 @@ export const analyzeFunctionItem = (
     }
     if (detail !== undefined) {
       const name = reference._tag === 'Unavailable' ? '<expression>' : reference.spelling
-      const diagnostic = Diagnostic.invalidForeignCallback(name, detail, node.span)
+      const diagnostic = Diagnostic.invalidForeignCallback(
+        name,
+        detail,
+        context.spanOf(node.anchor),
+      )
       return Object.freeze({
         fact: Object.freeze({
           _tag: 'FunctionItem',
           reference,
-          path: referencePath(node),
+          path: referencePath(context, node),
           typeArguments: Object.freeze([]),
           type: unavailableExpressionType,
-          syntax: node,
+          anchor: node.anchor,
         }),
         diagnostics: Object.freeze([diagnostic]),
         type: undefined,
@@ -2724,11 +2734,11 @@ export const analyzeFunctionItem = (
       fact: Object.freeze({
         _tag: 'FunctionItem',
         reference,
-        path: referencePath(node),
+        path: referencePath(context, node),
         typeArguments: Object.freeze([]),
         foreignAddress: Object.freeze({ symbol }),
         type: availableExpressionType(expected),
-        syntax: node,
+        anchor: node.anchor,
       }),
       diagnostics: Object.freeze([]),
       type: expected,
@@ -2891,7 +2901,7 @@ export const analyzeFunctionItem = (
           contextual,
           caller,
           resolution,
-          node.span,
+          context.spanOf(node.anchor),
         )
       : undefined
   if (
@@ -2913,14 +2923,15 @@ export const analyzeFunctionItem = (
   // declaration directly, so the diagnostic survives exactly at first-class uses.
   // A static function has no runtime function item either (STATIC-001).
   const firstClass =
-    foreignFirstClassDiagnostic(reference, node) ??
-    staticFirstClassDiagnostic(reference, node, resolution)
+    foreignFirstClassDiagnostic(context, reference, node) ??
+    staticFirstClassDiagnostic(context, reference, node, resolution)
   const constraints = interfaceConstraints(
+    context,
     reference,
     contextual,
     resolution.index,
     caller,
-    node.span,
+    context.spanOf(node.anchor),
   )
   // Specialization can turn invocation predicates into free formation facts. Prove them before
   // publishing the value: structural callable comparison may thereafter assume those facts.
@@ -2933,7 +2944,7 @@ export const analyzeFunctionItem = (
           formation.lifetimeBounds,
           new Map(),
           resolution.lifetimeCompatibility,
-          node.span,
+          context.spanOf(node.anchor),
           formation.typeOutlives,
         )
   const available =
@@ -2949,10 +2960,10 @@ export const analyzeFunctionItem = (
       _tag: 'FunctionItem',
       selectedConformances: constraints.proofs,
       reference,
-      path: referencePath(node),
+      path: referencePath(context, node),
       typeArguments,
       type,
-      syntax: node,
+      anchor: node.anchor,
     }),
     diagnostics: Object.freeze([
       ...constraints.diagnostics,
@@ -2965,8 +2976,9 @@ export const analyzeFunctionItem = (
 }
 
 const staticFirstClassDiagnostic = (
+  context: SemanticContext.SemanticContext,
   reference: CallReferenceFact,
-  node: SyntaxTree.Node,
+  node: AuthoredHir.Expression,
   resolution: ResolutionContext,
 ): Diagnostic.Diagnostic | undefined =>
   reference._tag === 'Resolved' && reference.declaration.phase === 'Static'
@@ -2974,16 +2986,17 @@ const staticFirstClassDiagnostic = (
         `static function ${reference.spelling} as a runtime callable`,
         resolution.staticContext?.environment.target ?? 'unselected-target',
         Object.freeze([]),
-        node.span,
+        context.spanOf(node.anchor),
       )
     : undefined
 
 const foreignFirstClassDiagnostic = (
+  context: SemanticContext.SemanticContext,
   reference: CallReferenceFact,
-  node: SyntaxTree.Node,
+  node: AuthoredHir.Expression,
 ): Diagnostic.Diagnostic | undefined =>
   reference._tag === 'Resolved' && reference.declaration.foreign !== undefined
-    ? Diagnostic.foreignFunctionNotFirstClass(reference.spelling, node.span)
+    ? Diagnostic.foreignFunctionNotFirstClass(reference.spelling, context.spanOf(node.anchor))
     : undefined
 
 export interface SectionContractResult {
@@ -3016,7 +3029,8 @@ export const sectionSpecializationSites = (
   )
 
 export const analyzeSectionContract = (
-  call: SyntaxTree.Node,
+  context: SemanticContext.SemanticContext,
+  call: AuthoredHir.Expression,
   reference: Extract<
     CallReferenceFact,
     { readonly _tag: 'Resolved' | 'ResolvedBuiltin' | 'ResolvedIntrinsicContract' }
@@ -3039,7 +3053,7 @@ export const analyzeSectionContract = (
         Diagnostic.argumentTypeMismatch(
           Type.encode(expected),
           Type.encode(argument.type.type),
-          argument.syntax.span,
+          context.spanOf(argument.anchor),
         ),
       ]
     })
@@ -3049,7 +3063,7 @@ export const analyzeSectionContract = (
           reference.spelling,
           0,
           callTypeArguments.facts.length,
-          call.span,
+          context.spanOf(call.anchor),
         ),
       )
     return Object.freeze({
@@ -3092,7 +3106,7 @@ export const analyzeSectionContract = (
           reference.spelling,
           declaredParameters.length,
           callTypeArguments.facts.length,
-          call.span,
+          context.spanOf(call.anchor),
         ),
       )
     } else {
@@ -3106,11 +3120,12 @@ export const analyzeSectionContract = (
           : [],
       )
       const seeded = seededSpecialization(
+        context,
         reference.spelling,
         declaredParameters,
         callTypeArguments.facts,
         sectionSpecializationSites(callable, arguments_, captured),
-        call.span,
+        context.spanOf(call.anchor),
         new Set([
           ...remainingLifetimeKeys,
           ...remaining.flatMap((parameter) => Type.parameters(parameter.type).map(Type.key)),
@@ -3147,8 +3162,8 @@ export const analyzeSectionContract = (
         )
         diagnostics.push(
           rowFailure === undefined
-            ? Diagnostic.typeArgumentInference(reference.spelling, call.span)
-            : Diagnostic.inferenceFailure(rowFailure, call.span),
+            ? Diagnostic.typeArgumentInference(reference.spelling, context.spanOf(call.anchor))
+            : Diagnostic.inferenceFailure(rowFailure, context.spanOf(call.anchor)),
         )
         break
       }
@@ -3169,7 +3184,9 @@ export const analyzeSectionContract = (
         (parameter) => !substitution.has(Type.key(parameter)) && !deferred.has(Type.key(parameter)),
       )
     ) {
-      diagnostics.push(Diagnostic.typeArgumentInference(reference.spelling, call.span))
+      diagnostics.push(
+        Diagnostic.typeArgumentInference(reference.spelling, context.spanOf(call.anchor)),
+      )
     }
   }
   for (const [ordinal, argument] of arguments_.entries()) {
@@ -3188,7 +3205,7 @@ export const analyzeSectionContract = (
       Diagnostic.argumentTypeMismatch(
         Type.encode(expected),
         Type.encode(argument.type.type),
-        argument.syntax.span,
+        context.spanOf(argument.anchor),
       ),
     )
   }
@@ -3201,7 +3218,7 @@ export const analyzeSectionContract = (
       ),
       substitution,
       resolution?.lifetimeCompatibility,
-      call.span,
+      context.spanOf(call.anchor),
       callable.typeOutlives.filter(
         (bound) => !remainingLifetimeKeys.has(Lifetime.key(bound.lifetime)),
       ),
@@ -3236,7 +3253,6 @@ export const captureAccess = (
       : 'Take'
   if (expression._tag === 'Borrow')
     return expression.access === 'Exclusive' ? 'Exclusive' : 'Shared'
-  if (expression._tag === 'Grouped') return captureAccess(expression.expression, index, assumptions)
   if (expression.type._tag === 'Available' && Type.isCallable(expression.type.type))
     return expression.type.type.mode === 'Shared' ? 'Copy' : expression.type.type.mode
   if (expression.type._tag === 'Available' && Type.isEffect(expression.type.type))
@@ -3274,11 +3290,8 @@ export const exactCallableOf = (
   expression: ExpressionFact,
   writtenBindings: ReadonlySet<number> = new Set(),
 ): ExactCallableFact | undefined => {
-  if (expression._tag === 'Grouped' || expression._tag === 'Move') {
-    return exactCallableOf(
-      expression._tag === 'Grouped' ? expression.expression : expression.subject,
-      writtenBindings,
-    )
+  if (expression._tag === 'Move') {
+    return exactCallableOf(expression.subject, writtenBindings)
   }
   if (expression._tag === 'FunctionItem' || expression._tag === 'CallableSection') return expression
   if (expression._tag === 'Identifier' && expression.reference._tag === 'ResolvedBinding') {
@@ -3293,11 +3306,8 @@ export const concreteCallableIdentity = (
   writtenBindings: ReadonlySet<number> = new Set(),
 ): boolean => {
   if (exactCallableOf(expression, writtenBindings) !== undefined) return true
-  if (expression._tag === 'Grouped' || expression._tag === 'Move') {
-    return concreteCallableIdentity(
-      expression._tag === 'Grouped' ? expression.expression : expression.subject,
-      writtenBindings,
-    )
+  if (expression._tag === 'Move') {
+    return concreteCallableIdentity(expression.subject, writtenBindings)
   }
   if (expression._tag === 'Identifier' && expression.reference._tag === 'ResolvedBinding') {
     if (writtenBindings.has(expression.reference.binding.id.ordinal)) return false
@@ -3312,6 +3322,7 @@ export const callableMode = (captures: ReadonlyArray<CallableCaptureFact>): Type
   )
 
 export const sectionCallableType = (
+  context: SemanticContext.SemanticContext,
   reference: Extract<
     CallReferenceFact,
     { readonly _tag: 'Resolved' | 'ResolvedBuiltin' | 'ResolvedIntrinsicContract' }
@@ -3375,7 +3386,7 @@ export const sectionCallableType = (
           contractKey: CallableContract.key(contract),
           constraintKeys: Object.freeze(contract.constraints.map(Constraint.key)),
           evidenceKeys: Object.freeze([]),
-          origins: constraintOrigins(sourceCallable(reference)),
+          origins: constraintOrigins(context, sourceCallable(reference)),
         }),
     contract.unsafe,
   )
@@ -3392,56 +3403,69 @@ export const callableSectionOf = (
 export function executableSite(
   tag: 'CallableSiteId',
   resolution: ResolutionContext,
-  node: SyntaxTree.Node,
-): Hir.CallableSiteId
+  node: AuthoredHir.Expression,
+  span: SourceSpan.SourceSpan,
+): Tir.CallableSiteId
 export function executableSite(
   tag: 'EffectSiteId',
   resolution: ResolutionContext,
-  node: SyntaxTree.Node,
-): Hir.EffectSiteId
+  node: AuthoredHir.Expression,
+  span: SourceSpan.SourceSpan,
+): Tir.EffectSiteId
 export function executableSite(
   tag: 'CallableSiteId' | 'EffectSiteId',
   resolution: ResolutionContext,
-  node: SyntaxTree.Node,
-): Hir.CallableSiteId | Hir.EffectSiteId {
-  const ordinal = resolution.executableSites?.get(node) ?? 0
+  node: AuthoredHir.Expression,
+  span: SourceSpan.SourceSpan,
+): Tir.CallableSiteId | Tir.EffectSiteId {
+  const ordinal = resolution.executableSites?.get(AuthoredIdentity.anchorKey(node.anchor)) ?? 0
   return Object.freeze({
     _tag: tag,
     function:
       resolution.executableFunction ??
-      Object.freeze({ _tag: 'DeclarationId', sourceId: node.span.sourceId, ordinal: 0 }),
+      Object.freeze({ _tag: 'DeclarationId', sourceId: span.sourceId, ordinal: 0 }),
     ...(resolution.executableOwner === undefined ? {} : { owner: resolution.executableOwner }),
     ordinal,
-    span: node.span,
+    span,
   })
 }
 
-export const executableSites = (root: SyntaxTree.Node): ReadonlyMap<SyntaxTree.Node, number> => {
-  const sites = new Map<SyntaxTree.Node, number>()
-  const isAppliedInterfacePipeline = (node: SyntaxTree.Node): boolean => {
-    if (node.kind !== 'PipelineExpression') return false
-    let target = pipelineCallable(node)
-    while (target?.kind === 'GroupedExpression') target = target.children.find(isExpressionNode)
-    return target?.kind === 'AppliedMemberExpression'
+/**
+ * Executable site ordinals in authored traversal order, keyed by anchor.
+ *
+ * The order is the one `$callable$N` and `Tir.anonymousCallableSite` count in, so it must stay a
+ * preorder walk of the authored body. Grouped expressions are absent, so a pipeline's target is
+ * reached directly.
+ */
+export const executableSites = (root: AuthoredHir.Block): ReadonlyMap<string, number> => {
+  const sites = new Map<string, number>()
+  const isAppliedInterfacePipeline = (node: AuthoredHir.Expression): boolean =>
+    node._tag === 'PipelineExpression' && node.target._tag === 'MemberExpression'
+  const record = (node: AuthoredHir.Expression): void => {
+    const key = AuthoredIdentity.anchorKey(node.anchor)
+    if (!sites.has(key)) sites.set(key, sites.size)
   }
-  const visit = (node: SyntaxTree.Node): void => {
+  const visit = (node: AuthoredHir.Expression): void => {
     if (
-      node.kind === 'CallExpression' ||
-      node.kind === 'EffectExpression' ||
-      node.kind === 'AnonymousCallableExpression' ||
+      node._tag === 'CallExpression' ||
+      node._tag === 'EffectExpression' ||
+      node._tag === 'CallableExpression' ||
       isAppliedInterfacePipeline(node)
     )
-      sites.set(node, sites.size)
-    for (const child of node.children) if (SyntaxTree.isNode(child)) visit(child)
+      record(node)
+    for (const child of AuthoredWalk.expressionChildren(node)) visit(child)
   }
-  visit(root)
+  const roots = AuthoredWalk.statements(root).flatMap((statement) =>
+    AuthoredWalk.statementExpressions(statement),
+  )
+  for (const expression of roots) visit(expression)
   // A bound method value is a section at a projection. Those sites follow every call site so the
   // ordinals of existing sites never move.
-  const visitProjections = (node: SyntaxTree.Node): void => {
-    if (node.kind === 'FieldProjectionExpression') sites.set(node, sites.size)
-    for (const child of node.children) if (SyntaxTree.isNode(child)) visitProjections(child)
+  const visitProjections = (node: AuthoredHir.Expression): void => {
+    if (node._tag === 'FieldExpression') record(node)
+    for (const child of AuthoredWalk.expressionChildren(node)) visitProjections(child)
   }
-  visitProjections(root)
+  for (const expression of roots) visitProjections(expression)
   return sites
 }
 
@@ -3463,7 +3487,8 @@ export const executableSpecializationOwner = (
 }
 
 export const finishCallableSection = (
-  node: SyntaxTree.Node,
+  context: SemanticContext.SemanticContext,
+  node: AuthoredHir.Expression,
   reference: Extract<
     CallReferenceFact,
     { readonly _tag: 'Resolved' | 'ResolvedBuiltin' | 'ResolvedIntrinsicContract' }
@@ -3473,7 +3498,7 @@ export const finishCallableSection = (
   resolution: ResolutionContext,
   caller: DeclarationFact,
   captured?: ReadonlyArray<number>,
-  path: ReferencePathFact = referencePath(node),
+  path: ReferencePathFact = referencePath(context, node),
 ): ExpressionResult => {
   const parameterCount =
     reference._tag === 'ResolvedBuiltin'
@@ -3482,6 +3507,7 @@ export const finishCallableSection = (
   const capturedParameters =
     captured ?? trailingCaptures(parameterCount, argumentsResult.facts.length)
   const contract = analyzeSectionContract(
+    context,
     node,
     reference,
     argumentsResult.facts,
@@ -3490,11 +3516,12 @@ export const finishCallableSection = (
     resolution,
   )
   const constraints = interfaceConstraints(
+    context,
     reference,
     contract.substitution,
     resolution.index,
     caller,
-    node.span,
+    context.spanOf(node.anchor),
   )
   const captures = Object.freeze(
     capturedParameters.map((parameterOrdinal, ordinal) => {
@@ -3522,22 +3549,23 @@ export const finishCallableSection = (
   )
   const mode = callableMode(captures)
   const callable = sectionCallableType(
+    context,
     reference,
     contract.substitution,
     mode,
     capturedParameters,
     BodyLifetime.environment(
       resolution.bodyLifetimes,
-      node,
+      node.anchor,
       captures.flatMap((capture) =>
         capture.expression.type._tag === 'Available' ? [capture.expression.type.type] : [],
       ),
       captures
         .filter((capture) => capture.access === 'Shared' || capture.access === 'Exclusive')
-        .map((capture) => capture.expression.syntax),
+        .map((capture) => capture.expression.anchor),
     ),
   )
-  const foreign = foreignFirstClassDiagnostic(reference, node)
+  const foreign = foreignFirstClassDiagnostic(context, reference, node)
   const type =
     contract.valid && callable !== undefined && foreign === undefined
       ? availableExpressionType(callable)
@@ -3547,7 +3575,7 @@ export const finishCallableSection = (
     fact: Object.freeze({
       _tag: 'CallableSection',
       selectedConformances: constraints.proofs,
-      site: executableSite('CallableSiteId', resolution, node),
+      site: executableSite('CallableSiteId', resolution, node, context.spanOf(node.anchor)),
       reference,
       path,
       remainingParameters: remainingOf(
@@ -3567,7 +3595,7 @@ export const finishCallableSection = (
       substitution: contract.substitution,
       mode,
       type,
-      syntax: node,
+      anchor: node.anchor,
     }),
     diagnostics: Object.freeze([
       ...argumentsResult.diagnostics,
@@ -3581,7 +3609,8 @@ export const finishCallableSection = (
 }
 
 export const finishCallableApplication = (
-  node: SyntaxTree.Node,
+  context: SemanticContext.SemanticContext,
+  node: AuthoredHir.Expression,
   callee: ExpressionResult,
   argumentsResult: ArgumentsResult,
   callTypeArguments: CallTypeArgumentsResult,
@@ -3598,7 +3627,13 @@ export const finishCallableApplication = (
       ...argumentsResult.diagnostics,
       ...callTypeArguments.diagnostics,
     ]
-    const unsafe = unsafeCallDiagnostic(true, Type.encode(contract), node, resolution)
+    const unsafe = unsafeCallDiagnostic(
+      true,
+      Type.encode(contract),
+      node,
+      context.spanOf(node.anchor),
+      resolution,
+    )
     if (unsafe !== undefined) diagnostics.push(unsafe)
     if (callTypeArguments.explicit)
       diagnostics.push(
@@ -3606,7 +3641,7 @@ export const finishCallableApplication = (
           'native function pointer',
           0,
           callTypeArguments.facts.length,
-          node.span,
+          context.spanOf(node.anchor),
         ),
       )
     if (contract.parameters.length !== argumentsResult.facts.length)
@@ -3615,7 +3650,7 @@ export const finishCallableApplication = (
           { _tag: 'BuiltinTarget', actor: 'Foreign', operation: 'Apply' },
           contract.parameters.length,
           argumentsResult.facts.length,
-          node.span,
+          context.spanOf(node.anchor),
         ),
       )
     for (const [ordinal, argument] of argumentsResult.facts.entries()) {
@@ -3634,7 +3669,7 @@ export const finishCallableApplication = (
           Diagnostic.argumentTypeMismatch(
             Type.encode(expected),
             Type.encode(argument.type.type),
-            argument.syntax.span,
+            context.spanOf(argument.anchor),
           ),
         )
     }
@@ -3643,7 +3678,7 @@ export const finishCallableApplication = (
         contract.lifetimeBounds ?? [],
         inferred,
         selected.compatibility,
-        node.span,
+        context.spanOf(node.anchor),
         contract.typeOutlives ?? [],
       ),
     )
@@ -3661,7 +3696,7 @@ export const finishCallableApplication = (
         arguments: argumentsResult.facts,
         contract,
         type: valid ? availableExpressionType(contract.result) : unavailableExpressionType,
-        syntax: node,
+        anchor: node.anchor,
       },
       diagnostics,
       type: valid ? contract.result : undefined,
@@ -3707,7 +3742,7 @@ export const finishCallableApplication = (
     resolution !== undefined &&
     caller !== undefined
       ? Object.freeze({
-          site: executableSite('CallableSiteId', resolution, node),
+          site: executableSite('CallableSiteId', resolution, node, context.spanOf(node.anchor)),
           captures: Object.freeze(
             argumentsResult.facts.map((argument, ordinal) =>
               Object.freeze({
@@ -3738,10 +3773,15 @@ export const finishCallableApplication = (
   let inferredProviderSelectors: ReadonlyArray<InferredProviderSelector> = Object.freeze([])
   let valid =
     callable !== undefined &&
-    (node.kind === 'PipelineExpression' ? isAvailableSyntax(node) : hasAvailableCallSyntax(node))
+    (node._tag === 'PipelineExpression'
+      ? AuthoredWalk.isAvailable(node)
+      : hasAvailableCallSyntax(node))
   if (callable === undefined && callee.type !== undefined) {
     diagnostics.push(
-      Diagnostic.nonCallableApplication(Type.encode(callee.type), callee.fact.syntax.span),
+      Diagnostic.nonCallableApplication(
+        Type.encode(callee.type),
+        context.spanOf(callee.fact.anchor),
+      ),
     )
   }
 
@@ -3752,7 +3792,7 @@ export const finishCallableApplication = (
     callee.fact.reference.binding.mutability !== 'Mutable'
   ) {
     diagnostics.push(
-      Diagnostic.invalidCallableInvocationAccess('Exclusive', callee.fact.syntax.span),
+      Diagnostic.invalidCallableInvocationAccess('Exclusive', context.spanOf(callee.fact.anchor)),
     )
     valid = false
   }
@@ -3761,12 +3801,19 @@ export const finishCallableApplication = (
     schema.source === undefined &&
     !concreteCallableIdentity(callee.fact, writtenBindings)
   ) {
-    diagnostics.push(Diagnostic.nonConcreteSpecialization('constrained callable', node.span))
+    diagnostics.push(
+      Diagnostic.nonConcreteSpecialization('constrained callable', context.spanOf(node.anchor)),
+    )
     valid = false
   }
   if (callTypeArguments.explicit) {
     diagnostics.push(
-      Diagnostic.typeArgumentArity('callable value', 0, callTypeArguments.facts.length, node.span),
+      Diagnostic.typeArgumentArity(
+        'callable value',
+        0,
+        callTypeArguments.facts.length,
+        context.spanOf(node.anchor),
+      ),
     )
     valid = false
   }
@@ -3781,7 +3828,7 @@ export const finishCallableApplication = (
         Object.freeze({ _tag: 'BuiltinTarget', actor: 'Callable', operation: 'Apply' }),
         callable.parameters.length,
         argumentsResult.facts.length,
-        node.span,
+        context.spanOf(node.anchor),
       ),
     )
     valid = false
@@ -3792,7 +3839,13 @@ export const finishCallableApplication = (
     stagedSection === undefined &&
     callable.parameters.length === argumentsResult.facts.length
   if (completeUnsafeInvocation && callable !== undefined) {
-    const diagnostic = unsafeCallDiagnostic(true, Type.encode(callable), node, resolution)
+    const diagnostic = unsafeCallDiagnostic(
+      true,
+      Type.encode(callable),
+      node,
+      context.spanOf(node.anchor),
+      resolution,
+    )
     if (diagnostic !== undefined) {
       diagnostics.push(diagnostic)
       valid = false
@@ -3821,17 +3874,17 @@ export const finishCallableApplication = (
             Diagnostic.invalidForeignCallback(
               Type.encode(argument.type.type),
               'capturing and anonymous Silk callables do not have an exported C address',
-              argument.syntax.span,
+              context.spanOf(argument.anchor),
             ),
           )
         } else if (rowFailure !== undefined) {
-          diagnostics.push(Diagnostic.inferenceFailure(rowFailure, argument.syntax.span))
+          diagnostics.push(Diagnostic.inferenceFailure(rowFailure, context.spanOf(argument.anchor)))
         } else if (Type.isCallable(expected) && Type.isCallable(argument.type.type)) {
           diagnostics.push(
             Diagnostic.incompatibleCallableSignature(
               Type.encode(expected),
               Type.encode(argument.type.type),
-              argument.syntax.span,
+              context.spanOf(argument.anchor),
             ),
           )
         } else {
@@ -3839,7 +3892,7 @@ export const finishCallableApplication = (
             Diagnostic.argumentTypeMismatch(
               Type.encode(expected),
               Type.encode(argument.type.type),
-              argument.syntax.span,
+              context.spanOf(argument.anchor),
             ),
           )
         }
@@ -3856,19 +3909,19 @@ export const finishCallableApplication = (
           mismatch = Diagnostic.invalidForeignCallback(
             Type.encode(argument.type.type),
             'capturing and anonymous Silk callables do not have an exported C address',
-            argument.syntax.span,
+            context.spanOf(argument.anchor),
           )
         else if (Type.isCallable(specialized) && Type.isCallable(argument.type.type))
           mismatch = Diagnostic.incompatibleCallableSignature(
             Type.encode(specialized),
             Type.encode(argument.type.type),
-            argument.syntax.span,
+            context.spanOf(argument.anchor),
           )
         else
           mismatch = Diagnostic.argumentTypeMismatch(
             Type.encode(specialized),
             Type.encode(argument.type.type),
-            argument.syntax.span,
+            context.spanOf(argument.anchor),
           )
         diagnostics.push(mismatch)
         valid = false
@@ -3880,7 +3933,7 @@ export const finishCallableApplication = (
       callable.lifetimeBounds,
       inferred,
       callLifetimes.compatibility,
-      node.span,
+      context.spanOf(node.anchor),
       callable.typeOutlives,
     )
     diagnostics.push(...lifetimeDiagnostics)
@@ -3931,11 +3984,11 @@ export const finishCallableApplication = (
       schema?.origins ??
         (section === undefined
           ? Object.freeze([])
-          : constraintOrigins(sourceCallable(section.reference))),
+          : constraintOrigins(context, sourceCallable(section.reference))),
       inferred,
       caller,
       resolution,
-      node.span,
+      context.spanOf(node.anchor),
     )
     inferred.clear()
     for (const [identity, argument] of solved.substitution) inferred.set(identity, argument)
@@ -3960,13 +4013,20 @@ export const finishCallableApplication = (
     sourceTarget = {
       _tag: 'Resolved',
       spelling: schemaDeclaration.name.spelling,
-      token: schemaDeclaration.name.token,
+      anchor: schemaDeclaration.name.anchor,
       declaration: schemaDeclaration,
     }
   const selectedConformances =
     sourceTarget === undefined || resolution === undefined || caller === undefined
       ? { diagnostics: [], proofs: [] }
-      : interfaceConstraints(sourceTarget, inferred, resolution.index, caller, node.span)
+      : interfaceConstraints(
+          context,
+          sourceTarget,
+          inferred,
+          resolution.index,
+          caller,
+          context.spanOf(node.anchor),
+        )
   diagnostics.push(...selectedConformances.diagnostics)
   if (selectedConformances.diagnostics.length > 0) valid = false
   const type = (() => {
@@ -3980,19 +4040,20 @@ export const finishCallableApplication = (
       )
         return unavailableExpressionType
       const sectionType = sectionCallableType(
+        context,
         reference,
         inferred,
         callableMode(stagedCaptures),
         stagedCaptures.map((capture) => capture.parameterOrdinal),
         BodyLifetime.environment(
           resolution?.bodyLifetimes,
-          node,
+          node.anchor,
           stagedCaptures.flatMap((capture) =>
             capture.expression.type._tag === 'Available' ? [capture.expression.type.type] : [],
           ),
           stagedCaptures
             .filter((capture) => capture.access === 'Shared' || capture.access === 'Exclusive')
-            .map((capture) => capture.expression.syntax),
+            .map((capture) => capture.expression.anchor),
         ),
       )
       return sectionType === undefined
@@ -4003,7 +4064,7 @@ export const finishCallableApplication = (
     if (stagedValue !== undefined) {
       const lifetimes = BodyLifetime.environment(
         resolution?.bodyLifetimes,
-        node,
+        node.anchor,
         [
           callable,
           ...stagedValue.captures.flatMap((capture) =>
@@ -4012,7 +4073,7 @@ export const finishCallableApplication = (
         ],
         stagedValue.captures
           .filter((capture) => capture.access === 'Shared' || capture.access === 'Exclusive')
-          .map((capture) => capture.expression.syntax),
+          .map((capture) => capture.expression.anchor),
       )
       if (lifetimes === undefined) return unavailableExpressionType
       return availableExpressionType(
@@ -4060,7 +4121,7 @@ export const finishCallableApplication = (
       fact: Object.freeze({
         _tag: 'CallableSection',
         selectedConformances: selectedConformances.proofs,
-        site: executableSite('CallableSiteId', resolution, node),
+        site: executableSite('CallableSiteId', resolution, node, context.spanOf(node.anchor)),
         reference: stagedSection.reference,
         path: stagedSection.path,
         remainingParameters: Object.freeze(
@@ -4079,7 +4140,7 @@ export const finishCallableApplication = (
         substitution: inferred,
         mode: callableMode(stagedCaptures),
         type,
-        syntax: node,
+        anchor: node.anchor,
       }),
       diagnostics: Object.freeze(diagnostics),
       type: type._tag === 'Available' ? type.type : undefined,
@@ -4127,8 +4188,8 @@ export const finishCallableApplication = (
         fact: Object.freeze({
           _tag: 'EffectCatch',
           reference: sectionIntrinsicReference(section),
-          protected: protected_?.expression ?? unavailableExpression(node),
-          handler: handler ?? unavailableExpression(node),
+          protected: protected_?.expression ?? unavailableExpression(node.anchor),
+          handler: handler ?? unavailableExpression(node.anchor),
           ...(wanted === undefined ? {} : { selected: Type.failureType(wanted.selected) }),
           protectedRow: wanted?.source ?? RowAlgebra.concrete(Type.failureRowPolicy(), []),
           handlerRow: handlerEffect?.failureRow ?? RowAlgebra.concrete(Type.failureRowPolicy(), []),
@@ -4138,7 +4199,7 @@ export const finishCallableApplication = (
               : RowAlgebra.without(Type.failureRowPolicy(), wanted.source, wanted.selected),
           evidence,
           type: catchAvailable ? type : unavailableExpressionType,
-          syntax: node,
+          anchor: node.anchor,
         }),
         diagnostics: Object.freeze(diagnostics),
         type: catchAvailable && type._tag === 'Available' ? type.type : undefined,
@@ -4153,17 +4214,17 @@ export const finishCallableApplication = (
             inferred,
             evidence,
             providerCapture.expression,
-            providerCapture.expression.syntax.span,
+            context.spanOf(providerCapture.expression.anchor),
             resolution?.index,
           )
     return Object.freeze({
       fact: Object.freeze({
         _tag: 'EffectBindRequirement',
         reference: sectionIntrinsicReference(section),
-        protected: protected_?.expression ?? unavailableExpression(node),
+        protected: protected_?.expression ?? unavailableExpression(node.anchor),
         ...(type._tag === 'Available' && provider !== undefined ? { provider } : {}),
         type,
-        syntax: node,
+        anchor: node.anchor,
       }),
       diagnostics: Object.freeze(diagnostics),
       type: type._tag === 'Available' ? type.type : undefined,
@@ -4187,7 +4248,7 @@ export const finishCallableApplication = (
       ...(stagedValue === undefined ? {} : { staged: stagedValue }),
       provenance: provenance ?? Object.freeze({ _tag: 'DirectCallableApplication' as const }),
       type,
-      syntax: node,
+      anchor: node.anchor,
     }),
     diagnostics: Object.freeze(diagnostics),
     type: type._tag === 'Available' ? type.type : undefined,
@@ -4200,13 +4261,10 @@ export const finishCallableApplication = (
  * yields the place's previous value. The place stays initialized, so affine owners can leave a
  * struct field behind a reference without a partial move.
  */
-export const unavailableIdentifierFact = (node: SyntaxTree.Node): ExpressionFact =>
+export const unavailableIdentifierFact = (node: AuthoredHir.Expression): ExpressionFact =>
   Object.freeze({
     _tag: 'Identifier',
-    reference: Object.freeze({
-      _tag: 'Unavailable' as const,
-      syntax: unavailableSyntax(node, 'Identifier'),
-    }),
+    reference: Object.freeze({ _tag: 'Unavailable' as const, anchor: node.anchor }),
     type: unavailableExpressionType,
-    syntax: node,
+    anchor: node.anchor,
   })

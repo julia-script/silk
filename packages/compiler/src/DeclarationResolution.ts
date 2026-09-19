@@ -46,16 +46,21 @@ import * as ResolutionSeams from './ResolutionSeams.js'
 import * as RowAlgebra from './RowAlgebra.js'
 import type * as SourceSpan from './SourceSpan.js'
 import * as Type from './Type.js'
+import type * as AuthoredHir from './AuthoredHir.js'
+
+/** Resolves one authored position to a current-revision span, for diagnostics only. */
+export type SpanOf = (anchor: AuthoredHir.Anchor) => SourceSpan.SourceSpan
 import * as TypeCompatibility from './TypeCompatibility.js'
 
 const resolveExactRepresentation = (
+  spanOf: SpanOf,
   module: string,
   fact: Extract<DeclaredTypeFact, { readonly _tag: 'ExactRepresentation' }>,
   resolvers: ResolutionSeams.ResolutionSeams,
   modules: ReadonlyArray<ModuleHeaders>,
 ): TypeResolution => {
   const arguments_ = fact.arguments.map((argument) =>
-    resolveDeclaredType(module, argument, resolvers, modules),
+    resolveDeclaredType(spanOf, module, argument, resolvers, modules),
   )
   const argumentDiagnostics = arguments_.flatMap((argument) => argument.diagnostics)
   const reject = (diagnostic: Diagnostic.Diagnostic, candidate?: MemberFact): TypeResolution => {
@@ -70,16 +75,21 @@ const resolveExactRepresentation = (
     })
   }
   const unresolved = () =>
-    Diagnostic.unresolvedExactRepresentationItem(fact.item.spelling, fact.token.span)
+    Diagnostic.unresolvedExactRepresentationItem(fact.item.spelling, spanOf(fact.anchor))
   const open = (expected: number, actual = arguments_.length) =>
-    Diagnostic.openExactRepresentationItem(fact.item.spelling, expected, actual, fact.token.span)
+    Diagnostic.openExactRepresentationItem(
+      fact.item.spelling,
+      expected,
+      actual,
+      spanOf(fact.anchor),
+    )
   const lookup = resolvers.item(module, fact.item)
   if (lookup._tag === 'Ambiguous')
     return reject(
       Diagnostic.ambiguousExactRepresentationItem(
         fact.item.spelling,
         lookup.count,
-        fact.token.span,
+        spanOf(fact.anchor),
       ),
     )
   if (lookup._tag !== 'Resolved')
@@ -95,7 +105,7 @@ const resolveExactRepresentation = (
       Diagnostic.uncallableExactRepresentationItem(
         fact.item.spelling,
         declaration._tag === 'FunctionDeclaration' ? 'EffectDeclaration' : 'NonCallableDeclaration',
-        fact.token.span,
+        spanOf(fact.anchor),
       ),
       declaration,
     )
@@ -127,6 +137,7 @@ const resolveExactRepresentation = (
     declaration.canonical._tag === 'Canonical' ? declaration.canonical.id : undefined
   if (canonical === undefined) return reject(unresolved(), declaration)
   const declaredReturn = resolveDeclaredType(
+    spanOf,
     canonical.module,
     declaration.returnType,
     resolvers,
@@ -135,7 +146,8 @@ const resolveExactRepresentation = (
   if (declaredReturn.fact._tag !== 'Resolved') return reject(unresolved(), declaration)
   const declaredParameters = declaration.parameters.map(
     (parameter) =>
-      resolveDeclaredType(canonical.module, parameter.declaredType, resolvers, modules).fact,
+      resolveDeclaredType(spanOf, canonical.module, parameter.declaredType, resolvers, modules)
+        .fact,
   )
   if (declaredParameters.some((parameter) => parameter._tag !== 'Resolved'))
     return reject(unresolved(), declaration)
@@ -164,8 +176,7 @@ const resolveExactRepresentation = (
       _tag: 'Resolved',
       type,
       spelling: fact.spelling,
-      token: fact.token,
-      syntax: fact.syntax,
+      anchor: fact.anchor,
       components: Object.freeze(arguments_.map((argument) => argument.fact)),
       exactItem: Object.freeze({ path: fact.item, declaration: canonical }),
     }),
@@ -174,6 +185,7 @@ const resolveExactRepresentation = (
 }
 
 export const resolveDeclaredType = (
+  spanOf: SpanOf,
   module: string,
   fact: DeclaredTypeFact,
   resolvers: ResolutionSeams.ResolutionSeams,
@@ -191,15 +203,14 @@ export const resolveDeclaredType = (
         _tag: 'Resolved',
         type,
         spelling: fact.spelling,
-        token: fact.token,
-        syntax: fact.syntax,
+        anchor: fact.anchor,
         path: fact.path,
       }),
       diagnostics: Object.freeze([]),
     })
   }
   if (fact._tag === 'ExactRepresentation')
-    return resolveExactRepresentation(module, fact, resolvers, modules)
+    return resolveExactRepresentation(spanOf, module, fact, resolvers, modules)
   if (fact._tag === 'Unresolved') {
     const resolved = resolvers.type(module, fact.path)
     if (resolved.fact._tag !== 'Resolved' || !Type.isNominal(resolved.fact.type)) return resolved
@@ -221,7 +232,7 @@ export const resolveDeclaredType = (
         diagnostics: resolved.diagnostics,
       })
     }
-    const diagnostic = Diagnostic.typeArgumentArity(fact.spelling, expected, 0, fact.token.span)
+    const diagnostic = Diagnostic.typeArgumentArity(fact.spelling, expected, 0, spanOf(fact.anchor))
     return Object.freeze({
       fact: Object.freeze({
         ...fact,
@@ -233,9 +244,9 @@ export const resolveDeclaredType = (
   }
   if (fact._tag === 'Callable' || fact._tag === 'ForeignFunction') {
     const parameters = fact.parameters.map((parameter) =>
-      resolveDeclaredType(module, parameter, resolvers, modules),
+      resolveDeclaredType(spanOf, module, parameter, resolvers, modules),
     )
-    const result = resolveDeclaredType(module, fact.result, resolvers, modules)
+    const result = resolveDeclaredType(spanOf, module, fact.result, resolvers, modules)
     const diagnostics = Object.freeze([
       ...parameters.flatMap((parameter) => parameter.diagnostics),
       ...result.diagnostics,
@@ -268,8 +279,7 @@ export const resolveDeclaredType = (
           _tag: 'Resolved',
           type,
           spelling: Type.encode(type),
-          token: fact.token,
-          syntax: fact.syntax,
+          anchor: fact.anchor,
           components: Object.freeze([
             ...parameters.map((parameter) => parameter.fact),
             result.fact,
@@ -295,15 +305,15 @@ export const resolveDeclaredType = (
     })
   }
   if (fact._tag === 'Effect') {
-    const success = resolveDeclaredType(module, fact.success, resolvers, modules)
+    const success = resolveDeclaredType(spanOf, module, fact.success, resolvers, modules)
     const failures = fact.failures.map((failure) =>
-      resolveDeclaredType(module, failure, resolvers, modules),
+      resolveDeclaredType(spanOf, module, failure, resolvers, modules),
     )
     const requirements = fact.requirements.map((requirement) => {
-      const role = resolveRequirementRole(module, requirement.role, resolvers)
+      const role = resolveRequirementRole(spanOf, module, requirement.role, resolvers)
       return Object.freeze({
         ...requirement,
-        capability: resolveDeclaredType(module, requirement.capability, resolvers, modules),
+        capability: resolveDeclaredType(spanOf, module, requirement.capability, resolvers, modules),
         role,
       })
     })
@@ -331,12 +341,15 @@ export const resolveDeclaredType = (
         Type.isParameter(failure.fact.type) &&
         failure.fact.type.kind === 'Value'
       ) {
-        symbolicFailureTypes.push({ type: failure.fact.type, span: failure.fact.syntax.span })
+        symbolicFailureTypes.push({ type: failure.fact.type, span: spanOf(failure.fact.anchor) })
       } else if (!(failure.fact._tag === 'Resolved' && Type.isNever(failure.fact.type))) {
         failuresAvailable = false
         if (failure.fact._tag === 'Resolved')
           diagnostics.push(
-            Diagnostic.invalidFailureType(Type.encode(failure.fact.type), failure.fact.syntax.span),
+            Diagnostic.invalidFailureType(
+              Type.encode(failure.fact.type),
+              spanOf(failure.fact.anchor),
+            ),
           )
       }
     }
@@ -364,7 +377,7 @@ export const resolveDeclaredType = (
           diagnostics.push(
             Diagnostic.invalidRequirementType(
               Type.encode(requirement.capability.fact.type),
-              requirement.syntax.span,
+              spanOf(requirement.anchor),
             ),
           )
       }
@@ -372,7 +385,7 @@ export const resolveDeclaredType = (
     const requirementExpression =
       fact.requirementExpression === undefined
         ? undefined
-        : resolveRowExpressionFact(module, fact.requirementExpression, resolvers, modules)
+        : resolveRowExpressionFact(spanOf, module, fact.requirementExpression, resolvers, modules)
     if (requirementExpression !== undefined) diagnostics.push(...requirementExpression.diagnostics)
     if (success.fact._tag === 'Resolved' && failuresAvailable && requirementsAvailable) {
       const base = Type.effect(
@@ -403,15 +416,14 @@ export const resolveDeclaredType = (
         fact.access,
         requirementExpression === undefined
           ? base.requirementRow
-          : semanticRequirementRow(requirementExpression.fact),
+          : semanticRequirementRow(spanOf, requirementExpression.fact),
       )
       return Object.freeze({
         fact: Object.freeze({
           _tag: 'Resolved',
           type,
           spelling: Type.encode(type),
-          token: fact.token,
-          syntax: fact.syntax,
+          anchor: fact.anchor,
           components: Object.freeze([
             success.fact,
             ...failures.map((failure) => failure.fact),
@@ -445,7 +457,7 @@ export const resolveDeclaredType = (
     const target =
       fact.target._tag === 'Unresolved'
         ? resolvers.type(module, fact.target.path)
-        : resolveDeclaredType(module, fact.target, resolvers, modules)
+        : resolveDeclaredType(spanOf, module, fact.target, resolvers, modules)
     const targetDeclaration =
       target.fact._tag === 'Resolved' && Type.isNominal(target.fact.type)
         ? memberByNominal(modules, target.fact.type)
@@ -461,8 +473,9 @@ export const resolveDeclaredType = (
     let argumentOrdinal = 0
     const arguments_ = fact.arguments.map((argument) =>
       argument._tag === 'Lifetime'
-        ? resolveGenericArgument(module, argument, undefined, resolvers, modules)
+        ? resolveGenericArgument(spanOf, module, argument, undefined, resolvers, modules)
         : resolveGenericArgument(
+            spanOf,
             module,
             argument,
             targetOrdinaryParameters?.at(argumentOrdinal++),
@@ -472,10 +485,16 @@ export const resolveDeclaredType = (
     )
     const requirements =
       fact.requirementRow?.requirements.map((requirement) => {
-        const role = resolveRequirementRole(module, requirement.role, resolvers)
+        const role = resolveRequirementRole(spanOf, module, requirement.role, resolvers)
         return Object.freeze({
           ...requirement,
-          capability: resolveDeclaredType(module, requirement.capability, resolvers, modules),
+          capability: resolveDeclaredType(
+            spanOf,
+            module,
+            requirement.capability,
+            resolvers,
+            modules,
+          ),
           role,
         })
       }) ?? []
@@ -631,14 +650,14 @@ export const resolveDeclaredType = (
                   incompatibleParameter.name,
                   Type.encode(required),
                   Type.encode(actual),
-                  incompatibleSupplied.fact.syntax.span,
+                  spanOf(incompatibleSupplied.fact.anchor),
                   {
                     ...(requiredParameter === undefined
                       ? {}
-                      : { requiredDeclarationSpan: requiredParameter.syntax.span }),
+                      : { requiredDeclarationSpan: spanOf(requiredParameter.anchor) }),
                     ...(actualParameter === undefined
                       ? {}
-                      : { actualDeclarationSpan: actualParameter.syntax.span }),
+                      : { actualDeclarationSpan: spanOf(actualParameter.anchor) }),
                   },
                 ),
               )
@@ -676,7 +695,7 @@ export const resolveDeclaredType = (
                 parameter.name,
                 parameter.kind,
                 suppliedKind,
-                supplied.fact.syntax.span,
+                spanOf(supplied.fact.anchor),
               ),
             )
           }
@@ -697,8 +716,7 @@ export const resolveDeclaredType = (
             _tag: 'Resolved',
             type,
             spelling: Type.encode(type),
-            token: fact.token,
-            syntax: fact.syntax,
+            anchor: fact.anchor,
             components: Object.freeze([
               target.fact,
               ...arguments_.map((argument) => argument.fact),
@@ -726,7 +744,7 @@ export const resolveDeclaredType = (
         fact.spelling,
         expected,
         suppliedCount,
-        fact.token.span,
+        spanOf(fact.target.anchor),
       )
       diagnostics.push(diagnostic)
       return Object.freeze({
@@ -740,7 +758,7 @@ export const resolveDeclaredType = (
         fact.spelling,
         0,
         fact.arguments.length,
-        fact.token.span,
+        spanOf(fact.target.anchor),
       )
       diagnostics.push(diagnostic)
       return Object.freeze({
@@ -752,7 +770,7 @@ export const resolveDeclaredType = (
   }
   if (fact._tag === 'Union') {
     const resolvedMembers = fact.members.map((member) =>
-      resolveDeclaredType(module, member, resolvers, modules),
+      resolveDeclaredType(spanOf, module, member, resolvers, modules),
     )
     const diagnostics: Array<Diagnostic.Diagnostic> = resolvedMembers.flatMap((member) =>
       Array.from(member.diagnostics),
@@ -770,13 +788,11 @@ export const resolveDeclaredType = (
             _tag: 'Resolved' as const,
             type: normalized.type,
             spelling: Type.encode(normalized.type),
-            token: fact.token,
-            syntax: fact.syntax,
+            anchor: fact.anchor,
             unionSource: Object.freeze({
               _tag: 'UnionSource' as const,
               members,
-              separators: fact.separators,
-              syntax: fact.syntax,
+              anchor: fact.anchor,
             }),
           }),
           diagnostics: Object.freeze(diagnostics),
@@ -788,7 +804,7 @@ export const resolveDeclaredType = (
           diagnostics.push(
             Diagnostic.invalidUnionMember(
               Type.encode(invalid),
-              sourceFact?.syntax.span ?? fact.syntax.span,
+              spanOf(sourceFact?.anchor ?? fact.anchor),
             ),
           )
         }
@@ -805,7 +821,7 @@ export const resolveDeclaredType = (
     })
   }
   if (fact._tag === 'Slice') {
-    const element = resolveDeclaredType(module, fact.element, resolvers, modules)
+    const element = resolveDeclaredType(spanOf, module, fact.element, resolvers, modules)
     if (element.fact._tag === 'Resolved') {
       const type = Type.slice(fact.access, element.fact.type, fact.lifetime)
       return Object.freeze({
@@ -813,8 +829,7 @@ export const resolveDeclaredType = (
           _tag: 'Resolved',
           type,
           spelling: Type.encode(type),
-          token: fact.token,
-          syntax: fact.syntax,
+          anchor: fact.anchor,
           components: Object.freeze([element.fact]),
           ...(element.fact.exposureCause === undefined
             ? {}
@@ -834,7 +849,7 @@ export const resolveDeclaredType = (
     })
   }
   if (fact._tag === 'Reference') {
-    const target = resolveDeclaredType(module, fact.target, resolvers, modules)
+    const target = resolveDeclaredType(spanOf, module, fact.target, resolvers, modules)
     if (target.fact._tag === 'Resolved') {
       const type = Type.reference(fact.access, target.fact.type, fact.lifetime)
       return Object.freeze({
@@ -842,8 +857,7 @@ export const resolveDeclaredType = (
           _tag: 'Resolved',
           type,
           spelling: Type.encode(type),
-          token: fact.token,
-          syntax: fact.syntax,
+          anchor: fact.anchor,
           components: Object.freeze([target.fact]),
         }),
         diagnostics: target.diagnostics,
@@ -861,7 +875,7 @@ export const resolveDeclaredType = (
     })
   }
   if (fact._tag === 'Pointer') {
-    const pointee = resolveDeclaredType(module, fact.pointee, resolvers, modules)
+    const pointee = resolveDeclaredType(spanOf, module, fact.pointee, resolvers, modules)
     if (pointee.fact._tag === 'Resolved') {
       const type = Type.pointer({ ...fact, pointee: pointee.fact.type })
       return Object.freeze({
@@ -869,8 +883,7 @@ export const resolveDeclaredType = (
           _tag: 'Resolved',
           type,
           spelling: Type.encode(type),
-          token: fact.token,
-          syntax: fact.syntax,
+          anchor: fact.anchor,
           components: Object.freeze([pointee.fact]),
         }),
         diagnostics: pointee.diagnostics,
@@ -889,12 +902,12 @@ export const resolveDeclaredType = (
   }
   if (fact._tag !== 'FixedArray') return Object.freeze({ fact, diagnostics: Object.freeze([]) })
   return (() => {
-    const element = resolveDeclaredType(module, fact.element, resolvers, modules)
+    const element = resolveDeclaredType(spanOf, module, fact.element, resolvers, modules)
     if (fact.length._tag !== 'Available') {
       return Object.freeze({
         fact: Object.freeze({
           _tag: 'Unavailable' as const,
-          syntax: fact.syntax,
+          anchor: fact.anchor,
           ...(fact.length._tag === 'OutOfRange' ? { cause: fact.length.cause } : {}),
         }),
         diagnostics: element.diagnostics,
@@ -907,8 +920,7 @@ export const resolveDeclaredType = (
           _tag: 'Resolved' as const,
           type,
           spelling: Type.encode(type),
-          token: fact.token,
-          syntax: fact.syntax,
+          anchor: fact.anchor,
           components: Object.freeze([element.fact]),
           ...(element.fact.exposureCause === undefined
             ? {}
@@ -922,8 +934,7 @@ export const resolveDeclaredType = (
         fact: Object.freeze({
           ...element.fact,
           spelling: fact.spelling,
-          token: fact.token,
-          syntax: fact.syntax,
+          anchor: fact.anchor,
         }),
         diagnostics: element.diagnostics,
       })
@@ -931,7 +942,7 @@ export const resolveDeclaredType = (
     return Object.freeze({
       fact: Object.freeze({
         _tag: 'Unavailable' as const,
-        syntax: fact.syntax,
+        anchor: fact.anchor,
         ...(element.fact._tag === 'Unavailable' && element.fact.cause !== undefined
           ? { cause: element.fact.cause }
           : {}),
@@ -1010,6 +1021,7 @@ type GenericArgumentResolution = TypeResolution & {
 
 /** Resolves a generic argument with the declaration parameter's kind available as context. */
 const resolveGenericArgument = (
+  spanOf: SpanOf,
   module: string,
   fact: DeclaredTypeFact,
   parameter: Type.Parameter | undefined,
@@ -1018,7 +1030,7 @@ const resolveGenericArgument = (
 ): GenericArgumentResolution => {
   if (parameter?.kind === 'RequirementRow' && fact._tag === 'Union') {
     const members = fact.members.map((member) =>
-      resolveGenericArgument(module, member, parameter, resolvers, modules),
+      resolveGenericArgument(spanOf, module, member, parameter, resolvers, modules),
     )
     const diagnostics = Object.freeze(members.flatMap((member) => member.diagnostics))
     const arguments_ = members.map((member) => member.argument)
@@ -1042,7 +1054,7 @@ const resolveGenericArgument = (
       ...(argument === undefined ? {} : { argument }),
     })
   }
-  const resolved = resolveDeclaredType(module, fact, resolvers, modules)
+  const resolved = resolveDeclaredType(spanOf, module, fact, resolvers, modules)
   if (resolved.fact._tag !== 'Resolved') return resolved
   return Object.freeze({
     ...resolved,
@@ -1058,6 +1070,7 @@ const resolveGenericArgument = (
  * `UnresolvedBound` and is reported once here, at the declaration that wrote it.
  */
 export const resolveBounds = (
+  spanOf: SpanOf,
   module: string,
   typeParameters: ReadonlyArray<TypeParameterFact>,
   resolvers: ResolutionSeams.ResolutionSeams,
@@ -1074,7 +1087,13 @@ export const resolveBounds = (
     typeParameters.map((parameter): TypeParameterFact => {
       const representation = parameter.representationBound
       if (representation !== undefined) {
-        const resolved = resolveDeclaredType(module, representation.contract, resolvers, modules)
+        const resolved = resolveDeclaredType(
+          spanOf,
+          module,
+          representation.contract,
+          resolvers,
+          modules,
+        )
         diagnostics.push(...resolved.diagnostics)
         const contract =
           resolved.fact._tag === 'Resolved' &&
@@ -1115,8 +1134,7 @@ export const resolveBounds = (
                     _tag: 'Resolved' as const,
                     type: parameter.type,
                     spelling: parameterName.spelling,
-                    token: parameterName.token,
-                    syntax: path.syntax,
+                    anchor: parameterName.anchor,
                     components: Object.freeze([]),
                   }),
                   diagnostics: Object.freeze([]),
@@ -1131,6 +1149,7 @@ export const resolveBounds = (
               ? bound.application.capability
               : (() => {
                   const resolved = resolveDeclaredType(
+                    spanOf,
                     module,
                     bound.application,
                     boundResolvers,
@@ -1186,7 +1205,7 @@ export const resolveBounds = (
           diagnostics.push(
             Diagnostic.invalidConformance(
               `unknown interface constraint ${bound.spelling}`,
-              parameter.syntax.span,
+              spanOf(parameter.anchor),
             ),
           )
           continue
@@ -1196,7 +1215,7 @@ export const resolveBounds = (
           diagnostics.push(
             Diagnostic.invalidConformance(
               `duplicate bound ${bound.spelling}`,
-              bound.path.syntax.span,
+              spanOf(bound.path.anchor),
             ),
           )
         else seen.add(key)
@@ -1590,12 +1609,14 @@ export const unpromisedWitnessBound = (
 
 /** Resolves one retained type fact through a supplied module resolver and complete index. */
 export const resolveTypeFact = (
+  spanOf: SpanOf,
   index: Index,
   module: string,
   fact: DeclaredTypeFact,
   resolver: TypeResolver,
 ): TypeResolution =>
   resolveDeclaredType(
+    spanOf,
     module,
     fact,
     ResolutionSeams.make(resolver, () => Object.freeze({ _tag: 'Missing' })),
@@ -1604,6 +1625,7 @@ export const resolveTypeFact = (
 
 /** Resolves a construction argument with its declared kind before normalizing value unions. */
 export const resolveGenericArgumentFact = (
+  spanOf: SpanOf,
   index: Index,
   module: string,
   fact: DeclaredTypeFact,
@@ -1611,6 +1633,7 @@ export const resolveGenericArgumentFact = (
   resolver: TypeResolver,
 ): GenericArgumentResolution =>
   resolveGenericArgument(
+    spanOf,
     module,
     fact,
     parameter,
@@ -1619,6 +1642,7 @@ export const resolveGenericArgumentFact = (
   )
 
 const resolveRequirementRole = (
+  spanOf: SpanOf,
   module: string,
   role: RequirementRoleFact,
   resolvers: ResolutionSeams.ResolutionSeams,
@@ -1657,12 +1681,13 @@ const resolveRequirementRole = (
   return Object.freeze({
     fact: role,
     diagnostics: Object.freeze([
-      Diagnostic.invalidRequirementType(`role ${role.path.spelling}`, role.path.syntax.span),
+      Diagnostic.invalidRequirementType(`role ${role.path.spelling}`, spanOf(role.path.anchor)),
     ]),
   })
 }
 
 const resolveRowExpressionFact = (
+  spanOf: SpanOf,
   module: string,
   fact: RowExpressionFact,
   resolvers: ResolutionSeams.ResolutionSeams,
@@ -1677,15 +1702,15 @@ const resolveRowExpressionFact = (
     case 'UnavailableRowExpression':
       return Object.freeze({ fact, diagnostics: Object.freeze([]) })
     case 'FailureMemberExpression': {
-      const member = resolveDeclaredType(module, fact.member, resolvers, modules)
+      const member = resolveDeclaredType(spanOf, module, fact.member, resolvers, modules)
       return Object.freeze({
         fact: Object.freeze({ ...fact, member: member.fact }),
         diagnostics: member.diagnostics,
       })
     }
     case 'RequirementMemberExpression': {
-      const capability = resolveDeclaredType(module, fact.capability, resolvers, modules)
-      const role = resolveRequirementRole(module, fact.role, resolvers)
+      const capability = resolveDeclaredType(spanOf, module, fact.capability, resolvers, modules)
+      const role = resolveRequirementRole(spanOf, module, fact.role, resolvers)
       return Object.freeze({
         fact: Object.freeze({ ...fact, capability: capability.fact, role: role.fact }),
         diagnostics: Object.freeze([...capability.diagnostics, ...role.diagnostics]),
@@ -1693,7 +1718,7 @@ const resolveRowExpressionFact = (
     }
     case 'UnionRowExpression': {
       const operands = fact.operands.map((operand) =>
-        resolveRowExpressionFact(module, operand, resolvers, modules),
+        resolveRowExpressionFact(spanOf, module, operand, resolvers, modules),
       )
       return Object.freeze({
         fact: Object.freeze({
@@ -1704,8 +1729,8 @@ const resolveRowExpressionFact = (
       })
     }
     case 'WithoutRowExpression': {
-      const source = resolveRowExpressionFact(module, fact.source, resolvers, modules)
-      const selected = resolveRowExpressionFact(module, fact.selected, resolvers, modules)
+      const source = resolveRowExpressionFact(spanOf, module, fact.source, resolvers, modules)
+      const selected = resolveRowExpressionFact(spanOf, module, fact.selected, resolvers, modules)
       return Object.freeze({
         fact: Object.freeze({ ...fact, source: source.fact, selected: selected.fact }),
         diagnostics: Object.freeze([...source.diagnostics, ...selected.diagnostics]),
@@ -1715,6 +1740,7 @@ const resolveRowExpressionFact = (
 }
 
 export const resolveConstraintFacts = (
+  spanOf: SpanOf,
   module: string,
   constraints: ReadonlyArray<ConstraintFact>,
   resolvers: ResolutionSeams.ResolutionSeams,
@@ -1725,12 +1751,18 @@ export const resolveConstraintFacts = (
 } => {
   const diagnostics: Array<Diagnostic.Diagnostic> = []
   const facts = constraints.map((constraint): ConstraintFact => {
-    const selected = resolveRowExpressionFact(module, constraint.selected, resolvers, modules)
-    const source = resolveRowExpressionFact(module, constraint.source, resolvers, modules)
+    const selected = resolveRowExpressionFact(
+      spanOf,
+      module,
+      constraint.selected,
+      resolvers,
+      modules,
+    )
+    const source = resolveRowExpressionFact(spanOf, module, constraint.source, resolvers, modules)
     diagnostics.push(...selected.diagnostics, ...source.diagnostics)
     if (constraint._tag === 'MembershipConstraint')
       return Object.freeze({ ...constraint, selected: selected.fact, source: source.fact })
-    const provider = resolveDeclaredType(module, constraint.provider, resolvers, modules)
+    const provider = resolveDeclaredType(spanOf, module, constraint.provider, resolvers, modules)
     diagnostics.push(...provider.diagnostics)
     return Object.freeze({
       ...constraint,
@@ -1742,7 +1774,7 @@ export const resolveConstraintFacts = (
   return Object.freeze({ facts: Object.freeze(facts), diagnostics: Object.freeze(diagnostics) })
 }
 
-const semanticFailureRow = (fact: RowExpressionFact): Type.FailureRow => {
+const semanticFailureRow = (spanOf: SpanOf, fact: RowExpressionFact): Type.FailureRow => {
   switch (fact._tag) {
     case 'EmptyRowExpression':
     case 'RequirementMemberExpression':
@@ -1756,7 +1788,7 @@ const semanticFailureRow = (fact: RowExpressionFact): Type.FailureRow => {
         return RowAlgebra.singleton(
           Type.failureRowPolicy(),
           Type.failureMemberShape(fact.member.type),
-          fact.syntax.span,
+          spanOf(fact.anchor),
         )
       return Type.isFailureValue(fact.member.type)
         ? RowAlgebra.concrete(Type.failureRowPolicy(), Type.failureLeaves(fact.member.type))
@@ -1764,19 +1796,19 @@ const semanticFailureRow = (fact: RowExpressionFact): Type.FailureRow => {
     case 'UnionRowExpression':
       return fact.operands.reduce<Type.FailureRow>(
         (row, operand) =>
-          RowAlgebra.union(Type.failureRowPolicy(), row, semanticFailureRow(operand)),
+          RowAlgebra.union(Type.failureRowPolicy(), row, semanticFailureRow(spanOf, operand)),
         RowAlgebra.concrete(Type.failureRowPolicy(), []),
       )
     case 'WithoutRowExpression':
       return RowAlgebra.without(
         Type.failureRowPolicy(),
-        semanticFailureRow(fact.source),
-        semanticFailureRow(fact.selected),
+        semanticFailureRow(spanOf, fact.source),
+        semanticFailureRow(spanOf, fact.selected),
       )
   }
 }
 
-const semanticRequirementRow = (fact: RowExpressionFact): Type.RequirementsRow => {
+const semanticRequirementRow = (spanOf: SpanOf, fact: RowExpressionFact): Type.RequirementsRow => {
   switch (fact._tag) {
     case 'EmptyRowExpression':
     case 'FailureMemberExpression':
@@ -1805,26 +1837,31 @@ const semanticRequirementRow = (fact: RowExpressionFact): Type.RequirementsRow =
         return RowAlgebra.singleton(
           Type.requirementRowPolicy(),
           Type.requirementMemberShape(fact.capability.type, fact.access, role),
-          fact.syntax.span,
+          spanOf(fact.anchor),
         )
       return RowAlgebra.concrete(Type.requirementRowPolicy(), [])
     }
     case 'UnionRowExpression':
       return fact.operands.reduce<Type.RequirementsRow>(
         (row, operand) =>
-          RowAlgebra.union(Type.requirementRowPolicy(), row, semanticRequirementRow(operand)),
+          RowAlgebra.union(
+            Type.requirementRowPolicy(),
+            row,
+            semanticRequirementRow(spanOf, operand),
+          ),
         RowAlgebra.concrete(Type.requirementRowPolicy(), []),
       )
     case 'WithoutRowExpression':
       return RowAlgebra.without(
         Type.requirementRowPolicy(),
-        semanticRequirementRow(fact.source),
-        semanticRequirementRow(fact.selected),
+        semanticRequirementRow(spanOf, fact.source),
+        semanticRequirementRow(spanOf, fact.selected),
       )
   }
 }
 
 export const semanticConstraints = (
+  spanOf: SpanOf,
   constraints: ReadonlyArray<ConstraintFact>,
 ): ReadonlyArray<Constraint.Constraint> =>
   Object.freeze(
@@ -1838,28 +1875,29 @@ export const semanticConstraints = (
           Constraint.providerSelection(
             constraint.mode,
             provider,
-            semanticRequirementRow(constraint.selected),
-            semanticRequirementRow(constraint.source),
+            semanticRequirementRow(spanOf, constraint.selected),
+            semanticRequirementRow(spanOf, constraint.source),
           ),
         ]
       }
       if (constraint.domain === 'Requirement')
         return [
           Constraint.requirementSubset(
-            semanticRequirementRow(constraint.selected),
-            semanticRequirementRow(constraint.source),
+            semanticRequirementRow(spanOf, constraint.selected),
+            semanticRequirementRow(spanOf, constraint.source),
           ),
         ]
       return [
         Constraint.failureSubset(
-          semanticFailureRow(constraint.selected),
-          semanticFailureRow(constraint.source),
+          semanticFailureRow(spanOf, constraint.selected),
+          semanticFailureRow(spanOf, constraint.source),
         ),
       ]
     }),
   )
 
 export const resolveFailureRow = (
+  spanOf: SpanOf,
   module: string,
   row: FailureRowFact,
   resolvers: ResolutionSeams.ResolutionSeams,
@@ -1868,13 +1906,13 @@ export const resolveFailureRow = (
   readonly fact: FailureRowFact
   readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
 } => {
-  if (row.syntax === undefined) return Object.freeze({ fact: row, diagnostics: Object.freeze([]) })
+  if (row.anchor === undefined) return Object.freeze({ fact: row, diagnostics: Object.freeze([]) })
   const diagnostics: Array<Diagnostic.Diagnostic> = []
-  const expression = resolveRowExpressionFact(module, row.expression, resolvers, modules)
+  const expression = resolveRowExpressionFact(spanOf, module, row.expression, resolvers, modules)
   // Legacy member facts and the symbolic expression share the same source nodes. Resolve the
   // expression for semantic shape, while the member pass below remains the single diagnostic owner.
   const members = row.members.map((member) => {
-    const resolved = resolveDeclaredType(module, member, resolvers, modules)
+    const resolved = resolveDeclaredType(spanOf, module, member, resolvers, modules)
     diagnostics.push(...resolved.diagnostics)
     return resolved.fact
   })
@@ -1885,7 +1923,7 @@ export const resolveFailureRow = (
       available = false
       if (member._tag === 'Resolved')
         diagnostics.push(
-          Diagnostic.invalidFailureType(Type.encode(member.type), member.syntax.span),
+          Diagnostic.invalidFailureType(Type.encode(member.type), spanOf(member.anchor)),
         )
       continue
     }
@@ -1898,7 +1936,7 @@ export const resolveFailureRow = (
       members: Object.freeze(members),
       failures: Object.freeze([...failures.values()].sort(Type.compare)),
       expression: expression.fact,
-      row: semanticFailureRow(expression.fact),
+      row: semanticFailureRow(spanOf, expression.fact),
       available,
     }),
     diagnostics: Object.freeze(diagnostics),
@@ -1906,6 +1944,7 @@ export const resolveFailureRow = (
 }
 
 export const resolveRequirementRow = (
+  spanOf: SpanOf,
   module: string,
   row: RequirementRowFact,
   resolvers: ResolutionSeams.ResolutionSeams,
@@ -1914,13 +1953,13 @@ export const resolveRequirementRow = (
   readonly fact: RequirementRowFact
   readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
 } => {
-  if (row.syntax === undefined) return Object.freeze({ fact: row, diagnostics: Object.freeze([]) })
+  if (row.anchor === undefined) return Object.freeze({ fact: row, diagnostics: Object.freeze([]) })
   const diagnostics: Array<Diagnostic.Diagnostic> = []
-  const expression = resolveRowExpressionFact(module, row.expression, resolvers, modules)
+  const expression = resolveRowExpressionFact(spanOf, module, row.expression, resolvers, modules)
   // The entry pass below owns diagnostics for these same source nodes.
   const entries = row.entries.map((entry) => {
-    const capability = resolveDeclaredType(module, entry.capability, resolvers, modules)
-    const role = resolveRequirementRole(module, entry.role, resolvers)
+    const capability = resolveDeclaredType(spanOf, module, entry.capability, resolvers, modules)
+    const role = resolveRequirementRole(spanOf, module, entry.role, resolvers)
     diagnostics.push(...capability.diagnostics, ...role.diagnostics)
     return Object.freeze({ ...entry, capability: capability.fact, role: role.fact })
   })
@@ -1945,7 +1984,10 @@ export const resolveRequirementRow = (
       available = false
       if (entry.capability._tag === 'Resolved')
         diagnostics.push(
-          Diagnostic.invalidRequirementType(Type.encode(entry.capability.type), entry.syntax.span),
+          Diagnostic.invalidRequirementType(
+            Type.encode(entry.capability.type),
+            spanOf(entry.anchor),
+          ),
         )
     }
   }
@@ -1964,7 +2006,7 @@ export const resolveRequirementRow = (
       entries: Object.freeze(entries),
       requirements: normalized,
       expression: expression.fact,
-      row: semanticRequirementRow(expression.fact),
+      row: semanticRequirementRow(spanOf, expression.fact),
       available,
     }),
     diagnostics: Object.freeze(diagnostics),
@@ -1972,6 +2014,7 @@ export const resolveRequirementRow = (
 }
 
 export const attachExposure = (
+  spanOf: SpanOf,
   fact: DeclaredTypeFact,
   modules: ReadonlyArray<ModuleHeaders>,
   diagnostics: Array<Diagnostic.Diagnostic>,
@@ -1985,7 +2028,7 @@ export const attachExposure = (
     return found._tag === 'Resolved' && found.declaration.visibility === 'Private'
   })
   if (leaked !== undefined) {
-    const diagnostic = Diagnostic.privateExactRepresentationLeak(leaked.name, fact.token.span)
+    const diagnostic = Diagnostic.privateExactRepresentationLeak(leaked.name, spanOf(fact.anchor))
     diagnostics.push(diagnostic)
     return Object.freeze({ ...fact, exposureCause: Diagnostic.identity(diagnostic) })
   }
@@ -1995,7 +2038,7 @@ export const attachExposure = (
   if (nominal === undefined) return fact
   const target = memberByNominal(modules, nominal)
   if (target?.visibility !== 'Private') return fact
-  const diagnostic = Diagnostic.privateTypeExposure(Type.encode(nominal), fact.token.span)
+  const diagnostic = Diagnostic.privateTypeExposure(Type.encode(nominal), spanOf(fact.anchor))
   diagnostics.push(diagnostic)
   return Object.freeze({ ...fact, exposureCause: Diagnostic.identity(diagnostic) })
 }
@@ -2179,6 +2222,7 @@ export const stronglyConnected = (
 }
 
 export const resolveOpaqueResult = (
+  spanOf: SpanOf,
   module: string,
   opaqueResult: OpaqueResultFact | undefined,
   resolvers: ResolutionSeams.ResolutionSeams,
@@ -2186,14 +2230,21 @@ export const resolveOpaqueResult = (
   diagnostics: Array<Diagnostic.Diagnostic>,
 ): OpaqueResultFact | undefined => {
   if (opaqueResult === undefined) return undefined
-  const binder = resolveBounds(module, [opaqueResult.binder], resolvers, modules, diagnostics).at(0)
+  const binder = resolveBounds(
+    spanOf,
+    module,
+    [opaqueResult.binder],
+    resolvers,
+    modules,
+    diagnostics,
+  ).at(0)
   if (binder === undefined) return undefined
   if (binder.type.kind !== 'CallableRepresentation' && binder.type.kind !== 'EffectRepresentation')
     diagnostics.push(
       Diagnostic.invalidOpaqueResultBinder(
         binder.name._tag === 'Present' ? binder.name.spelling : binder.type.name,
         binder.type.kind,
-        binder.syntax.span,
+        spanOf(binder.anchor),
       ),
     )
   return Object.freeze({ ...opaqueResult, binder })

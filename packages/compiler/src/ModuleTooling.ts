@@ -1,18 +1,19 @@
+import type * as SyntaxFile from './SyntaxFile.js'
 import type * as DeclarationIndex from './DeclarationIndex.js'
 import * as Elaboration from './Elaboration.js'
 import type * as ModuleSemantics from './ModuleSemantics.js'
 import type * as NameResolution from './NameResolution.js'
-import * as Presentation from './Presentation.js'
+import * as SemanticDisplay from './SemanticDisplay.js'
 import * as SemanticOccurrence from './SemanticOccurrence.js'
 import type * as SourceSpan from './SourceSpan.js'
-import * as SyntaxTree from './SyntaxTree.js'
+import * as SemanticContext from './SemanticContext.js'
 import type * as Type from './Type.js'
 
 /** One available anonymous expression type cached for position fallback. */
 export interface AnonymousExpression {
   readonly span: SourceSpan.SourceSpan
   readonly type: Type.Type
-  readonly presentation?: Presentation.Presentation
+  readonly presentation?: SemanticDisplay.Presentation
 }
 
 /** One module's immutable editor indexes and their exact semantic input. */
@@ -39,19 +40,22 @@ export const statementExpressions = (
 export const anonymousExpressionIndex = (
   semantics: ModuleSemantics.ModuleSemantics,
 ): ReadonlyArray<AnonymousExpression> => {
+  const context = SemanticContext.make(semantics.elaboration.authored)
   const found = new Map<string, AnonymousExpression>()
   for (const fn of semantics.elaboration.functions)
     for (const statement of fn.statements)
       for (const expression of statementExpressions(statement)) {
         if (expression.type._tag !== 'Available') continue
-        const span = SyntaxTree.span(expression.syntax)
+        const span = context.spanOf(expression.anchor)
         found.set(
           `${span.start}:${span.end}`,
           Object.freeze({
             span,
             type: expression.type.type,
             ...(expression._tag === 'CallableSection' && expression.anonymous !== undefined
-              ? { presentation: Presentation.anonymousCallable(expression, expression.anonymous) }
+              ? {
+                  presentation: SemanticDisplay.anonymousCallable(expression, expression.anonymous),
+                }
               : {}),
           }),
         )
@@ -69,15 +73,19 @@ export const anonymousExpressionIndex = (
 export const semanticOccurrenceIndex = (
   semantics: ModuleSemantics.ModuleSemantics,
   index: DeclarationIndex.Index,
+  spans: SemanticContext.Registry,
   resolution: NameResolution.Resolution,
   conditions: ReadonlyArray<Elaboration.ExpressionFact> = [],
+  syntax?: SyntaxFile.SyntaxFile,
 ): SemanticOccurrence.ModuleIndex =>
   SemanticOccurrence.makeModule(
     semantics.module,
     semantics.elaboration,
     index,
+    spans,
     resolution,
     conditions,
+    syntax,
   )
 
 /** Closes already-built module indexes into one reusable tooling artifact. */

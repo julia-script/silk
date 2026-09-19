@@ -9,17 +9,18 @@
 
 ## 2. A2 — JUL-206 complete local lowering (separate work package)
 
-- [ ] 2.1 Extend existing syntax/recovery specification deltas and implement all-form local lowering, preserving inactive arms, static bodies, lexical relationships, exact values and current presentation.
-- [ ] 2.2 Migrate representative structural source fixtures to the authored boundary, including recovery and source-release evidence; preserve syntax-only formatting.
+- [x] 2.1 Extend existing syntax/recovery specification deltas and implement all-form local lowering, preserving inactive arms, static bodies, lexical relationships, exact values and current presentation.
+- [x] 2.2 Migrate representative structural source fixtures to the authored boundary, including recovery and source-release evidence; preserve syntax-only formatting.
 
 ## 3. A3 — JUL-207 HIR-to-TIR semantics (separate work package)
 
-- [ ] 3.1 Extend existing semantic/reuse specification deltas and migrate declaration, resolution, typing, conformance, static and ownership consumers to authored HIR with explicit context.
-- [ ] 3.2 Publish one typed TIR body plus necessary indexed results, remove duplicate executable facts and syntax-backed rebinding, and migrate public/tooling terminology and goldens.
-- [ ] 3.3 Preserve dependency-sensitive positive/negative editor reuse and source-free semantic/static fixtures, including alpha renaming and current presentation remapping.
+- [x] 3.1 Carry the authored module and presentation beside every loaded module through the closure and elaboration inputs, and derive body-query implementation/scope keys and hidden anonymous identities from authored content instead of source tokens and byte offsets, preserving the positive/negative reuse witnesses including alpha renaming.
+- [x] 3.2 Extend the remaining semantic/reuse specification deltas and migrate declaration, resolution, typing, conformance, static and ownership consumers to authored HIR with explicit context.
+- [ ] 3.3 Publish one typed TIR body plus necessary indexed results, remove duplicate executable facts and syntax-backed rebinding, and migrate public/tooling terminology and goldens.
+- [ ] 3.4 Preserve source-free semantic/static fixtures with current presentation remapping for diagnostics and navigation.
 
 ## 4. A4 — JUL-208 sealed preparation (separate work package)
 
-- [ ] 4.1 Extend preparation/selection specification deltas and implement intent-specific manifests, normalized configuration and shared selected source-outcome discovery.
-- [ ] 4.2 Close executable component demand to a monotone fixed point and seal bundles; preserve analysis-only work bounds, partial queries, required-root failures and unused-component exclusion.
-- [ ] 4.3 Migrate public/compiler/tooling entry points and separate helper requests, removing downstream source reopening; provide poisoned-resolver/parser structural evidence.
+- [x] 4.1 Extend preparation/selection specification deltas and implement intent-specific manifests, normalized configuration and shared selected source-outcome discovery.
+- [x] 4.2 Close executable component demand to a monotone fixed point and seal bundles; preserve analysis-only work bounds, partial queries, required-root failures and unused-component exclusion.
+- [x] 4.3 Migrate public/compiler/tooling entry points and separate helper requests, removing downstream source reopening; provide resolver-free downstream evidence with a counting resolver.

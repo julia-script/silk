@@ -61,27 +61,14 @@ import * as InterfaceWitnessCompatibility from './InterfaceWitnessCompatibility.
 import * as Intrinsic from './Intrinsic.js'
 import * as TypeInference from './internal/TypeInference.js'
 import * as ResolutionSeams from './ResolutionSeams.js'
+import type * as SemanticContext from './SemanticContext.js'
+import type * as AuthoredHir from './AuthoredHir.js'
 import * as Scalar from './Scalar.js'
 import * as SourceSpan from './SourceSpan.js'
-import * as SyntaxTree from './SyntaxTree.js'
-import * as Type from './Type.js'
 
-const tightSpan = (syntax: SyntaxTree.Element): SourceSpan.SourceSpan => {
-  if (!SyntaxTree.isNode(syntax)) return syntax.span
-  const tokens = SyntaxTree.tokens(syntax).filter(
-    (token) =>
-      token.kind !== 'Whitespace' &&
-      token.kind !== 'LineComment' &&
-      token.kind !== 'DocComment' &&
-      token.kind !== 'ModuleDocComment' &&
-      token.kind !== 'EndOfFile',
-  )
-  const first = tokens.at(0)
-  const last = tokens.at(-1)
-  return first === undefined || last === undefined
-    ? syntax.span
-    : (SourceSpan.fromOffsets(syntax.span.sourceId, first.span.start, last.span.end) ?? syntax.span)
-}
+/** Resolves one authored position to a current-revision span, for diagnostics only. */
+type SpanOf = (anchor: AuthoredHir.Anchor) => SourceSpan.SourceSpan
+import * as Type from './Type.js'
 
 /** Makes resolved executable-representation bounds visible while closing their declaration. */
 const withResolvedRepresentationParameters = (
@@ -129,6 +116,7 @@ const isContractOwnedInlineProvider = (provider: Type.Type): boolean =>
   Type.isBuiltin(provider) || Type.isString(provider)
 
 const foreignAdmission = (
+  spanOf: SpanOf,
   parameters: ReadonlyArray<ParameterFact>,
   result: ReturnTypeFact,
   contract: ForeignContract.ForeignContract = ForeignContract.conservative,
@@ -148,28 +136,29 @@ const foreignAdmission = (
       )
       return admission._tag === 'Admitted'
         ? []
-        : [Diagnostic.foreignTypeNotAdmitted(declared.spelling, 'C', declared.syntax.span)]
+        : [Diagnostic.foreignTypeNotAdmitted(declared.spelling, 'C', spanOf(declared.anchor))]
     },
   )
 
 /** C function pointers are ABI contracts even when their enclosing declaration is ordinary Silk. */
 const foreignFunctionPointerAdmission = (
+  spanOf: SpanOf,
   declared: DeclaredTypeFact,
 ): ReadonlyArray<Diagnostic.Diagnostic> => {
   if (declared._tag !== 'Resolved') return []
   return Type.foreignFunctions(declared.type).flatMap((type) => [
     ...(CAbi.admit(type, 'Parameter')._tag === 'Admitted'
       ? []
-      : [Diagnostic.foreignTypeNotAdmitted(Type.encode(type), 'C', tightSpan(declared.syntax))]),
+      : [Diagnostic.foreignTypeNotAdmitted(Type.encode(type), 'C', spanOf(declared.anchor))]),
     ...ForeignContract.validate(
       type.contract,
       type.parameters.map((parameter, ordinal) => ({
         name: String(ordinal),
         type: parameter,
-        span: tightSpan(declared.syntax),
+        span: spanOf(declared.anchor),
       })),
       type.result,
-      tightSpan(declared.syntax),
+      spanOf(declared.anchor),
     ),
   ])
 }
@@ -177,7 +166,9 @@ const foreignFunctionPointerAdmission = (
 export const complete = (
   self: DeclarationIndex.Index,
   resolvers: ResolutionSeams.ResolutionSeams,
+  registry: SemanticContext.Registry,
 ): DeclarationIndex.Index => {
+  const spanOf = registry.spanOf
   const diagnostics: Array<Diagnostic.Diagnostic> = [...self.diagnostics]
   // Alias declarations own their one-shot resolution diagnostics. Header arity probes also
   // traverse property bounds and may ignore non-nominal results, so they must not force these first.
@@ -221,7 +212,9 @@ export const complete = (
           member.name.spelling === head.ownerSpelling &&
           NameResolution.isNominalOwner(member),
       )
-    const candidate = DeclarationCollection.finalizeLifetimeHeader(head, (path) => {
+    const headContext = registry.of(head.anchor)
+    if (headContext === undefined) return head
+    const candidate = DeclarationCollection.finalizeLifetimeHeader(headContext, head, (path) => {
       const owner =
         path.spelling === head.ownerSpelling && localOwner !== undefined
           ? finalize(localOwner)
@@ -237,7 +230,9 @@ export const complete = (
   const finalizeConformance = (head: ConformanceFact): ConformanceFact => {
     const cached = finalizedConformances.get(head)
     if (cached !== undefined) return cached
-    const candidate = DeclarationCollection.finalizeLifetimeHeader(head, (path) =>
+    const headContext = registry.of(head.anchor)
+    if (headContext === undefined) return head
+    const candidate = DeclarationCollection.finalizeLifetimeHeader(headContext, head, (path) =>
       nominalParameters(head.module, path),
     )
     const closed = candidate._tag === 'ConformanceDeclaration' ? candidate : head
@@ -267,11 +262,14 @@ export const complete = (
             )
         : undefined
     const completedHead = head === undefined ? undefined : finalizeHead(head)
+    const memberContext = registry.of(member.anchor)
     const candidate =
-      member._tag === 'FunctionDeclaration' ||
-      member._tag === 'StructDeclaration' ||
-      member._tag === 'UnionDeclaration'
+      (member._tag === 'FunctionDeclaration' ||
+        member._tag === 'StructDeclaration' ||
+        member._tag === 'UnionDeclaration') &&
+      memberContext !== undefined
         ? DeclarationCollection.finalizeLifetimeHeader(
+            memberContext,
             member,
             (path) => nominalParameters(module, path),
             conformance !== undefined ? finalizeConformance(conformance) : completedHead,
@@ -341,7 +339,7 @@ export const complete = (
         const resolved = resolvers.alias?.(member)
         if (resolved === undefined) return member
         diagnostics.push(...resolved.diagnostics)
-        diagnostics.push(...foreignFunctionPointerAdmission(resolved.fact))
+        diagnostics.push(...foreignFunctionPointerAdmission(spanOf, resolved.fact))
         return Object.freeze({ ...member, target: resolved.fact })
       }
       if (
@@ -349,13 +347,19 @@ export const complete = (
         member._tag === 'PackageParameterDeclaration' ||
         member._tag === 'ForeignStaticDeclaration'
       ) {
-        const resolved = resolveDeclaredType(module.module, member.declaredType, resolvers, headers)
+        const resolved = resolveDeclaredType(
+          spanOf,
+          module.module,
+          member.declaredType,
+          resolvers,
+          headers,
+        )
         diagnostics.push(...resolved.diagnostics)
         if (
           member._tag === 'ConstantDeclaration' ||
           member._tag === 'PackageParameterDeclaration'
         ) {
-          diagnostics.push(...foreignFunctionPointerAdmission(resolved.fact))
+          diagnostics.push(...foreignFunctionPointerAdmission(spanOf, resolved.fact))
           return Object.freeze({ ...member, declaredType: resolved.fact })
         }
         const admission =
@@ -367,7 +371,7 @@ export const complete = (
             Diagnostic.foreignTypeNotAdmitted(
               Type.encode(admission.type),
               'C',
-              resolved.fact.syntax.span,
+              spanOf(resolved.fact.anchor),
             ),
           )
         let invalidInitializer = false
@@ -394,7 +398,7 @@ export const complete = (
             diagnostics.push(
               Diagnostic.invalidConstant(
                 'an exported C static requires one matching integer or floating-point scalar literal',
-                member.initializer?.span ?? member.syntax.span,
+                spanOf(member.initializer?.anchor ?? member.anchor),
               ),
             )
           }
@@ -403,12 +407,13 @@ export const complete = (
           ...member,
           declaredType:
             admission?._tag === 'NotAdmitted' || invalidInitializer
-              ? Object.freeze({ _tag: 'Unavailable' as const, syntax: resolved.fact.syntax })
+              ? Object.freeze({ _tag: 'Unavailable' as const, anchor: resolved.fact.anchor })
               : resolved.fact,
         })
       }
       if (member._tag === 'FunctionDeclaration') {
         const resolvedTypeParameters = resolveBounds(
+          spanOf,
           module.module,
           member.typeParameters,
           resolvers,
@@ -416,6 +421,7 @@ export const complete = (
           diagnostics,
         )
         const opaqueResult = resolveOpaqueResult(
+          spanOf,
           module.module,
           member.opaqueResult,
           resolvers,
@@ -437,6 +443,7 @@ export const complete = (
               )
         const parameters = member.parameters.map((parameter) => {
           const resolved = resolveDeclaredType(
+            spanOf,
             module.module,
             parameter.declaredType,
             memberResolvers,
@@ -446,6 +453,7 @@ export const complete = (
           return Object.freeze({ ...parameter, declaredType: resolved.fact })
         })
         const resolvedResult = resolveDeclaredType(
+          spanOf,
           module.module,
           member.returnType,
           memberResolvers,
@@ -458,6 +466,7 @@ export const complete = (
           resolvedTypeParameters,
         )
         const failureRow = resolveFailureRow(
+          spanOf,
           module.module,
           member.failureRow,
           memberResolvers,
@@ -465,6 +474,7 @@ export const complete = (
         )
         diagnostics.push(...failureRow.diagnostics)
         const requirementRow = resolveRequirementRow(
+          spanOf,
           module.module,
           member.requirementRow,
           memberResolvers,
@@ -472,6 +482,7 @@ export const complete = (
         )
         diagnostics.push(...requirementRow.diagnostics)
         const constraints = resolveConstraintFacts(
+          spanOf,
           module.module,
           member.constraints,
           memberResolvers,
@@ -482,15 +493,16 @@ export const complete = (
           member.foreign === undefined && member.foreignExport === undefined
             ? []
             : foreignAdmission(
+                spanOf,
                 parameters,
                 result.fact,
                 (member.foreign ?? member.foreignExport)?.contract,
               )
         const pointerAdmission = [
           ...parameters.flatMap((parameter) =>
-            foreignFunctionPointerAdmission(parameter.declaredType),
+            foreignFunctionPointerAdmission(spanOf, parameter.declaredType),
           ),
-          ...foreignFunctionPointerAdmission(result.fact),
+          ...foreignFunctionPointerAdmission(spanOf, result.fact),
         ]
         const behaviorDiagnostics =
           member.foreign === undefined && member.foreignExport === undefined
@@ -503,10 +515,10 @@ export const complete = (
                     parameter.declaredType._tag === 'Resolved'
                       ? parameter.declaredType.type
                       : undefined,
-                  span: parameter.syntax.span,
+                  span: spanOf(parameter.anchor),
                 })),
                 result.fact._tag === 'Resolved' ? result.fact.type : undefined,
-                result.fact.syntax.span,
+                spanOf(result.fact.anchor),
               )
         diagnostics.push(...admission, ...behaviorDiagnostics, ...pointerAdmission)
         const { foreignExport, ...retained } = member
@@ -521,16 +533,17 @@ export const complete = (
           returnType:
             admission.length === 0 && behaviorDiagnostics.length === 0
               ? result.fact
-              : Object.freeze({ _tag: 'Unavailable' as const, syntax: result.fact.syntax }),
+              : Object.freeze({ _tag: 'Unavailable' as const, anchor: result.fact.anchor }),
           ...(result.opaqueResult === undefined ? {} : { opaqueResult: result.opaqueResult }),
           failureRow: failureRow.fact,
           requirementRow: requirementRow.fact,
           constraints: constraints.facts,
-          constraintContracts: semanticConstraints(constraints.facts),
+          constraintContracts: semanticConstraints(spanOf, constraints.facts),
         })
       }
       if (member._tag === 'ServiceDeclaration' || member._tag === 'InterfaceDeclaration') {
         const resolvedMemberTypeParameters = resolveBounds(
+          spanOf,
           module.module,
           member.typeParameters,
           resolvers,
@@ -543,10 +556,15 @@ export const complete = (
           resolvedMemberTypeParameters,
         )
         const operations = member.operations.map((collectedOperation) => {
-          const finalizedOperation = DeclarationCollection.finalizeLifetimeHeader(
-            collectedOperation,
-            nominalParameters,
-          )
+          const operationContext = registry.of(collectedOperation.anchor)
+          const finalizedOperation =
+            operationContext === undefined
+              ? collectedOperation
+              : DeclarationCollection.finalizeLifetimeHeader(
+                  operationContext,
+                  collectedOperation,
+                  nominalParameters,
+                )
           const operation =
             finalizedOperation._tag === 'ServiceOperation' ? finalizedOperation : collectedOperation
           diagnostics.push(
@@ -568,11 +586,12 @@ export const complete = (
               Diagnostic.bodylessOpaqueResult(
                 `${owner}.${name}`,
                 member._tag === 'ServiceDeclaration' ? 'ServiceOperation' : 'InterfaceOperation',
-                operation.opaqueResult.syntax.span,
+                spanOf(operation.opaqueResult.anchor),
               ),
             )
           }
           const resolvedOperationTypeParameters = resolveBounds(
+            spanOf,
             module.module,
             operation.typeParameters,
             memberResolvers,
@@ -580,6 +599,7 @@ export const complete = (
             diagnostics,
           )
           const opaqueResult = resolveOpaqueResult(
+            spanOf,
             module.module,
             operation.opaqueResult,
             memberResolvers,
@@ -601,6 +621,7 @@ export const complete = (
                 )
           const parameters = operation.parameters.map((parameter) => {
             const resolved = resolveDeclaredType(
+              spanOf,
               module.module,
               parameter.declaredType,
               operationResolvers,
@@ -610,6 +631,7 @@ export const complete = (
             return Object.freeze({ ...parameter, declaredType: resolved.fact })
           })
           const resolvedResult = resolveDeclaredType(
+            spanOf,
             module.module,
             operation.returnType,
             operationResolvers,
@@ -620,18 +642,21 @@ export const complete = (
             ...resolvedOperationTypeParameters,
           ])
           const failureRow = resolveFailureRow(
+            spanOf,
             module.module,
             operation.failureRow,
             operationResolvers,
             headers,
           )
           const requirementRow = resolveRequirementRow(
+            spanOf,
             module.module,
             operation.requirementRow,
             operationResolvers,
             headers,
           )
           const constraints = resolveConstraintFacts(
+            spanOf,
             module.module,
             operation.constraints,
             operationResolvers,
@@ -643,9 +668,9 @@ export const complete = (
             ...requirementRow.diagnostics,
             ...constraints.diagnostics,
             ...parameters.flatMap((parameter) =>
-              foreignFunctionPointerAdmission(parameter.declaredType),
+              foreignFunctionPointerAdmission(spanOf, parameter.declaredType),
             ),
-            ...foreignFunctionPointerAdmission(result.fact),
+            ...foreignFunctionPointerAdmission(spanOf, result.fact),
           )
           return Object.freeze({
             ...operation,
@@ -656,7 +681,7 @@ export const complete = (
             failureRow: failureRow.fact,
             requirementRow: requirementRow.fact,
             constraints: constraints.facts,
-            constraintContracts: semanticConstraints(constraints.facts),
+            constraintContracts: semanticConstraints(spanOf, constraints.facts),
           })
         })
         const completed = Object.freeze({
@@ -674,13 +699,14 @@ export const complete = (
         Object.freeze(
           fields.map((field) => {
             const resolved = resolveDeclaredType(
+              spanOf,
               module.module,
               field.declaredType,
               resolvers,
               headers,
             )
             diagnostics.push(...resolved.diagnostics)
-            diagnostics.push(...foreignFunctionPointerAdmission(resolved.fact))
+            diagnostics.push(...foreignFunctionPointerAdmission(spanOf, resolved.fact))
             return Object.freeze({ ...field, declaredType: resolved.fact })
           }),
         )
@@ -700,6 +726,7 @@ export const complete = (
         return Object.freeze({
           ...member,
           typeParameters: resolveBounds(
+            spanOf,
             module.module,
             member.typeParameters,
             resolvers,
@@ -722,6 +749,7 @@ export const complete = (
       return Object.freeze({
         ...member,
         typeParameters: resolveBounds(
+          spanOf,
           module.module,
           member.typeParameters,
           resolvers,
@@ -733,36 +761,47 @@ export const complete = (
     })
     const conformances = module.conformances.map((conformance) => {
       const capability = resolveDeclaredType(
+        spanOf,
         module.module,
         conformance.capability,
         resolvers,
         headers,
       )
-      const provider = resolveDeclaredType(module.module, conformance.provider, resolvers, headers)
+      const provider = resolveDeclaredType(
+        spanOf,
+        module.module,
+        conformance.provider,
+        resolvers,
+        headers,
+      )
       diagnostics.push(...capability.diagnostics, ...provider.diagnostics)
       const hook =
         conformance.hook === undefined
           ? undefined
           : (() => {
               const parameterType = resolveDeclaredType(
+                spanOf,
                 module.module,
                 conformance.hook.parameterType,
                 resolvers,
                 headers,
               )
               const returnType = resolveDeclaredType(
+                spanOf,
                 module.module,
                 conformance.hook.returnType,
                 resolvers,
                 headers,
               )
               const failureRow = resolveFailureRow(
+                spanOf,
                 module.module,
                 conformance.hook.failureRow,
                 resolvers,
                 headers,
               )
               const requirementRow = resolveRequirementRow(
+                spanOf,
                 module.module,
                 conformance.hook.requirementRow,
                 resolvers,
@@ -784,6 +823,7 @@ export const complete = (
             })()
       const requirements = conformance.requirements.map((requirement) => {
         const resolved = resolveDeclaredType(
+          spanOf,
           module.module,
           requirement.capability,
           resolvers,
@@ -811,7 +851,7 @@ export const complete = (
     // checks that need scope run here: the owner must be a nominal of this module named directly
     // (not through an alias), or the head publishes no members.
     const inherentImpls = module.inherentImpls.map((head): InherentImplFact => {
-      const owner = resolveDeclaredType(module.module, head.owner, resolvers, headers)
+      const owner = resolveDeclaredType(spanOf, module.module, head.owner, resolvers, headers)
       // A head already rejected at collection keeps only that diagnostic; its owner is resolved
       // for closing `Self` in its members, not for a second report.
       if (head.validity._tag === 'Invalid') return Object.freeze({ ...head, owner: owner.fact })
@@ -842,7 +882,7 @@ export const complete = (
         const diagnostic = Diagnostic.invalidInherentHead(
           head.ownerSpelling,
           'Specialized',
-          tightSpan(head.owner.syntax),
+          spanOf(head.owner.anchor),
         )
         diagnostics.push(diagnostic)
         return Object.freeze({
@@ -898,7 +938,7 @@ export const complete = (
       const diagnostic = Diagnostic.invalidInherentHead(
         head.ownerSpelling,
         problem,
-        head.owner._tag === 'Unavailable' ? head.syntax.span : head.owner.syntax.span,
+        head.owner._tag === 'Unavailable' ? spanOf(head.anchor) : spanOf(head.owner.anchor),
       )
       diagnostics.push(diagnostic)
       return Object.freeze({
@@ -936,7 +976,7 @@ export const complete = (
       const declaration = nominalOwnerDeclaration(headers, owner)
       const names = new Map<string, OwnerItem>()
       const add = (name: DeclaredName, kind: string): void => {
-        if (name._tag === 'Present') names.set(name.spelling, { kind, span: name.token.span })
+        if (name._tag === 'Present') names.set(name.spelling, { kind, span: spanOf(name.anchor) })
       }
       if (declaration?._tag === 'StructDeclaration')
         for (const field of declaration.fields) add(field.name, 'field')
@@ -944,7 +984,7 @@ export const complete = (
         for (const variant of declaration.variants) add(variant.name, 'variant')
       if (declaration?._tag === 'EnumDeclaration') {
         for (const member of declaration.members) add(member.name, 'member')
-        names.set('value', { kind: 'generated operation', span: declaration.syntax.span })
+        names.set('value', { kind: 'generated operation', span: spanOf(declaration.anchor) })
       }
       if (
         declaration?._tag === 'ServiceDeclaration' ||
@@ -985,7 +1025,7 @@ export const complete = (
             association.ownerSpelling,
             association.name,
             'Collision',
-            member.name._tag === 'Present' ? member.name.token.span : member.syntax.span,
+            member.name._tag === 'Present' ? spanOf(member.name.anchor) : spanOf(member.anchor),
             collision.kind,
             collision.span,
           ),
@@ -1090,7 +1130,9 @@ export const complete = (
         diagnostics.push(
           Diagnostic.genericCLayoutRecord(
             record,
-            SyntaxTree.directNode(member.syntax, 'TypeParameterList')?.span ?? member.syntax.span,
+            spanOf(
+              member.typeParametersAnchor ?? member.typeParameters[0]?.anchor ?? member.anchor,
+            ),
           ),
         )
       }
@@ -1111,7 +1153,7 @@ export const complete = (
             record,
             field.name._tag === 'Present' ? field.name.spelling : `${field.id.ordinal}`,
             field.declaredType.spelling,
-            tightSpan(field.declaredType.syntax),
+            spanOf(field.declaredType.anchor),
           ),
         )
       }
@@ -1275,7 +1317,7 @@ export const complete = (
               Diagnostic.nonTerminatingConformance(
                 ConformanceHead.encode(head),
                 failures.map(ConformanceHead.describeTermination),
-                conformance.syntax.span,
+                spanOf(conformance.anchor),
               ),
             )
           // This is the one authority on whether two conformances may cover one provider. Two
@@ -1295,7 +1337,7 @@ export const complete = (
                 module: module.module,
                 ordinal: conformance.ordinal,
                 head,
-                span: conformance.syntax.span,
+                span: spanOf(conformance.anchor),
               }),
             )
           else if (
@@ -1307,7 +1349,7 @@ export const complete = (
               Object.freeze({
                 ...Diagnostic.invalidConformance(
                   `duplicate ${conformance.capability.type.name} implementation for ${Type.encode(conformance.provider.type)}`,
-                  conformance.syntax.span,
+                  spanOf(conformance.anchor),
                 ),
                 relatedSpans: Object.freeze([
                   Object.freeze({ label: 'first implementation', span: overlapping.span }),
@@ -1319,7 +1361,7 @@ export const complete = (
               Diagnostic.overlappingConformance(
                 ConformanceHead.encode(head),
                 ConformanceHead.encode(overlapping.head),
-                conformance.syntax.span,
+                spanOf(conformance.anchor),
                 overlapping.span,
               ),
             )
@@ -1371,7 +1413,7 @@ export const complete = (
         diagnostics.push(
           invalidDiagnostic(
             'the capability must resolve to a nominal type and the provider must resolve to a type',
-            conformance.syntax.span,
+            spanOf(conformance.anchor),
           ),
         )
         continue
@@ -1388,7 +1430,7 @@ export const complete = (
         diagnostics.push(
           invalidDiagnostic(
             'interface and service providers must be nominal types, scalar types, or string',
-            conformance.syntax.span,
+            spanOf(conformance.anchor),
           ),
         )
         continue
@@ -1400,7 +1442,7 @@ export const complete = (
         diagnostics.push(
           invalidDiagnostic(
             `implementation for ${Type.encode(provider)} must be declared in ${conformanceOwner}, ${ownership}`,
-            conformance.syntax.span,
+            spanOf(conformance.anchor),
           ),
         )
         continue
@@ -1409,7 +1451,7 @@ export const complete = (
         diagnostics.push(
           invalidDiagnostic(
             'interface and service providers must be concrete value types',
-            conformance.syntax.span,
+            spanOf(conformance.anchor),
           ),
         )
         continue
@@ -1427,7 +1469,7 @@ export const complete = (
         diagnostics.push(
           invalidDiagnostic(
             'the capability must be concrete; impl type parameters may only bind the provider',
-            conformance.syntax.span,
+            spanOf(conformance.anchor),
           ),
         )
         continue
@@ -1450,7 +1492,7 @@ export const complete = (
         diagnostics.push(
           invalidDiagnostic(
             `requirement ${unstatedRequirement.spelling} must be an interface or service contract`,
-            unstatedRequirement.syntax.span,
+            spanOf(unstatedRequirement.anchor),
           ),
         )
         continue
@@ -1477,7 +1519,7 @@ export const complete = (
         diagnostics.push(
           invalidDiagnostic(
             `impl type parameter ${unused.map((parameter) => parameter.type.name).join(', ')} is not used by the ${sourceContract === undefined ? 'provider type' : 'conformance head'}`,
-            conformance.syntax.span,
+            spanOf(conformance.anchor),
           ),
         )
         continue
@@ -1487,7 +1529,7 @@ export const complete = (
           diagnostics.push(
             invalidDiagnostic(
               `${capability.name} implementations use operation mappings, not a hook body`,
-              conformance.hook.syntax.span,
+              spanOf(conformance.hook.anchor),
             ),
           )
           continue
@@ -1504,7 +1546,7 @@ export const complete = (
             diagnostics.push(
               invalidDiagnostic(
                 `duplicate ${capability.name}.${mapping.name.spelling} operation mapping`,
-                mapping.syntax.span,
+                spanOf(mapping.anchor),
               ),
             )
             invalid = true
@@ -1524,7 +1566,7 @@ export const complete = (
                 ...(missing.length === 0 ? [] : [`missing ${missing.join(', ')}`]),
                 ...(extra.length === 0 ? [] : [`unknown ${extra.join(', ')}`]),
               ].join('; '),
-              conformance.syntax.span,
+              spanOf(conformance.anchor),
             ),
           )
           invalid = true
@@ -1537,7 +1579,7 @@ export const complete = (
           diagnostics.push(
             invalidDiagnostic(
               `${capability.name} implementation has the wrong interface type-argument arity`,
-              conformance.syntax.span,
+              spanOf(conformance.anchor),
             ),
           )
           continue
@@ -1559,7 +1601,7 @@ export const complete = (
             diagnostics.push(
               invalidDiagnostic(
                 `${target._tag === 'TypePath' ? target.spelling : '_'} is incompatible with ${capability.name}.${contractName}${detail === undefined ? '' : `: ${detail}`}`,
-                mapping.syntax.span,
+                spanOf(mapping.anchor),
               ),
             )
           }
@@ -1595,7 +1637,7 @@ export const complete = (
                   mapping.form === 'Inline'
                     ? `inline operation ${capability.name}.${contractName} does not exist`
                     : `mapped operation ${Type.isNominal(provider) ? provider.name : Type.encode(provider)}.${targetName ?? '_'} does not exist`,
-                  mapping.syntax.span,
+                  spanOf(mapping.anchor),
                 ),
               )
               continue
@@ -1617,7 +1659,7 @@ export const complete = (
                   detail = `witness target binder ${problem.binder.name} cannot accept ${Type.encodeGenericArgument(problem.argument)}`
                 }
                 diagnostics.push(
-                  invalidDiagnostic(`${target.spelling}: ${detail}`, mapping.syntax.span),
+                  invalidDiagnostic(`${target.spelling}: ${detail}`, spanOf(mapping.anchor)),
                 )
               } else rejectIncompatibleMapping()
               continue
@@ -1635,7 +1677,7 @@ export const complete = (
               diagnostics.push(
                 invalidDiagnostic(
                   `${target.spelling} requires ${unpromisedBound.bound.spelling} for ${unpromisedBound.binder.type.name}, which ${capability.name} for ${Type.encode(provider)} does not require`,
-                  mapping.syntax.span,
+                  spanOf(mapping.anchor),
                 ),
               )
               continue
@@ -1702,7 +1744,7 @@ export const complete = (
         diagnostics.push(
           invalidDiagnostic(
             `Copy cannot be implemented for structural provider ${Type.encode(provider)}; shared references are compiler-proven Copy and every other structural type follows its sealed rule`,
-            conformance.syntax.span,
+            spanOf(conformance.anchor),
           ),
         )
         continue
@@ -1726,7 +1768,7 @@ export const complete = (
         diagnostics.push(
           invalidDiagnostic(
             `scalar enum ${Type.encode(provider)} has sealed compiler-proved Copy semantics and cannot implement ${capability.name}`,
-            conformance.syntax.span,
+            spanOf(conformance.anchor),
           ),
         )
         continue
@@ -1742,7 +1784,7 @@ export const complete = (
           diagnostics.push(
             invalidDiagnostic(
               'Copy requires one empty impl on a struct declared in the same module',
-              conformance.syntax.span,
+              spanOf(conformance.anchor),
             ),
           )
         }
@@ -1756,7 +1798,7 @@ export const complete = (
             rejectConformance(
               Diagnostic.invalidDropHook(
                 'Drop requires one inline fn drop hook and no operation mappings',
-                conformance.syntax.span,
+                spanOf(conformance.anchor),
               ),
             ),
           )
@@ -1786,7 +1828,7 @@ export const complete = (
             rejectConformance(
               Diagnostic.invalidDropHook(
                 'the hook must be fn drop(self: &mut Provider) -> () with no generics, failures, or requirements',
-                hook.syntax.span,
+                spanOf(hook.anchor),
               ),
             ),
           )
@@ -1797,7 +1839,7 @@ export const complete = (
       diagnostics.push(
         invalidDiagnostic(
           `unsupported compiler-sealed capability ${Type.encode(capability)}`,
-          conformance.syntax.span,
+          spanOf(conformance.anchor),
         ),
       )
     }
@@ -1858,7 +1900,7 @@ export const complete = (
       diagnostics.push(
         Diagnostic.invalidConformance(
           `Copy cannot be implemented for ${Type.encode(conformance.provider.type)}: ${proof.reason}`,
-          conformance.syntax.span,
+          spanOf(conformance.anchor),
         ),
       )
     }
@@ -1887,9 +1929,10 @@ export const complete = (
       if (member._tag === 'ServiceDeclaration' || member._tag === 'InterfaceDeclaration') {
         for (const operation of member.operations)
           for (const parameter of operation.parameters) {
-            const mut = SyntaxTree.directToken(parameter.syntax, 'MutKeyword')
-            if (mut !== undefined)
-              diagnostics.push(Diagnostic.invalidMutableParameter('Contract', mut.span))
+            if (parameter.bindingMutability === 'Mutable')
+              diagnostics.push(
+                Diagnostic.invalidMutableParameter('Contract', spanOf(parameter.anchor)),
+              )
           }
       }
     }
@@ -1903,25 +1946,25 @@ export const complete = (
       if (member._tag === 'ConstantDeclaration' || member._tag === 'PackageParameterDeclaration') {
         return Object.freeze({
           ...member,
-          declaredType: attachExposure(member.declaredType, modules, diagnostics),
+          declaredType: attachExposure(spanOf, member.declaredType, modules, diagnostics),
         })
       }
       if (member._tag === 'FunctionDeclaration') {
         const parameters = member.parameters.map((parameter) =>
           Object.freeze({
             ...parameter,
-            declaredType: attachExposure(parameter.declaredType, modules, diagnostics),
+            declaredType: attachExposure(spanOf, parameter.declaredType, modules, diagnostics),
           }),
         )
         return Object.freeze({
           ...member,
           parameters: Object.freeze(parameters),
-          returnType: attachExposure(member.returnType, modules, diagnostics),
+          returnType: attachExposure(spanOf, member.returnType, modules, diagnostics),
           failureRow: Object.freeze({
             ...member.failureRow,
             members: Object.freeze(
               member.failureRow.members.map((failure) =>
-                attachExposure(failure, modules, diagnostics),
+                attachExposure(spanOf, failure, modules, diagnostics),
               ),
             ),
           }),
@@ -1935,16 +1978,21 @@ export const complete = (
               operation.parameters.map((parameter) =>
                 Object.freeze({
                   ...parameter,
-                  declaredType: attachExposure(parameter.declaredType, modules, diagnostics),
+                  declaredType: attachExposure(
+                    spanOf,
+                    parameter.declaredType,
+                    modules,
+                    diagnostics,
+                  ),
                 }),
               ),
             ),
-            returnType: attachExposure(operation.returnType, modules, diagnostics),
+            returnType: attachExposure(spanOf, operation.returnType, modules, diagnostics),
             failureRow: Object.freeze({
               ...operation.failureRow,
               members: Object.freeze(
                 operation.failureRow.members.map((failure) =>
-                  attachExposure(failure, modules, diagnostics),
+                  attachExposure(spanOf, failure, modules, diagnostics),
                 ),
               ),
             }),
@@ -1963,7 +2011,7 @@ export const complete = (
             field.visibility === 'Public'
               ? Object.freeze({
                   ...field,
-                  declaredType: attachExposure(field.declaredType, modules, diagnostics),
+                  declaredType: attachExposure(spanOf, field.declaredType, modules, diagnostics),
                 })
               : field,
           ),
@@ -2034,7 +2082,7 @@ export const complete = (
     if (keys.length < 2 && !selfEdge) continue
     const diagnostic = Diagnostic.inlineRecursiveAggregate(
       Object.freeze(keys),
-      first.name._tag === 'Present' ? first.name.token.span : first.syntax.span,
+      first.name._tag === 'Present' ? spanOf(first.name.anchor) : spanOf(first.anchor),
     )
     diagnostics.push(diagnostic)
     const cause = Diagnostic.identity(diagnostic)
@@ -2094,8 +2142,11 @@ export const complete = (
         dependency,
       })
     })
+    // Diagnostics name the presented source; fixtures may present a module under another id.
+    const sourceId = registry.contexts.get(module.module)?.presentation.sourceId ?? module.module
     const moduleDiagnostics = diagnostics.filter(
-      (diagnostic) => diagnostic.span.sourceId === module.module,
+      (diagnostic) =>
+        diagnostic.span.sourceId === sourceId || diagnostic.span.sourceId === module.module,
     )
     return Object.freeze({
       ...module,
@@ -2132,7 +2183,11 @@ export const complete = (
 
   const lifetimeScope = TypeOutlives.context(modules)
   modules = modules.map((module) => {
-    const lifetimeDiagnostics = TypeOutlives.moduleDiagnostics(module, lifetimeScope)
+    const moduleContext = registry.contexts.get(module.module)
+    const lifetimeDiagnostics =
+      moduleContext === undefined
+        ? []
+        : TypeOutlives.moduleDiagnostics(module, lifetimeScope, moduleContext)
     diagnostics.push(...lifetimeDiagnostics)
     return Object.freeze({
       ...module,

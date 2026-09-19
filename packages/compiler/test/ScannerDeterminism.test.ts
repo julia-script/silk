@@ -16,7 +16,7 @@ it('keeps scanner phases, stdlib imports, and artifacts byte-identical across fr
     readonly native: {
       readonly diagnostics: ReadonlyArray<unknown>
       readonly modules: ReadonlyArray<string>
-      readonly hir: string
+      readonly tir: string
       readonly ownership: string
       readonly instances: string
       readonly layout: string
@@ -25,7 +25,7 @@ it('keeps scanner phases, stdlib imports, and artifacts byte-identical across fr
     readonly wasm: {
       readonly diagnostics: ReadonlyArray<unknown>
       readonly modules: ReadonlyArray<string>
-      readonly hir: string
+      readonly tir: string
       readonly ownership: string
       readonly instances: string
       readonly layout: string
@@ -39,7 +39,7 @@ it('keeps scanner phases, stdlib imports, and artifacts byte-identical across fr
   assert.include(encoded.native.modules, 'silk/vector')
   assert.include(encoded.wasm.modules, 'silk/vector')
   for (const snapshot of [encoded.native, encoded.wasm]) {
-    assert.strictEqual(snapshot.hir.length, 64)
+    assert.strictEqual(snapshot.tir.length, 64)
     assert.strictEqual(snapshot.ownership.length, 64)
     assert.strictEqual(snapshot.instances.length, 64)
     assert.strictEqual(snapshot.layout.length, 64)

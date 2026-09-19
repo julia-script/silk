@@ -3,7 +3,7 @@ import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
-import * as Hir from '../src/Hir.js'
+import * as Tir from '../src/Tir.js'
 import * as MirLinearization from '../src/MirLinearization.js'
 import * as MirVerification from '../src/MirVerification.js'
 import * as SourceFile from '../src/SourceFile.js'
@@ -171,13 +171,13 @@ it.effect(
       assert.strictEqual(main?.returnedExpression._tag, 'Operator')
       assert.deepEqual(Analysis.diagnostics(self), [])
 
-      const makeHir = Analysis.rootAnalysis(self).hir.functions.at(0)
+      const makeTir = Analysis.rootAnalysis(self).tir.functions.at(0)
       assert.strictEqual(
-        makeHir === undefined ? undefined : Hir.returned(makeHir)._tag,
+        makeTir === undefined ? undefined : Tir.returned(makeTir)._tag,
         'Construct',
       )
-      const mainHir = Analysis.rootAnalysis(self).hir.functions.at(2)
-      const returned = mainHir === undefined ? undefined : Hir.returned(mainHir)
+      const mainTir = Analysis.rootAnalysis(self).tir.functions.at(2)
+      const returned = mainTir === undefined ? undefined : Tir.returned(mainTir)
       assert.strictEqual(returned?._tag, 'BuiltinCall')
       if (returned?._tag === 'BuiltinCall') {
         for (const argument of returned.arguments) {
@@ -231,9 +231,9 @@ fn ready() -> State { return State.Ready }`),
       ready?.type._tag === 'Available' ? Type.encode(ready.type.type) : undefined,
       'union-values/construction.State',
     )
-    const hir = Analysis.rootAnalysis(self).hir.functions.map(Hir.returned)
+    const tir = Analysis.rootAnalysis(self).tir.functions.map(Tir.returned)
     assert.deepEqual(
-      hir.map((expression) => expression._tag),
+      tir.map((expression) => expression._tag),
       [
         'ConstructUnionVariant',
         'ConstructUnionVariant',
@@ -241,14 +241,14 @@ fn ready() -> State { return State.Ready }`),
         'ConstructUnionVariant',
       ],
     )
-    const someHir = hir.at(0)
+    const someTir = tir.at(0)
     assert.strictEqual(
-      someHir?._tag === 'ConstructUnionVariant' ? someHir.variant.name : undefined,
+      someTir?._tag === 'ConstructUnionVariant' ? someTir.variant.name : undefined,
       'Some',
     )
     assert.deepEqual(
-      someHir?._tag === 'ConstructUnionVariant'
-        ? someHir.fields.map((field) => field.field.ordinal)
+      someTir?._tag === 'ConstructUnionVariant'
+        ? someTir.fields.map((field) => field.field.ordinal)
         : undefined,
       [0],
     )
@@ -386,17 +386,17 @@ pub fn main() -> i32 { return 0 }`
       assert.strictEqual(
         Analysis.diagnostics(invalid).find((diagnostic) => diagnostic.code === 'OWN0002')?.span
           .start,
-        source.lastIndexOf(' move value.pair'),
+        source.lastIndexOf('move value.pair'),
       )
       const functions = Analysis.rootAnalysis(invalid).functions
       for (const ordinal of [0, 1, 2, 3]) {
         assert.strictEqual(functions.at(ordinal)?.returnedExpression.type._tag, 'Unavailable')
       }
-      const partial = Analysis.rootAnalysis(invalid).hir.functions.find(
+      const partial = Analysis.rootAnalysis(invalid).tir.functions.find(
         (fn) =>
           fn.declaration.name._tag === 'Present' && fn.declaration.name.spelling === 'partial',
       )
-      const partialExpression = partial === undefined ? undefined : Hir.returned(partial)
+      const partialExpression = partial === undefined ? undefined : Tir.returned(partial)
       assert.strictEqual(partialExpression?._tag, 'Move')
       if (partialExpression?._tag === 'Move') {
         assert.strictEqual(partialExpression.subject._tag, 'Project')

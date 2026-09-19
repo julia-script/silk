@@ -14,7 +14,7 @@ import * as MirVerification from '../src/MirVerification.js'
  * catalogue of operations the compiler provides, and in the MIR of a program that really uses a map.
  *
  * The catalogue check is the wider of the two. An engine can only gain a primitive by an intrinsic
- * being declared, and semantic analysis, HIR, MIR, and LLVM lowering all draw from that one
+ * being declared, and semantic analysis, TIR, MIR, and LLVM lowering all draw from that one
  * catalogue — so a catalogue with no hash in it is several
  * statements at once, and it would fail on the first commit that added one anywhere.
  */
@@ -95,7 +95,7 @@ it.effect('computes every hash as an ordinary call to a witness’s own Silk fun
 it('provides no hash operation to any engine', () => {
   // Every intrinsic the compiler declares, by the spelling a program would write. An engine cannot
   // implement an operation the catalogue does not name, so this one assertion covers analysis, the
-  // HIR, MIR, and LLVM lowering.
+  // TIR, MIR, and LLVM lowering.
   const spellings = Intrinsic.all().flatMap((actor) =>
     actor.operations.map((operation) => `${actor.spelling}.${operation.spelling}`),
   )

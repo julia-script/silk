@@ -8,10 +8,11 @@
 
 import * as Diagnostic from './Diagnostic.js'
 import type * as Elaboration from './Elaboration.js'
-import type * as Hir from './Hir.js'
+import type * as Tir from './Tir.js'
 import type { FlowModel } from './InspectorFlowModel.js'
 import type { RowModel, RowTone, Span } from './InspectorRow.js'
 import { spanOf as asSpan } from './InspectorRow.js'
+import type * as SemanticContext from './SemanticContext.js'
 import * as Match from './Match.js'
 import type * as SyntaxFile from './SyntaxFile.js'
 import * as SyntaxTree from './SyntaxTree.js'
@@ -159,18 +160,18 @@ export const treeRows = (
 }
 
 /** Contract types are `Type.Type`, so a struct parameter or result is an object, not a string. */
-export const hirContract = (contract: Hir.ContractFact): string => {
+export const tirContract = (contract: Tir.ContractFact): string => {
   if (contract._tag !== 'Contract') return 'contract unavailable'
 
   if (contract.functionKind !== 'Effect') {
-    return `(${contract.parameters.map(hirTypeText).join(', ')}) -> ${hirTypeText(contract.result)}`
+    return `(${contract.parameters.map(tirTypeText).join(', ')}) -> ${tirTypeText(contract.result)}`
   }
   const failureText =
-    contract.failureRow === undefined ? 'empty' : hirTypeText(Type.failureType(contract.failureRow))
-  return `effect (${contract.parameters.map(hirTypeText).join(', ')}) -> ${hirTypeText(contract.result)} ! ${failureText}`
+    contract.failureRow === undefined ? 'empty' : tirTypeText(Type.failureType(contract.failureRow))
+  return `effect (${contract.parameters.map(tirTypeText).join(', ')}) -> ${tirTypeText(contract.result)} ! ${failureText}`
 }
 
-const hirIdentity = (declaration: Hir.HirFunction['declaration']): string => {
+const tirIdentity = (declaration: Tir.TirFunction['declaration']): string => {
   switch (declaration.canonical._tag) {
     case 'Canonical':
       return declaration.canonical.id.name
@@ -181,9 +182,9 @@ const hirIdentity = (declaration: Hir.HirFunction['declaration']): string => {
   }
 }
 
-const hirTypeText = (type: Type.Type): string => Type.encode(type)
+const tirTypeText = (type: Type.Type): string => Type.encode(type)
 
-const hirExpressionLabel = (expression: Hir.Expression): string => {
+const tirExpressionLabel = (expression: Tir.Expression): string => {
   switch (expression._tag) {
     case 'IntegerLiteral':
     case 'BooleanLiteral':
@@ -197,19 +198,19 @@ const hirExpressionLabel = (expression: Hir.Expression): string => {
     case 'Move':
       return 'move'
     case 'UnionConvert':
-      return `${expression.conversion.toLowerCase()} → ${hirTypeText(expression.target)}`
+      return `${expression.conversion.toLowerCase()} → ${tirTypeText(expression.target)}`
     case 'Match':
       return `match ${expression.access.toLowerCase()} · ${expression.members.map(Match.encodeIdentity).join(' | ')}`
     case 'Construct':
-      return `construct ${hirTypeText(expression.nominal)}`
+      return `construct ${tirTypeText(expression.nominal)}`
     case 'ConstructUnionVariant':
-      return `construct ${hirTypeText(expression.nominal)}.${expression.variant.name}`
+      return `construct ${tirTypeText(expression.nominal)}.${expression.variant.name}`
     case 'ArrayConstruct':
-      return `array ${hirTypeText(expression.type)} · ${expression.elements.length} elements`
+      return `array ${tirTypeText(expression.type)} · ${expression.elements.length} elements`
     case 'Project':
-      return `project ${hirTypeText(expression.nominal)}.#${expression.field.ordinal}`
+      return `project ${tirTypeText(expression.nominal)}.#${expression.field.ordinal}`
     case 'IndexPlace':
-      return `index ${hirTypeText(expression.array)} · ${expression.bounds._tag.toLowerCase()}`
+      return `index ${tirTypeText(expression.array)} · ${expression.bounds._tag.toLowerCase()}`
     case 'SliceBorrow':
       return `${expression.reborrow ? 'reborrow' : 'borrow'} ${expression.access.toLowerCase()} · loan #${expression.borrow.ordinal}`
     case 'SliceLength':
@@ -243,7 +244,7 @@ const hirExpressionLabel = (expression: Hir.Expression): string => {
     case 'EffectBindRequirement':
       return expression.provider.capability === undefined
         ? 'bind selected requirement'
-        : `bind ${hirTypeText(expression.provider.capability)}@${expression.provider.role ?? 'DefaultRole'}`
+        : `bind ${tirTypeText(expression.provider.capability)}@${expression.provider.role ?? 'DefaultRole'}`
     case 'BuiltinCall':
       return `builtin i32.${expression.operation}`
     default:
@@ -251,17 +252,20 @@ const hirExpressionLabel = (expression: Hir.Expression): string => {
   }
 }
 
-export const hirRows = (hir: Hir.Module): ReadonlyArray<RowModel> => {
+export const tirRows = (
+  tir: Tir.Module,
+  spans: SemanticContext.Registry,
+): ReadonlyArray<RowModel> => {
   const rows: Array<RowModel> = []
 
-  const expression = (node: Hir.Expression, depth: number, path: string): void => {
+  const expression = (node: Tir.Expression, depth: number, path: string): void => {
     const span = asSpan(node.span)
     rows.push({
       key: `${path}-${node._tag}-${span.start}`,
       depth,
       dot: node._tag === 'Unavailable' ? 'warning' : undefined,
-      label: hirExpressionLabel(node),
-      detail: node._tag === 'Unavailable' ? 'unavailable' : `: ${hirTypeText(node.type)}`,
+      label: tirExpressionLabel(node),
+      detail: node._tag === 'Unavailable' ? 'unavailable' : `: ${tirTypeText(node.type)}`,
       span,
       ...(node._tag === 'Unavailable' ? { tone: 'warning' as const } : {}),
     })
@@ -338,7 +342,7 @@ export const hirRows = (hir: Hir.Module): ReadonlyArray<RowModel> => {
     }
   }
 
-  const statement = (node: Hir.Statement, depth: number, path: string): void => {
+  const statement = (node: Tir.Statement, depth: number, path: string): void => {
     const span = asSpan(node.span)
     if (node._tag === 'Bind') {
       rows.push({
@@ -463,7 +467,7 @@ export const hirRows = (hir: Hir.Module): ReadonlyArray<RowModel> => {
       rows.push({
         key: `${path}-fail-${span.start}`,
         depth,
-        label: `fail ${hirTypeText(node.failure)}`,
+        label: `fail ${tirTypeText(node.failure)}`,
         detail: `r${node.region.ordinal}`,
         span,
         tone: 'warning',
@@ -506,12 +510,12 @@ export const hirRows = (hir: Hir.Module): ReadonlyArray<RowModel> => {
     expression(node.expression, depth + 1, `${path}.${terminal.at(0) ?? 'x'}`)
   }
 
-  hir.functions.forEach((fn, index) => {
-    const span = asSpan(fn.declaration.syntax.span)
+  tir.functions.forEach((fn, index) => {
+    const span = asSpan(spans.spanOf(fn.declaration.anchor))
     rows.push({
       key: `fn-${index}`,
-      label: `fn#${fn.declaration.id.ordinal} ${hirIdentity(fn.declaration)}`,
-      detail: hirContract(fn.contract),
+      label: `fn#${fn.declaration.id.ordinal} ${tirIdentity(fn.declaration)}`,
+      detail: tirContract(fn.contract),
       span,
       head: true,
     })

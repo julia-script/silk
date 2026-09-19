@@ -1,7 +1,10 @@
 import type * as NativeAssembly from './NativeAssembly.js'
+import type * as AuthoredHir from './AuthoredHir.js'
+import * as AuthoredIdentity from './AuthoredIdentity.js'
+import * as AuthoredLowering from './AuthoredLowering.js'
+import * as SemanticContext from './SemanticContext.js'
 import * as BodyQuery from './BodyQuery.js'
 import { dual } from 'effect/Function'
-import * as Option from 'effect/Option'
 import type * as CallableContract from './CallableContract.js'
 import * as ConformanceProof from './ConformanceProof.js'
 import type * as ConformanceGoal from './ConformanceGoal.js'
@@ -10,20 +13,16 @@ import * as DeclarationFacts from './DeclarationFacts.js'
 import type * as DeclarationIndex from './DeclarationIndex.js'
 import * as Diagnostic from './Diagnostic.js'
 import * as NominalVariance from './NominalVariance.js'
-import * as Hir from './Hir.js'
+import * as Tir from './Tir.js'
 import type * as Intrinsic from './Intrinsic.js'
 import type * as Match from './Match.js'
 import type * as NameResolution from './NameResolution.js'
 import type * as Operator from './Operator.js'
 import * as Scalar from './Scalar.js'
-import * as SourceFile from './SourceFile.js'
 import * as SourceSpan from './SourceSpan.js'
 import type * as StaticEvaluation from './StaticEvaluation.js'
 import type * as StaticText from './StaticText.js'
 import type * as StaticValue from './StaticValue.js'
-import type * as SyntaxFile from './SyntaxFile.js'
-import * as SyntaxTree from './SyntaxTree.js'
-import type * as Token from './Token.js'
 import * as Lifetime from './Lifetime.js'
 import * as Type from './Type.js'
 import * as TypeCompatibility from './TypeCompatibility.js'
@@ -55,7 +54,7 @@ export type ParameterLookup = DeclarationFacts.ParameterLookup
 /** One `let` binding declaration with its inferred type and initializer facts. */
 export interface BindingDeclarationFact {
   readonly _tag: 'BindingFact'
-  readonly id: Hir.BindingId
+  readonly id: Tir.BindingId
   readonly name: DeclaredName
   readonly phase: 'Runtime' | 'Static'
   readonly mutability: 'Immutable' | 'Mutable'
@@ -70,7 +69,7 @@ export interface BindingDeclarationFact {
   >
   /** Whether the initialized value has one compile-time concrete callable representation. */
   readonly concreteCallableIdentity?: true
-  readonly syntax: SyntaxTree.Node
+  readonly anchor: AuthoredHir.Anchor
 }
 
 /** One independently elaborated lexical scope produced by a selected static iteration. */
@@ -88,7 +87,7 @@ export interface StaticIterationFact {
   readonly iterable: ExpressionFact
   readonly state: 'Deferred' | 'Rejected' | 'Expanded'
   readonly scopes: ReadonlyArray<StaticIterationScopeFact>
-  readonly syntax: SyntaxTree.Node
+  readonly anchor: AuthoredHir.Anchor
 }
 
 /** A bare identifier resolved against enclosing parameters and preceding bindings. */
@@ -96,36 +95,36 @@ export type ParameterReferenceFact =
   | {
       readonly _tag: 'Resolved'
       readonly spelling: string
-      readonly token: Token.Token
+      readonly anchor: AuthoredHir.Anchor
       readonly parameter: ParameterFact
     }
   | {
       readonly _tag: 'ResolvedBinding'
       readonly spelling: string
-      readonly token: Token.Token
+      readonly anchor: AuthoredHir.Anchor
       readonly binding: BindingDeclarationFact
     }
   | {
       readonly _tag: 'ResolvedPattern'
       readonly spelling: string
-      readonly token: Token.Token
+      readonly anchor: AuthoredHir.Anchor
       readonly binding: PatternBindingFact
     }
   | {
       readonly _tag: 'Missing'
       readonly spelling: string
-      readonly token: Token.Token
+      readonly anchor: AuthoredHir.Anchor
       readonly cause?: Diagnostic.Identity
     }
   | {
       readonly _tag: 'Ambiguous'
       readonly spelling: string
-      readonly token: Token.Token
+      readonly anchor: AuthoredHir.Anchor
       readonly parameters: ReadonlyArray<ParameterFact>
     }
   | {
       readonly _tag: 'Unavailable'
-      readonly syntax: SyntaxTree.Element
+      readonly anchor: AuthoredHir.Anchor
     }
 
 /** The available, out-of-range, or syntax-unavailable integer-expression fact. */
@@ -134,19 +133,17 @@ export type IntegerExpressionFact =
       readonly _tag: 'Available'
       readonly type: SemanticType
       readonly value: bigint
-      readonly token: Token.Token
-      readonly syntax: SyntaxTree.Node
+      readonly anchor: AuthoredHir.Anchor
     }
   | {
       readonly _tag: 'OutOfRange'
       readonly type: SemanticType
       readonly spelling: string
-      readonly token: Token.Token
-      readonly syntax: SyntaxTree.Node
+      readonly anchor: AuthoredHir.Anchor
     }
   | {
       readonly _tag: 'Unavailable'
-      readonly syntax: SyntaxTree.Element
+      readonly anchor: AuthoredHir.Anchor
     }
 
 /** One fixed-`u64` duration expression after exact nanosecond scaling. */
@@ -154,9 +151,8 @@ export interface DurationExpressionFact {
   readonly _tag: 'Duration'
   readonly value?: bigint
   readonly spelling?: string
-  readonly token?: Token.Token
   readonly type: ExpressionTypeFact
-  readonly syntax: SyntaxTree.Node
+  readonly anchor: AuthoredHir.Anchor
 }
 
 export type FloatingExpressionFact =
@@ -165,17 +161,23 @@ export type FloatingExpressionFact =
       readonly type: Scalar.FloatSpelling
       readonly bits: bigint
       readonly spelling: string
-      readonly token: Token.Token
-      readonly syntax: SyntaxTree.Node
+      readonly anchor: AuthoredHir.Anchor
     }
-  | { readonly _tag: 'Unavailable'; readonly syntax: SyntaxTree.Element }
+  | { readonly _tag: 'Unavailable'; readonly anchor: AuthoredHir.Anchor }
 
 export interface StaticTextExpressionFact {
   readonly _tag: 'StaticText'
   readonly data?: StaticText.Data
-  readonly token?: Token.Token
   readonly type: ExpressionTypeFact
-  readonly syntax: SyntaxTree.Node
+  /**
+   * The authored text literal this fact wraps directly, when it wraps one.
+   *
+   * Caller provenance for a compile error points inside the literal the caller wrote, which is a
+   * narrower position than the expression the fact is anchored to once the value flows through a
+   * parameter. Only a fact built straight from a literal can name it.
+   */
+  readonly literal?: AuthoredHir.Anchor
+  readonly anchor: AuthoredHir.Anchor
 }
 
 /** One character literal carrying the single Unicode scalar value its body denotes. */
@@ -183,7 +185,7 @@ export interface CharacterExpressionFact {
   readonly _tag: 'Character'
   readonly value?: number
   readonly type: ExpressionTypeFact
-  readonly syntax: SyntaxTree.Node
+  readonly anchor: AuthoredHir.Anchor
 }
 
 /** One dedicated selected compile-time failure expression. */
@@ -191,7 +193,7 @@ export interface CompileErrorExpressionFact {
   readonly _tag: 'CompileError'
   readonly message: ExpressionFact
   readonly type: ExpressionTypeFact
-  readonly syntax: SyntaxTree.Node
+  readonly anchor: AuthoredHir.Anchor
 }
 
 /** A call callee resolved against top-level declarations or unavailable after syntax recovery. */
@@ -199,16 +201,16 @@ export type CallReferenceFact =
   | {
       readonly _tag: 'Resolved'
       readonly spelling: string
-      readonly token: Token.Token
+      readonly anchor: AuthoredHir.Anchor
       readonly declaration: DeclarationFact
     }
   | {
       readonly _tag: 'ResolvedBuiltin'
       readonly assembly?: NativeAssembly.NativeAssembly
       readonly spelling: string
-      readonly token: Token.Token
+      readonly anchor: AuthoredHir.Anchor
       readonly actor: string
-      readonly operation: Hir.BuiltinOperation
+      readonly operation: Tir.BuiltinOperation
       readonly intrinsic: Intrinsic.OperationId
       readonly parameters: ReadonlyArray<SemanticType>
       readonly result: SemanticType
@@ -217,27 +219,27 @@ export type CallReferenceFact =
   | {
       readonly _tag: 'ResolvedEnumOperation'
       readonly spelling: string
-      readonly token: Token.Token
+      readonly anchor: AuthoredHir.Anchor
       readonly operation: DeclarationFacts.EnumAssociatedOperationFact
     }
   | {
       readonly _tag: 'ResolvedEnumEquality'
       readonly spelling: string
-      readonly token: Token.Token
+      readonly anchor: AuthoredHir.Anchor
       readonly enum: DeclarationFacts.CanonicalId
       readonly operator: 'Equals' | 'NotEquals'
     }
   | {
       readonly _tag: 'ResolvedIntrinsicContract'
       readonly spelling: string
-      readonly token: Token.Token
+      readonly anchor: AuthoredHir.Anchor
       readonly intrinsic: Intrinsic.Operation
       readonly contract: CallableContract.CallableContract
     }
   | {
       readonly _tag: 'ResolvedServiceOperation'
       readonly spelling: string
-      readonly token: Token.Token
+      readonly anchor: AuthoredHir.Anchor
       readonly service: DeclarationFacts.ServiceFact
       readonly operation: DeclarationFacts.ServiceOperationFact
     }
@@ -249,7 +251,7 @@ export type CallReferenceFact =
   | {
       readonly _tag: 'ResolvedInterfaceOperation'
       readonly spelling: string
-      readonly token: Token.Token
+      readonly anchor: AuthoredHir.Anchor
       readonly capability: Type.Nominal
       readonly provider: Type.Type
       readonly operation: string
@@ -261,29 +263,31 @@ export type CallReferenceFact =
   | {
       readonly _tag: 'Missing'
       readonly spelling: string
-      readonly token: Token.Token
+      readonly anchor: AuthoredHir.Anchor
       readonly cause?: Diagnostic.Identity
     }
   | {
       readonly _tag: 'Ambiguous'
       readonly spelling: string
-      readonly token: Token.Token
+      readonly anchor: AuthoredHir.Anchor
       readonly declarations: ReadonlyArray<DeclarationFact>
       readonly cause?: Diagnostic.Identity
     }
   | {
       readonly _tag: 'Unavailable'
-      readonly syntax: SyntaxTree.Element
+      readonly anchor: AuthoredHir.Anchor
     }
 
-/** Exact qualifier and member tokens retained beside semantic reference resolution. */
+/** Exact qualifier and member spellings retained beside semantic reference resolution. */
 export type ReferencePathFact =
   | {
       readonly _tag: 'ReferencePath'
-      readonly qualifier?: Token.Token
-      readonly member: Token.Token
+      readonly qualifierSpelling?: string
+      readonly qualifierAnchor?: AuthoredHir.Anchor
+      readonly memberSpelling: string
+      readonly memberAnchor: AuthoredHir.Anchor
     }
-  | { readonly _tag: 'UnavailableReferencePath'; readonly syntax: SyntaxTree.Element }
+  | { readonly _tag: 'UnavailableReferencePath'; readonly anchor: AuthoredHir.Anchor }
 
 /** Exact source tokens and catalog identity for one recognized intrinsic member path. */
 export type IntrinsicReferenceFact =
@@ -291,17 +295,17 @@ export type IntrinsicReferenceFact =
       readonly _tag: 'ResolvedIntrinsicReference'
       readonly actor: Intrinsic.Actor
       readonly operation: Intrinsic.Operation
-      readonly actorToken: Token.Token
-      readonly operationToken: Token.Token
+      readonly actorAnchor: AuthoredHir.Anchor
+      readonly operationAnchor: AuthoredHir.Anchor
     }
   | {
       readonly _tag: 'ResolvedCapabilityOperationReference'
       readonly actor: DeclarationFacts.StructFact | Intrinsic.Actor
       readonly operation: Intrinsic.Operation
-      readonly actorToken: Token.Token
-      readonly operationToken: Token.Token
+      readonly actorAnchor: AuthoredHir.Anchor
+      readonly operationAnchor: AuthoredHir.Anchor
     }
-  | { readonly _tag: 'UnavailableIntrinsicReference'; readonly syntax: SyntaxTree.Element }
+  | { readonly _tag: 'UnavailableIntrinsicReference'; readonly anchor: AuthoredHir.Anchor }
 
 /** The available or unavailable type of one returned expression. */
 export type ExpressionTypeFact =
@@ -315,7 +319,7 @@ export interface IdentifierExpressionFact {
   /** Concrete compile-time value retained while residualizing a runtime specialization. */
   readonly staticValue?: StaticValue.Value
   readonly type: ExpressionTypeFact
-  readonly syntax: SyntaxTree.Node
+  readonly anchor: AuthoredHir.Anchor
 }
 
 /** One `move <place>` expression with its consuming subject fact. */
@@ -323,7 +327,7 @@ export interface MoveExpressionFact {
   readonly _tag: 'Move'
   readonly subject: ExpressionFact
   readonly type: ExpressionTypeFact
-  readonly syntax: SyntaxTree.Node
+  readonly anchor: AuthoredHir.Anchor
 }
 
 export type BorrowSelectorFact =
@@ -364,7 +368,7 @@ export type BorrowRootFact =
     }
   | {
       readonly _tag: 'TemporaryRoot'
-      readonly owner: Hir.TemporaryOwnerId
+      readonly owner: Tir.TemporaryOwnerId
       readonly value: ExpressionFact
       readonly path: ReadonlyArray<BorrowSelectorFact>
     }
@@ -401,7 +405,7 @@ export interface BorrowExpressionFact {
   readonly subject: ExpressionFact
   readonly formation: BorrowFormationFact
   readonly type: ExpressionTypeFact
-  readonly syntax: SyntaxTree.Node
+  readonly anchor: AuthoredHir.Anchor
 }
 
 /** One flattened leaf binding introduced by a nominal pattern. */
@@ -416,7 +420,7 @@ export interface PatternBindingFact {
   readonly access: Match.Access
   /** Owned place aliases inherit assignment permission from the matched root. */
   readonly placeMutability?: 'Mutable' | 'Immutable'
-  readonly syntax: SyntaxTree.Node
+  readonly anchor: AuthoredHir.Anchor
 }
 
 export type PatternFieldState =
@@ -432,11 +436,10 @@ export type PatternFieldState =
 export interface PatternFieldFact {
   readonly _tag: 'PatternField'
   readonly name: string | undefined
-  readonly token?: Token.Token
   readonly state: PatternFieldState
   readonly binding?: PatternBindingFact
   readonly nested?: PatternFact
-  readonly syntax: SyntaxTree.Node
+  readonly anchor: AuthoredHir.Anchor
 }
 
 export type PatternFact =
@@ -447,7 +450,7 @@ export type PatternFact =
       readonly bindings: ReadonlyArray<PatternBindingFact>
       readonly omitted: ReadonlyArray<ReadonlyArray<DeclarationFacts.FieldId>>
       readonly complete: false
-      readonly syntax: SyntaxTree.Node
+      readonly anchor: AuthoredHir.Anchor
     }
   | {
       readonly _tag: 'EnumMemberPattern'
@@ -455,13 +458,13 @@ export type PatternFact =
       readonly enum?: DeclarationFacts.EnumFact
       readonly member?: DeclarationFacts.EnumMemberFact
       readonly coverage?: Match.CoverageIdentity
-      readonly qualifierToken?: Token.Token
-      readonly memberToken?: Token.Token
+      readonly qualifierAnchor?: AuthoredHir.Anchor
+      readonly memberAnchor?: AuthoredHir.Anchor
       readonly span: SourceSpan.SourceSpan
       readonly bindings: ReadonlyArray<PatternBindingFact>
       readonly omitted: ReadonlyArray<ReadonlyArray<DeclarationFacts.FieldId>>
       readonly complete: boolean
-      readonly syntax: SyntaxTree.Node
+      readonly anchor: AuthoredHir.Anchor
     }
   | {
       readonly _tag: 'IntegerPattern'
@@ -471,7 +474,7 @@ export type PatternFact =
       readonly bindings: ReadonlyArray<PatternBindingFact>
       readonly omitted: ReadonlyArray<ReadonlyArray<DeclarationFacts.FieldId>>
       readonly complete: false
-      readonly syntax: SyntaxTree.Node
+      readonly anchor: AuthoredHir.Anchor
     }
   | {
       readonly _tag: 'TypePattern'
@@ -481,7 +484,7 @@ export type PatternFact =
       readonly bindings: ReadonlyArray<PatternBindingFact>
       readonly omitted: ReadonlyArray<ReadonlyArray<DeclarationFacts.FieldId>>
       readonly complete: boolean
-      readonly syntax: SyntaxTree.Node
+      readonly anchor: AuthoredHir.Anchor
     }
   | {
       readonly _tag: 'NominalPattern'
@@ -493,7 +496,7 @@ export type PatternFact =
       readonly omitted: ReadonlyArray<ReadonlyArray<DeclarationFacts.FieldId>>
       readonly rest: boolean
       readonly complete: boolean
-      readonly syntax: SyntaxTree.Node
+      readonly anchor: AuthoredHir.Anchor
     }
   | {
       readonly _tag: 'UnionVariantPattern'
@@ -506,14 +509,14 @@ export type PatternFact =
       readonly omitted: ReadonlyArray<ReadonlyArray<DeclarationFacts.FieldId>>
       readonly rest: boolean
       readonly complete: boolean
-      readonly syntax: SyntaxTree.Node
+      readonly anchor: AuthoredHir.Anchor
     }
   | {
       readonly _tag: 'UniversalPattern'
       readonly id: Match.PatternId
       readonly bindings: ReadonlyArray<PatternBindingFact>
       readonly omitted: ReadonlyArray<ReadonlyArray<DeclarationFacts.FieldId>>
-      readonly syntax: SyntaxTree.Node
+      readonly anchor: AuthoredHir.Anchor
     }
 
 /** The authored match body, with ordinary blocks retaining their statement region. */
@@ -522,14 +525,14 @@ export type MatchArmBodyFact =
       readonly _tag: 'Expression'
       readonly expression: ExpressionFact
       readonly type: ExpressionTypeFact
-      readonly syntax: SyntaxTree.Node
+      readonly anchor: AuthoredHir.Anchor
     }
   | {
       readonly _tag: 'Block'
       readonly statements: ReadonlyArray<StatementFact>
       readonly completion: { readonly fallsThrough: boolean }
       readonly type: ExpressionTypeFact
-      readonly syntax: SyntaxTree.Node
+      readonly anchor: AuthoredHir.Anchor
     }
 
 export interface MatchArmFact {
@@ -543,7 +546,7 @@ export interface MatchArmFact {
   readonly before: ReadonlyArray<Match.CoverageIdentity>
   readonly after: ReadonlyArray<Match.CoverageIdentity>
   readonly reachable: boolean
-  readonly syntax: SyntaxTree.Node
+  readonly anchor: AuthoredHir.Anchor
 }
 
 export interface MatchExpressionFact {
@@ -555,7 +558,7 @@ export interface MatchExpressionFact {
   readonly arms: ReadonlyArray<MatchArmFact>
   readonly exhaustive: boolean
   readonly type: ExpressionTypeFact
-  readonly syntax: SyntaxTree.Node
+  readonly anchor: AuthoredHir.Anchor
 }
 
 /** One statement-form pattern decision shared by irrefutable let and refutable if-let. */
@@ -573,7 +576,7 @@ export interface PatternSelectionFact {
   readonly bindings: ReadonlyArray<PatternBindingFact>
   readonly irrefutable: boolean
   readonly loanEnd: SourceSpan.SourceSpan
-  readonly syntax: SyntaxTree.Node
+  readonly anchor: AuthoredHir.Anchor
 }
 
 export type StructTargetFact =
@@ -582,7 +585,7 @@ export type StructTargetFact =
       readonly struct: DeclarationFacts.StructFact
       readonly type: Type.Nominal
       /** Present for source-named constructors; occurrence-generated literals have no type token. */
-      readonly token?: Token.Token
+      readonly anchor?: AuthoredHir.Anchor
     }
   | { readonly _tag: 'Unavailable'; readonly cause?: Diagnostic.Identity }
 
@@ -592,7 +595,7 @@ export type UnionVariantTargetFact =
       readonly union: DeclarationFacts.UnionFact
       readonly variant: DeclarationFacts.UnionVariantFact
       readonly type: Type.Nominal
-      readonly token: Token.Token
+      readonly anchor: AuthoredHir.Anchor
     }
   | { readonly _tag: 'Unavailable'; readonly cause?: Diagnostic.Identity }
 
@@ -619,10 +622,11 @@ export type StructInitializerState =
 export interface StructInitializerFact {
   readonly _tag: 'StructInitializer'
   readonly name: string | undefined
-  readonly token?: Token.Token
   readonly expression: ExpressionFact
   readonly state: StructInitializerState
-  readonly syntax: SyntaxTree.Node
+  /** The written field label, which is where an editor finds this initializer's field. */
+  readonly nameAnchor?: AuthoredHir.Anchor
+  readonly anchor: AuthoredHir.Anchor
 }
 
 export interface StructTypeArgumentFact {
@@ -643,7 +647,7 @@ export interface StructLiteralExpressionFact {
     readonly initializer: StructInitializerFact
   }>
   readonly type: ExpressionTypeFact
-  readonly syntax: SyntaxTree.Node
+  readonly anchor: AuthoredHir.Anchor
 }
 
 export interface UnionVariantExpressionFact {
@@ -657,7 +661,7 @@ export interface UnionVariantExpressionFact {
     readonly initializer: StructInitializerFact
   }>
   readonly type: ExpressionTypeFact
-  readonly syntax: SyntaxTree.Node
+  readonly anchor: AuthoredHir.Anchor
 }
 
 export type ProjectionState =
@@ -673,10 +677,10 @@ export interface FieldProjectionExpressionFact {
   readonly nominal?: Type.Nominal
   readonly borrowAccess?: Type.BorrowAccess
   readonly fieldName: string | undefined
-  readonly fieldToken?: Token.Token
+  readonly fieldAnchor?: AuthoredHir.Anchor
   readonly state: ProjectionState
   readonly type: ExpressionTypeFact
-  readonly syntax: SyntaxTree.Node
+  readonly anchor: AuthoredHir.Anchor
 }
 
 export type ReferentProjectionState =
@@ -691,7 +695,7 @@ export interface ReferentProjectionExpressionFact {
   readonly borrowAccess?: Type.BorrowAccess
   readonly state: ReferentProjectionState
   readonly type: ExpressionTypeFact
-  readonly syntax: SyntaxTree.Node
+  readonly anchor: AuthoredHir.Anchor
 }
 
 /** One source-ordered array element with contextual compatibility retained independently. */
@@ -708,7 +712,7 @@ export interface ArrayElementFact {
         readonly actual: SemanticType
       }
     | { readonly _tag: 'Unavailable' }
-  readonly syntax: SyntaxTree.Node
+  readonly anchor: AuthoredHir.Anchor
 }
 
 export type ArrayLiteralState =
@@ -727,7 +731,7 @@ export interface ArrayLiteralExpressionFact {
   readonly length: number
   readonly state: ArrayLiteralState
   readonly type: ExpressionTypeFact
-  readonly syntax: SyntaxTree.Node
+  readonly anchor: AuthoredHir.Anchor
 }
 
 export type BoundsFact =
@@ -754,7 +758,7 @@ export interface IndexProjectionExpressionFact {
   readonly access: 'CopyRead' | 'ConsumeRequested'
   readonly bounds: BoundsFact
   readonly type: ExpressionTypeFact
-  readonly syntax: SyntaxTree.Node
+  readonly anchor: AuthoredHir.Anchor
 }
 
 /** One `true`/`false` literal expression fact. */
@@ -762,14 +766,14 @@ export interface BooleanExpressionFact {
   readonly _tag: 'Boolean'
   readonly value: boolean
   readonly type: ExpressionTypeFact
-  readonly syntax: SyntaxTree.Node
+  readonly anchor: AuthoredHir.Anchor
 }
 
 /** One reference to a typed compile-time scalar declaration. */
 export interface ConstantExpressionFact {
   readonly _tag: 'Constant'
   readonly declaration: DeclarationFacts.ConstantFact
-  readonly token: Token.Token
+  readonly anchor: AuthoredHir.Anchor
   readonly value?:
     | { readonly _tag: 'Boolean'; readonly value: boolean }
     | {
@@ -786,24 +790,14 @@ export interface ConstantExpressionFact {
     | { readonly _tag: 'String'; readonly data: StaticText.Data }
     | { readonly _tag: 'Character'; readonly value: number }
   readonly type: ExpressionTypeFact
-  readonly syntax: SyntaxTree.Node
 }
 
 /** One runtime load from a declaration-owned C data symbol. */
 export interface ForeignStaticExpressionFact {
   readonly _tag: 'ForeignStatic'
   readonly declaration: DeclarationFacts.ForeignStaticFact
-  readonly token: Token.Token
+  readonly anchor: AuthoredHir.Anchor
   readonly type: ExpressionTypeFact
-  readonly syntax: SyntaxTree.Node
-}
-
-/** One parenthesized expression retaining its concrete grouping. */
-export interface GroupedExpressionFact {
-  readonly _tag: 'Grouped'
-  readonly expression: ExpressionFact
-  readonly type: ExpressionTypeFact
-  readonly syntax: SyntaxTree.Node
 }
 
 /** One compiler-known operand-to-parameter relationship. */
@@ -825,7 +819,7 @@ export interface ShortCircuitExpressionFact {
   /** The left operand first, then the conditionally evaluated right operand. */
   readonly arguments: ReadonlyArray<ArgumentFact>
   readonly type: ExpressionTypeFact
-  readonly syntax: SyntaxTree.Node
+  readonly anchor: AuthoredHir.Anchor
 }
 
 /** One prefix or infix operator and its canonical builtin resolution. */
@@ -838,9 +832,9 @@ export interface OperatorExpressionFact {
   readonly mappings: ReadonlyArray<BuiltinArgumentMappingFact>
   readonly contract: CallContractFact
   readonly interfaceOperation?: InterfaceOperationFact
-  readonly witnessEffectSite?: Hir.EffectSiteId
+  readonly witnessEffectSite?: Tir.EffectSiteId
   readonly type: ExpressionTypeFact
-  readonly syntax: SyntaxTree.Node
+  readonly anchor: AuthoredHir.Anchor
 }
 
 /**
@@ -868,7 +862,7 @@ export interface FunctionItemExpressionFact {
   /** Present when contextual typing converts an exported function item to its C address. */
   readonly foreignAddress?: { readonly symbol: string }
   readonly type: ExpressionTypeFact
-  readonly syntax: SyntaxTree.Node
+  readonly anchor: AuthoredHir.Anchor
 }
 
 /** One trailing value retained by an automatic trailing-argument section. */
@@ -893,7 +887,7 @@ export interface AnonymousCaptureFact {
 export interface CallableSectionExpressionFact {
   readonly _tag: 'CallableSection'
   readonly selectedConformances?: ReadonlyArray<ConformanceGoal.Proof>
-  readonly site: Hir.CallableSiteId
+  readonly site: Tir.CallableSiteId
   readonly reference: CallReferenceFact
   readonly path: ReferencePathFact
   readonly remainingParameters: ReadonlyArray<number>
@@ -904,7 +898,7 @@ export interface CallableSectionExpressionFact {
   readonly substitution: Type.Substitution
   readonly mode: Type.CallableMode
   readonly type: ExpressionTypeFact
-  readonly syntax: SyntaxTree.Node
+  readonly anchor: AuthoredHir.Anchor
   /** Source-only provenance for a section whose target is an anonymous callable body. */
   readonly anonymous?: {
     readonly functionKind: 'Ordinary' | 'Effect'
@@ -920,7 +914,7 @@ export interface ForeignApplyExpressionFact {
   readonly arguments: ReadonlyArray<ArgumentFact>
   readonly contract: Type.ForeignFunction
   readonly type: ExpressionTypeFact
-  readonly syntax: SyntaxTree.Node
+  readonly anchor: AuthoredHir.Anchor
 }
 
 /** One ordinary invocation through a first-class callable expression. */
@@ -942,7 +936,7 @@ export interface CallableApplyExpressionFact {
    * invoking it, splicing these captures after the value's own environment.
    */
   readonly staged?: {
-    readonly site: Hir.CallableSiteId
+    readonly site: Tir.CallableSiteId
     readonly captures: ReadonlyArray<CallableCaptureFact>
   }
   readonly provenance:
@@ -954,7 +948,7 @@ export interface CallableApplyExpressionFact {
         readonly evaluation: 'LeftThenCallable'
       }
   readonly type: ExpressionTypeFact
-  readonly syntax: SyntaxTree.Node
+  readonly anchor: AuthoredHir.Anchor
 }
 
 /** One outer lexical value captured by a lazy effect block. */
@@ -987,14 +981,14 @@ export interface EffectRequirementBindingFact {
 /** One lazy imperative effect block and its capture-derived execution contract. */
 export interface EffectExpressionFact {
   readonly _tag: 'EffectBlock'
-  readonly site: Hir.EffectSiteId
+  readonly site: Tir.EffectSiteId
   readonly representationOwner?: Type.ExecutableSpecializationOwner
   readonly statements: ReadonlyArray<StatementFact>
   readonly captures: ReadonlyArray<EffectCaptureFact>
   readonly bindings: ReadonlyArray<BindingDeclarationFact>
-  readonly regions: ReadonlyArray<Hir.RegionId>
+  readonly regions: ReadonlyArray<Tir.RegionId>
   readonly type: ExpressionTypeFact
-  readonly syntax: SyntaxTree.Node
+  readonly anchor: AuthoredHir.Anchor
 }
 
 /** One qualified payload-free enum member value with canonical declaration identity. */
@@ -1003,10 +997,10 @@ export interface EnumMemberExpressionFact {
   readonly enum: DeclarationFacts.EnumFact
   readonly member?: DeclarationFacts.EnumMemberFact
   readonly cause?: Diagnostic.Identity
-  readonly qualifierToken: Token.Token
-  readonly memberToken: Token.Token
+  readonly qualifierAnchor: AuthoredHir.Anchor
+  readonly memberAnchor: AuthoredHir.Anchor
   readonly type: ExpressionTypeFact
-  readonly syntax: SyntaxTree.Node
+  readonly anchor: AuthoredHir.Anchor
 }
 
 /** One declaration-owned projection of an enum member's exact representation value. */
@@ -1014,10 +1008,10 @@ export interface EnumValueExpressionFact {
   readonly _tag: 'EnumValue'
   readonly operation: DeclarationFacts.EnumAssociatedOperationFact
   readonly argument: ExpressionFact
-  readonly qualifierToken: Token.Token
-  readonly operationToken: Token.Token
+  readonly qualifierAnchor: AuthoredHir.Anchor
+  readonly operationAnchor: AuthoredHir.Anchor
   readonly type: ExpressionTypeFact
-  readonly syntax: SyntaxTree.Node
+  readonly anchor: AuthoredHir.Anchor
 }
 
 /** One semantic expression fact at any returned or argument position. */
@@ -1026,14 +1020,14 @@ export type ExpressionFact =
       readonly _tag: 'Integer'
       readonly integer: IntegerExpressionFact
       readonly type: ExpressionTypeFact
-      readonly syntax: SyntaxTree.Node
+      readonly anchor: AuthoredHir.Anchor
     }
   | DurationExpressionFact
   | {
       readonly _tag: 'Floating'
       readonly floating: FloatingExpressionFact
       readonly type: ExpressionTypeFact
-      readonly syntax: SyntaxTree.Node
+      readonly anchor: AuthoredHir.Anchor
     }
   | StaticTextExpressionFact
   | CharacterExpressionFact
@@ -1041,7 +1035,7 @@ export type ExpressionFact =
   | {
       readonly _tag: 'Unit'
       readonly type: ExpressionTypeFact
-      readonly syntax: SyntaxTree.Node
+      readonly anchor: AuthoredHir.Anchor
     }
   | BooleanExpressionFact
   | ConstantExpressionFact
@@ -1058,7 +1052,6 @@ export type ExpressionFact =
   | FieldProjectionExpressionFact
   | ReferentProjectionExpressionFact
   | IndexProjectionExpressionFact
-  | GroupedExpressionFact
   | OperatorExpressionFact
   | ShortCircuitExpressionFact
   | FunctionItemExpressionFact
@@ -1070,7 +1063,7 @@ export type ExpressionFact =
       readonly _tag: 'Run'
       readonly subject: ExpressionFact
       readonly type: ExpressionTypeFact
-      readonly syntax: SyntaxTree.Node
+      readonly anchor: AuthoredHir.Anchor
     }
   | {
       /** `Place.replace(place, value)`: swap one writable place, yielding its old value. */
@@ -1081,7 +1074,7 @@ export type ExpressionFact =
       readonly value: ExpressionFact
       readonly compatible: boolean
       readonly type: ExpressionTypeFact
-      readonly syntax: SyntaxTree.Node
+      readonly anchor: AuthoredHir.Anchor
     }
   | {
       readonly _tag: 'EffectBindRequirement'
@@ -1089,7 +1082,7 @@ export type ExpressionFact =
       readonly protected: ExpressionFact
       readonly provider?: EffectRequirementBindingFact
       readonly type: ExpressionTypeFact
-      readonly syntax: SyntaxTree.Node
+      readonly anchor: AuthoredHir.Anchor
     }
   | {
       /**
@@ -1107,7 +1100,7 @@ export type ExpressionFact =
       readonly residualRow: Type.FailureRow
       readonly evidence: ReadonlyArray<Constraint.ConstraintEvidence>
       readonly type: ExpressionTypeFact
-      readonly syntax: SyntaxTree.Node
+      readonly anchor: AuthoredHir.Anchor
     }
   | {
       readonly _tag: 'Call'
@@ -1134,9 +1127,9 @@ export type ExpressionFact =
       readonly staticFailure?: StaticEvaluation.StaticFailure
       readonly mappings: ReadonlyArray<ArgumentMappingFact>
       readonly contract: CallContractFact
-      readonly witnessEffectSite?: Hir.EffectSiteId
+      readonly witnessEffectSite?: Tir.EffectSiteId
       readonly type: ExpressionTypeFact
-      readonly syntax: SyntaxTree.Node
+      readonly anchor: AuthoredHir.Anchor
     }
 
 /** Whether a selected result retains any validity requirement carried by an input value. */
@@ -1196,7 +1189,7 @@ export interface ArgumentFact {
   readonly id: ArgumentId
   readonly expression: ExpressionFact
   readonly type: ExpressionTypeFact
-  readonly syntax: SyntaxTree.Node
+  readonly anchor: AuthoredHir.Anchor
 }
 
 /** One positional argument-to-parameter relationship. */
@@ -1210,7 +1203,7 @@ export interface ArgumentMappingFact {
 export interface TypeArgumentFact {
   readonly _tag: 'TypeArgument'
   readonly ordinal: number
-  readonly syntax: SyntaxTree.Node
+  readonly anchor: AuthoredHir.Anchor
   readonly declared: DeclaredTypeFact
   readonly type?: SemanticType | Lifetime.Lifetime | Type.RequirementRowArgument
   /** Canonical role of an access-independent requirement selector such as `T at Role`. */
@@ -1225,7 +1218,7 @@ export interface InferredProviderSelector {
 
 /** Why a call contract cannot be established. */
 export type UnavailableCallContractReason =
-  | { readonly _tag: 'UnavailableCallSyntax'; readonly syntax: SyntaxTree.Node }
+  | { readonly _tag: 'UnavailableCallSyntax'; readonly anchor: AuthoredHir.Anchor }
   | { readonly _tag: 'UnavailableCallTarget'; readonly reference: CallReferenceFact }
   | { readonly _tag: 'UnavailableMappedType'; readonly mapping: ArgumentMappingFact }
   | { readonly _tag: 'UnavailableBuiltinArgument'; readonly argument: ArgumentFact }
@@ -1275,7 +1268,6 @@ export const assignmentRootAccess = (
   root: AssignmentRootFact,
   place: ExpressionFact,
 ): AssignmentRootAccess => {
-  if (place._tag === 'Grouped') return assignmentRootAccess(root, place.expression)
   if (root._tag === 'PatternBinding')
     return root.access === 'Place' && root.placeMutability === 'Mutable'
       ? 'MutableOwned'
@@ -1319,7 +1311,6 @@ export const assignmentRoot = (fact: ExpressionFact): AssignmentRootFact | undef
   ) {
     return assignmentRoot(fact.subject)
   }
-  if (fact._tag === 'Grouped') return assignmentRoot(fact.expression)
   return undefined
 }
 
@@ -1331,41 +1322,41 @@ export type StatementFact =
   | {
       readonly _tag: 'UnsafeStatement'
       readonly statements: ReadonlyArray<StatementFact>
-      readonly region: Hir.RegionId
-      readonly syntax: SyntaxTree.Node
+      readonly region: Tir.RegionId
+      readonly anchor: AuthoredHir.Anchor
     }
   | {
       readonly _tag: 'BindStatement'
       readonly binding: BindingDeclarationFact
-      readonly region: Hir.RegionId
+      readonly region: Tir.RegionId
     }
   | {
       readonly _tag: 'PatternBindStatement'
       readonly selection: PatternSelectionFact
-      readonly region: Hir.RegionId
-      readonly syntax: SyntaxTree.Node
+      readonly region: Tir.RegionId
+      readonly anchor: AuthoredHir.Anchor
     }
   | {
       readonly _tag: 'ExpressionStatement'
       readonly expression: ExpressionFact
-      readonly region: Hir.RegionId
-      readonly syntax: SyntaxTree.Node
+      readonly region: Tir.RegionId
+      readonly anchor: AuthoredHir.Anchor
     }
   | {
       readonly _tag: 'IfStatement'
       readonly condition: ExpressionFact
       readonly taken: ReadonlyArray<StatementFact>
       readonly otherwise: ReadonlyArray<StatementFact>
-      readonly region: Hir.RegionId
-      readonly syntax: SyntaxTree.Node
+      readonly region: Tir.RegionId
+      readonly anchor: AuthoredHir.Anchor
     }
   | {
       readonly _tag: 'IfLetStatement'
       readonly selection: PatternSelectionFact
       readonly taken: ReadonlyArray<StatementFact>
       readonly otherwise: ReadonlyArray<StatementFact>
-      readonly region: Hir.RegionId
-      readonly syntax: SyntaxTree.Node
+      readonly region: Tir.RegionId
+      readonly anchor: AuthoredHir.Anchor
     }
   | {
       readonly _tag: 'WriteStatement'
@@ -1375,49 +1366,51 @@ export type StatementFact =
       readonly compatible: boolean
       /** Checked conversion bounds for this value; installation still controls region validity. */
       readonly lifetimeProof: ReadonlyArray<Lifetime.Outlives>
-      readonly region: Hir.RegionId
-      readonly syntax: SyntaxTree.Node
+      readonly region: Tir.RegionId
+      readonly anchor: AuthoredHir.Anchor
     }
   | {
       readonly _tag: 'WhileStatement'
-      readonly loop: Hir.LoopId
-      readonly parent?: Hir.LoopId
+      readonly loop: Tir.LoopId
+      readonly parent?: Tir.LoopId
       readonly condition: ExpressionFact
       readonly body: ReadonlyArray<StatementFact>
-      readonly region: Hir.RegionId
-      readonly syntax: SyntaxTree.Node
+      readonly region: Tir.RegionId
+      readonly anchor: AuthoredHir.Anchor
     }
   | {
       readonly _tag: 'BreakStatement'
-      readonly target?: Hir.LoopId
-      readonly region: Hir.RegionId
-      readonly syntax: SyntaxTree.Node
+      readonly target?: Tir.LoopId
+      readonly region: Tir.RegionId
+      readonly anchor: AuthoredHir.Anchor
     }
   | {
       readonly _tag: 'ContinueStatement'
-      readonly target?: Hir.LoopId
-      readonly region: Hir.RegionId
-      readonly syntax: SyntaxTree.Node
+      readonly target?: Tir.LoopId
+      readonly region: Tir.RegionId
+      readonly anchor: AuthoredHir.Anchor
     }
   | {
       readonly _tag: 'ReturnStatement'
       readonly expression: ExpressionFact
-      readonly region: Hir.RegionId
-      readonly syntax: SyntaxTree.Node
+      /** A trailing block expression returns without an authored `return` statement. */
+      readonly implicit?: true
+      readonly region: Tir.RegionId
+      readonly anchor: AuthoredHir.Anchor
     }
   | {
       readonly _tag: 'FailStatement'
       readonly expression: ExpressionFact
       readonly failure?: Type.Type
       readonly transfer: 'Copy' | 'Move'
-      readonly region: Hir.RegionId
-      readonly syntax: SyntaxTree.Node
+      readonly region: Tir.RegionId
+      readonly anchor: AuthoredHir.Anchor
     }
   | {
       readonly _tag: 'DropStatement'
       readonly expression: ExpressionFact
-      readonly region: Hir.RegionId
-      readonly syntax: SyntaxTree.Node
+      readonly region: Tir.RegionId
+      readonly anchor: AuthoredHir.Anchor
     }
 
 /** One function's declaration, statements, bindings, and compatibility facts. */
@@ -1426,9 +1419,11 @@ export interface FunctionFact {
   readonly comparisonWork?: Readonly<import('./TypeCompatibility.js').Work>
   readonly lifetimeFlow?: import('./LifetimeFlow.js').LifetimeFlow
   readonly declaration: DeclarationFact
+  /** The authored block this body elaborated, absent for a declaration without one. */
+  readonly bodyAnchor?: AuthoredHir.Anchor
   readonly statements: ReadonlyArray<StatementFact>
   readonly bindings: ReadonlyArray<BindingDeclarationFact>
-  readonly regionOrder: ReadonlyArray<Hir.RegionId>
+  readonly regionOrder: ReadonlyArray<Tir.RegionId>
   readonly returnedExpression: ExpressionFact
   readonly returnCompatibility: ReturnCompatibility
   /** The finite composite Effect representation joined across distinct return sites. */
@@ -1462,13 +1457,14 @@ export type DeclarationLookup = DeclarationFacts.DeclarationLookup
 /** The complete deterministic elaboration result for all direct bootstrap declarations. */
 export interface Result {
   readonly _tag: 'Elaboration'
-  readonly syntax: SyntaxFile.SyntaxFile
+  /** The authored module this elaboration consumed; reuse keys derive from it. */
+  readonly authored: AuthoredLowering.Lowered
   readonly functions: ReadonlyArray<FunctionFact>
   /** Compiler-private executable bodies that never participate in source declaration lookup. */
   readonly hiddenFunctions: ReadonlyArray<FunctionFact>
   readonly generatedAggregates: ReadonlyArray<DeclarationFacts.StructFact>
   readonly lexicalScopes: ReadonlyArray<LexicalScopeFact>
-  readonly hir: Hir.Module
+  readonly tir: Tir.Module
   readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
 }
 
@@ -1511,16 +1507,17 @@ export const typesCompatible = (
 ): boolean => TypeCompatibility.isCompatible(TypeCompatibility.check(source, target, context))
 
 export const declaredReturnTypesCompatible = (
+  context: SemanticContext.SemanticContext,
   declaration: DeclarationFact,
   expression: ExpressionFact,
-  context?: TypeCompatibility.Context,
+  compatibility?: TypeCompatibility.Context,
 ): boolean => {
   if (declaration.returnType._tag !== 'Resolved' || expression.type._tag !== 'Available')
     return false
   const source = expression.type.type
   const target = declaration.returnType.type
-  if (typesCompatible(source, target, context)) return true
-  const representation = representationOfExpression(expression)
+  if (typesCompatible(source, target, compatibility)) return true
+  const representation = representationOfExpression(context, expression)
   const contract = Type.isRepresented(source) ? source.contract : source
   if (
     declaration.opaqueResult !== undefined &&
@@ -1528,11 +1525,11 @@ export const declaredReturnTypesCompatible = (
     Type.isOpaqueRepresentationArgument(target.representation.argument) &&
     Type.equalsOpaqueFamily(target.representation.argument.family, declaration.opaqueResult.family)
   )
-    return representation !== undefined && typesCompatible(contract, target.contract, context)
+    return representation !== undefined && typesCompatible(contract, target.contract, compatibility)
   if (
     representation !== undefined &&
     (Type.isCallable(contract) || Type.isEffect(contract)) &&
-    typesCompatible(Type.represented(contract, contract, representation), target, context)
+    typesCompatible(Type.represented(contract, contract, representation), target, compatibility)
   )
     return true
   if (
@@ -1614,153 +1611,63 @@ export const unionConversionDiagnostic = (
     : undefined
 }
 
-export const expressionNodeKinds: ReadonlyArray<SyntaxTree.NodeKind> = Object.freeze([
-  'IntegerLiteralExpression',
-  'DurationLiteralExpression',
-  'FloatingLiteralExpression',
-  'StaticTextLiteralExpression',
-  'CharacterLiteralExpression',
-  'UnitExpression',
-  'BooleanLiteralExpression',
-  'CompileErrorExpression',
-  'IdentifierExpression',
-  'MoveExpression',
-  'EffectExpression',
-  'BorrowExpression',
-  'MatchExpression',
-  'StructLiteralExpression',
-  'AppliedMemberExpression',
-  'TupleLiteralExpression',
-  'ContextualRecordLiteralExpression',
-  'ArrayLiteralExpression',
-  'FieldProjectionExpression',
-  'OrdinalProjectionExpression',
-  'ReferentProjectionExpression',
-  'IndexProjectionExpression',
-  'CallExpression',
-  'GroupedExpression',
-  'PrefixExpression',
-  'InfixExpression',
-  'PipelineExpression',
-  'RunExpression',
-  'UnsafeExpression',
-  'AnonymousCallableExpression',
-])
+/** The authored callee of a call, seeing through pipelines to the applied target. */
+export const callCallee = (node: AuthoredHir.Expression): AuthoredHir.Expression =>
+  node._tag === 'CallExpression' ? node.callee : node
 
-export const isExpressionNode = (element: SyntaxTree.Element): element is SyntaxTree.Node =>
-  SyntaxTree.isNode(element) && expressionNodeKinds.includes(element.kind)
-
-export const isRecursiveArgumentNode = (element: SyntaxTree.Element): element is SyntaxTree.Node =>
-  isExpressionNode(element) &&
-  (element.kind === 'CallExpression' ||
-    element.kind === 'MoveExpression' ||
-    element.kind === 'EffectExpression' ||
-    element.kind === 'BorrowExpression' ||
-    element.kind === 'MatchExpression' ||
-    element.kind === 'StructLiteralExpression' ||
-    element.kind === 'AppliedMemberExpression' ||
-    element.kind === 'TupleLiteralExpression' ||
-    element.kind === 'ContextualRecordLiteralExpression' ||
-    element.kind === 'ArrayLiteralExpression' ||
-    element.kind === 'FieldProjectionExpression' ||
-    element.kind === 'OrdinalProjectionExpression' ||
-    element.kind === 'ReferentProjectionExpression' ||
-    element.kind === 'IndexProjectionExpression' ||
-    element.kind === 'GroupedExpression' ||
-    element.kind === 'PrefixExpression' ||
-    element.kind === 'InfixExpression' ||
-    element.kind === 'PipelineExpression' ||
-    element.kind === 'RunExpression' ||
-    element.kind === 'UnsafeExpression' ||
-    SyntaxTree.isAvailableSyntax(element))
-
-export const childNode = (parent: SyntaxTree.Node, kind: SyntaxTree.NodeKind): SyntaxTree.Node => {
-  const child = SyntaxTree.directNode(parent, kind)
-  if (child === undefined) {
-    throw new RangeError(`Semantic analysis expected ${kind} below ${parent.kind}`)
-  }
-  return child
+/**
+ * The last name a type spells, seeing through an application so that an applied qualifier such as
+ * `Holder<i32>` names `Holder` exactly as the bare qualifier `Holder` does.
+ */
+const qualifierName = (type: AuthoredHir.Type): AuthoredHir.Name | undefined => {
+  if (type._tag === 'AppliedType') return qualifierName(type.target)
+  return type._tag === 'NamedType' ? type.path.segments.at(-1) : undefined
 }
 
-export const directToken = SyntaxTree.directToken
-
-export const callCallee = (node: SyntaxTree.Node): SyntaxTree.Node =>
-  node.kind === 'CallExpression' ? (node.children.find(isExpressionNode) ?? node) : node
-
-export const callReferenceTokens = (node: SyntaxTree.Node): ReadonlyArray<Token.Token> => {
+/**
+ * The qualifier/member name pair a callee reference spells, taken from the authored vocabulary.
+ * Grouped expressions do not exist in authored HIR, so no unwrapping is needed.
+ */
+export const referenceNames = (node: AuthoredHir.Expression): ReadonlyArray<AuthoredHir.Name> => {
   const callee = callCallee(node)
-  if (callee.kind === 'PipelineExpression') {
-    const target = pipelineCallable(callee)
-    return target === undefined ? Object.freeze([]) : callReferenceTokens(target)
-  }
-  if (callee.kind === 'GroupedExpression') {
-    const expression = callee.children.find(isExpressionNode)
-    return expression === undefined ? Object.freeze([]) : callReferenceTokens(expression)
-  }
-  if (callee.kind === 'IdentifierExpression') {
-    const identifier = directToken(callee, 'Identifier')
-    return identifier === undefined ? Object.freeze([]) : Object.freeze([identifier])
-  }
-  if (callee.kind === 'AppliedMemberExpression') {
-    const selector = SyntaxTree.directNode(callee, 'AppliedMemberSelector')
-    const owner =
-      selector === undefined ? undefined : SyntaxTree.directNode(selector, 'AppliedType')
-    const path = owner === undefined ? undefined : SyntaxTree.directNode(owner, 'TypePath')
-    const qualifier =
-      path === undefined
-        ? undefined
-        : SyntaxTree.tokens(path)
-            .filter((token) => token.kind === 'Identifier')
-            .at(-1)
-    const member = selector === undefined ? undefined : directToken(selector, 'Identifier')
-    return qualifier === undefined || member === undefined
+  if (callee._tag === 'PipelineExpression') return referenceNames(callee.target)
+  if (callee._tag === 'IdentifierExpression') return Object.freeze([callee.name])
+  if (callee._tag === 'MemberExpression') {
+    const qualifier = qualifierName(callee.selector.subject)
+    return qualifier === undefined
       ? Object.freeze([])
-      : Object.freeze([qualifier, member])
+      : Object.freeze([qualifier, callee.selector.member])
   }
-  if (callee.kind !== 'FieldProjectionExpression') return Object.freeze([])
-  const subject = callee.children.find(isExpressionNode)
-  const member = directToken(callee, 'Identifier') ?? directToken(callee, 'DropKeyword')
-  const qualifier = subject === undefined ? undefined : callReferenceTokens(subject).at(-1)
-  return qualifier === undefined || member === undefined
-    ? Object.freeze([])
-    : Object.freeze([qualifier, member])
+  if (callee._tag !== 'FieldExpression') return Object.freeze([])
+  const qualifier = referenceNames(callee.subject).at(-1)
+  return qualifier === undefined ? Object.freeze([]) : Object.freeze([qualifier, callee.field])
 }
 
-export const referencePath = (node: SyntaxTree.Node): ReferencePathFact => {
-  const identifiers = callReferenceTokens(node)
-  const member = identifiers.at(-1)
-  const qualifier = identifiers.length > 1 ? identifiers.at(0) : undefined
-  if (member === undefined) {
-    return Object.freeze({ _tag: 'UnavailableReferencePath', syntax: node })
-  }
+export const referencePath = (
+  context: SemanticContext.SemanticContext,
+  node: AuthoredHir.Expression,
+): ReferencePathFact => {
+  const names = referenceNames(node)
+  const member = names.at(-1)
+  const qualifier = names.length > 1 ? names.at(0) : undefined
+  if (member === undefined)
+    return Object.freeze({ _tag: 'UnavailableReferencePath', anchor: node.anchor })
   return Object.freeze({
     _tag: 'ReferencePath',
-    ...(qualifier === undefined ? {} : { qualifier }),
-    member,
+    ...(qualifier === undefined
+      ? {}
+      : {
+          qualifierSpelling: SemanticContext.nameText(context, qualifier) ?? '',
+          qualifierAnchor: qualifier.anchor,
+        }),
+    memberSpelling: SemanticContext.nameText(context, member) ?? '',
+    memberAnchor: member.anchor,
   })
 }
-
-export const pipelineInput = (node: SyntaxTree.Node): SyntaxTree.Node | undefined =>
-  node.children.filter(isExpressionNode).at(0)
-
-export const pipelineCallable = (node: SyntaxTree.Node): SyntaxTree.Node | undefined =>
-  node.children.filter(isExpressionNode).at(1)
-
-export const unavailableSyntax = SyntaxTree.unavailableChild
-
-export const isAvailableSyntax = SyntaxTree.isAvailableSyntax
-
-export const unavailableElement = SyntaxTree.unavailableElement
 
 export const lookupParameter = DeclarationFacts.lookupParameter
 
 export const lookupDeclaration = DeclarationFacts.lookupDeclaration
-
-export const spelling = (source: SourceFile.SourceFile, token: Token.Token): string =>
-  Option.getOrThrowWith(
-    SourceFile.spelling(source, token.span),
-    () => new RangeError(`Semantic token span does not belong to source ${source.id}`),
-  )
 
 export interface IntegerResult {
   readonly fact: IntegerExpressionFact
@@ -1777,7 +1684,7 @@ export interface IdentifierResult {
   readonly fact: IdentifierExpressionFact
   readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
   readonly type: SemanticType | undefined
-  readonly syntax: SyntaxTree.Node
+  readonly anchor: AuthoredHir.Anchor
 }
 
 export interface ArgumentsResult {
@@ -1801,7 +1708,7 @@ export const argumentFact = (
     }),
     expression,
     type: expression.type,
-    syntax: expression.syntax,
+    anchor: expression.anchor,
   })
 
 import { copyAssumptionsOf } from './CallResolution.js'
@@ -1816,7 +1723,7 @@ import {
   directStatementExpressions,
   lowerStatements,
   statementSpan,
-} from './HirLowering.js'
+} from './TirLowering.js'
 import { analyzeFunctionBody } from './StatementAnalysis.js'
 export interface FactVisitor {
   readonly statement?: (statement: StatementFact) => void
@@ -1915,8 +1822,7 @@ const forwardedCallableParameter = (
     current: ExpressionFact,
     bindings: ReadonlySet<number> = new Set(),
   ): number | undefined => {
-    if (current._tag === 'Grouped' || current._tag === 'Move')
-      return expression(current._tag === 'Grouped' ? current.expression : current.subject, bindings)
+    if (current._tag === 'Move') return expression(current.subject, bindings)
     if (current._tag === 'Identifier') {
       if (current.reference._tag === 'Resolved') return current.reference.parameter.id.ordinal
       if (current.reference._tag !== 'ResolvedBinding') return undefined
@@ -1947,6 +1853,7 @@ const forwardedCallableParameter = (
 }
 
 const constrainedCallableEscapeDiagnostics = (
+  context: SemanticContext.SemanticContext,
   functions: ReadonlyArray<FunctionFact>,
 ): ReadonlyArray<Diagnostic.Diagnostic> => {
   const byCanonical = new Map(
@@ -1958,11 +1865,15 @@ const constrainedCallableEscapeDiagnostics = (
   const diagnostics: Array<Diagnostic.Diagnostic> = []
   const seen = new Set<string>()
   const reject = (expression: ExpressionFact): void => {
-    const span = expression.syntax.span
-    const key_ = `${span.sourceId}:${span.start}:${span.end}`
+    const key_ = AuthoredIdentity.anchorKey(expression.anchor)
     if (seen.has(key_)) return
     seen.add(key_)
-    diagnostics.push(Diagnostic.nonConcreteSpecialization('constrained callable', span))
+    diagnostics.push(
+      Diagnostic.nonConcreteSpecialization(
+        'constrained callable',
+        context.spanOf(expression.anchor),
+      ),
+    )
   }
   for (const fn of functions) {
     visitStatementFacts(fn.statements, {
@@ -2035,7 +1946,7 @@ const constrainedCallableEscapeDiagnostics = (
 }
 
 const lexicalScopesOf = (
-  source: SourceFile.SourceFile,
+  context: SemanticContext.SemanticContext,
   functions: ReadonlyArray<FunctionFact>,
 ): ReadonlyArray<LexicalScopeFact> => {
   const scopes: Array<LexicalScopeFact> = []
@@ -2075,10 +1986,11 @@ const lexicalScopesOf = (
       const last = statements.at(-1)
       return first === undefined || last === undefined
         ? fallback
-        : Option.getOrElse(
-            SourceSpan.make(source, statementSpan(first).start, statementSpan(last).end),
-            () => fallback,
-          )
+        : (SourceSpan.fromOffsets(
+            context.presentation.sourceId,
+            statementSpan(context, first).start,
+            statementSpan(context, last).end,
+          ) ?? fallback)
     }
     let visitStatements: (
       statements: ReadonlyArray<StatementFact>,
@@ -2091,17 +2003,17 @@ const lexicalScopesOf = (
         for (const arm of expression.arms) {
           const armScope = add({
             parent,
-            span: arm.syntax.span,
+            span: context.spanOf(arm.anchor),
             patternBindings: arm.bindings,
           })
           if (arm.guard !== undefined) visitExpression(arm.guard, armScope)
           if (arm.body._tag === 'Expression') visitExpression(arm.body.expression, armScope)
-          else visitStatements(arm.body.statements, armScope, arm.body.syntax.span)
+          else visitStatements(arm.body.statements, armScope, context.spanOf(arm.body.anchor))
         }
         return
       }
       if (expression._tag === 'EffectBlock') {
-        visitStatements(expression.statements, parent, expression.syntax.span)
+        visitStatements(expression.statements, parent, context.spanOf(expression.anchor))
         return
       }
       for (const child of directExpressionChildren(expression)) visitExpression(child, parent)
@@ -2126,38 +2038,51 @@ const lexicalScopesOf = (
         for (const expression of directStatementExpressions(statement))
           visitExpression(expression, current)
         if (statement._tag === 'UnsafeStatement')
-          visitStatements(statement.statements, current, statement.syntax.span)
+          visitStatements(statement.statements, current, context.spanOf(statement.anchor))
         else if (statement._tag === 'IfStatement') {
-          visitStatements(statement.taken, current, statement.syntax.span)
-          visitStatements(statement.otherwise, current, statement.syntax.span)
+          visitStatements(statement.taken, current, context.spanOf(statement.anchor))
+          visitStatements(statement.otherwise, current, context.spanOf(statement.anchor))
         } else if (statement._tag === 'IfLetStatement') {
           const takenScope = add({
             parent: current,
-            span: statement.syntax.span,
+            span: context.spanOf(statement.anchor),
             patternBindings: statement.selection.bindings,
           })
-          visitStatements(statement.taken, takenScope, statement.syntax.span)
-          visitStatements(statement.otherwise, current, statement.syntax.span)
+          visitStatements(statement.taken, takenScope, context.spanOf(statement.anchor))
+          visitStatements(statement.otherwise, current, context.spanOf(statement.anchor))
         } else if (statement._tag === 'WhileStatement')
-          visitStatements(statement.body, current, statement.syntax.span)
+          visitStatements(statement.body, current, context.spanOf(statement.anchor))
       }
       return current
     }
-    visitStatements(fn.statements, undefined, fn.declaration.syntax.span)
+    visitStatements(fn.statements, undefined, context.spanOf(fn.declaration.anchor))
   }
   return Object.freeze(scopes)
 }
 
-/** Elaborates every declaration body into immutable facts and the module's HIR. */
+/** Elaborates every declaration body into immutable facts and the module's TIR. */
 export interface Input {
   readonly bodyQuery?: BodyQuery.BodyQuery
-  readonly syntax: SyntaxFile.SyntaxFile
+  readonly authored: AuthoredLowering.Lowered
   readonly headers: DeclarationFacts.ModuleHeaders
   readonly scope: NameResolution.ModuleScope
   readonly index: DeclarationIndex.Index
 }
 
-const runtimeHirFunction = (fact: FunctionFact, index: DeclarationIndex.Index): Hir.HirFunction => {
+/** The authored block of a callable declaration body, when it has one. */
+export const authoredBody = (
+  authored: AuthoredLowering.Lowered,
+  declaration: DeclarationFact,
+): AuthoredHir.Block | undefined => {
+  const found = AuthoredLowering.declarationOf(authored, declaration.owner)
+  return found?.body._tag === 'CallableBody' ? found.body.block : undefined
+}
+
+const runtimeTirFunction = (
+  context: SemanticContext.SemanticContext,
+  fact: FunctionFact,
+  index: DeclarationIndex.Index,
+): Tir.TirFunction => {
   const lifetimeAssumptions = Lifetime.assumptions(fact.lifetimeFlow?.input.constraints ?? [])
   const lifetimeCompatibility = TypeCompatibility.context({
     assumptions: lifetimeAssumptions,
@@ -2166,17 +2091,18 @@ const runtimeHirFunction = (fact: FunctionFact, index: DeclarationIndex.Index): 
   const originalEntryRegion =
     fact.regionOrder.at(0) ??
     Object.freeze({
-      _tag: 'HirRegion' as const,
+      _tag: 'TirRegion' as const,
       function: fact.declaration.id,
       ordinal: 0,
     })
-  const baseContract = Hir.contractOf(fact.declaration)
+  const baseContract = Tir.contractOf(fact.declaration)
   if (
     fact.declaration.functionKind === 'Effect' &&
     fact.declaration.returnType._tag === 'Resolved' &&
     baseContract._tag === 'Contract'
   ) {
     const referenced = effectCaptureFacts(
+      context,
       fact.statements,
       0,
       index,
@@ -2202,7 +2128,7 @@ const runtimeHirFunction = (fact: FunctionFact, index: DeclarationIndex.Index): 
               declared._tag === 'Resolved' && Type.isSlice(declared.type)
                 ? declared.type.access
                 : 'Take',
-            span: parameter.syntax.span,
+            span: context.spanOf(parameter.anchor),
           }),
         ]
       },
@@ -2254,14 +2180,13 @@ const runtimeHirFunction = (fact: FunctionFact, index: DeclarationIndex.Index): 
       access,
       fact.declaration.requirementRow.row,
     )
-    const body = SyntaxTree.directNode(fact.declaration.syntax, 'Block')
-    const siteSpan = body?.span ?? fact.declaration.syntax.span
-    const entryRegion: Hir.RegionId = Object.freeze({
-      _tag: 'HirRegion',
+    const siteSpan = context.spanOf(fact.bodyAnchor ?? fact.declaration.anchor)
+    const entryRegion: Tir.RegionId = Object.freeze({
+      _tag: 'TirRegion',
       function: fact.declaration.id,
       ordinal: Math.max(-1, ...fact.regionOrder.map((region) => region.ordinal)) + 1,
     })
-    const effectBlock: Extract<Hir.Expression, { readonly _tag: 'EffectBlock' }> = Object.freeze({
+    const effectBlock: Extract<Tir.Expression, { readonly _tag: 'EffectBlock' }> = Object.freeze({
       _tag: 'EffectBlock',
       site: Object.freeze({
         _tag: 'EffectSiteId',
@@ -2273,6 +2198,7 @@ const runtimeHirFunction = (fact: FunctionFact, index: DeclarationIndex.Index): 
         span: siteSpan,
       }),
       statements: lowerStatements(fact.statements, {
+        context,
         lifetimeAssumptions,
         lifetimeCompatibility,
         ...(fact.declaration.opaqueResult === undefined
@@ -2301,7 +2227,7 @@ const runtimeHirFunction = (fact: FunctionFact, index: DeclarationIndex.Index): 
       span: siteSpan,
     })
     return Object.freeze({
-      _tag: 'HirFunction',
+      _tag: 'TirFunction',
       declaration: fact.declaration,
       contract: Object.freeze({
         _tag: 'Contract',
@@ -2323,12 +2249,13 @@ const runtimeHirFunction = (fact: FunctionFact, index: DeclarationIndex.Index): 
     })
   }
   return Object.freeze({
-    _tag: 'HirFunction',
+    _tag: 'TirFunction',
     declaration: fact.declaration,
     contract: baseContract,
     entryRegion: originalEntryRegion,
     regionOrder: fact.regionOrder,
     statements: lowerStatements(fact.statements, {
+      context,
       lifetimeAssumptions,
       lifetimeCompatibility,
       ...(fact.declaration.opaqueResult === undefined
@@ -2346,19 +2273,20 @@ const runtimeHirFunction = (fact: FunctionFact, index: DeclarationIndex.Index): 
   })
 }
 
-/** Lowers one already-residual runtime function fact into backend-facing HIR. */
-export const residualHirFunction = (
+/** Lowers one already-residual runtime function fact into backend-facing TIR. */
+export const residualTirFunction = (
+  context: SemanticContext.SemanticContext,
   fact: FunctionFact,
   index: DeclarationIndex.Index,
-): Hir.HirFunction => {
+): Tir.TirFunction => {
   if (fact.declaration.phase === 'Static')
-    throw new RangeError('Static functions have no runtime HIR body')
-  return runtimeHirFunction(fact, index)
+    throw new RangeError('Static functions have no runtime TIR body')
+  return runtimeTirFunction(context, fact, index)
 }
 
 export const elaborateModule = (input: Input): Result => {
-  const { syntax, headers, scope, index } = input
-  const source = syntax.source
+  const { authored, headers, scope, index } = input
+  const context = SemanticContext.make(authored)
   const declarations = headers.declarations
   const hiddenFunctions: Array<FunctionFact> = []
   // A foreign header has a native body: it is indexed and callable but never analyzed here.
@@ -2367,18 +2295,26 @@ export const elaborateModule = (input: Input): Result => {
     .map((declaration) => {
       const compute = () =>
         analyzeFunctionBody(
-          source,
+          context,
           declaration,
           declarations,
           Object.freeze({ scope, index, hiddenFunctions }),
         )
       return input.bodyQuery === undefined
         ? compute()
-        : BodyQuery.check(input.bodyQuery, source, scope, declaration, hiddenFunctions, compute)
+        : BodyQuery.check(
+            input.bodyQuery,
+            context,
+            authored,
+            scope,
+            declaration,
+            hiddenFunctions,
+            compute,
+          )
     })
   const constantDiagnostics = headers.constants.flatMap((constant) =>
     constant.name._tag === 'Present'
-      ? analyzeConstant(constant, constant.name.token, constant.initializer, true).diagnostics
+      ? analyzeConstant(context, constant, constant.name.anchor, true).diagnostics
       : [],
   )
   const functions = Object.freeze(analyzed.map((result) => result.fact))
@@ -2387,28 +2323,28 @@ export const elaborateModule = (input: Input): Result => {
     ...headers.diagnostics,
     ...constantDiagnostics,
     ...analyzed.flatMap((result) => result.diagnostics),
-    ...constrainedCallableEscapeDiagnostics(functions),
+    ...constrainedCallableEscapeDiagnostics(context, functions),
   ].sort(compareDiagnostics)
-  const hir: Hir.Module = Object.freeze({
-    _tag: 'HirModule',
-    module: source.id,
+  const tir: Tir.Module = Object.freeze({
+    _tag: 'TirModule',
+    module: authored.module.owner.module,
     functions: Object.freeze(
       allRuntimeFunctions.flatMap((fact) =>
-        fact.declaration.phase === 'Static' ? [] : [runtimeHirFunction(fact, index)],
+        fact.declaration.phase === 'Static' ? [] : [runtimeTirFunction(context, fact, index)],
       ),
     ),
   })
 
   return Object.freeze({
     _tag: 'Elaboration',
-    syntax,
+    authored,
     functions,
     hiddenFunctions: Object.freeze([...hiddenFunctions]),
     generatedAggregates: Object.freeze(
       allRuntimeFunctions.flatMap((fact) => fact.generatedAggregates),
     ),
-    lexicalScopes: lexicalScopesOf(syntax.source, allRuntimeFunctions),
-    hir,
+    lexicalScopes: lexicalScopesOf(context, allRuntimeFunctions),
+    tir,
     diagnostics: Object.freeze(diagnostics),
   })
 }

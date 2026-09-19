@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
-import * as Hir from '../src/Hir.js'
+import * as Tir from '../src/Tir.js'
 import * as MirEncoding from '../src/MirEncoding.js'
 import * as Scalar from '../src/Scalar.js'
 import * as SourceFile from '../src/SourceFile.js'
@@ -205,18 +205,18 @@ it.effect('residualizes borrowed aggregate formatting without allocator machiner
     )
     assert.isAbove(projectedLoans.length, 0)
     assert.isTrue(projectedLoans.every((loan) => loan.access === 'Shared'))
-    const residualHir = Hir.encode(
+    const residualTir = Tir.encode(
       Object.freeze({
-        _tag: 'HirModule',
+        _tag: 'TirModule',
         module: 'silk/format',
         functions: Object.freeze(formatInstances.map((instance) => instance.function)),
       }),
     )
     const mir = MirEncoding.encode(Analysis.loweredMir(snapshot))
-    assert.include(residualHir, 'borrow-value')
+    assert.include(residualTir, 'borrow-value')
     assert.include(mir, 'begin-loan')
     for (const spelling of ['silk/allocator', 'Intrinsic.Fields', 'silk/static_sequence']) {
-      assert.notInclude(residualHir, spelling)
+      assert.notInclude(residualTir, spelling)
       assert.notInclude(mir, spelling)
     }
   }),

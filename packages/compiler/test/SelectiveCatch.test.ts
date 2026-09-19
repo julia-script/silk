@@ -3,7 +3,7 @@ import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
-import * as Hir from '../src/Hir.js'
+import * as Tir from '../src/Tir.js'
 import * as Mir from '../src/Mir.js'
 import * as MirNormalization from '../src/MirNormalization.js'
 import * as MirLinearization from '../src/MirLinearization.js'
@@ -186,10 +186,10 @@ pub fn main() -> i32 { return run Effect.catchAll(relay(A {}), recover) }`
     const diagnostic =
       Analysis.diagnostics(rejected).find((entry) => entry.code === 'SEM0064') ??
       unreachable('expected the undeclared union member diagnostic')
-    const start = rejectedSource.indexOf(' problem }')
+    const start = rejectedSource.indexOf(' problem }') + 1
     assert.deepEqual(
       [diagnostic.span.start, diagnostic.span.end],
-      [start, start + ' problem'.length],
+      [start, start + 'problem'.length],
     )
   }),
 )
@@ -391,8 +391,8 @@ effect fn selective(flag: bool) -> i32 ! B {
 pub fn main() -> i32 { return run Effect.catchAll(selective(true), recoverB) }`)
     const catches = self.instances.instances.flatMap((instance) =>
       instance.function.statements
-        .flatMap(Hir.statementExpressions)
-        .flatMap((root) => [...Hir.expressionTree(root)])
+        .flatMap(Tir.statementExpressions)
+        .flatMap((root) => [...Tir.expressionTree(root)])
         .filter((expression) => expression._tag === 'EffectCatch')
         .map((expression) => Object.freeze({ expression, substitution: instance.substitution }))
         .filter(
@@ -516,7 +516,7 @@ pub fn main() -> i32 { return run handleA(risky(true)) }`
         code: diagnostic.code,
         source: source.slice(diagnostic.span.start, diagnostic.span.end),
       })),
-      [{ code: 'SEM0052', source: ' handleA(risky(true))' }],
+      [{ code: 'SEM0052', source: 'handleA(risky(true))' }],
     )
   }),
 )

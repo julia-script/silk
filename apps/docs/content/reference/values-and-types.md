@@ -221,7 +221,7 @@ The diagnostic must retain its exact magnitude rather than a rounded host-number
 **Status:** Confirmed
 
 Every valid duration literal has type `u64`, independent of its surrounding context. The compiler
-scales every component exactly and sums the result before HIR lowering.
+scales every component exactly and sums the result before TIR lowering.
 
 | Suffix |     Exact nanoseconds |
 | ------ | --------------------: |
@@ -256,7 +256,7 @@ literals are values, not duration patterns, enum discriminants, array lengths, a
 type, or a new clock API.
 
 The largest valid total is `18_446_744_073_709_551_615` nanoseconds. A larger exact total reports
-`SEM0170` before HIR is produced. Public `u64` constants may use duration literals; their exported
+`SEM0170` before TIR is produced. Public `u64` constants may use duration literals; their exported
 module surface retains the exact scaled value, not the source padding or component grouping.
 
 **Evidence:** [duration literal specification](../../../../openspec/changes/add-duration-literals/specs/duration-literals/spec.md),
@@ -1444,7 +1444,7 @@ access, or another member property. A lexical borrow cannot become an owned unio
 never makes it detached. Requirement rows remain capability rows rather than value unions.
 
 Generic unions normalize again after monomorphic substitution. If `A | B` specializes with both
-parameters equal to `i32`, the instance carries `i32`, not two indistinguishable tags. HIR retains
+parameters equal to `i32`, the instance carries `i32`, not two indistinguishable tags. TIR retains
 the authored mapping and MIR deterministically recomputes the concrete mapping and canonical order.
 
 **Diagnostics:** An unresolved or otherwise unavailable member reports that member's ordinary type
@@ -1452,7 +1452,7 @@ diagnostic. A borrow or bare executable contract reports `SEM0039` because it ha
 storage plan. A valid non-nominal or represented executable member produces no diagnostic.
 
 **Current compiler:** Aligned. Normalization, compatibility, target layout, ownership, cleanup,
-HIR/MIR mappings and LLVM lowering for native and WebAssembly targets consume canonical ordinary
+TIR/MIR mappings and LLVM lowering for native and WebAssembly targets consume canonical ordinary
 member identities. Exact and opaque executable representations remain compiler-private while their
 public contract spelling is preserved.
 

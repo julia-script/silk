@@ -8,11 +8,16 @@ import * as ConformanceProof from '../src/ConformanceProof.js'
 import * as DeclarationFacts from '../src/DeclarationFacts.js'
 import type * as DeclarationIndex from '../src/DeclarationIndex.js'
 import * as LifetimeElision from '../src/LifetimeElision.js'
+import type * as AuthoredHir from '../src/AuthoredHir.js'
+import * as AuthoredWalk from '../src/AuthoredWalk.js'
+import type * as DeclarationLifetime from '../src/DeclarationLifetime.js'
+import * as SemanticContext from '../src/SemanticContext.js'
+import type * as SyntaxFile from '../src/SyntaxFile.js'
 import * as Option from 'effect/Option'
 import * as Lifetime from '../src/Lifetime.js'
 import * as ModuleClosure from '../src/ModuleClosure.js'
 import * as NameResolution from '../src/NameResolution.js'
-import * as Presentation from '../src/Presentation.js'
+import * as SemanticDisplay from '../src/SemanticDisplay.js'
 import type * as Scalar from '../src/Scalar.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
@@ -45,6 +50,69 @@ const collect = (
     ),
     (closure) => NameResolution.analyze(closure).index,
   )
+}
+
+/**
+ * The closure alongside its index, for the refactor that plans text edits.
+ *
+ * `LifetimeElision.makeExplicit` is a source action, so it needs the closure module's concrete
+ * syntax for byte offsets; every lifetime decision it applies still comes from the elaboration.
+ */
+const collectWithClosure = (
+  rootModule: string,
+  entries: ReadonlyArray<readonly [string, string]>,
+): Effect.Effect<
+  { readonly index: DeclarationIndex.Index; readonly closure: ModuleClosure.Facts },
+  ModuleClosure.ModuleClosureError
+> => {
+  const rootText = entries.find(([name]) => name === rootModule)?.[1]
+  if (rootText === undefined) throw new RangeError(`Fixture has no root source ${rootModule}`)
+  return Effect.map(
+    ModuleClosure.load({ root: rootModule }).pipe(
+      Effect.provide(
+        SourceResolver.overlay([SourceFile.make(rootModule, ascii(rootText))]).pipe(
+          Layer.provideMerge(
+            SourceResolver.memory(
+              new Map(
+                entries
+                  .filter(([name]) => name !== rootModule)
+                  .map(([name, text]) => [name, ascii(text)] as const),
+              ),
+            ),
+          ),
+        ),
+      ),
+    ),
+    (closure) => Object.freeze({ index: NameResolution.analyze(closure).index, closure }),
+  )
+}
+
+/** The root module's concrete syntax, which the lifetime source action edits. */
+const rootSyntax = (closure: ModuleClosure.Facts) => {
+  const found = closure.modules.find((module) => module.name === 'root')?.syntax
+  if (found === undefined) throw new RangeError('Fixture closure has no root module')
+  return found
+}
+
+/**
+ * Plans one header expansion.
+ *
+ * The elaboration is plain data, so the refactor takes the semantic context and the authored
+ * declaration beside it; both come from the closure the index was collected from.
+ */
+const planExplicit = (
+  closure: ModuleClosure.Facts,
+  syntax: SyntaxFile.SyntaxFile,
+  member: { readonly anchor: AuthoredHir.Anchor },
+  context: DeclarationLifetime.Context,
+  executable?: Type.ExecutableLifetimes,
+) => {
+  const registry = SemanticContext.fromModules(closure.modules)
+  const semantic = registry.of(member.anchor)
+  if (semantic === undefined) throw new RangeError('Fixture closure has no semantic context')
+  const declaration = AuthoredWalk.declarationOf(semantic.module, member.anchor.owner)
+  if (declaration === undefined) throw new RangeError('Fixture closure has no authored declaration')
+  return LifetimeElision.makeExplicit(syntax, semantic, declaration, context, executable)
 }
 
 it.effect('indexes canonical scalar enums with exact representations and bigint sequences', () =>
@@ -402,7 +470,7 @@ pub service Logger<T> {
     )
     const log = service?.operations.at(0)
     assert.strictEqual(
-      log === undefined ? undefined : Presentation.serviceOperation(log).text,
+      log === undefined ? undefined : SemanticDisplay.serviceOperation(log).text,
       "effect<'env> fn log<'life1: 'env, 'env>(static template: string<'static>, message: &'life1 [u8], value: T) -> () ! WriteFailure ? &mut root.Logger<T> with Intrinsic.nonParking()",
     )
     assert.deepEqual(index.diagnostics, [])
@@ -770,7 +838,10 @@ pub fn render(static template: string, value: i32) -> i32 {
     assert.strictEqual(parse?.bodyTemplate?._tag, 'FunctionBodyTemplate')
     assert.strictEqual(render?.bodyTemplate?._tag, 'FunctionBodyTemplate')
     assert.include(parse?.bodyTemplate?.canonical ?? '', 'ReturnStatement')
-    assert.include(render?.bodyTemplate?.canonical ?? '', 'StaticKeyword')
+    // The authored encoding spells a binding's markers positionally as `name mutable static`,
+    // so the retained static binding reads `"parsed" false true` rather than naming a keyword.
+    assert.include(render?.bodyTemplate?.canonical ?? '', 'BindingStatement')
+    assert.include(render?.bodyTemplate?.canonical ?? '', 'Name( [ ] "parsed" ) false true')
   }),
 )
 
@@ -1958,7 +2029,7 @@ pub fn plain(value: i32) -> i32 { return value }`,
     assert.strictEqual(named?.unsafe, false)
     assert.strictEqual(named?.phase, 'Runtime')
     assert.strictEqual(named?.functionKind, 'Ordinary')
-    assert.strictEqual(named?.syntax.kind, 'FunctionDeclaration')
+    assert.strictEqual(named?._tag, 'FunctionDeclaration')
     assert.strictEqual(named?.returnType._tag, 'Resolved')
     assert.strictEqual(
       named === undefined ? undefined : DeclarationFacts.callableContract(named).unsafe,
@@ -2296,7 +2367,9 @@ it.effect('makes lifetime headers explicit without changing canonical contracts 
   second: &[T]
 }
 fn apply<T>(value: &T, callback: fn(&T) -> &T) -> &T { return value }`
-    const original = yield* collect('root', [['root', source]])
+    const collected = yield* collectWithClosure('root', [['root', source]])
+    const original = collected.index
+    const syntax = rootSyntax(collected.closure)
     assert.deepEqual(
       original.diagnostics.map((diagnostic) => diagnostic.code),
       [],
@@ -2306,11 +2379,11 @@ fn apply<T>(value: &T, callback: fn(&T) -> &T) -> &T { return value }`
         .at(0)
         ?.members.flatMap((member) =>
           'lifetimeElaboration' in member && member.lifetimeElaboration !== undefined
-            ? [member.lifetimeElaboration]
+            ? [{ member, context: member.lifetimeElaboration }]
             : [],
         ) ?? []
-    const plans = contexts.map((context) =>
-      Option.getOrThrow(LifetimeElision.makeExplicit(context)),
+    const plans = contexts.map(({ member, context }) =>
+      Option.getOrThrow(planExplicit(collected.closure, syntax, member, context)),
     )
     const edits = plans
       .flatMap((plan) => plan.plan.changes.get('root') ?? [])
@@ -2323,7 +2396,9 @@ fn apply<T>(value: &T, callback: fn(&T) -> &T) -> &T { return value }`
     assert.include(expanded, '// independent views')
     assert.include(expanded, "Pair<T, 'life1, 'life2>")
     assert.include(expanded, "for<'call0> fn<'life2>")
-    const explicit = yield* collect('root', [['root', expanded]])
+    const reparsed = yield* collectWithClosure('root', [['root', expanded]])
+    const explicit = reparsed.index
+    const explicitSyntax = rootSyntax(reparsed.closure)
     assert.deepEqual(
       explicit.diagnostics.map((diagnostic) => diagnostic.code),
       [],
@@ -2359,7 +2434,9 @@ fn apply<T>(value: &T, callback: fn(&T) -> &T) -> &T { return value }`
           (member) =>
             !('lifetimeElaboration' in member) ||
             member.lifetimeElaboration === undefined ||
-            Option.isNone(LifetimeElision.makeExplicit(member.lifetimeElaboration)),
+            Option.isNone(
+              planExplicit(reparsed.closure, explicitSyntax, member, member.lifetimeElaboration),
+            ),
         ),
     )
   }),
@@ -2371,7 +2448,9 @@ it.effect('makes retained Effect environments explicit without strengthening the
 effect fn combine<'a, 'b>(left: &'a i32, right: &'b i32) -> i32 { return left.* + right.* }
 effect fn bounded<'a, 'b, T: 'a + 'b>(value: T) -> i32 { return 0 }
 service Work { effect<'static> fn tick() -> i32 }`
-    const original = yield* collect('root', [['root', source]])
+    const collected = yield* collectWithClosure('root', [['root', source]])
+    const original = collected.index
+    const syntax = rootSyntax(collected.closure)
     assert.deepEqual(original.diagnostics, [])
     const declarations = original.modules.at(0)?.declarations ?? []
     const edits = declarations
@@ -2379,7 +2458,13 @@ service Work { effect<'static> fn tick() -> i32 }`
         const context = declaration.lifetimeElaboration
         if (context === undefined) return []
         const expansion = Option.getOrThrow(
-          LifetimeElision.makeExplicit(context, DeclarationFacts.executableLifetimes(declaration)),
+          planExplicit(
+            collected.closure,
+            syntax,
+            declaration,
+            context,
+            DeclarationFacts.executableLifetimes(declaration),
+          ),
         )
         return expansion.plan.changes.get('root') ?? []
       })
@@ -2392,7 +2477,9 @@ service Work { effect<'static> fn tick() -> i32 }`
     assert.include(expanded, "effect<'env> fn retain<T: 'env, 'env>")
     assert.include(expanded, "effect<'env> fn combine<'a: 'env, 'b: 'env, 'env>")
     assert.include(expanded, "effect<'env> fn bounded<'a, 'b, T: 'a + 'b + 'env, 'env>")
-    const explicit = yield* collect('root', [['root', expanded]])
+    const reparsed = yield* collectWithClosure('root', [['root', expanded]])
+    const explicit = reparsed.index
+    const explicitSyntax = rootSyntax(reparsed.closure)
     assert.deepEqual(explicit.diagnostics, [])
     const contracts = (index: DeclarationIndex.Index) =>
       index.modules
@@ -2406,7 +2493,10 @@ service Work { effect<'static> fn tick() -> i32 }`
       if (context !== undefined)
         assert.isTrue(
           Option.isNone(
-            LifetimeElision.makeExplicit(
+            planExplicit(
+              reparsed.closure,
+              explicitSyntax,
+              declaration,
               context,
               DeclarationFacts.executableLifetimes(declaration),
             ),

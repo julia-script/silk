@@ -1,10 +1,10 @@
 import * as CompilerTrace from './CompilerTrace.js'
 import * as NativeAssemblyPlanning from './NativeAssemblyPlanning.js'
-import * as ArtifactPlan from './ArtifactPlan.js'
-import * as ToolchainIntegrity from './ToolchainIntegrity.js'
+import type * as ArtifactPlan from './ArtifactPlan.js'
 import * as ArtifactComposition from './ArtifactComposition.js'
 import type * as ModuleClosure from './ModuleClosure.js'
 import * as ModuleSelection from './ModuleSelection.js'
+import * as SemanticContext from './SemanticContext.js'
 import * as Effect from 'effect/Effect'
 import * as Result from 'effect/Result'
 import * as CompilationProfile from './CompilationProfile.js'
@@ -36,6 +36,7 @@ const instanceViolationDiagnostics = (
 const foreignStaticTargetDiagnostics = (
   index: DeclarationIndex.Index,
   target: Target.Target,
+  registry: SemanticContext.Registry,
 ): ReadonlyArray<Diagnostic.Diagnostic> =>
   index.modules.flatMap((module) =>
     module.members.flatMap((member): ReadonlyArray<Diagnostic.Diagnostic> => {
@@ -56,7 +57,7 @@ const foreignStaticTargetDiagnostics = (
       return [
         Diagnostic.invalidConstant(
           `the exported C static initializer is outside ${scalar.spelling} on ${target.id}`,
-          member.initializer?.span ?? member.syntax.span,
+          registry.spanOf(member.initializer?.anchor ?? member.anchor),
         ),
       ]
     }),
@@ -70,6 +71,7 @@ const discoverInstances = Effect.fn('Realization.discoverInstances')(function* (
   prepareForEmission: boolean,
   report: Array<PhaseReport.PhaseReport>,
   options: Options,
+  registry: SemanticContext.Registry,
 ) {
   const trace = yield* CompilerTrace.capture()
   const instances = PhaseReport.measureInto(
@@ -81,11 +83,12 @@ const discoverInstances = Effect.fn('Realization.discoverInstances')(function* (
       completion === undefined ||
       self.composition === undefined ||
       (!prepareForEmission && specializationInvalid)
-        ? Instances.invalid(self.closure.rootModule)
+        ? Instances.invalid(self.closure.rootModule, registry)
         : Instances.discover(
             self.closure.rootModule,
             self.results,
             self.index,
+            registry,
             completion,
             self.resolution,
             self.composition,
@@ -160,6 +163,7 @@ const buildTargetLayout = Effect.fn('Realization.buildTargetLayout')(function* (
   const catalog = yield* Layout.catalog(
     selection.target,
     self.index,
+    instances.registry,
     instances,
     OpaqueRealization.catalogOf(self),
   )
@@ -216,7 +220,7 @@ const checkForeignPlanning = Effect.fn('Realization.checkForeignPlanning')(
     Effect.sync(() => ForeignPlanning.check(program, target)),
 )
 
-function discoverAndLower(
+export function discoverAndLower(
   self: Frontend,
   targetId: string | undefined,
   completion: ProfileBootstrap.Completion | undefined,
@@ -225,7 +229,7 @@ function discoverAndLower(
     readonly optimization?: 'debug' | 'release' | 'release-with-debug'
   },
 ): Effect.Effect<Realization>
-function discoverAndLower(
+export function discoverAndLower(
   self: Frontend,
   targetId: string | undefined,
   completion: ProfileBootstrap.Completion | undefined,
@@ -235,7 +239,7 @@ function discoverAndLower(
   },
   prepareForEmission: true,
 ): Effect.Effect<Preparation>
-function discoverAndLower(
+export function discoverAndLower(
   self: Frontend,
   targetId: string | undefined,
   completion: ProfileBootstrap.Completion | undefined,
@@ -260,6 +264,7 @@ const discoverAndLowerEffect = Effect.fn('Realization.discoverAndLower')(functio
     'realization.mode': prepareForEmission ? 'prepare' : 'analyze',
     'mir.normalize': options.normalizeMir !== false,
   })
+  const registry = SemanticContext.fromModules(self.closure.modules)
   const report = [...self.report]
   if (prepareForEmission && Diagnostic.hasErrors(self.diagnostics))
     return Object.freeze({
@@ -270,13 +275,13 @@ const discoverAndLowerEffect = Effect.fn('Realization.discoverAndLower')(functio
 
   const specializationInvalid =
     Diagnostic.hasGenericSpecializationErrors(self.diagnostics) ||
-    hasInvalidGenericBody(self.index, self.diagnostics)
+    hasInvalidGenericBody(self.index, self.diagnostics, registry)
   // Static specialization is target-relative. Resolve the closed target before constructing any
   // executable worklist so no candidate body can observe a missing or host-inferred target.
   const targetSelection = Target.select(targetId)
   const foreignStaticDiagnostics =
     targetSelection._tag === 'Resolved'
-      ? foreignStaticTargetDiagnostics(self.index, targetSelection.target)
+      ? foreignStaticTargetDiagnostics(self.index, targetSelection.target, registry)
       : Object.freeze([])
   const instances = yield* discoverInstances(
     self,
@@ -286,6 +291,7 @@ const discoverAndLowerEffect = Effect.fn('Realization.discoverAndLower')(functio
     prepareForEmission,
     report,
     options,
+    registry,
   )
   const baseDiagnostics = yield* collectInstanceDiagnostics(
     self,
@@ -390,7 +396,7 @@ const discoverAndLowerEffect = Effect.fn('Realization.discoverAndLower')(functio
       })
     : undefined
   // Source diagnostics are the recovery result for an invalid program. Keep declaration,
-  // instance, and layout facts queryable, but do not demand executable runners from invalid HIR.
+  // instance, and layout facts queryable, but do not demand executable runners from invalid TIR.
   // Valid programs still pass through the complete lowering and verification boundary below.
   const sourceDiagnosticError = Diagnostic.hasErrors(diagnostics)
     ? new AnalysisUnavailable({
@@ -572,7 +578,7 @@ export const configure = Effect.fn('Realization.configure')(function* (
     })
     const completion = yield* ProfileBootstrap.complete(
       initial,
-      { ...self, modules },
+      { ...self, contexts: SemanticContext.fromModules(self.closure.modules), modules },
       configuration?.bindings,
     )
     if (
@@ -640,9 +646,19 @@ export const configure = Effect.fn('Realization.configure')(function* (
           ['default requires conditional declaration availability'],
           result.failure.staticFailure,
         )
+  // The root module stands for the whole configuration when no origin carries a span.
+  const rootContext = SemanticContext.fromModules(self.closure.modules).contexts.get(
+    self.closure.rootModule,
+  )
   const span =
     failure.origins.find((origin) => origin.span !== undefined)?.span ??
-    self.closure.modules.find((module) => module.name === self.closure.rootModule)?.syntax.root.span
+    (rootContext === undefined
+      ? undefined
+      : rootContext.spanOf({
+          _tag: 'AuthoredAnchor',
+          owner: rootContext.module.owner,
+          path: [],
+        }))
   if (span === undefined) throw new RangeError('Profile bootstrap lost root source span')
   return {
     frontend: OpaqueRealization.withCatalog(
@@ -658,205 +674,12 @@ export const configure = Effect.fn('Realization.configure')(function* (
   }
 })
 
-/** Derives immutable target/runtime facts after source configuration completes. */
-export const realize = Effect.fn('Realization.realize')(function* (
-  self: Frontend,
-  targetId: string | ModuleClosure.CompilationRequest['configuration'] = self.requestedTarget,
-  options: Options = {},
-): Effect.fn.Return<
-  Realization & { readonly frontend: Frontend },
-  ModuleClosure.ModuleClosureError,
-  SourceResolver.SourceResolver
-> {
-  let ready = yield* configure(
-    self,
-    typeof targetId === 'string' ? targetId : undefined,
-    undefined,
-    undefined,
-    typeof targetId === 'object' ? targetId : undefined,
-  )
-  let realized = yield* discoverAndLower(ready.frontend, ready.targetId, ready.completion, options)
-  if (
-    realized.mir._tag === 'Available' &&
-    realized.profile !== undefined &&
-    ExecutionStorageComponent.demanded(realized.mir.value)
-  ) {
-    const selection = yield* Effect.result(
-      ExecutionStorageComponent.select(ready.frontend.composition?.components ?? []),
-    )
-    let failure = Result.isFailure(selection) ? selection.failure : undefined
-    if (Result.isSuccess(selection)) {
-      const expanded = yield* FrontendActor.withComponents(
-        ready.frontend,
-        realized.profile,
-        [...new Set(selection.success.bindings.map((binding) => binding.module))],
-        options,
-      )
-      ready = yield* configure(expanded, realized.profile.target.id)
-      realized = yield* discoverAndLower(ready.frontend, ready.targetId, ready.completion, options)
-      if (realized.mir._tag === 'Available') {
-        const component = yield* Effect.result(
-          ExecutionStorageComponent.resolve(selection.success, realized.mir.value),
-        )
-        if (Result.isFailure(component)) failure = component.failure
-        else
-          realized = {
-            ...realized,
-            mir: {
-              _tag: 'Available',
-              value: {
-                ...realized.mir.value,
-                executionStorage: component.success,
-              },
-            },
-          }
-      }
-    }
-    if (failure !== undefined) {
-      const span = ready.frontend.closure.sources.get(ready.frontend.closure.rootModule)
-      const rootSpan = ready.frontend.closure.modules.find((module) => module.name === span?.id)
-        ?.syntax.root.span
-      if (rootSpan === undefined) throw new RangeError('Storage selection lost application source')
-      return {
-        ...realized,
-        frontend: ready.frontend,
-        diagnostics: Diagnostic.merge(realized.diagnostics, [
-          Diagnostic.invalidConfiguration(failure, rootSpan),
-        ]),
-        mir: {
-          _tag: 'Unavailable',
-          error: new AnalysisUnavailable({
-            operation: 'Analysis.realize',
-            message: 'Execution storage component is unavailable',
-          }),
-        },
-      }
-    }
-  }
-  if (
-    realized.mir._tag !== 'Available' ||
-    realized.profile === undefined ||
-    ready.frontend.composition === undefined
-  )
-    return { ...realized, frontend: ready.frontend }
-  const plan = yield* Effect.result(
-    ArtifactPlan.make(
-      ready.frontend,
-      realized.profile,
-      ready.frontend.composition,
-      realized.mir.value,
-      'llvm-bitcode',
-      ToolchainIntegrity.installed().digest,
-    ),
-  )
-  if (Result.isSuccess(plan))
-    return Object.freeze({ ...realized, frontend: ready.frontend, artifactPlan: plan.success })
-  const span = ready.frontend.closure.modules.find(
-    (module) => module.name === ready.frontend.closure.rootModule,
-  )?.syntax.root.span
-  if (span === undefined) throw new RangeError('Artifact planning lost application span')
-  return Object.freeze({
-    ...realized,
-    frontend: ready.frontend,
-    diagnostics: Diagnostic.merge(realized.diagnostics, [
-      Diagnostic.invalidConfiguration(plan.failure, span),
-    ]),
-    mir: Object.freeze({
-      _tag: 'Unavailable',
-      error: new AnalysisUnavailable({
-        operation: 'Analysis.realize',
-        message: 'Native requirements are incompatible',
-      }),
-    }),
+/** The unavailable MIR state a sealed executable publishes when configuration rejects it. */
+export const unavailableMir = (message: string): Targeted<Mir.Module> =>
+  Object.freeze({
+    _tag: 'Unavailable',
+    error: new AnalysisUnavailable({ operation: 'Analysis.realize', message }),
   })
-})
-
-/** Prepares valid runtime facts for Driver while stopping at each artifact-production gate. */
-export const prepare = Effect.fn('Realization.prepare')(function* (
-  self: Frontend,
-  targetId: string | undefined = self.requestedTarget,
-  options: Options & {
-    readonly artifactKind?: ArtifactKind.ArtifactKind
-    readonly optimization?: 'debug' | 'release' | 'release-with-debug'
-  } = {},
-): Effect.fn.Return<Preparation, ModuleClosure.ModuleClosureError, SourceResolver.SourceResolver> {
-  let ready = yield* configure(self, targetId, options.artifactKind, options.optimization)
-  let prepared = yield* discoverAndLower(
-    ready.frontend,
-    ready.targetId,
-    ready.completion,
-    options,
-    true,
-  )
-  if (prepared._tag !== 'Prepared') return prepared
-  if (ExecutionStorageComponent.demanded(prepared.program)) {
-    const selection = yield* Effect.result(
-      ExecutionStorageComponent.select(prepared.composition.components),
-    )
-    let failure = Result.isFailure(selection) ? selection.failure : undefined
-    if (Result.isSuccess(selection)) {
-      const expanded = yield* FrontendActor.withComponents(
-        ready.frontend,
-        prepared.profile,
-        [...new Set(selection.success.bindings.map((binding) => binding.module))],
-        options,
-      )
-      ready = yield* configure(expanded, prepared.target.id)
-      prepared = yield* discoverAndLower(
-        ready.frontend,
-        ready.targetId,
-        ready.completion,
-        options,
-        true,
-      )
-      if (prepared._tag !== 'Prepared') return prepared
-      const component = yield* Effect.result(
-        ExecutionStorageComponent.resolve(selection.success, prepared.program),
-      )
-      if (Result.isFailure(component)) failure = component.failure
-      else
-        prepared = {
-          ...prepared,
-          program: { ...prepared.program, executionStorage: component.success },
-        }
-    }
-    if (failure !== undefined) {
-      const span = ready.frontend.closure.modules.find(
-        (module) => module.name === ready.frontend.closure.rootModule,
-      )?.syntax.root.span
-      if (span === undefined) throw new RangeError('Storage preparation lost application source')
-      return {
-        _tag: 'Rejected',
-        report: prepared.report,
-        diagnostics: Diagnostic.merge(prepared.diagnostics, [
-          Diagnostic.invalidConfiguration(failure, span),
-        ]),
-      }
-    }
-  }
-  const plan = yield* Effect.result(
-    ArtifactPlan.make(
-      ready.frontend,
-      prepared.profile,
-      prepared.composition,
-      prepared.program,
-      'llvm-bitcode',
-      ToolchainIntegrity.installed().digest,
-    ),
-  )
-  if (Result.isSuccess(plan)) return Object.freeze({ ...prepared, artifactPlan: plan.success })
-  const span = ready.frontend.closure.modules.find(
-    (module) => module.name === ready.frontend.closure.rootModule,
-  )?.syntax.root.span
-  if (span === undefined) throw new RangeError('Artifact planning lost application span')
-  return Object.freeze({
-    _tag: 'Rejected',
-    diagnostics: Diagnostic.merge(prepared.diagnostics, [
-      Diagnostic.invalidConfiguration(plan.failure, span),
-    ]),
-    report: prepared.report,
-  })
-})
 
 import { AnalysisUnavailable } from './AnalysisUnavailable.js'
 import * as ArtifactKind from './ArtifactKind.js'
@@ -867,9 +690,6 @@ import * as ExecutableProperty from './ExecutableProperty.js'
 import * as ForeignAvailability from './ForeignAvailability.js'
 import * as ForeignPlanning from './ForeignPlanning.js'
 import type { Frontend, Options } from './Frontend.js'
-import * as FrontendActor from './Frontend.js'
-import * as SourceResolver from './SourceResolver.js'
-import * as ExecutionStorageComponent from './ExecutionStorageComponent.js'
 import * as InstanceDiagnostics from './InstanceDiagnostics.js'
 import * as Instances from './Instances.js'
 import * as IntrinsicAvailability from './IntrinsicAvailability.js'
@@ -999,16 +819,17 @@ export type Preparation =
 const hasInvalidGenericBody = (
   index: DeclarationIndex.Index,
   diagnostics: ReadonlyArray<Diagnostic.Diagnostic>,
+  registry: SemanticContext.Registry,
 ): boolean =>
   index.modules.some((module) =>
-    module.members.some(
-      (member) =>
-        member.typeParameters.length > 0 &&
-        diagnostics.some(
-          (diagnostic) =>
-            diagnostic.span.sourceId === member.syntax.span.sourceId &&
-            diagnostic.span.start >= member.syntax.span.start &&
-            diagnostic.span.end <= member.syntax.span.end,
-        ),
-    ),
+    module.members.some((member) => {
+      if (member.typeParameters.length === 0) return false
+      const span = registry.spanOf(member.anchor)
+      return diagnostics.some(
+        (diagnostic) =>
+          diagnostic.span.sourceId === span.sourceId &&
+          diagnostic.span.start >= span.start &&
+          diagnostic.span.end <= span.end,
+      )
+    }),
   )

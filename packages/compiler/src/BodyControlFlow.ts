@@ -1,10 +1,12 @@
+import type * as AuthoredHir from './AuthoredHir.js'
+import * as AuthoredIdentity from './AuthoredIdentity.js'
 import * as Elaboration from './Elaboration.js'
-import type * as Hir from './Hir.js'
+import type * as Tir from './Tir.js'
+import type * as SemanticContext from './SemanticContext.js'
 import type * as SourceSpan from './SourceSpan.js'
-import type * as SyntaxTree from './SyntaxTree.js'
 import * as Type from './Type.js'
 
-/** Evaluation boundaries for one retained source node. */
+/** Evaluation boundaries for one retained authored position. */
 export interface Boundary {
   readonly before: number
   readonly after: number
@@ -12,7 +14,7 @@ export interface Boundary {
 
 /** Finite semantic control flow, independent of source offsets and backend lowering. */
 export interface BodyControlFlow {
-  readonly boundaries: ReadonlyMap<SyntaxTree.Node, Boundary>
+  readonly boundaries: ReadonlyMap<string, Boundary>
   readonly spans: ReadonlyMap<string, Boundary>
   readonly writes: ReadonlyMap<string, number>
   readonly edges: ReadonlyArray<ReadonlyArray<number>>
@@ -22,16 +24,17 @@ export interface BodyControlFlow {
 
 const spanKey = (span: SourceSpan.SourceSpan): string =>
   `${span.sourceId}:${span.start}:${span.end}`
-const loopKey = (loop: Hir.LoopId): string =>
+const loopKey = (loop: Tir.LoopId): string =>
   `${loop.function.sourceId}:${loop.function.ordinal}:${loop.ordinal}`
 
-/** Builds structured branch exits and loop backedges once for one source body. */
+/** Builds structured branch exits and loop backedges once for one authored body. */
 export const make = (
+  context: SemanticContext.SemanticContext,
   statements: ReadonlyArray<Elaboration.StatementFact>,
-  root: SyntaxTree.Node,
+  root: AuthoredHir.Anchor,
 ): BodyControlFlow => {
   const edges: Array<Array<number>> = []
-  const boundaries = new Map<SyntaxTree.Node, Boundary>()
+  const boundaries = new Map<string, Boundary>()
   const spans = new Map<string, Boundary>()
   const writes = new Map<string, number>()
   const point = (): number => {
@@ -41,17 +44,18 @@ export const make = (
   const edge = (from: number, to: number): void => {
     edges.at(from)?.push(to)
   }
-  const boundary = (syntax: SyntaxTree.Node): Boundary => {
-    const found = boundaries.get(syntax)
+  const boundary = (anchor: AuthoredHir.Anchor): Boundary => {
+    const key = AuthoredIdentity.anchorKey(anchor)
+    const found = boundaries.get(key)
     if (found !== undefined) return found
     const value = { before: point(), after: point() }
-    boundaries.set(syntax, value)
-    spans.set(spanKey(syntax.span), value)
+    boundaries.set(key, value)
+    spans.set(spanKey(context.spanOf(anchor)), value)
     return value
   }
   type Loops = ReadonlyMap<string, { readonly exit: number; readonly repeat: number }>
   const expression = (value: Elaboration.ExpressionFact, next: number, loops: Loops): number => {
-    const own = boundary(value.syntax)
+    const own = boundary(value.anchor)
     if (value.type._tag !== 'Available' || !Type.isNever(value.type.type)) edge(own.after, next)
     if (value._tag === 'Match') {
       const dispatch = point()
@@ -69,7 +73,7 @@ export const make = (
           edge(choice, fallback)
           selected = expression(arm.guard, choice, loops)
         }
-        const entered = boundary(arm.syntax)
+        const entered = boundary(arm.anchor)
         edge(entered.before, selected)
         edge(dispatch, entered.before)
         fallback = entered.before
@@ -104,9 +108,9 @@ export const make = (
   ): number => {
     let start = next
     for (const statement of [...values].reverse()) {
-      const syntax =
-        statement._tag === 'BindStatement' ? statement.binding.syntax : statement.syntax
-      const own = boundary(syntax)
+      const anchor =
+        statement._tag === 'BindStatement' ? statement.binding.anchor : statement.anchor
+      const own = boundary(anchor)
       const previous = start
       start = own.before
       if (statement._tag === 'ReturnStatement' || statement._tag === 'FailStatement') {
@@ -153,7 +157,7 @@ export const make = (
         else values = [statement.expression]
         for (const value of [...values].reverse()) evaluated = expression(value, evaluated, loops)
         if (statement._tag === 'WriteStatement')
-          writes.set(spanKey(statement.destination.syntax.span), own.after)
+          writes.set(spanKey(context.spanOf(statement.destination.anchor)), own.after)
         edge(own.before, evaluated)
         edge(own.after, previous)
       }

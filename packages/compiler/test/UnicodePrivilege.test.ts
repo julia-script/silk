@@ -76,7 +76,7 @@ it('carries no Unicode policy anywhere in the compiler’s own sources', () => {
 it('provides no Unicode operation to any engine', () => {
   // Every intrinsic the compiler declares, by the spelling a program would write. An engine cannot
   // implement an operation the catalogue does not name, so this one assertion covers semantic
-  // analysis, HIR, MIR, and LLVM lowering at once.
+  // analysis, TIR, MIR, and LLVM lowering at once.
   const spellings = Intrinsic.all().flatMap((actor) =>
     actor.operations.map((operation) => `${actor.spelling}.${operation.spelling}`),
   )

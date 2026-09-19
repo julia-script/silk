@@ -67,7 +67,7 @@ later child even when runtime control may skip it.
 ordinary diagnostic for its own type, ownership, failure, requirement, or place boundary.
 
 **Evidence:** [call evaluation](functions-callables-and-control-flow.md#call-001--a-call-evaluates-each-argument-once-from-left-to-right),
-[aggregate HIR evaluation order](../../../../packages/compiler/src/Hir.ts).
+[aggregate TIR evaluation order](../../../../packages/compiler/src/Tir.ts).
 
 ### EVAL-002 — Conditional and deferred forms state which children do not evaluate eagerly
 
@@ -216,7 +216,7 @@ receive a parser diagnostic at the damaged group boundary; diagnostics within th
 expression remain attached to their original source.
 
 **Evidence:** [grouped expression parser](../../../../packages/compiler/src/Parser.ts),
-[expression HIR](../../../../packages/compiler/src/Hir.ts).
+[expression TIR](../../../../packages/compiler/src/Tir.ts).
 
 ### EXPR-004 — Assignment and bootstrap `if` are statements, not value expressions
 

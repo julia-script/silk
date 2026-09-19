@@ -5,7 +5,7 @@ import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
-import * as Hir from '../src/Hir.js'
+import * as Tir from '../src/Tir.js'
 import * as Lifetime from '../src/Lifetime.js'
 import * as CleanupPlan from '../src/CleanupPlan.js'
 import * as MirVerification from '../src/MirVerification.js'
@@ -658,7 +658,7 @@ pub fn main() -> i32 { return 0 }`,
         assert.include(
           Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
           code,
-          `${name}\n${Hir.encode(Analysis.rootAnalysis(snapshot).hir)}`,
+          `${name}\n${Tir.encode(Analysis.rootAnalysis(snapshot).tir)}`,
         )
         if (realized !== undefined)
           assert.throws(() => Analysis.loweredMir(realized), /MIR is unavailable/)

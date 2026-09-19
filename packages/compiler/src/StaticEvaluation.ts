@@ -1,22 +1,18 @@
 import type * as CompilationProfile from './CompilationProfile.js'
-import * as Option from 'effect/Option'
 import * as Constraint from './Constraint.js'
+import type * as AuthoredHir from './AuthoredHir.js'
 import type * as DeclarationFacts from './DeclarationFacts.js'
 import * as Diagnostic from './Diagnostic.js'
 import type * as Elaboration from './Elaboration.js'
 import * as FloatingPoint from './FloatingPoint.js'
-import type * as Hir from './Hir.js'
+import type * as Tir from './Tir.js'
 import * as Canonical from './internal/Canonical.js'
-import * as DigitSeparator from './internal/DigitSeparator.js'
-import * as IntegerLiteral from './internal/IntegerLiteral.js'
 import * as TypeInference from './internal/TypeInference.js'
-import * as LiteralForm from './LiteralForm.js'
 import * as Scalar from './Scalar.js'
-import * as SourceFile from './SourceFile.js'
 import * as SourceSpan from './SourceSpan.js'
-import * as StaticText from './StaticText.js'
+import type * as StaticText from './StaticText.js'
 import * as StaticValue from './StaticValue.js'
-import * as SyntaxTree from './SyntaxTree.js'
+import type * as SemanticContext from './SemanticContext.js'
 import type * as Target from './Target.js'
 import * as Type from './Type.js'
 
@@ -460,163 +456,103 @@ const expectedLiteral = (
         trace,
       )
 
-const tokenBytes = (
-  source: SourceFile.SourceFile,
-  node: SyntaxTree.Node,
-  kind: Parameters<typeof SyntaxTree.directToken>[1],
-): LiteralForm.ByteSequence | undefined => {
-  const token = SyntaxTree.directToken(node, kind)
-  if (token === undefined) return undefined
-  return Option.getOrUndefined(SourceFile.slice(source, token.span))
-}
-
 /**
- * Evaluates one real parser literal node under an optional contextual primitive type.
+ * Evaluates one authored literal under an optional contextual primitive type.
  *
- * This operation deliberately stops at a canonical value or a phase failure, so a later syntax
- * walker can own diagnostics, step charging, calls, and control flow without duplicating decoding.
+ * Authored literals already carry their exact decoded payload, so nothing is re-lexed here: the
+ * operation only selects the primitive type and admits the value for the target environment.
  */
 export const evaluateLiteral = (
   environment: TargetEnvironment,
-  source: SourceFile.SourceFile,
-  node: SyntaxTree.Node,
+  context: SemanticContext.SemanticContext,
+  node: AuthoredHir.Literal,
   expected?: LiteralExpectation,
   trace: Trace = Object.freeze([]),
 ): Outcome<StaticValue.Value> => {
+  const span = context.spanOf(node.anchor)
   const mismatch = (actual: LiteralExpectation): Outcome<StaticValue.Value> | undefined =>
-    expectedLiteral(expected, actual, node.span, trace)
-  if (node.kind === 'UnitExpression') return mismatch('unit') ?? complete(StaticValue.unit())
-  if (node.kind === 'BooleanLiteralExpression') {
-    const wrong = mismatch('bool')
-    if (wrong !== undefined) return wrong
-    const token =
-      SyntaxTree.directToken(node, 'TrueKeyword') ?? SyntaxTree.directToken(node, 'FalseKeyword')
-    return token === undefined
-      ? primitiveFailure(
-          'StaticEvaluation.evaluateLiteral',
-          'boolean syntax has no value token',
-          node.span,
-          trace,
-        )
-      : complete(StaticValue.boolean(token.kind === 'TrueKeyword'))
-  }
-  if (node.kind === 'IntegerLiteralExpression') {
+    expectedLiteral(expected, actual, span, trace)
+  if (node._tag === 'UnitLiteral') return mismatch('unit') ?? complete(StaticValue.unit())
+  if (node._tag === 'BooleanLiteral')
+    return mismatch('bool') ?? complete(StaticValue.boolean(node.value))
+  if (node._tag === 'IntegerLiteral') {
     const selected = expected === undefined ? Scalar.defaultInteger.spelling : expected
     if (!Scalar.isIntegerSpelling(selected))
       return primitiveFailure(
         'StaticEvaluation.evaluateLiteral',
         `expected ${selected}, received integer literal`,
-        node.span,
+        span,
         trace,
       )
-    const bytes = tokenBytes(source, node, 'DecimalInteger')
-    if (bytes === undefined)
-      return primitiveFailure(
-        'StaticEvaluation.evaluateLiteral',
-        'integer syntax has no source token',
-        node.span,
-        trace,
-      )
-    const magnitude = IntegerLiteral.magnitude(bytes)
-    const value = SyntaxTree.directToken(node, 'Minus') === undefined ? magnitude : -magnitude
     return admittedValue(
       environment,
-      { _tag: 'IntegerValue', type: selected, value },
+      { _tag: 'IntegerValue', type: selected, value: node.value },
       'StaticEvaluation.evaluateLiteral',
-      node.span,
+      span,
       trace,
     )
   }
-  if (node.kind === 'FloatingLiteralExpression') {
+  if (node._tag === 'FloatingLiteral') {
     const selected = expected === undefined ? Scalar.defaultFloat.spelling : expected
     if (!Scalar.isFloatSpelling(selected))
       return primitiveFailure(
         'StaticEvaluation.evaluateLiteral',
         `expected ${selected}, received floating literal`,
-        node.span,
+        span,
         trace,
       )
-    const bytes = tokenBytes(source, node, 'DecimalFloat')
-    if (bytes === undefined)
-      return primitiveFailure(
-        'StaticEvaluation.evaluateLiteral',
-        'floating syntax has no source token',
-        node.span,
-        trace,
-      )
-    const unsigned = DigitSeparator.strip(bytes)
-    const spelling = SyntaxTree.directToken(node, 'Minus') === undefined ? unsigned : `-${unsigned}`
-    const encoded = FloatingPoint.fromDecimal(spelling, selected === 'f32' ? 32 : 64)
+    const sign = node.sign === 'Negative' ? '-' : ''
+    const encoded = FloatingPoint.fromDecimal(
+      `${sign}${node.coefficient}e${node.exponent}`,
+      selected === 'f32' ? 32 : 64,
+    )
     return encoded === undefined
       ? primitiveFailure(
           'StaticEvaluation.evaluateLiteral',
-          'floating syntax cannot be encoded',
-          node.span,
+          'floating literal cannot be encoded',
+          span,
           trace,
         )
       : admittedValue(
           environment,
           { _tag: 'FloatValue', type: selected, bits: encoded.bits },
           'StaticEvaluation.evaluateLiteral',
-          node.span,
+          span,
           trace,
         )
   }
-  if (node.kind === 'CharacterLiteralExpression') {
-    const bytes = tokenBytes(source, node, 'CharLiteral')
-    const form = bytes === undefined ? undefined : LiteralForm.recognize(bytes)
-    const decoded =
-      bytes === undefined || form === undefined
-        ? undefined
-        : StaticText.decodeScalar(Array.from(bytes), form)
-    if (decoded?._tag !== 'Scalar')
-      return primitiveFailure(
-        'StaticEvaluation.evaluateLiteral',
-        decoded?._tag === 'Invalid' ? decoded.detail : 'character syntax has no source token',
-        node.span,
-        trace,
-      )
+  if (node._tag === 'CharacterLiteral') {
     const selected = expected ?? 'char'
     const wrong = Scalar.isIntegerSpelling(selected) ? undefined : mismatch('char')
     if (wrong !== undefined) return wrong
     return admittedValue(
       environment,
       Scalar.isIntegerSpelling(selected)
-        ? { _tag: 'IntegerValue', type: selected, value: BigInt(decoded.value) }
-        : { _tag: 'CharacterValue', value: decoded.value },
+        ? { _tag: 'IntegerValue', type: selected, value: BigInt(node.scalar) }
+        : { _tag: 'CharacterValue', value: node.scalar },
       'StaticEvaluation.evaluateLiteral',
-      node.span,
+      span,
       trace,
     )
   }
-  if (node.kind === 'StaticTextLiteralExpression') {
+  if (node._tag === 'TextLiteral') {
     const wrong = mismatch('string')
     if (wrong !== undefined) return wrong
-    const bytes = tokenBytes(source, node, 'TextLiteral')
-    const form = bytes === undefined ? undefined : LiteralForm.recognize(bytes)
-    const decoded =
-      bytes === undefined || form === undefined
-        ? undefined
-        : StaticText.decode(Array.from(bytes), form)
-    if (decoded?._tag !== 'Decoded' || decoded.data.kind !== 'Text')
-      return primitiveFailure(
-        'StaticEvaluation.evaluateLiteral',
-        decoded?._tag === 'Invalid' ? decoded.detail : 'text syntax has no text token',
-        node.span,
-        trace,
-      )
     return admittedValue(
       environment,
-      { _tag: 'TextValue', bytes: decoded.data.bytes },
+      {
+        _tag: 'TextValue',
+        bytes: Object.freeze([...new TextEncoder().encode(context.textOf(node.value))]),
+      },
       'StaticEvaluation.evaluateLiteral',
-      node.span,
+      span,
       trace,
     )
   }
   return primitiveFailure(
     'StaticEvaluation.evaluateLiteral',
-    `${node.kind} is not a static literal`,
-    node.span,
+    `${node._tag} is not a static literal`,
+    span,
     trace,
   )
 }
@@ -1146,6 +1082,8 @@ export const localValueKey = (
 
 export interface FactEvaluationContext {
   readonly environment: TargetEnvironment
+  /** Current-revision span of an authored position, for diagnostics and provenance only. */
+  readonly spanOf: (anchor: AuthoredHir.Anchor) => SourceSpan.SourceSpan
   /** Concrete declaration arguments retained while interpreting a generic static body. */
   readonly typeSubstitution?: Type.Substitution
   readonly values: ReadonlyMap<string, StaticValue.Value>
@@ -1197,7 +1135,12 @@ const unavailableFact = (
   context: FactEvaluationContext,
   detail: string,
 ): Outcome<StaticValue.Value> =>
-  primitiveFailure('StaticEvaluation.evaluateFact', detail, fact.syntax.span, context.trace)
+  primitiveFailure(
+    'StaticEvaluation.evaluateFact',
+    detail,
+    context.spanOf(fact.anchor),
+    context.trace,
+  )
 
 const valueOfConstant = (
   fact: Elaboration.ConstantExpressionFact,
@@ -1210,7 +1153,7 @@ const valueOfConstant = (
       context.environment,
       { _tag: 'CharacterValue', value: value.value },
       'StaticEvaluation.evaluateFact',
-      fact.syntax.span,
+      context.spanOf(fact.anchor),
       context.trace,
     )
   if (value?._tag === 'Integer')
@@ -1218,7 +1161,7 @@ const valueOfConstant = (
       context.environment,
       { _tag: 'IntegerValue', type: value.type, value: value.value },
       'StaticEvaluation.evaluateFact',
-      fact.syntax.span,
+      context.spanOf(fact.anchor),
       context.trace,
     )
   if (value?._tag === 'Floating')
@@ -1226,7 +1169,7 @@ const valueOfConstant = (
       context.environment,
       { _tag: 'FloatValue', type: value.type, bits: value.bits },
       'StaticEvaluation.evaluateFact',
-      fact.syntax.span,
+      context.spanOf(fact.anchor),
       context.trace,
     )
   if (value?._tag === 'String')
@@ -1234,11 +1177,11 @@ const valueOfConstant = (
       context.environment,
       { _tag: 'TextValue', bytes: value.data.bytes },
       'StaticEvaluation.evaluateFact',
-      fact.syntax.span,
+      context.spanOf(fact.anchor),
       context.trace,
     )
   if (context.constant !== undefined)
-    return context.constant(fact.declaration, fact.syntax.span, context.trace)
+    return context.constant(fact.declaration, context.spanOf(fact.anchor), context.trace)
   return unavailableFact(fact, context, 'constant has no selected static value')
 }
 
@@ -1287,8 +1230,9 @@ const staticTextSpan = (
   const evaluated = context.expressionSpans.get(fact)
   if (evaluated !== undefined) return evaluated
   if (fact._tag === 'Call' && fact.staticTextSpan !== undefined) return fact.staticTextSpan
-  if (fact._tag === 'StaticText') return fact.token?.span ?? fact.syntax.span
-  if (fact._tag === 'Grouped') return staticTextSpan(fact.expression, context)
+  // Caller provenance points inside the literal the caller wrote, not at the expression the fact
+  // is anchored to once the value has flowed through a parameter.
+  if (fact._tag === 'StaticText') return context.spanOf(fact.literal ?? fact.anchor)
   if (fact._tag === 'Move') return staticTextSpan(fact.subject, context)
   if (fact._tag === 'Identifier') {
     if (fact.reference._tag === 'Resolved')
@@ -1311,6 +1255,7 @@ const staticTextSpan = (
 
 /** Resolves static-text provenance for one analyzed expression without changing value identity. */
 export interface TextOriginContext {
+  readonly spanOf: (anchor: AuthoredHir.Anchor) => SourceSpan.SourceSpan
   readonly valueOrigins: ReadonlyMap<string, TextOrigin>
   readonly expressionOrigins: ReadonlyMap<Elaboration.ExpressionFact, TextOrigin>
 }
@@ -1323,8 +1268,7 @@ export const staticTextOrigin = (
   if (evaluated !== undefined) return evaluated
   if (fact._tag === 'Call' && fact.staticTextOrigin !== undefined) return fact.staticTextOrigin
   if (fact._tag === 'StaticText')
-    return sourceTextOrigin(fact.token?.span ?? fact.syntax.span, fact.data)
-  if (fact._tag === 'Grouped') return staticTextOrigin(fact.expression, context)
+    return sourceTextOrigin(context.spanOf(fact.literal ?? fact.anchor), fact.data)
   if (fact._tag === 'Move') return staticTextOrigin(fact.subject, context)
   if (fact._tag === 'Identifier') {
     if (fact.reference._tag === 'Resolved')
@@ -1455,7 +1399,7 @@ const bindPattern = (
         phaseViolation(
           'StaticEvaluation.bindPattern',
           'selected pattern binding has no static payload',
-          binding.syntax.span,
+          context.spanOf(binding.anchor),
           context.trace,
         ),
       )
@@ -1492,7 +1436,7 @@ const evaluateExpression = (
             context.environment,
             { _tag: 'CharacterValue', value: fact.value },
             'StaticEvaluation.evaluateFact',
-            fact.syntax.span,
+            context.spanOf(fact.anchor),
             context.trace,
           )
     case 'Integer':
@@ -1502,7 +1446,7 @@ const evaluateExpression = (
             context.environment,
             { _tag: 'IntegerValue', type: fact.integer.type, value: fact.integer.value },
             'StaticEvaluation.evaluateFact',
-            fact.syntax.span,
+            context.spanOf(fact.anchor),
             context.trace,
           )
     case 'Duration':
@@ -1512,7 +1456,7 @@ const evaluateExpression = (
             context.environment,
             { _tag: 'IntegerValue', type: 'u64', value: fact.value },
             'StaticEvaluation.evaluateFact',
-            fact.syntax.span,
+            context.spanOf(fact.anchor),
             context.trace,
           )
     case 'Floating':
@@ -1526,7 +1470,7 @@ const evaluateExpression = (
               bits: fact.floating.bits,
             },
             'StaticEvaluation.evaluateFact',
-            fact.syntax.span,
+            context.spanOf(fact.anchor),
             context.trace,
           )
     case 'StaticText':
@@ -1537,16 +1481,14 @@ const evaluateExpression = (
             {
               _tag: 'TextValue',
               bytes: fact.data.bytes,
-              origin: sourceTextOrigin(fact.token?.span ?? fact.syntax.span, fact.data),
+              origin: sourceTextOrigin(context.spanOf(fact.anchor), fact.data),
             },
             'StaticEvaluation.evaluateFact',
-            fact.syntax.span,
+            context.spanOf(fact.anchor),
             context.trace,
           )
     case 'Constant':
       return valueOfConstant(fact, context)
-    case 'Grouped':
-      return evaluateExpression(fact.expression, context)
     case 'Move':
       return evaluateExpression(fact.subject, context)
     case 'Match': {
@@ -1599,7 +1541,7 @@ const evaluateExpression = (
           typeArguments: Object.freeze(fact.target.type.arguments.map(Type.genericArgumentKey)),
         }),
         fields,
-        fact.syntax.span,
+        context.spanOf(fact.anchor),
         context.trace,
         fact.target.struct.fields.flatMap((field) =>
           field.declaredType._tag === 'Resolved'
@@ -1648,7 +1590,7 @@ const evaluateExpression = (
           }),
         }),
         fields,
-        fact.syntax.span,
+        context.spanOf(fact.anchor),
         context.trace,
         fact.target.variant.fields.flatMap((field) =>
           field.declaredType._tag === 'Resolved'
@@ -1679,7 +1621,7 @@ const evaluateExpression = (
           length: fact.state.type.length,
         }),
         fields,
-        fact.syntax.span,
+        context.spanOf(fact.anchor),
         context.trace,
       )
     }
@@ -1742,7 +1684,7 @@ const evaluateExpression = (
         member.name.spelling,
         representation.scalar.spelling,
         member.discriminant.value,
-        fact.syntax.span,
+        context.spanOf(fact.anchor),
         context.trace,
       )
     }
@@ -1769,7 +1711,13 @@ const evaluateExpression = (
         left?._tag === 'EnumValue' &&
         right?._tag === 'EnumValue'
       )
-        return evaluateEnumEquality(fact.operator, left, right, fact.syntax.span, context.trace)
+        return evaluateEnumEquality(
+          fact.operator,
+          left,
+          right,
+          context.spanOf(fact.anchor),
+          context.trace,
+        )
       if (
         fact.operator === 'Add' ||
         fact.operator === 'Subtract' ||
@@ -1789,7 +1737,7 @@ const evaluateExpression = (
           context.environment,
           fact.operator,
           operands.value,
-          fact.syntax.span,
+          context.spanOf(fact.anchor),
           context.trace,
         )
       return unavailableFact(fact, context, `${fact.operator} is not admitted statically`)
@@ -1807,7 +1755,7 @@ const evaluateExpression = (
           context.environment,
           operation,
           arguments_.value,
-          fact.syntax.span,
+          context.spanOf(fact.anchor),
           context.trace,
         )
         if (profile !== undefined) return profile
@@ -1818,7 +1766,7 @@ const evaluateExpression = (
           return context.reflect(
             typeArgument,
             operation === 'reflectType' ? 'Type' : 'Fields',
-            fact.syntax.span,
+            context.spanOf(fact.anchor),
             context.trace,
           )
         }
@@ -1834,7 +1782,7 @@ const evaluateExpression = (
               value: reflectedAggregateKindCode(descriptor.kind),
             },
             'StaticEvaluation.reflectTypeKind',
-            fact.syntax.span,
+            context.spanOf(fact.anchor),
             context.trace,
           )
         }
@@ -1851,7 +1799,7 @@ const evaluateExpression = (
                 value: descriptor.member._tag === 'LabeledField' ? 0n : 1n,
               },
               'StaticEvaluation.reflectFieldKind',
-              fact.syntax.span,
+              context.spanOf(fact.anchor),
               context.trace,
             )
           if (operation === 'reflectFieldLabel')
@@ -1863,7 +1811,7 @@ const evaluateExpression = (
                     bytes: Array.from(new TextEncoder().encode(descriptor.member.label)),
                   },
                   'StaticEvaluation.reflectFieldLabel',
-                  fact.syntax.span,
+                  context.spanOf(fact.anchor),
                   context.trace,
                 )
               : unavailableFact(fact, context, `${operation} cannot read a positional field`)
@@ -1877,7 +1825,7 @@ const evaluateExpression = (
                     value: BigInt(descriptor.member.ordinal),
                   },
                   'StaticEvaluation.reflectFieldOrdinal',
-                  fact.syntax.span,
+                  context.spanOf(fact.anchor),
                   context.trace,
                 )
               : unavailableFact(fact, context, `${operation} cannot read a labeled field`)
@@ -1890,7 +1838,7 @@ const evaluateExpression = (
             context.environment,
             StaticValue.emptySequence(typeArgument),
             'StaticEvaluation.staticSequenceEmpty',
-            fact.syntax.span,
+            context.spanOf(fact.anchor),
             context.trace,
           )
         }
@@ -1909,7 +1857,7 @@ const evaluateExpression = (
                 value: BigInt(StaticValue.sequenceLength(sequence)),
               },
               'StaticEvaluation.staticSequenceLength',
-              fact.syntax.span,
+              context.spanOf(fact.anchor),
               context.trace,
             )
           if (operation === 'staticSequenceAppend') {
@@ -1923,7 +1871,7 @@ const evaluateExpression = (
                   context.environment,
                   appended,
                   'StaticEvaluation.staticSequenceAppend',
-                  fact.syntax.span,
+                  context.spanOf(fact.anchor),
                   context.trace,
                 )
           }
@@ -1938,7 +1886,7 @@ const evaluateExpression = (
                   context.environment,
                   concatenated,
                   'StaticEvaluation.staticSequenceConcat',
-                  fact.syntax.span,
+                  context.spanOf(fact.anchor),
                   context.trace,
                 )
           }
@@ -1965,7 +1913,7 @@ const evaluateExpression = (
         const argument = fact.arguments.at(0)
         const literal =
           (argument === undefined ? undefined : staticTextSpan(argument.expression, context)) ??
-          fact.syntax.span
+          context.spanOf(fact.anchor)
         if (text?._tag !== 'TextValue')
           return unavailableFact(fact, context, `${operation} requires static text`)
         if (operation === 'staticTextByteLength')
@@ -2039,7 +1987,7 @@ const evaluateExpression = (
               )
             }),
           ),
-          fact.syntax.span,
+          context.spanOf(fact.anchor),
           context.trace,
           Object.freeze({
             typeArguments: Object.freeze(
@@ -2072,7 +2020,8 @@ const evaluateExpression = (
       return failed(
         compileError(
           new TextDecoder().decode(Uint8Array.from(message.value.bytes)),
-          (origin === undefined ? undefined : textOriginSpan(origin)) ?? fact.syntax.span,
+          (origin === undefined ? undefined : textOriginSpan(origin)) ??
+            context.spanOf(fact.anchor),
           context.trace,
           origin,
         ),
@@ -2085,7 +2034,7 @@ const evaluateExpression = (
 
 type StatementControl =
   | { readonly _tag: 'Return'; readonly value: StaticValue.Value }
-  | { readonly _tag: 'Break' | 'Continue'; readonly target: Hir.LoopId | undefined }
+  | { readonly _tag: 'Break' | 'Continue'; readonly target: Tir.LoopId | undefined }
 
 type ExecutionOutcome<A> =
   | Outcome<A>
@@ -2111,7 +2060,7 @@ const evaluateStaticIndex = (
       phaseViolation(
         'StaticEvaluation.evaluateFact',
         'array projection requires an in-bounds static index',
-        fact.syntax.span,
+        context.spanOf(fact.anchor),
         context.trace,
       ),
     )
@@ -2124,7 +2073,6 @@ const staticWritePath = (
   context: FactEvaluationContext,
 ): ExecutionOutcome<ReadonlyArray<number>> => {
   if (destination._tag === 'Identifier') return complete([])
-  if (destination._tag === 'Grouped') return staticWritePath(destination.expression, context)
   if (destination._tag === 'FieldProjection' && destination.state._tag === 'Resolved') {
     const parent = staticWritePath(destination.subject, context)
     return parent._tag === 'Complete'
@@ -2141,7 +2089,7 @@ const staticWritePath = (
     phaseViolation(
       'StaticEvaluation.evaluateStatements',
       'assignment destination is not an owned static place',
-      destination.syntax.span,
+      context.spanOf(destination.anchor),
       context.trace,
     ),
   )
@@ -2183,7 +2131,7 @@ const replaceStaticPlace = (
   )
 }
 
-const sameLoop = (left: Hir.LoopId | undefined, right: Hir.LoopId): boolean =>
+const sameLoop = (left: Tir.LoopId | undefined, right: Tir.LoopId): boolean =>
   left !== undefined &&
   left.ordinal === right.ordinal &&
   left.function.sourceId === right.function.sourceId &&
@@ -2205,7 +2153,9 @@ const evaluateStatementSequence = (
   })
   for (const statement of statements) {
     const statementSpan =
-      statement._tag === 'BindStatement' ? statement.binding.syntax.span : statement.syntax.span
+      statement._tag === 'BindStatement'
+        ? context.spanOf(statement.binding.anchor)
+        : context.spanOf(statement.anchor)
     const exhausted = context.step?.(statementSpan, context.trace)
     if (exhausted !== undefined) return failed(exhausted)
     if (statement._tag === 'BindStatement') {
@@ -2236,7 +2186,7 @@ const evaluateStatementSequence = (
         ? value
         : Object.freeze({
             _tag: 'Transfer',
-            span: statement.syntax.span,
+            span: context.spanOf(statement.anchor),
             control: Object.freeze({ _tag: 'Return', value: value.value }),
           })
     }
@@ -2248,7 +2198,7 @@ const evaluateStatementSequence = (
           phaseViolation(
             'StaticEvaluation.evaluateStatements',
             'if condition is not bool',
-            statement.condition.syntax.span,
+            context.spanOf(statement.condition.anchor),
             context.trace,
           ),
         )
@@ -2268,7 +2218,7 @@ const evaluateStatementSequence = (
             phaseViolation(
               'StaticEvaluation.evaluateStatements',
               'while condition is not bool',
-              statement.condition.syntax.span,
+              context.spanOf(statement.condition.anchor),
               context.trace,
             ),
           )
@@ -2289,7 +2239,7 @@ const evaluateStatementSequence = (
           phaseViolation(
             'StaticEvaluation.evaluateStatements',
             'assignment does not replace one static local',
-            statement.syntax.span,
+            context.spanOf(statement.anchor),
             context.trace,
           ),
         )
@@ -2302,7 +2252,7 @@ const evaluateStatementSequence = (
         values.get(key),
         path.value,
         value.value,
-        statement.destination.syntax.span,
+        context.spanOf(statement.destination.anchor),
         contextual,
       )
       if (replaced._tag !== 'Complete') return replaced
@@ -2319,20 +2269,20 @@ const evaluateStatementSequence = (
     if (statement._tag === 'BreakStatement')
       return Object.freeze({
         _tag: 'Transfer',
-        span: statement.syntax.span,
+        span: context.spanOf(statement.anchor),
         control: Object.freeze({ _tag: 'Break', target: statement.target }),
       })
     if (statement._tag === 'ContinueStatement')
       return Object.freeze({
         _tag: 'Transfer',
-        span: statement.syntax.span,
+        span: context.spanOf(statement.anchor),
         control: Object.freeze({ _tag: 'Continue', target: statement.target }),
       })
     return failed(
       phaseViolation(
         'StaticEvaluation.evaluateStatements',
         `${statement._tag} is not admitted in a static function`,
-        statement.syntax.span,
+        context.spanOf(statement.anchor),
         context.trace,
       ),
     )

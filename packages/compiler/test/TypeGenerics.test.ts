@@ -175,7 +175,7 @@ fn wrong<'call, 'view: 'call, T, H: Handle<T>>(
         code: diagnostic.code,
         start: diagnostic.span.start,
       })),
-      [{ code: 'SEM0012', start: source.lastIndexOf(' true') }],
+      [{ code: 'SEM0012', start: source.lastIndexOf('true') }],
     )
   }),
 )
@@ -390,17 +390,20 @@ it.effect('rejects residual rows at the complete-application specialization fron
 }
 pub fn main() -> i32 { return 0 }`),
     )
-    const fn = Projections.hirOf(snapshot, module)?.functions.find(
+    const fn = Projections.tirOf(snapshot, module)?.functions.find(
       (candidate) =>
         candidate.declaration.canonical._tag === 'Canonical' &&
         candidate.declaration.canonical.id.name === 'forward',
     )
     assert.isDefined(fn)
     if (fn === undefined) return
-    assert.isUndefined(Instances.specialize(fn, new Map(), Analysis.declarationIndex(snapshot)))
+    const registry = snapshot.resolution.contexts
+    assert.isUndefined(
+      Instances.specialize(fn, new Map(), Analysis.declarationIndex(snapshot), registry),
+    )
     const diagnostic = Diagnostic.nonConcreteSpecialization(
       `${module}.forward`,
-      fn.declaration.syntax.span,
+      registry.spanOf(fn.declaration.anchor),
     )
     assert.strictEqual(diagnostic.code, 'SEM0122')
     assert.strictEqual(diagnostic.reason._tag, 'NonConcreteSpecialization')
@@ -1455,7 +1458,7 @@ pub fn main() -> i32 { return replace<i32>([1], 2) }`),
   }),
 )
 
-it.effect('links an open HIR call through every reached caller instance', () =>
+it.effect('links an open TIR call through every reached caller instance', () =>
   Effect.gen(function* () {
     const snapshot = yield* AnalysisFixture.retainingMain(
       'generics/Facade',

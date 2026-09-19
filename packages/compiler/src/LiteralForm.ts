@@ -1,5 +1,4 @@
 import * as ByteClass from './internal/ByteClass.js'
-import type * as Token from './Token.js'
 
 /** The semantic category selected by a static-literal modifier and delimiter. */
 export type Category = 'Text' | 'Bytes' | 'Character'
@@ -147,4 +146,4 @@ export const scanBoundary = (
 export { scalarCount } from './internal/Escape.js'
 
 /** Returns the token kind selected by a valid form. */
-export const tokenKind = (self: LiteralForm): Token.TokenKind => self.tokenKind
+export const tokenKind = (self: LiteralForm): LiteralForm['tokenKind'] => self.tokenKind

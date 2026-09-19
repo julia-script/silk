@@ -3,7 +3,7 @@ import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import type * as Elaboration from '../src/Elaboration.js'
-import * as Hir from '../src/Hir.js'
+import * as Tir from '../src/Tir.js'
 import * as Type from '../src/Type.js'
 import * as Projections from './support/projections.js'
 
@@ -19,7 +19,6 @@ const nested = (fact: Elaboration.ExpressionFact): ReadonlyArray<Elaboration.Exp
   if (fact._tag === 'ArrayLiteral') return fact.elements.map((element) => element.expression)
   if (fact._tag === 'StructLiteral')
     return fact.initializers.map((initializer) => initializer.expression)
-  if (fact._tag === 'Grouped') return [fact.expression]
   if (fact._tag === 'Call' || fact._tag === 'Operator' || fact._tag === 'CallableApply')
     return fact.arguments.map((argument) => argument.expression)
   return []
@@ -61,8 +60,8 @@ pub fn main() -> i32 { return take([]) }`)
         true,
       )
     }
-    const main = Projections.hirOf(self, 'fixed-arrays/main')?.functions.at(4)
-    assert.strictEqual(main === undefined ? undefined : Hir.returned(main)._tag, 'Call')
+    const main = Projections.tirOf(self, 'fixed-arrays/main')?.functions.at(4)
+    assert.strictEqual(main === undefined ? undefined : Tir.returned(main)._tag, 'Call')
   }),
 )
 
@@ -107,8 +106,8 @@ pub fn main() -> i32 { return constant([4, 5, 6]) }`)
       facts.map((fact) => fact.bounds._tag),
       ['Runtime', 'Proven'],
     )
-    const hir = Projections.hirOf(valid, 'fixed-arrays/main')?.functions.at(0)
-    assert.strictEqual(hir === undefined ? undefined : Hir.returned(hir)._tag, 'IndexPlace')
+    const tir = Projections.tirOf(valid, 'fixed-arrays/main')?.functions.at(0)
+    assert.strictEqual(tir === undefined ? undefined : Tir.returned(tir)._tag, 'IndexPlace')
 
     const invalid = yield* snapshot(`fn low(values: [i32; 3]) -> i32 { return values[-1] }
 fn high(values: [i32; 3]) -> i32 { return values[3] }

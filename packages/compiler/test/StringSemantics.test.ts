@@ -2,10 +2,11 @@ import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
-import * as Hir from '../src/Hir.js'
+import * as Tir from '../src/Tir.js'
 import * as Lexer from '../src/Lexer.js'
 import * as Lifetime from '../src/Lifetime.js'
 import * as Parser from '../src/Parser.js'
+import * as SemanticContext from '../src/SemanticContext.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as Type from '../src/Type.js'
 import { elaborate } from './support/elaborate.js'
@@ -68,12 +69,11 @@ it.effect('elaborates text and byte literals with distinct semantic types', () =
     if (text?.type._tag === 'Available') {
       assert.isTrue(Type.isString(text.type.type))
       assert.deepEqual(text.data?.bytes, [104, 195, 169])
-      assert.strictEqual(text.syntax.span.sourceId, 'string/literals')
-      assert.strictEqual(text.syntax.span.start, source.indexOf('"hé"') - 1)
-      assert.strictEqual(
-        text.syntax.span.end,
-        source.indexOf('"hé"') + new TextEncoder().encode('"hé"').length,
-      )
+      // Presentation spans are trivia-free: the literal starts at its own opening quote.
+      const span = SemanticContext.fromModules(snapshot.closure.modules).spanOf(text.anchor)
+      assert.strictEqual(span.sourceId, 'string/literals')
+      assert.strictEqual(span.start, source.indexOf('"hé"'))
+      assert.strictEqual(span.end, source.indexOf('"hé"') + new TextEncoder().encode('"hé"').length)
     }
     if (bytes?.type._tag === 'Available') {
       assert.strictEqual(
@@ -83,11 +83,11 @@ it.effect('elaborates text and byte literals with distinct semantic types', () =
       assert.deepEqual(bytes.data?.bytes, [104, 195, 169])
     }
 
-    const hir = Projections.hirOf(snapshot, 'string/literals')
-    assert.isDefined(hir)
-    if (hir !== undefined) {
-      const expressions = hir.functions.flatMap((fn) =>
-        fn.statements.flatMap(Hir.statementExpressions).flatMap(Hir.expressionTree),
+    const tir = Projections.tirOf(snapshot, 'string/literals')
+    assert.isDefined(tir)
+    if (tir !== undefined) {
+      const expressions = tir.functions.flatMap((fn) =>
+        fn.statements.flatMap(Tir.statementExpressions).flatMap(Tir.expressionTree),
       )
       const stringLiteral = expressions.find(
         (expression) => expression._tag === 'StaticStringLiteral',
@@ -106,25 +106,25 @@ it.effect('elaborates text and byte literals with distinct semantic types', () =
           Type.key(Type.slice('Shared', 'u8', Lifetime.staticLifetime)),
         )
       }
-      const encoded = Hir.encode(hir)
+      const encoded = Tir.encode(tir)
       assert.include(
         encoded,
         'static-string text:68c3a9 bytes=68c3a9 length=3 provenance=program : string',
       )
       assert.include(encoded, "static-bytes bytes:68c3a9 bytes=68c3a9 length=3 : &'static [u8]")
-      assert.deepEqual(Hir.verify(hir), [])
+      assert.deepEqual(Tir.verify(tir), [])
 
-      const fn = hir.functions.at(0)
+      const fn = tir.functions.at(0)
       if (byteLiteral?._tag === 'StaticByteViewLiteral' && fn !== undefined) {
-        const runtimeView: Hir.Expression = Object.freeze({
+        const runtimeView: Tir.Expression = Object.freeze({
           _tag: 'RuntimeStringView',
           source: byteLiteral,
           heldLoans: Object.freeze([]),
           type: Type.string(Lifetime.staticLifetime),
           span: byteLiteral.span,
         })
-        const runtimeModule: Hir.Module = Object.freeze({
-          ...hir,
+        const runtimeModule: Tir.Module = Object.freeze({
+          ...tir,
           functions: Object.freeze([
             Object.freeze({
               ...fn,
@@ -140,9 +140,9 @@ it.effect('elaborates text and byte literals with distinct semantic types', () =
             }),
           ]),
         })
-        assert.deepEqual(Hir.expressionChildren(runtimeView), [byteLiteral])
-        assert.deepEqual(Hir.verify(runtimeModule), [])
-        assert.include(Hir.encode(runtimeModule), 'runtime-string-view loans=none : string')
+        assert.deepEqual(Tir.expressionChildren(runtimeView), [byteLiteral])
+        assert.deepEqual(Tir.verify(runtimeModule), [])
+        assert.include(Tir.encode(runtimeModule), 'runtime-string-view loans=none : string')
       }
     }
   }),

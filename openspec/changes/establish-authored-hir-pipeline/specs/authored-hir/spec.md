@@ -100,3 +100,90 @@ access. A1's foundation MUST NOT independently land as an unused competing pipel
 
 - **WHEN** a request asks only for analysis
 - **THEN** preparation performs no instance/MIR/backend work and later execution requires a new preparation request
+
+### Requirement: Semantic reuse keys derive from authored content
+
+Every loaded module SHALL be lowered to its authored module and presentation once per parse and
+carried beside its syntax through the closure and elaboration inputs. Body-query reuse SHALL key
+implementations by the canonical authored body, alpha-normalizing header lifetime binders to their
+declaration ordinal, and SHALL key scope sensitivity by the authored names spelled in the body; it
+MUST NOT tokenize or slice source to build a key. Hidden anonymous bodies SHALL take their
+snapshot-local declaration identity from their enclosing declaration and callable site, never from a
+byte offset. The typed executable representation is named TIR; authored HIR is the untyped input.
+
+#### Scenario: Alpha-rename a lifetime
+
+- **WHEN** a library renames `'a` to `'long` in a generic function without changing its meaning
+- **THEN** its body query and every consumer body are reused without executing a checker, and consumers observe the new spelling through current declaration facts
+
+#### Scenario: Insert an unrelated declaration
+
+- **WHEN** a declaration is inserted above a function that owns an anonymous callable
+- **THEN** the hidden body's identity moves with its enclosing declaration ordinal and the cached body is rebound without re-checking
+
+### Requirement: Preparation seals intent-specific bundles
+
+One preparation request SHALL name its intent. Analysis intent SHALL seal the required roots, normalized configuration and selected frontend closure. Executable intent SHALL additionally normalize the target profile, close runtime component demand to a fixed point and record the final realization product. Every bundle SHALL publish a manifest with its intent, root, identity, profile identity, target, loaded modules with origins, presentation revisions and resolved imports, component roots with reasons, source-closed or partial status, and diagnostic count. Executable consumers SHALL accept only executable bundles, and the operations downstream of a bundle SHALL carry no source-resolver requirement.
+
+#### Scenario: Reject analysis-only input
+
+- **WHEN** a Driver or realization consumer receives an analysis bundle
+- **THEN** the operation rejects the analysis bundle before any executable work runs on analysis-only input
+
+#### Scenario: Record component reasons
+
+- **WHEN** an executable bundle admitted a composition root and a demanded storage provider
+- **THEN** its manifest lists both with reasons `composition` and `execution-storage`
+
+### Requirement: Semantic analysis consumes authored HIR with explicit context
+
+Declaration collection and completion, name and import resolution, typing, conformance, static
+evaluation and ownership SHALL consume authored HIR together with one explicit semantic context per
+module: the authored module, pool-resolved text and bytes, and the current presentation for spans and
+document order. No semantic operation SHALL take a source file, syntax file, syntax node or token,
+slice source bytes, or compare syntax objects for identity. Facts SHALL carry authored anchors where
+they carried syntax nodes or tokens, and identities that keyed on spans SHALL key on anchors. The
+formatter, the syntax inspector and local lowering remain the only syntax consumers.
+
+#### Scenario: Analyze after syntax release
+
+- **WHEN** a module's syntax and source objects are released after lowering
+- **THEN** declaration collection, resolution, typing, static evaluation and ownership complete from the authored module and its context with identical facts and diagnostic codes
+
+#### Scenario: Literal facts read authored payloads
+
+- **WHEN** a body contains `18446744073709551616`, `1.5e300` and `2h`
+- **THEN** the integer, float and duration facts derive from the authored exact payloads and contextual range diagnostics keep their codes and spans
+
+### Requirement: One typed TIR body publishes indexed results
+
+Elaboration SHALL publish one typed executable body per checked function together with the indexed
+results other phases need: types and conversions, resolved members and operations, conformance
+witnesses, scopes, bindings and occurrences, lifetime, ownership and cleanup evidence, static
+dependencies, diagnostics and unavailable causes. It MUST NOT retain a second executable fact tree
+whose only purpose is conversion into TIR, and body reuse MUST NOT rebind cached facts to predecessor
+syntax: a reused body resolves its anchors through the current presentation. Positive and negative
+reuse witnesses (private body edit, alpha rename, new caller, static-helper dependency, exported-bound
+change, missing-member repair, SCC merge and split, origin isolation) SHALL keep their outcomes.
+
+#### Scenario: Reuse across a trivia edit without rebinding
+
+- **WHEN** whitespace above a function changes and its body is reused
+- **THEN** the reused body's diagnostics and navigation report the new spans through the current presentation and no checker executes
+
+#### Scenario: Hidden bodies keep structural identity
+
+- **WHEN** a declaration owning an anonymous callable moves below an inserted declaration
+- **THEN** the hidden body identity follows its enclosing declaration ordinal and callable site, and its reused analysis is correct without a rebinding pass
+
+### Requirement: Diagnostics and navigation resolve through current presentation
+
+Every semantic diagnostic and every navigation, hover, completion and inspector location SHALL be
+resolved from an authored anchor through the current presentation of its module. Presentation spans
+start at the first significant byte of the authored node. Moved declarations and hidden bodies SHALL
+navigate to their current spans without consulting predecessor syntax.
+
+#### Scenario: Navigate to a moved declaration
+
+- **WHEN** a dependency declaration moves within its module and an importer's tooling is reused
+- **THEN** definition queries from the importer resolve to the declaration's current span

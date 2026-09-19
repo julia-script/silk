@@ -1,6 +1,6 @@
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../../dist/Analysis.js'
-import * as Hir from '../../dist/Hir.js'
+import * as Tir from '../../dist/Tir.js'
 import * as MirEncoding from '../../dist/MirEncoding.js'
 
 const source = `import silk.vector { Vector }
@@ -17,7 +17,7 @@ process.stdout.write(
   JSON.stringify({
     diagnostics: Analysis.diagnostics(snapshot),
     modules: Analysis.modules(snapshot).map((module) => module.name),
-    libraryHir: Hir.encode(snapshot.results.get('silk/vector')?.hir),
+    libraryTir: Tir.encode(snapshot.results.get('silk/vector')?.tir),
     mir: MirEncoding.encode(Analysis.loweredMir(snapshot)),
   }),
 )

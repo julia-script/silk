@@ -2,7 +2,7 @@ import * as DeclarationFacts from './DeclarationFacts.js'
 import type * as DeclarationIndex from './DeclarationIndex.js'
 import * as Diagnostic from './Diagnostic.js'
 import * as ExecutionAffinity from './ExecutionAffinity.js'
-import * as Hir from './Hir.js'
+import * as Tir from './Tir.js'
 import * as Instances from './Instances.js'
 import * as Lifetime from './Lifetime.js'
 import * as TypeInference from './internal/TypeInference.js'
@@ -668,14 +668,16 @@ export const violationDiagnostics = (
     return instance.function.declaration.typeParameters.flatMap((parameter, ordinal) => {
       const argument = visibleArguments.at(ordinal)
       if (argument === undefined) return []
-      const span = incoming.get(Instances.keyText(instance.key))?.span ?? parameter.syntax.span
+      const span =
+        incoming.get(Instances.keyText(instance.key))?.span ??
+        self.registry.spanOf(parameter.anchor)
       return diagnosticsFor(parameter, argument, span)
     })
   })
   const nominalApplications_ = self.instances.flatMap((instance) =>
     instance.function.statements
-      .flatMap(Hir.statementExpressions)
-      .flatMap(Hir.expressionTree)
+      .flatMap(Tir.statementExpressions)
+      .flatMap(Tir.expressionTree)
       .flatMap((expression) => {
         if (expression._tag === 'Unavailable') {
           return []

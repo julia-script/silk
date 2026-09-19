@@ -2,7 +2,7 @@
 
 `@silklang/compiler` is the Effect-native stage-0 compiler for Silk. It accepts arbitrary source
 bytes, preserves lossless syntax and recovery facts, resolves a complete module closure, and
-realizes valid programs through HIR, ownership, specialization, target layout, MIR, and LLVM
+realizes valid programs through TIR, ownership, specialization, target layout, MIR, and LLVM
 backend emission.
 
 The package deliberately exposes one supported compilation surface: `Analysis`. Individual phase
@@ -50,7 +50,7 @@ A realized analysis snapshot makes these deterministic artifacts available:
 
 1. source files, tokens, lossless syntax, and unified diagnostics;
 2. module closure, declaration index, visibility, and name resolution;
-3. typed HIR and semantic occurrences for editor tooling;
+3. typed TIR and semantic occurrences for editor tooling;
 4. ownership, borrow, move, and cleanup facts;
 5. reachable generic/callable instances and target-aware layouts;
 6. backend-neutral structured MIR;
@@ -128,8 +128,8 @@ access belongs to the host boundary rather than the compiler core.
 
 `ProjectAnalysis` analyzes the union closure of synchronized roots once and returns immutable root
 views that share syntax, declaration, semantic, tooling, and diagnostic facts. Revising a project
-reuses byte-identical syntax and publishes conservative `SyntaxCorrespondence` for structurally
-unique unchanged subtrees; semantic facts are recomputed for the complete current revision.
+reuses byte-identical syntax and authored artifacts; semantic facts are reused per body when their
+authored content, scope and dependencies are unchanged and recomputed otherwise.
 
 ## Editor and documentation facts
 

@@ -3,7 +3,7 @@ import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import type * as Elaboration from '../src/Elaboration.js'
-import * as Hir from '../src/Hir.js'
+import * as Tir from '../src/Tir.js'
 import * as Lexer from '../src/Lexer.js'
 import * as Lifetime from '../src/Lifetime.js'
 import * as Parser from '../src/Parser.js'
@@ -270,12 +270,12 @@ pub fn main() -> i32 {
   )
 
   assert.deepEqual(result.diagnostics, [])
-  const main = result.hir.functions.find(
+  const main = result.tir.functions.find(
     (fact) => fact.declaration.name._tag === 'Present' && fact.declaration.name.spelling === 'main',
   )
   const arguments_ = main?.statements.flatMap((statement) =>
-    Hir.statementExpressions(statement)
-      .flatMap(Hir.expressionTree)
+    Tir.statementExpressions(statement)
+      .flatMap(Tir.expressionTree)
       .flatMap((expression) => (expression._tag === 'Call' ? expression.typeArguments : []))
       .filter((argument) => !Lifetime.isLifetime(argument)),
   )
@@ -343,7 +343,7 @@ fn invalid<'env, A, F: once fn<'env>(A) -> A>(parse: F) -> i32 {
   assert.strictEqual(diagnostic?.reason._tag, 'IncompatibleRepresentationBound')
   assert.deepEqual(
     [diagnostic?.span.start, diagnostic?.span.end],
-    [source.indexOf(' move parse'), source.indexOf('move parse') + 'move parse'.length],
+    [source.indexOf('move parse'), source.indexOf('move parse') + 'move parse'.length],
   )
   assert.deepEqual(
     diagnostic?.relatedSpans?.map((related) => related.label),
@@ -352,7 +352,7 @@ fn invalid<'env, A, F: once fn<'env>(A) -> A>(parse: F) -> i32 {
   assert.strictEqual(bindingInitializer(result, 0)?.type._tag, 'Unavailable')
 })
 
-it.effect('preserves open generic HIR and concrete representation instance keys', () =>
+it.effect('preserves open generic TIR and concrete representation instance keys', () =>
   Effect.gen(function* () {
     const source = `struct Parser<'env, A, F: fn<'env>(A) -> A> { parse: F }
 fn decode(value: i32) -> i32 { return value }
@@ -366,10 +366,10 @@ pub fn main() -> i32 {
       ascii(source),
     )
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
-    const consume = Analysis.rootAnalysis(snapshot).hir.functions.at(1)
+    const consume = Analysis.rootAnalysis(snapshot).tir.functions.at(1)
     const parameterType = consume?.declaration.parameters.at(0)?.declaredType
-    const main = Analysis.rootAnalysis(snapshot).hir.functions.at(2)
-    const returned = main === undefined ? undefined : Hir.returned(main)
+    const main = Analysis.rootAnalysis(snapshot).tir.functions.at(2)
+    const returned = main === undefined ? undefined : Tir.returned(main)
     const instance = Analysis.instancesOf(snapshot).instances.find(
       (candidate) => candidate.key.declaration.name === 'consume',
     )

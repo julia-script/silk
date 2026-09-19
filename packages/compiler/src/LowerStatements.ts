@@ -45,7 +45,7 @@ import {
   restoreDelayedEffectState,
 } from './Forwarding.js'
 import type { FunctionLowering } from './FunctionLowering.js'
-import type * as Hir from './Hir.js'
+import type * as Tir from './Tir.js'
 import * as Layout from './Layout.js'
 import type { DelayedEffectState } from './Lower.js'
 import { borrowKey, i32, patternKey, spanKey } from './Lower.js'
@@ -65,7 +65,7 @@ export interface LoweredPatternSelection {
 
 export const lowerPatternSelection = (
   fn: FunctionLowering,
-  selection: Hir.PatternSelection,
+  selection: Tir.PatternSelection,
   result: 'Unit' | 'Bool',
 ): LoweredPatternSelection | 'Transferred' | undefined => {
   if (selection.subject._tag === 'Unavailable') return undefined
@@ -285,7 +285,7 @@ export const lowerPatternSelection = (
 
 export const lowerSequence = (
   fn: FunctionLowering,
-  statements: ReadonlyArray<Hir.Statement>,
+  statements: ReadonlyArray<Tir.Statement>,
   exits: ExitIndex,
   ownerLoop: Mir.LoopId | undefined,
   terminal: Mir.Outcome,
@@ -306,7 +306,7 @@ export const lowerSequence = (
       outcome: {
         _tag: 'Forward',
         target: region,
-        provenance: generated(fn.owner.function.declaration.syntax.span),
+        provenance: generated(fn.registry.spanOf(fn.owner.function.declaration.anchor)),
       },
     })
   }
@@ -358,7 +358,7 @@ export const lowerSequence = (
  */
 const lowerStatement = (
   fn: FunctionLowering,
-  statement: Hir.Statement,
+  statement: Tir.Statement,
   exits: ExitIndex,
   ownerLoop: Mir.LoopId | undefined,
   terminal: Mir.Outcome,

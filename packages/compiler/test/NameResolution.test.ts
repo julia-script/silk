@@ -4,7 +4,7 @@ import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
-import * as Hir from '../src/Hir.js'
+import * as Tir from '../src/Tir.js'
 import * as MirEncoding from '../src/MirEncoding.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
@@ -140,8 +140,8 @@ it.effect('binds namespace aliases and selected members to canonical calls', () 
       'app/Main': 'import compiler.Syntax as Tree\npub fn main() -> i32 { return Tree.parse() }',
       'compiler/Syntax': 'pub fn parse() -> i32 { return 42 }\nfn hidden() -> i32 { return 0 }',
     })
-    const returned = Projections.hirOf(self, 'app/Main')?.functions.at(0)
-    const expression = returned === undefined ? undefined : Hir.returned(returned)
+    const returned = Projections.tirOf(self, 'app/Main')?.functions.at(0)
+    const expression = returned === undefined ? undefined : Tir.returned(returned)
     assert.strictEqual(expression?._tag, 'Call')
     if (expression?._tag === 'Call') {
       assert.deepEqual(expression.target, {
@@ -208,7 +208,7 @@ const threeModuleSources = {
   'values/Number': 'pub fn two() -> i32 { return 2 }',
 }
 
-it.effect('keeps HIR, MIR, diagnostics, and instances deterministic across fresh snapshots', () =>
+it.effect('keeps TIR, MIR, diagnostics, and instances deterministic across fresh snapshots', () =>
   Effect.gen(function* () {
     const forward = yield* snapshot('app/Main', threeModuleSources)
     const reverse = yield* snapshot('app/Main', {
@@ -218,18 +218,20 @@ it.effect('keeps HIR, MIR, diagnostics, and instances deterministic across fresh
     })
     const wasm = yield* snapshot('app/Main', threeModuleSources, 'wasm32-unknown-unknown')
     assert.deepEqual(
-      [...forward.results.values()].map((result) => Hir.encode(result.hir)),
-      [...reverse.results.values()].map((result) => Hir.encode(result.hir)),
+      [...forward.results.values()].map((result) => Tir.encode(result.tir)),
+      [...reverse.results.values()].map((result) => Tir.encode(result.tir)),
     )
     assert.strictEqual(
       MirEncoding.encode(Analysis.loweredMir(forward)),
       MirEncoding.encode(Analysis.loweredMir(reverse)),
     )
-    assert.deepEqual(forward.instances, reverse.instances)
+    // The span registry is a lookup over each snapshot's own presentation, not discovered data.
+    const discovered = ({ registry: _registry, ...rest }: typeof forward.instances) => rest
+    assert.deepEqual(discovered(forward.instances), discovered(reverse.instances))
     assert.deepEqual(forward.diagnostics, reverse.diagnostics)
     assert.deepEqual(
-      [...forward.results.values()].map((result) => Hir.encode(result.hir)),
-      [...wasm.results.values()].map((result) => Hir.encode(result.hir)),
+      [...forward.results.values()].map((result) => Tir.encode(result.tir)),
+      [...wasm.results.values()].map((result) => Tir.encode(result.tir)),
     )
     const functionBodies = (candidate: Analysis.Snapshot): string => {
       const encoded = MirEncoding.encode(Analysis.loweredMir(candidate))

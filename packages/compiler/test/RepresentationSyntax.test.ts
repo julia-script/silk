@@ -8,7 +8,7 @@ import * as Lifetime from '../src/Lifetime.js'
 import * as ModuleClosure from '../src/ModuleClosure.js'
 import * as NameResolution from '../src/NameResolution.js'
 import * as Parser from '../src/Parser.js'
-import * as Presentation from '../src/Presentation.js'
+import * as SemanticDisplay from '../src/SemanticDisplay.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
 import * as SuspensionMode from '../src/SuspensionMode.js'
@@ -291,7 +291,7 @@ fn forward<E, ?R>() -> i32 ! E ? R { return 0 }`,
     const declaration = analyzed.modules.at(0)?.declarations.at(0)
 
     assert.strictEqual(
-      declaration === undefined ? undefined : Presentation.functionDeclaration(declaration).text,
+      declaration === undefined ? undefined : SemanticDisplay.functionDeclaration(declaration).text,
       'fn forward<E, ?R>() -> i32 ! E ? R',
     )
   }),
@@ -307,7 +307,7 @@ fn update(mut counter: Counter) -> Counter { return move counter }`,
     const declaration = analyzed.modules.at(0)?.declarations.at(0)
 
     assert.strictEqual(
-      declaration === undefined ? undefined : Presentation.functionDeclaration(declaration).text,
+      declaration === undefined ? undefined : SemanticDisplay.functionDeclaration(declaration).text,
       'fn update(mut counter: Counter) -> Counter',
     )
   }),

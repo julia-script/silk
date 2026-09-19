@@ -3,6 +3,8 @@ import type * as NativeRequirement from './NativeRequirement.js'
 import type * as ForeignContract from './ForeignContract.js'
 import type * as DeclarationLifetime from './DeclarationLifetime.js'
 import * as Lifetime from './Lifetime.js'
+import type * as AuthoredHir from './AuthoredHir.js'
+import type * as AuthoredIdentity from './AuthoredIdentity.js'
 import type * as AggregateIdentity from './AggregateIdentity.js'
 import * as CallableContract from './CallableContract.js'
 import type * as ConformanceHead from './ConformanceHead.js'
@@ -10,18 +12,16 @@ import type * as Constraint from './Constraint.js'
 import type { Index } from './DeclarationIndex.js'
 import type * as Diagnostic from './Diagnostic.js'
 import * as TypeInference from './internal/TypeInference.js'
-import * as Presentation from './Presentation.js'
+import * as Presentation from './SemanticDisplay.js'
 import type * as Operator from './Operator.js'
 import * as RequirementRow from './RequirementRow.js'
 import * as RowAlgebra from './RowAlgebra.js'
 import type * as Scalar from './Scalar.js'
 import type * as SourceSpan from './SourceSpan.js'
 import type * as StaticText from './StaticText.js'
-import type * as SyntaxTree from './SyntaxTree.js'
-import type * as Token from './Token.js'
 import * as Type from './Type.js'
 
-/** One function declaration header and its syntax-owned semantic facts. */
+/** One function declaration header and its authored semantic facts. */
 export interface DeclarationFact {
   readonly _tag: 'FunctionDeclaration'
   readonly machine?: MachineFunction.MachineFunction
@@ -69,7 +69,9 @@ export interface DeclarationFact {
    */
   readonly associatedMember?: AssociatedMemberFact
   readonly bodyTemplate?: FunctionBodyTemplate
-  readonly syntax: SyntaxTree.Node
+  /** The authored declaration this header was collected from. */
+  readonly owner: AuthoredIdentity.Identity
+  readonly anchor: AuthoredHir.Anchor
 }
 
 /** The membership facts of one function declared inside an inherent impl. */
@@ -95,13 +97,13 @@ export interface InherentImplFact {
   readonly validity:
     | { readonly _tag: 'Valid' }
     | { readonly _tag: 'Invalid'; readonly cause: Diagnostic.Identity }
-  readonly syntax: SyntaxTree.Node
+  readonly anchor: AuthoredHir.Anchor
 }
 
-/** One retained function body plus its source-independent deterministic syntax encoding. */
+/** One retained function body plus its source-independent deterministic encoding. */
 export interface FunctionBodyTemplate {
   readonly _tag: 'FunctionBodyTemplate'
-  readonly syntax: SyntaxTree.Node
+  readonly anchor: AuthoredHir.Anchor
   readonly canonical: string
 }
 
@@ -225,7 +227,7 @@ export interface TypeParameterFact {
   readonly implicitLifetime?: boolean
   readonly type: Type.Parameter
   readonly name: DeclaredName
-  readonly syntax: SyntaxTree.Node
+  readonly anchor: AuthoredHir.Anchor
   readonly duplicateOf?: Type.Parameter
   readonly bounds: ReadonlyArray<BoundFact>
   readonly staticProperties: ReadonlyArray<Type.SealedStaticProperty>
@@ -233,7 +235,7 @@ export interface TypeParameterFact {
     readonly _tag: 'RepresentationBound'
     readonly kind: 'Callable' | 'Effect'
     readonly contract: DeclaredTypeFact
-    readonly syntax: SyntaxTree.Node
+    readonly anchor: AuthoredHir.Anchor
   }
 }
 
@@ -247,7 +249,7 @@ export interface OpaqueResultFact {
     readonly result: string
     readonly enclosingKinds: ReadonlyArray<Type.ParameterKind>
   }
-  readonly syntax: SyntaxTree.Node
+  readonly anchor: AuthoredHir.Anchor
 }
 
 /** The canonical, duplicate, or unidentified canonical-identity state of one header. */
@@ -260,17 +262,20 @@ export type CanonicalState =
     }
   | { readonly _tag: 'Unidentified' }
 
-/** A declaration or field name supplied by syntax or explicitly unavailable after recovery. */
+/** A declaration or field name supplied by the author or explicitly unavailable after recovery. */
 export type DeclaredName =
-  | { readonly _tag: 'Present'; readonly spelling: string; readonly token: Token.Token }
-  | { readonly _tag: 'Unavailable'; readonly syntax: SyntaxTree.Element }
+  | { readonly _tag: 'Present'; readonly spelling: string; readonly anchor: AuthoredHir.Anchor }
+  | { readonly _tag: 'Unavailable'; readonly anchor: AuthoredHir.Anchor }
 
-/** The exact one- or two-segment syntax retained for a declared type lookup. */
+/** The exact one- or two-segment path retained for a declared type lookup. */
 export interface TypePathFact {
   readonly _tag: 'TypePath'
   readonly spelling: string
-  readonly segments: ReadonlyArray<{ readonly spelling: string; readonly token: Token.Token }>
-  readonly syntax: SyntaxTree.Node
+  readonly segments: ReadonlyArray<{
+    readonly spelling: string
+    readonly anchor: AuthoredHir.Anchor
+  }>
+  readonly anchor: AuthoredHir.Anchor
 }
 
 /** Source and resolution state of one optional nominal dependency role. */
@@ -290,31 +295,29 @@ export type ArrayLengthFact =
       readonly _tag: 'Available'
       readonly value: number
       readonly spelling: string
-      readonly token: Token.Token
+      readonly anchor: AuthoredHir.Anchor
     }
   | {
       readonly _tag: 'OutOfRange'
       readonly spelling: string
-      readonly token: Token.Token
+      readonly anchor: AuthoredHir.Anchor
       readonly cause: Diagnostic.Identity
     }
-  | { readonly _tag: 'Unavailable'; readonly syntax: SyntaxTree.Element }
+  | { readonly _tag: 'Unavailable'; readonly anchor: AuthoredHir.Anchor }
 
-/** The resolved, unresolved, or syntax-unavailable declared type. */
+/** The resolved, unresolved, or unavailable declared type. */
 export type DeclaredTypeFact =
   | {
       readonly _tag: 'Lifetime'
       readonly lifetime: Lifetime.Lifetime
       readonly spelling: string
-      readonly token: Token.Token
-      readonly syntax: SyntaxTree.Node
+      readonly anchor: AuthoredHir.Anchor
     }
   | {
       readonly _tag: 'Resolved'
       readonly type: SemanticType
       readonly spelling: string
-      readonly token: Token.Token
-      readonly syntax: SyntaxTree.Element
+      readonly anchor: AuthoredHir.Anchor
       readonly path?: TypePathFact
       readonly components?: ReadonlyArray<DeclaredTypeFact>
       readonly exposureCause?: Diagnostic.Identity
@@ -328,8 +331,7 @@ export type DeclaredTypeFact =
       readonly _tag: 'Unresolved'
       readonly implicitLifetimeArguments?: ReadonlyArray<Lifetime.Lifetime>
       readonly spelling: string
-      readonly token: Token.Token
-      readonly syntax: SyntaxTree.Element
+      readonly anchor: AuthoredHir.Anchor
       readonly path: TypePathFact
       readonly cause?: Diagnostic.Identity
       readonly candidate?: Type.Nominal
@@ -339,8 +341,7 @@ export type DeclaredTypeFact =
       readonly element: DeclaredTypeFact
       readonly length: ArrayLengthFact
       readonly spelling: string
-      readonly token: Token.Token
-      readonly syntax: SyntaxTree.Node
+      readonly anchor: AuthoredHir.Anchor
     }
   | {
       readonly _tag: 'Slice'
@@ -348,8 +349,7 @@ export type DeclaredTypeFact =
       readonly access: Type.Slice['access']
       readonly element: DeclaredTypeFact
       readonly spelling: string
-      readonly token: Token.Token
-      readonly syntax: SyntaxTree.Node
+      readonly anchor: AuthoredHir.Anchor
       readonly cause?: Diagnostic.Identity
     }
   | {
@@ -358,8 +358,7 @@ export type DeclaredTypeFact =
       readonly access: Type.BorrowAccess
       readonly target: DeclaredTypeFact
       readonly spelling: string
-      readonly token: Token.Token
-      readonly syntax: SyntaxTree.Node
+      readonly anchor: AuthoredHir.Anchor
       readonly cause?: Diagnostic.Identity
     }
   | {
@@ -371,8 +370,7 @@ export type DeclaredTypeFact =
       readonly addressSpace: Type.Pointer['addressSpace']
       readonly pointee: DeclaredTypeFact
       readonly spelling: string
-      readonly token: Token.Token
-      readonly syntax: SyntaxTree.Node
+      readonly anchor: AuthoredHir.Anchor
       readonly cause?: Diagnostic.Identity
     }
   | {
@@ -383,8 +381,7 @@ export type DeclaredTypeFact =
       readonly parameters: ReadonlyArray<DeclaredTypeFact>
       readonly result: DeclaredTypeFact
       readonly spelling: string
-      readonly token: Token.Token
-      readonly syntax: SyntaxTree.Node
+      readonly anchor: AuthoredHir.Anchor
       readonly cause?: Diagnostic.Identity
     }
   | {
@@ -394,8 +391,7 @@ export type DeclaredTypeFact =
       readonly parameters: ReadonlyArray<DeclaredTypeFact>
       readonly result: DeclaredTypeFact
       readonly spelling: string
-      readonly token: Token.Token
-      readonly syntax: SyntaxTree.Node
+      readonly anchor: AuthoredHir.Anchor
       readonly cause?: Diagnostic.Identity
     }
   | {
@@ -408,14 +404,13 @@ export type DeclaredTypeFact =
           readonly capability: DeclaredTypeFact
           readonly role: RequirementRoleFact
           readonly access: Type.Requirement['access']
-          readonly syntax: SyntaxTree.Node
+          readonly anchor: AuthoredHir.Anchor
         }>
         readonly parameters: ReadonlyArray<Type.Parameter>
-        readonly syntax: SyntaxTree.Node
+        readonly anchor: AuthoredHir.Anchor
       }
       readonly spelling: string
-      readonly token: Token.Token
-      readonly syntax: SyntaxTree.Node
+      readonly anchor: AuthoredHir.Anchor
       readonly cause?: Diagnostic.Identity
     }
   | {
@@ -428,23 +423,20 @@ export type DeclaredTypeFact =
         readonly capability: DeclaredTypeFact
         readonly role: RequirementRoleFact
         readonly access: Type.Requirement['access']
-        readonly syntax: SyntaxTree.Node
+        readonly anchor: AuthoredHir.Anchor
       }>
       readonly requirementParameters: ReadonlyArray<Type.Parameter>
       /** The complete row expression, retained when the row subtracts (`Without<R, K>`). */
       readonly requirementExpression?: RowExpressionFact
       readonly spelling: string
-      readonly token: Token.Token
-      readonly syntax: SyntaxTree.Node
+      readonly anchor: AuthoredHir.Anchor
       readonly cause?: Diagnostic.Identity
     }
   | {
       readonly _tag: 'Union'
       readonly members: ReadonlyArray<DeclaredTypeFact>
-      readonly separators: ReadonlyArray<Token.Token>
       readonly spelling: string
-      readonly token: Token.Token
-      readonly syntax: SyntaxTree.Node
+      readonly anchor: AuthoredHir.Anchor
       readonly cause?: Diagnostic.Identity
     }
   | {
@@ -452,8 +444,7 @@ export type DeclaredTypeFact =
       readonly item: TypePathFact
       readonly arguments: ReadonlyArray<DeclaredTypeFact>
       readonly spelling: string
-      readonly token: Token.Token
-      readonly syntax: SyntaxTree.Node
+      readonly anchor: AuthoredHir.Anchor
       readonly cause?: Diagnostic.Identity
       readonly itemCandidate?: CanonicalId
     }
@@ -461,58 +452,56 @@ export type DeclaredTypeFact =
       readonly _tag: 'RepresentationParameter'
       readonly parameter: Type.Parameter
       readonly spelling: string
-      readonly token: Token.Token
-      readonly syntax: SyntaxTree.Node
+      readonly anchor: AuthoredHir.Anchor
       readonly path: TypePathFact
     }
   | {
       readonly _tag: 'Unavailable'
-      readonly syntax: SyntaxTree.Element
+      readonly anchor: AuthoredHir.Anchor
       readonly cause?: Diagnostic.Identity
     }
 
-/** Source-ordered union syntax retained beside one normalized resolved outcome. */
+/** Source-ordered union members retained beside one normalized resolved outcome. */
 export interface UnionSourceFact {
   readonly _tag: 'UnionSource'
   readonly members: ReadonlyArray<DeclaredTypeFact>
-  readonly separators: ReadonlyArray<Token.Token>
-  readonly syntax: SyntaxTree.Node
+  readonly anchor: AuthoredHir.Anchor
 }
 
 export type ReturnTypeFact = DeclaredTypeFact
 
-/** Source-shaped row syntax retained before module resolution and symbolic normalization. */
+/** Source-shaped row structure retained before module resolution and symbolic normalization. */
 export type RowExpressionFact =
   | { readonly _tag: 'EmptyRowExpression' }
   | {
       readonly _tag: 'RowParameterExpression'
       readonly parameter: Type.Parameter
-      readonly syntax: SyntaxTree.Node
+      readonly anchor: AuthoredHir.Anchor
     }
   | {
       readonly _tag: 'FailureMemberExpression'
       readonly member: DeclaredTypeFact
-      readonly syntax: SyntaxTree.Node
+      readonly anchor: AuthoredHir.Anchor
     }
   | {
       readonly _tag: 'RequirementMemberExpression'
       readonly capability: DeclaredTypeFact
       readonly access: Type.Requirement['access']
       readonly role: RequirementRoleFact
-      readonly syntax: SyntaxTree.Node
+      readonly anchor: AuthoredHir.Anchor
     }
   | {
       readonly _tag: 'UnionRowExpression'
       readonly operands: ReadonlyArray<RowExpressionFact>
-      readonly syntax: SyntaxTree.Node
+      readonly anchor: AuthoredHir.Anchor
     }
   | {
       readonly _tag: 'WithoutRowExpression'
       readonly source: RowExpressionFact
       readonly selected: RowExpressionFact
-      readonly syntax: SyntaxTree.Node
+      readonly anchor: AuthoredHir.Anchor
     }
-  | { readonly _tag: 'UnavailableRowExpression'; readonly syntax: SyntaxTree.Node }
+  | { readonly _tag: 'UnavailableRowExpression'; readonly anchor: AuthoredHir.Anchor }
 
 export type ConstraintFact =
   | {
@@ -520,7 +509,7 @@ export type ConstraintFact =
       readonly domain: 'Failure' | 'Requirement' | 'Unavailable'
       readonly selected: RowExpressionFact
       readonly source: RowExpressionFact
-      readonly syntax: SyntaxTree.Node
+      readonly anchor: AuthoredHir.Anchor
     }
   | {
       readonly _tag: 'ProviderConstraint'
@@ -528,7 +517,7 @@ export type ConstraintFact =
       readonly provider: DeclaredTypeFact
       readonly selected: RowExpressionFact
       readonly source: RowExpressionFact
-      readonly syntax: SyntaxTree.Node
+      readonly anchor: AuthoredHir.Anchor
     }
 
 /** A source-retained and canonically normalized effect failure row. */
@@ -537,7 +526,7 @@ export interface FailureRowFact {
   readonly members: ReadonlyArray<DeclaredTypeFact>
   readonly parameters: ReadonlyArray<Type.Parameter>
   readonly failures: ReadonlyArray<Type.Type>
-  readonly syntax?: SyntaxTree.Node
+  readonly anchor?: AuthoredHir.Anchor
   readonly available: boolean
   readonly expression: RowExpressionFact
   readonly row: Type.FailureRow
@@ -550,11 +539,11 @@ export interface RequirementRowFact {
     readonly capability: DeclaredTypeFact
     readonly role: RequirementRoleFact
     readonly access: Type.Requirement['access']
-    readonly syntax: SyntaxTree.Node
+    readonly anchor: AuthoredHir.Anchor
   }>
   readonly parameters: ReadonlyArray<Type.Parameter>
   readonly requirements: ReadonlyArray<Type.Requirement>
-  readonly syntax?: SyntaxTree.Node
+  readonly anchor?: AuthoredHir.Anchor
   readonly available: boolean
   readonly expression: RowExpressionFact
   readonly row: Type.RequirementsRow
@@ -568,39 +557,47 @@ export interface ParameterFact {
   readonly phase: 'Runtime' | 'Static'
   readonly bindingMutability: 'Immutable' | 'Mutable'
   readonly declaredType: DeclaredTypeFact
-  readonly syntax: SyntaxTree.Node
+  readonly anchor: AuthoredHir.Anchor
 }
 
 /** The source-retained literal carried by one compile-time constant header. */
 export type ConstantLiteralFact =
-  | { readonly _tag: 'BooleanLiteral'; readonly value: boolean; readonly token: Token.Token }
-  | { readonly _tag: 'CharacterLiteral'; readonly value: number; readonly token: Token.Token }
+  | {
+      readonly _tag: 'BooleanLiteral'
+      readonly value: boolean
+      readonly anchor: AuthoredHir.Anchor
+    }
+  | {
+      readonly _tag: 'CharacterLiteral'
+      readonly value: number
+      readonly anchor: AuthoredHir.Anchor
+    }
   | {
       readonly _tag: 'IntegerLiteral'
       readonly value: bigint
       readonly spelling: string
-      readonly token: Token.Token
+      readonly anchor: AuthoredHir.Anchor
     }
   | {
       readonly _tag: 'DurationLiteral'
       readonly value: bigint
       readonly spelling: string
-      readonly token: Token.Token
+      readonly anchor: AuthoredHir.Anchor
     }
   | {
       readonly _tag: 'FloatingLiteral'
       readonly spelling: string
-      readonly token: Token.Token
+      readonly anchor: AuthoredHir.Anchor
     }
   | {
       readonly _tag: 'StringLiteral'
       readonly data: StaticText.Data
-      readonly token: Token.Token
+      readonly anchor: AuthoredHir.Anchor
     }
   // A literal the lexer accepted but no value can be decoded from; it carries its own detail so
   // the reference site reports the real cause instead of a literal-kind mismatch.
-  | { readonly _tag: 'Malformed'; readonly detail: string; readonly syntax: SyntaxTree.Element }
-  | { readonly _tag: 'Unavailable'; readonly syntax: SyntaxTree.Element }
+  | { readonly _tag: 'Malformed'; readonly detail: string; readonly anchor: AuthoredHir.Anchor }
+  | { readonly _tag: 'Unavailable'; readonly anchor: AuthoredHir.Anchor }
 
 /** Common source and type facts of an immutable static module binding. */
 interface StaticBindingHeader {
@@ -612,8 +609,8 @@ interface StaticBindingHeader {
   readonly declaredType: DeclaredTypeFact
   readonly initializerTemplate: StaticExpressionTemplate
   readonly literal: ConstantLiteralFact
-  readonly initializer: SyntaxTree.Node
-  readonly syntax: SyntaxTree.Node
+  readonly initializer: AuthoredHir.Expression
+  readonly anchor: AuthoredHir.Anchor
 }
 
 /** One ordinary source constant. */
@@ -625,7 +622,7 @@ export interface ConstantDeclaration extends StaticBindingHeader {
 export interface PackageParameterFact extends StaticBindingHeader {
   readonly _tag: 'PackageParameterDeclaration'
   readonly hasDefault: boolean
-  readonly predicate?: SyntaxTree.Node
+  readonly predicate?: AuthoredHir.Expression
   readonly predicateTemplate?: StaticExpressionTemplate
 }
 
@@ -645,8 +642,8 @@ export interface ForeignStaticFact {
   readonly declaredType: DeclaredTypeFact
   readonly initializerTemplate?: StaticExpressionTemplate
   readonly literal?: ConstantLiteralFact
-  readonly initializer?: SyntaxTree.Node
-  readonly syntax: SyntaxTree.Node
+  readonly initializer?: AuthoredHir.Expression
+  readonly anchor: AuthoredHir.Anchor
 }
 
 /** One transparent type alias header. Its target erases to a canonical type at resolution. */
@@ -659,14 +656,14 @@ export interface AliasFact {
   readonly name: DeclaredName
   readonly target: DeclaredTypeFact
   /** Retained only so semantic analysis can reject a parameterized alias at its exact span. */
-  readonly parameterList?: SyntaxTree.Node
-  readonly syntax: SyntaxTree.Node
+  readonly parameterList?: AuthoredHir.Anchor
+  readonly anchor: AuthoredHir.Anchor
 }
 
 /** One target-neutral static initializer retained with deterministic source-independent syntax. */
 export interface StaticExpressionTemplate {
   readonly _tag: 'StaticExpressionTemplate'
-  readonly syntax: SyntaxTree.Node
+  readonly anchor: AuthoredHir.Anchor
   readonly canonical: string
 }
 
@@ -678,7 +675,7 @@ export interface RoleFact {
   readonly visibility: 'Public' | 'Private'
   readonly typeParameters: ReadonlyArray<TypeParameterFact>
   readonly name: DeclaredName
-  readonly syntax: SyntaxTree.Node
+  readonly anchor: AuthoredHir.Anchor
 }
 
 /** The unique, duplicate, or unidentified state of one field name. */
@@ -697,7 +694,7 @@ export interface FieldFact {
   readonly visibility: 'Public' | 'Private'
   readonly name: DeclaredName
   readonly declaredType: DeclaredTypeFact
-  readonly syntax: SyntaxTree.Node
+  readonly anchor: AuthoredHir.Anchor
 }
 
 /** The finite dependency state of one nominal struct declaration. */
@@ -726,6 +723,8 @@ export interface StructFact {
         readonly abiSpan: SourceSpan.SourceSpan
       }
   readonly typeParameters: ReadonlyArray<TypeParameterFact>
+  /** The written binder list as a whole, when the struct writes one. */
+  readonly typeParametersAnchor?: AuthoredHir.Anchor
   readonly name: DeclaredName
   /** Canonical source or literal-occurrence identity for this nominal aggregate. */
   readonly identity?: AggregateIdentity.AggregateIdentity
@@ -733,7 +732,7 @@ export interface StructFact {
   readonly aggregateKind: 'Named' | 'Positional' | 'AnonymousNamed' | 'AnonymousPositional'
   readonly fields: ReadonlyArray<FieldFact>
   readonly dependency: StructDependency
-  readonly syntax: SyntaxTree.Node
+  readonly anchor: AuthoredHir.Anchor
 }
 
 /** The canonical identity of one uniquely named variant of a canonical nominal union. */
@@ -760,7 +759,7 @@ export interface UnionVariantFact {
   readonly name: DeclaredName
   readonly kind: 'Unit' | 'Fields'
   readonly fields: ReadonlyArray<FieldFact>
-  readonly syntax: SyntaxTree.Node
+  readonly anchor: AuthoredHir.Anchor
 }
 
 export type UnionValidity =
@@ -779,7 +778,7 @@ export interface UnionFact {
   readonly variants: ReadonlyArray<UnionVariantFact>
   readonly dependency: StructDependency
   readonly validity: UnionValidity
-  readonly syntax: SyntaxTree.Node
+  readonly anchor: AuthoredHir.Anchor
 }
 
 /** A deterministic member identity nested under its owning enum declaration. */
@@ -811,12 +810,12 @@ export type EnumRepresentationFact =
       readonly _tag: 'Available'
       readonly scalar: Scalar.EnumRepresentation
       readonly explicit: boolean
-      readonly syntax: SyntaxTree.Element
+      readonly anchor: AuthoredHir.Anchor
     }
   | {
       readonly _tag: 'Unavailable'
       readonly explicit: boolean
-      readonly syntax: SyntaxTree.Element
+      readonly anchor: AuthoredHir.Anchor
       readonly spelling?: string
       readonly cause?: Diagnostic.Identity
     }
@@ -827,12 +826,12 @@ export type EnumDiscriminantFact =
       readonly _tag: 'Available'
       readonly value: bigint
       readonly source: 'Explicit' | 'Implicit'
-      readonly syntax: SyntaxTree.Element
+      readonly anchor: AuthoredHir.Anchor
     }
   | {
       readonly _tag: 'Unavailable'
       readonly source: 'Explicit' | 'Implicit'
-      readonly syntax: SyntaxTree.Element
+      readonly anchor: AuthoredHir.Anchor
       readonly attempted?: bigint
       readonly cause?: Diagnostic.Identity
     }
@@ -844,7 +843,7 @@ export interface EnumMemberFact {
   readonly canonical: EnumMemberCanonicalState
   readonly name: DeclaredName
   readonly discriminant: EnumDiscriminantFact
-  readonly syntax: SyntaxTree.Node
+  readonly anchor: AuthoredHir.Anchor
 }
 
 /** Canonical identity of one compiler-generated operation owned by an enum declaration. */
@@ -886,7 +885,7 @@ export interface EnumFact {
   readonly members: ReadonlyArray<EnumMemberFact>
   readonly associatedOperations: ReadonlyArray<EnumAssociatedOperationFact>
   readonly validity: EnumValidity
-  readonly syntax: SyntaxTree.Node
+  readonly anchor: AuthoredHir.Anchor
 }
 
 /** Canonical identity of one operation nested beneath a source service declaration. */
@@ -919,8 +918,7 @@ export interface ServiceOperationFact {
   readonly parameters: ReadonlyArray<ParameterFact>
   readonly operator?: {
     readonly operator: Operator.Eligible
-    readonly token: Token.Token
-    readonly syntax: SyntaxTree.Node
+    readonly anchor: AuthoredHir.Anchor
   }
   readonly name: DeclaredName
   readonly returnType: ReturnTypeFact
@@ -929,7 +927,7 @@ export interface ServiceOperationFact {
   readonly requirementRow: RequirementRowFact
   readonly constraints: ReadonlyArray<ConstraintFact>
   readonly constraintContracts: ReadonlyArray<Constraint.Constraint>
-  readonly syntax: SyntaxTree.Node
+  readonly anchor: AuthoredHir.Anchor
 }
 
 const contractParameterMode = (type: Type.Type): CallableContract.ParameterMode => {
@@ -1172,7 +1170,7 @@ export interface ContractFact {
   readonly name: DeclaredName
   readonly operations: ReadonlyArray<ServiceOperationFact>
   readonly operationContracts: ReadonlyArray<InterfaceOperationContractFact>
-  readonly syntax: SyntaxTree.Node
+  readonly anchor: AuthoredHir.Anchor
 }
 
 export type ServiceFact = ContractFact & {
@@ -1246,8 +1244,7 @@ const interfaceOperationContract = (
             _tag: 'Resolved',
             type,
             spelling: Type.encode(type),
-            token: operation.name.token,
-            syntax: operation.syntax,
+            anchor: operation.anchor,
           })
           const parameter: ParameterFact = Object.freeze({
             _tag: 'ParameterDeclaration',
@@ -1255,12 +1252,12 @@ const interfaceOperationContract = (
             name: Object.freeze({
               _tag: 'Present',
               spelling: 'self',
-              token: operation.name.token,
+              anchor: operation.anchor,
             }),
             phase: 'Runtime',
             bindingMutability: 'Immutable',
             declaredType,
-            syntax: operation.syntax,
+            anchor: operation.anchor,
           })
           return [
             Object.freeze({
@@ -1698,7 +1695,7 @@ export interface ConformanceRequirementFact {
   readonly parameter: Type.Parameter
   readonly spelling: string
   readonly capability: DeclaredTypeFact
-  readonly syntax: SyntaxTree.Node
+  readonly anchor: AuthoredHir.Anchor
 }
 
 /** Whether one conformance head is free of possible ambiguity with every other head. */
@@ -1745,12 +1742,12 @@ export interface ConformanceFact {
     readonly name: DeclaredName
     readonly target:
       | TypePathFact
-      | { readonly _tag: 'Unavailable'; readonly syntax: SyntaxTree.Element }
+      | { readonly _tag: 'Unavailable'; readonly anchor: AuthoredHir.Anchor }
     readonly contract?: InterfaceOperationApplicationFact
     /** The mapped declaration's binders expressed over this conformance header. */
     readonly targetArguments?: ReadonlyArray<Type.GenericArgument>
     readonly form: 'Mapped' | 'Inline'
-    readonly syntax: SyntaxTree.Node
+    readonly anchor: AuthoredHir.Anchor
   }>
   readonly hook?: DropHookFact
   /** The alpha-normalized head, present once the capability and provider both resolve. */
@@ -1759,7 +1756,7 @@ export interface ConformanceFact {
   readonly termination: ConformanceTermination
   /** Whether complete header/body validation admitted this declaration as a witness candidate. */
   readonly validity: ConformanceValidity
-  readonly syntax: SyntaxTree.Node
+  readonly anchor: AuthoredHir.Anchor
 }
 
 /** The source-retained header of one compiler-sealed Drop hook. */
@@ -1774,7 +1771,7 @@ export interface DropHookFact {
   readonly returnType: DeclaredTypeFact
   readonly failureRow: FailureRowFact
   readonly requirementRow: RequirementRowFact
-  readonly syntax: SyntaxTree.Node
+  readonly anchor: AuthoredHir.Anchor
 }
 
 /** One canonical nominal capability witness selected without erasing its provider type. */
@@ -1908,8 +1905,7 @@ export interface Publication {
   readonly module: string
   readonly original: string
   readonly spelling: string
-  readonly syntax: SyntaxTree.Node
-  readonly token: Token.Token
+  readonly anchor: AuthoredHir.Anchor
 }
 
 /** One module's collected headers with their header-level diagnostics. */
@@ -1961,7 +1957,7 @@ export const presentParameterEntries = (parameters: ReadonlyArray<ParameterFact>
       ? [
           Object.freeze({
             spelling: parameter.name.spelling,
-            token: parameter.name.token,
+            anchor: parameter.name.anchor,
             parameter,
           }),
         ]

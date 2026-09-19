@@ -1,8 +1,8 @@
-import * as DeclarationProperty from './DeclarationProperty.js'
+import type * as AuthoredHir from './AuthoredHir.js'
 import * as Diagnostic from './Diagnostic.js'
-import type * as SourceFile from './SourceFile.js'
+import * as MachineFunction from './MachineFunction.js'
+import type * as SemanticContext from './SemanticContext.js'
 import type * as SourceSpan from './SourceSpan.js'
-import * as SyntaxTree from './SyntaxTree.js'
 import * as Effect from 'effect/Effect'
 import * as Result from 'effect/Result'
 import type * as CompilationProfile from './CompilationProfile.js'
@@ -280,18 +280,25 @@ export const merge = Effect.fn('NativeRequirement.merge')(function* (
   return Object.freeze(merged)
 })
 
+/** The exact text one authored literal denotes; computed operands carry no configuration text. */
+const literalText = (
+  context: SemanticContext.SemanticContext,
+  value: AuthoredHir.Expression,
+): string | undefined => (value._tag === 'TextLiteral' ? context.textOf(value.value) : undefined)
+
 /** Validates an active source attachment without executing its expressions. */
 export const analyze = (
-  source: SourceFile.SourceFile,
-  clause: SyntaxTree.Node,
+  context: SemanticContext.SemanticContext,
+  clause: AuthoredHir.PropertyClause,
   scope: Scope,
 ): {
   readonly requirement?: NativeRequirement
   readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
 } => {
   const diagnostics: Array<Diagnostic.Diagnostic> = []
+  const clauseSpan = context.spanOf(clause.anchor)
   const at = (span: SourceSpan.SourceSpan): ConfigurationOrigin.ConfigurationOrigin =>
-    Object.freeze({ source: source.id, provenance: 'literal', span })
+    Object.freeze({ source: clauseSpan.sourceId, provenance: 'literal', span })
   const reject = (subject: string, span: SourceSpan.SourceSpan): void => {
     diagnostics.push(
       Diagnostic.invalidConfiguration(
@@ -300,40 +307,40 @@ export const analyze = (
       ),
     )
   }
-  if (DeclarationProperty.owner(source, clause) !== 'Intrinsic.native')
-    reject('expected Intrinsic.native', clause.span)
+  if (MachineFunction.clauseOwner(context, clause) !== 'Intrinsic.native')
+    reject('expected Intrinsic.native', clauseSpan)
   const properties = new Map<string, unknown>()
-  for (const node of clause.children.filter(SyntaxTree.isNode)) {
-    if (node.kind !== 'FunctionProperty') continue
-    const token = SyntaxTree.directToken(node, 'Identifier')
-    const value = node.children.find(SyntaxTree.isNode)
-    if (token === undefined || value === undefined) continue
-    const name = DeclarationProperty.spelling(source, token.span)
-    if (properties.has(name)) reject('duplicate native requirement property', token.span)
-    if (!fields.includes(name)) reject('unknown native requirement property', token.span)
+  for (const property of clause.properties) {
+    const name = property.name._tag === 'Name' ? context.textOf(property.name.text) : undefined
+    if (name === undefined) continue
+    const nameSpan = context.spanOf(property.name.anchor)
+    if (properties.has(name)) reject('duplicate native requirement property', nameSpan)
+    if (!fields.includes(name)) reject('unknown native requirement property', nameSpan)
+    const valueSpan = context.spanOf(property.value.anchor)
     if (name === 'alternatives') {
-      if (value.kind !== 'TupleLiteralExpression') {
-        reject('native requirement alternatives require a nonempty tuple', value.span)
+      if (property.value._tag !== 'TupleExpression') {
+        reject('native requirement alternatives require a nonempty tuple', valueSpan)
         continue
       }
       const alternatives: Array<string> = []
-      for (const child of value.children.filter(SyntaxTree.isNode)) {
-        const text = DeclarationProperty.text(source, child)
-        if (text === undefined) reject('native requirement alternative requires text', child.span)
+      for (const element of property.value.elements) {
+        const text = literalText(context, element)
+        if (text === undefined)
+          reject('native requirement alternative requires text', context.spanOf(element.anchor))
         else alternatives.push(text)
       }
       properties.set(name, alternatives)
     } else {
-      const text = DeclarationProperty.text(source, value)
-      if (text === undefined) reject('native requirement property requires text', value.span)
+      const text = literalText(context, property.value)
+      if (text === undefined) reject('native requirement property requires text', valueSpan)
       properties.set(name, text)
     }
   }
   if (diagnostics.length > 0) return { diagnostics: Object.freeze(diagnostics) }
-  const result = inspect(Object.fromEntries(properties), scope, at(clause.span))
+  const result = inspect(Object.fromEntries(properties), scope, at(clauseSpan))
   if (Result.isFailure(result))
     return {
-      diagnostics: Object.freeze([Diagnostic.invalidConfiguration(result.failure, clause.span)]),
+      diagnostics: Object.freeze([Diagnostic.invalidConfiguration(result.failure, clauseSpan)]),
     }
   return { requirement: result.success, diagnostics: Object.freeze([]) }
 }

@@ -6,7 +6,7 @@ import { endLoans } from './EffectLowering.js'
 import type {} from './EntryAssembly.js'
 import type {} from './Forwarding.js'
 import type { FunctionLowering } from './FunctionLowering.js'
-import type * as Hir from './Hir.js'
+import type * as Tir from './Tir.js'
 import * as TypeInference from './internal/TypeInference.js'
 import * as Instances from './Instances.js'
 import * as Layout from './Layout.js'
@@ -55,7 +55,7 @@ export const prepareInitialization = (fn: FunctionLowering): ReadonlyArray<Mir.O
           _tag: 'SetInitialized',
           flag: local,
           initialized: true,
-          provenance: generated(fn.owner.function.declaration.syntax.span),
+          provenance: generated(fn.registry.spanOf(fn.owner.function.declaration.anchor)),
         })
         return Object.freeze({ path, local })
       })
@@ -669,7 +669,7 @@ export const lowerReferencePlace = (
 export const lowerBorrowedWritePlace = (
   fn: FunctionLowering,
   initialRoot: Mir.LocalId,
-  declared: ReadonlyArray<Hir.BorrowedWriteSelector>,
+  declared: ReadonlyArray<Tir.BorrowedWriteSelector>,
   result: Type.Type,
   span: SourceSpan.SourceSpan,
 ):
@@ -732,7 +732,7 @@ export const lowerBorrowedWritePlace = (
 
 export const lowerWriteSelectors = (
   fn: FunctionLowering,
-  selectors: ReadonlyArray<Hir.WriteSelector>,
+  selectors: ReadonlyArray<Tir.WriteSelector>,
 ): ReadonlyArray<Mir.PlaceSelector> | 'Transferred' | undefined => {
   const lowered: Array<Mir.PlaceSelector> = []
   for (const selector of selectors) {
@@ -774,7 +774,7 @@ export const lowerWriteSelectors = (
 export const lowerBorrowPlace = (
   fn: FunctionLowering,
   initialRoot: Mir.LocalId,
-  selectors: ReadonlyArray<Hir.BorrowSelector>,
+  selectors: ReadonlyArray<Tir.BorrowSelector>,
   prefix: ReadonlyArray<Mir.PlaceSelector> = [],
 ):
   | { readonly root: Mir.LocalId; readonly selectors: ReadonlyArray<Mir.PlaceSelector> }
@@ -793,7 +793,7 @@ export const lowerBorrowPlace = (
 
 const lowerBorrowSelector = (
   fn: FunctionLowering,
-  selector: Hir.BorrowSelector,
+  selector: Tir.BorrowSelector,
 ): Mir.PlaceSelector | 'Transferred' | undefined => {
   if (selector._tag === 'Field')
     return {
@@ -834,7 +834,7 @@ const lowerBorrowSelector = (
 
 export const lowerBorrowedWriteSelectors = (
   fn: FunctionLowering,
-  selectors: ReadonlyArray<Hir.BorrowedWriteSelector>,
+  selectors: ReadonlyArray<Tir.BorrowedWriteSelector>,
 ): ReadonlyArray<Mir.PlaceSelector> | 'Transferred' | undefined => {
   const lowered: Array<Mir.PlaceSelector> = []
   for (const selector of selectors) {
@@ -960,7 +960,7 @@ export const withoutLoanEndings = (
 
 export interface DelayedLoopLoan {
   readonly key: string
-  readonly borrow: Hir.BorrowId
+  readonly borrow: Tir.BorrowId
   readonly slice: Mir.LocalId
 }
 

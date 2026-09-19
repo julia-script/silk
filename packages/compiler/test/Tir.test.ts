@@ -9,7 +9,7 @@ import * as AuthoredModule from '../src/AuthoredModule.js'
 import * as AuthoredPool from '../src/AuthoredPool.js'
 import * as AuthoredPresentation from '../src/AuthoredPresentation.js'
 import type * as Elaboration from '../src/Elaboration.js'
-import * as Hir from '../src/Hir.js'
+import * as Tir from '../src/Tir.js'
 import * as Lexer from '../src/Lexer.js'
 import * as Parser from '../src/Parser.js'
 import * as SourceFile from '../src/SourceFile.js'
@@ -396,16 +396,16 @@ it('owns complete callable target conversion and intrinsic-aware equality', () =
     operation: 'Add',
     intrinsic: Object.freeze({ actor: 'i32', name: 'add' }),
   })
-  const target = Hir.callableTargetFromIdentity(identity)
+  const target = Tir.callableTargetFromIdentity(identity)
 
   assert.deepEqual(
-    Hir.callableTargetIdentity(Hir.callableTargetFromIdentity(declaration)),
+    Tir.callableTargetIdentity(Tir.callableTargetFromIdentity(declaration)),
     declaration,
   )
-  assert.deepEqual(Hir.callableTargetIdentity(target), identity)
-  assert.strictEqual(Hir.matchesCallableTargetIdentity(target, identity), true)
+  assert.deepEqual(Tir.callableTargetIdentity(target), identity)
+  assert.strictEqual(Tir.matchesCallableTargetIdentity(target, identity), true)
   assert.strictEqual(
-    Hir.matchesCallableTargetIdentity(target, {
+    Tir.matchesCallableTargetIdentity(target, {
       ...identity,
       intrinsic: Object.freeze({ actor: 'u32', name: 'add' }),
     }),
@@ -413,9 +413,9 @@ it('owns complete callable target conversion and intrinsic-aware equality', () =
   )
 })
 
-it('constructs typed HIR with canonical call targets and normalized contracts', () => {
+it('constructs typed TIR with canonical call targets and normalized contracts', () => {
   const result = elaborate('golden://accepted.silk', acceptedSource)
-  const main = result.hir.functions.at(1)
+  const main = result.tir.functions.at(1)
 
   assert.deepEqual(main?.contract, {
     _tag: 'Contract',
@@ -424,12 +424,12 @@ it('constructs typed HIR with canonical call targets and normalized contracts', 
     result: 'i32',
     constraints: [],
   })
-  const body = main === undefined ? undefined : Hir.returned(main)
+  const body = main === undefined ? undefined : Tir.returned(main)
   assert.strictEqual(body?._tag, 'Call')
   if (body?._tag !== 'Call') return
   assert.deepEqual(body.target, {
     _tag: 'CanonicalDeclarationId',
-    module: 'golden://accepted.silk',
+    module: 'golden/accepted.silk',
     name: 'identity',
   })
   assert.strictEqual(body.type, 'i32')
@@ -442,19 +442,19 @@ it('constructs typed HIR with canonical call targets and normalized contracts', 
 it.effect('preserves contextual conversions across generic and service calls', () =>
   Effect.gen(function* () {
     const service = yield* elaborateWithStdlib(
-      'hir://service-argument-conversion.silk',
+      'tir://service-argument-conversion.silk',
       `service Sink<'a, ?R> { effect fn put(value: i32 | bool) -> i32 ? R | &Sink<'a, R> }
 effect fn use() -> i32 ? &Sink<'static, never> { return run Sink.put<'static, never>(1) }
 pub fn main() -> i32 { return 42 }`,
     )
     assert.deepEqual(service.diagnostics, [])
-    const use = service.hir.functions.find(
+    const use = service.tir.functions.find(
       (fn) => fn.declaration.name._tag === 'Present' && fn.declaration.name.spelling === 'use',
     )
     const serviceConstruct =
       use === undefined
         ? undefined
-        : Hir.expressionTree(Hir.returned(use)).find(
+        : Tir.expressionTree(Tir.returned(use)).find(
             (expression) => expression._tag === 'ServiceEffectConstruct',
           )
     assert.strictEqual(serviceConstruct?._tag, 'ServiceEffectConstruct')
@@ -467,19 +467,19 @@ pub fn main() -> i32 { return 42 }`,
     }
 
     const generic = elaborate(
-      'hir://generic-argument-conversion.silk',
+      'tir://generic-argument-conversion.silk',
       `fn accept<T>(value: T | i32) -> i32 { return 42 }
 fn forward<T>(value: T) -> i32 { return accept<T>(move value) }
 pub fn main() -> i32 { return forward<bool>(true) }`,
     )
     assert.deepEqual(generic.diagnostics, [])
-    const forward = generic.hir.functions.find(
+    const forward = generic.tir.functions.find(
       (fn) => fn.declaration.name._tag === 'Present' && fn.declaration.name.spelling === 'forward',
     )
     const acceptCall =
       forward === undefined
         ? undefined
-        : Hir.expressionTree(Hir.returned(forward)).find(
+        : Tir.expressionTree(Tir.returned(forward)).find(
             (expression) => expression._tag === 'Call' && expression.target.name === 'accept',
           )
     assert.strictEqual(acceptCall?._tag, 'Call')
@@ -488,9 +488,9 @@ pub fn main() -> i32 { return forward<bool>(true) }`,
   }),
 )
 
-it('retains canonical scalar enum member, value, and equality identities in typed HIR', () => {
+it('retains canonical scalar enum member, value, and equality identities in typed TIR', () => {
   const result = elaborate(
-    'hir://enum-values.silk',
+    'tir://enum-values.silk',
     `enum(i8) Status { Unknown = -1, Ready = 1 }
 fn raw(value: Status) -> i8 { return Status.value(value) }
 fn same(left: Status, right: Status) -> bool { return left == right }
@@ -498,55 +498,55 @@ fn ready() -> Status { return Status.Ready }`,
   )
   assert.deepEqual(result.diagnostics, [])
 
-  const raw = result.hir.functions.at(0)
-  const conversion = raw === undefined ? undefined : Hir.returned(raw)
+  const raw = result.tir.functions.at(0)
+  const conversion = raw === undefined ? undefined : Tir.returned(raw)
   assert.strictEqual(conversion?._tag, 'EnumValue')
   if (conversion?._tag === 'EnumValue') {
     assert.deepEqual(conversion.enum, {
       _tag: 'CanonicalDeclarationId',
-      module: 'hir://enum-values.silk',
+      module: 'tir/enum-values.silk',
       name: 'Status',
     })
     assert.strictEqual(conversion.intrinsic.name, 'enumValue')
     assert.strictEqual(conversion.type, 'i8')
   }
 
-  const same = result.hir.functions.at(1)
-  const equality = same === undefined ? undefined : Hir.returned(same)
+  const same = result.tir.functions.at(1)
+  const equality = same === undefined ? undefined : Tir.returned(same)
   assert.strictEqual(equality?._tag, 'EnumEquality')
   if (equality?._tag === 'EnumEquality') assert.strictEqual(equality.type, 'bool')
 
-  const ready = result.hir.functions.at(2)
-  const member = ready === undefined ? undefined : Hir.returned(ready)
+  const ready = result.tir.functions.at(2)
+  const member = ready === undefined ? undefined : Tir.returned(ready)
   assert.strictEqual(member?._tag, 'EnumMember')
   if (member?._tag === 'EnumMember') {
     assert.strictEqual(member.member.name, 'Ready')
     assert.strictEqual(member.discriminant, 1n)
-    assert.strictEqual(Type.encode(member.type), 'hir://enum-values.silk.Status')
+    assert.strictEqual(Type.encode(member.type), 'tir/enum-values.silk.Status')
   }
-  const encoded = Hir.encode(result.hir)
-  assert.include(encoded, 'enum-value hir://enum-values.silk.Status via Intrinsic.enumValue : i8')
-  assert.include(encoded, 'enum-equals hir://enum-values.silk.Status : bool')
-  assert.include(encoded, 'enum-member hir://enum-values.silk.Status.Ready discriminant=1')
+  const encoded = Tir.encode(result.tir)
+  assert.include(encoded, 'enum-value tir/enum-values.silk.Status via Intrinsic.enumValue : i8')
+  assert.include(encoded, 'enum-equals tir/enum-values.silk.Status : bool')
+  assert.include(encoded, 'enum-member tir/enum-values.silk.Status.Ready discriminant=1')
 })
 
-it('retains scalar enum pattern identities and nominal scrutinee type in typed HIR', () => {
+it('retains scalar enum pattern identities and nominal scrutinee type in typed TIR', () => {
   const result = elaborate(
-    'hir://enum-match.silk',
+    'tir://enum-match.silk',
     `enum Status { Unknown, Ready }
 fn inspect(value: Status) -> i32 {
   return match value { Status.Unknown => 0 Status.Ready => 1 }
 }`,
   )
-  const inspect = result.hir.functions.at(0)
-  const match = inspect === undefined ? undefined : Hir.returned(inspect)
+  const inspect = result.tir.functions.at(0)
+  const match = inspect === undefined ? undefined : Tir.returned(inspect)
 
   assert.deepEqual(result.diagnostics, [])
   assert.strictEqual(match?._tag, 'Match')
   if (match?._tag !== 'Match') return
   assert.notStrictEqual(match.scrutinee._tag, 'Unavailable')
   if (match.scrutinee._tag === 'Unavailable') return
-  assert.strictEqual(Type.encode(match.scrutinee.type), 'hir://enum-match.silk.Status')
+  assert.strictEqual(Type.encode(match.scrutinee.type), 'tir/enum-match.silk.Status')
   assert.deepEqual(
     match.members.map((member) => ({
       tag: member._tag,
@@ -554,8 +554,8 @@ fn inspect(value: Status) -> i32 {
       type: Type.encode(member.type),
     })),
     [
-      { tag: 'EnumMember', name: 'Unknown', type: 'hir://enum-match.silk.Status' },
-      { tag: 'EnumMember', name: 'Ready', type: 'hir://enum-match.silk.Status' },
+      { tag: 'EnumMember', name: 'Unknown', type: 'tir/enum-match.silk.Status' },
+      { tag: 'EnumMember', name: 'Ready', type: 'tir/enum-match.silk.Status' },
     ],
   )
   assert.deepEqual(
@@ -573,19 +573,19 @@ fn inspect(value: Status) -> i32 {
       { member: 'Ready', before: ['Ready'], after: [] },
     ],
   )
-  assert.deepEqual(Hir.verify(result.hir), [])
+  assert.deepEqual(Tir.verify(result.tir), [])
 })
 
-it('preserves unsafe declaration and section contracts in typed HIR', () => {
+it('preserves unsafe declaration and section contracts in typed TIR', () => {
   const result = elaborate(
-    'hir://unsafe-callable.silk',
+    'tir://unsafe-callable.silk',
     `unsafe fn combine(left: i32, right: i32) -> i32 { return left + right }
 fn staged() -> unsafe fn<'static>(i32) -> i32 { return combine(2) }
 pub fn main() -> i32 { let callback = staged() return unsafe callback(40) }`,
   )
-  const combine = result.hir.functions.at(0)
-  const staged = result.hir.functions.at(1)
-  const section = staged === undefined ? undefined : Hir.returned(staged)
+  const combine = result.tir.functions.at(0)
+  const staged = result.tir.functions.at(1)
+  const section = staged === undefined ? undefined : Tir.returned(staged)
 
   assert.deepEqual(result.diagnostics, [])
   assert.strictEqual(combine?.contract._tag, 'Contract')
@@ -596,14 +596,14 @@ pub fn main() -> i32 { let callback = staged() return unsafe callback(40) }`,
 
 it('keeps unknown facts explicit with causes instead of typed operations', () => {
   const result = elaborate('golden://damaged.silk', damagedSource)
-  const puzzle = result.hir.functions.at(0)
-  const main = result.hir.functions.at(1)
+  const puzzle = result.tir.functions.at(0)
+  const main = result.tir.functions.at(1)
 
   assert.strictEqual(puzzle?.contract._tag, 'Unavailable')
   if (puzzle?.contract._tag !== 'Unavailable') return
   assert.strictEqual(puzzle.contract.cause?.code, 'SEM0001')
-  assert.strictEqual(Hir.returned(puzzle)._tag, 'Unavailable')
-  const mainBody = main === undefined ? undefined : Hir.returned(main)
+  assert.strictEqual(Tir.returned(puzzle)._tag, 'Unavailable')
+  const mainBody = main === undefined ? undefined : Tir.returned(main)
   assert.strictEqual(mainBody?._tag, 'Unavailable')
   if (mainBody?._tag !== 'Unavailable') return
   assert.strictEqual(mainBody.cause?.code, 'SEM0004')
@@ -614,7 +614,7 @@ it('elaborates binding statements into typed locals with moves', () => {
     'golden://bindings.silk',
     `pub fn main() -> i32 { let value = 42 let copy = value return move copy }`,
   )
-  const main = result.hir.functions.at(0)
+  const main = result.tir.functions.at(0)
 
   assert.strictEqual(main?.statements.length, 3)
   const first = main?.statements.at(0)
@@ -626,7 +626,7 @@ it('elaborates binding statements into typed locals with moves', () => {
   assert.strictEqual(second?._tag, 'Bind')
   if (second?._tag !== 'Bind') return
   assert.strictEqual(second.initializer._tag, 'BindingReference')
-  const returned = main === undefined ? undefined : Hir.returned(main)
+  const returned = main === undefined ? undefined : Tir.returned(main)
   assert.strictEqual(returned?._tag, 'Move')
   if (returned?._tag !== 'Move') return
   assert.strictEqual(returned.subject._tag, 'BindingReference')
@@ -635,7 +635,7 @@ it('elaborates binding statements into typed locals with moves', () => {
   assert.strictEqual(result.diagnostics.length, 0)
 })
 
-it('keeps expression statements as Evaluate HIR with unavailable causes intact', () => {
+it('keeps expression statements as Evaluate TIR with unavailable causes intact', () => {
   const accepted = elaborate(
     'golden://evaluate.silk',
     `effect fn pulse() -> () { return () }
@@ -645,10 +645,10 @@ effect fn main() -> () { run pulse() return () }`,
     'golden://evaluate-damaged.silk',
     'fn main() -> () { missing() return () }',
   )
-  const effectBlock = accepted.hir.functions
+  const effectBlock = accepted.tir.functions
     .flatMap((fn) => fn.statements)
-    .flatMap(Hir.statementExpressions)
-    .flatMap(Hir.expressionTree)
+    .flatMap(Tir.statementExpressions)
+    .flatMap(Tir.expressionTree)
     .find(
       (expression) =>
         expression._tag === 'EffectBlock' &&
@@ -658,14 +658,14 @@ effect fn main() -> () { run pulse() return () }`,
     effectBlock?._tag === 'EffectBlock'
       ? effectBlock.statements.find((statement) => statement._tag === 'Evaluate')
       : undefined
-  const unavailable = damaged.hir.functions
+  const unavailable = damaged.tir.functions
     .flatMap((fn) => fn.statements)
     .find((statement) => statement._tag === 'Evaluate')
 
   assert.strictEqual(evaluated?._tag, 'Evaluate')
   if (evaluated?._tag !== 'Evaluate') return
   assert.strictEqual(evaluated.expression._tag, 'Run')
-  assert.include(Hir.encode(accepted.hir), 'evaluate r0')
+  assert.include(Tir.encode(accepted.tir), 'evaluate r0')
 
   assert.strictEqual(unavailable?._tag, 'Evaluate')
   if (unavailable?._tag !== 'Evaluate') return
@@ -684,8 +684,8 @@ it('rejects rebinding a name while references keep resolving to the original', (
     result.diagnostics.map((diagnostic) => diagnostic.code),
     ['SEM0008'],
   )
-  const main = result.hir.functions.at(0)
-  const returned = main === undefined ? undefined : Hir.returned(main)
+  const main = result.tir.functions.at(0)
+  const returned = main === undefined ? undefined : Tir.returned(main)
   assert.strictEqual(returned?._tag, 'BindingReference')
   if (returned?._tag !== 'BindingReference') return
   assert.strictEqual(returned.binding.ordinal, 0)
@@ -705,7 +705,7 @@ it('resolves a nested lexical shadow to the nearest local binding', () => {
   )
 
   assert.deepEqual(result.diagnostics, [])
-  const main = result.hir.functions.at(0)
+  const main = result.tir.functions.at(0)
   const conditional = main?.statements.at(1)
   assert.strictEqual(conditional?._tag, 'If')
   if (conditional?._tag !== 'If') return
@@ -727,24 +727,24 @@ it('reports an unknown name and a use before its binding as missing references',
     result.diagnostics.map((diagnostic) => diagnostic.code),
     ['SEM0006'],
   )
-  const main = result.hir.functions.at(0)
+  const main = result.tir.functions.at(0)
   const first = main?.statements.at(0)
   assert.strictEqual(first?._tag, 'Bind')
   if (first?._tag !== 'Bind') return
   assert.strictEqual(first.initializer._tag, 'Unavailable')
 })
 
-it('matches the accepted HIR golden encoding byte-for-byte', () => {
+it('matches the accepted TIR golden encoding byte-for-byte', () => {
   const result = elaborate('golden://accepted.silk', acceptedSource)
 
-  assert.strictEqual(Hir.encode(result.hir), golden('accepted.hir.txt'))
+  assert.strictEqual(Tir.encode(result.tir), golden('accepted.tir.txt'))
 })
 
-it('matches the damaged HIR golden encoding and names unavailable states', () => {
+it('matches the damaged TIR golden encoding and names unavailable states', () => {
   const result = elaborate('golden://damaged.silk', damagedSource)
-  const encoded = Hir.encode(result.hir)
+  const encoded = Tir.encode(result.tir)
 
-  assert.strictEqual(encoded, golden('damaged.hir.txt'))
+  assert.strictEqual(encoded, golden('damaged.tir.txt'))
   assert.include(encoded, 'contract-unavailable')
   assert.include(encoded, 'unavailable [')
 })
@@ -754,7 +754,7 @@ it('elaborates and encodes byte-identically across repeated fresh runs', () => {
   const second = elaborate('golden://repeat.silk', damagedSource)
 
   assert.deepEqual(first, second)
-  assert.strictEqual(Hir.encode(first.hir), Hir.encode(second.hir))
+  assert.strictEqual(Tir.encode(first.tir), Tir.encode(second.tir))
 })
 
 it('elaborates built-in arithmetic calls with signed literals', () => {
@@ -762,8 +762,8 @@ it('elaborates built-in arithmetic calls with signed literals', () => {
     'golden://arith.silk',
     'pub fn main() -> i32 { return Intrinsic.i32Add(-8, 50) }',
   )
-  const main = result.hir.functions.at(0)
-  const returned = main === undefined ? undefined : Hir.returned(main)
+  const main = result.tir.functions.at(0)
+  const returned = main === undefined ? undefined : Tir.returned(main)
 
   assert.strictEqual(result.diagnostics.length, 0)
   assert.strictEqual(returned?._tag, 'BuiltinCall')
@@ -773,7 +773,7 @@ it('elaborates built-in arithmetic calls with signed literals', () => {
   assert.strictEqual(first?._tag, 'IntegerLiteral')
   if (first?._tag !== 'IntegerLiteral') return
   assert.strictEqual(first.value, -8n)
-  assert.include(Hir.encode(result.hir), 'builtin i32.Add : i32')
+  assert.include(Tir.encode(result.tir), 'builtin i32.Add : i32')
 })
 
 it('accepts the signed minimum and rejects one below it', () => {
@@ -781,8 +781,8 @@ it('accepts the signed minimum and rejects one below it', () => {
   const below = elaborate('golden://below.silk', 'pub fn main() -> i32 { return -2147483649 }')
 
   assert.deepEqual(minimum.diagnostics, [])
-  const fn = minimum.hir.functions.at(0)
-  const returned = fn === undefined ? undefined : Hir.returned(fn)
+  const fn = minimum.tir.functions.at(0)
+  const returned = fn === undefined ? undefined : Tir.returned(fn)
   assert.strictEqual(returned?._tag, 'IntegerLiteral')
   if (returned?._tag !== 'IntegerLiteral') return
   assert.strictEqual(returned.value, -2147483648n)
@@ -816,8 +816,8 @@ it('diagnoses unknown actors and unknown operations distinctly', () => {
     ['SEM0007'],
   )
   for (const result of [actor, operation, arity]) {
-    const fn = result.hir.functions.at(0)
-    const returned = fn === undefined ? undefined : Hir.returned(fn)
+    const fn = result.tir.functions.at(0)
+    const returned = fn === undefined ? undefined : Tir.returned(fn)
     assert.strictEqual(returned?._tag, 'Unavailable')
   }
 })
@@ -836,7 +836,7 @@ it('elaborates conditionals with typed bool conditions and arm scopes', () => {
     'golden://branch.silk',
     'pub fn main() -> i32 { let base = 40 if base == 40 { let bonus = 2 return base + bonus } return 0 }',
   )
-  const main = result.hir.functions.at(0)
+  const main = result.tir.functions.at(0)
 
   assert.deepEqual(result.diagnostics, [])
   const conditional = main?.statements.at(1)
@@ -852,7 +852,7 @@ it('elaborates conditionals with typed bool conditions and arm scopes', () => {
   if (armBind?._tag !== 'Bind') return
   assert.strictEqual(armBind.binding.ordinal, 1)
   assert.strictEqual(conditional.taken.at(1)?._tag, 'Return')
-  const encoded = Hir.encode(result.hir)
+  const encoded = Tir.encode(result.tir)
   assert.include(encoded, 'if r')
   assert.include(encoded, 'then')
 })
@@ -865,7 +865,7 @@ pub fn main() -> i32 { if check(true) { return 1 } return 0 }`,
   )
 
   assert.deepEqual(result.diagnostics, [])
-  const check = result.hir.functions.at(0)
+  const check = result.tir.functions.at(0)
   assert.deepEqual(check?.contract, {
     _tag: 'Contract',
     unsafe: false,
@@ -873,7 +873,7 @@ pub fn main() -> i32 { if check(true) { return 1 } return 0 }`,
     result: 'bool',
     constraints: [],
   })
-  const returned = check === undefined ? undefined : Hir.returned(check)
+  const returned = check === undefined ? undefined : Tir.returned(check)
   assert.strictEqual(returned?._tag, 'ParameterReference')
   if (returned?._tag !== 'ParameterReference') return
   assert.strictEqual(returned.type, 'bool')
@@ -906,18 +906,18 @@ pub fn main() -> i32 { return pick(42) }`,
     userArg.diagnostics.map((diagnostic) => diagnostic.code),
     ['SEM0012'],
   )
-  const mainFn = builtinArg.hir.functions.at(0)
-  const returned = mainFn === undefined ? undefined : Hir.returned(mainFn)
+  const mainFn = builtinArg.tir.functions.at(0)
+  const returned = mainFn === undefined ? undefined : Tir.returned(mainFn)
   assert.strictEqual(returned?._tag, 'Unavailable')
 })
 
-it('erases grouping and operators into canonical builtin HIR calls', () => {
+it('erases grouping and operators into canonical builtin TIR calls', () => {
   const result = elaborate(
     'golden://operators.silk',
     'pub fn main() -> i32 { return -(2 + 3 * 4) }',
   )
-  const fn = result.hir.functions.at(0)
-  const returned = fn === undefined ? undefined : Hir.returned(fn)
+  const fn = result.tir.functions.at(0)
+  const returned = fn === undefined ? undefined : Tir.returned(fn)
 
   assert.deepEqual(result.diagnostics, [])
   assert.strictEqual(returned?._tag, 'BuiltinCall')
@@ -938,8 +938,8 @@ it('lowers builtin pipelines into left-first callable application with an erasab
     'golden://pipeline.silk',
     'pub fn main() -> i32 { return 2 |> Intrinsic.i32Add(3) }',
   )
-  const fn = result.hir.functions.at(0)
-  const returned = fn === undefined ? undefined : Hir.returned(fn)
+  const fn = result.tir.functions.at(0)
+  const returned = fn === undefined ? undefined : Tir.returned(fn)
 
   assert.deepEqual(result.diagnostics, [])
   assert.strictEqual(returned?._tag, 'CallableApply')
@@ -955,7 +955,7 @@ it('lowers builtin pipelines into left-first callable application with an erasab
 
 it('preserves stored and cross-call owned callable environments', () => {
   const result = elaborate(
-    'hir://owned-callable-return.silk',
+    'tir://owned-callable-return.silk',
     `struct Token { value: i32 }
 fn consume(value: i32, token: Token) -> i32 { return value }
 fn make(token: Token) -> once fn<'static>(i32) -> i32 { return consume(move token) }
@@ -965,10 +965,10 @@ pub fn main() -> i32 {
   return callback(1)
 }`,
   )
-  const make = result.hir.functions.at(1)
-  const main = result.hir.functions.at(2)
-  const returnedEnvironment = make === undefined ? undefined : Hir.returned(make)
-  const applied = main === undefined ? undefined : Hir.returned(main)
+  const make = result.tir.functions.at(1)
+  const main = result.tir.functions.at(2)
+  const returnedEnvironment = make === undefined ? undefined : Tir.returned(make)
+  const applied = main === undefined ? undefined : Tir.returned(main)
 
   assert.deepEqual(result.diagnostics, [])
   assert.strictEqual(returnedEnvironment?._tag, 'CallableSection')
@@ -986,7 +986,7 @@ pub fn main() -> i32 {
 it.effect('desugars effect functions and source-defined catch calls to hidden effect values', () =>
   Effect.gen(function* () {
     const result = yield* elaborateWithStdlib(
-      'hir://effect.silk',
+      'tir://effect.silk',
       `import silk.effect { Effect }
 struct Problem { code: i32 }
 effect fn risky() -> i32 ! Problem { fail move Problem { code: 41 } }
@@ -996,8 +996,8 @@ pub fn main() -> i32 {
   return run recipe
 }`,
     )
-    const risky = result.hir.functions.at(0)
-    const main = result.hir.functions.at(2)
+    const risky = result.tir.functions.at(0)
+    const main = result.tir.functions.at(2)
 
     assert.deepEqual(result.diagnostics, [])
     assert.strictEqual(risky?.contract._tag, 'Contract')
@@ -1005,7 +1005,7 @@ pub fn main() -> i32 {
       assert.isUndefined(risky.contract.functionKind)
       assert.strictEqual(
         Type.encode(risky.contract.result),
-        "Effect<'static; i32 ! hir/effect.Problem>",
+        "Effect<'static; i32 ! tir/effect.Problem>",
       )
     }
     assert.strictEqual(risky?.statements.at(0)?._tag, 'Return')
@@ -1027,14 +1027,14 @@ pub fn main() -> i32 {
       assert.strictEqual(binding.initializer.target.name, 'Effect.catchAll')
       assert.strictEqual(binding.initializer.arguments.at(0)?._tag, 'EffectConstruct')
     }
-    assert.strictEqual(main === undefined ? undefined : Hir.returned(main)._tag, 'Run')
-    assert.deepEqual(Hir.verify(result.hir), [])
+    assert.strictEqual(main === undefined ? undefined : Tir.returned(main)._tag, 'Run')
+    assert.deepEqual(Tir.verify(result.tir), [])
   }),
 )
 
 it('retains every runtime effect-function argument in declaration order', () => {
   const result = elaborate(
-    'hir://effect-function-arguments.silk',
+    'tir://effect-function-arguments.silk',
     `struct Guard {}
 effect fn hold(
   first: Guard,
@@ -1047,8 +1047,8 @@ effect fn hold(
   return ()
 }`,
   )
-  const hold = result.hir.functions.at(0)
-  const returned = hold === undefined ? undefined : Hir.returned(hold)
+  const hold = result.tir.functions.at(0)
+  const returned = hold === undefined ? undefined : Tir.returned(hold)
 
   assert.deepEqual(result.diagnostics, [])
   assert.strictEqual(returned?._tag, 'EffectBlock')
@@ -1068,14 +1068,14 @@ effect fn hold(
 
 it('retains effect blocks as lazy statement regions with canonical captures', () => {
   const result = elaborate(
-    'hir://effect-block.silk',
+    'tir://effect-block.silk',
     `fn main(value: i32) -> i32 {
   let mut counter = value
   let pending = effect { counter = counter + 1 return counter }
   return 0
 }`,
   )
-  const binding = result.hir.functions.at(0)?.statements.at(1)
+  const binding = result.tir.functions.at(0)?.statements.at(1)
   assert.deepEqual(result.diagnostics, [])
   assert.strictEqual(binding?._tag, 'Bind')
   if (binding?._tag !== 'Bind' || binding.initializer._tag !== 'EffectBlock') return
@@ -1083,10 +1083,10 @@ it('retains effect blocks as lazy statement regions with canonical captures', ()
   assert.deepEqual(
     binding.initializer.site.owner === undefined
       ? undefined
-      : Hir.effectRunnerId(binding.initializer.site.owner, binding.initializer.site),
+      : Tir.effectRunnerId(binding.initializer.site.owner, binding.initializer.site),
     {
       _tag: 'CanonicalDeclarationId',
-      module: 'hir://effect-block.silk',
+      module: 'tir/effect-block.silk',
       name: 'main$effect$0',
     },
   )
@@ -1095,18 +1095,18 @@ it('retains effect blocks as lazy statement regions with canonical captures', ()
     [[0, 'Exclusive']],
   )
   assert.include(
-    Hir.encode(result.hir),
-    'effect-block site=effect:declaration:hir://effect-block.silk:main:site:',
+    Tir.encode(result.tir),
+    'effect-block site=effect:declaration:tir/effect-block.silk:main:site:',
   )
-  assert.include(Hir.encode(result.hir), 'access=exclusive')
+  assert.include(Tir.encode(result.tir), 'access=exclusive')
 })
 
-it('retains explicit unsafe boundaries as typed HIR regions', () => {
+it('retains explicit unsafe boundaries as typed TIR regions', () => {
   const result = elaborate(
-    'hir://unsafe.silk',
+    'tir://unsafe.silk',
     'struct Token { value: i32 } pub fn main() -> i32 { unsafe { let token = Token { value: 1 } drop token } return 42 }',
   )
-  const statement = result.hir.functions.at(0)?.statements.at(0)
+  const statement = result.tir.functions.at(0)?.statements.at(0)
   assert.deepEqual(result.diagnostics, [])
   assert.strictEqual(statement?._tag, 'Unsafe')
   if (statement?._tag !== 'Unsafe') return
@@ -1114,19 +1114,19 @@ it('retains explicit unsafe boundaries as typed HIR regions', () => {
     statement.statements.map((nested) => nested._tag),
     ['Bind', 'Drop'],
   )
-  assert.include(Hir.encode(result.hir), 'unsafe r')
-  assert.deepEqual(Hir.verify(result.hir), [])
+  assert.include(Tir.encode(result.tir), 'unsafe r')
+  assert.deepEqual(Tir.verify(result.tir), [])
 })
 
 it('retains generic raw-buffer operations and whole-value borrows', () => {
   const result = elaborate(
-    'hir://raw-storage.silk',
+    'tir://raw-storage.silk',
     `fn destroy(buffer: RawBuffer<i32>) -> () {
   let mut owner = move buffer
   unsafe { return Intrinsic.slotDrop(Intrinsic.rawBufferSlot(&mut owner, 0)) }
 }`,
   )
-  const unsafe = result.hir.functions.at(0)?.statements.at(1)
+  const unsafe = result.tir.functions.at(0)?.statements.at(1)
 
   assert.deepEqual(result.diagnostics, [])
   assert.strictEqual(unsafe?._tag, 'Unsafe')
@@ -1140,12 +1140,12 @@ it('retains generic raw-buffer operations and whole-value borrows', () => {
   if (slot?._tag !== 'BuiltinCall') return
   assert.strictEqual(slot.operation, 'RawBufferSlot')
   assert.strictEqual(slot.arguments.at(0)?._tag, 'ValueBorrow')
-  assert.deepEqual(Hir.verify(result.hir), [])
+  assert.deepEqual(Tir.verify(result.tir), [])
 })
 
 it('retains shared pattern-field reborrows and raw-buffer reads', () => {
   const result = elaborate(
-    'hir://shared-pattern-read.silk',
+    'tir://shared-pattern-read.silk',
     `struct Box { buffer: RawBuffer<i32> }
 fn read(buffer: &RawBuffer<i32>) -> i32 {
   unsafe { return Intrinsic.rawBufferRead<i32>(buffer, 0) }
@@ -1156,8 +1156,8 @@ fn inspect(input: Box) -> i32 {
   )
 
   assert.deepEqual(result.diagnostics, [])
-  assert.include(Hir.encode(result.hir), 'borrow-value')
-  assert.include(Hir.encode(result.hir), 'a0.b0')
-  assert.include(Hir.encode(result.hir), 'RawBufferRead')
-  assert.deepEqual(Hir.verify(result.hir), [])
+  assert.include(Tir.encode(result.tir), 'borrow-value')
+  assert.include(Tir.encode(result.tir), 'a0.b0')
+  assert.include(Tir.encode(result.tir), 'RawBufferRead')
+  assert.deepEqual(Tir.verify(result.tir), [])
 })

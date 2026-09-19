@@ -1,13 +1,13 @@
 import * as ConformanceProof from './ConformanceProof.js'
 import type * as DeclarationIndex from './DeclarationIndex.js'
 import * as Diagnostic from './Diagnostic.js'
-import * as Hir from './Hir.js'
+import * as Tir from './Tir.js'
 import * as Instances from './Instances.js'
 import type * as SourceSpan from './SourceSpan.js'
 import * as Type from './Type.js'
 
-type SharedFromAllocation = Extract<Hir.Expression, { readonly _tag: 'BuiltinCall' }>
-type ExecutionFromAllocation = Extract<Hir.Expression, { readonly _tag: 'BuiltinCall' }>
+type SharedFromAllocation = Extract<Tir.Expression, { readonly _tag: 'BuiltinCall' }>
+type ExecutionFromAllocation = Extract<Tir.Expression, { readonly _tag: 'BuiltinCall' }>
 
 interface ConcreteOrigin {
   readonly _tag: 'ConcreteOrigin'
@@ -55,7 +55,7 @@ interface ProviderBoundOrigin {
   readonly _tag: 'ProviderBoundOrigin'
   readonly protected: Origin
   readonly owner: Instances.Instance
-  readonly provider: Extract<Hir.Expression, { readonly _tag: 'EffectBindRequirement' }>['provider']
+  readonly provider: Extract<Tir.Expression, { readonly _tag: 'EffectBindRequirement' }>['provider']
   readonly span: SourceSpan.SourceSpan
 }
 
@@ -69,7 +69,7 @@ type Origin =
   | ServiceOrigin
   | ProviderBoundOrigin
 
-/** One exact HIR initializer whose allocation originated at `sharedLayout<T>`. */
+/** One exact TIR initializer whose allocation originated at `sharedLayout<T>`. */
 export interface Fact {
   readonly _tag: 'LocalSharedAllocationProvenanceFact'
   readonly owner: string
@@ -78,7 +78,7 @@ export interface Fact {
   readonly span: SourceSpan.SourceSpan
 }
 
-/** One exact HIR initializer whose allocation originated at the same execution layout. */
+/** One exact TIR initializer whose allocation originated at the same execution layout. */
 export interface ExecutionFact {
   readonly _tag: 'ExecutionAllocationProvenanceFact'
   readonly owner: string
@@ -185,11 +185,11 @@ const callsByOwner = (
 }
 
 const nestedStatements = (
-  statements: ReadonlyArray<Hir.Statement>,
-): ReadonlyArray<Hir.Statement> => {
-  const found: Array<Hir.Statement> = []
-  const seen = new Set<Hir.Statement>()
-  const visit = (items: ReadonlyArray<Hir.Statement>): void => {
+  statements: ReadonlyArray<Tir.Statement>,
+): ReadonlyArray<Tir.Statement> => {
+  const found: Array<Tir.Statement> = []
+  const seen = new Set<Tir.Statement>()
+  const visit = (items: ReadonlyArray<Tir.Statement>): void => {
     for (const statement of items) {
       if (seen.has(statement)) continue
       seen.add(statement)
@@ -200,7 +200,7 @@ const nestedStatements = (
         visit(statement.otherwise)
       }
       if (statement._tag === 'While') visit(statement.body)
-      for (const expression of Hir.statementExpressions(statement).flatMap(Hir.expressionTree)) {
+      for (const expression of Tir.statementExpressions(statement).flatMap(Tir.expressionTree)) {
         if (expression._tag === 'EffectBlock') visit(expression.statements)
       }
     }
@@ -211,31 +211,31 @@ const nestedStatements = (
 
 interface ArgumentSource {
   readonly owner: Instances.Instance
-  readonly expression: Hir.Expression
+  readonly expression: Tir.Expression
 }
 
 interface FunctionContext {
   readonly instance: Instances.Instance
-  readonly bindings: ReadonlyMap<number, Hir.Expression>
-  readonly patternBindings: ReadonlyMap<string, Hir.Expression>
+  readonly bindings: ReadonlyMap<number, Tir.Expression>
+  readonly patternBindings: ReadonlyMap<string, Tir.Expression>
   readonly writtenBindings: ReadonlySet<number>
   readonly writtenParameters: ReadonlySet<number>
 }
 
 const patternBindingKey = (
-  binding: Extract<Hir.Expression, { readonly _tag: 'PatternBindingReference' }>['binding'],
+  binding: Extract<Tir.Expression, { readonly _tag: 'PatternBindingReference' }>['binding'],
 ): string =>
   `${binding.arm.match.span.sourceId}:${binding.arm.match.span.start}:${binding.arm.match.span.end}:${binding.arm.ordinal}:${binding.ordinal}`
 
-/** Plans exact source allocation provenance over specialized HIR, including ordinary calls. */
+/** Plans exact source allocation provenance over specialized TIR, including ordinary calls. */
 export const plan = (discovery: Instances.Discovery, index: DeclarationIndex.Index): Plan => {
   const instances = new Map(discovery.instances.map((instance) => [ownerKey(instance), instance]))
   const contexts = new Map<string, FunctionContext>()
   for (const instance of discovery.instances) {
     const statements = nestedStatements(instance.function.statements)
     const replacedRoots = statements
-      .flatMap(Hir.statementExpressions)
-      .flatMap(Hir.expressionTree)
+      .flatMap(Tir.statementExpressions)
+      .flatMap(Tir.expressionTree)
       .flatMap((expression) => (expression._tag === 'Replace' ? [expression.place.root] : []))
     contexts.set(
       ownerKey(instance),
@@ -250,8 +250,8 @@ export const plan = (discovery: Instances.Discovery, index: DeclarationIndex.Ind
         ),
         patternBindings: new Map(
           statements
-            .flatMap(Hir.statementExpressions)
-            .flatMap(Hir.expressionTree)
+            .flatMap(Tir.statementExpressions)
+            .flatMap(Tir.expressionTree)
             .flatMap((expression) =>
               expression._tag === 'Match'
                 ? expression.arms.flatMap((arm) =>
@@ -301,7 +301,7 @@ export const plan = (discovery: Instances.Discovery, index: DeclarationIndex.Ind
   const targetAt = (
     instance: Instances.Instance,
     expression: Extract<
-      Hir.Expression,
+      Tir.Expression,
       { readonly _tag: 'Call' | 'EffectConstruct' | 'CallableApply' }
     >,
   ): Instances.Instance | undefined => {
@@ -327,8 +327,8 @@ export const plan = (discovery: Instances.Discovery, index: DeclarationIndex.Ind
   const incoming = new Map<string, Map<number, Array<ArgumentSource>>>()
   for (const caller of discovery.instances) {
     for (const expression of caller.function.statements
-      .flatMap(Hir.statementExpressions)
-      .flatMap(Hir.expressionTree)) {
+      .flatMap(Tir.statementExpressions)
+      .flatMap(Tir.expressionTree)) {
       if (
         expression._tag !== 'Call' &&
         expression._tag !== 'EffectConstruct' &&
@@ -339,7 +339,7 @@ export const plan = (discovery: Instances.Discovery, index: DeclarationIndex.Ind
       if (target === undefined) continue
       const parameters = incoming.get(ownerKey(target)) ?? new Map<number, Array<ArgumentSource>>()
       incoming.set(ownerKey(target), parameters)
-      const add = (ordinal: number, value: Hir.Expression): void => {
+      const add = (ordinal: number, value: Tir.Expression): void => {
         const sources = parameters.get(ordinal) ?? []
         sources.push({ owner: caller, expression: value })
         parameters.set(ordinal, sources)
@@ -363,7 +363,7 @@ export const plan = (discovery: Instances.Discovery, index: DeclarationIndex.Ind
   // concrete construction still reaches this parameter through the ordinary call graph.
   const executionSources = (
     instance: Instances.Instance,
-    expression: Hir.Expression,
+    expression: Tir.Expression,
     visited: Set<string> = new Set(),
   ): ReadonlyArray<Instances.Instance> => {
     const key = `${ownerKey(instance)}:${expression._tag}:${expression.span.start}:${expression.span.end}`
@@ -411,7 +411,7 @@ export const plan = (discovery: Instances.Discovery, index: DeclarationIndex.Ind
     const identity = ownerKey(instance)
     const cached = summaries.get(identity)
     if (cached !== undefined) return cached
-    const returns = Hir.returnExpressions(instance.function.statements)
+    const returns = Tir.returnExpressions(instance.function.statements)
     const firstReturn = returns.at(0)
     if (firstReturn === undefined) return unreached
     if (resolving.has(identity))
@@ -444,7 +444,7 @@ export const plan = (discovery: Instances.Discovery, index: DeclarationIndex.Ind
   }
 
   function originOf(
-    expression: Hir.Expression,
+    expression: Tir.Expression,
     instance: Instances.Instance,
     parameterOrigins: ReadonlyArray<Origin>,
     resolving: ReadonlySet<string>,
@@ -521,7 +521,7 @@ export const plan = (discovery: Instances.Discovery, index: DeclarationIndex.Ind
     if (expression._tag === 'EffectCatch')
       return originOf(expression.protected, instance, parameterOrigins, resolving, activeBindings)
     if (expression._tag === 'EffectBlock') {
-      const returns = Hir.returnExpressions(expression.statements)
+      const returns = Tir.returnExpressions(expression.statements)
       return returns.length === 0
         ? unreached
         : returns
@@ -768,12 +768,12 @@ export const plan = (discovery: Instances.Discovery, index: DeclarationIndex.Ind
       // A source wrapper may first store the bound recipe in an immutable local; resolve that
       // binding through the same execution-source graph before following its protected parameter.
       return candidate.function.statements
-        .flatMap(Hir.statementExpressions)
-        .flatMap(Hir.expressionTree)
+        .flatMap(Tir.statementExpressions)
+        .flatMap(Tir.expressionTree)
         .some(
           (expression) =>
             expression._tag === 'Run' &&
-            Hir.expressionTree(expression.subject).some((nested) => {
+            Tir.expressionTree(expression.subject).some((nested) => {
               if (nested._tag !== 'ParameterReference' && nested._tag !== 'BindingReference')
                 return false
               return executionSources(candidate, nested).some((owner) =>
@@ -783,18 +783,18 @@ export const plan = (discovery: Instances.Discovery, index: DeclarationIndex.Ind
         )
     }
     // An ordinary effect helper executes with the provider bound around the helper construction at
-    // its caller. The provider node therefore lives in the caller HIR, while the service operation
-    // whose allocation provenance we must prove lives in the callee HIR. Follow that structural
+    // its caller. The provider node therefore lives in the caller TIR, while the service operation
+    // whose allocation provenance we must prove lives in the callee TIR. Follow that structural
     // call edge instead of requiring the helper to inline or recognizing it by declaration name.
     const forwarded =
       explicitlyBound === undefined
         ? discovery.instances.flatMap((caller): ReadonlyArray<Provider> =>
             caller.function.statements
-              .flatMap(Hir.statementExpressions)
-              .flatMap(Hir.expressionTree)
+              .flatMap(Tir.statementExpressions)
+              .flatMap(Tir.expressionTree)
               .flatMap((candidate): ReadonlyArray<Provider> => {
                 if (candidate._tag !== 'EffectBindRequirement') return []
-                const reachesOwner = Hir.expressionTree(candidate.protected).some((nested) => {
+                const reachesOwner = Tir.expressionTree(candidate.protected).some((nested) => {
                   if (nested._tag === 'ParameterReference' || nested._tag === 'BindingReference') {
                     return executionSources(caller, nested).some((owner) =>
                       reachesExecutionOwner(owner, origin.owner),
@@ -930,10 +930,10 @@ export const plan = (discovery: Instances.Discovery, index: DeclarationIndex.Ind
   const diagnostics: Array<Diagnostic.Diagnostic> = []
   for (const instance of discovery.instances) {
     const parameters = parameterOrigins.get(ownerKey(instance)) ?? []
-    const seen = new Set<Hir.Expression>()
+    const seen = new Set<Tir.Expression>()
     for (const expression of instance.function.statements
-      .flatMap(Hir.statementExpressions)
-      .flatMap(Hir.expressionTree)) {
+      .flatMap(Tir.statementExpressions)
+      .flatMap(Tir.expressionTree)) {
       if (seen.has(expression)) continue
       seen.add(expression)
       if (expression._tag !== 'BuiltinCall' || expression.operation !== 'SharedFromAllocation')
@@ -1003,10 +1003,10 @@ export const plan = (discovery: Instances.Discovery, index: DeclarationIndex.Ind
   }
   for (const instance of discovery.instances) {
     const parameters = parameterOrigins.get(ownerKey(instance)) ?? []
-    const seen = new Set<Hir.Expression>()
+    const seen = new Set<Tir.Expression>()
     for (const expression of instance.function.statements
-      .flatMap(Hir.statementExpressions)
-      .flatMap(Hir.expressionTree)) {
+      .flatMap(Tir.statementExpressions)
+      .flatMap(Tir.expressionTree)) {
       if (seen.has(expression)) continue
       seen.add(expression)
       if (expression._tag !== 'BuiltinCall' || expression.operation !== 'ExecutionFromAllocation')
@@ -1100,7 +1100,7 @@ export const plan = (discovery: Instances.Discovery, index: DeclarationIndex.Ind
   })
 }
 
-/** Finds the exact source allocation fact for one specialized HIR initializer. */
+/** Finds the exact source allocation fact for one specialized TIR initializer. */
 export const find = (
   self: Plan,
   owner: Instances.InstanceKey,

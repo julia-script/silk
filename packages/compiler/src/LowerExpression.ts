@@ -51,7 +51,7 @@ import {
   restoreDelayedEffectState,
 } from './Forwarding.js'
 import type { FunctionLowering } from './FunctionLowering.js'
-import * as Hir from './Hir.js'
+import * as Tir from './Tir.js'
 import * as Instances from './Instances.js'
 import * as Layout from './Layout.js'
 import type { DelayedEffectState, ProvidedRequirement } from './Lower.js'
@@ -137,13 +137,13 @@ const packEffectComposite = (
  */
 const forwardedServiceProvision = (
   fn: FunctionLowering,
-  expression: Extract<Hir.Expression, { readonly _tag: 'EffectConstruct' | 'CallableApply' }>,
+  expression: Extract<Tir.Expression, { readonly _tag: 'EffectConstruct' | 'CallableApply' }>,
   availableRequirements: ReadonlyArray<ProvidedRequirement>,
 ):
   | {
-      readonly provider: Hir.Expression
+      readonly provider: Tir.Expression
       readonly local: Mir.LocalId
-      readonly protected: Hir.Expression
+      readonly protected: Tir.Expression
       readonly requirements: ReadonlyArray<ProvidedRequirement>
     }
   | 'Transferred'
@@ -178,7 +178,7 @@ const forwardedServiceProvision = (
 const lowerOperandWithProvision = (
   fn: FunctionLowering,
   provision: Exclude<ReturnType<typeof forwardedServiceProvision>, 'Transferred'>,
-  operand: Hir.Expression,
+  operand: Tir.Expression,
   availableRequirements: ReadonlyArray<ProvidedRequirement>,
 ): LoweredExpression | undefined => {
   if (provision === undefined) return lowerExpression(fn, operand, availableRequirements)
@@ -218,7 +218,7 @@ const lowerTransferredPlace = (
 
 export function lowerExpression(
   fn: FunctionLowering,
-  expression: Hir.Expression,
+  expression: Tir.Expression,
   availableRequirements = fn.activeRequirements ?? fn.providedRequirements,
 ): LoweredExpression | undefined {
   const lower = (): LoweredExpression | undefined => {
@@ -290,7 +290,7 @@ export const lowerExecution = (
 
 export function lowerExpressionInner(
   fn: FunctionLowering,
-  expression: Hir.Expression,
+  expression: Tir.Expression,
   availableRequirements = fn.activeRequirements ?? fn.providedRequirements,
 ): LoweredExpression | undefined {
   switch (expression._tag) {
@@ -408,7 +408,7 @@ export function lowerExpressionInner(
     case 'ForeignApply': {
       const arguments_: Array<Mir.LocalId> = []
       let callee: Mir.LocalId | undefined
-      for (const child of Hir.expressionChildren(expression)) {
+      for (const child of Tir.expressionChildren(expression)) {
         const value = lowerExpression(fn, child, availableRequirements)
         if (value === 'Transferred' || value === undefined) return value
         if (child === expression.callee) callee = value.result
@@ -490,7 +490,7 @@ export function lowerExpressionInner(
 
 function lowerIntegerLiteralExpression(
   fn: FunctionLowering,
-  expression: Extract<Hir.Expression, { readonly _tag: 'IntegerLiteral' }>,
+  expression: Extract<Tir.Expression, { readonly _tag: 'IntegerLiteral' }>,
 ): LoweredExpression | undefined {
   const type = fn.type(expression.type)
   if (type === undefined || !Type.isBuiltin(Mir.semanticType(type))) return undefined
@@ -509,7 +509,7 @@ function lowerIntegerLiteralExpression(
 
 function lowerFloatingLiteralExpression(
   fn: FunctionLowering,
-  expression: Extract<Hir.Expression, { readonly _tag: 'FloatingLiteral' }>,
+  expression: Extract<Tir.Expression, { readonly _tag: 'FloatingLiteral' }>,
 ): LoweredExpression | undefined {
   const type = fn.type(expression.type)
   if (type?._tag !== expression.type) return undefined
@@ -528,7 +528,7 @@ function lowerFloatingLiteralExpression(
 
 function lowerEnumMemberExpression(
   fn: FunctionLowering,
-  expression: Extract<Hir.Expression, { readonly _tag: 'EnumMember' }>,
+  expression: Extract<Tir.Expression, { readonly _tag: 'EnumMember' }>,
 ): LoweredExpression | undefined {
   const type = fn.type(expression.type)
   if (
@@ -555,7 +555,7 @@ function lowerEnumMemberExpression(
 
 function lowerEnumValueExpression(
   fn: FunctionLowering,
-  expression: Extract<Hir.Expression, { readonly _tag: 'EnumValue' }>,
+  expression: Extract<Tir.Expression, { readonly _tag: 'EnumValue' }>,
   availableRequirements: FunctionLowering['providedRequirements'],
 ): LoweredExpression | undefined {
   const value = lowerExpression(fn, expression.value, availableRequirements)
@@ -588,7 +588,7 @@ function lowerEnumValueExpression(
 
 function lowerEnumEqualityExpression(
   fn: FunctionLowering,
-  expression: Extract<Hir.Expression, { readonly _tag: 'EnumEquality' }>,
+  expression: Extract<Tir.Expression, { readonly _tag: 'EnumEquality' }>,
   availableRequirements: FunctionLowering['providedRequirements'],
 ): LoweredExpression | undefined {
   const left = lowerExpression(fn, expression.left, availableRequirements)
@@ -627,7 +627,7 @@ function lowerEnumEqualityExpression(
 
 function lowerStaticStringLiteralExpression(
   fn: FunctionLowering,
-  expression: Extract<Hir.Expression, { readonly _tag: 'StaticStringLiteral' }>,
+  expression: Extract<Tir.Expression, { readonly _tag: 'StaticStringLiteral' }>,
 ): LoweredExpression | undefined {
   const type = fn.type(expression.type)
   if (type?._tag !== 'String') return undefined
@@ -647,7 +647,7 @@ function lowerStaticStringLiteralExpression(
 
 function lowerRuntimeStringViewExpression(
   fn: FunctionLowering,
-  expression: Extract<Hir.Expression, { readonly _tag: 'RuntimeStringView' }>,
+  expression: Extract<Tir.Expression, { readonly _tag: 'RuntimeStringView' }>,
   availableRequirements: FunctionLowering['providedRequirements'],
 ): LoweredExpression | undefined {
   const source = lowerExpression(fn, expression.source, availableRequirements)
@@ -679,7 +679,7 @@ function lowerRuntimeStringViewExpression(
 
 function lowerStringEqualityExpression(
   fn: FunctionLowering,
-  expression: Extract<Hir.Expression, { readonly _tag: 'StringEquality' }>,
+  expression: Extract<Tir.Expression, { readonly _tag: 'StringEquality' }>,
   availableRequirements: FunctionLowering['providedRequirements'],
 ): LoweredExpression | undefined {
   const left = lowerExpression(fn, expression.left, availableRequirements)
@@ -712,7 +712,7 @@ function lowerStringEqualityExpression(
 
 function lowerStaticByteViewLiteralExpression(
   fn: FunctionLowering,
-  expression: Extract<Hir.Expression, { readonly _tag: 'StaticByteViewLiteral' }>,
+  expression: Extract<Tir.Expression, { readonly _tag: 'StaticByteViewLiteral' }>,
 ): LoweredExpression | undefined {
   const type = fn.type(expression.type)
   if (type?._tag !== 'Slice') return undefined
@@ -732,7 +732,7 @@ function lowerStaticByteViewLiteralExpression(
 
 function lowerUnitLiteralExpression(
   fn: FunctionLowering,
-  expression: Extract<Hir.Expression, { readonly _tag: 'UnitLiteral' }>,
+  expression: Extract<Tir.Expression, { readonly _tag: 'UnitLiteral' }>,
 ): LoweredExpression | undefined {
   const type = fn.type(expression.type)
   if (type?._tag !== 'Nominal' || !Type.equals(type.type, Type.unit)) return undefined
@@ -751,7 +751,7 @@ function lowerUnitLiteralExpression(
 
 function lowerBooleanLiteralExpression(
   fn: FunctionLowering,
-  expression: Extract<Hir.Expression, { readonly _tag: 'BooleanLiteral' }>,
+  expression: Extract<Tir.Expression, { readonly _tag: 'BooleanLiteral' }>,
 ): LoweredExpression | undefined {
   const destination = fn.alloc(bool)
   fn.emit(
@@ -768,7 +768,7 @@ function lowerBooleanLiteralExpression(
 
 function lowerCharacterLiteralExpression(
   fn: FunctionLowering,
-  expression: Extract<Hir.Expression, { readonly _tag: 'CharacterLiteral' }>,
+  expression: Extract<Tir.Expression, { readonly _tag: 'CharacterLiteral' }>,
 ): LoweredExpression | undefined {
   const destination = fn.alloc(character)
   fn.emit(
@@ -785,7 +785,7 @@ function lowerCharacterLiteralExpression(
 
 function lowerReplaceExpression(
   fn: FunctionLowering,
-  expression: Extract<Hir.Expression, { readonly _tag: 'Replace' }>,
+  expression: Extract<Tir.Expression, { readonly _tag: 'Replace' }>,
   availableRequirements: FunctionLowering['providedRequirements'],
 ): LoweredExpression | undefined {
   // Swap one writable place: the old value reads out before the replacement commits, and
@@ -858,7 +858,7 @@ function lowerReplaceExpression(
 
 function lowerFunctionItemExpression(
   fn: FunctionLowering,
-  expression: Extract<Hir.Expression, { readonly _tag: 'FunctionItem' }>,
+  expression: Extract<Tir.Expression, { readonly _tag: 'FunctionItem' }>,
 ): LoweredExpression | undefined {
   const type = functionItemValueType(fn, expression)
   if (type === undefined) return undefined
@@ -881,7 +881,7 @@ function lowerFunctionItemExpression(
 
 function lowerCallableSectionExpression(
   fn: FunctionLowering,
-  expression: Extract<Hir.Expression, { readonly _tag: 'CallableSection' }>,
+  expression: Extract<Tir.Expression, { readonly _tag: 'CallableSection' }>,
   availableRequirements: FunctionLowering['providedRequirements'],
 ): LoweredExpression | undefined {
   const type = callableValueType(fn, expression)
@@ -929,8 +929,8 @@ function lowerCallableSectionExpression(
  */
 function lowerStagedCallableApply(
   fn: FunctionLowering,
-  expression: Extract<Hir.Expression, { readonly _tag: 'CallableApply' }>,
-  site: Hir.CallableSiteId,
+  expression: Extract<Tir.Expression, { readonly _tag: 'CallableApply' }>,
+  site: Tir.CallableSiteId,
   availableRequirements: FunctionLowering['providedRequirements'],
 ): LoweredExpression | undefined {
   const type = stagedCallableValueType(fn, expression, site)
@@ -998,7 +998,7 @@ function lowerStagedCallableApply(
 
 function lowerCallableApplyExpression(
   fn: FunctionLowering,
-  expression: Extract<Hir.Expression, { readonly _tag: 'CallableApply' }>,
+  expression: Extract<Tir.Expression, { readonly _tag: 'CallableApply' }>,
   availableRequirements: FunctionLowering['providedRequirements'],
 ): LoweredExpression | undefined {
   if (expression.staged !== undefined)
@@ -1024,7 +1024,7 @@ function lowerCallableApplyExpression(
   }> = []
   let callable: Mir.LocalId | undefined
   let callableType: Type.Callable | undefined
-  let target: Hir.CallableTarget | undefined
+  let target: Tir.CallableTarget | undefined
   let typeArguments: ReadonlyArray<Type.GenericArgument> = Object.freeze([])
   const provision = forwardedServiceProvision(fn, expression, availableRequirements)
   if (provision === 'Transferred') return provision
@@ -1246,7 +1246,7 @@ function lowerCallableApplyExpression(
 
 function lowerEffectConstructExpression(
   fn: FunctionLowering,
-  expression: Extract<Hir.Expression, { readonly _tag: 'EffectConstruct' }>,
+  expression: Extract<Tir.Expression, { readonly _tag: 'EffectConstruct' }>,
   availableRequirements: FunctionLowering['providedRequirements'],
 ): LoweredExpression | undefined {
   const authoredTypeArguments = expression.typeArguments.map((argument) =>
@@ -1299,7 +1299,7 @@ function lowerEffectConstructExpression(
 
 function lowerEffectBlockExpression(
   fn: FunctionLowering,
-  expression: Extract<Hir.Expression, { readonly _tag: 'EffectBlock' }>,
+  expression: Extract<Tir.Expression, { readonly _tag: 'EffectBlock' }>,
 ): LoweredExpression | undefined {
   const semanticType = fn.semantic(expression.type)
   const type = Type.isEffect(semanticType)
@@ -1325,7 +1325,7 @@ function lowerEffectBlockExpression(
     captures.push(Object.freeze({ source, access }))
   }
   const destination = fn.alloc(type)
-  const runner = Hir.effectRunnerId(fn.owner.key.declaration, expression.site)
+  const runner = Tir.effectRunnerId(fn.owner.key.declaration, expression.site)
   fn.emit(
     Object.freeze({
       _tag: 'MakeEffect',
@@ -1361,7 +1361,7 @@ function lowerEffectBlockExpression(
 
 function lowerRunExpression(
   fn: FunctionLowering,
-  expression: Extract<Hir.Expression, { readonly _tag: 'Run' }>,
+  expression: Extract<Tir.Expression, { readonly _tag: 'Run' }>,
   availableRequirements: FunctionLowering['providedRequirements'],
 ): LoweredExpression | undefined {
   return fn.withRecipeReplay(() => {
@@ -1459,7 +1459,7 @@ function lowerRunExpression(
       if (provided === undefined || runner === undefined) return undefined
       const baseRunner =
         effectValueType.storage?.realization.runner ??
-        Hir.effectRunnerId(effectValueType.environment.instance.declaration, effectValueType.site)
+        Tir.effectRunnerId(effectValueType.environment.instance.declaration, effectValueType.site)
       const runnerInstance =
         effectValueType.storage?.realization.runnerInstance ?? effectValueType.environment.instance
       const baseRunnerTypeArguments =
@@ -1987,7 +1987,7 @@ function lowerRunExpression(
 
 function lowerUnionConvertExpression(
   fn: FunctionLowering,
-  expression: Extract<Hir.Expression, { readonly _tag: 'UnionConvert' }>,
+  expression: Extract<Tir.Expression, { readonly _tag: 'UnionConvert' }>,
   availableRequirements: FunctionLowering['providedRequirements'],
 ): LoweredExpression | undefined {
   const source = lowerExpression(fn, expression.source, availableRequirements)
@@ -2050,7 +2050,7 @@ function lowerUnionConvertExpression(
 
 function lowerShortCircuitExpression(
   fn: FunctionLowering,
-  expression: Extract<Hir.Expression, { readonly _tag: 'ShortCircuit' }>,
+  expression: Extract<Tir.Expression, { readonly _tag: 'ShortCircuit' }>,
   availableRequirements: FunctionLowering['providedRequirements'],
 ): LoweredExpression | undefined {
   const type = fn.type(expression.type)
@@ -2116,7 +2116,7 @@ export const lowerPatternTests = (
 
 function lowerMatchExpression(
   fn: FunctionLowering,
-  expression: Extract<Hir.Expression, { readonly _tag: 'Match' }>,
+  expression: Extract<Tir.Expression, { readonly _tag: 'Match' }>,
   availableRequirements: FunctionLowering['providedRequirements'],
 ): LoweredExpression | undefined {
   if (expression.scrutinee._tag === 'Unavailable') return undefined
@@ -2501,7 +2501,7 @@ function lowerMatchExpression(
 
 function lowerConstructExpression(
   fn: FunctionLowering,
-  expression: Extract<Hir.Expression, { readonly _tag: 'Construct' }>,
+  expression: Extract<Tir.Expression, { readonly _tag: 'Construct' }>,
   availableRequirements: FunctionLowering['providedRequirements'],
 ): LoweredExpression | undefined {
   const type = fn.type(expression.type)
@@ -2558,7 +2558,7 @@ function lowerConstructExpression(
 
 function lowerConstructUnionVariantExpression(
   fn: FunctionLowering,
-  expression: Extract<Hir.Expression, { readonly _tag: 'ConstructUnionVariant' }>,
+  expression: Extract<Tir.Expression, { readonly _tag: 'ConstructUnionVariant' }>,
   availableRequirements: FunctionLowering['providedRequirements'],
 ): LoweredExpression | undefined {
   const type = fn.type(expression.type)
@@ -2623,7 +2623,7 @@ function lowerConstructUnionVariantExpression(
 
 function lowerArrayConstructExpression(
   fn: FunctionLowering,
-  expression: Extract<Hir.Expression, { readonly _tag: 'ArrayConstruct' }>,
+  expression: Extract<Tir.Expression, { readonly _tag: 'ArrayConstruct' }>,
   availableRequirements: FunctionLowering['providedRequirements'],
 ): LoweredExpression | undefined {
   const type = fn.type(expression.type)
@@ -2650,7 +2650,7 @@ function lowerArrayConstructExpression(
 
 function lowerSliceBorrowExpression(
   fn: FunctionLowering,
-  expression: Extract<Hir.Expression, { readonly _tag: 'SliceBorrow' }>,
+  expression: Extract<Tir.Expression, { readonly _tag: 'SliceBorrow' }>,
   availableRequirements: FunctionLowering['providedRequirements'],
 ): LoweredExpression | undefined {
   const temporary =
@@ -2721,7 +2721,7 @@ function lowerSliceBorrowExpression(
 
 function lowerValueBorrowExpression(
   fn: FunctionLowering,
-  expression: Extract<Hir.Expression, { readonly _tag: 'ValueBorrow' }>,
+  expression: Extract<Tir.Expression, { readonly _tag: 'ValueBorrow' }>,
   availableRequirements: FunctionLowering['providedRequirements'],
 ): LoweredExpression | undefined {
   const temporary =
@@ -2788,7 +2788,7 @@ function lowerValueBorrowExpression(
 
 function lowerSliceLengthExpression(
   fn: FunctionLowering,
-  expression: Extract<Hir.Expression, { readonly _tag: 'SliceLength' }>,
+  expression: Extract<Tir.Expression, { readonly _tag: 'SliceLength' }>,
   availableRequirements: FunctionLowering['providedRequirements'],
 ): LoweredExpression | undefined {
   const slice = lowerExpression(fn, expression.slice, availableRequirements)
@@ -2816,7 +2816,7 @@ function lowerSliceLengthExpression(
 
 function lowerCallExpression(
   fn: FunctionLowering,
-  expression: Extract<Hir.Expression, { readonly _tag: 'Call' }>,
+  expression: Extract<Tir.Expression, { readonly _tag: 'Call' }>,
   availableRequirements: FunctionLowering['providedRequirements'],
 ): LoweredExpression | undefined {
   const argumentLocals: Array<Mir.LocalId> = []
@@ -2917,7 +2917,7 @@ function lowerCallExpression(
 
 function lowerInterfaceOperationCallExpression(
   fn: FunctionLowering,
-  expression: Extract<Hir.Expression, { readonly _tag: 'InterfaceOperationCall' }>,
+  expression: Extract<Tir.Expression, { readonly _tag: 'InterfaceOperationCall' }>,
   availableRequirements: FunctionLowering['providedRequirements'],
 ): LoweredExpression | undefined {
   if (expression.witnessEffectSite !== undefined) return lowerWitnessEffect(fn, expression)

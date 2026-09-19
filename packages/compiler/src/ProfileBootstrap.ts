@@ -10,12 +10,14 @@ import type * as NameResolution from './NameResolution.js'
 import * as PackageConfiguration from './PackageConfiguration.js'
 import * as PackageParameter from './PackageParameter.js'
 import * as Residualization from './Residualization.js'
+import type * as SemanticContext from './SemanticContext.js'
 import type * as StaticEvaluation from './StaticEvaluation.js'
 import type * as StaticValue from './StaticValue.js'
 
 /** The unconditional source graph needed to resolve package defaults before specialization. */
 export interface Source {
   readonly index: DeclarationIndex.Index
+  readonly contexts: SemanticContext.Registry
   readonly results: ReadonlyMap<string, Elaboration.Result>
   readonly resolution: NameResolution.Resolution
   readonly modules: ReadonlyArray<PackageConfiguration.Module>
@@ -58,6 +60,7 @@ export const complete = Effect.fn('ProfileBootstrap.complete')(function* (
   )
   const parameters = yield* PackageConfiguration.prepare(
     source.index,
+    source.contexts,
     initial.target,
     source.modules,
     bindings,

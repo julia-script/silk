@@ -22,12 +22,12 @@ pub fn recover(problem: Problem) -> i32 { return problem.code }
       const headers = Analysis.declarationIndex(snapshot).modules.at(0)
       const declaration = headers?.declarations.at(0)
       assert.isDefined(declaration)
-      const raw = Analysis.documentationOfSyntax(snapshot, 'docs/main', declaration.syntax)
+      const raw = Analysis.documentationOfAnchor(snapshot, declaration.anchor)
       assert.isDefined(raw)
-      const syntax = Analysis.moduleAnalysis(snapshot, 'docs/main')?.syntax
-      assert.isDefined(syntax)
+      const sourceFile = Analysis.sources(snapshot).get('docs/main')
+      assert.isDefined(sourceFile)
 
-      const parsed = Document.parse(syntax.source, raw)
+      const parsed = Document.parse(sourceFile, raw)
       assert.strictEqual(parsed.fallback, false)
       assert.strictEqual(parsed.examples.length, 1)
       assert.strictEqual(parsed.examples[0]?.language, 'silk')
@@ -46,12 +46,12 @@ pub fn recover() -> i32 { return 1 }
     const snapshot = yield* Analysis.ofSource('malformed/main', encode(source))
     const declaration = Analysis.declarationIndex(snapshot).modules.at(0)?.declarations.at(0)
     assert.isDefined(declaration)
-    const raw = Analysis.documentationOfSyntax(snapshot, 'malformed/main', declaration.syntax)
-    const syntax = Analysis.moduleAnalysis(snapshot, 'malformed/main')?.syntax
+    const raw = Analysis.documentationOfAnchor(snapshot, declaration.anchor)
+    const sourceFile = Analysis.sources(snapshot).get('malformed/main')
     assert.isDefined(raw)
-    assert.isDefined(syntax)
+    assert.isDefined(sourceFile)
 
-    const parsed = Document.parse(syntax.source, raw)
+    const parsed = Document.parse(sourceFile, raw)
     assert.match(Document.toMarkdown(parsed), /never closes/)
   }),
 )

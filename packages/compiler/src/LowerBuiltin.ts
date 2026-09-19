@@ -7,7 +7,7 @@ import type {} from './EntryAssembly.js'
 import * as ExecutionPackage from './ExecutionPackage.js'
 import type {} from './Forwarding.js'
 import type { FunctionLowering } from './FunctionLowering.js'
-import * as Hir from './Hir.js'
+import * as Tir from './Tir.js'
 import * as Instances from './Instances.js'
 import * as Intrinsic from './Intrinsic.js'
 import * as Layout from './Layout.js'
@@ -34,7 +34,7 @@ const representedExecutionArgument = (
 
 export const lowerBuiltinExpression = (
   fn: FunctionLowering,
-  expression: Extract<Hir.Expression, { readonly _tag: 'BuiltinCall' }>,
+  expression: Extract<Tir.Expression, { readonly _tag: 'BuiltinCall' }>,
 ): LoweredExpression | undefined => {
   if (expression.operation === 'NativeAssembly') {
     const assembly = expression.assembly
@@ -65,7 +65,7 @@ export const lowerBuiltinExpression = (
   if (intrinsic === undefined || !Intrinsic.isBuiltinOperation(intrinsic)) return undefined
   const semanticType = fn.semantic(expression.type)
   if (Type.isEffect(semanticType)) {
-    const site = Hir.builtinEffectSite(
+    const site = Tir.builtinEffectSite(
       fn.owner.function.declaration.id,
       fn.owner.key.declaration,
       expression.span,
@@ -77,7 +77,7 @@ export const lowerBuiltinExpression = (
     if (captures === undefined || captures.length !== type.environment.fields.length)
       return undefined
     const destination = fn.alloc(type)
-    const runner = Hir.effectRunnerId(fn.owner.key.declaration, site)
+    const runner = Tir.effectRunnerId(fn.owner.key.declaration, site)
     fn.emit(
       Object.freeze({
         _tag: 'MakeEffect',
@@ -123,12 +123,12 @@ export const lowerBuiltinExpression = (
  */
 const lowerBuiltinOperation = (
   fn: FunctionLowering,
-  expression: Extract<Hir.Expression, { readonly _tag: 'BuiltinCall' }>,
+  expression: Extract<Tir.Expression, { readonly _tag: 'BuiltinCall' }>,
   argumentLocals: ReadonlyArray<Mir.LocalId>,
 ): LoweredExpression | undefined => {
   const finishBuiltin = (result: Mir.LocalId): { readonly result: Mir.LocalId } => {
     const slot = argumentLocals.at(0)
-    let inherited: ReadonlyArray<Hir.BorrowId> = []
+    let inherited: ReadonlyArray<Tir.BorrowId> = []
     if (
       slot !== undefined &&
       (expression.operation === 'SlotWrite' ||

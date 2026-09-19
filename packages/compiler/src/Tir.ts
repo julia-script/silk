@@ -17,7 +17,7 @@ import * as Type from './Type.js'
 import * as TypeCompatibility from './TypeCompatibility.js'
 
 /**
- * HIR: the resolved, typed semantic representation of elaborated bodies. Core operations carry
+ * TIR: the resolved, typed semantic representation of elaborated bodies. Core operations carry
  * their resolved type and exact source provenance; unknown facts stay explicit unavailable
  * states and never masquerade as typed operations.
  */
@@ -53,14 +53,14 @@ export type ContractFact =
 
 /** A deterministic binding identity local to its declaring function's statement order. */
 export interface BindingId {
-  readonly _tag: 'HirBinding'
+  readonly _tag: 'TirBinding'
   readonly function: DeclarationFacts.DeclarationId
   readonly ordinal: number
 }
 
 /** A canonical source-ordered region identity local to one function. */
 export interface RegionId {
-  readonly _tag: 'HirRegion'
+  readonly _tag: 'TirRegion'
   readonly function: DeclarationFacts.DeclarationId
   readonly ordinal: number
 }
@@ -161,7 +161,7 @@ export const executableSiteLabel = (self: EffectSiteId | CallableSiteId): string
 export const effectRepresentationIdentity = (self: EffectSiteId): string =>
   `effect:${executableSiteKey(self)}`
 
-/** Projects a HIR callable site into the semantic identity retained across specialization. */
+/** Projects a TIR callable site into the semantic identity retained across specialization. */
 export const callableEnvironmentSite = (self: CallableSiteId): Type.CallableEnvironmentSite =>
   Type.callableEnvironmentSite(
     self.owner === undefined
@@ -204,6 +204,21 @@ export const anonymousCallableId = (
 export const isAnonymousCallableId = (self: DeclarationFacts.CanonicalId): boolean =>
   /\$callable\$\d+$/.test(self.name)
 
+/** The callable site ordinal recorded in an anonymous callable's canonical identity. */
+export const anonymousCallableSite = (self: DeclarationFacts.CanonicalId): number | undefined => {
+  const match = /\$callable\$(\d+)$/.exec(self.name)
+  return match?.[1] === undefined ? undefined : Number(match[1])
+}
+
+/**
+ * The snapshot-local declaration ordinal of one hidden anonymous body: derived from its enclosing
+ * declaration and callable site, never from byte offsets, so trivia edits keep it stable.
+ */
+export const hiddenDeclarationOrdinal = (enclosing: number, site: number): number =>
+  // ponytail: injective while site < 65536 and enclosing < 2^37; sites are per declaration and
+  // enclosing ordinals are sequential per snapshot, so both bounds hold by construction.
+  0x70000000 + enclosing * 65536 + site
+
 export type CallableTarget =
   | {
       readonly _tag: 'DeclarationCallableTarget'
@@ -216,7 +231,7 @@ export type CallableTarget =
       readonly intrinsic: Intrinsic.OperationId
     }
 
-/** Converts the semantic callable identity retained by specialization into its HIR target. */
+/** Converts the semantic callable identity retained by specialization into its TIR target. */
 export const callableTargetFromIdentity = (
   target: Type.CallableIdentityArgument['target'],
 ): CallableTarget =>
@@ -240,7 +255,7 @@ export const callableTargetFromIdentity = (
         }),
       })
 
-/** Projects a HIR callable target into the semantic identity retained by specialization. */
+/** Projects a TIR callable target into the semantic identity retained by specialization. */
 export const callableTargetIdentity = (
   self: CallableTarget,
 ): Type.CallableIdentityArgument['target'] =>
@@ -260,7 +275,7 @@ export const callableTargetIdentity = (
         }),
       })
 
-/** Tests complete structural identity for two HIR callable targets. */
+/** Tests complete structural identity for two TIR callable targets. */
 export const sameCallableTarget = (left: CallableTarget, right: CallableTarget): boolean => {
   if (left._tag !== right._tag) return false
   if (left._tag === 'DeclarationCallableTarget' && right._tag === 'DeclarationCallableTarget') {
@@ -280,7 +295,7 @@ export const sameCallableTarget = (left: CallableTarget, right: CallableTarget):
   return false
 }
 
-/** Tests whether one HIR target is the target retained by a semantic callable identity. */
+/** Tests whether one TIR target is the target retained by a semantic callable identity. */
 export const matchesCallableTargetIdentity = (
   self: CallableTarget,
   identity: Type.CallableIdentityArgument['target'],
@@ -288,7 +303,7 @@ export const matchesCallableTargetIdentity = (
 
 /** A canonical lexical loop identity local to one function. */
 export interface LoopId {
-  readonly _tag: 'HirLoop'
+  readonly _tag: 'TirLoop'
   readonly function: DeclarationFacts.DeclarationId
   readonly ordinal: number
 }
@@ -1034,8 +1049,8 @@ export type Statement =
     }
 
 /** One elaborated function: its header, normalized contract, and desugared body statements. */
-export interface HirFunction {
-  readonly _tag: 'HirFunction'
+export interface TirFunction {
+  readonly _tag: 'TirFunction'
   readonly declaration: DeclarationFacts.DeclarationFact
   readonly contract: ContractFact
   readonly entryRegion: RegionId
@@ -1044,7 +1059,7 @@ export interface HirFunction {
 }
 
 /** The terminal return expression; throws when the body ends in another control-flow shape. */
-export const returned = (self: HirFunction): Expression => {
+export const returned = (self: TirFunction): Expression => {
   let statements = self.statements
   let last = statements.at(-1)
   while (last?._tag === 'Unsafe') {
@@ -1052,7 +1067,7 @@ export const returned = (self: HirFunction): Expression => {
     last = statements.at(-1)
   }
   if (last === undefined || last._tag !== 'Return') {
-    throw new RangeError('HIR body must end in a return statement')
+    throw new RangeError('TIR body must end in a return statement')
   }
   return last.expression
 }
@@ -1271,7 +1286,7 @@ export const returnExpressions = (body: ReadonlyArray<Statement>): ReadonlyArray
 
 /** The first unavailable expression's cause and span, if the body has one. */
 export const firstUnavailable = (
-  self: HirFunction,
+  self: TirFunction,
 ): { readonly span: SourceSpan.SourceSpan; readonly cause?: Diagnostic.Identity } | undefined => {
   const walk = (
     expression: Expression,
@@ -1736,11 +1751,11 @@ export const verify = (self: Module): ReadonlyArray<VerificationIssue> => {
   return Object.freeze(issues)
 }
 
-/** One module's elaborated HIR. */
+/** One module's elaborated TIR. */
 export interface Module {
-  readonly _tag: 'HirModule'
+  readonly _tag: 'TirModule'
   readonly module: string
-  readonly functions: ReadonlyArray<HirFunction>
+  readonly functions: ReadonlyArray<TirFunction>
 }
 
 /** Normalizes one header's contract, or keeps it explicitly unavailable with its cause. */
@@ -2211,12 +2226,12 @@ const encodeStatement = (statement: Statement, depth: number): string => {
 }
 
 /**
- * Deterministic textual encoding of one module's completed HIR for debugging, inspection, and
+ * Deterministic textual encoding of one module's completed TIR for debugging, inspection, and
  * golden tests. No compatibility promise attaches to this format.
  */
 export const encode = (self: Module): string =>
   [
-    `hir-module ${self.module}`,
+    `tir-module ${self.module}`,
     ...self.functions.flatMap((fn) => [
       `fn ${identityLabel(fn.declaration)}${
         fn.declaration.typeParameters.length === 0

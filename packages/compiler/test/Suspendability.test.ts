@@ -6,7 +6,7 @@ import * as Backend from '../src/Backend.js'
 import * as EntryAssembly from '../src/EntryAssembly.js'
 import * as ExecutableProperty from '../src/ExecutableProperty.js'
 import * as ExecutionBoundary from '../src/ExecutionBoundary.js'
-import * as Hir from '../src/Hir.js'
+import * as Tir from '../src/Tir.js'
 import * as Instances from '../src/Instances.js'
 import * as TypeInference from '../src/internal/TypeInference.js'
 import * as Lifetime from '../src/Lifetime.js'
@@ -250,8 +250,8 @@ ${main('recipes()')}`)
       (instance) => instance.key.declaration.name === 'recipes',
     )
     const synchronous = recipes?.function.statements
-      .flatMap(Hir.statementExpressions)
-      .flatMap(Hir.expressionTree)
+      .flatMap(Tir.statementExpressions)
+      .flatMap(Tir.expressionTree)
       .find((expression) => expression._tag === 'EffectBlock')
     const synchronousIdentity =
       recipes === undefined || synchronous?._tag !== 'EffectBlock'
@@ -727,7 +727,7 @@ pub fn main() -> i32 { return invoke(application) }`
     )
     assert.strictEqual(
       diagnostics.find((diagnostic) => diagnostic.code === 'SEM0139')?.span.start,
-      source.indexOf(' invoke(application)'),
+      source.indexOf('invoke(application)'),
     )
   }),
 )
@@ -842,7 +842,7 @@ pub fn main() -> i32 {
     )
     assert.strictEqual(
       diagnostics.at(0)?.span.start,
-      rejectedSource.indexOf(' Effect.useReleaseNonParking'),
+      rejectedSource.indexOf('Effect.useReleaseNonParking'),
     )
   }),
 )
@@ -884,10 +884,7 @@ pub effect fn main() -> i32 ? &FinalizerSource {
         diagnostics.map((diagnostic) => diagnostic.code),
         ['SEM0139'],
       )
-      assert.strictEqual(
-        diagnostics.at(0)?.span.start,
-        source.indexOf(' Effect.ensuringNonParking'),
-      )
+      assert.strictEqual(diagnostics.at(0)?.span.start, source.indexOf('Effect.ensuringNonParking'))
     }
   }),
 )
@@ -1284,11 +1281,11 @@ pub fn main() -> i32 {
       if (name === 'escape') {
         assert.strictEqual(
           diagnostics.at(0)?.span.start,
-          program.indexOf(' Effect.useReleaseNonParking'),
+          program.indexOf('Effect.useReleaseNonParking'),
         )
         assert.strictEqual(
           diagnostics.at(0)?.span.end,
-          program.indexOf('\n', program.indexOf(' Effect.useReleaseNonParking')),
+          program.indexOf('\n', program.indexOf('Effect.useReleaseNonParking')),
         )
       }
       if (name !== 'escape') {

@@ -12,7 +12,6 @@ import * as AbiManifest from './AbiManifest.js'
 import * as Backend from './Backend.js'
 import * as CHeader from './CHeader.js'
 import * as Diagnostic from './Diagnostic.js'
-import * as Frontend from './Frontend.js'
 import * as HeapObservation from './HeapObservation.js'
 import * as LlvmBackend from './LlvmBackend.js'
 import type * as ModuleClosure from './ModuleClosure.js'
@@ -20,7 +19,7 @@ import * as NativeLinkInput from './NativeLinkInput.js'
 import * as NativeToolchain from './NativeToolchain.js'
 import type * as NativeLinkPlan from './NativeLinkPlan.js'
 import * as PhaseReport from './PhaseReport.js'
-import * as Realization from './Realization.js'
+import * as Preparation from './Preparation.js'
 import * as SourceFile from './SourceFile.js'
 import * as SourceResolver from './SourceResolver.js'
 import * as Target from './Target.js'
@@ -396,7 +395,15 @@ export const compile = Effect.fn('Driver.compile')(function* (
 
   // 4. Load and parse the transitive module closure, resolve declarations and names, elaborate
   // bodies, and analyze semantics and ownership. Retain its diagnostics and per-phase observations.
-  const frontend = yield* Frontend.frontend(compilation, { heapBytes })
+  const bundle = yield* Preparation.prepare(compilation, 'executable', {
+    heapBytes,
+    artifactKind: request.artifactKind,
+    ...(request.compilation.configuration === undefined || request.optimization === undefined
+      ? {}
+      : { optimization: request.optimization }),
+    emission: true,
+  })
+  const frontend = bundle.frontend
 
   report.push(...frontend.report.map(phaseWithHeap))
   const closure = frontend.closure
@@ -426,15 +433,9 @@ export const compile = Effect.fn('Driver.compile')(function* (
       diagnostics: frontend.diagnostics,
       report: Object.freeze([...report]),
     })
-  // Complete target-specific configuration, discover concrete instances, and lower to normalized
-  // MIR (the shared middle-level representation), including any demanded storage components.
-  const preparation = yield* Realization.prepare(frontend, targetId, {
-    heapBytes,
-    artifactKind: request.artifactKind,
-    ...(request.compilation.configuration === undefined || request.optimization === undefined
-      ? {}
-      : { optimization: request.optimization }),
-  })
+  // The sealed bundle already completed target configuration, instance discovery, MIR lowering
+  // and demanded storage components; nothing downstream reopens source discovery.
+  const preparation = Preparation.preparation(bundle)
   // Preparation carries the frontend report forward. Replace the earlier frontend entries to
   // avoid counting them twice, while retaining the driver's initial distribution-integrity check.
   const integrityReport = report.at(0)

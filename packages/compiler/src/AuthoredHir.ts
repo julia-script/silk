@@ -177,12 +177,16 @@ export type Type = Node &
 
 export type Constraint = Node &
   (
-    | { readonly _tag: 'MembershipConstraint'; readonly subject: Type; readonly source: Type }
+    | {
+        readonly _tag: 'MembershipConstraint'
+        readonly subject: RowOperand
+        readonly source: RowOperand
+      }
     | {
         readonly _tag: 'ProviderConstraint'
         readonly provider: Type
-        readonly selected: Type
-        readonly source: Type
+        readonly selected: RowOperand
+        readonly source: RowOperand
       }
   )
 
@@ -206,6 +210,26 @@ export interface CallableContract extends Node {
   readonly environment: ReadonlyArray<Lifetime> | undefined
   readonly unsafe: boolean
   readonly static: boolean
+  /**
+   * Where each written modifier keyword sits, so a diagnostic about one modifier names that word
+   * rather than the whole header. Present exactly when the matching flag is set; a flag a header
+   * only implies carries no anchor.
+   */
+  readonly effectAnchor: Anchor | undefined
+  readonly unsafeAnchor: Anchor | undefined
+  readonly staticAnchor: Anchor | undefined
+  /** The written binder list including its brackets, so a diagnostic can name the list as a whole. */
+  readonly genericsAnchor: Anchor | undefined
+  /**
+   * The written failure row including its `!` marker. `failures` holds only the row's type, whose
+   * own anchor stops short of the marker.
+   */
+  readonly failuresAnchor: Anchor | undefined
+  /**
+   * The written `where` clause including its keyword. `constraints` holds only the individual
+   * constraints, whose anchors stop short of the keyword.
+   */
+  readonly constraintsAnchor: Anchor | undefined
 }
 
 export interface Property extends Node {
@@ -370,11 +394,15 @@ export type Expression =
         | {
             readonly _tag: 'PrefixExpression'
             readonly operator: PrefixOperator
+            /** Where the operator itself is written, so a diagnostic about it names that token. */
+            readonly operatorAnchor: Anchor
             readonly operand: Expression
           }
         | {
             readonly _tag: 'InfixExpression'
             readonly operator: InfixOperator
+            /** Where the operator itself is written, so a diagnostic about it names that token. */
+            readonly operatorAnchor: Anchor
             readonly left: Expression
             readonly right: Expression
           }
@@ -526,6 +554,11 @@ export interface Variant extends Node {
   readonly _tag: 'Variant'
   readonly name: Name
   readonly fields: ReadonlyArray<Field>
+  /**
+   * Whether the variant was written with a field block. A variant with no braces is a unit; one
+   * with empty braces is a distinct mistake, so `fields` alone cannot tell them apart.
+   */
+  readonly braces: boolean
 }
 
 export interface Linkage extends Node {
@@ -587,6 +620,8 @@ export type DeclarationHeader =
         | {
             readonly _tag: 'StructHeader'
             readonly generics: ReadonlyArray<GenericParameter>
+            /** The written binder list including its brackets, so a diagnostic can name it whole. */
+            readonly genericsAnchor: Anchor | undefined
             readonly fields: ReadonlyArray<Field>
             readonly abi: TextLiteral | MissingExpression | InvalidExpression | undefined
           }
@@ -626,6 +661,7 @@ export type DeclarationHeader =
             readonly type: Type
             readonly mutable: boolean
             readonly linkage: Linkage
+            readonly properties: ReadonlyArray<PropertyClause>
           }
       ))
 
@@ -766,6 +802,12 @@ export const fields = freezeFieldRegistry({
     'environment',
     'unsafe',
     'static',
+    'effectAnchor',
+    'unsafeAnchor',
+    'staticAnchor',
+    'genericsAnchor',
+    'failuresAnchor',
+    'constraintsAnchor',
   ],
   Property: [...nodeFields, 'name', 'value'],
   PropertyClause: [...nodeFields, 'namespace', 'operation', 'properties'],
@@ -801,8 +843,8 @@ export const fields = freezeFieldRegistry({
   ReferentExpression: [...nodeFields, 'subject'],
   IndexExpression: [...nodeFields, 'subject', 'index'],
   CallExpression: [...nodeFields, 'callee', 'generics', 'arguments'],
-  PrefixExpression: [...nodeFields, 'operator', 'operand'],
-  InfixExpression: [...nodeFields, 'operator', 'left', 'right'],
+  PrefixExpression: [...nodeFields, 'operator', 'operatorAnchor', 'operand'],
+  InfixExpression: [...nodeFields, 'operator', 'operatorAnchor', 'left', 'right'],
   PipelineExpression: [...nodeFields, 'input', 'target'],
   PatternField: [...nodeFields, 'name', 'pattern'],
   EnumPattern: [...nodeFields, 'path'],
@@ -836,7 +878,7 @@ export const fields = freezeFieldRegistry({
   ImportMember: [...nodeFields, 'name', 'alias'],
   Field: [...nodeFields, 'name', 'public', 'type'],
   EnumMember: [...nodeFields, 'name', 'value'],
-  Variant: [...nodeFields, 'name', 'fields'],
+  Variant: [...nodeFields, 'name', 'fields', 'braces'],
   Linkage: [...nodeFields, 'direction', 'abi', 'symbol'],
   ImportHeader: [...nodeFields, 'public', 'path', 'alias', 'members'],
   ConditionalHeader: [...nodeFields, 'condition'],
@@ -848,7 +890,7 @@ export const fields = freezeFieldRegistry({
   FunctionHeader: [...namedFields, 'contract', 'linkage', 'properties'],
   OperationHeader: [...namedFields, 'contract', 'operator', 'properties'],
   ImplAliasHeader: [...namedFields, 'target'],
-  StructHeader: [...namedFields, 'generics', 'fields', 'abi'],
+  StructHeader: [...namedFields, 'generics', 'genericsAnchor', 'fields', 'abi'],
   TupleHeader: [...namedFields, 'generics', 'elements'],
   EnumHeader: [...namedFields, 'representation', 'members'],
   UnionHeader: [...namedFields, 'generics', 'variants'],
@@ -858,7 +900,7 @@ export const fields = freezeFieldRegistry({
   ConstantHeader: [...namedFields, 'type'],
   PackageParameterHeader: [...namedFields, 'type'],
   AliasHeader: [...namedFields, 'generics', 'target'],
-  StaticHeader: [...namedFields, 'type', 'mutable', 'linkage'],
+  StaticHeader: [...namedFields, 'type', 'mutable', 'linkage', 'properties'],
   NoBody: [],
   CallableBody: ['block'],
   InitializerBody: ['value'],
@@ -897,7 +939,18 @@ export const optionalFields = freezeFieldRegistry({
   SliceType: ['lifetime'],
   ReferenceType: ['lifetime', 'role'],
   CallableType: ['environment'],
-  CallableContract: ['result', 'failures', 'requirements', 'environment'],
+  CallableContract: [
+    'result',
+    'failures',
+    'requirements',
+    'environment',
+    'effectAnchor',
+    'unsafeAnchor',
+    'staticAnchor',
+    'genericsAnchor',
+    'failuresAnchor',
+    'constraintsAnchor',
+  ],
   IntegerLiteral: ['suffix'],
   FloatingLiteral: ['suffix'],
   MemberExpression: ['fields'],
@@ -918,7 +971,7 @@ export const optionalFields = freezeFieldRegistry({
   ImplHeader: ['target'],
   FunctionHeader: ['linkage'],
   OperationHeader: ['operator'],
-  StructHeader: ['abi'],
+  StructHeader: ['genericsAnchor', 'abi'],
   EnumHeader: ['representation'],
   ConstantHeader: ['type'],
   CallableBody: ['block'],

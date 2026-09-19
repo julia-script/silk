@@ -14,7 +14,7 @@ import type {} from './EntryAssembly.js'
 import type {} from './Forwarding.js'
 import { inlineForwardedRequirement } from './Forwarding.js'
 import type { FunctionLowering } from './FunctionLowering.js'
-import * as Hir from './Hir.js'
+import * as Tir from './Tir.js'
 import * as Instances from './Instances.js'
 import * as Layout from './Layout.js'
 import * as Lifetime from './Lifetime.js'
@@ -40,7 +40,7 @@ import {
 
 export const lowerCatchEffectValue = (
   fn: FunctionLowering,
-  expression: Extract<Hir.Expression, { readonly _tag: 'EffectCatch' }>,
+  expression: Extract<Tir.Expression, { readonly _tag: 'EffectCatch' }>,
   availableRequirements: ReadonlyArray<ProvidedRequirement> = fn.activeRequirements ??
     fn.providedRequirements,
 ): LoweredExpression | undefined => {
@@ -60,7 +60,7 @@ export const lowerCatchEffectValue = (
     return undefined
   }
 
-  const site = Hir.effectCatchSite(
+  const site = Tir.effectCatchSite(
     fn.owner.function.declaration.id,
     fn.owner.key.declaration,
     expression.span,
@@ -73,7 +73,7 @@ export const lowerCatchEffectValue = (
     ): candidate is Extract<Layout.EffectEnvironment, { readonly _tag: 'EffectEnvironment' }> =>
       candidate._tag === 'EffectEnvironment' &&
       Instances.keyText(candidate.instance) === Instances.keyText(fn.owner.key) &&
-      Hir.sameExecutableSite(candidate.site, site) &&
+      Tir.sameExecutableSite(candidate.site, site) &&
       Type.equals(candidate.effect, semanticType),
   )
   if (environment === undefined || environment.fields.length !== 2) return undefined
@@ -83,7 +83,7 @@ export const lowerCatchEffectValue = (
     site,
     environment,
   })
-  const runner = Hir.effectRunnerId(fn.owner.key.declaration, site)
+  const runner = Tir.effectRunnerId(fn.owner.key.declaration, site)
   const specializationKey = baseRunnerKey(fn.owner.key, site, type.type)
   const destination = fn.alloc(type)
   fn.emit(
@@ -209,7 +209,7 @@ export const lowerRunEffectValue = (
   if (provided === undefined || runner === undefined) return undefined
   const baseRunner =
     effectType.storage?.realization.runner ??
-    Hir.effectRunnerId(effectType.environment.instance.declaration, effectType.site)
+    Tir.effectRunnerId(effectType.environment.instance.declaration, effectType.site)
   const runnerInstance =
     effectType.storage?.realization.runnerInstance ?? effectType.environment.instance
   const baseRunnerTypeArguments =
@@ -719,7 +719,7 @@ const beginResourceLoan = (
   resourceType: Mir.Type,
   callbackType: Extract<Mir.Type, { readonly _tag: 'CallableValue' }>,
   span: SourceSpan.SourceSpan,
-): { readonly borrow: Hir.BorrowId; readonly reference: Mir.LocalId } | undefined => {
+): { readonly borrow: Tir.BorrowId; readonly reference: Mir.LocalId } | undefined => {
   const parameter = callbackType.type.parameters.at(0)
   const referenceType = parameter === undefined ? undefined : fn.type(parameter)
   if (referenceType?._tag !== 'Reference' || referenceType.type.access !== 'Exclusive')
@@ -776,9 +776,9 @@ const applyResourceEffectBuilder = (
 /** Lowers an owned-resource bracket without forming simultaneous use and release borrows. */
 export const lowerUseReleaseNonParking = (
   fn: FunctionLowering,
-  resourceExpression: Hir.Expression,
-  useExpression: Hir.Expression,
-  releaseExpression: Hir.Expression,
+  resourceExpression: Tir.Expression,
+  useExpression: Tir.Expression,
+  releaseExpression: Tir.Expression,
   span: SourceSpan.SourceSpan,
   availableRequirements: ReadonlyArray<ProvidedRequirement>,
 ): LoweredExpression | undefined => {
@@ -1014,7 +1014,7 @@ const injectSuccess = (
 
 export const lowerEffectCatch = (
   fn: FunctionLowering,
-  expression: Extract<Hir.Expression, { readonly _tag: 'EffectCatch' }>,
+  expression: Extract<Tir.Expression, { readonly _tag: 'EffectCatch' }>,
   runSpan: SourceSpan.SourceSpan,
   captured?: {
     readonly protected: Mir.LocalId
@@ -1445,7 +1445,7 @@ export const lowerEffectCatch = (
 }
 export const lowerPlacePath = (
   fn: FunctionLowering,
-  expression: Hir.Expression,
+  expression: Tir.Expression,
   availableRequirements: ReadonlyArray<ProvidedRequirement> = fn.activeRequirements ??
     fn.providedRequirements,
 ): LoweredPlace | 'Transferred' | undefined => {
@@ -1542,7 +1542,7 @@ export const lowerPlacePath = (
 export const lowerPlace = (
   fn: FunctionLowering,
   expression: Extract<
-    Hir.Expression,
+    Tir.Expression,
     { readonly _tag: 'ReferentPlace' | 'Project' | 'IndexPlace' | 'SliceIndexPlace' }
   >,
   availableRequirements: ReadonlyArray<ProvidedRequirement> = fn.activeRequirements ??
@@ -1576,7 +1576,7 @@ export const lowerPlace = (
 
 export const endLoans = (
   fn: FunctionLowering,
-  loans: ReadonlyArray<Hir.BorrowId>,
+  loans: ReadonlyArray<Tir.BorrowId>,
   span: SourceSpan.SourceSpan,
 ): void => {
   for (const authored of loans) {
@@ -1588,7 +1588,7 @@ export const endLoans = (
 /** Ends one authored or synthetic loan exactly once. */
 export const endLoan = (
   fn: FunctionLowering,
-  borrow: Hir.BorrowId,
+  borrow: Tir.BorrowId,
   span: SourceSpan.SourceSpan,
 ): void => {
   const key = borrowKey(borrow)
@@ -1659,10 +1659,10 @@ export const endReturnedViewLoans = (fn: FunctionLowering, span: SourceSpan.Sour
 
 export const retainedEffectLoans = (
   fn: FunctionLowering,
-  expression: Hir.Expression,
-): ReadonlyArray<Hir.BorrowId> => {
-  const retained = new Map<string, Hir.BorrowId>()
-  for (const child of Hir.expressionTree(expression)) {
+  expression: Tir.Expression,
+): ReadonlyArray<Tir.BorrowId> => {
+  const retained = new Map<string, Tir.BorrowId>()
+  for (const child of Tir.expressionTree(expression)) {
     if (child._tag === 'BindingReference') {
       for (const borrow of fn.effectLoanEnds.get(child.binding.ordinal) ?? [])
         retained.set(borrowKey(borrow), borrow)
@@ -1696,7 +1696,7 @@ export const retainedEffectLoans = (
 
 export const borrowedWriteRoot = (
   fn: FunctionLowering,
-  root: Hir.BorrowedWritePlace['root'],
+  root: Tir.BorrowedWritePlace['root'],
 ): Mir.LocalId | undefined =>
   root._tag === 'ParameterSliceRoot'
     ? fn.parameterLocals.get(root.parameter.ordinal)
@@ -1724,7 +1724,7 @@ export const patternPlace = (
 
 export const ownedWriteRoot = (
   fn: FunctionLowering,
-  root: Hir.OwnedWriteRoot,
+  root: Tir.OwnedWriteRoot,
 ): Mir.LocalId | undefined => {
   switch (root._tag) {
     case 'ParameterWriteRoot':
@@ -1746,7 +1746,7 @@ export const ownedWriteRoot = (
 
 export const lowerServiceEffectValue = (
   fn: FunctionLowering,
-  subject: Extract<Hir.Expression, { readonly _tag: 'ServiceEffectConstruct' }>,
+  subject: Extract<Tir.Expression, { readonly _tag: 'ServiceEffectConstruct' }>,
   availableRequirements: ReadonlyArray<ProvidedRequirement>,
 ): LoweredExpression | undefined => {
   const service = fn.semantic(subject.service)
@@ -1814,12 +1814,12 @@ export const lowerServiceEffectValue = (
 interface LoweredProvidedEffect {
   readonly requirement: ProvidedRequirement
   readonly ownedProvider?: Mir.LocalId
-  readonly loan?: Hir.BorrowId
+  readonly loan?: Tir.BorrowId
 }
 
 const prepareProvidedEffect = (
   fn: FunctionLowering,
-  providerFact: Extract<Hir.Expression, { readonly _tag: 'EffectBindRequirement' }>['provider'],
+  providerFact: Extract<Tir.Expression, { readonly _tag: 'EffectBindRequirement' }>['provider'],
 ): LoweredProvidedEffect | undefined => {
   const selected = specializeProvider(fn, providerFact)
   if (selected === undefined) return undefined
@@ -1917,7 +1917,7 @@ const prepareProvidedEffect = (
  */
 export const lowerProvidedEffect = <A>(
   fn: FunctionLowering,
-  providerFact: Extract<Hir.Expression, { readonly _tag: 'EffectBindRequirement' }>['provider'],
+  providerFact: Extract<Tir.Expression, { readonly _tag: 'EffectBindRequirement' }>['provider'],
   use: (requirement: ProvidedRequirement) => A | undefined,
 ): A | 'Transferred' | undefined => {
   const provided = prepareProvidedEffect(fn, providerFact)
@@ -1954,7 +1954,7 @@ const lowerForwardedProvider = <A>(
       ? fn.recipeBorrow(forwarded.provider.borrow)
       : undefined
   let runtimeProvider = provider.result
-  let ownedLoan: Hir.BorrowId | undefined
+  let ownedLoan: Tir.BorrowId | undefined
   if (
     forwarded.selection.access === 'Take' &&
     forwarded.selection.witness._tag === 'SourceConformanceWitness'
@@ -2006,7 +2006,7 @@ const lowerForwardedProvider = <A>(
 
 export const lowerEffectExecution = (
   fn: FunctionLowering,
-  subject: Hir.Expression,
+  subject: Tir.Expression,
   success: Type.Type,
   span: SourceSpan.SourceSpan,
   availableRequirements: ReadonlyArray<ProvidedRequirement> = fn.activeRequirements ??

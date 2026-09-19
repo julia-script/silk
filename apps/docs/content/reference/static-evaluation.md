@@ -243,7 +243,7 @@ static fn hasAccent(value: string) -> bool {
 
 These are ordinary `static fn` wrappers. They return admitted values and reveal neither an address
 nor mutable compiler storage. Their sealed intrinsic primitives are static-only and cannot survive
-in runtime HIR.
+in runtime TIR.
 
 **Boundary:** `byteAt` rejects an out-of-bounds index. `slice` rejects an invalid range and any
 endpoint that splits a UTF-8 scalar encoding. Both failures are phase violations with source text
@@ -335,7 +335,7 @@ fn visit<Owner>(owner: &Owner) -> () {
 
 A zero-element loop contributes no residual statements and does not elaborate its body. If iterable
 evaluation, a later iteration, or a static budget fails, the whole expansion is discarded: earlier
-generated calls, HIR, ownership, cleanup, and instance facts do not survive.
+generated calls, TIR, ownership, cleanup, and instance facts do not survive.
 
 **Boundary:** `static for` is not a runtime loop, expression, declaration container, or unbounded
 generator protocol. Runtime values, Effects, services, unsafe operations, host input, I/O, time,

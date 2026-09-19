@@ -7,7 +7,8 @@ import type { LoweredExpression } from './EffectLowering.js'
 import { lowerEffectCatch, lowerRunEffectComposite, lowerRunEffectValue } from './EffectLowering.js'
 import type {} from './Forwarding.js'
 import { FunctionLowering, type LoweringFailure } from './FunctionLowering.js'
-import * as Hir from './Hir.js'
+import type * as SemanticContext from './SemanticContext.js'
+import * as Tir from './Tir.js'
 import * as Instances from './Instances.js'
 import * as TypeInference from './internal/TypeInference.js'
 import type * as Layout from './Layout.js'
@@ -91,7 +92,7 @@ const publishRunnerSuccess = (
   )
 }
 
-const runtimeParameterCount = (fn: Hir.HirFunction): number =>
+const runtimeParameterCount = (fn: Tir.TirFunction): number =>
   fn.declaration.parameters.filter((parameter) => parameter.phase === 'Runtime').length
 
 export const trapFunction = (
@@ -183,7 +184,7 @@ const unavailableEffectRunner = (
 ): UnavailableGeneratedEffectRunner =>
   unavailableGeneratedEffectRunner({
     runner: spec.id,
-    base: Hir.effectRunnerId(spec.type.environment.instance.declaration, spec.type.site),
+    base: Tir.effectRunnerId(spec.type.environment.instance.declaration, spec.type.site),
     owner: spec.owner.key,
     cause,
   })
@@ -197,25 +198,27 @@ const runnerFallback = (spec: GeneratedBlockEffectRunner): LoweringFailure =>
 
 export const planFor = (
   ownership: Ownership.ModuleOwnership | undefined,
-  fn: Hir.HirFunction,
+  fn: Tir.TirFunction,
 ): Ownership.FunctionOwnership | undefined =>
   ownership?.functions.find(
     (candidate) => candidate.declaration.id.ordinal === fn.declaration.id.ordinal,
   )
 
-export const bodySpan = (fn: Hir.HirFunction): SourceSpan.SourceSpan =>
-  fn.statements.at(-1)?.span ?? fn.declaration.syntax.span
+export const bodySpan = (
+  fn: Tir.TirFunction,
+  registry: SemanticContext.Registry,
+): SourceSpan.SourceSpan => fn.statements.at(-1)?.span ?? registry.spanOf(fn.declaration.anchor)
 
 export const returnedEffectBlock = (
-  fn: Hir.HirFunction,
-): Extract<Hir.Expression, { readonly _tag: 'EffectBlock' }> | undefined => {
+  fn: Tir.TirFunction,
+): Extract<Tir.Expression, { readonly _tag: 'EffectBlock' }> | undefined => {
   const terminal = fn.statements.at(-1)
   if (terminal?._tag !== 'Return') return undefined
   const returned = terminal.expression
   if (returned._tag === 'EffectBlock') return returned
   if (returned._tag !== 'BindingReference') return undefined
   const binding = fn.statements.find(
-    (statement): statement is Extract<Hir.Statement, { readonly _tag: 'Bind' }> =>
+    (statement): statement is Extract<Tir.Statement, { readonly _tag: 'Bind' }> =>
       statement._tag === 'Bind' && statement.binding.ordinal === returned.binding.ordinal,
   )
   return binding?.initializer._tag === 'EffectBlock' ? binding.initializer : undefined
@@ -225,10 +228,10 @@ export const returnedEffectBlock = (
 export const returnedValueType = (
   layout: Layout.Plan,
   opaqueRealizations: OpaqueRealization.Catalog,
-  fn: Hir.HirFunction,
+  fn: Tir.TirFunction,
   substitution: Type.Substitution,
 ): ReturnType<typeof representedValueType> => {
-  const returned = Hir.returnExpressions(fn.statements).flatMap((expression) =>
+  const returned = Tir.returnExpressions(fn.statements).flatMap((expression) =>
     expression._tag === 'Unavailable' || Type.isNever(expression.type)
       ? []
       : [Type.substitute(expression.type, substitution)],
@@ -249,6 +252,7 @@ export const lowerInstance = (
   effectResults: ReadonlyMap<string, ExecutableEffectType>,
   generatedRunners: Array<GeneratedEffectRunner>,
   opaqueRealizations: OpaqueRealization.Catalog,
+  registry: SemanticContext.Registry,
 ): Mir.MirFunction => {
   const fn = instance.function
   const plan = planFor(ownership, fn)
@@ -258,7 +262,7 @@ export const lowerInstance = (
   }
 
   const contract = fn.contract
-  const callableEnvironment = Hir.isAnonymousCallableId(instance.key.declaration)
+  const callableEnvironment = Tir.isAnonymousCallableId(instance.key.declaration)
     ? layout.callableEnvironments.find(
         (
           candidate,
@@ -447,12 +451,13 @@ export const lowerInstance = (
         ))
       : i32)
   if (resultType === undefined) {
-    return trapFunction(instance, 'unavailable contract type', bodySpan(fn))
+    return trapFunction(instance, 'unavailable contract type', bodySpan(fn, registry))
   }
 
   const lowering = new FunctionLowering(
     layout,
     index,
+    registry,
     parameterTypes,
     plan,
     instance.substitution,
@@ -473,7 +478,7 @@ export const lowerInstance = (
   const terminal: Mir.Outcome = Object.freeze({
     _tag: 'Trap',
     reason: 'body fell through without return',
-    provenance: generated(bodySpan(fn)),
+    provenance: generated(bodySpan(fn, registry)),
   })
   const entry = lowerSequence(lowering, fn.statements, indexExits(plan), undefined, terminal)
 
@@ -483,8 +488,8 @@ export const lowerInstance = (
       (region, ordinal) => region === undefined && !lowering.extractedRegions.has(ordinal),
     )
   ) {
-    const unavailable = Hir.firstUnavailable(fn)
-    return trapFunction(instance, 'unavailable body', unavailable?.span ?? bodySpan(fn))
+    const unavailable = Tir.firstUnavailable(fn)
+    return trapFunction(instance, 'unavailable body', unavailable?.span ?? bodySpan(fn, registry))
   }
 
   return Object.freeze({
@@ -562,6 +567,7 @@ export const lowerEffectRunner = (
   effectResults: ReadonlyMap<string, ExecutableEffectType>,
   generatedRunners: Array<GeneratedEffectRunner>,
   opaqueRealizations: OpaqueRealization.Catalog,
+  registry: SemanticContext.Registry,
 ): GeneratedEffectRunnerLowering => {
   const { owner, block, type } = spec
   const id = spec.id
@@ -573,7 +579,7 @@ export const lowerEffectRunner = (
     staticArguments: owner.key.staticArguments,
     contractRow: Object.freeze([
       ...owner.key.contractRow,
-      `effect-site:${Hir.executableSiteKey(block.site)}`,
+      `effect-site:${Tir.executableSiteKey(block.site)}`,
       ...spec.providedRequirements.map(providedContractEntry),
     ]),
   })
@@ -605,6 +611,7 @@ export const lowerEffectRunner = (
   const lowering = new FunctionLowering(
     layout,
     index,
+    registry,
     parameterTypes,
     plan,
     owner.substitution,
@@ -669,7 +676,7 @@ export const lowerEffectRunner = (
       ),
       effectRunner: Object.freeze({
         base: Object.freeze({
-          declaration: Hir.effectRunnerId(type.environment.instance.declaration, type.site),
+          declaration: Tir.effectRunnerId(type.environment.instance.declaration, type.site),
           typeArguments: type.environment.instance.typeArguments,
         }),
         providers: Object.freeze(
@@ -699,6 +706,7 @@ export const lowerCatchEffectRunner = (
   effectResults: ReadonlyMap<string, ExecutableEffectType>,
   generatedRunners: Array<GeneratedEffectRunner>,
   opaqueRealizations: OpaqueRealization.Catalog,
+  registry: SemanticContext.Registry,
 ): Mir.MirFunction | undefined => {
   const parameterizedRequirements = spec.providedRequirements.filter(
     (requirement) => requirement.witness._tag === 'SourceConformanceWitness',
@@ -724,13 +732,14 @@ export const lowerCatchEffectRunner = (
     staticArguments: spec.owner.key.staticArguments,
     contractRow: Object.freeze([
       ...spec.owner.key.contractRow,
-      `effect-site:${Hir.executableSiteKey(spec.type.site)}`,
+      `effect-site:${Tir.executableSiteKey(spec.type.site)}`,
       ...spec.providedRequirements.map(providedContractEntry),
     ]),
   })
   const lowering = new FunctionLowering(
     layout,
     index,
+    registry,
     parameterTypes,
     planFor(ownership, spec.owner.function),
     spec.owner.substitution,
@@ -780,7 +789,7 @@ export const lowerCatchEffectRunner = (
     ),
     effectRunner: Object.freeze({
       base: Object.freeze({
-        declaration: Hir.effectRunnerId(spec.type.environment.instance.declaration, spec.type.site),
+        declaration: Tir.effectRunnerId(spec.type.environment.instance.declaration, spec.type.site),
         typeArguments: spec.type.environment.instance.typeArguments,
       }),
       providers: Object.freeze(
@@ -809,6 +818,7 @@ export const lowerBuiltinEffectRunner = (
   effectResults: ReadonlyMap<string, ExecutableEffectType>,
   generatedRunners: Array<GeneratedEffectRunner>,
   opaqueRealizations: OpaqueRealization.Catalog,
+  registry: SemanticContext.Registry,
 ): Mir.MirFunction | undefined => {
   const parameterTypes = effectCaptureParameterTypes(
     spec.type.environment.fields,
@@ -839,12 +849,13 @@ export const lowerBuiltinEffectRunner = (
     staticArguments: spec.owner.key.staticArguments,
     contractRow: Object.freeze([
       ...spec.owner.key.contractRow,
-      `builtin-effect-site:${Hir.executableSiteKey(spec.type.site)}`,
+      `builtin-effect-site:${Tir.executableSiteKey(spec.type.site)}`,
     ]),
   })
   const lowering = new FunctionLowering(
     layout,
     index,
+    registry,
     allParameters,
     planFor(ownership, spec.owner.function),
     spec.owner.substitution,
@@ -914,7 +925,7 @@ export const lowerBuiltinEffectRunner = (
     ),
     effectRunner: Object.freeze({
       base: Object.freeze({
-        declaration: Hir.effectRunnerId(spec.type.environment.instance.declaration, spec.type.site),
+        declaration: Tir.effectRunnerId(spec.type.environment.instance.declaration, spec.type.site),
         typeArguments: spec.type.environment.instance.typeArguments,
       }),
       providers: Object.freeze(
@@ -943,6 +954,7 @@ export const lowerWitnessEffectRunner = (
   effectResults: ReadonlyMap<string, ExecutableEffectType>,
   generatedRunners: Array<GeneratedEffectRunner>,
   opaqueRealizations: OpaqueRealization.Catalog,
+  registry: SemanticContext.Registry,
 ): Mir.MirFunction | undefined => {
   const parameterTypes = effectCaptureParameterTypes(
     spec.type.environment.fields,
@@ -973,13 +985,14 @@ export const lowerWitnessEffectRunner = (
     staticArguments: spec.owner.key.staticArguments,
     contractRow: Object.freeze([
       ...spec.owner.key.contractRow,
-      `witness-effect-site:${Hir.executableSiteKey(spec.type.site)}`,
+      `witness-effect-site:${Tir.executableSiteKey(spec.type.site)}`,
       ...spec.providedRequirements.map(providedContractEntry),
     ]),
   })
   const lowering = new FunctionLowering(
     layout,
     index,
+    registry,
     allParameters,
     planFor(ownership, spec.owner.function),
     spec.owner.substitution,
@@ -1153,7 +1166,7 @@ export const lowerWitnessEffectRunner = (
     ),
     effectRunner: Object.freeze({
       base: Object.freeze({
-        declaration: Hir.effectRunnerId(spec.type.environment.instance.declaration, spec.type.site),
+        declaration: Tir.effectRunnerId(spec.type.environment.instance.declaration, spec.type.site),
         typeArguments: spec.type.environment.instance.typeArguments,
       }),
       providers: Object.freeze(

@@ -1,6 +1,7 @@
 import type * as ArtifactPlan from './ArtifactPlan.js'
 import * as NativeRequirement from './NativeRequirement.js'
 import * as DeclarationFacts from './DeclarationFacts.js'
+import * as SemanticContext from './SemanticContext.js'
 import type * as DeclarationIndex from './DeclarationIndex.js'
 /**
  * Module, name, ownership, lowering and backend phases as rows.
@@ -31,17 +32,27 @@ const typeText = (type: Type.Type): string => Type.encode(type)
 const callingScalarText = (scalar: Layout.CallingScalar): string =>
   typeof scalar === 'string' ? scalar : `Address<${Type.encode(scalar.element)},i${scalar.bits}>`
 
-export const closureRows = (closure: ModuleClosure.Closure): ReadonlyArray<RowModel> => {
+export const closureRows = (
+  closure: ModuleClosure.Closure,
+  spans: SemanticContext.Registry,
+): ReadonlyArray<RowModel> => {
   const rows: Array<RowModel> = []
 
   for (const module of closure.modules) {
     const isRoot = module.name === closure.rootModule
-    const span = asSpan(module.syntax.root.span)
+    const spanOfModule = spans.spanOf({
+      _tag: 'AuthoredAnchor',
+      owner: module.authored.module.owner,
+      path: [],
+    })
+    const span = asSpan(spanOfModule)
     rows.push({
       key: `mod-${module.name}`,
       dot: isRoot ? 'symbol' : 'node',
       label: module.name,
-      detail: `${isRoot ? 'root · ' : ''}${module.syntax.source.bytes.length} B`,
+      detail: `${isRoot ? 'root · ' : ''}${module.declarations.length} declaration${
+        module.declarations.length === 1 ? '' : 's'
+      }`,
       span,
       head: true,
       ...(isRoot ? { tone: 'symbol' as const } : {}),
@@ -151,7 +162,10 @@ const conformanceLabel = (conformance: DeclarationFacts.ConformanceFact): string
   return `impl${parameters} ${declaredTypeText(conformance.capability)} for ${declaredTypeText(conformance.provider)}`
 }
 
-export const indexRows = (index: DeclarationIndex.Index): ReadonlyArray<RowModel> => {
+export const indexRows = (
+  index: DeclarationIndex.Index,
+  spans: SemanticContext.Registry,
+): ReadonlyArray<RowModel> => {
   const rows: Array<RowModel> = []
 
   for (const module of index.modules) {
@@ -173,7 +187,7 @@ export const indexRows = (index: DeclarationIndex.Index): ReadonlyArray<RowModel
     })
 
     for (const member of module.members) {
-      const span = asSpan(member.syntax.span)
+      const span = asSpan(spans.spanOf(member.anchor))
       const duplicate = member.canonical._tag === 'Duplicate'
       rows.push({
         key: `idx-${module.module}-${member.id.ordinal}`,
@@ -185,7 +199,7 @@ export const indexRows = (index: DeclarationIndex.Index): ReadonlyArray<RowModel
       })
       if (member._tag === 'EnumDeclaration')
         for (const enumMember of member.members) {
-          const memberSpan = asSpan(enumMember.syntax.span)
+          const memberSpan = asSpan(spans.spanOf(enumMember.anchor))
           rows.push({
             key: `idx-${module.module}-${member.id.ordinal}-enum-member-${enumMember.id.ordinal}`,
             depth: 2,
@@ -200,7 +214,7 @@ export const indexRows = (index: DeclarationIndex.Index): ReadonlyArray<RowModel
     }
 
     for (const conformance of module.conformances) {
-      const span = asSpan(conformance.syntax.span)
+      const span = asSpan(spans.spanOf(conformance.anchor))
       rows.push({
         key: `idx-${module.module}-conformance-${conformance.ordinal}`,
         depth: 1,
@@ -212,7 +226,7 @@ export const indexRows = (index: DeclarationIndex.Index): ReadonlyArray<RowModel
         span,
       })
       for (const [ordinal, operation] of conformance.operations.entries()) {
-        const operationSpan = asSpan(operation.syntax.span)
+        const operationSpan = asSpan(spans.spanOf(operation.anchor))
         rows.push({
           key: `idx-${module.module}-conformance-${conformance.ordinal}-operation-${ordinal}`,
           depth: 2,
@@ -225,7 +239,7 @@ export const indexRows = (index: DeclarationIndex.Index): ReadonlyArray<RowModel
         })
       }
       if (conformance.hook !== undefined) {
-        const hookSpan = asSpan(conformance.hook.syntax.span)
+        const hookSpan = asSpan(spans.spanOf(conformance.hook.anchor))
         rows.push({
           key: `idx-${module.module}-conformance-${conformance.ordinal}-drop-hook`,
           depth: 2,
@@ -255,14 +269,20 @@ const bindingDetail = (binding: NameResolution.Binding): string => {
   }
 }
 
-const bindingSpan = (binding: NameResolution.Binding): Span | undefined => {
-  if (binding._tag === 'ModuleNamespace' || binding._tag === 'ImportedMember')
-    return asSpan(binding.syntax.span)
-  if (binding._tag === 'Unavailable') return asSpan(binding.syntax.span)
+const bindingSpan = (
+  binding: NameResolution.Binding,
+  spans: SemanticContext.Registry,
+): Span | undefined => {
+  if (binding._tag === 'ModuleNamespace') return asSpan(spans.spanOf(binding.anchor))
+  if (binding._tag === 'ImportedMember') return asSpan(spans.spanOf(binding.localAnchor))
+  if (binding._tag === 'Unavailable') return asSpan(spans.spanOf(binding.anchor))
   return undefined
 }
 
-export const resolutionRows = (resolution: NameResolution.Resolution): ReadonlyArray<RowModel> => {
+export const resolutionRows = (
+  resolution: NameResolution.Resolution,
+  spans: SemanticContext.Registry,
+): ReadonlyArray<RowModel> => {
   const rows: Array<RowModel> = []
 
   for (const scope of resolution.modules) {
@@ -277,7 +297,7 @@ export const resolutionRows = (resolution: NameResolution.Resolution): ReadonlyA
     })
 
     for (const [ordinal, binding] of scope.bindings.entries()) {
-      const span = bindingSpan(binding)
+      const span = bindingSpan(binding, spans)
       rows.push({
         key: `res-${scope.module}-${ordinal}`,
         depth: 1,
@@ -292,7 +312,13 @@ export const resolutionRows = (resolution: NameResolution.Resolution): ReadonlyA
 
     for (const [ordinal, outcome] of scope.imports.entries()) {
       const unavailable = outcome._tag === 'Unavailable'
-      const span = asSpan(outcome.import.syntax.span)
+      const span = asSpan(
+        spans.spanOf({
+          _tag: 'AuthoredAnchor',
+          owner: outcome.import.declaration.owner,
+          path: [],
+        }),
+      )
       let detail = 'unavailable'
       if (!unavailable) {
         detail = `${outcome.bindings.length} binding${outcome.bindings.length === 1 ? '' : 's'}`
@@ -388,11 +414,14 @@ const cleanupText = (cleanup: CleanupPlan.CleanupPlan): string => {
   }
 }
 
-export const ownershipRows = (facts: Ownership.ModuleOwnership): ReadonlyArray<RowModel> => {
+export const ownershipRows = (
+  facts: Ownership.ModuleOwnership,
+  spans: SemanticContext.Registry,
+): ReadonlyArray<RowModel> => {
   const rows: Array<RowModel> = []
 
   for (const fn of facts.functions) {
-    const span = asSpan(fn.declaration.syntax.span)
+    const span = asSpan(spans.spanOf(fn.declaration.anchor))
     const moves = fn.bindings.filter((binding) => binding.movedAt !== undefined).length
     const cleanups = fn.exits.reduce((total, exit) => total + exit.releases.length, 0)
     rows.push({
@@ -530,7 +559,10 @@ export const ownershipRows = (facts: Ownership.ModuleOwnership): ReadonlyArray<R
   return rows
 }
 
-export const instanceRows = (discovery: Instances.Discovery): ReadonlyArray<RowModel> => {
+export const instanceRows = (
+  discovery: Instances.Discovery,
+  spans: SemanticContext.Registry,
+): ReadonlyArray<RowModel> => {
   const rows: Array<RowModel> = [
     {
       key: 'roots',
@@ -547,7 +579,7 @@ export const instanceRows = (discovery: Instances.Discovery): ReadonlyArray<RowM
   ]
 
   for (const [ordinal, instance] of discovery.instances.entries()) {
-    const span = asSpan(instance.function.declaration.syntax.span)
+    const span = asSpan(spans.spanOf(instance.function.declaration.anchor))
     rows.push({
       key: `inst-${ordinal}`,
       depth: 1,
@@ -577,7 +609,8 @@ export const instanceRows = (discovery: Instances.Discovery): ReadonlyArray<RowM
 
   for (const [ordinal, violation] of discovery.violations.entries()) {
     const caller = discovery.instances.find((instance) => instance.key === violation.caller)
-    const span = caller === undefined ? undefined : asSpan(caller.function.declaration.syntax.span)
+    const span =
+      caller === undefined ? undefined : asSpan(spans.spanOf(caller.function.declaration.anchor))
     rows.push({
       key: `inst-violation-${ordinal}`,
       depth: 1,
@@ -1155,6 +1188,7 @@ export const symbolRows = (
  * on one row pair is what makes the reordering inspectable rather than folklore.
  */
 export const structValueRows = (
+  spans: SemanticContext.Registry,
   literals: ReadonlyArray<Elaboration.StructLiteralExpressionFact>,
   projections: ReadonlyArray<Elaboration.FieldProjectionExpressionFact>,
   shapes: ReadonlyArray<Layout.CallingShape>,
@@ -1168,7 +1202,7 @@ export const structValueRows = (
     head: true,
   })
   for (const literal of literals) {
-    const span = asSpan(literal.syntax.span)
+    const span = asSpan(spans.spanOf(literal.anchor))
     const key = `lit-${span.start}-${span.end}`
     rows.push({
       key,
@@ -1219,7 +1253,7 @@ export const structValueRows = (
     head: true,
   })
   for (const projection of projections) {
-    const span = asSpan(projection.syntax.span)
+    const span = asSpan(spans.spanOf(projection.anchor))
     const unresolved = projection.state._tag !== 'Resolved'
     rows.push({
       key: `proj-${span.start}-${span.end}`,
@@ -1280,6 +1314,7 @@ const selectorPathText = (path: ReadonlyArray<Layout.Selector>): string =>
 
 /** Canonical array facts from syntax through backend-neutral ABI paths. */
 export const arrayValueRows = (
+  spans: SemanticContext.Registry,
   types: ReadonlyArray<Type.FixedArray>,
   literals: ReadonlyArray<Elaboration.ArrayLiteralExpressionFact>,
   projections: ReadonlyArray<Elaboration.IndexProjectionExpressionFact>,
@@ -1310,7 +1345,7 @@ export const arrayValueRows = (
   ]
 
   for (const [literalOrdinal, literal] of literals.entries()) {
-    const span = asSpan(literal.syntax.span)
+    const span = asSpan(spans.spanOf(literal.anchor))
     const key = `array-literal-${literalOrdinal}`
     let label: string
     if (literal.state._tag === 'Complete') label = typeText(literal.state.type)
@@ -1326,7 +1361,7 @@ export const arrayValueRows = (
       ...(literal.state._tag === 'Complete' ? {} : { tone: 'warning' as const }),
     })
     for (const element of literal.elements) {
-      const elementSpan = asSpan(element.syntax.span)
+      const elementSpan = asSpan(spans.spanOf(element.anchor))
       rows.push({
         key: `${key}-element-${element.ordinal}`,
         depth: 2,
@@ -1347,7 +1382,7 @@ export const arrayValueRows = (
     head: true,
   })
   for (const [ordinal, projection] of projections.entries()) {
-    const span = asSpan(projection.syntax.span)
+    const span = asSpan(spans.spanOf(projection.anchor))
     let boundsDetail = 'bounds unavailable'
     switch (projection.bounds._tag) {
       case 'Proven':

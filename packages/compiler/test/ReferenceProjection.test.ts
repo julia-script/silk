@@ -3,10 +3,11 @@ import { unreachable } from './support/raise.js'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
-import * as Hir from '../src/Hir.js'
+import * as Tir from '../src/Tir.js'
 import type * as Mir from '../src/Mir.js'
 import * as MirVerification from '../src/MirVerification.js'
 import * as Residualization from '../src/Residualization.js'
+import * as SemanticContext from '../src/SemanticContext.js'
 import * as Type from '../src/Type.js'
 import type * as StaticValue from '../src/StaticValue.js'
 import { referenceProjectionAcceptance } from './support/corpus.js'
@@ -69,10 +70,10 @@ it.effect('retains zero-lane reads and nested reborrows while restoring the pare
       'aarch64-apple-darwin',
     )
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
-    const encoded = Hir.encode(Analysis.rootAnalysis(snapshot).hir)
+    const encoded = Tir.encode(Analysis.rootAnalysis(snapshot).tir)
     assert.include(encoded, 'reborrow-value')
     assert.include(encoded, 'readEmpty')
-    assert.deepEqual(Hir.verify(Analysis.rootAnalysis(snapshot).hir), [])
+    assert.deepEqual(Tir.verify(Analysis.rootAnalysis(snapshot).tir), [])
     assert.deepEqual(yield* MirVerification.verify(Analysis.loweredMir(snapshot)), [])
   }),
 )
@@ -118,6 +119,7 @@ pub fn main() -> i32 { return 0 }`),
     const field = aggregate.fields.at(0)
     assert.isDefined(field)
     if (field === undefined || field.declaredType._tag !== 'Resolved') return
+    const fieldSpan = SemanticContext.fromModules(snapshot.closure.modules).spanOf(field.anchor)
     const descriptor: StaticValue.FieldDescriptorValue = Object.freeze({
       _tag: 'FieldDescriptorValue',
       owner: Object.freeze({
@@ -135,9 +137,9 @@ pub fn main() -> i32 { return 0 }`),
       valueType: field.declaredType.type,
       authorization: function_.canonical.id,
       provenance: Object.freeze({
-        sourceId: field.syntax.span.sourceId,
-        start: field.syntax.span.start,
-        end: field.syntax.span.end,
+        sourceId: fieldSpan.sourceId,
+        start: fieldSpan.start,
+        end: fieldSpan.end,
       }),
     })
     const residual = Residualization.residualize(
@@ -166,17 +168,17 @@ pub fn main() -> i32 { return 0 }`),
         : 0,
       1,
     )
-    const expressions = residual.function.statements.flatMap(Hir.statementExpressions)
-    const tree = expressions.flatMap(Hir.expressionTree)
+    const expressions = residual.function.statements.flatMap(Tir.statementExpressions)
+    const tree = expressions.flatMap(Tir.expressionTree)
     const projection = tree.find(
-      (expression): expression is Extract<Hir.Expression, { readonly _tag: 'ValueBorrow' }> =>
+      (expression): expression is Extract<Tir.Expression, { readonly _tag: 'ValueBorrow' }> =>
         expression._tag === 'ValueBorrow',
     )
     assert.isDefined(
       projection,
-      Hir.encode(
+      Tir.encode(
         Object.freeze({
-          _tag: 'HirModule',
+          _tag: 'TirModule',
           module: 'debug',
           functions: Object.freeze([residual.function]),
         }),
@@ -185,9 +187,9 @@ pub fn main() -> i32 { return 0 }`),
     assert.strictEqual(projection?.access, 'Shared')
     assert.strictEqual(projection?.selectors.length, 1)
     assert.strictEqual(projection?.selectors.at(0)?._tag, 'Field')
-    const encoded = Hir.encode(
+    const encoded = Tir.encode(
       Object.freeze({
-        _tag: 'HirModule',
+        _tag: 'TirModule',
         module: 'reference-projection/static-descriptor',
         functions: Object.freeze([residual.function]),
       }),
@@ -195,9 +197,9 @@ pub fn main() -> i32 { return 0 }`),
     assert.isFalse(encoded.includes('Intrinsic.borrowField'))
     assert.isFalse(encoded.includes('Intrinsic.Field'))
     assert.deepEqual(
-      Hir.verify(
+      Tir.verify(
         Object.freeze({
-          _tag: 'HirModule',
+          _tag: 'TirModule',
           module: 'reference-projection/static-descriptor',
           functions: Object.freeze([residual.function]),
         }),
@@ -241,7 +243,7 @@ pub fn main() -> i32 { return 0 }`),
   }),
 )
 
-it.effect('rejects invalid mixed field-projection calling shapes before residual HIR', () =>
+it.effect('rejects invalid mixed field-projection calling shapes before residual TIR', () =>
   Effect.gen(function* () {
     const wrongOwner = yield* Analysis.ofSource(
       'reference-projection/static-descriptor-owner',

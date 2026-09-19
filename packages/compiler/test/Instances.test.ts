@@ -16,7 +16,7 @@ import * as Analysis from '../src/Analysis.js'
 import * as Backend from '../src/Backend.js'
 import * as Layout from '../src/Layout.js'
 import * as Lifetime from '../src/Lifetime.js'
-import * as Hir from '../src/Hir.js'
+import * as Tir from '../src/Tir.js'
 import * as FunctionIndex from '../src/internal/FunctionIndex.js'
 import * as Instances from '../src/Instances.js'
 import * as LlvmBackend from '../src/LlvmBackend.js'
@@ -24,7 +24,7 @@ import * as Match from '../src/Match.js'
 import * as Mir from '../src/Mir.js'
 import * as MirEncoding from '../src/MirEncoding.js'
 import * as MirVerification from '../src/MirVerification.js'
-import * as Realization from '../src/Realization.js'
+import * as Preparation from '../src/Preparation.js'
 import * as Type from '../src/Type.js'
 import * as SuspensionMode from '../src/SuspensionMode.js'
 import { unreachable } from './support/raise.js'
@@ -139,21 +139,21 @@ it.effect('discovers reachable call chains once and terminates recursion', () =>
   Effect.gen(function* () {
     const analyzedNested = yield* snapshot(nestedSource)
     const nested = Analysis.instancesOf(analyzedNested)
-    const hir = Analysis.rootAnalysis(analyzedNested).hir
-    for (const fn of hir.functions) {
+    const tir = Analysis.rootAnalysis(analyzedNested).tir
+    for (const fn of tir.functions) {
       if (fn.declaration.canonical._tag !== 'Canonical') continue
       const declaration = fn.declaration.canonical.id
-      assert.strictEqual(FunctionIndex.hirByName(hir, declaration.name), fn)
-      assert.strictEqual(FunctionIndex.hirByCanonical(hir, declaration), fn)
+      assert.strictEqual(FunctionIndex.tirByName(tir, declaration.name), fn)
+      assert.strictEqual(FunctionIndex.tirByCanonical(tir, declaration), fn)
       assert.strictEqual(
-        FunctionIndex.hirByCanonical(hir, { ...declaration, module: 'missing' }),
+        FunctionIndex.tirByCanonical(tir, { ...declaration, module: 'missing' }),
         undefined,
       )
     }
-    assert.strictEqual(FunctionIndex.hirByName(hir, 'missing'), undefined)
-    assert.strictEqual(FunctionIndex.hirByName(undefined, 'main'), undefined)
+    assert.strictEqual(FunctionIndex.tirByName(tir, 'missing'), undefined)
+    assert.strictEqual(FunctionIndex.tirByName(undefined, 'main'), undefined)
     // A changed immutable snapshot must not inherit the old module's cached entries.
-    assert.strictEqual(FunctionIndex.hirByName({ ...hir, functions: [] }, 'main'), undefined)
+    assert.strictEqual(FunctionIndex.tirByName({ ...tir, functions: [] }, 'main'), undefined)
     const direct = Analysis.instancesOf(yield* snapshot('pub fn main() -> i32 { return main() }'))
     const mutual = Analysis.instancesOf(
       yield* snapshot(`pub fn main() -> i32 { return other() }
@@ -237,9 +237,12 @@ it.effect('roots native libraries at C exports without selecting main', () =>
 export "C" fn increment(value: i32) -> i32 { return helper(value) }
 pub fn main() -> i32 { return 0 }`),
     )
-    const prepared = yield* Realization.prepare(frontend, 'aarch64-apple-darwin', {
-      artifactKind: 'NativeSharedLibrary',
-    }).pipe(Effect.provide(SourceResolver.empty))
+    const prepared = Preparation.preparation(
+      yield* Preparation.promote(frontend, 'aarch64-apple-darwin', {
+        artifactKind: 'NativeSharedLibrary',
+        emission: true,
+      }).pipe(Effect.provide(SourceResolver.empty)),
+    )
     assert.strictEqual(prepared._tag, 'Prepared')
     if (prepared._tag !== 'Prepared') return
     assert.deepStrictEqual(
@@ -267,9 +270,12 @@ it.effect('emits an empty native library without retaining unrelated public func
       'library/Empty',
       ascii('pub fn helper() -> i32 { return 42 }'),
     )
-    const prepared = yield* Realization.prepare(frontend, 'aarch64-apple-darwin', {
-      artifactKind: 'NativeStaticLibrary',
-    }).pipe(Effect.provide(SourceResolver.empty))
+    const prepared = Preparation.preparation(
+      yield* Preparation.promote(frontend, 'aarch64-apple-darwin', {
+        artifactKind: 'NativeStaticLibrary',
+        emission: true,
+      }).pipe(Effect.provide(SourceResolver.empty)),
+    )
     assert.strictEqual(prepared._tag, 'Prepared')
     if (prepared._tag === 'Prepared') {
       assert.deepEqual(prepared.program.functions, [])
@@ -391,7 +397,7 @@ pub fn main() -> i32 { return run forward(relay()) }`)
       )
       assert.notStrictEqual(owner, undefined)
       if (owner === undefined) continue
-      const ownerSpan = owner.function.declaration.syntax.span
+      const ownerSpan = discovery.registry.spanOf(owner.function.declaration.anchor)
       assert.strictEqual(call.span.sourceId, ownerSpan.sourceId)
       assert.isAtLeast(call.span.start, ownerSpan.start)
       assert.isAtMost(call.span.end, ownerSpan.end)
@@ -839,24 +845,24 @@ pub fn main() -> i32 {
     assert.deepEqual(Analysis.diagnostics(first), [])
     assert.deepEqual(Analysis.diagnostics(second), [])
 
-    const firstHir = Analysis.rootAnalysis(first).hir
-    const secondHir = Analysis.rootAnalysis(second).hir
-    assert.strictEqual(Hir.encode(firstHir), Hir.encode(secondHir))
-    const hiddenNames = (hir: Hir.Module) =>
-      hir.functions.flatMap((fn) =>
+    const firstTir = Analysis.rootAnalysis(first).tir
+    const secondTir = Analysis.rootAnalysis(second).tir
+    assert.strictEqual(Tir.encode(firstTir), Tir.encode(secondTir))
+    const hiddenNames = (tir: Tir.Module) =>
+      tir.functions.flatMap((fn) =>
         fn.declaration.canonical._tag === 'Canonical' &&
         fn.declaration.canonical.id.name.includes('$callable$')
           ? [fn.declaration.canonical.id.name]
           : [],
       )
-    assert.deepEqual(hiddenNames(firstHir), [
+    assert.deepEqual(hiddenNames(firstTir), [
       'main$callable$0',
       'main$callable$1',
       'main$callable$2',
     ])
-    assert.deepEqual(hiddenNames(firstHir), hiddenNames(secondHir))
+    assert.deepEqual(hiddenNames(firstTir), hiddenNames(secondTir))
 
-    const main = firstHir.functions.find(
+    const main = firstTir.functions.find(
       (fn) =>
         fn.declaration.canonical._tag === 'Canonical' &&
         fn.declaration.canonical.id.name === 'main',
@@ -865,13 +871,13 @@ pub fn main() -> i32 {
       main === undefined
         ? []
         : main.statements
-            .flatMap(Hir.statementExpressions)
-            .flatMap(Hir.expressionTree)
+            .flatMap(Tir.statementExpressions)
+            .flatMap(Tir.expressionTree)
             .filter(
               (
                 expression,
               ): expression is Extract<
-                Hir.Expression,
+                Tir.Expression,
                 {
                   readonly _tag: 'CallableSection'
                 }
@@ -921,7 +927,7 @@ pub fn main() -> i32 {
       ],
     )
 
-    const hidden = firstHir.functions.find(
+    const hidden = firstTir.functions.find(
       (fn) =>
         fn.declaration.canonical._tag === 'Canonical' &&
         fn.declaration.canonical.id.name === 'main$callable$2',
@@ -1932,8 +1938,10 @@ pub fn main() -> i32 { return run Effect.suspend(effect { return 42 }) }
       suspended.index.modules.some((module) => module.module === 'silk/execution_storage'),
     )
     assert.isTrue(suspended.toolingModules.has('silk/execution_storage'))
-    const prepared = yield* Realization.prepare(suspended, 'wasm32-unknown-unknown').pipe(
-      Effect.provide(SourceResolver.empty),
+    const prepared = Preparation.preparation(
+      yield* Preparation.promote(suspended, 'wasm32-unknown-unknown', { emission: true }).pipe(
+        Effect.provide(SourceResolver.empty),
+      ),
     )
     assert.strictEqual(prepared._tag, 'Prepared')
     if (prepared._tag === 'Prepared') {

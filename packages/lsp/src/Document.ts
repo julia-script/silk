@@ -6,12 +6,13 @@ import * as Diagnostic from '@silklang/compiler/Diagnostic'
 import * as FormattedDocument from '@silklang/compiler/FormattedDocument'
 import * as ImportPath from '@silklang/compiler/ImportPath'
 import * as ImportPlan from '@silklang/compiler/ImportPlan'
-import * as Presentation from '@silklang/compiler/Presentation'
+import * as SemanticDisplay from '@silklang/compiler/SemanticDisplay'
 import * as SemanticOccurrence from '@silklang/compiler/SemanticOccurrence'
 import * as SourceAction from '@silklang/compiler/SourceAction'
 import * as SourceFile from '@silklang/compiler/SourceFile'
 import * as SourceSpan from '@silklang/compiler/SourceSpan'
 import * as Stdlib from '@silklang/compiler/Stdlib'
+import type * as SemanticContext from '@silklang/compiler/SemanticContext'
 import type * as SyntaxFile from '@silklang/compiler/SyntaxFile'
 import * as SyntaxTree from '@silklang/compiler/SyntaxTree'
 import type * as Token from '@silklang/compiler/Token'
@@ -53,6 +54,18 @@ import {
 import * as LineIndex from './LineIndex.js'
 
 const decoder = new TextDecoder()
+
+/**
+ * The retained concrete syntax of one module.
+ *
+ * Only the syntax-shaped editor features read this — formatting, folding, lexical token colors and
+ * the import-list edits. Everything semantic answers from facts and their authored anchors.
+ */
+const moduleSyntax = (
+  snapshot: Analysis.FrontendSnapshot,
+  module: string,
+): SyntaxFile.SyntaxFile | undefined =>
+  snapshot.closure.modules.find((candidate) => candidate.name === module)?.syntax
 
 /** One open Silk source document with its canonical module identity and line map. */
 export interface Document {
@@ -196,7 +209,7 @@ const importRedundancies = (
   self: Document,
   snapshot: Analysis.FrontendSnapshot,
 ): ReadonlyArray<ImportRedundancy> => {
-  const syntax = Analysis.moduleAnalysis(snapshot, self.module)?.syntax
+  const syntax = moduleSyntax(snapshot, self.module)
   if (syntax === undefined) return []
   const source = syntax.source
   const result: Array<ImportRedundancy> = []
@@ -698,7 +711,7 @@ export const codeActions = Effect.fn('Document.codeActions')(function* (
   const compiler = diagnostics.flatMap((diagnostic, order) => {
     const source = published[order]
     if (source === undefined || !overlaps(source.range, range)) return []
-    const syntax = Analysis.moduleAnalysis(snapshot, self.module)?.syntax
+    const syntax = moduleSyntax(snapshot, self.module)
     const propagation = syntax === undefined ? undefined : propagationEdit(self, syntax, diagnostic)
     const contract =
       propagation === undefined
@@ -1047,7 +1060,7 @@ export const signatureHelp = (
   snapshot: Analysis.FrontendSnapshot,
   position: Position,
 ): SignatureHelp | undefined => {
-  const syntax = Analysis.moduleAnalysis(snapshot, self.module)?.syntax
+  const syntax = moduleSyntax(snapshot, self.module)
   if (syntax === undefined) return undefined
   const offset = LineIndex.offsetOf(self.index, position)
   const call = enclosingCall(syntax.root, offset)
@@ -1078,7 +1091,7 @@ export const signatureHelp = (
           ? Object.freeze({
               fields: declaration.fields,
               kind: 'Struct' as const,
-              presentation: Presentation.structDeclaration(declaration).text,
+              presentation: SemanticDisplay.structDeclaration(declaration).text,
             })
           : undefined
       }
@@ -1097,7 +1110,7 @@ export const signatureHelp = (
         ? Object.freeze({
             fields: resolvedVariant.variant.fields,
             kind: 'UnionVariant' as const,
-            presentation: Presentation.unionVariant(
+            presentation: SemanticDisplay.unionVariant(
               resolvedUnion.declaration,
               resolvedVariant.variant,
             ).text,
@@ -1108,7 +1121,7 @@ export const signatureHelp = (
     const fields = selected.fields.filter(
       (field) => field.visibility === 'Public' || occurrence.declaration?.module === self.module,
     )
-    const fieldList = fields.map((field) => Presentation.field(field).text).join(', ')
+    const fieldList = fields.map((field) => SemanticDisplay.field(field).text).join(', ')
     const label =
       selected.kind === 'Struct'
         ? `${selected.presentation} { ${fieldList} }`
@@ -1141,7 +1154,7 @@ export const signatureHelp = (
       signatures: [
         {
           label,
-          parameters: fields.map((field) => ({ label: Presentation.field(field).text })),
+          parameters: fields.map((field) => ({ label: SemanticDisplay.field(field).text })),
           ...(documentation === undefined || documentation.length === 0
             ? {}
             : { documentation: { kind: 'markdown' as const, value: documentation } }),
@@ -1170,9 +1183,9 @@ export const signatureHelp = (
   return {
     signatures: [
       {
-        label: Presentation.functionDeclaration(declaration).text,
+        label: SemanticDisplay.functionDeclaration(declaration).text,
         parameters: declaration.parameters.map((parameter) => ({
-          label: Presentation.parameter(parameter).text,
+          label: SemanticDisplay.parameter(parameter).text,
         })),
         ...(documentation === undefined || documentation.length === 0
           ? {}
@@ -1195,7 +1208,7 @@ const importedModuleAt = (
   snapshot: Analysis.FrontendSnapshot,
   offset: number,
 ): ImportedModuleTarget | undefined => {
-  const syntax = Analysis.moduleAnalysis(snapshot, self.module)?.syntax
+  const syntax = moduleSyntax(snapshot, self.module)
   if (syntax === undefined) return undefined
   for (const declaration of SyntaxTree.directNodes(syntax.root, 'ImportDeclaration')) {
     const path = SyntaxTree.directNode(declaration, 'ImportPath')
@@ -1672,7 +1685,7 @@ export const completion = Effect.fn('Document.completion')(function* (
     return { isIncomplete: false, items: [...items] }
 
   const inventory = yield* loadInventory
-  const syntax = Analysis.moduleAnalysis(snapshot, self.module)?.syntax
+  const syntax = moduleSyntax(snapshot, self.module)
   if (syntax === undefined) return { isIncomplete: false, items: [...items] }
   const visible = new Set(items.map((item) => item.label))
   const imported = new Set<string>()
@@ -1828,10 +1841,10 @@ export const completion = Effect.fn('Document.completion')(function* (
 const inherentImplSymbols = (
   self: Document,
   headers: DeclarationFacts.ModuleHeaders,
+  spans: SemanticContext.Registry,
 ): ReadonlyArray<DocumentSymbol> =>
   headers.inherentImpls.map((impl) => {
-    const owner = SyntaxTree.tokens(impl.syntax).find((token) => token.kind === 'Identifier')
-    const range = LineIndex.rangeOf(self.index, SyntaxTree.span(impl.syntax))
+    const range = LineIndex.rangeOf(self.index, spans.spanOf(impl.anchor))
     const children = headers.members.flatMap((member): ReadonlyArray<DocumentSymbol> =>
       member._tag === 'FunctionDeclaration' &&
       member.associatedMember?.ordinal === impl.ordinal &&
@@ -1839,10 +1852,10 @@ const inherentImplSymbols = (
         ? [
             {
               name: member.name.spelling,
-              detail: Presentation.functionDeclaration(member).text,
+              detail: SemanticDisplay.functionDeclaration(member).text,
               kind: member.associatedMember.receiver ? SymbolKind.Method : SymbolKind.Function,
-              range: LineIndex.rangeOf(self.index, SyntaxTree.span(member.syntax)),
-              selectionRange: LineIndex.rangeOf(self.index, member.name.token.span),
+              range: LineIndex.rangeOf(self.index, spans.spanOf(member.anchor)),
+              selectionRange: LineIndex.rangeOf(self.index, spans.spanOf(member.name.anchor)),
             },
           ]
         : [],
@@ -1851,7 +1864,7 @@ const inherentImplSymbols = (
       name: `impl ${impl.ownerSpelling}`,
       kind: SymbolKind.Object,
       range,
-      selectionRange: owner === undefined ? range : LineIndex.rangeOf(self.index, owner.span),
+      selectionRange: LineIndex.rangeOf(self.index, spans.spanOf(impl.owner.anchor)),
       ...(children.length > 0 ? { children } : {}),
     }
   })
@@ -1865,12 +1878,13 @@ export const symbols = (
     (candidate) => candidate.module === self.module,
   )
   if (headers === undefined) return []
+  const spans = snapshot.resolution.contexts
   const members = headers.members.flatMap((member): ReadonlyArray<DocumentSymbol> => {
     if (member.name._tag !== 'Present') return []
     // Inherent members are nested under their impl, never listed at module level.
     if (member._tag === 'FunctionDeclaration' && member.associatedMember !== undefined) return []
-    const range = LineIndex.rangeOf(self.index, SyntaxTree.span(member.syntax))
-    const selectionRange = LineIndex.rangeOf(self.index, member.name.token.span)
+    const range = LineIndex.rangeOf(self.index, spans.spanOf(member.anchor))
+    const selectionRange = LineIndex.rangeOf(self.index, spans.spanOf(member.name.anchor))
     if (member._tag === 'FunctionDeclaration') {
       return [
         {
@@ -1924,8 +1938,11 @@ export const symbols = (
                   {
                     name: operation.name.spelling,
                     kind: SymbolKind.Method,
-                    range: LineIndex.rangeOf(self.index, SyntaxTree.span(operation.syntax)),
-                    selectionRange: LineIndex.rangeOf(self.index, operation.name.token.span),
+                    range: LineIndex.rangeOf(self.index, spans.spanOf(operation.anchor)),
+                    selectionRange: LineIndex.rangeOf(
+                      self.index,
+                      spans.spanOf(operation.name.anchor),
+                    ),
                   },
                 ]
               : [],
@@ -1942,8 +1959,11 @@ export const symbols = (
                     {
                       name: enumMember.name.spelling,
                       kind: SymbolKind.EnumMember,
-                      range: LineIndex.rangeOf(self.index, SyntaxTree.span(enumMember.syntax)),
-                      selectionRange: LineIndex.rangeOf(self.index, enumMember.name.token.span),
+                      range: LineIndex.rangeOf(self.index, spans.spanOf(enumMember.anchor)),
+                      selectionRange: LineIndex.rangeOf(
+                        self.index,
+                        spans.spanOf(enumMember.name.anchor),
+                      ),
                     },
                   ]
                 : [],
@@ -1966,8 +1986,8 @@ export const symbols = (
               {
                 name: variant.name.spelling,
                 kind: SymbolKind.EnumMember,
-                range: LineIndex.rangeOf(self.index, SyntaxTree.span(variant.syntax)),
-                selectionRange: LineIndex.rangeOf(self.index, variant.name.token.span),
+                range: LineIndex.rangeOf(self.index, spans.spanOf(variant.anchor)),
+                selectionRange: LineIndex.rangeOf(self.index, spans.spanOf(variant.name.anchor)),
                 ...(variant.fields.length === 0
                   ? {}
                   : {
@@ -1977,10 +1997,10 @@ export const symbols = (
                               {
                                 name: field.name.spelling,
                                 kind: SymbolKind.Field,
-                                range: LineIndex.rangeOf(self.index, SyntaxTree.span(field.syntax)),
+                                range: LineIndex.rangeOf(self.index, spans.spanOf(field.anchor)),
                                 selectionRange: LineIndex.rangeOf(
                                   self.index,
-                                  field.name.token.span,
+                                  spans.spanOf(field.name.anchor),
                                 ),
                               },
                             ]
@@ -2007,8 +2027,8 @@ export const symbols = (
             {
               name: field.name.spelling,
               kind: SymbolKind.Field,
-              range: LineIndex.rangeOf(self.index, SyntaxTree.span(field.syntax)),
-              selectionRange: LineIndex.rangeOf(self.index, field.name.token.span),
+              range: LineIndex.rangeOf(self.index, spans.spanOf(field.anchor)),
+              selectionRange: LineIndex.rangeOf(self.index, spans.spanOf(field.name.anchor)),
             },
           ]
         : [],
@@ -2023,7 +2043,7 @@ export const symbols = (
       },
     ]
   })
-  return [...members, ...inherentImplSymbols(self, headers)].sort(
+  return [...members, ...inherentImplSymbols(self, headers, spans)].sort(
     (left, right) =>
       left.range.start.line - right.range.start.line ||
       left.range.start.character - right.range.start.character,
@@ -2183,7 +2203,7 @@ export const semanticTokens = (
   self: Document,
   snapshot: Analysis.FrontendSnapshot,
 ): SemanticTokens => {
-  const syntax = Analysis.moduleAnalysis(snapshot, self.module)?.syntax
+  const syntax = moduleSyntax(snapshot, self.module)
   if (syntax === undefined) return { data: [] }
   const source = Analysis.sources(snapshot).get(self.module)
   const occurrences =
@@ -2272,7 +2292,7 @@ export const foldingRanges = (
   self: Document,
   snapshot: Analysis.FrontendSnapshot,
 ): ReadonlyArray<FoldingRange> => {
-  const syntax = Analysis.moduleAnalysis(snapshot, self.module)?.syntax
+  const syntax = moduleSyntax(snapshot, self.module)
   if (syntax === undefined) return []
   const ranges: Array<FoldingRange> = []
   const visit = (node: SyntaxTree.Node): void => {
@@ -2328,11 +2348,12 @@ export const foldingRanges = (
 /** Builds the protocol item naming one source-backed declaration of the analyzed project. */
 const callHierarchyItem = (
   declaration: DeclarationFacts.MemberFact,
+  spans: SemanticContext.Registry,
   indexOf: (module: string) => LineIndex.LineIndex | undefined,
   uriOf: (module: string) => string | undefined,
 ): CallHierarchyItem | undefined => {
   if (declaration.name._tag !== 'Present') return undefined
-  const module = declaration.name.token.span.sourceId
+  const module = declaration.name.anchor.owner.module
   const uri = uriOf(module)
   const index = indexOf(module)
   if (uri === undefined || index === undefined) return undefined
@@ -2340,11 +2361,11 @@ const callHierarchyItem = (
     name: declaration.name.spelling,
     kind: declaration._tag === 'FunctionDeclaration' ? SymbolKind.Function : SymbolKind.Constant,
     ...(declaration._tag === 'FunctionDeclaration'
-      ? { detail: Presentation.functionDeclaration(declaration).text }
+      ? { detail: SemanticDisplay.functionDeclaration(declaration).text }
       : {}),
     uri,
-    range: LineIndex.rangeOf(index, SyntaxTree.span(declaration.syntax)),
-    selectionRange: LineIndex.rangeOf(index, declaration.name.token.span),
+    range: LineIndex.rangeOf(index, spans.spanOf(declaration.anchor)),
+    selectionRange: LineIndex.rangeOf(index, spans.spanOf(declaration.name.anchor)),
     data: SemanticOccurrence.identityKey(
       Object.freeze({
         _tag: 'DeclarationIdentity',
@@ -2367,15 +2388,17 @@ const enclosingDeclaration = (
   snapshot: Analysis.FrontendSnapshot,
   module: string,
   span: SourceSpan.SourceSpan,
-): DeclarationFacts.MemberFact | undefined =>
-  functionDeclarations(snapshot).find((declaration) => {
-    const declarationSpan = SyntaxTree.span(declaration.syntax)
+): DeclarationFacts.MemberFact | undefined => {
+  const spans = snapshot.resolution.contexts
+  return functionDeclarations(snapshot).find((declaration) => {
+    const declarationSpan = spans.spanOf(declaration.anchor)
     return (
       declarationSpan.sourceId === module &&
       declarationSpan.start <= span.start &&
       span.end <= declarationSpan.end
     )
   })
+}
 
 /**
  * Names the function the cursor selects, which anchors both call directions.
@@ -2400,8 +2423,11 @@ export const prepareCallHierarchy = (
   if (identity._tag !== 'DeclarationIdentity') return []
   const declaration = Analysis.declarationForIdentity(snapshot, identity)
   if (declaration?._tag !== 'FunctionDeclaration') return []
-  const item = callHierarchyItem(declaration, lineIndexes(self, snapshot), (module) =>
-    module === self.module ? self.uri : uriOf(module),
+  const item = callHierarchyItem(
+    declaration,
+    snapshot.resolution.contexts,
+    lineIndexes(self, snapshot),
+    (module) => (module === self.module ? self.uri : uriOf(module)),
   )
   return item === undefined ? [] : Object.freeze([item])
 }
@@ -2463,7 +2489,7 @@ export const incomingCalls = (
       existing.ranges.push(range)
       continue
     }
-    const from = callHierarchyItem(caller, indexOf, uriOfModule)
+    const from = callHierarchyItem(caller, snapshot.resolution.contexts, indexOf, uriOfModule)
     if (from === undefined) continue
     callers.set(key, { item: from, ranges: [range] })
   }
@@ -2487,7 +2513,7 @@ export const outgoingCalls = (
 ): ReadonlyArray<CallHierarchyOutgoingCall> => {
   const caller = declarationOfItem(snapshot, item)
   if (caller === undefined) return []
-  const body = SyntaxTree.span(caller.syntax)
+  const body = snapshot.resolution.contexts.spanOf(caller.anchor)
   const module = body.sourceId
   const indexOf = lineIndexes(self, snapshot)
   const callerIndex = indexOf(module)
@@ -2508,7 +2534,7 @@ export const outgoingCalls = (
       existing.ranges.push(range)
       continue
     }
-    const to = callHierarchyItem(callee, indexOf, uriOfModule)
+    const to = callHierarchyItem(callee, snapshot.resolution.contexts, indexOf, uriOfModule)
     if (to === undefined) continue
     callees.set(key, { item: to, ranges: [range] })
   }
@@ -2522,7 +2548,7 @@ export const format = Effect.fnUntraced(function* (
   self: Document,
   snapshot: Analysis.FrontendSnapshot,
 ): Effect.fn.Return<ReadonlyArray<TextEdit>, never> {
-  const syntax = Analysis.moduleAnalysis(snapshot, self.module)?.syntax
+  const syntax = moduleSyntax(snapshot, self.module)
   if (syntax === undefined) return []
   const formatted = yield* Effect.result(Formatter.format(syntax))
   if (Result.isFailure(formatted) || !formatted.success.changed) return []

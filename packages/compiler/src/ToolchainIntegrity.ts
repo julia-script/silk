@@ -257,7 +257,7 @@ const installedComponents = (): ReadonlyArray<Component> => {
                 compiler: compilerDigest,
                 target,
                 operation: entry.operation,
-                hir: entry.hir,
+                tir: entry.tir,
                 mir: entry.mir,
               }),
             ),

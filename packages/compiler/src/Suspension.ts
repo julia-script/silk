@@ -1,5 +1,5 @@
 import type * as DeclarationFacts from './DeclarationFacts.js'
-import type * as Hir from './Hir.js'
+import type * as Tir from './Tir.js'
 import type * as Instances from './Instances.js'
 import type * as Layout from './Layout.js'
 import type * as Mir from './Mir.js'
@@ -48,7 +48,7 @@ export interface SuspensionPointId {
 }
 
 export type SuspensionBorrowIdentity =
-  | { readonly _tag: 'MirLoan'; readonly borrow: Hir.BorrowId }
+  | { readonly _tag: 'MirLoan'; readonly borrow: Tir.BorrowId }
   | { readonly _tag: 'BorrowedParameter'; readonly parameterOrdinal: number }
   | { readonly _tag: 'BorrowedLocal'; readonly local: Mir.LocalId }
 

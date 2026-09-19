@@ -51,7 +51,7 @@ it.effect(
       const loanStart = contractRejectionSource.lastIndexOf('&mut decoder')
       assert.notStrictEqual(loanStart, -1)
       const construction =
-        " Completion<'owner> {kindValue: CompletionKind.Delimited, marker: marker}"
+        "Completion<'owner> {kindValue: CompletionKind.Delimited, marker: marker}"
       const constructionStart = contractRejectionSource.indexOf(construction)
       assert.notStrictEqual(constructionStart, -1)
       assert.deepEqual(

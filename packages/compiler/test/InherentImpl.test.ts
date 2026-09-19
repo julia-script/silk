@@ -280,7 +280,7 @@ it.effect('keeps elided inherent Self fixed to the owner lifetime', () =>
     assert.deepEqual(codes(snapshot), ['SEM0129'])
     assert.strictEqual(
       Analysis.diagnostics(snapshot).at(0)?.span.start,
-      source.indexOf(' SliceStream<A> { slice:'),
+      source.indexOf('SliceStream<A> { slice:'),
     )
     const lookup = Analysis.memberByName(snapshot, 'root', 'SliceStream.make')
     const member =

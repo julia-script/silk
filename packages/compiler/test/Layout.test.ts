@@ -868,7 +868,7 @@ pub fn main() -> i32 {
     )
     assert.strictEqual(unavailable?.reason._tag, 'IntrinsicTargetUnavailable')
     assert.strictEqual(unavailable?.span.sourceId, 'layout/local-shared-overflow')
-    assert.strictEqual(unavailable?.span.start, 67)
+    assert.strictEqual(unavailable?.span.start, 68)
     assert.strictEqual(unavailable?.span.end, 115)
     assert.throws(() => Analysis.loweredMir(snapshot), /MIR is unavailable/)
   }),
@@ -884,6 +884,7 @@ pub fn main() -> i32 { return 42 }`),
     const catalog = yield* Layout.catalog(
       Target.aarch64AppleDarwin,
       Analysis.declarationIndex(snapshot),
+      snapshot.resolution.contexts,
     )
     const plan = yield* Layout.plan(catalog, Analysis.instancesOf(snapshot), snapshot.index)
 
@@ -1653,7 +1654,11 @@ pub fn main() -> i32 { return 42 }`),
       [Target.aarch64AppleDarwin, 8, 64],
       [Target.wasm32UnknownUnknown, 4, 32],
     ] as const) {
-      const catalog = yield* Layout.catalog(target, Analysis.declarationIndex(snapshot))
+      const catalog = yield* Layout.catalog(
+        target,
+        Analysis.declarationIndex(snapshot),
+        snapshot.resolution.contexts,
+      )
       const pointer = Type.pointer({
         mutable: true,
         pointee: Type.nominal('layout/pointer', 'Opaque'),

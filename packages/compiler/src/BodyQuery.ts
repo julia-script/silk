@@ -1,4 +1,6 @@
-import * as Option from 'effect/Option'
+import type * as AuthoredHir from './AuthoredHir.js'
+import * as AuthoredIdentity from './AuthoredIdentity.js'
+import * as AuthoredLowering from './AuthoredLowering.js'
 import type * as DeclarationFacts from './DeclarationFacts.js'
 import type * as DeclarationIndex from './DeclarationIndex.js'
 import type * as Elaboration from './Elaboration.js'
@@ -6,10 +8,9 @@ import type * as ExpressionAnalysis from './ExpressionAnalysis.js'
 import * as ModuleSurface from './ModuleSurface.js'
 import type * as NameResolution from './NameResolution.js'
 import type * as Ownership from './Ownership.js'
+import * as Tir from './Tir.js'
 import * as SemanticRebinding from './SemanticRebinding.js'
-import * as SourceFile from './SourceFile.js'
-import * as SourceOrigin from './SourceOrigin.js'
-import * as SyntaxTree from './SyntaxTree.js'
+import type * as SemanticContext from './SemanticContext.js'
 
 /** Actual source-body query work, independent of module invalidation observations. */
 export interface Counters {
@@ -32,7 +33,13 @@ interface Dependency {
 
 interface Entry {
   readonly declaration: DeclarationFacts.DeclarationFact
-  readonly source: SourceFile.SourceFile
+  /**
+   * The authored declaration behind this body. Declaration facts are rebuilt every revision, so
+   * only the authored node — which the closure shares whenever a module's source is unchanged —
+   * can witness that a body's own input is untouched and its cached facts need no rebinding.
+   */
+  readonly authoredDeclaration: AuthoredHir.Declaration
+  readonly context: SemanticContext.SemanticContext
   readonly index: DeclarationIndex.Index
   readonly implementation: string
   readonly signature: string
@@ -63,6 +70,13 @@ export interface BodyQuery {
   readonly owners: WeakMap<object, string>
   readonly previous: ReadonlyMap<string, Entry>
   readonly previousModules: ReadonlyMap<string, Elaboration.Result>
+  /**
+   * Whether each module of this revision shares its authored lowering with the previous revision.
+   * A shared lowering is the only evidence that a module's declarations kept their authored
+   * positions, because every declaration fact is rebuilt each revision. Resolved for the whole
+   * closure up front, so a body may consult a module whose own bodies are not yet checked.
+   */
+  readonly sharedModules: ReadonlyMap<string, boolean>
   readonly entries: Map<string, Entry>
   readonly reuse: WeakMap<
     Elaboration.FunctionFact,
@@ -87,7 +101,7 @@ const records = (value: unknown): value is Readonly<Record<string, unknown>> =>
 const memberKey = (value: DeclarationFacts.MemberFact): string =>
   'canonical' in value && value.canonical._tag === 'Canonical'
     ? `${value.canonical.id.module}/${value.canonical.id.name}`
-    : `${value._tag}:${value.syntax.span.sourceId}:${value.syntax.span.start}`
+    : `${value._tag}:${AuthoredIdentity.anchorKey(value.anchor)}`
 
 const memberCatalogs = new WeakMap<
   DeclarationIndex.Index,
@@ -113,8 +127,12 @@ const membersOf = (
 export const make = (
   index: DeclarationIndex.Index,
   previous: Iterable<Elaboration.Result> = [],
+  current: Iterable<AuthoredLowering.Lowered> = [],
 ): BodyQuery => {
   const previousResults = [...previous]
+  const previousLowerings = new Map(
+    previousResults.map((result) => [result.authored.module.owner.module, result.authored]),
+  )
   const members = membersOf(index)
   const owners = new WeakMap<object, string>()
   for (const [key, member] of members)
@@ -152,7 +170,15 @@ export const make = (
         ),
       ),
     ),
-    previousModules: new Map(previousResults.map((result) => [result.syntax.source.id, result])),
+    previousModules: new Map(
+      previousResults.map((result) => [result.authored.module.owner.module, result]),
+    ),
+    sharedModules: new Map(
+      [...current].map((lowered) => {
+        const module = lowered.module.owner.module
+        return [module, previousLowerings.get(module) === lowered] as const
+      }),
+    ),
     entries: new Map(),
     reuse: new WeakMap(),
     parents: new WeakMap(),
@@ -168,61 +194,28 @@ export const make = (
   }
 }
 
-const spelling = (source: SourceFile.SourceFile, node: SyntaxTree.Element): string =>
-  Option.getOrElse(SourceFile.spelling(source, node.span), () => '')
-
-const body = (declaration: DeclarationFacts.DeclarationFact): SyntaxTree.Node =>
-  declaration.syntax.children.filter(SyntaxTree.isNode).find((node) => node.kind === 'Block') ??
-  declaration.syntax
-
-const tokens = (
-  source: SourceFile.SourceFile,
-  node: SyntaxTree.Node,
-): ReadonlyArray<readonly [string, string]> => {
-  const result: Array<readonly [string, string]> = []
-  const visit = (element: SyntaxTree.Element): void => {
-    if (SyntaxTree.isNode(element)) for (const child of element.children) visit(child)
-    else if (
-      SyntaxTree.isToken(element) &&
-      !['Whitespace', 'LineComment', 'DocComment', 'ModuleDocComment'].includes(element.kind)
-    )
-      result.push([element.kind, spelling(source, element)])
-  }
-  visit(node)
-  return result
-}
-
-const implementation = (
-  source: SourceFile.SourceFile,
+/** The authored declaration behind one indexed declaration; the pipeline lowers every module. */
+const authoredDeclaration = (
+  authored: AuthoredLowering.Lowered,
   declaration: DeclarationFacts.DeclarationFact,
-): string => {
-  const lifetimes = new Map(
-    declaration.typeParameters
-      .filter((parameter) => parameter.type.kind === 'Lifetime')
-      .flatMap((parameter) =>
-        parameter.name._tag === 'Present'
-          ? [[parameter.name.spelling, parameter.type.ordinal] as const]
-          : [],
-      ),
-  )
-  return JSON.stringify(
-    tokens(source, body(declaration)).map(([kind, text]) => [
-      kind,
-      kind === 'Lifetime' ? (lifetimes.get(text) ?? text) : text,
-    ]),
-  )
-}
+) =>
+  AuthoredLowering.declarationOf(authored, declaration.owner) ??
+  (() => {
+    throw new RangeError(`Authored module lost declaration ${memberKey(declaration)}`)
+  })()
+
+/** The canonical authored body up to lifetime alpha-renaming: the syntax-free implementation key. */
+const implementation = (
+  authored: AuthoredLowering.Lowered,
+  declaration: DeclarationFacts.DeclarationFact,
+): string => AuthoredLowering.canonicalBody(authored, authoredDeclaration(authored, declaration))
 
 const scopeSignature = (
-  source: SourceFile.SourceFile,
+  authored: AuthoredLowering.Lowered,
   declaration: DeclarationFacts.DeclarationFact,
   scope: NameResolution.ModuleScope,
 ): string => {
-  const names = new Set(
-    tokens(source, body(declaration))
-      .filter(([kind]) => kind === 'Identifier')
-      .map(([, text]) => text),
-  )
+  const names = AuthoredLowering.bodyNames(authored, authoredDeclaration(authored, declaration))
   return JSON.stringify(
     scope.bindings
       .filter((binding) => names.has(binding.spelling))
@@ -345,10 +338,13 @@ const correspondence = (previous: Entry, self: BodyQuery): SemanticRebinding.Sem
     const current = self.members.get(key)
     if (current === undefined) continue
     SemanticRebinding.pair(result, oldMember, current)
-    SemanticRebinding.syntax(result, oldMember.syntax, current.syntax)
   }
   return result
 }
+
+/** The authored module owning one dependency key's member fact, absent when the key is unresolved. */
+const dependencyModule = (self: BodyQuery, key: string): string | undefined =>
+  self.members.get(key)?.anchor.owner.module
 
 const validateDependencies = (
   self: BodyQuery,
@@ -381,7 +377,8 @@ const validateDependencies = (
 /** Runs the body checker only when its own implementation or a consumed input changed. */
 export const check = (
   self: BodyQuery,
-  source: SourceFile.SourceFile,
+  context: SemanticContext.SemanticContext,
+  authored: AuthoredLowering.Lowered,
   scope: NameResolution.ModuleScope,
   declaration: DeclarationFacts.DeclarationFact,
   hiddenFunctions: Array<Elaboration.FunctionFact>,
@@ -390,11 +387,12 @@ export const check = (
   const key = memberKey(declaration)
   const prior = self.previous.get(key)
   const signature = self.signatures.get(key) ?? ModuleSurface.memberSignature(declaration)
-  const bodyKey = implementation(source, declaration)
-  const scopeKey = scopeSignature(source, declaration, scope)
+  const declared = authoredDeclaration(authored, declaration)
+  const bodyKey = implementation(authored, declaration)
+  const scopeKey = scopeSignature(authored, declaration, scope)
   const valid =
     prior !== undefined &&
-    SourceOrigin.equals(prior.source.origin, source.origin) &&
+    AuthoredIdentity.equals(prior.context.module.owner, context.module.owner) &&
     prior.signature === signature &&
     prior.implementation === bodyKey &&
     prior.scope === scopeKey &&
@@ -404,21 +402,30 @@ export const check = (
   let hidden: ReadonlyArray<Elaboration.FunctionFact>
   if (valid && prior !== undefined) {
     self.work.reused += 1
-    const previousMembers = membersOf(prior.index)
+    // Declaration and member facts are rebuilt every revision, so their object identity never
+    // survives one; only the authored lowering is shared, and only for a byte-identical source.
+    // A shared authored declaration therefore witnesses that this body kept its own positions, and
+    // a shared lowering behind every consumed member witnesses the same for its inputs. Together
+    // they mean the cached facts still name live anchors, so reuse needs no rebinding.
     const unchanged =
-      prior.declaration.syntax === declaration.syntax &&
-      prior.dependencies.every(
-        (dependency) =>
-          previousMembers.get(dependency.key)?.syntax === self.members.get(dependency.key)?.syntax,
-      )
+      prior.authoredDeclaration === declared &&
+      prior.dependencies.every((dependency) => {
+        const module = dependencyModule(self, dependency.key)
+        return module !== undefined && self.sharedModules.get(module) === true
+      })
     const rebinding = unchanged ? undefined : correspondence(prior, self)
     if (rebinding !== undefined) {
-      SemanticRebinding.pair(rebinding, prior.source, source)
+      SemanticRebinding.pairPresentations(rebinding, prior.context, context)
       for (const hidden of prior.hidden) {
-        const syntax = SemanticRebinding.rebind(rebinding, hidden.declaration.syntax)
+        // The hidden body keeps its site; only its enclosing declaration's ordinal can move.
+        const site =
+          hidden.declaration.canonical._tag === 'Canonical'
+            ? Tir.anonymousCallableSite(hidden.declaration.canonical.id)
+            : undefined
+        if (site === undefined) throw new RangeError('Hidden body lost its anonymous callable site')
         SemanticRebinding.pair(rebinding, hidden.declaration.id, {
           ...hidden.declaration.id,
-          ordinal: 0x70000000 + syntax.span.start,
+          ordinal: Tir.hiddenDeclarationOrdinal(declaration.id.ordinal, site),
         })
       }
     }
@@ -440,7 +447,8 @@ export const check = (
   }
   self.entries.set(key, {
     declaration,
-    source,
+    authoredDeclaration: declared,
+    context,
     index: self.index,
     implementation: bodyKey,
     signature,
@@ -490,10 +498,10 @@ export const ownership = (
 
 /** Attaches current query artifacts to their immutable elaboration boundary for the next revision. */
 export const publish = (self: BodyQuery, result: Elaboration.Result): Elaboration.Result => {
-  const previous = self.previousModules.get(result.syntax.source.id)
+  const previous = self.previousModules.get(result.authored.module.owner.module)
   const published =
     previous !== undefined &&
-    previous.syntax === result.syntax &&
+    previous.authored === result.authored &&
     previous.functions.length === result.functions.length &&
     previous.hiddenFunctions.length === result.hiddenFunctions.length &&
     result.functions.every((fact, ordinal) => fact === previous.functions[ordinal]) &&

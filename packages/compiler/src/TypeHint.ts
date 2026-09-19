@@ -1,16 +1,16 @@
 import * as Elaboration from './Elaboration.js'
 import type * as NameResolution from './NameResolution.js'
-import type * as Presentation from './Presentation.js'
-import * as PresentationRenderer from './Presentation.js'
+import * as SemanticDisplay from './SemanticDisplay.js'
 import * as SourceSpan from './SourceSpan.js'
-import * as SyntaxTree from './SyntaxTree.js'
+import type * as AuthoredHir from './AuthoredHir.js'
+import type * as SemanticContext from './SemanticContext.js'
 import * as Type from './Type.js'
 
 /** One inferred local-binding type anchored to its exact declared name. */
 export interface BindingTypeHint {
   readonly _tag: 'BindingTypeHint'
   readonly span: SourceSpan.SourceSpan
-  readonly presentation: Presentation.Presentation
+  readonly presentation: SemanticDisplay.Presentation
 }
 
 /** One or more omitted provider selectors sharing one call-site insertion point. */
@@ -18,7 +18,7 @@ export interface ProviderSelectorTypeHint {
   readonly _tag: 'ProviderSelectorTypeHint'
   readonly span: SourceSpan.SourceSpan
   readonly selected: ReadonlyArray<Type.Requirement>
-  readonly presentation: Presentation.Presentation
+  readonly presentation: SemanticDisplay.Presentation
 }
 
 export type TypeHint = BindingTypeHint | ProviderSelectorTypeHint
@@ -29,13 +29,20 @@ const compareText = (left: string, right: string): number => {
   return 0
 }
 
-const selectorSyntax = (expression: Elaboration.ExpressionFact): SyntaxTree.Node | undefined => {
-  if (expression._tag === 'Call') return expression.syntax
+/**
+ * The callee an omitted provider selector would be spelled after. The hint is inserted at the
+ * end of that reference, which is where the authored argument list opens.
+ */
+/** The named end of one reference path, which is where the authored argument list opens. */
+const pathAnchor = (path: Elaboration.ReferencePathFact): AuthoredHir.Anchor =>
+  path._tag === 'ReferencePath' ? path.memberAnchor : path.anchor
+
+const selectorCallee = (expression: Elaboration.ExpressionFact): AuthoredHir.Anchor | undefined => {
+  if (expression._tag === 'Call') return pathAnchor(expression.path)
   if (expression._tag !== 'CallableApply') return undefined
-  if (expression.provenance._tag === 'DirectCallableApplication') return expression.syntax
-  return expression.provenance.callable._tag === 'CallableSection'
-    ? expression.provenance.callable.syntax
-    : undefined
+  if (expression.provenance._tag === 'DirectCallableApplication') return expression.callee.anchor
+  const callable = expression.provenance.callable
+  return callable._tag === 'CallableSection' ? pathAnchor(callable.path) : undefined
 }
 
 const selectorFacts = (
@@ -53,6 +60,7 @@ const selectorFacts = (
 
 /** Projects available inferred editor facts into one half-open byte range. */
 export const make = (
+  context: SemanticContext.SemanticContext,
   functions: ReadonlyArray<Elaboration.FunctionFact>,
   module: string,
   scope: NameResolution.ModuleScope | undefined,
@@ -63,7 +71,7 @@ export const make = (
   const hints: Array<TypeHint> = []
   for (const binding of functions.flatMap((fn) => fn.bindings)) {
     if (binding.name._tag !== 'Present' || binding.inferredType._tag !== 'Available') continue
-    const span = binding.name.token.span
+    const span = context.spanOf(binding.name.anchor)
     if (span.start < start || span.end > end) continue
     const key = `${span.sourceId}:${span.start}:${span.end}`
     if (seen.has(key)) continue
@@ -72,7 +80,7 @@ export const make = (
       Object.freeze({
         _tag: 'BindingTypeHint',
         span,
-        presentation: PresentationRenderer.expressionType(binding.inferredType.type, module, scope),
+        presentation: SemanticDisplay.expressionType(binding.inferredType.type, module, scope),
       }),
     )
   }
@@ -89,19 +97,10 @@ export const make = (
       expression: (expression) => {
         const selectors = selectorFacts(expression)
         if (selectors.length === 0) return
-        const syntax = selectorSyntax(expression)
-        if (syntax?.kind !== 'CallExpression' || !SyntaxTree.isAvailableSyntax(syntax)) return
-        const arguments_ = SyntaxTree.directNode(syntax, 'ArgumentList')
-        const leftParenthesis =
-          arguments_ === undefined
-            ? undefined
-            : SyntaxTree.directToken(arguments_, 'LeftParenthesis')
-        if (leftParenthesis === undefined) return
-        const span = SourceSpan.fromOffsets(
-          leftParenthesis.span.sourceId,
-          leftParenthesis.span.start,
-          leftParenthesis.span.start,
-        )
+        const callee = selectorCallee(expression)
+        if (callee === undefined) return
+        const calleeSpan = context.spanOf(callee)
+        const span = SourceSpan.fromOffsets(calleeSpan.sourceId, calleeSpan.end, calleeSpan.end)
         if (span === undefined || span.start < start || span.start >= end) return
         const key = `${span.sourceId}:${span.start}`
         const group = selectorGroups.get(key) ?? Object.freeze({ span, selectors: new Map() })
@@ -127,7 +126,7 @@ export const make = (
       .flatMap((selector) =>
         Type.isNominal(selector.selected.capability)
           ? [
-              PresentationRenderer.providerSelector(
+              SemanticDisplay.providerSelector(
                 Object.freeze({
                   capability: selector.selected.capability,
                   role: selector.selected.role,

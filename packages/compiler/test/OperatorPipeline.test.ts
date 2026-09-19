@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
-import * as Hir from '../src/Hir.js'
+import * as Tir from '../src/Tir.js'
 import * as MirEncoding from '../src/MirEncoding.js'
 import * as MirVerification from '../src/MirVerification.js'
 const encoder = new TextEncoder()
@@ -37,7 +37,7 @@ it.effect('lowers negation to generated zero plus source-authored trapping subtr
   }),
 )
 
-it.effect('pins one operator pipeline through canonical HIR, MIR, and LLVM', () =>
+it.effect('pins one operator pipeline through canonical TIR, MIR, and LLVM', () =>
   Effect.gen(function* () {
     const snapshot = yield* AnalysisFixture.retainingMain(
       'golden/operator',
@@ -46,7 +46,7 @@ it.effect('pins one operator pipeline through canonical HIR, MIR, and LLVM', () 
     )
     const artifact = yield* Analysis.codegen(snapshot, { mode: 'release' })
 
-    assert.strictEqual(Hir.encode(Analysis.rootAnalysis(snapshot).hir), golden('hir.txt'))
+    assert.strictEqual(Tir.encode(Analysis.rootAnalysis(snapshot).tir), golden('tir.txt'))
     assert.strictEqual(MirEncoding.encode(Analysis.loweredMir(snapshot)), golden('mir.txt'))
     assert.strictEqual(artifact.ir, golden('ll.txt'))
     assert.strictEqual(

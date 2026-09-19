@@ -5,7 +5,7 @@ import * as Analysis from '../src/Analysis.js'
 import * as ConformanceProof from '../src/ConformanceProof.js'
 import * as ConformanceGoal from '../src/ConformanceGoal.js'
 import * as DeclarationIndex from '../src/DeclarationIndex.js'
-import * as Hir from '../src/Hir.js'
+import * as Tir from '../src/Tir.js'
 import * as Lifetime from '../src/Lifetime.js'
 import * as MirEncoding from '../src/MirEncoding.js'
 import * as MirVerification from '../src/MirVerification.js'
@@ -97,15 +97,15 @@ effect fn invoke<'a, C: Read<'a>>(client: &C, request: Request<'a>) -> Request<'
 }`),
     )
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
-    const hir = Projections.hirOf(snapshot, module) ?? raise('expected HIR')
+    const tir = Projections.tirOf(snapshot, module) ?? raise('expected TIR')
     const fn =
-      hir.functions.find(
+      tir.functions.find(
         (fn) => fn.declaration.name._tag === 'Present' && fn.declaration.name.spelling === 'invoke',
       ) ?? raise('expected invocation')
     const call =
       fn.statements
-        .flatMap(Hir.statementExpressions)
-        .flatMap(Hir.expressionTree)
+        .flatMap(Tir.statementExpressions)
+        .flatMap(Tir.expressionTree)
         .find((expression) => expression._tag === 'InterfaceOperationCall') ??
       raise('expected interface call')
     if (call._tag !== 'InterfaceOperationCall') return
@@ -265,7 +265,7 @@ fn missing<T>(value: T) -> () {
         code: diagnostic.code,
         start: diagnostic.span.start,
       })),
-      [{ code: 'SEM0121', start: source.lastIndexOf(' accept(') }],
+      [{ code: 'SEM0121', start: source.lastIndexOf('accept(') }],
     )
   }),
 )
@@ -310,7 +310,7 @@ pub fn main() -> i32 {
   return run bridge(&mut provider, ConcreteHandler {})
 }`,
     )
-    const hir = Projections.hirOf(snapshot, 'conditional-conformance/effect-context')
+    const tir = Projections.tirOf(snapshot, 'conditional-conformance/effect-context')
     const discovery = Analysis.instancesOf(snapshot)
     assert.deepEqual(
       discovery.specializationFailures.map((failure) => ({
@@ -347,8 +347,8 @@ pub fn main() -> i32 {
       (instance) => instance.key.declaration.name === 'acquire',
     )
     const contextualOperation = acquireInstance?.function.statements
-      .flatMap(Hir.statementExpressions)
-      .flatMap(Hir.expressionTree)
+      .flatMap(Tir.statementExpressions)
+      .flatMap(Tir.expressionTree)
       .find((expression) => expression._tag === 'InterfaceOperationCall')
     assert.strictEqual(contextualOperation?._tag, 'InterfaceOperationCall')
     if (acquireInstance === undefined || contextualOperation?._tag !== 'InterfaceOperationCall')
@@ -394,10 +394,10 @@ pub fn main() -> i32 {
           call.runnerTypeArguments.every(Type.isRuntimeConcreteGenericArgument),
       ),
     )
-    const acquireCall = hir?.functions
+    const acquireCall = tir?.functions
       .flatMap((fn) => fn.statements)
-      .flatMap(Hir.statementExpressions)
-      .flatMap(Hir.expressionTree)
+      .flatMap(Tir.statementExpressions)
+      .flatMap(Tir.expressionTree)
       .find(
         (expression) =>
           expression._tag === 'EffectConstruct' && expression.target.name === 'acquire',
@@ -439,7 +439,7 @@ pub fn main() -> i32 { return 0 }`
       'conditional-conformance/effect-context-invalid',
       negativeSource,
     )
-    const responsibleExpression = ' acquire(move provider, move context)'
+    const responsibleExpression = 'acquire(move provider, move context)'
     const missingCallStart = negativeSource.indexOf(responsibleExpression)
     const mismatchedCallStart = negativeSource.lastIndexOf(responsibleExpression)
     assert.deepEqual(
@@ -833,28 +833,28 @@ pub fn main() -> i32 { return 0 }`,
   }),
 )
 
-it.effect('keeps the conditional witness question unresolved in generic HIR', () =>
+it.effect('keeps the conditional witness question unresolved in generic TIR', () =>
   Effect.gen(function* () {
     const snapshot = yield* analyze(
-      'conditional-conformance/generic-hir',
+      'conditional-conformance/generic-tir',
       `${nestedDecoder}
 
 pub fn main() -> i32 {
   return decodeOf<OptionalSchema<Schema>>(OptionalSchema<Schema> { source: Schema { tag: 1 } })
 }`,
     )
-    const hir = Projections.hirOf(snapshot, 'conditional-conformance/generic-hir')
-    assert.isDefined(hir)
-    if (hir === undefined) return
-    const encoded = Hir.encode(hir)
+    const tir = Projections.tirOf(snapshot, 'conditional-conformance/generic-tir')
+    assert.isDefined(tir)
+    if (tir === undefined) return
+    const encoded = Tir.encode(tir)
     // The wrapper's body names the interface, the operation, and the bounded parameter it dispatches
     // over — and no witness. Which conformance answers it is decided per specialization, so a
     // generic body that already carried an answer would have to carry one answer for every provider.
     assert.isTrue(
-      encoded.includes('interface conditional-conformance/generic-hir.Decoder.decode over S'),
+      encoded.includes('interface conditional-conformance/generic-tir.Decoder.decode over S'),
     )
     for (const spelling of ['witness', 'dictionary', 'vtable'])
-      assert.isFalse(encoded.includes(spelling), `${spelling} reached generic HIR`)
+      assert.isFalse(encoded.includes(spelling), `${spelling} reached generic TIR`)
   }),
 )
 

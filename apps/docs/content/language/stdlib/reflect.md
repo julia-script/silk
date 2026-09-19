@@ -9,7 +9,7 @@ Finite aggregate metadata available only during static evaluation.
 ## Details
 
 Reflection retains nominal owner and visible declaration order. Descriptors have no runtime
-representation and disappear before runtime HIR is published.
+representation and disappear before runtime TIR is published.
 
 Import as `Reflect` with `import silk.reflect { Reflect }`.
 

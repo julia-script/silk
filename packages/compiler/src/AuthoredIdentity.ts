@@ -104,6 +104,19 @@ export const equals = (self: Identity, other: Identity): boolean =>
     )
   })
 
+/** A string key for one owner identity: equal exactly when `equals` holds, usable in maps. */
+export const key = (self: Identity): string =>
+  `${self.namespace}:${self.module}${self.path
+    .map(
+      (part) =>
+        `/${part.kind}${part.name === undefined ? '' : `=${part.name}`}${part.role === undefined ? '' : `@${part.role}`}#${part.occurrence}`,
+    )
+    .join('')}`
+
+/** A string key for one owner-local anchor, usable in maps keyed by authored position. */
+export const anchorKey = (self: Anchor): string =>
+  `${key(self.owner)}${self.path.map((part) => `|${part.role}#${part.occurrence}`).join('')}`
+
 /** Copy and freeze a local anchor, rejecting invalid occurrence numbers as typed failures. */
 export const anchor = Effect.fn('AuthoredIdentity.anchor')(function* (
   owner: Identity,

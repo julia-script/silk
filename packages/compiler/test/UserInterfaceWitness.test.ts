@@ -173,7 +173,7 @@ pub fn main() -> i32 { return 0 }`,
         diagnostic.span.start,
         diagnostic.span.end,
       ]),
-      [['SEM0083', 213, 239]],
+      [['SEM0083', 216, 239]],
     )
   }),
 )

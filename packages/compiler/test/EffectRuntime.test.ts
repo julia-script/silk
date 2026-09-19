@@ -92,7 +92,7 @@ it.effect('resolves flatten through the ordinary declaration path without an int
       "pub effect<'env> fn flatten",
     )
 
-    const constructed = (Projections.hirOf(snapshot, module)?.functions ?? []).flatMap((fn) =>
+    const constructed = (Projections.tirOf(snapshot, module)?.functions ?? []).flatMap((fn) =>
       fn.statements.flatMap((statement) =>
         statement._tag === 'Bind' && statement.initializer._tag === 'EffectConstruct'
           ? [

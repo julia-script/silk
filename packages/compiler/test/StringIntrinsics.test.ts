@@ -1,7 +1,7 @@
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
-import * as Hir from '../src/Hir.js'
+import * as Tir from '../src/Tir.js'
 import * as Intrinsic from '../src/Intrinsic.js'
 import * as Lifetime from '../src/Lifetime.js'
 import * as Type from '../src/Type.js'
@@ -99,16 +99,16 @@ it('publishes the minimal portable string intrinsic catalog with exact signature
   )
 })
 
-it.effect('retains runtime string identity and provenance in HIR', () =>
+it.effect('retains runtime string identity and provenance in TIR', () =>
   Effect.gen(function* () {
     const snapshot = yield* Analysis.ofSource('string/intrinsics', encoder.encode(source))
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
-    const hir = Projections.hirOf(snapshot, 'string/intrinsics')
-    assert.isDefined(hir)
-    if (hir === undefined) return
+    const tir = Projections.tirOf(snapshot, 'string/intrinsics')
+    assert.isDefined(tir)
+    if (tir === undefined) return
 
-    const expressions = hir.functions.flatMap((fn) =>
-      fn.statements.flatMap(Hir.statementExpressions).flatMap(Hir.expressionTree),
+    const expressions = tir.functions.flatMap((fn) =>
+      fn.statements.flatMap(Tir.statementExpressions).flatMap(Tir.expressionTree),
     )
     const runtimeView = expressions.find((expression) => expression._tag === 'RuntimeStringView')
     assert.strictEqual(runtimeView?._tag, 'RuntimeStringView')
@@ -129,8 +129,8 @@ it.effect('retains runtime string identity and provenance in HIR', () =>
     assert.isTrue(
       expressions.some((expression) => expression._tag === 'StringEquality' && !expression.negated),
     )
-    assert.include(Hir.encode(hir), 'runtime-string-view loans=none : string')
-    assert.deepEqual(Hir.verify(hir), [])
+    assert.include(Tir.encode(tir), 'runtime-string-view loans=none : string')
+    assert.deepEqual(Tir.verify(tir), [])
   }),
 )
 
@@ -144,11 +144,11 @@ fn scalar() -> bool { return 1 == 1 }
 pub fn main() -> i32 { return 0 }`),
     )
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
-    const hir = Projections.hirOf(snapshot, 'string/operators')
-    assert.isDefined(hir)
-    if (hir !== undefined) {
-      const expressions = hir.functions.flatMap((fn) =>
-        fn.statements.flatMap(Hir.statementExpressions).flatMap(Hir.expressionTree),
+    const tir = Projections.tirOf(snapshot, 'string/operators')
+    assert.isDefined(tir)
+    if (tir !== undefined) {
+      const expressions = tir.functions.flatMap((fn) =>
+        fn.statements.flatMap(Tir.statementExpressions).flatMap(Tir.expressionTree),
       )
       const equality = expressions.filter((expression) => expression._tag === 'StringEquality')
       assert.deepEqual(
@@ -166,8 +166,8 @@ pub fn main() -> i32 { return 0 }`),
           (expression) => expression._tag === 'BuiltinCall' && expression.operation === 'Equals',
         ),
       )
-      assert.include(Hir.encode(hir), 'string-not-equals intrinsic=Intrinsic.stringEqualsExact')
-      assert.deepEqual(Hir.verify(hir), [])
+      assert.include(Tir.encode(tir), 'string-not-equals intrinsic=Intrinsic.stringEqualsExact')
+      assert.deepEqual(Tir.verify(tir), [])
     }
 
     const mixed = yield* Analysis.ofSource(

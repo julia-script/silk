@@ -336,7 +336,7 @@ it('rejects missing lifetime solver inputs instead of treating them as unconstra
 it('keeps nominal identity independent of field shape and import spelling', () => {
   const first = Type.nominal('syntax/Tree', 'Node')
   const repeated = Type.nominal('syntax/Tree', 'Node')
-  const otherModule = Type.nominal('hir/Tree', 'Node')
+  const otherModule = Type.nominal('tir/Tree', 'Node')
 
   assert.strictEqual(Type.equals(first, repeated), true)
   assert.strictEqual(Type.equals(first, otherModule), false)
@@ -1988,7 +1988,7 @@ fn caller() -> i32 { let local = 2 let view = identity(&local) return view.* }`
         diagnostics
           .filter((diagnostic) => diagnostic.code === Diagnostic.expiredLifetimeCode)
           .map((diagnostic) => diagnostic.span.start),
-        source.indexOf('return view') + 'return'.length,
+        source.indexOf('return view') + 'return '.length,
       )
       assert.isFalse(
         diagnostics.some((diagnostic) => diagnostic.span.start >= source.indexOf('fn caller')),

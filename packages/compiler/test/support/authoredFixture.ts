@@ -96,6 +96,12 @@ export const broadModule = Effect.fnUntraced(function* (): Effect.fn.Return<
     environment: [],
     unsafe: false,
     static: false,
+    effectAnchor: undefined,
+    unsafeAnchor: undefined,
+    staticAnchor: undefined,
+    genericsAnchor: undefined,
+    failuresAnchor: undefined,
+    constraintsAnchor: undefined,
   })
   const linkage = (owner: AuthoredIdentity.Identity): AuthoredHir.Linkage => ({
     ...node(owner, 'linkage'),
@@ -176,6 +182,7 @@ export const broadModule = Effect.fnUntraced(function* (): Effect.fn.Return<
           ...named(owner, 'Record'),
           _tag: 'StructHeader',
           generics: [],
+          genericsAnchor: undefined,
           fields: [
             {
               ...node(owner, 'field'),
@@ -237,6 +244,7 @@ export const broadModule = Effect.fnUntraced(function* (): Effect.fn.Return<
               _tag: 'Variant',
               name: name(owner, 'Empty', 'variant-name'),
               fields: [],
+              braces: false,
             },
           ],
         }
@@ -331,6 +339,7 @@ export const broadModule = Effect.fnUntraced(function* (): Effect.fn.Return<
           type: unit(owner),
           mutable: true,
           linkage: linkage(owner),
+          properties: [],
         }
         break
       case 'foreign':

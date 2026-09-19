@@ -5,7 +5,7 @@ import type * as DeclarationFacts from './DeclarationFacts.js'
 import type * as DeclarationIndex from './DeclarationIndex.js'
 import * as ExecutionPackage from './ExecutionPackage.js'
 import * as ExecutionTransition from './ExecutionTransition.js'
-import * as Hir from './Hir.js'
+import * as Tir from './Tir.js'
 import * as Instances from './Instances.js'
 import * as Layout from './Layout.js'
 import * as LocalSharedControlBlock from './LocalSharedControlBlock.js'
@@ -66,7 +66,7 @@ export const local = (ordinal: number): Mir.LocalId => Object.freeze({ _tag: 'Lo
 export const spanKey = (span: SourceSpan.SourceSpan): string => `${span.start}:${span.end}`
 export const patternKey = (binding: Match.BindingId): string =>
   `${spanKey(binding.arm.match.span)}:${binding.arm.ordinal}:${binding.ordinal}`
-export const borrowKey = (borrow: Hir.BorrowId): string =>
+export const borrowKey = (borrow: Tir.BorrowId): string =>
   `${borrow.function.sourceId}:${borrow.function.ordinal}:${borrow.callSpan.start}:${borrow.callSpan.end}:${borrow.ordinal}`
 
 export interface ProvidedRequirement {
@@ -86,7 +86,7 @@ export type ExecutableEffectType = Extract<
 
 export const specializeProvider = (
   fn: FunctionLowering,
-  provider: Extract<Hir.Expression, { readonly _tag: 'EffectBindRequirement' }>['provider'],
+  provider: Extract<Tir.Expression, { readonly _tag: 'EffectBindRequirement' }>['provider'],
 ): ProvidedRequirement | undefined => {
   const proof = Instances.requirementSelection(fn.owner, provider)
   if (proof === undefined) return undefined
@@ -109,8 +109,8 @@ export const specializeProvider = (
 
 import type { FunctionLowering } from './FunctionLowering.js'
 export interface DelayedEffectState {
-  readonly recipes: ReadonlyMap<number, Hir.Expression>
-  readonly loanEnds: ReadonlyMap<number, ReadonlyArray<Hir.BorrowId>>
+  readonly recipes: ReadonlyMap<number, Tir.Expression>
+  readonly loanEnds: ReadonlyMap<number, ReadonlyArray<Tir.BorrowId>>
   readonly loanLocals: ReadonlyMap<string, Mir.LocalId>
 }
 
@@ -289,7 +289,7 @@ import { baseRunnerKey, effectValueType, instanceText } from './ValueType.js'
 /**
  * Re-proves source witness effects while their concrete instance context is still authoritative.
  *
- * A generated block runner retains authored HIR, whose interface call remains intentionally
+ * A generated block runner retains source-authored TIR, whose interface call remains intentionally
  * symbolic. Repeating discovery's declaration substitution here, and carrying that exact target
  * into the runner, prevents lowering's proof-context compatibility from replacing the source
  * conformance identity when its execution boundary is synthesized later.
@@ -297,10 +297,10 @@ import { baseRunnerKey, effectValueType, instanceText } from './ValueType.js'
 export const specializedWitnessEffectTargets = (
   index: DeclarationIndex.Index,
   owner: Instances.Instance,
-  block: Extract<Hir.Expression, { readonly _tag: 'EffectBlock' }>,
+  block: Extract<Tir.Expression, { readonly _tag: 'EffectBlock' }>,
 ): ReadonlyArray<SpecializedWitnessEffectTarget> =>
   Object.freeze(
-    Hir.runtimeExpressionTree(block).flatMap((expression) => {
+    Tir.runtimeExpressionTree(block).flatMap((expression) => {
       if (
         (expression._tag !== 'BuiltinCall' && expression._tag !== 'InterfaceOperationCall') ||
         expression.witnessEffectSite === undefined
@@ -332,6 +332,7 @@ export const lowerProgram = (
   opaqueRealizations: OpaqueRealization.Catalog,
   trace: CompilerTrace.CompilerTrace = CompilerTrace.none,
 ): Mir.Module => {
+  const registry = discovery.registry
   const declaredForeignStatics = trace('Lower.collectForeignStatics', () => {
     const declaredForeignStatics = Object.freeze(
       index.modules.flatMap((module) =>
@@ -342,7 +343,7 @@ export const lowerProgram = (
             ? [
                 Object.freeze({
                   declaration: member.canonical.id,
-                  declarationSpan: member.syntax.span,
+                  declarationSpan: registry.spanOf(member.anchor),
                   direction: member.direction,
                   symbol: member.foreign.symbol,
                   type: member.declaredType.type,
@@ -366,14 +367,14 @@ export const lowerProgram = (
     const staticDataById = new Map<
       string,
       Extract<
-        Hir.Expression,
+        Tir.Expression,
         { readonly _tag: 'StaticStringLiteral' | 'StaticByteViewLiteral' }
       >['data']
     >()
     for (const instance of discovery.instances) {
       for (const expression of instance.function.statements
-        .flatMap(Hir.statementExpressions)
-        .flatMap(Hir.runtimeExpressionTree)) {
+        .flatMap(Tir.statementExpressions)
+        .flatMap(Tir.runtimeExpressionTree)) {
         if (
           expression._tag === 'StaticStringLiteral' ||
           expression._tag === 'StaticByteViewLiteral'
@@ -427,7 +428,7 @@ export const lowerProgram = (
         generatedRunners.push(
           Object.freeze({
             _tag: 'BlockEffectRunner',
-            id: Hir.effectRunnerId(instance.key.declaration, block.site),
+            id: Tir.effectRunnerId(instance.key.declaration, block.site),
             owner: instance,
             block,
             type,
@@ -463,6 +464,7 @@ export const lowerProgram = (
             effectResults,
             generatedRunners,
             opaqueRealizations,
+            registry,
           ),
         {
           'function.module': instance.key.declaration.module,
@@ -568,6 +570,7 @@ export const lowerProgram = (
             effectResults,
             generatedRunners,
             opaqueRealizations,
+            registry,
           ),
         {
           'function.module': generated.id.module,
@@ -591,6 +594,7 @@ export const lowerProgram = (
             effectResults,
             generatedRunners,
             opaqueRealizations,
+            registry,
           ),
         {
           'function.module': generated.id.module,
@@ -612,6 +616,7 @@ export const lowerProgram = (
             effectResults,
             generatedRunners,
             opaqueRealizations,
+            registry,
           ),
         {
           'function.module': generated.id.module,
@@ -633,6 +638,7 @@ export const lowerProgram = (
             effectResults,
             generatedRunners,
             opaqueRealizations,
+            registry,
           ),
         {
           'function.module': generated.id.module,

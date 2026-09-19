@@ -710,7 +710,7 @@ pub fn main() -> i32 {
         )
         assert.deepEqual(
           diagnostics.map((entry) => source.slice(entry.span.start, entry.span.end)),
-          [` ${call}`],
+          [call],
         )
       }
     }),
@@ -1286,7 +1286,7 @@ it('matches the checked intrinsic inventory and records every unsafe invariant',
     unsafe: entry.unsafe,
     admission: entry.admission,
     consumer: entry.consumer,
-    ...(entry.hir === undefined ? {} : { identity: entry.hir }),
+    ...(entry.tir === undefined ? {} : { identity: entry.tir }),
     ...(entry.invariant === undefined ? {} : { invariant: entry.invariant }),
   }))
   assert.deepEqual(fixture, { targets: Intrinsic.runtimeTargets, entries })
@@ -1352,7 +1352,7 @@ it('matches the checked intrinsic inventory and records every unsafe invariant',
   assert.isFalse(
     externalParking.some((entry) =>
       /cancel|destroy|scheduler|timer|payload|allocator/i.test(
-        `${entry.operation} ${entry.signature} ${entry.hir}`,
+        `${entry.operation} ${entry.signature} ${entry.tir}`,
       ),
     ),
   )
@@ -1513,7 +1513,7 @@ it.effect('rejects numeric operands to raw pointer address observation at the ca
     )
     assert.deepEqual(
       Analysis.diagnostics(snapshot).map((entry) => [entry.code, entry.span.start, entry.span.end]),
-      [['SEM0215', 30, 63]],
+      [['SEM0215', 31, 63]],
     )
   }),
 )

@@ -4,7 +4,7 @@ import type * as NativeValue from './NativeValue.js'
 import * as FunctionBody from '@silklang/llvm/FunctionBody'
 import type * as Value from '@silklang/llvm/Value'
 import * as Effect from 'effect/Effect'
-import * as Hir from './Hir.js'
+import * as Tir from './Tir.js'
 import * as Layout from './Layout.js'
 import * as NativePlace from './NativePlace.js'
 import type * as Mir from './Mir.js'
@@ -31,7 +31,7 @@ export const capturedArguments = Effect.fnUntraced(function* (
   }> = []
   const borrowed =
     type.target?._tag === 'DeclarationCallableTarget' &&
-    Hir.isAnonymousCallableId(type.target.declaration)
+    Tir.isAnonymousCallableId(type.target.declaration)
   let cursor = 0
   for (const field of type.environment?.fields ?? []) {
     const lanes = Layout.callableFieldLanes(context.program.layout, field)
