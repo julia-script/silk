@@ -8667,7 +8667,7 @@ const analyzeAnonymousCallable = (
   const hiddenId: DeclarationId = Object.freeze({
     _tag: 'DeclarationId',
     sourceId: source.id,
-    ordinal: 0x70000000 + node.span.start,
+    ordinal: Hir.hiddenDeclarationOrdinal(declaration.id.ordinal, site.ordinal),
   })
   const canonical = Hir.anonymousCallableId(owner, site)
   const initial = DeclarationCollection.collectAnonymousCallableDeclaration(

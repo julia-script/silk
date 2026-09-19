@@ -204,6 +204,20 @@ export const anonymousCallableId = (
 export const isAnonymousCallableId = (self: DeclarationFacts.CanonicalId): boolean =>
   /\$callable\$\d+$/.test(self.name)
 
+/** The callable site ordinal recorded in an anonymous callable's canonical identity. */
+export const anonymousCallableSite = (self: DeclarationFacts.CanonicalId): number | undefined => {
+  const match = /\$callable\$(\d+)$/.exec(self.name)
+  return match?.[1] === undefined ? undefined : Number(match[1])
+}
+
+/**
+ * The snapshot-local declaration ordinal of one hidden anonymous body: derived from its enclosing
+ * declaration and callable site, never from byte offsets, so trivia edits keep it stable.
+ */
+export const hiddenDeclarationOrdinal = (enclosing: number, site: number): number =>
+  // ponytail: 65536 sites per declaration; nested anonymous bodies are rejected before admission.
+  0x70000000 + enclosing * 65536 + site
+
 export type CallableTarget =
   | {
       readonly _tag: 'DeclarationCallableTarget'

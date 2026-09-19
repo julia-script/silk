@@ -3199,3 +3199,144 @@ export const lower = Effect.fn('AuthoredLowering.lower')(function* (
   )
   return Object.freeze({ _tag: 'AuthoredLowering', module, presentation })
 })
+
+// ---------------------------------------------------------------------------------------------
+// Semantic consumers: locating authored owners and deriving syntax-free reuse keys
+// ---------------------------------------------------------------------------------------------
+
+const namespaceOf = (origin: SourceFile.SourceFile['origin']): string => {
+  if (origin._tag === 'ProjectFile') return 'project'
+  if (origin._tag === 'ToolchainFile') return 'toolchain'
+  return 'memory'
+}
+
+/** The logical module owner of one loaded source: origin kind as namespace, canonical module name. */
+export const moduleOwner = (
+  module: string,
+  origin: SourceFile.SourceFile['origin'],
+): AuthoredIdentity.Identity => {
+  return AuthoredIdentity.module(namespaceOf(origin), module)
+}
+
+const allDeclarations = (module: AuthoredHir.Module): ReadonlyArray<AuthoredHir.Declaration> => {
+  const found: AuthoredHir.Declaration[] = []
+  const visit = (declaration: AuthoredHir.Declaration): void => {
+    found.push(declaration)
+    if (declaration.body._tag === 'MembersBody') declaration.body.members.forEach(visit)
+    if (declaration.body._tag === 'ConditionalBody') {
+      visit(declaration.body.thenBranch)
+      if (declaration.body.elseBranch !== undefined) visit(declaration.body.elseBranch)
+    }
+  }
+  module.declarations.forEach(visit)
+  return found
+}
+
+const headerStarts = new WeakMap<Lowered, ReadonlyMap<number, AuthoredHir.Declaration>>()
+
+/** Finds the authored declaration whose header presents at one declaration syntax node. */
+export const declarationFor = (
+  self: Lowered,
+  syntax: SyntaxTree.Node,
+): AuthoredHir.Declaration | undefined => {
+  let index = headerStarts.get(self)
+  if (index === undefined) {
+    const byOwner = new Map(
+      allDeclarations(self.module).map((declaration) => [
+        identityKey(declaration.owner),
+        declaration,
+      ]),
+    )
+    const built = new Map<number, AuthoredHir.Declaration>()
+    for (const entry of self.presentation.entries) {
+      const [segment] = entry.anchor.path
+      if (entry.anchor.path.length !== 1 || segment?.role !== 'header') continue
+      const declaration = byOwner.get(identityKey(entry.anchor.owner))
+      if (declaration !== undefined && !built.has(entry.span.start))
+        built.set(entry.span.start, declaration)
+    }
+    index = built
+    headerStarts.set(self, built)
+  }
+  return index.get(spanOf(syntax).start)
+}
+
+const textOf = (module: AuthoredHir.Module, reference: AuthoredPool.TextRef): string =>
+  module.pool.texts[reference.index]?.value ?? ''
+
+/**
+ * A canonical rendering of one authored body for reuse keys: pool references resolve to their
+ * text, header lifetime binders are alpha-normalized to their declaration ordinal, and only
+ * semantic fields participate. Equal keys mean equal authored meaning up to lifetime spelling.
+ */
+export const canonicalBody = (self: Lowered, declaration: AuthoredHir.Declaration): string => {
+  const module = self.module
+  const lifetimes = new Map<string, number>()
+  const header = declaration.header
+  if ('contract' in header) {
+    for (const [ordinal, generic] of header.contract.generics.entries()) {
+      if (generic._tag === 'LifetimeParameter' && generic.name._tag === 'Name')
+        lifetimes.set(textOf(module, generic.name.text), ordinal)
+    }
+  }
+  const parts: string[] = []
+  const visit = (value: unknown, lifetime: boolean): void => {
+    if (typeof value === 'bigint') return void parts.push(`${value}n`)
+    if (typeof value !== 'object' || value === null) return void parts.push(String(value))
+    if (Array.isArray(value)) {
+      parts.push('[')
+      for (const item of value) visit(item, lifetime)
+      parts.push(']')
+      return
+    }
+    if (!('_tag' in value) || typeof value._tag !== 'string') return
+    const tag = value._tag
+    if (tag === 'TextRef' && 'index' in value && typeof value.index === 'number') {
+      const text = module.pool.texts[value.index]?.value ?? ''
+      const ordinal = lifetime ? lifetimes.get(text) : undefined
+      return void parts.push(ordinal === undefined ? `"${text}"` : `'${ordinal}`)
+    }
+    if (tag === 'BytesRef' && 'index' in value && typeof value.index === 'number')
+      return void parts.push(`b[${module.pool.bytes[value.index]?.value.join(',') ?? ''}]`)
+    if (tag === 'LexicalReference' || tag === 'AuthoredAnchor' || tag === 'Authored') return
+    if (tag === 'Cause')
+      return void parts.push(`cause:${'code' in value ? String(value.code) : ''}`)
+    parts.push(`${tag}(`)
+    const order = AuthoredHir.fields[tag as keyof typeof AuthoredHir.fields] ?? []
+    for (const key of order) {
+      if (key === 'anchor' || key === 'origin') continue
+      const field = (value as Record<string, unknown>)[key]
+      if (field === undefined) parts.push('_')
+      else visit(field, lifetime || tag === 'Lifetime')
+    }
+    parts.push(')')
+  }
+  visit(declaration.body, false)
+  return parts.join(' ')
+}
+
+/** Every authored name spelled inside one declaration body, for scope-sensitive reuse keys. */
+export const bodyNames = (
+  self: Lowered,
+  declaration: AuthoredHir.Declaration,
+): ReadonlySet<string> => {
+  const names = new Set<string>()
+  const pending: unknown[] = [declaration.body]
+  while (pending.length > 0) {
+    const value = pending.pop()
+    if (value === null || typeof value !== 'object') continue
+    if ('_tag' in value && value._tag === 'Name' && 'text' in value) {
+      const reference = value.text
+      if (
+        typeof reference === 'object' &&
+        reference !== null &&
+        'index' in reference &&
+        typeof reference.index === 'number'
+      )
+        names.add(self.module.pool.texts[reference.index]?.value ?? '')
+      continue
+    }
+    for (const child of Object.values(value)) pending.push(child)
+  }
+  return names
+}

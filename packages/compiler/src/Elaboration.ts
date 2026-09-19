@@ -1,4 +1,5 @@
 import type * as NativeAssembly from './NativeAssembly.js'
+import type * as AuthoredLowering from './AuthoredLowering.js'
 import * as BodyQuery from './BodyQuery.js'
 import { dual } from 'effect/Function'
 import * as Option from 'effect/Option'
@@ -1463,6 +1464,8 @@ export type DeclarationLookup = DeclarationFacts.DeclarationLookup
 export interface Result {
   readonly _tag: 'Elaboration'
   readonly syntax: SyntaxFile.SyntaxFile
+  /** The authored module this elaboration consumed; reuse keys derive from it, not from syntax. */
+  readonly authored: AuthoredLowering.Lowered
   readonly functions: ReadonlyArray<FunctionFact>
   /** Compiler-private executable bodies that never participate in source declaration lookup. */
   readonly hiddenFunctions: ReadonlyArray<FunctionFact>
@@ -2152,6 +2155,7 @@ const lexicalScopesOf = (
 export interface Input {
   readonly bodyQuery?: BodyQuery.BodyQuery
   readonly syntax: SyntaxFile.SyntaxFile
+  readonly authored: AuthoredLowering.Lowered
   readonly headers: DeclarationFacts.ModuleHeaders
   readonly scope: NameResolution.ModuleScope
   readonly index: DeclarationIndex.Index
@@ -2357,7 +2361,7 @@ export const residualHirFunction = (
 }
 
 export const elaborateModule = (input: Input): Result => {
-  const { syntax, headers, scope, index } = input
+  const { syntax, authored, headers, scope, index } = input
   const source = syntax.source
   const declarations = headers.declarations
   const hiddenFunctions: Array<FunctionFact> = []
@@ -2374,7 +2378,15 @@ export const elaborateModule = (input: Input): Result => {
         )
       return input.bodyQuery === undefined
         ? compute()
-        : BodyQuery.check(input.bodyQuery, source, scope, declaration, hiddenFunctions, compute)
+        : BodyQuery.check(
+            input.bodyQuery,
+            source,
+            authored,
+            scope,
+            declaration,
+            hiddenFunctions,
+            compute,
+          )
     })
   const constantDiagnostics = headers.constants.flatMap((constant) =>
     constant.name._tag === 'Present'
@@ -2402,6 +2414,7 @@ export const elaborateModule = (input: Input): Result => {
   return Object.freeze({
     _tag: 'Elaboration',
     syntax,
+    authored,
     functions,
     hiddenFunctions: Object.freeze([...hiddenFunctions]),
     generatedAggregates: Object.freeze(

@@ -6,6 +6,7 @@ import * as Fiber from 'effect/Fiber'
 import * as Analysis from '../src/Analysis.js'
 import * as Elaboration from '../src/Elaboration.js'
 import * as FrontendTooling from '../src/FrontendTooling.js'
+import * as Hir from '../src/Hir.js'
 import * as ProjectAnalysis from '../src/ProjectAnalysis.js'
 import * as SourceCatalog from '../src/SourceCatalog.js'
 import * as Ownership from '../src/Ownership.js'
@@ -627,15 +628,19 @@ fn broken() -> i32 { return missing() }`
       assert.strictEqual(diagnostic.span.end, oldDiagnostic.span.end + prefix.length)
       const result = view.results.get('query/Rebind') ?? raise('rebound module')
       const hidden = result.hiddenFunctions.at(0) ?? raise('rebound anonymous function')
-      assert.strictEqual(
-        hidden.declaration.id.ordinal,
-        0x70000000 + hidden.declaration.syntax.span.start,
-      )
       const callback =
         result.functions.find(
           (fn) =>
             fn.declaration.name._tag === 'Present' && fn.declaration.name.spelling === 'callback',
         ) ?? raise('rebound callback')
+      // The hidden identity follows its enclosing declaration and callable site, not byte offsets.
+      assert.strictEqual(
+        hidden.declaration.id.ordinal,
+        Hir.hiddenDeclarationOrdinal(callback.declaration.id.ordinal, 0),
+      )
+      const oldResult = oldView.results.get('query/Rebind') ?? raise('original module')
+      const oldHidden = oldResult.hiddenFunctions.at(0) ?? raise('original anonymous function')
+      assert.strictEqual(hidden.declaration.id.ordinal - oldHidden.declaration.id.ordinal, 65536)
       Elaboration.visitStatementFacts(callback.statements, {
         expression: (expression) => {
           if (expression._tag === 'Identifier' && expression.reference._tag === 'ResolvedPattern') {
