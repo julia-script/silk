@@ -1061,7 +1061,7 @@ export const typeHints = (
     ? Object.freeze([])
     : TypeHint.make(
         scope.context,
-        self.results.get(module)?.functions ?? Object.freeze([]),
+        (self.results.get(module)?.functions ?? []).flatMap((fn) => fn.hints),
         module,
         scope,
         start,
