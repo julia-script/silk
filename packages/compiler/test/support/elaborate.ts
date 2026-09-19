@@ -1,4 +1,6 @@
 import * as Effect from 'effect/Effect'
+import * as Diagnostic from '../../src/Diagnostic.js'
+import * as SemanticContext from '../../src/SemanticContext.js'
 import * as AuthoredIdentity from '../../src/AuthoredIdentity.js'
 import * as AuthoredLowering from '../../src/AuthoredLowering.js'
 import * as Elaboration from '../../src/Elaboration.js'
@@ -13,7 +15,17 @@ const indices = new WeakMap<Elaboration.Result, DeclarationIndex.Index>()
 /** `fixture://semantic-accepted.silk` becomes `fixture/semantic-accepted.silk`. */
 export const canonicalName = (sourceId: string): string => sourceId.replace(/:\/*/g, '/')
 
-export const elaborate = (syntax: SyntaxFile.SyntaxFile): Elaboration.Result => {
+/**
+ * An elaboration as a test reads it: diagnostics carry this fixture's spans.
+ *
+ * `located` is the revision-free result itself, for a test that hands it to a later stage.
+ */
+export type Elaborated = Omit<Elaboration.Result, 'diagnostics'> & {
+  readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
+  readonly located: Elaboration.Result
+}
+
+export const elaborate = (syntax: SyntaxFile.SyntaxFile): Elaborated => {
   // Fixture ids such as `fixture://x.silk` are not canonical module names, so the closure module,
   // its authored owner and every declaration identity share one canonical name derived from the id.
   const name = canonicalName(syntax.source.id)
@@ -46,10 +58,21 @@ export const elaborate = (syntax: SyntaxFile.SyntaxFile): Elaboration.Result => 
     throw new RangeError('Single-module elaboration fixture lost its module')
   const result = Elaboration.elaborateModule({ authored, headers, scope, index })
   indices.set(result, index)
-  return result
+  return Object.freeze({
+    ...result,
+    // Published the way the frontend publishes: spans first, then the one deterministic order.
+    diagnostics: Diagnostic.merge(
+      Diagnostic.publishAll(
+        result.diagnostics,
+        SemanticContext.registryOf(SemanticContext.make(authored)),
+      ),
+    ),
+    located: result,
+  })
 }
 
-export const ownership = (result: Elaboration.Result): Ownership.ModuleOwnership => {
+export const ownership = (elaborated: Elaborated): Ownership.ModuleOwnership => {
+  const result = elaborated.located
   const index = indices.get(result)
   if (index === undefined)
     throw new RangeError('Ownership fixture requires its original elaboration result')

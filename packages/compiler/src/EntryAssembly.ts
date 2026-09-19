@@ -896,12 +896,14 @@ export const lowerBuiltinEffectRunner = (
                 }),
                 type: argument._tag === 'Unavailable' ? ('never' as const) : argument.type,
                 span: argument.span,
+                origin: argument.origin,
               }),
             ),
           ),
         }),
         type: spec.type.type.success,
         span: spec.expression.span,
+        origin: spec.expression.origin,
       }),
     ),
   )
@@ -1102,6 +1104,7 @@ export const lowerWitnessEffectRunner = (
                 parameter: operand.parameter.id,
                 type: operand.type._tag === 'Resolved' ? operand.type.type : 'never',
                 span: spec.expression.span,
+                origin: spec.expression.origin,
               }),
             ),
           ),
@@ -1109,6 +1112,7 @@ export const lowerWitnessEffectRunner = (
           heldLoans: Object.freeze([]),
           type: spec.type.type.success,
           span: spec.expression.span,
+          origin: spec.expression.origin,
         }),
       )
     }

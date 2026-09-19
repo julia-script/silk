@@ -4,6 +4,7 @@ import type * as ArtifactPlan from './ArtifactPlan.js'
 import * as ArtifactComposition from './ArtifactComposition.js'
 import type * as ModuleClosure from './ModuleClosure.js'
 import * as ModuleSelection from './ModuleSelection.js'
+import * as Location from './Location.js'
 import * as SemanticContext from './SemanticContext.js'
 import * as Effect from 'effect/Effect'
 import * as Result from 'effect/Result'
@@ -627,7 +628,13 @@ export const configure = Effect.fn('Realization.configure')(function* (
   const availability =
     result.failure.staticFailure === undefined
       ? []
-      : ModuleSelection.availabilityOrigins(self.closure, result.failure.staticFailure.span)
+      : ModuleSelection.availabilityOrigins(
+          self.closure,
+          Location.resolve(
+            result.failure.staticFailure.span,
+            SemanticContext.fromModules(self.closure.modules),
+          ).span,
+        )
   const failure =
     availability.length === 0
       ? result.failure

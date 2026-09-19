@@ -16,20 +16,20 @@ import * as StatementAnalysis from '../src/StatementAnalysis.js'
 import * as SemanticContext from '../src/SemanticContext.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as Type from '../src/Type.js'
-import { elaborate, ownership } from './support/elaborate.js'
+import { elaborate, ownership, type Elaborated } from './support/elaborate.js'
 import { raise } from './support/raise.js'
 
 const parse = (id: string, source: string) =>
   Parser.parse(Lexer.lex(SourceFile.make(id, new TextEncoder().encode(source))))
 
-const analyze = (id: string, source: string): Elaboration.Result => elaborate(parse(id, source))
+const analyze = (id: string, source: string): Elaborated => elaborate(parse(id, source))
 
 /** The elaboration's own span source: presentation spans of the authored module it consumed. */
-const spansOf = (result: Elaboration.Result): SemanticContext.SemanticContext =>
+const spansOf = (result: Elaborated): SemanticContext.SemanticContext =>
   SemanticContext.make(result.authored)
 
 const returnedMatch = (
-  result: Elaboration.Result,
+  result: Elaborated,
 ): Extract<Elaboration.ExpressionFact, { readonly _tag: 'Match' }> => {
   const returned = result.functions.at(0)?.returnedExpression
   return returned?._tag === 'Match' ? returned : raise('expected returned match fact')

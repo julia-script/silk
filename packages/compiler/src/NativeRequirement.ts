@@ -1,5 +1,6 @@
 import type * as AuthoredHir from './AuthoredHir.js'
 import * as Diagnostic from './Diagnostic.js'
+import * as Location from './Location.js'
 import * as MachineFunction from './MachineFunction.js'
 import type * as SemanticContext from './SemanticContext.js'
 import type * as SourceSpan from './SourceSpan.js'
@@ -293,46 +294,46 @@ export const analyze = (
   scope: Scope,
 ): {
   readonly requirement?: NativeRequirement
-  readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
+  readonly diagnostics: ReadonlyArray<Diagnostic.Located>
 } => {
-  const diagnostics: Array<Diagnostic.Diagnostic> = []
+  const diagnostics: Array<Diagnostic.Located> = []
   const clauseSpan = context.spanOf(clause.anchor)
   const at = (span: SourceSpan.SourceSpan): ConfigurationOrigin.ConfigurationOrigin =>
     Object.freeze({ source: clauseSpan.sourceId, provenance: 'literal', span })
-  const reject = (subject: string, span: SourceSpan.SourceSpan): void => {
+  const reject = (subject: string, anchor: AuthoredHir.Anchor): void => {
+    const span = context.spanOf(anchor)
     diagnostics.push(
-      Diagnostic.invalidConfiguration(
+      Diagnostic.invalidAuthoredConfiguration(
         ConfigurationError.make('NativeRequirement.analyze', 'InvalidInput', subject, [at(span)]),
-        span,
+        Location.at(anchor),
       ),
     )
   }
   if (MachineFunction.clauseOwner(context, clause) !== 'Intrinsic.native')
-    reject('expected Intrinsic.native', clauseSpan)
+    reject('expected Intrinsic.native', clause.anchor)
   const properties = new Map<string, unknown>()
   for (const property of clause.properties) {
     const name = property.name._tag === 'Name' ? context.textOf(property.name.text) : undefined
     if (name === undefined) continue
-    const nameSpan = context.spanOf(property.name.anchor)
-    if (properties.has(name)) reject('duplicate native requirement property', nameSpan)
-    if (!fields.includes(name)) reject('unknown native requirement property', nameSpan)
-    const valueSpan = context.spanOf(property.value.anchor)
+    if (properties.has(name)) reject('duplicate native requirement property', property.name.anchor)
+    if (!fields.includes(name)) reject('unknown native requirement property', property.name.anchor)
     if (name === 'alternatives') {
       if (property.value._tag !== 'TupleExpression') {
-        reject('native requirement alternatives require a nonempty tuple', valueSpan)
+        reject('native requirement alternatives require a nonempty tuple', property.value.anchor)
         continue
       }
       const alternatives: Array<string> = []
       for (const element of property.value.elements) {
         const text = literalText(context, element)
         if (text === undefined)
-          reject('native requirement alternative requires text', context.spanOf(element.anchor))
+          reject('native requirement alternative requires text', element.anchor)
         else alternatives.push(text)
       }
       properties.set(name, alternatives)
     } else {
       const text = literalText(context, property.value)
-      if (text === undefined) reject('native requirement property requires text', valueSpan)
+      if (text === undefined)
+        reject('native requirement property requires text', property.value.anchor)
       properties.set(name, text)
     }
   }
@@ -340,7 +341,9 @@ export const analyze = (
   const result = inspect(Object.fromEntries(properties), scope, at(clauseSpan))
   if (Result.isFailure(result))
     return {
-      diagnostics: Object.freeze([Diagnostic.invalidConfiguration(result.failure, clauseSpan)]),
+      diagnostics: Object.freeze([
+        Diagnostic.invalidAuthoredConfiguration(result.failure, Location.at(clause.anchor)),
+      ]),
     }
   return { requirement: result.success, diagnostics: Object.freeze([]) }
 }

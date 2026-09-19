@@ -122,6 +122,7 @@ it.effect('elaborates text and byte literals with distinct semantic types', () =
           heldLoans: Object.freeze([]),
           type: Type.string(Lifetime.staticLifetime),
           span: byteLiteral.span,
+          origin: byteLiteral.origin,
         })
         const runtimeModule: Tir.Module = Object.freeze({
           ...tir,
@@ -134,6 +135,7 @@ it.effect('elaborates text and byte literals with distinct semantic types', () =
                   expression: runtimeView,
                   region: fn.entryRegion,
                   span: byteLiteral.span,
+                  origin: byteLiteral.origin,
                 }),
                 ...fn.statements,
               ]),

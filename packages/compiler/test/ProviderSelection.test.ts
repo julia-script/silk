@@ -75,6 +75,7 @@ it('selects only an explicitly named, retained member of an open source row', ()
     mode: Constraint.ProviderMode = 'Exclusive',
   ) =>
     ProviderSelection.solve({
+      originKey: SourceSpan.key,
       relations: [
         {
           wanted: Constraint.providerSelection(mode, provider, selected, sourceRow),
@@ -102,6 +103,7 @@ it('rejects an empty relation set as an internal invariant violation', () => {
   assert.throws(
     () =>
       ProviderSelection.solve({
+        originKey: SourceSpan.key,
         relations: [],
         responsible: applicationOrigin,
         oracle: oracle(),
@@ -115,6 +117,7 @@ it('intersects complete candidate maps before selecting a late common member', (
   const first = relation(['A', 'B', 'C'], 20)
   const second = relation(['C'], 10)
   const solved = ProviderSelection.solve({
+    originKey: SourceSpan.key,
     relations: [first, second],
     responsible: applicationOrigin,
     oracle: {
@@ -126,6 +129,7 @@ it('intersects complete candidate maps before selecting a late common member', (
     },
   })
   const permuted = ProviderSelection.solve({
+    originKey: SourceSpan.key,
     relations: [second, first],
     responsible: applicationOrigin,
     oracle: oracle(),
@@ -163,6 +167,7 @@ it('reports every empty relation before irrelevant surviving statuses', () => {
     C: { _tag: 'Ambiguous', witnesses: [witness('First'), witness('Second')] },
   })
   const solved = ProviderSelection.solve({
+    originKey: SourceSpan.key,
     relations: [relation(['A'], 30), relation(['B'], 10), relation(['C'], 20)],
     responsible: applicationOrigin,
     oracle: noMatch,
@@ -176,7 +181,9 @@ it('reports every empty relation before irrelevant surviving statuses', () => {
     )
   if (solved._tag === 'Rejected')
     assert.deepEqual(
-      solved.diagnostics.map(Diagnostic.providerSelection).map((item) => item.code),
+      solved.diagnostics
+        .map((rejected) => Diagnostic.providerSelection(rejected, SourceSpan.key))
+        .map((item) => item.code),
       ['SEM0123', 'SEM0123'],
     )
 })
@@ -184,6 +191,7 @@ it('reports every empty relation before irrelevant surviving statuses', () => {
 it('separates span-free conflict payloads from local ordered locations', () => {
   const responsible = origin(5)
   const solved = ProviderSelection.solve({
+    originKey: SourceSpan.key,
     relations: [relation(['A'], 30), relation(['B'], 10)],
     responsible,
     oracle: oracle(),
@@ -194,7 +202,7 @@ it('separates span-free conflict payloads from local ordered locations', () => {
     const diagnostic = solved.diagnostics.at(0)
     assert.strictEqual(diagnostic?.problem._tag, 'JointSelectionConflict')
     if (diagnostic?.problem._tag === 'JointSelectionConflict') {
-      assert.strictEqual(Diagnostic.providerSelection(diagnostic).code, 'SEM0124')
+      assert.strictEqual(Diagnostic.providerSelection(diagnostic, SourceSpan.key).code, 'SEM0124')
       assert.strictEqual(diagnostic.locations.primary, responsible)
       assert.deepEqual(
         diagnostic.problem.payload.relations.map((entry) => entry.fullCandidateKeySet),
@@ -210,6 +218,7 @@ it('separates span-free conflict payloads from local ordered locations', () => {
 
 it('reports common ambiguity plus each unequal full relation candidate set', () => {
   const solved = ProviderSelection.solve({
+    originKey: SourceSpan.key,
     relations: [relation(['A', 'B', 'C'], 10), relation(['A', 'B', 'D'], 20)],
     responsible: origin(5),
     oracle: oracle(),
@@ -220,7 +229,7 @@ it('reports common ambiguity plus each unequal full relation candidate set', () 
     const diagnostic = solved.diagnostics.at(0)
     assert.strictEqual(diagnostic?.problem._tag, 'ProviderAmbiguity')
     if (diagnostic?.problem._tag === 'ProviderAmbiguity') {
-      assert.strictEqual(Diagnostic.providerSelection(diagnostic).code, 'SEM0125')
+      assert.strictEqual(Diagnostic.providerSelection(diagnostic, SourceSpan.key).code, 'SEM0125')
       assert.deepEqual(diagnostic.problem.payload.survivingCandidates, [
         memberKey(requirement('A')),
         memberKey(requirement('B')),
@@ -238,6 +247,7 @@ it('reports common ambiguity plus each unequal full relation candidate set', () 
 
 it('discards eliminated bad statuses but diagnoses surviving ambiguous and invalid matches', () => {
   const eliminated = ProviderSelection.solve({
+    originKey: SourceSpan.key,
     relations: [relation(['A', 'C'], 10), relation(['C'], 20)],
     responsible: applicationOrigin,
     oracle: oracle({
@@ -251,6 +261,7 @@ it('discards eliminated bad statuses but diagnoses surviving ambiguous and inval
     { _tag: 'Invalid', reason: 'conditional witness failed' },
   ] satisfies ReadonlyArray<Constraint.ConformanceOutcome>) {
     const surviving = ProviderSelection.solve({
+      originKey: SourceSpan.key,
       relations: [relation(['C', 'D'], 10), relation(['C'], 20)],
       responsible: applicationOrigin,
       oracle: oracle({ C: outcome }),
@@ -265,7 +276,9 @@ it('discards eliminated bad statuses but diagnoses surviving ambiguous and inval
       )
     if (surviving._tag === 'Rejected')
       assert.deepEqual(
-        surviving.diagnostics.map(Diagnostic.providerSelection).map((item) => item.code),
+        surviving.diagnostics
+          .map((rejected) => Diagnostic.providerSelection(rejected, SourceSpan.key))
+          .map((item) => item.code),
         outcome._tag === 'Ambiguous' ? ['SEM0127', 'SEM0127'] : ['SEM0128', 'SEM0128'],
       )
   }
@@ -273,14 +286,15 @@ it('discards eliminated bad statuses but diagnoses surviving ambiguous and inval
 
 it('coalesces duplicate wanted keys and canonicalizes occurrence origins', () => {
   const duplicate = relation(['A'], 30)
-  const grouped = ProviderSelection.groupRelations([
-    duplicate,
-    { wanted: duplicate.wanted, origins: [origin(20), origin(10)] },
-  ])
+  const grouped = ProviderSelection.groupRelations(
+    [duplicate, { wanted: duplicate.wanted, origins: [origin(20), origin(10)] }],
+    SourceSpan.key,
+  )
   assert.strictEqual(grouped.length, 1)
   assert.deepEqual(grouped.at(0)?.origins, [origin(10), origin(20), origin(30)])
 
   const solved = ProviderSelection.solve({
+    originKey: SourceSpan.key,
     relations: grouped,
     responsible: applicationOrigin,
     oracle: oracle(),
@@ -292,18 +306,21 @@ it('coalesces duplicate wanted keys and canonicalizes occurrence origins', () =>
 it('checks explicit selector cardinality and reports access after matching the key', () => {
   const base = relation(['A'], 10, 'Shared')
   const empty = ProviderSelection.solve({
+    originKey: SourceSpan.key,
     relations: [base],
     selected: row([]),
     responsible: applicationOrigin,
     oracle: oracle(),
   })
   const multiple = ProviderSelection.solve({
+    originKey: SourceSpan.key,
     relations: [base],
     selected: row([requirement('A'), requirement('B')]),
     responsible: applicationOrigin,
     oracle: oracle(),
   })
   const accessMismatch = ProviderSelection.solve({
+    originKey: SourceSpan.key,
     relations: [base],
     selected: row([requirement('A', 'Shared')]),
     responsible: applicationOrigin,
@@ -316,7 +333,9 @@ it('checks explicit selector cardinality and reports access after matching the k
     const diagnostic = result.diagnostics.at(0)
     assert.strictEqual(diagnostic?.problem._tag, 'SelectedRowCardinality')
     assert.strictEqual(
-      diagnostic === undefined ? undefined : Diagnostic.providerSelection(diagnostic).code,
+      diagnostic === undefined
+        ? undefined
+        : Diagnostic.providerSelection(diagnostic, SourceSpan.key).code,
       'SEM0126',
     )
   }
@@ -329,11 +348,13 @@ it('distinguishes exact provider identity from unique conformance evidence', () 
   const exactMember = requirement('Provider', 'Shared')
   const exactWanted = Constraint.providerSelection('Shared', provider, selected, row([exactMember]))
   const exact = ProviderSelection.solve({
+    originKey: SourceSpan.key,
     relations: [{ wanted: exactWanted, origins: [origin(10)] }],
     responsible: applicationOrigin,
     oracle: oracle(),
   })
   const conformance = ProviderSelection.solve({
+    originKey: SourceSpan.key,
     relations: [relation(['A'], 10)],
     responsible: applicationOrigin,
     oracle: oracle(),

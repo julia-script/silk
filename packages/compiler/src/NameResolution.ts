@@ -1,3 +1,4 @@
+import * as Location from './Location.js'
 import type * as AuthoredHir from './AuthoredHir.js'
 import * as DeclarationCollection from './DeclarationCollection.js'
 import * as DeclarationCompletion from './DeclarationCompletion.js'
@@ -11,7 +12,6 @@ import type * as ModuleClosure from './ModuleClosure.js'
 import * as ResolutionSeams from './ResolutionSeams.js'
 import * as ResolutionWork from './ResolutionWork.js'
 import * as SemanticContext from './SemanticContext.js'
-import type * as SourceSpan from './SourceSpan.js'
 import * as Type from './Type.js'
 
 export type IntrinsicActor = Intrinsic.Actor['spelling']
@@ -46,7 +46,7 @@ export type Binding =
       readonly spelling: string
       readonly anchor: AuthoredHir.Anchor
       readonly anchors: ReadonlyArray<AuthoredHir.Anchor>
-      readonly cause?: Diagnostic.Identity
+      readonly cause?: Diagnostic.Identity<Location.Location>
       readonly declaration?: DeclarationFacts.CanonicalId
     }
 
@@ -59,6 +59,7 @@ export type ImportOutcome =
   | {
       readonly _tag: 'Unavailable'
       readonly import: ModuleClosure.ImportFact
+      /** Names a module-closure diagnostic, which is reported in source coordinates. */
       readonly cause?: Diagnostic.Identity
     }
 
@@ -66,7 +67,7 @@ export interface Conflict {
   readonly _tag: 'BindingConflict'
   readonly spelling: string
   readonly bindings: ReadonlyArray<Binding>
-  readonly cause: Diagnostic.Identity
+  readonly cause: Diagnostic.Identity<Location.Location>
 }
 export interface ModuleScope {
   readonly _tag: 'ModuleScope'
@@ -76,14 +77,14 @@ export interface ModuleScope {
   readonly bindings: ReadonlyArray<Binding>
   readonly imports: ReadonlyArray<ImportOutcome>
   readonly conflicts: ReadonlyArray<Conflict>
-  readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
+  readonly diagnostics: ReadonlyArray<Diagnostic.Located>
 }
 export interface Resolution {
   readonly _tag: 'NameResolution'
   readonly modules: ReadonlyArray<ModuleScope>
   /** Every loaded module's context, so a fact from another module still resolves its span. */
   readonly contexts: SemanticContext.Registry
-  readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
+  readonly diagnostics: ReadonlyArray<Diagnostic.Located>
 }
 export type Lookup =
   | {
@@ -104,13 +105,13 @@ export type Lookup =
       readonly _tag: 'Inaccessible'
       readonly spelling: string
       readonly declaration: DeclarationFacts.MemberFact
-      readonly cause: Diagnostic.Identity
+      readonly cause: Diagnostic.Identity<Location.Location>
     }
   | { readonly _tag: 'Conflict'; readonly spelling: string; readonly conflict: Conflict }
   | {
       readonly _tag: 'Unavailable'
       readonly spelling: string
-      readonly cause?: Diagnostic.Identity
+      readonly cause?: Diagnostic.Identity<Location.Location>
       readonly declaration?: DeclarationFacts.MemberFact
     }
 
@@ -159,7 +160,7 @@ export const resolve = (
 ): Resolution => {
   const scopes: Array<ModuleScope> = []
   for (const module of closure.modules) {
-    const diagnostics: Array<Diagnostic.Diagnostic> = []
+    const diagnostics: Array<Diagnostic.Located> = []
     const candidates: Array<Binding> = Intrinsic.all().map((intrinsic) =>
       Object.freeze({ _tag: 'IntrinsicActor', spelling: intrinsic.spelling }),
     )
@@ -217,7 +218,7 @@ export const resolve = (
         if (origin === undefined) continue
         const sourceName = origin.spelling
         const alias = spelled(context, member.alias)
-        const span = context.spanOf(origin.anchor)
+        const span = Location.at(origin.anchor)
         const declaration = canonicalDeclaration(index, target, sourceName)
         const anchors = Object.freeze([
           origin.anchor,
@@ -296,20 +297,20 @@ export const resolve = (
     for (const [spelling, bindings] of grouped)
       if (bindings.length > 1) {
         const last = bindings.at(-1)
-        let span = context.spanOf({
+        let span = Location.at({
           _tag: 'AuthoredAnchor',
           owner: module.authored.module.owner,
           path: [],
         })
         if (last?._tag === 'LocalDeclaration') {
           const declaration = DeclarationFacts.byCanonical(index, last.declaration)
-          if (declaration?.name._tag === 'Present') span = context.spanOf(declaration.name.anchor)
+          if (declaration?.name._tag === 'Present') span = Location.at(declaration.name.anchor)
         } else if (last?._tag === 'ModuleNamespace') {
-          span = context.spanOf(last.anchor)
+          span = Location.at(last.anchor)
         } else if (last?._tag === 'ImportedMember') {
-          span = context.spanOf(last.member.anchor)
+          span = Location.at(last.member.anchor)
         } else if (last?._tag === 'Unavailable') {
-          span = context.spanOf(last.anchor)
+          span = Location.at(last.anchor)
         }
         const diagnostic = Diagnostic.bindingConflict(spelling, span)
         diagnostics.push(diagnostic)
@@ -330,7 +331,7 @@ export const resolve = (
         bindings: Object.freeze(candidates),
         imports: Object.freeze(imports),
         conflicts: Object.freeze(conflicts),
-        diagnostics: Diagnostic.merge(diagnostics),
+        diagnostics: Diagnostic.collect(diagnostics),
       }),
     )
   }
@@ -338,7 +339,7 @@ export const resolve = (
     _tag: 'NameResolution',
     modules: Object.freeze(scopes),
     contexts: SemanticContext.registry(scopes.map((scope) => scope.context)),
-    diagnostics: Diagnostic.merge(...scopes.map((scope) => scope.diagnostics)),
+    diagnostics: Diagnostic.collect(...scopes.map((scope) => scope.diagnostics)),
   })
 }
 
@@ -388,7 +389,7 @@ export type AssociatedLookup =
       readonly _tag: 'Inaccessible'
       readonly declaration: DeclarationFacts.DeclarationFact
     }
-  | { readonly _tag: 'Duplicate'; readonly cause: Diagnostic.Identity }
+  | { readonly _tag: 'Duplicate'; readonly cause: Diagnostic.Identity<Location.Location> }
   | { readonly _tag: 'Missing' }
 
 const associatedCache = new WeakMap<
@@ -507,7 +508,7 @@ export const lookupQualified = (
   anchor: AuthoredHir.Anchor,
   initiator?: ResolutionWork.Initiator,
 ): Lookup => {
-  const span = scope.context.spanOf(anchor)
+  const span = Location.at(anchor)
   const qualifier = lookup(scope, index, namespace, initiator)
   if (
     qualifier._tag === 'Intrinsic' ||
@@ -590,7 +591,7 @@ export const lookupQualified = (
 
 const unresolved = (
   path: DeclarationFacts.TypePathFact,
-  diagnostic: Diagnostic.Diagnostic,
+  diagnostic: Diagnostic.Located,
   candidate?: Type.Nominal,
 ): DeclarationFacts.TypeResolution => {
   const first = path.segments.at(0)
@@ -615,7 +616,7 @@ const unresolved = (
 
 const unavailable = (
   path: DeclarationFacts.TypePathFact,
-  cause?: Diagnostic.Identity,
+  cause?: Diagnostic.Identity<Location.Location>,
   candidate?: Type.Nominal,
 ): DeclarationFacts.TypeResolution => {
   const first = path.segments.at(0)
@@ -672,7 +673,7 @@ const nominalOf = (declaration: DeclarationFacts.MemberFact): Type.Nominal | und
 const typeUseSpan = (
   contexts: SemanticContext.Registry,
   path: DeclarationFacts.TypePathFact,
-): SourceSpan.SourceSpan => contexts.spanOf(path.segments.at(-1)?.anchor ?? path.anchor)
+): Location.Location => Location.at(path.segments.at(-1)?.anchor ?? path.anchor)
 
 /** Resolves one retained declaration type path through an immutable module scope. */
 /**
@@ -876,12 +877,12 @@ export const makeResolvers = (
 ): ResolutionSeams.ResolutionSeams => {
   const memo = new Map<DeclarationFacts.AliasFact, DeclarationFacts.TypeResolution>()
   const active: Array<NamedAlias> = []
-  const cycleCauses = new Map<DeclarationFacts.AliasFact, Diagnostic.Identity>()
+  const cycleCauses = new Map<DeclarationFacts.AliasFact, Diagnostic.Identity<Location.Location>>()
   // The alias's own name is the path of record for an unavailable outcome, so every later use
   // reads the cause off the completed fact exactly as it would off an unresolved spelling.
   const unavailableAlias = (
     declaration: NamedAlias,
-    cause: Diagnostic.Identity | undefined,
+    cause: Diagnostic.Identity<Location.Location> | undefined,
   ): DeclarationFacts.TypeResolution =>
     Object.freeze({
       fact: Object.freeze({
@@ -905,7 +906,7 @@ export const makeResolvers = (
     })
   const withDiagnostics = (
     result: DeclarationFacts.TypeResolution,
-    diagnostics: ReadonlyArray<Diagnostic.Diagnostic>,
+    diagnostics: ReadonlyArray<Diagnostic.Located>,
   ): DeclarationFacts.TypeResolution => Object.freeze({ fact: result.fact, diagnostics })
   const resolveAlias: ResolutionSeams.AliasResolver = (declaration) => {
     const named = namedAlias(declaration)
@@ -920,15 +921,13 @@ export const makeResolvers = (
     if (activeIndex >= 0) {
       const cycle = active.slice(activeIndex)
       const names = cycle.map((member) => member.name.spelling)
-      const diagnostics = cycle.flatMap((member): ReadonlyArray<Diagnostic.Diagnostic> => {
+      const diagnostics = cycle.flatMap((member): ReadonlyArray<Diagnostic.Located> => {
         if (cycleCauses.has(member)) return []
         const diagnostic = Diagnostic.cyclicTypeAlias(
           member.name.spelling,
           names,
-          cycle
-            .filter((other) => other !== member)
-            .map((other) => resolution.contexts.spanOf(other.name.anchor)),
-          resolution.contexts.spanOf(member.name.anchor),
+          cycle.filter((other) => other !== member).map((other) => Location.at(other.name.anchor)),
+          Location.at(member.name.anchor),
         )
         cycleCauses.set(member, Diagnostic.identity(diagnostic))
         return [diagnostic]
@@ -938,7 +937,7 @@ export const makeResolvers = (
     if (named.parameterList !== undefined) {
       const diagnostic = Diagnostic.typeAliasParameters(
         named.name.spelling,
-        resolution.contexts.spanOf(named.parameterList),
+        Location.at(named.parameterList),
       )
       const result = unavailableAlias(named, Diagnostic.identity(diagnostic))
       memo.set(named, result)
@@ -953,7 +952,7 @@ export const makeResolvers = (
       index.modules,
     )
     active.pop()
-    const diagnostics: Array<Diagnostic.Diagnostic> = [...resolved.diagnostics]
+    const diagnostics: Array<Diagnostic.Located> = [...resolved.diagnostics]
     const cycleCause = cycleCauses.get(named)
     let result: DeclarationFacts.TypeResolution
     if (cycleCause !== undefined) result = unavailableAlias(named, cycleCause)

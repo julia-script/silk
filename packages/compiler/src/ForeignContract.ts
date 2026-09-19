@@ -1,7 +1,7 @@
 import * as Diagnostic from './Diagnostic.js'
+import * as Location from './Location.js'
 import type * as AuthoredHir from './AuthoredHir.js'
 import * as SemanticContext from './SemanticContext.js'
-import type * as SourceSpan from './SourceSpan.js'
 import * as Type from './Type.js'
 
 /** Unsafe behavioral promises attached to one immediate foreign C call. */
@@ -36,12 +36,12 @@ export const key = (self: ForeignContract): string =>
 export interface Parameter {
   readonly name: string
   readonly type: Type.Type | undefined
-  readonly span: SourceSpan.SourceSpan
+  readonly at: Location.Location
 }
 
 export interface Analysis {
   readonly contract: ForeignContract
-  readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
+  readonly diagnostics: ReadonlyArray<Diagnostic.Located>
 }
 
 const parameterKind = (name: 'noCapture' | 'borrow' | 'callbacks', type: Type.Type): boolean => {
@@ -78,29 +78,31 @@ export const analyze = (
   result: Type.Type | undefined,
 ): Analysis => {
   if (clause === undefined) return { contract: conservative, diagnostics: [] }
-  const diagnostics: Array<Diagnostic.Diagnostic> = []
-  const reject = (name: string, problem: string, span: SourceSpan.SourceSpan): void => {
+  const diagnostics: Array<Diagnostic.Located> = []
+  const reject = (name: string, problem: string, anchor: AuthoredHir.Anchor): void => {
     diagnostics.push(
-      Diagnostic.foreignDeclarationRestriction(`foreign contract ${name}: ${problem}`, span),
+      Diagnostic.foreignDeclarationRestriction(
+        `foreign contract ${name}: ${problem}`,
+        Location.at(anchor),
+      ),
     )
   }
   if (
     nameText(context, clause.namespace) !== 'Intrinsic' ||
     nameText(context, clause.operation) !== 'foreign'
   )
-    reject('owner', 'expected Intrinsic.foreign', context.spanOf(clause.anchor))
+    reject('owner', 'expected Intrinsic.foreign', clause.anchor)
   const properties = new Map<string, AuthoredHir.Property>()
   for (const property of clause.properties) {
     const name = nameText(context, property.name)
     if (name === undefined) continue
-    if (properties.has(name))
-      reject(name, 'duplicate property', context.spanOf(property.name.anchor))
+    if (properties.has(name)) reject(name, 'duplicate property', property.name.anchor)
     if (
       !['memory', 'locality', 'noCapture', 'borrow', 'callbacks', 'returned', 'noReturn'].includes(
         name,
       )
     )
-      reject(name, 'unsupported property', context.spanOf(property.name.anchor))
+      reject(name, 'unsupported property', property.name.anchor)
     properties.set(name, property)
   }
   const choice = <const Choices extends ReadonlyArray<string>>(
@@ -113,7 +115,7 @@ export const analyze = (
     const value = textValue(context, property.value)
     const found = values.find((candidate) => candidate === value)
     if (found !== undefined) return found
-    reject(name, `expected ${values.join(' or ')}`, context.spanOf(property.value.anchor))
+    reject(name, `expected ${values.join(' or ')}`, property.value.anchor)
     return fallback
   }
   const memory = choice('memory', ['none', 'read', 'write', 'readwrite'], 'readwrite')
@@ -125,7 +127,7 @@ export const analyze = (
     // A unit literal is the empty tuple; anything else must be an authored tuple of names.
     const elements = tupleElements(tuple)
     if (elements === undefined) {
-      reject(name, 'expected a tuple of parameter names', context.spanOf(tuple.anchor))
+      reject(name, 'expected a tuple of parameter names', tuple.anchor)
       return []
     }
     const ordinals: Array<number> = []
@@ -137,14 +139,14 @@ export const analyze = (
       const ordinal = parameters.findIndex((parameter) => parameter.name === spelled)
       const parameter = parameters[ordinal]
       if (parameter === undefined || ordinals.includes(ordinal)) {
-        reject(name, 'expected unique existing parameter names', context.spanOf(element.anchor))
+        reject(name, 'expected unique existing parameter names', element.anchor)
         continue
       }
       if (parameter.type !== undefined && !parameterKind(name, parameter.type))
         reject(
           name,
           `requires a ${{ callbacks: 'native function pointer', borrow: 'single-value reference', noCapture: 'raw pointer' }[name]} parameter`,
-          context.spanOf(element.anchor),
+          element.anchor,
         )
       ordinals.push(ordinal)
     }
@@ -172,14 +174,10 @@ export const analyze = (
       reject(
         'returned',
         'requires a raw pointer parameter identical to the result type',
-        context.spanOf(value.anchor),
+        value.anchor,
       )
     else if (noCapture.includes(ordinal))
-      reject(
-        'returned',
-        'cannot capture a noCapture parameter through the result',
-        context.spanOf(value.anchor),
-      )
+      reject('returned', 'cannot capture a noCapture parameter through the result', value.anchor)
     else returned = ordinal
   }
   const noReturnProperty = properties.get('noReturn')
@@ -187,17 +185,13 @@ export const analyze = (
   if (noReturnProperty !== undefined) {
     const value = noReturnProperty.value
     if (value._tag !== 'BooleanLiteral')
-      reject('noReturn', 'expected a Boolean literal', context.spanOf(value.anchor))
+      reject('noReturn', 'expected a Boolean literal', value.anchor)
     else noReturn = value.value
     if (
       noReturn &&
       ((result !== undefined && !Type.equals(result, Type.unit)) || returnedProperty !== undefined)
     )
-      reject(
-        'noReturn',
-        'requires a unit result without a returned alias',
-        context.spanOf(value.anchor),
-      )
+      reject('noReturn', 'requires a unit result without a returned alias', value.anchor)
   }
   return Object.freeze({
     contract: Object.freeze({
@@ -252,9 +246,9 @@ export const validate = (
   self: ForeignContract,
   parameters: ReadonlyArray<Parameter>,
   result: Type.Type | undefined,
-  span: SourceSpan.SourceSpan,
-): ReadonlyArray<Diagnostic.Diagnostic> => {
-  const diagnostics: Array<Diagnostic.Diagnostic> = []
+  at: Location.Location,
+): ReadonlyArray<Diagnostic.Located> => {
+  const diagnostics: Array<Diagnostic.Located> = []
   for (const [name, ordinals] of [
     ['noCapture', self.noCapture],
     ['borrow', self.borrow],
@@ -266,7 +260,7 @@ export const validate = (
         diagnostics.push(
           Diagnostic.foreignDeclarationRestriction(
             `foreign contract ${name}: invalid parameter type`,
-            parameter.span,
+            parameter.at,
           ),
         )
     }
@@ -276,14 +270,14 @@ export const validate = (
       diagnostics.push(
         Diagnostic.foreignDeclarationRestriction(
           'callback parameter requires an explicit synchronous callbacks promise',
-          parameter.span,
+          parameter.at,
         ),
       )
     if (!callbackAccessAdmitted(self, parameter.type.contract))
       diagnostics.push(
         Diagnostic.foreignDeclarationRestriction(
           'callback access alongside borrowed storage must be argument-local',
-          parameter.span,
+          parameter.at,
         ),
       )
   }
@@ -297,7 +291,7 @@ export const validate = (
       diagnostics.push(
         Diagnostic.foreignDeclarationRestriction(
           'foreign contract returned: result must equal the raw pointer parameter type',
-          parameter.span,
+          parameter.at,
         ),
       )
   }
@@ -305,7 +299,7 @@ export const validate = (
     diagnostics.push(
       Diagnostic.foreignDeclarationRestriction(
         'foreign contract noReturn: result must be unit',
-        span,
+        at,
       ),
     )
   return diagnostics

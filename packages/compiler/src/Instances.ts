@@ -25,7 +25,7 @@ import * as Residualization from './Residualization.js'
 import * as SemanticContext from './SemanticContext.js'
 import * as ResidualOwnership from './ResidualOwnership.js'
 import * as RowAlgebra from './RowAlgebra.js'
-import type * as SourceSpan from './SourceSpan.js'
+import * as SourceSpan from './SourceSpan.js'
 import * as Specialization from './Specialization.js'
 import * as StaticEvaluation from './StaticEvaluation.js'
 import * as StaticValue from './StaticValue.js'
@@ -513,6 +513,7 @@ const concreteConstraintEvidence = (
     ]),
     selected: wanted.selected,
     responsible: origin,
+    originKey: SourceSpan.key,
     oracle: Object.freeze({
       match: (provider: Type.Type, capability: Type.Nominal) =>
         ConformanceProof.providerMatch(index, provider, capability),
@@ -1238,7 +1239,10 @@ export const discover = (
   const residualizationDiagnostics = new Map<string, Diagnostic.Diagnostic>()
   const selectedConstants: Array<SelectedConstant> = []
   for (const module of index.modules) {
-    const moduleDiagnostics = results.get(module.module)?.diagnostics ?? Object.freeze([])
+    const moduleDiagnostics = Diagnostic.publishAll(
+      results.get(module.module)?.diagnostics ?? Object.freeze([]),
+      registry,
+    )
     for (const declaration of module.constants) {
       const declarationSpan = registry.spanOf(declaration.anchor)
       const declarationHasError = moduleDiagnostics.some(
@@ -1251,7 +1255,10 @@ export const discover = (
       if (declarationHasError) continue
       const selected = Residualization.evaluateConstant(residualization, declaration)
       if (selected._tag === 'Failed') {
-        const diagnostic = StaticEvaluation.diagnostic(selected.failure, target.id)
+        const diagnostic = Diagnostic.publish(
+          StaticEvaluation.diagnostic(selected.failure, target.id),
+          registry,
+        )
         residualizationDiagnostics.set(
           `${diagnostic.code}:${diagnostic.span.sourceId}:${diagnostic.span.start}:${diagnostic.span.end}`,
           diagnostic,
@@ -1664,7 +1671,10 @@ export const discover = (
           { 'function.module': key.declaration.module, 'function.name': key.declaration.name },
         )
         if (residual._tag === 'StaticFailure') {
-          const diagnostic = StaticEvaluation.diagnostic(residual.failure, target.id)
+          const diagnostic = Diagnostic.publish(
+            StaticEvaluation.diagnostic(residual.failure, target.id),
+            registry,
+          )
           residualizationDiagnostics.set(
             `${diagnostic.code}:${diagnostic.span.sourceId}:${diagnostic.span.start}:${diagnostic.span.end}`,
             diagnostic,
@@ -1674,10 +1684,12 @@ export const discover = (
         const selectedCompileError = residual.diagnostics.findIndex(
           (diagnostic) => diagnostic.code === Diagnostic.selectedCompileErrorCode,
         )
-        const residualDiagnostics =
+        const residualDiagnostics = Diagnostic.publishAll(
           selectedCompileError < 0
             ? residual.diagnostics
-            : residual.diagnostics.slice(0, selectedCompileError + 1)
+            : residual.diagnostics.slice(0, selectedCompileError + 1),
+          registry,
+        )
         for (const diagnostic of residualDiagnostics)
           residualizationDiagnostics.set(
             `${diagnostic.code}:${diagnostic.span.sourceId}:${diagnostic.span.start}:${diagnostic.span.end}`,

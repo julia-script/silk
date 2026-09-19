@@ -1,8 +1,8 @@
+import type * as AuthoredIdentity from './AuthoredIdentity.js'
 import type * as DeclarationFacts from './DeclarationFacts.js'
 import * as FloatingPoint from './FloatingPoint.js'
 import * as Canonical from './internal/Canonical.js'
 import * as Scalar from './Scalar.js'
-import * as SourceSpan from './SourceSpan.js'
 import * as Type from './Type.js'
 
 /** One finite, immutable value admitted to compiler-owned static evaluation. */
@@ -64,11 +64,17 @@ export interface TextValue {
 /** Source provenance retained as non-identity metadata on static text values. */
 export type TextOrigin = SourceTextOrigin | ParameterTextOrigin
 
+/**
+ * A half-open byte range of one written literal's decoded value.
+ *
+ * Both offsets are value coordinates. Which source bytes spell them is a question for the literal's
+ * presentation, asked when a diagnostic is published.
+ */
 export interface SourceTextOrigin {
   readonly _tag: 'SourceTextOrigin'
-  readonly span: SourceSpan.SourceSpan
-  readonly byteSpans: ReadonlyArray<SourceSpan.SourceSpan>
-  readonly boundary: SourceSpan.SourceSpan
+  readonly at: AuthoredIdentity.Anchor
+  readonly start: number
+  readonly end: number
 }
 
 export interface ParameterTextOrigin {
@@ -318,17 +324,6 @@ const floatValue = (type: Scalar.FloatSpelling, bits: bigint): Admission => {
   )
 }
 
-const spanMetadata = (value: unknown): SourceSpan.SourceSpan | undefined => {
-  if (
-    !isRecord(value) ||
-    typeof value.sourceId !== 'string' ||
-    typeof value.start !== 'number' ||
-    typeof value.end !== 'number'
-  )
-    return undefined
-  return SourceSpan.fromOffsets(value.sourceId, value.start, value.end)
-}
-
 const textOrigin = (value: unknown): TextOrigin | undefined => {
   if (!isRecord(value)) return undefined
   if (value._tag === 'ParameterTextOrigin') {
@@ -352,17 +347,23 @@ const textOrigin = (value: unknown): TextOrigin | undefined => {
       end: value.end,
     })
   }
-  if (value._tag !== 'SourceTextOrigin' || !Array.isArray(value.byteSpans)) return undefined
-  const span = spanMetadata(value.span)
-  const boundary = spanMetadata(value.boundary)
-  const byteSpans = value.byteSpans.map(spanMetadata)
-  if (span === undefined || boundary === undefined || byteSpans.some((item) => item === undefined))
+  if (
+    value._tag !== 'SourceTextOrigin' ||
+    !isRecord(value.at) ||
+    value.at._tag !== 'AuthoredAnchor' ||
+    typeof value.start !== 'number' ||
+    typeof value.end !== 'number' ||
+    !Number.isSafeInteger(value.start) ||
+    !Number.isSafeInteger(value.end) ||
+    value.start < 0 ||
+    value.start > value.end
+  )
     return undefined
   return Object.freeze({
     _tag: 'SourceTextOrigin',
-    span,
-    boundary,
-    byteSpans: Object.freeze(byteSpans.filter((item) => item !== undefined)),
+    at: value.at as unknown as AuthoredIdentity.Anchor,
+    start: value.start,
+    end: value.end,
   })
 }
 

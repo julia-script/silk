@@ -1,7 +1,7 @@
+import * as Location from './Location.js'
 import * as AuthoredIdentity from './AuthoredIdentity.js'
 import * as DeclarationFacts from './DeclarationFacts.js'
 import * as Diagnostic from './Diagnostic.js'
-import type * as SemanticContext from './SemanticContext.js'
 import * as Lifetime from './Lifetime.js'
 import * as Type from './Type.js'
 
@@ -367,9 +367,8 @@ export const application = (
 export const moduleDiagnostics = (
   self: DeclarationFacts.ModuleHeaders,
   scope: Context,
-  context: SemanticContext.SemanticContext,
-): ReadonlyArray<Diagnostic.Diagnostic> => {
-  const diagnostics = new Map<string, Diagnostic.Diagnostic>()
+): ReadonlyArray<Diagnostic.Located> => {
+  const diagnostics = new Map<string, Diagnostic.Located>()
   const inspect = (fact: DeclarationFacts.DeclaredTypeFact): void => {
     if (fact._tag !== 'Resolved') return
     for (const nominal of Type.nominals(fact.type))
@@ -377,7 +376,7 @@ export const moduleDiagnostics = (
         const diagnostic = Diagnostic.unsatisfiedLifetimeBound(
           Type.encodeGenericArgument(failure.argument),
           Lifetime.display(failure.required),
-          context.spanOf(fact.anchor),
+          Location.at(fact.anchor),
         )
         diagnostics.set(
           `${Type.key(nominal)}:${failure.ordinal}:${Lifetime.key(failure.required)}:${AuthoredIdentity.anchorKey(fact.anchor)}`,

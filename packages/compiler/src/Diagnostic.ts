@@ -1,5 +1,7 @@
 import type * as ConfigurationError from './ConfigurationError.js'
 import type * as ProviderSelection from './ProviderSelection.js'
+import * as Location from './Location.js'
+import type * as SemanticContext from './SemanticContext.js'
 import * as SourceSpan from './SourceSpan.js'
 import type * as Target from './Target.js'
 import * as Token from './Token.js'
@@ -727,17 +729,17 @@ export interface BuiltinEntity {
 }
 
 /** One deterministic source-level frame retained by a static diagnostic. */
-export interface StaticTraceFrame {
+export interface StaticTraceFrame<L = SourceSpan.SourceSpan> {
   readonly kind: 'Call' | 'SelectedArm' | 'StaticText'
   readonly label: string
   readonly arguments: ReadonlyArray<string>
-  readonly span: SourceSpan.SourceSpan
+  readonly span: L
 }
 
 export type ParserContext = 'syntax' | 'statement' | 'expression' | 'parameter' | 'delimiter'
 
 /** Structured per-code data explaining why the originating phase diagnosed. */
-export type Reason =
+export type Reason<L = SourceSpan.SourceSpan> =
   | {
       readonly _tag: 'InvalidPointerQualifier'
       readonly qualifier: string
@@ -789,7 +791,7 @@ export type Reason =
   | {
       readonly _tag: 'DuplicateUnionVariant'
       readonly spelling: string
-      readonly originalSpan: SourceSpan.SourceSpan
+      readonly originalSpan: L
     }
   | { readonly _tag: 'EmptyUnionVariant'; readonly variant: string }
   | { readonly _tag: 'UnknownUnionVariant'; readonly union: string; readonly variant: string }
@@ -820,26 +822,26 @@ export type Reason =
       readonly _tag: 'StaticPhaseViolation'
       readonly operation: string
       readonly target: string
-      readonly trace: ReadonlyArray<StaticTraceFrame>
+      readonly trace: ReadonlyArray<StaticTraceFrame<L>>
     }
   | {
       readonly _tag: 'SelectedCompileError'
       readonly detail: string
       readonly target: string
-      readonly trace: ReadonlyArray<StaticTraceFrame>
+      readonly trace: ReadonlyArray<StaticTraceFrame<L>>
     }
   | {
       readonly _tag: 'StaticEvaluationCycle'
       readonly application: string
       readonly target: string
-      readonly trace: ReadonlyArray<StaticTraceFrame>
+      readonly trace: ReadonlyArray<StaticTraceFrame<L>>
     }
   | {
       readonly _tag: 'StaticEvaluationLimit'
       readonly resource: 'Steps' | 'CallDepth' | 'RetainedValueBytes' | 'ResidualNodes'
       readonly limit: number
       readonly target: string
-      readonly trace: ReadonlyArray<StaticTraceFrame>
+      readonly trace: ReadonlyArray<StaticTraceFrame<L>>
     }
   | { readonly _tag: 'UnknownModule'; readonly module: string }
   | { readonly _tag: 'SelfImport'; readonly module: string }
@@ -934,21 +936,21 @@ export type Reason =
       readonly parameter: string
       readonly expected: string
       readonly actual: string
-      readonly originalSpan: SourceSpan.SourceSpan
+      readonly originalSpan: L
     }
   | {
       readonly _tag: 'DivergentRepresentationJoin'
       readonly expected: string
       readonly actual: string
-      readonly originSpans: readonly [SourceSpan.SourceSpan, SourceSpan.SourceSpan]
+      readonly originSpans: readonly [L, L]
     }
   | {
       readonly _tag: 'IncompatibleRepresentationBound'
       readonly parameter: string
       readonly required: string
       readonly actual: string
-      readonly requiredDeclarationSpan?: SourceSpan.SourceSpan
-      readonly actualDeclarationSpan?: SourceSpan.SourceSpan
+      readonly requiredDeclarationSpan?: L
+      readonly actualDeclarationSpan?: L
     }
   | {
       readonly _tag: 'StoredRepresentedEffectConstruction'
@@ -1031,13 +1033,13 @@ export type Reason =
   | {
       readonly _tag: 'DuplicateDeclarationName'
       readonly spelling: string
-      readonly originalSpan: SourceSpan.SourceSpan
+      readonly originalSpan: L
     }
   | { readonly _tag: 'UnknownFunction'; readonly spelling: string }
   | {
       readonly _tag: 'DuplicateParameterName'
       readonly spelling: string
-      readonly originalSpan: SourceSpan.SourceSpan
+      readonly originalSpan: L
     }
   | { readonly _tag: 'UnknownValueReference'; readonly spelling: string }
   | {
@@ -1049,7 +1051,7 @@ export type Reason =
   | {
       readonly _tag: 'RebindingName'
       readonly spelling: string
-      readonly originalSpan: SourceSpan.SourceSpan
+      readonly originalSpan: L
     }
   | { readonly _tag: 'UnknownActor'; readonly spelling: string }
   | {
@@ -1090,7 +1092,7 @@ export type Reason =
   | {
       readonly _tag: 'DuplicateFieldName'
       readonly spelling: string
-      readonly originalSpan: SourceSpan.SourceSpan
+      readonly originalSpan: L
     }
   | { readonly _tag: 'EmptyEnum'; readonly enum: string }
   | {
@@ -1101,12 +1103,12 @@ export type Reason =
   | {
       readonly _tag: 'DuplicateEnumMemberName'
       readonly spelling: string
-      readonly originalSpan: SourceSpan.SourceSpan
+      readonly originalSpan: L
     }
   | {
       readonly _tag: 'DuplicateEnumDiscriminant'
       readonly value: string
-      readonly originalSpan: SourceSpan.SourceSpan
+      readonly originalSpan: L
     }
   | {
       readonly _tag: 'EnumDiscriminantOutOfRange'
@@ -1144,11 +1146,11 @@ export type Reason =
   | {
       readonly _tag: 'DuplicateEnumMatchArm'
       readonly member: string
-      readonly originalSpan: SourceSpan.SourceSpan
+      readonly originalSpan: L
     }
   | {
       readonly _tag: 'EnumMatchArmAfterWildcard'
-      readonly wildcardSpan: SourceSpan.SourceSpan
+      readonly wildcardSpan: L
     }
   | { readonly _tag: 'ForeignEnumPattern'; readonly expected: string; readonly actual: string }
   | { readonly _tag: 'IntegerPatternAgainstEnum'; readonly enum: string; readonly value: string }
@@ -1182,7 +1184,7 @@ export type Reason =
   | {
       readonly _tag: 'ConflictingForeignSignature'
       readonly symbol: string
-      readonly otherSpan: SourceSpan.SourceSpan
+      readonly otherSpan: L
     }
   | {
       readonly _tag: 'ForeignFunctionTargetUnavailable'
@@ -1194,7 +1196,7 @@ export type Reason =
   | {
       readonly _tag: 'DuplicateStructInitializer'
       readonly field: string
-      readonly originalSpan: SourceSpan.SourceSpan
+      readonly originalSpan: L
     }
   | { readonly _tag: 'MissingStructInitializer'; readonly type: string; readonly field: string }
   | {
@@ -1255,19 +1257,19 @@ export type Reason =
   | {
       readonly _tag: 'DuplicatePatternField'
       readonly field: string
-      readonly originalSpan: SourceSpan.SourceSpan
+      readonly originalSpan: L
     }
   | {
       readonly _tag: 'PatternBindingConflict'
       readonly spelling: string
-      readonly originalSpan: SourceSpan.SourceSpan
+      readonly originalSpan: L
     }
   | { readonly _tag: 'IncompatibleMatchResults'; readonly types: ReadonlyArray<string> }
   | { readonly _tag: 'EffectBlockReturnMismatch'; readonly types: ReadonlyArray<string> }
   | {
       readonly _tag: 'DuplicateTypeParameter'
       readonly spelling: string
-      readonly originalSpan: SourceSpan.SourceSpan
+      readonly originalSpan: L
     }
   | {
       readonly _tag: 'TypeArgumentArity'
@@ -1349,7 +1351,7 @@ export type Reason =
   | {
       readonly _tag: 'UseAfterMove'
       readonly spelling: string
-      readonly moveSpan: SourceSpan.SourceSpan
+      readonly moveSpan: L
     }
   | { readonly _tag: 'PartialMove' }
   | {
@@ -1386,13 +1388,13 @@ export type Reason =
       readonly _tag: 'ConflictingViewLoan'
       readonly existing: 'Shared' | 'Exclusive'
       readonly requested: 'Shared' | 'Exclusive'
-      readonly loanSpan: SourceSpan.SourceSpan
+      readonly loanSpan: L
     }
   | {
       readonly _tag: 'OwnerAccessDuringLoan'
       readonly spelling: string
       readonly access: 'Read' | 'Write' | 'Move'
-      readonly loanSpan: SourceSpan.SourceSpan
+      readonly loanSpan: L
     }
   | { readonly _tag: 'BorrowedMove' }
   | {
@@ -1442,9 +1444,9 @@ export type Reason =
     }
   | { readonly _tag: 'ExportSuspends'; readonly symbol: string }
 /** One additional source span labeled with its relationship to the diagnostic. */
-export interface RelatedSpan {
+export interface RelatedSpan<L = SourceSpan.SourceSpan> {
   readonly label: string
-  readonly span: SourceSpan.SourceSpan
+  readonly span: L
 }
 
 /**
@@ -1467,29 +1469,38 @@ export interface Edit {
  * ordinal among equal (phase, code, span) diagnostics within one phase result. Reproducible
  * across runs because every phase is deterministic.
  */
-export interface Identity {
+export interface Identity<L = SourceSpan.SourceSpan> {
   readonly _tag: 'DiagnosticIdentity'
   readonly phase: Phase
   readonly code: Code
-  readonly span: SourceSpan.SourceSpan
+  readonly span: L
   readonly ordinal: number
 }
 
-/** A recoverable source mistake published by one compiler phase as ordinary data. */
-export interface Diagnostic {
+/**
+ * A recoverable source mistake published by one compiler phase as ordinary data.
+ *
+ * `L` is where it points. A published diagnostic points at a source span. A diagnostic held by a
+ * reusable semantic product points at a revision-free `Location` and gains its span when the
+ * product is published for a revision.
+ */
+export interface Diagnostic<L = SourceSpan.SourceSpan> {
   readonly _tag: 'Diagnostic'
   readonly phase: Phase
   readonly code: Code
   readonly severity: 'error'
   readonly message: string
-  readonly reason: Reason
-  readonly span: SourceSpan.SourceSpan
-  readonly relatedSpans?: ReadonlyArray<RelatedSpan>
+  readonly reason: Reason<L>
+  readonly span: L
+  readonly relatedSpans?: ReadonlyArray<RelatedSpan<L>>
   readonly notes?: ReadonlyArray<string>
   readonly edits?: ReadonlyArray<Edit>
   readonly entity?: DeclarationEntity
-  readonly cause?: Identity
+  readonly cause?: Identity<L>
 }
+
+/** A diagnostic held by a reusable semantic product. */
+export type Located = Diagnostic<Location.Location>
 
 /** Tests whether a diagnostic collection contains an emission-blocking error. */
 export const hasErrors = (diagnostics: ReadonlyArray<Diagnostic>): boolean =>
@@ -1541,7 +1552,7 @@ export const hasReturnContractErrors = (diagnostics: ReadonlyArray<Diagnostic>):
   )
 
 /** Derives the identity of one diagnostic given its ordinal among equals. */
-export const identity = (self: Diagnostic, ordinal = 0): Identity =>
+export const identity = <L>(self: Diagnostic<L>, ordinal = 0): Identity<L> =>
   Object.freeze({
     _tag: 'DiagnosticIdentity',
     phase: self.phase,
@@ -1564,12 +1575,10 @@ export const identify = (diagnostics: ReadonlyArray<Diagnostic>): ReadonlyArray<
 }
 
 /** Tests structural identity equality. */
-export const identityEquals = (self: Identity, other: Identity): boolean =>
+export const identityEquals = (self: CauseIdentity, other: CauseIdentity): boolean =>
   self.phase === other.phase &&
   self.code === other.code &&
-  self.span.sourceId === other.span.sourceId &&
-  self.span.start === other.span.start &&
-  self.span.end === other.span.end &&
+  causeLabel(self) === causeLabel(other) &&
   self.ordinal === other.ordinal
 
 const compareStrings = (left: string, right: string): number => {
@@ -1612,37 +1621,126 @@ export const merge = (
   ...collections: ReadonlyArray<ReadonlyArray<Diagnostic>>
 ): ReadonlyArray<Diagnostic> => Object.freeze(collections.flat().sort(compare))
 
+/**
+ * Joins diagnostics that are not published yet, keeping their deterministic emission order.
+ *
+ * A located diagnostic has no offsets to sort by; `publish` orders them once their spans exist.
+ */
+export const collect = <L>(
+  ...collections: ReadonlyArray<ReadonlyArray<Diagnostic<L>>>
+): ReadonlyArray<Diagnostic<L>> => Object.freeze(collections.flat())
+
+/** The reason fields that hold a position, so publication can resolve them with the diagnostic. */
+const positionFields = [
+  'originalSpan',
+  'loanSpan',
+  'wildcardSpan',
+  'requiredDeclarationSpan',
+  'actualDeclarationSpan',
+  'otherSpan',
+  'moveSpan',
+] as const
+
+/**
+ * A cause as a stage after TIR may hold it.
+ *
+ * ponytail: those stages still report in source coordinates, yet they also read header facts,
+ * whose causes are revision-free. One type once those stages read TIR nodes (task 3.3.3).
+ */
+export type CauseIdentity = Identity | Identity<Location.Location>
+
+/** A stable text for a cause, in whichever coordinates it holds. */
+export const causeLabel = (self: CauseIdentity): string =>
+  'sourceId' in self.span
+    ? `${self.span.sourceId}:${self.span.start}-${self.span.end}`
+    : Location.key(self.span)
+
+/** Gives a located identity its span for one revision. */
+export const publishIdentity = (
+  self: Identity<Location.Location>,
+  registry: SemanticContext.Registry,
+): Identity => Object.freeze({ ...self, span: Location.resolve(self.span, registry).span })
+
+/**
+ * Gives a located diagnostic its spans for one revision.
+ *
+ * A value range split across several written literals reports at the first and relates the rest.
+ */
+export const publish = (self: Located, registry: SemanticContext.Registry): Diagnostic => {
+  const primary = Location.resolve(self.span, registry)
+  const span = (location: Location.Location): SourceSpan.SourceSpan =>
+    Location.resolve(location, registry).span
+  const reason: Record<string, unknown> = { ...self.reason }
+  for (const field of positionFields) {
+    const value = reason[field]
+    if (value !== undefined) reason[field] = span(value as Location.Location)
+  }
+  if (Array.isArray(reason['originSpans']))
+    reason['originSpans'] = Object.freeze(
+      (reason['originSpans'] as ReadonlyArray<Location.Location>).map(span),
+    )
+  if (Array.isArray(reason['trace']))
+    reason['trace'] = Object.freeze(
+      // A conformance trace is lines of text; only static-evaluation frames hold a position.
+      (reason['trace'] as ReadonlyArray<string | StaticTraceFrame<Location.Location>>).map(
+        (frame) =>
+          typeof frame === 'string' ? frame : Object.freeze({ ...frame, span: span(frame.span) }),
+      ),
+    )
+  const relatedSpans = [
+    ...primary.related.map((related) => Object.freeze({ label: 'continues here', span: related })),
+    ...(self.relatedSpans ?? []).map((related) =>
+      Object.freeze({ label: related.label, span: span(related.span) }),
+    ),
+  ]
+  return Object.freeze({
+    ...self,
+    // The reason vocabulary is identical on both sides; only its position fields changed type.
+    reason: Object.freeze(reason) as unknown as Reason,
+    span: primary.span,
+    ...(relatedSpans.length === 0 ? {} : { relatedSpans: Object.freeze(relatedSpans) }),
+    ...(self.cause === undefined ? {} : { cause: publishIdentity(self.cause, registry) }),
+  }) as Diagnostic
+}
+
+/** Publishes a collection in its emission order; `merge` gives the final order. */
+export const publishAll = (
+  diagnostics: ReadonlyArray<Located>,
+  registry: SemanticContext.Registry,
+): ReadonlyArray<Diagnostic> =>
+  Object.freeze(diagnostics.map((diagnostic) => publish(diagnostic, registry)))
+
 /** Creates the diagnostic associated with one `Invalid` token. */
-export const unsupportedBytes = (span: SourceSpan.SourceSpan): Diagnostic =>
+export const unsupportedBytes = <L>(span: L): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'lexical',
     code: unsupportedBytesCode,
     severity: 'error',
     message: 'Unsupported byte sequence',
-    reason: Object.freeze({ _tag: 'UnsupportedBytes' }),
+    reason: Object.freeze({ _tag: 'UnsupportedBytes' as const }),
     span,
   })
 
 /** Creates the lexical diagnostic for one reserved but unrecognized literal modifier. */
-export const unknownLiteralModifier = (modifier: string, span: SourceSpan.SourceSpan): Diagnostic =>
+export const unknownLiteralModifier = <L>(modifier: string, span: L): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'lexical',
     code: unknownLiteralModifierCode,
     severity: 'error',
     message: `Unknown static-literal modifier: ${modifier}`,
-    reason: Object.freeze({ _tag: 'UnknownLiteralModifier', modifier }),
+    reason: Object.freeze({ _tag: 'UnknownLiteralModifier' as const, modifier }),
     span,
   })
 
 /** Creates the lexical diagnostic for one deterministic unterminated-literal recovery range. */
-export const unterminatedStaticLiteral = (
+export const unterminatedStaticLiteral = <L>(
   modifier: string,
   delimiterWidth: 1 | 3,
-  span: SourceSpan.SourceSpan,
+  span: L,
   delimiter: '"' | "'" = '"',
-): Diagnostic => {
+): Diagnostic<L> => {
   let subject: string
   if (delimiter === "'") {
     subject = 'character'
@@ -1656,7 +1754,7 @@ export const unterminatedStaticLiteral = (
     severity: 'error',
     message: `Unterminated ${subject} literal`,
     reason: Object.freeze({
-      _tag: 'UnterminatedStaticLiteral',
+      _tag: 'UnterminatedStaticLiteral' as const,
       modifier,
       delimiter,
       delimiterWidth,
@@ -1671,79 +1769,72 @@ export const unterminatedStaticLiteral = (
  * The rule counts Unicode scalars rather than bytes, so a multi-byte scalar such as `'é'` is one
  * character and never a length error.
  */
-export const characterLiteralScalarCount = (
-  scalars: number,
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
+export const characterLiteralScalarCount = <L>(scalars: number, span: L): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'lexical',
     code: characterLiteralScalarCountCode,
     severity: 'error',
     message: `Character literal must hold exactly one Unicode scalar, but holds ${scalars}`,
-    reason: Object.freeze({ _tag: 'CharacterLiteralScalarCount', scalars }),
+    reason: Object.freeze({ _tag: 'CharacterLiteralScalarCount' as const, scalars }),
     span,
   })
 
 /** Creates the lexical diagnostic for a duration amount that is not a whole decimal integer. */
-export const invalidDurationAmount = (span: SourceSpan.SourceSpan): Diagnostic =>
+export const invalidDurationAmount = <L>(span: L): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'lexical',
     code: invalidDurationAmountCode,
     severity: 'error',
     message: 'Duration components require whole decimal amounts',
-    reason: Object.freeze({ _tag: 'InvalidDurationAmount' }),
+    reason: Object.freeze({ _tag: 'InvalidDurationAmount' as const }),
     span,
   })
 
 /** Creates the lexical diagnostic for one unknown duration unit suffix. */
-export const unknownDurationUnit = (spelling: string, span: SourceSpan.SourceSpan): Diagnostic =>
+export const unknownDurationUnit = <L>(spelling: string, span: L): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'lexical',
     code: unknownDurationUnitCode,
     severity: 'error',
     message: `Unknown duration unit ${spelling}`,
-    reason: Object.freeze({ _tag: 'UnknownDurationUnit', spelling }),
+    reason: Object.freeze({ _tag: 'UnknownDurationUnit' as const, spelling }),
     span,
   })
 
 /** Creates the lexical diagnostic for one duration unit repeated in a compact literal. */
-export const repeatedDurationUnit = (unit: string, span: SourceSpan.SourceSpan): Diagnostic =>
+export const repeatedDurationUnit = <L>(unit: string, span: L): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'lexical',
     code: repeatedDurationUnitCode,
     severity: 'error',
     message: `Duration unit ${unit} may appear only once`,
-    reason: Object.freeze({ _tag: 'RepeatedDurationUnit', unit }),
+    reason: Object.freeze({ _tag: 'RepeatedDurationUnit' as const, unit }),
     span,
   })
 
 /** Creates the lexical diagnostic for a duration unit written after a smaller unit. */
-export const outOfOrderDurationUnit = (
-  unit: string,
-  previous: string,
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
+export const outOfOrderDurationUnit = <L>(unit: string, previous: string, span: L): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'lexical',
     code: outOfOrderDurationUnitCode,
     severity: 'error',
     message: `Duration unit ${unit} must not follow ${previous}`,
-    reason: Object.freeze({ _tag: 'OutOfOrderDurationUnit', unit, previous }),
+    reason: Object.freeze({ _tag: 'OutOfOrderDurationUnit' as const, unit, previous }),
     span,
   })
 
 /** Creates the lexical diagnostic for a non-leading duration component outside its field bound. */
-export const subordinateDurationOutOfRange = (
+export const subordinateDurationOutOfRange = <L>(
   unit: string,
   amount: bigint,
   maximum: bigint,
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
+  span: L,
+): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'lexical',
@@ -1751,7 +1842,7 @@ export const subordinateDurationOutOfRange = (
     severity: 'error',
     message: `Subordinate ${unit} component ${amount} exceeds ${maximum}`,
     reason: Object.freeze({
-      _tag: 'SubordinateDurationOutOfRange',
+      _tag: 'SubordinateDurationOutOfRange' as const,
       unit,
       amount: amount.toString(),
       maximum: maximum.toString(),
@@ -1760,133 +1851,130 @@ export const subordinateDurationOutOfRange = (
   })
 
 /** Creates the lexical diagnostic for one base prefix that no digit of its base follows. */
-export const missingBaseDigits = (radix: 2 | 8 | 16, span: SourceSpan.SourceSpan): Diagnostic =>
+export const missingBaseDigits = <L>(radix: 2 | 8 | 16, span: L): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'lexical',
     code: missingBaseDigitsCode,
     severity: 'error',
     message: `Base-${radix} integer literal without digits`,
-    reason: Object.freeze({ _tag: 'MissingBaseDigits', radix }),
+    reason: Object.freeze({ _tag: 'MissingBaseDigits' as const, radix }),
     span,
   })
 
 /** Creates the lexical diagnostic for one number literal whose `_` is not between two digits. */
-export const invalidDigitSeparator = (span: SourceSpan.SourceSpan): Diagnostic =>
+export const invalidDigitSeparator = <L>(span: L): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'lexical',
     code: invalidDigitSeparatorCode,
     severity: 'error',
     message: 'Digit separator must sit between two digits',
-    reason: Object.freeze({ _tag: 'InvalidDigitSeparator' }),
+    reason: Object.freeze({ _tag: 'InvalidDigitSeparator' as const }),
     span,
   })
 
 /** Creates the lexical diagnostic for one exponent marker that no exponent digit follows. */
-export const missingExponentDigits = (span: SourceSpan.SourceSpan): Diagnostic =>
+export const missingExponentDigits = <L>(span: L): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'lexical',
     code: missingExponentDigitsCode,
     severity: 'error',
     message: 'Float literal exponent must have at least one digit',
-    reason: Object.freeze({ _tag: 'MissingExponentDigits' }),
+    reason: Object.freeze({ _tag: 'MissingExponentDigits' as const }),
     span,
   })
 
 /** Creates the semantic diagnostic for a static literal that cannot decode atomically. */
-export const invalidStaticLiteral = (detail: string, span: SourceSpan.SourceSpan): Diagnostic =>
+export const invalidStaticLiteral = <L>(detail: string, span: L): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: invalidStaticLiteralCode,
     severity: 'error',
     message: `Invalid static literal: ${detail}`,
-    reason: Object.freeze({ _tag: 'InvalidStaticLiteral', detail }),
+    reason: Object.freeze({ _tag: 'InvalidStaticLiteral' as const, detail }),
     span,
   })
 
 /** Creates the semantic diagnostic for a float spelling no floating-point value can represent. */
-export const invalidFloatLiteral = (spelling: string, span: SourceSpan.SourceSpan): Diagnostic =>
+export const invalidFloatLiteral = <L>(spelling: string, span: L): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: invalidFloatLiteralCode,
     severity: 'error',
     message: `Invalid float literal: ${spelling}`,
-    reason: Object.freeze({ _tag: 'InvalidFloatLiteral', spelling }),
+    reason: Object.freeze({ _tag: 'InvalidFloatLiteral' as const, spelling }),
     span,
   })
 
 /** Creates the semantic diagnostic for a constant outside the literal scalar contract. */
-export const invalidConstant = (detail: string, span: SourceSpan.SourceSpan): Diagnostic =>
+export const invalidConstant = <L>(detail: string, span: L): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: invalidConstantCode,
     severity: 'error',
     message: `Invalid constant: ${detail}`,
-    reason: Object.freeze({ _tag: 'InvalidConstant', detail }),
+    reason: Object.freeze({ _tag: 'InvalidConstant' as const, detail }),
     span,
   })
 
 /** Creates the declaration diagnostic for an invalid interface operator marker. */
-export const invalidOperatorContract = (detail: string, span: SourceSpan.SourceSpan): Diagnostic =>
+export const invalidOperatorContract = <L>(detail: string, span: L): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: invalidOperatorContractCode,
     severity: 'error',
     message: `Invalid operator contract: ${detail}`,
-    reason: Object.freeze({ _tag: 'InvalidOperatorContract', detail }),
+    reason: Object.freeze({ _tag: 'InvalidOperatorContract' as const, detail }),
     span,
   })
 
 /** Creates the operator-site diagnostic when no marked operation accepts the operands. */
-export const operatorNotApplicable = (
+export const operatorNotApplicable = <L>(
   operator: string,
   operands: ReadonlyArray<string>,
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
+  span: L,
+): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: operatorNotApplicableCode,
     severity: 'error',
     message: `Operator ${operator} does not accept (${operands.join(', ')})`,
-    reason: Object.freeze({ _tag: 'OperatorNotApplicable', operator, operands }),
+    reason: Object.freeze({ _tag: 'OperatorNotApplicable' as const, operator, operands }),
     span,
   })
 
 /** Creates the operator-site diagnostic when static conformance leaves multiple candidates. */
-export const ambiguousOperator = (
+export const ambiguousOperator = <L>(
   operator: string,
   candidates: ReadonlyArray<string>,
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
+  span: L,
+): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: ambiguousOperatorCode,
     severity: 'error',
     message: `Operator ${operator} is ambiguous between ${candidates.join(', ')}`,
-    reason: Object.freeze({ _tag: 'AmbiguousOperator', operator, candidates }),
+    reason: Object.freeze({ _tag: 'AmbiguousOperator' as const, operator, candidates }),
     span,
   })
 
 /** Creates the semantic diagnostic for an unused non-unit expression-statement result. */
-export const expressionStatementResult = (
-  actual: string,
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
+export const expressionStatementResult = <L>(actual: string, span: L): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: expressionStatementResultCode,
     severity: 'error',
     message: `Expression statement produces ${actual}, but only () or never may be ignored`,
-    reason: Object.freeze({ _tag: 'ExpressionStatementResult', actual }),
+    reason: Object.freeze({ _tag: 'ExpressionStatementResult' as const, actual }),
     span,
     notes: Object.freeze([
       'Bind the value with `let`, return it, or consume it explicitly with `drop`.',
@@ -1894,14 +1982,14 @@ export const expressionStatementResult = (
   })
 
 /** Creates the diagnostic associated with one missing token leaf. */
-export const missingToken = (expected: Token.TokenKind, span: SourceSpan.SourceSpan): Diagnostic =>
+export const missingToken = <L>(expected: Token.TokenKind, span: L): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'parser',
     code: missingTokenCode,
     severity: 'error',
     message: `Expected ${Token.describe(expected)}`,
-    reason: Object.freeze({ _tag: 'MissingToken', expected }),
+    reason: Object.freeze({ _tag: 'MissingToken' as const, expected }),
     span,
   })
 
@@ -1919,12 +2007,12 @@ const unexpectedTokensMessage = (
 }
 
 /** Creates the diagnostic associated with one unexpected-token error node. */
-export const unexpectedTokens = (
+export const unexpectedTokens = <L>(
   unexpected: ReadonlyArray<Token.TokenKind>,
   context: ParserContext,
   expected: ReadonlyArray<string>,
-  span: SourceSpan.SourceSpan,
-): Diagnostic => {
+  span: L,
+): Diagnostic<L> => {
   const firstUnexpected = unexpected[0]
   const encountered =
     firstUnexpected === undefined || firstUnexpected === 'Invalid'
@@ -1939,7 +2027,7 @@ export const unexpectedTokens = (
     severity: 'error',
     message: unexpectedTokensMessage(encountered, context, expectation),
     reason: Object.freeze({
-      _tag: 'UnexpectedTokens',
+      _tag: 'UnexpectedTokens' as const,
       unexpected: Object.freeze([...unexpected]),
       context,
       expected: expectations,
@@ -1952,123 +2040,123 @@ export const unexpectedTokens = (
 }
 
 /** Creates the diagnostic for a future template expression start in primary position. */
-export const reservedTemplateSyntax = (span: SourceSpan.SourceSpan): Diagnostic =>
+export const reservedTemplateSyntax = <L>(span: L): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'parser',
     code: reservedTemplateSyntaxCode,
     severity: 'error',
     message: 'Template syntax is reserved but not implemented',
-    reason: Object.freeze({ _tag: 'ReservedTemplateSyntax' }),
+    reason: Object.freeze({ _tag: 'ReservedTemplateSyntax' as const }),
     span,
   })
 
 /** Creates the parser diagnostic for the first token of an over-budget child expression. */
-export const expressionNestingLimitExceeded = (
+export const expressionNestingLimitExceeded = <L>(
   limit: number,
   attemptedDepth: number,
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
+  span: L,
+): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'parser',
     code: expressionNestingLimitExceededCode,
     severity: 'error',
     message: `Expression nesting exceeds the supported limit of ${limit}`,
-    reason: Object.freeze({ _tag: 'ExpressionNestingLimitExceeded', limit, attemptedDepth }),
+    reason: Object.freeze({
+      _tag: 'ExpressionNestingLimitExceeded' as const,
+      limit,
+      attemptedDepth,
+    }),
     span,
   })
 
 /** Creates the diagnostic for a reserved final import segment without a usable binding form. */
-export const reservedImportBinding = (spelling: string, span: SourceSpan.SourceSpan): Diagnostic =>
+export const reservedImportBinding = <L>(spelling: string, span: L): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'parser',
     code: reservedImportBindingCode,
     severity: 'error',
     message: `Reserved module segment ${spelling} requires an explicit alias or selected-member list`,
-    reason: Object.freeze({ _tag: 'ReservedImportBinding', spelling }),
+    reason: Object.freeze({ _tag: 'ReservedImportBinding' as const, spelling }),
     span,
   })
 
 /** Creates the diagnostic for an import whose target module is not supplied. */
-export const unknownModule = (module: string, span: SourceSpan.SourceSpan): Diagnostic =>
+export const unknownModule = <L>(module: string, span: L): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'module',
     code: unknownModuleCode,
     severity: 'error',
     message: `Unknown module ${module}`,
-    reason: Object.freeze({ _tag: 'UnknownModule', module }),
+    reason: Object.freeze({ _tag: 'UnknownModule' as const, module }),
     span,
   })
 
 /** Creates the diagnostic for an import redundantly naming its own module. */
-export const selfImport = (module: string, span: SourceSpan.SourceSpan): Diagnostic =>
+export const selfImport = <L>(module: string, span: L): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'module',
     code: selfImportCode,
     severity: 'error',
     message: `Module ${module} imports itself`,
-    reason: Object.freeze({ _tag: 'SelfImport', module }),
+    reason: Object.freeze({ _tag: 'SelfImport' as const, module }),
     span,
   })
 
-export const unknownImportedMember = (
+export const unknownImportedMember = <L>(
   module: string,
   spelling: string,
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
+  span: L,
+): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: unknownImportedMemberCode,
     severity: 'error',
     message: `Module ${module} has no member ${spelling}`,
-    reason: Object.freeze({ _tag: 'UnknownImportedMember', module, spelling }),
+    reason: Object.freeze({ _tag: 'UnknownImportedMember' as const, module, spelling }),
     span,
   })
 
-export const inaccessibleImportedMember = (
+export const inaccessibleImportedMember = <L>(
   module: string,
   spelling: string,
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
+  span: L,
+): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: inaccessibleImportedMemberCode,
     severity: 'error',
     message: `${module}.${spelling} is private`,
-    reason: Object.freeze({ _tag: 'InaccessibleImportedMember', module, spelling }),
+    reason: Object.freeze({ _tag: 'InaccessibleImportedMember' as const, module, spelling }),
     span,
   })
 
-export const bindingConflict = (spelling: string, span: SourceSpan.SourceSpan): Diagnostic =>
+export const bindingConflict = <L>(spelling: string, span: L): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: bindingConflictCode,
     severity: 'error',
     message: `Multiple bindings claim ${spelling}`,
-    reason: Object.freeze({ _tag: 'BindingConflict', spelling }),
+    reason: Object.freeze({ _tag: 'BindingConflict' as const, spelling }),
     span,
   })
 
 /** Creates the diagnostic for a field name repeated within one struct. */
-export const duplicateFieldName = (
-  spelling: string,
-  originalSpan: SourceSpan.SourceSpan,
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
+export const duplicateFieldName = <L>(spelling: string, originalSpan: L, span: L): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: duplicateFieldNameCode,
     severity: 'error',
     message: `Duplicate field name ${spelling}`,
-    reason: Object.freeze({ _tag: 'DuplicateFieldName', spelling, originalSpan }),
+    reason: Object.freeze({ _tag: 'DuplicateFieldName' as const, spelling, originalSpan }),
     span,
     relatedSpans: Object.freeze([
       Object.freeze({ label: 'first declared here', span: originalSpan }),
@@ -2076,42 +2164,42 @@ export const duplicateFieldName = (
   })
 
 /** Creates the diagnostic for a scalar enum with no members. */
-export const emptyEnum = (enumName: string, span: SourceSpan.SourceSpan): Diagnostic =>
+export const emptyEnum = <L>(enumName: string, span: L): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: emptyEnumCode,
     severity: 'error',
     message: `Enum ${enumName} must declare at least one member`,
-    reason: Object.freeze({ _tag: 'EmptyEnum', enum: enumName }),
+    reason: Object.freeze({ _tag: 'EmptyEnum' as const, enum: enumName }),
     span,
   })
 
 /** Creates the diagnostic for a nominal union with no variants. */
-export const emptyNominalUnion = (unionName: string, span: SourceSpan.SourceSpan): Diagnostic =>
+export const emptyNominalUnion = <L>(unionName: string, span: L): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: emptyNominalUnionCode,
     severity: 'error',
     message: `Union ${unionName} must declare at least one variant`,
-    reason: Object.freeze({ _tag: 'EmptyNominalUnion', union: unionName }),
+    reason: Object.freeze({ _tag: 'EmptyNominalUnion' as const, union: unionName }),
     span,
   })
 
 /** Creates the diagnostic for a repeated variant name within one nominal union. */
-export const duplicateUnionVariant = (
+export const duplicateUnionVariant = <L>(
   spelling: string,
-  originalSpan: SourceSpan.SourceSpan,
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
+  originalSpan: L,
+  span: L,
+): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: duplicateUnionVariantCode,
     severity: 'error',
     message: `Duplicate union variant ${spelling}`,
-    reason: Object.freeze({ _tag: 'DuplicateUnionVariant', spelling, originalSpan }),
+    reason: Object.freeze({ _tag: 'DuplicateUnionVariant' as const, spelling, originalSpan }),
     span,
     relatedSpans: Object.freeze([
       Object.freeze({ label: 'first declared here', span: originalSpan }),
@@ -2119,23 +2207,23 @@ export const duplicateUnionVariant = (
   })
 
 /** Creates the diagnostic for braces used without any named variant field. */
-export const emptyUnionVariant = (variantName: string, span: SourceSpan.SourceSpan): Diagnostic =>
+export const emptyUnionVariant = <L>(variantName: string, span: L): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: emptyUnionVariantCode,
     severity: 'error',
     message: `Union variant ${variantName} must omit braces or declare at least one field`,
-    reason: Object.freeze({ _tag: 'EmptyUnionVariant', variant: variantName }),
+    reason: Object.freeze({ _tag: 'EmptyUnionVariant' as const, variant: variantName }),
     span,
   })
 
 /** Creates the diagnostic for selecting a missing variant from a resolved nominal union. */
-export const unknownUnionVariant = (
+export const unknownUnionVariant = <L>(
   unionName: string,
   variantName: string,
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
+  span: L,
+): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
@@ -2143,7 +2231,7 @@ export const unknownUnionVariant = (
     severity: 'error',
     message: `Union ${unionName} has no variant ${variantName}`,
     reason: Object.freeze({
-      _tag: 'UnknownUnionVariant',
+      _tag: 'UnknownUnionVariant' as const,
       union: unionName,
       variant: variantName,
     }),
@@ -2151,37 +2239,34 @@ export const unknownUnionVariant = (
   })
 
 /** Creates the diagnostic for a variant qualifier that is not a nominal union. */
-export const expectedNominalUnion = (actual: string, span: SourceSpan.SourceSpan): Diagnostic =>
+export const expectedNominalUnion = <L>(actual: string, span: L): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: expectedNominalUnionCode,
     severity: 'error',
     message: `Expected a nominal union, found ${actual}`,
-    reason: Object.freeze({ _tag: 'ExpectedNominalUnion', actual }),
+    reason: Object.freeze({ _tag: 'ExpectedNominalUnion' as const, actual }),
     span,
   })
 
 /** Creates the construction fence for a nominal union with invalid declaration facts. */
-export const invalidNominalUnionConstruction = (
-  unionName: string,
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
+export const invalidNominalUnionConstruction = <L>(unionName: string, span: L): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: invalidNominalUnionConstructionCode,
     severity: 'error',
     message: `Cannot construct invalid nominal union ${unionName}`,
-    reason: Object.freeze({ _tag: 'InvalidNominalUnionConstruction', union: unionName }),
+    reason: Object.freeze({ _tag: 'InvalidNominalUnionConstruction' as const, union: unionName }),
     span,
   })
 
-export const unsupportedEnumRepresentation = (
+export const unsupportedEnumRepresentation = <L>(
   spelling: string,
   allowed: ReadonlyArray<string>,
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
+  span: L,
+): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
@@ -2189,36 +2274,36 @@ export const unsupportedEnumRepresentation = (
     severity: 'error',
     message: `${spelling} is not a scalar enum representation`,
     reason: Object.freeze({
-      _tag: 'UnsupportedEnumRepresentation',
+      _tag: 'UnsupportedEnumRepresentation' as const,
       spelling,
       allowed: Object.freeze([...allowed]),
     }),
     span,
   })
 
-export const duplicateEnumMemberName = (
+export const duplicateEnumMemberName = <L>(
   spelling: string,
-  originalSpan: SourceSpan.SourceSpan,
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
+  originalSpan: L,
+  span: L,
+): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: duplicateEnumMemberNameCode,
     severity: 'error',
     message: `Duplicate enum member name ${spelling}`,
-    reason: Object.freeze({ _tag: 'DuplicateEnumMemberName', spelling, originalSpan }),
+    reason: Object.freeze({ _tag: 'DuplicateEnumMemberName' as const, spelling, originalSpan }),
     span,
     relatedSpans: Object.freeze([
       Object.freeze({ label: 'first declared here', span: originalSpan }),
     ]),
   })
 
-export const duplicateEnumDiscriminant = (
+export const duplicateEnumDiscriminant = <L>(
   value: bigint,
-  originalSpan: SourceSpan.SourceSpan,
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
+  originalSpan: L,
+  span: L,
+): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
@@ -2226,7 +2311,7 @@ export const duplicateEnumDiscriminant = (
     severity: 'error',
     message: `Duplicate enum discriminant ${value}`,
     reason: Object.freeze({
-      _tag: 'DuplicateEnumDiscriminant',
+      _tag: 'DuplicateEnumDiscriminant' as const,
       value: value.toString(),
       originalSpan,
     }),
@@ -2236,13 +2321,13 @@ export const duplicateEnumDiscriminant = (
     ]),
   })
 
-export const enumDiscriminantOutOfRange = (
+export const enumDiscriminantOutOfRange = <L>(
   representation: string,
   value: bigint,
   minimum: bigint,
   maximum: bigint,
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
+  span: L,
+): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
@@ -2250,7 +2335,7 @@ export const enumDiscriminantOutOfRange = (
     severity: 'error',
     message: `Enum discriminant ${value} is outside ${representation}`,
     reason: Object.freeze({
-      _tag: 'EnumDiscriminantOutOfRange',
+      _tag: 'EnumDiscriminantOutOfRange' as const,
       representation,
       value: value.toString(),
       minimum: minimum.toString(),
@@ -2259,12 +2344,12 @@ export const enumDiscriminantOutOfRange = (
     span,
   })
 
-export const enumImplicitDiscriminantOverflow = (
+export const enumImplicitDiscriminantOverflow = <L>(
   representation: string,
   predecessor: bigint,
   maximum: bigint,
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
+  span: L,
+): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
@@ -2272,7 +2357,7 @@ export const enumImplicitDiscriminantOverflow = (
     severity: 'error',
     message: `Implicit enum discriminant after ${predecessor} exceeds ${representation}`,
     reason: Object.freeze({
-      _tag: 'EnumImplicitDiscriminantOverflow',
+      _tag: 'EnumImplicitDiscriminantOverflow' as const,
       representation,
       predecessor: predecessor.toString(),
       maximum: maximum.toString(),
@@ -2280,11 +2365,11 @@ export const enumImplicitDiscriminantOverflow = (
     span,
   })
 
-export const unsignedEnumNegativeDiscriminant = (
+export const unsignedEnumNegativeDiscriminant = <L>(
   representation: string,
   value: bigint,
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
+  span: L,
+): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
@@ -2292,49 +2377,41 @@ export const unsignedEnumNegativeDiscriminant = (
     severity: 'error',
     message: `Unsigned enum representation ${representation} cannot hold ${value}`,
     reason: Object.freeze({
-      _tag: 'UnsignedEnumNegativeDiscriminant',
+      _tag: 'UnsignedEnumNegativeDiscriminant' as const,
       representation,
       value: value.toString(),
     }),
     span,
   })
 
-export const unknownEnumMember = (
-  enumName: string,
-  member: string,
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
+export const unknownEnumMember = <L>(enumName: string, member: string, span: L): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: unknownEnumMemberCode,
     severity: 'error',
     message: `Enum ${enumName} has no member ${member}`,
-    reason: Object.freeze({ _tag: 'UnknownEnumMember', enum: enumName, member }),
+    reason: Object.freeze({ _tag: 'UnknownEnumMember' as const, enum: enumName, member }),
     span,
   })
 
-export const wrongEnumMember = (
-  expected: string,
-  actual: string,
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
+export const wrongEnumMember = <L>(expected: string, actual: string, span: L): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: wrongEnumMemberCode,
     severity: 'error',
     message: `Enum member of ${actual} cannot be used as ${expected}`,
-    reason: Object.freeze({ _tag: 'WrongEnumMember', expected, actual }),
+    reason: Object.freeze({ _tag: 'WrongEnumMember' as const, expected, actual }),
     span,
   })
 
-export const enumIntegerMismatch = (
+export const enumIntegerMismatch = <L>(
   enumName: string,
   integer: string,
   direction: 'IntegerToEnum' | 'EnumToInteger',
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
+  span: L,
+): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
@@ -2344,69 +2421,66 @@ export const enumIntegerMismatch = (
       direction === 'IntegerToEnum'
         ? `${integer} does not implicitly construct ${enumName}`
         : `${enumName} does not implicitly convert to ${integer}`,
-    reason: Object.freeze({ _tag: 'EnumIntegerMismatch', enum: enumName, integer, direction }),
+    reason: Object.freeze({
+      _tag: 'EnumIntegerMismatch' as const,
+      enum: enumName,
+      integer,
+      direction,
+    }),
     span,
   })
 
-export const crossEnumEquality = (
-  left: string,
-  right: string,
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
+export const crossEnumEquality = <L>(left: string, right: string, span: L): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: crossEnumEqualityCode,
     severity: 'error',
     message: `Equality requires one enum type, not ${left} and ${right}`,
-    reason: Object.freeze({ _tag: 'CrossEnumEquality', left, right }),
+    reason: Object.freeze({ _tag: 'CrossEnumEquality' as const, left, right }),
     span,
   })
 
-export const enumOrdering = (
-  enumName: string,
-  operator: string,
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
+export const enumOrdering = <L>(enumName: string, operator: string, span: L): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: enumOrderingCode,
     severity: 'error',
     message: `Enum ${enumName} does not support ${operator}; compare backing values explicitly`,
-    reason: Object.freeze({ _tag: 'EnumOrdering', enum: enumName, operator }),
+    reason: Object.freeze({ _tag: 'EnumOrdering' as const, enum: enumName, operator }),
     span,
   })
 
 /** Creates the diagnostic for a value declaration used as a declared type. */
-export const expectedType = (spelling: string, span: SourceSpan.SourceSpan): Diagnostic =>
+export const expectedType = <L>(spelling: string, span: L): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: expectedTypeCode,
     severity: 'error',
     message: `Expected a type, found ${spelling}`,
-    reason: Object.freeze({ _tag: 'ExpectedType', spelling }),
+    reason: Object.freeze({ _tag: 'ExpectedType' as const, spelling }),
     span,
   })
 
 /** Creates the diagnostic for a public contract exposing a private nominal type. */
-export const privateTypeExposure = (type: string, span: SourceSpan.SourceSpan): Diagnostic =>
+export const privateTypeExposure = <L>(type: string, span: L): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: privateTypeExposureCode,
     severity: 'error',
     message: `Public declaration exposes private type ${type}`,
-    reason: Object.freeze({ _tag: 'PrivateTypeExposure', type }),
+    reason: Object.freeze({ _tag: 'PrivateTypeExposure' as const, type }),
     span,
   })
 
 /** Creates the one canonical diagnostic for an inline recursive nominal-aggregate component. */
-export const inlineRecursiveAggregate = (
+export const inlineRecursiveAggregate = <L>(
   members: ReadonlyArray<string>,
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
+  span: L,
+): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
@@ -2414,26 +2488,29 @@ export const inlineRecursiveAggregate = (
     severity: 'error',
     message: `Inline recursive aggregate layout: ${members.join(' -> ')}`,
     reason: Object.freeze({
-      _tag: 'InlineRecursiveAggregate',
+      _tag: 'InlineRecursiveAggregate' as const,
       members: Object.freeze([...members]),
     }),
     span,
   })
 
 /** Reports one alias on a cycle, relating every other alias declaration on that cycle. */
-export const cyclicTypeAlias = (
+export const cyclicTypeAlias = <L>(
   alias: string,
   aliases: ReadonlyArray<string>,
-  related: ReadonlyArray<SourceSpan.SourceSpan>,
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
+  related: ReadonlyArray<L>,
+  span: L,
+): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: cyclicTypeAliasCode,
     severity: 'error',
     message: `Type alias ${alias} is cyclic: ${[...aliases, aliases[0] ?? alias].join(' -> ')}`,
-    reason: Object.freeze({ _tag: 'CyclicTypeAlias', aliases: Object.freeze([...aliases]) }),
+    reason: Object.freeze({
+      _tag: 'CyclicTypeAlias' as const,
+      aliases: Object.freeze([...aliases]),
+    }),
     span,
     ...(related.length === 0
       ? {}
@@ -2447,207 +2524,187 @@ export const cyclicTypeAlias = (
   })
 
 /** Rejects a type alias that declares type parameters. */
-export const typeAliasParameters = (alias: string, span: SourceSpan.SourceSpan): Diagnostic =>
+export const typeAliasParameters = <L>(alias: string, span: L): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: typeAliasParametersCode,
     severity: 'error',
     message: `Type alias ${alias} cannot declare type parameters; alias an applied type such as Point<i32> instead`,
-    reason: Object.freeze({ _tag: 'TypeAliasParameters', alias }),
+    reason: Object.freeze({ _tag: 'TypeAliasParameters' as const, alias }),
     span,
   })
 
 /** Rejects the ABI string of a foreign function declaration; only "C" is supported. */
-export const unsupportedForeignAbi = (abi: string, span: SourceSpan.SourceSpan): Diagnostic =>
+export const unsupportedForeignAbi = <L>(abi: string, span: L): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: unsupportedForeignAbiCode,
     severity: 'error',
     message: `Foreign ABI "${abi}" is not supported; only "C" is available`,
-    reason: Object.freeze({ _tag: 'UnsupportedForeignAbi', abi }),
+    reason: Object.freeze({ _tag: 'UnsupportedForeignAbi' as const, abi }),
     span,
   })
 
 /** Rejects a parameterized record before it can publish a C-layout promise. */
-export const genericCLayoutRecord = (record: string, span: SourceSpan.SourceSpan): Diagnostic =>
+export const genericCLayoutRecord = <L>(record: string, span: L): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: genericCLayoutRecordCode,
     severity: 'error',
     message: `C-layout record ${record} cannot declare type parameters`,
-    reason: Object.freeze({ _tag: 'GenericCLayoutRecord', record }),
+    reason: Object.freeze({ _tag: 'GenericCLayoutRecord' as const, record }),
     span,
   })
 
 /** Rejects one field whose resolved type has no supported C object representation. */
-export const unsupportedCLayoutField = (
+export const unsupportedCLayoutField = <L>(
   record: string,
   field: string,
   type: string,
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
+  span: L,
+): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: unsupportedCLayoutFieldCode,
     severity: 'error',
     message: `Field ${field} of C-layout record ${record} has unsupported type ${type}`,
-    reason: Object.freeze({ _tag: 'UnsupportedCLayoutField', record, field, type }),
+    reason: Object.freeze({ _tag: 'UnsupportedCLayoutField' as const, record, field, type }),
     span,
   })
 
-export const foreignFunctionRequiresUnsafe = (
-  name: string,
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
+export const foreignFunctionRequiresUnsafe = <L>(name: string, span: L): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: foreignFunctionRequiresUnsafeCode,
     severity: 'error',
     message: `Foreign function ${name} must be declared unsafe`,
-    reason: Object.freeze({ _tag: 'ForeignFunctionRequiresUnsafe', name }),
+    reason: Object.freeze({ _tag: 'ForeignFunctionRequiresUnsafe' as const, name }),
     span,
   })
 
 /** Reported at the offending parameter or result type of a foreign function. */
-export const foreignTypeNotAdmitted = (
-  type: string,
-  abi: string,
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
+export const foreignTypeNotAdmitted = <L>(type: string, abi: string, span: L): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: foreignTypeNotAdmittedCode,
     severity: 'error',
     message: `${type} is not admitted by the ${abi} ABI`,
-    reason: Object.freeze({ _tag: 'ForeignTypeNotAdmitted', type, abi }),
+    reason: Object.freeze({ _tag: 'ForeignTypeNotAdmitted' as const, type, abi }),
     span,
   })
 
 /** Reported at retained Silk-only syntax such as type parameters, rows, `effect`, or a body. */
-export const foreignDeclarationRestriction = (
-  restriction: string,
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
+export const foreignDeclarationRestriction = <L>(restriction: string, span: L): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: foreignDeclarationRestrictionCode,
     severity: 'error',
     message: `A foreign function declaration must not include ${restriction}`,
-    reason: Object.freeze({ _tag: 'ForeignDeclarationRestriction', restriction }),
+    reason: Object.freeze({ _tag: 'ForeignDeclarationRestriction' as const, restriction }),
     span,
   })
 
-export const foreignFunctionNotFirstClass = (
-  name: string,
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
+export const foreignFunctionNotFirstClass = <L>(name: string, span: L): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: foreignFunctionNotFirstClassCode,
     severity: 'error',
     message: `Foreign function ${name} can only be called; it cannot be used as a first-class value`,
-    reason: Object.freeze({ _tag: 'ForeignFunctionNotFirstClass', name }),
+    reason: Object.freeze({ _tag: 'ForeignFunctionNotFirstClass' as const, name }),
     span,
   })
 
-export const invalidForeignCallback = (
-  name: string,
-  detail: string,
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
+export const invalidForeignCallback = <L>(name: string, detail: string, span: L): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: invalidForeignCallbackCode,
     severity: 'error',
     message: `${name} cannot be used as a C callback: ${detail}`,
-    reason: Object.freeze({ _tag: 'InvalidForeignCallback', name, detail }),
+    reason: Object.freeze({ _tag: 'InvalidForeignCallback' as const, name, detail }),
     span,
   })
 
-export const missingDiagnosticContext = (span: SourceSpan.SourceSpan): Diagnostic =>
+export const missingDiagnosticContext = <L>(span: L): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: missingDiagnosticContextCode,
     severity: 'error',
     message: 'Terminal diagnostic observation requires a selected failure context',
-    reason: Object.freeze({ _tag: 'MissingDiagnosticContext' }),
+    reason: Object.freeze({ _tag: 'MissingDiagnosticContext' as const }),
     span,
   })
 
-export const invalidDiagnosticObserver = (
-  detail: string,
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
+export const invalidDiagnosticObserver = <L>(detail: string, span: L): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: invalidDiagnosticObserverCode,
     severity: 'error',
     message: `Diagnostic observer callback requires direct execution: ${detail}`,
-    reason: Object.freeze({ _tag: 'InvalidDiagnosticObserver', detail }),
+    reason: Object.freeze({ _tag: 'InvalidDiagnosticObserver' as const, detail }),
     span,
   })
 
-export const foreignStaticTargetUnavailable = (
+export const foreignStaticTargetUnavailable = <L>(
   symbol: string,
   surface: string,
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
+  span: L,
+): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: foreignStaticTargetUnavailableCode,
     severity: 'error',
     message: `Foreign static ${symbol} is unavailable on ${surface}; C data symbols require native LLVM linkage`,
-    reason: Object.freeze({ _tag: 'ForeignStaticTargetUnavailable', symbol, surface }),
+    reason: Object.freeze({ _tag: 'ForeignStaticTargetUnavailable' as const, symbol, surface }),
     span,
   })
 
-export const invalidForeignSymbol = (symbol: string, span: SourceSpan.SourceSpan): Diagnostic =>
+export const invalidForeignSymbol = <L>(symbol: string, span: L): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: invalidForeignSymbolCode,
     severity: 'error',
     message: `"${symbol}" is not a valid native symbol; use a letter or underscore followed by letters, digits, or underscores`,
-    reason: Object.freeze({ _tag: 'InvalidForeignSymbol', symbol }),
+    reason: Object.freeze({ _tag: 'InvalidForeignSymbol' as const, symbol }),
     span,
   })
 
-export const reservedForeignSymbol = (symbol: string, span: SourceSpan.SourceSpan): Diagnostic =>
+export const reservedForeignSymbol = <L>(symbol: string, span: L): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: reservedForeignSymbolCode,
     severity: 'error',
     message: `Native symbol ${symbol} is reserved by the compiler runtime`,
-    reason: Object.freeze({ _tag: 'ReservedForeignSymbol', symbol }),
+    reason: Object.freeze({ _tag: 'ReservedForeignSymbol' as const, symbol }),
     span,
   })
 
 /** Relates the other reachable declaration of the same symbol. */
-export const conflictingForeignSignature = (
+export const conflictingForeignSignature = <L>(
   symbol: string,
-  span: SourceSpan.SourceSpan,
-  otherSpan: SourceSpan.SourceSpan,
-): Diagnostic =>
+  span: L,
+  otherSpan: L,
+): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: conflictingForeignSignatureCode,
     severity: 'error',
     message: `Foreign symbol ${symbol} is declared with a conflicting C signature or behavioral contract`,
-    reason: Object.freeze({ _tag: 'ConflictingForeignSignature', symbol, otherSpan }),
+    reason: Object.freeze({ _tag: 'ConflictingForeignSignature' as const, symbol, otherSpan }),
     span,
     relatedSpans: Object.freeze([
       Object.freeze({ label: 'conflicting declaration', span: otherSpan }),
@@ -2655,18 +2712,18 @@ export const conflictingForeignSignature = (
   })
 
 /** Diagnoses a reachable foreign call before an execution surface without bindings is entered. */
-export const foreignFunctionTargetUnavailable = (
+export const foreignFunctionTargetUnavailable = <L>(
   symbol: string,
   surface: string,
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
+  span: L,
+): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: foreignFunctionTargetUnavailableCode,
     severity: 'error',
     message: `Foreign function ${symbol} is unavailable for ${surface}`,
-    reason: Object.freeze({ _tag: 'ForeignFunctionTargetUnavailable', symbol, surface }),
+    reason: Object.freeze({ _tag: 'ForeignFunctionTargetUnavailable' as const, symbol, surface }),
     span,
   })
 
@@ -2689,18 +2746,18 @@ const inherentHeadMessage = (
 }
 
 /** Rejects an inherent impl head that does not own the complete family of a module-local nominal. */
-export const invalidInherentHead = (
+export const invalidInherentHead = <L>(
   owner: string,
   problem: 'Specialized' | 'Bounded' | 'ForeignOwner' | 'AliasOwner' | 'NotNominal',
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
+  span: L,
+): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: invalidInherentHeadCode,
     severity: 'error',
     message: inherentHeadMessage(owner, problem),
-    reason: Object.freeze({ _tag: 'InvalidInherentHead', owner, problem }),
+    reason: Object.freeze({ _tag: 'InvalidInherentHead' as const, owner, problem }),
     span,
   })
 
@@ -2721,14 +2778,14 @@ const inherentMemberMessage = (
 }
 
 /** Rejects an inherent impl member that cannot become an associated member of its owner. */
-export const invalidInherentMember = (
+export const invalidInherentMember = <L>(
   owner: string,
   member: string,
   problem: 'MappedOperation' | 'DropHook' | 'Collision',
-  span: SourceSpan.SourceSpan,
+  span: L,
   collidesWith?: string,
-  relatedSpan?: SourceSpan.SourceSpan,
-): Diagnostic =>
+  relatedSpan?: L,
+): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
@@ -2736,7 +2793,7 @@ export const invalidInherentMember = (
     severity: 'error',
     message: inherentMemberMessage(owner, member, problem, collidesWith),
     reason: Object.freeze({
-      _tag: 'InvalidInherentMember',
+      _tag: 'InvalidInherentMember' as const,
       owner,
       member,
       problem,
@@ -2753,19 +2810,19 @@ export const invalidInherentMember = (
   })
 
 /** Rejects a second inherent member of one owner with a name an earlier impl block already used. */
-export const duplicateInherentMember = (
+export const duplicateInherentMember = <L>(
   owner: string,
   member: string,
-  span: SourceSpan.SourceSpan,
-  otherSpan: SourceSpan.SourceSpan,
-): Diagnostic =>
+  span: L,
+  otherSpan: L,
+): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: duplicateInherentMemberCode,
     severity: 'error',
     message: `${owner}.${member} is declared more than once; one owner has at most one member of each name`,
-    reason: Object.freeze({ _tag: 'DuplicateInherentMember', owner, member }),
+    reason: Object.freeze({ _tag: 'DuplicateInherentMember' as const, owner, member }),
     span,
     relatedSpans: Object.freeze([
       Object.freeze({ label: `other declaration of ${owner}.${member}`, span: otherSpan }),
@@ -2773,45 +2830,45 @@ export const duplicateInherentMember = (
   })
 
 /** Rejects a selective import that names an inherent member as though it were a root declaration. */
-export const importedInherentMember = (
+export const importedInherentMember = <L>(
   module: string,
   member: string,
   owner: string,
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
+  span: L,
+): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: importedInherentMemberCode,
     severity: 'error',
     message: `${module} has no root declaration ${member}; it is a member of ${owner}, so import ${owner} and write ${owner}.${member}`,
-    reason: Object.freeze({ _tag: 'ImportedInherentMember', module, member, owner }),
+    reason: Object.freeze({ _tag: 'ImportedInherentMember' as const, module, member, owner }),
     span,
   })
 
 /** Rejects `value.member(...)` when `member` is an associated function that declares no receiver. */
-export const associatedFunctionOnValue = (
+export const associatedFunctionOnValue = <L>(
   owner: string,
   member: string,
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
+  span: L,
+): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: associatedFunctionOnValueCode,
     severity: 'error',
     message: `${owner}.${member} is an associated function without a receiver; call it as ${owner}.${member}(...)`,
-    reason: Object.freeze({ _tag: 'AssociatedFunctionOnValue', owner, member }),
+    reason: Object.freeze({ _tag: 'AssociatedFunctionOnValue' as const, owner, member }),
     span,
   })
 
 /** Rejects `value.member(...)` on a type parameter whose bounds declare `member` more than once. */
-export const ambiguousReceiverOperation = (
+export const ambiguousReceiverOperation = <L>(
   parameter: string,
   member: string,
   interfaces: ReadonlyArray<string>,
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
+  span: L,
+): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
@@ -2819,7 +2876,7 @@ export const ambiguousReceiverOperation = (
     severity: 'error',
     message: `${member} is declared by more than one bound of ${parameter} (${interfaces.join(', ')}); call it through the bound, as ${interfaces.at(0) ?? 'Bound'}.${member}(...)`,
     reason: Object.freeze({
-      _tag: 'AmbiguousReceiverOperation',
+      _tag: 'AmbiguousReceiverOperation' as const,
       parameter,
       member,
       interfaces: Object.freeze([...interfaces]),
@@ -2836,12 +2893,12 @@ export const ambiguousReceiverOperation = (
  * conformances are proved; what is missing is which one the call means. Arguments must not choose,
  * so the qualified spelling is the answer.
  */
-export const ambiguousSuppliedOperation = (
+export const ambiguousSuppliedOperation = <L>(
   receiver: string,
   member: string,
   interfaces: ReadonlyArray<string>,
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
+  span: L,
+): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
@@ -2849,7 +2906,7 @@ export const ambiguousSuppliedOperation = (
     severity: 'error',
     message: `${member} is supplied to ${receiver} by more than one interface (${interfaces.join(', ')}); call it through one, as ${interfaces.at(0) ?? 'Interface'}.${member}(...)`,
     reason: Object.freeze({
-      _tag: 'AmbiguousSuppliedOperation',
+      _tag: 'AmbiguousSuppliedOperation' as const,
       receiver,
       member,
       interfaces: Object.freeze([...interfaces]),
@@ -2864,106 +2921,95 @@ export const ambiguousSuppliedOperation = (
  * to carry the conformance witness its call selects statically. That is a separate capability, so
  * the operation is available only in callee position.
  */
-export const suppliedOperationValue = (
+export const suppliedOperationValue = <L>(
   receiver: string,
   member: string,
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
+  span: L,
+): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: suppliedOperationValueCode,
     severity: 'error',
     message: `${member} is supplied to ${receiver} by an interface and must be called; it has no value form`,
-    reason: Object.freeze({ _tag: 'SuppliedOperationValue', receiver, member }),
+    reason: Object.freeze({ _tag: 'SuppliedOperationValue' as const, receiver, member }),
     span,
   })
 
-export const inaccessibleStructConstruction = (
-  type: string,
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
+export const inaccessibleStructConstruction = <L>(type: string, span: L): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: inaccessibleStructConstructionCode,
     severity: 'error',
     message: `Cannot construct ${type} because its raw constructor is not available at this site`,
-    reason: Object.freeze({ _tag: 'InaccessibleStructConstruction', type }),
+    reason: Object.freeze({ _tag: 'InaccessibleStructConstruction' as const, type }),
     span,
   })
 
-export const unknownStructField = (
-  type: string,
-  field: string,
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
+export const unknownStructField = <L>(type: string, field: string, span: L): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: unknownStructFieldCode,
     severity: 'error',
     message: `${type} has no field ${field}`,
-    reason: Object.freeze({ _tag: 'UnknownStructField', type, field }),
+    reason: Object.freeze({ _tag: 'UnknownStructField' as const, type, field }),
     span,
   })
 
-export const duplicateStructInitializer = (
+export const duplicateStructInitializer = <L>(
   field: string,
-  originalSpan: SourceSpan.SourceSpan,
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
+  originalSpan: L,
+  span: L,
+): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: duplicateStructInitializerCode,
     severity: 'error',
     message: `Field ${field} is initialized more than once`,
-    reason: Object.freeze({ _tag: 'DuplicateStructInitializer', field, originalSpan }),
+    reason: Object.freeze({ _tag: 'DuplicateStructInitializer' as const, field, originalSpan }),
     span,
     relatedSpans: Object.freeze([
       Object.freeze({ label: 'first initialized here', span: originalSpan }),
     ]),
   })
 
-export const missingStructInitializer = (
-  type: string,
-  field: string,
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
+export const missingStructInitializer = <L>(type: string, field: string, span: L): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: missingStructInitializerCode,
     severity: 'error',
     message: `Missing initializer for ${type}.${field}`,
-    reason: Object.freeze({ _tag: 'MissingStructInitializer', type, field }),
+    reason: Object.freeze({ _tag: 'MissingStructInitializer' as const, type, field }),
     span,
   })
 
-export const structFieldTypeMismatch = (
+export const structFieldTypeMismatch = <L>(
   field: string,
   expected: string,
   actual: string,
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
+  span: L,
+): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: structFieldTypeMismatchCode,
     severity: 'error',
     message: `Field ${field} expects ${expected} but received ${actual}`,
-    reason: Object.freeze({ _tag: 'StructFieldTypeMismatch', field, expected, actual }),
+    reason: Object.freeze({ _tag: 'StructFieldTypeMismatch' as const, field, expected, actual }),
     span,
   })
 
-export const conflictingInitializerRepresentation = (
+export const conflictingInitializerRepresentation = <L>(
   parameter: string,
   expected: string,
   actual: string,
-  originalSpan: SourceSpan.SourceSpan,
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
+  originalSpan: L,
+  span: L,
+): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
@@ -2971,7 +3017,7 @@ export const conflictingInitializerRepresentation = (
     severity: 'error',
     message: `Representation ${parameter} was inferred as ${expected}, but this initializer uses ${actual}`,
     reason: Object.freeze({
-      _tag: 'ConflictingInitializerRepresentation',
+      _tag: 'ConflictingInitializerRepresentation' as const,
       parameter,
       expected,
       actual,
@@ -2983,159 +3029,144 @@ export const conflictingInitializerRepresentation = (
     ]),
   })
 
-export const projectionOnNonStruct = (actual: string, span: SourceSpan.SourceSpan): Diagnostic =>
+export const projectionOnNonStruct = <L>(actual: string, span: L): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: projectionOnNonStructCode,
     severity: 'error',
     message: `Cannot project a field from ${actual}`,
-    reason: Object.freeze({ _tag: 'ProjectionOnNonStruct', actual }),
+    reason: Object.freeze({ _tag: 'ProjectionOnNonStruct' as const, actual }),
     span,
   })
 
-export const invalidReferentProjection = (
-  actual: string,
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
+export const invalidReferentProjection = <L>(actual: string, span: L): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: invalidReferentProjectionCode,
     severity: 'error',
     message: `Cannot project a referent from ${actual}; the subject must be a reference`,
-    reason: Object.freeze({ _tag: 'InvalidReferentProjection', actual }),
+    reason: Object.freeze({ _tag: 'InvalidReferentProjection' as const, actual }),
     span,
   })
 
-export const unknownProjectedField = (
-  type: string,
-  field: string,
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
+export const unknownProjectedField = <L>(type: string, field: string, span: L): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: unknownProjectedFieldCode,
     severity: 'error',
     message: `${type} has no field ${field}`,
-    reason: Object.freeze({ _tag: 'UnknownProjectedField', type, field }),
+    reason: Object.freeze({ _tag: 'UnknownProjectedField' as const, type, field }),
     span,
   })
 
-export const inaccessibleProjectedField = (
+export const inaccessibleProjectedField = <L>(
   type: string,
   field: string,
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
+  span: L,
+): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: inaccessibleProjectedFieldCode,
     severity: 'error',
     message: `${type}.${field} is private`,
-    reason: Object.freeze({ _tag: 'InaccessibleProjectedField', type, field }),
+    reason: Object.freeze({ _tag: 'InaccessibleProjectedField' as const, type, field }),
     span,
   })
 
-export const emptyArrayNeedsContext = (span: SourceSpan.SourceSpan): Diagnostic =>
+export const emptyArrayNeedsContext = <L>(span: L): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: emptyArrayNeedsContextCode,
     severity: 'error',
     message: 'An empty array literal needs an expected Array type',
-    reason: Object.freeze({ _tag: 'EmptyArrayNeedsContext' }),
+    reason: Object.freeze({ _tag: 'EmptyArrayNeedsContext' as const }),
     span,
   })
 
-export const arrayElementTypeMismatch = (
+export const arrayElementTypeMismatch = <L>(
   expected: string,
   actual: string,
   index: number,
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
+  span: L,
+): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: arrayElementTypeMismatchCode,
     severity: 'error',
     message: `Array element ${index} expects ${expected} but received ${actual}`,
-    reason: Object.freeze({ _tag: 'ArrayElementTypeMismatch', expected, actual, index }),
+    reason: Object.freeze({ _tag: 'ArrayElementTypeMismatch' as const, expected, actual, index }),
     span,
   })
 
-export const arrayLengthMismatch = (
-  expected: number,
-  actual: number,
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
+export const arrayLengthMismatch = <L>(expected: number, actual: number, span: L): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: arrayLengthMismatchCode,
     severity: 'error',
     message: `Array literal expects ${expected} elements but received ${actual}`,
-    reason: Object.freeze({ _tag: 'ArrayLengthMismatch', expected, actual }),
+    reason: Object.freeze({ _tag: 'ArrayLengthMismatch' as const, expected, actual }),
     span,
   })
 
-export const indexOnNonArray = (actual: string, span: SourceSpan.SourceSpan): Diagnostic =>
+export const indexOnNonArray = <L>(actual: string, span: L): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: indexOnNonArrayCode,
     severity: 'error',
     message: `Cannot index ${actual}`,
-    reason: Object.freeze({ _tag: 'IndexOnNonArray', actual }),
+    reason: Object.freeze({ _tag: 'IndexOnNonArray' as const, actual }),
     span,
   })
 
-export const indexNotUsize = (actual: string, span: SourceSpan.SourceSpan): Diagnostic =>
+export const indexNotUsize = <L>(actual: string, span: L): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: indexNotUsizeCode,
     severity: 'error',
     message: `Array index must be usize, found ${actual}`,
-    reason: Object.freeze({ _tag: 'IndexNotUsize', actual }),
+    reason: Object.freeze({ _tag: 'IndexNotUsize' as const, actual }),
     span,
   })
 
-export const indexOutOfBounds = (
-  index: number,
-  length: number,
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
+export const indexOutOfBounds = <L>(index: number, length: number, span: L): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: indexOutOfBoundsCode,
     severity: 'error',
     message: `Array index ${index} is outside length ${length}`,
-    reason: Object.freeze({ _tag: 'IndexOutOfBounds', index, length }),
+    reason: Object.freeze({ _tag: 'IndexOutOfBounds' as const, index, length }),
     span,
   })
 
 /** Creates the diagnostic for one present identifier that cannot resolve as a type. */
-export const unknownType = (spelling: string, span: SourceSpan.SourceSpan): Diagnostic =>
+export const unknownType = <L>(spelling: string, span: L): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: unknownTypeCode,
     severity: 'error',
     message: `Unknown type ${spelling}`,
-    reason: Object.freeze({ _tag: 'UnknownType', spelling }),
+    reason: Object.freeze({ _tag: 'UnknownType' as const, spelling }),
     span,
   })
 
 /** Creates a range diagnostic with the selected integer type and exact decimal bounds. */
-export const integerOutOfRange = (
+export const integerOutOfRange = <L>(
   spelling: string,
   type: string,
   range: { readonly minimum: bigint; readonly maximum: bigint },
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
+  span: L,
+): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
@@ -3143,7 +3174,7 @@ export const integerOutOfRange = (
     severity: 'error',
     message: `Integer literal ${spelling} exceeds the ${type} range ${range.minimum} through ${range.maximum}`,
     reason: Object.freeze({
-      _tag: 'IntegerOutOfRange',
+      _tag: 'IntegerOutOfRange' as const,
       spelling,
       type,
       maximum: range.maximum.toString(),
@@ -3153,7 +3184,7 @@ export const integerOutOfRange = (
   })
 
 /** Creates the semantic diagnostic for a duration total outside the fixed `u64` domain. */
-export const durationOutOfRange = (spelling: string, span: SourceSpan.SourceSpan): Diagnostic =>
+export const durationOutOfRange = <L>(spelling: string, span: L): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
@@ -3161,75 +3192,72 @@ export const durationOutOfRange = (spelling: string, span: SourceSpan.SourceSpan
     severity: 'error',
     message: 'Duration literal exceeds the u64 nanosecond range',
     reason: Object.freeze({
-      _tag: 'DurationOutOfRange',
+      _tag: 'DurationOutOfRange' as const,
       spelling,
       maximum: '18446744073709551615',
     }),
     span,
   })
 
-export const tupleArityMismatch = (
+export const tupleArityMismatch = <L>(
   type: string,
   expected: number,
   actual: number,
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
+  span: L,
+): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: tupleArityMismatchCode,
     severity: 'error',
     message: `${type} expects ${expected} tuple elements but received ${actual}`,
-    reason: Object.freeze({ _tag: 'TupleArityMismatch', type, expected, actual }),
+    reason: Object.freeze({ _tag: 'TupleArityMismatch' as const, type, expected, actual }),
     span,
   })
 
-export const contextualAggregateKindMismatch = (
+export const contextualAggregateKindMismatch = <L>(
   expected: 'record' | 'tuple',
   actual: string,
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
+  span: L,
+): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: contextualAggregateKindMismatchCode,
     severity: 'error',
     message: `A contextual ${expected} literal cannot construct ${actual}`,
-    reason: Object.freeze({ _tag: 'ContextualAggregateKindMismatch', expected, actual }),
+    reason: Object.freeze({ _tag: 'ContextualAggregateKindMismatch' as const, expected, actual }),
     span,
   })
 
-export const anonymousAggregateJoinMismatch = (
+export const anonymousAggregateJoinMismatch = <L>(
   types: ReadonlyArray<string>,
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
+  span: L,
+): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: anonymousAggregateJoinMismatchCode,
     severity: 'error',
     message: 'Separate anonymous aggregate occurrences do not acquire a common type',
-    reason: Object.freeze({ _tag: 'AnonymousAggregateJoinMismatch', types }),
+    reason: Object.freeze({ _tag: 'AnonymousAggregateJoinMismatch' as const, types }),
     span,
   })
 
-export const positionalFieldConstruction = (
-  type: string,
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
+export const positionalFieldConstruction = <L>(type: string, span: L): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: positionalFieldConstructionCode,
     severity: 'error',
     message: `${type} is positional and cannot be constructed with named fields`,
-    reason: Object.freeze({ _tag: 'PositionalFieldConstruction', type }),
+    reason: Object.freeze({ _tag: 'PositionalFieldConstruction' as const, type }),
     span,
   })
 
-const freezeStaticTrace = (
-  trace: ReadonlyArray<StaticTraceFrame>,
-): ReadonlyArray<StaticTraceFrame> =>
+const freezeStaticTrace = <L>(
+  trace: ReadonlyArray<StaticTraceFrame<L>>,
+): ReadonlyArray<StaticTraceFrame<L>> =>
   Object.freeze(
     trace.map((frame) =>
       Object.freeze({
@@ -3239,18 +3267,18 @@ const freezeStaticTrace = (
     ),
   )
 
-const staticTraceRelatedSpans = (
-  trace: ReadonlyArray<StaticTraceFrame>,
-): ReadonlyArray<RelatedSpan> =>
+const staticTraceRelatedSpans = <L>(
+  trace: ReadonlyArray<StaticTraceFrame<L>>,
+): ReadonlyArray<RelatedSpan<L>> =>
   Object.freeze(trace.map((frame) => Object.freeze({ label: frame.label, span: frame.span })))
 
 /** Creates a diagnostic for one operation unavailable during static evaluation. */
-export const staticPhaseViolation = (
+export const staticPhaseViolation = <L>(
   operation: string,
   target: string,
-  trace: ReadonlyArray<StaticTraceFrame>,
-  span: SourceSpan.SourceSpan,
-): Diagnostic => {
+  trace: ReadonlyArray<StaticTraceFrame<L>>,
+  span: L,
+): Diagnostic<L> => {
   const frozenTrace = freezeStaticTrace(trace)
   return Object.freeze({
     _tag: 'Diagnostic',
@@ -3259,7 +3287,7 @@ export const staticPhaseViolation = (
     severity: 'error',
     message: `${operation} is not available during static evaluation for ${target}`,
     reason: Object.freeze({
-      _tag: 'StaticPhaseViolation',
+      _tag: 'StaticPhaseViolation' as const,
       operation,
       target,
       trace: frozenTrace,
@@ -3270,12 +3298,12 @@ export const staticPhaseViolation = (
 }
 
 /** Creates the diagnostic requested by a selected `compileError` expression. */
-export const selectedCompileError = (
+export const selectedCompileError = <L>(
   detail: string,
   target: string,
-  trace: ReadonlyArray<StaticTraceFrame>,
-  span: SourceSpan.SourceSpan,
-): Diagnostic => {
+  trace: ReadonlyArray<StaticTraceFrame<L>>,
+  span: L,
+): Diagnostic<L> => {
   const frozenTrace = freezeStaticTrace(trace)
   return Object.freeze({
     _tag: 'Diagnostic',
@@ -3284,7 +3312,7 @@ export const selectedCompileError = (
     severity: 'error',
     message: `${detail}`,
     reason: Object.freeze({
-      _tag: 'SelectedCompileError',
+      _tag: 'SelectedCompileError' as const,
       detail,
       target,
       trace: frozenTrace,
@@ -3295,12 +3323,12 @@ export const selectedCompileError = (
 }
 
 /** Creates a diagnostic for a cyclic demanded static application. */
-export const staticEvaluationCycle = (
+export const staticEvaluationCycle = <L>(
   application: string,
   target: string,
-  trace: ReadonlyArray<StaticTraceFrame>,
-  span: SourceSpan.SourceSpan,
-): Diagnostic => {
+  trace: ReadonlyArray<StaticTraceFrame<L>>,
+  span: L,
+): Diagnostic<L> => {
   const frozenTrace = freezeStaticTrace(trace)
   return Object.freeze({
     _tag: 'Diagnostic',
@@ -3309,7 +3337,7 @@ export const staticEvaluationCycle = (
     severity: 'error',
     message: `Static evaluation of ${application} is cyclic for ${target}`,
     reason: Object.freeze({
-      _tag: 'StaticEvaluationCycle',
+      _tag: 'StaticEvaluationCycle' as const,
       application,
       target,
       trace: frozenTrace,
@@ -3320,12 +3348,12 @@ export const staticEvaluationCycle = (
 }
 
 /** Creates a diagnostic for exhaustion of the deterministic static step budget. */
-export const staticStepLimit = (
+export const staticStepLimit = <L>(
   limit: number,
   target: string,
-  trace: ReadonlyArray<StaticTraceFrame>,
-  span: SourceSpan.SourceSpan,
-): Diagnostic => {
+  trace: ReadonlyArray<StaticTraceFrame<L>>,
+  span: L,
+): Diagnostic<L> => {
   const frozenTrace = freezeStaticTrace(trace)
   return Object.freeze({
     _tag: 'Diagnostic',
@@ -3334,7 +3362,7 @@ export const staticStepLimit = (
     severity: 'error',
     message: `Static evaluation exceeded its step limit of ${limit} for ${target}`,
     reason: Object.freeze({
-      _tag: 'StaticEvaluationLimit',
+      _tag: 'StaticEvaluationLimit' as const,
       resource: 'Steps',
       limit,
       target,
@@ -3346,12 +3374,12 @@ export const staticStepLimit = (
 }
 
 /** Creates a diagnostic for exhaustion of the logical static call-depth budget. */
-export const staticCallDepthLimit = (
+export const staticCallDepthLimit = <L>(
   limit: number,
   target: string,
-  trace: ReadonlyArray<StaticTraceFrame>,
-  span: SourceSpan.SourceSpan,
-): Diagnostic => {
+  trace: ReadonlyArray<StaticTraceFrame<L>>,
+  span: L,
+): Diagnostic<L> => {
   const frozenTrace = freezeStaticTrace(trace)
   return Object.freeze({
     _tag: 'Diagnostic',
@@ -3360,7 +3388,7 @@ export const staticCallDepthLimit = (
     severity: 'error',
     message: `Static evaluation exceeded its call-depth limit of ${limit} for ${target}`,
     reason: Object.freeze({
-      _tag: 'StaticEvaluationLimit',
+      _tag: 'StaticEvaluationLimit' as const,
       resource: 'CallDepth',
       limit,
       target,
@@ -3372,12 +3400,12 @@ export const staticCallDepthLimit = (
 }
 
 /** Creates a diagnostic for exhaustion of retained canonical static-value bytes. */
-export const staticRetainedValueLimit = (
+export const staticRetainedValueLimit = <L>(
   limit: number,
   target: string,
-  trace: ReadonlyArray<StaticTraceFrame>,
-  span: SourceSpan.SourceSpan,
-): Diagnostic => {
+  trace: ReadonlyArray<StaticTraceFrame<L>>,
+  span: L,
+): Diagnostic<L> => {
   const frozenTrace = freezeStaticTrace(trace)
   return Object.freeze({
     _tag: 'Diagnostic',
@@ -3386,7 +3414,7 @@ export const staticRetainedValueLimit = (
     severity: 'error',
     message: `Static evaluation exceeded its retained-value limit of ${limit} bytes for ${target}`,
     reason: Object.freeze({
-      _tag: 'StaticEvaluationLimit',
+      _tag: 'StaticEvaluationLimit' as const,
       resource: 'RetainedValueBytes',
       limit,
       target,
@@ -3398,12 +3426,12 @@ export const staticRetainedValueLimit = (
 }
 
 /** Creates a diagnostic for exhaustion of residual TIR growth. */
-export const staticResidualGrowthLimit = (
+export const staticResidualGrowthLimit = <L>(
   limit: number,
   target: string,
-  trace: ReadonlyArray<StaticTraceFrame>,
-  span: SourceSpan.SourceSpan,
-): Diagnostic => {
+  trace: ReadonlyArray<StaticTraceFrame<L>>,
+  span: L,
+): Diagnostic<L> => {
   const frozenTrace = freezeStaticTrace(trace)
   return Object.freeze({
     _tag: 'Diagnostic',
@@ -3412,7 +3440,7 @@ export const staticResidualGrowthLimit = (
     severity: 'error',
     message: `Static evaluation exceeded its residual-growth limit of ${limit} nodes for ${target}`,
     reason: Object.freeze({
-      _tag: 'StaticEvaluationLimit',
+      _tag: 'StaticEvaluationLimit' as const,
       resource: 'ResidualNodes',
       limit,
       target,
@@ -3424,104 +3452,107 @@ export const staticResidualGrowthLimit = (
 }
 
 /** Creates the target-independent diagnostic for a negative `usize` literal. */
-export const usizeNegative = (spelling: string, span: SourceSpan.SourceSpan): Diagnostic =>
+export const usizeNegative = <L>(spelling: string, span: L): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: usizeNegativeCode,
     severity: 'error',
     message: 'usize literals cannot be negative',
-    reason: Object.freeze({ _tag: 'UsizeNegative', spelling }),
+    reason: Object.freeze({ _tag: 'UsizeNegative' as const, spelling }),
     span,
   })
 
 /** Creates the diagnostic for a type that cannot inhabit an Effect failure channel. */
-export const invalidFailureType = (type: string, span: SourceSpan.SourceSpan): Diagnostic =>
+export const invalidFailureType = <L>(type: string, span: L): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: invalidFailureTypeCode,
     severity: 'error',
     message: `Effect failure ${type} must be a detached ordinary value type`,
-    reason: Object.freeze({ _tag: 'InvalidFailureType', type }),
+    reason: Object.freeze({ _tag: 'InvalidFailureType' as const, type }),
     span,
   })
 
 /** Creates the diagnostic for a requirement that cannot name one dependency-eligible service. */
-export const invalidRequirementType = (type: string, span: SourceSpan.SourceSpan): Diagnostic =>
+export const invalidRequirementType = <L>(type: string, span: L): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: invalidRequirementTypeCode,
     severity: 'error',
     message: `Effect requirement ${type} must be one concrete service type`,
-    reason: Object.freeze({ _tag: 'InvalidRequirementType', type }),
+    reason: Object.freeze({ _tag: 'InvalidRequirementType' as const, type }),
     span,
   })
 
 /** Creates the diagnostic for spelling a failure channel on a direct ordinary function. */
-export const failureChannelOnOrdinary = (span: SourceSpan.SourceSpan): Diagnostic =>
+export const failureChannelOnOrdinary = <L>(span: L): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: failureChannelOnOrdinaryCode,
     severity: 'error',
     message: 'Only effect functions may declare a failure channel',
-    reason: Object.freeze({ _tag: 'FailureChannelOnOrdinary' }),
+    reason: Object.freeze({ _tag: 'FailureChannelOnOrdinary' as const }),
     span,
   })
 
-export const failOutsideEffect = (span: SourceSpan.SourceSpan): Diagnostic =>
+export const failOutsideEffect = <L>(span: L): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: failOutsideEffectCode,
     severity: 'error',
     message: 'Only effect functions may originate a typed failure',
-    reason: Object.freeze({ _tag: 'FailOutsideEffect' }),
+    reason: Object.freeze({ _tag: 'FailOutsideEffect' as const }),
     span,
   })
 
-export const undeclaredFailure = (type: string, span: SourceSpan.SourceSpan): Diagnostic =>
+export const undeclaredFailure = <L>(type: string, span: L): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: undeclaredFailureCode,
     severity: 'error',
     message: `Failure ${type} is not declared by this effect function`,
-    reason: Object.freeze({ _tag: 'UndeclaredFailure', type }),
+    reason: Object.freeze({ _tag: 'UndeclaredFailure' as const, type }),
     span,
   })
 
-export const runNonEffect = (type: string, span: SourceSpan.SourceSpan): Diagnostic =>
+export const runNonEffect = <L>(type: string, span: L): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: runNonEffectCode,
     severity: 'error',
     message: `Cannot run non-effect value ${type}`,
-    reason: Object.freeze({ _tag: 'RunNonEffect', type }),
+    reason: Object.freeze({ _tag: 'RunNonEffect' as const, type }),
     span,
   })
 
-export const unhandledEffectFailures = (
+export const unhandledEffectFailures = <L>(
   failures: ReadonlyArray<string>,
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
+  span: L,
+): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: unhandledEffectFailuresCode,
     severity: 'error',
     message: `Run leaves unhandled failures: ${failures.join(' | ')}`,
-    reason: Object.freeze({ _tag: 'UnhandledEffectFailures', failures: Object.freeze(failures) }),
+    reason: Object.freeze({
+      _tag: 'UnhandledEffectFailures' as const,
+      failures: Object.freeze(failures),
+    }),
     span,
   })
 
-export const unhandledEffectRequirements = (
+export const unhandledEffectRequirements = <L>(
   requirements: ReadonlyArray<string>,
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
+  span: L,
+): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
@@ -3529,20 +3560,20 @@ export const unhandledEffectRequirements = (
     severity: 'error',
     message: `Run leaves unsatisfied requirements: ${requirements.join(' | ')}`,
     reason: Object.freeze({
-      _tag: 'UnhandledEffectRequirements',
+      _tag: 'UnhandledEffectRequirements' as const,
       requirements: Object.freeze(requirements),
     }),
     span,
   })
 
-export const invalidEffectProvision = (detail: string, span: SourceSpan.SourceSpan): Diagnostic =>
+export const invalidEffectProvision = <L>(detail: string, span: L): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: invalidEffectProvisionCode,
     severity: 'error',
     message: `Invalid Effect provider: ${detail}`,
-    reason: Object.freeze({ _tag: 'InvalidEffectProvision', detail }),
+    reason: Object.freeze({ _tag: 'InvalidEffectProvision' as const, detail }),
     span,
   })
 
@@ -3560,15 +3591,15 @@ export const invalidEffectProvision = (detail: string, span: SourceSpan.SourceSp
  * because that is where the concrete callable argument was written, and the generic body's
  * construction is retained as `constructedAt` related provenance.
  */
-export const storedCallableConstruction = (
+export const storedCallableConstruction = <L>(
   aggregate: string,
   field: string | undefined,
   callable: string,
-  span: SourceSpan.SourceSpan,
-  constructedAt?: SourceSpan.SourceSpan,
+  span: L,
+  constructedAt?: L,
   represented = false,
   kind: 'callable' | 'Effect' = 'callable',
-): Diagnostic => {
+): Diagnostic<L> => {
   const site = field === undefined ? 'its element' : `field ${field}`
   return Object.freeze({
     _tag: 'Diagnostic',
@@ -3579,7 +3610,7 @@ export const storedCallableConstruction = (
       ? `Cannot construct ${aggregate}: ${site} retains the static identity of ${callable}, but represented callable storage has no supported runtime layout`
       : `Cannot construct ${aggregate}: ${site} would store the ${kind} ${callable}, whose environment layout depends on a hidden concrete identity that ${aggregate} does not carry`,
     reason: Object.freeze({
-      _tag: 'StoredCallableConstruction',
+      _tag: 'StoredCallableConstruction' as const,
       aggregate,
       ...(field === undefined ? {} : { field }),
       callable,
@@ -3619,34 +3650,31 @@ const opaqueResultNote =
   'Return an opaque representation result instead when the concrete identity must stay private.'
 
 /** Rejects one `typeof` item that names no declaration in the enclosing scope. */
-export const unresolvedExactRepresentationItem = (
-  item: string,
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
+export const unresolvedExactRepresentationItem = <L>(item: string, span: L): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: unresolvedExactRepresentationItemCode,
     severity: 'error',
     message: `Cannot name the exact representation of ${item}: no declaration of that name is in scope`,
-    reason: Object.freeze({ _tag: 'UnresolvedExactRepresentationItem', item }),
+    reason: Object.freeze({ _tag: 'UnresolvedExactRepresentationItem' as const, item }),
     span,
     notes: Object.freeze([opaqueResultNote]),
   })
 
 /** Rejects one `typeof` item whose name belongs to more than one declaration. */
-export const ambiguousExactRepresentationItem = (
+export const ambiguousExactRepresentationItem = <L>(
   item: string,
   count: number,
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
+  span: L,
+): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: ambiguousExactRepresentationItemCode,
     severity: 'error',
     message: `Cannot name the exact representation of ${item}: ${count} declarations carry that name, so no single item is resolved`,
-    reason: Object.freeze({ _tag: 'AmbiguousExactRepresentationItem', item, count }),
+    reason: Object.freeze({ _tag: 'AmbiguousExactRepresentationItem' as const, item, count }),
     span,
     notes: Object.freeze([opaqueResultNote]),
   })
@@ -3658,11 +3686,11 @@ export const ambiguousExactRepresentationItem = (
  * are written. They have no declaration-owned identity a contract can name, so their
  * representation can only cross a boundary behind an opaque result.
  */
-export const uncallableExactRepresentationItem = (
+export const uncallableExactRepresentationItem = <L>(
   item: string,
   subjectKind: UncallableExactRepresentationSubject,
-  span: SourceSpan.SourceSpan,
-): Diagnostic => {
+  span: L,
+): Diagnostic<L> => {
   const subject = uncallableSubjectProse(subjectKind)
   return Object.freeze({
     _tag: 'Diagnostic',
@@ -3671,7 +3699,7 @@ export const uncallableExactRepresentationItem = (
     severity: 'error',
     message: `Cannot name the exact representation of ${item}: it names ${subject}, which has no source-nameable exact identity`,
     reason: Object.freeze({
-      _tag: 'UncallableExactRepresentationItem',
+      _tag: 'UncallableExactRepresentationItem' as const,
       item,
       subject: subjectKind,
     }),
@@ -3681,46 +3709,43 @@ export const uncallableExactRepresentationItem = (
 }
 
 /** Rejects one `typeof` item whose generic parameters are not all supplied. */
-export const openExactRepresentationItem = (
+export const openExactRepresentationItem = <L>(
   item: string,
   expected: number,
   actual: number,
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
+  span: L,
+): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: openExactRepresentationItemCode,
     severity: 'error',
     message: `Cannot name the exact representation of ${item}: an exact representation names one construction, but ${expected} generic parameters were declared and ${actual} concrete arguments were supplied`,
-    reason: Object.freeze({ _tag: 'OpenExactRepresentationItem', item, expected, actual }),
+    reason: Object.freeze({ _tag: 'OpenExactRepresentationItem' as const, item, expected, actual }),
     span,
     notes: Object.freeze([opaqueResultNote]),
   })
 
 /** Rejects a public contract that exposes the exact identity of a less visible item. */
-export const privateExactRepresentationLeak = (
-  item: string,
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
+export const privateExactRepresentationLeak = <L>(item: string, span: L): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: privateExactRepresentationLeakCode,
     severity: 'error',
     message: `Public contract exposes the exact representation of private ${item}`,
-    reason: Object.freeze({ _tag: 'PrivateExactRepresentationLeak', item }),
+    reason: Object.freeze({ _tag: 'PrivateExactRepresentationLeak' as const, item }),
     span,
     notes: Object.freeze([opaqueResultNote]),
   })
 
 /** Rejects one opaque family whose reachable returns select more than one exact realization. */
-export const divergentOpaqueRealization = (
+export const divergentOpaqueRealization = <L>(
   family: string,
   realizations: ReadonlyArray<string>,
-  related: ReadonlyArray<SourceSpan.SourceSpan>,
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
+  related: ReadonlyArray<L>,
+  span: L,
+): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
@@ -3728,7 +3753,7 @@ export const divergentOpaqueRealization = (
     severity: 'error',
     message: `Opaque result ${family} has divergent reachable realizations: ${realizations.join(', ')}`,
     reason: Object.freeze({
-      _tag: 'DivergentOpaqueRealization',
+      _tag: 'DivergentOpaqueRealization' as const,
       family,
       realizations: Object.freeze([...realizations]),
     }),
@@ -3745,10 +3770,10 @@ export const divergentOpaqueRealization = (
   })
 
 /** Rejects opaque families whose only representation evidence is another unresolved family. */
-export const opaqueRealizationCycle = (
+export const opaqueRealizationCycle = <L>(
   families: ReadonlyArray<string>,
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
+  span: L,
+): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
@@ -3756,17 +3781,17 @@ export const opaqueRealizationCycle = (
     severity: 'error',
     message: `Opaque realization cycle has no local concrete construction: ${families.join(' -> ')}`,
     reason: Object.freeze({
-      _tag: 'OpaqueRealizationCycle',
+      _tag: 'OpaqueRealizationCycle' as const,
       families: Object.freeze([...families]),
     }),
     span,
   })
 
 /** Rejects a capture layout that would contain the opaque family it is defining inline. */
-export const inlineOpaqueLayoutCycle = (
+export const inlineOpaqueLayoutCycle = <L>(
   families: ReadonlyArray<string>,
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
+  span: L,
+): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
@@ -3774,46 +3799,46 @@ export const inlineOpaqueLayoutCycle = (
     severity: 'error',
     message: `Opaque results form an infinite inline layout cycle: ${families.join(' -> ')}`,
     reason: Object.freeze({
-      _tag: 'InlineOpaqueLayoutCycle',
+      _tag: 'InlineOpaqueLayoutCycle' as const,
       families: Object.freeze([...families]),
     }),
     span,
   })
 
 /** Rejects an opaque result binder whose bound is not a callable or Effect representation. */
-export const invalidOpaqueResultBinder = (
+export const invalidOpaqueResultBinder = <L>(
   binder: string,
   actual: 'Lifetime' | 'Value' | 'RequirementRow',
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
+  span: L,
+): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: invalidOpaqueResultBinderCode,
     severity: 'error',
     message: `Opaque result binder ${binder} must have a callable or Effect representation bound, but its kind is ${actual}`,
-    reason: Object.freeze({ _tag: 'InvalidOpaqueResultBinder', binder, actual }),
+    reason: Object.freeze({ _tag: 'InvalidOpaqueResultBinder' as const, binder, actual }),
     span,
   })
 
 /** Rejects an opaque producer whose reachable returns select no representation construction. */
-export const missingOpaqueRealization = (family: string, span: SourceSpan.SourceSpan): Diagnostic =>
+export const missingOpaqueRealization = <L>(family: string, span: L): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: missingOpaqueRealizationCode,
     severity: 'error',
     message: `Opaque result ${family} has no reachable callable or Effect representation construction`,
-    reason: Object.freeze({ _tag: 'MissingOpaqueRealization', family }),
+    reason: Object.freeze({ _tag: 'MissingOpaqueRealization' as const, family }),
     span,
   })
 
 /** Rejects an opaque result in a contract-only declaration that has no producer body. */
-export const bodylessOpaqueResult = (
+export const bodylessOpaqueResult = <L>(
   declaration: string,
   contextKind: 'ServiceOperation' | 'InterfaceOperation',
-  span: SourceSpan.SourceSpan,
-): Diagnostic => {
+  span: L,
+): Diagnostic<L> => {
   const context = contextKind === 'ServiceOperation' ? 'service' : 'interface'
   return Object.freeze({
     _tag: 'Diagnostic',
@@ -3822,7 +3847,7 @@ export const bodylessOpaqueResult = (
     severity: 'error',
     message: `Opaque result ${declaration} is not permitted on a ${context} operation because no producer body can establish one static representation`,
     reason: Object.freeze({
-      _tag: 'BodylessOpaqueResult',
+      _tag: 'BodylessOpaqueResult' as const,
       declaration,
       context: contextKind,
     }),
@@ -3831,13 +3856,13 @@ export const bodylessOpaqueResult = (
 }
 
 /** Rejects represented Effect storage until a downstream runtime layout has been proven. */
-export const storedRepresentedEffectConstruction = (
+export const storedRepresentedEffectConstruction = <L>(
   aggregate: string,
   field: string | undefined,
   effect: string,
-  span: SourceSpan.SourceSpan,
-  constructedAt?: SourceSpan.SourceSpan,
-): Diagnostic => {
+  span: L,
+  constructedAt?: L,
+): Diagnostic<L> => {
   const site = field === undefined ? 'its element' : `field ${field}`
   return Object.freeze({
     _tag: 'Diagnostic',
@@ -3846,7 +3871,7 @@ export const storedRepresentedEffectConstruction = (
     severity: 'error',
     message: `Cannot construct ${aggregate}: ${site} retains the static identity of ${effect}, but represented Effect storage has no supported runtime layout`,
     reason: Object.freeze({
-      _tag: 'StoredRepresentedEffectConstruction',
+      _tag: 'StoredRepresentedEffectConstruction' as const,
       aggregate,
       ...(field === undefined ? {} : { field }),
       effect,
@@ -3862,40 +3887,40 @@ export const storedRepresentedEffectConstruction = (
   })
 }
 
-export const invalidEffectHandler = (detail: string, span: SourceSpan.SourceSpan): Diagnostic =>
+export const invalidEffectHandler = <L>(detail: string, span: L): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: invalidEffectHandlerCode,
     severity: 'error',
     message: `Invalid Effect.catch handler: ${detail}`,
-    reason: Object.freeze({ _tag: 'InvalidEffectHandler', detail }),
+    reason: Object.freeze({ _tag: 'InvalidEffectHandler' as const, detail }),
     span,
   })
 
-export const mutableEffectRecipe = (span: SourceSpan.SourceSpan): Diagnostic =>
+export const mutableEffectRecipe = <L>(span: L): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: mutableEffectRecipeCode,
     severity: 'error',
     message: 'Effect recipe bindings are immutable',
-    reason: Object.freeze({ _tag: 'MutableEffectRecipe' }),
+    reason: Object.freeze({ _tag: 'MutableEffectRecipe' as const }),
     span,
   })
 
-export const nonFiniteEffectJoin = (detail: string, span: SourceSpan.SourceSpan): Diagnostic =>
+export const nonFiniteEffectJoin = <L>(detail: string, span: L): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: nonFiniteEffectJoinCode,
     severity: 'error',
     message: `Cannot form a finite Effect join: ${detail}`,
-    reason: Object.freeze({ _tag: 'NonFiniteEffectJoin', detail }),
+    reason: Object.freeze({ _tag: 'NonFiniteEffectJoin' as const, detail }),
     span,
   })
 
-export const callableIdentityErasure = (span: SourceSpan.SourceSpan): Diagnostic =>
+export const callableIdentityErasure = <L>(span: L): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
@@ -3903,29 +3928,29 @@ export const callableIdentityErasure = (span: SourceSpan.SourceSpan): Diagnostic
     severity: 'error',
     message:
       'Cannot merge callable values from different construction sites without explicit erasure',
-    reason: Object.freeze({ _tag: 'CallableIdentityErasure' }),
+    reason: Object.freeze({ _tag: 'CallableIdentityErasure' as const }),
     span,
   })
 
-export const unknownOwnedCallableReturn = (span: SourceSpan.SourceSpan): Diagnostic =>
+export const unknownOwnedCallableReturn = <L>(span: L): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: unknownOwnedCallableReturnCode,
     severity: 'error',
     message: 'Cannot return an owned callable whose concrete environment identity is unknown',
-    reason: Object.freeze({ _tag: 'UnknownOwnedCallableReturn' }),
+    reason: Object.freeze({ _tag: 'UnknownOwnedCallableReturn' as const }),
     span,
   })
 
 /** Creates the target-owned diagnostic for a `usize` literal outside its selected word. */
-export const wordLiteralTargetOutOfRange = (
+export const wordLiteralTargetOutOfRange = <L>(
   type: 'usize' | 'isize',
   spelling: string,
   target: string,
   bits: 32 | 64,
-  span: SourceSpan.SourceSpan,
-): Diagnostic => {
+  span: L,
+): Diagnostic<L> => {
   const minimum = type === 'usize' ? 0n : -(1n << BigInt(bits - 1))
   const maximum = type === 'usize' ? (1n << BigInt(bits)) - 1n : (1n << BigInt(bits - 1)) - 1n
   return Object.freeze({
@@ -3935,7 +3960,7 @@ export const wordLiteralTargetOutOfRange = (
     severity: 'error',
     message: `${type} literal ${spelling} exceeds the ${bits}-bit range for ${target}`,
     reason: Object.freeze({
-      _tag: 'WordLiteralOutOfRange',
+      _tag: 'WordLiteralOutOfRange' as const,
       type,
       spelling,
       target,
@@ -3948,39 +3973,35 @@ export const wordLiteralTargetOutOfRange = (
 }
 
 /** Creates the diagnostic for a qualified call naming an unknown built-in actor. */
-export const unknownActor = (spelling: string, span: SourceSpan.SourceSpan): Diagnostic =>
+export const unknownActor = <L>(spelling: string, span: L): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: unknownActorCode,
     severity: 'error',
     message: `Unknown actor ${spelling}`,
-    reason: Object.freeze({ _tag: 'UnknownActor', spelling }),
+    reason: Object.freeze({ _tag: 'UnknownActor' as const, spelling }),
     span,
   })
 
 /** Creates the diagnostic for a known actor called with an unknown operation. */
-export const unknownActorOperation = (
-  actor: string,
-  spelling: string,
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
+export const unknownActorOperation = <L>(actor: string, spelling: string, span: L): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: unknownActorOperationCode,
     severity: 'error',
     message: `${actor} has no operation ${spelling}`,
-    reason: Object.freeze({ _tag: 'UnknownActorOperation', actor, spelling }),
+    reason: Object.freeze({ _tag: 'UnknownActorOperation' as const, actor, spelling }),
     span,
   })
 
 /** Creates the diagnostic for a declaration name repeated after its first occurrence. */
-export const duplicateDeclarationName = (
+export const duplicateDeclarationName = <L>(
   spelling: string,
-  originalSpan: SourceSpan.SourceSpan,
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
+  originalSpan: L,
+  span: L,
+): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
@@ -3988,7 +4009,7 @@ export const duplicateDeclarationName = (
     severity: 'error',
     message: `Duplicate declaration name ${spelling}`,
     reason: Object.freeze({
-      _tag: 'DuplicateDeclarationName',
+      _tag: 'DuplicateDeclarationName' as const,
       spelling,
       originalSpan,
     }),
@@ -3999,23 +4020,23 @@ export const duplicateDeclarationName = (
   })
 
 /** Creates the diagnostic for one present call name with no matching declaration. */
-export const unknownFunction = (spelling: string, span: SourceSpan.SourceSpan): Diagnostic =>
+export const unknownFunction = <L>(spelling: string, span: L): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: unknownFunctionCode,
     severity: 'error',
     message: `Unknown function ${spelling}`,
-    reason: Object.freeze({ _tag: 'UnknownFunction', spelling }),
+    reason: Object.freeze({ _tag: 'UnknownFunction' as const, spelling }),
     span,
   })
 
 /** Creates the diagnostic for a parameter name repeated after its first occurrence. */
-export const duplicateParameterName = (
+export const duplicateParameterName = <L>(
   spelling: string,
-  originalSpan: SourceSpan.SourceSpan,
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
+  originalSpan: L,
+  span: L,
+): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
@@ -4023,7 +4044,7 @@ export const duplicateParameterName = (
     severity: 'error',
     message: `Duplicate parameter name ${spelling}`,
     reason: Object.freeze({
-      _tag: 'DuplicateParameterName',
+      _tag: 'DuplicateParameterName' as const,
       spelling,
       originalSpan,
     }),
@@ -4034,30 +4055,26 @@ export const duplicateParameterName = (
   })
 
 /** Creates the diagnostic for one present value name with no matching local declaration. */
-export const unknownValueReference = (spelling: string, span: SourceSpan.SourceSpan): Diagnostic =>
+export const unknownValueReference = <L>(spelling: string, span: L): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: unknownValueReferenceCode,
     severity: 'error',
     message: `Unknown value ${spelling}`,
-    reason: Object.freeze({ _tag: 'UnknownValueReference', spelling }),
+    reason: Object.freeze({ _tag: 'UnknownValueReference' as const, spelling }),
     span,
   })
 
 /** Creates the diagnostic for a binding name that repeats an existing local declaration. */
-export const rebindingName = (
-  spelling: string,
-  originalSpan: SourceSpan.SourceSpan,
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
+export const rebindingName = <L>(spelling: string, originalSpan: L, span: L): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: rebindingNameCode,
     severity: 'error',
     message: `Cannot rebind ${spelling}`,
-    reason: Object.freeze({ _tag: 'RebindingName', spelling, originalSpan }),
+    reason: Object.freeze({ _tag: 'RebindingName' as const, spelling, originalSpan }),
     span,
     relatedSpans: Object.freeze([
       Object.freeze({ label: 'first declared here', span: originalSpan }),
@@ -4065,113 +4082,106 @@ export const rebindingName = (
   })
 
 /** Creates the diagnostic for a conditional whose condition is not `bool`. */
-export const conditionNotBool = (actual: string, span: SourceSpan.SourceSpan): Diagnostic =>
+export const conditionNotBool = <L>(actual: string, span: L): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: conditionNotBoolCode,
     severity: 'error',
     message: `Condition must be bool, found ${actual}`,
-    reason: Object.freeze({ _tag: 'ConditionNotBool', actual }),
+    reason: Object.freeze({ _tag: 'ConditionNotBool' as const, actual }),
     span,
   })
 
-export const immutableAssignment = (spelling: string, span: SourceSpan.SourceSpan): Diagnostic =>
+export const immutableAssignment = <L>(spelling: string, span: L): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: immutableAssignmentCode,
     severity: 'error',
     message: `Cannot assign through immutable binding ${spelling}`,
-    reason: Object.freeze({ _tag: 'ImmutableAssignment', spelling }),
+    reason: Object.freeze({ _tag: 'ImmutableAssignment' as const, spelling }),
     span,
   })
 
-export const invalidAssignmentPlace = (span: SourceSpan.SourceSpan): Diagnostic =>
+export const invalidAssignmentPlace = <L>(span: L): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: invalidAssignmentPlaceCode,
     severity: 'error',
     message: 'Assignment requires a writable binding, field, or indexed place',
-    reason: Object.freeze({ _tag: 'InvalidAssignmentPlace' }),
+    reason: Object.freeze({ _tag: 'InvalidAssignmentPlace' as const }),
     span,
   })
 
-export const assignmentTypeMismatch = (
+export const assignmentTypeMismatch = <L>(
   expected: string,
   actual: string,
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
+  span: L,
+): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: assignmentTypeMismatchCode,
     severity: 'error',
     message: `Assignment expected ${expected} but received ${actual}`,
-    reason: Object.freeze({ _tag: 'AssignmentTypeMismatch', expected, actual }),
+    reason: Object.freeze({ _tag: 'AssignmentTypeMismatch' as const, expected, actual }),
     span,
   })
 
 /** Creates the diagnostic for an explicit return that violates its declaration result. */
-export const returnTypeMismatch = (
-  expected: string,
-  actual: string,
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
+export const returnTypeMismatch = <L>(expected: string, actual: string, span: L): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: returnTypeMismatchCode,
     severity: 'error',
     message: `Return expected ${expected} but received ${actual}`,
-    reason: Object.freeze({ _tag: 'ReturnTypeMismatch', expected, actual }),
+    reason: Object.freeze({ _tag: 'ReturnTypeMismatch' as const, expected, actual }),
     span,
   })
 
 /** Creates the diagnostic for a reachable closing brace in a non-unit body. */
-export const missingReturn = (expected: string, span: SourceSpan.SourceSpan): Diagnostic =>
+export const missingReturn = <L>(expected: string, span: L): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: missingReturnCode,
     severity: 'error',
     message: `A reachable path must return ${expected}`,
-    reason: Object.freeze({ _tag: 'MissingReturn', expected }),
+    reason: Object.freeze({ _tag: 'MissingReturn' as const, expected }),
     span,
   })
 
-export const transferOutsideLoop = (
-  transfer: 'break' | 'continue',
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
+export const transferOutsideLoop = <L>(transfer: 'break' | 'continue', span: L): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: transferOutsideLoopCode,
     severity: 'error',
     message: `${transfer} is only valid inside a loop`,
-    reason: Object.freeze({ _tag: 'TransferOutsideLoop', transfer }),
+    reason: Object.freeze({ _tag: 'TransferOutsideLoop' as const, transfer }),
     span,
   })
 
-export const invalidUnionMember = (type: string, span: SourceSpan.SourceSpan): Diagnostic =>
+export const invalidUnionMember = <L>(type: string, span: L): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: invalidUnionMemberCode,
     severity: 'error',
     message: `Structural union members must be detached ordinary values with finite storage, found ${type}`,
-    reason: Object.freeze({ _tag: 'InvalidUnionMember', type }),
+    reason: Object.freeze({ _tag: 'InvalidUnionMember' as const, type }),
     span,
   })
 
-export const incompatibleUnionConversion = (
+export const incompatibleUnionConversion = <L>(
   source: string,
   target: string,
   missing: ReadonlyArray<string>,
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
+  span: L,
+): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
@@ -4179,7 +4189,7 @@ export const incompatibleUnionConversion = (
     severity: 'error',
     message: `${source} cannot widen to ${target}; missing ${missing.join(', ')}`,
     reason: Object.freeze({
-      _tag: 'IncompatibleUnionConversion',
+      _tag: 'IncompatibleUnionConversion' as const,
       source,
       target,
       missing: Object.freeze([...missing]),
@@ -4187,62 +4197,62 @@ export const incompatibleUnionConversion = (
     span,
   })
 
-export const matchScrutineeNotNominal = (actual: string, span: SourceSpan.SourceSpan): Diagnostic =>
+export const matchScrutineeNotNominal = <L>(actual: string, span: L): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: matchScrutineeNotNominalCode,
     severity: 'error',
     message: `Cannot match non-nominal type ${actual}`,
-    reason: Object.freeze({ _tag: 'MatchScrutineeNotNominal', actual }),
+    reason: Object.freeze({ _tag: 'MatchScrutineeNotNominal' as const, actual }),
     span,
   })
 
-export const matchMemberNotInScrutinee = (
+export const matchMemberNotInScrutinee = <L>(
   member: string,
   scrutinee: string,
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
+  span: L,
+): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: matchMemberNotInScrutineeCode,
     severity: 'error',
     message: `${member} is not a member of ${scrutinee}`,
-    reason: Object.freeze({ _tag: 'MatchMemberNotInScrutinee', member, scrutinee }),
+    reason: Object.freeze({ _tag: 'MatchMemberNotInScrutinee' as const, member, scrutinee }),
     span,
   })
 
-export const unreachableMatchArm = (member: string, span: SourceSpan.SourceSpan): Diagnostic =>
+export const unreachableMatchArm = <L>(member: string, span: L): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: unreachableMatchArmCode,
     severity: 'error',
     message: `Unreachable match arm ${member}`,
-    reason: Object.freeze({ _tag: 'UnreachableMatchArm', member }),
+    reason: Object.freeze({ _tag: 'UnreachableMatchArm' as const, member }),
     span,
   })
 
-export const incompleteMatch = (
-  missing: ReadonlyArray<string>,
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
+export const incompleteMatch = <L>(missing: ReadonlyArray<string>, span: L): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: incompleteMatchCode,
     severity: 'error',
     message: `Match does not cover ${missing.join(', ')}`,
-    reason: Object.freeze({ _tag: 'IncompleteMatch', missing: Object.freeze([...missing]) }),
+    reason: Object.freeze({
+      _tag: 'IncompleteMatch' as const,
+      missing: Object.freeze([...missing]),
+    }),
     span,
   })
 
-export const incompleteEnumMatch = (
+export const incompleteEnumMatch = <L>(
   enum_: string,
   missing: ReadonlyArray<string>,
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
+  span: L,
+): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
@@ -4250,66 +4260,55 @@ export const incompleteEnumMatch = (
     severity: 'error',
     message: `Match over ${enum_} does not cover ${missing.join(', ')}`,
     reason: Object.freeze({
-      _tag: 'IncompleteEnumMatch',
+      _tag: 'IncompleteEnumMatch' as const,
       enum: enum_,
       missing: Object.freeze([...missing]),
     }),
     span,
   })
 
-export const duplicateEnumMatchArm = (
-  member: string,
-  originalSpan: SourceSpan.SourceSpan,
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
+export const duplicateEnumMatchArm = <L>(member: string, originalSpan: L, span: L): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: duplicateEnumMatchArmCode,
     severity: 'error',
     message: `Duplicate enum match arm ${member}`,
-    reason: Object.freeze({ _tag: 'DuplicateEnumMatchArm', member, originalSpan }),
+    reason: Object.freeze({ _tag: 'DuplicateEnumMatchArm' as const, member, originalSpan }),
     span,
     relatedSpans: Object.freeze([
       Object.freeze({ label: 'first covering arm', span: originalSpan }),
     ]),
   })
 
-export const enumMatchArmAfterWildcard = (
-  wildcardSpan: SourceSpan.SourceSpan,
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
+export const enumMatchArmAfterWildcard = <L>(wildcardSpan: L, span: L): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: enumMatchArmAfterWildcardCode,
     severity: 'error',
     message: 'Enum match arm is unreachable after `_`',
-    reason: Object.freeze({ _tag: 'EnumMatchArmAfterWildcard', wildcardSpan }),
+    reason: Object.freeze({ _tag: 'EnumMatchArmAfterWildcard' as const, wildcardSpan }),
     span,
     relatedSpans: Object.freeze([Object.freeze({ label: 'wildcard arm', span: wildcardSpan })]),
   })
 
-export const foreignEnumPattern = (
-  expected: string,
-  actual: string,
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
+export const foreignEnumPattern = <L>(expected: string, actual: string, span: L): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: foreignEnumPatternCode,
     severity: 'error',
     message: `Enum pattern from ${actual} cannot match ${expected}`,
-    reason: Object.freeze({ _tag: 'ForeignEnumPattern', expected, actual }),
+    reason: Object.freeze({ _tag: 'ForeignEnumPattern' as const, expected, actual }),
     span,
   })
 
-export const integerPatternAgainstEnum = (
+export const integerPatternAgainstEnum = <L>(
   enum_: string,
   value: bigint,
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
+  span: L,
+): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
@@ -4317,18 +4316,18 @@ export const integerPatternAgainstEnum = (
     severity: 'error',
     message: `Integer pattern ${value} cannot match enum ${enum_}`,
     reason: Object.freeze({
-      _tag: 'IntegerPatternAgainstEnum',
+      _tag: 'IntegerPatternAgainstEnum' as const,
       enum: enum_,
       value: value.toString(),
     }),
     span,
   })
 
-export const refutableLetPattern = (
+export const refutableLetPattern = <L>(
   actual: string,
   missing: ReadonlyArray<string>,
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
+  span: L,
+): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
@@ -4336,90 +4335,79 @@ export const refutableLetPattern = (
     severity: 'error',
     message: `Let pattern is refutable for ${actual}; it does not cover ${missing.join(', ')}. Use if let or match`,
     reason: Object.freeze({
-      _tag: 'RefutableLetPattern',
+      _tag: 'RefutableLetPattern' as const,
       actual,
       missing: Object.freeze([...missing]),
     }),
     span,
   })
 
-export const matchGuardNotBool = (actual: string, span: SourceSpan.SourceSpan): Diagnostic =>
+export const matchGuardNotBool = <L>(actual: string, span: L): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: matchGuardNotBoolCode,
     severity: 'error',
     message: `Match guard must be bool, found ${actual}`,
-    reason: Object.freeze({ _tag: 'MatchGuardNotBool', actual }),
+    reason: Object.freeze({ _tag: 'MatchGuardNotBool' as const, actual }),
     span,
   })
 
-export const missingPatternField = (
-  type: string,
-  field: string,
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
+export const missingPatternField = <L>(type: string, field: string, span: L): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: missingPatternFieldCode,
     severity: 'error',
     message: `Pattern for ${type} is missing field ${field}; add it or use ..`,
-    reason: Object.freeze({ _tag: 'MissingPatternField', type, field }),
+    reason: Object.freeze({ _tag: 'MissingPatternField' as const, type, field }),
     span,
   })
 
-export const inaccessiblePatternFields = (type: string, span: SourceSpan.SourceSpan): Diagnostic =>
+export const inaccessiblePatternFields = <L>(type: string, span: L): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: missingPatternFieldCode,
     severity: 'error',
     message: `Pattern for ${type} must use .. to omit inaccessible fields`,
-    reason: Object.freeze({ _tag: 'MissingPatternField', type, field: '<inaccessible>' }),
+    reason: Object.freeze({ _tag: 'MissingPatternField' as const, type, field: '<inaccessible>' }),
     span,
   })
 
-export const duplicatePatternField = (
-  field: string,
-  originalSpan: SourceSpan.SourceSpan,
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
+export const duplicatePatternField = <L>(field: string, originalSpan: L, span: L): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: duplicatePatternFieldCode,
     severity: 'error',
     message: `Pattern field ${field} appears more than once`,
-    reason: Object.freeze({ _tag: 'DuplicatePatternField', field, originalSpan }),
+    reason: Object.freeze({ _tag: 'DuplicatePatternField' as const, field, originalSpan }),
     span,
     relatedSpans: Object.freeze([
       Object.freeze({ label: 'first matched here', span: originalSpan }),
     ]),
   })
 
-export const patternBindingConflict = (
+export const patternBindingConflict = <L>(
   spelling: string,
-  originalSpan: SourceSpan.SourceSpan,
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
+  originalSpan: L,
+  span: L,
+): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: patternBindingConflictCode,
     severity: 'error',
     message: `Pattern binding ${spelling} conflicts with an existing declaration`,
-    reason: Object.freeze({ _tag: 'PatternBindingConflict', spelling, originalSpan }),
+    reason: Object.freeze({ _tag: 'PatternBindingConflict' as const, spelling, originalSpan }),
     span,
     relatedSpans: Object.freeze([
       Object.freeze({ label: 'first declared here', span: originalSpan }),
     ]),
   })
 
-export const incompatibleMatchResults = (
-  types: ReadonlyArray<string>,
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
+export const incompatibleMatchResults = <L>(types: ReadonlyArray<string>, span: L): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
@@ -4427,17 +4415,17 @@ export const incompatibleMatchResults = (
     severity: 'error',
     message: `Match arms have incompatible result types: ${types.join(', ')}`,
     reason: Object.freeze({
-      _tag: 'IncompatibleMatchResults',
+      _tag: 'IncompatibleMatchResults' as const,
       types: Object.freeze([...types]),
     }),
     span,
   })
 
 /** Creates the diagnostic for an effect-block return whose type disagrees with the block's. */
-export const effectBlockReturnMismatch = (
+export const effectBlockReturnMismatch = <L>(
   types: ReadonlyArray<string>,
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
+  span: L,
+): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
@@ -4445,18 +4433,18 @@ export const effectBlockReturnMismatch = (
     severity: 'error',
     message: `Effect block return sites have incompatible types: ${types.join(', ')}`,
     reason: Object.freeze({
-      _tag: 'EffectBlockReturnMismatch',
+      _tag: 'EffectBlockReturnMismatch' as const,
       types: Object.freeze([...types]),
     }),
     span,
   })
 
-export const divergentRepresentationJoin = (
+export const divergentRepresentationJoin = <L>(
   expected: string,
   actual: string,
-  originSpans: readonly [SourceSpan.SourceSpan, SourceSpan.SourceSpan],
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
+  originSpans: readonly [L, L],
+  span: L,
+): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
@@ -4464,7 +4452,7 @@ export const divergentRepresentationJoin = (
     severity: 'error',
     message: `Cannot join ${expected} with ${actual}; consume each represented value inside its branch before joining`,
     reason: Object.freeze({
-      _tag: 'DivergentRepresentationJoin',
+      _tag: 'DivergentRepresentationJoin' as const,
       expected,
       actual,
       originSpans: Object.freeze(originSpans),
@@ -4476,25 +4464,25 @@ export const divergentRepresentationJoin = (
     ]),
   })
 
-export const duplicateTypeParameter = (
+export const duplicateTypeParameter = <L>(
   spelling: string,
-  originalSpan: SourceSpan.SourceSpan,
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
+  originalSpan: L,
+  span: L,
+): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: duplicateTypeParameterCode,
     severity: 'error',
     message: `Duplicate type parameter ${spelling}`,
-    reason: Object.freeze({ _tag: 'DuplicateTypeParameter', spelling, originalSpan }),
+    reason: Object.freeze({ _tag: 'DuplicateTypeParameter' as const, spelling, originalSpan }),
     span,
     relatedSpans: Object.freeze([
       Object.freeze({ label: 'first declared here', span: originalSpan }),
     ]),
   })
 
-export const genericParameterKindMismatch = (
+export const genericParameterKindMismatch = <L>(
   spelling: string,
   expected:
     | 'Lifetime'
@@ -4508,8 +4496,8 @@ export const genericParameterKindMismatch = (
     | 'RequirementRow'
     | 'CallableRepresentation'
     | 'EffectRepresentation',
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
+  span: L,
+): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
@@ -4517,7 +4505,7 @@ export const genericParameterKindMismatch = (
     severity: 'error',
     message: `Generic parameter ${spelling} has kind ${actual}, expected ${expected}`,
     reason: Object.freeze({
-      _tag: 'GenericParameterKindMismatch',
+      _tag: 'GenericParameterKindMismatch' as const,
       spelling,
       expected,
       actual,
@@ -4525,17 +4513,17 @@ export const genericParameterKindMismatch = (
     span,
   })
 
-export const incompatibleRepresentationBound = (
+export const incompatibleRepresentationBound = <L>(
   parameter: string,
   required: string,
   actual: string,
-  span: SourceSpan.SourceSpan,
+  span: L,
   provenance: {
-    readonly requiredDeclarationSpan?: SourceSpan.SourceSpan
-    readonly actualDeclarationSpan?: SourceSpan.SourceSpan
+    readonly requiredDeclarationSpan?: L
+    readonly actualDeclarationSpan?: L
   } = {},
-): Diagnostic => {
-  const relatedSpans: Array<RelatedSpan> = []
+): Diagnostic<L> => {
+  const relatedSpans: Array<RelatedSpan<L>> = []
   if (provenance.requiredDeclarationSpan !== undefined)
     relatedSpans.push(
       Object.freeze({
@@ -4557,7 +4545,7 @@ export const incompatibleRepresentationBound = (
     severity: 'error',
     message: `Representation ${parameter} requires ${required}, but the supplied bound ${actual} is not admissible`,
     reason: Object.freeze({
-      _tag: 'IncompatibleRepresentationBound',
+      _tag: 'IncompatibleRepresentationBound' as const,
       parameter,
       required,
       actual,
@@ -4600,7 +4588,7 @@ const contractRowInferenceMessage = (problem: ContractRowInferenceProblem): stri
 }
 
 /** Preserves the first failed inference obligation instead of attributing every open row to it. */
-export const inferenceFailure = (
+export const inferenceFailure = <L>(
   problem:
     | ContractRowInferenceProblem
     | {
@@ -4608,83 +4596,92 @@ export const inferenceFailure = (
         readonly longer: string
         readonly shorter: string
       },
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
+  span: L,
+): Diagnostic<L> =>
   problem._tag === 'EnvironmentMismatch'
     ? unsatisfiedLifetimeBound(problem.longer, problem.shorter, span)
     : contractRowInference(problem, span)
 
-export const contractRowInference = (
+export const contractRowInference = <L>(
   problem: ContractRowInferenceProblem,
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
+  span: L,
+): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: contractRowInferenceCode,
     severity: 'error',
     message: contractRowInferenceMessage(problem),
-    reason: Object.freeze({ _tag: 'ContractRowInference', problem: Object.freeze(problem) }),
+    reason: Object.freeze({
+      _tag: 'ContractRowInference' as const,
+      problem: Object.freeze(problem),
+    }),
     span,
   })
 
-export const typeArgumentArity = (
+export const typeArgumentArity = <L>(
   target: string,
   expected: number,
   actual: number,
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
+  span: L,
+): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: typeArgumentArityCode,
     severity: 'error',
     message: `${target} expects ${expected} type argument${expected === 1 ? '' : 's'}, received ${actual}`,
-    reason: Object.freeze({ _tag: 'TypeArgumentArity', target, expected, actual }),
+    reason: Object.freeze({ _tag: 'TypeArgumentArity' as const, target, expected, actual }),
     span,
   })
 
-export const typeArgumentInference = (target: string, span: SourceSpan.SourceSpan): Diagnostic =>
+export const typeArgumentInference = <L>(target: string, span: L): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: typeArgumentInferenceCode,
     severity: 'error',
     message: `Cannot infer all type arguments for ${target} from supplied values`,
-    reason: Object.freeze({ _tag: 'TypeArgumentInference', target }),
+    reason: Object.freeze({ _tag: 'TypeArgumentInference' as const, target }),
     span,
   })
 
-export const uninferredTypeParameter = (
+export const uninferredTypeParameter = <L>(
   target: string,
   parameter: string,
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
+  span: L,
+): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: uninferredTypeParameterCode,
     severity: 'error',
     message: `Cannot infer type argument ${parameter} of ${target} from supplied values`,
-    reason: Object.freeze({ _tag: 'UninferredTypeParameter', target, parameter }),
+    reason: Object.freeze({ _tag: 'UninferredTypeParameter' as const, target, parameter }),
     span,
   })
 
-export const typeArgumentConflict = (
+export const typeArgumentConflict = <L>(
   target: string,
   parameter: string,
   written: string,
   implied: string,
-  span: SourceSpan.SourceSpan,
-  firstConstraint?: SourceSpan.SourceSpan,
-): Diagnostic =>
+  span: L,
+  firstConstraint?: L,
+): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: typeArgumentConflictCode,
     severity: 'error',
     message: `Type argument ${parameter} of ${target} is ${written}, but the supplied values imply ${implied}`,
-    reason: Object.freeze({ _tag: 'TypeArgumentConflict', target, parameter, written, implied }),
+    reason: Object.freeze({
+      _tag: 'TypeArgumentConflict' as const,
+      target,
+      parameter,
+      written,
+      implied,
+    }),
     span,
     ...(firstConstraint === undefined
       ? {}
@@ -4695,51 +4692,47 @@ export const typeArgumentConflict = (
         }),
   })
 
-export const polymorphicRecursion = (
-  caller: string,
-  target: string,
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
+export const polymorphicRecursion = <L>(caller: string, target: string, span: L): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: polymorphicRecursionCode,
     severity: 'error',
     message: `Recursive specialization changes type arguments from ${caller} to ${target}`,
-    reason: Object.freeze({ _tag: 'PolymorphicRecursion', caller, target }),
+    reason: Object.freeze({ _tag: 'PolymorphicRecursion' as const, caller, target }),
     span,
   })
 
 /** Diagnoses a reachable sealed operation before its unsupported execution surface is entered. */
-export const intrinsicTargetUnavailable = (
+export const intrinsicTargetUnavailable = <L>(
   operation: string,
   target: Target.Id,
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
+  span: L,
+): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: intrinsicTargetUnavailableCode,
     severity: 'error',
     message: `${operation} is unavailable for ${target}`,
-    reason: Object.freeze({ _tag: 'IntrinsicTargetUnavailable', operation, target }),
+    reason: Object.freeze({ _tag: 'IntrinsicTargetUnavailable' as const, operation, target }),
     span,
   })
 
 /** Diagnoses a known mismatch before MIR consumes either affine initializer argument. */
-export const localSharedLayoutMismatch = (
+export const localSharedLayoutMismatch = <L>(
   expected: string,
   actual: string,
-  allocationSpan: SourceSpan.SourceSpan,
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
+  allocationSpan: L,
+  span: L,
+): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: localSharedLayoutMismatchCode,
     severity: 'error',
     message: `Local-shared allocation was planned for ${actual}, not ${expected}`,
-    reason: Object.freeze({ _tag: 'LocalSharedLayoutMismatch', expected, actual }),
+    reason: Object.freeze({ _tag: 'LocalSharedLayoutMismatch' as const, expected, actual }),
     span,
     relatedSpans: Object.freeze([
       Object.freeze({
@@ -4750,19 +4743,19 @@ export const localSharedLayoutMismatch = (
   })
 
 /** Diagnoses a mismatched execution-package allocation before initializer publication. */
-export const executionLayoutMismatch = (
+export const executionLayoutMismatch = <L>(
   expected: string,
   actual: string,
-  allocationSpan: SourceSpan.SourceSpan,
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
+  allocationSpan: L,
+  span: L,
+): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: executionLayoutMismatchCode,
     severity: 'error',
     message: `Execution allocation was planned for ${actual}, not ${expected}`,
-    reason: Object.freeze({ _tag: 'ExecutionLayoutMismatch', expected, actual }),
+    reason: Object.freeze({ _tag: 'ExecutionLayoutMismatch' as const, expected, actual }),
     span,
     relatedSpans: Object.freeze([
       Object.freeze({
@@ -4773,11 +4766,11 @@ export const executionLayoutMismatch = (
   })
 
 /** Diagnoses one failed sealed-property check at its concrete application obligation. */
-export const unsatisfiedExecutableProperty = (
+export const unsatisfiedExecutableProperty = <L>(
   property: 'Intrinsic.Detached' | 'Intrinsic.NonParking',
   causes: ReadonlyArray<string>,
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
+  span: L,
+): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
@@ -4785,7 +4778,7 @@ export const unsatisfiedExecutableProperty = (
     severity: 'error',
     message: `${property} is unsatisfied: ${causes.join('; ')}`,
     reason: Object.freeze({
-      _tag: 'UnsatisfiedExecutableProperty',
+      _tag: 'UnsatisfiedExecutableProperty' as const,
       property,
       causes: Object.freeze(Array.from(causes)),
     }),
@@ -4793,62 +4786,59 @@ export const unsatisfiedExecutableProperty = (
   })
 
 /** Rejects ordinary interface/service bounds in the sealed exact-executable conjunction lane. */
-export const invalidExecutablePropertyConjunct = (
-  conjunct: string,
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
+export const invalidExecutablePropertyConjunct = <L>(conjunct: string, span: L): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: invalidExecutablePropertyConjunctCode,
     severity: 'error',
     message: `${conjunct} is not a sealed executable property`,
-    reason: Object.freeze({ _tag: 'InvalidExecutablePropertyConjunct', conjunct }),
+    reason: Object.freeze({ _tag: 'InvalidExecutablePropertyConjunct' as const, conjunct }),
     span,
   })
 
-export const missingUnsafeBoundary = (operation: string, span: SourceSpan.SourceSpan): Diagnostic =>
+export const missingUnsafeBoundary = <L>(operation: string, span: L): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: missingUnsafeBoundaryCode,
     severity: 'error',
     message: `${operation} requires unsafe acknowledgement`,
-    reason: Object.freeze({ _tag: 'MissingUnsafeBoundary', operation }),
+    reason: Object.freeze({ _tag: 'MissingUnsafeBoundary' as const, operation }),
     span,
   })
 
-export const misplacedUnsafeAcknowledgement = (span: SourceSpan.SourceSpan): Diagnostic =>
+export const misplacedUnsafeAcknowledgement = <L>(span: L): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: misplacedUnsafeAcknowledgementCode,
     severity: 'error',
     message: '`unsafe` must acknowledge a complete unsafe invocation',
-    reason: Object.freeze({ _tag: 'MisplacedUnsafeAcknowledgement' }),
+    reason: Object.freeze({ _tag: 'MisplacedUnsafeAcknowledgement' as const }),
     span,
   })
 
 /** Rejects nested anonymous bodies until transitive capture lifting has a language contract. */
-export const nestedAnonymousCallable = (span: SourceSpan.SourceSpan): Diagnostic =>
+export const nestedAnonymousCallable = <L>(span: L): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: nestedAnonymousCallableCode,
     severity: 'error',
     message: 'Anonymous callable bodies cannot be nested in this language slice',
-    reason: Object.freeze({ _tag: 'NestedAnonymousCallable' }),
+    reason: Object.freeze({ _tag: 'NestedAnonymousCallable' as const }),
     span,
   })
 
-export const invalidConformance = (detail: string, span: SourceSpan.SourceSpan): Diagnostic =>
+export const invalidConformance = <L>(detail: string, span: L): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: invalidConformanceCode,
     severity: 'error',
     message: `Invalid conformance: ${detail}`,
-    reason: Object.freeze({ _tag: 'InvalidConformance', detail }),
+    reason: Object.freeze({ _tag: 'InvalidConformance' as const, detail }),
     span,
   })
 
@@ -4860,19 +4850,19 @@ export const invalidConformance = (detail: string, span: SourceSpan.SourceSpan):
  * changes as declarations are added, and a coherence answer that moved with the program would let
  * one specialization silently change which witness it selects.
  */
-export const overlappingConformance = (
+export const overlappingConformance = <L>(
   head: string,
   other: string,
-  span: SourceSpan.SourceSpan,
-  originalSpan?: SourceSpan.SourceSpan,
-): Diagnostic =>
+  span: L,
+  originalSpan?: L,
+): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: overlappingConformanceCode,
     severity: 'error',
     message: `${head} may overlap ${other}`,
-    reason: Object.freeze({ _tag: 'OverlappingConformance', head, other }),
+    reason: Object.freeze({ _tag: 'OverlappingConformance' as const, head, other }),
     span,
     ...(originalSpan === undefined
       ? {}
@@ -4893,11 +4883,11 @@ export const overlappingConformance = (
  * provider term a well-founded measure, which is why proof search needs no fuel: a requirement that
  * satisfies them can only be followed finitely many times.
  */
-export const nonTerminatingConformance = (
+export const nonTerminatingConformance = <L>(
   head: string,
   failures: ReadonlyArray<string>,
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
+  span: L,
+): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
@@ -4905,7 +4895,7 @@ export const nonTerminatingConformance = (
     severity: 'error',
     message: `${head} declares a requirement that does not descend`,
     reason: Object.freeze({
-      _tag: 'NonTerminatingConformance',
+      _tag: 'NonTerminatingConformance' as const,
       head,
       failures: Object.freeze([...failures]),
     }),
@@ -4920,12 +4910,12 @@ export const nonTerminatingConformance = (
  * lacks a conformance, while the chain says which wrapper asked for it and through which
  * requirement, which is what tells the author where to declare the missing implementation.
  */
-export const unprovenConformance = (
+export const unprovenConformance = <L>(
   goal: string,
   detail: string,
   trace: ReadonlyArray<string>,
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
+  span: L,
+): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
@@ -4933,7 +4923,7 @@ export const unprovenConformance = (
     severity: 'error',
     message: `${goal} cannot be proved: ${detail}`,
     reason: Object.freeze({
-      _tag: 'UnprovenConformance',
+      _tag: 'UnprovenConformance' as const,
       goal,
       detail,
       trace: Object.freeze([...trace]),
@@ -4942,148 +4932,154 @@ export const unprovenConformance = (
     ...(trace.length === 0 ? {} : { notes: Object.freeze([...trace]) }),
   })
 
-export const nonConcreteSpecialization = (
-  declaration: string,
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
+export const nonConcreteSpecialization = <L>(declaration: string, span: L): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: nonConcreteSpecializationCode,
     severity: 'error',
     message: `${declaration} reaches a complete application with unresolved contract rows or evidence`,
-    reason: Object.freeze({ _tag: 'NonConcreteSpecialization', declaration }),
+    reason: Object.freeze({ _tag: 'NonConcreteSpecialization' as const, declaration }),
     span,
   })
 
-const providerSelectionFields = (
+const providerSelectionFields = <L>(
   problem: ProviderSelection.SelectionProblem,
-  locations: ProviderSelection.DiagnosticLocations,
+  locations: ProviderSelection.DiagnosticLocations<L>,
+  originKey: ProviderSelection.OriginKey<L>,
 ) => {
   const primarySpan = locations.primary
-  const primaryKey = SourceSpan.key(primarySpan)
+  const primaryKey = originKey(primarySpan)
   const related = locations.relations
     .flatMap((relation) => relation.origins)
-    .filter((origin) => SourceSpan.key(origin) !== primaryKey)
+    .filter((origin) => originKey(origin) !== primaryKey)
     .map((span) => Object.freeze({ label: 'contributing provider constraint', span }))
   return Object.freeze({
-    reason: Object.freeze({ _tag: 'ProviderSelection', problem }),
+    reason: Object.freeze({ _tag: 'ProviderSelection' as const, problem }),
     span: primarySpan,
     ...(related.length === 0 ? {} : { relatedSpans: Object.freeze(related) }),
   })
 }
 
-const providerNoMatch = (
+const providerNoMatch = <L>(
   problem: Extract<ProviderSelection.SelectionProblem, { readonly _tag: 'ProviderNoMatch' }>,
-  locations: ProviderSelection.DiagnosticLocations,
-): Diagnostic =>
+  locations: ProviderSelection.DiagnosticLocations<L>,
+  originKey: ProviderSelection.OriginKey<L>,
+): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: providerNoMatchCode,
     severity: 'error',
     message: 'The provider matches no compatible requirement',
-    ...providerSelectionFields(problem, locations),
+    ...providerSelectionFields(problem, locations, originKey),
   })
 
-const providerAccessMismatch = (
+const providerAccessMismatch = <L>(
   problem: Extract<ProviderSelection.SelectionProblem, { readonly _tag: 'ProviderAccessMismatch' }>,
-  locations: ProviderSelection.DiagnosticLocations,
-): Diagnostic =>
+  locations: ProviderSelection.DiagnosticLocations<L>,
+  originKey: ProviderSelection.OriginKey<L>,
+): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: providerAccessMismatchCode,
     severity: 'error',
     message: `${problem.provider.toLowerCase()} provider access cannot satisfy an ${problem.required.toLowerCase()} requirement`,
-    ...providerSelectionFields(problem, locations),
+    ...providerSelectionFields(problem, locations, originKey),
   })
 
-const jointProviderSelectionConflict = (
+const jointProviderSelectionConflict = <L>(
   problem: Extract<ProviderSelection.SelectionProblem, { readonly _tag: 'JointSelectionConflict' }>,
-  locations: ProviderSelection.DiagnosticLocations,
-): Diagnostic =>
+  locations: ProviderSelection.DiagnosticLocations<L>,
+  originKey: ProviderSelection.OriginKey<L>,
+): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: jointProviderSelectionConflictCode,
     severity: 'error',
     message: 'Provider constraints select incompatible requirement members',
-    ...providerSelectionFields(problem, locations),
+    ...providerSelectionFields(problem, locations, originKey),
   })
 
-const providerAmbiguity = (
+const providerAmbiguity = <L>(
   problem: Extract<ProviderSelection.SelectionProblem, { readonly _tag: 'ProviderAmbiguity' }>,
-  locations: ProviderSelection.DiagnosticLocations,
-): Diagnostic =>
+  locations: ProviderSelection.DiagnosticLocations<L>,
+  originKey: ProviderSelection.OriginKey<L>,
+): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: providerAmbiguityCode,
     severity: 'error',
     message: 'The provider matches more than one requirement; select one explicitly',
-    ...providerSelectionFields(problem, locations),
+    ...providerSelectionFields(problem, locations, originKey),
   })
 
-const selectedRowCardinality = (
+const selectedRowCardinality = <L>(
   problem: Extract<ProviderSelection.SelectionProblem, { readonly _tag: 'SelectedRowCardinality' }>,
-  locations: ProviderSelection.DiagnosticLocations,
-): Diagnostic =>
+  locations: ProviderSelection.DiagnosticLocations<L>,
+  originKey: ProviderSelection.OriginKey<L>,
+): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: selectedRowCardinalityCode,
     severity: 'error',
     message: `Selected requirement row has ${problem.count} members; exactly one is required`,
-    ...providerSelectionFields(problem, locations),
+    ...providerSelectionFields(problem, locations, originKey),
   })
 
-const providerConformanceAmbiguity = (
+const providerConformanceAmbiguity = <L>(
   problem: Extract<ProviderSelection.SelectionProblem, { readonly _tag: 'ConformanceAmbiguity' }>,
-  locations: ProviderSelection.DiagnosticLocations,
-): Diagnostic =>
+  locations: ProviderSelection.DiagnosticLocations<L>,
+  originKey: ProviderSelection.OriginKey<L>,
+): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: providerConformanceAmbiguityCode,
     severity: 'error',
     message: 'More than one conformance witness can provide the selected requirement',
-    ...providerSelectionFields(problem, locations),
+    ...providerSelectionFields(problem, locations, originKey),
   })
 
-const invalidProviderConformance = (
+const invalidProviderConformance = <L>(
   problem: Extract<ProviderSelection.SelectionProblem, { readonly _tag: 'InvalidConformance' }>,
-  locations: ProviderSelection.DiagnosticLocations,
-): Diagnostic =>
+  locations: ProviderSelection.DiagnosticLocations<L>,
+  originKey: ProviderSelection.OriginKey<L>,
+): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: invalidProviderConformanceCode,
     severity: 'error',
     message: `The provider's conformance mapping is invalid: ${problem.reason}`,
-    ...providerSelectionFields(problem, locations),
+    ...providerSelectionFields(problem, locations, originKey),
   })
 
 /** Preserves the solver's span-free semantic payload separately from ordered source locations. */
-export const providerSelection = (
-  diagnostic: ProviderSelection.SelectionDiagnostic,
-): Diagnostic => {
+export const providerSelection = <L>(
+  diagnostic: ProviderSelection.SelectionDiagnostic<L>,
+  originKey: ProviderSelection.OriginKey<L>,
+): Diagnostic<L> => {
   const problem = diagnostic.problem
   switch (problem._tag) {
     case 'ProviderNoMatch':
-      return providerNoMatch(problem, diagnostic.locations)
+      return providerNoMatch(problem, diagnostic.locations, originKey)
     case 'ProviderAccessMismatch':
-      return providerAccessMismatch(problem, diagnostic.locations)
+      return providerAccessMismatch(problem, diagnostic.locations, originKey)
     case 'JointSelectionConflict':
-      return jointProviderSelectionConflict(problem, diagnostic.locations)
+      return jointProviderSelectionConflict(problem, diagnostic.locations, originKey)
     case 'ProviderAmbiguity':
-      return providerAmbiguity(problem, diagnostic.locations)
+      return providerAmbiguity(problem, diagnostic.locations, originKey)
     case 'SelectedRowCardinality':
-      return selectedRowCardinality(problem, diagnostic.locations)
+      return selectedRowCardinality(problem, diagnostic.locations, originKey)
     case 'ConformanceAmbiguity':
-      return providerConformanceAmbiguity(problem, diagnostic.locations)
+      return providerConformanceAmbiguity(problem, diagnostic.locations, originKey)
     case 'InvalidConformance':
-      return invalidProviderConformance(problem, diagnostic.locations)
+      return invalidProviderConformance(problem, diagnostic.locations, originKey)
   }
 }
 
@@ -5094,11 +5090,11 @@ export const providerSelection = (
  * of its parameters by the same interface leaves the call naming no single parameter. The operation
  * is real and the bound is satisfied; what is missing is which parameter's witness answers it.
  */
-export const ambiguousBoundOperation = (
+export const ambiguousBoundOperation = <L>(
   spelling: string,
   parameters: ReadonlyArray<string>,
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
+  span: L,
+): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
@@ -5106,7 +5102,7 @@ export const ambiguousBoundOperation = (
     severity: 'error',
     message: `${spelling} is ambiguous across bounded type parameters ${parameters.join(', ')}`,
     reason: Object.freeze({
-      _tag: 'AmbiguousBoundOperation',
+      _tag: 'AmbiguousBoundOperation' as const,
       spelling,
       parameters: Object.freeze([...parameters]),
     }),
@@ -5123,39 +5119,36 @@ export const ambiguousBoundOperation = (
  * user-visible cause. A call that passes analysis and produces no code is a reported error, because
  * the alternative is a silent miscompile.
  */
-export const unlowerableBoundWitness = (
+export const unlowerableBoundWitness = <L>(
   spelling: string,
   provider: string,
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
+  span: L,
+): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: unlowerableBoundWitnessCode,
     severity: 'error',
     message: `${spelling} has no witness that can be lowered for ${provider}`,
-    reason: Object.freeze({ _tag: 'UnlowerableBoundWitness', spelling, provider }),
+    reason: Object.freeze({ _tag: 'UnlowerableBoundWitness' as const, spelling, provider }),
     span,
   })
 
-export const invalidServiceDeclaration = (
-  detail: string,
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
+export const invalidServiceDeclaration = <L>(detail: string, span: L): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: invalidServiceDeclarationCode,
     severity: 'error',
     message: `Invalid service declaration: ${detail}`,
-    reason: Object.freeze({ _tag: 'InvalidServiceDeclaration', detail }),
+    reason: Object.freeze({ _tag: 'InvalidServiceDeclaration' as const, detail }),
     span,
   })
 
-export const invalidMutableParameter = (
+export const invalidMutableParameter = <L>(
   context: 'BorrowedView' | 'Contract',
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
+  span: L,
+): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
@@ -5165,179 +5158,165 @@ export const invalidMutableParameter = (
       context === 'Contract'
         ? '`mut` declares function-local owned parameter storage and is not valid in a service or interface contract'
         : '`mut` declares mutable owned parameter storage; use `&mut` for exclusive borrowed access',
-    reason: Object.freeze({ _tag: 'InvalidMutableParameter', context }),
+    reason: Object.freeze({ _tag: 'InvalidMutableParameter' as const, context }),
     span,
   })
 
 /** Rejects mutation whose execution time cannot preserve the outer callable's exact recipe. */
-export const deferredCallableMutation = (
-  spelling: string,
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
+export const deferredCallableMutation = <L>(spelling: string, span: L): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: deferredCallableMutationCode,
     severity: 'error',
     message: `A deferred effect cannot mutate captured callable binding ${spelling}`,
-    reason: Object.freeze({ _tag: 'DeferredCallableMutation', spelling }),
+    reason: Object.freeze({ _tag: 'DeferredCallableMutation' as const, spelling }),
     span,
   })
 
-export const invalidDropHook = (detail: string, span: SourceSpan.SourceSpan): Diagnostic =>
+export const invalidDropHook = <L>(detail: string, span: L): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: invalidDropHookCode,
     severity: 'error',
     message: `Invalid Drop hook: ${detail}`,
-    reason: Object.freeze({ _tag: 'InvalidDropHook', detail }),
+    reason: Object.freeze({ _tag: 'InvalidDropHook' as const, detail }),
     span,
   })
 
-export const invalidBorrowOperand = (span: SourceSpan.SourceSpan): Diagnostic =>
+export const invalidBorrowOperand = <L>(span: L): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: invalidBorrowOperandCode,
     severity: 'error',
     message: 'A borrowed view requires a direct stable owner or borrowed view',
-    reason: Object.freeze({ _tag: 'InvalidBorrowOperand' }),
+    reason: Object.freeze({ _tag: 'InvalidBorrowOperand' as const }),
     span,
   })
 
-export const exclusiveBorrowRequiresMutable = (
-  spelling: string,
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
+export const exclusiveBorrowRequiresMutable = <L>(spelling: string, span: L): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: exclusiveBorrowRequiresMutableCode,
     severity: 'error',
     message: `Exclusive borrowing requires mutable binding ${spelling}`,
-    reason: Object.freeze({ _tag: 'ExclusiveBorrowRequiresMutable', spelling }),
+    reason: Object.freeze({ _tag: 'ExclusiveBorrowRequiresMutable' as const, spelling }),
     span,
   })
 
-export const invalidSliceReborrow = (
+export const invalidSliceReborrow = <L>(
   parent: 'Shared' | 'Exclusive',
   requested: 'Shared' | 'Exclusive',
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
+  span: L,
+): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: invalidSliceReborrowCode,
     severity: 'error',
     message: 'A shared slice cannot be reborrowed exclusively',
-    reason: Object.freeze({ _tag: 'InvalidSliceReborrow', parent, requested }),
+    reason: Object.freeze({ _tag: 'InvalidSliceReborrow' as const, parent, requested }),
     span,
   })
 
-export const implicitSliceDecay = (expected: string, span: SourceSpan.SourceSpan): Diagnostic =>
+export const implicitSliceDecay = <L>(expected: string, span: L): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: implicitSliceDecayCode,
     severity: 'error',
     message: `Passing an array as ${expected} requires an explicit borrow`,
-    reason: Object.freeze({ _tag: 'ImplicitSliceDecay', expected }),
+    reason: Object.freeze({ _tag: 'ImplicitSliceDecay' as const, expected }),
     span,
   })
 
 /** Creates the diagnostic for a call argument whose type mismatches its parameter. */
-export const argumentTypeMismatch = (
-  expected: string,
-  actual: string,
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
+export const argumentTypeMismatch = <L>(expected: string, actual: string, span: L): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: argumentTypeMismatchCode,
     severity: 'error',
     message: `Expected ${expected} but received ${actual}`,
-    reason: Object.freeze({ _tag: 'ArgumentTypeMismatch', expected, actual }),
+    reason: Object.freeze({ _tag: 'ArgumentTypeMismatch' as const, expected, actual }),
     span,
   })
 
-export const nonCallableApplication = (actual: string, span: SourceSpan.SourceSpan): Diagnostic =>
+export const nonCallableApplication = <L>(actual: string, span: L): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: nonCallableApplicationCode,
     severity: 'error',
     message: `Cannot call non-callable value ${actual}`,
-    reason: Object.freeze({ _tag: 'NonCallableApplication', actual }),
+    reason: Object.freeze({ _tag: 'NonCallableApplication' as const, actual }),
     span,
   })
 
-export const incompatibleCallableSignature = (
+export const incompatibleCallableSignature = <L>(
   expected: string,
   actual: string,
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
+  span: L,
+): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: incompatibleCallableSignatureCode,
     severity: 'error',
     message: `Callable ${actual} cannot satisfy ${expected}`,
-    reason: Object.freeze({ _tag: 'IncompatibleCallableSignature', expected, actual }),
+    reason: Object.freeze({ _tag: 'IncompatibleCallableSignature' as const, expected, actual }),
     span,
   })
 
-export const invalidCallableInvocationAccess = (
+export const invalidCallableInvocationAccess = <L>(
   required: 'Shared' | 'Exclusive' | 'Take',
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
+  span: L,
+): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: invalidCallableInvocationAccessCode,
     severity: 'error',
     message: `Callable invocation requires ${required.toLowerCase()} access`,
-    reason: Object.freeze({ _tag: 'InvalidCallableInvocationAccess', required }),
+    reason: Object.freeze({ _tag: 'InvalidCallableInvocationAccess' as const, required }),
     span,
   })
 
-export const redundantUnaryEmptyCall = (target: string, span: SourceSpan.SourceSpan): Diagnostic =>
+export const redundantUnaryEmptyCall = <L>(target: string, span: L): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: redundantUnaryEmptyCallCode,
     severity: 'error',
     message: `${target} is unary; name it directly instead of calling it with no arguments`,
-    reason: Object.freeze({ _tag: 'RedundantUnaryEmptyCall', target }),
+    reason: Object.freeze({ _tag: 'RedundantUnaryEmptyCall' as const, target }),
     span,
   })
 
 /** Creates the diagnostic for a binding used again after its consuming move. */
-export const useAfterMove = (
-  spelling: string,
-  moveSpan: SourceSpan.SourceSpan,
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
+export const useAfterMove = <L>(spelling: string, moveSpan: L, span: L): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'ownership',
     code: useAfterMoveCode,
     severity: 'error',
     message: `${spelling} was moved and cannot be used again`,
-    reason: Object.freeze({ _tag: 'UseAfterMove', spelling, moveSpan }),
+    reason: Object.freeze({ _tag: 'UseAfterMove' as const, spelling, moveSpan }),
     span,
     relatedSpans: Object.freeze([Object.freeze({ label: 'moved here', span: moveSpan })]),
   })
 
-export const partialMove = (span: SourceSpan.SourceSpan): Diagnostic =>
+export const partialMove = <L>(span: L): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'ownership',
     code: partialMoveCode,
     severity: 'error',
     message: 'This place crosses a boundary that does not support partial moves',
-    reason: Object.freeze({ _tag: 'PartialMove' }),
+    reason: Object.freeze({ _tag: 'PartialMove' as const }),
     span,
   })
 
@@ -5346,14 +5325,14 @@ export const partialMove = (span: SourceSpan.SourceSpan): Diagnostic =>
  * the modes its environment admits: a shared receiver invokes only `fn`, an exclusive receiver also
  * invokes `mut fn`, and only a whole-owner receiver may consume a `once fn`.
  */
-export const storedCallableInvocationAccess = (
+export const storedCallableInvocationAccess = <L>(
   aggregate: string,
   field: string,
   contract: string,
   receiver: 'Shared' | 'Exclusive' | 'Take',
   required: 'Shared' | 'Exclusive' | 'Take',
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
+  span: L,
+): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'ownership',
@@ -5361,7 +5340,7 @@ export const storedCallableInvocationAccess = (
     severity: 'error',
     message: `Cannot invoke field ${field} of ${aggregate} through ${receiver.toLowerCase()} aggregate access: ${contract} requires ${required.toLowerCase()} access to the whole aggregate`,
     reason: Object.freeze({
-      _tag: 'StoredCallableInvocationAccess',
+      _tag: 'StoredCallableInvocationAccess' as const,
       aggregate,
       field,
       contract,
@@ -5376,14 +5355,14 @@ export const storedCallableInvocationAccess = (
  * its run mode: a shared receiver runs only `Effect`, an exclusive receiver also runs `mut Effect`,
  * and only a whole-owner receiver may consume a `once Effect`.
  */
-export const storedEffectRunAccess = (
+export const storedEffectRunAccess = <L>(
   aggregate: string,
   field: string,
   contract: string,
   receiver: 'Shared' | 'Exclusive' | 'Take',
   required: 'Shared' | 'Exclusive' | 'Take',
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
+  span: L,
+): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'ownership',
@@ -5391,7 +5370,7 @@ export const storedEffectRunAccess = (
     severity: 'error',
     message: `Cannot run field ${field} of ${aggregate} through ${receiver.toLowerCase()} aggregate access: ${contract} requires ${required.toLowerCase()} access to the whole aggregate`,
     reason: Object.freeze({
-      _tag: 'StoredEffectRunAccess',
+      _tag: 'StoredEffectRunAccess' as const,
       aggregate,
       field,
       contract,
@@ -5401,167 +5380,169 @@ export const storedEffectRunAccess = (
     span,
   })
 
-export const explicitMoveRequired = (spelling: string, span: SourceSpan.SourceSpan): Diagnostic =>
+export const explicitMoveRequired = <L>(spelling: string, span: L): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'ownership',
     code: explicitMoveRequiredCode,
     severity: 'error',
     message: `Moving ${spelling} requires an explicit move`,
-    reason: Object.freeze({ _tag: 'ExplicitMoveRequired', spelling }),
+    reason: Object.freeze({ _tag: 'ExplicitMoveRequired' as const, spelling }),
     span,
   })
 
-export const overlappingAssignment = (spelling: string, span: SourceSpan.SourceSpan): Diagnostic =>
+export const overlappingAssignment = <L>(spelling: string, span: L): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'ownership',
     code: overlappingAssignmentCode,
     severity: 'error',
     message: `Assignment to ${spelling} consumes the same owner before replacement commits`,
-    reason: Object.freeze({ _tag: 'OverlappingAssignment', spelling }),
+    reason: Object.freeze({ _tag: 'OverlappingAssignment' as const, spelling }),
     span,
   })
 
-export const incompatibleLoopHeader = (loop: number, span: SourceSpan.SourceSpan): Diagnostic =>
+export const incompatibleLoopHeader = <L>(loop: number, span: L): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'ownership',
     code: incompatibleLoopHeaderCode,
     severity: 'error',
     message: `Loop ${loop} repeats with incompatible owner liveness`,
-    reason: Object.freeze({ _tag: 'IncompatibleLoopHeader', loop }),
+    reason: Object.freeze({ _tag: 'IncompatibleLoopHeader' as const, loop }),
     span,
   })
 
-export const incompatibleArmMerge = (spelling: string, span: SourceSpan.SourceSpan): Diagnostic =>
+export const incompatibleArmMerge = <L>(spelling: string, span: L): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'ownership',
     code: incompatibleArmMergeCode,
     severity: 'error',
     message: `Branches merge with incompatible owner liveness for ${spelling}`,
-    reason: Object.freeze({ _tag: 'IncompatibleArmMerge', spelling }),
+    reason: Object.freeze({ _tag: 'IncompatibleArmMerge' as const, spelling }),
     span,
   })
 
-export const matchBorrowEscape = (spelling: string, span: SourceSpan.SourceSpan): Diagnostic =>
+export const matchBorrowEscape = <L>(spelling: string, span: L): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'ownership',
     code: matchBorrowEscapeCode,
     severity: 'error',
     message: `Borrowed pattern binding ${spelling} cannot escape its match arm`,
-    reason: Object.freeze({ _tag: 'MatchBorrowEscape', spelling }),
+    reason: Object.freeze({ _tag: 'MatchBorrowEscape' as const, spelling }),
     span,
   })
 
 /** Rejects a callable environment whose borrowed root ends when its creating function returns. */
-export const executableBorrowEscape = (
+export const executableBorrowEscape = <L>(
   executable: 'Callable' | 'Effect',
   spelling: string,
   access: 'Shared' | 'Exclusive',
-  span: SourceSpan.SourceSpan,
-  returnSpan: SourceSpan.SourceSpan,
-): Diagnostic =>
+  span: L,
+  returnSpan: L,
+): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'ownership',
     code: executableBorrowEscapeCode,
     severity: 'error',
     message: `${executable} cannot escape with a ${access.toLowerCase()} borrow of local ${spelling}`,
-    reason: Object.freeze({ _tag: 'ExecutableBorrowEscape', executable, spelling, access }),
+    reason: Object.freeze({
+      _tag: 'ExecutableBorrowEscape' as const,
+      executable,
+      spelling,
+      access,
+    }),
     span,
     relatedSpans: Object.freeze([
       Object.freeze({ label: `${executable.toLowerCase()} escapes here`, span: returnSpan }),
     ]),
   })
 
-export const exclusiveMatchRequiresMutable = (
-  spelling: string,
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
+export const exclusiveMatchRequiresMutable = <L>(spelling: string, span: L): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'ownership',
     code: exclusiveMatchRequiresMutableCode,
     severity: 'error',
     message: `Exclusive match requires mutable binding ${spelling}`,
-    reason: Object.freeze({ _tag: 'ExclusiveMatchRequiresMutable', spelling }),
+    reason: Object.freeze({ _tag: 'ExclusiveMatchRequiresMutable' as const, spelling }),
     span,
   })
 
-export const guardConsumesPattern = (spelling: string, span: SourceSpan.SourceSpan): Diagnostic =>
+export const guardConsumesPattern = <L>(spelling: string, span: L): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'ownership',
     code: guardConsumesPatternCode,
     severity: 'error',
     message: `Match guard cannot consume pattern binding ${spelling}`,
-    reason: Object.freeze({ _tag: 'GuardConsumesPattern', spelling }),
+    reason: Object.freeze({ _tag: 'GuardConsumesPattern' as const, spelling }),
     span,
   })
 
-export const invalidMatchScrutineePlace = (
+export const invalidMatchScrutineePlace = <L>(
   access: 'Move' | 'Exclusive' | 'Place',
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
+  span: L,
+): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'ownership',
     code: invalidMatchScrutineePlaceCode,
     severity: 'error',
     message: `${access} match requires a complete binding place`,
-    reason: Object.freeze({ _tag: 'InvalidMatchScrutineePlace', access }),
+    reason: Object.freeze({ _tag: 'InvalidMatchScrutineePlace' as const, access }),
     span,
   })
 
-export const conflictingViewLoan = (
+export const conflictingViewLoan = <L>(
   existing: 'Shared' | 'Exclusive',
   requested: 'Shared' | 'Exclusive',
-  loanSpan: SourceSpan.SourceSpan,
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
+  loanSpan: L,
+  span: L,
+): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'ownership',
     code: conflictingViewLoanCode,
     severity: 'error',
     message: `${requested} borrowed-view loan conflicts with an active ${existing.toLowerCase()} loan`,
-    reason: Object.freeze({ _tag: 'ConflictingViewLoan', existing, requested, loanSpan }),
+    reason: Object.freeze({ _tag: 'ConflictingViewLoan' as const, existing, requested, loanSpan }),
     span,
     relatedSpans: Object.freeze([
       Object.freeze({ label: 'active loan begins here', span: loanSpan }),
     ]),
   })
 
-export const ownerAccessDuringLoan = (
+export const ownerAccessDuringLoan = <L>(
   spelling: string,
   access: 'Read' | 'Write' | 'Move',
-  loanSpan: SourceSpan.SourceSpan,
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
+  loanSpan: L,
+  span: L,
+): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'ownership',
     code: ownerAccessDuringLoanCode,
     severity: 'error',
     message: `${access.toLowerCase()} access to ${spelling} conflicts with an active borrowed-view loan`,
-    reason: Object.freeze({ _tag: 'OwnerAccessDuringLoan', spelling, access, loanSpan }),
+    reason: Object.freeze({ _tag: 'OwnerAccessDuringLoan' as const, spelling, access, loanSpan }),
     span,
     relatedSpans: Object.freeze([
       Object.freeze({ label: 'active loan begins here', span: loanSpan }),
     ]),
   })
 
-export const borrowedMove = (span: SourceSpan.SourceSpan): Diagnostic =>
+export const borrowedMove = <L>(span: L): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'ownership',
     code: borrowedMoveCode,
     severity: 'error',
     message: 'A non-Copy value cannot be moved out through a borrowed-view place',
-    reason: Object.freeze({ _tag: 'BorrowedMove' }),
+    reason: Object.freeze({ _tag: 'BorrowedMove' as const }),
     span,
   })
 
@@ -5576,18 +5557,18 @@ const localSharedAccessEscapeMessage = (kind: 'Callback' | 'Result' | 'Suspensio
 }
 
 /** Relates one access-scoped escape to the sealed boundary that created the exclusive loan. */
-export const localSharedAccessEscape = (
+export const localSharedAccessEscape = <L>(
   kind: 'Callback' | 'Result' | 'Suspension',
-  span: SourceSpan.SourceSpan,
-  boundary: SourceSpan.SourceSpan,
-): Diagnostic => {
+  span: L,
+  boundary: L,
+): Diagnostic<L> => {
   return Object.freeze({
     _tag: 'Diagnostic',
     phase: 'ownership',
     code: localSharedAccessEscapeCode,
     severity: 'error',
     message: localSharedAccessEscapeMessage(kind),
-    reason: Object.freeze({ _tag: 'LocalSharedAccessEscape', kind }),
+    reason: Object.freeze({ _tag: 'LocalSharedAccessEscape' as const, kind }),
     span,
     relatedSpans: Object.freeze([
       Object.freeze({ label: 'local-shared access boundary', span: boundary }),
@@ -5596,12 +5577,12 @@ export const localSharedAccessEscape = (
 }
 
 /** Creates the diagnostic for a uniquely resolved call with the wrong arity. */
-export const wrongCallArity = (
+export const wrongCallArity = <L>(
   target: DeclarationEntity | BuiltinEntity,
   expectedCount: number,
   actualCount: number,
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
+  span: L,
+): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
@@ -5609,7 +5590,7 @@ export const wrongCallArity = (
     severity: 'error',
     message: `Expected ${expectedCount} ${expectedCount === 1 ? 'argument' : 'arguments'} but received ${actualCount}`,
     reason: Object.freeze({
-      _tag: 'WrongCallArity',
+      _tag: 'WrongCallArity' as const,
       target,
       expectedCount,
       actualCount,
@@ -5619,18 +5600,14 @@ export const wrongCallArity = (
   })
 
 /** Rejects an exported C function whose MIR body may suspend, relating the suspending call. */
-export const exportSuspends = (
-  symbol: string,
-  span: SourceSpan.SourceSpan,
-  callSpan?: SourceSpan.SourceSpan,
-): Diagnostic =>
+export const exportSuspends = <L>(symbol: string, span: L, callSpan?: L): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: exportSuspendsCode,
     severity: 'error',
     message: `Exported function ${symbol} may suspend; a C-callable body must be synchronous`,
-    reason: Object.freeze({ _tag: 'ExportSuspends', symbol }),
+    reason: Object.freeze({ _tag: 'ExportSuspends' as const, symbol }),
     span,
     ...(callSpan === undefined
       ? {}
@@ -5642,86 +5619,82 @@ export const exportSuspends = (
   })
 
 /** Reports an explicit region outside its declaration or callable binder scope. */
-export const unknownLifetime = (spelling: string, span: SourceSpan.SourceSpan): Diagnostic =>
+export const unknownLifetime = <L>(spelling: string, span: L): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: unknownLifetimeCode,
     severity: 'error',
     message: `Unknown lifetime ${spelling}`,
-    reason: Object.freeze({ _tag: 'UnknownLifetime', spelling }),
+    reason: Object.freeze({ _tag: 'UnknownLifetime' as const, spelling }),
     span,
   })
 
 /** Requests a written relationship when an output has no unique borrowed input. */
-export const ambiguousLifetimeElision = (span: SourceSpan.SourceSpan): Diagnostic =>
+export const ambiguousLifetimeElision = <L>(span: L): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: ambiguousLifetimeElisionCode,
     severity: 'error',
     message: 'The omitted output lifetime has no unique input; name its lifetime explicitly',
-    reason: Object.freeze({ _tag: 'AmbiguousLifetimeElision' }),
+    reason: Object.freeze({ _tag: 'AmbiguousLifetimeElision' as const }),
     span,
   })
 
 /** Reports unsupported lifetime binder syntax without inventing a semantic relationship. */
-export const invalidLifetimeBinder = (detail: string, span: SourceSpan.SourceSpan): Diagnostic =>
+export const invalidLifetimeBinder = <L>(detail: string, span: L): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: invalidLifetimeBinderCode,
     severity: 'error',
     message: `Invalid lifetime binder: ${detail}`,
-    reason: Object.freeze({ _tag: 'InvalidLifetimeBinder', detail }),
+    reason: Object.freeze({ _tag: 'InvalidLifetimeBinder' as const, detail }),
     span,
   })
 
 /** Rejects a selected lifetime relationship that the caller cannot prove. */
-export const unsatisfiedLifetimeBound = (
+export const unsatisfiedLifetimeBound = <L>(
   longer: string,
   shorter: string,
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
+  span: L,
+): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: unsatisfiedLifetimeBoundCode,
     severity: 'error',
     message: `Lifetime ${longer} does not outlive ${shorter}`,
-    reason: Object.freeze({ _tag: 'UnsatisfiedLifetimeBound', longer, shorter }),
+    reason: Object.freeze({ _tag: 'UnsatisfiedLifetimeBound' as const, longer, shorter }),
     span,
   })
 
 /** Rejects a selected generic value whose retained data cannot satisfy its lifetime bound. */
-export const unsatisfiedTypeOutlives = (
+export const unsatisfiedTypeOutlives = <L>(
   type: string,
   lifetime: string,
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
+  span: L,
+): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: unsatisfiedTypeOutlivesCode,
     severity: 'error',
     message: `Type ${type} does not remain valid for ${lifetime}`,
-    reason: Object.freeze({ _tag: 'UnsatisfiedTypeOutlives', type, lifetime }),
+    reason: Object.freeze({ _tag: 'UnsatisfiedTypeOutlives' as const, type, lifetime }),
     span,
   })
 
 /** Locates a value use outside the finite validity of its borrowed storage. */
-export const expiredLifetime = (
-  lifetime: string,
-  span: SourceSpan.SourceSpan,
-  origin?: SourceSpan.SourceSpan,
-): Diagnostic =>
+export const expiredLifetime = <L>(lifetime: string, span: L, origin?: L): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'ownership',
     code: expiredLifetimeCode,
     severity: 'error',
     message: `Lifetime ${lifetime} does not remain valid at this use`,
-    reason: Object.freeze({ _tag: 'ExpiredLifetime', lifetime }),
+    reason: Object.freeze({ _tag: 'ExpiredLifetime' as const, lifetime }),
     span,
     ...(origin === undefined
       ? {}
@@ -5733,21 +5706,20 @@ export const expiredLifetime = (
   })
 
 /** Publishes an ownership planner rejection at the source suspension boundary. */
-export const invalidSuspensionOwnership = (
-  detail: string,
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
+export const invalidSuspensionOwnership = <L>(detail: string, span: L): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'ownership',
     code: invalidSuspensionOwnershipCode,
     severity: 'error',
     message: `Cannot preserve ownership across suspension: ${detail}`,
-    reason: Object.freeze({ _tag: 'InvalidSuspensionOwnership', detail }),
+    reason: Object.freeze({ _tag: 'InvalidSuspensionOwnership' as const, detail }),
     span,
   })
 
 /** Preserves typed configuration origins and dependency failures without interpolating values. */
+// Configuration origins are positions in this revision's configuration, so this diagnostic is only
+// ever a published one.
 export const invalidConfiguration = (
   error: ConfigurationError.ConfigurationError,
   span: SourceSpan.SourceSpan,
@@ -5758,7 +5730,7 @@ export const invalidConfiguration = (
     code: invalidConfigurationCode,
     severity: 'error',
     message: `Invalid compilation configuration: ${error.message}`,
-    reason: Object.freeze({ _tag: 'InvalidConfiguration', error }),
+    reason: Object.freeze({ _tag: 'InvalidConfiguration' as const, error }),
     span,
     relatedSpans: Object.freeze(
       error.origins.flatMap((origin) =>
@@ -5767,18 +5739,43 @@ export const invalidConfiguration = (
     ),
   })
 
+/**
+ * The same rejection for configuration written in a declaration header, located at its node.
+ *
+ * ponytail: the origins inside `error` still hold this revision's spans. Headers are rebuilt for
+ * every revision, so nothing stale is reported; give origins locations when headers are cached.
+ */
+export const invalidAuthoredConfiguration = <L>(
+  error: ConfigurationError.ConfigurationError,
+  span: L,
+): Diagnostic<L> =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: invalidConfigurationCode,
+    severity: 'error',
+    message: `Invalid compilation configuration: ${error.message}`,
+    reason: Object.freeze({ _tag: 'InvalidConfiguration' as const, error }),
+    span,
+    relatedSpans: Object.freeze(
+      error.origins.flatMap((origin) =>
+        origin.span === undefined ? [] : [{ label: origin.source, span }],
+      ),
+    ),
+  })
+
 /** Reports an invalid minimum alignment or unsupported raw data address space. */
-export const invalidPointerQualifier = (
+export const invalidPointerQualifier = <L>(
   qualifier: string,
   detail: string,
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
+  span: L,
+): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: invalidPointerQualifierCode,
     severity: 'error',
     message: `Invalid pointer qualifier ${qualifier}: ${detail}`,
-    reason: Object.freeze({ _tag: 'InvalidPointerQualifier', qualifier, detail }),
+    reason: Object.freeze({ _tag: 'InvalidPointerQualifier' as const, qualifier, detail }),
     span,
   })

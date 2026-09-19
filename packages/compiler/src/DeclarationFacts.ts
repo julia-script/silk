@@ -1,3 +1,4 @@
+import type * as Location from './Location.js'
 import type * as MachineFunction from './MachineFunction.js'
 import type * as NativeRequirement from './NativeRequirement.js'
 import type * as ForeignContract from './ForeignContract.js'
@@ -96,7 +97,7 @@ export interface InherentImplFact {
   readonly owner: DeclaredTypeFact
   readonly validity:
     | { readonly _tag: 'Valid' }
-    | { readonly _tag: 'Invalid'; readonly cause: Diagnostic.Identity }
+    | { readonly _tag: 'Invalid'; readonly cause: Diagnostic.Identity<Location.Location> }
   readonly anchor: AuthoredHir.Anchor
 }
 
@@ -258,7 +259,7 @@ export type CanonicalState =
   | {
       readonly _tag: 'Duplicate'
       readonly original: CanonicalId
-      readonly cause: Diagnostic.Identity
+      readonly cause: Diagnostic.Identity<Location.Location>
     }
   | { readonly _tag: 'Unidentified' }
 
@@ -301,7 +302,7 @@ export type ArrayLengthFact =
       readonly _tag: 'OutOfRange'
       readonly spelling: string
       readonly anchor: AuthoredHir.Anchor
-      readonly cause: Diagnostic.Identity
+      readonly cause: Diagnostic.Identity<Location.Location>
     }
   | { readonly _tag: 'Unavailable'; readonly anchor: AuthoredHir.Anchor }
 
@@ -320,7 +321,7 @@ export type DeclaredTypeFact =
       readonly anchor: AuthoredHir.Anchor
       readonly path?: TypePathFact
       readonly components?: ReadonlyArray<DeclaredTypeFact>
-      readonly exposureCause?: Diagnostic.Identity
+      readonly exposureCause?: Diagnostic.Identity<Location.Location>
       readonly unionSource?: UnionSourceFact
       readonly exactItem?: {
         readonly path: TypePathFact
@@ -333,7 +334,7 @@ export type DeclaredTypeFact =
       readonly spelling: string
       readonly anchor: AuthoredHir.Anchor
       readonly path: TypePathFact
-      readonly cause?: Diagnostic.Identity
+      readonly cause?: Diagnostic.Identity<Location.Location>
       readonly candidate?: Type.Nominal
     }
   | {
@@ -350,7 +351,7 @@ export type DeclaredTypeFact =
       readonly element: DeclaredTypeFact
       readonly spelling: string
       readonly anchor: AuthoredHir.Anchor
-      readonly cause?: Diagnostic.Identity
+      readonly cause?: Diagnostic.Identity<Location.Location>
     }
   | {
       readonly _tag: 'Reference'
@@ -359,7 +360,7 @@ export type DeclaredTypeFact =
       readonly target: DeclaredTypeFact
       readonly spelling: string
       readonly anchor: AuthoredHir.Anchor
-      readonly cause?: Diagnostic.Identity
+      readonly cause?: Diagnostic.Identity<Location.Location>
     }
   | {
       readonly _tag: 'Pointer'
@@ -371,7 +372,7 @@ export type DeclaredTypeFact =
       readonly pointee: DeclaredTypeFact
       readonly spelling: string
       readonly anchor: AuthoredHir.Anchor
-      readonly cause?: Diagnostic.Identity
+      readonly cause?: Diagnostic.Identity<Location.Location>
     }
   | {
       readonly _tag: 'Callable'
@@ -382,7 +383,7 @@ export type DeclaredTypeFact =
       readonly result: DeclaredTypeFact
       readonly spelling: string
       readonly anchor: AuthoredHir.Anchor
-      readonly cause?: Diagnostic.Identity
+      readonly cause?: Diagnostic.Identity<Location.Location>
     }
   | {
       readonly _tag: 'ForeignFunction'
@@ -392,7 +393,7 @@ export type DeclaredTypeFact =
       readonly result: DeclaredTypeFact
       readonly spelling: string
       readonly anchor: AuthoredHir.Anchor
-      readonly cause?: Diagnostic.Identity
+      readonly cause?: Diagnostic.Identity<Location.Location>
     }
   | {
       readonly _tag: 'Applied'
@@ -411,7 +412,7 @@ export type DeclaredTypeFact =
       }
       readonly spelling: string
       readonly anchor: AuthoredHir.Anchor
-      readonly cause?: Diagnostic.Identity
+      readonly cause?: Diagnostic.Identity<Location.Location>
     }
   | {
       readonly _tag: 'Effect'
@@ -430,14 +431,14 @@ export type DeclaredTypeFact =
       readonly requirementExpression?: RowExpressionFact
       readonly spelling: string
       readonly anchor: AuthoredHir.Anchor
-      readonly cause?: Diagnostic.Identity
+      readonly cause?: Diagnostic.Identity<Location.Location>
     }
   | {
       readonly _tag: 'Union'
       readonly members: ReadonlyArray<DeclaredTypeFact>
       readonly spelling: string
       readonly anchor: AuthoredHir.Anchor
-      readonly cause?: Diagnostic.Identity
+      readonly cause?: Diagnostic.Identity<Location.Location>
     }
   | {
       readonly _tag: 'ExactRepresentation'
@@ -445,7 +446,7 @@ export type DeclaredTypeFact =
       readonly arguments: ReadonlyArray<DeclaredTypeFact>
       readonly spelling: string
       readonly anchor: AuthoredHir.Anchor
-      readonly cause?: Diagnostic.Identity
+      readonly cause?: Diagnostic.Identity<Location.Location>
       readonly itemCandidate?: CanonicalId
     }
   | {
@@ -458,7 +459,7 @@ export type DeclaredTypeFact =
   | {
       readonly _tag: 'Unavailable'
       readonly anchor: AuthoredHir.Anchor
-      readonly cause?: Diagnostic.Identity
+      readonly cause?: Diagnostic.Identity<Location.Location>
     }
 
 /** Source-ordered union members retained beside one normalized resolved outcome. */
@@ -681,7 +682,11 @@ export interface RoleFact {
 /** The unique, duplicate, or unidentified state of one field name. */
 export type FieldState =
   | { readonly _tag: 'Unique'; readonly id: FieldId }
-  | { readonly _tag: 'Duplicate'; readonly original: FieldId; readonly cause: Diagnostic.Identity }
+  | {
+      readonly _tag: 'Duplicate'
+      readonly original: FieldId
+      readonly cause: Diagnostic.Identity<Location.Location>
+    }
   | { readonly _tag: 'Unidentified' }
 
 /** One ordered aggregate field header shared by structs and nominal-union variants. */
@@ -703,7 +708,7 @@ export type StructDependency =
   | {
       readonly _tag: 'Unavailable'
       readonly types: ReadonlyArray<Type.Nominal>
-      readonly cause?: Diagnostic.Identity
+      readonly cause?: Diagnostic.Identity<Location.Location>
     }
 
 /** One nominal struct declaration header and its ordered fields. */
@@ -747,7 +752,7 @@ export type UnionVariantCanonicalState =
   | {
       readonly _tag: 'Duplicate'
       readonly original: CanonicalUnionVariantId
-      readonly cause: Diagnostic.Identity
+      readonly cause: Diagnostic.Identity<Location.Location>
     }
   | { readonly _tag: 'Unidentified' }
 
@@ -764,7 +769,10 @@ export interface UnionVariantFact {
 
 export type UnionValidity =
   | { readonly _tag: 'Valid' }
-  | { readonly _tag: 'Invalid'; readonly causes: ReadonlyArray<Diagnostic.Identity> }
+  | {
+      readonly _tag: 'Invalid'
+      readonly causes: ReadonlyArray<Diagnostic.Identity<Location.Location>>
+    }
 
 /** One nominal tagged union declaration and its subordinate ordered variants. */
 export interface UnionFact {
@@ -800,7 +808,7 @@ export type EnumMemberCanonicalState =
   | {
       readonly _tag: 'Duplicate'
       readonly original: CanonicalEnumMemberId
-      readonly cause: Diagnostic.Identity
+      readonly cause: Diagnostic.Identity<Location.Location>
     }
   | { readonly _tag: 'Unidentified' }
 
@@ -817,7 +825,7 @@ export type EnumRepresentationFact =
       readonly explicit: boolean
       readonly anchor: AuthoredHir.Anchor
       readonly spelling?: string
-      readonly cause?: Diagnostic.Identity
+      readonly cause?: Diagnostic.Identity<Location.Location>
     }
 
 /** One checked discriminant or its local recovery state. */
@@ -833,7 +841,7 @@ export type EnumDiscriminantFact =
       readonly source: 'Explicit' | 'Implicit'
       readonly anchor: AuthoredHir.Anchor
       readonly attempted?: bigint
-      readonly cause?: Diagnostic.Identity
+      readonly cause?: Diagnostic.Identity<Location.Location>
     }
 
 /** One declaration-ordered, fieldless scalar-enum member. */
@@ -871,7 +879,10 @@ export interface EnumAssociatedOperationFact {
 /** Whether all declaration-owned enum invariants were established. */
 export type EnumValidity =
   | { readonly _tag: 'Valid' }
-  | { readonly _tag: 'Invalid'; readonly causes: ReadonlyArray<Diagnostic.Identity> }
+  | {
+      readonly _tag: 'Invalid'
+      readonly causes: ReadonlyArray<Diagnostic.Identity<Location.Location>>
+    }
 
 /** One canonical nominal scalar enum and its checked declaration-ordered member set. */
 export interface EnumFact {
@@ -900,7 +911,7 @@ export type ServiceOperationState =
   | {
       readonly _tag: 'Duplicate'
       readonly original: ServiceOperationId
-      readonly cause: Diagnostic.Identity
+      readonly cause: Diagnostic.Identity<Location.Location>
     }
   | { readonly _tag: 'Unidentified' }
 
@@ -1924,12 +1935,12 @@ export interface ModuleHeaders {
   readonly constants: ReadonlyArray<ConstantFact>
   readonly conformances: ReadonlyArray<ConformanceFact>
   readonly inherentImpls: ReadonlyArray<InherentImplFact>
-  readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
+  readonly diagnostics: ReadonlyArray<Diagnostic.Located>
 }
 
 export interface TypeResolution {
   readonly fact: DeclaredTypeFact
-  readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
+  readonly diagnostics: ReadonlyArray<Diagnostic.Located>
 }
 
 export type TypeResolver = (module: string, path: TypePathFact) => TypeResolution
@@ -1937,16 +1948,20 @@ export type TypeResolver = (module: string, path: TypePathFact) => TypeResolutio
 export type ItemResolution =
   | { readonly _tag: 'Resolved'; readonly declaration: MemberFact }
   | { readonly _tag: 'Missing' }
-  | { readonly _tag: 'Ambiguous'; readonly count: number; readonly cause?: Diagnostic.Identity }
+  | {
+      readonly _tag: 'Ambiguous'
+      readonly count: number
+      readonly cause?: Diagnostic.Identity<Location.Location>
+    }
   | {
       readonly _tag: 'Inaccessible'
       readonly declaration: MemberFact
-      readonly cause: Diagnostic.Identity
+      readonly cause: Diagnostic.Identity<Location.Location>
     }
   | {
       readonly _tag: 'Unavailable'
       readonly declaration?: MemberFact
-      readonly cause?: Diagnostic.Identity
+      readonly cause?: Diagnostic.Identity<Location.Location>
     }
 
 export type ItemResolver = (module: string, path: TypePathFact) => ItemResolution

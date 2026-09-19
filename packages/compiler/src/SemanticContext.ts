@@ -173,6 +173,18 @@ export const registry = (contexts: Iterable<SemanticContext>): Registry => {
   }
 }
 
+/**
+ * One module's context as a registry, for a consumer that holds only that module.
+ *
+ * A context already resolves anchors of other modules as far as it can, so its own `spanOf` answers.
+ */
+export const registryOf = (context: SemanticContext): Registry => ({
+  _tag: 'SemanticContextRegistry',
+  contexts: new Map([[context.module.owner.module, context]]),
+  of: (anchor) => (anchor.owner.module === context.module.owner.module ? context : undefined),
+  spanOf: context.spanOf,
+})
+
 /** The registry of every loaded module of a closure, built from the authored artifacts it carries. */
 export const fromModules = (
   modules: Iterable<{ readonly authored: AuthoredLowering.Lowered }>,

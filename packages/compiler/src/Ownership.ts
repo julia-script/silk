@@ -267,7 +267,7 @@ export interface LoopFixedPoint {
 export type Verdict =
   | { readonly _tag: 'Satisfied' }
   | { readonly _tag: 'Violation'; readonly cause: Diagnostic.Identity }
-  | { readonly _tag: 'Unavailable'; readonly cause?: Diagnostic.Identity }
+  | { readonly _tag: 'Unavailable'; readonly cause?: Diagnostic.CauseIdentity }
 
 /** Actual source ownership operations performed while checking one body. */
 export interface Work {
@@ -398,7 +398,7 @@ interface MutableBinding {
   readonly liveFrom: SourceSpan.SourceSpan
   readonly category: OwnershipCategory
   readonly type?: DeclarationFacts.SemanticType
-  readonly cause?: Diagnostic.Identity
+  readonly cause?: Diagnostic.CauseIdentity
   readonly executionAffinity?: ExecutionAffinity.ExecutionAffinity
   readonly localSharedObligations?: LocalSharedOwnership.ObligationPlan
   readonly cleanup?: CleanupPlan.CleanupPlan
@@ -1017,7 +1017,7 @@ const executableEnvironment = (
   let components: ReadonlyArray<{
     readonly access: Type.CaptureAccess
     readonly type?: Type.Type
-    readonly cause?: Diagnostic.Identity
+    readonly cause?: Diagnostic.CauseIdentity
   }>
   if (expression._tag === 'EffectConstruct' || expression._tag === 'ServiceEffectConstruct') {
     components = expression.arguments.map((argument) => {

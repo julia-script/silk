@@ -1,6 +1,6 @@
 import * as DeclarationFacts from './DeclarationFacts.js'
 import type * as DeclarationIndex from './DeclarationIndex.js'
-import type * as Diagnostic from './Diagnostic.js'
+import * as Diagnostic from './Diagnostic.js'
 import * as ExecutionAffinity from './ExecutionAffinity.js'
 import * as TypeInference from './internal/TypeInference.js'
 import * as Type from './Type.js'
@@ -65,14 +65,16 @@ export type ObligationPlan =
         readonly obligations: ObligationPlan
       }>
     }
-  | { readonly _tag: 'Unavailable'; readonly causes: ReadonlyArray<Diagnostic.Identity> }
+  | { readonly _tag: 'Unavailable'; readonly causes: ReadonlyArray<Diagnostic.CauseIdentity> }
 
 export const none: ObligationPlan = Object.freeze({ _tag: 'NoLocalSharedObligation' })
 
-const unavailable = (causes: ReadonlyArray<Diagnostic.Identity>): ObligationPlan =>
+const unavailable = (causes: ReadonlyArray<Diagnostic.CauseIdentity>): ObligationPlan =>
   Object.freeze({ _tag: 'Unavailable', causes: Object.freeze([...causes]) })
 
-const causeOf = (fact: DeclarationFacts.DeclaredTypeFact): ReadonlyArray<Diagnostic.Identity> =>
+const causeOf = (
+  fact: DeclarationFacts.DeclaredTypeFact,
+): ReadonlyArray<Diagnostic.CauseIdentity> =>
   'cause' in fact && fact.cause !== undefined ? Object.freeze([fact.cause]) : Object.freeze([])
 
 const product = (components: ReadonlyArray<ObligationPlan>): ObligationPlan => {
@@ -195,7 +197,7 @@ export const ofEnvironment = (
   components: ReadonlyArray<{
     readonly access: Type.CaptureAccess
     readonly type?: Type.Type
-    readonly cause?: Diagnostic.Identity
+    readonly cause?: Diagnostic.CauseIdentity
   }>,
 ): ObligationPlan =>
   product(
@@ -245,6 +247,6 @@ export const encode = (self: ObligationPlan): string => {
     case 'ActiveNominalUnion':
       return `active-nominal-union(${Type.key(self.type)};${self.cases.map((entry) => `variant#${entry.variant.ordinal}:${encode(entry.obligations)}`).join(',')})`
     case 'Unavailable':
-      return `unavailable(${self.causes.map((cause) => `${cause.code}@${cause.span.sourceId}:${cause.span.start}:${cause.ordinal}`).join(',')})`
+      return `unavailable(${self.causes.map((cause) => `${cause.code}@${Diagnostic.causeLabel(cause)}:${cause.ordinal}`).join(',')})`
   }
 }

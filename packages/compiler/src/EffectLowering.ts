@@ -2031,6 +2031,7 @@ export const lowerEffectExecution = (
                       subject: arm.body.expression,
                       type: success,
                       span: arm.body.span,
+                      origin: arm.body.origin,
                     }),
                   }),
                 }),
@@ -2116,7 +2117,13 @@ export const lowerEffectExecution = (
   }
 
   if (subject._tag === 'BuiltinCall' && Type.isEffect(subject.type)) {
-    const run = Object.freeze({ _tag: 'Run' as const, subject, type: success, span })
+    const run = Object.freeze({
+      _tag: 'Run' as const,
+      subject,
+      type: success,
+      span,
+      origin: subject.origin,
+    })
     return lowerExpression(fn, run, availableRequirements)
   }
 

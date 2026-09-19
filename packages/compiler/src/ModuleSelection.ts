@@ -358,11 +358,17 @@ export const select = Effect.fn('ModuleSelection.select')(function* (
         module.set(AuthoredIdentity.key(condition.declaration.owner), result.outcome.value.value)
         progressed = true
       } else {
-        failedConditions.push({ condition, diagnostics: result.diagnostics })
-        failures.push(...result.diagnostics)
+        // Selection diagnostics join the module closure's, which are in source coordinates.
+        const registry = SemanticContext.registryOf(condition.context)
+        const published = Diagnostic.publishAll(result.diagnostics, registry)
+        failedConditions.push({ condition, diagnostics: published })
+        failures.push(...published)
         if (result.outcome._tag === 'Failed')
           failures.push(
-            StaticEvaluation.diagnostic(result.outcome.failure, completion.profile.target.id),
+            Diagnostic.publish(
+              StaticEvaluation.diagnostic(result.outcome.failure, completion.profile.target.id),
+              registry,
+            ),
           )
       }
     }

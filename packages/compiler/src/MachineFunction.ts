@@ -4,6 +4,7 @@ import * as ConfigurationError from './ConfigurationError.js'
 import * as ConfigurationOrigin from './ConfigurationOrigin.js'
 import type * as DeclarationFacts from './DeclarationFacts.js'
 import * as Diagnostic from './Diagnostic.js'
+import * as Location from './Location.js'
 import type * as SemanticContext from './SemanticContext.js'
 import type * as SourceSpan from './SourceSpan.js'
 import * as Type from './Type.js'
@@ -13,15 +14,22 @@ export interface MachineFunction {
   readonly naked: true
   readonly noReturn: true
   readonly span: SourceSpan.SourceSpan
+  readonly anchor: AuthoredHir.Anchor
 }
 
-const diagnostic = (detail: string, span: SourceSpan.SourceSpan): Diagnostic.Diagnostic =>
-  Diagnostic.invalidConfiguration(
+const diagnostic = (
+  detail: string,
+  context: SemanticContext.SemanticContext,
+  anchor: AuthoredHir.Anchor,
+): Diagnostic.Located => {
+  const span = context.spanOf(anchor)
+  return Diagnostic.invalidAuthoredConfiguration(
     ConfigurationError.make('MachineFunction.validate', 'InvalidInput', detail, [
       { ...ConfigurationOrigin.literal(span.sourceId), span },
     ]),
-    span,
+    Location.at(anchor),
   )
+}
 
 /** The authored property clauses one declaration header carries, empty when it admits none. */
 const clausesOf = (
@@ -51,7 +59,7 @@ export const analyze = (
   declaration: AuthoredHir.Declaration,
 ): {
   readonly properties?: MachineFunction
-  readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
+  readonly diagnostics: ReadonlyArray<Diagnostic.Located>
 } => {
   const clauses = clausesOf(declaration.header).filter(
     (clause) => clauseOwner(context, clause) === 'Intrinsic.machine',
@@ -59,11 +67,11 @@ export const analyze = (
   const clause = clauses[0]
   if (clause === undefined) return { diagnostics: [] }
   const properties = new Set<string>()
-  const diagnostics: Array<Diagnostic.Diagnostic> = []
+  const diagnostics: Array<Diagnostic.Located> = []
   if (clauses.length !== 1)
     diagnostics.push(
       ...clauses.map((entry) =>
-        diagnostic('duplicate machine function clause', context.spanOf(entry.anchor)),
+        diagnostic('duplicate machine function clause', context, entry.anchor),
       ),
     )
   for (const property of clause.properties) {
@@ -78,14 +86,15 @@ export const analyze = (
       diagnostics.push(
         diagnostic(
           'machine properties require naked: true and noReturn: true',
-          context.spanOf(property.anchor),
+          context,
+          property.anchor,
         ),
       )
     properties.add(spelling)
   }
   if (!properties.has('naked') || !properties.has('noReturn'))
     diagnostics.push(
-      diagnostic('machine properties require naked and noReturn', context.spanOf(clause.anchor)),
+      diagnostic('machine properties require naked and noReturn', context, clause.anchor),
     )
   return diagnostics.length > 0
     ? { diagnostics }
@@ -94,6 +103,7 @@ export const analyze = (
           naked: true,
           noReturn: true,
           span: context.spanOf(clause.anchor),
+          anchor: clause.anchor,
         }),
         diagnostics: [],
       }
@@ -132,10 +142,10 @@ const calleePath = (
 export const bodyDiagnostics = (
   context: SemanticContext.SemanticContext,
   declaration: DeclarationFacts.DeclarationFact,
-): ReadonlyArray<Diagnostic.Diagnostic> => {
+): ReadonlyArray<Diagnostic.Located> => {
   const properties = declaration.machine
   if (properties === undefined) return []
-  const rejected = (detail: string) => [diagnostic(detail, properties.span)]
+  const rejected = (detail: string) => [diagnostic(detail, context, properties.anchor)]
   if (
     !declaration.unsafe ||
     declaration.phase !== 'Runtime' ||

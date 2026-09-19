@@ -1,6 +1,6 @@
 import * as DeclarationFacts from './DeclarationFacts.js'
 import type * as DeclarationIndex from './DeclarationIndex.js'
-import type * as Diagnostic from './Diagnostic.js'
+import * as Diagnostic from './Diagnostic.js'
 import * as TypeInference from './internal/TypeInference.js'
 import * as Type from './Type.js'
 
@@ -12,13 +12,13 @@ export type ExecutionAffinity =
       readonly parameters: ReadonlyArray<Type.Parameter>
     }
   | { readonly _tag: 'LocalExecution' }
-  | { readonly _tag: 'Unavailable'; readonly causes: ReadonlyArray<Diagnostic.Identity> }
+  | { readonly _tag: 'Unavailable'; readonly causes: ReadonlyArray<Diagnostic.CauseIdentity> }
 
 /** One environment component, optionally retaining a canonical borrow-root dependency. */
 export interface Component {
   readonly type?: Type.Type
   readonly root?: Type.Type
-  readonly cause?: Diagnostic.Identity
+  readonly cause?: Diagnostic.CauseIdentity
 }
 
 export const unrestricted: Extract<ExecutionAffinity, { readonly _tag: 'Unrestricted' }> =
@@ -26,15 +26,15 @@ export const unrestricted: Extract<ExecutionAffinity, { readonly _tag: 'Unrestri
 export const localExecution: Extract<ExecutionAffinity, { readonly _tag: 'LocalExecution' }> =
   Object.freeze({ _tag: 'LocalExecution' })
 
-const diagnosticKey = (identity: Diagnostic.Identity): string =>
-  `${identity.phase}\0${identity.code}\0${identity.span.sourceId}\0${identity.span.start}\0${identity.span.end}\0${identity.ordinal}`
+const diagnosticKey = (identity: Diagnostic.CauseIdentity): string =>
+  `${identity.phase}\0${identity.code}\0${Diagnostic.causeLabel(identity)}\0${identity.ordinal}`
 
-const diagnosticLabel = (identity: Diagnostic.Identity): string =>
-  `${identity.phase}:${identity.code}@${identity.span.sourceId}:${identity.span.start}-${identity.span.end}#${identity.ordinal}`
+const diagnosticLabel = (identity: Diagnostic.CauseIdentity): string =>
+  `${identity.phase}:${identity.code}@${Diagnostic.causeLabel(identity)}#${identity.ordinal}`
 
 const distinctCauses = (
-  causes: ReadonlyArray<Diagnostic.Identity>,
-): ReadonlyArray<Diagnostic.Identity> => {
+  causes: ReadonlyArray<Diagnostic.CauseIdentity>,
+): ReadonlyArray<Diagnostic.CauseIdentity> => {
   const seen = new Set<string>()
   return Object.freeze(
     causes.filter((cause) => {
@@ -71,12 +71,12 @@ export const join = (inputs: ReadonlyArray<ExecutionAffinity>): ExecutionAffinit
     : Object.freeze({ _tag: 'ParameterDependent', parameters: dependent })
 }
 
-const unavailable = (causes: ReadonlyArray<Diagnostic.Identity>): ExecutionAffinity =>
+const unavailable = (causes: ReadonlyArray<Diagnostic.CauseIdentity>): ExecutionAffinity =>
   Object.freeze({ _tag: 'Unavailable', causes: distinctCauses(causes) })
 
 const declaredCauses = (
   fact: DeclarationFacts.DeclaredTypeFact,
-): ReadonlyArray<Diagnostic.Identity> => {
+): ReadonlyArray<Diagnostic.CauseIdentity> => {
   const own = 'cause' in fact && fact.cause !== undefined ? [fact.cause] : []
   switch (fact._tag) {
     case 'FixedArray':

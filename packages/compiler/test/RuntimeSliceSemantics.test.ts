@@ -9,16 +9,16 @@ import * as Lifetime from '../src/Lifetime.js'
 import * as Parser from '../src/Parser.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as Type from '../src/Type.js'
-import { elaborate } from './support/elaborate.js'
+import { elaborate, type Elaborated } from './support/elaborate.js'
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
 
-const analyze = (source: string): Elaboration.Result =>
+const analyze = (source: string): Elaborated =>
   elaborate(Parser.parse(Lexer.lex(SourceFile.make('slices/Semantics', ascii(source)))))
 
 const returnedCall = (
-  result: Elaboration.Result,
+  result: Elaborated,
   ordinal: number,
 ): Extract<Elaboration.ExpressionFact, { readonly _tag: 'Call' }> => {
   const expression = result.functions.at(ordinal)?.returnedExpression

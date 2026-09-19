@@ -109,6 +109,7 @@ export const lowerPatternSelection = (
         value,
         type: 'bool' as const,
         span: selection.span,
+        origin: selection.origin,
       }),
     )
   const bindingIds = Object.freeze(selection.bindings.map((binding) => binding.id))

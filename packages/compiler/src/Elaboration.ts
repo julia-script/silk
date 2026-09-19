@@ -1,3 +1,4 @@
+import * as Location from './Location.js'
 import type * as NativeAssembly from './NativeAssembly.js'
 import type * as AuthoredHir from './AuthoredHir.js'
 import * as AuthoredIdentity from './AuthoredIdentity.js'
@@ -114,7 +115,7 @@ export type ParameterReferenceFact =
       readonly _tag: 'Missing'
       readonly spelling: string
       readonly anchor: AuthoredHir.Anchor
-      readonly cause?: Diagnostic.Identity
+      readonly cause?: Diagnostic.Identity<Location.Location>
     }
   | {
       readonly _tag: 'Ambiguous'
@@ -264,14 +265,14 @@ export type CallReferenceFact =
       readonly _tag: 'Missing'
       readonly spelling: string
       readonly anchor: AuthoredHir.Anchor
-      readonly cause?: Diagnostic.Identity
+      readonly cause?: Diagnostic.Identity<Location.Location>
     }
   | {
       readonly _tag: 'Ambiguous'
       readonly spelling: string
       readonly anchor: AuthoredHir.Anchor
       readonly declarations: ReadonlyArray<DeclarationFact>
-      readonly cause?: Diagnostic.Identity
+      readonly cause?: Diagnostic.Identity<Location.Location>
     }
   | {
       readonly _tag: 'Unavailable'
@@ -396,7 +397,7 @@ export type BorrowFormationFact =
       readonly parent: Type.Reference
       readonly suspendsParent: boolean
     }
-  | { readonly _tag: 'Unavailable'; readonly cause?: Diagnostic.Identity }
+  | { readonly _tag: 'Unavailable'; readonly cause?: Diagnostic.Identity<Location.Location> }
 
 /** One explicit whole-root borrowed view. */
 export interface BorrowExpressionFact {
@@ -425,11 +426,11 @@ export interface PatternBindingFact {
 
 export type PatternFieldState =
   | { readonly _tag: 'Resolved'; readonly field: DeclarationFacts.FieldFact }
-  | { readonly _tag: 'Unknown'; readonly cause: Diagnostic.Identity }
+  | { readonly _tag: 'Unknown'; readonly cause: Diagnostic.Identity<Location.Location> }
   | {
       readonly _tag: 'Duplicate'
       readonly field: DeclarationFacts.FieldFact
-      readonly cause: Diagnostic.Identity
+      readonly cause: Diagnostic.Identity<Location.Location>
     }
   | { readonly _tag: 'Unavailable' }
 
@@ -587,7 +588,7 @@ export type StructTargetFact =
       /** Present for source-named constructors; occurrence-generated literals have no type token. */
       readonly anchor?: AuthoredHir.Anchor
     }
-  | { readonly _tag: 'Unavailable'; readonly cause?: Diagnostic.Identity }
+  | { readonly _tag: 'Unavailable'; readonly cause?: Diagnostic.Identity<Location.Location> }
 
 export type UnionVariantTargetFact =
   | {
@@ -597,25 +598,25 @@ export type UnionVariantTargetFact =
       readonly type: Type.Nominal
       readonly anchor: AuthoredHir.Anchor
     }
-  | { readonly _tag: 'Unavailable'; readonly cause?: Diagnostic.Identity }
+  | { readonly _tag: 'Unavailable'; readonly cause?: Diagnostic.Identity<Location.Location> }
 
 export type StructInitializerState =
   | { readonly _tag: 'Resolved'; readonly field: DeclarationFacts.FieldFact }
-  | { readonly _tag: 'Unknown'; readonly cause: Diagnostic.Identity }
+  | { readonly _tag: 'Unknown'; readonly cause: Diagnostic.Identity<Location.Location> }
   | {
       readonly _tag: 'Duplicate'
       readonly field: DeclarationFacts.FieldFact
-      readonly cause: Diagnostic.Identity
+      readonly cause: Diagnostic.Identity<Location.Location>
     }
   | {
       readonly _tag: 'TypeMismatch'
       readonly field: DeclarationFacts.FieldFact
-      readonly cause: Diagnostic.Identity
+      readonly cause: Diagnostic.Identity<Location.Location>
     }
   | {
       readonly _tag: 'Inaccessible'
       readonly field: DeclarationFacts.FieldFact
-      readonly cause: Diagnostic.Identity
+      readonly cause: Diagnostic.Identity<Location.Location>
     }
   | { readonly _tag: 'Unavailable' }
 
@@ -633,7 +634,7 @@ export interface StructTypeArgumentFact {
   readonly parameter: Type.Parameter
   readonly argument?: Type.GenericArgument
   readonly source: 'Explicit' | 'Inferred' | 'Unavailable'
-  readonly origins: ReadonlyArray<SourceSpan.SourceSpan>
+  readonly origins: ReadonlyArray<Location.Location>
 }
 
 export interface StructLiteralExpressionFact {
@@ -667,7 +668,7 @@ export interface UnionVariantExpressionFact {
 export type ProjectionState =
   | { readonly _tag: 'Resolved'; readonly field: DeclarationFacts.FieldFact }
   | { readonly _tag: 'SliceLength' }
-  | { readonly _tag: 'Unavailable'; readonly cause?: Diagnostic.Identity }
+  | { readonly _tag: 'Unavailable'; readonly cause?: Diagnostic.Identity<Location.Location> }
 
 export interface FieldProjectionExpressionFact {
   readonly _tag: 'FieldProjection'
@@ -685,7 +686,7 @@ export interface FieldProjectionExpressionFact {
 
 export type ReferentProjectionState =
   | { readonly _tag: 'Resolved'; readonly reference: Type.Reference }
-  | { readonly _tag: 'Unavailable'; readonly cause?: Diagnostic.Identity }
+  | { readonly _tag: 'Unavailable'; readonly cause?: Diagnostic.Identity<Location.Location> }
 
 /** One explicit postfix projection from a reference value to its borrowed target place. */
 export interface ReferentProjectionExpressionFact {
@@ -740,7 +741,7 @@ export type BoundsFact =
       readonly _tag: 'Invalid'
       readonly index: number
       readonly length: number
-      readonly cause: Diagnostic.Identity
+      readonly cause: Diagnostic.Identity<Location.Location>
     }
   | { readonly _tag: 'Runtime'; readonly length: number }
   | { readonly _tag: 'RuntimeSlice' }
@@ -957,6 +958,8 @@ export interface EffectCaptureFact {
   readonly reference: BindingDeclarationFact | ParameterFact | PatternBindingFact
   readonly access: 'Copy' | 'Shared' | 'Exclusive' | 'Take'
   readonly span: SourceSpan.SourceSpan
+  /** The authored use that `span` presents. */
+  readonly anchor: AuthoredHir.Anchor
   /** First lexical identifier occurrence retained for anonymous environment construction. */
   readonly expression?: IdentifierExpressionFact
 }
@@ -996,7 +999,7 @@ export interface EnumMemberExpressionFact {
   readonly _tag: 'EnumMember'
   readonly enum: DeclarationFacts.EnumFact
   readonly member?: DeclarationFacts.EnumMemberFact
-  readonly cause?: Diagnostic.Identity
+  readonly cause?: Diagnostic.Identity<Location.Location>
   readonly qualifierAnchor: AuthoredHir.Anchor
   readonly memberAnchor: AuthoredHir.Anchor
   readonly type: ExpressionTypeFact
@@ -1120,7 +1123,7 @@ export type ExpressionFact =
       /** Complete compile-time result when this call targets a `static fn`. */
       readonly staticValue?: StaticValue.Value
       /** Source text provenance retained separately from the canonical static result. */
-      readonly staticTextSpan?: SourceSpan.SourceSpan
+      readonly staticTextSpan?: Location.Location
       /** Source-independent origin retained for cached static text results. */
       readonly staticTextOrigin?: StaticEvaluation.TextOrigin
       /** Original compile-time failure when eager static-call evaluation did not complete. */
@@ -1249,7 +1252,7 @@ export type CallContractFact =
   | {
       readonly _tag: 'Unavailable'
       readonly reason: UnavailableCallContractReason
-      readonly cause?: Diagnostic.Identity
+      readonly cause?: Diagnostic.Identity<Location.Location>
     }
 
 /** Whether one returned expression is known to match its declared result type. */
@@ -1465,7 +1468,7 @@ export interface Result {
   readonly generatedAggregates: ReadonlyArray<DeclarationFacts.StructFact>
   readonly lexicalScopes: ReadonlyArray<LexicalScopeFact>
   readonly tir: Tir.Module
-  readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
+  readonly diagnostics: ReadonlyArray<Diagnostic.Located>
 }
 
 /** All executable semantic bodies, including compiler-private anonymous targets. */
@@ -1566,10 +1569,10 @@ export const declaredReturnTypesCompatible = (
 export const representationJoinDiagnostic = (
   expected: SemanticType,
   actual: SemanticType,
-  expectedOrigin: SourceSpan.SourceSpan,
-  actualOrigin: SourceSpan.SourceSpan,
-  span: SourceSpan.SourceSpan,
-): Diagnostic.Diagnostic | undefined => {
+  expectedOrigin: Location.Location,
+  actualOrigin: Location.Location,
+  span: Location.Location,
+): Diagnostic.Located | undefined => {
   const divergence = Type.firstRepresentationDivergence(expected, actual)
   return divergence === undefined
     ? undefined
@@ -1596,9 +1599,9 @@ export const contextualIntegerCompatible = (
 export const unionConversionDiagnostic = (
   source: SemanticType,
   target: SemanticType,
-  span: SourceSpan.SourceSpan,
+  span: Location.Location,
   context?: TypeCompatibility.Context,
-): Diagnostic.Diagnostic | undefined => {
+): Diagnostic.Located | undefined => {
   const compatibility = TypeCompatibility.check(source, target, context)
   return compatibility._tag === 'Incompatible' &&
     (Type.isUnion(source) || Type.isNever(source) || Type.isUnion(target) || Type.isNever(target))
@@ -1671,25 +1674,25 @@ export const lookupDeclaration = DeclarationFacts.lookupDeclaration
 
 export interface IntegerResult {
   readonly fact: IntegerExpressionFact
-  readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
+  readonly diagnostics: ReadonlyArray<Diagnostic.Located>
 }
 
 export interface ExpressionResult {
   readonly fact: ExpressionFact
-  readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
+  readonly diagnostics: ReadonlyArray<Diagnostic.Located>
   readonly type: SemanticType | undefined
 }
 
 export interface IdentifierResult {
   readonly fact: IdentifierExpressionFact
-  readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
+  readonly diagnostics: ReadonlyArray<Diagnostic.Located>
   readonly type: SemanticType | undefined
   readonly anchor: AuthoredHir.Anchor
 }
 
 export interface ArgumentsResult {
   readonly facts: ReadonlyArray<ArgumentFact>
-  readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
+  readonly diagnostics: ReadonlyArray<Diagnostic.Located>
 }
 
 export const argumentFact = (
@@ -1714,7 +1717,6 @@ export const argumentFact = (
 import { copyAssumptionsOf } from './CallResolution.js'
 import {
   analyzeConstant,
-  compareDiagnostics,
   effectCaptureFacts,
   representationOfExpression,
 } from './ExpressionAnalysis.js'
@@ -1855,24 +1857,21 @@ const forwardedCallableParameter = (
 const constrainedCallableEscapeDiagnostics = (
   context: SemanticContext.SemanticContext,
   functions: ReadonlyArray<FunctionFact>,
-): ReadonlyArray<Diagnostic.Diagnostic> => {
+): ReadonlyArray<Diagnostic.Located> => {
   const byCanonical = new Map(
     functions.flatMap((fn) => {
       const key_ = canonicalFunctionKey(fn.declaration)
       return key_ === undefined ? [] : [[key_, fn] as const]
     }),
   )
-  const diagnostics: Array<Diagnostic.Diagnostic> = []
+  const diagnostics: Array<Diagnostic.Located> = []
   const seen = new Set<string>()
   const reject = (expression: ExpressionFact): void => {
     const key_ = AuthoredIdentity.anchorKey(expression.anchor)
     if (seen.has(key_)) return
     seen.add(key_)
     diagnostics.push(
-      Diagnostic.nonConcreteSpecialization(
-        'constrained callable',
-        context.spanOf(expression.anchor),
-      ),
+      Diagnostic.nonConcreteSpecialization('constrained callable', Location.at(expression.anchor)),
     )
   }
   for (const fn of functions) {
@@ -2129,6 +2128,7 @@ const runtimeTirFunction = (
                 ? declared.type.access
                 : 'Take',
             span: context.spanOf(parameter.anchor),
+            anchor: parameter.anchor,
           }),
         ]
       },
@@ -2180,7 +2180,8 @@ const runtimeTirFunction = (
       access,
       fact.declaration.requirementRow.row,
     )
-    const siteSpan = context.spanOf(fact.bodyAnchor ?? fact.declaration.anchor)
+    const siteAnchor = fact.bodyAnchor ?? fact.declaration.anchor
+    const siteSpan = context.spanOf(siteAnchor)
     const entryRegion: Tir.RegionId = Object.freeze({
       _tag: 'TirRegion',
       function: fact.declaration.id,
@@ -2225,6 +2226,7 @@ const runtimeTirFunction = (
       ),
       type,
       span: siteSpan,
+      origin: Tir.synthetic(siteAnchor, 'effect-body'),
     })
     return Object.freeze({
       _tag: 'TirFunction',
@@ -2244,6 +2246,7 @@ const runtimeTirFunction = (
           expression: effectBlock,
           region: entryRegion,
           span: siteSpan,
+          origin: Tir.synthetic(siteAnchor, 'effect-return'),
         }),
       ]),
     })
@@ -2324,7 +2327,7 @@ export const elaborateModule = (input: Input): Result => {
     ...constantDiagnostics,
     ...analyzed.flatMap((result) => result.diagnostics),
     ...constrainedCallableEscapeDiagnostics(context, functions),
-  ].sort(compareDiagnostics)
+  ]
   const tir: Tir.Module = Object.freeze({
     _tag: 'TirModule',
     module: authored.module.owner.module,

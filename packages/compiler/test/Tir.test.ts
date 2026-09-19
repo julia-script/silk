@@ -374,7 +374,7 @@ const damagedSource = `pub fn puzzle(value: Mystery) -> i32 { return value }
 pub fn main() -> i32 { return missing(2147483648) }`
 
 const elaborate = (id: string, text: string): Elaboration.Result =>
-  elaborateSyntax(Parser.parse(Lexer.lex(SourceFile.make(id, ascii(text)))))
+  elaborateSyntax(Parser.parse(Lexer.lex(SourceFile.make(id, ascii(text))))).located
 
 const elaborateWithStdlib = Effect.fnUntraced(function* (id: string, text: string) {
   const module = id.replace('://', '/').replace(/\.silk$/, '')

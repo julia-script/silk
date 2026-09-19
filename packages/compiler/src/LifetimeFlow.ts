@@ -1,3 +1,4 @@
+import * as Location from './Location.js'
 import * as BodyLifetime from './BodyLifetime.js'
 import * as BodyControlFlow from './BodyControlFlow.js'
 import * as CleanupPlan from './CleanupPlan.js'
@@ -9,7 +10,7 @@ import * as TirLowering from './TirLowering.js'
 import * as Lifetime from './Lifetime.js'
 import type * as MovePath from './MovePath.js'
 import * as Ownership from './Ownership.js'
-import type * as SourceSpan from './SourceSpan.js'
+import * as SourceSpan from './SourceSpan.js'
 import type * as AuthoredHir from './AuthoredHir.js'
 import * as AuthoredIdentity from './AuthoredIdentity.js'
 import type * as SemanticContext from './SemanticContext.js'
@@ -24,6 +25,8 @@ export interface Origin {
   readonly path?: ReadonlyArray<Elaboration.BorrowSelectorFact>
   readonly parent?: Lifetime.Lifetime
   readonly span: SourceSpan.SourceSpan
+  /** The node `span` presents, which is where a diagnostic about this origin reports. */
+  readonly at: AuthoredHir.Anchor
   /** The authored position this borrow was created at, for structural containment tests. */
   readonly anchor?: AuthoredHir.Anchor
 }
@@ -38,7 +41,7 @@ export interface LifetimeFlow {
   readonly solution: Lifetime.Solution
   readonly origins: ReadonlyMap<string, Origin>
   readonly spans: ReadonlyMap<number, SourceSpan.SourceSpan>
-  readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
+  readonly diagnostics: ReadonlyArray<Diagnostic.Located>
 }
 
 interface Region {
@@ -205,7 +208,7 @@ export const analyze = (
   context: SemanticContext.SemanticContext,
   outlivesScope: TypeOutlives.Context = TypeOutlives.context(index.modules),
 ): LifetimeFlow => {
-  const applicationDiagnostics = new Map<string, Diagnostic.Diagnostic>()
+  const applicationDiagnostics = new Map<string, Diagnostic.Located>()
   // Points are the authored positions BodyLifetime enumerated, addressed by anchor key.
   const entries = [...body.points].flatMap(([key, point]) => {
     const anchor = body.anchors.get(key)
@@ -216,6 +219,7 @@ export const analyze = (
   const boundaries = new Map<string, number>()
   const bindingInitializers = new Set<string>()
   const terminalSpans = new Map<number, SourceSpan.SourceSpan>()
+  const terminalAnchors = new Map<number, AuthoredHir.Anchor>()
   Elaboration.visitStatementFacts(statements, {
     statement: (statement) => {
       if (statement._tag === 'BindStatement')
@@ -226,6 +230,7 @@ export const analyze = (
       const point = body.points.size + boundaries.size
       boundaries.set(key, point)
       terminalSpans.set(point, context.spanOf(statement.expression.anchor))
+      terminalAnchors.set(point, statement.expression.anchor)
     },
   })
   const pointCount = body.points.size + boundaries.size
@@ -336,6 +341,7 @@ export const analyze = (
         path: source.path,
         parent: sliceIndex.slice.lifetime,
         span,
+        at: position,
         anchor: position,
       })
       return
@@ -359,6 +365,7 @@ export const analyze = (
         path: source.path,
         parent: rootType.lifetime,
         span,
+        at: position,
         anchor: position,
       })
       return
@@ -392,6 +399,7 @@ export const analyze = (
       root: rootSite(source),
       path: source.path,
       span,
+      at: position,
       anchor: position,
     })
   }
@@ -411,6 +419,7 @@ export const analyze = (
         path: source.path,
         parent: type.lifetime,
         span: context.spanOf(expression.anchor),
+        at: expression.anchor,
         anchor: expression.anchor,
       })
     } else anchor(lifetime, source, statement, expression.anchor)
@@ -496,7 +505,7 @@ export const analyze = (
           const diagnostic = Diagnostic.unsatisfiedLifetimeBound(
             Type.encodeGenericArgument(failure.argument),
             Lifetime.display(failure.required),
-            context.spanOf(expression.anchor),
+            Location.at(expression.anchor),
           )
           applicationDiagnostics.set(
             `${Type.key(nominal)}:${failure.ordinal}:${Lifetime.key(failure.required)}:${context.spanOf(expression.anchor).start}`,
@@ -523,6 +532,7 @@ export const analyze = (
             path: formation.root.path,
             parent: formation.parent.lifetime,
             span: context.spanOf(expression.anchor),
+            at: expression.anchor,
             anchor: expression.anchor,
           })
         } else anchor(type.lifetime, formation.root, statement, expression.anchor)
@@ -870,7 +880,7 @@ export const analyze = (
     outlivesScope.assumptions,
     Lifetime.assumptions(DeclarationFacts.executableLifetimes(declaration).lifetimeBounds ?? []),
   )
-  const universalDiagnostics = new Map<string, Diagnostic.Diagnostic>()
+  const universalDiagnostics = new Map<string, Diagnostic.Located>()
   const incoming = new Map<string, Array<Lifetime.Lifetime>>()
   for (const bound of constraints.values()) {
     const predecessors = incoming.get(Lifetime.key(bound.shorter)) ?? []
@@ -911,7 +921,7 @@ export const analyze = (
           const diagnostic = Diagnostic.unsatisfiedLifetimeBound(
             Type.encode(parameter),
             Lifetime.display(required),
-            context.spanOf(declaration.anchor),
+            Location.at(declaration.anchor),
           )
           universalDiagnostics.set(`${Type.key(parameter)}:${Lifetime.key(required)}`, diagnostic)
         }
@@ -920,7 +930,11 @@ export const analyze = (
     }
     const available = entries.map(([, point]) => point)
     if (allProven && publicObligations > 0) available.push(...boundaries.values())
-    restrict(lifetime, available, { lifetime, span: context.spanOf(declaration.anchor) })
+    restrict(lifetime, available, {
+      lifetime,
+      span: context.spanOf(declaration.anchor),
+      at: declaration.anchor,
+    })
   }
   for (const target of regions.values()) {
     if (
@@ -949,7 +963,7 @@ export const analyze = (
         const diagnostic = Diagnostic.unsatisfiedLifetimeBound(
           Lifetime.display(source),
           Lifetime.display(target.lifetime),
-          finiteStorage ? origin.span : context.spanOf(declaration.anchor),
+          Location.at(finiteStorage ? origin.at : declaration.anchor),
         )
         universalDiagnostics.set(
           `${Lifetime.key(source)}:${Lifetime.key(target.lifetime)}`,
@@ -993,7 +1007,18 @@ export const analyze = (
   const diagnostics = Object.freeze([
     ...applicationDiagnostics.values(),
     ...universalDiagnostics.values(),
-    ...diagnosticsOf(solution, origins, spans, context.spanOf(declaration.anchor)),
+    ...diagnosticsOf(
+      solution,
+      origins,
+      (origin) => Location.at(origin.at),
+      new Map(
+        [...entries.map(([anchor, point]) => [point, anchor] as const), ...terminalAnchors].map(
+          ([point, anchor]) => [point, Location.at(anchor)],
+        ),
+      ),
+      Location.at(declaration.anchor),
+      Location.key,
+    ),
   ])
   return Object.freeze({
     controlFlow,
@@ -1055,12 +1080,18 @@ export const liveAt = (
   return false
 }
 
-const diagnosticsOf = (
+/**
+ * Reports a solution in the caller's coordinates: elaboration reports at locations, the cleanup
+ * replay in ownership at the spans ownership still works in.
+ */
+const diagnosticsOf = <L>(
   solution: Lifetime.Solution,
   origins: ReadonlyMap<string, Origin>,
-  spans: ReadonlyMap<number, SourceSpan.SourceSpan>,
-  fallback: SourceSpan.SourceSpan,
-): ReadonlyArray<Diagnostic.Diagnostic> => {
+  originAt: (origin: Origin) => L,
+  points: ReadonlyMap<number, L>,
+  fallback: L,
+  keyOf: (position: L) => string,
+): ReadonlyArray<Diagnostic.Diagnostic<L>> => {
   if (solution._tag !== 'Solved')
     return [
       Diagnostic.invalidLifetimeBinder(
@@ -1068,16 +1099,16 @@ const diagnosticsOf = (
         fallback,
       ),
     ]
-  const diagnostics = new Map<string, Diagnostic.Diagnostic>()
+  const diagnostics = new Map<string, Diagnostic.Diagnostic<L>>()
   for (const violation of solution.violations) {
     const origin = origins.get(Lifetime.key(violation.lifetime))
-    const span = spans.get(violation.point) ?? fallback
+    const span = points.get(violation.point) ?? fallback
     const diagnostic = Diagnostic.expiredLifetime(
       Lifetime.display(violation.lifetime),
       span,
-      origin?.span,
+      origin === undefined ? undefined : originAt(origin),
     )
-    diagnostics.set(`${Lifetime.key(violation.lifetime)}:${span.start}:${span.end}`, diagnostic)
+    diagnostics.set(`${Lifetime.key(violation.lifetime)}:${keyOf(span)}`, diagnostic)
   }
   return Object.freeze([...diagnostics.values()])
 }
@@ -1266,8 +1297,10 @@ export const validateCleanup = (
     diagnostics: diagnosticsOf(
       solution,
       self.origins,
+      (origin) => origin.span,
       spans,
       context.spanOf(ownership.declaration.anchor),
+      SourceSpan.key,
     ),
     ...(solution._tag === 'Solved' ? { work: solution.work } : {}),
   }

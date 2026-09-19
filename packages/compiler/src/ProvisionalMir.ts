@@ -1592,6 +1592,7 @@ const builtinExecution = (
         subject: expression,
         type: effect.success,
         span: expression.span,
+        origin: expression.origin,
       }),
     ],
     key,

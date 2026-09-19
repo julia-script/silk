@@ -1,3 +1,4 @@
+import { locationAt } from './support/location.js'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
@@ -530,7 +531,7 @@ it('specializes executable owners throughout nested callable schemas without cap
     contractKey: CallableContract.key(contract),
     constraintKeys: [Constraint.key(constraint)],
     evidenceKeys: [Constraint.evidenceKey(evidence)],
-    origins: [span('types/schema-owner', 0, 1)],
+    origins: [locationAt('types/schema-owner')],
   })
 
   const specialized = Type.specializeExecutableOwner(
@@ -1411,7 +1412,7 @@ it('keys callable contracts and branded constraint evidence without source locat
       contractKey: CallableContract.key(contract),
       constraintKeys: contract.constraints.map(Constraint.key),
       evidenceKeys: [Constraint.evidenceKey(Constraint.assumed(loggerWanted, new Map()))],
-      origins: [span('work', 10, 20)],
+      origins: [locationAt('work', 1)],
     },
   )
   const movedOrigin = Type.callable(
@@ -1421,7 +1422,7 @@ it('keys callable contracts and branded constraint evidence without source locat
     quantified.mode,
     quantified.schema === undefined
       ? undefined
-      : { ...quantified.schema, origins: [span('work', 30, 40)] },
+      : { ...quantified.schema, origins: [locationAt('work', 2)] },
   )
   assert.deepEqual(Type.parameters(quantified), [])
   assert.strictEqual(Type.isConcrete(quantified), true)
@@ -1473,7 +1474,7 @@ it('keeps a free parameter open when a nested callable schema binds the same par
     contractKey: CallableContract.key(contract),
     constraintKeys: [],
     evidenceKeys: [],
-    origins: [span('work', 0, 1)],
+    origins: [locationAt('work')],
   })
   assert.deepEqual(Type.parameters(quantified), [])
   assert.strictEqual(Type.isConcrete(quantified), true)

@@ -1,3 +1,4 @@
+import * as Location from './Location.js'
 import * as Effect from 'effect/Effect'
 import * as ToolchainIntegrity from './ToolchainIntegrity.js'
 import type * as CompilationProfile from './CompilationProfile.js'
@@ -13,7 +14,6 @@ import * as TypeInference from './internal/TypeInference.js'
 import * as Canonical from './internal/Canonical.js'
 import * as NameResolution from './NameResolution.js'
 import * as RowAlgebra from './RowAlgebra.js'
-import * as SourceSpan from './SourceSpan.js'
 import { analyzeFunctionBody } from './StatementAnalysis.js'
 import * as StaticEvaluation from './StaticEvaluation.js'
 import * as StaticValue from './StaticValue.js'
@@ -39,7 +39,7 @@ export interface ResidualBody {
   readonly _tag: 'ResidualBody'
   readonly function: Tir.TirFunction
   readonly fact: Elaboration.FunctionFact
-  readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
+  readonly diagnostics: ReadonlyArray<Diagnostic.Located>
 }
 
 export type Result =
@@ -47,7 +47,7 @@ export type Result =
   | {
       readonly _tag: 'StaticFailure'
       readonly failure: StaticEvaluation.StaticFailure
-      readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
+      readonly diagnostics: ReadonlyArray<Diagnostic.Located>
     }
 
 /** The first declaration-local reason a runtime body needs static selection. */
@@ -95,7 +95,7 @@ const emptyCounters = (): MutableCounters => ({
 export const noWork: Counters = Object.freeze(emptyCounters())
 
 interface State {
-  conditionDiagnostics?: Array<Diagnostic.Diagnostic>
+  conditionDiagnostics?: Array<Diagnostic.Located>
   conditionExpression?: Elaboration.ExpressionFact
   readonly target: Target.Target
   readonly dependencies: Map<string, string>
@@ -255,7 +255,7 @@ const reflectAggregate = (
   authorization: DeclarationFacts.DeclarationFact,
   owner: Type.Type,
   kind: 'Type' | 'Fields',
-  span: SourceSpan.SourceSpan,
+  span: Location.Location,
   trace: StaticEvaluation.Trace,
 ): StaticEvaluation.Outcome<StaticValue.Value> => {
   if (!Type.isNominal(owner) || authorization.canonical._tag !== 'Canonical')
@@ -427,13 +427,13 @@ const constantHost = (
 const bindStaticParameters = (
   declaration: DeclarationFacts.DeclarationFact,
   arguments_: ReadonlyArray<StaticValue.Value>,
-  argumentSpans: ReadonlyArray<SourceSpan.SourceSpan | undefined> = Object.freeze([]),
+  argumentSpans: ReadonlyArray<Location.Location | undefined> = Object.freeze([]),
   argumentOrigins: ReadonlyArray<StaticEvaluation.TextOrigin | undefined> = Object.freeze([]),
   originScope?: string,
 ):
   | {
       readonly values: Map<string, StaticValue.Value>
-      readonly valueSpans: Map<string, SourceSpan.SourceSpan>
+      readonly valueSpans: Map<string, Location.Location>
       readonly valueOrigins: Map<string, StaticEvaluation.TextOrigin>
     }
   | undefined => {
@@ -519,15 +519,17 @@ const resolveValueOrigins = (
 
 const resolveTextSpan = (
   origin: StaticEvaluation.TextOrigin | undefined,
-  arguments_: ReadonlyArray<SourceSpan.SourceSpan | undefined>,
-): SourceSpan.SourceSpan | undefined =>
-  origin?._tag === 'SourceTextOrigin' ? origin.span : arguments_.at(origin?.ordinal ?? -1)
+  arguments_: ReadonlyArray<Location.Location | undefined>,
+): Location.Location | undefined =>
+  origin?._tag === 'SourceTextOrigin'
+    ? Location.at(origin.at)
+    : arguments_.at(origin?.ordinal ?? -1)
 
 const evaluateStaticFunction = (
   self: EvaluationCoordinator,
   declaration: DeclarationFacts.DeclarationFact,
   arguments_: ReadonlyArray<StaticValue.Value>,
-  argumentSpans: ReadonlyArray<SourceSpan.SourceSpan | undefined>,
+  argumentSpans: ReadonlyArray<Location.Location | undefined>,
   argumentOrigins: ReadonlyArray<StaticEvaluation.TextOrigin | undefined>,
   span: Parameters<StaticEvaluation.FactEvaluationContext['call']>[4],
   parentTrace: StaticEvaluation.Trace,
@@ -608,8 +610,7 @@ const evaluateStaticFunction = (
         values: bindings.values,
         valueSpans: bindings.valueSpans,
         valueOrigins: bindings.valueOrigins,
-        spanOf: self[stateSymbol].spans.spanOf,
-        expressionSpans: new Map<Elaboration.ExpressionFact, SourceSpan.SourceSpan>(),
+        expressionSpans: new Map<Elaboration.ExpressionFact, Location.Location>(),
         expressionOrigins: new Map<Elaboration.ExpressionFact, StaticEvaluation.TextOrigin>(),
         returnedTextSpan: { value: undefined },
         returnedTextOrigin: { value: undefined },
@@ -619,12 +620,12 @@ const evaluateStaticFunction = (
         reflect: (
           owner: Type.Type,
           kind: 'Type' | 'Fields',
-          reflectSpan: SourceSpan.SourceSpan,
+          reflectSpan: Location.Location,
           trace: StaticEvaluation.Trace,
         ) => reflectAggregate(self, declaration, owner, kind, reflectSpan, trace),
         constant: (
           constant: DeclarationFacts.ConstantFact,
-          constantSpan: SourceSpan.SourceSpan,
+          constantSpan: Location.Location,
           trace: StaticEvaluation.Trace,
         ) => evaluateConstantValue(self, constant, constantSpan, trace),
       }
@@ -684,7 +685,9 @@ const evaluateStaticFunction = (
     const failure = Object.freeze({
       ...result.failure,
       span:
-        (origin === undefined ? undefined : StaticEvaluation.textOriginSpan(origin)) ??
+        (origin === undefined
+          ? undefined
+          : StaticEvaluation.textOriginLocation(origin, Location.anchorOf(result.failure.span))) ??
         result.failure.span,
       ...(origin === undefined ? {} : { origin }),
     })
@@ -713,7 +716,7 @@ const staticValueType = (value: StaticValue.Value): Type.Type | undefined => {
 function evaluateConstantValue(
   self: EvaluationCoordinator,
   declaration: DeclarationFacts.ConstantFact,
-  span: SourceSpan.SourceSpan,
+  span: Location.Location,
   parentTrace: StaticEvaluation.Trace,
   predicate?: AuthoredHir.Expression,
 ): StaticEvaluation.Outcome<StaticValue.Value> {
@@ -778,7 +781,7 @@ function evaluateConstantValue(
           StaticEvaluation.phaseViolation(
             'StaticEvaluation.constant',
             'constant declaration is unavailable',
-            self[stateSymbol].spans.spanOf(initializer.anchor),
+            Location.at(initializer.anchor),
             evaluation.trace,
           ),
         )
@@ -809,17 +812,16 @@ function evaluateConstantValue(
       const staticContext = Object.freeze({
         environment: self[stateSymbol].environment,
         values: new Map<string, StaticValue.Value>(),
-        valueSpans: new Map<string, SourceSpan.SourceSpan>(),
+        valueSpans: new Map<string, Location.Location>(),
         valueOrigins: new Map<string, StaticEvaluation.TextOrigin>(),
-        spanOf: self[stateSymbol].spans.spanOf,
-        expressionSpans: new Map<Elaboration.ExpressionFact, SourceSpan.SourceSpan>(),
+        expressionSpans: new Map<Elaboration.ExpressionFact, Location.Location>(),
         expressionOrigins: new Map<Elaboration.ExpressionFact, StaticEvaluation.TextOrigin>(),
         trace: evaluation.trace,
         call,
         reflect: (
           owner: Type.Type,
           kind: 'Type' | 'Fields',
-          reflectSpan: SourceSpan.SourceSpan,
+          reflectSpan: Location.Location,
           trace: StaticEvaluation.Trace,
         ) => reflectAggregate(self, constantHost(declaration), owner, kind, reflectSpan, trace),
         constant,
@@ -860,7 +862,7 @@ function evaluateConstantValue(
           StaticEvaluation.phaseViolation(
             'StaticEvaluation.constant',
             firstError?.message ?? 'constant initializer cannot be analyzed',
-            firstError?.span ?? self[stateSymbol].spans.spanOf(initializer.anchor),
+            firstError?.span ?? Location.at(initializer.anchor),
             evaluation.trace,
           ),
         )
@@ -878,7 +880,7 @@ function evaluateConstantValue(
           StaticEvaluation.phaseViolation(
             'StaticEvaluation.constant',
             `initializer produced ${actual === undefined ? 'an unsupported aggregate' : Type.display(actual)} instead of ${Type.display(declaration.declaredType.type)}`,
-            self[stateSymbol].spans.spanOf(initializer.anchor),
+            Location.at(initializer.anchor),
             evaluation.trace,
           ),
         )
@@ -899,7 +901,7 @@ export const evaluateConstant = (
   evaluateConstantValue(
     self,
     declaration,
-    self[stateSymbol].spans.spanOf(declaration.initializer.anchor),
+    Location.at(declaration.initializer.anchor),
     Object.freeze([]),
   )
 
@@ -910,7 +912,7 @@ export const evaluateModuleCondition = Effect.fn('Residualization.evaluateModule
     declaration: AuthoredHir.Declaration,
   ): Effect.Effect<{
     readonly outcome: StaticEvaluation.Outcome<StaticValue.Value>
-    readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
+    readonly diagnostics: ReadonlyArray<Diagnostic.Located>
     readonly expression?: Elaboration.ExpressionFact
   }> =>
     Effect.sync(() => {
@@ -919,7 +921,9 @@ export const evaluateModuleCondition = Effect.fn('Residualization.evaluateModule
         owner: declaration.owner,
         path: [],
       }
-      const span = self[stateSymbol].spans.spanOf(anchor)
+      const span = Location.at(anchor)
+      // ponytail: a span-derived ordinal; rebuilt as a node reference with the other identities (task 3.3.2).
+      const ordinal = self[stateSymbol].spans.spanOf(anchor).start
       if (declaration.header._tag !== 'ConditionalHeader')
         return {
           outcome: StaticEvaluation.failed(
@@ -941,7 +945,7 @@ export const evaluateModuleCondition = Effect.fn('Residualization.evaluateModule
       }
       const constant: DeclarationFacts.ConstantDeclaration = {
         _tag: 'ConstantDeclaration',
-        id: { _tag: 'DeclarationId', sourceId: declaration.owner.module, ordinal: span.start },
+        id: { _tag: 'DeclarationId', sourceId: declaration.owner.module, ordinal },
         canonical: { _tag: 'Canonical', id: canonical },
         visibility: 'Private',
         typeParameters: [],
@@ -956,7 +960,7 @@ export const evaluateModuleCondition = Effect.fn('Residualization.evaluateModule
         initializer: expression,
         anchor,
       }
-      const diagnostics: Array<Diagnostic.Diagnostic> = []
+      const diagnostics: Array<Diagnostic.Located> = []
       self[stateSymbol].conditionDiagnostics = diagnostics
       const outcome = evaluateConstant(self, constant)
       const expressionFact = self[stateSymbol].conditionExpression
@@ -980,7 +984,7 @@ export const evaluateParameterPredicate = (
     : evaluateConstantValue(
         self,
         declaration,
-        self[stateSymbol].spans.spanOf(declaration.predicate.anchor),
+        Location.at(declaration.predicate.anchor),
         Object.freeze([]),
         declaration.predicate,
       )
@@ -1078,12 +1082,14 @@ export const residualize = (self: Coordinator, key: ApplicationKey): Result => {
           key.staticArgumentOrigins,
         )
   if (declaration === undefined || input === undefined || bindings === undefined) {
-    const span =
-      declaration === undefined
-        ? SourceSpan.fromOffsets(key.declaration.module, 0, 0)
-        : self[stateSymbol].spans.spanOf(declaration.anchor)
-    if (span === undefined)
-      throw new RangeError(`Residualization lost source ${key.declaration.module}`)
+    // A declaration that is gone has no node; its module's root resolves to that module's start.
+    const span = Location.at(
+      declaration?.anchor ?? {
+        _tag: 'AuthoredAnchor',
+        owner: AuthoredIdentity.module('', key.declaration.module),
+        path: [],
+      },
+    )
     const failure = StaticEvaluation.phaseViolation(
       'Residualization.residualize',
       'application does not match one runtime declaration',
@@ -1121,7 +1127,7 @@ export const residualize = (self: Coordinator, key: ApplicationKey): Result => {
     evidence: key.evidence,
     contractRow: key.contractRow,
     staticArguments: key.staticArguments,
-    span: self[stateSymbol].spans.spanOf(declaration.anchor),
+    span: Location.at(declaration.anchor),
   })
   let executed = false
   const evaluated = StaticEvaluation.evaluateApplication(
@@ -1138,7 +1144,7 @@ export const residualize = (self: Coordinator, key: ApplicationKey): Result => {
           StaticEvaluation.phaseViolation(
             'Residualization.residualize',
             'runtime application does not completely specialize its declaration',
-            self[stateSymbol].spans.spanOf(declaration.anchor),
+            Location.at(declaration.anchor),
             evaluation.trace,
           ),
         )
@@ -1178,8 +1184,7 @@ export const residualize = (self: Coordinator, key: ApplicationKey): Result => {
           values: bindings.values,
           valueSpans: bindings.valueSpans,
           valueOrigins: bindings.valueOrigins,
-          spanOf: self[stateSymbol].spans.spanOf,
-          expressionSpans: new Map<Elaboration.ExpressionFact, SourceSpan.SourceSpan>(),
+          expressionSpans: new Map<Elaboration.ExpressionFact, Location.Location>(),
           expressionOrigins: new Map<Elaboration.ExpressionFact, StaticEvaluation.TextOrigin>(),
           trace: evaluation.trace,
           call,
@@ -1191,7 +1196,7 @@ export const residualize = (self: Coordinator, key: ApplicationKey): Result => {
           reflect: (
             owner: Type.Type,
             kind: 'Type' | 'Fields',
-            reflectSpan: SourceSpan.SourceSpan,
+            reflectSpan: Location.Location,
             trace: StaticEvaluation.Trace,
           ) => reflectAggregate(self, declaration, owner, kind, reflectSpan, trace),
           constant,

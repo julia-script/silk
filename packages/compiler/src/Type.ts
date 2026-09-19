@@ -7,6 +7,7 @@ import * as Canonical from './internal/Canonical.js'
 import * as RequirementRow from './RequirementRow.js'
 import * as RowAlgebra from './RowAlgebra.js'
 import * as Scalar from './Scalar.js'
+import type * as Location from './Location.js'
 import * as SourceSpan from './SourceSpan.js'
 import * as TypeCompatibility from './TypeCompatibility.js'
 
@@ -134,7 +135,7 @@ export interface CallableSchema {
   readonly contractKey: string
   readonly constraintKeys: ReadonlyArray<string>
   readonly evidenceKeys: ReadonlyArray<string>
-  readonly origins: ReadonlyArray<SourceSpan.SourceSpan>
+  readonly origins: ReadonlyArray<Location.Location>
 }
 
 /**
