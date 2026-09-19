@@ -1645,7 +1645,7 @@ const positionFields = [
  * A cause as a stage after TIR may hold it.
  *
  * ponytail: those stages still report in source coordinates, yet they also read header facts,
- * whose causes are revision-free. One type once TIR nodes carry anchors (task 3.3.4).
+ * whose causes are revision-free. One type once those stages read TIR nodes (task 3.3.3).
  */
 export type CauseIdentity = Identity | Identity<Location.Location>
 

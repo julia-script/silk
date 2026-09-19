@@ -625,6 +625,16 @@ except where stated.
    `structuredClone` equality as a secondary check; spec sync; an inventory check that nothing
    imports a deleted schema.
 
-Steps 1–2 remove rebinding. Step 6 removes the duplicate body. The milestone is complete only after
+**Order as implemented.** Step 2 cannot delete `SemanticRebinding` while the cached product is
+still the fact tree: facts embed the declaration objects of their revision, so a cached fact can only
+be reused by rebinding it. Converting facts to ids would be work that step 6 deletes. The same holds
+for span-derived identities: `BorrowId`, `TemporaryOwnerId` and the site ids become node references,
+which need the node ids of step 3, and rebuilding them on anchors first would be redone there. So
+step 2 is split. Its identity types and the node-based identities land with the schema in step 3;
+the `Request`/`Validity` split, returning the cached object on a hit, and the deletion of
+`SemanticRebinding` land directly after step 6, when the cached product is the checked body. The
+milestone still closes only with rebinding and the duplicate body both gone.
+
+Step 6 removes the duplicate body and, with the rest of step 2, rebinding. The milestone is complete only after
 step 7. Persistent caching stays later work; what it needs already holds after step 3: a portable
 schema, a canonical codec, revision-free content, and validity carried by the artifact.

@@ -922,7 +922,7 @@ export const evaluateModuleCondition = Effect.fn('Residualization.evaluateModule
         path: [],
       }
       const span = Location.at(anchor)
-      // ponytail: a span-derived ordinal; rebuilt from the anchor with the other identities (3.3.1d).
+      // ponytail: a span-derived ordinal; rebuilt as a node reference with the other identities (task 3.3.2).
       const ordinal = self[stateSymbol].spans.spanOf(anchor).start
       if (declaration.header._tag !== 'ConditionalHeader')
         return {
