@@ -1401,10 +1401,9 @@ export const complete = (
         return diagnostic
       }
       const invalidDiagnostic = (
-        ...args: Parameters<typeof Diagnostic.invalidConformance>
-      ): ReturnType<typeof Diagnostic.invalidConformance> => {
-        return rejectConformance(Diagnostic.invalidConformance(...args))
-      }
+        detail: string,
+        span: SourceSpan.SourceSpan,
+      ): Diagnostic.Diagnostic => rejectConformance(Diagnostic.invalidConformance(detail, span))
       if (
         conformance.capability._tag !== 'Resolved' ||
         !Type.isNominal(conformance.capability.type) ||
