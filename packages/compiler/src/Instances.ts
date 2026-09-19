@@ -1601,7 +1601,6 @@ export const discover = (
   for (const root of roots) schedule(root)
   const cleanupPrepassTargets = (
     fn: Tir.TirFunction,
-    fact: Elaboration.FunctionFact,
     substitution: Type.Substitution,
   ): ReadonlyArray<CallTarget> => {
     const types = new Map<string, Type.Type>()
@@ -1610,13 +1609,13 @@ export const discover = (
       const type = Type.substitute(parameter.declaredType.type, substitution)
       types.set(Type.key(type), type)
     }
-    Elaboration.visitStatementFacts(fact.statements, {
-      expression: (expression) => {
-        if (expression.type._tag !== 'Available') return
-        const type = Type.substitute(expression.type.type, substitution)
-        types.set(Type.key(type), type)
-      },
-    })
+    for (const expression of fn.statements
+      .flatMap(Tir.statementExpressions)
+      .flatMap(Tir.expressionTree)) {
+      if (expression._tag === 'Unavailable') continue
+      const type = Type.substitute(expression.type, substitution)
+      types.set(Type.key(type), type)
+    }
     return Object.freeze(
       [...types.values()].flatMap((type) => hookCalls(CleanupPlan.cleanupPlan(index, type), index)),
     )
@@ -1773,7 +1772,7 @@ export const discover = (
             )) {
               recordedCallables.set(callableIdentity(callable), callable)
             }
-            const cleanupHooks = cleanupPrepassTargets(fn, residual.fact, substitution)
+            const cleanupHooks = cleanupPrepassTargets(fn, substitution)
             const calls = new Map<string, CallTarget>()
             const directCalls = directCallInstances(fn, key, substitution, results, index)
             const callableTargets = callableCallTargets(fn, key, substitution, results, index)
