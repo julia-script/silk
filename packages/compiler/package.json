@@ -522,7 +522,6 @@
       "types": "./dist/SuspensionMode.d.ts",
       "import": "./dist/SuspensionMode.js"
     },
-
     "./SyntaxFile": {
       "types": "./dist/SyntaxFile.d.ts",
       "import": "./dist/SyntaxFile.js"

@@ -1067,7 +1067,7 @@ const collectExpression = (
       const resolved = parameterResolution(expression.reference, spans)
       push(
         pending,
-        'token' in expression.reference ? spans.spanOf(expression.reference.anchor) : undefined,
+        spans.spanOf(expression.reference.anchor),
         'Value',
         resolved.resolution,
         resolved.declaration,

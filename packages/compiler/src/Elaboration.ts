@@ -169,6 +169,14 @@ export interface StaticTextExpressionFact {
   readonly _tag: 'StaticText'
   readonly data?: StaticText.Data
   readonly type: ExpressionTypeFact
+  /**
+   * The authored text literal this fact wraps directly, when it wraps one.
+   *
+   * Caller provenance for a compile error points inside the literal the caller wrote, which is a
+   * narrower position than the expression the fact is anchored to once the value flows through a
+   * parameter. Only a fact built straight from a literal can name it.
+   */
+  readonly literal?: AuthoredHir.Anchor
   readonly anchor: AuthoredHir.Anchor
 }
 
@@ -2317,7 +2325,7 @@ export const elaborateModule = (input: Input): Result => {
   ].sort(compareDiagnostics)
   const tir: Tir.Module = Object.freeze({
     _tag: 'TirModule',
-    module: authored.presentation.sourceId,
+    module: authored.module.owner.module,
     functions: Object.freeze(
       allRuntimeFunctions.flatMap((fact) =>
         fact.declaration.phase === 'Static' ? [] : [runtimeTirFunction(context, fact, index)],

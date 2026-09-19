@@ -463,7 +463,12 @@ export const resolveValueName = (
     const boundParameter = scope.parameters.findLast(
       (candidate) => AuthoredIdentity.anchorKey(candidate.anchor) === key,
     )
-    if (boundParameter !== undefined)
+    // Lowering binds a duplicated parameter name to one of its binders, so the anchor alone cannot
+    // see the ambiguity the declaration owns. The spelling decides it, exactly as the fallback does.
+    if (
+      boundParameter !== undefined &&
+      lookupParameter(scope.parameters, tokenSpelling)._tag !== 'Ambiguous'
+    )
       return Object.freeze({
         reference: Object.freeze({
           _tag: 'Resolved' as const,
@@ -1597,7 +1602,7 @@ export const resolveStructTarget = (
       const candidate = NameResolution.resolveType(
         nameResolution,
         resolution.index,
-        context.presentation.sourceId,
+        AuthoredWalk.moduleName(context),
         path,
       ).fact
       if (candidate._tag === 'Resolved' && Type.isNominal(candidate.type)) base = candidate.type
@@ -1632,7 +1637,7 @@ export const resolveStructTarget = (
           DeclarationResolution.resolveGenericArgumentFact(
             context.spanOf,
             resolution.index,
-            context.presentation.sourceId,
+            AuthoredWalk.moduleName(context),
             argument,
             argument._tag === 'Lifetime' ? undefined : valueParameters.at(suppliedOrdinal++)?.type,
             (module, argumentPath) =>
@@ -1704,7 +1709,7 @@ export const resolveStructTarget = (
   const resolved = DeclarationResolution.resolveTypeFact(
     context.spanOf,
     resolution.index,
-    context.presentation.sourceId,
+    AuthoredWalk.moduleName(context),
     analyzed.fact,
     (module, path) => NameResolution.resolveType(nameResolution, resolution.index, module, path),
   )
@@ -1839,7 +1844,7 @@ export const resolveUnionVariantTarget = (
     const candidate = NameResolution.resolveType(
       nameResolution,
       resolution.index,
-      context.presentation.sourceId,
+      AuthoredWalk.moduleName(context),
       path,
     ).fact
     if (candidate._tag === 'Resolved' && Type.isNominal(candidate.type)) base = candidate.type
@@ -1862,7 +1867,7 @@ export const resolveUnionVariantTarget = (
   const fullyResolved = DeclarationResolution.resolveTypeFact(
     context.spanOf,
     resolution.index,
-    context.presentation.sourceId,
+    AuthoredWalk.moduleName(context),
     analyzed.fact,
     (module, argumentPath) =>
       NameResolution.resolveType(nameResolution, resolution.index, module, argumentPath),
@@ -1898,7 +1903,7 @@ export const resolveUnionVariantTarget = (
     DeclarationResolution.resolveTypeFact(
       context.spanOf,
       resolution.index,
-      context.presentation.sourceId,
+      AuthoredWalk.moduleName(context),
       argument,
       (module, argumentPath) =>
         NameResolution.resolveType(nameResolution, resolution.index, module, argumentPath),
@@ -2063,7 +2068,7 @@ export const resolvePatternType = (
   const resolved = DeclarationResolution.resolveTypeFact(
     context.spanOf,
     resolution.index,
-    context.presentation.sourceId,
+    AuthoredWalk.moduleName(context),
     analyzed.fact,
     (module, path) => NameResolution.resolveType(nameResolution, resolution.index, module, path),
   )
@@ -2240,7 +2245,7 @@ export const analyzePattern = (
       qualifierToken === undefined || memberToken === undefined
         ? context.spanOf(node.anchor)
         : (SourceSpan.fromOffsets(
-            context.presentation.sourceId,
+            AuthoredWalk.moduleName(context),
             context.spanOf(qualifierToken.anchor).start,
             context.spanOf(memberToken.anchor).end,
           ) ?? context.spanOf(node.anchor))
@@ -2412,7 +2417,7 @@ export const analyzePattern = (
   }
   const label = nominal === undefined ? 'unknown aggregate' : Type.display(nominal)
   const outsideDefiningModule =
-    nominal !== undefined && nominal.module !== context.presentation.sourceId
+    nominal !== undefined && nominal.module !== AuthoredWalk.moduleName(context)
   const seen = new Map<string, PatternFieldFact>()
   const bindings: Array<PatternBindingFact> = []
   const fields = patternFieldsOf(node).map((fieldNode): PatternFieldFact => {
@@ -2815,7 +2820,7 @@ export const analyzeMatch = (
     armNode: AuthoredHir.MatchArm,
   ): SourceSpan.SourceSpan =>
     SourceSpan.fromOffsets(
-      context.presentation.sourceId,
+      AuthoredWalk.moduleName(context),
       semanticPatternSpan(pattern).start,
       context.spanOf(armNode.anchor).end,
     ) ?? context.spanOf(armNode.anchor)
@@ -3019,7 +3024,7 @@ export const analyzeMatch = (
             ),
             coverage.missing.map(Match.encodeIdentity),
             SourceSpan.fromOffsets(
-              context.presentation.sourceId,
+              AuthoredWalk.moduleName(context),
               context.spanOf(node.anchor).start,
               context.spanOf(node.anchor).end,
             ) ?? context.spanOf(node.anchor),
@@ -3609,9 +3614,10 @@ export const analyzeAggregateLiteral = (
   const authorized =
     definingModule !== undefined &&
     aggregate !== undefined &&
-    (aggregate.visibility === 'Public' || definingModule === context.presentation.sourceId) &&
+    (aggregate.visibility === 'Public' || definingModule === AuthoredWalk.moduleName(context)) &&
     aggregateFields.every(
-      (field) => field.visibility === 'Public' || definingModule === context.presentation.sourceId,
+      (field) =>
+        field.visibility === 'Public' || definingModule === AuthoredWalk.moduleName(context),
     )
   const accessDiagnostic =
     nominal !== undefined && !authorized
@@ -3687,7 +3693,7 @@ export const analyzeAggregateLiteral = (
       } else if (
         fieldLookup.field.visibility === 'Private' &&
         nominal !== undefined &&
-        nominal.module !== context.presentation.sourceId &&
+        nominal.module !== AuthoredWalk.moduleName(context) &&
         accessDiagnostic !== undefined
       ) {
         state = Object.freeze({
@@ -4067,7 +4073,7 @@ export const analyzeAggregateLiteral = (
       if (field.name._tag !== 'Present' || seen.has(field.name.spelling)) continue
       if (
         field.visibility === 'Private' &&
-        completedNominal.module !== context.presentation.sourceId
+        completedNominal.module !== AuthoredWalk.moduleName(context)
       )
         continue
       diagnostics.push(
@@ -4522,7 +4528,7 @@ export const analyzeProjection = (
       state = Object.freeze({ _tag: 'Unavailable', cause: Diagnostic.identity(diagnostic) })
     } else if (
       lookup.field.visibility === 'Private' &&
-      nominal.module !== context.presentation.sourceId
+      nominal.module !== AuthoredWalk.moduleName(context)
     ) {
       const diagnostic = Diagnostic.inaccessibleProjectedField(
         Type.display(nominal),
@@ -5814,14 +5820,14 @@ const generatedAggregate = (
   resolution: ResolutionContext,
 ): { readonly struct: DeclarationFacts.StructFact; readonly type: Type.Nominal } => {
   const identity = AggregateIdentity.anonymous(
-    context.presentation.sourceId,
+    AuthoredWalk.moduleName(context),
     context.spanOf(syntax.anchor),
     kind,
   )
   const type = AggregateIdentity.nominal(identity)
   const id: DeclarationFacts.DeclarationId = Object.freeze({
     _tag: 'DeclarationId',
-    sourceId: context.presentation.sourceId,
+    sourceId: AuthoredWalk.moduleName(context),
     ordinal:
       -1 - context.spanOf(syntax.anchor).start * 2 - (kind === 'AnonymousPositional' ? 1 : 0),
   })
@@ -5977,7 +5983,7 @@ const analyzeAggregateElements = (
       seen.set(element.label, context.spanOf(element.anchor ?? element.expression.anchor))
     }
     if (field !== undefined && state._tag === 'Unavailable') {
-      if (field.visibility === 'Private' && nominal.module !== context.presentation.sourceId) {
+      if (field.visibility === 'Private' && nominal.module !== AuthoredWalk.moduleName(context)) {
         const diagnostic = Diagnostic.inaccessibleProjectedField(
           Type.display(nominal),
           element.label ?? `${ordinal}`,
@@ -6035,9 +6041,10 @@ const analyzeAggregateElements = (
     }
   }
   const authorized =
-    (struct.visibility === 'Public' || nominal.module === context.presentation.sourceId) &&
+    (struct.visibility === 'Public' || nominal.module === AuthoredWalk.moduleName(context)) &&
     struct.fields.every(
-      (field) => field.visibility === 'Public' || nominal.module === context.presentation.sourceId,
+      (field) =>
+        field.visibility === 'Public' || nominal.module === AuthoredWalk.moduleName(context),
     )
   const complete =
     AuthoredWalk.isAvailable(syntax) &&
@@ -6982,7 +6989,7 @@ export const analyzeOperatorExpression = (
   if (!builtinOperand) {
     const candidates = [
       ...boundOperatorSelections(declaration, operator),
-      ...concreteOperatorSelections(resolution.index, context.presentation.sourceId, operator),
+      ...concreteOperatorSelections(resolution.index, AuthoredWalk.moduleName(context), operator),
     ].filter((candidate) =>
       operatorSelectionMatches(candidate, argumentsResult.facts, node, resolution),
     )
@@ -8966,7 +8973,7 @@ const analyzeAnonymousCallable = (
   }
   const hiddenId: DeclarationId = Object.freeze({
     _tag: 'DeclarationId',
-    sourceId: context.presentation.sourceId,
+    sourceId: AuthoredWalk.moduleName(context),
     ordinal: Tir.hiddenDeclarationOrdinal(declaration.id.ordinal, site.ordinal),
   })
   const canonical = Tir.anonymousCallableId(owner, site)
@@ -8985,7 +8992,7 @@ const analyzeAnonymousCallable = (
   })
   const resolvers = NameResolution.makeResolvers(nameResolution, resolution.index)
   const finalized = DeclarationCollection.finalizeLifetimeHeader(context, initial.fact, (path) => {
-    const resolved = resolvers.type(context.presentation.sourceId, path)
+    const resolved = resolvers.type(AuthoredWalk.moduleName(context), path)
     if (
       resolved.fact._tag !== 'Resolved' ||
       !Type.isNominal(resolved.fact.type) ||
@@ -9008,7 +9015,7 @@ const analyzeAnonymousCallable = (
     DeclarationResolution.resolveTypeFact(
       context.spanOf,
       resolution.index,
-      context.presentation.sourceId,
+      AuthoredWalk.moduleName(context),
       fact,
       resolvers.type,
     )
@@ -9024,14 +9031,14 @@ const analyzeAnonymousCallable = (
   typeDiagnostics.push(...returnType.diagnostics)
   const failureRow = DeclarationResolution.resolveFailureRow(
     context.spanOf,
-    context.presentation.sourceId,
+    AuthoredWalk.moduleName(context),
     collected.fact.failureRow,
     resolvers,
     resolution.index.modules,
   )
   const requirementRow = DeclarationResolution.resolveRequirementRow(
     context.spanOf,
-    context.presentation.sourceId,
+    AuthoredWalk.moduleName(context),
     collected.fact.requirementRow,
     resolvers,
     resolution.index.modules,
@@ -9628,6 +9635,7 @@ export function analyzeExpression(
       fact: Object.freeze({
         _tag: 'StaticText',
         ...(data === undefined ? {} : { data }),
+        literal: node.anchor,
         anchor: node.anchor,
         type,
       }),

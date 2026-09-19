@@ -2140,8 +2140,11 @@ export const complete = (
         dependency,
       })
     })
+    // Diagnostics name the presented source; fixtures may present a module under another id.
+    const sourceId = registry.contexts.get(module.module)?.presentation.sourceId ?? module.module
     const moduleDiagnostics = diagnostics.filter(
-      (diagnostic) => diagnostic.span.sourceId === module.module,
+      (diagnostic) =>
+        diagnostic.span.sourceId === sourceId || diagnostic.span.sourceId === module.module,
     )
     return Object.freeze({
       ...module,

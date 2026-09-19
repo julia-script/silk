@@ -666,7 +666,7 @@ export const analyzeStatements = (
           : DeclarationResolution.resolveTypeFact(
               context.context.spanOf,
               context.resolution.index,
-              context.context.presentation.sourceId,
+              AuthoredWalk.moduleName(context.context),
               analyzedDeclared.fact,
               (module, path) =>
                 NameResolution.resolveType(nameResolution, context.resolution.index, module, path),
@@ -810,7 +810,7 @@ export const analyzeStatements = (
             Diagnostic.expressionStatementResult(
               SemanticDisplay.type(
                 selection.subject.type.type,
-                context.context.presentation.sourceId,
+                AuthoredWalk.moduleName(context.context),
                 context.resolution.scope,
               ),
               context.context.spanOf(selection.pattern.anchor),
@@ -836,7 +836,7 @@ export const analyzeStatements = (
             selection.subject.type._tag === 'Available'
               ? SemanticDisplay.type(
                   selection.subject.type.type,
-                  context.context.presentation.sourceId,
+                  AuthoredWalk.moduleName(context.context),
                   context.resolution.scope,
                 )
               : '<unavailable>',
@@ -911,7 +911,7 @@ export const analyzeStatements = (
           Diagnostic.expressionStatementResult(
             SemanticDisplay.type(
               expression.type,
-              context.context.presentation.sourceId,
+              AuthoredWalk.moduleName(context.context),
               context.resolution.scope,
             ),
             context.context.spanOf(expressionNode.anchor),
@@ -1477,6 +1477,11 @@ export const analyzeStatements = (
         Object.freeze({
           _tag: 'ReturnStatement',
           expression: expression.fact,
+          // A trailing block expression carries no `return` keyword, so lowering marks the
+          // statement it synthesizes `implicit-return` instead of leaving a token to inspect.
+          ...(element.origin._tag === 'Synthetic' && element.origin.role === 'implicit-return'
+            ? { implicit: true as const }
+            : {}),
           region,
           anchor: element.anchor,
         }),
@@ -1880,7 +1885,7 @@ export const analyzeFunctionBody = (
     declaration.canonical._tag === 'Canonical'
       ? declaration.canonical.id
       : {
-          module: semantic.presentation.sourceId,
+          module: AuthoredWalk.moduleName(semantic),
           name: `#${declaration.id.ordinal}`,
         },
     AuthoredWalk.anchors(blockNode),

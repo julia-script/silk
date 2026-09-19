@@ -218,7 +218,7 @@ fn build(value: i32) -> i32 {
   assert.strictEqual(pending.type.type.access, 'Exclusive')
   assert.strictEqual(pending.type.type.success, 'i32')
   assert.deepEqual(Type.failureMembers(pending.type.type).map(Type.encode), [
-    'effect://block-captures.Problem',
+    'effect/block-captures.Problem',
   ])
   assert.strictEqual(pending.type.type.environment._tag, 'LocalLifetime')
   assert.deepEqual(
@@ -2492,7 +2492,7 @@ effect fn main() -> i32 ? &Logger { return run Logger.value() }`,
   assert.strictEqual(returned.subject.reference._tag, 'ResolvedServiceOperation')
   assert.include(
     Tir.encode(result.tir),
-    'service-call service://call.Logger.value@DefaultRole:shared',
+    'service-call service/call.Logger.value@DefaultRole:shared',
   )
 })
 

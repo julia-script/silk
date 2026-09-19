@@ -852,6 +852,7 @@ export const frontendProject = Effect.fn('Frontend.frontendProject')(function* (
   const bodyQueries = BodyQuery.make(
     headers.index,
     [...(compatiblePrevious?.semantics.values() ?? [])].map((module) => module.elaboration),
+    closure.modules.map((module) => module.authored),
   )
   const currentElaboration = yield* PhaseReport.measureEffectInto(
     report,

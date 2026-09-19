@@ -288,10 +288,13 @@ const expressionChildren = (
 const bodyTemplate = (
   lowered: AuthoredLowering.Lowered,
   declaration: AuthoredHir.Declaration,
+  // A statically phased callable is evaluated whole, so its body is retained whatever it contains;
+  // a runtime callable only needs a template when some construct inside it demands evaluation.
+  staticPhase = false,
 ): FunctionBodyTemplate | undefined => {
   if (declaration.body._tag !== 'CallableBody') return undefined
   const block = declaration.body.block
-  if (block === undefined || !requiresStaticEvaluation(block)) return undefined
+  if (block === undefined || !(staticPhase || requiresStaticEvaluation(block))) return undefined
   return Object.freeze({
     _tag: 'FunctionBodyTemplate',
     anchor: block.anchor,
@@ -2765,6 +2768,18 @@ const collectUnion = (
       typeParameters.lifetimeContext,
     )
     unionDiagnostics.push(...collected.diagnostics)
+    // Written braces with nothing in them are neither a unit variant nor a field variant; the
+    // author has to pick one, so the braces are reported rather than silently treated as a unit.
+    // An empty block still lowers one unnamed placeholder field, so emptiness is "no field was
+    // actually named" rather than an empty list.
+    if (
+      variant.braces &&
+      variantName._tag === 'Present' &&
+      variant.fields.every((field) => field.name._tag !== 'Name')
+    )
+      unionDiagnostics.push(
+        Diagnostic.emptyUnionVariant(variantName.spelling, context.spanOf(variant.anchor)),
+      )
     return Object.freeze({
       _tag: 'UnionVariant',
       id: variantId,
@@ -2850,23 +2865,37 @@ const foreignRestrictions = (
   direction: 'Foreign' | 'Export',
 ): ReadonlyArray<readonly [detail: string, anchor: AuthoredHir.Anchor]> => {
   const found: Array<readonly [string, AuthoredHir.Anchor]> = []
-  if (contract.static) found.push(['static', contract.anchor])
-  if (contract.effect) found.push(['effect', contract.anchor])
+  if (contract.static) found.push(['static', contract.staticAnchor ?? contract.anchor])
+  if (contract.effect) found.push(['effect', contract.effectAnchor ?? contract.anchor])
   // An exported header may still bind lifetimes; any other binder is rejected.
   const rejectedBinders =
     direction === 'Export'
       ? contract.generics.filter((generic) => generic._tag !== 'LifetimeParameter')
       : contract.generics
   if (rejectedBinders.length > 0)
-    found.push(['type parameters', rejectedBinders[0]?.anchor ?? contract.anchor])
-  if (contract.failures !== undefined) found.push(['failure row', contract.failures.anchor])
+    found.push([
+      'type parameters',
+      // The whole written list is the subject only when every binder in it is rejected; an export
+      // that keeps its lifetimes must point at the first offending binder instead.
+      (rejectedBinders.length === contract.generics.length
+        ? contract.genericsAnchor
+        : rejectedBinders[0]?.anchor) ??
+        rejectedBinders[0]?.anchor ??
+        contract.anchor,
+    ])
+  if (contract.failures !== undefined)
+    found.push(['failure row', contract.failuresAnchor ?? contract.failures.anchor])
   if (contract.requirements !== undefined)
     found.push(['requirement row', contract.requirements.anchor])
   if (contract.constraints.length > 0)
-    found.push(['where clause', contract.constraints[0]?.anchor ?? contract.anchor])
+    found.push([
+      'where clause',
+      contract.constraintsAnchor ?? contract.constraints[0]?.anchor ?? contract.anchor,
+    ])
   if (direction === 'Foreign' && body._tag === 'CallableBody' && body.block !== undefined)
     found.push(['body', body.block.anchor])
-  if (direction === 'Export' && contract.unsafe) found.push(['unsafe', contract.anchor])
+  if (direction === 'Export' && contract.unsafe)
+    found.push(['unsafe', contract.unsafeAnchor ?? contract.anchor])
   return Object.freeze(found)
 }
 
@@ -3843,7 +3872,8 @@ const collectModule = (module: ModuleClosure.Module): ModuleHeaders => {
     if (native === undefined && functionKind === 'Ordinary' && failureRow.fact.anchor !== undefined)
       diagnostics.push(Diagnostic.failureChannelOnOrdinary(context.spanOf(failureRow.fact.anchor)))
     if (native !== undefined) diagnostics.push(...native.diagnostics)
-    const retainedBody = foreign === undefined ? bodyTemplate(lowered, declaration) : undefined
+    const retainedBody =
+      foreign === undefined ? bodyTemplate(lowered, declaration, staticFunction) : undefined
     return Object.freeze({
       _tag: 'FunctionDeclaration',
       lifetimeElaboration: typeParameters.lifetimeContext,
@@ -4041,7 +4071,7 @@ const collectModule = (module: ModuleClosure.Module): ModuleHeaders => {
       ...requirementRow.diagnostics,
       ...constraints.diagnostics,
     )
-    const retainedBody = bodyTemplate(lowered, member)
+    const retainedBody = bodyTemplate(lowered, member, contract.static)
     return Object.freeze({
       _tag: 'FunctionDeclaration' as const,
       phase: contract.static ? ('Static' as const) : ('Runtime' as const),

@@ -429,7 +429,7 @@ it('constructs typed TIR with canonical call targets and normalized contracts', 
   if (body?._tag !== 'Call') return
   assert.deepEqual(body.target, {
     _tag: 'CanonicalDeclarationId',
-    module: 'golden://accepted.silk',
+    module: 'golden/accepted.silk',
     name: 'identity',
   })
   assert.strictEqual(body.type, 'i32')
@@ -504,7 +504,7 @@ fn ready() -> Status { return Status.Ready }`,
   if (conversion?._tag === 'EnumValue') {
     assert.deepEqual(conversion.enum, {
       _tag: 'CanonicalDeclarationId',
-      module: 'tir://enum-values.silk',
+      module: 'tir/enum-values.silk',
       name: 'Status',
     })
     assert.strictEqual(conversion.intrinsic.name, 'enumValue')
@@ -522,12 +522,12 @@ fn ready() -> Status { return Status.Ready }`,
   if (member?._tag === 'EnumMember') {
     assert.strictEqual(member.member.name, 'Ready')
     assert.strictEqual(member.discriminant, 1n)
-    assert.strictEqual(Type.encode(member.type), 'tir://enum-values.silk.Status')
+    assert.strictEqual(Type.encode(member.type), 'tir/enum-values.silk.Status')
   }
   const encoded = Tir.encode(result.tir)
-  assert.include(encoded, 'enum-value tir://enum-values.silk.Status via Intrinsic.enumValue : i8')
-  assert.include(encoded, 'enum-equals tir://enum-values.silk.Status : bool')
-  assert.include(encoded, 'enum-member tir://enum-values.silk.Status.Ready discriminant=1')
+  assert.include(encoded, 'enum-value tir/enum-values.silk.Status via Intrinsic.enumValue : i8')
+  assert.include(encoded, 'enum-equals tir/enum-values.silk.Status : bool')
+  assert.include(encoded, 'enum-member tir/enum-values.silk.Status.Ready discriminant=1')
 })
 
 it('retains scalar enum pattern identities and nominal scrutinee type in typed TIR', () => {
@@ -546,7 +546,7 @@ fn inspect(value: Status) -> i32 {
   if (match?._tag !== 'Match') return
   assert.notStrictEqual(match.scrutinee._tag, 'Unavailable')
   if (match.scrutinee._tag === 'Unavailable') return
-  assert.strictEqual(Type.encode(match.scrutinee.type), 'tir://enum-match.silk.Status')
+  assert.strictEqual(Type.encode(match.scrutinee.type), 'tir/enum-match.silk.Status')
   assert.deepEqual(
     match.members.map((member) => ({
       tag: member._tag,
@@ -554,8 +554,8 @@ fn inspect(value: Status) -> i32 {
       type: Type.encode(member.type),
     })),
     [
-      { tag: 'EnumMember', name: 'Unknown', type: 'tir://enum-match.silk.Status' },
-      { tag: 'EnumMember', name: 'Ready', type: 'tir://enum-match.silk.Status' },
+      { tag: 'EnumMember', name: 'Unknown', type: 'tir/enum-match.silk.Status' },
+      { tag: 'EnumMember', name: 'Ready', type: 'tir/enum-match.silk.Status' },
     ],
   )
   assert.deepEqual(
@@ -1086,7 +1086,7 @@ it('retains effect blocks as lazy statement regions with canonical captures', ()
       : Tir.effectRunnerId(binding.initializer.site.owner, binding.initializer.site),
     {
       _tag: 'CanonicalDeclarationId',
-      module: 'tir://effect-block.silk',
+      module: 'tir/effect-block.silk',
       name: 'main$effect$0',
     },
   )
@@ -1096,7 +1096,7 @@ it('retains effect blocks as lazy statement regions with canonical captures', ()
   )
   assert.include(
     Tir.encode(result.tir),
-    'effect-block site=effect:declaration:tir://effect-block.silk:main:site:',
+    'effect-block site=effect:declaration:tir/effect-block.silk:main:site:',
   )
   assert.include(Tir.encode(result.tir), 'access=exclusive')
 })

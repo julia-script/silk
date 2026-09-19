@@ -1230,7 +1230,9 @@ const staticTextSpan = (
   const evaluated = context.expressionSpans.get(fact)
   if (evaluated !== undefined) return evaluated
   if (fact._tag === 'Call' && fact.staticTextSpan !== undefined) return fact.staticTextSpan
-  if (fact._tag === 'StaticText') return context.spanOf(fact.anchor)
+  // Caller provenance points inside the literal the caller wrote, not at the expression the fact
+  // is anchored to once the value has flowed through a parameter.
+  if (fact._tag === 'StaticText') return context.spanOf(fact.literal ?? fact.anchor)
   if (fact._tag === 'Move') return staticTextSpan(fact.subject, context)
   if (fact._tag === 'Identifier') {
     if (fact.reference._tag === 'Resolved')
@@ -1265,7 +1267,8 @@ export const staticTextOrigin = (
   const evaluated = context.expressionOrigins.get(fact)
   if (evaluated !== undefined) return evaluated
   if (fact._tag === 'Call' && fact.staticTextOrigin !== undefined) return fact.staticTextOrigin
-  if (fact._tag === 'StaticText') return sourceTextOrigin(context.spanOf(fact.anchor), fact.data)
+  if (fact._tag === 'StaticText')
+    return sourceTextOrigin(context.spanOf(fact.literal ?? fact.anchor), fact.data)
   if (fact._tag === 'Move') return staticTextOrigin(fact.subject, context)
   if (fact._tag === 'Identifier') {
     if (fact.reference._tag === 'Resolved')

@@ -19,7 +19,7 @@ import * as StaticEvaluation from './StaticEvaluation.js'
 import * as StaticValue from './StaticValue.js'
 import type * as AuthoredHir from './AuthoredHir.js'
 import * as AuthoredIdentity from './AuthoredIdentity.js'
-import * as AuthoredLowering from './AuthoredLowering.js'
+import * as AuthoredWalk from './AuthoredWalk.js'
 import * as SemanticContext from './SemanticContext.js'
 import type * as Target from './Target.js'
 import * as Type from './Type.js'
@@ -1014,10 +1014,10 @@ const blockHasStaticControlFlow = (block: AuthoredHir.Block): boolean =>
 
 /** Whether the authored body behind one declaration fact selects on static control flow. */
 const hasStaticControlFlow = (
-  input: { readonly result: Elaboration.Result },
+  module: AuthoredHir.Module,
   declaration: DeclarationFacts.DeclarationFact,
 ): boolean => {
-  const authored = AuthoredLowering.declarationOf(input.result.authored, declaration.owner)
+  const authored = AuthoredWalk.declarationOf(module, declaration.owner)
   return authored?.body._tag === 'CallableBody' && authored.body.block !== undefined
     ? blockHasStaticControlFlow(authored.body.block)
     : false
@@ -1036,8 +1036,11 @@ export const selectionReason = (
   const reason = (): SelectionReason | undefined => {
     if (declaration.parameters.some((parameter) => parameter.phase === 'Static'))
       return 'StaticParameter'
+    // The authored body decides static control flow before any elaboration result exists.
+    const scope = NameResolution.scopeOf(self[stateSymbol].resolution, declaration.id.sourceId)
+    if (scope !== undefined && hasStaticControlFlow(scope.context.module, declaration))
+      return 'StaticControlFlow'
     const input = moduleInput(self, declaration)
-    if (input !== undefined && hasStaticControlFlow(input, declaration)) return 'StaticControlFlow'
     const fact =
       input === undefined
         ? undefined

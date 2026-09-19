@@ -1,3 +1,4 @@
+import type * as AuthoredHir from './AuthoredHir.js'
 import * as AuthoredIdentity from './AuthoredIdentity.js'
 import * as AuthoredLowering from './AuthoredLowering.js'
 import type * as DeclarationFacts from './DeclarationFacts.js'
@@ -32,6 +33,12 @@ interface Dependency {
 
 interface Entry {
   readonly declaration: DeclarationFacts.DeclarationFact
+  /**
+   * The authored declaration behind this body. Declaration facts are rebuilt every revision, so
+   * only the authored node — which the closure shares whenever a module's source is unchanged —
+   * can witness that a body's own input is untouched and its cached facts need no rebinding.
+   */
+  readonly authoredDeclaration: AuthoredHir.Declaration
   readonly context: SemanticContext.SemanticContext
   readonly index: DeclarationIndex.Index
   readonly implementation: string
@@ -63,6 +70,13 @@ export interface BodyQuery {
   readonly owners: WeakMap<object, string>
   readonly previous: ReadonlyMap<string, Entry>
   readonly previousModules: ReadonlyMap<string, Elaboration.Result>
+  /**
+   * Whether each module of this revision shares its authored lowering with the previous revision.
+   * A shared lowering is the only evidence that a module's declarations kept their authored
+   * positions, because every declaration fact is rebuilt each revision. Resolved for the whole
+   * closure up front, so a body may consult a module whose own bodies are not yet checked.
+   */
+  readonly sharedModules: ReadonlyMap<string, boolean>
   readonly entries: Map<string, Entry>
   readonly reuse: WeakMap<
     Elaboration.FunctionFact,
@@ -113,8 +127,12 @@ const membersOf = (
 export const make = (
   index: DeclarationIndex.Index,
   previous: Iterable<Elaboration.Result> = [],
+  current: Iterable<AuthoredLowering.Lowered> = [],
 ): BodyQuery => {
   const previousResults = [...previous]
+  const previousLowerings = new Map(
+    previousResults.map((result) => [result.authored.module.owner.module, result.authored]),
+  )
   const members = membersOf(index)
   const owners = new WeakMap<object, string>()
   for (const [key, member] of members)
@@ -154,6 +172,12 @@ export const make = (
     ),
     previousModules: new Map(
       previousResults.map((result) => [result.authored.module.owner.module, result]),
+    ),
+    sharedModules: new Map(
+      [...current].map((lowered) => {
+        const module = lowered.module.owner.module
+        return [module, previousLowerings.get(module) === lowered] as const
+      }),
     ),
     entries: new Map(),
     reuse: new WeakMap(),
@@ -318,6 +342,10 @@ const correspondence = (previous: Entry, self: BodyQuery): SemanticRebinding.Sem
   return result
 }
 
+/** The authored module owning one dependency key's member fact, absent when the key is unresolved. */
+const dependencyModule = (self: BodyQuery, key: string): string | undefined =>
+  self.members.get(key)?.anchor.owner.module
+
 const validateDependencies = (
   self: BodyQuery,
   dependencies: ReadonlyArray<Dependency>,
@@ -359,6 +387,7 @@ export const check = (
   const key = memberKey(declaration)
   const prior = self.previous.get(key)
   const signature = self.signatures.get(key) ?? ModuleSurface.memberSignature(declaration)
+  const declared = authoredDeclaration(authored, declaration)
   const bodyKey = implementation(authored, declaration)
   const scopeKey = scopeSignature(authored, declaration, scope)
   const valid =
@@ -373,13 +402,17 @@ export const check = (
   let hidden: ReadonlyArray<Elaboration.FunctionFact>
   if (valid && prior !== undefined) {
     self.work.reused += 1
-    const previousMembers = membersOf(prior.index)
-    // An anchor is stable across revisions, so identity of the fact object decides reuse.
+    // Declaration and member facts are rebuilt every revision, so their object identity never
+    // survives one; only the authored lowering is shared, and only for a byte-identical source.
+    // A shared authored declaration therefore witnesses that this body kept its own positions, and
+    // a shared lowering behind every consumed member witnesses the same for its inputs. Together
+    // they mean the cached facts still name live anchors, so reuse needs no rebinding.
     const unchanged =
-      prior.declaration === declaration &&
-      prior.dependencies.every(
-        (dependency) => previousMembers.get(dependency.key) === self.members.get(dependency.key),
-      )
+      prior.authoredDeclaration === declared &&
+      prior.dependencies.every((dependency) => {
+        const module = dependencyModule(self, dependency.key)
+        return module !== undefined && self.sharedModules.get(module) === true
+      })
     const rebinding = unchanged ? undefined : correspondence(prior, self)
     if (rebinding !== undefined) {
       SemanticRebinding.pairPresentations(rebinding, prior.context, context)
@@ -414,6 +447,7 @@ export const check = (
   }
   self.entries.set(key, {
     declaration,
+    authoredDeclaration: declared,
     context,
     index: self.index,
     implementation: bodyKey,

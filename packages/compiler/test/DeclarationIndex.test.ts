@@ -838,7 +838,10 @@ pub fn render(static template: string, value: i32) -> i32 {
     assert.strictEqual(parse?.bodyTemplate?._tag, 'FunctionBodyTemplate')
     assert.strictEqual(render?.bodyTemplate?._tag, 'FunctionBodyTemplate')
     assert.include(parse?.bodyTemplate?.canonical ?? '', 'ReturnStatement')
-    assert.include(render?.bodyTemplate?.canonical ?? '', 'StaticKeyword')
+    // The authored encoding spells a binding's markers positionally as `name mutable static`,
+    // so the retained static binding reads `"parsed" false true` rather than naming a keyword.
+    assert.include(render?.bodyTemplate?.canonical ?? '', 'BindingStatement')
+    assert.include(render?.bodyTemplate?.canonical ?? '', 'Name( [ ] "parsed" ) false true')
   }),
 )
 

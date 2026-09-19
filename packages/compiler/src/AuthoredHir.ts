@@ -206,6 +206,26 @@ export interface CallableContract extends Node {
   readonly environment: ReadonlyArray<Lifetime> | undefined
   readonly unsafe: boolean
   readonly static: boolean
+  /**
+   * Where each written modifier keyword sits, so a diagnostic about one modifier names that word
+   * rather than the whole header. Present exactly when the matching flag is set; a flag a header
+   * only implies carries no anchor.
+   */
+  readonly effectAnchor: Anchor | undefined
+  readonly unsafeAnchor: Anchor | undefined
+  readonly staticAnchor: Anchor | undefined
+  /** The written binder list including its brackets, so a diagnostic can name the list as a whole. */
+  readonly genericsAnchor: Anchor | undefined
+  /**
+   * The written failure row including its `!` marker. `failures` holds only the row's type, whose
+   * own anchor stops short of the marker.
+   */
+  readonly failuresAnchor: Anchor | undefined
+  /**
+   * The written `where` clause including its keyword. `constraints` holds only the individual
+   * constraints, whose anchors stop short of the keyword.
+   */
+  readonly constraintsAnchor: Anchor | undefined
 }
 
 export interface Property extends Node {
@@ -526,6 +546,11 @@ export interface Variant extends Node {
   readonly _tag: 'Variant'
   readonly name: Name
   readonly fields: ReadonlyArray<Field>
+  /**
+   * Whether the variant was written with a field block. A variant with no braces is a unit; one
+   * with empty braces is a distinct mistake, so `fields` alone cannot tell them apart.
+   */
+  readonly braces: boolean
 }
 
 export interface Linkage extends Node {
@@ -767,6 +792,12 @@ export const fields = freezeFieldRegistry({
     'environment',
     'unsafe',
     'static',
+    'effectAnchor',
+    'unsafeAnchor',
+    'staticAnchor',
+    'genericsAnchor',
+    'failuresAnchor',
+    'constraintsAnchor',
   ],
   Property: [...nodeFields, 'name', 'value'],
   PropertyClause: [...nodeFields, 'namespace', 'operation', 'properties'],
@@ -837,7 +868,7 @@ export const fields = freezeFieldRegistry({
   ImportMember: [...nodeFields, 'name', 'alias'],
   Field: [...nodeFields, 'name', 'public', 'type'],
   EnumMember: [...nodeFields, 'name', 'value'],
-  Variant: [...nodeFields, 'name', 'fields'],
+  Variant: [...nodeFields, 'name', 'fields', 'braces'],
   Linkage: [...nodeFields, 'direction', 'abi', 'symbol'],
   ImportHeader: [...nodeFields, 'public', 'path', 'alias', 'members'],
   ConditionalHeader: [...nodeFields, 'condition'],
@@ -898,7 +929,18 @@ export const optionalFields = freezeFieldRegistry({
   SliceType: ['lifetime'],
   ReferenceType: ['lifetime', 'role'],
   CallableType: ['environment'],
-  CallableContract: ['result', 'failures', 'requirements', 'environment'],
+  CallableContract: [
+    'result',
+    'failures',
+    'requirements',
+    'environment',
+    'effectAnchor',
+    'unsafeAnchor',
+    'staticAnchor',
+    'genericsAnchor',
+    'failuresAnchor',
+    'constraintsAnchor',
+  ],
   IntegerLiteral: ['suffix'],
   FloatingLiteral: ['suffix'],
   MemberExpression: ['fields'],

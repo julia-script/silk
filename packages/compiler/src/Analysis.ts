@@ -418,22 +418,22 @@ export const explicitLifetimes = (
               : AuthoredWalk.declarationOf(semantic.module, declaration.anchor.owner)
           if (semantic === undefined || authored === undefined) return []
           return [
-                {
-                  context: declaration.lifetimeElaboration,
-                  semantic,
-                  authored,
-                  header: spans.spanOf(declaration.anchor),
-                  body:
-                    'bodyTemplate' in declaration && declaration.bodyTemplate !== undefined
-                      ? spans.spanOf(declaration.bodyTemplate.anchor)
-                      : undefined,
-                  executable:
-                    declaration._tag === 'FunctionDeclaration' ||
-                    declaration._tag === 'ServiceOperation'
-                      ? DeclarationFacts.executableLifetimes(declaration)
-                      : undefined,
-                },
-              ]
+            {
+              context: declaration.lifetimeElaboration,
+              semantic,
+              authored,
+              header: spans.spanOf(declaration.anchor),
+              body:
+                'bodyTemplate' in declaration && declaration.bodyTemplate !== undefined
+                  ? spans.spanOf(declaration.bodyTemplate.anchor)
+                  : undefined,
+              executable:
+                declaration._tag === 'FunctionDeclaration' ||
+                declaration._tag === 'ServiceOperation'
+                  ? DeclarationFacts.executableLifetimes(declaration)
+                  : undefined,
+            },
+          ]
         },
       )
     }) ?? []

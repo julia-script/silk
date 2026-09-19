@@ -397,6 +397,21 @@ const missing = (
 const hasToken = (parent: SyntaxTree.Node, kind: Token.TokenKind): boolean =>
   token(parent, kind) !== undefined
 
+/**
+ * Presents one written modifier keyword at its own cursor, so a diagnostic about that modifier can
+ * name the keyword alone. Absent when the header does not spell it.
+ */
+const modifierAnchor = (
+  draft: Draft,
+  cursor: Cursor,
+  parent: SyntaxTree.Node,
+  kind: Token.TokenKind,
+  role: string,
+): AuthoredHir.Anchor | undefined => {
+  const marker = token(parent, kind)
+  return marker === undefined ? undefined : node(draft, child(cursor, role), marker.span).anchor
+}
+
 const spelled = (
   draft: Draft,
   parent: SyntaxTree.Node,
@@ -1147,11 +1162,8 @@ const callableContract = (
   const own = child(cursor, 'contract')
   const base = node(draft, own, header.span)
   const parts = nodes(header)
-  const generics = genericParameters(
-    draft,
-    own,
-    parts.find((n) => n.kind === 'TypeParameterList'),
-  )
+  const genericList = parts.find((n) => n.kind === 'TypeParameterList')
+  const generics = genericParameters(draft, own, genericList)
   const { parameters, variadic } = parameterList(
     draft,
     own,
@@ -1183,6 +1195,21 @@ const callableContract = (
         : lifetimesIn(draft, child(own, 'environment'), environment),
     unsafe: hasToken(header, 'UnsafeKeyword'),
     static: hasToken(header, 'StaticKeyword'),
+    effectAnchor: modifierAnchor(draft, own, header, 'EffectKeyword', 'effectMarker'),
+    unsafeAnchor: modifierAnchor(draft, own, header, 'UnsafeKeyword', 'unsafeMarker'),
+    staticAnchor: modifierAnchor(draft, own, header, 'StaticKeyword', 'staticMarker'),
+    genericsAnchor:
+      genericList === undefined
+        ? undefined
+        : node(draft, child(own, 'genericList'), spanOf(genericList)).anchor,
+    failuresAnchor:
+      failures === undefined
+        ? undefined
+        : node(draft, child(own, 'failureRow'), spanOf(failures)).anchor,
+    constraintsAnchor:
+      where === undefined
+        ? undefined
+        : node(draft, child(own, 'whereClause'), spanOf(where)).anchor,
   }
 }
 
@@ -3020,6 +3047,7 @@ const declarationParts = (
                     _tag: 'Variant',
                     name: nameIn(draft, own, variant, identifierKinds),
                     fields: fields(draft, own, variant, 'UnionVariantField'),
+                    braces: hasToken(variant, 'LeftBrace'),
                   },
                   damage(draft, own, variant),
                 )

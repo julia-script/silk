@@ -21,6 +21,16 @@ const emptyBlock = (anchor: AuthoredHir.Anchor): AuthoredHir.Block =>
     statements: Object.freeze([]),
   })
 
+/**
+ * The canonical module name semantic comparisons use.
+ *
+ * `presentation.sourceId` is the loaded source's id, which fixtures and virtual sources spell with
+ * a scheme (`tir://x.silk`). Declaration identities, name resolution and visibility all key on the
+ * authored owner's canonical module name, so semantic comparisons must read it from the module.
+ */
+export const moduleName = (context: SemanticContext.SemanticContext): string =>
+  context.module.owner.module
+
 /** The authored declaration one owner identity names, at any nesting depth of the module. */
 export const declarationOf = (
   module: AuthoredHir.Module,

@@ -320,6 +320,12 @@ export const forHeader = (
         return
       }
       case 'OpaqueResultType': {
+        for (const parameter of type.binders) {
+          if (parameter._tag === 'RowParameter') continue
+          for (const bound of parameter.bounds)
+            if (bound._tag !== 'Lifetime')
+              walkType(bound, scope, output, defaultOutput, allocate, quantified)
+        }
         walkType(type.result, scope, output, defaultOutput, allocate, quantified)
         return
       }

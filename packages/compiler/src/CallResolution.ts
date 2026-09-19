@@ -476,7 +476,7 @@ export const analyzeCallTypeArguments = (
         : NameResolution.resolveItem(
             nameResolution,
             resolution.index,
-            context.presentation.sourceId,
+            AuthoredWalk.moduleName(context),
             rolePath,
           )
     const roleDeclaration =
@@ -521,7 +521,7 @@ export const analyzeCallTypeArguments = (
               const target = NameResolution.resolveType(
                 nameResolution,
                 resolution.index,
-                context.presentation.sourceId,
+                AuthoredWalk.moduleName(context),
                 rawPath.path,
               ).fact
               return target._tag === 'Resolved' && Type.isNominal(target.type)
@@ -544,7 +544,7 @@ export const analyzeCallTypeArguments = (
         DeclarationResolution.resolveTypeFact(
           context.spanOf,
           resolution.index,
-          context.presentation.sourceId,
+          AuthoredWalk.moduleName(context),
           member,
           (module, path) =>
             NameResolution.resolveType(nameResolution, resolution.index, module, path),
@@ -589,7 +589,7 @@ export const analyzeCallTypeArguments = (
     const resolved = DeclarationResolution.resolveTypeFact(
       context.spanOf,
       resolution.index,
-      context.presentation.sourceId,
+      AuthoredWalk.moduleName(context),
       raw.fact,
       (module, path) => NameResolution.resolveType(nameResolution, resolution.index, module, path),
     )

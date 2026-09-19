@@ -96,6 +96,12 @@ export const broadModule = Effect.fnUntraced(function* (): Effect.fn.Return<
     environment: [],
     unsafe: false,
     static: false,
+    effectAnchor: undefined,
+    unsafeAnchor: undefined,
+    staticAnchor: undefined,
+    genericsAnchor: undefined,
+    failuresAnchor: undefined,
+    constraintsAnchor: undefined,
   })
   const linkage = (owner: AuthoredIdentity.Identity): AuthoredHir.Linkage => ({
     ...node(owner, 'linkage'),
@@ -237,6 +243,7 @@ export const broadModule = Effect.fnUntraced(function* (): Effect.fn.Return<
               _tag: 'Variant',
               name: name(owner, 'Empty', 'variant-name'),
               fields: [],
+              braces: false,
             },
           ],
         }
