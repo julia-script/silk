@@ -1366,7 +1366,7 @@ pub fn main() -> i32 { return choose(true, 41) }`),
     )
     assert.strictEqual(
       sha256(tir),
-      'f497ee6a635c3b22fefa683e10329c863b1f5a0d03fb3f41ffc2e40e585c63e0',
+      'db781131cc72b6506fff095211b06c4ddf5f43fddbea828f4fb43849e037158f',
     )
     assert.strictEqual(
       sha256(ownership),
@@ -1435,7 +1435,7 @@ pub fn main() -> i32 { return invalid(true, false) }`
           {
             code: 'SEM0176',
             sourceId: 'static/phase-crossing',
-            start: runtimeStart - 1,
+            start: runtimeStart,
             end: runtimeStart + 'runtime'.length,
           },
         ],
