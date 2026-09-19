@@ -1961,7 +1961,7 @@ export const modules = [
     module: 'silk/reflect',
     path: 'silk/reflect.silk',
     sourceIdentity: 'silk/reflect',
-    digest: '51a1c7d36bf5032df0bacd8d2e0e3a28e6a00130792583af2acd7fd318ed6bf0',
+    digest: '01135f20d0dc1332f42512f64d437a97dab2d9d9c3c0bfaae2bc6cea0a914146',
     documentation: 'silk/reflect.silk',
     staticInventory: [],
     runtimeInventory: [

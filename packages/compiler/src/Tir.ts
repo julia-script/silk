@@ -215,7 +215,8 @@ export const anonymousCallableSite = (self: DeclarationFacts.CanonicalId): numbe
  * declaration and callable site, never from byte offsets, so trivia edits keep it stable.
  */
 export const hiddenDeclarationOrdinal = (enclosing: number, site: number): number =>
-  // ponytail: 65536 sites per declaration; nested anonymous bodies are rejected before admission.
+  // ponytail: injective while site < 65536 and enclosing < 2^37; sites are per declaration and
+  // enclosing ordinals are sequential per snapshot, so both bounds hold by construction.
   0x70000000 + enclosing * 65536 + site
 
 export type CallableTarget =

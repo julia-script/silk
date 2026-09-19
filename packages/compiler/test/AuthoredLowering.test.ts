@@ -6,6 +6,7 @@ import type * as AuthoredHir from '../src/AuthoredHir.js'
 import * as AuthoredIdentity from '../src/AuthoredIdentity.js'
 import * as AuthoredLowering from '../src/AuthoredLowering.js'
 import * as AuthoredModule from '../src/AuthoredModule.js'
+import * as AuthoredPresentation from '../src/AuthoredPresentation.js'
 import * as Lexer from '../src/Lexer.js'
 import * as Parser from '../src/Parser.js'
 import * as SourceFile from '../src/SourceFile.js'
@@ -260,6 +261,20 @@ it.effect('lowers every syntax category into one published source-free module', 
     assert.isTrue(presentation.entries.some((entry) => entry.documentation === '/// A point.'))
     assert.isTrue(presentation.entries.some((entry) => entry.spelling === '18446744073709551615'))
     assert.deepEqual(presentation.diagnostics, [])
+    // Anchors index the current revision: every declaration header resolves to a source span.
+    const index = AuthoredPresentation.index(presentation)
+    for (const declaration of module.declarations) {
+      const span = index.span(declaration.header.anchor)
+      assert.isDefined(span)
+      assert.strictEqual(span?.sourceId, presentation.sourceId)
+    }
+    const first = module.declarations[0] ?? unreachable('expected a declaration')
+    assert.isUndefined(
+      index.span({
+        ...first.header.anchor,
+        path: [{ _tag: 'LocalSegment', role: 'nowhere', occurrence: 0 }],
+      }),
+    )
   }),
 )
 
@@ -423,6 +438,21 @@ fn identity(value: i32)   ->  i32 { return value }`,
       yield* bodyBytes(base.module, 'identity'),
       yield* bodyBytes(edited.module, 'identity'),
     )
+    // Reuse keys normalize lifetimes per binding scope: `for<'x>` binders are alpha-equivalent and
+    // shadow header lifetimes, while free lifetimes keep their spelling.
+    const key = (lowered: AuthoredLowering.Lowered) =>
+      AuthoredLowering.canonicalBody(lowered, declarationNamed(lowered.module, 'pick'))
+    const inner = (binder: string, environment: string) =>
+      lower(
+        `pick-${binder}-${environment}`,
+        `fn pick<'a, 'b>(p: &'a u8, q: &'b u8) -> u32 { let g: for<'${binder}> fn<'${environment}>(&'${binder} u8) -> u32 = h  return 1 }`,
+      )
+    assert.strictEqual(key(yield* inner('a', 'static')), key(yield* inner('z', 'static')))
+    assert.notStrictEqual(key(yield* inner('a', 'b')), key(yield* inner('b', 'a')))
+    assert.notStrictEqual(
+      key(yield* lower('free-a', "fn pick() -> u32 { let g: &'a u8 = h  return 1 }")),
+      key(yield* lower('free-b', "fn pick() -> u32 { let g: &'b u8 = h  return 1 }")),
+    )
   }),
 )
 
@@ -440,10 +470,12 @@ fn healthy() -> i32 { return answer(0) }
 it.effect('matches the structural golden for a representative module', () =>
   Effect.gen(function* () {
     const { module } = yield* lower('structural', structural)
+    // A digest of the deterministic rendering pins the whole shape without a 4,000-line dump;
+    // regenerate with `render(module)` when authored vocabulary or anchoring changes on purpose.
     assert.strictEqual(
-      `${render(module)}
+      `${yield* AuthoredEncoding.digest([...encoder.encode(render(module))])}
 `,
-      golden('authored-lowering.txt'),
+      golden('authored-lowering.sha256'),
     )
   }),
 )

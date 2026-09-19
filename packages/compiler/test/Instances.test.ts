@@ -24,7 +24,7 @@ import * as Match from '../src/Match.js'
 import * as Mir from '../src/Mir.js'
 import * as MirEncoding from '../src/MirEncoding.js'
 import * as MirVerification from '../src/MirVerification.js'
-import * as Realization from '../src/Realization.js'
+import * as Preparation from '../src/Preparation.js'
 import * as Type from '../src/Type.js'
 import * as SuspensionMode from '../src/SuspensionMode.js'
 import { unreachable } from './support/raise.js'
@@ -237,9 +237,12 @@ it.effect('roots native libraries at C exports without selecting main', () =>
 export "C" fn increment(value: i32) -> i32 { return helper(value) }
 pub fn main() -> i32 { return 0 }`),
     )
-    const prepared = yield* Realization.prepare(frontend, 'aarch64-apple-darwin', {
-      artifactKind: 'NativeSharedLibrary',
-    }).pipe(Effect.provide(SourceResolver.empty))
+    const prepared = Preparation.preparation(
+      yield* Preparation.promote(frontend, 'aarch64-apple-darwin', {
+        artifactKind: 'NativeSharedLibrary',
+        emission: true,
+      }).pipe(Effect.provide(SourceResolver.empty)),
+    )
     assert.strictEqual(prepared._tag, 'Prepared')
     if (prepared._tag !== 'Prepared') return
     assert.deepStrictEqual(
@@ -267,9 +270,12 @@ it.effect('emits an empty native library without retaining unrelated public func
       'library/Empty',
       ascii('pub fn helper() -> i32 { return 42 }'),
     )
-    const prepared = yield* Realization.prepare(frontend, 'aarch64-apple-darwin', {
-      artifactKind: 'NativeStaticLibrary',
-    }).pipe(Effect.provide(SourceResolver.empty))
+    const prepared = Preparation.preparation(
+      yield* Preparation.promote(frontend, 'aarch64-apple-darwin', {
+        artifactKind: 'NativeStaticLibrary',
+        emission: true,
+      }).pipe(Effect.provide(SourceResolver.empty)),
+    )
     assert.strictEqual(prepared._tag, 'Prepared')
     if (prepared._tag === 'Prepared') {
       assert.deepEqual(prepared.program.functions, [])
@@ -1932,8 +1938,10 @@ pub fn main() -> i32 { return run Effect.suspend(effect { return 42 }) }
       suspended.index.modules.some((module) => module.module === 'silk/execution_storage'),
     )
     assert.isTrue(suspended.toolingModules.has('silk/execution_storage'))
-    const prepared = yield* Realization.prepare(suspended, 'wasm32-unknown-unknown').pipe(
-      Effect.provide(SourceResolver.empty),
+    const prepared = Preparation.preparation(
+      yield* Preparation.promote(suspended, 'wasm32-unknown-unknown', { emission: true }).pipe(
+        Effect.provide(SourceResolver.empty),
+      ),
     )
     assert.strictEqual(prepared._tag, 'Prepared')
     if (prepared._tag === 'Prepared') {

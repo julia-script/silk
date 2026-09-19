@@ -1,7 +1,6 @@
 import * as CompilerTrace from './CompilerTrace.js'
 import * as NativeAssemblyPlanning from './NativeAssemblyPlanning.js'
-import * as ArtifactPlan from './ArtifactPlan.js'
-import * as ToolchainIntegrity from './ToolchainIntegrity.js'
+import type * as ArtifactPlan from './ArtifactPlan.js'
 import * as ArtifactComposition from './ArtifactComposition.js'
 import type * as ModuleClosure from './ModuleClosure.js'
 import * as ModuleSelection from './ModuleSelection.js'
@@ -216,7 +215,7 @@ const checkForeignPlanning = Effect.fn('Realization.checkForeignPlanning')(
     Effect.sync(() => ForeignPlanning.check(program, target)),
 )
 
-function discoverAndLower(
+export function discoverAndLower(
   self: Frontend,
   targetId: string | undefined,
   completion: ProfileBootstrap.Completion | undefined,
@@ -225,7 +224,7 @@ function discoverAndLower(
     readonly optimization?: 'debug' | 'release' | 'release-with-debug'
   },
 ): Effect.Effect<Realization>
-function discoverAndLower(
+export function discoverAndLower(
   self: Frontend,
   targetId: string | undefined,
   completion: ProfileBootstrap.Completion | undefined,
@@ -235,7 +234,7 @@ function discoverAndLower(
   },
   prepareForEmission: true,
 ): Effect.Effect<Preparation>
-function discoverAndLower(
+export function discoverAndLower(
   self: Frontend,
   targetId: string | undefined,
   completion: ProfileBootstrap.Completion | undefined,
@@ -658,205 +657,12 @@ export const configure = Effect.fn('Realization.configure')(function* (
   }
 })
 
-/** Derives immutable target/runtime facts after source configuration completes. */
-export const realize = Effect.fn('Realization.realize')(function* (
-  self: Frontend,
-  targetId: string | ModuleClosure.CompilationRequest['configuration'] = self.requestedTarget,
-  options: Options = {},
-): Effect.fn.Return<
-  Realization & { readonly frontend: Frontend },
-  ModuleClosure.ModuleClosureError,
-  SourceResolver.SourceResolver
-> {
-  let ready = yield* configure(
-    self,
-    typeof targetId === 'string' ? targetId : undefined,
-    undefined,
-    undefined,
-    typeof targetId === 'object' ? targetId : undefined,
-  )
-  let realized = yield* discoverAndLower(ready.frontend, ready.targetId, ready.completion, options)
-  if (
-    realized.mir._tag === 'Available' &&
-    realized.profile !== undefined &&
-    ExecutionStorageComponent.demanded(realized.mir.value)
-  ) {
-    const selection = yield* Effect.result(
-      ExecutionStorageComponent.select(ready.frontend.composition?.components ?? []),
-    )
-    let failure = Result.isFailure(selection) ? selection.failure : undefined
-    if (Result.isSuccess(selection)) {
-      const expanded = yield* FrontendActor.withComponents(
-        ready.frontend,
-        realized.profile,
-        [...new Set(selection.success.bindings.map((binding) => binding.module))],
-        options,
-      )
-      ready = yield* configure(expanded, realized.profile.target.id)
-      realized = yield* discoverAndLower(ready.frontend, ready.targetId, ready.completion, options)
-      if (realized.mir._tag === 'Available') {
-        const component = yield* Effect.result(
-          ExecutionStorageComponent.resolve(selection.success, realized.mir.value),
-        )
-        if (Result.isFailure(component)) failure = component.failure
-        else
-          realized = {
-            ...realized,
-            mir: {
-              _tag: 'Available',
-              value: {
-                ...realized.mir.value,
-                executionStorage: component.success,
-              },
-            },
-          }
-      }
-    }
-    if (failure !== undefined) {
-      const span = ready.frontend.closure.sources.get(ready.frontend.closure.rootModule)
-      const rootSpan = ready.frontend.closure.modules.find((module) => module.name === span?.id)
-        ?.syntax.root.span
-      if (rootSpan === undefined) throw new RangeError('Storage selection lost application source')
-      return {
-        ...realized,
-        frontend: ready.frontend,
-        diagnostics: Diagnostic.merge(realized.diagnostics, [
-          Diagnostic.invalidConfiguration(failure, rootSpan),
-        ]),
-        mir: {
-          _tag: 'Unavailable',
-          error: new AnalysisUnavailable({
-            operation: 'Analysis.realize',
-            message: 'Execution storage component is unavailable',
-          }),
-        },
-      }
-    }
-  }
-  if (
-    realized.mir._tag !== 'Available' ||
-    realized.profile === undefined ||
-    ready.frontend.composition === undefined
-  )
-    return { ...realized, frontend: ready.frontend }
-  const plan = yield* Effect.result(
-    ArtifactPlan.make(
-      ready.frontend,
-      realized.profile,
-      ready.frontend.composition,
-      realized.mir.value,
-      'llvm-bitcode',
-      ToolchainIntegrity.installed().digest,
-    ),
-  )
-  if (Result.isSuccess(plan))
-    return Object.freeze({ ...realized, frontend: ready.frontend, artifactPlan: plan.success })
-  const span = ready.frontend.closure.modules.find(
-    (module) => module.name === ready.frontend.closure.rootModule,
-  )?.syntax.root.span
-  if (span === undefined) throw new RangeError('Artifact planning lost application span')
-  return Object.freeze({
-    ...realized,
-    frontend: ready.frontend,
-    diagnostics: Diagnostic.merge(realized.diagnostics, [
-      Diagnostic.invalidConfiguration(plan.failure, span),
-    ]),
-    mir: Object.freeze({
-      _tag: 'Unavailable',
-      error: new AnalysisUnavailable({
-        operation: 'Analysis.realize',
-        message: 'Native requirements are incompatible',
-      }),
-    }),
+/** The unavailable MIR state a sealed executable publishes when configuration rejects it. */
+export const unavailableMir = (message: string): Targeted<Mir.Module> =>
+  Object.freeze({
+    _tag: 'Unavailable',
+    error: new AnalysisUnavailable({ operation: 'Analysis.realize', message }),
   })
-})
-
-/** Prepares valid runtime facts for Driver while stopping at each artifact-production gate. */
-export const prepare = Effect.fn('Realization.prepare')(function* (
-  self: Frontend,
-  targetId: string | undefined = self.requestedTarget,
-  options: Options & {
-    readonly artifactKind?: ArtifactKind.ArtifactKind
-    readonly optimization?: 'debug' | 'release' | 'release-with-debug'
-  } = {},
-): Effect.fn.Return<Preparation, ModuleClosure.ModuleClosureError, SourceResolver.SourceResolver> {
-  let ready = yield* configure(self, targetId, options.artifactKind, options.optimization)
-  let prepared = yield* discoverAndLower(
-    ready.frontend,
-    ready.targetId,
-    ready.completion,
-    options,
-    true,
-  )
-  if (prepared._tag !== 'Prepared') return prepared
-  if (ExecutionStorageComponent.demanded(prepared.program)) {
-    const selection = yield* Effect.result(
-      ExecutionStorageComponent.select(prepared.composition.components),
-    )
-    let failure = Result.isFailure(selection) ? selection.failure : undefined
-    if (Result.isSuccess(selection)) {
-      const expanded = yield* FrontendActor.withComponents(
-        ready.frontend,
-        prepared.profile,
-        [...new Set(selection.success.bindings.map((binding) => binding.module))],
-        options,
-      )
-      ready = yield* configure(expanded, prepared.target.id)
-      prepared = yield* discoverAndLower(
-        ready.frontend,
-        ready.targetId,
-        ready.completion,
-        options,
-        true,
-      )
-      if (prepared._tag !== 'Prepared') return prepared
-      const component = yield* Effect.result(
-        ExecutionStorageComponent.resolve(selection.success, prepared.program),
-      )
-      if (Result.isFailure(component)) failure = component.failure
-      else
-        prepared = {
-          ...prepared,
-          program: { ...prepared.program, executionStorage: component.success },
-        }
-    }
-    if (failure !== undefined) {
-      const span = ready.frontend.closure.modules.find(
-        (module) => module.name === ready.frontend.closure.rootModule,
-      )?.syntax.root.span
-      if (span === undefined) throw new RangeError('Storage preparation lost application source')
-      return {
-        _tag: 'Rejected',
-        report: prepared.report,
-        diagnostics: Diagnostic.merge(prepared.diagnostics, [
-          Diagnostic.invalidConfiguration(failure, span),
-        ]),
-      }
-    }
-  }
-  const plan = yield* Effect.result(
-    ArtifactPlan.make(
-      ready.frontend,
-      prepared.profile,
-      prepared.composition,
-      prepared.program,
-      'llvm-bitcode',
-      ToolchainIntegrity.installed().digest,
-    ),
-  )
-  if (Result.isSuccess(plan)) return Object.freeze({ ...prepared, artifactPlan: plan.success })
-  const span = ready.frontend.closure.modules.find(
-    (module) => module.name === ready.frontend.closure.rootModule,
-  )?.syntax.root.span
-  if (span === undefined) throw new RangeError('Artifact planning lost application span')
-  return Object.freeze({
-    _tag: 'Rejected',
-    diagnostics: Diagnostic.merge(prepared.diagnostics, [
-      Diagnostic.invalidConfiguration(plan.failure, span),
-    ]),
-    report: prepared.report,
-  })
-})
 
 import { AnalysisUnavailable } from './AnalysisUnavailable.js'
 import * as ArtifactKind from './ArtifactKind.js'
@@ -867,9 +673,6 @@ import * as ExecutableProperty from './ExecutableProperty.js'
 import * as ForeignAvailability from './ForeignAvailability.js'
 import * as ForeignPlanning from './ForeignPlanning.js'
 import type { Frontend, Options } from './Frontend.js'
-import * as FrontendActor from './Frontend.js'
-import * as SourceResolver from './SourceResolver.js'
-import * as ExecutionStorageComponent from './ExecutionStorageComponent.js'
 import * as InstanceDiagnostics from './InstanceDiagnostics.js'
 import * as Instances from './Instances.js'
 import * as IntrinsicAvailability from './IntrinsicAvailability.js'

@@ -40,6 +40,22 @@ export const make = Effect.fn('AuthoredModule.make')(function* (
     try: () => structuredClone(draft),
     catch: (cause) => new AuthoredModuleError({ cause }),
   })
+  return deepFreeze(snapshot)
+})
+
+/**
+ * Publish a draft the producer relinquishes: validated and frozen in place, without the clone that
+ * `make` performs for callers who keep editing their draft. Lowering seals every module it builds,
+ * so its presentation anchors stay shared with the published nodes.
+ */
+export const seal = Effect.fn('AuthoredModule.seal')(function* (
+  draft: AuthoredHir.Module,
+): Effect.fn.Return<AuthoredHir.Module, AuthoredEncoding.AuthoredEncodingError> {
+  yield* AuthoredEncoding.validate(draft)
+  return deepFreeze(draft)
+})
+
+const deepFreeze = (snapshot: AuthoredHir.Module): AuthoredHir.Module => {
   const pending: unknown[] = [snapshot]
   const frozen = new Set<object>()
   while (pending.length > 0) {
@@ -50,4 +66,4 @@ export const make = Effect.fn('AuthoredModule.make')(function* (
     Object.freeze(value)
   }
   return snapshot
-})
+}

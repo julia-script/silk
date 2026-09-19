@@ -43,7 +43,8 @@ import * as OpaqueRealization from './OpaqueRealization.js'
 import type * as Ownership from './Ownership.js'
 import type * as PhaseReport from './PhaseReport.js'
 import * as Presentation from './Presentation.js'
-import * as Realization from './Realization.js'
+import * as Preparation from './Preparation.js'
+
 import type * as SemanticInvalidation from './SemanticInvalidation.js'
 import * as SemanticOccurrence from './SemanticOccurrence.js'
 import * as SourceFile from './SourceFile.js'
@@ -152,7 +153,7 @@ export const make = Effect.fn('Analysis.make')(function* (
   ModuleClosure.ModuleClosureError,
   SourceResolver.SourceResolver
 > {
-  const frontend = yield* Frontend.frontend(request)
+  const { frontend } = yield* Preparation.prepare(request, 'analysis')
   yield* Effect.yieldNow
   const tooling = yield* FrontendTooling.make(frontend)
   return OpaqueRealization.withCatalog(
@@ -173,7 +174,9 @@ export const realize = Effect.fn('Analysis.realize')(function* (
     Target.x8664UnknownLinuxGnu.id,
   options: Frontend.Options = {},
 ): Effect.fn.Return<Snapshot, ModuleClosure.ModuleClosureError, SourceResolver.SourceResolver> {
-  const { frontend, ...realization } = yield* Realization.realize(self, target, options)
+  const { frontend, ...realization } = Preparation.realization(
+    yield* Preparation.promote(self, target, options),
+  )
   const tooling =
     frontend.index === self.index && frontend.closure === self.closure
       ? {
@@ -203,7 +206,19 @@ export const makeRealized = Effect.fn('Analysis.makeRealized')(function* (
     request.configuration === undefined && request.target === undefined
       ? { ...request, target: Target.x8664UnknownLinuxGnu.id }
       : request
-  return yield* realize(yield* make(selected), selected.configuration ?? selected.target)
+  const bundle = yield* Preparation.prepare(selected, 'executable')
+  const { frontend, ...realization } = Preparation.realization(bundle)
+  const tooling = yield* FrontendTooling.make(frontend)
+  return OpaqueRealization.withCatalog(
+    Object.freeze({
+      ...frontend,
+      ...tooling,
+      ...realization,
+      _tag: 'AnalysisSnapshot',
+      realization: 'SingleRoot',
+    }),
+    OpaqueRealization.catalogOf(frontend),
+  )
 })
 
 /** Builds the snapshot of one single-module source. */
@@ -224,8 +239,23 @@ export const ofSourceRealized = (
   target: string = Target.x8664UnknownLinuxGnu.id,
   options: Frontend.Options = {},
 ): Effect.Effect<Snapshot, ModuleClosure.ModuleClosureError> =>
-  Effect.flatMap(ofSource(sourceId, bytes, target), (self) => realize(self, target, options)).pipe(
-    Effect.provide(SourceResolver.empty),
+  Effect.provide(
+    Effect.gen(function* () {
+      const bundle = yield* Preparation.prepare({ root: sourceId, target }, 'executable', options)
+      const { frontend, ...realization } = Preparation.realization(bundle)
+      const tooling = yield* FrontendTooling.make(frontend)
+      return OpaqueRealization.withCatalog(
+        Object.freeze({
+          ...frontend,
+          ...tooling,
+          ...realization,
+          _tag: 'AnalysisSnapshot' as const,
+          realization: 'SingleRoot' as const,
+        }),
+        OpaqueRealization.catalogOf(frontend),
+      )
+    }),
+    SourceResolver.memory(new Map([[sourceId, bytes]])),
   )
 
 /** Returns every loaded module of the snapshot in canonical identity order. */

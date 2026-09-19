@@ -27,8 +27,6 @@ import * as Ownership from './Ownership.js'
 import * as PhaseReport from './PhaseReport.js'
 import * as SemanticInvalidation from './SemanticInvalidation.js'
 import * as SourceResolver from './SourceResolver.js'
-import * as SourceFile from './SourceFile.js'
-import * as Option from 'effect/Option'
 import * as ArtifactComposition from './ArtifactComposition.js'
 
 /** Optional environment-specific observations attached to compiler phase reports. */
@@ -484,12 +482,13 @@ const loadClosure = Effect.fnUntraced(function* (
   additionalRoots: ReadonlyArray<string>,
   report: Array<PhaseReport.PhaseReport>,
   options: Options,
+  previous: ModuleClosure.Facts | undefined,
 ) {
   return yield* PhaseReport.measureEffectInto(
     report,
     'closure',
     1,
-    ModuleClosure.load(request, additionalRoots),
+    ModuleClosure.load(request, additionalRoots, previous),
     (value) => value.modules.length,
     (value) => value.diagnostics.length,
     options,
@@ -599,6 +598,7 @@ export const frontend = Effect.fn('Frontend.frontend')(function* (
   request: ModuleClosure.CompilationRequest,
   options: Options = {},
   componentModules: ReadonlyArray<string> = [],
+  previous?: ModuleClosure.Facts,
 ): Effect.fn.Return<Frontend, ModuleClosure.ModuleClosureError, SourceResolver.SourceResolver> {
   yield* ModuleClosure.validateRoots([request.root])
   yield* Effect.annotateCurrentSpan('frontend.root', request.root)
@@ -616,7 +616,7 @@ export const frontend = Effect.fn('Frontend.frontend')(function* (
         )
       : []
   const report: Array<PhaseReport.PhaseReport> = []
-  const closure = yield* loadClosure(request, modules, report, options)
+  const closure = yield* loadClosure(request, modules, report, options, previous)
   const roots: AdditionalRoots = {
     modules,
     error: compositionRootError(composition, closure.missingRoots),
@@ -936,44 +936,5 @@ export const frontendProject = Effect.fn('Frontend.frontendProject')(function* (
       report: Object.freeze([...report]),
     }),
     OpaqueRealization.catalogOf(semantics),
-  )
-})
-
-/** Extends a proven source snapshot with demanded component modules through the explicit resolver. */
-export const withComponents = Effect.fn('Frontend.withComponents')(function* (
-  self: Frontend,
-  profile: CompilationProfile.CompilationProfile,
-  modules: ReadonlyArray<string>,
-  options: Options = {},
-): Effect.fn.Return<Frontend, ModuleClosure.ModuleClosureError, SourceResolver.SourceResolver> {
-  if (modules.every((module) => self.closure.sources.has(module))) return self
-  const root = self.closure.sources.get(self.closure.rootModule)
-  if (root === undefined) throw new RangeError('Component activation lost application source')
-  const resolver = yield* SourceResolver.SourceResolver
-  const existing = (module: string) => {
-    const source = self.closure.sources.get(module)
-    return source === undefined
-      ? undefined
-      : SourceResolver.resolved(SourceFile.toUint8Array(source), source.origin)
-  }
-  const resolve = Effect.fnUntraced(function* (module: string, standard: boolean) {
-    const source = existing(module)
-    return source === undefined
-      ? yield* standard ? resolver.resolveStandardLibrary(module) : resolver.resolve(module)
-      : Option.some(source)
-  })
-  return yield* frontend(
-    {
-      root: root.id,
-      configuration: { ...self.configuration, profile: CompilationProfile.input(profile) },
-    },
-    options,
-    modules,
-  ).pipe(
-    Effect.provideService(SourceResolver.SourceResolver, {
-      ...resolver,
-      resolve: (module) => resolve(module, false),
-      resolveStandardLibrary: (module) => resolve(module, true),
-    }),
   )
 })

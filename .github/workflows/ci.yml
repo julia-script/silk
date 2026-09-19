@@ -130,7 +130,10 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @silklang/cli... run build
       # Generation and maintained policy still share one project-analysis pass in the check leg.
+      # Six profile analyses each carry the lowered authored stdlib; the default heap is marginal.
       - run: pnpm --filter @silklang/compiler run documentation:${{ matrix.check }}
+        env:
+          NODE_OPTIONS: --max-old-space-size=6144
 
   # Pull requests run a representative compile/link/execute smoke set. The bounded TLS witnesses
   # use separate processes so their realized compiler graphs do not accumulate in one V8 heap.

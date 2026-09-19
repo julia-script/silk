@@ -418,6 +418,10 @@
       "types": "./dist/PlatformSupplyResolver.d.ts",
       "import": "./dist/PlatformSupplyResolver.js"
     },
+    "./Preparation": {
+      "types": "./dist/Preparation.d.ts",
+      "import": "./dist/Preparation.js"
+    },
     "./Presentation": {
       "types": "./dist/Presentation.d.ts",
       "import": "./dist/Presentation.js"

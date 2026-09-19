@@ -607,6 +607,7 @@ test('the compiler release candidate exposes only its LLVM compiler actors', () 
       './PlatformCatalog',
       './PlatformSupply',
       './PlatformSupplyResolver',
+      './Preparation',
       './Presentation',
       './ProfileBootstrap',
       './Project',
