@@ -108,6 +108,7 @@ import {
   unsafeCallDiagnostic,
 } from './StatementAnalysis.js'
 import * as StaticEvaluation from './StaticEvaluation.js'
+import * as LiteralForm from './LiteralForm.js'
 import * as StaticText from './StaticText.js'
 import * as StaticValue from './StaticValue.js'
 import * as Type from './Type.js'
@@ -278,10 +279,22 @@ const staticDataOf = (
   node: Extract<AuthoredHir.Literal, { readonly _tag: 'TextLiteral' | 'BytesLiteral' }>,
 ): StaticText.Data => {
   const kind = node._tag === 'TextLiteral' ? 'Text' : 'Bytes'
+  // Provenance slices a literal by the source bytes behind each decoded byte. Only the written
+  // spelling carries those, so decode it again and keep the result when it denotes this payload.
+  const spelling = context.spellingOf(node.anchor)
+  const raw = spelling === undefined ? undefined : Array.from(new TextEncoder().encode(spelling))
+  const form = raw === undefined ? undefined : LiteralForm.recognize(raw)
+  const decoded = raw === undefined || form === undefined ? undefined : StaticText.decode(raw, form)
   const bytes =
     node._tag === 'TextLiteral'
       ? Array.from(new TextEncoder().encode(context.textOf(node.value)))
       : Array.from(context.bytesOf(node.value))
+  if (
+    decoded?._tag === 'Decoded' &&
+    decoded.data.kind === kind &&
+    hexOf(decoded.data.bytes) === hexOf(bytes)
+  )
+    return decoded.data
   return Object.freeze({
     _tag: 'StaticData',
     id: `${kind === 'Text' ? 'text' : 'bytes'}:${hexOf(bytes)}`,

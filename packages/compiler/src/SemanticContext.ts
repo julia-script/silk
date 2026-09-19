@@ -16,6 +16,8 @@ export interface SemanticContext {
   readonly presentation: AuthoredPresentation.Presentation
   /** Current-revision span of an authored position; total, falling back to the nearest presented ancestor. */
   readonly spanOf: (anchor: AuthoredIdentity.Anchor) => SourceSpan.SourceSpan
+  /** The source spelling a node was presented with, when lowering kept one. */
+  readonly spellingOf: (anchor: AuthoredIdentity.Anchor) => string | undefined
   /** Authored text behind a pool reference. */
   readonly textOf: (reference: AuthoredPool.TextRef) => string
   /** Authored bytes behind a pool reference. */
@@ -104,6 +106,7 @@ export const make = (lowered: AuthoredLowering.Lowered): SemanticContext => {
             entry.span.end,
           ) ?? moduleSpan)
     },
+    spellingOf: (anchor) => index.entry(anchor)?.spelling,
     textOf: (reference) => {
       const text = pool.texts[reference.index]
       if (text === undefined)
