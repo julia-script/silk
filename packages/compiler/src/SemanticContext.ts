@@ -128,3 +128,33 @@ export const nameText = (self: SemanticContext, name: AuthoredHir.Name): string 
   if (name._tag === 'InvalidName') return self.textOf(name.spelling)
   return undefined
 }
+
+/**
+ * Contexts of every module in one closure, addressed by the module an anchor's owner names, so a
+ * consumer holding a fact from another module still resolves its span without that module's source.
+ */
+export interface Registry {
+  readonly _tag: 'SemanticContextRegistry'
+  readonly contexts: ReadonlyMap<string, SemanticContext>
+  readonly of: (anchor: AuthoredIdentity.Anchor) => SemanticContext | undefined
+  /** Total: an anchor whose module is unknown resolves to the empty span of that module. */
+  readonly spanOf: (anchor: AuthoredIdentity.Anchor) => SourceSpan.SourceSpan
+}
+
+export const registry = (contexts: Iterable<SemanticContext>): Registry => {
+  const byModule = new Map<string, SemanticContext>()
+  for (const context of contexts) byModule.set(context.module.owner.module, context)
+  const of = (anchor: AuthoredIdentity.Anchor) => byModule.get(anchor.owner.module)
+  return {
+    _tag: 'SemanticContextRegistry',
+    contexts: byModule,
+    of,
+    spanOf: (anchor) => {
+      const context = of(anchor)
+      if (context !== undefined) return context.spanOf(anchor)
+      const empty = SourceSpan.fromOffsets(anchor.owner.module, 0, 0)
+      if (empty === undefined) throw new RangeError('Empty span rejected for a module')
+      return empty
+    },
+  }
+}

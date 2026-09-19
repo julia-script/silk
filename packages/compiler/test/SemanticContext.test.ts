@@ -59,5 +59,12 @@ it.effect('resolves spans, text and document order through the current presentat
       context.spanOf({ ...phantom, owner: AuthoredIdentity.module('x', 'y') }).end,
       0,
     )
+    const registry = SemanticContext.registry([context])
+    assert.strictEqual(registry.of(phantom), context)
+    assert.deepEqual(registry.spanOf(declaration.header.anchor), header)
+    assert.strictEqual(
+      registry.spanOf({ ...phantom, owner: AuthoredIdentity.module('x', 'other') }).sourceId,
+      'other',
+    )
   }),
 )
