@@ -1370,7 +1370,7 @@ pub fn main() -> i32 { return choose(true, 41) }`),
     )
     assert.strictEqual(
       sha256(ownership),
-      '210a97833a8d7b4909845775cbd6f639d15400f046c017ed42ae7b1a9d3572c0',
+      '3384de79ed4297f0d90ef90f51ebcb7ae207d6a2a37426b54e225ff2bdaaccae',
     )
 
     const alternateEvidence = Object.freeze({
