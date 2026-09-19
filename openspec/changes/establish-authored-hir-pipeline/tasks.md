@@ -17,13 +17,13 @@
 - [x] 3.1 Carry the authored module and presentation beside every loaded module through the closure and elaboration inputs, and derive body-query implementation/scope keys and hidden anonymous identities from authored content instead of source tokens and byte offsets, preserving the positive/negative reuse witnesses including alpha renaming.
 - [x] 3.2 Extend the remaining semantic/reuse specification deltas and migrate declaration, resolution, typing, conformance, static and ownership consumers to authored HIR with explicit context.
 - [ ] 3.3 Publish one typed TIR body plus necessary indexed results, remove duplicate executable facts and syntax-backed rebinding, and migrate public/tooling terminology and goldens. The contract, representative artifacts, consumer map and step rationale are in `tir-contract.md`.
-  - [ ] 3.3.1 Locate body diagnostics and text origins by anchor, publish spans at one point per revision, and rebuild span-derived identities from anchors.
-  - [ ] 3.3.2 Reference declarations, fields and members by identity in TIR and cached products; reuse by key returns the cached object; delete `SemanticRebinding`.
-  - [ ] 3.3.3 Give TIR owner-local node and local ids, authored origins, a field registry and the indexed result tables; publish static bodies; make `Tir.encode` canonical and source-free.
-  - [ ] 3.3.4 Move static evaluation, residualization, module selection, lifetime flow, control flow, ownership and opaque realization onto TIR and its tables.
-  - [ ] 3.3.5 Move occurrences, completion, type hints, inspector, module tooling and the LSP/docgen callers onto TIR and its tables.
-  - [ ] 3.3.6 Emit TIR directly from analysis through one body builder; delete `FunctionFact`, `StatementFact`, `ExpressionFact`, `TirLowering` and the fact half of `ResidualBody`.
-  - [ ] 3.3.7 Add `CheckedBody` round-trip and canonical-encoding fixtures, sync specifications, and verify no module imports a deleted schema.
+  - [ ] 3.3.1 Locations and provenance: `Location`, value-coordinate `Provenance` with slice/concat/call composition, one publication point using the presented spelling map, per-call-site reporting of shared results; body products hold locations, never spans; span-derived identities rebuilt from anchors.
+  - [ ] 3.3.2 Identities and artifacts: `ArtifactId`, `Application`, `NodeRef`; declarations, fields and members by id in TIR and cached products; request identity separated from validity; a hit returns the cached object; delete `SemanticRebinding`.
+  - [ ] 3.3.3 The TIR schema: node and local ids, origins, resolved operations and explicit conversions on nodes, `evidence`/`causes` references, supplementary tables, field registry and canonical codec; static bodies published; goldens move to the source-free encoding.
+  - [ ] 3.3.4 Whole-body consumers onto TIR: lifetime flow, control flow, type outlives, ownership, opaque realization, instances, then occurrences, completion, type hints, inspector and the LSP/docgen callers.
+  - [ ] 3.3.5 The evaluator onto typed nodes with an environment and a session; outcomes keyed by artifact identity; residualization and module selection request `Specialize` artifacts. Construction hands it per-expression lowered nodes until 3.3.6.
+  - [ ] 3.3.6 Direct construction through a private body builder; delete `FunctionFact`, `StatementFact`, `ExpressionFact`, `TirLowering` and the fact half of `ResidualBody`.
+  - [ ] 3.3.7 Codec round-trip and fingerprint fixtures for every body category, specification sync, and an inventory check that nothing imports a deleted schema.
 - [x] 3.4 Preserve source-free semantic/static fixtures with current presentation remapping for diagnostics and navigation.
 
 ## 4. A4 — JUL-208 sealed preparation (separate work package)
