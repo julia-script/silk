@@ -1141,7 +1141,8 @@ const collectExpression = (
       return
     case 'FieldProjection': {
       collectExpression(expression.subject, index, spans, scope, pending)
-      const token = expression.anchor
+      // The occurrence is the written field name, not the projection around it.
+      const token = expression.fieldAnchor
       if (expression.state._tag === 'Resolved')
         push(
           pending,
@@ -1175,7 +1176,7 @@ const collectExpression = (
           locationOfDeclaration(index, spans, expression.target.struct),
         )
       for (const initializer of expression.initializers) {
-        const fieldToken = initializer.anchor
+        const fieldToken = initializer.nameAnchor ?? initializer.anchor
         if (initializer.state._tag === 'Resolved' || initializer.state._tag === 'Inaccessible')
           push(
             pending,
@@ -1206,7 +1207,7 @@ const collectExpression = (
           locationOfUnionVariant(spans, expression.target.variant),
         )
       for (const initializer of expression.initializers) {
-        const fieldToken = initializer.anchor
+        const fieldToken = initializer.nameAnchor ?? initializer.anchor
         if (initializer.state._tag === 'Resolved' || initializer.state._tag === 'Inaccessible')
           push(
             pending,

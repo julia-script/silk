@@ -624,6 +624,8 @@ export interface StructInitializerFact {
   readonly name: string | undefined
   readonly expression: ExpressionFact
   readonly state: StructInitializerState
+  /** The written field label, which is where an editor finds this initializer's field. */
+  readonly nameAnchor?: AuthoredHir.Anchor
   readonly anchor: AuthoredHir.Anchor
 }
 

@@ -4016,7 +4016,7 @@ export const analyzeAggregateLiteral = (
     const fact: StructInitializerFact = Object.freeze({
       _tag: 'StructInitializer',
       name,
-      ...(nameToken === undefined ? {} : { anchor: nameToken.anchor }),
+      ...(nameToken === undefined ? {} : { nameAnchor: nameToken.anchor }),
       expression: expression.fact,
       state,
       anchor: initializer.anchor,
@@ -6034,7 +6034,7 @@ const analyzeAggregateElements = (
     const initializer: StructInitializerFact = Object.freeze({
       _tag: 'StructInitializer',
       name: positional ? undefined : element.label,
-      ...(element.anchor === undefined ? {} : { anchor: element.anchor }),
+      ...(element.anchor === undefined ? {} : { nameAnchor: element.anchor }),
       expression: analyzed.fact,
       state,
       anchor: (element.initializerSyntax ?? element.expression).anchor,
