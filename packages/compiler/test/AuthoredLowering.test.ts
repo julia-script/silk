@@ -6,6 +6,7 @@ import type * as AuthoredHir from '../src/AuthoredHir.js'
 import * as AuthoredIdentity from '../src/AuthoredIdentity.js'
 import * as AuthoredLowering from '../src/AuthoredLowering.js'
 import * as AuthoredModule from '../src/AuthoredModule.js'
+import * as AuthoredPresentation from '../src/AuthoredPresentation.js'
 import * as Lexer from '../src/Lexer.js'
 import * as Parser from '../src/Parser.js'
 import * as SourceFile from '../src/SourceFile.js'
@@ -260,6 +261,20 @@ it.effect('lowers every syntax category into one published source-free module', 
     assert.isTrue(presentation.entries.some((entry) => entry.documentation === '/// A point.'))
     assert.isTrue(presentation.entries.some((entry) => entry.spelling === '18446744073709551615'))
     assert.deepEqual(presentation.diagnostics, [])
+    // Anchors index the current revision: every declaration header resolves to a source span.
+    const index = AuthoredPresentation.index(presentation)
+    for (const declaration of module.declarations) {
+      const span = index.span(declaration.header.anchor)
+      assert.isDefined(span)
+      assert.strictEqual(span?.sourceId, presentation.sourceId)
+    }
+    const first = module.declarations[0] ?? unreachable('expected a declaration')
+    assert.isUndefined(
+      index.span({
+        ...first.header.anchor,
+        path: [{ _tag: 'LocalSegment', role: 'nowhere', occurrence: 0 }],
+      }),
+    )
   }),
 )
 

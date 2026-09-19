@@ -1,6 +1,7 @@
 import * as Data from 'effect/Data'
 import * as Effect from 'effect/Effect'
 import * as AuthoredIdentity from './AuthoredIdentity.js'
+import * as SourceSpan from './SourceSpan.js'
 
 /** Current byte coordinates, deliberately absent from authored semantic artifacts. */
 export interface Span {
@@ -36,6 +37,40 @@ export interface Presentation {
 export class AuthoredPresentationError extends Data.TaggedError('AuthoredPresentationError')<{
   readonly reason: { readonly _tag: 'InvalidSpan'; readonly span: Span }
 }> {}
+
+/** Current entries by anchor, built once per revision for consumers that map anchors to spans. */
+export interface Index {
+  readonly presentation: Presentation
+  readonly entry: (anchor: AuthoredIdentity.Anchor) => Entry | undefined
+  /** The entry's span as a source span of this revision's source, when the anchor is presented. */
+  readonly span: (anchor: AuthoredIdentity.Anchor) => SourceSpan.SourceSpan | undefined
+}
+
+const indexes = new WeakMap<Presentation, Index>()
+
+export const index = (self: Presentation): Index => {
+  const cached = indexes.get(self)
+  if (cached !== undefined) return cached
+  const byAnchor = new Map<string, Entry>()
+  for (const entry of self.entries) {
+    const key = AuthoredIdentity.anchorKey(entry.anchor)
+    if (!byAnchor.has(key)) byAnchor.set(key, entry)
+  }
+  const entry = (anchor: AuthoredIdentity.Anchor) =>
+    byAnchor.get(AuthoredIdentity.anchorKey(anchor))
+  const built: Index = {
+    presentation: self,
+    entry,
+    span: (anchor) => {
+      const found = entry(anchor)
+      return found === undefined
+        ? undefined
+        : SourceSpan.fromOffsets(self.sourceId, found.span.start, found.span.end)
+    },
+  }
+  indexes.set(self, built)
+  return built
+}
 
 const validSpan = (value: Span): boolean =>
   Number.isSafeInteger(value.start) &&
