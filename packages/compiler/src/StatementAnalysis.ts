@@ -59,7 +59,7 @@ import { directStatementExpressions } from './TirLowering.js'
 import * as Match from './Match.js'
 import * as NameResolution from './NameResolution.js'
 import * as SemanticDisplay from './SemanticDisplay.js'
-import type * as SourceSpan from './SourceSpan.js'
+import * as SourceSpan from './SourceSpan.js'
 import * as StaticEvaluation from './StaticEvaluation.js'
 import * as StaticValue from './StaticValue.js'
 import * as Type from './Type.js'
@@ -1800,6 +1800,19 @@ export const reachableCallableWrites = (
   return writes
 }
 
+
+/**
+ * Where a body that falls off its end is reported: the closing brace, which a presented block
+ * span always ends with unless recovery left the block damaged.
+ */
+const closingBraceSpan = (
+  semantic: SemanticContext.SemanticContext,
+  block: AuthoredHir.Block,
+): SourceSpan.SourceSpan => {
+  const span = semantic.spanOf(block.anchor)
+  if (block.causes.length > 0 || span.end <= span.start) return span
+  return SourceSpan.fromOffsets(span.sourceId, span.end - 1, span.end) ?? span
+}
 /**
  * Joins the Effects constructed at distinct return sites of one function into one finite
  * composite representation under the declared contract (EFF-013). A single construction site
@@ -2061,7 +2074,7 @@ export const analyzeFunctionBody = (
       context.diagnostics.push(
         Diagnostic.missingReturn(
           Type.encode(returnType ?? declaration.returnType.type),
-          semantic.spanOf(blockNode.anchor),
+          closingBraceSpan(semantic, blockNode),
         ),
       )
     }
