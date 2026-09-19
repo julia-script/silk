@@ -46,9 +46,52 @@ export const bodyBlock = (
   declaration: DeclarationFacts.DeclarationFact,
 ): AuthoredHir.Block => {
   const found = declarationOf(context.module, declaration.owner)
-  return found?.body._tag === 'CallableBody' && found.body.block !== undefined
-    ? found.body.block
-    : emptyBlock(declaration.anchor)
+  if (found !== undefined)
+    return found.body._tag === 'CallableBody' && found.body.block !== undefined
+      ? found.body.block
+      : emptyBlock(declaration.anchor)
+  // Hidden declarations belong to anonymous callables, which are nested owners inside a body.
+  return callableOf(context.module, declaration.owner)?.body ?? emptyBlock(declaration.anchor)
+}
+
+/** Every callable body block a module owns directly, at any declaration nesting depth. */
+const callableBlocks = (module: AuthoredHir.Module): ReadonlyArray<AuthoredHir.Block> => {
+  const found: Array<AuthoredHir.Block> = []
+  const pending = [...module.declarations]
+  while (pending.length > 0) {
+    const declaration = pending.pop()
+    if (declaration === undefined) break
+    if (declaration.body._tag === 'CallableBody') {
+      if (declaration.body.block !== undefined) found.push(declaration.body.block)
+    } else if (declaration.body._tag === 'MembersBody') pending.push(...declaration.body.members)
+    else if (declaration.body._tag === 'ConditionalBody') {
+      pending.push(declaration.body.thenBranch)
+      if (declaration.body.elseBranch !== undefined) pending.push(declaration.body.elseBranch)
+    }
+  }
+  return found
+}
+
+/** The anonymous callable one nested owner identity names, at any nesting depth of the module. */
+export const callableOf = (
+  module: AuthoredHir.Module,
+  owner: AuthoredIdentity.Identity,
+): Extract<AuthoredHir.Expression, { readonly _tag: 'CallableExpression' }> | undefined => {
+  const search = (
+    block: AuthoredHir.Block,
+  ): Extract<AuthoredHir.Expression, { readonly _tag: 'CallableExpression' }> | undefined => {
+    for (const callable of callableExpressions(block)) {
+      if (AuthoredIdentity.equals(callable.anchor.owner, owner)) return callable
+      const nested = search(callable.body)
+      if (nested !== undefined) return nested
+    }
+    return undefined
+  }
+  for (const block of callableBlocks(module)) {
+    const found = search(block)
+    if (found !== undefined) return found
+  }
+  return undefined
 }
 
 const blocksOf = (
@@ -70,6 +113,22 @@ const blocksOf = (
   }
 }
 
+/**
+ * Blocks an expression owns within the same authored owner: effect bodies and block-valued match
+ * arms. Anonymous callable bodies are nested owners and are deliberately excluded.
+ */
+const expressionBlocks = (expression: AuthoredHir.Expression): ReadonlyArray<AuthoredHir.Block> => {
+  const found: Array<AuthoredHir.Block> = []
+  const visit = (current: AuthoredHir.Expression): void => {
+    if (current._tag === 'EffectExpression') found.push(current.body)
+    if (current._tag === 'MatchExpression')
+      for (const arm of current.arms) if (arm.result._tag === 'Block') found.push(arm.result)
+    for (const child of expressionChildren(current)) visit(child)
+  }
+  visit(expression)
+  return found
+}
+
 /** Every statement below one block, including nested arms and loop bodies, in document order. */
 export const statements = (block: AuthoredHir.Block): ReadonlyArray<AuthoredHir.Statement> => {
   const found: Array<AuthoredHir.Statement> = []
@@ -83,6 +142,8 @@ export const statements = (block: AuthoredHir.Block): ReadonlyArray<AuthoredHir.
   const visitStatement = (statement: AuthoredHir.Statement): void => {
     found.push(statement)
     for (const nested of blocksOf(statement)) visitBlock(nested)
+    for (const expression of statementExpressions(statement))
+      for (const nested of expressionBlocks(expression)) visitBlock(nested)
   }
   visitBlock(block)
   return Object.freeze(found)
@@ -158,7 +219,13 @@ export const expressionChildren = (
     case 'CompileErrorExpression':
       return [expression.message]
     case 'MatchExpression':
-      return [expression.subject]
+      return [
+        expression.subject,
+        ...expression.arms.flatMap((arm): ReadonlyArray<AuthoredHir.Expression> => [
+          ...(arm.guard === undefined ? [] : [arm.guard]),
+          ...(arm.result._tag === 'Block' ? [] : [arm.result]),
+        ]),
+      ]
     case 'StructExpression':
       return expression.fields.map((field) => field.value)
     case 'RecordExpression':
