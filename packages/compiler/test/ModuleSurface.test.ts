@@ -1,3 +1,4 @@
+import { locationAt } from './support/location.js'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Result from 'effect/Result'
@@ -433,10 +434,7 @@ it.effect('round-trips constrained callable schemas without source origins', () 
         contractKey: CallableContract.key(contract),
         constraintKeys: [Constraint.key(wanted)],
         evidenceKeys: [Constraint.evidenceKey(assumed)],
-        origins: [
-          SourceSpan.fromOffsets('surface/Main', 20, 40) ??
-            unreachable('expected a valid source span'),
-        ],
+        origins: [locationAt('surface/Main')],
       },
       true,
     )

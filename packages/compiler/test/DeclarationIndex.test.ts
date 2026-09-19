@@ -6,6 +6,7 @@ import * as Analysis from '../src/Analysis.js'
 import * as CleanupPlan from '../src/CleanupPlan.js'
 import * as ConformanceProof from '../src/ConformanceProof.js'
 import * as DeclarationFacts from '../src/DeclarationFacts.js'
+import * as Diagnostic from '../src/Diagnostic.js'
 import type * as DeclarationIndex from '../src/DeclarationIndex.js'
 import * as LifetimeElision from '../src/LifetimeElision.js'
 import type * as AuthoredHir from '../src/AuthoredHir.js'
@@ -26,10 +27,25 @@ import * as Type from '../src/Type.js'
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
 
+/** An index as these tests read it: its diagnostics carry the fixture's spans. */
+type PublishedIndex = DeclarationIndex.Index & {
+  readonly published: ReadonlyArray<Diagnostic.Diagnostic>
+}
+
+const published = (closure: ModuleClosure.Facts): PublishedIndex => {
+  const index = NameResolution.analyze(closure).index
+  return Object.freeze({
+    ...index,
+    published: Diagnostic.merge(
+      Diagnostic.publishAll(index.diagnostics, SemanticContext.fromModules(closure.modules)),
+    ),
+  })
+}
+
 const collect = (
   rootModule: string,
   entries: ReadonlyArray<readonly [string, string]>,
-): Effect.Effect<DeclarationIndex.Index, ModuleClosure.ModuleClosureError> => {
+): Effect.Effect<PublishedIndex, ModuleClosure.ModuleClosureError> => {
   const rootText = entries.find(([name]) => name === rootModule)?.[1]
   if (rootText === undefined) throw new RangeError(`Fixture has no root source ${rootModule}`)
   return Effect.map(
@@ -48,7 +64,7 @@ const collect = (
         ),
       ),
     ),
-    (closure) => NameResolution.analyze(closure).index,
+    published,
   )
 }
 
@@ -62,7 +78,7 @@ const collectWithClosure = (
   rootModule: string,
   entries: ReadonlyArray<readonly [string, string]>,
 ): Effect.Effect<
-  { readonly index: DeclarationIndex.Index; readonly closure: ModuleClosure.Facts },
+  { readonly index: PublishedIndex; readonly closure: ModuleClosure.Facts },
   ModuleClosure.ModuleClosureError
 > => {
   const rootText = entries.find(([name]) => name === rootModule)?.[1]
@@ -83,7 +99,7 @@ const collectWithClosure = (
         ),
       ),
     ),
-    (closure) => Object.freeze({ index: NameResolution.analyze(closure).index, closure }),
+    (closure) => Object.freeze({ index: published(closure), closure }),
   )
 }
 
@@ -211,7 +227,7 @@ enum(i64) Signed { Minimum = -9223372036854775808, Next }`,
     )
     assert.strictEqual(Object.isFrozen(direction), true)
     assert.strictEqual(Object.isFrozen(direction?.members), true)
-    assert.deepEqual(index.diagnostics, [])
+    assert.deepEqual(index.published, [])
   }),
 )
 
@@ -261,7 +277,7 @@ enum(i64) I64 { Minimum = -9223372036854775808, Maximum = 9223372036854775807 }`
       })),
       expected,
     )
-    assert.deepEqual(index.diagnostics, [])
+    assert.deepEqual(index.published, [])
   }),
 )
 
@@ -286,7 +302,7 @@ it.effect('keeps enums in one source-ordered flat nominal namespace', () =>
     assert.strictEqual(module?.members.at(1)?.canonical._tag, 'Duplicate')
     assert.strictEqual(DeclarationFacts.enumByName(index, 'root', 'State')._tag, 'Ambiguous')
     assert.deepEqual(
-      index.diagnostics.map((diagnostic) => diagnostic.code),
+      index.published.map((diagnostic) => diagnostic.code),
       ['SEM0003', 'SEM0003'],
     )
   }),
@@ -312,7 +328,7 @@ enum Good { Ready }`
       )
 
     assert.deepEqual(
-      index.diagnostics.map((diagnostic) => ({
+      index.published.map((diagnostic) => ({
         code: diagnostic.code,
         text: source.slice(diagnostic.span.start, diagnostic.span.end),
         related: diagnostic.relatedSpans?.map((related) =>
@@ -360,7 +376,7 @@ it.effect('keeps parser-damaged enum values explicitly unavailable without losin
     assert.strictEqual(broken?.members.at(1)?.discriminant._tag, 'Unavailable')
     assert.strictEqual(good?.validity._tag, 'Valid')
     assert.strictEqual(good?.members.at(0)?.discriminant._tag, 'Available')
-    assert.deepEqual(index.diagnostics, [])
+    assert.deepEqual(index.published, [])
   }),
 )
 
@@ -378,7 +394,7 @@ it.effect('assigns distinct canonical identities to same-named declarations acro
       { _tag: 'Canonical', id: { _tag: 'CanonicalDeclarationId', module: 'lib', name: 'answer' } },
       { _tag: 'Canonical', id: { _tag: 'CanonicalDeclarationId', module: 'root', name: 'answer' } },
     ])
-    assert.deepEqual(index.diagnostics, [])
+    assert.deepEqual(index.published, [])
   }),
 )
 
@@ -397,7 +413,7 @@ effect fn compare() -> i32 ? &Clock at left.Audit | &Clock at right.Audit { retu
     ])
     const declaration = index.modules.find((module) => module.module === 'root')?.declarations.at(0)
 
-    assert.deepEqual(index.diagnostics, [])
+    assert.deepEqual(index.published, [])
     assert.deepEqual(
       declaration?.requirementRow.requirements.map((requirement) => requirement.role),
       ['left::Audit', 'right::Audit'],
@@ -473,7 +489,7 @@ pub service Logger<T> {
       log === undefined ? undefined : SemanticDisplay.serviceOperation(log).text,
       "effect<'env> fn log<'life1: 'env, 'env>(static template: string<'static>, message: &'life1 [u8], value: T) -> () ! WriteFailure ? &mut root.Logger<T> with Intrinsic.nonParking()",
     )
-    assert.deepEqual(index.diagnostics, [])
+    assert.deepEqual(index.published, [])
   }),
 )
 
@@ -492,7 +508,7 @@ it.effect('rejects malformed service operation executable properties', () =>
     ])
 
     assert.deepEqual(
-      index.diagnostics.map((diagnostic) => diagnostic.code),
+      index.published.map((diagnostic) => diagnostic.code),
       ['SEM0090', 'SEM0090', 'SEM0090', 'SEM0090'],
     )
   }),
@@ -505,7 +521,7 @@ it.effect('rejects service operation bodies in semantic declaration analysis', (
     ])
 
     assert.deepEqual(
-      index.diagnostics.map((diagnostic) => ({
+      index.published.map((diagnostic) => ({
         code: diagnostic.code,
         reason: diagnostic.reason._tag,
       })),
@@ -553,7 +569,7 @@ impl Logger for Console { enabled: Console.enabled log: Console.log }`,
         },
       },
     ])
-    assert.deepEqual(index.diagnostics, [])
+    assert.deepEqual(index.published, [])
   }),
 )
 
@@ -581,7 +597,7 @@ pub fn main() -> i32 { return 0 }`,
       if (result.match._tag === 'Conformance')
         assert.strictEqual(result.match.witness.origin._tag, 'SourceWitness')
     }
-    assert.deepEqual(index.diagnostics, [])
+    assert.deepEqual(index.published, [])
   }),
 )
 
@@ -603,11 +619,11 @@ impl Logger for Console { log: Console.log unknown: Console.unknown }`,
     ])
 
     assert.deepEqual(
-      index.diagnostics.map((diagnostic) => diagnostic.reason._tag),
+      index.published.map((diagnostic) => diagnostic.reason._tag),
       ['InvalidConformance'],
     )
-    assert.include(index.diagnostics.at(0)?.message ?? '', 'missing enabled')
-    assert.include(index.diagnostics.at(0)?.message ?? '', 'unknown unknown')
+    assert.include(index.published.at(0)?.message ?? '', 'missing enabled')
+    assert.include(index.published.at(0)?.message ?? '', 'unknown unknown')
   }),
 )
 
@@ -628,7 +644,7 @@ impl Store<i32> for IntStore { load: IntStore.load }`,
     const provider = Type.nominal('root', 'IntStore')
     const witness = ConformanceProof.witness(index, provider, store)
 
-    assert.deepEqual(index.diagnostics, [])
+    assert.deepEqual(index.published, [])
     assert.deepEqual(witness?._tag === 'SourceConformanceWitness' ? witness.operations : [], [
       {
         name: 'load',
@@ -659,10 +675,10 @@ impl Logger for Console { log: Console.log }`,
     ])
 
     assert.deepEqual(
-      index.diagnostics.map((diagnostic) => diagnostic.reason._tag),
+      index.published.map((diagnostic) => diagnostic.reason._tag),
       ['InvalidConformance'],
     )
-    assert.include(index.diagnostics.at(0)?.message ?? '', 'incompatible with Logger.log')
+    assert.include(index.published.at(0)?.message ?? '', 'incompatible with Logger.log')
   }),
 )
 
@@ -683,7 +699,7 @@ impl Present for i32 {
     ])
 
     assert.deepEqual(
-      index.diagnostics.map((diagnostic) => ({
+      index.published.map((diagnostic) => ({
         code: diagnostic.code,
         message: diagnostic.message,
       })),
@@ -725,7 +741,7 @@ impl Compared for i32 { fn less(left: &Self, right: &Self) -> bool { return fals
     const mapped = ConformanceProof.interfaceWitnessImplementation(index, box, present, 'present')
     const intrinsic = ConformanceProof.interfaceOperationIntrinsic(index, 'i32', combined, 'add')
 
-    assert.deepEqual(index.diagnostics, [])
+    assert.deepEqual(index.published, [])
     assert.strictEqual(inline?.module, 'root')
     assert.match(inline?.name ?? '', /^impl@\d+\.present$/)
     assert.strictEqual(mapped?.name, 'presentBox')
@@ -776,7 +792,7 @@ it.effect('marks later duplicates as caused duplicates of the first occurrence',
     })
     assert.strictEqual(duplicate.cause.code, 'SEM0003')
     assert.deepEqual(
-      index.diagnostics.map((diagnostic) => diagnostic.code),
+      index.published.map((diagnostic) => diagnostic.code),
       ['SEM0003'],
     )
   }),
@@ -789,7 +805,7 @@ it.effect('keeps unavailable names unidentified without extra diagnostics', () =
 
     assert.strictEqual(header?.canonical._tag, 'Unidentified')
     assert.strictEqual(header?.name._tag, 'Unavailable')
-    assert.deepEqual(index.diagnostics, [])
+    assert.deepEqual(index.published, [])
   }),
 )
 
@@ -805,7 +821,7 @@ it.effect('resolves header signatures and diagnoses unknown types at exact spans
     assert.strictEqual(header?.parameters.at(1)?.declaredType._tag, 'Unresolved')
     assert.strictEqual(header?.returnType._tag, 'Resolved')
     assert.deepEqual(
-      index.diagnostics.map((diagnostic) => ({
+      index.published.map((diagnostic) => ({
         code: diagnostic.code,
         start: diagnostic.span.start,
         end: diagnostic.span.end,
@@ -877,7 +893,7 @@ pub fn identity(value: string, boxed: Box<string>) -> string { return value }`,
       DeclarationFacts.containsLexicalBorrow(index, Type.string(Lifetime.staticLifetime)),
       true,
     )
-    assert.deepEqual(index.diagnostics, [])
+    assert.deepEqual(index.published, [])
   }),
 )
 
@@ -895,7 +911,7 @@ it.effect('resolves references and slices around string through ordinary type fa
       declaration?.parameters.map((parameter) => parameter.declaredType._tag),
       ['Resolved', 'Resolved', 'Resolved'],
     )
-    assert.deepEqual(index.diagnostics, [])
+    assert.deepEqual(index.published, [])
   }),
 )
 
@@ -917,7 +933,7 @@ it.effect('resolves callable parameter and result contracts canonically', () =>
       ),
       ["fn<'life1>(T) -> T", "mut fn<'life2>(T) -> bool", "once fn<'life3>() -> T"],
     )
-    assert.deepEqual(index.diagnostics, [])
+    assert.deepEqual(index.published, [])
   }),
 )
 
@@ -968,7 +984,7 @@ it.effect('indexes failure payloads as values and requirements as row binders', 
         ],
       )
     }
-    assert.deepEqual(index.diagnostics, [])
+    assert.deepEqual(index.published, [])
   }),
 )
 
@@ -983,7 +999,7 @@ effect fn unbound() -> i32 ? MissingRow { return 0 }`,
     ])
 
     assert.deepEqual(
-      index.diagnostics.map((diagnostic) => ({
+      index.published.map((diagnostic) => ({
         code: diagnostic.code,
         reason: diagnostic.reason._tag,
       })),
@@ -1010,7 +1026,7 @@ it.effect('keeps cross-kind duplicate binders attached to the first canonical id
     assert.strictEqual(parameters.at(2)?.duplicateOf, parameters.at(0)?.type)
     assert.strictEqual(parameters.at(0)?.type.kind, 'Value')
     assert.deepEqual(
-      index.diagnostics.map((diagnostic) => diagnostic.code),
+      index.published.map((diagnostic) => diagnostic.code),
       ['SEM0050', 'SEM0050'],
     )
   }),
@@ -1035,7 +1051,7 @@ it.effect('normalizes effect failure rows while retaining source members', () =>
     assert.strictEqual(effect?.failureRow.available, true)
     assert.strictEqual(plain?.functionKind, 'Ordinary')
     assert.deepEqual(plain?.failureRow.failures, [])
-    assert.deepEqual(index.diagnostics, [])
+    assert.deepEqual(index.published, [])
   }),
 )
 
@@ -1068,7 +1084,7 @@ it.effect('resolves imported failure members and preserves invalid row facts', (
       ],
     )
     assert.deepEqual(
-      index.diagnostics.map((diagnostic) => diagnostic.code),
+      index.published.map((diagnostic) => diagnostic.code),
       ['SEM0001'],
     )
   }),
@@ -1084,7 +1100,7 @@ it.effect('rejects failure rows on ordinary functions without losing the row', (
     assert.strictEqual(declaration?.functionKind, 'Ordinary')
     assert.deepEqual(declaration?.failureRow.failures.map(Type.encode), ['root.Problem'])
     assert.deepEqual(
-      index.diagnostics.map((diagnostic) => diagnostic.code),
+      index.published.map((diagnostic) => diagnostic.code),
       ['SEM0062'],
     )
   }),
@@ -1106,7 +1122,7 @@ effect fn work() -> i32 ! Problem ? &FileSystem | &mut Allocator at Scratch { re
       ],
     ])
     const [later, work] = index.modules.at(0)?.declarations ?? []
-    assert.deepEqual(index.diagnostics, [])
+    assert.deepEqual(index.published, [])
     assert.strictEqual(later?.returnType._tag, 'Resolved')
     const laterType = later?.returnType._tag === 'Resolved' ? later.returnType.type : undefined
     assert.isTrue(laterType !== undefined && Type.isEffect(laterType))
@@ -1177,7 +1193,7 @@ it.effect('indexes mixed struct and function declarations in one canonical names
     assert.strictEqual(module?.structs.at(0)?.fields.at(1)?.visibility, 'Private')
     assert.strictEqual(module?.members.at(2)?.canonical._tag, 'Duplicate')
     assert.deepEqual(
-      index.diagnostics.map((diagnostic) => diagnostic.code),
+      index.published.map((diagnostic) => diagnostic.code),
       ['SEM0003'],
     )
   }),
@@ -1203,7 +1219,7 @@ pub extern "C" struct Packet {
     const packet = index.modules.find((module) => module.module === 'root')?.structs.at(1)
     const inner = index.modules.find((module) => module.module === 'dep')?.structs.at(0)
 
-    assert.deepEqual(index.diagnostics, [])
+    assert.deepEqual(index.published, [])
     assert.strictEqual(packet?.layout._tag, 'Foreign')
     assert.strictEqual(inner?.layout._tag, 'Foreign')
     if (packet?.layout._tag === 'Foreign') assert.strictEqual(packet.layout.abi, 'C')
@@ -1234,7 +1250,7 @@ extern "C" struct Bad {
       structs.find((struct) => struct.name._tag === 'Present' && struct.name.spelling === name)
 
     assert.deepEqual(
-      index.diagnostics.map((diagnostic) => ({
+      index.published.map((diagnostic) => ({
         code: diagnostic.code,
         reason: diagnostic.reason._tag,
         text: source.slice(diagnostic.span.start, diagnostic.span.end),
@@ -1271,7 +1287,7 @@ extern "C" struct Right { left: Left }`,
       ['InvalidForeign', 'InvalidForeign', 'InvalidForeign'],
     )
     assert.deepEqual(
-      index.diagnostics.map((diagnostic) => diagnostic.code),
+      index.published.map((diagnostic) => diagnostic.code),
       ['SEM0020', 'SEM0206', 'SEM0020', 'SEM0206', 'SEM0206'],
     )
   }),
@@ -1317,7 +1333,7 @@ union Other { Success { value: bool } }`,
       result?.variants.at(0)?.fields.at(0)?.id,
       other?.variants.at(0)?.fields.at(0)?.id,
     )
-    assert.deepEqual(index.diagnostics, [])
+    assert.deepEqual(index.published, [])
   }),
 )
 
@@ -1339,10 +1355,10 @@ struct Damaged {}`
     assert.strictEqual(damaged?.variants.at(4)?.canonical._tag, 'Canonical')
     assert.strictEqual(damaged?.validity._tag, 'Invalid')
     assert.deepEqual(
-      index.diagnostics.map((diagnostic) => diagnostic.code),
+      index.published.map((diagnostic) => diagnostic.code),
       ['SEM0164', 'SEM0165', 'SEM0166', 'SEM0001', 'SEM0003'],
     )
-    const duplicate = index.diagnostics.find((diagnostic) => diagnostic.code === 'SEM0165')
+    const duplicate = index.published.find((diagnostic) => diagnostic.code === 'SEM0165')
     assert.deepEqual(
       duplicate?.relatedSpans?.map((related) => source.slice(related.span.start, related.span.end)),
       ['Same'],
@@ -1367,7 +1383,7 @@ it.effect('retains duplicate and damaged struct fields without losing later fiel
     )
     assert.strictEqual(fields.at(3)?.declaredType._tag, 'Resolved')
     assert.deepEqual(
-      index.diagnostics.map((diagnostic) => diagnostic.code),
+      index.published.map((diagnostic) => diagnostic.code),
       ['SEM0017'],
     )
   }),
@@ -1381,11 +1397,11 @@ it.effect('diagnoses private exposure and inline recursive struct components can
       'pub fn reveal(value: Hidden) -> Hidden { return value }'
     const exposed = yield* collect('root', [['root', exposedSource]])
     assert.deepEqual(
-      exposed.diagnostics.map((diagnostic) => diagnostic.code),
+      exposed.published.map((diagnostic) => diagnostic.code),
       ['SEM0019', 'SEM0019', 'SEM0019'],
     )
     assert.deepEqual(
-      exposed.diagnostics.map((diagnostic) =>
+      exposed.published.map((diagnostic) =>
         exposedSource.slice(diagnostic.span.start, diagnostic.span.end),
       ),
       ['Hidden', 'Hidden', 'Hidden'],
@@ -1398,7 +1414,7 @@ it.effect('diagnoses private exposure and inline recursive struct components can
       ],
     ])
     assert.deepEqual(
-      exposedUnion.diagnostics.map((diagnostic) => diagnostic.code),
+      exposedUnion.published.map((diagnostic) => diagnostic.code),
       ['SEM0019'],
     )
     assert.strictEqual(exposedUnion.modules.at(0)?.unions.at(0)?.validity._tag, 'Invalid')
@@ -1410,11 +1426,11 @@ it.effect('diagnoses private exposure and inline recursive struct components can
       ['b/B', 'import a.A\npub struct B { value: A.A }'],
     ])
     assert.deepEqual(
-      recursive.diagnostics.map((diagnostic) => diagnostic.code),
+      recursive.published.map((diagnostic) => diagnostic.code),
       ['SEM0020'],
     )
     assert.deepEqual(
-      recursive.diagnostics.map((diagnostic) => ({
+      recursive.published.map((diagnostic) => ({
         sourceId: diagnostic.span.sourceId,
         text: recursiveSource.slice(diagnostic.span.start, diagnostic.span.end),
       })),
@@ -1427,7 +1443,7 @@ it.effect('diagnoses private exposure and inline recursive struct components can
       ['direct', 'struct Node { next: Node }\npub fn main() -> i32 { return 0 }'],
     ])
     assert.deepEqual(
-      direct.diagnostics.map((diagnostic) => diagnostic.code),
+      direct.published.map((diagnostic) => diagnostic.code),
       ['SEM0020'],
     )
     assert.strictEqual(direct.modules.at(0)?.structs.at(0)?.dependency._tag, 'Unavailable')
@@ -1436,7 +1452,7 @@ it.effect('diagnoses private exposure and inline recursive struct components can
       ['mixed', 'union Link { Next { node: Node }, End }\nstruct Node { link: Link }'],
     ])
     assert.deepEqual(
-      mixed.diagnostics.map((diagnostic) => diagnostic.code),
+      mixed.published.map((diagnostic) => diagnostic.code),
       ['SEM0020'],
     )
     assert.strictEqual(mixed.modules.at(0)?.unions.at(0)?.dependency._tag, 'Unavailable')
@@ -1491,7 +1507,7 @@ it.effect('resolves generic slice storage and diagnoses an ambiguous returned sl
       ["&'life1 [T]", "&'life2 mut [T]"],
     )
     assert.deepEqual(
-      index.diagnostics.map((diagnostic) => diagnostic.code),
+      index.published.map((diagnostic) => diagnostic.code),
       ['SEM0210'],
     )
   }),
@@ -1537,7 +1553,7 @@ effect fn allocate(self: &mut TestAllocator, layout: i32) -> i32 { return layout
 impl Allocator for TestAllocator { allocate: TestAllocator.allocate }`,
       ],
     ])
-    assert.deepEqual(valid.diagnostics, [])
+    assert.deepEqual(valid.published, [])
     assert.deepEqual(
       valid.modules.at(0)?.conformances.map((conformance) => conformance.validity._tag),
       ['ValidConformance'],
@@ -1561,7 +1577,7 @@ impl Allocator for TestAllocator { allocate: TestAllocator.allocate }`,
       ],
     ])
     assert.deepEqual(
-      invalid.diagnostics
+      invalid.published
         .filter((diagnostic) => diagnostic.code === 'SEM0083')
         .map((diagnostic) => diagnostic.reason._tag),
       ['InvalidConformance', 'InvalidConformance'],
@@ -1637,7 +1653,7 @@ impl Drop for Guard { effect fn dispose(value: &Guard) -> i32 { return 0 } }`,
       assert.isTrue(ConformanceProof.conforms(index, accepted, Type.dropCapability))
     }
     assert.deepEqual(
-      index.diagnostics
+      index.published
         .filter((diagnostic) => diagnostic.code === 'SEM0084')
         .map((diagnostic) =>
           diagnostic.reason._tag === 'InvalidDropHook' ? diagnostic.reason.detail : undefined,
@@ -1649,7 +1665,7 @@ impl Drop for Guard { effect fn dispose(value: &Guard) -> i32 { return 0 } }`,
       ],
     )
     assert.include(
-      index.diagnostics
+      index.published
         .filter((diagnostic) => diagnostic.code === 'SEM0083')
         .map((diagnostic) =>
           diagnostic.reason._tag === 'InvalidConformance' ? diagnostic.reason.detail : undefined,
@@ -1671,7 +1687,7 @@ impl Drop for State { fn drop(self: &mut State) -> () { return () } }`,
     ])
 
     assert.deepEqual(
-      index.diagnostics.map((diagnostic) => ({
+      index.published.map((diagnostic) => ({
         code: diagnostic.code,
         reason: diagnostic.reason._tag,
       })),
@@ -1699,7 +1715,7 @@ impl Copy for u32 {}`,
     ])
 
     assert.deepEqual(
-      index.diagnostics.map((diagnostic) => diagnostic.code),
+      index.published.map((diagnostic) => diagnostic.code),
       ['SEM0083', 'SEM0083', 'SEM0083'],
     )
     assert.deepEqual(
@@ -1774,7 +1790,7 @@ impl Clock for FixedClock {}`,
       ],
     )
     assert.strictEqual(
-      index.diagnostics.filter((diagnostic) => diagnostic.code === 'SEM0083').length,
+      index.published.filter((diagnostic) => diagnostic.code === 'SEM0083').length,
       3,
     )
   }),
@@ -1804,7 +1820,7 @@ impl Copy for Owned {}`,
       ['ValidConformance', 'InvalidConformance'],
     )
     assert.deepEqual(
-      index.diagnostics.map((diagnostic) => diagnostic.code),
+      index.published.map((diagnostic) => diagnostic.code),
       ['SEM0083'],
     )
   }),
@@ -1820,7 +1836,7 @@ impl<T> Drop for Vector<T> { fn drop(self: &mut Vector<T>) -> () { return () } }
 pub fn main() -> i32 { return 0 }`,
       ],
     ])
-    assert.deepEqual(index.diagnostics, [])
+    assert.deepEqual(index.published, [])
     const conformance = index.modules.at(0)?.conformances.at(0)
     assert.strictEqual(conformance?.typeParameters.length, 1)
     assert.strictEqual(conformance?.provider._tag, 'Resolved')
@@ -1861,7 +1877,7 @@ impl<T, T> Drop for Vector<T> { fn drop(self: &mut Vector<T>) -> () { return () 
       ],
     ])
     assert.deepEqual(
-      duplicate.diagnostics.map((diagnostic) => diagnostic.code),
+      duplicate.published.map((diagnostic) => diagnostic.code),
       ['SEM0050'],
     )
 
@@ -1879,12 +1895,8 @@ impl<U> Drop for Vector<U> { fn drop(self: &mut Vector<U>) -> () { return () } }
   }),
 )
 
-const spans = (
-  index: DeclarationIndex.Index,
-  source: string,
-  code: string,
-): ReadonlyArray<string> =>
-  index.diagnostics
+const spans = (index: PublishedIndex, source: string, code: string): ReadonlyArray<string> =>
+  index.published
     .filter((diagnostic) => diagnostic.code === code)
     .map((diagnostic) => source.slice(diagnostic.span.start, diagnostic.span.end).trim())
 
@@ -1901,7 +1913,7 @@ unsafe extern "C" fn bare(value: u8)`,
     ])
     const [abs, renamed, every, bare] = index.modules.at(0)?.declarations ?? []
 
-    assert.deepEqual(index.diagnostics, [])
+    assert.deepEqual(index.published, [])
     assert.deepEqual(abs?.foreign, {
       variadic: false,
       abi: 'C',
@@ -1956,7 +1968,7 @@ unsafe extern "C" fn abs(value: i32) -> i32`,
     ])
 
     assert.deepEqual(
-      index.diagnostics.map((diagnostic) => diagnostic.code),
+      index.published.map((diagnostic) => diagnostic.code),
       ['SEM0003'],
     )
     assert.strictEqual(index.modules.at(0)?.declarations.at(1)?.canonical._tag, 'Duplicate')
@@ -2017,7 +2029,7 @@ pub fn plain(value: i32) -> i32 { return value }`,
     ])
     const [named, renamed, plain] = index.modules.at(0)?.declarations ?? []
 
-    assert.deepEqual(index.diagnostics, [])
+    assert.deepEqual(index.published, [])
     assert.deepEqual(named?.foreignExport, {
       variadic: false,
       abi: 'C',
@@ -2059,7 +2071,7 @@ export "C" static answer: i32 as "silk$data" = 42`,
     ])
     const [environment, answer] = index.modules.at(0)?.members ?? []
 
-    assert.deepEqual(index.diagnostics, [])
+    assert.deepEqual(index.published, [])
     assert.strictEqual(environment?._tag, 'ForeignStaticDeclaration')
     assert.strictEqual(answer?._tag, 'ForeignStaticDeclaration')
     if (
@@ -2083,7 +2095,7 @@ it.effect('rejects a non-C function-pointer ABI at its type declaration', () =>
       ['root', 'fn install(callback: extern "system" fn(i32) -> i32) -> () {}'],
     ])
     assert.deepEqual(
-      index.diagnostics.map((diagnostic) => diagnostic.code),
+      index.published.map((diagnostic) => diagnostic.code),
       ['SEM0185'],
     )
   }),
@@ -2098,7 +2110,7 @@ it.effect('rejects exported C statics without a matching scalar literal', () =>
       ],
     ])
     assert.deepEqual(
-      index.diagnostics.map((diagnostic) => diagnostic.code),
+      index.published.map((diagnostic) => diagnostic.code),
       ['SEM0086', 'SEM0086', 'SEM0086'],
     )
     assert.deepEqual(
@@ -2157,7 +2169,7 @@ it.effect('does not double-report a foreign header whose ABI literal the parser 
     const index = yield* collect('root', [['root', 'unsafe extern fn f() -> i32']])
 
     assert.deepEqual(
-      index.diagnostics.map((diagnostic) => diagnostic.code),
+      index.published.map((diagnostic) => diagnostic.code),
       [],
     )
     assert.strictEqual(index.modules.at(0)?.declarations.at(0)?.foreign?.symbol, 'f')
@@ -2180,7 +2192,7 @@ fn take(value: *const i32, nested: *mut *const u8, handle: *mut Handle) -> *mut 
     const encoded = (fact: DeclarationFacts.DeclaredTypeFact | undefined) =>
       fact?._tag === 'Resolved' ? Type.encode(fact.type) : fact?._tag
 
-    assert.deepEqual(index.diagnostics, [])
+    assert.deepEqual(index.published, [])
     assert.deepEqual(
       take?.parameters.map((parameter) => encoded(parameter.declaredType)),
       ['*const i32', '*mut *const u8', '*mut pointers.Handle'],
@@ -2239,11 +2251,11 @@ fn visit(callback: for<'a> fn(&'a i32) -> &'a i32) {}`
       ['root', `// offset change\n${header.replace('return value', 'return value;')}`],
     ])
     assert.deepEqual(
-      first.diagnostics.map((diagnostic) => diagnostic.code),
+      first.published.map((diagnostic) => diagnostic.code),
       [],
     )
     assert.deepEqual(
-      second.diagnostics.map((diagnostic) => diagnostic.code),
+      second.published.map((diagnostic) => diagnostic.code),
       [],
     )
     const signatures = (index: DeclarationIndex.Index) =>
@@ -2285,7 +2297,7 @@ it.effect('diagnoses ambiguous outputs and unknown lifetime names at authored an
     const text = `fn ambiguous(left: &i32, right: &i32) -> &i32 { return left }
 fn missing(value: &'lost i32) {}`
     const index = yield* collect('root', [['root', text]])
-    const diagnostics = index.diagnostics.filter(
+    const diagnostics = index.published.filter(
       (diagnostic) => diagnostic.code === 'SEM0210' || diagnostic.code === 'SEM0209',
     )
     assert.deepEqual([...new Set(diagnostics.map((diagnostic) => diagnostic.code))].sort(), [
@@ -2318,7 +2330,7 @@ fn explicit<'a>(value: View<'a, i32>) {}`,
       ],
     ])
     assert.deepEqual(
-      index.diagnostics.map((diagnostic) => diagnostic.code),
+      index.published.map((diagnostic) => diagnostic.code),
       [],
     )
     const implicit = index.modules
@@ -2350,10 +2362,10 @@ interface Bounded { fn choose<'a: 'b, 'b>(left: &'a i32, right: &'b i32) -> &'a 
 impl Bounded for i32 { fn choose<'x: 'y, 'y>(left: &'x i32, right: &'y i32) -> &'x i32 { return left } }`
     const index = yield* collect('root', [['root', text]])
     assert.deepEqual(
-      index.diagnostics.map((diagnostic) => diagnostic.code),
+      index.published.map((diagnostic) => diagnostic.code),
       ['SEM0083'],
     )
-    const diagnostic = index.diagnostics.at(0)
+    const diagnostic = index.published.at(0)
     assert.isTrue(
       diagnostic !== undefined && diagnostic.span.start < text.indexOf('interface Bounded'),
     )
@@ -2371,7 +2383,7 @@ fn apply<T>(value: &T, callback: fn(&T) -> &T) -> &T { return value }`
     const original = collected.index
     const syntax = rootSyntax(collected.closure)
     assert.deepEqual(
-      original.diagnostics.map((diagnostic) => diagnostic.code),
+      original.published.map((diagnostic) => diagnostic.code),
       [],
     )
     const contexts =
@@ -2400,7 +2412,7 @@ fn apply<T>(value: &T, callback: fn(&T) -> &T) -> &T { return value }`
     const explicit = reparsed.index
     const explicitSyntax = rootSyntax(reparsed.closure)
     assert.deepEqual(
-      explicit.diagnostics.map((diagnostic) => diagnostic.code),
+      explicit.published.map((diagnostic) => diagnostic.code),
       [],
     )
     const keys = (index: DeclarationIndex.Index) =>
@@ -2451,7 +2463,7 @@ service Work { effect<'static> fn tick() -> i32 }`
     const collected = yield* collectWithClosure('root', [['root', source]])
     const original = collected.index
     const syntax = rootSyntax(collected.closure)
-    assert.deepEqual(original.diagnostics, [])
+    assert.deepEqual(original.published, [])
     const declarations = original.modules.at(0)?.declarations ?? []
     const edits = declarations
       .flatMap((declaration) => {
@@ -2480,7 +2492,7 @@ service Work { effect<'static> fn tick() -> i32 }`
     const reparsed = yield* collectWithClosure('root', [['root', expanded]])
     const explicit = reparsed.index
     const explicitSyntax = rootSyntax(reparsed.closure)
-    assert.deepEqual(explicit.diagnostics, [])
+    assert.deepEqual(explicit.published, [])
     const contracts = (index: DeclarationIndex.Index) =>
       index.modules
         .at(0)
@@ -2533,7 +2545,7 @@ pub struct Nested<T> { value: ?[*]const ?*mut align(1) T }
 `,
       ],
     ])
-    assert.deepEqual(valid.diagnostics, [])
+    assert.deepEqual(valid.published, [])
     const result = valid.modules[0]?.declarations[0]?.returnType
     assert.strictEqual(result?._tag, 'Resolved')
     if (result?._tag === 'Resolved')
@@ -2542,7 +2554,7 @@ pub struct Nested<T> { value: ?[*]const ?*mut align(1) T }
       const invalid = yield* collect('invalid', [
         ['invalid', `unsafe extern "C" fn value() -> *const ${qualifier} i32`],
       ])
-      const diagnostics = invalid.diagnostics.filter((diagnostic) => diagnostic.code === 'SEM0215')
+      const diagnostics = invalid.published.filter((diagnostic) => diagnostic.code === 'SEM0215')
       assert.strictEqual(diagnostics.length, 1)
       assert.strictEqual(diagnostics[0]?.span.sourceId, 'invalid')
       assert.isAbove(diagnostics[0]?.span.start ?? 0, 0)

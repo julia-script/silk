@@ -1,3 +1,4 @@
+import * as Location from './Location.js'
 import type * as AuthoredHir from './AuthoredHir.js'
 import * as AuthoredIdentity from './AuthoredIdentity.js'
 import * as AuthoredWalk from './AuthoredWalk.js'
@@ -69,9 +70,9 @@ export const unsafeCallDiagnostic = (
   call: AuthoredHir.Expression,
   callSpan: SourceSpan.SourceSpan,
   resolution: ResolutionContext | undefined,
-): Diagnostic.Diagnostic | undefined =>
+): Diagnostic.Located | undefined =>
   unsafe && !unsafeCallAuthorized(resolution, call, callSpan)
-    ? Diagnostic.missingUnsafeBoundary(spelling, callSpan)
+    ? Diagnostic.missingUnsafeBoundary(spelling, Location.at(call.anchor))
     : undefined
 
 interface StaticIterationElement {
@@ -153,10 +154,10 @@ export const analyzeStatements = (
           ...context,
           resolution: Object.freeze({ ...context.resolution, deferStaticCalls: true as const }),
         })
-  const blockBindings = new Map<string, SourceSpan.SourceSpan>(
+  const blockBindings = new Map<string, Location.Location>(
     introducedPatterns.flatMap((binding) =>
       binding.name._tag === 'Present'
-        ? [[binding.name.spelling, context.context.spanOf(binding.name.anchor)] as const]
+        ? [[binding.name.spelling, Location.at(binding.name.anchor)] as const]
         : [],
     ),
   )
@@ -364,7 +365,7 @@ export const analyzeStatements = (
     return region
   }
 
-  const staticDiagnostic = (failure: StaticEvaluation.StaticFailure): Diagnostic.Diagnostic =>
+  const staticDiagnostic = (failure: StaticEvaluation.StaticFailure): Diagnostic.Located =>
     StaticEvaluation.diagnostic(
       failure,
       context.staticContext?.environment.target ?? 'unselected-target',
@@ -457,7 +458,7 @@ export const analyzeStatements = (
         Diagnostic.matchMemberNotInScrutinee(
           Type.encode(member.type),
           Type.encode(subject.type.type),
-          context.context.spanOf(pattern.fact.anchor),
+          Location.at(pattern.fact.anchor),
         ),
       )
     }
@@ -524,7 +525,7 @@ export const analyzeStatements = (
       context.diagnostics.push(
         Diagnostic.conditionNotBool(
           Type.encode(condition.fact.type.type),
-          context.context.spanOf(condition.fact.anchor),
+          Location.at(condition.fact.anchor),
         ),
       )
     }
@@ -697,14 +698,12 @@ export const analyzeStatements = (
           Diagnostic.assignmentTypeMismatch(
             Type.encode(expected),
             Type.encode(initializer.type),
-            context.context.spanOf(initializerNode.anchor),
+            Location.at(initializerNode.anchor),
           ),
         )
 
       if (element.mutable && initializer.type !== undefined && Type.isEffect(initializer.type))
-        context.diagnostics.push(
-          Diagnostic.mutableEffectRecipe(context.context.spanOf(element.anchor)),
-        )
+        context.diagnostics.push(Diagnostic.mutableEffectRecipe(Location.at(element.anchor)))
 
       const name = bindingName(context.context, element.name)
       const exactCallable = exactCallableOf(
@@ -728,7 +727,7 @@ export const analyzeStatements = (
             'runtime binding of a phase-only value',
             context.staticContext?.environment.target ?? 'unselected-target',
             Object.freeze([]),
-            context.context.spanOf(element.anchor),
+            Location.at(element.anchor),
           ),
         )
       const evaluated =
@@ -782,7 +781,7 @@ export const analyzeStatements = (
       if (name._tag === 'Present') {
         const originalSpan = blockBindings.get(name.spelling)
         if (originalSpan === undefined) {
-          blockBindings.set(name.spelling, context.context.spanOf(name.anchor))
+          blockBindings.set(name.spelling, Location.at(name.anchor))
           scope = Object.freeze({
             parameters: scope.parameters,
             bindings: Object.freeze([...scope.bindings, binding]),
@@ -790,11 +789,7 @@ export const analyzeStatements = (
           })
         } else {
           context.diagnostics.push(
-            Diagnostic.rebindingName(
-              name.spelling,
-              originalSpan,
-              context.context.spanOf(name.anchor),
-            ),
+            Diagnostic.rebindingName(name.spelling, originalSpan, Location.at(name.anchor)),
           )
         }
       }
@@ -813,7 +808,7 @@ export const analyzeStatements = (
                 AuthoredWalk.moduleName(context.context),
                 context.resolution.scope,
               ),
-              context.context.spanOf(selection.pattern.anchor),
+              Location.at(selection.pattern.anchor),
             ),
           )
       } else if (selection.pattern._tag !== 'UnavailablePattern' && !selection.irrefutable) {
@@ -843,7 +838,7 @@ export const analyzeStatements = (
             selection.members
               .filter((member) => selected === undefined || !Match.selects(selected, member))
               .map(Match.encodeIdentity),
-            context.context.spanOf(selection.pattern.anchor),
+            Location.at(selection.pattern.anchor),
           ),
         )
       }
@@ -859,7 +854,7 @@ export const analyzeStatements = (
         if (binding.name._tag !== 'Present') continue
         const originalSpan = blockBindings.get(binding.name.spelling)
         if (originalSpan === undefined)
-          blockBindings.set(binding.name.spelling, context.context.spanOf(binding.name.anchor))
+          blockBindings.set(binding.name.spelling, Location.at(binding.name.anchor))
       }
       scope = Object.freeze({
         parameters: scope.parameters,
@@ -914,7 +909,7 @@ export const analyzeStatements = (
               AuthoredWalk.moduleName(context.context),
               context.resolution.scope,
             ),
-            context.context.spanOf(expressionNode.anchor),
+            Location.at(expressionNode.anchor),
           ),
         )
       }
@@ -984,7 +979,7 @@ export const analyzeStatements = (
             'static for requires a finite static sequence or field collection',
             context.staticContext.environment.target,
             Object.freeze([]),
-            context.context.spanOf(iterableNode.anchor),
+            Location.at(iterableNode.anchor),
           ),
         )
         reject()
@@ -1000,7 +995,7 @@ export const analyzeStatements = (
           StaticEvaluation.staticIterationFrame(
             ordinal,
             current.value,
-            context.context.spanOf(element.anchor),
+            Location.at(element.anchor),
           ),
         )
         const iterationStaticContext = Object.freeze({
@@ -1124,7 +1119,7 @@ export const analyzeStatements = (
             'static if condition must evaluate to bool',
             context.staticContext.environment.target,
             Object.freeze([]),
-            context.context.spanOf(conditionNode.anchor),
+            Location.at(conditionNode.anchor),
           ),
         )
         continue
@@ -1150,7 +1145,7 @@ export const analyzeStatements = (
             context.staticContext.trace,
             StaticEvaluation.selectedArmFrame(
               evaluated.value.value ? 'Taken' : 'Otherwise',
-              context.context.spanOf(selected.anchor),
+              Location.at(selected.anchor),
             ),
           ),
         })
@@ -1231,20 +1226,20 @@ export const analyzeStatements = (
             destination.fact.declaration.name._tag === 'Present'
               ? destination.fact.declaration.name.spelling
               : '?',
-            context.context.spanOf(destinationNode.anchor),
+            Location.at(destinationNode.anchor),
           ),
         )
       } else if (root === undefined) {
         if (AuthoredWalk.isAvailable(destinationNode) && destination.diagnostics.length === 0) {
           context.diagnostics.push(
-            Diagnostic.invalidAssignmentPlace(context.context.spanOf(destinationNode.anchor)),
+            Diagnostic.invalidAssignmentPlace(Location.at(destinationNode.anchor)),
           )
         }
       } else if (assignmentRootAccess(root, destination.fact) === 'ImmutableOwned') {
         context.diagnostics.push(
           Diagnostic.immutableAssignment(
             root.name._tag === 'Present' ? root.name.spelling : '?',
-            context.context.spanOf(destinationNode.anchor),
+            Location.at(destinationNode.anchor),
           ),
         )
       } else if (
@@ -1255,7 +1250,7 @@ export const analyzeStatements = (
           destination.fact._tag !== 'FieldProjection')
       ) {
         context.diagnostics.push(
-          Diagnostic.invalidAssignmentPlace(context.context.spanOf(destinationNode.anchor)),
+          Diagnostic.invalidAssignmentPlace(Location.at(destinationNode.anchor)),
         )
       }
       const compatible =
@@ -1265,26 +1260,26 @@ export const analyzeStatements = (
       if (destination.type !== undefined && value.type !== undefined && !compatible) {
         const expectedOrigin =
           root?._tag === 'BindingFact'
-            ? context.context.spanOf(root.initializer.anchor)
-            : context.context.spanOf(destinationNode.anchor)
+            ? Location.at(root.initializer.anchor)
+            : Location.at(destinationNode.anchor)
         context.diagnostics.push(
           representationJoinDiagnostic(
             destination.type,
             value.type,
             expectedOrigin,
-            context.context.spanOf(valueNode.anchor),
-            context.context.spanOf(valueNode.anchor),
+            Location.at(valueNode.anchor),
+            Location.at(valueNode.anchor),
           ) ??
             unionConversionDiagnostic(
               value.type,
               destination.type,
-              context.context.spanOf(valueNode.anchor),
+              Location.at(valueNode.anchor),
               context.resolution?.lifetimeCompatibility,
             ) ??
             Diagnostic.assignmentTypeMismatch(
               Type.encode(destination.type),
               Type.encode(value.type),
-              context.context.spanOf(valueNode.anchor),
+              Location.at(valueNode.anchor),
             ),
         )
       }
@@ -1315,7 +1310,7 @@ export const analyzeStatements = (
           current !== written
         )
           context.diagnostics.push(
-            Diagnostic.callableIdentityErasure(context.context.spanOf(valueNode.anchor)),
+            Diagnostic.callableIdentityErasure(Location.at(valueNode.anchor)),
           )
         context.resolution.writtenCallableBindings?.add(root.id.ordinal)
       }
@@ -1385,7 +1380,7 @@ export const analyzeStatements = (
           context.diagnostics.push(
             Diagnostic.conditionNotBool(
               Type.encode(condition.fact.type.type),
-              context.context.spanOf(conditionNode.anchor),
+              Location.at(conditionNode.anchor),
             ),
           )
         }
@@ -1442,7 +1437,7 @@ export const analyzeStatements = (
         context.diagnostics.push(
           Diagnostic.transferOutsideLoop(
             element._tag === 'BreakStatement' ? 'break' : 'continue',
-            context.context.spanOf(element.anchor),
+            Location.at(element.anchor),
           ),
         )
       }
@@ -1482,7 +1477,7 @@ export const analyzeStatements = (
         !concreteCallableIdentity(expression.fact, context.resolution.writtenCallableBindings)
       ) {
         context.diagnostics.push(
-          Diagnostic.unknownOwnedCallableReturn(context.context.spanOf(expressionNode.anchor)),
+          Diagnostic.unknownOwnedCallableReturn(Location.at(expressionNode.anchor)),
         )
       }
       facts.push(
@@ -1520,14 +1515,12 @@ export const analyzeStatements = (
           ? expression.type
           : undefined
       if (!context.effectBlock && context.declaration.functionKind !== 'Effect')
-        context.diagnostics.push(
-          Diagnostic.failOutsideEffect(context.context.spanOf(element.anchor)),
-        )
+        context.diagnostics.push(Diagnostic.failOutsideEffect(Location.at(element.anchor)))
       if (expression.type !== undefined && failure === undefined)
         context.diagnostics.push(
           Diagnostic.invalidFailureType(
             Type.encode(expression.type),
-            context.context.spanOf(expressionNode.anchor),
+            Location.at(expressionNode.anchor),
           ),
         )
       if (
@@ -1544,10 +1537,7 @@ export const analyzeStatements = (
         )
       )
         context.diagnostics.push(
-          Diagnostic.undeclaredFailure(
-            Type.encode(failure),
-            context.context.spanOf(expressionNode.anchor),
-          ),
+          Diagnostic.undeclaredFailure(Type.encode(failure), Location.at(expressionNode.anchor)),
         )
       facts.push(
         Object.freeze({
@@ -1816,14 +1806,8 @@ export const reachableCallableWrites = (
  * Where a body that falls off its end is reported: the closing brace, which a presented block
  * span always ends with unless recovery left the block damaged.
  */
-const closingBraceSpan = (
-  semantic: SemanticContext.SemanticContext,
-  block: AuthoredHir.Block,
-): SourceSpan.SourceSpan => {
-  const span = semantic.spanOf(block.anchor)
-  if (block.causes.length > 0 || span.end <= span.start) return span
-  return SourceSpan.fromOffsets(span.sourceId, span.end - 1, span.end) ?? span
-}
+const closingBraceSpan = (block: AuthoredHir.Block): Location.Location =>
+  block.causes.length > 0 ? Location.at(block.anchor) : Location.endOf(block.anchor)
 /**
  * Joins the Effects constructed at distinct return sites of one function into one finite
  * composite representation under the declared contract (EFF-013). A single construction site
@@ -1844,7 +1828,7 @@ const returnSiteEffectJoin = (
       !Type.isNever(statement.expression.type.type),
   )
   const alternatives: Array<Type.ExactRepresentationArgument> = []
-  const missing: Array<SourceSpan.SourceSpan> = []
+  const missing: Array<Location.Location> = []
   for (const statement of sites) {
     const representation = representationOfExpression(context.context, statement.expression)
     if (
@@ -1858,7 +1842,7 @@ const returnSiteEffectJoin = (
       Type.isCompositeEffectRepresentationArgument(representation)
     )
       alternatives.push(...representation.alternatives)
-    else missing.push(context.context.spanOf(statement.expression.anchor))
+    else missing.push(Location.at(statement.expression.anchor))
   }
   const composite = Type.compositeEffectRepresentationArgument(declared, alternatives)
   if (composite.alternatives.length < 2 && missing.length === 0) return undefined
@@ -1969,7 +1953,7 @@ export const analyzeFunctionBody = (
             'runtime parameter with a phase-only type',
             target,
             Object.freeze([]),
-            context.context.spanOf(parameter.anchor),
+            Location.at(parameter.anchor),
           ),
         )
     }
@@ -1982,7 +1966,7 @@ export const analyzeFunctionBody = (
           'runtime return with a phase-only type',
           target,
           Object.freeze([]),
-          context.context.spanOf(declaration.returnType.anchor),
+          Location.at(declaration.returnType.anchor),
         ),
       )
   }
@@ -2058,20 +2042,20 @@ export const analyzeFunctionBody = (
         representationJoinDiagnostic(
           returnType ?? declaration.returnType.type,
           actual,
-          context.context.spanOf(declaration.returnType.anchor),
-          context.context.spanOf(returned.expression.anchor),
-          context.context.spanOf(returned.expression.anchor),
+          Location.at(declaration.returnType.anchor),
+          Location.at(returned.expression.anchor),
+          Location.at(returned.expression.anchor),
         ) ??
           unionConversionDiagnostic(
             actual,
             returnType ?? declaration.returnType.type,
-            context.context.spanOf(returned.expression.anchor),
+            Location.at(returned.expression.anchor),
             bodyResolution?.lifetimeCompatibility,
           ) ??
           Diagnostic.returnTypeMismatch(
             Type.encode(returnType ?? declaration.returnType.type),
             Type.encode(actual),
-            context.context.spanOf(returned.expression.anchor),
+            Location.at(returned.expression.anchor),
           ),
       )
     }
@@ -2085,7 +2069,7 @@ export const analyzeFunctionBody = (
       context.diagnostics.push(
         Diagnostic.missingReturn(
           Type.encode(returnType ?? declaration.returnType.type),
-          closingBraceSpan(semantic, blockNode),
+          closingBraceSpan(blockNode),
         ),
       )
     }

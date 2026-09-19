@@ -62,11 +62,11 @@ export type Role =
 
 export type Resolution =
   | { readonly _tag: 'Available'; readonly identity: Identity }
-  | { readonly _tag: 'Missing'; readonly cause?: Diagnostic.Identity }
-  | { readonly _tag: 'Inaccessible'; readonly cause?: Diagnostic.Identity }
-  | { readonly _tag: 'Ambiguous'; readonly cause?: Diagnostic.Identity }
-  | { readonly _tag: 'Conflicting'; readonly cause?: Diagnostic.Identity }
-  | { readonly _tag: 'Unavailable'; readonly cause?: Diagnostic.Identity }
+  | { readonly _tag: 'Missing'; readonly cause?: Diagnostic.CauseIdentity }
+  | { readonly _tag: 'Inaccessible'; readonly cause?: Diagnostic.CauseIdentity }
+  | { readonly _tag: 'Ambiguous'; readonly cause?: Diagnostic.CauseIdentity }
+  | { readonly _tag: 'Conflicting'; readonly cause?: Diagnostic.CauseIdentity }
+  | { readonly _tag: 'Unavailable'; readonly cause?: Diagnostic.CauseIdentity }
 
 /** One immutable exact-token semantic query answer. */
 export interface SemanticOccurrence {

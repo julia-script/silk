@@ -53,6 +53,7 @@ import * as SourceResolver from './SourceResolver.js'
 import type * as SourceSpan from './SourceSpan.js'
 import type * as AuthoredHir from './AuthoredHir.js'
 import * as AuthoredWalk from './AuthoredWalk.js'
+import * as Location from './Location.js'
 import type * as SemanticContext from './SemanticContext.js'
 import type * as SyntaxFile from './SyntaxFile.js'
 import * as SyntaxTree from './SyntaxTree.js'
@@ -446,13 +447,13 @@ export const explicitLifetimes = (
     if (body !== undefined && start >= body.start && end <= body.end) return []
     const headerEnd = body?.start ?? header.end
     if (
-      self.index.diagnostics.some(
-        (diagnostic) =>
-          diagnostic.severity === 'error' &&
-          diagnostic.span.sourceId === header.sourceId &&
-          diagnostic.span.start >= header.start &&
-          diagnostic.span.start < headerEnd,
-      )
+      self.index.diagnostics.some((located) => {
+        if (located.severity !== 'error') return false
+        const span = semantic.spanOf(Location.anchorOf(located.span))
+        return (
+          span.sourceId === header.sourceId && span.start >= header.start && span.start < headerEnd
+        )
+      })
     )
       return []
     const syntax = moduleSyntax(self, module)

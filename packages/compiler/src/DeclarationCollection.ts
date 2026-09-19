@@ -1,3 +1,4 @@
+import * as Location from './Location.js'
 import * as MachineFunction from './MachineFunction.js'
 import * as DeclarationProperty from './DeclarationProperty.js'
 import * as NativeRequirement from './NativeRequirement.js'
@@ -80,7 +81,7 @@ import * as Type from './Type.js'
 
 type Context = SemanticContext.SemanticContext
 
-const noDiagnostics: ReadonlyArray<Diagnostic.Diagnostic> = Object.freeze([])
+const noDiagnostics: ReadonlyArray<Diagnostic.Located> = Object.freeze([])
 
 /** The spelling of an authored name, or `undefined` when recovery left none. */
 const nameText = (context: Context, name: AuthoredHir.Name): string | undefined =>
@@ -462,7 +463,7 @@ interface AppliedRows {
   readonly rowParameterComponents: ReadonlyArray<DeclaredTypeFact>
   /** The row as one expression, present only when the row subtracts (`Without<R, K>`). */
   readonly requirementExpression: RowExpressionFact | undefined
-  readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
+  readonly diagnostics: ReadonlyArray<Diagnostic.Located>
 }
 
 /** The members a failure operand contributes: a union spreads, anything else stands alone. */
@@ -478,7 +479,7 @@ const analyzeAppliedRows = (
   typeParameters: ReadonlyMap<string, Type.Parameter>,
   lifetimeContext?: DeclarationLifetime.Context,
 ): AppliedRows => {
-  const diagnostics: Array<Diagnostic.Diagnostic> = []
+  const diagnostics: Array<Diagnostic.Located> = []
   const failureNodes =
     argumentList.failures === undefined ? [] : failureMembers(argumentList.failures)
   const failures = failureNodes.flatMap((member): ReadonlyArray<TypeResolution> => {
@@ -492,7 +493,7 @@ const analyzeAppliedRows = (
           segment.spelling,
           'Value',
           parameter.kind,
-          context.spanOf(segment.anchor),
+          Location.at(segment.anchor),
         ),
       )
     return []
@@ -527,12 +528,12 @@ const analyzeAppliedRows = (
     if (segment !== undefined)
       diagnostics.push(
         parameter === undefined
-          ? Diagnostic.unknownType(segment.spelling, context.spanOf(segment.anchor))
+          ? Diagnostic.unknownType(segment.spelling, Location.at(segment.anchor))
           : Diagnostic.genericParameterKindMismatch(
               segment.spelling,
               'RequirementRow',
               parameter.kind,
-              context.spanOf(segment.anchor),
+              Location.at(segment.anchor),
             ),
       )
     return []
@@ -571,14 +572,12 @@ const analyzeAppliedRows = (
 }
 
 const unreportedLifetimeDiagnostic = (
-  diagnostic: Diagnostic.Diagnostic,
+  diagnostic: Diagnostic.Located,
   context: DeclarationLifetime.Context | undefined,
-): ReadonlyArray<Diagnostic.Diagnostic> =>
+): ReadonlyArray<Diagnostic.Located> =>
   context?.diagnostics.some(
     (reported) =>
-      reported.code === diagnostic.code &&
-      reported.span.start === diagnostic.span.start &&
-      reported.span.end === diagnostic.span.end,
+      reported.code === diagnostic.code && Location.equals(reported.span, diagnostic.span),
   )
     ? noDiagnostics
     : Object.freeze([diagnostic])
@@ -611,8 +610,8 @@ export const analyzeDeclaredType = (
       })
     const diagnostic =
       ticked === undefined
-        ? Diagnostic.invalidLifetimeBinder('Expected a lifetime argument', context.spanOf(anchor))
-        : Diagnostic.unknownLifetime(ticked, context.spanOf(type.name.anchor))
+        ? Diagnostic.invalidLifetimeBinder('Expected a lifetime argument', Location.at(anchor))
+        : Diagnostic.unknownLifetime(ticked, Location.at(type.name.anchor))
     return Object.freeze({
       fact: Object.freeze({ _tag: 'Unavailable', anchor, cause: Diagnostic.identity(diagnostic) }),
       diagnostics: unreportedLifetimeDiagnostic(diagnostic, lifetimeContext),
@@ -640,10 +639,10 @@ export const analyzeDeclaredType = (
     const spelling = written === undefined ? undefined : nameText(context, written.name)
     const diagnostic =
       spelling === undefined
-        ? Diagnostic.ambiguousLifetimeElision(context.spanOf(anchor))
+        ? Diagnostic.ambiguousLifetimeElision(Location.at(anchor))
         : Diagnostic.unknownLifetime(
             spelling.startsWith("'") ? spelling : `'${spelling}`,
-            context.spanOf(written?.anchor ?? anchor),
+            Location.at(written?.anchor ?? anchor),
           )
     return Object.freeze({
       fact: Object.freeze({ _tag: 'Unavailable', anchor, cause: Diagnostic.identity(diagnostic) }),
@@ -733,11 +732,11 @@ export const analyzeDeclaredType = (
       parameters.map((entry, ordinal) => ({
         name: String(ordinal),
         type: entry.fact._tag === 'Resolved' ? entry.fact.type : undefined,
-        span: context.spanOf(entry.fact.anchor),
+        at: Location.at(entry.fact.anchor),
       })),
       result.fact._tag === 'Resolved' ? result.fact.type : undefined,
     )
-    const diagnostics: Array<Diagnostic.Diagnostic> = [...parameters, result].flatMap((entry) =>
+    const diagnostics: Array<Diagnostic.Located> = [...parameters, result].flatMap((entry) =>
       Array.from(entry.diagnostics),
     )
     diagnostics.push(...behavior.diagnostics)
@@ -745,12 +744,12 @@ export const analyzeDeclaredType = (
       diagnostics.push(
         Diagnostic.foreignDeclarationRestriction(
           'duplicate foreign contract',
-          context.spanOf(clause.anchor),
+          Location.at(clause.anchor),
         ),
       )
     const abi = type.abi._tag === 'TextLiteral' ? context.textOf(type.abi.value) : undefined
     if (type.abi._tag === 'TextLiteral' && abi !== 'C')
-      diagnostics.push(Diagnostic.unsupportedForeignAbi(abi ?? '', context.spanOf(type.abi.anchor)))
+      diagnostics.push(Diagnostic.unsupportedForeignAbi(abi ?? '', Location.at(type.abi.anchor)))
     if (
       diagnostics.length === 0 &&
       result.fact._tag === 'Resolved' &&
@@ -802,7 +801,7 @@ export const analyzeDeclaredType = (
             ),
           ],
     )
-    const diagnostics: Array<Diagnostic.Diagnostic> = members.flatMap((member) =>
+    const diagnostics: Array<Diagnostic.Located> = members.flatMap((member) =>
       Array.from(member.diagnostics),
     )
     const facts = Object.freeze(members.map((member) => member.fact))
@@ -829,7 +828,7 @@ export const analyzeDeclaredType = (
           diagnostics.push(
             Diagnostic.invalidUnionMember(
               Type.encode(invalid),
-              context.spanOf(sourceFact?.anchor ?? anchor),
+              Location.at(sourceFact?.anchor ?? anchor),
             ),
           )
         }
@@ -917,7 +916,7 @@ export const analyzeDeclaredType = (
     const extent: Type.Pointer['extent'] = type.multiplicity === 'Many' ? 'Many' : 'Single'
     let alignment: Type.Pointer['alignment'] = 'Natural'
     const seen = new Set<string>()
-    const qualifierDiagnostics: Array<Diagnostic.Diagnostic> = []
+    const qualifierDiagnostics: Array<Diagnostic.Located> = []
     for (const qualifier of type.qualifiers) {
       const name = nameText(context, qualifier.name)
       if (name === undefined || qualifier.value._tag !== 'IntegerLiteral') continue
@@ -932,7 +931,7 @@ export const analyzeDeclaredType = (
       seen.add(name)
       if (detail !== undefined)
         qualifierDiagnostics.push(
-          Diagnostic.invalidPointerQualifier(name, detail, context.spanOf(qualifier.value.anchor)),
+          Diagnostic.invalidPointerQualifier(name, detail, Location.at(qualifier.value.anchor)),
         )
     }
     const qualifiers = {
@@ -990,7 +989,7 @@ export const analyzeDeclaredType = (
       false,
       lifetimeContext,
     )
-    const diagnostics: Array<Diagnostic.Diagnostic> = [...element.diagnostics]
+    const diagnostics: Array<Diagnostic.Located> = [...element.diagnostics]
     let length: ArrayLengthFact
     if (type.length._tag !== 'IntegerLiteral') {
       length = Object.freeze({ _tag: 'Unavailable', anchor: type.length.anchor })
@@ -1002,7 +1001,7 @@ export const analyzeDeclaredType = (
           spelling,
           'i32',
           { minimum: -2147483648n, maximum: 2147483647n },
-          context.spanOf(type.length.anchor),
+          Location.at(type.length.anchor),
         )
         diagnostics.push(diagnostic)
         length = Object.freeze({
@@ -1089,7 +1088,7 @@ export const analyzeDeclaredType = (
       if (arguments_.length !== 1 || argument?._tag !== 'Lifetime') {
         const diagnostic = Diagnostic.invalidLifetimeBinder(
           'string requires exactly one lifetime argument',
-          context.spanOf(anchor),
+          Location.at(anchor),
         )
         return Object.freeze({
           fact: Object.freeze({
@@ -1138,7 +1137,7 @@ export const analyzeDeclaredType = (
             'Effect',
             1,
             arguments_.length,
-            context.spanOf(type.target.anchor),
+            Location.at(type.target.anchor),
           ),
         )
       const resolvedFailures = rows.failures.flatMap((failure) =>
@@ -1255,7 +1254,7 @@ export const analyzeDeclaredType = (
         spelling: appliedSpelling(context, type),
         anchor,
       }),
-      diagnostics: Diagnostic.merge(
+      diagnostics: Diagnostic.collect(
         target.diagnostics,
         ...arguments_.map((argument) => argument.diagnostics),
         ...rows.failures.map((failure) => failure.diagnostics),
@@ -1339,7 +1338,7 @@ export const analyzeDeclaredType = (
         bare,
         'Value',
         parameterType.kind,
-        context.spanOf(first.anchor),
+        Location.at(first.anchor),
       )
       return Object.freeze({
         fact: Object.freeze({
@@ -1444,7 +1443,7 @@ const analyzeParameter = (
   lifetimeContext?: DeclarationLifetime.Context,
 ): {
   readonly fact: ParameterFact
-  readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
+  readonly diagnostics: ReadonlyArray<Diagnostic.Located>
 } => {
   const type = analyzeDeclaredType(context, parameter.type, typeParameters, false, lifetimeContext)
   return Object.freeze({
@@ -1466,7 +1465,7 @@ const duplicateParameterDiagnostics = (
   parameters: ReadonlyArray<ParameterFact>,
 ) => {
   const first = new Map<string, ReturnType<typeof presentParameterEntries>[number]>()
-  const diagnostics: Array<Diagnostic.Diagnostic> = []
+  const diagnostics: Array<Diagnostic.Located> = []
   for (const entry of presentParameterEntries(parameters)) {
     const original = first.get(entry.spelling)
     if (original === undefined) first.set(entry.spelling, entry)
@@ -1474,8 +1473,8 @@ const duplicateParameterDiagnostics = (
       diagnostics.push(
         Diagnostic.duplicateParameterName(
           entry.spelling,
-          context.spanOf(original.anchor),
-          context.spanOf(entry.anchor),
+          Location.at(original.anchor),
+          Location.at(entry.anchor),
         ),
       )
   }
@@ -1490,7 +1489,7 @@ const collectFields = (
   lifetimeContext?: DeclarationLifetime.Context,
 ) => {
   const first = new Map<string, { readonly id: FieldId; readonly anchor: AuthoredHir.Anchor }>()
-  const diagnostics: Array<Diagnostic.Diagnostic> = []
+  const diagnostics: Array<Diagnostic.Located> = []
   const fields = fieldNodes.map((field, ordinal): FieldFact => {
     const id: FieldId = Object.freeze({ _tag: 'FieldId', owner, ordinal })
     const name = declaredName(context, field.name)
@@ -1506,8 +1505,8 @@ const collectFields = (
       } else {
         const diagnostic = Diagnostic.duplicateFieldName(
           name.spelling,
-          context.spanOf(original.anchor),
-          context.spanOf(name.anchor),
+          Location.at(original.anchor),
+          Location.at(name.anchor),
         )
         diagnostics.push(diagnostic)
         state = Object.freeze({
@@ -1539,7 +1538,7 @@ const collectPositionalFields = (
   typeParameters: ReadonlyMap<string, Type.Parameter>,
   lifetimeContext?: DeclarationLifetime.Context,
 ) => {
-  const diagnostics: Array<Diagnostic.Diagnostic> = []
+  const diagnostics: Array<Diagnostic.Located> = []
   const fields = elements.map((element, ordinal): FieldFact => {
     const id: FieldId = Object.freeze({ _tag: 'FieldId', owner, ordinal })
     const declaredType = analyzeDeclaredType(
@@ -1562,14 +1561,6 @@ const collectPositionalFields = (
     })
   })
   return Object.freeze({ fields: Object.freeze(fields), diagnostics: Object.freeze(diagnostics) })
-}
-
-const compareDiagnostics = (left: Diagnostic.Diagnostic, right: Diagnostic.Diagnostic): number => {
-  const spanOrder = left.span.start - right.span.start || left.span.end - right.span.end
-  if (spanOrder !== 0) return spanOrder
-  if (left.code < right.code) return -1
-  if (left.code > right.code) return 1
-  return 0
 }
 
 /** A generic binder's written name, normalized so a lifetime binder keeps its leading tick. */
@@ -1614,7 +1605,7 @@ const collectTypeParameters = (
 ): {
   readonly facts: ReadonlyArray<TypeParameterFact>
   readonly environment: ReadonlyMap<string, Type.Parameter>
-  readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
+  readonly diagnostics: ReadonlyArray<Diagnostic.Located>
   readonly lifetimeContext: DeclarationLifetime.Context
 } => {
   const moduleName = context.module.owner.module
@@ -1630,7 +1621,7 @@ const collectTypeParameters = (
         : [],
     ),
   )
-  const diagnostics: Array<Diagnostic.Diagnostic> = []
+  const diagnostics: Array<Diagnostic.Located> = []
   // Every binder is visible to every bound, so the environment is seeded before any bound resolves.
   for (const [ordinal, generic] of generics.entries()) {
     const name = binderName(context, generic)
@@ -1662,7 +1653,7 @@ const collectTypeParameters = (
       diagnostics.push(
         Diagnostic.invalidLifetimeBinder(
           'static cannot be declared as a lifetime parameter',
-          context.spanOf(name.anchor),
+          Location.at(name.anchor),
         ),
       )
     const declaredBounds = generic._tag === 'RowParameter' ? [] : generic.bounds
@@ -1674,7 +1665,7 @@ const collectTypeParameters = (
       if (region === undefined && ticked !== undefined)
         diagnostics.push(
           ...unreportedLifetimeDiagnostic(
-            Diagnostic.unknownLifetime(ticked, context.spanOf(bound.anchor)),
+            Diagnostic.unknownLifetime(ticked, Location.at(bound.anchor)),
             lifetimeContext,
           ),
         )
@@ -1685,7 +1676,7 @@ const collectTypeParameters = (
       diagnostics.push(
         Diagnostic.invalidLifetimeBinder(
           'A lifetime parameter accepts only lifetime outlives bounds',
-          context.spanOf(generic.anchor),
+          Location.at(generic.anchor),
         ),
       )
     const boundNode = typeBounds.at(0)
@@ -1730,7 +1721,7 @@ const collectTypeParameters = (
           diagnostics.push(
             Diagnostic.invalidExecutablePropertyConjunct(
               segment.spelling,
-              context.spanOf(conjunct.anchor),
+              Location.at(conjunct.anchor),
             ),
           )
       }
@@ -1744,7 +1735,7 @@ const collectTypeParameters = (
         diagnostics.push(
           Diagnostic.invalidExecutablePropertyConjunct(
             segment.spelling,
-            context.spanOf(propertyNode.anchor),
+            Location.at(propertyNode.anchor),
           ),
         )
     }
@@ -1828,8 +1819,8 @@ const collectTypeParameters = (
         diagnostics.push(
           Diagnostic.duplicateTypeParameter(
             name.spelling,
-            context.spanOf(originalAnchor),
-            context.spanOf(name.anchor),
+            Location.at(originalAnchor),
+            Location.at(name.anchor),
           ),
         )
     }
@@ -1917,7 +1908,7 @@ const collectReturnType = (
 ): {
   readonly fact: ReturnTypeFact
   readonly opaqueResult?: OpaqueResultFact
-  readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
+  readonly diagnostics: ReadonlyArray<Diagnostic.Located>
 } => {
   if (result._tag !== 'OpaqueResultType') {
     const analyzed = analyzeDeclaredType(
@@ -1995,7 +1986,7 @@ const collectRowExpression = (
   lifetimeContext?: DeclarationLifetime.Context,
 ): {
   readonly fact: RowExpressionFact
-  readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
+  readonly diagnostics: ReadonlyArray<Diagnostic.Located>
 } => {
   const anchor = operand.anchor
   if (operand._tag === 'RowWithout') {
@@ -2169,7 +2160,7 @@ const collectFailureRow = (
   lifetimeContext?: DeclarationLifetime.Context,
 ): {
   readonly fact: FailureRowFact
-  readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
+  readonly diagnostics: ReadonlyArray<Diagnostic.Located>
 } => {
   if (failures === undefined)
     return Object.freeze({ fact: absentFailureRow, diagnostics: noDiagnostics })
@@ -2183,7 +2174,7 @@ const collectFailureRow = (
   )
   // The member facts remain the single diagnostic owner while the row expression is retained as
   // the semantic shape. Reporting both would emit one source member's error twice.
-  const diagnostics: Array<Diagnostic.Diagnostic> = []
+  const diagnostics: Array<Diagnostic.Located> = []
   const members = failureMembers(failures).flatMap((member): ReadonlyArray<DeclaredTypeFact> => {
     const parameter = parameterAtType(context, member, typeParameters)
     if (parameter?.kind === 'RequirementRow') {
@@ -2194,7 +2185,7 @@ const collectFailureRow = (
             segment.spelling,
             'Value',
             parameter.kind,
-            context.spanOf(segment.anchor),
+            Location.at(segment.anchor),
           ),
         )
       return []
@@ -2225,11 +2216,11 @@ const collectRequirementRow = (
   lifetimeContext?: DeclarationLifetime.Context,
 ): {
   readonly fact: RequirementRowFact
-  readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
+  readonly diagnostics: ReadonlyArray<Diagnostic.Located>
 } => {
   if (row === undefined)
     return Object.freeze({ fact: absentRequirementRow, diagnostics: noDiagnostics })
-  const diagnostics: Array<Diagnostic.Diagnostic> = []
+  const diagnostics: Array<Diagnostic.Located> = []
   // Entry collection owns the source diagnostics; the expression facts are structural and must
   // not duplicate the same diagnostic occurrence.
   const expression = rowExpressionOf(context, row, typeParameters, lifetimeContext)
@@ -2260,12 +2251,12 @@ const collectRequirementRow = (
     if (segment !== undefined)
       diagnostics.push(
         parameter === undefined
-          ? Diagnostic.unknownType(segment.spelling, context.spanOf(segment.anchor))
+          ? Diagnostic.unknownType(segment.spelling, Location.at(segment.anchor))
           : Diagnostic.genericParameterKindMismatch(
               segment.spelling,
               'RequirementRow',
               parameter.kind,
-              context.spanOf(segment.anchor),
+              Location.at(segment.anchor),
             ),
       )
     return []
@@ -2315,11 +2306,11 @@ const collectConstraints = (
   typeParameters: ReadonlyMap<string, Type.Parameter>,
 ): {
   readonly facts: ReadonlyArray<ConstraintFact>
-  readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
+  readonly diagnostics: ReadonlyArray<Diagnostic.Located>
 } => {
   if (constraints.length === 0)
     return Object.freeze({ facts: Object.freeze([]), diagnostics: noDiagnostics })
-  const diagnostics: Array<Diagnostic.Diagnostic> = []
+  const diagnostics: Array<Diagnostic.Located> = []
   const facts = constraints.map((constraint): ConstraintFact => {
     if (constraint._tag === 'MembershipConstraint') {
       const domain = constraintDomain(context, constraint.source, typeParameters)
@@ -2415,7 +2406,7 @@ export const collectAnonymousCallableDeclaration = (
   inheritedTypeParameters: ReadonlyArray<TypeParameterFact>,
 ): {
   readonly fact: DeclarationFact
-  readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
+  readonly diagnostics: ReadonlyArray<Diagnostic.Located>
 } => {
   const environment = new Map(
     inheritedTypeParameters.flatMap((parameter) =>
@@ -2464,7 +2455,7 @@ export const collectAnonymousCallableDeclaration = (
   const returnType: {
     readonly fact: ReturnTypeFact
     readonly opaqueResult?: OpaqueResultFact
-    readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
+    readonly diagnostics: ReadonlyArray<Diagnostic.Located>
   } =
     contract.result === undefined
       ? Object.freeze({
@@ -2496,7 +2487,7 @@ export const collectAnonymousCallableDeclaration = (
     ...failureRow.diagnostics,
     ...requirementRow.diagnostics,
     ...(!contract.effect && failureRow.fact.anchor !== undefined
-      ? [Diagnostic.failureChannelOnOrdinary(context.spanOf(failureRow.fact.anchor))]
+      ? [Diagnostic.failureChannelOnOrdinary(Location.at(failureRow.fact.anchor))]
       : []),
   ])
   return Object.freeze({
@@ -2532,7 +2523,7 @@ export const collectAnonymousCallableDeclaration = (
 const enumRepresentation = (
   context: Context,
   header: Extract<AuthoredHir.DeclarationHeader, { readonly _tag: 'EnumHeader' }>,
-  diagnostics: Array<Diagnostic.Diagnostic>,
+  diagnostics: Array<Diagnostic.Located>,
 ): EnumRepresentationFact => {
   const representation = header.representation
   if (representation === undefined)
@@ -2557,7 +2548,7 @@ const enumRepresentation = (
   const diagnostic = Diagnostic.unsupportedEnumRepresentation(
     spelling,
     Scalar.enumRepresentations().map((candidate) => candidate.spelling),
-    context.spanOf(representation.anchor),
+    Location.at(representation.anchor),
   )
   diagnostics.push(diagnostic)
   return Object.freeze({
@@ -2577,15 +2568,15 @@ const collectEnum = (
   canonical: CanonicalState,
   visibility: 'Private' | 'Public',
   name: DeclaredName,
-  diagnostics: Array<Diagnostic.Diagnostic>,
+  diagnostics: Array<Diagnostic.Located>,
 ): EnumFact => {
-  const enumDiagnostics: Array<Diagnostic.Diagnostic> = []
+  const enumDiagnostics: Array<Diagnostic.Located> = []
   const representation = enumRepresentation(context, header, enumDiagnostics)
   if (header.members.length === 0)
     enumDiagnostics.push(
       Diagnostic.emptyEnum(
         name._tag === 'Present' ? name.spelling : '<anonymous>',
-        context.spanOf(header.anchor),
+        Location.at(header.anchor),
       ),
     )
   const firstNames = new Map<
@@ -2630,8 +2621,8 @@ const collectEnum = (
       } else {
         const diagnostic = Diagnostic.duplicateEnumMemberName(
           memberName.spelling,
-          context.spanOf(original.anchor),
-          context.spanOf(memberName.anchor),
+          Location.at(original.anchor),
+          Location.at(memberName.anchor),
         )
         enumDiagnostics.push(diagnostic)
         if (original.canonical !== undefined)
@@ -2672,7 +2663,7 @@ const collectEnum = (
       const diagnostic = Diagnostic.unsignedEnumNegativeDiscriminant(
         representationScalar.spelling,
         attempted,
-        context.spanOf(discriminantAnchor),
+        Location.at(discriminantAnchor),
       )
       enumDiagnostics.push(diagnostic)
       discriminant = Object.freeze({
@@ -2690,13 +2681,13 @@ const collectEnum = (
               attempted,
               range.minimum,
               range.maximum,
-              context.spanOf(discriminantAnchor),
+              Location.at(discriminantAnchor),
             )
           : Diagnostic.enumImplicitDiscriminantOverflow(
               representationScalar.spelling,
               previous ?? range.maximum,
               range.maximum,
-              context.spanOf(member.anchor),
+              Location.at(member.anchor),
             )
       enumDiagnostics.push(diagnostic)
       discriminant = Object.freeze({
@@ -2719,8 +2710,8 @@ const collectEnum = (
       } else {
         const diagnostic = Diagnostic.duplicateEnumDiscriminant(
           attempted,
-          context.spanOf(original),
-          context.spanOf(member.anchor),
+          Location.at(original),
+          Location.at(member.anchor),
         )
         enumDiagnostics.push(diagnostic)
         discriminant = Object.freeze({
@@ -2792,14 +2783,14 @@ const collectUnion = (
   visibility: 'Private' | 'Public',
   name: DeclaredName,
   typeParameters: ReturnType<typeof collectTypeParameters>,
-  diagnostics: Array<Diagnostic.Diagnostic>,
+  diagnostics: Array<Diagnostic.Located>,
 ): UnionFact => {
-  const unionDiagnostics: Array<Diagnostic.Diagnostic> = []
+  const unionDiagnostics: Array<Diagnostic.Located> = []
   if (header.variants.length === 0)
     unionDiagnostics.push(
       Diagnostic.emptyNominalUnion(
         name._tag === 'Present' ? name.spelling : '<anonymous>',
-        context.spanOf(header.anchor),
+        Location.at(header.anchor),
       ),
     )
   const first = new Map<
@@ -2838,8 +2829,8 @@ const collectUnion = (
       } else {
         const diagnostic = Diagnostic.duplicateUnionVariant(
           variantName.spelling,
-          context.spanOf(original.anchor),
-          context.spanOf(variantName.anchor),
+          Location.at(original.anchor),
+          Location.at(variantName.anchor),
         )
         unionDiagnostics.push(diagnostic)
         if (original.canonical !== undefined)
@@ -2868,7 +2859,7 @@ const collectUnion = (
       variant.fields.every((field) => field.name._tag !== 'Name')
     )
       unionDiagnostics.push(
-        Diagnostic.emptyUnionVariant(variantName.spelling, context.spanOf(variant.anchor)),
+        Diagnostic.emptyUnionVariant(variantName.spelling, Location.at(variant.anchor)),
       )
     return Object.freeze({
       _tag: 'UnionVariant',
@@ -2924,7 +2915,7 @@ const collectStructLayout = (
   header: Extract<AuthoredHir.DeclarationHeader, { readonly _tag: 'StructHeader' }>,
 ): {
   readonly fact: StructFact['layout']
-  readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
+  readonly diagnostics: ReadonlyArray<Diagnostic.Located>
 } => {
   const marker = header.abi
   if (marker === undefined)
@@ -2943,7 +2934,7 @@ const collectStructLayout = (
     })
   return Object.freeze({
     fact: Object.freeze({ _tag: 'InvalidForeign', abi, abiSpan }),
-    diagnostics: Object.freeze([Diagnostic.unsupportedForeignAbi(abi, abiSpan)]),
+    diagnostics: Object.freeze([Diagnostic.unsupportedForeignAbi(abi, Location.at(marker.anchor))]),
   })
 }
 
@@ -3003,26 +2994,24 @@ const collectForeign = (
   parameters: ReadonlyArray<ParameterFact>,
 ): {
   readonly fact: NonNullable<DeclarationFact['foreign']>
-  readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
+  readonly diagnostics: ReadonlyArray<Diagnostic.Located>
 } => {
-  const diagnostics: Array<Diagnostic.Diagnostic> = []
+  const diagnostics: Array<Diagnostic.Located> = []
   const contract = header.contract
-  const declarationSpan = context.spanOf(name._tag === 'Present' ? name.anchor : header.anchor)
+  const declarationSpan = Location.at(name._tag === 'Present' ? name.anchor : header.anchor)
   const spellingOf = name._tag === 'Present' ? name.spelling : '#foreign'
   if (contract.variadic && (direction !== 'Foreign' || parameters.length === 0))
     diagnostics.push(
       Diagnostic.foreignDeclarationRestriction(
         'ellipsis requires an external C declaration with at least one fixed parameter',
-        context.spanOf(contract.anchor),
+        Location.at(contract.anchor),
       ),
     )
   const linkage = header.linkage
   if (linkage !== undefined) {
     const abi = literalText(context, linkage.abi)
     if (linkage.abi._tag === 'TextLiteral' && abi !== 'C')
-      diagnostics.push(
-        Diagnostic.unsupportedForeignAbi(abi ?? '', context.spanOf(linkage.abi.anchor)),
-      )
+      diagnostics.push(Diagnostic.unsupportedForeignAbi(abi ?? '', Location.at(linkage.abi.anchor)))
   }
   if (direction === 'Foreign' && !contract.unsafe)
     diagnostics.push(Diagnostic.foreignFunctionRequiresUnsafe(spellingOf, declarationSpan))
@@ -3043,14 +3032,14 @@ const collectForeign = (
       (machine.properties !== undefined || foreignClause)
     )
       continue
-    diagnostics.push(Diagnostic.foreignDeclarationRestriction(detail, context.spanOf(anchor)))
+    diagnostics.push(Diagnostic.foreignDeclarationRestriction(detail, Location.at(anchor)))
   }
   const renamed = linkage?.symbol === undefined ? undefined : literalText(context, linkage.symbol)
   const symbol = renamed ?? spellingOf
   const symbolSpan =
     renamed === undefined || linkage?.symbol === undefined
       ? declarationSpan
-      : context.spanOf(linkage.symbol.anchor)
+      : Location.at(linkage.symbol.anchor)
   if (!ForeignSymbol.isValidSpelling(symbol))
     diagnostics.push(Diagnostic.invalidForeignSymbol(symbol, symbolSpan))
   else if (ForeignSymbol.isReserved(symbol))
@@ -3066,7 +3055,7 @@ const collectForeign = (
     parameters.map((parameter) => ({
       name: parameter.name._tag === 'Present' ? parameter.name.spelling : '',
       type: undefined,
-      span: context.spanOf(parameter.anchor),
+      at: Location.at(parameter.anchor),
     })),
     undefined,
   )
@@ -3078,7 +3067,7 @@ const collectForeign = (
     diagnostics.push(
       Diagnostic.foreignDeclarationRestriction(
         'stronger exported foreign contracts require unsafe export',
-        context.spanOf(header.anchor),
+        Location.at(header.anchor),
       ),
     )
   diagnostics.push(...behavior.diagnostics)
@@ -3100,23 +3089,21 @@ const collectForeignStatic = (
   name: DeclaredName,
 ): {
   readonly fact: ForeignStaticFact['foreign']
-  readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
+  readonly diagnostics: ReadonlyArray<Diagnostic.Located>
 } => {
-  const diagnostics: Array<Diagnostic.Diagnostic> = []
-  const declarationSpan = context.spanOf(name._tag === 'Present' ? name.anchor : header.anchor)
+  const diagnostics: Array<Diagnostic.Located> = []
+  const declarationSpan = Location.at(name._tag === 'Present' ? name.anchor : header.anchor)
   const spellingOf = name._tag === 'Present' ? name.spelling : '#foreign-static'
   const linkage = header.linkage
   const abi = literalText(context, linkage.abi)
   if (linkage.abi._tag === 'TextLiteral' && abi !== 'C')
-    diagnostics.push(
-      Diagnostic.unsupportedForeignAbi(abi ?? '', context.spanOf(linkage.abi.anchor)),
-    )
+    diagnostics.push(Diagnostic.unsupportedForeignAbi(abi ?? '', Location.at(linkage.abi.anchor)))
   const renamed = linkage.symbol === undefined ? undefined : literalText(context, linkage.symbol)
   const symbol = renamed ?? spellingOf
   const symbolSpan =
     renamed === undefined || linkage.symbol === undefined
       ? declarationSpan
-      : context.spanOf(linkage.symbol.anchor)
+      : Location.at(linkage.symbol.anchor)
   if (!ForeignSymbol.isValidSpelling(symbol))
     diagnostics.push(Diagnostic.invalidForeignSymbol(symbol, symbolSpan))
   else if (ForeignSymbol.isReserved(symbol))
@@ -3161,7 +3148,7 @@ const collectModule = (module: ModuleClosure.Module): ModuleHeaders => {
   const declarations = module.declarations
   const own = declarations.filter((declaration) => isOwnDeclaration(declaration.header))
   const first = new Map<string, { readonly id: CanonicalId; readonly anchor: AuthoredHir.Anchor }>()
-  const diagnostics: Array<Diagnostic.Diagnostic> = []
+  const diagnostics: Array<Diagnostic.Located> = []
   const implDeclarations = declarations.filter(
     (declaration) => declaration.header._tag === 'ImplHeader',
   )
@@ -3375,8 +3362,8 @@ const collectModule = (module: ModuleClosure.Module): ModuleHeaders => {
       } else {
         const diagnostic = Diagnostic.duplicateDeclarationName(
           name.spelling,
-          context.spanOf(original.anchor),
-          context.spanOf(name.anchor),
+          Location.at(original.anchor),
+          Location.at(name.anchor),
         )
         diagnostics.push(diagnostic)
         canonical = Object.freeze({
@@ -3606,8 +3593,8 @@ const collectModule = (module: ModuleClosure.Module): ModuleHeaders => {
             } else {
               const diagnostic = Diagnostic.duplicateDeclarationName(
                 operationName.spelling,
-                context.spanOf(original.anchor),
-                context.spanOf(operationName.anchor),
+                Location.at(original.anchor),
+                Location.at(operationName.anchor),
               )
               diagnostics.push(diagnostic)
               operationState = Object.freeze({
@@ -3645,7 +3632,7 @@ const collectModule = (module: ModuleClosure.Module): ModuleHeaders => {
           const returnType: {
             readonly fact: ReturnTypeFact
             readonly opaqueResult?: OpaqueResultFact
-            readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
+            readonly diagnostics: ReadonlyArray<Diagnostic.Located>
           } =
             result === undefined
               ? Object.freeze({
@@ -3693,7 +3680,7 @@ const collectModule = (module: ModuleClosure.Module): ModuleHeaders => {
               diagnostics.push(
                 Diagnostic.invalidServiceDeclaration(
                   `unsupported operation property ${owner || '<missing>'}`,
-                  context.spanOf(clause.anchor),
+                  Location.at(clause.anchor),
                 ),
               )
               return false
@@ -3702,7 +3689,7 @@ const collectModule = (module: ModuleClosure.Module): ModuleHeaders => {
               diagnostics.push(
                 Diagnostic.invalidServiceDeclaration(
                   'Intrinsic.nonParking takes no arguments on an operation',
-                  context.spanOf(clause.anchor),
+                  Location.at(clause.anchor),
                 ),
               )
               return false
@@ -3711,7 +3698,7 @@ const collectModule = (module: ModuleClosure.Module): ModuleHeaders => {
               diagnostics.push(
                 Diagnostic.invalidServiceDeclaration(
                   'Intrinsic.nonParking applies only to effect operations',
-                  context.spanOf(clause.anchor),
+                  Location.at(clause.anchor),
                 ),
               )
               return false
@@ -3722,7 +3709,7 @@ const collectModule = (module: ModuleClosure.Module): ModuleHeaders => {
             diagnostics.push(
               Diagnostic.invalidServiceDeclaration(
                 'duplicate Intrinsic.nonParking operation property',
-                context.spanOf(duplicate.anchor),
+                Location.at(duplicate.anchor),
               ),
             )
           const staticProperties: ReadonlyArray<Type.SealedStaticProperty> =
@@ -3759,19 +3746,19 @@ const collectModule = (module: ModuleClosure.Module): ModuleHeaders => {
             }
             if (detail !== undefined)
               diagnostics.push(
-                Diagnostic.invalidOperatorContract(detail, context.spanOf(operatorName.anchor)),
+                Diagnostic.invalidOperatorContract(detail, Location.at(operatorName.anchor)),
               )
           }
           if (operation.body._tag === 'CallableBody' && operation.body.block !== undefined)
             diagnostics.push(
               Diagnostic.invalidServiceDeclaration(
                 'service operations declare contracts and cannot contain bodies',
-                context.spanOf(operation.body.block.anchor),
+                Location.at(operation.body.block.anchor),
               ),
             )
           if (!operationHeader.contract.effect && failureRow.fact.anchor !== undefined)
             diagnostics.push(
-              Diagnostic.failureChannelOnOrdinary(context.spanOf(failureRow.fact.anchor)),
+              Diagnostic.failureChannelOnOrdinary(Location.at(failureRow.fact.anchor)),
             )
           return Object.freeze({
             _tag: 'ServiceOperation',
@@ -3857,7 +3844,7 @@ const collectModule = (module: ModuleClosure.Module): ModuleHeaders => {
     const returnType: {
       readonly fact: ReturnTypeFact
       readonly opaqueResult?: OpaqueResultFact
-      readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
+      readonly diagnostics: ReadonlyArray<Diagnostic.Located>
     } =
       contract.result === undefined
         ? Object.freeze({
@@ -3917,7 +3904,7 @@ const collectModule = (module: ModuleClosure.Module): ModuleHeaders => {
       diagnostics.push(
         Diagnostic.foreignDeclarationRestriction(
           'variadic definitions are not admitted',
-          context.spanOf(contract.anchor),
+          Location.at(contract.anchor),
         ),
       )
     const foreign =
@@ -3934,7 +3921,7 @@ const collectModule = (module: ModuleClosure.Module): ModuleHeaders => {
       diagnostics.push(
         Diagnostic.foreignDeclarationRestriction(
           'machine property on a foreign import',
-          machine.properties.span,
+          Location.at(machine.properties.anchor),
         ),
       )
     const behavior = header.properties.filter(
@@ -3946,7 +3933,7 @@ const collectModule = (module: ModuleClosure.Module): ModuleHeaders => {
       diagnostics.push(
         Diagnostic.foreignDeclarationRestriction(
           'duplicate foreign contract',
-          context.spanOf(property.anchor),
+          Location.at(property.anchor),
         ),
       )
     for (const property of header.properties)
@@ -3958,12 +3945,12 @@ const collectModule = (module: ModuleClosure.Module): ModuleHeaders => {
         diagnostics.push(
           Diagnostic.foreignDeclarationRestriction(
             'foreign contract on a non-foreign function',
-            context.spanOf(property.anchor),
+            Location.at(property.anchor),
           ),
         )
     const native = foreign ?? foreignExport
     if (native === undefined && functionKind === 'Ordinary' && failureRow.fact.anchor !== undefined)
-      diagnostics.push(Diagnostic.failureChannelOnOrdinary(context.spanOf(failureRow.fact.anchor)))
+      diagnostics.push(Diagnostic.failureChannelOnOrdinary(Location.at(failureRow.fact.anchor)))
     if (native !== undefined) diagnostics.push(...native.diagnostics)
     const retainedBody =
       foreign === undefined ? bodyTemplate(lowered, declaration, staticFunction) : undefined
@@ -4307,24 +4294,24 @@ const collectModule = (module: ModuleClosure.Module): ModuleHeaders => {
     const bounded = binders.some(
       (binder) => binder.bounds.length > 0 || binder.representationBound !== undefined,
     )
-    let headDiagnostic: Diagnostic.Diagnostic | undefined
+    let headDiagnostic: Diagnostic.Located | undefined
     if (ownerPath === undefined || ownerPath.segments.length !== 1) {
       headDiagnostic = Diagnostic.invalidInherentHead(
         ownerSpelling || '?',
         'NotNominal',
-        context.spanOf(headAnchor),
+        Location.at(headAnchor),
       )
     } else if (!wholeFamily) {
       headDiagnostic = Diagnostic.invalidInherentHead(
         ownerSpelling,
         'Specialized',
-        context.spanOf(headAnchor),
+        Location.at(headAnchor),
       )
     } else if (bounded) {
       headDiagnostic = Diagnostic.invalidInherentHead(
         ownerSpelling,
         'Bounded',
-        context.spanOf(headAnchor),
+        Location.at(headAnchor),
       )
     } else {
       headDiagnostic = undefined
@@ -4359,7 +4346,7 @@ const collectModule = (module: ModuleClosure.Module): ModuleHeaders => {
           ownerSpelling,
           name._tag === 'Present' ? name.spelling : '?',
           'MappedOperation',
-          context.spanOf(mapped.header.anchor),
+          Location.at(mapped.header.anchor),
         ),
       )
     }
@@ -4375,7 +4362,7 @@ const collectModule = (module: ModuleClosure.Module): ModuleHeaders => {
               ownerSpelling,
               'drop',
               'DropHook',
-              context.spanOf(memberHeader.anchor),
+              Location.at(memberHeader.anchor),
             ),
           )
           return
@@ -4459,8 +4446,8 @@ const collectModule = (module: ModuleClosure.Module): ModuleHeaders => {
     const diagnostic = Diagnostic.duplicateInherentMember(
       association?.ownerSpelling ?? '?',
       association?.name ?? '?',
-      context.spanOf(member.name._tag === 'Present' ? member.name.anchor : member.anchor),
-      context.spanOf(other.name._tag === 'Present' ? other.name.anchor : other.anchor),
+      Location.at(member.name._tag === 'Present' ? member.name.anchor : member.anchor),
+      Location.at(other.name._tag === 'Present' ? other.name.anchor : other.anchor),
     )
     diagnostics.push(diagnostic)
     return Object.freeze({
@@ -4639,7 +4626,7 @@ const collectModule = (module: ModuleClosure.Module): ModuleHeaders => {
     ),
     conformances: Object.freeze(conformances),
     inherentImpls: Object.freeze(inherentImpls),
-    diagnostics: Object.freeze(diagnostics.sort(compareDiagnostics)),
+    diagnostics: Object.freeze(diagnostics),
   })
 }
 
@@ -4893,7 +4880,7 @@ export const collect = (closure: ModuleClosure.Facts): DeclarationIndex.Index =>
   return DeclarationIndex.make(
     'Collected',
     modules,
-    Diagnostic.merge(...modules.map((module) => module.diagnostics)),
+    Diagnostic.collect(...modules.map((module) => module.diagnostics)),
   )
 }
 

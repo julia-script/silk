@@ -1,3 +1,4 @@
+import { locationAt } from './support/location.js'
 import * as Layer from 'effect/Layer'
 import * as AnalysisFixture from './support/AnalysisFixture.js'
 import * as Schema from 'effect/Schema'
@@ -26,7 +27,7 @@ import * as AuthoredIdentity from '../src/AuthoredIdentity.js'
 import * as AuthoredLowering from '../src/AuthoredLowering.js'
 import * as SemanticContext from '../src/SemanticContext.js'
 import * as SourceFile from '../src/SourceFile.js'
-import * as SourceSpan from '../src/SourceSpan.js'
+import * as Location from '../src/Location.js'
 import * as StaticEvaluation from '../src/StaticEvaluation.js'
 import * as StaticText from '../src/StaticText.js'
 import * as StaticValue from '../src/StaticValue.js'
@@ -64,8 +65,7 @@ const admitted = (value: StaticValue.Admission): StaticValue.Value => {
   return value.value
 }
 
-const staticSpan = SourceSpan.fromOffsets('static/evaluation', 4, 12)
-if (staticSpan === undefined) throw new Error('expected a static evaluation span')
+const staticSpan = locationAt('static/evaluation')
 
 const staticArgument = admitted(
   StaticValue.admit({ _tag: 'IntegerValue', type: 'i32', value: 42n }, { pointerBits: 64 }),
@@ -1784,21 +1784,31 @@ it('composes decoded static-text ranges through source and parameter slices', ()
   const decoded = StaticText.decode(Array.from(encoder.encode(spelling)), formOf(spelling))
   assert.strictEqual(decoded._tag, 'Decoded')
   if (decoded._tag !== 'Decoded') return
-  const token = SourceSpan.fromOffsets('static/origin', 100, 100 + encoder.encode(spelling).length)
-  if (token === undefined) throw new Error('expected source text span')
-  const origin = StaticEvaluation.sourceTextOrigin(token, decoded.data)
+  // Provenance holds value offsets only; the literal's presentation maps them to its spelling.
+  const text = `pub fn f() -> i32 { return g(${spelling}) }`
+  const lowered = Effect.runSync(
+    AuthoredLowering.lower(
+      Parser.parse(Lexer.lex(SourceFile.make('static/origin', encoder.encode(text)))),
+      AuthoredIdentity.module('memory', 'static/origin'),
+    ),
+  )
+  const literal =
+    lowered.presentation.entries.find((entry) => entry.spelling === spelling)?.anchor ??
+    unreachable('expected the literal to be presented')
+  const registry = SemanticContext.registryOf(SemanticContext.make(lowered))
+  const written = (origin: StaticEvaluation.TextOrigin): string => {
+    const location =
+      StaticEvaluation.textOriginLocation(origin, literal) ?? unreachable('expected a location')
+    const span = Location.resolve(location, registry).span
+    return new TextDecoder().decode(encoder.encode(text).slice(span.start, span.end))
+  }
+  const origin = StaticEvaluation.sourceTextOrigin(literal, decoded.data.bytes.length)
   const newline = StaticEvaluation.sliceTextOrigin(origin, 3, 4)
   if (newline === undefined) throw new Error('expected newline origin')
-  const newlineSpan = StaticEvaluation.textOriginSpan(newline)
-  assert.strictEqual(newlineSpan?.sourceId, 'static/origin')
-  assert.strictEqual(newlineSpan?.start, 104)
-  assert.strictEqual(newlineSpan?.end, 106)
+  assert.strictEqual(written(newline), '\\n')
   const emoji = StaticEvaluation.sliceTextOrigin(origin, 4, 8)
   if (emoji === undefined) throw new Error('expected emoji origin')
-  const emojiSpan = StaticEvaluation.textOriginSpan(emoji)
-  assert.strictEqual(emojiSpan?.sourceId, 'static/origin')
-  assert.strictEqual(emojiSpan?.start, 106)
-  assert.strictEqual(emojiSpan?.end, 115)
+  assert.strictEqual(written(emoji), '\\u{1f642}')
   assert.deepEqual(
     StaticEvaluation.sliceTextOrigin(
       StaticEvaluation.parameterTextOrigin(0, decoded.data.bytes.length),
@@ -1921,7 +1931,6 @@ static fn computed() -> i32 {
     const result = completedValue(
       StaticEvaluation.evaluateStatements(computed.statements, {
         environment: StaticEvaluation.targetEnvironment(profilewasm32UnknownUnknown),
-        spanOf: snapshot.resolution.contexts.spanOf,
         values: new Map(),
         valueSpans: new Map(),
         valueOrigins: new Map(),

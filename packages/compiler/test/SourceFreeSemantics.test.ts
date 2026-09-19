@@ -2,12 +2,14 @@ import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as AuthoredIdentity from '../src/AuthoredIdentity.js'
 import * as AuthoredLowering from '../src/AuthoredLowering.js'
+import * as Diagnostic from '../src/Diagnostic.js'
 import * as Elaboration from '../src/Elaboration.js'
 import * as Lexer from '../src/Lexer.js'
 import * as ModuleClosure from '../src/ModuleClosure.js'
 import * as NameResolution from '../src/NameResolution.js'
 import * as Ownership from '../src/Ownership.js'
 import * as Parser from '../src/Parser.js'
+import * as SemanticContext from '../src/SemanticContext.js'
 import * as SourceFile from '../src/SourceFile.js'
 import type * as SyntaxFile from '../src/SyntaxFile.js'
 import * as Tir from '../src/Tir.js'
@@ -60,7 +62,8 @@ const analyze = (text: string) =>
       analyzed.index,
       Ownership.localSharedAccessBoundaryPlan(new Map([[name, result]])),
     )
-    return { result, ownership }
+    const registry = SemanticContext.registryOf(SemanticContext.make(authored))
+    return { result, ownership, published: Diagnostic.publishAll(result.diagnostics, registry) }
   })
 
 const program = (body: string) => `struct Counter { value: i32 }
@@ -91,15 +94,15 @@ it.effect('names diagnostics through the current presentation when a declaration
   Effect.gen(function* () {
     const text = program('return missing(&mut counter)')
     const moved = `// a comment that moves every declaration\n\n${text}`
-    const before = (yield* analyze(text)).result.diagnostics
-    const after = (yield* analyze(moved)).result.diagnostics
+    const first = yield* analyze(text)
+    const second = yield* analyze(moved)
+    // What elaboration produced names no revision, so moving the declaration changes none of it.
+    assert.deepEqual(second.result.diagnostics, first.result.diagnostics)
+    const before = first.published
+    const after = second.published
     assert.deepEqual(
       before.map((diagnostic) => diagnostic.code),
       ['SEM0004'],
-    )
-    assert.deepEqual(
-      after.map((diagnostic) => [diagnostic.code, diagnostic.reason]),
-      before.map((diagnostic) => [diagnostic.code, diagnostic.reason]),
     )
     const shift = moved.length - text.length
     assert.deepEqual(

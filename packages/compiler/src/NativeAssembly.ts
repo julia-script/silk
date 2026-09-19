@@ -2,10 +2,11 @@ import * as Effect from 'effect/Effect'
 import * as Result from 'effect/Result'
 import * as ConfigurationError from './ConfigurationError.js'
 import * as ConfigurationOrigin from './ConfigurationOrigin.js'
+import type * as AuthoredHir from './AuthoredHir.js'
 import * as Diagnostic from './Diagnostic.js'
+import * as Location from './Location.js'
 import type * as Elaboration from './Elaboration.js'
 import type * as SemanticContext from './SemanticContext.js'
-import type * as SourceSpan from './SourceSpan.js'
 import type * as Target from './Target.js'
 import * as Type from './Type.js'
 import * as Canonical from './internal/Canonical.js'
@@ -177,19 +178,20 @@ export const analyze = (
   context: SemanticContext.SemanticContext,
   arguments_: ReadonlyArray<Elaboration.ArgumentFact>,
   result: Type.Type,
-  span: SourceSpan.SourceSpan,
+  call: AuthoredHir.Anchor,
   target?: Target.Target,
 ): {
   readonly assembly?: NativeAssembly
-  readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
+  readonly diagnostics: ReadonlyArray<Diagnostic.Located>
 } => {
-  const reject = (detail: string, at = span) => ({
+  const span = context.spanOf(call)
+  const reject = (detail: string, at = call) => ({
     diagnostics: [
-      Diagnostic.invalidConfiguration(
+      Diagnostic.invalidAuthoredConfiguration(
         ConfigurationError.make('NativeAssembly.analyze', 'InvalidInput', detail, [
-          { ...ConfigurationOrigin.literal(span.sourceId), span: at },
+          { ...ConfigurationOrigin.literal(span.sourceId), span: context.spanOf(at) },
         ]),
-        at,
+        Location.at(at),
       ),
     ],
   })
@@ -221,7 +223,7 @@ export const analyze = (
     for (const field of tuple.fields) {
       const type = field.initializer.expression.type
       if (type._tag !== 'Available')
-        return reject('assembly operand type', context.spanOf(field.initializer.expression.anchor))
+        return reject('assembly operand type', field.initializer.expression.anchor)
       operands.push(type.type)
     }
   } else if (tuple?._tag !== 'Unit') return reject('assembly inputs require a tuple literal')

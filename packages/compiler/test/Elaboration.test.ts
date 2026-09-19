@@ -64,7 +64,7 @@ import {
   unresolvedTargetTypeCallSource,
   validCallSource,
 } from './fixtures/BootstrapSemanticFixture.js'
-import { elaborate } from './support/elaborate.js'
+import { elaborate, type Elaborated } from './support/elaborate.js'
 import { ordinaryStorageSource } from './support/ordinaryStorageSource.js'
 import { raise } from './support/raise.js'
 
@@ -76,20 +76,20 @@ const parseText = (id: string, source: string): SyntaxFile.SyntaxFile =>
 
 // The elaboration result no longer carries its syntax; these fixtures still assert on the
 // parser's own diagnostics, so the parse that produced each result is retained beside it.
-const parses = new WeakMap<Elaboration.Result, SyntaxFile.SyntaxFile>()
+const parses = new WeakMap<Elaborated, SyntaxFile.SyntaxFile>()
 
-const analyzeText = (id: string, source: string): Elaboration.Result => {
+const analyzeText = (id: string, source: string): Elaborated => {
   const syntax = parseText(id, source)
   const result = elaborate(syntax)
   parses.set(result, syntax)
   return result
 }
 
-const syntaxOf = (result: Elaboration.Result): SyntaxFile.SyntaxFile =>
+const syntaxOf = (result: Elaborated): SyntaxFile.SyntaxFile =>
   parses.get(result) ?? raise('expected the parse behind this elaboration')
 
 /** The elaboration's own span source: presentation spans of the authored module it consumed. */
-const spansOf = (result: Elaboration.Result): SemanticContext.SemanticContext =>
+const spansOf = (result: Elaborated): SemanticContext.SemanticContext =>
   SemanticContext.make(result.authored)
 
 const analyzeWithStdlib = Effect.fnUntraced(function* (id: string, source: string) {
@@ -760,7 +760,10 @@ fn main() -> i32 {
   }),
 )
 
-const functionAt = (result: Elaboration.Result, index: number): Elaboration.FunctionFact =>
+const functionAt = (
+  result: Pick<Elaborated, 'functions'>,
+  index: number,
+): Elaboration.FunctionFact =>
   result.functions.at(index) ?? raise(`expected function fact at index ${index}`)
 
 const integerFact = (fact: Elaboration.FunctionFact): Elaboration.IntegerExpressionFact =>
@@ -782,7 +785,7 @@ const identifierFact = (
     ? fact.returnedExpression
     : raise('expected an identifier returned expression')
 
-const diagnosticView = (result: Elaboration.Result) =>
+const diagnosticView = (result: Elaborated) =>
   result.diagnostics.map((diagnostic) => ({
     code: diagnostic.code,
     start: diagnostic.span.start,
@@ -826,14 +829,14 @@ it('publishes one immutable function fact with exact accepted provenance', () =>
   assert.deepEqual(fact.returnCompatibility, { _tag: 'Compatible' })
   assert.deepEqual(result.diagnostics, [])
 
-  const directLookup = Elaboration.declarationByName(result, 'main')
-  const pipedLookup = pipe(result, Elaboration.declarationByName('main'))
+  const directLookup = Elaboration.declarationByName(result.located, 'main')
+  const pipedLookup = pipe(result.located, Elaboration.declarationByName('main'))
   assert.strictEqual(directLookup._tag, 'Resolved')
   assert.strictEqual(pipedLookup._tag, 'Resolved')
   if (directLookup._tag !== 'Resolved' || pipedLookup._tag !== 'Resolved') return
   assert.strictEqual(directLookup.declaration, declaration)
   assert.strictEqual(pipedLookup.declaration, declaration)
-  assert.deepEqual(Elaboration.declarationByName(result, 'other'), {
+  assert.deepEqual(Elaboration.declarationByName(result.located, 'other'), {
     _tag: 'Missing',
     spelling: 'other',
   })
@@ -1673,7 +1676,7 @@ it('keeps missing declaration names unavailable and out of lookup', () => {
 
   assert.strictEqual(functionAt(single, 0).declaration.name._tag, 'Unavailable')
   assert.strictEqual(functionAt(multiple, 1).declaration.name._tag, 'Unavailable')
-  assert.deepEqual(Elaboration.declarationByName(multiple, ''), {
+  assert.deepEqual(Elaboration.declarationByName(multiple.located, ''), {
     _tag: 'Missing',
     spelling: '',
   })
@@ -1688,9 +1691,9 @@ it('keeps missing declaration names unavailable and out of lookup', () => {
 it('resolves unique names and reports every duplicate as ambiguous', () => {
   const unique = analyzeText('fixture://unique.silk', twoFunctionSource)
   const duplicate = analyzeText('fixture://duplicate.silk', duplicateNameSource)
-  const answer = Elaboration.declarationByName(unique, 'answer')
-  const main = Elaboration.declarationByName(unique, 'main')
-  const same = Elaboration.declarationByName(duplicate, 'same')
+  const answer = Elaboration.declarationByName(unique.located, 'answer')
+  const main = Elaboration.declarationByName(unique.located, 'main')
+  const same = Elaboration.declarationByName(duplicate.located, 'same')
 
   assert.strictEqual(answer._tag, 'Resolved')
   assert.strictEqual(main._tag, 'Resolved')
@@ -1730,7 +1733,7 @@ it('diagnoses later duplicate names at their exact spans with original provenanc
 
 it('diagnoses the second and third occurrence of one name', () => {
   const result = analyzeText('fixture://triple-duplicate.silk', tripleDuplicateNameSource)
-  const lookup = Elaboration.declarationByName(result, 'same')
+  const lookup = Elaboration.declarationByName(result.located, 'same')
 
   assert.deepEqual(
     result.diagnostics.map((diagnostic) => diagnostic.code),
@@ -1888,8 +1891,8 @@ it('is deterministic across repeated fresh multi-function results', () => {
   assert.deepEqual(first.functions, second.functions)
   assert.deepEqual(diagnosticView(first), diagnosticView(second))
   assert.deepEqual(
-    Elaboration.declarationByName(first, 'same'),
-    Elaboration.declarationByName(second, 'same'),
+    Elaboration.declarationByName(first.located, 'same'),
+    Elaboration.declarationByName(second.located, 'same'),
   )
 })
 
@@ -1940,23 +1943,18 @@ it('links unavailable call contracts to the unresolved-target diagnostic without
   const result = analyzeText('fixture://caused-contract.silk', unknownCallSource)
   const call = callFact(functionAt(result, 0))
   const diagnostic = result.diagnostics.at(0) ?? raise('expected an unknown-function diagnostic')
+  const located = result.located.diagnostics.at(0) ?? raise('expected its located form')
 
   assert.strictEqual(result.diagnostics.length, 1)
   assert.strictEqual(diagnostic.code, 'SEM0004')
   assert.strictEqual(call.reference._tag, 'Missing')
   if (call.reference._tag !== 'Missing') return
   const referenceCause = call.reference.cause ?? raise('expected a caused missing reference')
-  assert.strictEqual(
-    Diagnostic.identityEquals(referenceCause, Diagnostic.identity(diagnostic)),
-    true,
-  )
+  assert.strictEqual(Diagnostic.identityEquals(referenceCause, Diagnostic.identity(located)), true)
   assert.strictEqual(call.contract._tag, 'Unavailable')
   if (call.contract._tag !== 'Unavailable') return
   const contractCause = call.contract.cause ?? raise('expected a caused unavailable contract')
-  assert.strictEqual(
-    Diagnostic.identityEquals(contractCause, Diagnostic.identity(diagnostic)),
-    true,
-  )
+  assert.strictEqual(Diagnostic.identityEquals(contractCause, Diagnostic.identity(located)), true)
 })
 
 it('links unresolved types and missing parameter references to their diagnostics', () => {
@@ -1967,7 +1965,8 @@ it('links unresolved types and missing parameter references to their diagnostics
 
   assert.strictEqual(returnType._tag, 'Unresolved')
   if (returnType._tag !== 'Unresolved') return
-  const typeDiagnostic = types.diagnostics.at(0) ?? raise('expected an unknown-type diagnostic')
+  const typeDiagnostic =
+    types.located.diagnostics.at(0) ?? raise('expected an unknown-type diagnostic')
   const typeCause = returnType.cause ?? raise('expected a caused unresolved type')
   assert.strictEqual(
     Diagnostic.identityEquals(typeCause, Diagnostic.identity(typeDiagnostic)),
@@ -1977,7 +1976,7 @@ it('links unresolved types and missing parameter references to their diagnostics
   assert.strictEqual(reference._tag, 'Missing')
   if (reference._tag !== 'Missing') return
   const referenceDiagnostic =
-    references.diagnostics.at(0) ?? raise('expected an unknown-parameter diagnostic')
+    references.located.diagnostics.at(0) ?? raise('expected an unknown-parameter diagnostic')
   const referenceCause = reference.cause ?? raise('expected a caused missing reference')
   assert.strictEqual(
     Diagnostic.identityEquals(referenceCause, Diagnostic.identity(referenceDiagnostic)),

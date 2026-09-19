@@ -1,3 +1,4 @@
+import { locationAt } from './support/location.js'
 import * as Layer from 'effect/Layer'
 import { readFileSync } from 'node:fs'
 import { assert, it } from '@effect/vitest'
@@ -5,7 +6,6 @@ import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as CompilationProfile from '../src/CompilationProfile.js'
 import * as MirVerification from '../src/MirVerification.js'
-import * as SourceSpan from '../src/SourceSpan.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
 import * as StaticEvaluation from '../src/StaticEvaluation.js'
@@ -345,9 +345,7 @@ import silk.bytes { Bytes }`,
       const profile = yield* CompilationProfile.normalize({
         target: Target.x8664UnknownLinuxGnu.id,
       })
-      const span = SourceSpan.fromOffsets('buffered-byte-io/aggregate-overflow', 0, 1)
-      assert.isDefined(span)
-      if (span === undefined) return
+      const span = locationAt('buffered-byte-io/aggregate-overflow')
       const maximum = StaticValue.admit(
         { _tag: 'IntegerValue', type: 'usize', value: (1n << 64n) - 1n },
         { pointerBits: 64 },

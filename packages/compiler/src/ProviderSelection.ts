@@ -16,14 +16,15 @@ export type CandidateStatus =
   | { readonly _tag: 'Ambiguous'; readonly witnesses: ReadonlyArray<Constraint.WitnessIdentity> }
   | { readonly _tag: 'Invalid'; readonly reason: string }
 
-export type NonEmptySourceSpans = readonly [
-  SourceSpan.SourceSpan,
-  ...ReadonlyArray<SourceSpan.SourceSpan>,
-]
+/**
+ * Where a relation was written. The solver never reads an origin: a caller that reports in source
+ * coordinates passes spans, and one that reports revision-free passes locations.
+ */
+export type NonEmptyOrigins<L = SourceSpan.SourceSpan> = readonly [L, ...ReadonlyArray<L>]
 
-export interface Relation {
+export interface Relation<L = SourceSpan.SourceSpan> {
   readonly wanted: Constraint.ProviderSelection
-  readonly origins: NonEmptySourceSpans
+  readonly origins: NonEmptyOrigins<L>
 }
 
 export interface CandidateRecord {
@@ -31,10 +32,10 @@ export interface CandidateRecord {
   readonly status: CandidateStatus
 }
 
-export interface RelationCandidates {
+export interface RelationCandidates<L = SourceSpan.SourceSpan> {
   readonly constraintKey: string
   readonly wanted: Constraint.ProviderSelection
-  readonly origins: NonEmptySourceSpans
+  readonly origins: NonEmptyOrigins<L>
   readonly candidates: ReadonlyMap<string, CandidateRecord>
 }
 
@@ -43,11 +44,11 @@ export interface RelationPayload {
   readonly fullCandidateKeySet: ReadonlyArray<string>
 }
 
-export interface DiagnosticLocations {
-  readonly primary: SourceSpan.SourceSpan
+export interface DiagnosticLocations<L = SourceSpan.SourceSpan> {
+  readonly primary: L
   readonly relations: ReadonlyArray<{
     readonly constraintKey: string
-    readonly origins: NonEmptySourceSpans
+    readonly origins: NonEmptyOrigins<L>
   }>
 }
 
@@ -92,23 +93,23 @@ export type SelectionProblem =
     }
 
 /** One span-free solver problem paired with diagnostic-only source provenance. */
-export interface SelectionDiagnostic {
+export interface SelectionDiagnostic<L = SourceSpan.SourceSpan> {
   readonly problem: SelectionProblem
-  readonly locations: DiagnosticLocations
+  readonly locations: DiagnosticLocations<L>
 }
 
-const diagnostic = (
+const diagnostic = <L>(
   problem: SelectionProblem,
-  sourceLocations: DiagnosticLocations,
-): SelectionDiagnostic =>
+  sourceLocations: DiagnosticLocations<L>,
+): SelectionDiagnostic<L> =>
   Object.freeze({ problem: Object.freeze(problem), locations: sourceLocations })
 
-export type SelectionDiagnostics = readonly [
-  SelectionDiagnostic,
-  ...ReadonlyArray<SelectionDiagnostic>,
+export type SelectionDiagnostics<L = SourceSpan.SourceSpan> = readonly [
+  SelectionDiagnostic<L>,
+  ...ReadonlyArray<SelectionDiagnostic<L>>,
 ]
 
-export type Result =
+export type Result<L = SourceSpan.SourceSpan> =
   | {
       readonly _tag: 'Selected'
       readonly member: Type.Requirement
@@ -116,15 +117,15 @@ export type Result =
         Extract<Constraint.ConstraintEvidence, { readonly _tag: 'RequirementSelection' }>
       >
     }
-  | { readonly _tag: 'Rejected'; readonly diagnostics: SelectionDiagnostics }
+  | { readonly _tag: 'Rejected'; readonly diagnostics: SelectionDiagnostics<L> }
 
-const rejected = (
-  diagnostics: ReadonlyArray<SelectionDiagnostic>,
-): Extract<Result, { readonly _tag: 'Rejected' }> => {
+const rejected = <L>(
+  diagnostics: ReadonlyArray<SelectionDiagnostic<L>>,
+): Extract<Result<L>, { readonly _tag: 'Rejected' }> => {
   const first = diagnostics.at(0)
   if (first === undefined)
     throw new RangeError('Provider selection rejection requires at least one diagnostic')
-  const nonEmptyDiagnostics: SelectionDiagnostics = [first, ...diagnostics.slice(1)]
+  const nonEmptyDiagnostics: SelectionDiagnostics<L> = [first, ...diagnostics.slice(1)]
   return Object.freeze({
     _tag: 'Rejected',
     diagnostics: Object.freeze(nonEmptyDiagnostics),
@@ -149,8 +150,16 @@ const compareText = (left: string, right: string): number => {
   return 0
 }
 
-const canonicalOrigins = (origins: NonEmptySourceSpans): NonEmptySourceSpans => {
-  const canonical = SourceSpan.canonicalize(origins)
+/** The key that makes two origins the same one, and orders them deterministically. */
+export type OriginKey<L> = (origin: L) => string
+
+const canonicalOrigins = <L>(
+  origins: NonEmptyOrigins<L>,
+  key: OriginKey<L>,
+): NonEmptyOrigins<L> => {
+  const canonical = [...new Map(origins.map((origin) => [key(origin), origin])).entries()]
+    .sort(([left], [right]) => compareText(left, right))
+    .map(([, origin]) => origin)
   const first = canonical.at(0)
   return first === undefined ? origins : Object.freeze([first, ...canonical.slice(1)])
 }
@@ -201,11 +210,12 @@ const concreteSource = (
   return concrete._tag === 'Concrete' ? concrete.row : undefined
 }
 
-const relationCandidates = (
-  relation: Relation,
+const relationCandidates = <L>(
+  relation: Relation<L>,
   oracle: ConformanceOracle,
+  key: OriginKey<L>,
   selected?: Type.RequirementsRow,
-): RelationCandidates => {
+): RelationCandidates<L> => {
   const candidates = new Map<string, CandidateRecord>()
   const observation = oracle.observation
   const work =
@@ -248,7 +258,7 @@ const relationCandidates = (
   return Object.freeze({
     constraintKey: Constraint.key(relation.wanted),
     wanted: relation.wanted,
-    origins: canonicalOrigins(relation.origins),
+    origins: canonicalOrigins(relation.origins, key),
     candidates: new Map(
       [...candidates.entries()].sort(([left], [right]) => compareText(left, right)),
     ),
@@ -256,12 +266,15 @@ const relationCandidates = (
 }
 
 /** Groups both textual duplicates and post-substitution semantic-key collisions. */
-export const groupRelations = (relations: ReadonlyArray<Relation>): ReadonlyArray<Relation> => {
-  const grouped = new Map<string, Relation>()
+export const groupRelations = <L>(
+  relations: ReadonlyArray<Relation<L>>,
+  originKey: OriginKey<L>,
+): ReadonlyArray<Relation<L>> => {
+  const grouped = new Map<string, Relation<L>>()
   for (const relation of relations) {
     const key = Constraint.key(relation.wanted)
     const existing = grouped.get(key)
-    const origins: NonEmptySourceSpans =
+    const origins: NonEmptyOrigins<L> =
       existing === undefined
         ? relation.origins
         : [existing.origins[0], ...existing.origins.slice(1), ...relation.origins]
@@ -269,7 +282,7 @@ export const groupRelations = (relations: ReadonlyArray<Relation>): ReadonlyArra
       key,
       Object.freeze({
         wanted: existing?.wanted ?? relation.wanted,
-        origins: canonicalOrigins(origins),
+        origins: canonicalOrigins(origins, originKey),
       }),
     )
   }
@@ -281,13 +294,20 @@ export const groupRelations = (relations: ReadonlyArray<Relation>): ReadonlyArra
 }
 
 /** Builds every relation's complete candidate map without emitting diagnostics. */
-export const candidates = (
-  relations: ReadonlyArray<Relation>,
+export const candidates = <L>(
+  relations: ReadonlyArray<Relation<L>>,
   oracle: ConformanceOracle,
-): ReadonlyArray<RelationCandidates> =>
-  Object.freeze(groupRelations(relations).map((relation) => relationCandidates(relation, oracle)))
+  originKey: OriginKey<L>,
+): ReadonlyArray<RelationCandidates<L>> =>
+  Object.freeze(
+    groupRelations(relations, originKey).map((relation) =>
+      relationCandidates(relation, oracle, originKey),
+    ),
+  )
 
-const payload = (relations: ReadonlyArray<RelationCandidates>): ReadonlyArray<RelationPayload> =>
+const payload = <L>(
+  relations: ReadonlyArray<RelationCandidates<L>>,
+): ReadonlyArray<RelationPayload> =>
   Object.freeze(
     relations.map((relation) =>
       Object.freeze({
@@ -297,10 +317,10 @@ const payload = (relations: ReadonlyArray<RelationCandidates>): ReadonlyArray<Re
     ),
   )
 
-const locations = (
-  relations: ReadonlyArray<RelationCandidates>,
-  responsible: SourceSpan.SourceSpan,
-): DiagnosticLocations => {
+const locations = <L>(
+  relations: ReadonlyArray<RelationCandidates<L>>,
+  responsible: L,
+): DiagnosticLocations<L> => {
   return Object.freeze({
     primary: responsible,
     relations: Object.freeze(
@@ -322,7 +342,7 @@ const selectedFinite = (
   return concrete._tag === 'Concrete' ? concrete.row : undefined
 }
 
-const candidateAt = (relation: RelationCandidates, key: string): CandidateRecord => {
+const candidateAt = <L>(relation: RelationCandidates<L>, key: string): CandidateRecord => {
   const candidate = relation.candidates.get(key)
   if (candidate === undefined)
     throw new RangeError(`Provider selection lost candidate ${key} from a surviving relation`)
@@ -330,16 +350,17 @@ const candidateAt = (relation: RelationCandidates, key: string): CandidateRecord
 }
 
 /** Solves one conjunctive selected-row variable after all ordinary substitutions are known. */
-export const solve = (options: {
-  readonly relations: ReadonlyArray<Relation>
+export const solve = <L>(options: {
+  readonly relations: ReadonlyArray<Relation<L>>
   readonly selected?: Type.RequirementsRow
-  readonly responsible: SourceSpan.SourceSpan
+  readonly responsible: L
+  readonly originKey: OriginKey<L>
   readonly oracle: ConformanceOracle
-}): Result => {
+}): Result<L> => {
   if (options.relations.length === 0)
     throw new RangeError('Provider selection requires at least one relation')
-  const maps = groupRelations(options.relations).map((relation) =>
-    relationCandidates(relation, options.oracle, options.selected),
+  const maps = groupRelations(options.relations, options.originKey).map((relation) =>
+    relationCandidates(relation, options.oracle, options.originKey, options.selected),
   )
   const selected = selectedFinite(options.selected)
   if (options.selected !== undefined && (selected === undefined || selected.members.length !== 1))
@@ -351,7 +372,7 @@ export const solve = (options: {
     ])
 
   const selectedMember = selected?.members.at(0)
-  let considered: ReadonlyArray<RelationCandidates>
+  let considered: ReadonlyArray<RelationCandidates<L>>
   if (selectedMember === undefined) {
     considered = maps
   } else {
@@ -393,7 +414,7 @@ export const solve = (options: {
       ),
     ])
 
-  const statusDiagnostics: Array<SelectionDiagnostic> = []
+  const statusDiagnostics: Array<SelectionDiagnostic<L>> = []
   for (const key of surviving)
     for (const relation of considered) {
       const status = candidateAt(relation, key).status

@@ -1,6 +1,7 @@
 import * as Lifetime from './Lifetime.js'
 import { callableSectionOf, genericArgumentOfTypeArgument } from './CallResolution.js'
-import type * as Diagnostic from './Diagnostic.js'
+import * as Diagnostic from './Diagnostic.js'
+import type * as Location from './Location.js'
 import type {
   ArgumentFact,
   AssignmentRootFact,
@@ -23,7 +24,7 @@ import { representationOfExpression } from './ExpressionAnalysis.js'
 import type * as Tir from './Tir.js'
 import * as Intrinsic from './Intrinsic.js'
 import * as TypeInference from './internal/TypeInference.js'
-import type * as SemanticContext from './SemanticContext.js'
+import * as SemanticContext from './SemanticContext.js'
 import * as Match from './Match.js'
 import * as Scalar from './Scalar.js'
 import type * as SourceSpan from './SourceSpan.js'
@@ -33,10 +34,17 @@ import type * as StaticValue from './StaticValue.js'
 import * as Type from './Type.js'
 import * as TypeCompatibility from './TypeCompatibility.js'
 
+/** TIR still reports in source coordinates, so a cause gets its span where it enters TIR. */
+const publishedCause = (
+  context: SemanticContext.SemanticContext,
+  cause: Diagnostic.Identity<Location.Location>,
+): Diagnostic.Identity => Diagnostic.publishIdentity(cause, SemanticContext.registryOf(context))
+
 export const tirReference = (
   reference: ParameterReferenceFact,
   type: ExpressionTypeFact,
   span: SourceSpan.SourceSpan,
+  context: SemanticContext.SemanticContext,
 ): Tir.Expression => {
   if (reference._tag === 'Resolved' && type._tag === 'Available') {
     return Object.freeze({
@@ -66,7 +74,7 @@ export const tirReference = (
     _tag: 'Unavailable',
     span,
     ...(reference._tag === 'Missing' && reference.cause !== undefined
-      ? { cause: reference.cause }
+      ? { cause: publishedCause(context, reference.cause) }
       : {}),
   })
 }
@@ -681,7 +689,7 @@ export const tirExpression = (
       return Object.freeze({
         _tag: 'Unavailable',
         span: options.context.spanOf(fact.anchor),
-        ...(fact.cause === undefined ? {} : { cause: fact.cause }),
+        ...(fact.cause === undefined ? {} : { cause: publishedCause(options.context, fact.cause) }),
       })
     return Object.freeze({
       _tag: 'EnumMember',
@@ -722,7 +730,12 @@ export const tirExpression = (
         fact.type.type,
         options.context.spanOf(fact.anchor),
       )
-    return tirReference(fact.reference, fact.type, options.context.spanOf(fact.anchor))
+    return tirReference(
+      fact.reference,
+      fact.type,
+      options.context.spanOf(fact.anchor),
+      options.context,
+    )
   }
   if (fact._tag === 'Move') {
     const subject = tirExpression(fact.subject, options)
@@ -965,7 +978,7 @@ export const tirExpression = (
         _tag: 'Unavailable',
         span: options.context.spanOf(fact.anchor),
         ...(fact.target._tag === 'Unavailable' && fact.target.cause !== undefined
-          ? { cause: fact.target.cause }
+          ? { cause: publishedCause(options.context, fact.target.cause) }
           : {}),
       })
     }
@@ -1012,7 +1025,7 @@ export const tirExpression = (
         _tag: 'Unavailable',
         span: options.context.spanOf(fact.anchor),
         ...(fact.target._tag === 'Unavailable' && fact.target.cause !== undefined
-          ? { cause: fact.target.cause }
+          ? { cause: publishedCause(options.context, fact.target.cause) }
           : {}),
       })
     }
@@ -1100,7 +1113,7 @@ export const tirExpression = (
         _tag: 'Unavailable',
         span: options.context.spanOf(fact.anchor),
         ...(fact.state._tag === 'Unavailable' && fact.state.cause !== undefined
-          ? { cause: fact.state.cause }
+          ? { cause: publishedCause(options.context, fact.state.cause) }
           : {}),
       })
     }
@@ -1144,7 +1157,9 @@ export const tirExpression = (
       return Object.freeze({
         _tag: 'Unavailable',
         span: options.context.spanOf(fact.anchor),
-        ...(fact.bounds._tag === 'Invalid' ? { cause: fact.bounds.cause } : {}),
+        ...(fact.bounds._tag === 'Invalid'
+          ? { cause: publishedCause(options.context, fact.bounds.cause) }
+          : {}),
       })
     }
     const subject = tirExpression(fact.subject, options)
@@ -1174,7 +1189,7 @@ export const tirExpression = (
         _tag: 'Unavailable',
         span: options.context.spanOf(fact.anchor),
         ...(fact.state._tag === 'Unavailable' && fact.state.cause !== undefined
-          ? { cause: fact.state.cause }
+          ? { cause: publishedCause(options.context, fact.state.cause) }
           : {}),
       })
     }
@@ -1210,7 +1225,7 @@ export const tirExpression = (
         _tag: 'Unavailable',
         span: options.context.spanOf(fact.anchor),
         ...(fact.formation._tag === 'Unavailable' && fact.formation.cause !== undefined
-          ? { cause: fact.formation.cause }
+          ? { cause: publishedCause(options.context, fact.formation.cause) }
           : {}),
       })
     }
@@ -1771,7 +1786,7 @@ export const tirExpression = (
       ? Object.freeze({ ...call, _tag: 'EffectConstruct' as const, type: fact.type.type })
       : Object.freeze({ ...call, _tag: 'Call' as const })
   }
-  let cause: Diagnostic.Identity | undefined
+  let cause: Diagnostic.Identity<Location.Location> | undefined
   if (fact.reference._tag === 'Missing' || fact.reference._tag === 'Ambiguous') {
     cause = fact.reference.cause
   } else if (fact.contract._tag === 'Unavailable') {
@@ -1780,7 +1795,7 @@ export const tirExpression = (
   return Object.freeze({
     _tag: 'Unavailable',
     span: options.context.spanOf(fact.anchor),
-    ...(cause === undefined ? {} : { cause }),
+    ...(cause === undefined ? {} : { cause: publishedCause(options.context, cause) }),
   })
 }
 

@@ -1,6 +1,7 @@
 import type * as ConfigurationError from './ConfigurationError.js'
 import type * as ProviderSelection from './ProviderSelection.js'
-import type * as Location from './Location.js'
+import * as Location from './Location.js'
+import type * as SemanticContext from './SemanticContext.js'
 import * as SourceSpan from './SourceSpan.js'
 import type * as Target from './Target.js'
 import * as Token from './Token.js'
@@ -1551,7 +1552,7 @@ export const hasReturnContractErrors = (diagnostics: ReadonlyArray<Diagnostic>):
   )
 
 /** Derives the identity of one diagnostic given its ordinal among equals. */
-export const identity = (self: Diagnostic, ordinal = 0): Identity =>
+export const identity = <L>(self: Diagnostic<L>, ordinal = 0): Identity<L> =>
   Object.freeze({
     _tag: 'DiagnosticIdentity',
     phase: self.phase,
@@ -1574,12 +1575,10 @@ export const identify = (diagnostics: ReadonlyArray<Diagnostic>): ReadonlyArray<
 }
 
 /** Tests structural identity equality. */
-export const identityEquals = (self: Identity, other: Identity): boolean =>
+export const identityEquals = (self: CauseIdentity, other: CauseIdentity): boolean =>
   self.phase === other.phase &&
   self.code === other.code &&
-  self.span.sourceId === other.span.sourceId &&
-  self.span.start === other.span.start &&
-  self.span.end === other.span.end &&
+  causeLabel(self) === causeLabel(other) &&
   self.ordinal === other.ordinal
 
 const compareStrings = (left: string, right: string): number => {
@@ -1621,6 +1620,95 @@ export const compareIdentity = (left: Identity, right: Identity): number =>
 export const merge = (
   ...collections: ReadonlyArray<ReadonlyArray<Diagnostic>>
 ): ReadonlyArray<Diagnostic> => Object.freeze(collections.flat().sort(compare))
+
+/**
+ * Joins diagnostics that are not published yet, keeping their deterministic emission order.
+ *
+ * A located diagnostic has no offsets to sort by; `publish` orders them once their spans exist.
+ */
+export const collect = <L>(
+  ...collections: ReadonlyArray<ReadonlyArray<Diagnostic<L>>>
+): ReadonlyArray<Diagnostic<L>> => Object.freeze(collections.flat())
+
+/** The reason fields that hold a position, so publication can resolve them with the diagnostic. */
+const positionFields = [
+  'originalSpan',
+  'loanSpan',
+  'wildcardSpan',
+  'requiredDeclarationSpan',
+  'actualDeclarationSpan',
+  'otherSpan',
+  'moveSpan',
+] as const
+
+/**
+ * A cause as a stage after TIR may hold it.
+ *
+ * ponytail: those stages still report in source coordinates, yet they also read header facts,
+ * whose causes are revision-free. One type once TIR nodes carry anchors (task 3.3.4).
+ */
+export type CauseIdentity = Identity | Identity<Location.Location>
+
+/** A stable text for a cause, in whichever coordinates it holds. */
+export const causeLabel = (self: CauseIdentity): string =>
+  'sourceId' in self.span
+    ? `${self.span.sourceId}:${self.span.start}-${self.span.end}`
+    : Location.key(self.span)
+
+/** Gives a located identity its span for one revision. */
+export const publishIdentity = (
+  self: Identity<Location.Location>,
+  registry: SemanticContext.Registry,
+): Identity => Object.freeze({ ...self, span: Location.resolve(self.span, registry).span })
+
+/**
+ * Gives a located diagnostic its spans for one revision.
+ *
+ * A value range split across several written literals reports at the first and relates the rest.
+ */
+export const publish = (self: Located, registry: SemanticContext.Registry): Diagnostic => {
+  const primary = Location.resolve(self.span, registry)
+  const span = (location: Location.Location): SourceSpan.SourceSpan =>
+    Location.resolve(location, registry).span
+  const reason: Record<string, unknown> = { ...self.reason }
+  for (const field of positionFields) {
+    const value = reason[field]
+    if (value !== undefined) reason[field] = span(value as Location.Location)
+  }
+  if (Array.isArray(reason['originSpans']))
+    reason['originSpans'] = Object.freeze(
+      (reason['originSpans'] as ReadonlyArray<Location.Location>).map(span),
+    )
+  if (Array.isArray(reason['trace']))
+    reason['trace'] = Object.freeze(
+      // A conformance trace is lines of text; only static-evaluation frames hold a position.
+      (reason['trace'] as ReadonlyArray<string | StaticTraceFrame<Location.Location>>).map(
+        (frame) =>
+          typeof frame === 'string' ? frame : Object.freeze({ ...frame, span: span(frame.span) }),
+      ),
+    )
+  const relatedSpans = [
+    ...primary.related.map((related) => Object.freeze({ label: 'continues here', span: related })),
+    ...(self.relatedSpans ?? []).map((related) =>
+      Object.freeze({ label: related.label, span: span(related.span) }),
+    ),
+  ]
+  return Object.freeze({
+    ...self,
+    // The reason vocabulary is identical on both sides; only its position fields changed type.
+    reason: Object.freeze(reason) as unknown as Reason,
+    span: primary.span,
+    ...(relatedSpans.length === 0 ? {} : { relatedSpans: Object.freeze(relatedSpans) }),
+    ...(self.cause === undefined ? {} : { cause: publishIdentity(self.cause, registry) }),
+  }) as Diagnostic
+}
+
+/** Publishes a collection in its emission order; `merge` gives the final order. */
+export const publishAll = (
+  diagnostics: ReadonlyArray<Located>,
+  registry: SemanticContext.Registry,
+): ReadonlyArray<Diagnostic> =>
+  Object.freeze(diagnostics.map((diagnostic) => publish(diagnostic, registry)))
 
 /** Creates the diagnostic associated with one `Invalid` token. */
 export const unsupportedBytes = <L>(span: L): Diagnostic<L> =>
@@ -4855,15 +4943,16 @@ export const nonConcreteSpecialization = <L>(declaration: string, span: L): Diag
     span,
   })
 
-const providerSelectionFields = (
+const providerSelectionFields = <L>(
   problem: ProviderSelection.SelectionProblem,
-  locations: ProviderSelection.DiagnosticLocations,
+  locations: ProviderSelection.DiagnosticLocations<L>,
+  originKey: ProviderSelection.OriginKey<L>,
 ) => {
   const primarySpan = locations.primary
-  const primaryKey = SourceSpan.key(primarySpan)
+  const primaryKey = originKey(primarySpan)
   const related = locations.relations
     .flatMap((relation) => relation.origins)
-    .filter((origin) => SourceSpan.key(origin) !== primaryKey)
+    .filter((origin) => originKey(origin) !== primaryKey)
     .map((span) => Object.freeze({ label: 'contributing provider constraint', span }))
   return Object.freeze({
     reason: Object.freeze({ _tag: 'ProviderSelection' as const, problem }),
@@ -4872,117 +4961,125 @@ const providerSelectionFields = (
   })
 }
 
-const providerNoMatch = (
+const providerNoMatch = <L>(
   problem: Extract<ProviderSelection.SelectionProblem, { readonly _tag: 'ProviderNoMatch' }>,
-  locations: ProviderSelection.DiagnosticLocations,
-): Diagnostic =>
+  locations: ProviderSelection.DiagnosticLocations<L>,
+  originKey: ProviderSelection.OriginKey<L>,
+): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: providerNoMatchCode,
     severity: 'error',
     message: 'The provider matches no compatible requirement',
-    ...providerSelectionFields(problem, locations),
+    ...providerSelectionFields(problem, locations, originKey),
   })
 
-const providerAccessMismatch = (
+const providerAccessMismatch = <L>(
   problem: Extract<ProviderSelection.SelectionProblem, { readonly _tag: 'ProviderAccessMismatch' }>,
-  locations: ProviderSelection.DiagnosticLocations,
-): Diagnostic =>
+  locations: ProviderSelection.DiagnosticLocations<L>,
+  originKey: ProviderSelection.OriginKey<L>,
+): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: providerAccessMismatchCode,
     severity: 'error',
     message: `${problem.provider.toLowerCase()} provider access cannot satisfy an ${problem.required.toLowerCase()} requirement`,
-    ...providerSelectionFields(problem, locations),
+    ...providerSelectionFields(problem, locations, originKey),
   })
 
-const jointProviderSelectionConflict = (
+const jointProviderSelectionConflict = <L>(
   problem: Extract<ProviderSelection.SelectionProblem, { readonly _tag: 'JointSelectionConflict' }>,
-  locations: ProviderSelection.DiagnosticLocations,
-): Diagnostic =>
+  locations: ProviderSelection.DiagnosticLocations<L>,
+  originKey: ProviderSelection.OriginKey<L>,
+): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: jointProviderSelectionConflictCode,
     severity: 'error',
     message: 'Provider constraints select incompatible requirement members',
-    ...providerSelectionFields(problem, locations),
+    ...providerSelectionFields(problem, locations, originKey),
   })
 
-const providerAmbiguity = (
+const providerAmbiguity = <L>(
   problem: Extract<ProviderSelection.SelectionProblem, { readonly _tag: 'ProviderAmbiguity' }>,
-  locations: ProviderSelection.DiagnosticLocations,
-): Diagnostic =>
+  locations: ProviderSelection.DiagnosticLocations<L>,
+  originKey: ProviderSelection.OriginKey<L>,
+): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: providerAmbiguityCode,
     severity: 'error',
     message: 'The provider matches more than one requirement; select one explicitly',
-    ...providerSelectionFields(problem, locations),
+    ...providerSelectionFields(problem, locations, originKey),
   })
 
-const selectedRowCardinality = (
+const selectedRowCardinality = <L>(
   problem: Extract<ProviderSelection.SelectionProblem, { readonly _tag: 'SelectedRowCardinality' }>,
-  locations: ProviderSelection.DiagnosticLocations,
-): Diagnostic =>
+  locations: ProviderSelection.DiagnosticLocations<L>,
+  originKey: ProviderSelection.OriginKey<L>,
+): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: selectedRowCardinalityCode,
     severity: 'error',
     message: `Selected requirement row has ${problem.count} members; exactly one is required`,
-    ...providerSelectionFields(problem, locations),
+    ...providerSelectionFields(problem, locations, originKey),
   })
 
-const providerConformanceAmbiguity = (
+const providerConformanceAmbiguity = <L>(
   problem: Extract<ProviderSelection.SelectionProblem, { readonly _tag: 'ConformanceAmbiguity' }>,
-  locations: ProviderSelection.DiagnosticLocations,
-): Diagnostic =>
+  locations: ProviderSelection.DiagnosticLocations<L>,
+  originKey: ProviderSelection.OriginKey<L>,
+): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: providerConformanceAmbiguityCode,
     severity: 'error',
     message: 'More than one conformance witness can provide the selected requirement',
-    ...providerSelectionFields(problem, locations),
+    ...providerSelectionFields(problem, locations, originKey),
   })
 
-const invalidProviderConformance = (
+const invalidProviderConformance = <L>(
   problem: Extract<ProviderSelection.SelectionProblem, { readonly _tag: 'InvalidConformance' }>,
-  locations: ProviderSelection.DiagnosticLocations,
-): Diagnostic =>
+  locations: ProviderSelection.DiagnosticLocations<L>,
+  originKey: ProviderSelection.OriginKey<L>,
+): Diagnostic<L> =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: invalidProviderConformanceCode,
     severity: 'error',
     message: `The provider's conformance mapping is invalid: ${problem.reason}`,
-    ...providerSelectionFields(problem, locations),
+    ...providerSelectionFields(problem, locations, originKey),
   })
 
 /** Preserves the solver's span-free semantic payload separately from ordered source locations. */
-export const providerSelection = (
-  diagnostic: ProviderSelection.SelectionDiagnostic,
-): Diagnostic => {
+export const providerSelection = <L>(
+  diagnostic: ProviderSelection.SelectionDiagnostic<L>,
+  originKey: ProviderSelection.OriginKey<L>,
+): Diagnostic<L> => {
   const problem = diagnostic.problem
   switch (problem._tag) {
     case 'ProviderNoMatch':
-      return providerNoMatch(problem, diagnostic.locations)
+      return providerNoMatch(problem, diagnostic.locations, originKey)
     case 'ProviderAccessMismatch':
-      return providerAccessMismatch(problem, diagnostic.locations)
+      return providerAccessMismatch(problem, diagnostic.locations, originKey)
     case 'JointSelectionConflict':
-      return jointProviderSelectionConflict(problem, diagnostic.locations)
+      return jointProviderSelectionConflict(problem, diagnostic.locations, originKey)
     case 'ProviderAmbiguity':
-      return providerAmbiguity(problem, diagnostic.locations)
+      return providerAmbiguity(problem, diagnostic.locations, originKey)
     case 'SelectedRowCardinality':
-      return selectedRowCardinality(problem, diagnostic.locations)
+      return selectedRowCardinality(problem, diagnostic.locations, originKey)
     case 'ConformanceAmbiguity':
-      return providerConformanceAmbiguity(problem, diagnostic.locations)
+      return providerConformanceAmbiguity(problem, diagnostic.locations, originKey)
     case 'InvalidConformance':
-      return invalidProviderConformance(problem, diagnostic.locations)
+      return invalidProviderConformance(problem, diagnostic.locations, originKey)
   }
 }
 
@@ -5638,6 +5735,31 @@ export const invalidConfiguration = (
     relatedSpans: Object.freeze(
       error.origins.flatMap((origin) =>
         origin.span === undefined ? [] : [{ label: origin.source, span: origin.span }],
+      ),
+    ),
+  })
+
+/**
+ * The same rejection for configuration written in a declaration header, located at its node.
+ *
+ * ponytail: the origins inside `error` still hold this revision's spans. Headers are rebuilt for
+ * every revision, so nothing stale is reported; give origins locations when headers are cached.
+ */
+export const invalidAuthoredConfiguration = <L>(
+  error: ConfigurationError.ConfigurationError,
+  span: L,
+): Diagnostic<L> =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: invalidConfigurationCode,
+    severity: 'error',
+    message: `Invalid compilation configuration: ${error.message}`,
+    reason: Object.freeze({ _tag: 'InvalidConfiguration' as const, error }),
+    span,
+    relatedSpans: Object.freeze(
+      error.origins.flatMap((origin) =>
+        origin.span === undefined ? [] : [{ label: origin.source, span }],
       ),
     ),
   })

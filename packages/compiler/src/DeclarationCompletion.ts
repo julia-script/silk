@@ -1,3 +1,4 @@
+import * as Location from './Location.js'
 import * as ForeignContract from './ForeignContract.js'
 import * as CAbi from './CAbi.js'
 import * as CLayout from './CLayout.js'
@@ -120,7 +121,7 @@ const foreignAdmission = (
   parameters: ReadonlyArray<ParameterFact>,
   result: ReturnTypeFact,
   contract: ForeignContract.ForeignContract = ForeignContract.conservative,
-): ReadonlyArray<Diagnostic.Diagnostic> =>
+): ReadonlyArray<Diagnostic.Located> =>
   [...parameters.map((parameter) => parameter.declaredType), result].flatMap(
     (declared, ordinal) => {
       if (declared._tag !== 'Resolved') return []
@@ -136,7 +137,7 @@ const foreignAdmission = (
       )
       return admission._tag === 'Admitted'
         ? []
-        : [Diagnostic.foreignTypeNotAdmitted(declared.spelling, 'C', spanOf(declared.anchor))]
+        : [Diagnostic.foreignTypeNotAdmitted(declared.spelling, 'C', Location.at(declared.anchor))]
     },
   )
 
@@ -144,21 +145,21 @@ const foreignAdmission = (
 const foreignFunctionPointerAdmission = (
   spanOf: SpanOf,
   declared: DeclaredTypeFact,
-): ReadonlyArray<Diagnostic.Diagnostic> => {
+): ReadonlyArray<Diagnostic.Located> => {
   if (declared._tag !== 'Resolved') return []
   return Type.foreignFunctions(declared.type).flatMap((type) => [
     ...(CAbi.admit(type, 'Parameter')._tag === 'Admitted'
       ? []
-      : [Diagnostic.foreignTypeNotAdmitted(Type.encode(type), 'C', spanOf(declared.anchor))]),
+      : [Diagnostic.foreignTypeNotAdmitted(Type.encode(type), 'C', Location.at(declared.anchor))]),
     ...ForeignContract.validate(
       type.contract,
       type.parameters.map((parameter, ordinal) => ({
         name: String(ordinal),
         type: parameter,
-        span: spanOf(declared.anchor),
+        at: Location.at(declared.anchor),
       })),
       type.result,
-      spanOf(declared.anchor),
+      Location.at(declared.anchor),
     ),
   ])
 }
@@ -169,7 +170,7 @@ export const complete = (
   registry: SemanticContext.Registry,
 ): DeclarationIndex.Index => {
   const spanOf = registry.spanOf
-  const diagnostics: Array<Diagnostic.Diagnostic> = [...self.diagnostics]
+  const diagnostics: Array<Diagnostic.Located> = [...self.diagnostics]
   // Alias declarations own their one-shot resolution diagnostics. Header arity probes also
   // traverse property bounds and may ignore non-nominal results, so they must not force these first.
   for (const module of self.modules)
@@ -327,10 +328,7 @@ export const complete = (
             (candidate) =>
               !diagnostics.some(
                 (prior) =>
-                  prior.code === candidate.code &&
-                  prior.span.sourceId === candidate.span.sourceId &&
-                  prior.span.start === candidate.span.start &&
-                  prior.span.end === candidate.span.end,
+                  prior.code === candidate.code && Location.equals(prior.span, candidate.span),
               ),
           ),
         )
@@ -371,7 +369,7 @@ export const complete = (
             Diagnostic.foreignTypeNotAdmitted(
               Type.encode(admission.type),
               'C',
-              spanOf(resolved.fact.anchor),
+              Location.at(resolved.fact.anchor),
             ),
           )
         let invalidInitializer = false
@@ -398,7 +396,7 @@ export const complete = (
             diagnostics.push(
               Diagnostic.invalidConstant(
                 'an exported C static requires one matching integer or floating-point scalar literal',
-                spanOf(member.initializer?.anchor ?? member.anchor),
+                Location.at(member.initializer?.anchor ?? member.anchor),
               ),
             )
           }
@@ -515,10 +513,10 @@ export const complete = (
                     parameter.declaredType._tag === 'Resolved'
                       ? parameter.declaredType.type
                       : undefined,
-                  span: spanOf(parameter.anchor),
+                  at: Location.at(parameter.anchor),
                 })),
                 result.fact._tag === 'Resolved' ? result.fact.type : undefined,
-                spanOf(result.fact.anchor),
+                Location.at(result.fact.anchor),
               )
         diagnostics.push(...admission, ...behaviorDiagnostics, ...pointerAdmission)
         const { foreignExport, ...retained } = member
@@ -572,10 +570,7 @@ export const complete = (
               (candidate) =>
                 !diagnostics.some(
                   (prior) =>
-                    prior.code === candidate.code &&
-                    prior.span.sourceId === candidate.span.sourceId &&
-                    prior.span.start === candidate.span.start &&
-                    prior.span.end === candidate.span.end,
+                    prior.code === candidate.code && Location.equals(prior.span, candidate.span),
                 ),
             ),
           )
@@ -586,7 +581,7 @@ export const complete = (
               Diagnostic.bodylessOpaqueResult(
                 `${owner}.${name}`,
                 member._tag === 'ServiceDeclaration' ? 'ServiceOperation' : 'InterfaceOperation',
-                spanOf(operation.opaqueResult.anchor),
+                Location.at(operation.opaqueResult.anchor),
               ),
             )
           }
@@ -882,7 +877,7 @@ export const complete = (
         const diagnostic = Diagnostic.invalidInherentHead(
           head.ownerSpelling,
           'Specialized',
-          spanOf(head.owner.anchor),
+          Location.at(head.owner.anchor),
         )
         diagnostics.push(diagnostic)
         return Object.freeze({
@@ -938,7 +933,9 @@ export const complete = (
       const diagnostic = Diagnostic.invalidInherentHead(
         head.ownerSpelling,
         problem,
-        head.owner._tag === 'Unavailable' ? spanOf(head.anchor) : spanOf(head.owner.anchor),
+        head.owner._tag === 'Unavailable'
+          ? Location.at(head.anchor)
+          : Location.at(head.owner.anchor),
       )
       diagnostics.push(diagnostic)
       return Object.freeze({
@@ -970,13 +967,14 @@ export const complete = (
     )
     interface OwnerItem {
       readonly kind: string
-      readonly span: SourceSpan.SourceSpan
+      readonly span: Location.Location
     }
     const ownerItemNames = (owner: Type.Nominal): ReadonlyMap<string, OwnerItem> => {
       const declaration = nominalOwnerDeclaration(headers, owner)
       const names = new Map<string, OwnerItem>()
       const add = (name: DeclaredName, kind: string): void => {
-        if (name._tag === 'Present') names.set(name.spelling, { kind, span: spanOf(name.anchor) })
+        if (name._tag === 'Present')
+          names.set(name.spelling, { kind, span: Location.at(name.anchor) })
       }
       if (declaration?._tag === 'StructDeclaration')
         for (const field of declaration.fields) add(field.name, 'field')
@@ -984,7 +982,10 @@ export const complete = (
         for (const variant of declaration.variants) add(variant.name, 'variant')
       if (declaration?._tag === 'EnumDeclaration') {
         for (const member of declaration.members) add(member.name, 'member')
-        names.set('value', { kind: 'generated operation', span: spanOf(declaration.anchor) })
+        names.set('value', {
+          kind: 'generated operation',
+          span: Location.at(declaration.anchor),
+        })
       }
       if (
         declaration?._tag === 'ServiceDeclaration' ||
@@ -1025,7 +1026,9 @@ export const complete = (
             association.ownerSpelling,
             association.name,
             'Collision',
-            member.name._tag === 'Present' ? spanOf(member.name.anchor) : spanOf(member.anchor),
+            member.name._tag === 'Present'
+              ? Location.at(member.name.anchor)
+              : Location.at(member.anchor),
             collision.kind,
             collision.span,
           ),
@@ -1130,7 +1133,7 @@ export const complete = (
         diagnostics.push(
           Diagnostic.genericCLayoutRecord(
             record,
-            spanOf(
+            Location.at(
               member.typeParametersAnchor ?? member.typeParameters[0]?.anchor ?? member.anchor,
             ),
           ),
@@ -1153,7 +1156,7 @@ export const complete = (
             record,
             field.name._tag === 'Present' ? field.name.spelling : `${field.id.ordinal}`,
             field.declaredType.spelling,
-            spanOf(field.declaredType.anchor),
+            Location.at(field.declaredType.anchor),
           ),
         )
       }
@@ -1279,7 +1282,7 @@ export const complete = (
     readonly module: string
     readonly ordinal: number
     readonly head: ConformanceHead.ConformanceHead
-    readonly span: SourceSpan.SourceSpan
+    readonly span: Location.Location
   }> = []
   modules = modules.map((module) =>
     Object.freeze({
@@ -1317,7 +1320,7 @@ export const complete = (
               Diagnostic.nonTerminatingConformance(
                 ConformanceHead.encode(head),
                 failures.map(ConformanceHead.describeTermination),
-                spanOf(conformance.anchor),
+                Location.at(conformance.anchor),
               ),
             )
           // This is the one authority on whether two conformances may cover one provider. Two
@@ -1337,7 +1340,7 @@ export const complete = (
                 module: module.module,
                 ordinal: conformance.ordinal,
                 head,
-                span: spanOf(conformance.anchor),
+                span: Location.at(conformance.anchor),
               }),
             )
           else if (
@@ -1349,7 +1352,7 @@ export const complete = (
               Object.freeze({
                 ...Diagnostic.invalidConformance(
                   `duplicate ${conformance.capability.type.name} implementation for ${Type.encode(conformance.provider.type)}`,
-                  spanOf(conformance.anchor),
+                  Location.at(conformance.anchor),
                 ),
                 relatedSpans: Object.freeze([
                   Object.freeze({ label: 'first implementation', span: overlapping.span }),
@@ -1361,7 +1364,7 @@ export const complete = (
               Diagnostic.overlappingConformance(
                 ConformanceHead.encode(head),
                 ConformanceHead.encode(overlapping.head),
-                spanOf(conformance.anchor),
+                Location.at(conformance.anchor),
                 overlapping.span,
               ),
             )
@@ -1396,14 +1399,12 @@ export const complete = (
       const markInvalid = (): void => {
         invalidConformances.add(conformance)
       }
-      const rejectConformance = <A extends Diagnostic.Diagnostic>(diagnostic: A): A => {
+      const rejectConformance = <A extends Diagnostic.Located>(diagnostic: A): A => {
         markInvalid()
         return diagnostic
       }
-      const invalidDiagnostic = (
-        detail: string,
-        span: SourceSpan.SourceSpan,
-      ): Diagnostic.Diagnostic => rejectConformance(Diagnostic.invalidConformance(detail, span))
+      const invalidDiagnostic = (detail: string, span: Location.Location): Diagnostic.Located =>
+        rejectConformance(Diagnostic.invalidConformance(detail, span))
       if (
         conformance.capability._tag !== 'Resolved' ||
         !Type.isNominal(conformance.capability.type) ||
@@ -1412,7 +1413,7 @@ export const complete = (
         diagnostics.push(
           invalidDiagnostic(
             'the capability must resolve to a nominal type and the provider must resolve to a type',
-            spanOf(conformance.anchor),
+            Location.at(conformance.anchor),
           ),
         )
         continue
@@ -1429,7 +1430,7 @@ export const complete = (
         diagnostics.push(
           invalidDiagnostic(
             'interface and service providers must be nominal types, scalar types, or string',
-            spanOf(conformance.anchor),
+            Location.at(conformance.anchor),
           ),
         )
         continue
@@ -1441,7 +1442,7 @@ export const complete = (
         diagnostics.push(
           invalidDiagnostic(
             `implementation for ${Type.encode(provider)} must be declared in ${conformanceOwner}, ${ownership}`,
-            spanOf(conformance.anchor),
+            Location.at(conformance.anchor),
           ),
         )
         continue
@@ -1450,7 +1451,7 @@ export const complete = (
         diagnostics.push(
           invalidDiagnostic(
             'interface and service providers must be concrete value types',
-            spanOf(conformance.anchor),
+            Location.at(conformance.anchor),
           ),
         )
         continue
@@ -1468,7 +1469,7 @@ export const complete = (
         diagnostics.push(
           invalidDiagnostic(
             'the capability must be concrete; impl type parameters may only bind the provider',
-            spanOf(conformance.anchor),
+            Location.at(conformance.anchor),
           ),
         )
         continue
@@ -1491,7 +1492,7 @@ export const complete = (
         diagnostics.push(
           invalidDiagnostic(
             `requirement ${unstatedRequirement.spelling} must be an interface or service contract`,
-            spanOf(unstatedRequirement.anchor),
+            Location.at(unstatedRequirement.anchor),
           ),
         )
         continue
@@ -1518,7 +1519,7 @@ export const complete = (
         diagnostics.push(
           invalidDiagnostic(
             `impl type parameter ${unused.map((parameter) => parameter.type.name).join(', ')} is not used by the ${sourceContract === undefined ? 'provider type' : 'conformance head'}`,
-            spanOf(conformance.anchor),
+            Location.at(conformance.anchor),
           ),
         )
         continue
@@ -1528,7 +1529,7 @@ export const complete = (
           diagnostics.push(
             invalidDiagnostic(
               `${capability.name} implementations use operation mappings, not a hook body`,
-              spanOf(conformance.hook.anchor),
+              Location.at(conformance.hook.anchor),
             ),
           )
           continue
@@ -1545,7 +1546,7 @@ export const complete = (
             diagnostics.push(
               invalidDiagnostic(
                 `duplicate ${capability.name}.${mapping.name.spelling} operation mapping`,
-                spanOf(mapping.anchor),
+                Location.at(mapping.anchor),
               ),
             )
             invalid = true
@@ -1565,7 +1566,7 @@ export const complete = (
                 ...(missing.length === 0 ? [] : [`missing ${missing.join(', ')}`]),
                 ...(extra.length === 0 ? [] : [`unknown ${extra.join(', ')}`]),
               ].join('; '),
-              spanOf(conformance.anchor),
+              Location.at(conformance.anchor),
             ),
           )
           invalid = true
@@ -1578,7 +1579,7 @@ export const complete = (
           diagnostics.push(
             invalidDiagnostic(
               `${capability.name} implementation has the wrong interface type-argument arity`,
-              spanOf(conformance.anchor),
+              Location.at(conformance.anchor),
             ),
           )
           continue
@@ -1600,7 +1601,7 @@ export const complete = (
             diagnostics.push(
               invalidDiagnostic(
                 `${target._tag === 'TypePath' ? target.spelling : '_'} is incompatible with ${capability.name}.${contractName}${detail === undefined ? '' : `: ${detail}`}`,
-                spanOf(mapping.anchor),
+                Location.at(mapping.anchor),
               ),
             )
           }
@@ -1636,7 +1637,7 @@ export const complete = (
                   mapping.form === 'Inline'
                     ? `inline operation ${capability.name}.${contractName} does not exist`
                     : `mapped operation ${Type.isNominal(provider) ? provider.name : Type.encode(provider)}.${targetName ?? '_'} does not exist`,
-                  spanOf(mapping.anchor),
+                  Location.at(mapping.anchor),
                 ),
               )
               continue
@@ -1658,7 +1659,7 @@ export const complete = (
                   detail = `witness target binder ${problem.binder.name} cannot accept ${Type.encodeGenericArgument(problem.argument)}`
                 }
                 diagnostics.push(
-                  invalidDiagnostic(`${target.spelling}: ${detail}`, spanOf(mapping.anchor)),
+                  invalidDiagnostic(`${target.spelling}: ${detail}`, Location.at(mapping.anchor)),
                 )
               } else rejectIncompatibleMapping()
               continue
@@ -1676,7 +1677,7 @@ export const complete = (
               diagnostics.push(
                 invalidDiagnostic(
                   `${target.spelling} requires ${unpromisedBound.bound.spelling} for ${unpromisedBound.binder.type.name}, which ${capability.name} for ${Type.encode(provider)} does not require`,
-                  spanOf(mapping.anchor),
+                  Location.at(mapping.anchor),
                 ),
               )
               continue
@@ -1743,7 +1744,7 @@ export const complete = (
         diagnostics.push(
           invalidDiagnostic(
             `Copy cannot be implemented for structural provider ${Type.encode(provider)}; shared references are compiler-proven Copy and every other structural type follows its sealed rule`,
-            spanOf(conformance.anchor),
+            Location.at(conformance.anchor),
           ),
         )
         continue
@@ -1767,7 +1768,7 @@ export const complete = (
         diagnostics.push(
           invalidDiagnostic(
             `scalar enum ${Type.encode(provider)} has sealed compiler-proved Copy semantics and cannot implement ${capability.name}`,
-            spanOf(conformance.anchor),
+            Location.at(conformance.anchor),
           ),
         )
         continue
@@ -1783,7 +1784,7 @@ export const complete = (
           diagnostics.push(
             invalidDiagnostic(
               'Copy requires one empty impl on a struct declared in the same module',
-              spanOf(conformance.anchor),
+              Location.at(conformance.anchor),
             ),
           )
         }
@@ -1797,7 +1798,7 @@ export const complete = (
             rejectConformance(
               Diagnostic.invalidDropHook(
                 'Drop requires one inline fn drop hook and no operation mappings',
-                spanOf(conformance.anchor),
+                Location.at(conformance.anchor),
               ),
             ),
           )
@@ -1827,7 +1828,7 @@ export const complete = (
             rejectConformance(
               Diagnostic.invalidDropHook(
                 'the hook must be fn drop(self: &mut Provider) -> () with no generics, failures, or requirements',
-                spanOf(hook.anchor),
+                Location.at(hook.anchor),
               ),
             ),
           )
@@ -1838,7 +1839,7 @@ export const complete = (
       diagnostics.push(
         invalidDiagnostic(
           `unsupported compiler-sealed capability ${Type.encode(capability)}`,
-          spanOf(conformance.anchor),
+          Location.at(conformance.anchor),
         ),
       )
     }
@@ -1899,7 +1900,7 @@ export const complete = (
       diagnostics.push(
         Diagnostic.invalidConformance(
           `Copy cannot be implemented for ${Type.encode(conformance.provider.type)}: ${proof.reason}`,
-          spanOf(conformance.anchor),
+          Location.at(conformance.anchor),
         ),
       )
     }
@@ -1930,7 +1931,7 @@ export const complete = (
           for (const parameter of operation.parameters) {
             if (parameter.bindingMutability === 'Mutable')
               diagnostics.push(
-                Diagnostic.invalidMutableParameter('Contract', spanOf(parameter.anchor)),
+                Diagnostic.invalidMutableParameter('Contract', Location.at(parameter.anchor)),
               )
           }
       }
@@ -2063,7 +2064,7 @@ export const complete = (
   // "inline" means, or a struct that reaches itself through an indirection is a component of one
   // in the first and a cycle in the second.
   const inlineParameters = inlineParametersOf(aggregates)
-  const cycleCause = new Map<string, Diagnostic.Identity>()
+  const cycleCause = new Map<string, Diagnostic.Identity<Location.Location>>()
   for (const component of stronglyConnected(aggregates, inlineParameters)) {
     const first = component.at(0)
     if (first === undefined) continue
@@ -2081,7 +2082,7 @@ export const complete = (
     if (keys.length < 2 && !selfEdge) continue
     const diagnostic = Diagnostic.inlineRecursiveAggregate(
       Object.freeze(keys),
-      first.name._tag === 'Present' ? spanOf(first.name.anchor) : spanOf(first.anchor),
+      first.name._tag === 'Present' ? Location.at(first.name.anchor) : Location.at(first.anchor),
     )
     diagnostics.push(diagnostic)
     const cause = Diagnostic.identity(diagnostic)
@@ -2112,7 +2113,7 @@ export const complete = (
       )
       const key =
         member.canonical._tag === 'Canonical' ? canonicalKey(member.canonical.id) : undefined
-      let fieldDependencyCause: ReturnType<typeof Diagnostic.identity> | undefined
+      let fieldDependencyCause: Diagnostic.Identity<Location.Location> | undefined
       if (fieldCause?.declaredType._tag === 'Unresolved') {
         fieldDependencyCause = fieldCause.declaredType.cause
       } else if (fieldCause?.declaredType._tag === 'Resolved') {
@@ -2141,11 +2142,8 @@ export const complete = (
         dependency,
       })
     })
-    // Diagnostics name the presented source; fixtures may present a module under another id.
-    const sourceId = registry.contexts.get(module.module)?.presentation.sourceId ?? module.module
     const moduleDiagnostics = diagnostics.filter(
-      (diagnostic) =>
-        diagnostic.span.sourceId === sourceId || diagnostic.span.sourceId === module.module,
+      (diagnostic) => Location.moduleOf(diagnostic.span) === module.module,
     )
     return Object.freeze({
       ...module,
@@ -2176,7 +2174,7 @@ export const complete = (
             member._tag === 'ConstantDeclaration' || member._tag === 'PackageParameterDeclaration',
         ),
       ),
-      diagnostics: Diagnostic.merge(moduleDiagnostics),
+      diagnostics: Diagnostic.collect(moduleDiagnostics),
     })
   })
 
@@ -2184,15 +2182,13 @@ export const complete = (
   modules = modules.map((module) => {
     const moduleContext = registry.contexts.get(module.module)
     const lifetimeDiagnostics =
-      moduleContext === undefined
-        ? []
-        : TypeOutlives.moduleDiagnostics(module, lifetimeScope, moduleContext)
+      moduleContext === undefined ? [] : TypeOutlives.moduleDiagnostics(module, lifetimeScope)
     diagnostics.push(...lifetimeDiagnostics)
     return Object.freeze({
       ...module,
-      diagnostics: Diagnostic.merge(module.diagnostics, lifetimeDiagnostics),
+      diagnostics: Diagnostic.collect(module.diagnostics, lifetimeDiagnostics),
     })
   })
 
-  return DeclarationIndex.make('Complete', modules, Diagnostic.merge(diagnostics))
+  return DeclarationIndex.make('Complete', modules, Diagnostic.collect(diagnostics))
 }

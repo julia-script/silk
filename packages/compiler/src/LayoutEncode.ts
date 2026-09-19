@@ -1,3 +1,4 @@
+import * as Diagnostic from './Diagnostic.js'
 import * as DeclarationFacts from './DeclarationFacts.js'
 import * as ExecutionPackage from './ExecutionPackage.js'
 import * as Tir from './Tir.js'
@@ -237,7 +238,7 @@ const unavailableText = (candidate: UnavailableEntry): string => {
   const cause =
     candidate.cause === undefined
       ? ''
-      : ` cause=${candidate.cause.code}@${candidate.cause.span.sourceId}:${candidate.cause.span.start}-${candidate.cause.span.end}`
+      : ` cause=${candidate.cause.code}@${Diagnostic.causeLabel(candidate.cause)}`
   return `layout ${Type.encode(candidate.type)} unavailable reason=${candidate.reason._tag} ${reason}${cause}`
 }
 

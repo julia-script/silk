@@ -1,3 +1,4 @@
+import * as Location from './Location.js'
 import * as CAbi from './CAbi.js'
 import type * as AuthoredHir from './AuthoredHir.js'
 import * as AuthoredIdentity from './AuthoredIdentity.js'
@@ -292,14 +293,14 @@ export function analyzeArguments(
 export interface CallContractResult {
   readonly mappings: ReadonlyArray<ArgumentMappingFact>
   readonly fact: CallContractFact
-  readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
+  readonly diagnostics: ReadonlyArray<Diagnostic.Located>
 }
 
 export interface CallTypeArgumentsResult {
   readonly explicit: boolean
   readonly facts: ReadonlyArray<TypeArgumentFact>
   readonly types?: ReadonlyArray<Type.GenericArgument>
-  readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
+  readonly diagnostics: ReadonlyArray<Diagnostic.Located>
 }
 
 const requirementArgumentOfType = (
@@ -498,11 +499,11 @@ export const analyzeCallTypeArguments = (
         : undefined
     const roleDiagnostics =
       rolePath === undefined || requirementRole !== undefined
-        ? Object.freeze<ReadonlyArray<Diagnostic.Diagnostic>>([])
+        ? Object.freeze<ReadonlyArray<Diagnostic.Located>>([])
         : Object.freeze([
             Diagnostic.invalidRequirementType(
               `role ${rolePath.spelling}`,
-              context.spanOf(rolePath.anchor),
+              Location.at(rolePath.anchor),
             ),
           ])
     const body = resolution.bodyLifetimes
@@ -572,7 +573,7 @@ export const analyzeCallTypeArguments = (
             arguments_.flatMap(Type.requirementRowParameters),
           )
         : undefined
-      const diagnostics = Diagnostic.merge(
+      const diagnostics = Diagnostic.collect(
         raw.diagnostics,
         ...members.map((member) => member.diagnostics),
         roleDiagnostics,
@@ -613,7 +614,7 @@ export const analyzeCallTypeArguments = (
             }
           : {}),
       }),
-      diagnostics: Diagnostic.merge(raw.diagnostics, resolved.diagnostics, roleDiagnostics),
+      diagnostics: Diagnostic.collect(raw.diagnostics, resolved.diagnostics, roleDiagnostics),
     })
   })
   const facts = Object.freeze(analyzed.map((entry) => entry.fact))
@@ -626,7 +627,7 @@ export const analyzeCallTypeArguments = (
           types: Object.freeze(available.filter((type) => type !== undefined)),
         }
       : {}),
-    diagnostics: Diagnostic.merge(...analyzed.map((entry) => entry.diagnostics)),
+    diagnostics: Diagnostic.collect(...analyzed.map((entry) => entry.diagnostics)),
   })
 }
 
@@ -701,8 +702,8 @@ export const callArityDiagnostic = (
   >,
   expectedCount: number,
   actualCount: number,
-  span: SourceSpan.SourceSpan,
-): Diagnostic.Diagnostic => {
+  span: Location.Location,
+): Diagnostic.Located => {
   if (
     expectedCount === 1 &&
     actualCount === 0 &&
@@ -744,7 +745,7 @@ export interface SpecializationSite {
 
 /** One written type argument the value arguments contradict, reported at what was written. */
 export interface SpecializationConflict {
-  readonly diagnostic: Diagnostic.Diagnostic
+  readonly diagnostic: Diagnostic.Located
   /** The argument that implied the other type, absent when no value argument is involved. */
   readonly ordinal?: number
 }
@@ -757,7 +758,7 @@ export interface SeededSpecialization {
    * A parameter no explicit argument wrote and no value argument determines. It waits for the
    * ordinary argument checks, because an argument the call got wrong is the better first report.
    */
-  readonly unresolved?: Diagnostic.Diagnostic
+  readonly unresolved?: Diagnostic.Located
 }
 
 /** Converts one written source type argument to the generic kind its declaration binder owns. */
@@ -878,9 +879,9 @@ const selectedLifetimeBoundDiagnostics = (
   bounds: ReadonlyArray<Lifetime.Outlives>,
   substitution: Type.Substitution,
   compatibility: TypeCompatibility.Context | undefined,
-  span: SourceSpan.SourceSpan,
+  span: Location.Location,
   typeBounds: ReadonlyArray<Type.TypeOutlives> = [],
-): ReadonlyArray<Diagnostic.Diagnostic> => [
+): ReadonlyArray<Diagnostic.Located> => [
   ...bounds.flatMap((bound) => {
     const longer = Type.substituteLifetime(bound.longer, substitution)
     const shorter = Type.substituteLifetime(bound.shorter, substitution)
@@ -923,7 +924,7 @@ export const seededSpecialization = (
   declared: ReadonlyArray<Type.Parameter>,
   explicit: ReadonlyArray<TypeArgumentFact>,
   sites: ReadonlyArray<SpecializationSite>,
-  span: SourceSpan.SourceSpan,
+  span: Location.Location,
   deferred: ReadonlySet<string> = new Set(),
   enclosingSubstitution: Type.Substitution = new Map(),
   lifetimes?: SelectedCallLifetimes,
@@ -974,7 +975,7 @@ export const seededSpecialization = (
             parameter.name,
             parameter.kind,
             suppliedKind,
-            context.spanOf(fact.anchor),
+            Location.at(fact.anchor),
           ),
         }),
       )
@@ -1025,7 +1026,7 @@ export const seededSpecialization = (
             selectedParameters.get(fact)?.name ?? fact.ordinal.toString(),
             Type.encodeGenericArgument(explicitArgument),
             Type.encodeGenericArgument(suppliedArgument),
-            context.spanOf(fact.anchor),
+            Location.at(fact.anchor),
           ),
         }),
       )
@@ -1066,7 +1067,7 @@ export const commitSpecialization = (
 interface KnownProviderBoundInference {
   readonly substitution: Type.Substitution
   readonly symbolicConformances: ReadonlyArray<ConformanceProof.SymbolicConformanceSelection>
-  readonly diagnostic?: Diagnostic.Diagnostic
+  readonly diagnostic?: Diagnostic.Located
 }
 
 const sameNominalDeclaration = (left: Type.Nominal, right: Type.Nominal): boolean =>
@@ -1131,7 +1132,7 @@ const inferKnownProviderBounds = (
   initial: Type.Substitution,
   resolution: ResolutionContext,
   caller: DeclarationFact | undefined,
-  span: SourceSpan.SourceSpan,
+  span: Location.Location,
 ): KnownProviderBoundInference => {
   const substitution = new Map(initial)
   const symbolicConformances: Array<ConformanceProof.SymbolicConformanceSelection> = []
@@ -1293,7 +1294,7 @@ const inferKnownProviderBounds = (
             Type.encodeGenericArgument(existing),
             Type.encodeGenericArgument(inferred),
             span,
-            context.spanOf(bound.path.anchor),
+            Location.at(bound.path.anchor),
           ),
         })
       }
@@ -1330,28 +1331,28 @@ export interface ConstraintSolveResult {
   readonly substitution: Type.Substitution
   readonly evidence: ReadonlyArray<Constraint.ConstraintEvidence>
   readonly inferredProviderSelectors: ReadonlyArray<InferredProviderSelector>
-  readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
+  readonly diagnostics: ReadonlyArray<Diagnostic.Located>
 }
 
 export const constraintOrigins = (
   context: SemanticContext.SemanticContext,
   callable: SourceCallable | undefined,
-): ReadonlyArray<SourceSpan.SourceSpan> =>
-  Object.freeze(callable?.constraints.map((constraint) => context.spanOf(constraint.anchor)) ?? [])
+): ReadonlyArray<Location.Location> =>
+  Object.freeze(callable?.constraints.map((constraint) => Location.at(constraint.anchor)) ?? [])
 
 /** Solves provider relations only after arguments have independently established their operands. */
 export const solveCallableConstraints = (
   constraints: ReadonlyArray<Constraint.Constraint>,
-  origins: ReadonlyArray<SourceSpan.SourceSpan>,
+  origins: ReadonlyArray<Location.Location>,
   initial: Type.Substitution,
   caller: DeclarationFact | undefined,
   resolution: ResolutionContext,
-  span: SourceSpan.SourceSpan,
+  span: Location.Location,
 ): ConstraintSolveResult => {
   const substitution = new Map(initial)
   const evidence: Array<Constraint.ConstraintEvidence> = []
   const inferredProviderSelectors: Array<InferredProviderSelector> = []
-  const diagnostics: Array<Diagnostic.Diagnostic> = []
+  const diagnostics: Array<Diagnostic.Located> = []
   const givens = caller?.constraintContracts ?? Object.freeze([])
   const checked = constraints.flatMap((constraint, ordinal) =>
     constraint._tag === 'ProviderSelectionConstraint'
@@ -1395,7 +1396,7 @@ export const solveCallableConstraints = (
     const relations = wanted.flatMap((constraint, ordinal) =>
       constraint._tag === 'ProviderSelectionConstraint'
         ? [
-            Object.freeze<ProviderSelection.Relation>({
+            Object.freeze<ProviderSelection.Relation<Location.Location>>({
               wanted: constraint,
               origins: [origins.at(group.at(ordinal)?.ordinal ?? 0) ?? span],
             }),
@@ -1406,17 +1407,22 @@ export const solveCallableConstraints = (
       relations,
       ...(selected === undefined ? {} : { selected }),
       responsible: span,
+      originKey: Location.key,
       oracle: Object.freeze<ProviderSelection.ConformanceOracle>({
         observation: {
           work: ResolutionWork.ofIndex(resolution.index),
-          initiator: { kind: 'CallConstraint', key: selectedKey, span },
+          initiator: { kind: 'CallConstraint', key: `${selectedKey}@${Location.key(span)}` },
         },
         match: (provider: Type.Type, capability: Type.Nominal) =>
           ConformanceProof.providerMatch(resolution.index, provider, capability, caller),
       }),
     })
     if (solved._tag === 'Rejected') {
-      diagnostics.push(...solved.diagnostics.map(Diagnostic.providerSelection))
+      diagnostics.push(
+        ...solved.diagnostics.map((rejected) =>
+          Diagnostic.providerSelection(rejected, Location.key),
+        ),
+      )
       continue
     }
     if (selectedArgument === undefined) {
@@ -1529,31 +1535,31 @@ export const analyzeCallContract = (
         argument.type._tag === 'Available' &&
         !typesCompatible(argument.type.type, expected, resolution?.lifetimeCompatibility)
       ) {
-        let mismatch: Diagnostic.Diagnostic
+        let mismatch: Diagnostic.Located
         if (Type.isForeignFunction(expected) && !Type.isForeignFunction(argument.type.type))
           mismatch = Diagnostic.invalidForeignCallback(
             Type.encode(argument.type.type),
             'capturing and anonymous Silk callables do not have an exported C address',
-            context.spanOf(argument.anchor),
+            Location.at(argument.anchor),
           )
         else if (Type.isCallable(expected) && Type.isCallable(argument.type.type))
           mismatch = Diagnostic.incompatibleCallableSignature(
             Type.encode(expected),
             Type.encode(argument.type.type),
-            context.spanOf(argument.anchor),
+            Location.at(argument.anchor),
           )
         else
           mismatch =
             unionConversionDiagnostic(
               argument.type.type,
               expected,
-              context.spanOf(argument.anchor),
+              Location.at(argument.anchor),
               resolution?.lifetimeCompatibility,
             ) ??
             Diagnostic.argumentTypeMismatch(
               Type.encode(expected),
               Type.encode(argument.type.type),
-              context.spanOf(argument.anchor),
+              Location.at(argument.anchor),
             )
         return Object.freeze({
           mappings: Object.freeze([]),
@@ -1573,7 +1579,7 @@ export const analyzeCallContract = (
         mappings: Object.freeze([]),
         fact: Object.freeze({ _tag: 'ArityMismatch', expectedCount, actualCount }),
         diagnostics: Object.freeze([
-          callArityDiagnostic(reference, expectedCount, actualCount, context.spanOf(call.anchor)),
+          callArityDiagnostic(reference, expectedCount, actualCount, Location.at(call.anchor)),
         ]),
       })
     }
@@ -1665,7 +1671,7 @@ export const analyzeCallContract = (
     if (argument === undefined) throw new RangeError('specialization site lost its argument')
     const diagnostic = Diagnostic.implicitSliceDecay(
       Type.encode(expected),
-      context.spanOf(argument.anchor),
+      Location.at(argument.anchor),
     )
     return Object.freeze({
       mappings,
@@ -1693,7 +1699,7 @@ export const analyzeCallContract = (
   )
   let substitution: Type.Substitution
   let typeArguments: ReadonlyArray<Type.GenericArgument>
-  let unresolvedSpecialization: Diagnostic.Diagnostic | undefined
+  let unresolvedSpecialization: Diagnostic.Located | undefined
   if (callTypeArguments?.explicit === true) {
     // More type arguments than the callable declares is the arity error that remains: fewer is a
     // prefix, and the parameters it leaves open are inferred from the value arguments below.
@@ -1702,7 +1708,7 @@ export const analyzeCallContract = (
         reference.spelling,
         declaredTypeParameters.length,
         callTypeArguments.facts.length,
-        context.spanOf(call.anchor),
+        Location.at(call.anchor),
       )
       return Object.freeze({
         mappings,
@@ -1737,7 +1743,7 @@ export const analyzeCallContract = (
       declaredTypeParameters,
       callTypeArguments.facts,
       sites,
-      context.spanOf(call.anchor),
+      Location.at(call.anchor),
       constraintDeferred,
       resolution?.staticContext?.typeSubstitution,
       callLifetimes,
@@ -1764,7 +1770,7 @@ export const analyzeCallContract = (
     const inferred = new Map<string, Type.GenericArgument>(callLifetimes.substitution)
     let compatible = true
     let rowFailure: Type.InferenceFailure | undefined
-    let representationFailure: Diagnostic.Diagnostic | undefined
+    let representationFailure: Diagnostic.Located | undefined
     let pending = [...sites]
     while (pending.length > 0) {
       const deferred: Array<SpecializationSite> = []
@@ -1799,7 +1805,7 @@ export const analyzeCallContract = (
             representationFailure = Diagnostic.unsatisfiedExecutableProperty(
               'Intrinsic.NonParking',
               ['Unavailable:exact execution target'],
-              context.spanOf(call.anchor),
+              Location.at(call.anchor),
             )
           else
             rowFailure = TypeInference.inferenceFailure(
@@ -1846,8 +1852,8 @@ export const analyzeCallContract = (
       const diagnostic =
         representationFailure ??
         (rowFailure === undefined
-          ? Diagnostic.typeArgumentInference(reference.spelling, context.spanOf(call.anchor))
-          : Diagnostic.inferenceFailure(rowFailure, context.spanOf(call.anchor)))
+          ? Diagnostic.typeArgumentInference(reference.spelling, Location.at(call.anchor))
+          : Diagnostic.inferenceFailure(rowFailure, Location.at(call.anchor)))
       return Object.freeze({
         mappings,
         fact: Object.freeze({
@@ -1884,7 +1890,7 @@ export const analyzeCallContract = (
       substitution,
       resolution,
       caller,
-      context.spanOf(call.anchor),
+      Location.at(call.anchor),
     )
     substitution = inferredFromBounds.substitution
     symbolicConformances = inferredFromBounds.symbolicConformances
@@ -1920,7 +1926,7 @@ export const analyzeCallContract = (
     if (missingAfterKnownProviderInference !== undefined) {
       const diagnostic = Diagnostic.typeArgumentInference(
         reference.spelling,
-        context.spanOf(call.anchor),
+        Location.at(call.anchor),
       )
       return Object.freeze({
         mappings,
@@ -1942,7 +1948,7 @@ export const analyzeCallContract = (
       substitution,
       caller,
       resolution,
-      context.spanOf(call.anchor),
+      Location.at(call.anchor),
     )
     substitution = solved.substitution
     evidence = solved.evidence
@@ -1972,7 +1978,7 @@ export const analyzeCallContract = (
     unresolvedSpecialization ??= Diagnostic.uninferredTypeParameter(
       reference.spelling,
       remainingOpen.name,
-      context.spanOf(call.anchor),
+      Location.at(call.anchor),
     )
   for (const site of sites) {
     const argument = argumentsList.at(site.ordinal)
@@ -1984,36 +1990,36 @@ export const analyzeCallContract = (
       !typesCompatible(suppliedValue, expectedValue, resolution?.lifetimeCompatibility) &&
       !contextualIntegerCompatible(argument.expression, expectedValue)
     ) {
-      let mismatch: Diagnostic.Diagnostic
+      let mismatch: Diagnostic.Located
       if (Type.isForeignFunction(expectedValue) && !Type.isForeignFunction(suppliedValue)) {
         mismatch = Diagnostic.invalidForeignCallback(
           Type.encode(suppliedValue),
           'capturing and anonymous Silk callables do not have an exported C address',
-          context.spanOf(argument.anchor),
+          Location.at(argument.anchor),
         )
       } else if (Type.isCallable(expectedValue) && Type.isCallable(suppliedValue)) {
         mismatch = Diagnostic.incompatibleCallableSignature(
           Type.encode(expectedValue),
           Type.encode(suppliedValue),
-          context.spanOf(argument.anchor),
+          Location.at(argument.anchor),
         )
       } else if (Type.isSlice(expectedValue) && Type.isFixedArray(suppliedValue)) {
         mismatch = Diagnostic.implicitSliceDecay(
           Type.encode(expectedValue),
-          context.spanOf(argument.anchor),
+          Location.at(argument.anchor),
         )
       } else {
         mismatch =
           unionConversionDiagnostic(
             suppliedValue,
             expectedValue,
-            context.spanOf(argument.anchor),
+            Location.at(argument.anchor),
             resolution?.lifetimeCompatibility,
           ) ??
           Diagnostic.argumentTypeMismatch(
             Type.encode(expectedValue),
             Type.encode(suppliedValue),
-            context.spanOf(argument.anchor),
+            Location.at(argument.anchor),
           )
       }
       return Object.freeze({
@@ -2046,7 +2052,7 @@ export const analyzeCallContract = (
       const diagnostic = Diagnostic.foreignTypeNotAdmitted(
         Type.encode(invalid.type.type),
         'C variadic tail',
-        context.spanOf(invalid.anchor),
+        Location.at(invalid.anchor),
       )
       return Object.freeze({
         mappings,
@@ -2064,7 +2070,7 @@ export const analyzeCallContract = (
       mappings,
       fact: Object.freeze({ _tag: 'ArityMismatch', expectedCount, actualCount }),
       diagnostics: Object.freeze([
-        callArityDiagnostic(reference, expectedCount, actualCount, context.spanOf(call.anchor)),
+        callArityDiagnostic(reference, expectedCount, actualCount, Location.at(call.anchor)),
       ]),
     })
   }
@@ -2086,7 +2092,7 @@ export const analyzeCallContract = (
     contract.lifetimeBounds,
     substitution,
     resolution?.lifetimeCompatibility,
-    context.spanOf(call.anchor),
+    Location.at(call.anchor),
     contract.typeOutlives,
   )
   const lifetimeFailure = lifetimeDiagnostics.at(0)
@@ -2136,9 +2142,9 @@ export const interfaceConstraints = (
   substitution: Type.Substitution | undefined,
   index: DeclarationIndex.Index,
   caller: DeclarationFact,
-  span: SourceSpan.SourceSpan,
+  span: Location.Location,
 ): {
-  readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
+  readonly diagnostics: ReadonlyArray<Diagnostic.Located>
   readonly proofs: ReadonlyArray<ConformanceGoal.Proof>
 } => {
   const proofs: Array<ConformanceGoal.Proof> = []
@@ -2150,7 +2156,7 @@ export const interfaceConstraints = (
     reference.declaration.typeParameters.flatMap((parameter) => {
       const provider = substitution.get(Type.key(parameter.type))
       if (provider === undefined || !Type.isTypeArgument(provider)) return []
-      return parameter.bounds.flatMap((bound): ReadonlyArray<Diagnostic.Diagnostic> => {
+      return parameter.bounds.flatMap((bound): ReadonlyArray<Diagnostic.Located> => {
         // An unresolved bound was reported at its declaration.
         if (bound._tag !== 'ResolvedBound') return []
         const substitutedCapability = Type.substitute(bound.application.capability, substitution)
@@ -2158,7 +2164,7 @@ export const interfaceConstraints = (
           return [
             Diagnostic.invalidConformance(
               `unknown interface constraint ${bound.spelling}`,
-              context.spanOf(parameter.anchor),
+              Location.at(parameter.anchor),
             ),
           ]
         const capability = substitutedCapability
@@ -2172,7 +2178,7 @@ export const interfaceConstraints = (
           return [
             Diagnostic.invalidConformance(
               `${bound.spelling} cannot bind Self to ${Type.encode(provider)}`,
-              context.spanOf(parameter.anchor),
+              Location.at(parameter.anchor),
             ),
           ]
         // Selection excludes rejected declarations, but a partial declaration still carries the most
@@ -2637,18 +2643,18 @@ export const analyzeFunctionItem = (
     const qualifierLookup = NameResolution.lookup(resolution.scope, resolution.index, qualifier)
     if (qualifierLookup._tag !== 'Namespace') return undefined
     const memberLookup = DeclarationFacts.lookup(resolution.index, qualifierLookup.module, member)
-    let diagnostic: Diagnostic.Diagnostic | undefined
+    let diagnostic: Diagnostic.Located | undefined
     if (memberLookup._tag !== 'Resolved') {
       diagnostic = Diagnostic.unknownImportedMember(
         qualifierLookup.module,
         member,
-        context.spanOf(memberToken.anchor),
+        Location.at(memberToken.anchor),
       )
     } else if (memberLookup.declaration.visibility !== 'Public') {
       diagnostic = Diagnostic.inaccessibleImportedMember(
         qualifierLookup.module,
         member,
-        context.spanOf(memberToken.anchor),
+        Location.at(memberToken.anchor),
       )
     } else {
       diagnostic = undefined
@@ -2710,11 +2716,7 @@ export const analyzeFunctionItem = (
     }
     if (detail !== undefined) {
       const name = reference._tag === 'Unavailable' ? '<expression>' : reference.spelling
-      const diagnostic = Diagnostic.invalidForeignCallback(
-        name,
-        detail,
-        context.spanOf(node.anchor),
-      )
+      const diagnostic = Diagnostic.invalidForeignCallback(name, detail, Location.at(node.anchor))
       return Object.freeze({
         fact: Object.freeze({
           _tag: 'FunctionItem',
@@ -2901,7 +2903,7 @@ export const analyzeFunctionItem = (
           contextual,
           caller,
           resolution,
-          context.spanOf(node.anchor),
+          Location.at(node.anchor),
         )
       : undefined
   if (
@@ -2931,7 +2933,7 @@ export const analyzeFunctionItem = (
     contextual,
     resolution.index,
     caller,
-    context.spanOf(node.anchor),
+    Location.at(node.anchor),
   )
   // Specialization can turn invocation predicates into free formation facts. Prove them before
   // publishing the value: structural callable comparison may thereafter assume those facts.
@@ -2944,7 +2946,7 @@ export const analyzeFunctionItem = (
           formation.lifetimeBounds,
           new Map(),
           resolution.lifetimeCompatibility,
-          context.spanOf(node.anchor),
+          Location.at(node.anchor),
           formation.typeOutlives,
         )
   const available =
@@ -2980,13 +2982,13 @@ const staticFirstClassDiagnostic = (
   reference: CallReferenceFact,
   node: AuthoredHir.Expression,
   resolution: ResolutionContext,
-): Diagnostic.Diagnostic | undefined =>
+): Diagnostic.Located | undefined =>
   reference._tag === 'Resolved' && reference.declaration.phase === 'Static'
     ? Diagnostic.staticPhaseViolation(
         `static function ${reference.spelling} as a runtime callable`,
         resolution.staticContext?.environment.target ?? 'unselected-target',
         Object.freeze([]),
-        context.spanOf(node.anchor),
+        Location.at(node.anchor),
       )
     : undefined
 
@@ -2994,15 +2996,15 @@ const foreignFirstClassDiagnostic = (
   context: SemanticContext.SemanticContext,
   reference: CallReferenceFact,
   node: AuthoredHir.Expression,
-): Diagnostic.Diagnostic | undefined =>
+): Diagnostic.Located | undefined =>
   reference._tag === 'Resolved' && reference.declaration.foreign !== undefined
-    ? Diagnostic.foreignFunctionNotFirstClass(reference.spelling, context.spanOf(node.anchor))
+    ? Diagnostic.foreignFunctionNotFirstClass(reference.spelling, Location.at(node.anchor))
     : undefined
 
 export interface SectionContractResult {
   readonly substitution: Type.Substitution
   readonly typeArguments: ReadonlyArray<Type.GenericArgument>
-  readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
+  readonly diagnostics: ReadonlyArray<Diagnostic.Located>
   readonly valid: boolean
 }
 
@@ -3053,7 +3055,7 @@ export const analyzeSectionContract = (
         Diagnostic.argumentTypeMismatch(
           Type.encode(expected),
           Type.encode(argument.type.type),
-          context.spanOf(argument.anchor),
+          Location.at(argument.anchor),
         ),
       ]
     })
@@ -3063,7 +3065,7 @@ export const analyzeSectionContract = (
           reference.spelling,
           0,
           callTypeArguments.facts.length,
-          context.spanOf(call.anchor),
+          Location.at(call.anchor),
         ),
       )
     return Object.freeze({
@@ -3093,7 +3095,7 @@ export const analyzeSectionContract = (
   const remainingLifetimeKeys = new Set(remainingBinders.map(Lifetime.key))
   const callLifetimes = selectedCallLifetimes(call, capturedBinders, resolution)
   const declaredParameters = callable.binders
-  const diagnostics: Array<Diagnostic.Diagnostic> = []
+  const diagnostics: Array<Diagnostic.Located> = []
   const contradicted = new Set<number>()
   let substitution = new Map<string, Type.GenericArgument>(callLifetimes.substitution)
   if (callTypeArguments.explicit) {
@@ -3106,7 +3108,7 @@ export const analyzeSectionContract = (
           reference.spelling,
           declaredParameters.length,
           callTypeArguments.facts.length,
-          context.spanOf(call.anchor),
+          Location.at(call.anchor),
         ),
       )
     } else {
@@ -3125,7 +3127,7 @@ export const analyzeSectionContract = (
         declaredParameters,
         callTypeArguments.facts,
         sectionSpecializationSites(callable, arguments_, captured),
-        context.spanOf(call.anchor),
+        Location.at(call.anchor),
         new Set([
           ...remainingLifetimeKeys,
           ...remaining.flatMap((parameter) => Type.parameters(parameter.type).map(Type.key)),
@@ -3162,8 +3164,8 @@ export const analyzeSectionContract = (
         )
         diagnostics.push(
           rowFailure === undefined
-            ? Diagnostic.typeArgumentInference(reference.spelling, context.spanOf(call.anchor))
-            : Diagnostic.inferenceFailure(rowFailure, context.spanOf(call.anchor)),
+            ? Diagnostic.typeArgumentInference(reference.spelling, Location.at(call.anchor))
+            : Diagnostic.inferenceFailure(rowFailure, Location.at(call.anchor)),
         )
         break
       }
@@ -3185,7 +3187,7 @@ export const analyzeSectionContract = (
       )
     ) {
       diagnostics.push(
-        Diagnostic.typeArgumentInference(reference.spelling, context.spanOf(call.anchor)),
+        Diagnostic.typeArgumentInference(reference.spelling, Location.at(call.anchor)),
       )
     }
   }
@@ -3205,7 +3207,7 @@ export const analyzeSectionContract = (
       Diagnostic.argumentTypeMismatch(
         Type.encode(expected),
         Type.encode(argument.type.type),
-        context.spanOf(argument.anchor),
+        Location.at(argument.anchor),
       ),
     )
   }
@@ -3218,7 +3220,7 @@ export const analyzeSectionContract = (
       ),
       substitution,
       resolution?.lifetimeCompatibility,
-      context.spanOf(call.anchor),
+      Location.at(call.anchor),
       callable.typeOutlives.filter(
         (bound) => !remainingLifetimeKeys.has(Lifetime.key(bound.lifetime)),
       ),
@@ -3521,7 +3523,7 @@ export const finishCallableSection = (
     contract.substitution,
     resolution.index,
     caller,
-    context.spanOf(node.anchor),
+    Location.at(node.anchor),
   )
   const captures = Object.freeze(
     capturedParameters.map((parameterOrdinal, ordinal) => {
@@ -3641,7 +3643,7 @@ export const finishCallableApplication = (
           'native function pointer',
           0,
           callTypeArguments.facts.length,
-          context.spanOf(node.anchor),
+          Location.at(node.anchor),
         ),
       )
     if (contract.parameters.length !== argumentsResult.facts.length)
@@ -3650,7 +3652,7 @@ export const finishCallableApplication = (
           { _tag: 'BuiltinTarget', actor: 'Foreign', operation: 'Apply' },
           contract.parameters.length,
           argumentsResult.facts.length,
-          context.spanOf(node.anchor),
+          Location.at(node.anchor),
         ),
       )
     for (const [ordinal, argument] of argumentsResult.facts.entries()) {
@@ -3669,7 +3671,7 @@ export const finishCallableApplication = (
           Diagnostic.argumentTypeMismatch(
             Type.encode(expected),
             Type.encode(argument.type.type),
-            context.spanOf(argument.anchor),
+            Location.at(argument.anchor),
           ),
         )
     }
@@ -3678,7 +3680,7 @@ export const finishCallableApplication = (
         contract.lifetimeBounds ?? [],
         inferred,
         selected.compatibility,
-        context.spanOf(node.anchor),
+        Location.at(node.anchor),
         contract.typeOutlives ?? [],
       ),
     )
@@ -3714,7 +3716,7 @@ export const finishCallableApplication = (
   } else {
     callable = undefined
   }
-  const diagnostics: Array<Diagnostic.Diagnostic> = [
+  const diagnostics: Array<Diagnostic.Located> = [
     ...callee.diagnostics,
     ...argumentsResult.diagnostics,
     ...callTypeArguments.diagnostics,
@@ -3778,10 +3780,7 @@ export const finishCallableApplication = (
       : hasAvailableCallSyntax(node))
   if (callable === undefined && callee.type !== undefined) {
     diagnostics.push(
-      Diagnostic.nonCallableApplication(
-        Type.encode(callee.type),
-        context.spanOf(callee.fact.anchor),
-      ),
+      Diagnostic.nonCallableApplication(Type.encode(callee.type), Location.at(callee.fact.anchor)),
     )
   }
 
@@ -3792,7 +3791,7 @@ export const finishCallableApplication = (
     callee.fact.reference.binding.mutability !== 'Mutable'
   ) {
     diagnostics.push(
-      Diagnostic.invalidCallableInvocationAccess('Exclusive', context.spanOf(callee.fact.anchor)),
+      Diagnostic.invalidCallableInvocationAccess('Exclusive', Location.at(callee.fact.anchor)),
     )
     valid = false
   }
@@ -3802,7 +3801,7 @@ export const finishCallableApplication = (
     !concreteCallableIdentity(callee.fact, writtenBindings)
   ) {
     diagnostics.push(
-      Diagnostic.nonConcreteSpecialization('constrained callable', context.spanOf(node.anchor)),
+      Diagnostic.nonConcreteSpecialization('constrained callable', Location.at(node.anchor)),
     )
     valid = false
   }
@@ -3812,7 +3811,7 @@ export const finishCallableApplication = (
         'callable value',
         0,
         callTypeArguments.facts.length,
-        context.spanOf(node.anchor),
+        Location.at(node.anchor),
       ),
     )
     valid = false
@@ -3828,7 +3827,7 @@ export const finishCallableApplication = (
         Object.freeze({ _tag: 'BuiltinTarget', actor: 'Callable', operation: 'Apply' }),
         callable.parameters.length,
         argumentsResult.facts.length,
-        context.spanOf(node.anchor),
+        Location.at(node.anchor),
       ),
     )
     valid = false
@@ -3874,17 +3873,17 @@ export const finishCallableApplication = (
             Diagnostic.invalidForeignCallback(
               Type.encode(argument.type.type),
               'capturing and anonymous Silk callables do not have an exported C address',
-              context.spanOf(argument.anchor),
+              Location.at(argument.anchor),
             ),
           )
         } else if (rowFailure !== undefined) {
-          diagnostics.push(Diagnostic.inferenceFailure(rowFailure, context.spanOf(argument.anchor)))
+          diagnostics.push(Diagnostic.inferenceFailure(rowFailure, Location.at(argument.anchor)))
         } else if (Type.isCallable(expected) && Type.isCallable(argument.type.type)) {
           diagnostics.push(
             Diagnostic.incompatibleCallableSignature(
               Type.encode(expected),
               Type.encode(argument.type.type),
-              context.spanOf(argument.anchor),
+              Location.at(argument.anchor),
             ),
           )
         } else {
@@ -3892,7 +3891,7 @@ export const finishCallableApplication = (
             Diagnostic.argumentTypeMismatch(
               Type.encode(expected),
               Type.encode(argument.type.type),
-              context.spanOf(argument.anchor),
+              Location.at(argument.anchor),
             ),
           )
         }
@@ -3904,24 +3903,24 @@ export const finishCallableApplication = (
         Type.isConcrete(specialized) &&
         !typesCompatible(argument.type.type, specialized, callLifetimes.compatibility)
       ) {
-        let mismatch: Diagnostic.Diagnostic
+        let mismatch: Diagnostic.Located
         if (Type.isForeignFunction(specialized) && !Type.isForeignFunction(argument.type.type))
           mismatch = Diagnostic.invalidForeignCallback(
             Type.encode(argument.type.type),
             'capturing and anonymous Silk callables do not have an exported C address',
-            context.spanOf(argument.anchor),
+            Location.at(argument.anchor),
           )
         else if (Type.isCallable(specialized) && Type.isCallable(argument.type.type))
           mismatch = Diagnostic.incompatibleCallableSignature(
             Type.encode(specialized),
             Type.encode(argument.type.type),
-            context.spanOf(argument.anchor),
+            Location.at(argument.anchor),
           )
         else
           mismatch = Diagnostic.argumentTypeMismatch(
             Type.encode(specialized),
             Type.encode(argument.type.type),
-            context.spanOf(argument.anchor),
+            Location.at(argument.anchor),
           )
         diagnostics.push(mismatch)
         valid = false
@@ -3933,7 +3932,7 @@ export const finishCallableApplication = (
       callable.lifetimeBounds,
       inferred,
       callLifetimes.compatibility,
-      context.spanOf(node.anchor),
+      Location.at(node.anchor),
       callable.typeOutlives,
     )
     diagnostics.push(...lifetimeDiagnostics)
@@ -3988,7 +3987,7 @@ export const finishCallableApplication = (
       inferred,
       caller,
       resolution,
-      context.spanOf(node.anchor),
+      Location.at(node.anchor),
     )
     inferred.clear()
     for (const [identity, argument] of solved.substitution) inferred.set(identity, argument)
@@ -4025,7 +4024,7 @@ export const finishCallableApplication = (
           inferred,
           resolution.index,
           caller,
-          context.spanOf(node.anchor),
+          Location.at(node.anchor),
         )
   diagnostics.push(...selectedConformances.diagnostics)
   if (selectedConformances.diagnostics.length > 0) valid = false

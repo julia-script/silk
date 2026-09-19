@@ -8,11 +8,11 @@ implementation, not the size of the change.
 
 ## Why neither current schema is the answer
 
-| | Fact tree today | TIR today |
-|---|---|---|
-| Who reads it | static evaluator, `LifetimeFlow`, completion, type hints, inspector, occurrences | ownership, instances, MIR lowering |
-| What it knows | references, call contracts, static values, scopes, captures | normalized executable operations, regions, borrow identities |
-| What ties it to a revision | `DeclarationFact` objects, embedded `SourceSpan`s in diagnostics and identities | `DeclarationFact` objects, a `SourceSpan` on every node |
+|                            | Fact tree today                                                                  | TIR today                                                    |
+| -------------------------- | -------------------------------------------------------------------------------- | ------------------------------------------------------------ |
+| Who reads it               | static evaluator, `LifetimeFlow`, completion, type hints, inspector, occurrences | ownership, instances, MIR lowering                           |
+| What it knows              | references, call contracts, static values, scopes, captures                      | normalized executable operations, regions, borrow identities |
+| What ties it to a revision | `DeclarationFact` objects, embedded `SourceSpan`s in diagnostics and identities  | `DeclarationFact` objects, a `SourceSpan` on every node      |
 
 Both bodies hold objects and offsets that belong to one revision. That is the only reason
 `SemanticRebinding` exists. A body that holds no such value needs no rebinding, and is also the body
@@ -63,7 +63,7 @@ Application = { typeArguments:   canonical generic-argument keys, declared order
   change the result participates in identity, including evidence, because a `static if` may select
   on a conformance or on a type argument.
 - **Pure type instantiation is not an artifact.** A generic body applied to `T = i32` with nothing
-  static to select stays an *instance*: `InstanceKey = (ArtifactId, type substitution)`, handled by
+  static to select stays an _instance_: `InstanceKey = (ArtifactId, type substitution)`, handled by
   `Instances` by substitution over the one checked body. It is never re-checked.
 - **Provenance never participates.** Two applications whose static arguments are equal values are
   the same artifact regardless of where those values were written.
@@ -91,7 +91,7 @@ Validity = { header:   canonical semantic signature of the owner   (stable under
 ```
 
 `BodyQuery.request(request)` looks a candidate up by `Request`, then re-validates its `Validity`
-against the current index: each `Observation` (a lookup with its answer, *including misses*; a
+against the current index: each `Observation` (a lookup with its answer, _including misses_; a
 callee signature; a conformance answer; an evaluation's key and outcome key) is asked again and must
 answer the same. All valid → the candidate object itself is returned. Anything else → rebuild. Equal
 bytes alone never authorize reuse. This is the whole boundary: no general query engine, no
@@ -118,7 +118,7 @@ EvaluationKey = { body:        ArtifactId                    the typed body that
 
 Everything that can change the result participates; nothing else does. Call-site provenance, the
 caller's identity and source positions are excluded, exactly as they are excluded from `ArtifactId`.
-An evaluation never requires another TIR body: `next(1)` and `next(2)` run the *same* checked body
+An evaluation never requires another TIR body: `next(1)` and `next(2)` run the _same_ checked body
 under two keys.
 
 ```silk
@@ -136,11 +136,11 @@ is left: ordinary parameters, captures, instance and context.
 
 **Two kinds of re-entry.** They are different conditions with different answers:
 
-| Re-entered while in progress | Meaning | Answer |
-|---|---|---|
-| the same `ArtifactId` under **construction** | building this body needs this body: an availability cycle | the existing availability-cycle rejection |
-| the same `ArtifactId` under **evaluation**, different `EvaluationKey` | ordinary recursion (`fact(n)` calls `fact(n - 1)`) | legal; bounded by the evaluation depth and step budgets |
-| the same `EvaluationKey` under evaluation | this execution needs its own result | a non-terminating evaluation: a semantic rejection, not an availability cycle |
+| Re-entered while in progress                                          | Meaning                                                   | Answer                                                                        |
+| --------------------------------------------------------------------- | --------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| the same `ArtifactId` under **construction**                          | building this body needs this body: an availability cycle | the existing availability-cycle rejection                                     |
+| the same `ArtifactId` under **evaluation**, different `EvaluationKey` | ordinary recursion (`fact(n)` calls `fact(n - 1)`)        | legal; bounded by the evaluation depth and step budgets                       |
+| the same `EvaluationKey` under evaluation                             | this execution needs its own result                       | a non-terminating evaluation: a semantic rejection, not an availability cycle |
 
 The session keeps two in-progress sets, one keyed by `ArtifactId` and one by `EvaluationKey`.
 
@@ -150,23 +150,23 @@ The session keeps two in-progress sets, one keyed by `ArtifactId` and one by `Ev
 payload is stored once in a table and the node holds an explicit reference to it. Anything that only
 describes source, explains a decision, or serves an editor is supplementary.
 
-| Decision | Authoritative home |
-|---|---|
-| Which operation this is, fully resolved (`Call` target id, `InterfaceOperationCall` operation + witness, `BuiltinCall`, `Intrinsic`, `Construct` struct id, `Project` field id, variant / enum-member ids) | node |
-| Result type; operand order; region; place selectors; transfer (`Copy`/`Move`); borrow access | node |
-| Every implicit conversion, as its own node (`UnionConvert`, receiver `ValueBorrow`, contextual integer typing, effect join conversion) | node |
-| Call type arguments and substitution | node (`Call.typeArguments`) — instances and lowering need them |
-| Selected evidence and provider selections (large) | `results.evidence[]`; node holds `evidence: EvidenceRef` |
-| The application a static call selects | node (`Call.application: ArtifactId`) |
-| Locals: kind, type, mutability, capture source | `function.locals[]`; nodes hold `LocalId` |
-| Why a node is unavailable | node is `Unavailable { cause: CauseRef }`; payload in `results.causes[]` |
-| A compile-time value the body depends on (selected arm, array length, residual literal) | node: it *is* a literal, a selected branch, a length in a type |
-| Source occurrences for navigation | `results.occurrences[]` (supplementary) |
-| Lexical scopes for completion | `results.scopes[]` (supplementary) |
-| Lifetime regions, outlives constraints, borrow origins | `results.lifetimes` (analysis evidence) |
-| Diagnostics | `results.diagnostics[]` (supplementary) |
-| What this build depended on | `validity.observed[]` |
-| Provenance of static values written in this body | `results.provenance[]` (supplementary; § Text provenance) |
+| Decision                                                                                                                                                                                                   | Authoritative home                                                       |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
+| Which operation this is, fully resolved (`Call` target id, `InterfaceOperationCall` operation + witness, `BuiltinCall`, `Intrinsic`, `Construct` struct id, `Project` field id, variant / enum-member ids) | node                                                                     |
+| Result type; operand order; region; place selectors; transfer (`Copy`/`Move`); borrow access                                                                                                               | node                                                                     |
+| Every implicit conversion, as its own node (`UnionConvert`, receiver `ValueBorrow`, contextual integer typing, effect join conversion)                                                                     | node                                                                     |
+| Call type arguments and substitution                                                                                                                                                                       | node (`Call.typeArguments`) — instances and lowering need them           |
+| Selected evidence and provider selections (large)                                                                                                                                                          | `results.evidence[]`; node holds `evidence: EvidenceRef`                 |
+| The application a static call selects                                                                                                                                                                      | node (`Call.application: ArtifactId`)                                    |
+| Locals: kind, type, mutability, capture source                                                                                                                                                             | `function.locals[]`; nodes hold `LocalId`                                |
+| Why a node is unavailable                                                                                                                                                                                  | node is `Unavailable { cause: CauseRef }`; payload in `results.causes[]` |
+| A compile-time value the body depends on (selected arm, array length, residual literal)                                                                                                                    | node: it _is_ a literal, a selected branch, a length in a type           |
+| Source occurrences for navigation                                                                                                                                                                          | `results.occurrences[]` (supplementary)                                  |
+| Lexical scopes for completion                                                                                                                                                                              | `results.scopes[]` (supplementary)                                       |
+| Lifetime regions, outlives constraints, borrow origins                                                                                                                                                     | `results.lifetimes` (analysis evidence)                                  |
+| Diagnostics                                                                                                                                                                                                | `results.diagnostics[]` (supplementary)                                  |
+| What this build depended on                                                                                                                                                                                | `validity.observed[]`                                                    |
+| Provenance of static values written in this body                                                                                                                                                           | `results.provenance[]` (supplementary; § Text provenance)                |
 
 There is no `resolutions` table and no `calls` table: the earlier draft put executable decisions in
 tables, which would have given a call target two homes.
@@ -191,26 +191,26 @@ authored vocabulary: `Authored(anchor)` or `Synthetic(anchor, role, occurrence)`
 
 ### Complete input of each consumer
 
-| Consumer | Complete input |
-|---|---|
+| Consumer                                                               | Complete input                                                                                       |
+| ---------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
 | Analysis (`ExpressionAnalysis`, `StatementAnalysis`, `CallResolution`) | authored declaration, `SemanticContext`, declaration index, scope, `BodyBuilder`, evaluation session |
-| `StaticEvaluation` | typed nodes, a read-only `BodyView` (locals, evidence, causes), an `Environment`, the session |
-| `Residualization`, `ModuleSelection` | a `Request` for `Specialize(application)`; they hold the returned artifact and nothing else |
-| `LifetimeFlow`, `BodyControlFlow`, `TypeOutlives` | `function`, `results.lifetimes` |
-| `Ownership`, `CleanupPlan`, `ResidualOwnership`, `SuspensionOwnership` | `function`, `results.evidence`, declaration index (headers by id) |
-| `Instances`, `ExecutableOrigin`, `OpaqueRealization` | artifacts by `ArtifactId`, `results.evidence`, declaration index |
-| `FunctionLowering`, `Lower`, `EffectLowering` | `function`, `results.evidence`, layout; presentation registry only to stamp MIR provenance |
-| `SemanticOccurrence` | `results.occurrences` of each artifact, header occurrences from the declaration index |
-| `Completion`, `TypeHint`, `InspectorFlowModel` | `results.scopes`, `function.locals`, node types, `results.occurrences` |
-| Publication (`Analysis`, `Frontend`) | `results.diagnostics`, `results.provenance`, rejected evaluation outcomes, presentation registry |
+| `StaticEvaluation`                                                     | typed nodes, a read-only `BodyView` (locals, evidence, causes), an `Environment`, the session        |
+| `Residualization`, `ModuleSelection`                                   | a `Request` for `Specialize(application)`; they hold the returned artifact and nothing else          |
+| `LifetimeFlow`, `BodyControlFlow`, `TypeOutlives`                      | `function`, `results.lifetimes`                                                                      |
+| `Ownership`, `CleanupPlan`, `ResidualOwnership`, `SuspensionOwnership` | `function`, `results.evidence`, declaration index (headers by id)                                    |
+| `Instances`, `ExecutableOrigin`, `OpaqueRealization`                   | artifacts by `ArtifactId`, `results.evidence`, declaration index                                     |
+| `FunctionLowering`, `Lower`, `EffectLowering`                          | `function`, `results.evidence`, layout; presentation registry only to stamp MIR provenance           |
+| `SemanticOccurrence`                                                   | `results.occurrences` of each artifact, header occurrences from the declaration index                |
+| `Completion`, `TypeHint`, `InspectorFlowModel`                         | `results.scopes`, `function.locals`, node types, `results.occurrences`                               |
+| Publication (`Analysis`, `Frontend`)                                   | `results.diagnostics`, `results.provenance`, rejected evaluation outcomes, presentation registry     |
 
 ## Text provenance and diagnostic locations
 
 Two coordinate systems exist and must never be mixed:
 
-- **Value coordinates**: byte offsets into a *decoded* static value. Slicing, concatenation and
+- **Value coordinates**: byte offsets into a _decoded_ static value. Slicing, concatenation and
   comparison happen here. They are revision-free.
-- **Spelling coordinates**: byte offsets into the *source spelling* of one literal. `"\x41"` is one
+- **Spelling coordinates**: byte offsets into the _source spelling_ of one literal. `"\x41"` is one
   value byte and four spelling bytes. They belong to presentation.
 
 **Provenance is always in value coordinates.** A static text or bytes value may carry:
@@ -240,16 +240,23 @@ computed rather than copied (a formatted number) has no segment for those bytes.
    not depend on the caller.
 2. The caller substitutes each `Parameter { ordinal: k, range }` with the segments of argument `k`'s
    provenance restricted to `range`, and **preserves every `Literal` segment unchanged**. The result
-   is provenance in the *caller's* terms.
+   is provenance in the _caller's_ terms.
 3. In a `Check` body of an ordinary function that ends at `Literal`s. Inside another shared body it
-   may mention that body's own `Parameter`s, resolved by *its* callers in turn.
+   may mention that body's own `Parameter`s, resolved by _its_ callers in turn.
 
 **Locations.**
 
 ```text
-Location = At { anchor: Anchor }              a node's or authored position's anchor
-         | In { parts: Source[] }             a value range, as the ordered sources that cover it
+Location = At { anchor: Anchor, edge?: End } a node, or with `edge` the last byte of that node
+         | In { parts: Source[],              a value range, as the ordered sources that cover it
+                fallback: Anchor }            the reporting node, when no part resolves to a literal
 ```
+
+`edge` exists because some reported positions have no node of their own: a missing return reports at
+a block's closing brace, which is the last byte of the block. It is still relative to a node, so it
+names no revision. A range that once ran from one token to another (`Enum.member`, a match arm from
+its pattern to its body) is the span of the node that contains both, because presented spans are
+trivia-free.
 
 A rejected range can straddle segments (part of a callee literal and part of an argument), so a
 value location is a list of sources, not one. `Parameter` sources appear only in `Specialize`
@@ -257,10 +264,10 @@ artifacts and in evaluation outcomes.
 
 **Publication** runs once per revision, outside every artifact and outcome:
 
-1. `At` → the presentation's span for the anchor.
-2. A `Literal` part → the presentation of *the anchor's own module* (which may be the callee's, or a
+1. `At` → the presentation's span for the anchor; with `edge`, that span's last byte.
+2. A `Literal` part → the presentation of _the anchor's own module_ (which may be the callee's, or a
    standard library module). The literal's presented spelling is decoded once to obtain its
-   *spelling map* (for each decoded byte, its spelling range — what `StaticText.decode` already
+   _spelling map_ (for each decoded byte, its spelling range — what `StaticText.decode` already
    computes as `sourceRanges`). The value range maps to the union of the spelling ranges of its
    bytes, offset by the literal's span start. The map is a function of the spelling, so it lives with
    presentation and is never stored in an artifact.
@@ -377,7 +384,7 @@ publication span `x:` in helper's literal (helper's module presentation);
 
 ## Construction, evaluation and publication
 
-Elaboration needs the evaluator *while* it builds (to select a `static if`, to fix an array length,
+Elaboration needs the evaluator _while_ it builds (to select a `static if`, to fix an array length,
 to reject a `compileError`). It must not need a finished `CheckedBody` of the body it is building,
 and the evaluator must never write into a published one.
 
@@ -405,33 +412,33 @@ over its **completed rows only**: rows are appended before any node that referen
 so every reference a finished node holds already resolves. The view exposes no way to write, does not
 require the surrounding artifact to be finished, and never reaches a row that is still being built.
 
-**Calls during evaluation.** A call to another static function makes two requests: a *body request*
+**Calls during evaluation.** A call to another static function makes two requests: a _body request_
 for the callee's artifact (`check @callee`, or `specialize @callee<application>` when selection
-requires it), which is published and immutable before any of its nodes run; then an *evaluation
-request* under the `EvaluationKey` built from that artifact and the argument values. A recorded
+requires it), which is published and immutable before any of its nodes run; then an _evaluation
+request_ under the `EvaluationKey` built from that artifact and the argument values. A recorded
 outcome answers it; otherwise the callee's nodes are evaluated through a view of the callee's
 artifact in a fresh environment.
 
 **Where results live.**
 
-| Result | Home |
-|---|---|
-| A value the body under construction depends on | becomes nodes of *that* artifact before it is finished (selected branch, literal, type length) |
-| The outcome of one execution | `session.outcomes[EvaluationKey]`: a separate product, never a field of an artifact |
-| What one call site passed | the caller's artifact: the `Call` node, and a `results.provenance` row for its arguments |
+| Result                                         | Home                                                                                           |
+| ---------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| A value the body under construction depends on | becomes nodes of _that_ artifact before it is finished (selected branch, literal, type length) |
+| The outcome of one execution                   | `session.outcomes[EvaluationKey]`: a separate product, never a field of an artifact            |
+| What one call site passed                      | the caller's artifact: the `Call` node, and a `results.provenance` row for its arguments       |
 
 So "static evaluation writes statics" means exactly: the evaluator returns values to the builder of
 the artifact being built, and records outcomes in the session under evaluation keys. A node never has
 different results for different executions, because results are not stored on nodes at all.
 
-**Completed versus aborted.** A result that reports a problem in the source is a *completed* result.
+**Completed versus aborted.** A result that reports a problem in the source is a _completed_ result.
 It is not a failure of the compiler.
 
-| | Construction | Evaluation |
-|---|---|---|
-| **Completed, accepted** | artifact with no diagnostics; executable | `Value { value, provenance }` |
+|                         | Construction                                                                                                                                           | Evaluation                                                                                                                                     |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Completed, accepted** | artifact with no diagnostics; executable                                                                                                               | `Value { value, provenance }`                                                                                                                  |
 | **Completed, rejected** | immutable artifact **with** diagnostics; damaged nodes are `Unavailable`, healthy structure is preserved; inspectable by tooling, **never executable** | `Rejected { failure, locations }`: `compileError`, a phase violation, a non-terminating evaluation; budget exhaustion only as § Budgets allows |
-| **Aborted** | cancellation, interruption, an internal defect: **no artifact, no partial artifact** | cancellation or a transient or internal failure: **no outcome recorded** |
+| **Aborted**             | cancellation, interruption, an internal defect: **no artifact, no partial artifact**                                                                   | cancellation or a transient or internal failure: **no outcome recorded**                                                                       |
 
 A completed rejection is deterministic for its request, so it is published and recorded like any
 other completed result; the residual `compileError` artifacts in the examples above are completed
@@ -440,8 +447,8 @@ rejections. An aborted request leaves nothing behind and can simply be asked aga
 **Reuse policy is explicit.** Publication and reuse are separate questions; whether a completed,
 diagnostic-bearing result may be reused is stated here, as part of `Validity`, not implied.
 
-The authored HIR specification already says: *"Damaged owners MUST NOT be eligible for successful
-semantic reuse or selected executable publication."* This contract keeps that rule and makes its two
+The authored HIR specification already says: _"Damaged owners MUST NOT be eligible for successful
+semantic reuse or selected executable publication."_ This contract keeps that rule and makes its two
 halves precise, rather than claiming a behaviour the current implementation has not been shown to
 have (`BodyQuery` today applies one validity check and has no recovery-specific rule):
 
@@ -450,7 +457,7 @@ have (`BodyQuery` today applies one validity check and has no recovery-specific 
   admitted as a successfully checked body or selected for executable publication, whether it was
   just built or reused. That is what "successful semantic reuse" forbids, and it stays forbidden.
 - **A completed rejection may be reused as a rejection** when everything it was derived from still
-  holds: the owner's *canonical authored content* (header and body encodings, which include the
+  holds: the owner's _canonical authored content_ (header and body encodings, which include the
   recovery causes and the retained healthy structure), its scope signature, and every recorded
   observation.
 - **"Identical" means canonical authored content, never source bytes.** A presentation-only edit
@@ -481,18 +488,18 @@ Cost        what one completed evaluation consumed, in the same units; depth rel
   `EvaluationKey.context`, so they are part of every validated request.
 - **Nested requests draw from their root.** They run against what remains.
 - **An outcome records its cost.** A `Value` or a semantic `Rejected` recorded under a key means:
-  *evaluated to completion, consuming `cost`*. Because accounting is additive and depth is relative,
+  _evaluated to completion, consuming `cost`_. Because accounting is additive and depth is relative,
   that cost is a function of the key alone.
 - **A cache hit is charged like an execution.** The requester is charged the recorded cost, and the
   recorded relative depth is checked against the current depth. If what remains cannot pay, the
   requester exhausts exactly as it would have by executing. Cache warmth therefore never changes
   acceptance, only time.
-- **Exhaustion is stored only where it is a function of the key.** A *root* evaluation that exhausts
+- **Exhaustion is stored only where it is a function of the key.** A _root_ evaluation that exhausts
   a fresh full allowance is a deterministic fact about its key (which includes the limits): it is
-  recorded as `Rejected(BudgetExhausted)` and reusable. A *nested* evaluation that exhausts a
+  recorded as `Rejected(BudgetExhausted)` and reusable. A _nested_ evaluation that exhausts a
   remainder is a fact about its ancestors' spending: **nothing is recorded under its key**; the
   exhaustion is reported for the current attempt, and it surfaces as the root's outcome.
-- **Completion under less implies completion under more.** A nested evaluation that *completes*
+- **Completion under less implies completion under more.** A nested evaluation that _completes_
   within a remainder would complete identically with a full allowance, so its `Value` and cost are
   recorded normally.
 
@@ -531,15 +538,15 @@ supplementary index: nothing reads it to execute, and no body is reconstructed f
 
 ## Body categories
 
-| Category | `ArtifactId` | Notes |
-|---|---|---|
-| Ordinary | `{ owner, Check }` | generic bodies keep static structure |
-| Static | `{ owner, Check }` | `static fn` bodies are published like any other; today they exist only as facts |
-| Residual | `{ owner, Specialize(app) }` | no static structure left |
-| Hidden | `{ callable owner, request of parent, parent }` | captures are `locals` with a capture source |
-| Generated | `{ synthetic owner, request of parent, parent }` | every origin is `Synthetic` |
-| Malformed | any | damaged nodes are `Unavailable`; healthy siblings stay; never executable |
-| Foreign | none | a contract and no body |
+| Category  | `ArtifactId`                                     | Notes                                                                           |
+| --------- | ------------------------------------------------ | ------------------------------------------------------------------------------- |
+| Ordinary  | `{ owner, Check }`                               | generic bodies keep static structure                                            |
+| Static    | `{ owner, Check }`                               | `static fn` bodies are published like any other; today they exist only as facts |
+| Residual  | `{ owner, Specialize(app) }`                     | no static structure left                                                        |
+| Hidden    | `{ callable owner, request of parent, parent }`  | captures are `locals` with a capture source                                     |
+| Generated | `{ synthetic owner, request of parent, parent }` | every origin is `Synthetic`                                                     |
+| Malformed | any                                              | damaged nodes are `Unavailable`; healthy siblings stay; never executable        |
+| Foreign   | none                                             | a contract and no body                                                          |
 
 ## Representative artifact
 
@@ -586,10 +593,14 @@ its reference survives as an occurrence with no node. Misspelling `identity` tur
 Each step lands green, deletes what it replaces, and introduces nothing that a later step removes
 except where stated.
 
-1. **Locations and provenance.** `Location`, `Provenance` in value coordinates, composition at
-   calls, one publication point with the spelling map, per-call-site reporting. `Diagnostic` becomes
-   generic over its location so body products hold `Location`s. Span-derived identities rebuilt from
-   anchors.
+1. **Locations.** `Location` and `Provenance` in value coordinates; `Diagnostic` generic over its
+   location, so header and body products, cause identities and evaluator failures hold `Location`s;
+   static text provenance as a literal's anchor plus value offsets; one publication point with the
+   spelling map. Stages after TIR keep source coordinates until step 4, reading revision-free causes
+   through one interim union. Two things wait for the step that owns them: span-derived identities
+   are rebuilt from anchors with the other identities (step 2), and segment composition through
+   slice, concat and calls with per-call-site reporting arrives with the node evaluator (step 5),
+   because the fact evaluator's single-source side channel is deleted there.
 2. **Identities and artifacts.** `ArtifactId`, `Application`, `NodeRef`, `EvaluationKey`; declarations, fields and
    members by id throughout TIR and cached products; `Request` separated from `Validity` in
    `BodyQuery`; a hit returns the cached object. **Delete `SemanticRebinding`.**

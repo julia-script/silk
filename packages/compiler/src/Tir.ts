@@ -4,6 +4,7 @@ import * as Constraint from './Constraint.js'
 import type * as ConformanceProof from './ConformanceProof.js'
 import type * as DeclarationFacts from './DeclarationFacts.js'
 import type * as Diagnostic from './Diagnostic.js'
+import type * as Location from './Location.js'
 import * as Intrinsic from './Intrinsic.js'
 import * as Match from './Match.js'
 import type * as Operator from './Operator.js'
@@ -49,7 +50,8 @@ export const selectedRequirement = (
 /** The normalized or explicitly unavailable contract of one declaration. */
 export type ContractFact =
   | Contract
-  | { readonly _tag: 'Unavailable'; readonly cause?: Diagnostic.Identity }
+  /** Derived from a header without a presentation, so the cause is still revision-free. */
+  | { readonly _tag: 'Unavailable'; readonly cause?: Diagnostic.Identity<Location.Location> }
 
 /** A deterministic binding identity local to its declaring function's statement order. */
 export interface BindingId {

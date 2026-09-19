@@ -1,3 +1,4 @@
+import * as Location from './Location.js'
 import * as Diagnostic from './Diagnostic.js'
 import type * as AuthoredHir from './AuthoredHir.js'
 import * as AuthoredIdentity from './AuthoredIdentity.js'
@@ -29,7 +30,7 @@ export interface Context {
   readonly regions: ReadonlyMap<string, Lifetime.Lifetime>
   readonly callables: ReadonlyMap<string, Type.ExecutableLifetimes>
   readonly implicit: ReadonlyArray<ImplicitBinder>
-  readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
+  readonly diagnostics: ReadonlyArray<Diagnostic.Located>
   readonly explicitEnvironment?: Lifetime.Lifetime
 }
 
@@ -175,7 +176,7 @@ export const forHeader = (
   const regions = new Map<string, Lifetime.Lifetime>()
   const callables = new Map<string, Type.ExecutableLifetimes>()
   const implicit: Array<ImplicitBinder> = []
-  const diagnostics: Array<Diagnostic.Diagnostic> = []
+  const diagnostics: Array<Diagnostic.Located> = []
   const names = new Set(parameters.keys())
   const bindings = new Map<string, Lifetime.Lifetime>()
   for (const [name, parameter] of parameters)
@@ -209,12 +210,12 @@ export const forHeader = (
   ): Lifetime.Lifetime | undefined => {
     const name = lifetimeName(context, lifetime)
     if (name === undefined) {
-      diagnostics.push(Diagnostic.ambiguousLifetimeElision(context.spanOf(lifetime.anchor)))
+      diagnostics.push(Diagnostic.ambiguousLifetimeElision(Location.at(lifetime.anchor)))
       return undefined
     }
     const value = scope.get(name)
     if (value === undefined)
-      diagnostics.push(Diagnostic.unknownLifetime(name, context.spanOf(lifetime.anchor)))
+      diagnostics.push(Diagnostic.unknownLifetime(name, Location.at(lifetime.anchor)))
     else setRegion(anchor, value)
     return value
   }
@@ -247,7 +248,7 @@ export const forHeader = (
     if (written !== undefined) return resolve(anchor, written, scope)
     const value = output && body === undefined ? defaultOutput : allocate(anchor)
     if (value === undefined)
-      diagnostics.push(Diagnostic.ambiguousLifetimeElision(context.spanOf(anchor)))
+      diagnostics.push(Diagnostic.ambiguousLifetimeElision(Location.at(anchor)))
     else setRegion(anchor, value)
     return value
   }
@@ -466,7 +467,7 @@ export const forHeader = (
       diagnostics.push(
         Diagnostic.invalidLifetimeBinder(
           'Nested quantified callable contracts are not supported',
-          context.spanOf(type.anchor),
+          Location.at(type.anchor),
         ),
       )
     for (const parameter of type.binders) {
@@ -474,7 +475,7 @@ export const forHeader = (
         diagnostics.push(
           Diagnostic.invalidLifetimeBinder(
             'A callable lifetime binder accepts only lifetime parameters',
-            context.spanOf(parameter.anchor),
+            Location.at(parameter.anchor),
           ),
         )
         continue
@@ -488,7 +489,7 @@ export const forHeader = (
         diagnostics.push(
           Diagnostic.invalidLifetimeBinder(
             'Lifetime binders must have distinct names other than static',
-            context.spanOf(parameter.anchor),
+            Location.at(parameter.anchor),
           ),
         )
         continue

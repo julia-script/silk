@@ -13,6 +13,7 @@
 import * as Analysis from './Analysis.js'
 import * as Tir from './Tir.js'
 import { projectDataFlow } from './InspectorFlowModel.js'
+import * as Diagnostic from './Diagnostic.js'
 import * as SemanticContext from './SemanticContext.js'
 import { backendEmission, toolchainCommands } from './InspectorPanels.js'
 import {
@@ -609,7 +610,10 @@ export const views: ReadonlyArray<ViewDefinition> = [
       const entries = diagnosticEntries(
         syntax.lexicalDiagnostics,
         syntax.parserDiagnostics,
-        analysis.diagnostics,
+        Diagnostic.publishAll(
+          analysis.diagnostics,
+          SemanticContext.fromModules(snapshot.closure.modules),
+        ),
       )
       const counts = diagnosticCounts(entries)
       return {

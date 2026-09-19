@@ -248,7 +248,7 @@ export interface UnavailableEntry {
   readonly type: DeclarationFacts.SemanticType
   readonly dependencies: ReadonlyArray<Type.Nominal>
   readonly reason: UnavailableReason
-  readonly cause?: Diagnostic.Identity
+  readonly cause?: Diagnostic.CauseIdentity
 }
 
 export type CatalogEntry = Entry | UnavailableEntry
@@ -388,7 +388,7 @@ export type WordLiteralVerdict =
       readonly value: bigint
       readonly bits: 32 | 64
       readonly span: SourceSpan.SourceSpan
-      readonly cause: Diagnostic.Identity
+      readonly cause: Diagnostic.CauseIdentity
     }
 
 /** One member-specific lane transfer between two failure payload carriers. */
@@ -633,7 +633,7 @@ const makeCatalogState = (
   const completed = new Map<string, CatalogEntry>()
   for (const declaration of enumDeclarations) {
     const entry = scalarEnumEntry(target, declaration.enum_)
-    let cause: Diagnostic.Identity | undefined
+    let cause: Diagnostic.CauseIdentity | undefined
     if (declaration.enum_.validity._tag === 'Invalid') {
       cause = declaration.enum_.validity.causes.at(0)
     } else if (declaration.enum_.representation._tag === 'Unavailable') {
@@ -985,7 +985,7 @@ const layoutNominal = Effect.fn('Layout.layoutNominal')(function* (
       break
     }
     if (field.declaredType._tag !== 'Resolved' || field.declaredType.exposureCause !== undefined) {
-      let cause: Diagnostic.Identity | undefined
+      let cause: Diagnostic.CauseIdentity | undefined
       if (field.declaredType._tag === 'Unresolved') cause = field.declaredType.cause
       else if (field.declaredType._tag === 'Resolved') cause = field.declaredType.exposureCause
       failure = unavailable(
@@ -1197,7 +1197,7 @@ const layoutNominalUnion = Effect.fn('Layout.layoutNominalUnion')(function* (
     return result
   }
   if (union.validity._tag !== 'Valid' || union.dependency._tag === 'Unavailable') {
-    let cause: Diagnostic.Identity | undefined
+    let cause: Diagnostic.CauseIdentity | undefined
     if (union.validity._tag === 'Invalid') cause = union.validity.causes.at(0)
     else if (union.dependency._tag === 'Unavailable') cause = union.dependency.cause
     const result = unavailable(
@@ -1236,7 +1236,7 @@ const layoutNominalUnion = Effect.fn('Layout.layoutNominalUnion')(function* (
         field.declaredType._tag !== 'Resolved' ||
         field.declaredType.exposureCause !== undefined
       ) {
-        let cause: Diagnostic.Identity | undefined
+        let cause: Diagnostic.CauseIdentity | undefined
         if (field.state._tag === 'Duplicate') cause = field.state.cause
         else if (field.declaredType._tag === 'Unresolved') {
           cause = field.declaredType.cause
@@ -5514,7 +5514,7 @@ const unavailable = (
   type: DeclarationFacts.SemanticType,
   dependencies: ReadonlyArray<Type.Nominal>,
   reason: UnavailableReason,
-  cause?: Diagnostic.Identity,
+  cause?: Diagnostic.CauseIdentity,
 ): UnavailableEntry =>
   Object.freeze({
     _tag: 'UnavailableLayoutEntry',

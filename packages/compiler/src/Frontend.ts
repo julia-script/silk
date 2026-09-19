@@ -12,6 +12,7 @@ import * as DeclarationCompletion from './DeclarationCompletion.js'
 import type * as DeclarationFacts from './DeclarationFacts.js'
 import * as DeclarationIndex from './DeclarationIndex.js'
 import * as Diagnostic from './Diagnostic.js'
+import * as SemanticContext from './SemanticContext.js'
 import * as Elaboration from './Elaboration.js'
 import * as IncrementalReuse from './IncrementalReuse.js'
 import * as ModuleClosure from './ModuleClosure.js'
@@ -303,12 +304,14 @@ const analyzeSemantics = Effect.fn('Frontend.analyzeSemantics')(function* (
     }
     semanticOrdinal += 1
   }
+  // The one place semantic locations become spans: everything before this is revision-free.
+  const registry = SemanticContext.fromModules(closure.modules)
   const diagnostics = Diagnostic.merge(
     ...closure.modules.map((module) => module.syntax.lexicalDiagnostics),
     ...closure.modules.map((module) => module.syntax.parserDiagnostics),
     closure.diagnostics,
-    headers.resolution.diagnostics,
-    ...[...results.values()].map((result) => result.diagnostics),
+    Diagnostic.publishAll(headers.resolution.diagnostics, registry),
+    ...[...results.values()].map((result) => Diagnostic.publishAll(result.diagnostics, registry)),
     opaqueRealizations.diagnostics,
     ...[...ownership.values()].map((facts) => facts.diagnostics),
   )

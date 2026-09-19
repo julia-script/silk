@@ -1,4 +1,4 @@
-import type * as AuthoredIdentity from './AuthoredIdentity.js'
+import * as AuthoredIdentity from './AuthoredIdentity.js'
 import * as LiteralForm from './LiteralForm.js'
 import * as Provenance from './Provenance.js'
 import type * as SemanticContext from './SemanticContext.js'
@@ -13,15 +13,50 @@ import * as StaticText from './StaticText.js'
  * source has now.
  */
 export type Location =
-  | { readonly _tag: 'At'; readonly anchor: AuthoredIdentity.Anchor }
-  /** A range of a static value, as the ordered sources that cover it. */
-  | { readonly _tag: 'In'; readonly parts: ReadonlyArray<Provenance.Source> }
+  /** A node, or with `edge` the last byte of it: a block's closing brace has no node of its own. */
+  | { readonly _tag: 'At'; readonly anchor: AuthoredIdentity.Anchor; readonly edge?: 'End' }
+  /**
+   * A range of a static value, as the ordered sources that cover it. `fallback` is the node that
+   * reported it, used when no part can be resolved to a written literal.
+   */
+  | {
+      readonly _tag: 'In'
+      readonly parts: ReadonlyArray<Provenance.Source>
+      readonly fallback: AuthoredIdentity.Anchor
+    }
 
 export const at = (anchor: AuthoredIdentity.Anchor): Location =>
   Object.freeze({ _tag: 'At', anchor })
 
-export const within = (parts: ReadonlyArray<Provenance.Source>): Location =>
-  Object.freeze({ _tag: 'In', parts: Object.freeze([...parts]) })
+/** The last byte of a node. */
+export const endOf = (anchor: AuthoredIdentity.Anchor): Location =>
+  Object.freeze({ _tag: 'At', anchor, edge: 'End' })
+
+export const within = (
+  parts: ReadonlyArray<Provenance.Source>,
+  fallback: AuthoredIdentity.Anchor,
+): Location => Object.freeze({ _tag: 'In', parts: Object.freeze([...parts]), fallback })
+
+/** A stable text key: equal locations have equal keys in every revision. */
+export const key = (self: Location): string =>
+  self._tag === 'At'
+    ? `${AuthoredIdentity.anchorKey(self.anchor)}${self.edge === undefined ? '' : '$'}`
+    : `${AuthoredIdentity.anchorKey(self.fallback)}[${self.parts
+        .map((part) =>
+          part._tag === 'Literal'
+            ? `${AuthoredIdentity.anchorKey(part.at)}:${part.range.start}-${part.range.end}`
+            : `#${part.ordinal}:${part.range.start}-${part.range.end}`,
+        )
+        .join(',')}]`
+
+/** The node a location names, or reports at when its value range cannot be resolved. */
+export const anchorOf = (self: Location): AuthoredIdentity.Anchor =>
+  self._tag === 'At' ? self.anchor : self.fallback
+
+/** The module whose authored structure the location names. */
+export const moduleOf = (self: Location): string => anchorOf(self).owner.module
+
+export const equals = (self: Location, other: Location): boolean => key(self) === key(other)
 
 /** Rewrites a shared location in one caller's terms; literal parts are kept as they are. */
 export const substitute = (
@@ -30,7 +65,10 @@ export const substitute = (
 ): Location =>
   self._tag === 'At'
     ? self
-    : within(self.parts.flatMap((part) => Provenance.substituteSource(part, arguments_)))
+    : within(
+        self.parts.flatMap((part) => Provenance.substituteSource(part, arguments_)),
+        self.fallback,
+      )
 
 /** Whether resolving this location still needs a call site. */
 export const isShared = (self: Location): boolean =>
@@ -77,23 +115,24 @@ const literalSpan = (
  *
  * Each literal part resolves through the presentation of its own module, which may be the callee's.
  * A part that still names a parameter cannot be resolved here: the caller must `substitute` first.
- * When nothing resolves, the location falls back to `fallback`, the position of the call or node
- * that produced it.
+ * When nothing resolves, the location falls back to the node that reported it.
  */
-export const resolve = (
-  self: Location,
-  registry: SemanticContext.Registry,
-  fallback: AuthoredIdentity.Anchor,
-): Resolved => {
-  if (self._tag === 'At')
-    return Object.freeze({ span: registry.spanOf(self.anchor), related: Object.freeze([]) })
+export const resolve = (self: Location, registry: SemanticContext.Registry): Resolved => {
+  if (self._tag === 'At') {
+    const whole = registry.spanOf(self.anchor)
+    const span =
+      self.edge === undefined || whole.end <= whole.start
+        ? whole
+        : (SourceSpan.fromOffsets(whole.sourceId, whole.end - 1, whole.end) ?? whole)
+    return Object.freeze({ span, related: Object.freeze([]) })
+  }
   const spans = self.parts.flatMap((part) => {
     const span = part._tag === 'Literal' ? literalSpan(registry, part) : undefined
     return span === undefined ? [] : [span]
   })
   const [span, ...related] = spans
   return Object.freeze({
-    span: span ?? registry.spanOf(fallback),
+    span: span ?? registry.spanOf(self.fallback),
     related: Object.freeze(related),
   })
 }

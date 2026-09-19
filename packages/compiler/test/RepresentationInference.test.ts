@@ -9,16 +9,16 @@ import * as Lifetime from '../src/Lifetime.js'
 import * as Parser from '../src/Parser.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as Type from '../src/Type.js'
-import { elaborate } from './support/elaborate.js'
+import { elaborate, type Elaborated } from './support/elaborate.js'
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
 
-const analyze = (id: string, source: string): Elaboration.Result =>
+const analyze = (id: string, source: string): Elaborated =>
   elaborate(Parser.parse(Lexer.lex(SourceFile.make(id, ascii(source)))))
 
 const bindingInitializer = (
-  result: Elaboration.Result,
+  result: Elaborated,
   functionOrdinal = 2,
 ): Elaboration.ExpressionFact | undefined => {
   const statement = result.functions.at(functionOrdinal)?.statements.at(0)
