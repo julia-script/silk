@@ -441,6 +441,8 @@ export const isAvailable = (
 ): boolean =>
   // Recovery keeps an absent operand as an identifier over a missing name.
   !(node._tag === 'IdentifierExpression' && node.name._tag !== 'Name') &&
+  // …and an absent type as a named type over one.
+  !(node._tag === 'NamedType' && node.path.segments.some((segment) => segment._tag !== 'Name')) &&
   node._tag !== 'MissingExpression' &&
   node._tag !== 'InvalidExpression' &&
   node._tag !== 'MissingPattern' &&

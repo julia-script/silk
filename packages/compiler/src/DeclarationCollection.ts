@@ -1719,6 +1719,25 @@ const collectTypeParameters = (
               if (staticPropertyOf(context, candidate) !== undefined) return []
               const segment = firstSegment(context, candidate)
               const path = nominalPath(context, candidate)
+              // A bound recovery left without a name is still a written obligation: it stays an
+              // unavailable requirement, so nothing downstream proves the binder unconstrained.
+              if (
+                (segment === undefined || path === undefined) &&
+                !AuthoredWalk.isAvailable(candidate)
+              )
+                return [
+                  Object.freeze({
+                    _tag: 'UnresolvedBound' as const,
+                    spelling: '',
+                    path: Object.freeze({
+                      _tag: 'TypePath' as const,
+                      spelling: '',
+                      segments: Object.freeze([]),
+                      anchor: candidate.anchor,
+                    }),
+                    application: unavailable(candidate.anchor),
+                  }),
+                ]
               if (segment === undefined || path === undefined) return []
               const resolution = analyzeDeclaredType(
                 context,
