@@ -2819,6 +2819,12 @@ const declarationParts = (
       header,
       nodes(syntax).find((n) => n.kind === 'TypeParameterList'),
     )
+  const genericsAnchor = (): AuthoredHir.Anchor | undefined => {
+    const list = nodes(syntax).find((n) => n.kind === 'TypeParameterList')
+    return list === undefined
+      ? undefined
+      : node(draft, child(header, 'genericList'), spanOf(list)).anchor
+  }
   const firstType = (role: string): AuthoredHir.Type => {
     const typed = typeChildren(syntax)[0]
     return typed === undefined
@@ -3060,6 +3066,7 @@ const declarationParts = (
             ...named(),
             _tag: 'StructHeader',
             generics: generics(),
+            genericsAnchor: genericsAnchor(),
             fields: fields(draft, header, syntax, 'StructField'),
             abi: hasToken(syntax, 'ExternKeyword')
               ? textLiteralToken(draft, header, syntax, 'abi')

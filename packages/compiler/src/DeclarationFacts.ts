@@ -723,6 +723,8 @@ export interface StructFact {
         readonly abiSpan: SourceSpan.SourceSpan
       }
   readonly typeParameters: ReadonlyArray<TypeParameterFact>
+  /** The written binder list as a whole, when the struct writes one. */
+  readonly typeParametersAnchor?: AuthoredHir.Anchor
   readonly name: DeclaredName
   /** Canonical source or literal-occurrence identity for this nominal aggregate. */
   readonly identity?: AggregateIdentity.AggregateIdentity

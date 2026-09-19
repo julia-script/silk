@@ -1130,7 +1130,9 @@ export const complete = (
         diagnostics.push(
           Diagnostic.genericCLayoutRecord(
             record,
-            spanOf(member.typeParameters[0]?.anchor ?? member.anchor),
+            spanOf(
+              member.typeParametersAnchor ?? member.typeParameters[0]?.anchor ?? member.anchor,
+            ),
           ),
         )
       }

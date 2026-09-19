@@ -119,7 +119,8 @@ struct Parser<F: fn<'static>(i32) -> i32> {
       firstUnavailable?._tag === 'UnavailableRepresentationField' &&
       movedUnavailable?._tag === 'UnavailableRepresentationField'
     ) {
-      assert.notDeepEqual(firstUnavailable.provenance, movedUnavailable.provenance)
+      // Provenance is an authored anchor: moving the declaration moves its presentation, not it.
+      assert.deepEqual(firstUnavailable.provenance, movedUnavailable.provenance)
       assert.strictEqual(
         RepresentationField.key(firstOpen, firstUnavailable.id),
         RepresentationField.key(movedOpen, movedUnavailable.id),

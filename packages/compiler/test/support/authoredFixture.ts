@@ -182,6 +182,7 @@ export const broadModule = Effect.fnUntraced(function* (): Effect.fn.Return<
           ...named(owner, 'Record'),
           _tag: 'StructHeader',
           generics: [],
+          genericsAnchor: undefined,
           fields: [
             {
               ...node(owner, 'field'),

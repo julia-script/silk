@@ -3467,6 +3467,9 @@ const collectModule = (module: ModuleClosure.Module): ModuleHeaders => {
         visibility,
         layout: layout.fact,
         typeParameters: typeParameters.facts,
+        ...(header.genericsAnchor === undefined
+          ? {}
+          : { typeParametersAnchor: header.genericsAnchor }),
         name,
         ...(name._tag === 'Present'
           ? { identity: AggregateIdentity.source(moduleName, name.spelling, 'Named') }

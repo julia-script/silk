@@ -620,6 +620,8 @@ export type DeclarationHeader =
         | {
             readonly _tag: 'StructHeader'
             readonly generics: ReadonlyArray<GenericParameter>
+            /** The written binder list including its brackets, so a diagnostic can name it whole. */
+            readonly genericsAnchor: Anchor | undefined
             readonly fields: ReadonlyArray<Field>
             readonly abi: TextLiteral | MissingExpression | InvalidExpression | undefined
           }
@@ -888,7 +890,7 @@ export const fields = freezeFieldRegistry({
   FunctionHeader: [...namedFields, 'contract', 'linkage', 'properties'],
   OperationHeader: [...namedFields, 'contract', 'operator', 'properties'],
   ImplAliasHeader: [...namedFields, 'target'],
-  StructHeader: [...namedFields, 'generics', 'fields', 'abi'],
+  StructHeader: [...namedFields, 'generics', 'genericsAnchor', 'fields', 'abi'],
   TupleHeader: [...namedFields, 'generics', 'elements'],
   EnumHeader: [...namedFields, 'representation', 'members'],
   UnionHeader: [...namedFields, 'generics', 'variants'],
@@ -969,7 +971,7 @@ export const optionalFields = freezeFieldRegistry({
   ImplHeader: ['target'],
   FunctionHeader: ['linkage'],
   OperationHeader: ['operator'],
-  StructHeader: ['abi'],
+  StructHeader: ['genericsAnchor', 'abi'],
   EnumHeader: ['representation'],
   ConstantHeader: ['type'],
   CallableBody: ['block'],
