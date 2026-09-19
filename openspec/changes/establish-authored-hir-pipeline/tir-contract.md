@@ -247,7 +247,7 @@ computed rather than copied (a formatted number) has no segment for those bytes.
 **Locations.**
 
 ```text
-Location = At { origin: Origin }              a node or authored position
+Location = At { anchor: Anchor }              a node's or authored position's anchor
          | In { parts: Source[] }             a value range, as the ordered sources that cover it
 ```
 
@@ -257,7 +257,7 @@ artifacts and in evaluation outcomes.
 
 **Publication** runs once per revision, outside every artifact and outcome:
 
-1. `At` → the presentation's span for the origin.
+1. `At` → the presentation's span for the anchor.
 2. A `Literal` part → the presentation of *the anchor's own module* (which may be the callee's, or a
    standard library module). The literal's presented spelling is decoded once to obtain its
    *spelling map* (for each decoded byte, its spelling range — what `StaticText.decode` already
