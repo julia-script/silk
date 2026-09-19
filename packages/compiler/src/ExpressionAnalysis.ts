@@ -3498,6 +3498,15 @@ export const isOwnStructArgument = (
   argument: Type.GenericArgument,
 ): boolean => Type.equalsGenericArgument(Type.parameterArgument(parameter), argument)
 
+/** Written field initializers of a struct or variant literal; other shapes write none. */
+const writtenFieldsOf = (
+  node: AuthoredHir.Expression,
+): ReadonlyArray<AuthoredHir.FieldInitializer> => {
+  if (node._tag === 'StructExpression') return node.fields
+  if (node._tag === 'MemberExpression') return node.fields ?? []
+  return []
+}
+
 export const analyzeAggregateLiteral = (
   context: SemanticContext.SemanticContext,
   node: AuthoredHir.Expression,
@@ -3616,12 +3625,7 @@ export const analyzeAggregateLiteral = (
   const seen = new Map<string, StructInitializerFact>()
   // A variant literal (`R<A, F>.Success { value: ... }`) carries its initializers on the member
   // expression, not on a struct expression, so both node shapes supply the written fields.
-  const writtenFields =
-    node._tag === 'StructExpression'
-      ? node.fields
-      : node._tag === 'MemberExpression'
-        ? (node.fields ?? [])
-        : []
+  const writtenFields = writtenFieldsOf(node)
   const initializers = writtenFields.map((initializer): StructInitializerFact => {
     const nameToken = initializer.name
     const name =
