@@ -14,7 +14,9 @@ import * as ConfigurationOrigin from '../src/ConfigurationOrigin.js'
 import * as ConfigurationValue from '../src/ConfigurationValue.js'
 import * as PackageParameter from '../src/PackageParameter.js'
 import * as FloatingPoint from '../src/FloatingPoint.js'
+import * as DeclarationFacts from '../src/DeclarationFacts.js'
 import * as Tir from '../src/Tir.js'
+import * as TirLowering from '../src/TirLowering.js'
 import * as Instances from '../src/Instances.js'
 import * as Lexer from '../src/Lexer.js'
 import * as Lifetime from '../src/Lifetime.js'
@@ -1929,17 +1931,23 @@ static fn computed() -> i32 {
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
     const computed = Analysis.rootAnalysis(snapshot).functions.at(0) ?? unreachable('static body')
     const result = completedValue(
-      StaticEvaluation.evaluateStatements(computed.statements, {
-        environment: StaticEvaluation.targetEnvironment(profilewasm32UnknownUnknown),
-        values: new Map(),
-        valueSpans: new Map(),
-        valueOrigins: new Map(),
-        expressionSpans: new Map(),
-        expressionOrigins: new Map(),
-        trace: [],
-        reflect: () => unreachable('fixture does not reflect'),
-        call: () => unreachable('fixture does not call another function'),
-      }),
+      StaticEvaluation.evaluateStatements(
+        TirLowering.staticLowering(
+          SemanticContext.make(Analysis.rootAnalysis(snapshot).authored),
+        ).statements(computed.statements),
+        {
+          environment: StaticEvaluation.targetEnvironment(profilewasm32UnknownUnknown),
+          lookup: (id) => DeclarationFacts.byCanonical(snapshot.index, id),
+          values: new Map(),
+          valueSpans: new Map(),
+          valueOrigins: new Map(),
+          expressionSpans: new Map(),
+          expressionOrigins: new Map(),
+          trace: [],
+          reflect: () => unreachable('fixture does not reflect'),
+          call: () => unreachable('fixture does not call another function'),
+        },
+      ),
     )
     assert.strictEqual(result._tag, 'IntegerValue')
     if (result._tag === 'IntegerValue') assert.strictEqual(result.value, 23n)

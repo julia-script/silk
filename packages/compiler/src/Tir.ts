@@ -558,6 +558,52 @@ export type Expression =
       readonly origin: Origin
     }
   | {
+      /**
+       * `compileError(message)`: static structure. It is reached only while a body is evaluated at
+       * compile time, so no residual body holds one.
+       */
+      readonly _tag: 'CompileError'
+      readonly message: Expression
+      readonly type: DeclarationFacts.SemanticType
+      readonly span: SourceSpan.SourceSpan
+      readonly origin: Origin
+    }
+  | {
+      /** A call of a `static fn`, with every argument kept: static structure. */
+      readonly _tag: 'StaticCall'
+      readonly target: DeclarationFacts.CanonicalId
+      readonly typeArguments: ReadonlyArray<Type.GenericArgument>
+      /** Canonical keys of the evidence the call selected, which are part of its application. */
+      readonly evidence: ReadonlyArray<string>
+      readonly arguments: ReadonlyArray<Expression>
+      /** A rejection already reached while construction selected this call's application. */
+      readonly failure?: StaticEvaluation.StaticFailure
+      /** Where the text this call returns was written, when construction already knows. */
+      readonly text?: Location.Location
+      readonly textOrigin?: StaticEvaluation.TextOrigin
+      readonly type: DeclarationFacts.SemanticType
+      readonly span: SourceSpan.SourceSpan
+      readonly origin: Origin
+    }
+  | {
+      /** A compile-time intrinsic (profile facts, reflection, static text and sequences). */
+      readonly _tag: 'StaticIntrinsic'
+      readonly operation: string
+      readonly typeArguments: ReadonlyArray<Type.GenericArgument>
+      readonly arguments: ReadonlyArray<Expression>
+      readonly type: DeclarationFacts.SemanticType
+      readonly span: SourceSpan.SourceSpan
+      readonly origin: Origin
+    }
+  | {
+      /** A constant whose value is selected by evaluating its initializer: static structure. */
+      readonly _tag: 'ConstantReference'
+      readonly declaration: DeclarationFacts.CanonicalId
+      readonly type: DeclarationFacts.SemanticType
+      readonly span: SourceSpan.SourceSpan
+      readonly origin: Origin
+    }
+  | {
       readonly _tag: 'ParameterReference'
       readonly parameter: DeclarationFacts.ParameterId
       readonly type: DeclarationFacts.SemanticType
@@ -634,6 +680,8 @@ export type Expression =
         readonly tests?: ReadonlyArray<Match.PatternTest>
         readonly id: Match.ArmId
         readonly member?: Match.CoverageIdentity
+        /** An integer pattern selects one value; it is static structure with no coverage member. */
+        readonly integer?: bigint
         readonly universal: boolean
         readonly bindings: ReadonlyArray<PatternBinding>
         readonly cleanup: ReadonlyArray<ReadonlyArray<DeclarationFacts.FieldId>>
@@ -1252,11 +1300,15 @@ export const expressionChildren = (expression: Expression): ReadonlyArray<Expres
       case 'ArrayConstruct':
         return expression.elements
       case 'Call':
+      case 'StaticCall':
+      case 'StaticIntrinsic':
       case 'EffectConstruct':
       case 'ServiceEffectConstruct':
       case 'BuiltinCall':
       case 'InterfaceOperationCall':
         return expression.arguments
+      case 'CompileError':
+        return [expression.message]
       case 'CallableSection':
         return expression.captures.map((capture) => capture.value)
       case 'ForeignApply':
@@ -2216,6 +2268,23 @@ const encodeExpression = (expression: Expression, depth: number): string => {
         `${indent}interface ${Type.encode(expression.capability)}.${expression.operation} over ${Type.encode(expression.provider)} : ${Type.encode(expression.type)} ${spanText(expression.span)}`,
         ...expression.arguments.map((argument) => encodeExpression(argument, depth + 1)),
       ].join('\n')
+    case 'CompileError':
+      return [
+        `${indent}compile-error ${spanText(expression.span)}`,
+        encodeExpression(expression.message, depth + 1),
+      ].join('\n')
+    case 'StaticCall':
+      return [
+        `${indent}static-call ${expression.target.module}::${expression.target.name}${expression.typeArguments.length === 0 ? '' : `<${expression.typeArguments.map(Type.encodeGenericArgument).join(',')}>`} : ${Type.encode(expression.type)} ${spanText(expression.span)}`,
+        ...expression.arguments.map((argument) => encodeExpression(argument, depth + 1)),
+      ].join('\n')
+    case 'StaticIntrinsic':
+      return [
+        `${indent}static-intrinsic ${expression.operation}${expression.typeArguments.length === 0 ? '' : `<${expression.typeArguments.map(Type.encodeGenericArgument).join(',')}>`} : ${Type.encode(expression.type)} ${spanText(expression.span)}`,
+        ...expression.arguments.map((argument) => encodeExpression(argument, depth + 1)),
+      ].join('\n')
+    case 'ConstantReference':
+      return `${indent}constant ${expression.declaration.module}::${expression.declaration.name} : ${Type.encode(expression.type)} ${spanText(expression.span)}`
     case 'Unavailable':
       return `${indent}unavailable ${spanText(expression.span)}`
   }

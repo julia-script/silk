@@ -1,6 +1,7 @@
 import * as Lifetime from './Lifetime.js'
 import { callableSectionOf, genericArgumentOfTypeArgument } from './CallResolution.js'
 import type * as AuthoredHir from './AuthoredHir.js'
+import * as Constraint from './Constraint.js'
 import * as Diagnostic from './Diagnostic.js'
 import type * as Location from './Location.js'
 import type {
@@ -283,6 +284,14 @@ export const tirPatternSelection = (
 export interface LowerStatementOptions {
   /** Spans of the authored module being lowered; TIR retains spans for diagnostics only. */
   readonly context: SemanticContext.SemanticContext
+  /**
+   * Keeps static structure for the evaluator: static calls, compile errors, static intrinsics and
+   * references to static locals stay nodes instead of becoming the values they selected.
+   *
+   * The map remembers the node of every lowered expression. The evaluator keeps provenance per
+   * node, so a subexpression must lower to the same node each time its parent is evaluated.
+   */
+  readonly static?: WeakMap<object, Tir.Expression>
   readonly lifetimeAssumptions?: Lifetime.Assumptions
   readonly lifetimeCompatibility?: TypeCompatibility.Context
   readonly resultType?: SemanticType
@@ -302,7 +311,9 @@ export const lowerStatements = (
     (options.eraseIntrinsicSections ? executableStatements(facts) : facts)
       .filter(
         (statement) =>
-          (statement._tag !== 'BindStatement' || statement.binding.phase === 'Runtime') &&
+          (options.static !== undefined ||
+            statement._tag !== 'BindStatement' ||
+            statement.binding.phase === 'Runtime') &&
           (!options.eraseIntrinsicSections ||
             !(
               (statement._tag === 'BindStatement' &&
@@ -574,7 +585,98 @@ const isRepresentationIdenticalGenericForwarding = (
   )
 }
 
+/** The nodes only a body that keeps static structure holds. */
+const staticStructure = (
+  fact: ExpressionFact,
+  options: LowerStatementOptions,
+): Tir.Expression | undefined => {
+  const span = options.context.spanOf(fact.anchor)
+  const origin = Tir.authored(fact.anchor)
+  const unavailable = (): Tir.Expression => Object.freeze({ _tag: 'Unavailable', span, origin })
+  if (fact._tag === 'CompileError')
+    return Object.freeze({
+      _tag: 'CompileError',
+      message: tirExpression(fact.message, options),
+      type: fact.type._tag === 'Available' ? fact.type.type : 'never',
+      span,
+      origin,
+    })
+  if (fact._tag === 'StaticText' && fact.data?.kind === 'Text' && fact.literal !== undefined)
+    // Provenance names the literal itself, which can be narrower than the expression wrapping it.
+    return Object.freeze({
+      _tag: 'StaticStringLiteral',
+      data: fact.data,
+      type: Type.string(Lifetime.staticLifetime),
+      span: options.context.spanOf(fact.literal),
+      origin: Tir.authored(fact.literal),
+    })
+  if (fact._tag === 'Constant' && fact.value === undefined)
+    return fact.declaration.canonical._tag === 'Canonical' && fact.type._tag === 'Available'
+      ? Object.freeze({
+          _tag: 'ConstantReference',
+          declaration: fact.declaration.canonical.id,
+          type: fact.type.type,
+          span,
+          origin,
+        })
+      : unavailable()
+  if (fact._tag !== 'Call') return undefined
+  const typeArguments = fact.contract._tag === 'Compatible' ? fact.contract.typeArguments : []
+  const arguments_ = Object.freeze(
+    fact.arguments.map((argument) => tirExpression(argument.expression, options)),
+  )
+  if (
+    fact.reference._tag === 'ResolvedIntrinsicContract' &&
+    fact.reference.intrinsic.id.actor === 'Intrinsic'
+  )
+    return Object.freeze({
+      _tag: 'StaticIntrinsic',
+      operation: fact.reference.intrinsic.id.name,
+      typeArguments,
+      arguments: arguments_,
+      type: fact.type._tag === 'Available' ? fact.type.type : 'never',
+      span,
+      origin,
+    })
+  if (
+    fact.reference._tag === 'Resolved' &&
+    fact.reference.declaration.phase === 'Static' &&
+    fact.reference.declaration.canonical._tag === 'Canonical'
+  )
+    return Object.freeze({
+      _tag: 'StaticCall',
+      target: fact.reference.declaration.canonical.id,
+      typeArguments,
+      evidence: Object.freeze(
+        fact.contract._tag === 'Compatible'
+          ? fact.contract.evidence.map(Constraint.evidenceKey)
+          : [],
+      ),
+      arguments: arguments_,
+      ...(fact.staticFailure === undefined ? {} : { failure: fact.staticFailure }),
+      ...(fact.staticTextSpan === undefined ? {} : { text: fact.staticTextSpan }),
+      ...(fact.staticTextOrigin === undefined ? {} : { textOrigin: fact.staticTextOrigin }),
+      type: fact.type._tag === 'Available' ? fact.type.type : 'never',
+      span,
+      origin,
+    })
+  return undefined
+}
+
 export const tirExpression = (
+  fact: ExpressionFact,
+  options: LowerStatementOptions,
+  borrow?: Tir.BorrowId,
+): Tir.Expression => {
+  if (options.static === undefined) return residualExpression(fact, options, borrow)
+  const known = options.static.get(fact)
+  if (known !== undefined) return known
+  const node = staticStructure(fact, options) ?? residualExpression(fact, options, borrow)
+  options.static.set(fact, node)
+  return node
+}
+
+const residualExpression = (
   fact: ExpressionFact,
   options: LowerStatementOptions,
   borrow?: Tir.BorrowId,
@@ -833,9 +935,14 @@ export const tirExpression = (
         })
   }
   if (fact._tag === 'Identifier') {
-    if (fact.staticValue !== undefined && fact.type._tag === 'Available')
+    if (
+      options.static === undefined &&
+      fact.staticValue !== undefined &&
+      fact.type._tag === 'Available'
+    )
       return staticValueExpression(fact.staticValue, fact.type.type, fact.anchor, options.context)
     if (
+      options.static === undefined &&
       fact.reference._tag === 'ResolvedBinding' &&
       fact.reference.binding.staticValue !== undefined &&
       fact.type._tag === 'Available'
@@ -1056,6 +1163,9 @@ export const tirExpression = (
             id: arm.id,
             tests: arm.tests,
             ...(member === undefined ? {} : { member }),
+            ...(arm.pattern._tag === 'IntegerPattern' && arm.pattern.value !== undefined
+              ? { integer: arm.pattern.value }
+              : {}),
             universal: arm.pattern._tag === 'UniversalPattern',
             bindings: Object.freeze(
               arm.bindings.flatMap((binding) =>
@@ -1246,7 +1356,11 @@ export const tirExpression = (
     })
   }
   if (fact._tag === 'FieldProjection') {
-    if (fact.staticValue !== undefined && fact.type._tag === 'Available')
+    if (
+      options.static === undefined &&
+      fact.staticValue !== undefined &&
+      fact.type._tag === 'Available'
+    )
       return staticValueExpression(fact.staticValue, fact.type.type, fact.anchor, options.context)
     if (fact.state._tag === 'SliceLength' && fact.type._tag === 'Available') {
       const slice = tirExpression(fact.subject, options)
@@ -1939,7 +2053,7 @@ export const tirExpression = (
     fact.contract._tag === 'Compatible' &&
     fact.type._tag === 'Available'
   ) {
-    if (fact._tag === 'Call' && fact.staticValue !== undefined)
+    if (options.static === undefined && fact._tag === 'Call' && fact.staticValue !== undefined)
       return staticValueExpression(fact.staticValue, fact.type.type, fact.anchor, options.context)
     const target = fact.reference.declaration
     const substitution = fact.contract.substitution
@@ -2447,3 +2561,22 @@ export const directExpressionChildren = (
 }
 
 /** Callbacks for one deterministic traversal of elaborated statement and expression facts. */
+
+/**
+ * Lowers what construction has analyzed so far into nodes the evaluator can interpret.
+ *
+ * One lowering is shared by everything evaluated for one body: the evaluator keeps text provenance
+ * per node, and a subexpression must be the same node whenever its parent is evaluated again.
+ */
+export interface StaticLowering {
+  readonly expression: (fact: ExpressionFact) => Tir.Expression
+  readonly statements: (facts: ReadonlyArray<StatementFact>) => ReadonlyArray<Tir.Statement>
+}
+
+export const staticLowering = (context: SemanticContext.SemanticContext): StaticLowering => {
+  const options: LowerStatementOptions = { context, static: new WeakMap() }
+  return Object.freeze({
+    expression: (fact: ExpressionFact) => tirExpression(fact, options),
+    statements: (facts: ReadonlyArray<StatementFact>) => lowerStatements(facts, options),
+  })
+}

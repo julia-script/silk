@@ -47,6 +47,7 @@ import type {
 } from './ExpressionAnalysis.js'
 import {
   analyzeExpression,
+  evaluateStatic,
   analyzePattern,
   patternTests,
   bindingName,
@@ -737,7 +738,7 @@ export const analyzeStatements = (
         context.staticContext !== undefined &&
         context.resolution.deferStaticCalls !== true &&
         !containsOrdinaryArm(initializerNode)
-          ? StaticEvaluation.evaluateFact(initializer.fact, context.staticContext)
+          ? evaluateStatic(initializer.fact, context.staticContext, context.resolution)
           : undefined
       if (evaluated?._tag === 'Failed')
         context.diagnostics.push(staticDiagnostic(evaluated.failure))
@@ -772,9 +773,10 @@ export const analyzeStatements = (
       if (staticValue !== undefined && context.staticContext !== undefined) {
         const key = StaticEvaluation.localValueKey(binding)
         context.staticContext.values.set(key, staticValue)
-        const staticTextSpan = context.staticContext.expressionSpans.get(initializer.fact)
+        const evaluatedNode = context.staticContext.nodes.expression(initializer.fact)
+        const staticTextSpan = context.staticContext.expressionSpans.get(evaluatedNode)
         if (staticTextSpan !== undefined) context.staticContext.valueSpans.set(key, staticTextSpan)
-        const staticTextOrigin = context.staticContext.expressionOrigins.get(initializer.fact)
+        const staticTextOrigin = context.staticContext.expressionOrigins.get(evaluatedNode)
         if (staticTextOrigin !== undefined)
           context.staticContext.valueOrigins.set(key, staticTextOrigin)
       }
@@ -886,7 +888,7 @@ export const analyzeStatements = (
         context.declaration.phase !== 'Static' &&
         expression.fact._tag === 'CompileError'
       ) {
-        const evaluated = StaticEvaluation.evaluateFact(expression.fact, context.staticContext)
+        const evaluated = evaluateStatic(expression.fact, context.staticContext, context.resolution)
         if (evaluated._tag === 'Failed')
           context.diagnostics.push(staticDiagnostic(evaluated.failure))
         facts.push(
@@ -968,7 +970,7 @@ export const analyzeStatements = (
         reject()
         continue
       }
-      const evaluated = StaticEvaluation.evaluateFact(iterable.fact, context.staticContext)
+      const evaluated = evaluateStatic(iterable.fact, context.staticContext, context.resolution)
       if (evaluated._tag === 'Failed') {
         context.diagnostics.push(staticDiagnostic(evaluated.failure))
         reject()
@@ -1110,7 +1112,7 @@ export const analyzeStatements = (
       if (condition === undefined)
         throw new RangeError(`Semantic analysis cannot analyze ${conditionNode._tag}`)
       context.diagnostics.push(...condition.diagnostics)
-      const evaluated = StaticEvaluation.evaluateFact(condition.fact, context.staticContext)
+      const evaluated = evaluateStatic(condition.fact, context.staticContext, context.resolution)
       if (evaluated._tag === 'Failed') {
         context.diagnostics.push(staticDiagnostic(evaluated.failure))
         continue

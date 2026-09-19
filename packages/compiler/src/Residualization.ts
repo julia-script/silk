@@ -9,6 +9,7 @@ import type * as Diagnostic from './Diagnostic.js'
 import * as Elaboration from './Elaboration.js'
 import { analyzeExpression } from './ExpressionAnalysis.js'
 import type * as Tir from './Tir.js'
+import * as TirLowering from './TirLowering.js'
 import * as FunctionIndex from './internal/FunctionIndex.js'
 import * as TypeInference from './internal/TypeInference.js'
 import * as Canonical from './internal/Canonical.js'
@@ -517,6 +518,20 @@ const resolveValueOrigins = (
   return value
 }
 
+/** The headers a body can name: the index, and before it the aggregates the body generated. */
+const bodyLookup =
+  (
+    lookup: StaticEvaluation.NodeContext['lookup'],
+    generated: ReadonlyArray<DeclarationFacts.StructFact>,
+  ): StaticEvaluation.NodeContext['lookup'] =>
+  (id) =>
+    generated.find(
+      (aggregate) =>
+        aggregate.canonical._tag === 'Canonical' &&
+        aggregate.canonical.id.module === id.module &&
+        aggregate.canonical.id.name === id.name,
+    ) ?? lookup(id)
+
 const resolveTextSpan = (
   origin: StaticEvaluation.TextOrigin | undefined,
   arguments_: ReadonlyArray<Location.Location | undefined>,
@@ -531,10 +546,10 @@ const evaluateStaticFunction = (
   arguments_: ReadonlyArray<StaticValue.Value>,
   argumentSpans: ReadonlyArray<Location.Location | undefined>,
   argumentOrigins: ReadonlyArray<StaticEvaluation.TextOrigin | undefined>,
-  span: Parameters<StaticEvaluation.FactEvaluationContext['call']>[4],
+  span: Parameters<StaticEvaluation.NodeContext['call']>[4],
   parentTrace: StaticEvaluation.Trace,
-  identity: Parameters<StaticEvaluation.FactEvaluationContext['call']>[6],
-): StaticEvaluation.FactCallResult => {
+  identity: Parameters<StaticEvaluation.NodeContext['call']>[6],
+): StaticEvaluation.CallResult => {
   if (declaration.canonical._tag !== 'Canonical')
     return Object.freeze({
       outcome: StaticEvaluation.failed(
@@ -585,7 +600,7 @@ const evaluateStaticFunction = (
             evaluation.trace,
           ),
         )
-      const call: StaticEvaluation.FactEvaluationContext['call'] = (
+      const call: StaticEvaluation.NodeContext['call'] = (
         callee,
         nestedArguments,
         nestedArgumentSpans,
@@ -610,8 +625,11 @@ const evaluateStaticFunction = (
         values: bindings.values,
         valueSpans: bindings.valueSpans,
         valueOrigins: bindings.valueOrigins,
-        expressionSpans: new Map<Elaboration.ExpressionFact, Location.Location>(),
-        expressionOrigins: new Map<Elaboration.ExpressionFact, StaticEvaluation.TextOrigin>(),
+        expressionSpans: new Map<Tir.Expression, Location.Location>(),
+        expressionOrigins: new Map<Tir.Expression, StaticEvaluation.TextOrigin>(),
+        nodes: TirLowering.staticLowering(SemanticContext.make(input.result.authored)),
+        lookup: (id: DeclarationFacts.CanonicalId) =>
+          DeclarationFacts.byCanonical(self[stateSymbol].index, id),
         returnedTextSpan: { value: undefined },
         returnedTextOrigin: { value: undefined },
         trace: evaluation.trace,
@@ -662,10 +680,14 @@ const evaluateStaticFunction = (
           ),
         )
       }
-      const value = StaticEvaluation.evaluateStatements(analyzed.fact.statements, {
-        ...staticContext,
-        step: () => evaluation.step(),
-      })
+      const value = StaticEvaluation.evaluateStatements(
+        staticContext.nodes.statements(analyzed.fact.statements),
+        {
+          ...staticContext,
+          lookup: bodyLookup(staticContext.lookup, analyzed.fact.generatedAggregates),
+          step: () => evaluation.step(),
+        },
+      )
       if (value._tag === 'Complete') {
         if (staticContext.returnedTextOrigin.value !== undefined)
           self[stateSymbol].staticResultOrigins.set(
@@ -785,7 +807,7 @@ function evaluateConstantValue(
             evaluation.trace,
           ),
         )
-      const call: StaticEvaluation.FactEvaluationContext['call'] = (
+      const call: StaticEvaluation.NodeContext['call'] = (
         callee,
         arguments_,
         argumentSpans,
@@ -804,7 +826,7 @@ function evaluateConstantValue(
           trace,
           identity,
         )
-      const constant: NonNullable<StaticEvaluation.FactEvaluationContext['constant']> = (
+      const constant: NonNullable<StaticEvaluation.NodeContext['constant']> = (
         nested,
         nestedSpan,
         trace,
@@ -814,8 +836,11 @@ function evaluateConstantValue(
         values: new Map<string, StaticValue.Value>(),
         valueSpans: new Map<string, Location.Location>(),
         valueOrigins: new Map<string, StaticEvaluation.TextOrigin>(),
-        expressionSpans: new Map<Elaboration.ExpressionFact, Location.Location>(),
-        expressionOrigins: new Map<Elaboration.ExpressionFact, StaticEvaluation.TextOrigin>(),
+        expressionSpans: new Map<Tir.Expression, Location.Location>(),
+        expressionOrigins: new Map<Tir.Expression, StaticEvaluation.TextOrigin>(),
+        nodes: TirLowering.staticLowering(SemanticContext.make(input.result.authored)),
+        lookup: (id: DeclarationFacts.CanonicalId) =>
+          DeclarationFacts.byCanonical(self[stateSymbol].index, id),
         trace: evaluation.trace,
         call,
         reflect: (
@@ -866,7 +891,7 @@ function evaluateConstantValue(
             evaluation.trace,
           ),
         )
-      const value = StaticEvaluation.evaluateFact(analyzed.fact, {
+      const value = StaticEvaluation.evaluate(staticContext.nodes.expression(analyzed.fact), {
         ...staticContext,
         step: () => evaluation.step(),
       })
@@ -1148,7 +1173,7 @@ export const residualize = (self: Coordinator, key: ApplicationKey): Result => {
             evaluation.trace,
           ),
         )
-      const call: StaticEvaluation.FactEvaluationContext['call'] = (
+      const call: StaticEvaluation.NodeContext['call'] = (
         callee,
         arguments_,
         argumentSpans,
@@ -1167,7 +1192,7 @@ export const residualize = (self: Coordinator, key: ApplicationKey): Result => {
           trace,
           identity,
         )
-      const constant: NonNullable<StaticEvaluation.FactEvaluationContext['constant']> = (
+      const constant: NonNullable<StaticEvaluation.NodeContext['constant']> = (
         declaration,
         span,
         trace,
@@ -1184,8 +1209,11 @@ export const residualize = (self: Coordinator, key: ApplicationKey): Result => {
           values: bindings.values,
           valueSpans: bindings.valueSpans,
           valueOrigins: bindings.valueOrigins,
-          expressionSpans: new Map<Elaboration.ExpressionFact, Location.Location>(),
-          expressionOrigins: new Map<Elaboration.ExpressionFact, StaticEvaluation.TextOrigin>(),
+          expressionSpans: new Map<Tir.Expression, Location.Location>(),
+          expressionOrigins: new Map<Tir.Expression, StaticEvaluation.TextOrigin>(),
+          nodes: TirLowering.staticLowering(SemanticContext.make(input.result.authored)),
+          lookup: (id: DeclarationFacts.CanonicalId) =>
+            DeclarationFacts.byCanonical(self[stateSymbol].index, id),
           trace: evaluation.trace,
           call,
           chargeStaticIteration: (trace: StaticEvaluation.Trace, residualNodes: number) => {
