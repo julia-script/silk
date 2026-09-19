@@ -1,5 +1,5 @@
 import * as Elaboration from './Elaboration.js'
-import type * as Hir from './Hir.js'
+import type * as Tir from './Tir.js'
 import type * as SourceSpan from './SourceSpan.js'
 import type * as SyntaxTree from './SyntaxTree.js'
 import * as Type from './Type.js'
@@ -22,7 +22,7 @@ export interface BodyControlFlow {
 
 const spanKey = (span: SourceSpan.SourceSpan): string =>
   `${span.sourceId}:${span.start}:${span.end}`
-const loopKey = (loop: Hir.LoopId): string =>
+const loopKey = (loop: Tir.LoopId): string =>
   `${loop.function.sourceId}:${loop.function.ordinal}:${loop.ordinal}`
 
 /** Builds structured branch exits and loop backedges once for one source body. */

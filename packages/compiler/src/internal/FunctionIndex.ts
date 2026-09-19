@@ -1,5 +1,5 @@
 import type * as DeclarationFacts from '../DeclarationFacts.js'
-import type * as Hir from '../Hir.js'
+import type * as Tir from '../Tir.js'
 import type * as NativeLoweringContext from '../NativeLoweringContext.js'
 
 /** Source-ordered candidates, indexed without changing declaration or specialization identity. */
@@ -40,33 +40,33 @@ export const candidates = <A>(
   declaration: DeclarationFacts.CanonicalId,
 ): ReadonlyArray<A> => self.modules.get(declaration.module)?.get(declaration.name) ?? []
 
-const hirIndexes = new WeakMap<Hir.Module, FunctionIndex<Hir.HirFunction>>()
+const tirIndexes = new WeakMap<Tir.Module, FunctionIndex<Tir.TirFunction>>()
 
-const hirIndex = (module: Hir.Module): FunctionIndex<Hir.HirFunction> => {
-  const cached = hirIndexes.get(module)
+const tirIndex = (module: Tir.Module): FunctionIndex<Tir.TirFunction> => {
+  const cached = tirIndexes.get(module)
   if (cached !== undefined) return cached
   const index = make(module.functions, (fn) =>
     fn.declaration.canonical._tag === 'Canonical' ? fn.declaration.canonical.id : undefined,
   )
-  // HIR module snapshots are immutable. A revised module owns a different index, and weak
+  // TIR module snapshots are immutable. A revised module owns a different index, and weak
   // ownership lets discarded analysis snapshots (including their functions) be collected.
-  hirIndexes.set(module, index)
+  tirIndexes.set(module, index)
   return index
 }
 
-/** Resolves the first canonical function by name in an already-selected HIR module. */
-export const hirByName = (
-  module: Hir.Module | undefined,
+/** Resolves the first canonical function by name in an already-selected TIR module. */
+export const tirByName = (
+  module: Tir.Module | undefined,
   name: string,
-): Hir.HirFunction | undefined =>
-  module === undefined ? undefined : hirIndex(module).names.get(name)?.at(0)
+): Tir.TirFunction | undefined =>
+  module === undefined ? undefined : tirIndex(module).names.get(name)?.at(0)
 
 /** Resolves the first function with the exact canonical module and declaration name. */
-export const hirByCanonical = (
-  module: Hir.Module | undefined,
+export const tirByCanonical = (
+  module: Tir.Module | undefined,
   declaration: DeclarationFacts.CanonicalId,
-): Hir.HirFunction | undefined =>
-  module === undefined ? undefined : candidates(hirIndex(module), declaration).at(0)
+): Tir.TirFunction | undefined =>
+  module === undefined ? undefined : candidates(tirIndex(module), declaration).at(0)
 
 const nativeIndexes = new WeakMap<
   ReadonlyArray<NativeLoweringContext.DeclaredFunction>,

@@ -54,8 +54,8 @@ import {
   statementExpressionNode,
   unsafeCallAuthorized,
 } from './ExpressionAnalysis.js'
-import type * as Hir from './Hir.js'
-import { directStatementExpressions } from './HirLowering.js'
+import type * as Tir from './Tir.js'
+import { directStatementExpressions } from './TirLowering.js'
 import * as Match from './Match.js'
 import * as NameResolution from './NameResolution.js'
 import * as Presentation from './Presentation.js'
@@ -125,7 +125,7 @@ export const analyzeStatements = (
   context: BodyContext,
   blockNode: SyntaxTree.Node,
   initialScope: Scope,
-  loopStack: ReadonlyArray<Hir.LoopId> = Object.freeze([]),
+  loopStack: ReadonlyArray<Tir.LoopId> = Object.freeze([]),
   introducedPatterns: ReadonlyArray<PatternBindingFact> = Object.freeze([]),
 ): ReadonlyArray<StatementFact> => {
   context = { ...context, resolution: { ...context.resolution, execution: { context, loopStack } } }
@@ -244,7 +244,7 @@ export const analyzeStatements = (
   const callableWriteFlow = (
     statements: ReadonlyArray<StatementFact>,
     initial: ReadonlySet<number>,
-    targetLoop: Hir.LoopId,
+    targetLoop: Tir.LoopId,
   ): CallableWriteFlow => {
     let fallthrough: ReadonlySet<number> | undefined = new Set(initial)
     let continues: ReadonlySet<number> | undefined
@@ -339,9 +339,9 @@ export const analyzeStatements = (
     })
   }
 
-  const nextRegion = (): Hir.RegionId => {
+  const nextRegion = (): Tir.RegionId => {
     const region = Object.freeze({
-      _tag: 'HirRegion' as const,
+      _tag: 'TirRegion' as const,
       function: context.declaration.id,
       ordinal: (context.regionBase ?? 0) + context.regions.length,
     })
@@ -484,7 +484,7 @@ export const analyzeStatements = (
   const analyzeConditional = (
     element: SyntaxTree.Node,
     armScope: Scope,
-    armLoopStack: ReadonlyArray<Hir.LoopId>,
+    armLoopStack: ReadonlyArray<Tir.LoopId>,
   ): StatementFact => {
     const region = nextRegion()
     const conditionNode = statementExpressionNode(element)
@@ -552,7 +552,7 @@ export const analyzeStatements = (
   const analyzePatternConditional = (
     element: SyntaxTree.Node,
     armScope: Scope,
-    armLoopStack: ReadonlyArray<Hir.LoopId>,
+    armLoopStack: ReadonlyArray<Tir.LoopId>,
   ): StatementFact => {
     const region = nextRegion()
     const selection = analyzePatternSelection(element, armScope)
@@ -758,7 +758,7 @@ export const analyzeStatements = (
       const binding: BindingDeclarationFact = Object.freeze({
         _tag: 'BindingFact',
         id: Object.freeze({
-          _tag: 'HirBinding',
+          _tag: 'TirBinding',
           function: context.declaration.id,
           ordinal: bindingOrdinal,
         }),
@@ -1029,7 +1029,7 @@ export const analyzeStatements = (
         const binding: BindingDeclarationFact = Object.freeze({
           _tag: 'BindingFact',
           id: Object.freeze({
-            _tag: 'HirBinding',
+            _tag: 'TirBinding',
             function: context.declaration.id,
             ordinal: context.nextBindingOrdinal.value,
           }),
@@ -1350,7 +1350,7 @@ export const analyzeStatements = (
     if (element.kind === 'WhileStatement') {
       const region = nextRegion()
       const loop = Object.freeze({
-        _tag: 'HirLoop' as const,
+        _tag: 'TirLoop' as const,
         function: context.declaration.id,
         ordinal: context.loops.length,
       })

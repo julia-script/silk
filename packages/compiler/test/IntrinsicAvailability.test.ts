@@ -120,7 +120,7 @@ it('rejects static-only intrinsic leakage at runtime availability and integrity 
   )
 })
 
-it.effect('does not admit targetPointerBits into runtime HIR', () =>
+it.effect('does not admit targetPointerBits into runtime TIR', () =>
   Effect.gen(function* () {
     const self = yield* snapshot(
       'pub fn main() -> u32 { return Intrinsic.targetPointerBits() }',

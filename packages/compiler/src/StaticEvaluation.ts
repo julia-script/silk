@@ -5,7 +5,7 @@ import type * as DeclarationFacts from './DeclarationFacts.js'
 import * as Diagnostic from './Diagnostic.js'
 import type * as Elaboration from './Elaboration.js'
 import * as FloatingPoint from './FloatingPoint.js'
-import type * as Hir from './Hir.js'
+import type * as Tir from './Tir.js'
 import * as Canonical from './internal/Canonical.js'
 import * as DigitSeparator from './internal/DigitSeparator.js'
 import * as IntegerLiteral from './internal/IntegerLiteral.js'
@@ -2085,7 +2085,7 @@ const evaluateExpression = (
 
 type StatementControl =
   | { readonly _tag: 'Return'; readonly value: StaticValue.Value }
-  | { readonly _tag: 'Break' | 'Continue'; readonly target: Hir.LoopId | undefined }
+  | { readonly _tag: 'Break' | 'Continue'; readonly target: Tir.LoopId | undefined }
 
 type ExecutionOutcome<A> =
   | Outcome<A>
@@ -2183,7 +2183,7 @@ const replaceStaticPlace = (
   )
 }
 
-const sameLoop = (left: Hir.LoopId | undefined, right: Hir.LoopId): boolean =>
+const sameLoop = (left: Tir.LoopId | undefined, right: Tir.LoopId): boolean =>
   left !== undefined &&
   left.ordinal === right.ordinal &&
   left.function.sourceId === right.function.sourceId &&

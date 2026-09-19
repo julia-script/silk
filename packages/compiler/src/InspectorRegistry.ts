@@ -11,7 +11,7 @@
  */
 
 import * as Analysis from './Analysis.js'
-import * as Hir from './Hir.js'
+import * as Tir from './Tir.js'
 import { projectDataFlow } from './InspectorFlowModel.js'
 import { backendEmission, toolchainCommands } from './InspectorPanels.js'
 import {
@@ -36,7 +36,7 @@ import {
   diagnosticEntries,
   diagnosticRows,
   flowRows,
-  hirRows,
+  tirRows,
   tokenRows,
   treeRows,
 } from './InspectorProjectSyntax.js'
@@ -53,7 +53,7 @@ export const viewIds = [
   'closure',
   'index',
   'resolution',
-  'hir',
+  'tir',
   'struct-values',
   'array-values',
   'ownership',
@@ -198,24 +198,24 @@ export const views: ReadonlyArray<ViewDefinition> = [
     },
   },
   {
-    id: 'hir',
-    title: 'Typed HIR',
+    id: 'tir',
+    title: 'Typed TIR',
     phase: 'elaboration',
-    tag: 'HIR',
+    tag: 'TIR',
     group: 'semantics',
     project: ({ snapshot }) => {
-      const hir = Analysis.rootAnalysis(snapshot).hir
-      const conversions = (snapshot.results.get(snapshot.closure.rootModule)?.hir.functions ?? [])
-        .flatMap((fn) => fn.statements.flatMap(Hir.statementExpressions))
-        .flatMap(Hir.expressionTree)
+      const tir = Analysis.rootAnalysis(snapshot).tir
+      const conversions = (snapshot.results.get(snapshot.closure.rootModule)?.tir.functions ?? [])
+        .flatMap((fn) => fn.statements.flatMap(Tir.statementExpressions))
+        .flatMap(Tir.expressionTree)
         .filter((expression) => expression._tag === 'UnionConvert')
       return {
-        rows: hirRows(hir),
+        rows: tirRows(tir),
         facts:
           conversions.length === 0
             ? undefined
             : [{ text: `${conversions.length} union conversion`, tone: 'symbol' }],
-        meta: `${hir.functions.length} fn${conversions.length === 0 ? '' : ` · ${conversions.length} union`}`,
+        meta: `${tir.functions.length} fn${conversions.length === 0 ? '' : ` · ${conversions.length} union`}`,
       }
     },
   },
@@ -529,8 +529,8 @@ export const views: ReadonlyArray<ViewDefinition> = [
           diagnostics: countFor('semantic'),
         },
         {
-          phase: 'elaboration (HIR)',
-          outputs: `${analysis.hir.functions.length} typed functions`,
+          phase: 'elaboration (TIR)',
+          outputs: `${analysis.tir.functions.length} typed functions`,
           diagnostics: 0,
         },
         {

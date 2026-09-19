@@ -418,7 +418,7 @@ callable used where its eventual result is required reports a type mismatch nami
 callable contract. Capture ownership errors occur when the section is constructed.
 
 The compiler carries every remaining leading parameter and captured trailing argument through
-semantic facts, HIR, MIR, and each execution engine. `combine(3)(2)(1)` therefore preserves both
+semantic facts, TIR, MIR, and each execution engine. `combine(3)(2)(1)` therefore preserves both
 source evaluation order and the final positional call `combine(1, 2, 3)`.
 
 **Evidence:** [captured callable rule](ownership-and-borrowing.md#callable-001--named-functions-support-trailing-partial-application).

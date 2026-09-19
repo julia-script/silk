@@ -17,7 +17,7 @@ Two parts:
 ## Silk Inspector
 
 **Silk: Open Inspector** (command palette) opens one webview panel beside the editor showing a
-compiler-phase view of the active `.silk` file — tokens, concrete tree, HIR, ownership, MIR,
+compiler-phase view of the active `.silk` file — tokens, concrete tree, TIR, ownership, MIR,
 backend output, the whole pipeline — one view at a time, switched with the in-panel picker. The
 panel follows the active `.silk` editor, refreshes when the language server commits a new
 analysis, and shares a span cursor with the editor: selecting source tints the rows covering it,

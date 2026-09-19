@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../../dist/Analysis.js'
-import * as Hir from '../../dist/Hir.js'
+import * as Tir from '../../dist/Tir.js'
 import * as LayoutEncode from '../../dist/LayoutEncode.js'
 import * as MirEncoding from '../../dist/MirEncoding.js'
 import * as OwnershipEncoding from '../../dist/OwnershipEncoding.js'
@@ -26,9 +26,9 @@ const nativeArtifact = await Effect.runPromise(Analysis.codegen(native, { mode: 
 const encodeSnapshot = (self) => ({
   diagnostics: Analysis.diagnostics(self),
   modules: Analysis.modules(self).map((module) => module.name),
-  hir: hash(
+  tir: hash(
     Analysis.modules(self)
-      .map((module) => Hir.encode(self.results.get(module.name)?.hir))
+      .map((module) => Tir.encode(self.results.get(module.name)?.tir))
       .join('\n'),
   ),
   ownership: hash(

@@ -6,7 +6,7 @@ import type * as ExpressionAnalysis from './ExpressionAnalysis.js'
 import * as ModuleSurface from './ModuleSurface.js'
 import type * as NameResolution from './NameResolution.js'
 import type * as Ownership from './Ownership.js'
-import * as Hir from './Hir.js'
+import * as Tir from './Tir.js'
 import * as SemanticRebinding from './SemanticRebinding.js'
 import type * as SourceFile from './SourceFile.js'
 import * as SourceOrigin from './SourceOrigin.js'
@@ -386,12 +386,12 @@ export const check = (
         // The hidden body keeps its site; only its enclosing declaration's ordinal can move.
         const site =
           hidden.declaration.canonical._tag === 'Canonical'
-            ? Hir.anonymousCallableSite(hidden.declaration.canonical.id)
+            ? Tir.anonymousCallableSite(hidden.declaration.canonical.id)
             : undefined
         if (site === undefined) throw new RangeError('Hidden body lost its anonymous callable site')
         SemanticRebinding.pair(rebinding, hidden.declaration.id, {
           ...hidden.declaration.id,
-          ordinal: Hir.hiddenDeclarationOrdinal(declaration.id.ordinal, site),
+          ordinal: Tir.hiddenDeclarationOrdinal(declaration.id.ordinal, site),
         })
       }
     }

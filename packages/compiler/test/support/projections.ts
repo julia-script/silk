@@ -3,7 +3,7 @@ import type * as Analysis from '../../src/Analysis.js'
 import type * as Backend from '../../src/Backend.js'
 import type * as DeclarationFacts from '../../src/DeclarationFacts.js'
 import type * as Elaboration from '../../src/Elaboration.js'
-import * as Hir from '../../src/Hir.js'
+import * as Tir from '../../src/Tir.js'
 import * as Layout from '../../src/Layout.js'
 import * as Mir from '../../src/Mir.js'
 import * as ModuleTooling from '../../src/ModuleTooling.js'
@@ -94,8 +94,8 @@ export const matchesOf = (self: Analysis.FrontendSnapshot, module: string) =>
     ),
   )
 
-export const hirOf = (self: Analysis.FrontendSnapshot, module: string) =>
-  self.results.get(module)?.hir
+export const tirOf = (self: Analysis.FrontendSnapshot, module: string) =>
+  self.results.get(module)?.tir
 
 export const ownershipFixedPointsOf = (self: Analysis.FrontendSnapshot, module: string) =>
   Object.freeze(self.ownership.get(module)?.functions.flatMap((fn) => fn.fixedPoints) ?? [])
@@ -115,10 +115,10 @@ export const genericDeclarationsOf = (
 export const genericCallsOf = (self: Analysis.FrontendSnapshot) =>
   Object.freeze(
     [...self.results.values()].flatMap((result) =>
-      result.hir.functions.flatMap((fn) =>
+      result.tir.functions.flatMap((fn) =>
         fn.statements
-          .flatMap(Hir.statementExpressions)
-          .flatMap(Hir.expressionTree)
+          .flatMap(Tir.statementExpressions)
+          .flatMap(Tir.expressionTree)
           .flatMap((expression) =>
             expression._tag === 'Call' && expression.typeArguments.length > 0 ? [expression] : [],
           ),
@@ -127,20 +127,20 @@ export const genericCallsOf = (self: Analysis.FrontendSnapshot) =>
   )
 
 export interface CallInstanceLink {
-  readonly call: Extract<Hir.Expression, { readonly _tag: 'Call' }>
+  readonly call: Extract<Tir.Expression, { readonly _tag: 'Call' }>
   readonly caller: Analysis.Snapshot['instances']['instances'][number]
   readonly target: Analysis.Snapshot['instances']['instances'][number]
 }
 
 export const instancesOfCall = (
   self: Analysis.Snapshot,
-  call: Extract<Hir.Expression, { readonly _tag: 'Call' }>,
+  call: Extract<Tir.Expression, { readonly _tag: 'Call' }>,
 ): ReadonlyArray<CallInstanceLink> =>
   Object.freeze(
     self.instances.instances.flatMap((caller): ReadonlyArray<CallInstanceLink> => {
       const ownsCall = caller.function.statements
-        .flatMap(Hir.statementExpressions)
-        .flatMap(Hir.expressionTree)
+        .flatMap(Tir.statementExpressions)
+        .flatMap(Tir.expressionTree)
         .some((expression) => expression === call)
       if (!ownsCall) return []
       const arguments_ = call.typeArguments.map((argument) =>
@@ -193,12 +193,12 @@ export const suspensionOwnershipOf = (
       })
 }
 
-export const hirMatchesOf = (self: Analysis.FrontendSnapshot, module: string) =>
+export const tirMatchesOf = (self: Analysis.FrontendSnapshot, module: string) =>
   Object.freeze(
-    (self.results.get(module)?.hir.functions ?? []).flatMap((fn) =>
+    (self.results.get(module)?.tir.functions ?? []).flatMap((fn) =>
       fn.statements
-        .flatMap(Hir.statementExpressions)
-        .flatMap(Hir.expressionTree)
+        .flatMap(Tir.statementExpressions)
+        .flatMap(Tir.expressionTree)
         .flatMap((expression) => (expression._tag === 'Match' ? [expression] : [])),
     ),
   )

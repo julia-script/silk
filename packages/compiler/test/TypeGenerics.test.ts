@@ -390,7 +390,7 @@ it.effect('rejects residual rows at the complete-application specialization fron
 }
 pub fn main() -> i32 { return 0 }`),
     )
-    const fn = Projections.hirOf(snapshot, module)?.functions.find(
+    const fn = Projections.tirOf(snapshot, module)?.functions.find(
       (candidate) =>
         candidate.declaration.canonical._tag === 'Canonical' &&
         candidate.declaration.canonical.id.name === 'forward',
@@ -1455,7 +1455,7 @@ pub fn main() -> i32 { return replace<i32>([1], 2) }`),
   }),
 )
 
-it.effect('links an open HIR call through every reached caller instance', () =>
+it.effect('links an open TIR call through every reached caller instance', () =>
   Effect.gen(function* () {
     const snapshot = yield* AnalysisFixture.retainingMain(
       'generics/Facade',

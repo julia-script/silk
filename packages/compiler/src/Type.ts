@@ -317,7 +317,7 @@ const nonScalarBuiltinOperations = Object.freeze([
   'StringEqualsExact',
 ] as const)
 
-/** The closed operation vocabulary shared by semantic callable identities and HIR targets. */
+/** The closed operation vocabulary shared by semantic callable identities and TIR targets. */
 export type BuiltinOperation = Scalar.OperationCode | (typeof nonScalarBuiltinOperations)[number]
 
 const builtinOperations: ReadonlySet<string> = new Set([
@@ -738,7 +738,7 @@ export const isWake = (
   self.sealed === 'Intrinsic.Wake' &&
   self.arguments.length === 0
 
-/** Tests whether a type is one of the sealed values erased before runtime HIR. */
+/** Tests whether a type is one of the sealed values erased before runtime TIR. */
 export const isStaticPhaseOnly = (self: Type): boolean =>
   isNominal(self) &&
   (self.sealed === 'Intrinsic.Type' ||

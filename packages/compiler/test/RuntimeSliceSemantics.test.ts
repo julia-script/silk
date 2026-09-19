@@ -3,7 +3,7 @@ import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import type * as Elaboration from '../src/Elaboration.js'
-import * as Hir from '../src/Hir.js'
+import * as Tir from '../src/Tir.js'
 import * as Lexer from '../src/Lexer.js'
 import * as Lifetime from '../src/Lifetime.js'
 import * as Parser from '../src/Parser.js'
@@ -163,7 +163,7 @@ it('discards lifetime constraints from a rejected union alternative', () => {
   const result = analyze(`pub struct Data { value: i32 }
 pub fn wrap<'a, 'b>(value: &'b Data) -> &'a bool | &'b i32 { return &value.value }`)
   assert.deepEqual(result.diagnostics, [])
-  assert.deepEqual(Hir.verify(result.hir), [])
+  assert.deepEqual(Tir.verify(result.tir), [])
 })
 
 it('instantiates callback invocation lifetimes after inferring a borrowed branch state', () => {
@@ -179,7 +179,7 @@ fn completed(state: &mut State, result: ()) -> () {
 fn invoke(state: &mut State) -> () { return dispatch(move state, completed) }
 pub fn main() -> i32 { let mut state = State { value: 0 } invoke(&mut state) return state.value }`)
   assert.deepEqual(result.diagnostics, [])
-  assert.deepEqual(Hir.verify(result.hir), [])
+  assert.deepEqual(Tir.verify(result.tir), [])
 })
 
 it('forms shared and exclusive whole-array borrows without encoding source length', () => {
@@ -213,8 +213,8 @@ pub fn main() -> i32 { return short() }`)
     assert.strictEqual(exclusive.access, 'Exclusive')
     assert.strictEqual(exclusive.formation.array.length, 6)
   }
-  const hirCall = result.hir.functions.at(2)
-  const returned = hirCall === undefined ? undefined : Hir.returned(hirCall)
+  const tirCall = result.tir.functions.at(2)
+  const returned = tirCall === undefined ? undefined : Tir.returned(tirCall)
   assert.strictEqual(returned?._tag, 'Call')
   if (returned?._tag === 'Call') {
     assert.strictEqual(returned.arguments.at(0)?._tag, 'SliceBorrow')
@@ -223,7 +223,7 @@ pub fn main() -> i32 { return short() }`)
       [0],
     )
   }
-  assert.deepEqual(Hir.verify(result.hir), [])
+  assert.deepEqual(Tir.verify(result.tir), [])
 })
 
 it('retains compatible reborrows and rejects access strengthening', () => {
@@ -270,7 +270,7 @@ pub fn main() -> i32 {
   const main = result.functions.at(3)
   const returned = main?.returnedExpression
   assert.isDefined(returned)
-  assert.deepEqual(Hir.verify(result.hir), [])
+  assert.deepEqual(Tir.verify(result.tir), [])
 })
 
 it('elides returned view lifetimes and rejects ambiguous or strengthened headers', () => {
@@ -480,25 +480,25 @@ pub fn main() -> i32 { return 0 }`)
     assert.strictEqual(write.destination.borrowAccess, 'Exclusive')
     assert.strictEqual(write.root?._tag, 'ParameterDeclaration')
   }
-  const lengthHir = result.hir.functions.at(0)
-  const lengthReturn = lengthHir === undefined ? undefined : Hir.returned(lengthHir)
+  const lengthTir = result.tir.functions.at(0)
+  const lengthReturn = lengthTir === undefined ? undefined : Tir.returned(lengthTir)
   assert.strictEqual(
     lengthReturn?._tag === 'BuiltinCall' ? lengthReturn.arguments.at(0)?._tag : undefined,
     'SliceLength',
   )
-  const inspectHir = result.hir.functions.at(1)
-  const inspectReturn = inspectHir === undefined ? undefined : Hir.returned(inspectHir)
+  const inspectTir = result.tir.functions.at(1)
+  const inspectReturn = inspectTir === undefined ? undefined : Tir.returned(inspectTir)
   assert.strictEqual(inspectReturn?._tag, 'Project')
   if (inspectReturn?._tag === 'Project') {
     assert.strictEqual(inspectReturn.borrowAccess, 'Shared')
     assert.strictEqual(inspectReturn.subject._tag, 'SliceIndexPlace')
   }
-  const replaceHir = result.hir.functions.at(2)?.statements.at(0)
+  const replaceTir = result.tir.functions.at(2)?.statements.at(0)
   assert.strictEqual(
-    replaceHir?._tag === 'Write' ? replaceHir.place._tag : undefined,
+    replaceTir?._tag === 'Write' ? replaceTir.place._tag : undefined,
     'BorrowedWritePlace',
   )
-  assert.deepEqual(Hir.verify(result.hir), [])
+  assert.deepEqual(Tir.verify(result.tir), [])
 })
 
 it('admits shared slices through explicit generic type arguments', () => {
@@ -518,38 +518,38 @@ pub fn main() -> i32 { return read(&) }`)
     argument?._tag === 'Borrow' ? argument.formation._tag : undefined,
     'Unavailable',
   )
-  const main = result.hir.functions.at(1)
-  assert.notStrictEqual(main === undefined ? undefined : Hir.firstUnavailable(main), undefined)
+  const main = result.tir.functions.at(1)
+  assert.notStrictEqual(main === undefined ? undefined : Tir.firstUnavailable(main), undefined)
 })
 
-it('verifies mismatched HIR loan endings without introducing graph cycles', () => {
+it('verifies mismatched TIR loan endings without introducing graph cycles', () => {
   const result = analyze(`fn read(values: &[i32]) -> i32 { return 0 }
 pub fn main() -> i32 { let values = [1, 2] return read(&values) }`)
-  const fn = result.hir.functions.at(1)
+  const fn = result.tir.functions.at(1)
   const statement = fn?.statements.at(-1)
   if (fn === undefined || statement?._tag !== 'Return' || statement.expression._tag !== 'Call') {
-    throw new RangeError('expected slice call return HIR')
+    throw new RangeError('expected slice call return TIR')
   }
-  const expression: Hir.Expression = Object.freeze({
+  const expression: Tir.Expression = Object.freeze({
     ...statement.expression,
     loanEnds: Object.freeze([]),
   })
-  const returned: Hir.Statement = Object.freeze({ ...statement, expression })
-  const malformedFunction: Hir.HirFunction = Object.freeze({
+  const returned: Tir.Statement = Object.freeze({ ...statement, expression })
+  const malformedFunction: Tir.TirFunction = Object.freeze({
     ...fn,
     statements: Object.freeze([...fn.statements.slice(0, -1), returned]),
   })
-  const malformed: Hir.Module = Object.freeze({
-    ...result.hir,
+  const malformed: Tir.Module = Object.freeze({
+    ...result.tir,
     functions: Object.freeze([
-      ...result.hir.functions.slice(0, 1),
+      ...result.tir.functions.slice(0, 1),
       malformedFunction,
-      ...result.hir.functions.slice(2),
+      ...result.tir.functions.slice(2),
     ]),
   })
 
   assert.deepEqual(
-    Hir.verify(malformed).map((issue) => issue._tag),
+    Tir.verify(malformed).map((issue) => issue._tag),
     ['InvalidLoanEnd'],
   )
 })

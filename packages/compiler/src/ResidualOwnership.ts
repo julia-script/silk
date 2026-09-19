@@ -1,5 +1,5 @@
 import type * as DeclarationFacts from './DeclarationFacts.js'
-import type * as Hir from './Hir.js'
+import type * as Tir from './Tir.js'
 import * as Ownership from './Ownership.js'
 
 /** Why the caller requested ownership for this selected body. */
@@ -36,7 +36,7 @@ interface State {
   checked: number
   cacheReused: number
   readonly executedWork: MutableWork
-  readonly entries: WeakMap<Hir.HirFunction, Array<Entry>>
+  readonly entries: WeakMap<Tir.TirFunction, Array<Entry>>
   readonly observations: Array<Observation>
 }
 

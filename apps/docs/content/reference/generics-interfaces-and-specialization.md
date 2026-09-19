@@ -415,7 +415,7 @@ application diagnostics as a generic call. All such failures occur before owners
 
 **Current compiler:** Aligned. Construction collects field evidence for omitted ordinary, row, and
 representation parameters after a written prefix, retains every origin, and rejects missing or
-conflicting evidence before HIR lowering.
+conflicting evidence before TIR lowering.
 
 **Evidence:** [representation inference tests](../../../../packages/compiler/test/RepresentationInference.test.ts),
 [struct literal analysis](../../../../packages/compiler/src/ExpressionAnalysis.ts),
@@ -508,7 +508,7 @@ representation diagnostic at the escape or application before lowering. An incom
 bound identifies both the source parameter contract and destination field or parameter contract.
 
 **Current compiler:** Aligned. Representation identity survives substitution, nominal nesting,
-borrows, HIR, and instance discovery and must be concrete before layout and MIR.
+borrows, TIR, and instance discovery and must be concrete before layout and MIR.
 
 **Evidence:** [representation forwarding](../../../../openspec/specs/bootstrap-representation-parameters/spec.md),
 [representation inference tests](../../../../packages/compiler/test/RepresentationInference.test.ts),

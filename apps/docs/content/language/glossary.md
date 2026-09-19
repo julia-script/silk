@@ -131,7 +131,7 @@ _Avoid_: valid-program model, compiler-success result
 The lossless frontend artifact for one source module, owning its original bytes, tokens including
 comments and whitespace, and a source-faithful tree with explicit missing and error nodes. Stable
 source identities and byte spans connect its tokens and nodes to diagnostics and later semantic
-facts; semantic phases do not store tooling trivia in HIR.
+facts; semantic phases do not store tooling trivia in TIR.
 _Avoid_: trivia-free AST, valid-source tree
 
 **Bytes**:
@@ -288,11 +288,11 @@ bootstrap has no general iterator protocol, lazy chain, generator, or heap-alloc
 object.
 _Avoid_: iterator pipeline, enumerable collection
 
-**High-level intermediate representation (HIR)**:
-The compiler's generic-aware semantic representation after name, type, and function-contract
-elaboration. It uses canonical declaration and type identities, normalized contracts, core semantic
-operations, and source provenance; separate stable-ID-keyed tables retain partial semantic facts
-for tooling and incomplete programs.
+**Typed intermediate representation (TIR)**:
+The compiler's resolved, typed executable body representation, produced from the authored HIR after
+name, type, and function-contract elaboration. It uses canonical declaration and type identities,
+normalized contracts, core semantic operations, and source provenance; separate stable-ID-keyed
+tables retain partial semantic facts for tooling and incomplete programs.
 _Avoid_: annotated syntax tree, LLVM-like IR
 
 **Mid-level intermediate representation (MIR)**:
@@ -421,7 +421,7 @@ _Avoid_: wall clock, timer service
 
 **Phase encoder**:
 An optional observer that converts one canonical compiler-phase artifact, such as a syntax file,
-HIR, or MIR, into a requested textual or binary representation without changing that artifact or
+TIR, or MIR, into a requested textual or binary representation without changing that artifact or
 participating in the next phase. A phase has one semantic processor but may have multiple encoders;
 writing or transporting the encoded bytes is a separate boundary.
 _Avoid_: phase emitter, alternate phase processor, serialized pipeline handoff

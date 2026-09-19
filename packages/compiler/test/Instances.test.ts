@@ -16,7 +16,7 @@ import * as Analysis from '../src/Analysis.js'
 import * as Backend from '../src/Backend.js'
 import * as Layout from '../src/Layout.js'
 import * as Lifetime from '../src/Lifetime.js'
-import * as Hir from '../src/Hir.js'
+import * as Tir from '../src/Tir.js'
 import * as FunctionIndex from '../src/internal/FunctionIndex.js'
 import * as Instances from '../src/Instances.js'
 import * as LlvmBackend from '../src/LlvmBackend.js'
@@ -139,21 +139,21 @@ it.effect('discovers reachable call chains once and terminates recursion', () =>
   Effect.gen(function* () {
     const analyzedNested = yield* snapshot(nestedSource)
     const nested = Analysis.instancesOf(analyzedNested)
-    const hir = Analysis.rootAnalysis(analyzedNested).hir
-    for (const fn of hir.functions) {
+    const tir = Analysis.rootAnalysis(analyzedNested).tir
+    for (const fn of tir.functions) {
       if (fn.declaration.canonical._tag !== 'Canonical') continue
       const declaration = fn.declaration.canonical.id
-      assert.strictEqual(FunctionIndex.hirByName(hir, declaration.name), fn)
-      assert.strictEqual(FunctionIndex.hirByCanonical(hir, declaration), fn)
+      assert.strictEqual(FunctionIndex.tirByName(tir, declaration.name), fn)
+      assert.strictEqual(FunctionIndex.tirByCanonical(tir, declaration), fn)
       assert.strictEqual(
-        FunctionIndex.hirByCanonical(hir, { ...declaration, module: 'missing' }),
+        FunctionIndex.tirByCanonical(tir, { ...declaration, module: 'missing' }),
         undefined,
       )
     }
-    assert.strictEqual(FunctionIndex.hirByName(hir, 'missing'), undefined)
-    assert.strictEqual(FunctionIndex.hirByName(undefined, 'main'), undefined)
+    assert.strictEqual(FunctionIndex.tirByName(tir, 'missing'), undefined)
+    assert.strictEqual(FunctionIndex.tirByName(undefined, 'main'), undefined)
     // A changed immutable snapshot must not inherit the old module's cached entries.
-    assert.strictEqual(FunctionIndex.hirByName({ ...hir, functions: [] }, 'main'), undefined)
+    assert.strictEqual(FunctionIndex.tirByName({ ...tir, functions: [] }, 'main'), undefined)
     const direct = Analysis.instancesOf(yield* snapshot('pub fn main() -> i32 { return main() }'))
     const mutual = Analysis.instancesOf(
       yield* snapshot(`pub fn main() -> i32 { return other() }
@@ -839,24 +839,24 @@ pub fn main() -> i32 {
     assert.deepEqual(Analysis.diagnostics(first), [])
     assert.deepEqual(Analysis.diagnostics(second), [])
 
-    const firstHir = Analysis.rootAnalysis(first).hir
-    const secondHir = Analysis.rootAnalysis(second).hir
-    assert.strictEqual(Hir.encode(firstHir), Hir.encode(secondHir))
-    const hiddenNames = (hir: Hir.Module) =>
-      hir.functions.flatMap((fn) =>
+    const firstTir = Analysis.rootAnalysis(first).tir
+    const secondTir = Analysis.rootAnalysis(second).tir
+    assert.strictEqual(Tir.encode(firstTir), Tir.encode(secondTir))
+    const hiddenNames = (tir: Tir.Module) =>
+      tir.functions.flatMap((fn) =>
         fn.declaration.canonical._tag === 'Canonical' &&
         fn.declaration.canonical.id.name.includes('$callable$')
           ? [fn.declaration.canonical.id.name]
           : [],
       )
-    assert.deepEqual(hiddenNames(firstHir), [
+    assert.deepEqual(hiddenNames(firstTir), [
       'main$callable$0',
       'main$callable$1',
       'main$callable$2',
     ])
-    assert.deepEqual(hiddenNames(firstHir), hiddenNames(secondHir))
+    assert.deepEqual(hiddenNames(firstTir), hiddenNames(secondTir))
 
-    const main = firstHir.functions.find(
+    const main = firstTir.functions.find(
       (fn) =>
         fn.declaration.canonical._tag === 'Canonical' &&
         fn.declaration.canonical.id.name === 'main',
@@ -865,13 +865,13 @@ pub fn main() -> i32 {
       main === undefined
         ? []
         : main.statements
-            .flatMap(Hir.statementExpressions)
-            .flatMap(Hir.expressionTree)
+            .flatMap(Tir.statementExpressions)
+            .flatMap(Tir.expressionTree)
             .filter(
               (
                 expression,
               ): expression is Extract<
-                Hir.Expression,
+                Tir.Expression,
                 {
                   readonly _tag: 'CallableSection'
                 }
@@ -921,7 +921,7 @@ pub fn main() -> i32 {
       ],
     )
 
-    const hidden = firstHir.functions.find(
+    const hidden = firstTir.functions.find(
       (fn) =>
         fn.declaration.canonical._tag === 'Canonical' &&
         fn.declaration.canonical.id.name === 'main$callable$2',

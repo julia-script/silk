@@ -66,7 +66,7 @@ effect fn outer() -> i32 { return inner() }
 produce a return-type mismatch at the returned expression, naming the declared success type and the
 actual expression type. `SEM0129` reports an incompatible explicit return at the returned
 expression. `SEM0130` reports reachable fallthrough from a body whose declared result is not `()`.
-HIR may retain explicitly unavailable structure for inspection, but realization, layout, MIR, and
+TIR may retain explicitly unavailable structure for inspection, but realization, layout, MIR, and
 backends are unavailable while either diagnostic exists.
 
 This is not intentional tail propagation. Issue

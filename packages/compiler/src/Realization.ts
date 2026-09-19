@@ -390,7 +390,7 @@ const discoverAndLowerEffect = Effect.fn('Realization.discoverAndLower')(functio
       })
     : undefined
   // Source diagnostics are the recovery result for an invalid program. Keep declaration,
-  // instance, and layout facts queryable, but do not demand executable runners from invalid HIR.
+  // instance, and layout facts queryable, but do not demand executable runners from invalid TIR.
   // Valid programs still pass through the complete lowering and verification boundary below.
   const sourceDiagnosticError = Diagnostic.hasErrors(diagnostics)
     ? new AnalysisUnavailable({

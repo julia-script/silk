@@ -13,7 +13,7 @@ import * as ConfigurationOrigin from '../src/ConfigurationOrigin.js'
 import * as ConfigurationValue from '../src/ConfigurationValue.js'
 import * as PackageParameter from '../src/PackageParameter.js'
 import * as FloatingPoint from '../src/FloatingPoint.js'
-import * as Hir from '../src/Hir.js'
+import * as Tir from '../src/Tir.js'
 import * as Instances from '../src/Instances.js'
 import * as Lexer from '../src/Lexer.js'
 import * as Lifetime from '../src/Lifetime.js'
@@ -1344,9 +1344,9 @@ pub fn main() -> i32 { return choose(true, 41) }`),
       (instance) => instance.key.declaration.name === 'choose',
     )
     if (selected === undefined) throw new Error('expected selected residual instance')
-    const hir = Hir.encode(
+    const tir = Tir.encode(
       Object.freeze({
-        _tag: 'HirModule',
+        _tag: 'TirModule',
         module: 'static/encoding',
         functions: Object.freeze([selected.function]),
       }),
@@ -1364,7 +1364,7 @@ pub fn main() -> i32 { return choose(true, 41) }`),
       'eec2210666e5c049b8352f5c4c07c94c97b0492768591d37ebfd4a044fcb3926',
     )
     assert.strictEqual(
-      sha256(hir),
+      sha256(tir),
       'bd2543084bec93081c83fffe9526d5b812bfb0db7694ec495e31091f942a44a4',
     )
     assert.strictEqual(
@@ -1868,7 +1868,7 @@ pub fn main() -> i32 { return 42 }`),
       Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
       ['SEM0085'],
     )
-    assert.strictEqual(Projections.hirOf(snapshot, 'static/recovery')?.functions.length, 2)
+    assert.strictEqual(Projections.tirOf(snapshot, 'static/recovery')?.functions.length, 2)
   }),
 )
 
@@ -1885,7 +1885,7 @@ it.effect('keeps lexical literal sentinels out of parser and semantic diagnostic
       Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
       ['LEX0002'],
     )
-    assert.strictEqual(Projections.hirOf(snapshot, 'static/lexical-sentinel')?.functions.length, 1)
+    assert.strictEqual(Projections.tirOf(snapshot, 'static/lexical-sentinel')?.functions.length, 1)
   }),
 )
 

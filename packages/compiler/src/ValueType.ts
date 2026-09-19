@@ -4,7 +4,7 @@ import type {} from './EntryAssembly.js'
 import * as FieldRealization from './FieldRealization.js'
 import type {} from './Forwarding.js'
 import type { FunctionLowering } from './FunctionLowering.js'
-import * as Hir from './Hir.js'
+import * as Tir from './Tir.js'
 import * as Instances from './Instances.js'
 import type * as Intrinsic from './Intrinsic.js'
 import * as EffectExecutionContract from './internal/EffectExecutionContract.js'
@@ -19,7 +19,7 @@ import * as Type from './Type.js'
 
 /** One concrete source witness selected before an enclosing Effect block becomes a runner. */
 export interface SpecializedWitnessEffectTarget {
-  readonly site: Hir.EffectSiteId
+  readonly site: Tir.EffectSiteId
   readonly target: ConformanceProof.InterfaceWitnessTarget
 }
 
@@ -27,7 +27,7 @@ export interface GeneratedBlockEffectRunner {
   readonly _tag: 'BlockEffectRunner'
   readonly id: DeclarationFacts.CanonicalId
   readonly owner: Instances.Instance
-  readonly block: Extract<Hir.Expression, { readonly _tag: 'EffectBlock' }>
+  readonly block: Extract<Tir.Expression, { readonly _tag: 'EffectBlock' }>
   readonly type: Extract<Mir.Type, { readonly _tag: 'EffectValue' }>
   readonly specializationKey: string
   readonly providedRequirements: ReadonlyArray<Omit<ProvidedRequirement, 'local'>>
@@ -39,7 +39,7 @@ export interface GeneratedWitnessEffectRunner {
   readonly id: DeclarationFacts.CanonicalId
   readonly owner: Instances.Instance
   readonly expression: Extract<
-    Hir.Expression,
+    Tir.Expression,
     { readonly _tag: 'BuiltinCall' | 'InterfaceOperationCall' }
   >
   readonly target?: ConformanceProof.InterfaceWitnessTarget
@@ -53,7 +53,7 @@ export interface GeneratedBuiltinEffectRunner {
   readonly _tag: 'BuiltinEffectRunner'
   readonly id: DeclarationFacts.CanonicalId
   readonly owner: Instances.Instance
-  readonly expression: Extract<Hir.Expression, { readonly _tag: 'BuiltinCall' }>
+  readonly expression: Extract<Tir.Expression, { readonly _tag: 'BuiltinCall' }>
   readonly type: Extract<Mir.Type, { readonly _tag: 'EffectValue' }>
   readonly specializationKey: string
   readonly providedRequirements: ReadonlyArray<Omit<ProvidedRequirement, 'local'>>
@@ -63,7 +63,7 @@ export interface GeneratedCatchEffectRunner {
   readonly _tag: 'CatchEffectRunner'
   readonly id: DeclarationFacts.CanonicalId
   readonly owner: Instances.Instance
-  readonly expression: Extract<Hir.Expression, { readonly _tag: 'EffectCatch' }>
+  readonly expression: Extract<Tir.Expression, { readonly _tag: 'EffectCatch' }>
   readonly type: Extract<Mir.Type, { readonly _tag: 'EffectValue' }>
   readonly protectedType: Extract<Mir.Type, { readonly _tag: 'EffectValue' }>
   readonly handlerType: Extract<Mir.Type, { readonly _tag: 'CallableValue' }>
@@ -83,13 +83,13 @@ export const instanceText = (
   staticArguments: ReadonlyArray<StaticValue.Value> = Object.freeze([]),
 ): string => Specialization.runtimeKey({ declaration, typeArguments, staticArguments })
 
-const runnerSiteKey = (owner: Instances.InstanceKey, site: Hir.EffectSiteId): string =>
-  `${instanceText(owner.declaration, owner.typeArguments, owner.staticArguments)}\u0000${Hir.executableSiteKey(site)}`
+const runnerSiteKey = (owner: Instances.InstanceKey, site: Tir.EffectSiteId): string =>
+  `${instanceText(owner.declaration, owner.typeArguments, owner.staticArguments)}\u0000${Tir.executableSiteKey(site)}`
 
 /** Exact semantic specialization of one generated Effect runner at a physical source site. */
 export const baseRunnerKey = (
   owner: Instances.InstanceKey,
-  site: Hir.EffectSiteId,
+  site: Tir.EffectSiteId,
   effect: Type.Effect,
 ): string => `${runnerSiteKey(owner, site)}\u0000effect:${EffectExecutionContract.key(effect)}`
 
@@ -152,14 +152,14 @@ const providerRequirementSubtractionMatches = (
 export const effectValueType = (
   layout: Layout.Plan,
   instance: Instances.InstanceKey,
-  block: Extract<Hir.Expression, { readonly _tag: 'EffectBlock' }>,
+  block: Extract<Tir.Expression, { readonly _tag: 'EffectBlock' }>,
   requested: Type.Effect,
 ): Extract<Mir.Type, { readonly _tag: 'EffectValue' }> | undefined => {
   const environment = layout.effectEnvironments.find(
     (candidate) =>
       candidate._tag === 'EffectEnvironment' &&
       Instances.keyText(candidate.instance) === Instances.keyText(instance) &&
-      Hir.sameExecutableSite(candidate.site, block.site) &&
+      Tir.sameExecutableSite(candidate.site, block.site) &&
       EffectExecutionContract.equals(candidate.effect, requested),
   )
   if (environment?._tag !== 'EffectEnvironment') return undefined
@@ -174,14 +174,14 @@ export const effectValueType = (
 export const effectValueAtSite = (
   layout: Layout.Plan,
   instance: Instances.InstanceKey,
-  site: Hir.EffectSiteId,
+  site: Tir.EffectSiteId,
   requested: Type.Effect,
 ): Extract<Mir.Type, { readonly _tag: 'EffectValue' }> | undefined => {
   const environment = layout.effectEnvironments.find(
     (candidate) =>
       candidate._tag === 'EffectEnvironment' &&
       Instances.keyText(candidate.instance) === Instances.keyText(instance) &&
-      Hir.sameExecutableSite(candidate.site, site) &&
+      Tir.sameExecutableSite(candidate.site, site) &&
       EffectExecutionContract.equals(candidate.effect, requested),
   )
   return environment?._tag !== 'EffectEnvironment'
@@ -206,7 +206,7 @@ const effectEnvironmentsByIdentity = (
   const success = available.filter((candidate) => candidate.successEffectIdentity === identity)
   const recovered = available.filter(
     (candidate) =>
-      Hir.effectRepresentationIdentity(candidate.site) === identity &&
+      Tir.effectRepresentationIdentity(candidate.site) === identity &&
       owner !== undefined &&
       candidate.instance.declaration.module === owner.declaration.module &&
       candidate.instance.declaration.name === owner.declaration.name &&
@@ -286,7 +286,7 @@ export const callableValueByIdentity = (
   identity: Type.CallableIdentityArgument,
   type: Type.Callable,
 ): Extract<Mir.Type, { readonly _tag: 'CallableValue' }> | undefined => {
-  const target = Hir.callableTargetFromIdentity(identity.target)
+  const target = Tir.callableTargetFromIdentity(identity.target)
   const environment =
     identity.environment === undefined
       ? undefined
@@ -464,7 +464,7 @@ export const representedValueType = (
           ),
           definition.construction.arguments,
         ) &&
-        definition.construction.site === Hir.effectRepresentationIdentity(candidate.site) &&
+        definition.construction.site === Tir.effectRepresentationIdentity(candidate.site) &&
         Type.equals(candidate.effect, specialized.contract),
     )
     return environment === undefined
@@ -504,7 +504,7 @@ export const storedCallableValueType = (
   return Object.freeze({
     _tag: 'CallableValue',
     type: realization.contract,
-    target: Hir.callableTargetFromIdentity(realization.target),
+    target: Tir.callableTargetFromIdentity(realization.target),
     ...(realization.site === undefined ? {} : { site: realization.site }),
     ...(environment === undefined ? {} : { environment }),
     storage: Object.freeze({
@@ -604,7 +604,7 @@ export const ensureEffectRunner = (
   )
     return (
       type.storage?.realization.runner ??
-      Hir.effectRunnerId(type.environment.instance.declaration, type.site)
+      Tir.effectRunnerId(type.environment.instance.declaration, type.site)
     )
   // Layout entries can differ in caller-local proof evidence while selecting the same
   // physical owner and site. Match that identity and the exact execution channels;
@@ -669,12 +669,12 @@ export const providerBindings = (
     ) ?? [],
   )
 
-export const sameSite = (left: Hir.CallableSiteId, right: Hir.CallableSiteId): boolean =>
-  Hir.sameExecutableSite(left, right)
+export const sameSite = (left: Tir.CallableSiteId, right: Tir.CallableSiteId): boolean =>
+  Tir.sameExecutableSite(left, right)
 
 const recontextualizedCallableEnvironment = (
   fn: FunctionLowering,
-  section: Extract<Hir.Expression, { readonly _tag: 'CallableSection' }>,
+  section: Extract<Tir.Expression, { readonly _tag: 'CallableSection' }>,
   type: Type.Callable,
   substitution: Type.Substitution,
   environment: Extract<Layout.CallableEnvironment, { readonly _tag: 'CallableEnvironment' }>,
@@ -720,13 +720,13 @@ const recontextualizedCallableEnvironment = (
 
 export const callableValueType = (
   fn: FunctionLowering,
-  section: Extract<Hir.Expression, { readonly _tag: 'CallableSection' }>,
+  section: Extract<Tir.Expression, { readonly _tag: 'CallableSection' }>,
   applicationSubstitution: Type.Substitution = new Map(),
 ): Extract<Mir.Type, { readonly _tag: 'CallableValue' }> | undefined => {
   const substitution = new Map([...section.substitution, ...applicationSubstitution])
   const expected = Type.substitute(fn.semantic(section.type), substitution)
   if (!Type.isCallable(expected)) return undefined
-  const identity = Hir.callableEnvironmentIdentity(section.site, {
+  const identity = Tir.callableEnvironmentIdentity(section.site, {
     declaration: fn.owner.key.declaration,
     typeArguments: fn.owner.key.typeArguments,
     staticArgumentKeys: Object.freeze(fn.owner.key.staticArguments.map(StaticValue.key)),
@@ -781,8 +781,8 @@ export const callableValueType = (
 /** The environment-bearing value type a staged application builds at its own site. */
 export const stagedCallableValueType = (
   fn: FunctionLowering,
-  expression: Extract<Hir.Expression, { readonly _tag: 'CallableApply' }>,
-  site: Hir.CallableSiteId,
+  expression: Extract<Tir.Expression, { readonly _tag: 'CallableApply' }>,
+  site: Tir.CallableSiteId,
 ): Extract<Mir.Type, { readonly _tag: 'CallableValue' }> | undefined => {
   const expected = fn.semantic(expression.type)
   const candidates = fn.layout.callableEnvironments.filter(
@@ -808,7 +808,7 @@ export const stagedCallableValueType = (
 
 export const directCallableSectionValueType = (
   fn: FunctionLowering,
-  section: Extract<Hir.Expression, { readonly _tag: 'CallableSection' }>,
+  section: Extract<Tir.Expression, { readonly _tag: 'CallableSection' }>,
   applicationSubstitution: Type.Substitution,
 ): Extract<Mir.Type, { readonly _tag: 'CallableValue' }> | undefined => {
   // Resolve application arguments before the enclosing instance: an argument may
@@ -823,7 +823,7 @@ export const directCallableSectionValueType = (
 
 export const functionItemValueType = (
   fn: FunctionLowering,
-  item: Extract<Hir.Expression, { readonly _tag: 'FunctionItem' }>,
+  item: Extract<Tir.Expression, { readonly _tag: 'FunctionItem' }>,
   applicationSubstitution: Type.Substitution = new Map(),
 ): Extract<Mir.Type, { readonly _tag: 'CallableValue' }> | undefined => {
   const type = Type.substitute(

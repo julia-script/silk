@@ -8,7 +8,7 @@ import * as Diagnostic from './Diagnostic.js'
 import * as Elaboration from './Elaboration.js'
 import * as ExecutionAffinity from './ExecutionAffinity.js'
 import * as FieldRealization from './FieldRealization.js'
-import * as Hir from './Hir.js'
+import * as Tir from './Tir.js'
 import * as TypeInference from './internal/TypeInference.js'
 import * as LocalSharedOwnership from './LocalSharedOwnership.js'
 import * as Match from './Match.js'
@@ -19,7 +19,7 @@ import type * as SourceSpan from './SourceSpan.js'
 import * as Type from './Type.js'
 
 /**
- * The ownership and scope phase over typed HIR. It runs once per declaration and is a producer:
+ * The ownership and scope phase over typed TIR. It runs once per declaration and is a producer:
  * ownership facts plus the target-neutral cleanup plan MIR lowering consumes to insert drops.
  * Bindings cover parameters and `let` statements; an explicit `move` consumes its binding even
  * for copyable types, and later uses are `OWN0001` violations.
@@ -34,11 +34,11 @@ export type OwnershipCategory =
 /** Where one binding was introduced: a parameter or a `let` statement. */
 export type BindingSite =
   | { readonly _tag: 'Parameter'; readonly parameter: DeclarationFacts.ParameterId }
-  | { readonly _tag: 'Let'; readonly binding: Hir.BindingId }
+  | { readonly _tag: 'Let'; readonly binding: Tir.BindingId }
   | { readonly _tag: 'Pattern'; readonly binding: Match.BindingId }
-  | { readonly _tag: 'Temporary'; readonly owner: Hir.TemporaryOwnerId }
+  | { readonly _tag: 'Temporary'; readonly owner: Tir.TemporaryOwnerId }
 
-const ownedWriteSite = (root: Hir.OwnedWriteRoot): BindingSite => {
+const ownedWriteSite = (root: Tir.OwnedWriteRoot): BindingSite => {
   if (root._tag === 'ParameterWriteRoot')
     return Object.freeze({ _tag: 'Parameter', parameter: root.parameter })
   if (root._tag === 'PatternWriteRoot')
@@ -83,7 +83,7 @@ export interface Release {
 }
 
 /** A deterministic compiler-only identity for one lexical borrowed-view loan. */
-export type BorrowId = Hir.BorrowId
+export type BorrowId = Tir.BorrowId
 
 /** One concrete validity dependency, retaining its precise known subplace. */
 export interface LoanReferent {
@@ -143,8 +143,8 @@ export interface LoanFact {
     | 'ReturnedView'
   readonly parent?: BindingSite
   readonly suspendsParent: boolean
-  readonly startRegion: Hir.RegionId
-  readonly endRegion: Hir.RegionId
+  readonly startRegion: Tir.RegionId
+  readonly endRegion: Tir.RegionId
   readonly startSpan: SourceSpan.SourceSpan
   readonly endSpan: SourceSpan.SourceSpan
   /** The retained storage is used by a destructor, so expression completion cannot end this loan. */
@@ -154,7 +154,7 @@ export interface LoanFact {
 /** One write that displaces a live value: lowering cleans the displaced value before the commit. */
 export interface ReplacementFact {
   readonly _tag: 'Replacement'
-  readonly region: Hir.RegionId
+  readonly region: Tir.RegionId
   readonly type: DeclarationFacts.SemanticType
   readonly cleanup: CleanupPlan.CleanupPlan
   readonly span: SourceSpan.SourceSpan
@@ -185,7 +185,7 @@ export interface CallableEnvironmentSlot {
 /** Ownership facts for one hidden callable section environment. */
 export interface CallableEnvironmentFact {
   readonly _tag: 'CallableEnvironment'
-  readonly site: Hir.CallableSiteId
+  readonly site: Tir.CallableSiteId
   readonly mode: Type.CallableMode
   readonly slots: ReadonlyArray<CallableEnvironmentSlot>
   readonly executionAffinity: ExecutionAffinity.ExecutionAffinity
@@ -239,9 +239,9 @@ export interface ExitPlan {
     | 'Continue'
     | 'Propagation'
   readonly span: SourceSpan.SourceSpan
-  readonly region?: Hir.RegionId
+  readonly region?: Tir.RegionId
   readonly arm?: 'Taken' | 'Otherwise'
-  readonly target?: Hir.LoopId
+  readonly target?: Tir.LoopId
   readonly loanEnds: ReadonlyArray<BorrowId>
   readonly releases: ReadonlyArray<Release>
   readonly temporaries: ReadonlyArray<TemporaryRelease>
@@ -251,7 +251,7 @@ export interface ExitPlan {
 /** The finite owner-liveness states used to establish one deterministic loop header. */
 export interface LoopFixedPoint {
   readonly _tag: 'LoopFixedPoint'
-  readonly loop: Hir.LoopId
+  readonly loop: Tir.LoopId
   readonly span: SourceSpan.SourceSpan
   readonly incoming: ReadonlyArray<BindingSite>
   readonly repeating: ReadonlyArray<ReadonlyArray<BindingSite>>
@@ -406,10 +406,10 @@ interface MutableBinding {
 }
 
 interface ExpressionExecution {
-  readonly regions: Array<{ readonly region: Hir.RegionId; readonly frame: number }>
+  readonly regions: Array<{ readonly region: Tir.RegionId; readonly frame: number }>
   readonly guard: boolean
   readonly frames: Array<Array<string>>
-  readonly loopScopes: ReadonlyArray<{ readonly loop: Hir.LoopId; readonly frame: number }>
+  readonly loopScopes: ReadonlyArray<{ readonly loop: Tir.LoopId; readonly frame: number }>
   readonly temporaries: Array<{ readonly frame: number; readonly release: TemporaryRelease }>
   readonly matches: Array<{ readonly frame: number; readonly release: MatchRelease }>
 }
@@ -436,14 +436,14 @@ interface CheckState {
   execution: ExpressionExecution | undefined
   readonly checkMatch: (
     live: FlowState,
-    expression: Extract<Hir.Expression, { readonly _tag: 'Match' }>,
+    expression: Extract<Tir.Expression, { readonly _tag: 'Match' }>,
     consuming: boolean,
     guard: boolean,
     escaping: boolean,
   ) => boolean
   readonly propagation: (
     live: FlowState,
-    expression: Extract<Hir.Expression, { readonly _tag: 'Run' }>,
+    expression: Extract<Tir.Expression, { readonly _tag: 'Run' }>,
   ) => void
   readonly transitions: Array<PlaceTransition>
   readonly shapes: Map<string, MovePath.ShapeOf>
@@ -584,7 +584,7 @@ const fieldSelectors = (field: DeclarationFacts.FieldId): MovePath.Path =>
 
 /** Identifies an owned source place without evaluating it or refining its variant state. */
 export const placeOf = (
-  expression: Hir.Expression,
+  expression: Tir.Expression,
 ): { readonly root: BindingSite; readonly path: MovePath.Path } | undefined => {
   if (expression._tag === 'Project') {
     if (expression.subject._tag !== 'Unavailable' && Type.isReference(expression.subject.type))
@@ -619,7 +619,7 @@ const canonicalPlace = (
 }
 
 const selectorPath = (
-  selectors: ReadonlyArray<Hir.BorrowSelector | Hir.WriteSelector>,
+  selectors: ReadonlyArray<Tir.BorrowSelector | Tir.WriteSelector>,
 ): MovePath.Path | undefined => {
   const path: Array<MovePath.Selector> = []
   for (const selector of selectors) {
@@ -717,7 +717,7 @@ const sameFlow = (left: ReadonlyFlowState, right: ReadonlyFlowState): boolean =>
     return candidate !== undefined && MovePath.equivalent(value, candidate)
   })
 
-const useSite = (expression: Hir.Expression): BindingSite | undefined => {
+const useSite = (expression: Tir.Expression): BindingSite | undefined => {
   switch (expression._tag) {
     case 'ParameterReference':
       return Object.freeze({ _tag: 'Parameter', parameter: expression.parameter })
@@ -730,7 +730,7 @@ const useSite = (expression: Hir.Expression): BindingSite | undefined => {
   }
 }
 
-const placeSite = (expression: Hir.Expression): BindingSite | undefined => {
+const placeSite = (expression: Tir.Expression): BindingSite | undefined => {
   if (expression._tag === 'Project' || expression._tag === 'IndexPlace') {
     return placeSite(expression.subject)
   }
@@ -739,9 +739,9 @@ const placeSite = (expression: Hir.Expression): BindingSite | undefined => {
 
 const retainedBinding = (
   state: CheckState,
-  expression: Hir.Expression,
+  expression: Tir.Expression,
 ): MutableBinding | undefined => {
-  let source: Hir.Expression
+  let source: Tir.Expression
   if (expression._tag === 'Move') {
     source = expression.subject
   } else if (expression._tag === 'UnionConvert') {
@@ -753,7 +753,7 @@ const retainedBinding = (
   return site === undefined ? undefined : state.bindings.get(siteKey(site))
 }
 
-const borrowRootType = (state: CheckState, expression: Hir.Expression): Type.Type | undefined => {
+const borrowRootType = (state: CheckState, expression: Tir.Expression): Type.Type | undefined => {
   if (expression._tag !== 'SliceBorrow' && expression._tag !== 'ValueBorrow') return undefined
   if (expression.root._tag === 'TemporarySliceRoot')
     return expression.root.value._tag === 'Unavailable' ? undefined : expression.root.value.type
@@ -775,7 +775,7 @@ const borrowRootType = (state: CheckState, expression: Hir.Expression): Type.Typ
  * declaration-owned representation bound; both name the same contract, and neither is read from the
  * construction that filled the field. A field of any other type stores no callable.
  */
-const storedCallableContract = (place: Hir.Expression): Type.Callable | undefined => {
+const storedCallableContract = (place: Tir.Expression): Type.Callable | undefined => {
   if (place._tag !== 'Project') return undefined
   const type = place.type
   if (Type.isRepresented(type)) return Type.isCallable(type.contract) ? type.contract : undefined
@@ -783,7 +783,7 @@ const storedCallableContract = (place: Hir.Expression): Type.Callable | undefine
 }
 
 /** The Effect contract one place stores, when the place is a represented nominal field. */
-const storedEffectContract = (place: Hir.Expression): Type.Effect | undefined => {
+const storedEffectContract = (place: Tir.Expression): Type.Effect | undefined => {
   if (place._tag !== 'Project') return undefined
   const type = place.type
   if (Type.isRepresented(type))
@@ -801,7 +801,7 @@ const storedEffectContract = (place: Hir.Expression): Type.Effect | undefined =>
  */
 const receiverAccess = (
   state: CheckState,
-  place: Hir.Expression,
+  place: Tir.Expression,
 ): FieldRealization.ReceiverAccess => {
   if (place._tag !== 'Project' && place._tag !== 'IndexPlace') {
     const site = useSite(place)
@@ -825,7 +825,7 @@ const receiverAccess = (
  */
 const storedCallableInvocationAccess = (
   state: CheckState,
-  callee: Hir.Expression,
+  callee: Tir.Expression,
   access: Type.CallableMode,
   span: SourceSpan.SourceSpan,
 ): Diagnostic.Diagnostic | undefined => {
@@ -847,7 +847,7 @@ const storedCallableInvocationAccess = (
 /** Rejects running a stored Effect through aggregate access weaker than its representation bound. */
 const storedEffectRunAccess = (
   state: CheckState,
-  subject: Hir.Expression,
+  subject: Tir.Expression,
   span: SourceSpan.SourceSpan,
 ): Diagnostic.Diagnostic | undefined => {
   if (subject._tag !== 'Project') return undefined
@@ -881,7 +881,7 @@ const checkUse = (
 
 const callableEnvironment = (
   state: CheckState,
-  expression: Extract<Hir.Expression, { readonly _tag: 'CallableSection' }>,
+  expression: Extract<Tir.Expression, { readonly _tag: 'CallableSection' }>,
 ): CallableEnvironmentFact => {
   const slots = Object.freeze(
     expression.captures.map((capture): CallableEnvironmentSlot => {
@@ -941,7 +941,7 @@ const callableEnvironment = (
 
 const executableEnvironment = (
   state: CheckState,
-  expression: Hir.Expression,
+  expression: Tir.Expression,
 ):
   | {
       readonly affinity: ExecutionAffinity.ExecutionAffinity
@@ -1060,7 +1060,7 @@ const callableCleanup = (
 const checkPlaceInterior = (
   state: CheckState,
   live: FlowState,
-  place: Hir.Expression,
+  place: Tir.Expression,
   guard: boolean,
   escaping: boolean,
 ): boolean => {
@@ -1078,7 +1078,7 @@ const checkPlaceInterior = (
   return true
 }
 
-const retainTemporary = (state: CheckState, expression: Hir.Expression): void => {
+const retainTemporary = (state: CheckState, expression: Tir.Expression): void => {
   const execution = state.execution
   if (expression._tag === 'Unavailable' || execution === undefined) return
   const cleanup = cleanupPlan(state, expression.type)
@@ -1133,7 +1133,7 @@ const checkPatternUse = (
 const checkExpression = (
   state: CheckState,
   live: FlowState,
-  expression: Hir.Expression,
+  expression: Tir.Expression,
   consuming: boolean,
   guard = state.execution?.guard ?? false,
   escaping = false,
@@ -1155,12 +1155,12 @@ const checkExpression = (
 const checkExpressionOperation = (
   state: CheckState,
   live: FlowState,
-  expression: Hir.Expression,
+  expression: Tir.Expression,
   consuming: boolean,
   guard = state.execution?.guard ?? false,
   escaping = false,
 ): boolean => {
-  const argumentConsumes = (argument: Hir.Expression): boolean => {
+  const argumentConsumes = (argument: Tir.Expression): boolean => {
     if (argument._tag === 'Unavailable') {
       return true
     }
@@ -1381,7 +1381,7 @@ const checkExpressionOperation = (
       const environment = callableEnvironment(state, expression)
       if (
         !state.callables.some((candidate) =>
-          Hir.sameExecutableSite(candidate.site, expression.site),
+          Tir.sameExecutableSite(candidate.site, expression.site),
         )
       ) {
         state.callables.push(environment)
@@ -1580,7 +1580,7 @@ const checkExpressionOperation = (
     case 'EffectCatch':
       // The sealed primitive has the same owned operands as its ordinary callable contract.
       // Visiting both here preserves take-once use checking after elaboration replaces the call
-      // with dedicated HIR.
+      // with dedicated TIR.
       if (
         !checkExpression(
           state,
@@ -1686,7 +1686,7 @@ const checkExpressionOperation = (
  * because the statement walker recurses into them itself, and would otherwise observe the same
  * expression twice.
  */
-const statementRootExpressions = (statement: Hir.Statement): ReadonlyArray<Hir.Expression> => {
+const statementRootExpressions = (statement: Tir.Statement): ReadonlyArray<Tir.Expression> => {
   switch (statement._tag) {
     case 'Bind':
       return [statement.initializer]
@@ -1717,8 +1717,8 @@ const statementRootExpressions = (statement: Hir.Statement): ReadonlyArray<Hir.E
 
 /** Effect blocks owned by this expression, stopping at each block: nested blocks belong to it. */
 const deferredBlocks = (
-  expression: Hir.Expression,
-): ReadonlyArray<Extract<Hir.Expression, { readonly _tag: 'EffectBlock' }>> => {
+  expression: Tir.Expression,
+): ReadonlyArray<Extract<Tir.Expression, { readonly _tag: 'EffectBlock' }>> => {
   if (expression._tag === 'EffectBlock') return [expression]
   if (expression._tag === 'Match')
     return [
@@ -1728,7 +1728,7 @@ const deferredBlocks = (
         ...(arm.body._tag === 'Expression' ? [arm.body.expression] : []),
       ]),
     ].flatMap(deferredBlocks)
-  return Hir.expressionChildren(expression).flatMap(deferredBlocks)
+  return Tir.expressionChildren(expression).flatMap(deferredBlocks)
 }
 
 const cleanupPlan = (state: CheckState, type: Type.Type): CleanupPlan.CleanupPlan => {
@@ -1759,7 +1759,7 @@ const sameSite = (left: BindingSite, right: BindingSite): boolean =>
   siteKey(left) === siteKey(right)
 
 interface LoanEndpoint {
-  readonly region: Hir.RegionId
+  readonly region: Tir.RegionId
   readonly span: SourceSpan.SourceSpan
   readonly cleanupOnly?: boolean
 }
@@ -1866,7 +1866,7 @@ const analyzeLoans = (
   // between constructing a call argument and invoking the callee that reads it.
   const scanRunEnds = (
     expression: Elaboration.ExpressionFact,
-    region: Hir.RegionId,
+    region: Tir.RegionId,
     useSpan: SourceSpan.SourceSpan = expression.syntax.span,
   ): void => {
     switch (expression._tag) {
@@ -2677,7 +2677,7 @@ const analyzeLoans = (
 
   const inspect = (
     expression: Elaboration.ExpressionFact,
-    region: Hir.RegionId,
+    region: Tir.RegionId,
     active: ReadonlyArray<LoanFact>,
     access: 'Read' | 'Write' | 'Move' = 'Read',
     delayedEnd?: LoanEndpoint,
@@ -3342,18 +3342,18 @@ export interface CheckedFunction {
 interface ExitDescriptor {
   readonly kind: ExitPlan['kind']
   readonly span: SourceSpan.SourceSpan
-  readonly region?: Hir.RegionId
+  readonly region?: Tir.RegionId
   readonly arm?: 'Taken' | 'Otherwise'
-  readonly target?: Hir.LoopId
+  readonly target?: Tir.LoopId
   readonly sites: ReadonlyArray<string>
   readonly initialization: ReadonlyFlowState
   readonly temporaries?: ReadonlyArray<TemporaryRelease>
   readonly matches?: ReadonlyArray<MatchRelease>
-  readonly loanRegions?: ReadonlyArray<Hir.RegionId>
+  readonly loanRegions?: ReadonlyArray<Tir.RegionId>
 }
 
 const checkFunction = (
-  fn: Hir.HirFunction,
+  fn: Tir.TirFunction,
   index: DeclarationIndex.Index,
   semantic?: Elaboration.FunctionFact,
   localSharedBoundaries: ReadonlyArray<SourceSpan.SourceSpan> = Object.freeze([]),
@@ -3399,19 +3399,19 @@ const checkFunction = (
   }
   if (localSharedBoundaries.length > 0) {
     const activeBoundaryOperations = (
-      expression: Hir.Expression,
-    ): ReadonlyArray<Hir.Expression> => {
+      expression: Tir.Expression,
+    ): ReadonlyArray<Tir.Expression> => {
       if (expression._tag === 'EffectBlock') return Object.freeze([])
       return Object.freeze([
         ...(expression._tag === 'Run' ||
         (expression._tag === 'BuiltinCall' && expression.operation === 'ExecutionWake')
           ? [expression]
           : []),
-        ...Hir.expressionChildren(expression).flatMap(activeBoundaryOperations),
+        ...Tir.expressionChildren(expression).flatMap(activeBoundaryOperations),
       ])
     }
     const boundaryOperations = fn.statements
-      .flatMap(Hir.statementExpressions)
+      .flatMap(Tir.statementExpressions)
       .flatMap(activeBoundaryOperations)
     for (const boundary of localSharedBoundaries)
       for (const operation of boundaryOperations)
@@ -3429,8 +3429,8 @@ const checkFunction = (
   if (localSharedResultBoundaries.length > 0) {
     const parameter = fn.declaration.parameters.at(0)?.id
     if (parameter !== undefined) {
-      const bindings = new Map<number, Hir.Expression>()
-      const collectBindings = (statements: ReadonlyArray<Hir.Statement>): void => {
+      const bindings = new Map<number, Tir.Expression>()
+      const collectBindings = (statements: ReadonlyArray<Tir.Statement>): void => {
         for (const statement of statements) {
           if (statement._tag === 'Bind')
             bindings.set(statement.binding.ordinal, statement.initializer)
@@ -3444,7 +3444,7 @@ const checkFunction = (
       }
       collectBindings(fn.statements)
       const referencesParameter = (
-        expression: Hir.Expression,
+        expression: Tir.Expression,
         seen = new Set<number>(),
       ): boolean => {
         if (
@@ -3459,10 +3459,10 @@ const checkFunction = (
             ? false
             : referencesParameter(initializer, new Set(seen).add(expression.binding.ordinal))
         }
-        return Hir.expressionChildren(expression).some((child) => referencesParameter(child, seen))
+        return Tir.expressionChildren(expression).some((child) => referencesParameter(child, seen))
       }
-      const exits = (statements: ReadonlyArray<Hir.Statement>): ReadonlyArray<Hir.Expression> =>
-        statements.flatMap((statement): ReadonlyArray<Hir.Expression> => {
+      const exits = (statements: ReadonlyArray<Tir.Statement>): ReadonlyArray<Tir.Expression> =>
+        statements.flatMap((statement): ReadonlyArray<Tir.Expression> => {
           switch (statement._tag) {
             case 'Return':
             case 'Fail':
@@ -3478,7 +3478,7 @@ const checkFunction = (
               return []
           }
         })
-      const capturesParameter = (expression: Hir.Expression, seen = new Set<number>()): boolean => {
+      const capturesParameter = (expression: Tir.Expression, seen = new Set<number>()): boolean => {
         if (expression._tag === 'BindingReference') {
           if (seen.has(expression.binding.ordinal)) return false
           const initializer = bindings.get(expression.binding.ordinal)
@@ -3491,7 +3491,7 @@ const checkFunction = (
           referencesParameter(expression)
         )
           return true
-        return Hir.expressionChildren(expression).some((child) => capturesParameter(child, seen))
+        return Tir.expressionChildren(expression).some((child) => capturesParameter(child, seen))
       }
       const escapeSites = exits(fn.statements).filter((returned) => {
         const capturesRestrictedParameter = capturesParameter(returned)
@@ -3546,7 +3546,7 @@ const checkFunction = (
   const continueStates = new Map<number, Array<FlowState>>()
   const breakStates = new Map<number, Array<FlowState>>()
   const fixedPoints: Array<{
-    readonly loop: Hir.LoopId
+    readonly loop: Tir.LoopId
     readonly span: SourceSpan.SourceSpan
     readonly incoming: FlowState
     readonly repeating: ReadonlyArray<FlowState>
@@ -3556,7 +3556,7 @@ const checkFunction = (
   }> = []
   const appendLoopState = (
     states: Map<number, Array<FlowState>>,
-    loop: Hir.LoopId,
+    loop: Tir.LoopId,
     live: FlowState,
   ): void => {
     const existing = states.get(loop.ordinal)
@@ -3574,7 +3574,7 @@ const checkFunction = (
       .reverse()
       .flatMap((frame) => [...frame].reverse().filter((site) => present(live, site)))
 
-  const checkPatternSubject = (selection: Hir.PatternSelection, live: FlowState): boolean => {
+  const checkPatternSubject = (selection: Tir.PatternSelection, live: FlowState): boolean => {
     const temporaryMark = state.execution?.temporaries.length ?? 0
     const subjectType =
       selection.subject._tag === 'Unavailable' ? undefined : selection.subject.type
@@ -3622,7 +3622,7 @@ const checkFunction = (
   }
 
   const introducePatternBindings = (
-    selection: Hir.PatternSelection,
+    selection: Tir.PatternSelection,
     live: FlowState,
     frame: Array<string>,
     liveTo: SourceSpan.SourceSpan,
@@ -3652,7 +3652,7 @@ const checkFunction = (
   }
 
   const patternSelectionCleanup = (
-    selection: Hir.PatternSelection,
+    selection: Tir.PatternSelection,
     live: ReadonlyFlowState,
     includeBindings: boolean,
   ): MatchOwnership['arms'][number]['cleanup'] => {
@@ -3714,7 +3714,7 @@ const checkFunction = (
   })
   const propagation = (
     live: FlowState,
-    expression: Extract<Hir.Expression, { readonly _tag: 'Run' }>,
+    expression: Extract<Tir.Expression, { readonly _tag: 'Run' }>,
   ): void => {
     if (
       expression.subject._tag === 'Unavailable' ||
@@ -3726,7 +3726,7 @@ const checkFunction = (
     // bracket releases on both outcomes: lowering emits the normal drop, while propagation
     // must retain its owner until the protected execution has produced an outcome.
     const failureLive = new Map(live)
-    let protectedEffect: Hir.Expression = expression.subject
+    let protectedEffect: Tir.Expression = expression.subject
     while (protectedEffect._tag === 'EffectBindRequirement') {
       const provider = protectedEffect.provider
       if (provider.selectionAccess === 'Take') {
@@ -3751,11 +3751,11 @@ const checkFunction = (
     )
   }
   const walkStatements = (
-    statements: ReadonlyArray<Hir.Statement>,
+    statements: ReadonlyArray<Tir.Statement>,
     enclosingSpan: SourceSpan.SourceSpan,
     initial: FlowState,
     frames: Array<Array<string>>,
-    loopScopes: ReadonlyArray<{ readonly loop: Hir.LoopId; readonly frame: number }> = [],
+    loopScopes: ReadonlyArray<{ readonly loop: Tir.LoopId; readonly frame: number }> = [],
   ): { readonly returned: boolean; readonly live: FlowState } => {
     const previous = state.execution
     state.execution = {
@@ -3772,14 +3772,14 @@ const checkFunction = (
   }
 
   const walkStatementBody = (
-    statements: ReadonlyArray<Hir.Statement>,
+    statements: ReadonlyArray<Tir.Statement>,
     enclosingSpan: SourceSpan.SourceSpan,
     initial: FlowState,
     frames: Array<Array<string>>,
-    loopScopes: ReadonlyArray<{ readonly loop: Hir.LoopId; readonly frame: number }> = [],
+    loopScopes: ReadonlyArray<{ readonly loop: Tir.LoopId; readonly frame: number }> = [],
   ): { readonly returned: boolean; readonly live: FlowState } => {
     let live = initial
-    const evaluate = (expression: Hir.Expression, consuming: boolean): boolean => {
+    const evaluate = (expression: Tir.Expression, consuming: boolean): boolean => {
       const mark = state.execution?.temporaries.length ?? 0
       const completed = checkExpression(state, live, expression, consuming)
       if (state.execution !== undefined) state.execution.temporaries.length = mark
@@ -4252,7 +4252,7 @@ const checkFunction = (
 
   const checkMatch = (
     live: FlowState,
-    expression: Extract<Hir.Expression, { readonly _tag: 'Match' }>,
+    expression: Extract<Tir.Expression, { readonly _tag: 'Match' }>,
     consuming: boolean,
     guard: boolean,
     _escaping: boolean,
@@ -4674,7 +4674,7 @@ const checkFunction = (
     }),
   )
 
-  const firstUnavailable = Hir.firstUnavailable(fn)
+  const firstUnavailable = Tir.firstUnavailable(fn)
   const violation = state.diagnostics.at(0)
   let verdict: Verdict
   if (fn.contract._tag === 'Unavailable') {
@@ -4764,7 +4764,7 @@ const checkFunction = (
 
 /** Every input read by the ownership checker, after callback boundaries are selected. */
 export interface CheckInput {
-  readonly function: Hir.HirFunction
+  readonly function: Tir.TirFunction
   readonly semantic: Elaboration.FunctionFact | undefined
   readonly index: DeclarationIndex.Index
   readonly boundaries: ReadonlyArray<SourceSpan.SourceSpan>
@@ -4773,7 +4773,7 @@ export interface CheckInput {
 
 /** Resolves ownership inputs without running the checker or reconstructing prior diagnostics. */
 export const input = (
-  fn: Hir.HirFunction,
+  fn: Tir.TirFunction,
   semantic: Elaboration.FunctionFact | undefined,
   index: DeclarationIndex.Index,
   accessBoundaryPlan: LocalSharedAccessBoundaryPlan,
@@ -4829,7 +4829,7 @@ interface SourceProof {
 
 const sourceProofs = new WeakMap<
   DeclarationIndex.Index,
-  WeakMap<Hir.HirFunction, Array<SourceProof>>
+  WeakMap<Tir.TirFunction, Array<SourceProof>>
 >()
 
 /** Reads a result published at the source checker boundary for these exact current inputs. */
@@ -4884,12 +4884,12 @@ export const localSharedAccessBoundaryPlan = (
   results: ReadonlyMap<string, Elaboration.Result>,
 ): LocalSharedAccessBoundaryPlan => {
   const callbackOrdinals = new Map<string, Set<number>>()
-  const bindingsByFunction = new Map<Hir.HirFunction, ReadonlyMap<number, Hir.Expression>>()
-  const bindingsOf = (fn: Hir.HirFunction): ReadonlyMap<number, Hir.Expression> => {
+  const bindingsByFunction = new Map<Tir.TirFunction, ReadonlyMap<number, Tir.Expression>>()
+  const bindingsOf = (fn: Tir.TirFunction): ReadonlyMap<number, Tir.Expression> => {
     const cached = bindingsByFunction.get(fn)
     if (cached !== undefined) return cached
-    const bindings = new Map<number, Hir.Expression>()
-    const collect = (statements: ReadonlyArray<Hir.Statement>): void => {
+    const bindings = new Map<number, Tir.Expression>()
+    const collect = (statements: ReadonlyArray<Tir.Statement>): void => {
       for (const statement of statements) {
         if (statement._tag === 'Bind')
           bindings.set(statement.binding.ordinal, statement.initializer)
@@ -4906,8 +4906,8 @@ export const localSharedAccessBoundaryPlan = (
     return bindings
   }
   const parameterOrdinals = (
-    expression: Hir.Expression,
-    bindings: ReadonlyMap<number, Hir.Expression>,
+    expression: Tir.Expression,
+    bindings: ReadonlyMap<number, Tir.Expression>,
     seen = new Set<number>(),
   ): ReadonlySet<number> => {
     if (expression._tag === 'ParameterReference') return new Set([expression.parameter.ordinal])
@@ -4927,7 +4927,7 @@ export const localSharedAccessBoundaryPlan = (
       ? new Set()
       : parameterOrdinals(initializer, bindings, new Set(seen).add(expression.binding.ordinal))
   }
-  const functions = [...results.values()].flatMap((result) => result.hir.functions)
+  const functions = [...results.values()].flatMap((result) => result.tir.functions)
   let changed = true
   while (changed) {
     changed = false
@@ -4937,10 +4937,10 @@ export const localSharedAccessBoundaryPlan = (
       const ordinals = callbackOrdinals.get(owner) ?? new Set<number>()
       const bindings = bindingsOf(fn)
       for (const expression of fn.statements
-        .flatMap(Hir.statementExpressions)
-        .flatMap(Hir.expressionTree)) {
+        .flatMap(Tir.statementExpressions)
+        .flatMap(Tir.expressionTree)) {
         let boundaryOrdinals: ReadonlySet<number> | undefined
-        let arguments_: ReadonlyArray<Hir.Expression> | undefined
+        let arguments_: ReadonlyArray<Tir.Expression> | undefined
         if (expression._tag === 'BuiltinCall' && expression.operation === 'SharedWithMut') {
           boundaryOrdinals = new Set([1])
           arguments_ = expression.arguments
@@ -4965,10 +4965,10 @@ export const localSharedAccessBoundaryPlan = (
 
   const boundaries = new Map<string, Array<SourceSpan.SourceSpan>>()
   const callableTarget = (
-    expression: Hir.Expression,
-    bindings: ReadonlyMap<number, Hir.Expression>,
+    expression: Tir.Expression,
+    bindings: ReadonlyMap<number, Tir.Expression>,
     seen = new Set<number>(),
-  ): Hir.CallableTarget | undefined => {
+  ): Tir.CallableTarget | undefined => {
     if (expression._tag === 'FunctionItem' || expression._tag === 'CallableSection')
       return expression.target
     if (expression._tag === 'Move') return callableTarget(expression.subject, bindings, seen)
@@ -4983,10 +4983,10 @@ export const localSharedAccessBoundaryPlan = (
   for (const fn of functions) {
     const bindings = bindingsOf(fn)
     for (const expression of fn.statements
-      .flatMap(Hir.statementExpressions)
-      .flatMap(Hir.expressionTree)) {
+      .flatMap(Tir.statementExpressions)
+      .flatMap(Tir.expressionTree)) {
       let ordinals: ReadonlySet<number> | undefined
-      let arguments_: ReadonlyArray<Hir.Expression> | undefined
+      let arguments_: ReadonlyArray<Tir.Expression> | undefined
       if (expression._tag === 'BuiltinCall' && expression.operation === 'SharedWithMut') {
         ordinals = new Set([1])
         arguments_ = expression.arguments
@@ -5023,8 +5023,8 @@ export const localSharedAccessBoundaryPlan = (
       const inherited = boundaries.get(localSharedTargetKey(fn.declaration.canonical.id))
       if (inherited === undefined || inherited.length === 0) continue
       for (const expression of fn.statements
-        .flatMap(Hir.statementExpressions)
-        .flatMap(Hir.expressionTree)) {
+        .flatMap(Tir.statementExpressions)
+        .flatMap(Tir.expressionTree)) {
         if (expression._tag !== 'Call') continue
         const key = localSharedTargetKey(expression.target)
         const existing = boundaries.get(key) ?? []
@@ -5060,7 +5060,7 @@ export const checkModule = (
   bodyQuery?: BodyQuery.BodyQuery,
 ): ModuleOwnership => {
   const executableFacts = Elaboration.executableFunctions(result)
-  const checked = result.hir.functions.map((fn) => {
+  const checked = result.tir.functions.map((fn) => {
     const semantic = executableFacts.find(
       (fact) =>
         fact.declaration.id.sourceId === fn.declaration.id.sourceId &&

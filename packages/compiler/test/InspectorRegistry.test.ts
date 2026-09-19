@@ -51,7 +51,7 @@ describe('view registry', () => {
   // The syntax inspector was two panels, and the consolidation first ported only the left one.
   // These are the panels that made it a *syntax* lab rather than a token list.
   it('carries every panel the syntax inspector shipped', () => {
-    for (const id of ['tokens', 'tree', 'flow', 'hir', 'diagnostics']) {
+    for (const id of ['tokens', 'tree', 'flow', 'tir', 'diagnostics']) {
       expect(viewById(id)?.id, id).toBe(id)
     }
   })
@@ -179,7 +179,7 @@ describe('control DAG view', () => {
     ).toBe(true)
   })
 
-  it('coordinates match facts through the existing HIR, ownership, and MIR panes', () => {
+  it('coordinates match facts through the existing TIR, ownership, and MIR panes', () => {
     const source = `struct Left { value: i32 }
 struct Right { value: i32 }
 fn inspect(input: Left | Right) -> i32 {
@@ -190,12 +190,12 @@ fn inspect(input: Left | Right) -> i32 {
   }
 }
 pub fn main() -> i32 { return inspect(Left { value: 42 }) }`
-    const hir = project('hir', source)
+    const tir = project('tir', source)
     const ownership = project('ownership', source)
     const mir = project('mir', source)
 
-    expect(text(hir)).toContain('match shared')
-    expect(text(hir)).toContain('guarded')
+    expect(text(tir)).toContain('match shared')
+    expect(text(tir)).toContain('guarded')
     expect(text(ownership)).toContain('match shared')
     expect(text(ownership)).toContain('provisional guard')
     expect(text(mir)).toContain('decision memory/docs/unified-layout.Left')

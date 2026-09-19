@@ -12,7 +12,7 @@ import * as ConformanceProof from '../src/ConformanceProof.js'
 import * as ExecutableProperty from '../src/ExecutableProperty.js'
 import * as ExecutionAffinity from '../src/ExecutionAffinity.js'
 import * as ExecutionLifecycle from '../src/ExecutionLifecycle.js'
-import * as Hir from '../src/Hir.js'
+import * as Tir from '../src/Tir.js'
 import * as Lifetime from '../src/Lifetime.js'
 import * as LocalSharedOwnership from '../src/LocalSharedOwnership.js'
 import * as ExpressionNesting from '../src/Parser/ExpressionNesting.js'
@@ -195,7 +195,7 @@ it.effect('answers multi-module queries from one snapshot', () =>
     assert.strictEqual(Projections.syntaxOf(self, 'lib')?.source.id, 'lib')
     assert.strictEqual(Analysis.declarationByName(self, 'lib', 'answer')._tag, 'Resolved')
     assert.strictEqual(Analysis.declarationByName(self, 'root', 'answer')._tag, 'Missing')
-    assert.strictEqual(Projections.hirOf(self, 'root')?.functions.length, 1)
+    assert.strictEqual(Projections.tirOf(self, 'root')?.functions.length, 1)
     assert.strictEqual(Analysis.moduleAnalysis(self, 'absent'), undefined)
     assert.deepEqual(Analysis.cycles(self), [])
     assert.deepEqual([...Analysis.sources(self).keys()], ['lib', 'root'])
@@ -306,9 +306,9 @@ it.effect('merges diagnostics while keeping unrelated facts queryable', () =>
       ['lib', 'pub fn answer() -> i32 { return 1 }'],
     ])
     assert.strictEqual(Analysis.declarationByName(self, 'lib', 'answer')._tag, 'Resolved')
-    const libFunction = Projections.hirOf(self, 'lib')?.functions.at(0)
+    const libFunction = Projections.tirOf(self, 'lib')?.functions.at(0)
     assert.strictEqual(
-      libFunction === undefined ? undefined : Hir.returned(libFunction)._tag,
+      libFunction === undefined ? undefined : Tir.returned(libFunction)._tag,
       'IntegerLiteral',
     )
     assert.include(

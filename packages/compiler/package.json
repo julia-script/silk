@@ -214,10 +214,6 @@
       "types": "./dist/HelperSource.d.ts",
       "import": "./dist/HelperSource.js"
     },
-    "./Hir": {
-      "types": "./dist/Hir.d.ts",
-      "import": "./dist/Hir.js"
-    },
     "./ImportPath": {
       "types": "./dist/ImportPath.d.ts",
       "import": "./dist/ImportPath.js"
@@ -541,6 +537,10 @@
     "./TargetSelector": {
       "types": "./dist/TargetSelector.d.ts",
       "import": "./dist/TargetSelector.js"
+    },
+    "./Tir": {
+      "types": "./dist/Tir.d.ts",
+      "import": "./dist/Tir.js"
     },
     "./Token": {
       "types": "./dist/Token.d.ts",

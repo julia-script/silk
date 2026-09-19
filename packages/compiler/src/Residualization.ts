@@ -7,7 +7,7 @@ import type * as DeclarationIndex from './DeclarationIndex.js'
 import type * as Diagnostic from './Diagnostic.js'
 import * as Elaboration from './Elaboration.js'
 import { analyzeExpression } from './ExpressionAnalysis.js'
-import type * as Hir from './Hir.js'
+import type * as Tir from './Tir.js'
 import * as FunctionIndex from './internal/FunctionIndex.js'
 import * as TypeInference from './internal/TypeInference.js'
 import * as Canonical from './internal/Canonical.js'
@@ -34,7 +34,7 @@ export interface ApplicationKey {
 
 export interface ResidualBody {
   readonly _tag: 'ResidualBody'
-  readonly function: Hir.HirFunction
+  readonly function: Tir.TirFunction
   readonly fact: Elaboration.FunctionFact
   readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
 }
@@ -345,7 +345,7 @@ const declarationOf = (
 ): DeclarationFacts.DeclarationFact | undefined => {
   const declaration = DeclarationFacts.byCanonical(self[stateSymbol].index, identity)
   if (declaration?._tag === 'FunctionDeclaration') return declaration
-  return FunctionIndex.hirByCanonical(self[stateSymbol].results.get(identity.module)?.hir, identity)
+  return FunctionIndex.tirByCanonical(self[stateSymbol].results.get(identity.module)?.tir, identity)
     ?.declaration
 }
 
@@ -1032,7 +1032,7 @@ export const selectionReason = (
   return selected
 }
 
-/** Produces one concrete residual HIR body for a demanded runtime application. */
+/** Produces one concrete residual TIR body for a demanded runtime application. */
 export const residualize = (self: Coordinator, key: ApplicationKey): Result => {
   const declaration = declarationOf(self, key.declaration)
   const input = declaration === undefined ? undefined : moduleInput(self, declaration)
@@ -1076,7 +1076,7 @@ export const residualize = (self: Coordinator, key: ApplicationKey): Result => {
     const fact = Elaboration.executableFunctions(input.result).find(
       (candidate) => candidate.declaration.id.ordinal === declaration.id.ordinal,
     )
-    const fn = FunctionIndex.hirByCanonical(input.result.hir, key.declaration)
+    const fn = FunctionIndex.tirByCanonical(input.result.tir, key.declaration)
     if (fact !== undefined && fn !== undefined) {
       record(self, key.declaration, 'UnchangedBody', 'sourceReused', false)
       return Object.freeze({
@@ -1185,7 +1185,7 @@ export const residualize = (self: Coordinator, key: ApplicationKey): Result => {
       return StaticEvaluation.complete(
         Object.freeze({
           _tag: 'ResidualBody' as const,
-          function: Elaboration.residualHirFunction(analyzed.fact, self[stateSymbol].index),
+          function: Elaboration.residualTirFunction(analyzed.fact, self[stateSymbol].index),
           fact: analyzed.fact,
           diagnostics: analyzed.diagnostics,
         }),

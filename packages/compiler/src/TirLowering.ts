@@ -20,7 +20,7 @@ import {
   retainsLifetimes,
 } from './Elaboration.js'
 import { representationOfExpression } from './ExpressionAnalysis.js'
-import type * as Hir from './Hir.js'
+import type * as Tir from './Tir.js'
 import * as Intrinsic from './Intrinsic.js'
 import * as TypeInference from './internal/TypeInference.js'
 import * as Match from './Match.js'
@@ -32,11 +32,11 @@ import type * as StaticValue from './StaticValue.js'
 import * as Type from './Type.js'
 import * as TypeCompatibility from './TypeCompatibility.js'
 
-export const hirReference = (
+export const tirReference = (
   reference: ParameterReferenceFact,
   type: ExpressionTypeFact,
   span: SourceSpan.SourceSpan,
-): Hir.Expression => {
+): Tir.Expression => {
   if (reference._tag === 'Resolved' && type._tag === 'Available') {
     return Object.freeze({
       _tag: 'ParameterReference',
@@ -74,7 +74,7 @@ const staticValueExpression = (
   value: StaticValue.Value,
   type: SemanticType,
   span: SourceSpan.SourceSpan,
-): Hir.Expression => {
+): Tir.Expression => {
   switch (value._tag) {
     case 'UnitValue':
       return Object.freeze({ _tag: 'UnitLiteral', type: Type.unit, span })
@@ -183,10 +183,10 @@ const staticValueExpression = (
   }
 }
 
-export const hirPatternSelection = (
+export const tirPatternSelection = (
   selection: PatternSelectionFact,
   options: LowerStatementOptions = {},
-): Hir.PatternSelection => {
+): Tir.PatternSelection => {
   let member: Match.CoverageIdentity | undefined
   if (selection.pattern._tag === 'EnumMemberPattern') {
     member = selection.pattern.coverage
@@ -198,7 +198,7 @@ export const hirPatternSelection = (
   ) {
     member = Match.structuralMember(selection.pattern.member)
   }
-  const subject = hirExpression(selection.subject, undefined, options)
+  const subject = tirExpression(selection.subject, undefined, options)
   return Object.freeze({
     id: selection.id,
     tests: selection.tests,
@@ -212,7 +212,7 @@ export const hirPatternSelection = (
     ...(member === undefined ? {} : { member }),
     universal: selection.pattern._tag === 'UniversalPattern',
     bindings: Object.freeze(
-      selection.bindings.flatMap((binding): ReadonlyArray<Hir.PatternBinding> =>
+      selection.bindings.flatMap((binding): ReadonlyArray<Tir.PatternBinding> =>
         binding.type._tag === 'Available'
           ? [
               Object.freeze({
@@ -249,7 +249,7 @@ export interface LowerStatementOptions {
 export const lowerStatements = (
   facts: ReadonlyArray<StatementFact>,
   options: LowerStatementOptions = {},
-): ReadonlyArray<Hir.Statement> =>
+): ReadonlyArray<Tir.Statement> =>
   Object.freeze(
     (options.eraseIntrinsicSections ? executableStatements(facts) : facts)
       .filter(
@@ -265,7 +265,7 @@ export const lowerStatements = (
                   'ResolvedIntrinsicContract')
             )),
       )
-      .map((statement): Hir.Statement => {
+      .map((statement): Tir.Statement => {
         if (statement._tag === 'UnsafeStatement')
           return Object.freeze({
             _tag: 'Unsafe',
@@ -275,13 +275,13 @@ export const lowerStatements = (
           })
         if (statement._tag === 'BindStatement') {
           const binding = statement.binding
-          const initializer = (): Hir.Expression => {
+          const initializer = (): Tir.Expression => {
             // A declared union is the binding's type: the initializer injects at the boundary.
             if (
               binding.declaredType?._tag === 'Resolved' &&
               Type.isUnion(binding.declaredType.type)
             )
-              return hirExpectedExpression(
+              return tirExpectedExpression(
                 binding.initializer,
                 binding.declaredType.type,
                 'Binding',
@@ -289,7 +289,7 @@ export const lowerStatements = (
                 undefined,
                 options,
               )
-            return hirExpression(binding.initializer, undefined, options)
+            return tirExpression(binding.initializer, undefined, options)
           }
           return Object.freeze({
             _tag: 'Bind',
@@ -304,21 +304,21 @@ export const lowerStatements = (
         if (statement._tag === 'PatternBindStatement')
           return Object.freeze({
             _tag: 'PatternBind',
-            selection: hirPatternSelection(statement.selection, options),
+            selection: tirPatternSelection(statement.selection, options),
             region: statement.region,
             span: statement.syntax.span,
           })
         if (statement._tag === 'ExpressionStatement')
           return Object.freeze({
             _tag: 'Evaluate',
-            expression: hirExpression(statement.expression, undefined, options),
+            expression: tirExpression(statement.expression, undefined, options),
             region: statement.region,
             span: statement.syntax.span,
           })
         if (statement._tag === 'IfStatement')
           return Object.freeze({
             _tag: 'If',
-            condition: hirExpression(statement.condition, undefined, options),
+            condition: tirExpression(statement.condition, undefined, options),
             taken: lowerStatements(statement.taken, options),
             otherwise: lowerStatements(statement.otherwise, options),
             region: statement.region,
@@ -327,7 +327,7 @@ export const lowerStatements = (
         if (statement._tag === 'IfLetStatement')
           return Object.freeze({
             _tag: 'IfLet',
-            selection: hirPatternSelection(statement.selection, options),
+            selection: tirPatternSelection(statement.selection, options),
             taken: lowerStatements(statement.taken, options),
             otherwise: lowerStatements(statement.otherwise, options),
             region: statement.region,
@@ -337,7 +337,7 @@ export const lowerStatements = (
           const place =
             statement.root === undefined
               ? undefined
-              : hirAssignmentWritePlace(statement.destination, statement.root, options)
+              : tirAssignmentWritePlace(statement.destination, statement.root, options)
           if (place === undefined || !statement.compatible)
             return Object.freeze({
               _tag: 'UnavailableStatement',
@@ -366,7 +366,7 @@ export const lowerStatements = (
           return Object.freeze({
             _tag: 'Write',
             place,
-            value: hirExpectedExpression(
+            value: tirExpectedExpression(
               statement.value,
               place.type,
               'Assignment',
@@ -383,7 +383,7 @@ export const lowerStatements = (
             _tag: 'While',
             loop: statement.loop,
             ...(statement.parent === undefined ? {} : { parent: statement.parent }),
-            condition: hirExpression(statement.condition, undefined, options),
+            condition: tirExpression(statement.condition, undefined, options),
             body: lowerStatements(statement.body, options),
             region: statement.region,
             span: statement.syntax.span,
@@ -406,8 +406,8 @@ export const lowerStatements = (
             _tag: 'Return',
             expression: effectJoinConvert(
               options.resultType === undefined
-                ? hirExpression(statement.expression, undefined, options)
-                : hirExpectedExpression(
+                ? tirExpression(statement.expression, undefined, options)
+                : tirExpectedExpression(
                     statement.expression,
                     options.resultType,
                     'Return',
@@ -424,7 +424,7 @@ export const lowerStatements = (
         if (statement._tag === 'DropStatement')
           return Object.freeze({
             _tag: 'Drop',
-            expression: hirExpression(statement.expression, undefined, options),
+            expression: tirExpression(statement.expression, undefined, options),
             region: statement.region,
             span: statement.syntax.span,
           })
@@ -440,14 +440,14 @@ export const lowerStatements = (
             statement.transfer === 'Move'
               ? Object.freeze({
                   _tag: 'Move',
-                  subject: hirExpression(statement.expression, undefined, options),
+                  subject: tirExpression(statement.expression, undefined, options),
                   type:
                     statement.expression.type._tag === 'Available'
                       ? statement.expression.type.type
                       : statement.failure,
                   span: statement.expression.syntax.span,
                 })
-              : hirExpression(statement.expression, undefined, options),
+              : tirExpression(statement.expression, undefined, options),
           failure: statement.failure,
           transfer: statement.transfer,
           region: statement.region,
@@ -456,7 +456,7 @@ export const lowerStatements = (
       }),
   )
 
-export const hirCallableTarget = (reference: CallReferenceFact): Hir.CallableTarget | undefined => {
+export const tirCallableTarget = (reference: CallReferenceFact): Tir.CallableTarget | undefined => {
   if (reference._tag === 'ResolvedBuiltin')
     return Object.freeze({
       _tag: 'BuiltinCallableTarget',
@@ -475,7 +475,7 @@ export const hirCallableTarget = (reference: CallReferenceFact): Hir.CallableTar
 export const argumentBorrowId = (
   argument: ArgumentFact,
   ordinal: number,
-): Hir.BorrowId | undefined => {
+): Tir.BorrowId | undefined => {
   let expression = argument.expression
   while (expression._tag === 'Grouped') expression = expression.expression
   return expression._tag === 'Borrow' && expression.formation._tag !== 'Unavailable'
@@ -491,7 +491,7 @@ export const argumentBorrowId = (
 export const loanEndsOf = (
   arguments_: ReadonlyArray<ArgumentFact>,
   retained: (ordinal: number) => boolean = () => true,
-): ReadonlyArray<Hir.BorrowId> =>
+): ReadonlyArray<Tir.BorrowId> =>
   Object.freeze(
     arguments_.flatMap((argument, ordinal) => {
       const borrow = argumentBorrowId(argument, ordinal)
@@ -514,11 +514,11 @@ const isRepresentationIdenticalGenericForwarding = (
   )
 }
 
-export const hirExpression = (
+export const tirExpression = (
   fact: ExpressionFact,
-  borrow?: Hir.BorrowId,
+  borrow?: Tir.BorrowId,
   options: LowerStatementOptions = {},
-): Hir.Expression => {
+): Tir.Expression => {
   if (fact._tag === 'CompileError')
     return Object.freeze({ _tag: 'Unavailable', span: fact.syntax.span })
   if (fact._tag === 'ShortCircuit') {
@@ -527,8 +527,8 @@ export const hirExpression = (
     if (left === undefined || right === undefined || fact.type._tag !== 'Available') {
       return Object.freeze({ _tag: 'Unavailable', span: fact.syntax.span })
     }
-    const loweredLeft = hirExpression(left.expression, undefined, options)
-    const loweredRight = hirExpression(right.expression, undefined, options)
+    const loweredLeft = tirExpression(left.expression, undefined, options)
+    const loweredRight = tirExpression(right.expression, undefined, options)
     return loweredLeft._tag === 'Unavailable' || loweredRight._tag === 'Unavailable'
       ? Object.freeze({ _tag: 'Unavailable', span: fact.syntax.span })
       : Object.freeze({
@@ -694,7 +694,7 @@ export const hirExpression = (
     })
   }
   if (fact._tag === 'EnumValue') {
-    const value = hirExpression(fact.argument, undefined, options)
+    const value = tirExpression(fact.argument, undefined, options)
     return fact.type._tag !== 'Available' || value._tag === 'Unavailable'
       ? Object.freeze({ _tag: 'Unavailable', span: fact.syntax.span })
       : Object.freeze({
@@ -719,10 +719,10 @@ export const hirExpression = (
         fact.type.type,
         fact.syntax.span,
       )
-    return hirReference(fact.reference, fact.type, fact.syntax.span)
+    return tirReference(fact.reference, fact.type, fact.syntax.span)
   }
   if (fact._tag === 'Move') {
-    const subject = hirExpression(fact.subject, undefined, options)
+    const subject = tirExpression(fact.subject, undefined, options)
     if (subject._tag === 'Unavailable' || fact.type._tag !== 'Available') {
       return subject._tag === 'Unavailable'
         ? subject
@@ -742,14 +742,14 @@ export const hirExpression = (
     const place =
       fact.root === undefined
         ? undefined
-        : hirAssignmentWritePlace(fact.destination, fact.root, options)
+        : tirAssignmentWritePlace(fact.destination, fact.root, options)
     if (place === undefined || !fact.compatible || fact.type._tag !== 'Available') {
       return Object.freeze({ _tag: 'Unavailable', span: fact.syntax.span })
     }
     return Object.freeze({
       _tag: 'Replace',
       place,
-      value: hirExpectedExpression(
+      value: tirExpectedExpression(
         fact.value,
         place.type,
         'Assignment',
@@ -801,7 +801,7 @@ export const hirExpression = (
     })
   }
   if (fact._tag === 'Run') {
-    const subject = hirExpression(fact.subject, undefined, options)
+    const subject = tirExpression(fact.subject, undefined, options)
     if (subject._tag === 'Unavailable' || fact.type._tag !== 'Available')
       return Object.freeze({ _tag: 'Unavailable', span: fact.syntax.span })
     return Object.freeze({
@@ -812,8 +812,8 @@ export const hirExpression = (
     })
   }
   if (fact._tag === 'EffectCatch') {
-    const protected_ = hirExpression(fact.protected, undefined, options)
-    const handler = hirExpression(fact.handler, undefined, options)
+    const protected_ = tirExpression(fact.protected, undefined, options)
+    const handler = tirExpression(fact.handler, undefined, options)
     if (
       protected_._tag === 'Unavailable' ||
       handler._tag === 'Unavailable' ||
@@ -838,7 +838,7 @@ export const hirExpression = (
     })
   }
   if (fact._tag === 'EffectBindRequirement') {
-    const protected_ = hirExpression(fact.protected, undefined, options)
+    const protected_ = tirExpression(fact.protected, undefined, options)
     if (
       protected_._tag === 'Unavailable' ||
       fact.provider === undefined ||
@@ -868,7 +868,7 @@ export const hirExpression = (
     })
   }
   if (fact._tag === 'Match') {
-    const loweredScrutinee = hirExpression(fact.scrutinee, undefined, options)
+    const loweredScrutinee = tirExpression(fact.scrutinee, undefined, options)
     const scrutinee =
       fact.access === 'Move' &&
       (loweredScrutinee._tag === 'Project' || loweredScrutinee._tag === 'IndexPlace')
@@ -922,13 +922,13 @@ export const hirExpression = (
             cleanup: arm.pattern.omitted,
             ...(arm.guard === undefined
               ? {}
-              : { guard: hirExpression(arm.guard, undefined, options) }),
+              : { guard: tirExpression(arm.guard, undefined, options) }),
             body:
               arm.body._tag === 'Expression'
                 ? Object.freeze({
                     _tag: 'Expression' as const,
                     expression: Type.isUnion(target)
-                      ? hirExpectedExpression(
+                      ? tirExpectedExpression(
                           arm.body.expression,
                           target,
                           'MatchArm',
@@ -936,7 +936,7 @@ export const hirExpression = (
                           undefined,
                           options,
                         )
-                      : hirExpression(arm.body.expression, undefined, options),
+                      : tirExpression(arm.body.expression, undefined, options),
                     type:
                       arm.body.type._tag === 'Available' && !Type.isUnion(target)
                         ? arm.body.type.type
@@ -992,7 +992,7 @@ export const hirExpression = (
         fact.fields.map(({ field, initializer }) => {
           const value =
             field.declaredType._tag === 'Resolved'
-              ? hirExpectedExpression(
+              ? tirExpectedExpression(
                   initializer.expression,
                   Type.substitute(field.declaredType.type, substitution),
                   'StructField',
@@ -1000,7 +1000,7 @@ export const hirExpression = (
                   undefined,
                   options,
                 )
-              : hirExpression(initializer.expression, undefined, options)
+              : tirExpression(initializer.expression, undefined, options)
           return Object.freeze({ field: field.id, value })
         }),
       ),
@@ -1042,7 +1042,7 @@ export const hirExpression = (
         fact.fields.map(({ field, initializer }) => {
           const value =
             field.declaredType._tag === 'Resolved'
-              ? hirExpectedExpression(
+              ? tirExpectedExpression(
                   initializer.expression,
                   Type.substitute(field.declaredType.type, substitution),
                   'StructField',
@@ -1050,7 +1050,7 @@ export const hirExpression = (
                   undefined,
                   options,
                 )
-              : hirExpression(initializer.expression, undefined, options)
+              : tirExpression(initializer.expression, undefined, options)
           return Object.freeze({ field: field.id, value })
         }),
       ),
@@ -1067,8 +1067,8 @@ export const hirExpression = (
       elements: Object.freeze(
         fact.elements.map((element) =>
           element.expected === undefined
-            ? hirExpression(element.expression, undefined, options)
-            : hirExpectedExpression(
+            ? tirExpression(element.expression, undefined, options)
+            : tirExpectedExpression(
                 element.expression,
                 element.expected,
                 'ArrayElement',
@@ -1086,7 +1086,7 @@ export const hirExpression = (
     if (fact.staticValue !== undefined && fact.type._tag === 'Available')
       return staticValueExpression(fact.staticValue, fact.type.type, fact.syntax.span)
     if (fact.state._tag === 'SliceLength' && fact.type._tag === 'Available') {
-      const slice = hirExpression(fact.subject, undefined, options)
+      const slice = tirExpression(fact.subject, undefined, options)
       return slice._tag === 'Unavailable'
         ? slice
         : Object.freeze({
@@ -1111,7 +1111,7 @@ export const hirExpression = (
     }
     return Object.freeze({
       _tag: 'Project',
-      subject: hirExpression(fact.subject, undefined, options),
+      subject: tirExpression(fact.subject, undefined, options),
       nominal: fact.nominal,
       field: fact.state.field.id,
       access: 'CopyRead',
@@ -1126,8 +1126,8 @@ export const hirExpression = (
       fact.type._tag === 'Available' &&
       fact.bounds._tag === 'RuntimeSlice'
     ) {
-      const slice = hirExpression(fact.subject, undefined, options)
-      const index = hirExpression(fact.index, undefined, options)
+      const slice = tirExpression(fact.subject, undefined, options)
+      const index = tirExpression(fact.index, undefined, options)
       if (slice._tag === 'Unavailable' || index._tag === 'Unavailable') {
         return slice._tag === 'Unavailable' ? slice : index
       }
@@ -1152,8 +1152,8 @@ export const hirExpression = (
         ...(fact.bounds._tag === 'Invalid' ? { cause: fact.bounds.cause } : {}),
       })
     }
-    const subject = hirExpression(fact.subject, undefined, options)
-    const index = hirExpression(fact.index, undefined, options)
+    const subject = tirExpression(fact.subject, undefined, options)
+    const index = tirExpression(fact.index, undefined, options)
     if (subject._tag === 'Unavailable' || index._tag === 'Unavailable') {
       return subject._tag === 'Unavailable' ? subject : index
     }
@@ -1185,7 +1185,7 @@ export const hirExpression = (
     }
     return Object.freeze({
       _tag: 'ReferentPlace',
-      subject: hirExpression(fact.subject, undefined, options),
+      subject: tirExpression(fact.subject, undefined, options),
       reference: fact.reference,
       access: 'CopyRead',
       borrowAccess: fact.borrowAccess,
@@ -1219,7 +1219,7 @@ export const hirExpression = (
           : {}),
       })
     }
-    let root: Hir.SliceRoot
+    let root: Tir.SliceRoot
     switch (fact.formation.root._tag) {
       case 'BindingRoot':
         root = Object.freeze({ _tag: 'BindingSliceRoot', binding: fact.formation.root.binding.id })
@@ -1237,11 +1237,11 @@ export const hirExpression = (
         root = Object.freeze({
           _tag: 'TemporarySliceRoot',
           owner: fact.formation.root.owner,
-          value: hirExpression(fact.formation.root.value, undefined, options),
+          value: tirExpression(fact.formation.root.value, undefined, options),
         })
         break
     }
-    const selectors: Array<Hir.BorrowSelector> = []
+    const selectors: Array<Tir.BorrowSelector> = []
     for (const selector of fact.formation.root.path) {
       if (selector._tag === 'Field') {
         selectors.push(
@@ -1254,7 +1254,7 @@ export const hirExpression = (
         continue
       }
       if (selector._tag === 'SliceIndex') {
-        const index = hirExpression(selector.index, undefined, options)
+        const index = tirExpression(selector.index, undefined, options)
         if (index._tag === 'Unavailable') {
           return Object.freeze({ _tag: 'Unavailable', span: fact.syntax.span })
         }
@@ -1268,7 +1268,7 @@ export const hirExpression = (
         )
         continue
       }
-      const index = hirExpression(selector.index, undefined, options)
+      const index = tirExpression(selector.index, undefined, options)
       if (index._tag === 'Unavailable') {
         return Object.freeze({ _tag: 'Unavailable', span: fact.syntax.span })
       }
@@ -1318,9 +1318,9 @@ export const hirExpression = (
       span: fact.syntax.span,
     })
   }
-  if (fact._tag === 'Grouped') return hirExpression(fact.expression, borrow, options)
+  if (fact._tag === 'Grouped') return tirExpression(fact.expression, borrow, options)
   if (fact._tag === 'FunctionItem') {
-    const target = hirCallableTarget(fact.reference)
+    const target = tirCallableTarget(fact.reference)
     if (target === undefined || fact.type._tag !== 'Available')
       return Object.freeze({ _tag: 'Unavailable', span: fact.syntax.span })
     if (fact.foreignAddress !== undefined && Type.isForeignFunction(fact.type.type))
@@ -1342,7 +1342,7 @@ export const hirExpression = (
     })
   }
   if (fact._tag === 'CallableSection') {
-    const target = hirCallableTarget(fact.reference)
+    const target = tirCallableTarget(fact.reference)
     if (target === undefined || fact.type._tag !== 'Available' || !Type.isCallable(fact.type.type))
       return Object.freeze({ _tag: 'Unavailable', span: fact.syntax.span })
     return Object.freeze({
@@ -1355,7 +1355,7 @@ export const hirExpression = (
           Object.freeze({
             ordinal: capture.ordinal,
             parameterOrdinal: capture.parameterOrdinal,
-            value: hirExpression(
+            value: tirExpression(
               capture.expression,
               Object.freeze({
                 _tag: 'BorrowId',
@@ -1382,9 +1382,9 @@ export const hirExpression = (
     return {
       _tag: 'ForeignApply',
       evaluation: fact.evaluation,
-      callee: hirExpression(fact.callee, undefined, options),
+      callee: tirExpression(fact.callee, undefined, options),
       arguments: fact.arguments.map((argument, ordinal) =>
-        hirExpression(argument.expression, argumentBorrowId(argument, ordinal), options),
+        tirExpression(argument.expression, argumentBorrowId(argument, ordinal), options),
       ),
       contract: fact.contract,
       loanEnds: loanEndsOf(fact.arguments, () => true),
@@ -1412,7 +1412,7 @@ export const hirExpression = (
             options.lifetimeAssumptions ?? Lifetime.assumptions([]),
           ),
       ) ?? []
-    const retainedCaptureLoans: ReadonlyArray<Hir.BorrowId> =
+    const retainedCaptureLoans: ReadonlyArray<Tir.BorrowId> =
       retainedSection === undefined
         ? []
         : retainedCaptures.map((capture) => ({
@@ -1423,10 +1423,10 @@ export const hirExpression = (
           }))
     return Object.freeze({
       _tag: 'CallableApply',
-      callee: hirExpression(fact.callee, undefined, options),
+      callee: tirExpression(fact.callee, undefined, options),
       arguments: Object.freeze(
         fact.arguments.map((argument, ordinal) =>
-          hirExpression(argument.expression, argumentBorrowId(argument, ordinal), options),
+          tirExpression(argument.expression, argumentBorrowId(argument, ordinal), options),
         ),
       ),
       // A staged application retains every argument loan inside the new environment.
@@ -1481,7 +1481,7 @@ export const hirExpression = (
         : { witnessEffectSite: fact.witnessEffectSite }),
       arguments: Object.freeze(
         fact.arguments.map((argument, ordinal) =>
-          hirExpression(argument.expression, argumentBorrowId(argument, ordinal), options),
+          tirExpression(argument.expression, argumentBorrowId(argument, ordinal), options),
         ),
       ),
       loanEnds: borrowIds,
@@ -1497,9 +1497,9 @@ export const hirExpression = (
     const leftFact = fact.arguments.at(0)
     const rightFact = fact.arguments.at(1)
     const left =
-      leftFact === undefined ? undefined : hirExpression(leftFact.expression, undefined, options)
+      leftFact === undefined ? undefined : tirExpression(leftFact.expression, undefined, options)
     const right =
-      rightFact === undefined ? undefined : hirExpression(rightFact.expression, undefined, options)
+      rightFact === undefined ? undefined : tirExpression(rightFact.expression, undefined, options)
     return left === undefined ||
       right === undefined ||
       left._tag === 'Unavailable' ||
@@ -1531,7 +1531,7 @@ export const hirExpression = (
       fact.reference.operation === 'SlotTake' ||
       fact.reference.operation === 'SlotCopy' ||
       fact.reference.operation === 'SlotDrop'
-        ? fact.arguments.flatMap((argument): ReadonlyArray<Hir.BorrowId> => {
+        ? fact.arguments.flatMap((argument): ReadonlyArray<Tir.BorrowId> => {
             const nested = argument.expression
             if (
               nested._tag !== 'Call' ||
@@ -1545,7 +1545,7 @@ export const hirExpression = (
     const arguments_ = Object.freeze(
       fact.arguments.map((argument, ordinal) => {
         const borrowId = argumentBorrowId(argument, ordinal)
-        return hirExpression(argument.expression, borrowId, options)
+        return tirExpression(argument.expression, borrowId, options)
       }),
     )
     const heldLoans = Object.freeze(
@@ -1676,7 +1676,7 @@ export const hirExpression = (
             )
           return [
             parameter?.declaredType._tag === 'Resolved' && !genericForwarding
-              ? hirExpectedExpression(
+              ? tirExpectedExpression(
                   argument.expression,
                   Type.substitute(parameter.declaredType.type, substitution),
                   'Argument',
@@ -1684,7 +1684,7 @@ export const hirExpression = (
                   borrowId,
                   options,
                 )
-              : hirExpression(argument.expression, borrowId, options),
+              : tirExpression(argument.expression, borrowId, options),
           ]
         }),
       ),
@@ -1743,7 +1743,7 @@ export const hirExpression = (
             )
           return [
             parameter?.declaredType._tag === 'Resolved' && !genericForwarding
-              ? hirExpectedExpression(
+              ? tirExpectedExpression(
                   argument.expression,
                   Type.substitute(parameter.declaredType.type, substitution),
                   'Argument',
@@ -1751,7 +1751,7 @@ export const hirExpression = (
                   borrowId,
                   options,
                 )
-              : hirExpression(argument.expression, borrowId, options),
+              : tirExpression(argument.expression, borrowId, options),
           ]
         }),
       ),
@@ -1789,10 +1789,10 @@ export const hirExpression = (
 
 /** Wraps one return site so it packs its Effect into the function's composite representation. */
 const effectJoinConvert = (
-  source: Hir.Expression,
+  source: Tir.Expression,
   target: SemanticType | undefined,
   expectedAt: SourceSpan.SourceSpan,
-): Hir.Expression => {
+): Tir.Expression => {
   if (
     target === undefined ||
     source._tag === 'Unavailable' ||
@@ -1815,14 +1815,14 @@ const effectJoinConvert = (
   })
 }
 
-export const hirExpectedExpression = (
+export const tirExpectedExpression = (
   fact: ExpressionFact,
   target: SemanticType,
-  context: Extract<Hir.Expression, { readonly _tag: 'UnionConvert' }>['context'],
+  context: Extract<Tir.Expression, { readonly _tag: 'UnionConvert' }>['context'],
   expectedAt: SourceSpan.SourceSpan,
-  borrow?: Hir.BorrowId,
+  borrow?: Tir.BorrowId,
   options: LowerStatementOptions = {},
-): Hir.Expression => {
+): Tir.Expression => {
   if (
     fact._tag === 'Integer' &&
     fact.integer._tag === 'Available' &&
@@ -1836,7 +1836,7 @@ export const hirExpectedExpression = (
       type: target,
       span: fact.syntax.span,
     })
-  const loweredSource = hirExpression(fact, borrow, options)
+  const loweredSource = tirExpression(fact, borrow, options)
   if (loweredSource._tag === 'Unavailable') return loweredSource
   const unionTarget = Type.isUnion(target) ? target : undefined
   const representation = unionTarget === undefined ? undefined : representationOfExpression(fact)
@@ -1901,12 +1901,12 @@ export const hirExpectedExpression = (
   })
 }
 
-export const hirWritePlace = (
+export const tirWritePlace = (
   fact: ExpressionFact,
   root: AssignmentRootFact,
   options: LowerStatementOptions = {},
-): Hir.WritePlace | undefined => {
-  const selectors: Array<Hir.WriteSelector> = []
+): Tir.WritePlace | undefined => {
+  const selectors: Array<Tir.WriteSelector> = []
   const walk = (current: ExpressionFact): boolean => {
     if (current._tag === 'Grouped') return walk(current.expression)
     if (current._tag === 'Identifier') {
@@ -1947,7 +1947,7 @@ export const hirWritePlace = (
       ) {
         return false
       }
-      const index = hirExpression(current.index, undefined, options)
+      const index = tirExpression(current.index, undefined, options)
       if (index._tag === 'Unavailable') return false
       selectors.push(
         Object.freeze({
@@ -1964,7 +1964,7 @@ export const hirWritePlace = (
     return false
   }
   if (!walk(fact) || fact.type._tag !== 'Available') return undefined
-  let ownedRoot: Hir.OwnedWriteRoot
+  let ownedRoot: Tir.OwnedWriteRoot
   if (root._tag === 'ParameterDeclaration')
     ownedRoot = { _tag: 'ParameterWriteRoot', parameter: root.id }
   else if (root._tag === 'PatternBinding')
@@ -1988,11 +1988,11 @@ export const assignmentRootType = (root: AssignmentRootFact): SemanticType | und
   return root.inferredType._tag === 'Available' ? root.inferredType.type : undefined
 }
 
-export const hirBorrowedWritePlace = (
+export const tirBorrowedWritePlace = (
   fact: ExpressionFact,
   root: AssignmentRootFact,
   options: LowerStatementOptions = {},
-): Hir.BorrowedWritePlace | undefined => {
+): Tir.BorrowedWritePlace | undefined => {
   if (root._tag === 'PatternBinding') return undefined
   const rootType = assignmentRootType(root)
   if (
@@ -2002,7 +2002,7 @@ export const hirBorrowedWritePlace = (
   ) {
     return undefined
   }
-  const selectors: Array<Hir.BorrowedWriteSelector> = []
+  const selectors: Array<Tir.BorrowedWriteSelector> = []
   const walk = (current: ExpressionFact): boolean => {
     if (current._tag === 'Grouped') return walk(current.expression)
     if (current._tag === 'Identifier') {
@@ -2040,7 +2040,7 @@ export const hirBorrowedWritePlace = (
     }
     if (current._tag === 'IndexProjection') {
       if (!walk(current.subject) || current.type._tag !== 'Available') return false
-      const index = hirExpression(current.index, undefined, options)
+      const index = tirExpression(current.index, undefined, options)
       if (index._tag === 'Unavailable') return false
       if (
         current.slice !== undefined &&
@@ -2092,14 +2092,14 @@ export const hirBorrowedWritePlace = (
   })
 }
 
-export const hirAssignmentWritePlace = (
+export const tirAssignmentWritePlace = (
   fact: ExpressionFact,
   root: AssignmentRootFact,
   options: LowerStatementOptions = {},
-): Hir.WritePlace | undefined => {
+): Tir.WritePlace | undefined => {
   const access = assignmentRootAccess(root, fact)
-  if (access === 'ExclusiveBorrowed') return hirBorrowedWritePlace(fact, root, options)
-  if (access === 'MutableOwned') return hirWritePlace(fact, root, options)
+  if (access === 'ExclusiveBorrowed') return tirBorrowedWritePlace(fact, root, options)
+  if (access === 'MutableOwned') return tirWritePlace(fact, root, options)
   return undefined
 }
 

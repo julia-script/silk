@@ -2,7 +2,7 @@ import * as DeclarationFacts from './DeclarationFacts.js'
 import type * as DeclarationIndex from './DeclarationIndex.js'
 import type * as Diagnostic from './Diagnostic.js'
 import * as Elaboration from './Elaboration.js'
-import type * as Hir from './Hir.js'
+import type * as Tir from './Tir.js'
 import * as Intrinsic from './Intrinsic.js'
 import type * as Match from './Match.js'
 import * as NameResolution from './NameResolution.js'
@@ -28,7 +28,7 @@ export type Identity =
     }
   | { readonly _tag: 'TypeParameterIdentity'; readonly id: Type.Parameter }
   | { readonly _tag: 'ParameterIdentity'; readonly id: DeclarationFacts.ParameterId }
-  | { readonly _tag: 'BindingIdentity'; readonly id: Hir.BindingId }
+  | { readonly _tag: 'BindingIdentity'; readonly id: Tir.BindingId }
   | { readonly _tag: 'PatternBindingIdentity'; readonly id: Match.BindingId }
   | { readonly _tag: 'FieldIdentity'; readonly id: DeclarationFacts.FieldId }
   | {

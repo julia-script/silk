@@ -132,9 +132,9 @@ it.effect('encodes and projects raw pointer type syntax and contracts', () =>
     assert.deepEqual(syntax.parserDiagnostics, [])
 
     const snapshot = yield* Analysis.ofSource('memory/pointer-inspection', ascii(source))
-    const hirRows = InspectorProjectSyntax.hirRows(Analysis.rootAnalysis(snapshot).hir)
+    const tirRows = InspectorProjectSyntax.tirRows(Analysis.rootAnalysis(snapshot).tir)
     assert.strictEqual(
-      hirRows.find((row) => row.head === true)?.detail,
+      tirRows.find((row) => row.head === true)?.detail,
       '(*mut u8, usize) -> *const u8',
     )
   }),

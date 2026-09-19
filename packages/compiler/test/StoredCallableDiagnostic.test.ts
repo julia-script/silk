@@ -335,7 +335,7 @@ pub fn main() -> i32 {
     const result = Analysis.rootAnalysis(snapshot)
     assert.strictEqual(result.hiddenFunctions.length, 1)
     assert.strictEqual(result.hiddenFunctions.at(0)?.declaration.typeParameters.length, 0)
-    const hidden = result.hir.functions.find(
+    const hidden = result.tir.functions.find(
       (fn) =>
         fn.declaration.canonical._tag === 'Canonical' &&
         fn.declaration.canonical.id.name.includes('$callable$'),

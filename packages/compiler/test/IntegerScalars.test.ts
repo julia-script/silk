@@ -2,7 +2,7 @@ import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
-import * as Hir from '../src/Hir.js'
+import * as Tir from '../src/Tir.js'
 import * as MirEncoding from '../src/MirEncoding.js'
 
 const checkedIntegerSource = `import silk.i16
@@ -72,7 +72,7 @@ pub fn main() -> i32 {
 }`
 
 it.effect(
-  'rejects duration range and type mismatches before HIR without duplicate recovery errors',
+  'rejects duration range and type mismatches before TIR without duplicate recovery errors',
   () =>
     Effect.gen(function* () {
       const overflow = yield* AnalysisFixture.retainingMain(
@@ -83,7 +83,7 @@ it.effect(
         Analysis.diagnostics(overflow).map((diagnostic) => diagnostic.code),
         ['SEM0170'],
       )
-      assert.notInclude(Hir.encode(Analysis.rootAnalysis(overflow).hir), '18446744073709551616')
+      assert.notInclude(Tir.encode(Analysis.rootAnalysis(overflow).tir), '18446744073709551616')
 
       const constantOverflow = yield* AnalysisFixture.retainingMain(
         'integer/duration-constant-overflow',
@@ -140,7 +140,7 @@ it.effect('rejects contextual overflow and already-typed integer mismatches befo
         (expression) => expression._tag === 'Integer' && expression.integer._tag === 'OutOfRange',
       ),
     )
-    assert.notInclude(Hir.encode(Analysis.rootAnalysis(overflow).hir), 'literal 256')
+    assert.notInclude(Tir.encode(Analysis.rootAnalysis(overflow).tir), 'literal 256')
 
     const mismatch = yield* AnalysisFixture.retainingMain(
       'integer/contextual-mismatch',
@@ -175,8 +175,8 @@ it.effect('uses call and pipeline parameters as exact integer literal contexts',
           : [],
     )
     assert.isAtLeast(contextualValues.filter((type) => type === 'u8').length, 3)
-    assert.include(Hir.encode(Analysis.rootAnalysis(snapshot).hir), 'literal 42 : u8')
-    assert.include(Hir.encode(Analysis.rootAnalysis(snapshot).hir), 'literal 13 : u8')
+    assert.include(Tir.encode(Analysis.rootAnalysis(snapshot).tir), 'literal 42 : u8')
+    assert.include(Tir.encode(Analysis.rootAnalysis(snapshot).tir), 'literal 13 : u8')
     assert.include(MirEncoding.encode(Analysis.loweredMir(snapshot)), 'literal 42 : u8')
   }),
 )
@@ -204,6 +204,6 @@ pub fn main() -> i32 { return mixed(21) }`),
         : [],
     )
     assert.isAtLeast(fives.filter((type) => type === 'u16').length, 2)
-    assert.include(Hir.encode(Analysis.rootAnalysis(snapshot).hir), 'literal 5 : u16')
+    assert.include(Tir.encode(Analysis.rootAnalysis(snapshot).tir), 'literal 5 : u16')
   }),
 )

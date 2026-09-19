@@ -3,7 +3,7 @@
 //! # Details
 //!
 //! Reflection retains nominal owner and visible declaration order. Descriptors have no runtime
-//! representation and disappear before runtime HIR is published.
+//! representation and disappear before runtime TIR is published.
 
 /// Source-declared named aggregate kind returned by `typeKind`.
 pub const namedKind: u8 = 0

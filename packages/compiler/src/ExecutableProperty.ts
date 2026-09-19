@@ -2,7 +2,7 @@ import * as DeclarationFacts from './DeclarationFacts.js'
 import type * as DeclarationIndex from './DeclarationIndex.js'
 import * as Diagnostic from './Diagnostic.js'
 import * as ExecutionAffinity from './ExecutionAffinity.js'
-import * as Hir from './Hir.js'
+import * as Tir from './Tir.js'
 import * as Instances from './Instances.js'
 import * as Lifetime from './Lifetime.js'
 import * as TypeInference from './internal/TypeInference.js'
@@ -674,8 +674,8 @@ export const violationDiagnostics = (
   })
   const nominalApplications_ = self.instances.flatMap((instance) =>
     instance.function.statements
-      .flatMap(Hir.statementExpressions)
-      .flatMap(Hir.expressionTree)
+      .flatMap(Tir.statementExpressions)
+      .flatMap(Tir.expressionTree)
       .flatMap((expression) => {
         if (expression._tag === 'Unavailable') {
           return []
