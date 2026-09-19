@@ -458,7 +458,7 @@ it.effect('matches the structural golden for a representative module', () =>
     // A digest of the deterministic rendering pins the whole shape without a 4,000-line dump;
     // regenerate with `render(module)` when authored vocabulary or anchoring changes on purpose.
     assert.strictEqual(
-      `${yield* AuthoredEncoding.digest(encoder.encode(render(module)))}
+      `${yield* AuthoredEncoding.digest([...encoder.encode(render(module))])}
 `,
       golden('authored-lowering.sha256'),
     )

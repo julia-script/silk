@@ -1,4 +1,5 @@
 import * as Effect from 'effect/Effect'
+import * as Option from 'effect/Option'
 import * as Result from 'effect/Result'
 import type * as ArtifactKind from './ArtifactKind.js'
 import * as ArtifactPlan from './ArtifactPlan.js'
@@ -13,6 +14,7 @@ import type * as Mir from './Mir.js'
 import * as OpaqueRealization from './OpaqueRealization.js'
 import type * as ProfileBootstrap from './ProfileBootstrap.js'
 import * as Realization from './Realization.js'
+import * as SourceFile from './SourceFile.js'
 import type * as SourceOrigin from './SourceOrigin.js'
 import * as SourceResolver from './SourceResolver.js'
 import * as ToolchainIntegrity from './ToolchainIntegrity.js'
@@ -257,6 +259,30 @@ const executablePass = Effect.fnUntraced(function* (
  * component roots, every module outcome is shared through one resolver snapshot, and a pass that
  * admits nothing new seals. Unused catalog entries are never resolved.
  */
+/**
+ * Serves sources the sealed frontend already holds from memory, so admitting component roots only
+ * resolves the new modules and never reopens a source that discovery has already proven.
+ */
+const retaining = Effect.fnUntraced(function* <A, E>(
+  closure: ModuleClosure.Facts,
+  effect: Effect.Effect<A, E, SourceResolver.SourceResolver>,
+): Effect.fn.Return<A, E, SourceResolver.SourceResolver> {
+  const live = yield* SourceResolver.SourceResolver
+  const resolve = Effect.fnUntraced(function* (module: string, standard: boolean) {
+    const source = closure.sources.get(module)
+    if (source !== undefined)
+      return Option.some(SourceResolver.resolved(SourceFile.toUint8Array(source), source.origin))
+    return yield* standard ? live.resolveStandardLibrary(module) : live.resolve(module)
+  })
+  return yield* effect.pipe(
+    Effect.provideService(SourceResolver.SourceResolver, {
+      ...live,
+      resolve: (module) => resolve(module, false),
+      resolveStandardLibrary: (module) => resolve(module, true),
+    }),
+  )
+})
+
 const closeExecutable = Effect.fnUntraced(function* (
   request: ModuleClosure.CompilationRequest,
   load: (
@@ -347,9 +373,12 @@ const closeExecutable = Effect.fnUntraced(function* (
     const profile =
       pass.ready.completion?.profile ??
       (pass.product._tag === 'Realized' ? pass.product.value.profile : undefined)
-    frontend = yield* load(
-      components.map((component) => component.module),
-      pass.ready.frontend,
+    frontend = yield* retaining(
+      pass.ready.frontend.closure,
+      load(
+        components.map((component) => component.module),
+        pass.ready.frontend,
+      ),
     )
     pass = yield* executablePass(
       frontend,
