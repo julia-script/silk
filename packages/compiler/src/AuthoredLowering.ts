@@ -1733,6 +1733,24 @@ const prefixOperator = (syntax: SyntaxTree.Node): AuthoredHir.PrefixOperator => 
   return 'Negate'
 }
 
+/**
+ * The anchor of the operator token an expression is written with. A damaged expression whose
+ * operator is gone falls back to the expression itself.
+ */
+const operatorAnchor = (
+  draft: Draft,
+  cursor: Cursor,
+  syntax: SyntaxTree.Node,
+  own: AuthoredHir.Anchor,
+): AuthoredHir.Anchor => {
+  const written = syntax.children.find(
+    (element): element is Token.Token =>
+      isToken(element) &&
+      (Operator.infix(element.kind) !== undefined || Operator.prefix(element.kind) !== undefined),
+  )
+  return written === undefined ? own : node(draft, child(cursor, 'operator'), written.span).anchor
+}
+
 const infixOperator = (syntax: SyntaxTree.Node): AuthoredHir.InfixOperator | undefined => {
   for (const element of syntax.children) {
     if (!isToken(element)) continue
@@ -1961,13 +1979,16 @@ const expression = (
               ),
       })
     }
-    case 'PrefixExpression':
+    case 'PrefixExpression': {
+      const base = node(draft, cursor, spanOf(syntax))
       return done({
-        ...node(draft, cursor, spanOf(syntax)),
+        ...base,
         _tag: 'PrefixExpression',
         operator: prefixOperator(syntax),
+        operatorAnchor: operatorAnchor(draft, cursor, syntax, base.anchor),
         operand: operandAt(draft, cursor, syntax, 0, 'operand', frame),
       })
+    }
     case 'InfixExpression': {
       const operator = infixOperator(syntax)
       const left = operandAt(draft, cursor, syntax, 0, 'left', frame)
@@ -1977,10 +1998,12 @@ const expression = (
           left,
           right,
         ])
+      const base = node(draft, cursor, spanOf(syntax))
       return done({
-        ...node(draft, cursor, spanOf(syntax)),
+        ...base,
         _tag: 'InfixExpression',
         operator,
+        operatorAnchor: operatorAnchor(draft, cursor, syntax, base.anchor),
         left,
         right,
       })

@@ -6783,6 +6783,11 @@ export const analyzeOperatorExpression = (
   resolution: ResolutionContext,
   expected?: SemanticType,
 ): ExpressionResult => {
+  // Operator diagnostics and the operator reference name the written token, not the operands.
+  const operatorPosition =
+    node._tag === 'PrefixExpression' || node._tag === 'InfixExpression'
+      ? node.operatorAnchor
+      : node.anchor
   // The authored operator is already decoded; only `BitwiseNot` is spelled differently here.
   let operator: Operator.Prefix | Operator.Infix | undefined
   let operandNodes: ReadonlyArray<AuthoredHir.Expression>
@@ -6920,7 +6925,7 @@ export const analyzeOperatorExpression = (
       const reference: CallReferenceFact = Object.freeze({
         _tag: 'ResolvedEnumEquality',
         spelling: Operator.spelling(operator),
-        anchor: node.anchor,
+        anchor: operatorPosition,
         enum: firstEnum.canonical.id,
         operator: equalityOperator,
       })
@@ -6952,20 +6957,20 @@ export const analyzeOperatorExpression = (
       diagnostic = Diagnostic.enumOrdering(
         firstEnum === undefined ? secondTypeText : firstTypeText,
         Operator.spelling(operator),
-        context.spanOf(node.anchor),
+        context.spanOf(operatorPosition),
       )
     } else if (isEquality && firstEnum !== undefined && secondEnum !== undefined) {
       diagnostic = Diagnostic.crossEnumEquality(
         firstTypeText,
         secondTypeText,
-        context.spanOf(node.anchor),
+        context.spanOf(operatorPosition),
       )
     } else if (isEquality) {
       diagnostic = Diagnostic.enumIntegerMismatch(
         firstEnum === undefined ? secondTypeText : firstTypeText,
         firstEnum === undefined ? firstTypeText : secondTypeText,
         firstEnum === undefined ? 'IntegerToEnum' : 'EnumToInteger',
-        context.spanOf(node.anchor),
+        context.spanOf(operatorPosition),
       )
     } else {
       diagnostic = undefined
@@ -6974,7 +6979,7 @@ export const analyzeOperatorExpression = (
       const reference: CallReferenceFact = Object.freeze({
         _tag: 'Missing',
         spelling: Operator.spelling(operator),
-        anchor: node.anchor,
+        anchor: operatorPosition,
         cause: Diagnostic.identity(diagnostic),
       })
       return Object.freeze({
@@ -7031,17 +7036,17 @@ export const analyzeOperatorExpression = (
         ? Diagnostic.ambiguousOperator(
             operatorSpelling,
             candidates.map((candidate) => candidate.label),
-            context.spanOf(node.anchor),
+            context.spanOf(operatorPosition),
           )
         : Diagnostic.operatorNotApplicable(
             operatorSpelling,
             operandTypes,
-            context.spanOf(node.anchor),
+            context.spanOf(operatorPosition),
           )
     const reference: CallReferenceFact = Object.freeze({
       _tag: 'Missing',
       spelling: operatorSpelling,
-      anchor: node.anchor,
+      anchor: operatorPosition,
       cause: Diagnostic.identity(diagnostic),
     })
     return Object.freeze({
@@ -7080,7 +7085,7 @@ export const analyzeOperatorExpression = (
   const reference: CallReferenceFact = Object.freeze({
     _tag: 'ResolvedBuiltin',
     spelling: `${target.actor}.${target.operation}`,
-    anchor: node.anchor,
+    anchor: operatorPosition,
     actor: target.actor,
     operation: signature.operation,
     intrinsic: signature.id,

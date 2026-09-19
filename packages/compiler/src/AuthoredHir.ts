@@ -394,11 +394,15 @@ export type Expression =
         | {
             readonly _tag: 'PrefixExpression'
             readonly operator: PrefixOperator
+            /** Where the operator itself is written, so a diagnostic about it names that token. */
+            readonly operatorAnchor: Anchor
             readonly operand: Expression
           }
         | {
             readonly _tag: 'InfixExpression'
             readonly operator: InfixOperator
+            /** Where the operator itself is written, so a diagnostic about it names that token. */
+            readonly operatorAnchor: Anchor
             readonly left: Expression
             readonly right: Expression
           }
@@ -837,8 +841,8 @@ export const fields = freezeFieldRegistry({
   ReferentExpression: [...nodeFields, 'subject'],
   IndexExpression: [...nodeFields, 'subject', 'index'],
   CallExpression: [...nodeFields, 'callee', 'generics', 'arguments'],
-  PrefixExpression: [...nodeFields, 'operator', 'operand'],
-  InfixExpression: [...nodeFields, 'operator', 'left', 'right'],
+  PrefixExpression: [...nodeFields, 'operator', 'operatorAnchor', 'operand'],
+  InfixExpression: [...nodeFields, 'operator', 'operatorAnchor', 'left', 'right'],
   PipelineExpression: [...nodeFields, 'input', 'target'],
   PatternField: [...nodeFields, 'name', 'pattern'],
   EnumPattern: [...nodeFields, 'path'],
