@@ -331,6 +331,7 @@ export const broadModule = Effect.fnUntraced(function* (): Effect.fn.Return<
           type: unit(owner),
           mutable: true,
           linkage: linkage(owner),
+          properties: [],
         }
         break
       case 'foreign':

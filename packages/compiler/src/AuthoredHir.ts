@@ -626,6 +626,7 @@ export type DeclarationHeader =
             readonly type: Type
             readonly mutable: boolean
             readonly linkage: Linkage
+            readonly properties: ReadonlyArray<PropertyClause>
           }
       ))
 
@@ -858,7 +859,7 @@ export const fields = freezeFieldRegistry({
   ConstantHeader: [...namedFields, 'type'],
   PackageParameterHeader: [...namedFields, 'type'],
   AliasHeader: [...namedFields, 'generics', 'target'],
-  StaticHeader: [...namedFields, 'type', 'mutable', 'linkage'],
+  StaticHeader: [...namedFields, 'type', 'mutable', 'linkage', 'properties'],
   NoBody: [],
   CallableBody: ['block'],
   InitializerBody: ['value'],

@@ -518,6 +518,7 @@ test('the compiler release candidate exposes only its LLVM compiler actors', () 
       './AuthoredEncoding',
       './AuthoredHir',
       './AuthoredIdentity',
+      './AuthoredLowering',
       './AuthoredModule',
       './AuthoredPool',
       './AuthoredPresentation',
