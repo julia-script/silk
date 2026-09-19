@@ -15,7 +15,7 @@ import * as RunCommand from './RunCommand.js'
  * adding a command never edits a shared switch.
  */
 export const command = Command.make('silk').pipe(
-  Command.withDescription('The Silk Effect bootstrap compiler.'),
+  Command.withDescription('The Silk bootstrap compiler.'),
   Command.withSubcommands([
     InitCommand.command,
     BuildCommand.command,

@@ -1,18 +1,18 @@
-# Silk Effect Language
+# Silk Language
 
-The language-design context for Silk Effect, from its initial bootstrap subset through later
+The language-design context for Silk, from its initial bootstrap subset through later
 self-hosted implementations.
 
 ## Language
 
-**Silk Effect**:
+**Silk**:
 A low-level systems programming language prioritizing explicit control, memory safety, predictable
 performance, and suitability for systems software. Effect informs parts of its semantic model;
 interoperability with Effect is an important later convenience, not the language's purpose.
 _Avoid_: native Effect, systems Effect
 
 **Bootstrap language**:
-The smallest credible subset of Silk Effect whose reference program is the compiler itself; a
+The smallest credible subset of Silk whose reference program is the compiler itself; a
 feature belongs in this subset when the compiler or its conformance tests require it. It is a
 coherent subset of the intended language rather than a disposable dialect, although early
 implementations may impose restrictions and alpha discoveries may still justify breaking changes.
@@ -57,7 +57,7 @@ files, or hold implicit runtime initialization.
 _Avoid_: partial module, declared module name
 
 **Self-hosting compiler**:
-A compiler written in Silk Effect that can compile its own source into a working native compiler
+A compiler written in Silk that can compile its own source into a working native compiler
 without Node.js or TypeScript at runtime. The first self-hosting compiler may emit LLVM IR and use
 the LLVM toolchain for code generation and linking.
 _Avoid_: frontend-only self-host, LLVM-independent compiler
@@ -749,7 +749,7 @@ _Avoid_: global registration, implicit override
 
 **Effect reference model**:
 The TypeScript Effect library as a semantic reference for how programs compose through typed
-failures, requirements, services, scopes, concurrency, interruption, and observability. Silk Effect
+failures, requirements, services, scopes, concurrency, interruption, and observability. Silk
 does not target Effect API parity, source compatibility, identical runtime behavior, or Effect
 integration as a primary goal.
 _Avoid_: Effect port, native Effect runtime

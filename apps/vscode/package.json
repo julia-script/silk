@@ -3,7 +3,7 @@
   "displayName": "Silk Language",
   "version": "0.0.0",
   "private": true,
-  "description": "Syntax highlighting and language server support for Silk Effect source files.",
+  "description": "Syntax highlighting and language server support for Silk source files.",
   "categories": [
     "Programming Languages"
   ],

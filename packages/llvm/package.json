@@ -1,7 +1,7 @@
 {
   "name": "@silklang/llvm",
   "version": "0.0.0",
-  "description": "LLVM integration primitives for Silk Effect.",
+  "description": "LLVM integration primitives for Silk.",
   "keywords": [
     "effect",
     "llvm",

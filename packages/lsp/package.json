@@ -1,7 +1,7 @@
 {
   "name": "@silklang/lsp",
   "version": "0.0.0",
-  "description": "Language Server Protocol server for Silk Effect, powered by the bootstrap compiler analysis snapshot.",
+  "description": "Language Server Protocol server for Silk, powered by the bootstrap compiler analysis snapshot.",
   "keywords": [
     "effect",
     "language-server",

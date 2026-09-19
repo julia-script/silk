@@ -1,4 +1,4 @@
-# Silk Effect agent instructions
+# Silk agent instructions
 
 ## Green-field policy
 
@@ -18,6 +18,10 @@ compatibility contract.
 These conventions apply to the entire repository. The current `effect-patterns` skill is the
 authoritative source for Effect architecture. When this file and that skill differ, follow the
 skill and update this file rather than preserving an older convention.
+
+## Papercuts
+
+Maintain PAPERCUTS.md, a global log shared by all agents sessions of anything that slowed down development. When you lose time to one mid-session, append date · symptom · fix · project. Check this file first when tooling fails mysteriously.
 
 ## Agent skills
 

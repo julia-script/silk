@@ -1,7 +1,7 @@
 {
   "name": "@silklang/compiler",
   "version": "0.0.0",
-  "description": "Effect-native stage-0 compiler and reusable compiler tooling for Silk Effect.",
+  "description": "Effect-native stage-0 compiler and reusable compiler tooling for Silk.",
   "keywords": [
     "compiler",
     "effect",

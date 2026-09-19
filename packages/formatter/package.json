@@ -1,7 +1,7 @@
 {
   "name": "@silklang/formatter",
   "version": "0.0.0",
-  "description": "Canonical whole-source formatting for Silk Effect, including active Silk examples in source documentation.",
+  "description": "Canonical whole-source formatting for Silk, including active Silk examples in source documentation.",
   "keywords": [
     "documentation",
     "formatter",

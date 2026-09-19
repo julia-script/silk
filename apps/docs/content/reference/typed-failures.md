@@ -516,8 +516,8 @@ channel.
 
 Silk source cannot throw. A future foreign boundary must translate an anticipated host failure into
 ordinary data or a declared typed failure before it enters Silk. An unexpected foreign exception
-that crosses the boundary is fatal; it does not justify adding a recoverable defect channel to all
-Silk Effects.
+that crosses the boundary is fatal; it does not justify adding a recoverable defect channel to every
+Effect in Silk.
 
 **Diagnostics:** A trap encountered while evaluating a required compile-time constant reports a
 compile-time diagnostic at the trapping operation. A trap reached during program execution reports

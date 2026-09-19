@@ -1,6 +1,6 @@
-# Silk Effect
+# Silk
 
-Silk Effect is an unreleased low-level systems language built around explicit memory and execution
+Silk is an unreleased low-level systems language built around explicit memory and execution
 control, typed failures, replaceable service requirements, deterministic cleanup, and
 tooling-friendly semantics. The repository is a strict TypeScript, ESM-only monorepo containing the
 stage-0 compiler, runtime-facing libraries, editor tooling, and language-pressure programs.

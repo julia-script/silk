@@ -1,7 +1,7 @@
 {
   "name": "@silklang/cli",
   "version": "0.0.0",
-  "description": "Command line interface for the Silk Effect bootstrap compiler.",
+  "description": "Command line interface for the Silk bootstrap compiler.",
   "keywords": [
     "cli",
     "compiler",

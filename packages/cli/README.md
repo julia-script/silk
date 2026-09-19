@@ -1,6 +1,6 @@
 # @silklang/cli
 
-The project-oriented command line interface for the Silk Effect bootstrap compiler.
+The project-oriented command line interface for the Silk bootstrap compiler.
 
 ## Create a project
 

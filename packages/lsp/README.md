@@ -1,6 +1,6 @@
 # @silklang/lsp
 
-A Language Server Protocol server for Silk Effect, powered by the bootstrap compiler's analysis
+A Language Server Protocol server for Silk, powered by the bootstrap compiler's analysis
 snapshot. Project-scoped analysis sessions feed every feature; the server adds only protocol
 translation.
 

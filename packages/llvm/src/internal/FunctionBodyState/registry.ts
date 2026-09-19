@@ -598,7 +598,7 @@ export const makeSwitchHandle = (
   })
 
 /** @internal */
-export const validate = Effect.fnUntraced(function* (
+export const validate = Effect.fn('FunctionBody.validate')(function* (
   self: FunctionBodyActor.FunctionBody,
 ): Effect.fn.Return<FunctionBodyDescription.Snapshot, LlvmError> {
   return yield* mutate(self, 'FunctionBody.validate', (draft) => {
