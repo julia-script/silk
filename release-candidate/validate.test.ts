@@ -619,6 +619,7 @@ test('the compiler release candidate exposes only its LLVM compiler actors', () 
       './RowAlgebra',
       './RuntimeComponent',
       './Scalar',
+      './SemanticContext',
       './SemanticDisplay',
       './SemanticInvalidation',
       './SemanticOccurrence',
