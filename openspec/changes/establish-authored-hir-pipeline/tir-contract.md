@@ -635,6 +635,26 @@ the `Request`/`Validity` split, returning the cached object on a hit, and the de
 `SemanticRebinding` land directly after step 6, when the cached product is the checked body. The
 milestone still closes only with rebinding and the duplicate body both gone.
 
-Step 6 removes the duplicate body and, with the rest of step 2, rebinding. The milestone is complete only after
+Step 6 removes the duplicate body and, with the rest of step 2, rebinding.
+
+**What construction keeps private.** Analysis reasons about the subexpressions it has just checked:
+their resolved references, contracts, written sub-tokens and recovery states. Typed nodes do not carry
+all of that, and should not, because none of it is needed to execute or to reuse a body. So analysis
+keeps working records while it builds a body. The boundary is strict and is what removes the
+duplicate body:
+
+- a working record never leaves construction: `Elaboration.Result` exposes checked bodies and their
+  tables, and nothing outside construction imports a record type;
+- nothing caches a record: reuse stores the checked body only;
+- everything a later stage or a tool needs is either on a node or in a table the body publishes
+  (occurrences, inference rows, scopes, lifetimes, diagnostics, provenance);
+- the evaluator reads nodes, also while a body is still being built.
+
+**Presentation of a checked body.** Stages after construction still read source coordinates (loan
+liveness, MIR provenance, debug locations). A checked body names authored nodes only. Once per
+revision `Tir.present` stamps each node's span from its origin through the presentation registry;
+the stamped span is presentation state, is never part of the portable schema, and is never read
+from a cached body before it is stamped again. This is a pure function of origin and presentation,
+which is what replaces `SemanticRebinding`. The milestone is complete only after
 step 7. Persistent caching stays later work; what it needs already holds after step 3: a portable
 schema, a canonical codec, revision-free content, and validity carried by the artifact.
