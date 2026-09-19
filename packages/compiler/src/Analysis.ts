@@ -424,9 +424,10 @@ export const explicitLifetimes = (
               semantic,
               authored,
               header: spans.spanOf(declaration.anchor),
+              // Every written body counts, not only one retained as a static template.
               body:
-                'bodyTemplate' in declaration && declaration.bodyTemplate !== undefined
-                  ? spans.spanOf(declaration.bodyTemplate.anchor)
+                authored.body._tag === 'CallableBody' && authored.body.block !== undefined
+                  ? spans.spanOf(authored.body.block.anchor)
                   : undefined,
               executable:
                 declaration._tag === 'FunctionDeclaration' ||
