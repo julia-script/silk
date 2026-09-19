@@ -322,9 +322,10 @@ export const forHeader = (
       case 'OpaqueResultType': {
         for (const parameter of type.binders) {
           if (parameter._tag === 'RowParameter') continue
+          // A binder's bound is a contract of its own, not part of the output it sits in: it
+          // elides like any other generic bound rather than taking the output's default region.
           for (const bound of parameter.bounds)
-            if (bound._tag !== 'Lifetime')
-              walkType(bound, scope, output, defaultOutput, allocate, quantified)
+            if (bound._tag !== 'Lifetime') walkType(bound, scope)
         }
         walkType(type.result, scope, output, defaultOutput, allocate, quantified)
         return
