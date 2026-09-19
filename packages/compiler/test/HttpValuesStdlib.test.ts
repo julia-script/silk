@@ -152,7 +152,7 @@ pub fn main() -> i32 {
             sourceId: diagnostic.span.sourceId,
             start: diagnostic.span.start,
           })),
-        [{ code: 'SEM0021', sourceId: 'http-values/forged-target', start: 79 }],
+        [{ code: 'SEM0021', sourceId: 'http-values/forged-target', start: 80 }],
       )
     }),
   60_000,

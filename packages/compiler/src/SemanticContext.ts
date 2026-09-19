@@ -97,6 +97,10 @@ export const make = (lowered: AuthoredLowering.Lowered): SemanticContext => {
     module: lowered.module,
     presentation: lowered.presentation,
     spanOf: (anchor) => {
+      // Another module's position is never inside this one: name that module rather than
+      // presenting its anchor as the start of this source.
+      if (anchor.owner.module !== lowered.module.owner.module)
+        return SourceSpan.fromOffsets(anchor.owner.module, 0, 0) ?? moduleSpan
       const entry = resolve(anchor)
       return entry === undefined
         ? moduleSpan
