@@ -128,7 +128,7 @@ One preparation request SHALL name its intent. Analysis intent SHALL seal the re
 #### Scenario: Reject analysis-only input
 
 - **WHEN** a Driver or realization consumer receives an analysis bundle
-- **THEN** the operation is unavailable by type; no executable work runs on analysis-only input
+- **THEN** the operation rejects the analysis bundle before any executable work runs on analysis-only input
 
 #### Scenario: Record component reasons
 

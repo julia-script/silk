@@ -37,23 +37,16 @@ export class AuthoredPresentationError extends Data.TaggedError('AuthoredPresent
   readonly reason: { readonly _tag: 'InvalidSpan'; readonly span: Span }
 }> {}
 
-const span = Effect.fnUntraced(function* (
-  value: Span,
-): Effect.fn.Return<Span, AuthoredPresentationError> {
-  if (
-    !Number.isSafeInteger(value.start) ||
-    !Number.isSafeInteger(value.end) ||
-    value.start < 0 ||
-    value.end < value.start
-  ) {
-    return yield* new AuthoredPresentationError({
-      reason: { _tag: 'InvalidSpan', span: value },
-    })
-  }
-  return Object.freeze({ start: value.start, end: value.end })
-})
+const validSpan = (value: Span): boolean =>
+  Number.isSafeInteger(value.start) &&
+  Number.isSafeInteger(value.end) &&
+  value.start >= 0 &&
+  value.end >= value.start
 
-/** Copy display data independently; a new source revision never mutates previous artifacts. */
+/**
+ * Publishes display data for one revision. Entries and spans are copied; anchors are checked and
+ * shared, since owners and local paths are immutable authored identity, not revision data.
+ */
 export const make = Effect.fn('AuthoredPresentation.make')(function* (
   sourceId: string,
   revision: string,
@@ -63,24 +56,65 @@ export const make = Effect.fn('AuthoredPresentation.make')(function* (
   Presentation,
   AuthoredPresentationError | AuthoredIdentity.AuthoredIdentityError
 > {
+  const checkAnchor = (
+    anchor: AuthoredIdentity.Anchor,
+  ): AuthoredIdentity.AuthoredIdentityError | undefined => {
+    const owner = anchor.owner.path.findIndex(
+      (part) => !Number.isSafeInteger(part.occurrence) || part.occurrence < 0,
+    )
+    if (owner >= 0)
+      return new AuthoredIdentity.AuthoredIdentityError({
+        operation: 'AuthoredIdentity.anchor',
+        reason: {
+          _tag: 'InvalidOwnerOccurrence',
+          index: owner,
+          occurrence: anchor.owner.path[owner]?.occurrence ?? Number.NaN,
+        },
+      })
+    const local = anchor.path.findIndex(
+      (part) => !Number.isSafeInteger(part.occurrence) || part.occurrence < 0,
+    )
+    if (local >= 0)
+      return new AuthoredIdentity.AuthoredIdentityError({
+        operation: 'AuthoredIdentity.anchor',
+        reason: {
+          _tag: 'InvalidLocalOccurrence',
+          index: local,
+          occurrence: anchor.path[local]?.occurrence ?? Number.NaN,
+        },
+      })
+    return undefined
+  }
   const copiedEntries: Entry[] = []
-  const copiedDiagnostics: Diagnostic[] = []
   for (const entry of entries) {
+    const failure = checkAnchor(entry.anchor)
+    if (failure !== undefined) return yield* failure
+    if (!validSpan(entry.span))
+      return yield* new AuthoredPresentationError({
+        reason: { _tag: 'InvalidSpan', span: entry.span },
+      })
     copiedEntries.push(
       Object.freeze({
-        anchor: yield* AuthoredIdentity.anchor(entry.anchor.owner, entry.anchor.path),
-        span: yield* span(entry.span),
+        anchor: entry.anchor,
+        span: Object.freeze({ start: entry.span.start, end: entry.span.end }),
         ...(entry.spelling === undefined ? {} : { spelling: entry.spelling }),
         ...(entry.trivia === undefined ? {} : { trivia: entry.trivia }),
         ...(entry.documentation === undefined ? {} : { documentation: entry.documentation }),
       }),
     )
   }
+  const copiedDiagnostics: Diagnostic[] = []
   for (const diagnostic of diagnostics) {
+    const failure = checkAnchor(diagnostic.anchor)
+    if (failure !== undefined) return yield* failure
+    if (!validSpan(diagnostic.span))
+      return yield* new AuthoredPresentationError({
+        reason: { _tag: 'InvalidSpan', span: diagnostic.span },
+      })
     copiedDiagnostics.push(
       Object.freeze({
-        anchor: yield* AuthoredIdentity.anchor(diagnostic.anchor.owner, diagnostic.anchor.path),
-        span: yield* span(diagnostic.span),
+        anchor: diagnostic.anchor,
+        span: Object.freeze({ start: diagnostic.span.start, end: diagnostic.span.end }),
         code: diagnostic.code,
         message: diagnostic.message,
       }),

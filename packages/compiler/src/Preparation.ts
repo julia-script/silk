@@ -277,6 +277,7 @@ const closeExecutable = Effect.fnUntraced(function* (
   SourceResolver.SourceResolver
 > {
   let frontend = initial
+  // Composition roots derive from configuration, not from the closure, so one reading suffices.
   let components: ReadonlyArray<ComponentRoot> = compositionComponents(initial)
   let pass = yield* executablePass(frontend, target, options, emission)
   for (let iteration = 0; ; iteration += 1) {
@@ -319,6 +320,8 @@ const closeExecutable = Effect.fnUntraced(function* (
       }
       break
     }
+    // Storage demand comes from a fixed catalog, so the loop settles in two passes; the bound only
+    // turns a catalog defect into a rejection instead of a hang.
     if (iteration >= maximumComponentPasses) {
       pass = {
         ready: pass.ready,

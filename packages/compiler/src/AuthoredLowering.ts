@@ -253,7 +253,8 @@ interface Draft {
 
 const decoder = new TextDecoder()
 
-const spanKey = (span: SourceSpan.SourceSpan): string => `${span.start}:${span.end}`
+const spanKey = (span: { readonly start: number; readonly end: number }): string =>
+  `${span.start}:${span.end}`
 
 const triviaKinds: ReadonlySet<Token.TokenKind> = new Set<Token.TokenKind>([
   'Whitespace',
@@ -302,6 +303,8 @@ const anchorOf = (cursor: Cursor): AuthoredHir.Anchor => ({
 })
 
 const authored: AuthoredHir.Origin = { _tag: 'Authored' }
+/** Shared by every undamaged node; publication clones preserve the sharing, freezing it once. */
+const noCauses: ReadonlyArray<AuthoredHir.Cause> = []
 
 const slice = (draft: Draft, span: SourceSpan.SourceSpan): Uint8Array =>
   Uint8Array.from(draft.source.bytes.slice(span.start, span.end))
@@ -346,7 +349,7 @@ const node = (
     ...(display.spelling === undefined ? {} : { spelling: display.spelling }),
     ...(display.documentation === undefined ? {} : { documentation: display.documentation }),
   })
-  return { anchor, origin, causes: [] }
+  return { anchor, origin, causes: noCauses }
 }
 
 /** Recovery causes name the frontend diagnostic covering the damaged region when one exists. */
@@ -851,7 +854,7 @@ const requirement = (
       capability:
         capability === undefined
           ? missingType(draft, child(own, 'capability'), spanOf(syntax))
-          : type(draft, own, capability),
+          : type(draft, child(own, 'capability'), capability),
       role:
         rolePath === undefined
           ? undefined
@@ -3190,7 +3193,7 @@ export const lower = Effect.fn('AuthoredLowering.lower')(function* (
   }
   const declarations = nodes(syntax.root).map((element) => declaration(draft, owner, element))
   const pool = yield* AuthoredPool.make(draft.texts, draft.bytes)
-  const module = yield* AuthoredModule.make({ _tag: 'AuthoredModule', owner, pool, declarations })
+  const module = yield* AuthoredModule.seal({ _tag: 'AuthoredModule', owner, pool, declarations })
   const presentation = yield* AuthoredPresentation.make(
     syntax.source.id,
     revisionOf(syntax.source),
@@ -3232,14 +3235,14 @@ const allDeclarations = (module: AuthoredHir.Module): ReadonlyArray<AuthoredHir.
   return found
 }
 
-const headerStarts = new WeakMap<Lowered, ReadonlyMap<number, AuthoredHir.Declaration>>()
+const headerSpans = new WeakMap<Lowered, ReadonlyMap<string, AuthoredHir.Declaration>>()
 
 /** Finds the authored declaration whose header presents at one declaration syntax node. */
 export const declarationFor = (
   self: Lowered,
   syntax: SyntaxTree.Node,
 ): AuthoredHir.Declaration | undefined => {
-  let index = headerStarts.get(self)
+  let index = headerSpans.get(self)
   if (index === undefined) {
     const byOwner = new Map(
       allDeclarations(self.module).map((declaration) => [
@@ -3247,37 +3250,61 @@ export const declarationFor = (
         declaration,
       ]),
     )
-    const built = new Map<number, AuthoredHir.Declaration>()
+    const built = new Map<string, AuthoredHir.Declaration>()
     for (const entry of self.presentation.entries) {
       const [segment] = entry.anchor.path
       if (entry.anchor.path.length !== 1 || segment?.role !== 'header') continue
       const declaration = byOwner.get(identityKey(entry.anchor.owner))
-      if (declaration !== undefined && !built.has(entry.span.start))
-        built.set(entry.span.start, declaration)
+      if (declaration !== undefined) built.set(spanKey(entry.span), declaration)
     }
     index = built
-    headerStarts.set(self, built)
+    headerSpans.set(self, built)
   }
-  return index.get(spanOf(syntax).start)
+  return index.get(spanKey(spanOf(syntax)))
 }
 
 const textOf = (module: AuthoredHir.Module, reference: AuthoredPool.TextRef): string =>
   module.pool.texts[reference.index]?.value ?? ''
 
+/** Lifetime binders introduced by one body node, which scope every lifetime spelled beneath it. */
+const lifetimeBinders = (
+  record: Readonly<Record<string, unknown>>,
+): ReadonlyArray<AuthoredHir.GenericParameter> | undefined => {
+  if (Array.isArray(record.binders)) return record.binders as AuthoredHir.GenericParameter[]
+  const contract = record.contract
+  if (record._tag === 'CallableExpression' && typeof contract === 'object' && contract !== null)
+    return (contract as AuthoredHir.CallableContract).generics
+  return undefined
+}
+
 /**
  * A canonical rendering of one authored body for reuse keys: pool references resolve to their
- * text, header lifetime binders are alpha-normalized to their declaration ordinal, and only
+ * text, lifetime binders are alpha-normalized to their binding depth and ordinal, and only
  * semantic fields participate. Equal keys mean equal authored meaning up to lifetime spelling.
  */
 export const canonicalBody = (self: Lowered, declaration: AuthoredHir.Declaration): string => {
   const module = self.module
-  const lifetimes = new Map<string, number>()
-  const header = declaration.header
-  if ('contract' in header) {
-    for (const [ordinal, generic] of header.contract.generics.entries()) {
+  const frameOf = (
+    generics: ReadonlyArray<AuthoredHir.GenericParameter>,
+    depth: number,
+  ): ReadonlyMap<string, string> => {
+    const frame = new Map<string, string>()
+    for (const [ordinal, generic] of generics.entries()) {
       if (generic._tag === 'LifetimeParameter' && generic.name._tag === 'Name')
-        lifetimes.set(textOf(module, generic.name.text), ordinal)
+        frame.set(textOf(module, generic.name.text), `${depth}:${ordinal}`)
     }
+    return frame
+  }
+  const header = declaration.header
+  const frames: Array<ReadonlyMap<string, string>> = [
+    'contract' in header ? frameOf(header.contract.generics, 0) : new Map(),
+  ]
+  const resolve = (text: string): string | undefined => {
+    for (let depth = frames.length - 1; depth >= 0; depth -= 1) {
+      const key = frames[depth]?.get(text)
+      if (key !== undefined) return key
+    }
+    return undefined
   }
   const parts: string[] = []
   const visit = (value: unknown, lifetime: boolean): void => {
@@ -3293,23 +3320,27 @@ export const canonicalBody = (self: Lowered, declaration: AuthoredHir.Declaratio
     const tag = value._tag
     if (tag === 'TextRef' && 'index' in value && typeof value.index === 'number') {
       const text = module.pool.texts[value.index]?.value ?? ''
-      const ordinal = lifetime ? lifetimes.get(text) : undefined
-      return void parts.push(ordinal === undefined ? `"${text}"` : `'${ordinal}`)
+      const key = lifetime ? resolve(text) : undefined
+      return void parts.push(key === undefined ? `"${text}"` : `'${key}`)
     }
     if (tag === 'BytesRef' && 'index' in value && typeof value.index === 'number')
       return void parts.push(`b[${module.pool.bytes[value.index]?.value.join(',') ?? ''}]`)
     if (tag === 'LexicalReference' || tag === 'AuthoredAnchor' || tag === 'Authored') return
     if (tag === 'Cause')
       return void parts.push(`cause:${'code' in value ? String(value.code) : ''}`)
+    const record = value as Readonly<Record<string, unknown>>
+    const binders = lifetimeBinders(record)
+    if (binders !== undefined) frames.push(frameOf(binders, frames.length))
     parts.push(`${tag}(`)
     const order = AuthoredHir.fields[tag as keyof typeof AuthoredHir.fields] ?? []
     for (const key of order) {
       if (key === 'anchor' || key === 'origin') continue
-      const field = (value as Record<string, unknown>)[key]
+      const field = record[key]
       if (field === undefined) parts.push('_')
-      else visit(field, lifetime || tag === 'Lifetime')
+      else visit(field, lifetime || tag === 'Lifetime' || tag === 'LifetimeParameter')
     }
     parts.push(')')
+    if (binders !== undefined) frames.pop()
   }
   visit(declaration.body, false)
   return parts.join(' ')

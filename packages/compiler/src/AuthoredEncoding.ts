@@ -37,6 +37,19 @@ const optionalFields: ReadonlyMap<string, ReadonlyArray<string>> = new Map<
   readonly string[]
 >([['OwnerSegment', ['name', 'role']], ...Object.entries(AuthoredHir.optionalFields)])
 
+interface Shape {
+  readonly known: ReadonlySet<string>
+  readonly required: ReadonlyArray<string>
+}
+
+/** Field membership per tag, precomputed once: validation visits every record of every module. */
+const shapes: ReadonlyMap<string, Shape> = new Map(
+  [...fields].map(([tag, keys]) => {
+    const optional = optionalFields.get(tag) ?? []
+    return [tag, { known: new Set(keys), required: keys.filter((key) => !optional.includes(key)) }]
+  }),
+)
+
 const invalid = (message: string): AuthoredEncodingError =>
   new AuthoredEncodingError({ reason: { _tag: 'InvalidArtifact', message } })
 
@@ -44,37 +57,52 @@ const invalid = (message: string): AuthoredEncodingError =>
 const property = (value: object, key: string): unknown =>
   Object.getOwnPropertyDescriptor(value, key)?.value
 
+/** Direct reads for structure that `encode` has already proven to be plain data fields. */
+const read = (value: object, key: string): unknown =>
+  (value as Readonly<Record<string, unknown>>)[key]
+
+const identityKeys = new WeakMap<object, string | undefined>()
+
 const identityKey = (value: unknown): string | undefined => {
   if (value === null || typeof value !== 'object') return undefined
-  const path = property(value, 'path')
+  if (identityKeys.has(value)) return identityKeys.get(value)
+  const key = computeIdentityKey(value)
+  identityKeys.set(value, key)
+  return key
+}
+
+const computeIdentityKey = (value: object): string | undefined => {
+  const path = read(value, 'path')
   if (!Array.isArray(path)) return undefined
   const parts: unknown[] = []
   for (const part of path) {
     if (part === null || typeof part !== 'object') return undefined
     parts.push([
-      property(part, 'kind'),
-      property(part, 'name'),
-      property(part, 'role'),
-      property(part, 'occurrence'),
+      read(part, 'kind'),
+      read(part, 'name'),
+      read(part, 'role'),
+      read(part, 'occurrence'),
     ])
   }
-  return JSON.stringify([property(value, 'namespace'), property(value, 'module'), parts])
+  return JSON.stringify([read(value, 'namespace'), read(value, 'module'), parts])
 }
 
 const localKey = (value: unknown): string | undefined => {
   if (value === null || typeof value !== 'object') return undefined
-  const owner = identityKey(property(value, 'owner'))
-  const path = property(value, 'path')
+  const owner = identityKey(read(value, 'owner'))
+  const path = read(value, 'path')
   if (owner === undefined || !Array.isArray(path)) return undefined
   const parts: unknown[] = []
   for (const part of path) {
     if (part === null || typeof part !== 'object') return undefined
-    parts.push([property(part, 'role'), property(part, 'occurrence')])
+    parts.push([read(part, 'role'), read(part, 'occurrence')])
   }
   return JSON.stringify([owner, parts])
 }
 
 const isWithinOwner = (value: unknown, parent: unknown): boolean => {
+  // Lowering shares one identity object per owner, so most anchors resolve without comparing paths.
+  if (value === parent) return true
   if (
     value === null ||
     typeof value !== 'object' ||
@@ -84,21 +112,21 @@ const isWithinOwner = (value: unknown, parent: unknown): boolean => {
     return false
   }
   if (
-    property(value, 'namespace') !== property(parent, 'namespace') ||
-    property(value, 'module') !== property(parent, 'module')
+    read(value, 'namespace') !== read(parent, 'namespace') ||
+    read(value, 'module') !== read(parent, 'module')
   )
     return false
-  const path = property(value, 'path')
-  const parentPath = property(parent, 'path')
+  const path = read(value, 'path')
+  const parentPath = read(parent, 'path')
   if (!Array.isArray(path) || !Array.isArray(parentPath) || path.length < parentPath.length)
     return false
   const segmentKey = (part: unknown): string | undefined => {
     if (part === null || typeof part !== 'object') return undefined
     return JSON.stringify([
-      property(part, 'kind'),
-      property(part, 'name'),
-      property(part, 'role'),
-      property(part, 'occurrence'),
+      read(part, 'kind'),
+      read(part, 'name'),
+      read(part, 'role'),
+      read(part, 'occurrence'),
     ])
   }
   return parentPath.every((part, index) => segmentKey(part) === segmentKey(path[index]))
@@ -132,10 +160,10 @@ const validateOwnership = Effect.fnUntraced(function* (
     if (item === undefined) break
     const value = item.value
     if (value === null || typeof value !== 'object') continue
-    const tag = property(value, '_tag')
+    const tag = read(value, '_tag')
     let owner = item.owner
     if (tag === 'Declaration') {
-      owner = property(value, 'owner')
+      owner = read(value, 'owner')
       const key = identityKey(owner)
       if (
         key === undefined ||
@@ -147,9 +175,9 @@ const validateOwnership = Effect.fnUntraced(function* (
       }
       declarations.add(key)
     }
-    const anchor = property(value, 'anchor')
+    const anchor = read(value, 'anchor')
     if (anchor !== undefined && anchor !== null && typeof anchor === 'object') {
-      const anchorOwner = property(anchor, 'owner')
+      const anchorOwner = read(anchor, 'owner')
       if (tag === 'CallableExpression') {
         if (identityKey(anchorOwner) === identityKey(owner) || !isWithinOwner(anchorOwner, owner)) {
           return yield* invalid('Anonymous callable must introduce a nested authored owner')
@@ -162,19 +190,19 @@ const validateOwnership = Effect.fnUntraced(function* (
         return yield* invalid('Node anchor must belong to its containing authored owner')
       }
     }
-    if (tag === 'LexicalReference' && !isWithinOwner(owner, property(value, 'owner'))) {
+    if (tag === 'LexicalReference' && !isWithinOwner(owner, read(value, 'owner'))) {
       return yield* invalid('Lexical captures must target the current or an enclosing owner')
     }
     if (visited.has(value)) continue
     visited.add(value)
     if (
       tag === 'AuthoredIdentity' &&
-      (property(value, 'namespace') !== self.owner.namespace ||
-        property(value, 'module') !== self.owner.module)
+      (read(value, 'namespace') !== self.owner.namespace ||
+        read(value, 'module') !== self.owner.module)
     )
       return yield* invalid('Authored identities and local references must belong to their module')
     if (typeof tag === 'string' && binderTags.has(tag)) {
-      const key = localKey(property(value, 'anchor'))
+      const key = localKey(read(value, 'anchor'))
       if (key === undefined || binders.has(key))
         return yield* invalid('Binder anchors must be distinct')
       binders.add(key)
@@ -204,6 +232,8 @@ const encode = Effect.fnUntraced(function* (
   pool: AuthoredPool.Pool,
   root: unknown,
   domain: 'header' | 'body' | 'artifact',
+  /** Validation walks the same structure without materializing bytes. */
+  emit = true,
 ): Effect.fn.Return<ReadonlyArray<number>, AuthoredEncodingError> {
   const output: number[] = []
   const active = new Set<object>()
@@ -216,37 +246,40 @@ const encode = Effect.fnUntraced(function* (
     length(payload.length)
     for (const byte of payload) output.push(byte)
   }
-  frame(1, encoder.encode(`silk.authored.${domain}`))
-  frame(2, encoder.encode(String(version)))
+  if (emit) {
+    frame(1, encoder.encode(`silk.authored.${domain}`))
+    frame(2, encoder.encode(String(version)))
+  }
   while (work.length > 0) {
     const next = work.pop()
     if (next === undefined) break
     if (next._tag === 'End') {
+      active.delete(next.value)
+      if (!emit) continue
       const size = output.length - next.lengthOffset - 4
       if (size > 0xffffffff) return yield* invalid('Canonical frame exceeds u32 length')
       output[next.lengthOffset] = (size >>> 24) & 255
       output[next.lengthOffset + 1] = (size >>> 16) & 255
       output[next.lengthOffset + 2] = (size >>> 8) & 255
       output[next.lengthOffset + 3] = size & 255
-      active.delete(next.value)
       continue
     }
     const value = next.value
     if (value === undefined) {
-      frame(3, [])
+      if (emit) frame(3, [])
     } else if (typeof value === 'string') {
       if (/[\uD800-\uDFFF]/u.test(value))
         return yield* invalid('Text contains an unpaired surrogate')
-      frame(4, encoder.encode(value))
+      if (emit) frame(4, encoder.encode(value))
     } else if (typeof value === 'bigint') {
-      frame(5, encoder.encode(value.toString()))
+      if (emit) frame(5, encoder.encode(value.toString()))
     } else if (typeof value === 'number') {
       if (!Number.isSafeInteger(value) || Object.is(value, -0)) {
         return yield* invalid('Numbers must be exact safe integers; exact literals use bigint')
       }
-      frame(6, encoder.encode(String(value)))
+      if (emit) frame(6, encoder.encode(String(value)))
     } else if (typeof value === 'boolean') {
-      frame(7, [value ? 1 : 0])
+      if (emit) frame(7, [value ? 1 : 0])
     } else if (value === null || typeof value !== 'object') {
       return yield* invalid('Unsupported authored value')
     } else {
@@ -257,42 +290,51 @@ const encode = Effect.fnUntraced(function* (
       }
       if (isArray) {
         const items: readonly unknown[] = value
-        if (Reflect.ownKeys(value).length !== items.length + 1) {
+        // Holes and extra enumerable fields change the key count; non-enumerable and symbol keys
+        // never reach the published clone, so they need no rejection here.
+        if (Object.keys(value).length !== items.length) {
           return yield* invalid('Authored sequences cannot contain holes or extra fields')
         }
         active.add(value)
-        output.push(8)
-        const lengthOffset = output.length
-        length(0)
+        const lengthOffset = output.length + 1
+        if (emit) {
+          output.push(8)
+          length(0)
+        }
         work.push({ _tag: 'End', value, lengthOffset })
         for (let index = items.length - 1; index >= 0; index -= 1) {
-          const descriptor = Object.getOwnPropertyDescriptor(value, String(index))
-          if (descriptor === undefined || !('value' in descriptor) || !descriptor.enumerable) {
-            return yield* invalid('Authored sequences cannot contain accessors')
-          }
           work.push({ _tag: 'Value', value: items[index] })
         }
         continue
       }
       const tag = property(value, '_tag')
+      const shape = typeof tag === 'string' ? shapes.get(tag) : undefined
       const keys = typeof tag === 'string' ? fields.get(tag) : undefined
-      if (typeof tag !== 'string' || keys === undefined) {
+      if (typeof tag !== 'string' || shape === undefined || keys === undefined) {
         return yield* invalid('Unknown authored record tag')
       }
-      for (const key of Reflect.ownKeys(value)) {
-        if (typeof key !== 'string' || (key !== '_tag' && !keys.includes(key))) {
+      let enumerable = 0
+      for (const key in value) {
+        enumerable += 1
+        if (key !== '_tag' && !shape.known.has(key)) {
           return yield* invalid(`Unexpected field in ${tag}`)
         }
         const descriptor = Object.getOwnPropertyDescriptor(value, key)
-        if (descriptor === undefined || !('value' in descriptor) || !descriptor.enumerable) {
-          return yield* invalid(`Accessor or non-enumerable field in ${tag}`)
+        if (descriptor === undefined || !('value' in descriptor)) {
+          return yield* invalid(`Accessor field in ${tag}`)
         }
       }
-      const optional = optionalFields.get(tag) ?? []
-      for (const key of keys) {
-        if (property(value, key) === undefined && !optional.includes(key)) {
-          return yield* invalid(`Missing ${tag}.${key}`)
-        }
+      // Non-enumerable and symbol fields would silently vanish from the published clone.
+      if (
+        Object.getOwnPropertyNames(value).length !== enumerable ||
+        Object.getOwnPropertySymbols(value).length !== 0
+      ) {
+        return yield* invalid(`Non-enumerable field in ${tag}`)
+      }
+      // Every own property is now a plain data field, so direct reads cannot run source access.
+      const record = value as Readonly<Record<string, unknown>>
+      for (const key of shape.required) {
+        if (record[key] === undefined) return yield* invalid(`Missing ${tag}.${key}`)
       }
       if (tag === 'OwnerSegment' || tag === 'LocalSegment' || tag === 'Synthetic') {
         const occurrence = property(value, 'occurrence')
@@ -370,12 +412,12 @@ const encode = Effect.fnUntraced(function* (
             const entry = pool.texts[index]
             if (entry === undefined)
               return yield* invalid('Text reference is outside its module pool')
-            frame(10, encoder.encode(entry.value))
+            if (emit) frame(10, encoder.encode(entry.value))
           } else {
             const entry = pool.bytes[index]
             if (entry === undefined)
               return yield* invalid('Byte reference is outside its module pool')
-            frame(11, entry.value)
+            if (emit) frame(11, entry.value)
           }
           continue
         }
@@ -384,10 +426,12 @@ const encode = Effect.fnUntraced(function* (
         }
       }
       active.add(value)
-      output.push(9)
-      const lengthOffset = output.length
-      length(0)
-      frame(4, encoder.encode(tag))
+      const lengthOffset = output.length + 1
+      if (emit) {
+        output.push(9)
+        length(0)
+        frame(4, encoder.encode(tag))
+      }
       work.push({ _tag: 'End', value, lengthOffset })
       // Owner identity belongs to the identity channel. Content anchors are owner-relative.
       const contentKeys =
@@ -431,7 +475,7 @@ export const validate = Effect.fn('AuthoredEncoding.validate')(function* (
   if (descriptor === undefined || !('value' in descriptor)) {
     return yield* invalid('Module pool must be an owned data property')
   }
-  yield* encode(self.pool, self, 'artifact')
+  yield* encode(self.pool, self, 'artifact', false)
   yield* validateOwnership(self)
 })
 

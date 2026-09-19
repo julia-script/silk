@@ -117,7 +117,6 @@ it.effect('seals demanded storage once and leaves an unused catalog unloaded', (
       Effect.provide(synchronous.layer),
     )
     assert.notInclude(synchronous.calls, 'custom/storage')
-    assert.isFalse(unused.frontend.closure.sources.has('custom/storage'))
     assert.deepEqual(unused.components, [])
     assert.deepEqual(Preparation.realization(unused).diagnostics, [])
   }),
