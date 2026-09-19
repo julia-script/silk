@@ -5,7 +5,9 @@ import * as ExpressionAnalysis from './ExpressionAnalysis.js'
 import * as Canonical from './internal/Canonical.js'
 import * as Graph from './internal/Graph.js'
 import * as TypeInference from './internal/TypeInference.js'
-import * as SyntaxTree from './SyntaxTree.js'
+import * as AuthoredLowering from './AuthoredLowering.js'
+import * as SemanticContext from './SemanticContext.js'
+import * as AuthoredWalk from './AuthoredWalk.js'
 import * as Type from './Type.js'
 
 /** One private runtime field retained by a concrete opaque callable or Effect construction. */
@@ -95,7 +97,6 @@ const familyKey = (family: Type.OpaqueFamilyKey): string => Type.opaqueFamilyKey
 const reachableResults = (
   expression: Elaboration.ExpressionFact,
 ): ReadonlyArray<Elaboration.ExpressionFact> => {
-  if (expression._tag === 'Grouped') return reachableResults(expression.expression)
   if (expression._tag !== 'Match') return Object.freeze([expression])
   return Object.freeze(
     expression.arms.flatMap((arm) =>
@@ -119,6 +120,7 @@ const returnExpressions = (
 }
 
 const evidenceOf = (
+  context: SemanticContext.SemanticContext,
   expression: Elaboration.ExpressionFact,
   expected: Type.Type,
   family: Type.OpaqueFamilyKey,
@@ -133,7 +135,7 @@ const evidenceOf = (
     Type.equalsOpaqueFamily(argument.family, family),
   )
   if (nestedFamily) {
-    const argument = ExpressionAnalysis.representationOfExpression(expression)
+    const argument = ExpressionAnalysis.representationOfExpression(context, expression)
     if (argument !== undefined) return Object.freeze([Object.freeze({ argument, expression })])
   }
   const expectedArgument = Type.isRepresented(expected)
@@ -145,28 +147,34 @@ const evidenceOf = (
     !Type.equalsOpaqueFamily(expectedArgument.family, family)
   )
     return Object.freeze([])
-  const argument = ExpressionAnalysis.representationOfExpression(expression)
+  const argument = ExpressionAnalysis.representationOfExpression(context, expression)
   return argument === undefined
     ? Object.freeze([])
     : Object.freeze([Object.freeze({ argument, expression })])
 }
 
+/**
+ * The authored body a realization is keyed by.
+ *
+ * The canonical encoding replaces the source-byte slice the syntax fingerprint took: it is
+ * already source-independent, so a re-indented body keeps its realization.
+ */
 const sourceBodyFingerprint = (
   result: Elaboration.Result,
   declaration: DeclarationFacts.DeclarationFact,
 ): string => {
-  const body = SyntaxTree.directNode(declaration.syntax, 'Block')
-  const span = body?.span ?? declaration.syntax.span
+  const authored = AuthoredWalk.declarationOf(result.authored.module, declaration.owner)
   return Canonical.record('OpaqueBody', [
     declaration.id.sourceId,
-    Array.from(result.syntax.source.bytes.slice(span.start, span.end)).join(','),
+    authored === undefined ? '' : AuthoredLowering.canonicalBody(result.authored, authored),
   ])
 }
 
 const producers = (results: ReadonlyMap<string, Elaboration.Result>): ReadonlyArray<Producer> =>
   Object.freeze(
-    [...results.values()].flatMap((result) =>
-      result.functions.flatMap((function_): ReadonlyArray<Producer> => {
+    [...results.values()].flatMap((result) => {
+      const context = SemanticContext.make(result.authored)
+      return result.functions.flatMap((function_): ReadonlyArray<Producer> => {
         const opaque = function_.declaration.opaqueResult
         const expected = function_.declaration.returnType
         if (opaque === undefined || expected._tag !== 'Resolved') return []
@@ -180,20 +188,19 @@ const producers = (results: ReadonlyMap<string, Elaboration.Result>): ReadonlyAr
             instance,
             evidence: Object.freeze(
               returnExpressions(function_.statements).flatMap((expression) =>
-                evidenceOf(expression, expected.type, opaque.family),
+                evidenceOf(context, expression, expected.type, opaque.family),
               ),
             ),
             bodyFingerprint: sourceBodyFingerprint(result, function_.declaration),
           }),
         ]
-      }),
-    ),
+      })
+    }),
   )
 
 const constructionExpression = (
   expression: Elaboration.ExpressionFact,
 ): Elaboration.ExpressionFact => {
-  if (expression._tag === 'Grouped') return constructionExpression(expression.expression)
   if (expression._tag === 'Move') return constructionExpression(expression.subject)
   if (expression._tag === 'Identifier' && expression.reference._tag === 'ResolvedBinding')
     return constructionExpression(expression.reference.binding.initializer)
@@ -485,6 +492,9 @@ const unresolvedRealizationCycles = (
 
 /** Builds all private definitions and diagnoses non-finite or divergent opaque families. */
 export const analyze = (results: ReadonlyMap<string, Elaboration.Result>): Catalog => {
+  // Producers and their evidence span several modules, so spans resolve through the closure's
+  // registry rather than any one module's context.
+  const spanOf = SemanticContext.fromModules([...results.values()]).spanOf
   const pending = producers(results)
   const producersByFamily = new Map(
     pending.map((producer) => [familyKey(producer.instance.family), producer]),
@@ -539,8 +549,10 @@ export const analyze = (results: ReadonlyMap<string, Elaboration.Result>): Catal
     diagnostics.push(
       Diagnostic.opaqueRealizationCycle(
         cycle,
-        producer.function.declaration.opaqueResult?.syntax.span ??
-          producer.function.declaration.syntax.span,
+        spanOf(
+          producer.function.declaration.opaqueResult?.anchor ??
+            producer.function.declaration.anchor,
+        ),
       ),
     )
   }
@@ -561,9 +573,11 @@ export const analyze = (results: ReadonlyMap<string, Elaboration.Result>): Catal
         Diagnostic.divergentOpaqueRealization(
           key,
           alternatives.map(([identity]) => identity),
-          producer.evidence.map((evidence) => evidence.expression.syntax.span),
-          producer.function.declaration.opaqueResult?.syntax.span ??
-            producer.function.declaration.syntax.span,
+          producer.evidence.map((evidence) => spanOf(evidence.expression.anchor)),
+          spanOf(
+            producer.function.declaration.opaqueResult?.anchor ??
+              producer.function.declaration.anchor,
+          ),
         ),
       )
     } else if (alternatives.length === 0 && !cyclic.has(key)) {
@@ -571,8 +585,10 @@ export const analyze = (results: ReadonlyMap<string, Elaboration.Result>): Catal
       diagnostics.push(
         Diagnostic.missingOpaqueRealization(
           key,
-          producer.function.declaration.opaqueResult?.syntax.span ??
-            producer.function.declaration.syntax.span,
+          spanOf(
+            producer.function.declaration.opaqueResult?.anchor ??
+              producer.function.declaration.anchor,
+          ),
         ),
       )
     }
@@ -625,8 +641,10 @@ export const analyze = (results: ReadonlyMap<string, Elaboration.Result>): Catal
     diagnostics.push(
       Diagnostic.inlineOpaqueLayoutCycle(
         cycle,
-        producer?.function.declaration.opaqueResult?.syntax.span ??
-          producer.function.declaration.syntax.span,
+        spanOf(
+          producer.function.declaration.opaqueResult?.anchor ??
+            producer.function.declaration.anchor,
+        ),
       ),
     )
   }

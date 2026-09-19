@@ -21,6 +21,10 @@ import * as LiteralForm from '../src/LiteralForm.js'
 import * as OwnershipEncoding from '../src/OwnershipEncoding.js'
 import * as Parser from '../src/Parser.js'
 import * as Residualization from '../src/Residualization.js'
+import type * as AuthoredHir from '../src/AuthoredHir.js'
+import * as AuthoredIdentity from '../src/AuthoredIdentity.js'
+import * as AuthoredLowering from '../src/AuthoredLowering.js'
+import * as SemanticContext from '../src/SemanticContext.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SourceSpan from '../src/SourceSpan.js'
 import * as StaticEvaluation from '../src/StaticEvaluation.js'
@@ -594,7 +598,59 @@ it('normalizes float NaNs and rejects resource-bearing or malformed candidates',
   )
 })
 
-it.effect('evaluates real literal syntax with contextual scalar and target ranges', () =>
+const loweredLiterals = Effect.fn('loweredLiterals')(function* (
+  sourceId: string,
+  text: string,
+): Effect.fn.Return<
+  {
+    readonly context: SemanticContext.SemanticContext
+    readonly literal: (tag: AuthoredHir.Literal['_tag']) => AuthoredHir.Literal
+  },
+  never
+> {
+  const file = SourceFile.make(sourceId, encoder.encode(text))
+  const parsed = Parser.parse(Lexer.lex(file))
+  assert.deepEqual(parsed.lexicalDiagnostics, [])
+  assert.deepEqual(parsed.parserDiagnostics, [])
+  const lowered = yield* AuthoredLowering.lower(
+    parsed,
+    AuthoredIdentity.module('fixture', sourceId),
+  ).pipe(Effect.orDie)
+  const found: Array<AuthoredHir.Literal> = []
+  const walk = (value: unknown): void => {
+    if (Array.isArray(value)) {
+      for (const item of value) walk(item)
+      return
+    }
+    if (typeof value !== 'object' || value === null) return
+    const record = value as Record<string, unknown>
+    if (typeof record._tag === 'string' && literalTags.has(record._tag))
+      found.push(value as AuthoredHir.Literal)
+    for (const nested of Object.values(record)) walk(nested)
+  }
+  walk(lowered.module.declarations)
+  return {
+    context: SemanticContext.make(lowered),
+    literal: (tag) => {
+      const selected = found.find((candidate) => candidate._tag === tag)
+      if (selected === undefined) throw new Error(`expected a ${tag}`)
+      return selected
+    },
+  }
+})
+
+const literalTags: ReadonlySet<string> = new Set([
+  'UnitLiteral',
+  'BooleanLiteral',
+  'CharacterLiteral',
+  'IntegerLiteral',
+  'FloatingLiteral',
+  'TextLiteral',
+  'BytesLiteral',
+  'DurationLiteral',
+])
+
+it.effect('evaluates authored literals with contextual scalar and target ranges', () =>
   Effect.gen(function* () {
     const profilewasm32UnknownUnknown = yield* CompilationProfile.normalize({
       target: Target.wasm32UnknownUnknown.id,
@@ -603,9 +659,9 @@ it.effect('evaluates real literal syntax with contextual scalar and target range
       target: Target.x8664UnknownLinuxGnu.id,
     })
 
-    const file = SourceFile.make(
+    const { context, literal } = yield* loweredLiterals(
       'static/literals',
-      encoder.encode(`pub fn main() -> () {
+      `pub fn main() -> () {
   let unit = ()
   let boolean = true
   let character = 'é'
@@ -613,120 +669,65 @@ it.effect('evaluates real literal syntax with contextual scalar and target range
   let floating = -1.5
   let text = "hé"
   return ()
-}`),
+}`,
     )
-    const parsed = Parser.parse(Lexer.lex(file))
-    assert.deepEqual(parsed.lexicalDiagnostics, [])
-    assert.deepEqual(parsed.parserDiagnostics, [])
-    const all = syntaxNodes(parsed.root)
-    const literal = (kind: SyntaxTree.Node['kind']): SyntaxTree.Node => {
-      const found = all.find((node) => node.kind === kind)
-      if (found === undefined) throw new Error(`expected ${kind}`)
-      return found
-    }
     const environment = StaticEvaluation.targetEnvironment(profilex8664UnknownLinuxGnu)
-    assert.strictEqual(
-      completedValue(
-        StaticEvaluation.evaluateLiteral(environment, file, literal('UnitExpression'), 'unit'),
-      )._tag,
-      'UnitValue',
-    )
-    assert.deepEqual(
-      completedValue(
-        StaticEvaluation.evaluateLiteral(
-          environment,
-          file,
-          literal('BooleanLiteralExpression'),
-          'bool',
-        ),
-      ),
-      { _tag: 'BooleanValue', value: true },
-    )
-    assert.deepEqual(
-      completedValue(
-        StaticEvaluation.evaluateLiteral(
-          environment,
-          file,
-          literal('CharacterLiteralExpression'),
-          'char',
-        ),
-      ),
-      { _tag: 'CharacterValue', value: 0xe9 },
-    )
-    assert.deepEqual(
-      completedValue(
-        StaticEvaluation.evaluateLiteral(
-          environment,
-          file,
-          literal('CharacterLiteralExpression'),
-          'u8',
-        ),
-      ),
-      { _tag: 'IntegerValue', type: 'u8', value: 233n },
-    )
-    assert.strictEqual(
-      StaticEvaluation.evaluateLiteral(
-        environment,
-        file,
-        literal('CharacterLiteralExpression'),
-        'i8',
-      )._tag,
-      'Failed',
-    )
-    assert.deepEqual(
-      completedValue(
-        StaticEvaluation.evaluateLiteral(
-          environment,
-          file,
-          literal('IntegerLiteralExpression'),
-          'i8',
-        ),
-      ),
-      { _tag: 'IntegerValue', type: 'i8', value: -42n },
-    )
-    assert.deepEqual(
-      completedValue(
-        StaticEvaluation.evaluateLiteral(
-          environment,
-          file,
-          literal('FloatingLiteralExpression'),
-          'f32',
-        ),
-      ),
-      { _tag: 'FloatValue', type: 'f32', bits: 0xbfc0_0000n },
-    )
-    assert.deepEqual(
-      completedValue(
-        StaticEvaluation.evaluateLiteral(
-          environment,
-          file,
-          literal('StaticTextLiteralExpression'),
-          'string',
-        ),
-      ),
-      { _tag: 'TextValue', bytes: [0x68, 0xc3, 0xa9] },
-    )
+    const evaluate = (
+      tag: AuthoredHir.Literal['_tag'],
+      expected: StaticEvaluation.LiteralExpectation,
+    ) => StaticEvaluation.evaluateLiteral(environment, context, literal(tag), expected)
 
-    const wideFile = SourceFile.make(
+    assert.strictEqual(completedValue(evaluate('UnitLiteral', 'unit'))._tag, 'UnitValue')
+    assert.deepEqual(completedValue(evaluate('BooleanLiteral', 'bool')), {
+      _tag: 'BooleanValue',
+      value: true,
+    })
+    assert.deepEqual(completedValue(evaluate('CharacterLiteral', 'char')), {
+      _tag: 'CharacterValue',
+      value: 0xe9,
+    })
+    assert.deepEqual(completedValue(evaluate('CharacterLiteral', 'u8')), {
+      _tag: 'IntegerValue',
+      type: 'u8',
+      value: 233n,
+    })
+    assert.strictEqual(evaluate('CharacterLiteral', 'i8')._tag, 'Failed')
+    assert.deepEqual(completedValue(evaluate('IntegerLiteral', 'i8')), {
+      _tag: 'IntegerValue',
+      type: 'i8',
+      value: -42n,
+    })
+    assert.deepEqual(completedValue(evaluate('FloatingLiteral', 'f32')), {
+      _tag: 'FloatValue',
+      type: 'f32',
+      bits: 0xbfc0_0000n,
+    })
+    assert.deepEqual(completedValue(evaluate('TextLiteral', 'string')), {
+      _tag: 'TextValue',
+      bytes: [0x68, 0xc3, 0xa9],
+    })
+
+    // The target's pointer width, not the literal's spelling, decides whether a `usize` admits it.
+    const wide = yield* loweredLiterals(
       'static/target-range',
-      encoder.encode('pub fn main() -> usize { return 4294967296 }'),
+      'pub fn main() -> usize { return 4294967296 }',
     )
-    const wideParsed = Parser.parse(Lexer.lex(wideFile))
-    const wideNode = syntaxNodes(wideParsed.root).find(
-      (node) => node.kind === 'IntegerLiteralExpression',
-    )
-    if (wideNode === undefined) throw new Error('expected target-width integer')
     assert.strictEqual(
       StaticEvaluation.evaluateLiteral(
         StaticEvaluation.targetEnvironment(profilewasm32UnknownUnknown),
-        wideFile,
-        wideNode,
+        wide.context,
+        wide.literal('IntegerLiteral'),
         'usize',
       )._tag,
       'Failed',
     )
     assert.strictEqual(
-      StaticEvaluation.evaluateLiteral(environment, wideFile, wideNode, 'usize')._tag,
+      StaticEvaluation.evaluateLiteral(
+        environment,
+        wide.context,
+        wide.literal('IntegerLiteral'),
+        'usize',
+      )._tag,
       'Complete',
     )
   }),

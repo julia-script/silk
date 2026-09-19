@@ -1,17 +1,18 @@
+import type * as AuthoredHir from './AuthoredHir.js'
+import * as AuthoredIdentity from './AuthoredIdentity.js'
 import * as Lifetime from './Lifetime.js'
-import * as SyntaxTree from './SyntaxTree.js'
 import * as Type from './Type.js'
 import * as TypeCompatibility from './TypeCompatibility.js'
 
-/** A declaration-local, finite syntax domain shared by annotation and expression inference. */
+/** A declaration-local, finite authored domain shared by annotation and expression inference. */
 export interface BodyLifetime {
   readonly owner: Lifetime.Owner
-  readonly points: ReadonlyMap<SyntaxTree.Node, number>
+  readonly points: ReadonlyMap<string, number>
   readonly constraints: Map<string, Lifetime.Outlives>
   readonly activatedConstraints: Array<{
     readonly bound: Lifetime.Outlives
-    readonly installed: SyntaxTree.Node
-    readonly owner?: SyntaxTree.Node
+    readonly installed: AuthoredHir.Anchor
+    readonly owner?: AuthoredHir.Anchor
   }>
   readonly parameterBounds: ReadonlyMap<string, ReadonlyArray<Lifetime.Lifetime>>
   readonly genericStorage: Map<
@@ -20,23 +21,16 @@ export interface BodyLifetime {
   >
 }
 
-/** Assigns stable preorder points once; whitespace and preceding declarations have no effect. */
+/** Assigns stable preorder points once, in authored traversal order of the supplied anchors. */
 export const make = (
   owner: Lifetime.Owner,
-  body: SyntaxTree.Node,
+  anchors: Iterable<AuthoredHir.Anchor>,
   parameterBounds: ReadonlyMap<string, ReadonlyArray<Lifetime.Lifetime>> = new Map(),
 ): BodyLifetime => {
-  const points = new Map<SyntaxTree.Node, number>()
-  const pending = [body]
-  while (pending.length > 0) {
-    const node = pending.pop()
-    if (node === undefined) break
-    points.set(node, points.size)
-    const children = node.children.filter(SyntaxTree.isNode)
-    for (let ordinal = children.length - 1; ordinal >= 0; ordinal -= 1) {
-      const child = children.at(ordinal)
-      if (child !== undefined) pending.push(child)
-    }
+  const points = new Map<string, number>()
+  for (const anchor of anchors) {
+    const key = AuthoredIdentity.anchorKey(anchor)
+    if (!points.has(key)) points.set(key, points.size)
   }
   return {
     owner: Object.freeze({ ...owner }),
@@ -51,11 +45,11 @@ export const make = (
 /** Allocates an occurrence region only inside the already registered declaration domain. */
 export const region = (
   self: BodyLifetime,
-  node: SyntaxTree.Node,
+  anchor: AuthoredHir.Anchor,
   role: 'Borrow' | 'Annotation' | 'Environment' | 'Call',
   binderOrdinal = 0,
 ): Lifetime.Local | undefined => {
-  const ordinal = self.points.get(node)
+  const ordinal = self.points.get(AuthoredIdentity.anchorKey(anchor))
   return ordinal === undefined
     ? undefined
     : Lifetime.local(self.owner, `${role}:${binderOrdinal}`, ordinal)
@@ -142,8 +136,8 @@ export const constrain = (
 export const activatedCompatibility = (
   self: BodyLifetime,
   base: TypeCompatibility.Context,
-  installed: SyntaxTree.Node,
-  owner?: SyntaxTree.Node,
+  installed: AuthoredHir.Anchor,
+  owner?: AuthoredHir.Anchor,
 ): TypeCompatibility.Context => {
   const retain = (longer: Lifetime.Lifetime, shorter: Lifetime.Lifetime): void => {
     // A caller-owned universal lifetime remains a whole-contract requirement.
@@ -173,9 +167,9 @@ export const activatedCompatibility = (
 /** Derives environment validity from every retained semantic dependency, including nested views. */
 export const environment = (
   self: BodyLifetime | undefined,
-  node: SyntaxTree.Node,
+  anchor: AuthoredHir.Anchor,
   retained: ReadonlyArray<Type.Type>,
-  borrowed: ReadonlyArray<SyntaxTree.Node> = [],
+  borrowed: ReadonlyArray<AuthoredHir.Anchor> = [],
 ): Type.ExecutableLifetimes | undefined => {
   const dependencies: Array<Lifetime.Lifetime> = [
     ...new Map(
@@ -203,7 +197,7 @@ export const environment = (
     if (dependency === undefined) return undefined
     dependencies.push(dependency)
   }
-  const lifetime = region(self, node, 'Environment')
+  const lifetime = region(self, anchor, 'Environment')
   if (lifetime === undefined) return undefined
   const lifetimeBounds = dependencies.map((longer) => ({ longer, shorter: lifetime }))
   for (const bound of lifetimeBounds) constrain(self, bound.longer, bound.shorter)

@@ -332,6 +332,7 @@ export const lowerProgram = (
   opaqueRealizations: OpaqueRealization.Catalog,
   trace: CompilerTrace.CompilerTrace = CompilerTrace.none,
 ): Mir.Module => {
+  const registry = discovery.registry
   const declaredForeignStatics = trace('Lower.collectForeignStatics', () => {
     const declaredForeignStatics = Object.freeze(
       index.modules.flatMap((module) =>
@@ -342,7 +343,7 @@ export const lowerProgram = (
             ? [
                 Object.freeze({
                   declaration: member.canonical.id,
-                  declarationSpan: member.syntax.span,
+                  declarationSpan: registry.spanOf(member.anchor),
                   direction: member.direction,
                   symbol: member.foreign.symbol,
                   type: member.declaredType.type,
@@ -463,6 +464,7 @@ export const lowerProgram = (
             effectResults,
             generatedRunners,
             opaqueRealizations,
+            registry,
           ),
         {
           'function.module': instance.key.declaration.module,
@@ -568,6 +570,7 @@ export const lowerProgram = (
             effectResults,
             generatedRunners,
             opaqueRealizations,
+            registry,
           ),
         {
           'function.module': generated.id.module,
@@ -591,6 +594,7 @@ export const lowerProgram = (
             effectResults,
             generatedRunners,
             opaqueRealizations,
+            registry,
           ),
         {
           'function.module': generated.id.module,
@@ -612,6 +616,7 @@ export const lowerProgram = (
             effectResults,
             generatedRunners,
             opaqueRealizations,
+            registry,
           ),
         {
           'function.module': generated.id.module,
@@ -633,6 +638,7 @@ export const lowerProgram = (
             effectResults,
             generatedRunners,
             opaqueRealizations,
+            registry,
           ),
         {
           'function.module': generated.id.module,

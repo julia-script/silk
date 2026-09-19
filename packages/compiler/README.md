@@ -128,8 +128,8 @@ access belongs to the host boundary rather than the compiler core.
 
 `ProjectAnalysis` analyzes the union closure of synchronized roots once and returns immutable root
 views that share syntax, declaration, semantic, tooling, and diagnostic facts. Revising a project
-reuses byte-identical syntax and publishes conservative `SyntaxCorrespondence` for structurally
-unique unchanged subtrees; semantic facts are recomputed for the complete current revision.
+reuses byte-identical syntax and authored artifacts; semantic facts are reused per body when their
+authored content, scope and dependencies are unchanged and recomputed otherwise.
 
 ## Editor and documentation facts
 

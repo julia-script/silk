@@ -7,7 +7,7 @@ import * as CallableContract from '../src/CallableContract.js'
 import * as Constraint from '../src/Constraint.js'
 import * as Lifetime from '../src/Lifetime.js'
 import * as ModuleSurface from '../src/ModuleSurface.js'
-import * as Presentation from '../src/Presentation.js'
+import * as SemanticDisplay from '../src/SemanticDisplay.js'
 import * as RowAlgebra from '../src/RowAlgebra.js'
 import * as SourceSpan from '../src/SourceSpan.js'
 import * as Type from '../src/Type.js'
@@ -156,11 +156,11 @@ it.effect('preserves C-layout struct facts in presentation and module surfaces',
     assert.strictEqual(ordinaryFact?.layout._tag, 'Silk')
     assert.strictEqual(invalidFact?.layout._tag, 'InvalidForeign')
     assert.strictEqual(
-      fact === undefined ? undefined : Presentation.structDeclaration(fact).text,
+      fact === undefined ? undefined : SemanticDisplay.structDeclaration(fact).text,
       'pub extern "C" struct Timespec',
     )
     assert.strictEqual(
-      invalidFact === undefined ? undefined : Presentation.structDeclaration(invalidFact).text,
+      invalidFact === undefined ? undefined : SemanticDisplay.structDeclaration(invalidFact).text,
       'pub extern "Rust" struct Timespec',
     )
     assert.strictEqual(ModuleSurface.equals(cLayoutSurface, repeated), true)

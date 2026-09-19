@@ -33,6 +33,7 @@ import type * as StaticText from './StaticText.js'
 import * as SuspensionMode from './SuspensionMode.js'
 import * as StaticValue from './StaticValue.js'
 import type * as Target from './Target.js'
+import type * as SemanticContext from './SemanticContext.js'
 import * as Type from './Type.js'
 import * as ValueStorage from './ValueStorage.js'
 export type { AddressScalar, CallingLane, CallingScalar, CallingShape, CallingShapeNode, Selector }
@@ -430,6 +431,7 @@ export interface Violation {
 export const catalog = Effect.fn('Layout.catalog')(function* (
   target: Target.Target,
   index: DeclarationIndex.Index,
+  registry: SemanticContext.Registry,
   discovery?: Instances.Discovery,
   opaqueRealizations?: OpaqueRealization.Catalog,
 ): Effect.fn.Return<Catalog> {
@@ -463,7 +465,7 @@ export const catalog = Effect.fn('Layout.catalog')(function* (
             Object.freeze({
               type: constant.declaredType.type,
               value: literal.value,
-              span: literal.token.span,
+              span: registry.spanOf(literal.anchor),
             }),
           ]
         }),

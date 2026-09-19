@@ -668,7 +668,9 @@ export const violationDiagnostics = (
     return instance.function.declaration.typeParameters.flatMap((parameter, ordinal) => {
       const argument = visibleArguments.at(ordinal)
       if (argument === undefined) return []
-      const span = incoming.get(Instances.keyText(instance.key))?.span ?? parameter.syntax.span
+      const span =
+        incoming.get(Instances.keyText(instance.key))?.span ??
+        self.registry.spanOf(parameter.anchor)
       return diagnosticsFor(parameter, argument, span)
     })
   })

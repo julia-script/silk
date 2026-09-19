@@ -884,6 +884,7 @@ pub fn main() -> i32 { return 42 }`),
     const catalog = yield* Layout.catalog(
       Target.aarch64AppleDarwin,
       Analysis.declarationIndex(snapshot),
+      snapshot.resolution.contexts,
     )
     const plan = yield* Layout.plan(catalog, Analysis.instancesOf(snapshot), snapshot.index)
 
@@ -1653,7 +1654,11 @@ pub fn main() -> i32 { return 42 }`),
       [Target.aarch64AppleDarwin, 8, 64],
       [Target.wasm32UnknownUnknown, 4, 32],
     ] as const) {
-      const catalog = yield* Layout.catalog(target, Analysis.declarationIndex(snapshot))
+      const catalog = yield* Layout.catalog(
+        target,
+        Analysis.declarationIndex(snapshot),
+        snapshot.resolution.contexts,
+      )
       const pointer = Type.pointer({
         mutable: true,
         pointee: Type.nominal('layout/pointer', 'Opaque'),

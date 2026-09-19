@@ -55,7 +55,7 @@ export const prepareInitialization = (fn: FunctionLowering): ReadonlyArray<Mir.O
           _tag: 'SetInitialized',
           flag: local,
           initialized: true,
-          provenance: generated(fn.owner.function.declaration.syntax.span),
+          provenance: generated(fn.registry.spanOf(fn.owner.function.declaration.anchor)),
         })
         return Object.freeze({ path, local })
       })

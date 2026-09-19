@@ -2,7 +2,6 @@ import * as MachineFunction from './MachineFunction.js'
 import * as DeclarationProperty from './DeclarationProperty.js'
 import * as NativeRequirement from './NativeRequirement.js'
 import * as ForeignContract from './ForeignContract.js'
-import * as Option from 'effect/Option'
 import * as AggregateIdentity from './AggregateIdentity.js'
 import type {
   ArrayLengthFact,
@@ -61,254 +60,381 @@ import {
   presentParameterEntries,
   requirementRoleIdentity,
 } from './DeclarationFacts.js'
+import type * as AuthoredHir from './AuthoredHir.js'
+import * as AuthoredIdentity from './AuthoredIdentity.js'
+import * as AuthoredLowering from './AuthoredLowering.js'
 import * as DeclarationLifetime from './DeclarationLifetime.js'
 import * as Lifetime from './Lifetime.js'
 import * as DeclarationIndex from './DeclarationIndex.js'
 import * as Diagnostic from './Diagnostic.js'
-import * as DigitSeparator from './internal/DigitSeparator.js'
-import * as DurationLiteral from './internal/DurationLiteral.js'
 import * as ForeignSymbol from './ForeignSymbol.js'
-import * as ImportPath from './ImportPath.js'
-import * as IntegerLiteral from './internal/IntegerLiteral.js'
-import * as LiteralForm from './LiteralForm.js'
 import type * as ModuleClosure from './ModuleClosure.js'
 import * as Operator from './Operator.js'
 import * as RequirementRow from './RequirementRow.js'
 import * as RowAlgebra from './RowAlgebra.js'
 import * as Scalar from './Scalar.js'
-import * as SourceFile from './SourceFile.js'
-import * as SourceSpan from './SourceSpan.js'
+import * as SemanticContext from './SemanticContext.js'
 import * as StaticText from './StaticText.js'
-import type * as SyntaxFile from './SyntaxFile.js'
-import * as SyntaxTree from './SyntaxTree.js'
-import * as Token from './Token.js'
 import * as Type from './Type.js'
 
-export const spelling = (source: SourceFile.SourceFile, token: Token.Token): string =>
-  Option.getOrThrowWith(
-    SourceFile.spelling(source, token.span),
-    () => new RangeError(`Header token span does not belong to source ${source.id}`),
-  )
+type Context = SemanticContext.SemanticContext
 
-const templateElement = (
-  source: SourceFile.SourceFile,
-  element: SyntaxTree.Element,
-): ReadonlyArray<unknown> | undefined => {
-  if (SyntaxTree.isNode(element))
-    return Object.freeze([
-      'Node',
-      element.kind,
-      Object.freeze(
-        element.children.flatMap((child) => {
-          const retained = templateElement(source, child)
-          return retained === undefined ? [] : [retained]
-        }),
-      ),
-    ])
-  if (SyntaxTree.isToken(element)) {
-    if (
-      element.kind === 'Whitespace' ||
-      element.kind === 'LineComment' ||
-      element.kind === 'DocComment' ||
-      element.kind === 'ModuleDocComment'
-    )
-      return undefined
-    return Object.freeze(['Token', element.kind, spelling(source, element)])
-  }
-  return Object.freeze(['Missing', element.expected])
+const noDiagnostics: ReadonlyArray<Diagnostic.Diagnostic> = Object.freeze([])
+
+/** The spelling of an authored name, or `undefined` when recovery left none. */
+const nameText = (context: Context, name: AuthoredHir.Name): string | undefined =>
+  SemanticContext.nameText(context, name)
+
+/** A declared-name fact for one authored name: present only when a spelling survived recovery. */
+export const declaredName = (context: Context, name: AuthoredHir.Name): DeclaredName => {
+  const spelling = nameText(context, name)
+  return spelling === undefined
+    ? Object.freeze({ _tag: 'Unavailable', anchor: name.anchor })
+    : Object.freeze({ _tag: 'Present', spelling, anchor: name.anchor })
 }
 
-const bodyTemplate = (
-  source: SourceFile.SourceFile,
-  declaration: SyntaxTree.Node,
-): FunctionBodyTemplate | undefined => {
-  const block = SyntaxTree.directNode(declaration, 'Block')
-  if (block === undefined) return undefined
-  const tokens = SyntaxTree.tokens(declaration)
-  const requiresStaticEvaluation = tokens.some(
-    (token) => token.kind === 'StaticKeyword' || token.kind === 'CompileErrorKeyword',
-  )
-  if (!requiresStaticEvaluation) return undefined
-  return Object.freeze({
-    _tag: 'FunctionBodyTemplate',
-    syntax: block,
-    canonical: JSON.stringify(templateElement(source, block)),
-  })
-}
+/** A header's declared name; headers that declare none are unavailable at their own anchor. */
+const headerName = (context: Context, header: AuthoredHir.DeclarationHeader): DeclaredName =>
+  'name' in header
+    ? declaredName(context, header.name)
+    : Object.freeze({ _tag: 'Unavailable', anchor: header.anchor })
 
-const staticExpressionTemplate = (
-  source: SourceFile.SourceFile,
-  syntax: SyntaxTree.Node,
-): StaticExpressionTemplate =>
-  Object.freeze({
-    _tag: 'StaticExpressionTemplate',
-    syntax,
-    canonical: JSON.stringify(templateElement(source, syntax)),
-  })
+const unavailable = (anchor: AuthoredHir.Anchor): DeclaredTypeFact =>
+  Object.freeze({ _tag: 'Unavailable', anchor })
 
-const retainedTypePath = (
-  source: SourceFile.SourceFile,
-  syntax: SyntaxTree.Node,
-): TypePathFact | undefined => {
-  const segments = SyntaxTree.tokens(syntax)
-    .filter((token) => token.kind === 'Identifier')
-    .map((token) => Object.freeze({ spelling: spelling(source, token), token }))
+const unavailableResolution = (anchor: AuthoredHir.Anchor): TypeResolution =>
+  Object.freeze({ fact: unavailable(anchor), diagnostics: noDiagnostics })
+
+/** The type path an authored path denotes, or `undefined` when no segment kept a spelling. */
+const typePathOf = (context: Context, path: AuthoredHir.Path): TypePathFact | undefined => {
+  const segments = path.segments.flatMap((segment) => {
+    const spelling = nameText(context, segment)
+    return spelling === undefined ? [] : [Object.freeze({ spelling, anchor: segment.anchor })]
+  })
   return segments.length === 0
     ? undefined
     : Object.freeze({
         _tag: 'TypePath',
         spelling: segments.map((segment) => segment.spelling).join('.'),
         segments: Object.freeze(segments),
-        syntax,
+        anchor: path.anchor,
       })
 }
 
+/** The role an authored requirement selects; a requirement without a role keeps the default. */
 export const collectedRequirementRole = (
-  source: SourceFile.SourceFile,
-  requirement: SyntaxTree.Node,
+  context: Context,
+  requirement: AuthoredHir.Requirement,
 ): RequirementRoleFact => {
-  const at = SyntaxTree.directToken(requirement, 'Identifier')
-  const roleSyntax =
-    at === undefined ? undefined : SyntaxTree.directNodes(requirement, 'TypePath').at(-1)
-  const path = roleSyntax?.kind === 'TypePath' ? retainedTypePath(source, roleSyntax) : undefined
+  const path = requirement.role === undefined ? undefined : typePathOf(context, requirement.role)
   return path === undefined
     ? Object.freeze({ _tag: 'DefaultRole' })
     : Object.freeze({ _tag: 'UnresolvedRole', path })
 }
 
-export const childNode = (parent: SyntaxTree.Node, kind: SyntaxTree.NodeKind): SyntaxTree.Node => {
-  const child = SyntaxTree.directNode(parent, kind)
-  if (child === undefined)
-    throw new RangeError(`Header collection expected ${kind} below ${parent.kind}`)
-  return child
+/** The single type path a named type names directly, used to recognize a binder occurrence. */
+const parameterAtType = (
+  context: Context,
+  type: AuthoredHir.Type,
+  typeParameters: ReadonlyMap<string, Type.Parameter>,
+): Type.Parameter | undefined => {
+  if (type._tag !== 'NamedType' || type.path.segments.length !== 1) return undefined
+  const segment = type.path.segments[0]
+  if (segment === undefined) return undefined
+  const spelling = nameText(context, segment)
+  return spelling === undefined ? undefined : typeParameters.get(spelling)
 }
 
-export const isDeclaredTypeNode = (element: SyntaxTree.Element): element is SyntaxTree.Node =>
-  SyntaxTree.isNode(element) &&
-  (element.kind === 'TypePath' ||
-    element.kind === 'AppliedType' ||
-    element.kind === 'FixedArrayType' ||
-    element.kind === 'SliceType' ||
-    element.kind === 'ReferenceType' ||
-    element.kind === 'PointerType' ||
-    element.kind === 'CallableType' ||
-    element.kind === 'ForeignFunctionType' ||
-    element.kind === 'UnitType' ||
-    element.kind === 'ParenthesizedType' ||
-    element.kind === 'ExactRepresentationType' ||
-    element.kind === 'OpaqueResultType' ||
-    element.kind === 'UnionType')
-
-export const declaredTypeNode = (parent: SyntaxTree.Node): SyntaxTree.Node => {
-  const child = parent.children.find((element): element is SyntaxTree.Node =>
-    isDeclaredTypeNode(element),
-  )
-  if (child === undefined) throw new RangeError(`Header collection expected a declared type`)
-  return child
+/** The first spelled segment of a named type, for diagnostics that quote the written name. */
+const firstSegment = (
+  context: Context,
+  type: AuthoredHir.Type,
+): { readonly spelling: string; readonly anchor: AuthoredHir.Anchor } | undefined => {
+  if (type._tag !== 'NamedType') return undefined
+  for (const segment of type.path.segments) {
+    const spelling = nameText(context, segment)
+    if (spelling !== undefined) return Object.freeze({ spelling, anchor: segment.anchor })
+  }
+  return undefined
 }
 
-export const presentName = (source: SourceFile.SourceFile, node: SyntaxTree.Node): DeclaredName => {
-  const token = SyntaxTree.directToken(node, 'Identifier')
-  return token === undefined
-    ? Object.freeze({
-        _tag: 'Unavailable',
-        syntax: SyntaxTree.unavailableChild(node, 'Identifier'),
-      })
-    : Object.freeze({ _tag: 'Present', spelling: spelling(source, token), token })
+/** Whether one authored body mentions a construct only static evaluation can reduce. */
+const requiresStaticEvaluation = (block: AuthoredHir.Block): boolean => {
+  let found = false
+  const visitExpression = (expression: AuthoredHir.Expression): void => {
+    if (found) return
+    if (expression._tag === 'CompileErrorExpression') found = true
+    for (const child of expressionChildren(expression)) visitExpression(child)
+  }
+  const visitStatement = (statement: AuthoredHir.Statement): void => {
+    if (found) return
+    if (statement._tag === 'StaticConditionalStatement' || statement._tag === 'StaticForStatement')
+      found = true
+    if (statement._tag === 'BindingStatement' && statement.static) found = true
+    for (const expression of statementExpressions(statement)) visitExpression(expression)
+    for (const nested of nestedBlocks(statement)) visitBlock(nested)
+  }
+  const visitBlock = (current: AuthoredHir.Block | AuthoredHir.Conditional): void => {
+    if (current._tag !== 'Block') return visitStatement(current)
+    for (const statement of current.statements) visitStatement(statement)
+  }
+  visitBlock(block)
+  return found
 }
 
+const nestedBlocks = (
+  statement: AuthoredHir.Statement,
+): ReadonlyArray<AuthoredHir.Block | AuthoredHir.Conditional> => {
+  switch (statement._tag) {
+    case 'ConditionalStatement':
+    case 'PatternConditionalStatement':
+    case 'StaticConditionalStatement':
+      return statement.elseBranch === undefined
+        ? [statement.thenBranch]
+        : [statement.thenBranch, statement.elseBranch]
+    case 'StaticForStatement':
+    case 'WhileStatement':
+    case 'UnsafeStatement':
+      return [statement.body]
+    default:
+      return []
+  }
+}
+
+const statementExpressions = (
+  statement: AuthoredHir.Statement,
+): ReadonlyArray<AuthoredHir.Expression> => {
+  switch (statement._tag) {
+    case 'ExpressionStatement':
+      return [statement.expression]
+    case 'BindingStatement':
+    case 'PatternBindingStatement':
+      return [statement.initializer]
+    case 'AssignmentStatement':
+      return [statement.target, statement.value]
+    case 'StaticForStatement':
+      return [statement.iterable]
+    case 'WhileStatement':
+    case 'ConditionalStatement':
+    case 'StaticConditionalStatement':
+      return [statement.condition]
+    case 'PatternConditionalStatement':
+      return [statement.subject]
+    case 'ReturnStatement':
+      return statement.value === undefined ? [] : [statement.value]
+    case 'FailStatement':
+    case 'DropStatement':
+      return [statement.value]
+    default:
+      return []
+  }
+}
+
+const expressionChildren = (
+  expression: AuthoredHir.Expression,
+): ReadonlyArray<AuthoredHir.Expression> => {
+  switch (expression._tag) {
+    case 'MoveExpression':
+    case 'BorrowExpression':
+    case 'RunExpression':
+    case 'UnsafeExpression':
+    case 'PrefixExpression':
+      return [expression.operand]
+    case 'CompileErrorExpression':
+      return [expression.message]
+    case 'MatchExpression':
+      return [expression.subject]
+    case 'StructExpression':
+    case 'RecordExpression':
+      return expression.fields.map((field) => field.value)
+    case 'TupleExpression':
+    case 'ArrayExpression':
+      return expression.elements
+    case 'MemberExpression':
+      return expression.fields === undefined ? [] : expression.fields.map((field) => field.value)
+    case 'FieldExpression':
+    case 'ReferentExpression':
+    case 'OrdinalExpression':
+      return [expression.subject]
+    case 'IndexExpression':
+      return [expression.subject, expression.index]
+    case 'CallExpression':
+      return [expression.callee, ...expression.arguments]
+    case 'InfixExpression':
+      return [expression.left, expression.right]
+    case 'PipelineExpression':
+      return [expression.input, expression.target]
+    case 'InvalidExpression':
+      return expression.retained
+    default:
+      return []
+  }
+}
+
+/**
+ * One retained body plus its deterministic encoding.
+ *
+ * Authored HIR is already trivia-free and source-independent, so the canonical body encoding
+ * replaces the token template the syntax collector had to rebuild from source bytes.
+ */
+const bodyTemplate = (
+  lowered: AuthoredLowering.Lowered,
+  declaration: AuthoredHir.Declaration,
+): FunctionBodyTemplate | undefined => {
+  if (declaration.body._tag !== 'CallableBody') return undefined
+  const block = declaration.body.block
+  if (block === undefined || !requiresStaticEvaluation(block)) return undefined
+  return Object.freeze({
+    _tag: 'FunctionBodyTemplate',
+    anchor: block.anchor,
+    canonical: AuthoredLowering.canonicalBody(lowered, declaration),
+  })
+}
+
+/** A static initializer's deterministic encoding, taken from the declaration that owns it. */
+const staticExpressionTemplate = (
+  lowered: AuthoredLowering.Lowered,
+  declaration: AuthoredHir.Declaration,
+  expression: AuthoredHir.Expression,
+): StaticExpressionTemplate =>
+  Object.freeze({
+    _tag: 'StaticExpressionTemplate',
+    anchor: expression.anchor,
+    canonical: `${AuthoredIdentity.anchorKey(expression.anchor)}=${AuthoredLowering.canonicalBody(
+      lowered,
+      declaration,
+    )}`,
+  })
+
+/** The constant value an authored initializer denotes without any evaluation. */
 export const constantLiteral = (
-  source: SourceFile.SourceFile,
-  initializer: SyntaxTree.Node,
+  context: Context,
+  initializer: AuthoredHir.Expression,
 ): ConstantLiteralFact => {
-  if (initializer.kind === 'BooleanLiteralExpression') {
-    const token =
-      SyntaxTree.directToken(initializer, 'TrueKeyword') ??
-      SyntaxTree.directToken(initializer, 'FalseKeyword')
-    return token === undefined
-      ? Object.freeze({ _tag: 'Unavailable', syntax: initializer })
-      : Object.freeze({ _tag: 'BooleanLiteral', value: token.kind === 'TrueKeyword', token })
-  }
-  if (initializer.kind === 'CharacterLiteralExpression') {
-    const token = SyntaxTree.directToken(initializer, 'CharLiteral')
-    if (token === undefined) return Object.freeze({ _tag: 'Unavailable', syntax: initializer })
-    const bytes = Option.getOrUndefined(SourceFile.slice(source, token.span))
-    const form = bytes === undefined ? undefined : LiteralForm.recognize(bytes)
-    if (bytes === undefined || form === undefined)
-      return Object.freeze({ _tag: 'Unavailable', syntax: initializer })
-    const decoded = StaticText.decodeScalar(Array.from(bytes), form)
-    return decoded._tag === 'Scalar'
-      ? Object.freeze({ _tag: 'CharacterLiteral', value: decoded.value, token })
-      : Object.freeze({ _tag: 'Malformed', detail: decoded.detail, syntax: initializer })
-  }
-  if (initializer.kind === 'IntegerLiteralExpression') {
-    const token = SyntaxTree.directToken(initializer, 'DecimalInteger')
-    if (token === undefined) return Object.freeze({ _tag: 'Unavailable', syntax: initializer })
-    const digits = spelling(source, token)
-    const negative = SyntaxTree.directToken(initializer, 'Minus') !== undefined
-    const magnitude = IntegerLiteral.magnitude(digits)
+  const anchor = initializer.anchor
+  if (initializer._tag === 'BooleanLiteral')
+    return Object.freeze({ _tag: 'BooleanLiteral', value: initializer.value, anchor })
+  if (initializer._tag === 'CharacterLiteral')
+    return Object.freeze({ _tag: 'CharacterLiteral', value: initializer.scalar, anchor })
+  if (initializer._tag === 'IntegerLiteral')
     return Object.freeze({
       _tag: 'IntegerLiteral',
-      value: negative ? -magnitude : magnitude,
-      spelling: `${negative ? '-' : ''}${digits}`,
-      token,
+      value: initializer.value,
+      spelling: integerSpelling(initializer),
+      anchor,
     })
-  }
-  if (initializer.kind === 'DurationLiteralExpression') {
-    const token = SyntaxTree.directToken(initializer, 'DurationLiteral')
-    if (token === undefined) return Object.freeze({ _tag: 'Unavailable', syntax: initializer })
-    const bytes = Option.getOrUndefined(SourceFile.slice(source, token.span))
-    if (bytes === undefined) return Object.freeze({ _tag: 'Unavailable', syntax: initializer })
-    const parsed = DurationLiteral.parse(bytes)
-    if (parsed._tag === 'Invalid')
-      return Object.freeze({ _tag: 'Unavailable', syntax: initializer })
+  if (initializer._tag === 'DurationLiteral') {
+    const value = initializer.components.reduce(
+      (total, component) => total + component.magnitude * durationScale[component.unit],
+      0n,
+    )
     return Object.freeze({
       _tag: 'DurationLiteral',
-      value: parsed.nanoseconds,
-      spelling: spelling(source, token),
-      token,
+      value,
+      spelling: initializer.components
+        .map((component) => `${component.magnitude}${component.unit}`)
+        .join(''),
+      anchor,
     })
   }
-  if (initializer.kind === 'FloatingLiteralExpression') {
-    const token = SyntaxTree.directToken(initializer, 'DecimalFloat')
-    if (token === undefined) return Object.freeze({ _tag: 'Unavailable', syntax: initializer })
-    const literal = DigitSeparator.strip(spelling(source, token))
+  if (initializer._tag === 'FloatingLiteral')
     return Object.freeze({
       _tag: 'FloatingLiteral',
-      spelling: `${SyntaxTree.directToken(initializer, 'Minus') === undefined ? '' : '-'}${literal}`,
-      token,
+      spelling: floatingSpelling(initializer),
+      anchor,
     })
+  if (initializer._tag === 'TextLiteral')
+    return Object.freeze({
+      _tag: 'StringLiteral',
+      data: staticData('Text', Array.from(utf8.encode(context.textOf(initializer.value)))),
+      anchor,
+    })
+  if (initializer._tag === 'BytesLiteral')
+    return Object.freeze({
+      _tag: 'StringLiteral',
+      data: staticData('Bytes', Array.from(context.bytesOf(initializer.value))),
+      anchor,
+    })
+  // A prefix negation over an integer or float is part of the literal a constant header admits.
+  if (initializer._tag === 'PrefixExpression' && initializer.operator === 'Negate') {
+    const operand = constantLiteral(context, initializer.operand)
+    if (operand._tag === 'IntegerLiteral')
+      return Object.freeze({
+        _tag: 'IntegerLiteral',
+        value: -operand.value,
+        spelling: `-${operand.spelling}`,
+        anchor,
+      })
+    if (operand._tag === 'FloatingLiteral')
+      return Object.freeze({
+        _tag: 'FloatingLiteral',
+        spelling: `-${operand.spelling}`,
+        anchor,
+      })
   }
-  if (initializer.kind === 'StaticTextLiteralExpression') {
-    const token =
-      SyntaxTree.directToken(initializer, 'TextLiteral') ??
-      SyntaxTree.directToken(initializer, 'ByteStringLiteral')
-    if (token === undefined) return Object.freeze({ _tag: 'Unavailable', syntax: initializer })
-    const bytes = Option.getOrUndefined(SourceFile.slice(source, token.span))
-    const form = bytes === undefined ? undefined : LiteralForm.recognize(bytes)
-    if (bytes === undefined || form === undefined)
-      return Object.freeze({ _tag: 'Unavailable', syntax: initializer })
-    // The header decodes once so every reference — in this module or an importing one — shares
-    // the exact bytes the equivalent `let` binding would produce.
-    const decoded = StaticText.decode(Array.from(bytes), form)
-    return decoded._tag === 'Decoded'
-      ? Object.freeze({ _tag: 'StringLiteral', data: decoded.data, token })
-      : Object.freeze({ _tag: 'Malformed', detail: decoded.detail, syntax: initializer })
-  }
-  return Object.freeze({ _tag: 'Unavailable', syntax: initializer })
+  return Object.freeze({ _tag: 'Unavailable', anchor })
+}
+
+const utf8 = new TextEncoder()
+
+/**
+ * The compiler-owned payload of one authored literal.
+ *
+ * Authored HIR already carries the decoded bytes, so the header no longer re-lexes the literal;
+ * the identity stays the byte digest every later phase compares.
+ */
+const staticData = (kind: StaticText.Data['kind'], bytes: ReadonlyArray<number>): StaticText.Data =>
+  Object.freeze({
+    _tag: 'StaticData',
+    id: `${kind === 'Text' ? 'text' : 'bytes'}:${bytes
+      .map((byte) => byte.toString(16).padStart(2, '0'))
+      .join('')}`,
+    kind,
+    bytes: Object.freeze([...bytes]),
+    utf8: kind === 'Text',
+  })
+
+const durationScale: Readonly<Record<AuthoredHir.DurationComponent['unit'], bigint>> =
+  Object.freeze({
+    w: 604800000000000n,
+    d: 86400000000000n,
+    h: 3600000000000n,
+    m: 60000000000n,
+    s: 1000000000n,
+    ms: 1000000n,
+    us: 1000n,
+    ns: 1n,
+  })
+
+const radixPrefix: Readonly<Record<AuthoredHir.IntegerLiteral['radix'], string>> = Object.freeze({
+  2: '0b',
+  8: '0o',
+  10: '',
+  16: '0x',
+})
+
+/** The decimal spelling a consumer compares and re-renders; the radix prefix is preserved. */
+const integerSpelling = (literal: AuthoredHir.IntegerLiteral): string =>
+  `${radixPrefix[literal.radix]}${literal.value.toString(literal.radix)}`
+
+const floatingSpelling = (
+  literal: Extract<AuthoredHir.Literal, { readonly _tag: 'FloatingLiteral' }>,
+): string => {
+  const magnitude = `${literal.coefficient}e${literal.exponent}`
+  return literal.sign === 'Negative' ? `-${magnitude}` : magnitude
 }
 
 interface AppliedRequirement {
   readonly capability: TypeResolution
-  readonly role: ReturnType<typeof collectedRequirementRole>
+  readonly role: RequirementRoleFact
   readonly access: 'Shared' | 'Exclusive'
-  readonly syntax: SyntaxTree.Node
+  readonly anchor: AuthoredHir.Anchor
 }
 
 interface AppliedRows {
-  readonly failureRowSyntax: SyntaxTree.Node | undefined
+  readonly failureAnchor: AuthoredHir.Anchor | undefined
   readonly failures: ReadonlyArray<TypeResolution>
-  readonly requirementRowSyntax: SyntaxTree.Node | undefined
+  readonly requirementAnchor: AuthoredHir.Anchor | undefined
   readonly requirements: ReadonlyArray<AppliedRequirement>
   readonly requirementParameters: ReadonlyArray<Type.Parameter>
   readonly rowParameterComponents: ReadonlyArray<DeclaredTypeFact>
@@ -317,114 +443,103 @@ interface AppliedRows {
   readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
 }
 
+/** The members a failure operand contributes: a union spreads, anything else stands alone. */
+const failureMembers = (failures: AuthoredHir.Type): ReadonlyArray<AuthoredHir.Type> =>
+  failures._tag === 'UnionType'
+    ? failures.members.flatMap((member) => (member._tag === 'Requirement' ? [] : [member]))
+    : [failures]
+
 /** Analyzes the failure and requirement arguments shared by Effect and nominal applications. */
 const analyzeAppliedRows = (
-  source: SourceFile.SourceFile,
-  list: SyntaxTree.Node,
+  context: Context,
+  argumentList: AuthoredHir.TypeArguments,
   typeParameters: ReadonlyMap<string, Type.Parameter>,
   lifetimeContext?: DeclarationLifetime.Context,
 ): AppliedRows => {
-  const failureRowSyntax = SyntaxTree.directNode(list, 'FailureRow')
-  const failureType = failureRowSyntax?.children.find(isDeclaredTypeNode)
-  let failureNodes: SyntaxTree.Node[]
-  if (failureType?.kind === 'UnionType') {
-    failureNodes = failureType.children.filter(isDeclaredTypeNode)
-  } else if (failureType === undefined) {
-    failureNodes = []
-  } else {
-    failureNodes = [failureType]
-  }
   const diagnostics: Array<Diagnostic.Diagnostic> = []
+  const failureNodes =
+    argumentList.failures === undefined ? [] : failureMembers(argumentList.failures)
   const failures = failureNodes.flatMap((member): ReadonlyArray<TypeResolution> => {
-    const parameter = parameterAtTypePath(source, member, typeParameters)
+    const parameter = parameterAtType(context, member, typeParameters)
     if (parameter?.kind !== 'RequirementRow')
-      return [analyzeDeclaredType(source, member, typeParameters, false, lifetimeContext)]
-    const token = SyntaxTree.directToken(member, 'Identifier')
-    if (token !== undefined)
+      return [analyzeDeclaredType(context, member, typeParameters, false, lifetimeContext)]
+    const segment = firstSegment(context, member)
+    if (segment !== undefined)
       diagnostics.push(
         Diagnostic.genericParameterKindMismatch(
-          spelling(source, token),
+          segment.spelling,
           'Value',
           parameter.kind,
-          token.span,
+          context.spanOf(segment.anchor),
         ),
       )
     return []
   })
-  const requirementRowSyntax = SyntaxTree.directNode(list, 'RequirementRow')
-  const requirements =
-    requirementRowSyntax?.children
-      .filter(
-        (element): element is SyntaxTree.Node =>
-          SyntaxTree.isNode(element) && element.kind === 'Requirement',
-      )
-      .map((requirement) => {
-        const capability = requirement.children.find(isDeclaredTypeNode)
-        return Object.freeze({
-          capability:
-            capability === undefined
-              ? Object.freeze({
-                  fact: Object.freeze({ _tag: 'Unavailable' as const, syntax: requirement }),
-                  diagnostics: Object.freeze<ReadonlyArray<Diagnostic.Diagnostic>>([]),
-                })
-              : analyzeDeclaredType(source, capability, typeParameters, false, lifetimeContext),
-          role: collectedRequirementRole(source, requirement),
-          access:
-            SyntaxTree.directToken(requirement, 'MutKeyword') === undefined
-              ? ('Shared' as const)
-              : ('Exclusive' as const),
-          syntax: requirement,
-        })
-      }) ?? []
-  const parameterPaths =
-    requirementRowSyntax?.children.filter(
-      (element): element is SyntaxTree.Node =>
-        SyntaxTree.isNode(element) && element.kind === 'TypePath',
-    ) ?? []
+  const row = argumentList.requirements
+  const requirements = (row?.members ?? []).flatMap((member): ReadonlyArray<AppliedRequirement> =>
+    member._tag !== 'Requirement'
+      ? []
+      : [
+          Object.freeze({
+            capability: analyzeDeclaredType(
+              context,
+              member.capability,
+              typeParameters,
+              false,
+              lifetimeContext,
+            ),
+            role: collectedRequirementRole(context, member),
+            access: member.access === 'Mutable' ? ('Exclusive' as const) : ('Shared' as const),
+            anchor: member.anchor,
+          }),
+        ],
+  )
+  // A bare path inside a requirement row names a row parameter, never a capability.
+  const parameterPaths = (row?.members ?? []).flatMap((member): ReadonlyArray<AuthoredHir.Type> =>
+    member._tag === 'Requirement' ? [] : [member],
+  )
   const requirementParameters = parameterPaths.flatMap((path): ReadonlyArray<Type.Parameter> => {
-    const token = SyntaxTree.directToken(path, 'Identifier')
-    const parameter = parameterAtTypePath(source, path, typeParameters)
+    const parameter = parameterAtType(context, path, typeParameters)
     if (parameter?.kind === 'RequirementRow') return [parameter]
-    if (token !== undefined)
+    const segment = firstSegment(context, path)
+    if (segment !== undefined)
       diagnostics.push(
         parameter === undefined
-          ? Diagnostic.unknownType(spelling(source, token), token.span)
+          ? Diagnostic.unknownType(segment.spelling, context.spanOf(segment.anchor))
           : Diagnostic.genericParameterKindMismatch(
-              spelling(source, token),
+              segment.spelling,
               'RequirementRow',
               parameter.kind,
-              token.span,
+              context.spanOf(segment.anchor),
             ),
       )
     return []
   })
   const rowParameterComponents = parameterPaths.flatMap((path): ReadonlyArray<DeclaredTypeFact> => {
-    const token = SyntaxTree.directToken(path, 'Identifier')
-    const parameter = parameterAtTypePath(source, path, typeParameters)
-    return token === undefined || parameter?.kind !== 'RequirementRow'
+    const segment = firstSegment(context, path)
+    const parameter = parameterAtType(context, path, typeParameters)
+    return segment === undefined || parameter?.kind !== 'RequirementRow'
       ? []
       : [
           Object.freeze({
             _tag: 'Resolved' as const,
             type: parameter,
-            spelling: spelling(source, token),
-            token,
-            syntax: path,
+            spelling: segment.spelling,
+            anchor: path.anchor,
           }),
         ]
   })
-  const rowNodes =
-    requirementRowSyntax?.children.filter((element): element is SyntaxTree.Node =>
-      SyntaxTree.isNode(element),
-    ) ?? []
+  const subtracts = (row?.members ?? []).some(
+    (member) => member._tag !== 'Requirement' && member._tag === 'RowWithout',
+  )
   const requirementExpression =
-    requirementRowSyntax !== undefined && rowNodes.some((node) => node.kind === 'RowWithout')
-      ? rowExpressionOf(source, requirementRowSyntax, rowNodes, typeParameters)
+    row !== undefined && subtracts
+      ? rowExpressionOf(context, row, typeParameters, lifetimeContext)
       : undefined
   return Object.freeze({
-    failureRowSyntax,
+    failureAnchor: argumentList.failures?.anchor,
     failures: Object.freeze(failures),
-    requirementRowSyntax,
+    requirementAnchor: row?.anchor,
     requirements: Object.freeze(requirements),
     requirementParameters: Object.freeze(requirementParameters),
     rowParameterComponents: Object.freeze(rowParameterComponents),
@@ -443,200 +558,180 @@ const unreportedLifetimeDiagnostic = (
       reported.span.start === diagnostic.span.start &&
       reported.span.end === diagnostic.span.end,
   )
-    ? Object.freeze([])
+    ? noDiagnostics
     : Object.freeze([diagnostic])
 
+/**
+ * Resolves one authored type annotation into a declared-type fact.
+ *
+ * Every construct is a named field of the authored vocabulary, so the analysis is a closed
+ * dispatch over `AuthoredHir.Type` rather than a scan over untyped syntax children.
+ */
 export const analyzeDeclaredType = (
-  source: SourceFile.SourceFile,
-  syntax: SyntaxTree.Node,
+  context: Context,
+  type: AuthoredHir.Type | AuthoredHir.Lifetime,
   typeParameters: ReadonlyMap<string, Type.Parameter> = new Map(),
   genericArgumentPosition = false,
   lifetimeContext?: DeclarationLifetime.Context,
 ): TypeResolution => {
-  if (syntax.kind === 'LifetimeType') {
-    const token = SyntaxTree.directToken(syntax, 'Lifetime')
+  const anchor = type.anchor
+  if (type._tag === 'Lifetime') {
+    const ticked = tickedLifetimeName(context, type.name)
     const lifetime =
-      lifetimeContext?.regions.get(syntax) ??
-      (token === undefined ? undefined : DeclarationLifetime.named(source, token, typeParameters))
-    if (token !== undefined && lifetime !== undefined && genericArgumentPosition)
+      (lifetimeContext === undefined
+        ? undefined
+        : DeclarationLifetime.regionOf(lifetimeContext, anchor)) ??
+      (ticked === undefined ? undefined : DeclarationLifetime.named(ticked, typeParameters))
+    if (ticked !== undefined && lifetime !== undefined && genericArgumentPosition)
       return Object.freeze({
-        fact: Object.freeze({
-          _tag: 'Lifetime',
-          lifetime,
-          spelling: spelling(source, token),
-          token,
-          syntax,
-        }),
-        diagnostics: Object.freeze([]),
+        fact: Object.freeze({ _tag: 'Lifetime', lifetime, spelling: ticked, anchor }),
+        diagnostics: noDiagnostics,
       })
     const diagnostic =
-      token === undefined
-        ? Diagnostic.invalidLifetimeBinder('Expected a lifetime argument', syntax.span)
-        : Diagnostic.unknownLifetime(spelling(source, token), token.span)
+      ticked === undefined
+        ? Diagnostic.invalidLifetimeBinder('Expected a lifetime argument', context.spanOf(anchor))
+        : Diagnostic.unknownLifetime(ticked, context.spanOf(type.name.anchor))
     return Object.freeze({
-      fact: Object.freeze({ _tag: 'Unavailable', syntax, cause: Diagnostic.identity(diagnostic) }),
+      fact: Object.freeze({ _tag: 'Unavailable', anchor, cause: Diagnostic.identity(diagnostic) }),
       diagnostics: unreportedLifetimeDiagnostic(diagnostic, lifetimeContext),
     })
   }
-  const lifetimeFor = (node: SyntaxTree.Node): Lifetime.Lifetime | undefined => {
-    const token = SyntaxTree.directToken(node, 'Lifetime')
-    return (
-      lifetimeContext?.regions.get(node) ??
-      (token === undefined ? undefined : DeclarationLifetime.named(source, token, typeParameters))
+  /** The region elaboration assigned to one annotation, or the one its own lifetime names. */
+  const regionOf = (
+    node: AuthoredHir.Type,
+    written: AuthoredHir.Lifetime | undefined,
+  ): Lifetime.Lifetime | undefined => {
+    const assigned =
+      lifetimeContext === undefined
+        ? undefined
+        : DeclarationLifetime.regionOf(lifetimeContext, node.anchor)
+    if (assigned !== undefined) return assigned
+    if (written === undefined) return undefined
+    const spelling = nameText(context, written.name)
+    if (spelling === undefined) return undefined
+    return DeclarationLifetime.named(
+      spelling.startsWith("'") ? spelling : `'${spelling}`,
+      typeParameters,
     )
   }
-  const missingLifetime = (): TypeResolution => {
-    const token = SyntaxTree.directToken(syntax, 'Lifetime')
+  const missingLifetime = (written: AuthoredHir.Lifetime | undefined): TypeResolution => {
+    const spelling = written === undefined ? undefined : nameText(context, written.name)
     const diagnostic =
-      token === undefined
-        ? Diagnostic.ambiguousLifetimeElision(syntax.span)
-        : Diagnostic.unknownLifetime(spelling(source, token), token.span)
+      spelling === undefined
+        ? Diagnostic.ambiguousLifetimeElision(context.spanOf(anchor))
+        : Diagnostic.unknownLifetime(
+            spelling.startsWith("'") ? spelling : `'${spelling}`,
+            context.spanOf(written?.anchor ?? anchor),
+          )
     return Object.freeze({
-      fact: Object.freeze({ _tag: 'Unavailable', syntax, cause: Diagnostic.identity(diagnostic) }),
+      fact: Object.freeze({ _tag: 'Unavailable', anchor, cause: Diagnostic.identity(diagnostic) }),
       diagnostics: unreportedLifetimeDiagnostic(diagnostic, lifetimeContext),
     })
   }
-  if (syntax.kind === 'UnitType') {
-    const token = SyntaxTree.directToken(syntax, 'LeftParenthesis')
-    if (token === undefined)
-      return Object.freeze({
-        fact: Object.freeze({ _tag: 'Unavailable', syntax }),
-        diagnostics: Object.freeze([]),
-      })
+  if (type._tag === 'UnitType')
     return Object.freeze({
-      fact: Object.freeze({
-        _tag: 'Resolved',
-        type: Type.unit,
-        spelling: '()',
-        token,
-        syntax,
-      }),
-      diagnostics: Object.freeze([]),
+      fact: Object.freeze({ _tag: 'Resolved', type: Type.unit, spelling: '()', anchor }),
+      diagnostics: noDiagnostics,
     })
-  }
-  if (syntax.kind === 'CallableType') {
-    const lifetimes = lifetimeContext?.callables.get(syntax)
-    if (lifetimes === undefined) return missingLifetime()
-    const token = SyntaxTree.directToken(syntax, 'FnKeyword')
-    const typeNodes = syntax.children.filter(isDeclaredTypeNode)
-    const resultSyntax = typeNodes.at(-1)
-    if (token === undefined || resultSyntax === undefined) {
-      return Object.freeze({
-        fact: Object.freeze({ _tag: 'Unavailable', syntax }),
-        diagnostics: Object.freeze([]),
-      })
-    }
-    let mode: Type.CallableMode
-    if (SyntaxTree.directToken(syntax, 'OnceKeyword') !== undefined) {
-      mode = 'Take'
-    } else if (SyntaxTree.directToken(syntax, 'MutKeyword') !== undefined) {
-      mode = 'Exclusive'
-    } else {
-      mode = 'Shared'
-    }
-    const unsafe = SyntaxTree.directToken(syntax, 'UnsafeKeyword') !== undefined
-    const analyzed = typeNodes.map((node) =>
-      analyzeDeclaredType(source, node, typeParameters, false, lifetimeContext),
+  if (type._tag === 'MissingType' || type._tag === 'InvalidType')
+    return unavailableResolution(anchor)
+  if (type._tag === 'CallableType') {
+    const lifetimes =
+      lifetimeContext === undefined
+        ? undefined
+        : DeclarationLifetime.callableOf(lifetimeContext, anchor)
+    if (lifetimes === undefined) return missingLifetime(undefined)
+    const mode: Type.CallableMode = callableMode(type.mode)
+    const parameters = type.parameters.map((parameter) =>
+      analyzeDeclaredType(context, parameter, typeParameters, false, lifetimeContext),
     )
-    const result = analyzed.at(-1)
-    const parameters = analyzed.slice(0, -1)
-    const diagnostics = Object.freeze(analyzed.flatMap((entry) => entry.diagnostics))
+    const result = analyzeDeclaredType(context, type.result, typeParameters, false, lifetimeContext)
+    const diagnostics = Object.freeze(
+      [...parameters, result].flatMap((entry) => Array.from(entry.diagnostics)),
+    )
     if (
-      result?.fact._tag === 'Resolved' &&
+      result.fact._tag === 'Resolved' &&
       parameters.every((entry) => entry.fact._tag === 'Resolved')
     ) {
-      const type = Type.callable(
+      const contract = Type.callable(
         parameters.flatMap((entry) => (entry.fact._tag === 'Resolved' ? [entry.fact.type] : [])),
         result.fact.type,
         lifetimes,
         mode,
         undefined,
-        unsafe,
+        type.unsafe,
       )
       return Object.freeze({
         fact: Object.freeze({
           _tag: 'Resolved',
-          type,
-          spelling: Type.encode(type),
-          token,
-          syntax,
-          components: Object.freeze([
-            ...parameters.map((parameter) => parameter.fact),
-            result.fact,
-          ]),
+          type: contract,
+          spelling: Type.encode(contract),
+          anchor,
+          components: Object.freeze([...parameters.map((entry) => entry.fact), result.fact]),
         }),
         diagnostics,
       })
     }
-    const resultFact = result?.fact ?? Object.freeze({ _tag: 'Unavailable' as const, syntax })
-    const cause = [...parameters.map((entry) => entry.fact), resultFact]
+    const cause = [...parameters.map((entry) => entry.fact), result.fact]
       .flatMap((fact) => ('cause' in fact && fact.cause !== undefined ? [fact.cause] : []))
       .at(-1)
     return Object.freeze({
       fact: Object.freeze({
         _tag: 'Callable',
         lifetimes,
-        unsafe,
+        unsafe: type.unsafe,
         mode,
         parameters: Object.freeze(parameters.map((entry) => entry.fact)),
-        result: resultFact,
-        spelling: `${unsafe ? 'unsafe ' : ''}${mode === 'Exclusive' ? 'mut ' : ''}${mode === 'Take' ? 'once ' : ''}fn(...)`,
-        token,
-        syntax,
+        result: result.fact,
+        spelling: `${type.unsafe ? 'unsafe ' : ''}${mode === 'Exclusive' ? 'mut ' : ''}${
+          mode === 'Take' ? 'once ' : ''
+        }fn(...)`,
+        anchor,
         ...(cause === undefined ? {} : { cause }),
       }),
       diagnostics,
     })
   }
-  if (syntax.kind === 'ForeignFunctionType') {
-    const lifetimes = lifetimeContext?.callables.get(syntax) ?? {
-      environment: Lifetime.staticLifetime,
-      lifetimeBinders: [],
-    }
-    const token = SyntaxTree.directToken(syntax, 'FnKeyword')
-    const abiToken = SyntaxTree.directToken(syntax, 'TextLiteral')
-    const typeNodes = syntax.children.filter(isDeclaredTypeNode)
-    const resultSyntax = typeNodes.at(-1)
-    if (token === undefined || resultSyntax === undefined) {
-      return Object.freeze({
-        fact: Object.freeze({ _tag: 'Unavailable', syntax }),
-        diagnostics: Object.freeze([]),
-      })
-    }
-    const analyzed = typeNodes.map((node) =>
-      analyzeDeclaredType(source, node, typeParameters, false, lifetimeContext),
+  if (type._tag === 'ForeignFunctionType') {
+    const lifetimes =
+      (lifetimeContext === undefined
+        ? undefined
+        : DeclarationLifetime.callableOf(lifetimeContext, anchor)) ??
+      Object.freeze({ environment: Lifetime.staticLifetime, lifetimeBinders: Object.freeze([]) })
+    const parameters = type.parameters.map((parameter) =>
+      analyzeDeclaredType(context, parameter, typeParameters, false, lifetimeContext),
     )
-    const result = analyzed.at(-1)
-    const parameters = analyzed.slice(0, -1)
-    const clauses = DeclarationProperty.clauses(syntax)
+    const result = analyzeDeclaredType(context, type.result, typeParameters, false, lifetimeContext)
     const behavior = ForeignContract.analyze(
-      source,
-      clauses[0],
+      context,
+      type.properties[0],
       parameters.map((entry, ordinal) => ({
         name: String(ordinal),
         type: entry.fact._tag === 'Resolved' ? entry.fact.type : undefined,
-        span: entry.fact.syntax.span,
+        span: context.spanOf(entry.fact.anchor),
       })),
-      result?.fact._tag === 'Resolved' ? result.fact.type : undefined,
+      result.fact._tag === 'Resolved' ? result.fact.type : undefined,
     )
-    const diagnostics: Array<Diagnostic.Diagnostic> = analyzed.flatMap((entry) =>
+    const diagnostics: Array<Diagnostic.Diagnostic> = [...parameters, result].flatMap((entry) =>
       Array.from(entry.diagnostics),
     )
     diagnostics.push(...behavior.diagnostics)
-    for (const clause of clauses.slice(1))
+    for (const clause of type.properties.slice(1))
       diagnostics.push(
-        Diagnostic.foreignDeclarationRestriction('duplicate foreign contract', clause.span),
+        Diagnostic.foreignDeclarationRestriction(
+          'duplicate foreign contract',
+          context.spanOf(clause.anchor),
+        ),
       )
-    if (abiToken !== undefined) {
-      const abi = decodedText(source, abiToken)
-      if (abi !== 'C') diagnostics.push(Diagnostic.unsupportedForeignAbi(abi ?? '', abiToken.span))
-    }
+    const abi = type.abi._tag === 'TextLiteral' ? context.textOf(type.abi.value) : undefined
+    if (type.abi._tag === 'TextLiteral' && abi !== 'C')
+      diagnostics.push(Diagnostic.unsupportedForeignAbi(abi ?? '', context.spanOf(type.abi.anchor)))
     if (
       diagnostics.length === 0 &&
-      result?.fact._tag === 'Resolved' &&
+      result.fact._tag === 'Resolved' &&
       parameters.every((entry) => entry.fact._tag === 'Resolved')
     ) {
-      const type = Type.foreignFunction(
+      const contract = Type.foreignFunction(
         parameters.flatMap((entry) => (entry.fact._tag === 'Resolved' ? [entry.fact.type] : [])),
         result.fact.type,
         behavior.contract,
@@ -645,19 +740,14 @@ export const analyzeDeclaredType = (
       return Object.freeze({
         fact: Object.freeze({
           _tag: 'Resolved',
-          type,
-          spelling: Type.encode(type),
-          token,
-          syntax,
-          components: Object.freeze([
-            ...parameters.map((parameter) => parameter.fact),
-            result.fact,
-          ]),
+          type: contract,
+          spelling: Type.encode(contract),
+          anchor,
+          components: Object.freeze([...parameters.map((entry) => entry.fact), result.fact]),
         }),
         diagnostics: Object.freeze(diagnostics),
       })
     }
-    const resultFact = result?.fact ?? Object.freeze({ _tag: 'Unavailable' as const, syntax })
     const cause = diagnostics.at(-1)
     return Object.freeze({
       fact: Object.freeze({
@@ -665,147 +755,93 @@ export const analyzeDeclaredType = (
         lifetimes,
         contract: behavior.contract,
         parameters: Object.freeze(parameters.map((entry) => entry.fact)),
-        result: resultFact,
+        result: result.fact,
         spelling: 'extern "C" fn(...)',
-        token,
-        syntax,
+        anchor,
         ...(cause === undefined ? {} : { cause: Diagnostic.identity(cause) }),
       }),
       diagnostics: Object.freeze(diagnostics),
     })
   }
-  if (syntax.kind === 'ParenthesizedType') {
-    const inner = syntax.children.find(isDeclaredTypeNode)
-    if (inner === undefined)
-      return Object.freeze({
-        fact: Object.freeze({ _tag: 'Unavailable', syntax }),
-        diagnostics: Object.freeze([]),
-      })
-    const analyzed = analyzeDeclaredType(
-      source,
-      inner,
-      typeParameters,
-      genericArgumentPosition,
-      lifetimeContext,
+  if (type._tag === 'UnionType') {
+    const members = type.members.flatMap((member) =>
+      member._tag === 'Requirement'
+        ? []
+        : [
+            analyzeDeclaredType(
+              context,
+              member,
+              typeParameters,
+              genericArgumentPosition,
+              lifetimeContext,
+            ),
+          ],
     )
-    return Object.freeze({
-      fact: Object.freeze({ ...analyzed.fact, syntax }),
-      diagnostics: analyzed.diagnostics,
-    })
-  }
-  if (syntax.kind === 'UnionType') {
-    const members = syntax.children
-      .filter(isDeclaredTypeNode)
-      .map((member) =>
-        analyzeDeclaredType(
-          source,
-          member,
-          typeParameters,
-          genericArgumentPosition,
-          lifetimeContext,
-        ),
-      )
     const diagnostics: Array<Diagnostic.Diagnostic> = members.flatMap((member) =>
       Array.from(member.diagnostics),
     )
     const facts = Object.freeze(members.map((member) => member.fact))
-    const separators = Object.freeze(
-      syntax.children.filter(
-        (element): element is Token.Token => SyntaxTree.isToken(element) && element.kind === 'Pipe',
-      ),
-    )
-    const firstResolved = facts.find(
-      (fact): fact is Extract<DeclaredTypeFact, { readonly _tag: 'Resolved' }> =>
-        fact._tag === 'Resolved',
-    )
-    const firstToken = SyntaxTree.tokens(syntax).find((token) => token.kind === 'Identifier')
-    if (firstToken === undefined) {
-      return Object.freeze({
-        fact: Object.freeze({ _tag: 'Unavailable', syntax }),
-        diagnostics: Object.freeze(diagnostics),
-      })
-    }
     if (facts.every((fact) => fact._tag === 'Resolved')) {
       const resolved = facts.filter(
         (fact): fact is Extract<DeclaredTypeFact, { readonly _tag: 'Resolved' }> =>
           fact._tag === 'Resolved',
       )
       const normalized = Type.union(resolved.map((fact) => fact.type))
-      if (normalized._tag === 'Normalized') {
+      if (normalized._tag === 'Normalized')
         return Object.freeze({
           fact: Object.freeze({
             _tag: 'Resolved',
             type: normalized.type,
             spelling: Type.encode(normalized.type),
-            token: firstResolved?.token ?? firstToken,
-            syntax,
-            unionSource: Object.freeze({
-              _tag: 'UnionSource',
-              members: facts,
-              separators,
-              syntax,
-            }),
+            anchor,
+            unionSource: Object.freeze({ _tag: 'UnionSource', members: facts, anchor }),
           }),
           diagnostics: Object.freeze(diagnostics),
         })
-      }
-      if (normalized._tag === 'InvalidMembers') {
+      if (normalized._tag === 'InvalidMembers')
         for (const invalid of normalized.members) {
           const sourceFact = resolved.find((fact) => Type.equals(fact.type, invalid))
           diagnostics.push(
             Diagnostic.invalidUnionMember(
               Type.encode(invalid),
-              sourceFact?.syntax.span ?? syntax.span,
+              context.spanOf(sourceFact?.anchor ?? anchor),
             ),
           )
         }
-      }
     }
     const cause = diagnostics.at(-1)
     return Object.freeze({
       fact: Object.freeze({
         _tag: 'Union',
         members: facts,
-        separators,
         spelling: facts
           .map((fact) => (fact._tag === 'Resolved' ? Type.encode(fact.type) : 'unavailable'))
           .join(' | '),
-        token: firstResolved?.token ?? firstToken,
-        syntax,
+        anchor,
         ...(cause === undefined ? {} : { cause: Diagnostic.identity(cause) }),
       }),
       diagnostics: Object.freeze(diagnostics),
     })
   }
-  if (syntax.kind === 'SliceType') {
-    const lifetime = lifetimeFor(syntax)
-    if (lifetime === undefined) return missingLifetime()
-    const token = SyntaxTree.directToken(syntax, 'Ampersand')
-    const elementSyntax = syntax.children.find(isDeclaredTypeNode)
-    if (token === undefined || elementSyntax === undefined) {
-      return Object.freeze({
-        fact: Object.freeze({ _tag: 'Unavailable', syntax }),
-        diagnostics: Object.freeze([]),
-      })
-    }
-    const access: Type.Slice['access'] =
-      SyntaxTree.directToken(syntax, 'MutKeyword') === undefined ? 'Shared' : 'Exclusive'
+  if (type._tag === 'SliceType') {
+    const lifetime = regionOf(type, type.lifetime)
+    if (lifetime === undefined) return missingLifetime(type.lifetime)
+    const access: Type.Slice['access'] = type.access === 'Mutable' ? 'Exclusive' : 'Shared'
     const element = analyzeDeclaredType(
-      source,
-      elementSyntax,
+      context,
+      type.element,
       typeParameters,
       false,
       lifetimeContext,
     )
     if (element.fact._tag === 'Resolved') {
-      const type = Type.slice(access, element.fact.type, lifetime)
+      const sliced = Type.slice(access, element.fact.type, lifetime)
       return Object.freeze({
         fact: Object.freeze({
           _tag: 'Resolved',
-          type,
-          spelling: Type.encode(type),
-          token,
-          syntax,
+          type: sliced,
+          spelling: Type.encode(sliced),
+          anchor,
           components: Object.freeze([element.fact]),
         }),
         diagnostics: element.diagnostics,
@@ -818,8 +854,7 @@ export const analyzeDeclaredType = (
         access,
         element: element.fact,
         spelling: `${access === 'Exclusive' ? '&mut' : '&'}[unavailable]`,
-        token,
-        syntax,
+        anchor,
         ...('cause' in element.fact && element.fact.cause !== undefined
           ? { cause: element.fact.cause }
           : {}),
@@ -827,20 +862,17 @@ export const analyzeDeclaredType = (
       diagnostics: element.diagnostics,
     })
   }
-  if (syntax.kind === 'ReferenceType') {
-    const lifetime = lifetimeFor(syntax)
-    if (lifetime === undefined) return missingLifetime()
-    const token = SyntaxTree.directToken(syntax, 'Ampersand')
-    const targetSyntax = syntax.children.find(isDeclaredTypeNode)
-    if (token === undefined || targetSyntax === undefined) {
-      return Object.freeze({
-        fact: Object.freeze({ _tag: 'Unavailable', syntax }),
-        diagnostics: Object.freeze([]),
-      })
-    }
-    const access: 'Shared' | 'Exclusive' =
-      SyntaxTree.directToken(syntax, 'MutKeyword') === undefined ? 'Shared' : 'Exclusive'
-    const target = analyzeDeclaredType(source, targetSyntax, typeParameters, false, lifetimeContext)
+  if (type._tag === 'ReferenceType') {
+    const lifetime = regionOf(type, type.lifetime)
+    if (lifetime === undefined) return missingLifetime(type.lifetime)
+    const access: 'Shared' | 'Exclusive' = type.access === 'Mutable' ? 'Exclusive' : 'Shared'
+    const target = analyzeDeclaredType(
+      context,
+      type.referent,
+      typeParameters,
+      false,
+      lifetimeContext,
+    )
     return Object.freeze({
       fact: Object.freeze({
         _tag: 'Reference',
@@ -848,8 +880,7 @@ export const analyzeDeclaredType = (
         access,
         target: target.fact,
         spelling: `${access === 'Exclusive' ? '&mut ' : '&'}unavailable`,
-        token,
-        syntax,
+        anchor,
         ...('cause' in target.fact && target.fact.cause !== undefined
           ? { cause: target.fact.cause }
           : {}),
@@ -857,29 +888,15 @@ export const analyzeDeclaredType = (
       diagnostics: target.diagnostics,
     })
   }
-  if (syntax.kind === 'PointerType') {
-    const token = SyntaxTree.directToken(syntax, 'Star')
-    const pointeeSyntax = syntax.children.find(isDeclaredTypeNode)
-    if (token === undefined || pointeeSyntax === undefined) {
-      return Object.freeze({
-        fact: Object.freeze({ _tag: 'Unavailable', syntax }),
-        diagnostics: Object.freeze([]),
-      })
-    }
-    const mutable = SyntaxTree.directToken(syntax, 'MutKeyword') !== undefined
-    const nullable = SyntaxTree.directToken(syntax, 'Question') !== undefined
-    const extent: Type.Pointer['extent'] =
-      SyntaxTree.directToken(syntax, 'LeftBracket') === undefined ? 'Single' : 'Many'
+  if (type._tag === 'PointerType') {
+    const extent: Type.Pointer['extent'] = type.multiplicity === 'Many' ? 'Many' : 'Single'
     let alignment: Type.Pointer['alignment'] = 'Natural'
     const seen = new Set<string>()
     const qualifierDiagnostics: Array<Diagnostic.Diagnostic> = []
-    for (const qualifier of SyntaxTree.directNodes(syntax, 'PointerQualifier')) {
-      const nameToken = SyntaxTree.directToken(qualifier, 'Identifier')
-      const valueToken = SyntaxTree.directToken(qualifier, 'DecimalInteger')
-      if (nameToken === undefined || valueToken === undefined) continue
-      const name = Option.getOrElse(SourceFile.spelling(source, nameToken.span), () => '')
-      const spelling = Option.getOrElse(SourceFile.spelling(source, valueToken.span), () => '')
-      const value = Number(spelling.replaceAll('_', ''))
+    for (const qualifier of type.qualifiers) {
+      const name = nameText(context, qualifier.name)
+      if (name === undefined || qualifier.value._tag !== 'IntegerLiteral') continue
+      const value = Number(qualifier.value.value)
       let detail: string | undefined
       if (seen.has(name)) detail = 'qualifier is repeated'
       else if (name === 'align') {
@@ -889,31 +906,38 @@ export const analyzeDeclaredType = (
         detail = 'only ordinary data address space zero is admitted'
       seen.add(name)
       if (detail !== undefined)
-        qualifierDiagnostics.push(Diagnostic.invalidPointerQualifier(name, detail, valueToken.span))
+        qualifierDiagnostics.push(
+          Diagnostic.invalidPointerQualifier(name, detail, context.spanOf(qualifier.value.anchor)),
+        )
     }
-    const qualifiers = { mutable, nullable, extent, alignment, addressSpace: 0 as const }
+    const qualifiers = {
+      mutable: type.access === 'Mutable',
+      nullable: type.nullable,
+      extent,
+      alignment,
+      addressSpace: 0 as const,
+    }
     const invalid = qualifierDiagnostics[0]
     if (invalid !== undefined)
       return Object.freeze({
-        fact: Object.freeze({ _tag: 'Unavailable', syntax, cause: Diagnostic.identity(invalid) }),
+        fact: Object.freeze({ _tag: 'Unavailable', anchor, cause: Diagnostic.identity(invalid) }),
         diagnostics: Object.freeze(qualifierDiagnostics),
       })
     const pointee = analyzeDeclaredType(
-      source,
-      pointeeSyntax,
+      context,
+      type.pointee,
       typeParameters,
       false,
       lifetimeContext,
     )
     if (pointee.fact._tag === 'Resolved') {
-      const type = Type.pointer({ ...qualifiers, pointee: pointee.fact.type })
+      const pointer = Type.pointer({ ...qualifiers, pointee: pointee.fact.type })
       return Object.freeze({
         fact: Object.freeze({
           _tag: 'Resolved',
-          type,
-          spelling: Type.encode(type),
-          token,
-          syntax,
+          type: pointer,
+          spelling: Type.encode(pointer),
+          anchor,
           components: Object.freeze([pointee.fact]),
         }),
         diagnostics: pointee.diagnostics,
@@ -924,9 +948,8 @@ export const analyzeDeclaredType = (
         _tag: 'Pointer',
         ...qualifiers,
         pointee: pointee.fact,
-        spelling: `${mutable ? '*mut ' : '*const '}unavailable`,
-        token,
-        syntax,
+        spelling: `${qualifiers.mutable ? '*mut ' : '*const '}unavailable`,
+        anchor,
         ...('cause' in pointee.fact && pointee.fact.cause !== undefined
           ? { cause: pointee.fact.cause }
           : {}),
@@ -934,68 +957,52 @@ export const analyzeDeclaredType = (
       diagnostics: pointee.diagnostics,
     })
   }
-  if (syntax.kind === 'FixedArrayType') {
-    const arrayToken = SyntaxTree.directToken(syntax, 'LeftBracket')
-    const elementSyntax = syntax.children.find(isDeclaredTypeNode)
-    const lengthToken = SyntaxTree.directToken(syntax, 'DecimalInteger')
-    if (arrayToken === undefined || elementSyntax === undefined) {
-      return Object.freeze({
-        fact: Object.freeze({
-          _tag: 'Unavailable',
-          syntax: SyntaxTree.unavailableChild(syntax, 'LeftBracket'),
-        }),
-        diagnostics: Object.freeze([]),
-      })
-    }
+  if (type._tag === 'FixedArrayType') {
     const element = analyzeDeclaredType(
-      source,
-      elementSyntax,
+      context,
+      type.element,
       typeParameters,
       false,
       lifetimeContext,
     )
-    let length: ArrayLengthFact
     const diagnostics: Array<Diagnostic.Diagnostic> = [...element.diagnostics]
-    if (lengthToken === undefined) {
-      length = Object.freeze({
-        _tag: 'Unavailable',
-        syntax: SyntaxTree.unavailableChild(syntax, 'DecimalInteger'),
-      })
+    let length: ArrayLengthFact
+    if (type.length._tag !== 'IntegerLiteral') {
+      length = Object.freeze({ _tag: 'Unavailable', anchor: type.length.anchor })
     } else {
-      const lengthSpelling = spelling(source, lengthToken)
-      const value = Number(IntegerLiteral.magnitude(lengthSpelling))
+      const spelling = integerSpelling(type.length)
+      const value = Number(type.length.value)
       if (!Number.isSafeInteger(value) || value > 2147483647) {
         const diagnostic = Diagnostic.integerOutOfRange(
-          lengthSpelling,
+          spelling,
           'i32',
           { minimum: -2147483648n, maximum: 2147483647n },
-          lengthToken.span,
+          context.spanOf(type.length.anchor),
         )
         diagnostics.push(diagnostic)
         length = Object.freeze({
           _tag: 'OutOfRange',
-          spelling: lengthSpelling,
-          token: lengthToken,
+          spelling,
+          anchor: type.length.anchor,
           cause: Diagnostic.identity(diagnostic),
         })
       } else {
         length = Object.freeze({
           _tag: 'Available',
           value,
-          spelling: lengthSpelling,
-          token: lengthToken,
+          spelling,
+          anchor: type.length.anchor,
         })
       }
     }
     if (element.fact._tag === 'Resolved' && length._tag === 'Available') {
-      const type = Type.fixedArray(element.fact.type, length.value)
+      const array = Type.fixedArray(element.fact.type, length.value)
       return Object.freeze({
         fact: Object.freeze({
           _tag: 'Resolved',
-          type,
-          spelling: Type.encode(type),
-          token: arrayToken,
-          syntax,
+          type: array,
+          spelling: Type.encode(array),
+          anchor,
           components: Object.freeze([element.fact]),
         }),
         diagnostics: Object.freeze(diagnostics),
@@ -1009,115 +1016,64 @@ export const analyzeDeclaredType = (
         spelling: `Array<${
           element.fact._tag === 'Resolved' ? Type.encode(element.fact.type) : 'unavailable'
         }, ${length._tag === 'Available' ? length.value : 'unavailable'}>`,
-        token: arrayToken,
-        syntax,
+        anchor,
       }),
       diagnostics: Object.freeze(diagnostics),
     })
   }
-  if (syntax.kind === 'OpaqueResultType') {
-    // The binder is owned by the declaration that carries it, so its representation parameters and
+  if (type._tag === 'OpaqueResultType')
+    // The binder belongs to the declaration that carries it, so its representation parameters and
     // family key can only be minted where that canonical identity is known. Until the declaration
-    // site supplies it, the result stays deterministically unavailable rather than resolving to a
-    // parameter with a fabricated owner.
-    return Object.freeze({
-      fact: Object.freeze({ _tag: 'Unavailable', syntax }),
-      diagnostics: Object.freeze([]),
-    })
-  }
-  if (syntax.kind === 'ExactRepresentationType') {
-    const item = syntax.children.find(isDeclaredTypeNode)
-    let pathSyntax: SyntaxTree.Node | undefined
-    if (item === undefined) {
-      pathSyntax = undefined
-    } else if (item.kind === 'TypePath') {
-      pathSyntax = item
-    } else {
-      pathSyntax = SyntaxTree.directNode(item, 'TypePath')
-    }
-    const keyword = SyntaxTree.directToken(syntax, 'Identifier')
-    if (item === undefined || pathSyntax === undefined || keyword === undefined)
-      return Object.freeze({
-        fact: Object.freeze({ _tag: 'Unavailable', syntax }),
-        diagnostics: Object.freeze([]),
-      })
-    const segments = SyntaxTree.tokens(pathSyntax)
-      .filter((token) => token.kind === 'Identifier')
-      .map((token) => Object.freeze({ spelling: spelling(source, token), token }))
-    if (segments.length === 0 || !SyntaxTree.isAvailableSyntax(syntax))
-      return Object.freeze({
-        fact: Object.freeze({
-          _tag: 'Unavailable',
-          syntax: SyntaxTree.unavailableChild(syntax, 'Identifier'),
-        }),
-        diagnostics: Object.freeze([]),
-      })
-    const list =
-      item.kind === 'AppliedType' ? SyntaxTree.directNode(item, 'TypeArgumentList') : undefined
-    const arguments_ = (
-      list?.children.filter(
-        (element): element is SyntaxTree.Node =>
-          SyntaxTree.isNode(element) &&
-          (element.kind === 'LifetimeType' || isDeclaredTypeNode(element)),
-      ) ?? []
-    ).map((argument) =>
-      analyzeDeclaredType(source, argument, typeParameters, true, lifetimeContext),
+    // site supplies it, the result stays deterministically unavailable.
+    return unavailableResolution(anchor)
+  if (type._tag === 'ExactRepresentationType') {
+    const subject = type.subject
+    const path = nominalPath(context, subject)
+    if (path === undefined) return unavailableResolution(anchor)
+    const arguments_ = (subject._tag === 'AppliedType' ? subject.arguments.arguments : []).flatMap(
+      (argument) =>
+        argument._tag === 'RequirementSelector'
+          ? []
+          : [analyzeDeclaredType(context, argument, typeParameters, true, lifetimeContext)],
     )
     return Object.freeze({
       fact: Object.freeze({
         _tag: 'ExactRepresentation',
-        item: Object.freeze({
-          _tag: 'TypePath',
-          spelling: segments.map((segment) => segment.spelling).join('.'),
-          segments: Object.freeze(segments),
-          syntax: pathSyntax,
-        }),
+        item: path,
         arguments: Object.freeze(arguments_.map((argument) => argument.fact)),
-        spelling: `typeof(${segments.map((segment) => segment.spelling).join('.')})`,
-        token: keyword,
-        syntax,
+        spelling: `typeof(${path.spelling})`,
+        anchor,
       }),
       diagnostics: Object.freeze(arguments_.flatMap((argument) => argument.diagnostics)),
     })
   }
-  if (syntax.kind === 'AppliedType') {
-    const pathSyntax = SyntaxTree.directNode(syntax, 'TypePath')
-    const list = SyntaxTree.directNode(syntax, 'TypeArgumentList')
-    const firstToken = SyntaxTree.tokens(syntax).find((token) => token.kind === 'Identifier')
-    if (pathSyntax === undefined || list === undefined || firstToken === undefined) {
-      return Object.freeze({
-        fact: Object.freeze({ _tag: 'Unavailable', syntax }),
-        diagnostics: Object.freeze([]),
-      })
-    }
-    const target = analyzeDeclaredType(source, pathSyntax, typeParameters, false, lifetimeContext)
-    const arguments_ = list.children
-      .filter(
-        (element): element is SyntaxTree.Node =>
-          SyntaxTree.isNode(element) &&
-          (element.kind === 'LifetimeType' || isDeclaredTypeNode(element)),
-      )
-      .map((argument) =>
-        analyzeDeclaredType(source, argument, typeParameters, true, lifetimeContext),
-      )
-    const pathSegments = SyntaxTree.tokens(pathSyntax)
-      .filter((token) => token.kind === 'Identifier')
-      .map((token) => spelling(source, token))
-    if (pathSegments.length === 1 && pathSegments.at(0) === 'string') {
+  if (type._tag === 'RowWithout') return unavailableResolution(anchor)
+  if (type._tag === 'AppliedType') {
+    const target = analyzeDeclaredType(context, type.target, typeParameters, false, lifetimeContext)
+    const arguments_ = type.arguments.arguments.flatMap((argument) =>
+      argument._tag === 'RequirementSelector'
+        ? []
+        : [analyzeDeclaredType(context, argument, typeParameters, true, lifetimeContext)],
+    )
+    const targetPath =
+      type.target._tag === 'NamedType' ? typePathOf(context, type.target.path) : undefined
+    const bare =
+      targetPath !== undefined && targetPath.segments.length === 1 ? targetPath.spelling : undefined
+    if (bare === 'string') {
       const argument = arguments_.at(0)?.fact
       if (arguments_.length !== 1 || argument?._tag !== 'Lifetime') {
         const diagnostic = Diagnostic.invalidLifetimeBinder(
           'string requires exactly one lifetime argument',
-          syntax.span,
+          context.spanOf(anchor),
         )
         return Object.freeze({
           fact: Object.freeze({
             _tag: 'Unavailable',
-            syntax,
+            anchor,
             cause: Diagnostic.identity(diagnostic),
           }),
           diagnostics: Object.freeze([
-            ...arguments_.flatMap((argument) => argument.diagnostics),
+            ...arguments_.flatMap((entry) => entry.diagnostics),
             diagnostic,
           ]),
         })
@@ -1127,54 +1083,45 @@ export const analyzeDeclaredType = (
           _tag: 'Resolved',
           type: Type.string(argument.lifetime),
           spelling: `string<${Lifetime.display(argument.lifetime)}>`,
-          token: firstToken,
-          syntax,
-          components: [argument],
+          anchor,
+          components: Object.freeze([argument]),
         }),
-        diagnostics: Object.freeze([]),
+        diagnostics: noDiagnostics,
       })
     }
-    if (pathSegments.length === 1 && pathSegments.at(0) === 'Effect') {
-      const environment = lifetimeFor(syntax)
-      if (environment === undefined) return missingLifetime()
+    if (bare === 'Effect') {
+      const environment = regionOf(type, undefined)
+      if (environment === undefined) return missingLifetime(undefined)
       const lifetimes: Type.ExecutableLifetimes = Object.freeze({
         environment,
         lifetimeBinders: Object.freeze([]),
       })
-      let access: Type.Effect['access']
-      if (SyntaxTree.directToken(syntax, 'OnceKeyword') !== undefined) {
-        access = 'Take'
-      } else if (SyntaxTree.directToken(syntax, 'MutKeyword') !== undefined) {
-        access = 'Exclusive'
-      } else {
-        access = 'Shared'
-      }
-      const {
-        failures,
-        requirements,
-        requirementParameters,
-        rowParameterComponents,
-        requirementExpression,
-        diagnostics: rowDiagnostics,
-      } = analyzeAppliedRows(source, list, typeParameters, lifetimeContext)
+      const access: Type.Effect['access'] = callableMode(
+        type.target._tag === 'NamedType' ? type.target.mode : undefined,
+      )
+      const rows = analyzeAppliedRows(context, type.arguments, typeParameters, lifetimeContext)
       const diagnostics = [
-        ...rowDiagnostics,
+        ...rows.diagnostics,
         ...arguments_.flatMap((argument) => argument.diagnostics),
-        ...failures.flatMap((failure) => failure.diagnostics),
-        ...requirements.flatMap((requirement) => requirement.capability.diagnostics),
+        ...rows.failures.flatMap((failure) => failure.diagnostics),
+        ...rows.requirements.flatMap((requirement) => requirement.capability.diagnostics),
       ]
       const success = arguments_.at(0)?.fact
-      if (arguments_.length !== 1) {
+      if (arguments_.length !== 1)
         diagnostics.push(
-          Diagnostic.typeArgumentArity('Effect', 1, arguments_.length, firstToken.span),
+          Diagnostic.typeArgumentArity(
+            'Effect',
+            1,
+            arguments_.length,
+            context.spanOf(type.target.anchor),
+          ),
         )
-      }
-      const resolvedFailures = failures.flatMap((failure) =>
+      const resolvedFailures = rows.failures.flatMap((failure) =>
         failure.fact._tag === 'Resolved' && Type.isTypeArgument(failure.fact.type)
           ? [failure.fact.type]
           : [],
       )
-      const resolvedRequirements = requirements.flatMap((requirement) =>
+      const resolvedRequirements = rows.requirements.flatMap((requirement) =>
         requirement.capability.fact._tag === 'Resolved' &&
         requirementRoleIdentity(requirement.role) !== undefined &&
         (Type.isNominal(requirement.capability.fact.type) ||
@@ -1189,7 +1136,7 @@ export const analyzeDeclaredType = (
             ]
           : [],
       )
-      const failuresAvailable = failures.every(
+      const failuresAvailable = rows.failures.every(
         (failure) => failure.fact._tag === 'Resolved' && Type.isTypeArgument(failure.fact.type),
       )
       // A subtracting row is resolved with the module graph, where the row algebra runs.
@@ -1197,29 +1144,28 @@ export const analyzeDeclaredType = (
         arguments_.length === 1 &&
         success?._tag === 'Resolved' &&
         failuresAvailable &&
-        requirementExpression === undefined &&
-        resolvedRequirements.length === requirements.length
+        rows.requirementExpression === undefined &&
+        resolvedRequirements.length === rows.requirements.length
       ) {
-        const type = Type.effect(
+        const effect = Type.effect(
           success.type,
           resolvedFailures,
           lifetimes,
           access,
           resolvedRequirements,
-          requirementParameters,
+          rows.requirementParameters,
         )
         return Object.freeze({
           fact: Object.freeze({
             _tag: 'Resolved',
-            type,
-            spelling: Type.encode(type),
-            token: firstToken,
-            syntax,
+            type: effect,
+            spelling: Type.encode(effect),
+            anchor,
             components: Object.freeze([
               target.fact,
               ...arguments_.map((argument) => argument.fact),
-              ...requirements.map((requirement) => requirement.capability.fact),
-              ...rowParameterComponents,
+              ...rows.requirements.map((requirement) => requirement.capability.fact),
+              ...rows.rowParameterComponents,
             ]),
           }),
           diagnostics: Object.freeze(diagnostics),
@@ -1230,164 +1176,124 @@ export const analyzeDeclaredType = (
           _tag: 'Effect',
           lifetimes,
           access,
-          success: success ?? Object.freeze({ _tag: 'Unavailable', syntax: list }),
-          failures: Object.freeze(failures.map((failure) => failure.fact)),
+          success: success ?? unavailable(type.arguments.anchor),
+          failures: Object.freeze(rows.failures.map((failure) => failure.fact)),
           requirements: Object.freeze(
-            requirements.map((requirement) =>
+            rows.requirements.map((requirement) =>
               Object.freeze({
                 capability: requirement.capability.fact,
                 role: requirement.role,
                 access: requirement.access,
-                syntax: requirement.syntax,
+                anchor: requirement.anchor,
               }),
             ),
           ),
-          requirementParameters: Object.freeze(requirementParameters),
-          ...(requirementExpression === undefined ? {} : { requirementExpression }),
+          requirementParameters: Object.freeze(rows.requirementParameters),
+          ...(rows.requirementExpression === undefined
+            ? {}
+            : { requirementExpression: rows.requirementExpression }),
           spelling: 'Effect',
-          token: firstToken,
-          syntax,
+          anchor,
         }),
         diagnostics: Object.freeze(diagnostics),
       })
     }
-    const {
-      failures,
-      requirementRowSyntax,
-      requirements,
-      requirementParameters,
-      diagnostics: rowDiagnostics,
-    } = analyzeAppliedRows(source, list, typeParameters, lifetimeContext)
+    const rows = analyzeAppliedRows(context, type.arguments, typeParameters, lifetimeContext)
+    const implicit =
+      lifetimeContext === undefined
+        ? undefined
+        : DeclarationLifetime.nominalArgumentsOf(lifetimeContext, anchor)
     return Object.freeze({
       fact: Object.freeze({
         _tag: 'Applied',
-        ...(lifetimeContext?.nominalArguments.get(syntax) === undefined
-          ? {}
-          : { implicitLifetimeArguments: lifetimeContext.nominalArguments.get(syntax) ?? [] }),
+        ...(implicit === undefined ? {} : { implicitLifetimeArguments: implicit }),
         target: target.fact,
         arguments: Object.freeze(arguments_.map((argument) => argument.fact)),
-        ...(requirementRowSyntax === undefined
+        ...(rows.requirementAnchor === undefined
           ? {}
           : {
               requirementRow: Object.freeze({
                 requirements: Object.freeze(
-                  requirements.map((requirement) =>
+                  rows.requirements.map((requirement) =>
                     Object.freeze({
-                      ...requirement,
                       capability: requirement.capability.fact,
+                      role: requirement.role,
+                      access: requirement.access,
+                      anchor: requirement.anchor,
                     }),
                   ),
                 ),
-                parameters: Object.freeze(requirementParameters),
-                syntax: requirementRowSyntax,
+                parameters: Object.freeze(rows.requirementParameters),
+                anchor: rows.requirementAnchor,
               }),
             }),
-        spelling: SyntaxTree.tokens(syntax)
-          .filter(
-            (token) =>
-              !['Whitespace', 'LineComment', 'DocComment', 'ModuleDocComment'].includes(token.kind),
-          )
-          .map((token) => spelling(source, token))
-          .join(''),
-        token: firstToken,
-        syntax,
+        spelling: appliedSpelling(context, type),
+        anchor,
       }),
       diagnostics: Diagnostic.merge(
         target.diagnostics,
         ...arguments_.map((argument) => argument.diagnostics),
-        ...failures.map((failure) => failure.diagnostics),
-        ...requirements.map((requirement) => requirement.capability.diagnostics),
-        rowDiagnostics,
+        ...rows.failures.map((failure) => failure.diagnostics),
+        ...rows.requirements.map((requirement) => requirement.capability.diagnostics),
+        rows.diagnostics,
       ),
     })
   }
-  const tokens = syntax.children.filter(
-    (element): element is Token.Token =>
-      SyntaxTree.isToken(element) && element.kind === 'Identifier',
-  )
-  const segments = tokens.map((token) =>
-    Object.freeze({ spelling: spelling(source, token), token }),
-  )
-  const first = segments.at(0)
-  if (first === undefined || !SyntaxTree.isAvailableSyntax(syntax)) {
-    return Object.freeze({
-      fact: Object.freeze({
-        _tag: 'Unavailable',
-        syntax: SyntaxTree.unavailableChild(syntax, 'Identifier'),
-      }),
-      diagnostics: Object.freeze([]),
-    })
-  }
-  const path: TypePathFact = Object.freeze({
-    _tag: 'TypePath',
-    spelling: segments.map((segment) => segment.spelling).join('.'),
-    segments: Object.freeze(segments),
-    syntax,
-  })
-  if (segments.length === 1 && first.spelling === 'string') {
-    const lifetime = lifetimeFor(syntax)
-    if (lifetime === undefined) return missingLifetime()
+  const path = typePathOf(context, type.path)
+  if (path === undefined) return unavailableResolution(anchor)
+  const first = path.segments[0]
+  if (first === undefined) return unavailableResolution(anchor)
+  const bare = path.segments.length === 1 ? first.spelling : undefined
+  if (bare === 'string') {
+    const lifetime = regionOf(type, undefined)
+    if (lifetime === undefined) return missingLifetime(undefined)
     return Object.freeze({
       fact: Object.freeze({
         _tag: 'Resolved',
         type: Type.string(lifetime),
         spelling: `string<${Lifetime.display(lifetime)}>`,
-        token: first.token,
-        syntax,
+        anchor,
         path,
       }),
-      diagnostics: Object.freeze([]),
+      diagnostics: noDiagnostics,
     })
   }
-  if (segments.length === 1 && (Type.isBuiltin(first.spelling) || first.spelling === 'never')) {
+  if (bare !== undefined && (Type.isBuiltin(bare) || bare === 'never'))
     return Object.freeze({
-      fact: Object.freeze({
-        _tag: 'Resolved',
-        type: first.spelling,
-        spelling: first.spelling,
-        token: first.token,
-        syntax,
-        path,
-      }),
-      diagnostics: Object.freeze([]),
+      fact: Object.freeze({ _tag: 'Resolved', type: bare, spelling: bare, anchor, path }),
+      diagnostics: noDiagnostics,
     })
-  }
-  const intrinsicNominal =
-    segments.length === 1 ? Type.intrinsicNominals.get(first.spelling) : undefined
-  if (intrinsicNominal !== undefined) {
+  const intrinsicNominal = bare === undefined ? undefined : Type.intrinsicNominals.get(bare)
+  if (intrinsicNominal !== undefined && bare !== undefined)
     return Object.freeze({
       fact: Object.freeze({
         _tag: 'Resolved',
         type: intrinsicNominal,
-        spelling: first.spelling,
-        token: first.token,
-        syntax,
+        spelling: bare,
+        anchor,
         path,
       }),
-      diagnostics: Object.freeze([]),
+      diagnostics: noDiagnostics,
     })
-  }
-  const parameterType = segments.length === 1 ? typeParameters.get(first.spelling) : undefined
-  if (parameterType !== undefined) {
+  const parameterType = bare === undefined ? undefined : typeParameters.get(bare)
+  if (parameterType !== undefined && bare !== undefined) {
     if (
       parameterType.kind === 'CallableRepresentation' ||
       parameterType.kind === 'EffectRepresentation'
     ) {
       const bound = parameterType.representationBound
-      if (bound === undefined) {
+      if (bound === undefined)
         return Object.freeze({
           fact: Object.freeze({
             _tag: 'RepresentationParameter',
             parameter: parameterType,
-            spelling: first.spelling,
-            token: first.token,
-            syntax,
+            spelling: bare,
+            anchor,
             path,
           }),
-          diagnostics: Object.freeze([]),
+          diagnostics: noDiagnostics,
         })
-      }
-      const type = Type.represented(
+      const represented = Type.represented(
         bound,
         bound,
         Type.representationParameterArgument(parameterType),
@@ -1395,26 +1301,25 @@ export const analyzeDeclaredType = (
       return Object.freeze({
         fact: Object.freeze({
           _tag: 'Resolved',
-          type,
-          spelling: first.spelling,
-          token: first.token,
-          syntax,
+          type: represented,
+          spelling: bare,
+          anchor,
           path,
         }),
-        diagnostics: Object.freeze([]),
+        diagnostics: noDiagnostics,
       })
     }
     if (parameterType.kind !== 'Value' && !genericArgumentPosition) {
       const diagnostic = Diagnostic.genericParameterKindMismatch(
-        first.spelling,
+        bare,
         'Value',
         parameterType.kind,
-        first.token.span,
+        context.spanOf(first.anchor),
       )
       return Object.freeze({
         fact: Object.freeze({
           _tag: 'Unavailable',
-          syntax,
+          anchor,
           cause: Diagnostic.identity(diagnostic),
         }),
         diagnostics: Object.freeze([diagnostic]),
@@ -1424,44 +1329,53 @@ export const analyzeDeclaredType = (
       fact: Object.freeze({
         _tag: 'Resolved',
         type: parameterType,
-        spelling: first.spelling,
-        token: first.token,
-        syntax,
+        spelling: bare,
+        anchor,
         path,
       }),
-      diagnostics: Object.freeze([]),
+      diagnostics: noDiagnostics,
     })
   }
+  const implicit =
+    lifetimeContext === undefined
+      ? undefined
+      : DeclarationLifetime.nominalArgumentsOf(lifetimeContext, anchor)
   return Object.freeze({
     fact: Object.freeze({
       _tag: 'Unresolved',
-      ...(lifetimeContext?.nominalArguments.get(syntax) === undefined
-        ? {}
-        : { implicitLifetimeArguments: lifetimeContext.nominalArguments.get(syntax) ?? [] }),
+      ...(implicit === undefined ? {} : { implicitLifetimeArguments: implicit }),
       spelling: path.spelling,
-      token: first.token,
-      syntax,
+      anchor,
       path,
     }),
-    diagnostics: Object.freeze([]),
+    diagnostics: noDiagnostics,
   })
 }
 
-const isSeparator = (element: SyntaxTree.Element, kind: Token.TokenKind): boolean =>
-  (SyntaxTree.isToken(element) && element.kind === kind) ||
-  (SyntaxTree.isMissingToken(element) && element.expected === kind)
+/** The written spelling of an applied type, rebuilt from authored names rather than source. */
+const appliedSpelling = (
+  context: Context,
+  type: Extract<AuthoredHir.Type, { readonly _tag: 'AppliedType' }>,
+): string => {
+  const target =
+    type.target._tag === 'NamedType' ? (typePathOf(context, type.target.path)?.spelling ?? '') : ''
+  const arguments_ = type.arguments.arguments
+    .map((argument) => argumentSpelling(context, argument))
+    .join(',')
+  return `${target}<${arguments_}>`
+}
 
-const identifierToken = (elements: ReadonlyArray<SyntaxTree.Element>): Token.Token | undefined =>
-  elements.every(SyntaxTree.isAvailableSyntax)
-    ? elements.find(
-        (element): element is Token.Token =>
-          SyntaxTree.isToken(element) && element.kind === 'Identifier',
-      )
-    : undefined
+const argumentSpelling = (context: Context, argument: AuthoredHir.GenericArgument): string => {
+  if (argument._tag === 'Lifetime') return nameText(context, argument.name) ?? ''
+  if (argument._tag === 'RequirementSelector') return ''
+  if (argument._tag === 'NamedType') return typePathOf(context, argument.path)?.spelling ?? ''
+  if (argument._tag === 'AppliedType') return appliedSpelling(context, argument)
+  return argument._tag
+}
 
 const analyzeParameter = (
-  source: SourceFile.SourceFile,
-  node: SyntaxTree.Node,
+  context: Context,
+  parameter: AuthoredHir.Parameter,
   functionId: DeclarationId,
   ordinal: number,
   typeParameters: ReadonlyMap<string, Type.Parameter> = new Map(),
@@ -1470,138 +1384,25 @@ const analyzeParameter = (
   readonly fact: ParameterFact
   readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
 } => {
-  const colonIndex = node.children.findIndex((element) => isSeparator(element, 'Colon'))
-  const nameElements = colonIndex < 0 ? node.children : node.children.slice(0, colonIndex)
-  const nameToken = identifierToken(nameElements)
-  const name: DeclaredName =
-    nameToken === undefined
-      ? Object.freeze({
-          _tag: 'Unavailable',
-          syntax: SyntaxTree.unavailableElement(nameElements, node),
-        })
-      : Object.freeze({
-          _tag: 'Present',
-          spelling: spelling(source, nameToken),
-          token: nameToken,
-        })
-  const type = analyzeDeclaredType(
-    source,
-    declaredTypeNode(node),
-    typeParameters,
-    false,
-    lifetimeContext,
-  )
+  const type = analyzeDeclaredType(context, parameter.type, typeParameters, false, lifetimeContext)
   return Object.freeze({
     fact: Object.freeze({
       _tag: 'ParameterDeclaration',
       id: Object.freeze({ _tag: 'ParameterId', function: functionId, ordinal }),
-      name,
-      phase: SyntaxTree.directToken(node, 'StaticKeyword') === undefined ? 'Runtime' : 'Static',
-      bindingMutability:
-        SyntaxTree.directToken(node, 'MutKeyword') === undefined ? 'Immutable' : 'Mutable',
+      name: declaredName(context, parameter.name),
+      phase: parameter.mode === 'Static' ? 'Static' : 'Runtime',
+      bindingMutability: parameter.mode === 'Mutable' ? 'Mutable' : 'Immutable',
       declaredType: type.fact,
-      syntax: node,
+      anchor: parameter.anchor,
     }),
     diagnostics: type.diagnostics,
   })
 }
 
-/** Collects the declaration-shaped contract owned by one anonymous callable occurrence. */
-export const collectAnonymousCallableDeclaration = (
-  source: SourceFile.SourceFile,
-  node: SyntaxTree.Node,
-  id: DeclarationId,
-  canonical: CanonicalId,
-  inheritedTypeParameters: ReadonlyArray<TypeParameterFact>,
-): {
-  readonly fact: DeclarationFact
-  readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
-} => {
-  const environment = new Map(
-    inheritedTypeParameters.flatMap((parameter) =>
-      parameter.name._tag === 'Present' ? [[parameter.name.spelling, parameter.type] as const] : [],
-    ),
-  )
-  const lifetimeContext = DeclarationLifetime.forHeader(source, canonical, node, environment)
-  const parameterList = childNode(node, 'ParameterList')
-  const parameters = SyntaxTree.directNodes(parameterList, 'ParameterDeclaration').map(
-    (parameter, ordinal) =>
-      analyzeParameter(source, parameter, id, ordinal, environment, lifetimeContext),
-  )
-  const returnSyntax = SyntaxTree.directNode(node, 'ReturnType')
-  const returnType =
-    returnSyntax === undefined
-      ? Object.freeze({
-          fact: Object.freeze({ _tag: 'Unavailable' as const, syntax: node }),
-          diagnostics: Object.freeze<ReadonlyArray<Diagnostic.Diagnostic>>([]),
-        })
-      : collectReturnType(
-          source,
-          returnSyntax,
-          canonical.name,
-          inheritedTypeParameters,
-          environment,
-          lifetimeContext,
-        )
-  const failureRow = collectFailureRow(source, node, environment, lifetimeContext)
-  const requirementRow = collectRequirementRow(source, node, environment, lifetimeContext)
-  const parameterFacts = Object.freeze(parameters.map((parameter) => parameter.fact))
-  const diagnostics = Object.freeze([
-    ...lifetimeContext.diagnostics,
-    ...parameters.flatMap((parameter) => parameter.diagnostics),
-    ...duplicateParameterDiagnostics(parameterFacts),
-    ...returnType.diagnostics,
-    ...failureRow.diagnostics,
-    ...requirementRow.diagnostics,
-    ...(SyntaxTree.directToken(node, 'EffectKeyword') === undefined &&
-    failureRow.fact.syntax !== undefined
-      ? [Diagnostic.failureChannelOnOrdinary(failureRow.fact.syntax.span)]
-      : []),
-  ])
-  const fnToken = SyntaxTree.directToken(node, 'FnKeyword')
-  const name: DeclaredName =
-    fnToken === undefined
-      ? Object.freeze({ _tag: 'Unavailable', syntax: node })
-      : Object.freeze({
-          _tag: 'Present',
-          spelling: canonical.name,
-          token: fnToken,
-        })
-  const retainedBody = bodyTemplate(source, node)
-  return Object.freeze({
-    fact: Object.freeze({
-      _tag: 'FunctionDeclaration',
-      lifetimeElaboration: lifetimeContext,
-      id,
-      canonical: Object.freeze({ _tag: 'Canonical', id: canonical }),
-      visibility: 'Private',
-      phase: 'Runtime',
-      functionKind:
-        SyntaxTree.directToken(node, 'EffectKeyword') === undefined ? 'Ordinary' : 'Effect',
-      unsafe: false,
-      typeParameters: Object.freeze([
-        ...inheritedTypeParameters,
-        ...implicitLifetimeParameters(lifetimeContext, environment),
-      ]),
-      parameterCount: parameterFacts.length,
-      parameters: parameterFacts,
-      name,
-      returnType: returnType.fact,
-      ...('opaqueResult' in returnType && returnType.opaqueResult !== undefined
-        ? { opaqueResult: returnType.opaqueResult }
-        : {}),
-      failureRow: failureRow.fact,
-      requirementRow: requirementRow.fact,
-      constraints: Object.freeze([]),
-      constraintContracts: Object.freeze([]),
-      ...(retainedBody === undefined ? {} : { bodyTemplate: retainedBody }),
-      syntax: node,
-    }),
-    diagnostics,
-  })
-}
-
-const duplicateParameterDiagnostics = (parameters: ReadonlyArray<ParameterFact>) => {
+const duplicateParameterDiagnostics = (
+  context: Context,
+  parameters: ReadonlyArray<ParameterFact>,
+) => {
   const first = new Map<string, ReturnType<typeof presentParameterEntries>[number]>()
   const diagnostics: Array<Diagnostic.Diagnostic> = []
   for (const entry of presentParameterEntries(parameters)) {
@@ -1609,45 +1410,42 @@ const duplicateParameterDiagnostics = (parameters: ReadonlyArray<ParameterFact>)
     if (original === undefined) first.set(entry.spelling, entry)
     else
       diagnostics.push(
-        Diagnostic.duplicateParameterName(entry.spelling, original.token.span, entry.token.span),
+        Diagnostic.duplicateParameterName(
+          entry.spelling,
+          context.spanOf(original.anchor),
+          context.spanOf(entry.anchor),
+        ),
       )
   }
   return Object.freeze(diagnostics)
 }
 
 const collectFields = (
-  source: SourceFile.SourceFile,
-  node: SyntaxTree.Node,
+  context: Context,
+  fieldNodes: ReadonlyArray<AuthoredHir.Field>,
   owner: FieldOwnerId,
-  nodeKind: 'StructField' | 'UnionVariantField',
   typeParameters: ReadonlyMap<string, Type.Parameter>,
   lifetimeContext?: DeclarationLifetime.Context,
 ) => {
-  const first = new Map<string, { readonly id: FieldId; readonly token: Token.Token }>()
+  const first = new Map<string, { readonly id: FieldId; readonly anchor: AuthoredHir.Anchor }>()
   const diagnostics: Array<Diagnostic.Diagnostic> = []
-  const fields = SyntaxTree.directNodes(node, nodeKind).map((fieldNode, ordinal): FieldFact => {
+  const fields = fieldNodes.map((field, ordinal): FieldFact => {
     const id: FieldId = Object.freeze({ _tag: 'FieldId', owner, ordinal })
-    const name = presentName(source, fieldNode)
-    const type = analyzeDeclaredType(
-      source,
-      declaredTypeNode(fieldNode),
-      typeParameters,
-      false,
-      lifetimeContext,
-    )
+    const name = declaredName(context, field.name)
+    const type = analyzeDeclaredType(context, field.type, typeParameters, false, lifetimeContext)
     diagnostics.push(...type.diagnostics)
     let state: FieldState
     if (name._tag !== 'Present') state = Object.freeze({ _tag: 'Unidentified' })
     else {
       const original = first.get(name.spelling)
       if (original === undefined) {
-        first.set(name.spelling, Object.freeze({ id, token: name.token }))
+        first.set(name.spelling, Object.freeze({ id, anchor: name.anchor }))
         state = Object.freeze({ _tag: 'Unique', id })
       } else {
         const diagnostic = Diagnostic.duplicateFieldName(
           name.spelling,
-          original.token.span,
-          name.token.span,
+          context.spanOf(original.anchor),
+          context.spanOf(name.anchor),
         )
         diagnostics.push(diagnostic)
         state = Object.freeze({
@@ -1662,11 +1460,10 @@ const collectFields = (
       id,
       member: AggregateIdentity.labeled(name._tag === 'Present' ? name.spelling : ''),
       state,
-      visibility:
-        SyntaxTree.directToken(fieldNode, 'PubKeyword') === undefined ? 'Private' : 'Public',
+      visibility: field.public ? 'Public' : 'Private',
       name,
       declaredType: type.fact,
-      syntax: fieldNode,
+      anchor: field.anchor,
     })
   })
   return Object.freeze({ fields: Object.freeze(fields), diagnostics: Object.freeze(diagnostics) })
@@ -1674,18 +1471,18 @@ const collectFields = (
 
 /** Collects declaration-ordered tuple positions without inventing source field spellings. */
 const collectPositionalFields = (
-  source: SourceFile.SourceFile,
-  node: SyntaxTree.Node,
+  context: Context,
+  elements: ReadonlyArray<AuthoredHir.Type>,
   owner: FieldOwnerId,
   typeParameters: ReadonlyMap<string, Type.Parameter>,
   lifetimeContext?: DeclarationLifetime.Context,
 ) => {
   const diagnostics: Array<Diagnostic.Diagnostic> = []
-  const fields = node.children.filter(isDeclaredTypeNode).map((typeSyntax, ordinal): FieldFact => {
+  const fields = elements.map((element, ordinal): FieldFact => {
     const id: FieldId = Object.freeze({ _tag: 'FieldId', owner, ordinal })
     const declaredType = analyzeDeclaredType(
-      source,
-      typeSyntax,
+      context,
+      element,
       typeParameters,
       false,
       lifetimeContext,
@@ -1697,9 +1494,9 @@ const collectPositionalFields = (
       member: AggregateIdentity.ordinal(ordinal),
       state: Object.freeze({ _tag: 'Unique', id }),
       visibility: 'Public',
-      name: Object.freeze({ _tag: 'Unavailable', syntax: typeSyntax }),
+      name: Object.freeze({ _tag: 'Unavailable', anchor: element.anchor }),
       declaredType: declaredType.fact,
-      syntax: typeSyntax,
+      anchor: element.anchor,
     })
   })
   return Object.freeze({ fields: Object.freeze(fields), diagnostics: Object.freeze(diagnostics) })
@@ -1713,9 +1510,42 @@ const compareDiagnostics = (left: Diagnostic.Diagnostic, right: Diagnostic.Diagn
   return 0
 }
 
+/** A generic binder's written name, normalized so a lifetime binder keeps its leading tick. */
+const binderName = (context: Context, generic: AuthoredHir.GenericParameter): DeclaredName => {
+  const name = declaredName(context, generic.name)
+  if (generic._tag !== 'LifetimeParameter' || name._tag !== 'Present') return name
+  return name.spelling.startsWith("'")
+    ? name
+    : Object.freeze({ _tag: 'Present', spelling: `'${name.spelling}`, anchor: name.anchor })
+}
+
+/** The sealed static property a bound names, when the bound is `Intrinsic.<Property>`. */
+const staticPropertyOf = (
+  context: Context,
+  bound: AuthoredHir.Type | AuthoredHir.Lifetime,
+): Type.SealedStaticProperty | undefined => {
+  if (bound._tag !== 'NamedType') return undefined
+  const path = typePathOf(context, bound.path)
+  if (path === undefined || path.segments.length !== 2) return undefined
+  if (path.segments[0]?.spelling !== 'Intrinsic') return undefined
+  const property = path.segments[1]?.spelling
+  return property === 'Detached' || property === 'NonParking' ? `Intrinsic.${property}` : undefined
+}
+
+/** Whether a bound is the `Effect<...>` application that makes a binder an effect representation. */
+const isEffectBound = (
+  context: Context,
+  bound: AuthoredHir.Type | AuthoredHir.Lifetime,
+): boolean => {
+  if (bound._tag !== 'AppliedType' || bound.target._tag !== 'NamedType') return false
+  const path = typePathOf(context, bound.target.path)
+  return path?.segments.length === 1 && path.segments[0]?.spelling === 'Effect'
+}
+
 const collectTypeParameters = (
-  source: SourceFile.SourceFile,
-  node: SyntaxTree.Node,
+  context: Context,
+  owner: AuthoredHir.Declaration,
+  generics: ReadonlyArray<AuthoredHir.GenericParameter>,
   ownerName: string,
   ordinalOffset = 0,
   enclosing: ReadonlyArray<TypeParameterFact> = [],
@@ -1725,139 +1555,94 @@ const collectTypeParameters = (
   readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
   readonly lifetimeContext: DeclarationLifetime.Context
 } => {
-  const list = SyntaxTree.directNode(node, 'TypeParameterList')
+  const moduleName = context.module.owner.module
   const environment = new Map<string, Type.Parameter>(
     enclosing.flatMap((parameter) =>
       parameter.name._tag === 'Present' ? [[parameter.name.spelling, parameter.type] as const] : [],
     ),
   )
-  const originals = new Map<string, SourceSpan.SourceSpan>(
+  const originals = new Map<string, AuthoredHir.Anchor>(
     enclosing.flatMap((parameter) =>
       parameter.name._tag === 'Present'
-        ? [[parameter.name.spelling, parameter.name.token.span] as const]
+        ? [[parameter.name.spelling, parameter.name.anchor] as const]
         : [],
     ),
   )
   const diagnostics: Array<Diagnostic.Diagnostic> = []
-  const parameterNodes =
-    list?.children.filter(
-      (child): child is SyntaxTree.Node =>
-        SyntaxTree.isNode(child) &&
-        (child.kind === 'TypeParameter' || child.kind === 'LifetimeParameter'),
-    ) ?? []
-  for (const [ordinal, parameterNode] of parameterNodes.entries()) {
-    const token = SyntaxTree.directToken(
-      parameterNode,
-      parameterNode.kind === 'LifetimeParameter' ? 'Lifetime' : 'Identifier',
-    )
-    if (token !== undefined && !environment.has(spelling(source, token)))
+  // Every binder is visible to every bound, so the environment is seeded before any bound resolves.
+  for (const [ordinal, generic] of generics.entries()) {
+    const name = binderName(context, generic)
+    if (name._tag === 'Present' && !environment.has(name.spelling))
       environment.set(
-        spelling(source, token),
+        name.spelling,
         Type.parameter(
-          { module: source.id, name: ownerName },
+          { module: moduleName, name: ownerName },
           ordinalOffset + ordinal,
-          spelling(source, token),
-          parameterNode.kind === 'LifetimeParameter' ? 'Lifetime' : 'Value',
+          name.spelling,
+          generic._tag === 'LifetimeParameter' ? 'Lifetime' : 'Value',
         ),
       )
   }
   const lifetimeContext = DeclarationLifetime.forHeader(
-    source,
-    { module: source.id, name: ownerName },
-    node,
+    context,
+    { module: moduleName, name: ownerName },
+    owner,
     environment,
   )
   diagnostics.push(...lifetimeContext.diagnostics)
-  const facts = parameterNodes.map((parameterNode, ordinal): TypeParameterFact => {
-    const lifetimeToken = SyntaxTree.directToken(parameterNode, 'Lifetime')
-    const name: DeclaredName =
-      lifetimeToken === undefined
-        ? presentName(source, parameterNode)
-        : Object.freeze({
-            _tag: 'Present',
-            spelling: spelling(source, lifetimeToken),
-            token: lifetimeToken,
-          })
-    if (lifetimeToken !== undefined && spelling(source, lifetimeToken) === "'static")
+  const facts = generics.map((generic, ordinal): TypeParameterFact => {
+    const name = binderName(context, generic)
+    if (
+      generic._tag === 'LifetimeParameter' &&
+      name._tag === 'Present' &&
+      name.spelling === "'static"
+    )
       diagnostics.push(
         Diagnostic.invalidLifetimeBinder(
           'static cannot be declared as a lifetime parameter',
-          lifetimeToken.span,
+          context.spanOf(name.anchor),
         ),
       )
-    const lifetimeBounds = parameterNode.children
-      .filter(
-        (child): child is SyntaxTree.Node =>
-          SyntaxTree.isNode(child) && child.kind === 'LifetimeType',
-      )
-      .flatMap((bound) => {
-        const token = SyntaxTree.directToken(bound, 'Lifetime')
-        const region =
-          token === undefined ? undefined : DeclarationLifetime.named(source, token, environment)
-        if (region === undefined && token !== undefined)
-          diagnostics.push(
-            ...unreportedLifetimeDiagnostic(
-              Diagnostic.unknownLifetime(spelling(source, token), token.span),
-              lifetimeContext,
-            ),
-          )
-        return region === undefined ? [] : [region]
-      })
-    // Every direct type node after the colon is one conjunct. Taking only direct children keeps
-    // nested type arguments from being mistaken for sibling bounds.
-    const boundNodes = parameterNode.children.filter(
-      (child): child is SyntaxTree.Node =>
-        SyntaxTree.isNode(child) && child.kind !== 'LifetimeType',
-    )
-    if (lifetimeToken !== undefined && boundNodes.length > 0)
+    const declaredBounds = generic._tag === 'RowParameter' ? [] : generic.bounds
+    const lifetimeBounds = declaredBounds.flatMap((bound) => {
+      if (bound._tag !== 'Lifetime') return []
+      const ticked = tickedLifetimeName(context, bound.name)
+      const region =
+        ticked === undefined ? undefined : DeclarationLifetime.named(ticked, environment)
+      if (region === undefined && ticked !== undefined)
+        diagnostics.push(
+          ...unreportedLifetimeDiagnostic(
+            Diagnostic.unknownLifetime(ticked, context.spanOf(bound.anchor)),
+            lifetimeContext,
+          ),
+        )
+      return region === undefined ? [] : [region]
+    })
+    const typeBounds = declaredBounds.flatMap((bound) => (bound._tag === 'Lifetime' ? [] : [bound]))
+    if (generic._tag === 'LifetimeParameter' && typeBounds.length > 0)
       diagnostics.push(
         Diagnostic.invalidLifetimeBinder(
           'A lifetime parameter accepts only lifetime outlives bounds',
-          parameterNode.span,
+          context.spanOf(generic.anchor),
         ),
       )
-    const boundNode = boundNodes.at(0)
+    const boundNode = typeBounds.at(0)
     const boundResolution =
       boundNode === undefined
         ? undefined
-        : analyzeDeclaredType(source, boundNode, environment, false, lifetimeContext)
-    const effectBoundTarget =
-      boundNode?.kind === 'AppliedType' ? SyntaxTree.directNode(boundNode, 'TypePath') : undefined
-    const effectBoundSegments =
-      effectBoundTarget === undefined
-        ? []
-        : SyntaxTree.tokens(effectBoundTarget).filter((token) => token.kind === 'Identifier')
-    const effectBoundSegment = effectBoundSegments.at(0)
-    const effectBound =
-      effectBoundSegments.length === 1 &&
-      effectBoundSegment !== undefined &&
-      spelling(source, effectBoundSegment) === 'Effect'
-    const staticPropertyOf = (
-      candidate: SyntaxTree.Node,
-    ): Type.SealedStaticProperty | undefined => {
-      const segments = SyntaxTree.tokens(candidate)
-        .filter((token) => token.kind === 'Identifier')
-        .map((token) => spelling(source, token))
-      if (segments.length !== 2 || segments.at(0) !== 'Intrinsic') return undefined
-      const property = segments.at(1)
-      return property === 'Detached' || property === 'NonParking'
-        ? `Intrinsic.${property}`
-        : undefined
-    }
+        : analyzeDeclaredType(context, boundNode, environment, false, lifetimeContext)
     let representationKind: Type.ParameterKind | undefined
-    if (boundNode?.kind === 'CallableType') {
-      representationKind = 'CallableRepresentation'
-    } else if (effectBound) {
+    if (boundNode?._tag === 'CallableType') representationKind = 'CallableRepresentation'
+    else if (boundNode !== undefined && isEffectBound(context, boundNode))
       representationKind = 'EffectRepresentation'
-    } else {
-      representationKind = undefined
-    }
-    const firstStaticProperty = boundNode === undefined ? undefined : staticPropertyOf(boundNode)
+    else representationKind = undefined
+    const firstStaticProperty =
+      boundNode === undefined ? undefined : staticPropertyOf(context, boundNode)
     const rawStaticProperties = (
       representationKind === undefined && firstStaticProperty !== undefined
-        ? boundNodes
-        : boundNodes.slice(1)
-    ).map(staticPropertyOf)
+        ? typeBounds
+        : typeBounds.slice(1)
+    ).map((bound) => staticPropertyOf(context, bound))
     const staticPropertySet = new Set(
       rawStaticProperties.filter(
         (property): property is Type.SealedStaticProperty => property !== undefined,
@@ -1875,42 +1660,43 @@ const collectTypeParameters = (
         : undefined
     if (representationKind !== undefined && boundResolution !== undefined) {
       diagnostics.push(...boundResolution.diagnostics)
-      for (const [ordinal, property] of rawStaticProperties.entries()) {
+      for (const [conjunctOrdinal, property] of rawStaticProperties.entries()) {
         if (property !== undefined) continue
-        const conjunct = boundNodes.at(ordinal + 1)
-        const token =
-          conjunct === undefined
-            ? undefined
-            : SyntaxTree.tokens(conjunct).find((candidate) => candidate.kind === 'Identifier')
-        if (conjunct !== undefined && token !== undefined)
+        const conjunct = typeBounds.at(conjunctOrdinal + 1)
+        const segment = conjunct === undefined ? undefined : firstSegment(context, conjunct)
+        if (conjunct !== undefined && segment !== undefined)
           diagnostics.push(
-            Diagnostic.invalidExecutablePropertyConjunct(spelling(source, token), conjunct.span),
+            Diagnostic.invalidExecutablePropertyConjunct(
+              segment.spelling,
+              context.spanOf(conjunct.anchor),
+            ),
           )
       }
     }
     if (representationKind === undefined && staticProperties.includes('Intrinsic.NonParking')) {
-      const propertyNode = boundNodes.find(
-        (candidate) => staticPropertyOf(candidate) === 'Intrinsic.NonParking',
+      const propertyNode = typeBounds.find(
+        (candidate) => staticPropertyOf(context, candidate) === 'Intrinsic.NonParking',
       )
-      const token = propertyNode
-        ? SyntaxTree.tokens(propertyNode).find((candidate) => candidate.kind === 'Identifier')
-        : undefined
-      if (propertyNode !== undefined && token !== undefined)
+      const segment = propertyNode === undefined ? undefined : firstSegment(context, propertyNode)
+      if (propertyNode !== undefined && segment !== undefined)
         diagnostics.push(
-          Diagnostic.invalidExecutablePropertyConjunct(spelling(source, token), propertyNode.span),
+          Diagnostic.invalidExecutablePropertyConjunct(
+            segment.spelling,
+            context.spanOf(propertyNode.anchor),
+          ),
         )
     }
     const bounds: ReadonlyArray<BoundFact> =
-      representationKind !== undefined ||
-      SyntaxTree.directToken(parameterNode, 'Colon') === undefined
+      representationKind !== undefined || declaredBounds.length === 0
         ? Object.freeze([])
         : Object.freeze(
-            boundNodes.flatMap((candidate): ReadonlyArray<BoundFact> => {
-              if (staticPropertyOf(candidate) !== undefined) return []
-              const token = SyntaxTree.tokens(candidate).find((part) => part.kind === 'Identifier')
-              if (token === undefined) return []
+            typeBounds.flatMap((candidate): ReadonlyArray<BoundFact> => {
+              if (staticPropertyOf(context, candidate) !== undefined) return []
+              const segment = firstSegment(context, candidate)
+              const path = nominalPath(context, candidate)
+              if (segment === undefined || path === undefined) return []
               const resolution = analyzeDeclaredType(
-                source,
+                context,
                 candidate,
                 environment,
                 false,
@@ -1919,14 +1705,14 @@ const collectTypeParameters = (
               return [
                 Object.freeze({
                   _tag: 'UnresolvedBound' as const,
-                  spelling: spelling(source, token),
+                  spelling: segment.spelling,
                   path: Object.freeze({
                     _tag: 'TypePath' as const,
-                    spelling: spelling(source, token),
+                    spelling: segment.spelling,
                     segments: Object.freeze([
-                      Object.freeze({ spelling: spelling(source, token), token }),
+                      Object.freeze({ spelling: segment.spelling, anchor: segment.anchor }),
                     ]),
-                    syntax: candidate,
+                    anchor: candidate.anchor,
                   }),
                   application: resolution.fact,
                 }),
@@ -1938,13 +1724,12 @@ const collectTypeParameters = (
         ? environment.get(name.spelling)
         : undefined
     let parameterKind: Type.ParameterKind = representationKind ?? 'Value'
-    if (lifetimeToken !== undefined) parameterKind = 'Lifetime'
-    else if (SyntaxTree.directToken(parameterNode, 'Question') !== undefined)
-      parameterKind = 'RequirementRow'
-    const type =
+    if (generic._tag === 'LifetimeParameter') parameterKind = 'Lifetime'
+    else if (generic._tag === 'RowParameter') parameterKind = 'RequirementRow'
+    const parameterType =
       duplicateOf ??
       Type.parameter(
-        { module: source.id, name: ownerName },
+        { module: moduleName, name: ownerName },
         ordinalOffset + ordinal,
         name._tag === 'Present' ? name.spelling : `#${ordinal}`,
         parameterKind,
@@ -1954,21 +1739,24 @@ const collectTypeParameters = (
           : staticProperties,
       )
     if (name._tag === 'Present' && duplicateOf === undefined) {
-      environment.set(name.spelling, type)
-      originals.set(name.spelling, name.token.span)
+      environment.set(name.spelling, parameterType)
+      originals.set(name.spelling, name.anchor)
     } else if (name._tag === 'Present') {
-      const originalSpan = originals.get(name.spelling)
-      if (originalSpan !== undefined) {
+      const originalAnchor = originals.get(name.spelling)
+      if (originalAnchor !== undefined)
         diagnostics.push(
-          Diagnostic.duplicateTypeParameter(name.spelling, originalSpan, name.token.span),
+          Diagnostic.duplicateTypeParameter(
+            name.spelling,
+            context.spanOf(originalAnchor),
+            context.spanOf(name.anchor),
+          ),
         )
-      }
     }
     return Object.freeze({
       _tag: 'TypeParameterDeclaration' as const,
-      type,
+      type: parameterType,
       name,
-      syntax: parameterNode,
+      anchor: generic.anchor,
       bounds,
       lifetimeBounds: Object.freeze(lifetimeBounds),
       staticProperties:
@@ -1988,7 +1776,7 @@ const collectTypeParameters = (
                   ? ('Callable' as const)
                   : ('Effect' as const),
               contract: boundResolution.fact,
-              syntax: boundNode,
+              anchor: boundNode.anchor,
             }),
           }),
     })
@@ -2021,9 +1809,9 @@ const implicitLifetimeParameters = (
       name: Object.freeze({
         _tag: 'Present',
         spelling: binder.parameter.name,
-        token: binder.token,
+        anchor: binder.anchor,
       }),
-      syntax: binder.syntax,
+      anchor: binder.anchor,
       bounds: Object.freeze([]),
       staticProperties: Object.freeze([]),
       lifetimeBounds: Object.freeze([]),
@@ -2031,9 +1819,16 @@ const implicitLifetimeParameters = (
     })
   })
 
+/**
+ * The declared result of one contract, plus the opaque binder it introduces.
+ *
+ * An `impl Bound` result owns a hidden binder whose identity belongs to the declaring header, so
+ * the binder is minted here where the canonical owner name is known.
+ */
 const collectReturnType = (
-  source: SourceFile.SourceFile,
-  returnSyntax: SyntaxTree.Node,
+  context: Context,
+  owner: AuthoredHir.Declaration,
+  result: AuthoredHir.Type,
   ownerName: string,
   typeParameters: ReadonlyArray<TypeParameterFact>,
   ambientParameters: ReadonlyMap<string, Type.Parameter> = new Map(),
@@ -2043,11 +1838,10 @@ const collectReturnType = (
   readonly opaqueResult?: OpaqueResultFact
   readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
 } => {
-  const syntax = declaredTypeNode(returnSyntax)
-  if (syntax.kind !== 'OpaqueResultType') {
+  if (result._tag !== 'OpaqueResultType') {
     const analyzed = analyzeDeclaredType(
-      source,
-      syntax,
+      context,
+      result,
       new Map([
         ...ambientParameters,
         ...typeParameters.flatMap((parameter) =>
@@ -2062,23 +1856,22 @@ const collectReturnType = (
     return Object.freeze({ fact: analyzed.fact, diagnostics: analyzed.diagnostics })
   }
   const collected = collectTypeParameters(
-    source,
-    syntax,
+    context,
+    owner,
+    result.binders,
     ownerName,
     typeParameters.length,
     typeParameters,
   )
   const binder = collected.facts.at(0)
-  const resultSyntax = syntax.children.find(isDeclaredTypeNode)
-  if (binder === undefined || resultSyntax === undefined) {
+  if (binder === undefined)
     return Object.freeze({
-      fact: Object.freeze({ _tag: 'Unavailable', syntax }),
+      fact: unavailable(result.anchor),
       diagnostics: collected.diagnostics,
     })
-  }
   const analyzed = analyzeDeclaredType(
-    source,
-    resultSyntax,
+    context,
+    result.result,
     new Map([...ambientParameters, ...collected.environment]),
     false,
     lifetimeContext,
@@ -2090,7 +1883,7 @@ const collectReturnType = (
       binder,
       family: Object.freeze({
         _tag: 'OpaqueFamilyKey',
-        producer: Object.freeze({ module: source.id, name: ownerName }),
+        producer: Object.freeze({ module: context.module.owner.module, name: ownerName }),
         binderOrdinal: 0,
       }),
       publicSignature: Object.freeze({
@@ -2102,23 +1895,10 @@ const collectReturnType = (
           analyzed.fact._tag === 'Resolved' ? Type.key(analyzed.fact.type) : analyzed.fact._tag,
         enclosingKinds: Object.freeze(typeParameters.map((parameter) => parameter.type.kind)),
       }),
-      syntax,
+      anchor: result.anchor,
     }),
     diagnostics: Object.freeze([...collected.diagnostics, ...analyzed.diagnostics]),
   })
-}
-
-const parameterAtTypePath = (
-  source: SourceFile.SourceFile,
-  syntax: SyntaxTree.Node,
-  typeParameters: ReadonlyMap<string, Type.Parameter>,
-): Type.Parameter | undefined => {
-  if (syntax.kind !== 'TypePath') return undefined
-  const identifiers = SyntaxTree.tokens(syntax).filter((token) => token.kind === 'Identifier')
-  const identifier = identifiers.at(0)
-  return identifiers.length === 1 && identifier !== undefined
-    ? typeParameters.get(spelling(source, identifier))
-    : undefined
 }
 
 /**
@@ -2126,8 +1906,8 @@ const parameterAtTypePath = (
  * form a `Without` operand names; elsewhere a bare path is a row parameter.
  */
 const collectRowExpression = (
-  source: SourceFile.SourceFile,
-  syntax: SyntaxTree.Node,
+  context: Context,
+  operand: AuthoredHir.RowOperand,
   typeParameters: ReadonlyMap<string, Type.Parameter>,
   leaf: 'Failure' | 'Requirement',
   bareKeys = false,
@@ -2136,28 +1916,19 @@ const collectRowExpression = (
   readonly fact: RowExpressionFact
   readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
 } => {
-  if (syntax.kind === 'RowWithout') {
-    const operands = syntax.children.filter((element): element is SyntaxTree.Node =>
-      SyntaxTree.isNode(element),
-    )
-    const left = operands.at(0)
-    const right = operands.at(1)
-    if (left === undefined || right === undefined)
-      return Object.freeze({
-        fact: Object.freeze({ _tag: 'UnavailableRowExpression', syntax }),
-        diagnostics: Object.freeze([]),
-      })
+  const anchor = operand.anchor
+  if (operand._tag === 'RowWithout') {
     const sourceRow = collectRowExpression(
-      source,
-      left,
+      context,
+      operand.source,
       typeParameters,
       leaf,
       true,
       lifetimeContext,
     )
     const selected = collectRowExpression(
-      source,
-      right,
+      context,
+      operand.removed,
       typeParameters,
       leaf,
       true,
@@ -2168,71 +1939,64 @@ const collectRowExpression = (
         _tag: 'WithoutRowExpression',
         source: sourceRow.fact,
         selected: selected.fact,
-        syntax,
+        anchor,
       }),
       diagnostics: Object.freeze([...sourceRow.diagnostics, ...selected.diagnostics]),
     })
   }
-  if (syntax.kind === 'UnionType') {
-    const collected = syntax.children
-      .filter((element): element is SyntaxTree.Node => SyntaxTree.isNode(element))
-      .map((operand) =>
-        collectRowExpression(source, operand, typeParameters, leaf, bareKeys, lifetimeContext),
-      )
+  if (operand._tag === 'UnionType') {
+    const collected = operand.members.map((member) =>
+      collectRowExpression(context, member, typeParameters, leaf, bareKeys, lifetimeContext),
+    )
     return Object.freeze({
       fact: Object.freeze({
         _tag: 'UnionRowExpression',
-        operands: Object.freeze(collected.map((operand) => operand.fact)),
-        syntax,
+        operands: Object.freeze(collected.map((member) => member.fact)),
+        anchor,
       }),
-      diagnostics: Object.freeze(collected.flatMap((operand) => operand.diagnostics)),
+      diagnostics: Object.freeze(collected.flatMap((member) => member.diagnostics)),
     })
   }
   if (leaf === 'Failure') {
-    if (!isDeclaredTypeNode(syntax))
+    if (operand._tag === 'Requirement')
       return Object.freeze({
-        fact: Object.freeze({ _tag: 'UnavailableRowExpression', syntax }),
-        diagnostics: Object.freeze([]),
+        fact: Object.freeze({ _tag: 'UnavailableRowExpression', anchor }),
+        diagnostics: noDiagnostics,
       })
-    const analyzed = analyzeDeclaredType(source, syntax, typeParameters, false, lifetimeContext)
+    const analyzed = analyzeDeclaredType(context, operand, typeParameters, false, lifetimeContext)
     return Object.freeze({
-      fact: Object.freeze({ _tag: 'FailureMemberExpression', member: analyzed.fact, syntax }),
+      fact: Object.freeze({ _tag: 'FailureMemberExpression', member: analyzed.fact, anchor }),
       diagnostics: analyzed.diagnostics,
     })
   }
-  const parameter = parameterAtTypePath(source, syntax, typeParameters)
-  if (parameter?.kind === 'RequirementRow')
+  if (operand._tag !== 'Requirement') {
+    const parameter = parameterAtType(context, operand, typeParameters)
+    if (parameter?.kind === 'RequirementRow')
+      return Object.freeze({
+        fact: Object.freeze({ _tag: 'RowParameterExpression', parameter, anchor }),
+        diagnostics: noDiagnostics,
+      })
+    if (bareKeys && operand._tag === 'NamedType') {
+      const analyzed = analyzeDeclaredType(context, operand, typeParameters, false, lifetimeContext)
+      return Object.freeze({
+        fact: Object.freeze({
+          _tag: 'RequirementMemberExpression',
+          capability: analyzed.fact,
+          access: 'Shared',
+          role: Object.freeze({ _tag: 'DefaultRole' }),
+          anchor,
+        }),
+        diagnostics: analyzed.diagnostics,
+      })
+    }
     return Object.freeze({
-      fact: Object.freeze({ _tag: 'RowParameterExpression', parameter, syntax }),
-      diagnostics: Object.freeze([]),
-    })
-  if (bareKeys && syntax.kind === 'TypePath') {
-    const analyzed = analyzeDeclaredType(source, syntax, typeParameters, false, lifetimeContext)
-    return Object.freeze({
-      fact: Object.freeze({
-        _tag: 'RequirementMemberExpression',
-        capability: analyzed.fact,
-        access: 'Shared',
-        role: Object.freeze({ _tag: 'DefaultRole' }),
-        syntax,
-      }),
-      diagnostics: analyzed.diagnostics,
+      fact: Object.freeze({ _tag: 'UnavailableRowExpression', anchor }),
+      diagnostics: noDiagnostics,
     })
   }
-  if (syntax.kind !== 'Requirement' && syntax.kind !== 'ReferenceType')
-    return Object.freeze({
-      fact: Object.freeze({ _tag: 'UnavailableRowExpression', syntax }),
-      diagnostics: Object.freeze([]),
-    })
-  const capabilitySyntax = syntax.children.find(isDeclaredTypeNode)
-  if (capabilitySyntax === undefined)
-    return Object.freeze({
-      fact: Object.freeze({ _tag: 'UnavailableRowExpression', syntax }),
-      diagnostics: Object.freeze([]),
-    })
   const analyzed = analyzeDeclaredType(
-    source,
-    capabilitySyntax,
+    context,
+    operand.capability,
     typeParameters,
     false,
     lifetimeContext,
@@ -2241,9 +2005,9 @@ const collectRowExpression = (
     fact: Object.freeze({
       _tag: 'RequirementMemberExpression',
       capability: analyzed.fact,
-      access: SyntaxTree.directToken(syntax, 'MutKeyword') === undefined ? 'Shared' : 'Exclusive',
-      role: collectedRequirementRole(source, syntax),
-      syntax,
+      access: operand.access === 'Mutable' ? 'Exclusive' : 'Shared',
+      role: collectedRequirementRole(context, operand),
+      anchor,
     }),
     diagnostics: analyzed.diagnostics,
   })
@@ -2251,17 +2015,16 @@ const collectRowExpression = (
 
 const emptyRowExpression: RowExpressionFact = Object.freeze({ _tag: 'EmptyRowExpression' })
 
-/** Joins one requirement row's member nodes into a single row expression. */
+/** Joins one requirement row's members into a single row expression. */
 const rowExpressionOf = (
-  source: SourceFile.SourceFile,
-  syntax: SyntaxTree.Node,
-  rowNodes: ReadonlyArray<SyntaxTree.Node>,
+  context: Context,
+  row: AuthoredHir.RequirementRow,
   typeParameters: ReadonlyMap<string, Type.Parameter>,
   lifetimeContext?: DeclarationLifetime.Context,
 ): RowExpressionFact =>
-  rowNodes
+  row.members
     .map((member) =>
-      collectRowExpression(source, member, typeParameters, 'Requirement', false, lifetimeContext),
+      collectRowExpression(context, member, typeParameters, 'Requirement', false, lifetimeContext),
     )
     .reduce<RowExpressionFact>(
       (left, right) =>
@@ -2270,89 +2033,72 @@ const rowExpressionOf = (
           : Object.freeze({
               _tag: 'UnionRowExpression',
               operands: Object.freeze([left, right.fact]),
-              syntax,
+              anchor: row.anchor,
             }),
       emptyRowExpression,
     )
+
 const emptyFailureRow = RowAlgebra.concrete(Type.failureRowPolicy(), [])
 const emptyRequirementRow = RowAlgebra.concrete(Type.requirementRowPolicy(), [])
 
+const absentFailureRow: FailureRowFact = Object.freeze({
+  _tag: 'FailureRow',
+  members: Object.freeze([]),
+  parameters: Object.freeze([]),
+  failures: Object.freeze([]),
+  available: true,
+  expression: emptyRowExpression,
+  row: emptyFailureRow,
+})
+
+const absentRequirementRow: RequirementRowFact = Object.freeze({
+  _tag: 'RequirementRow',
+  entries: Object.freeze([]),
+  parameters: Object.freeze([]),
+  requirements: Object.freeze([]),
+  available: true,
+  expression: emptyRowExpression,
+  row: emptyRequirementRow,
+})
+
 const collectFailureRow = (
-  source: SourceFile.SourceFile,
-  node: SyntaxTree.Node,
+  context: Context,
+  failures: AuthoredHir.Type | undefined,
   typeParameters: ReadonlyMap<string, Type.Parameter>,
   lifetimeContext?: DeclarationLifetime.Context,
 ): {
   readonly fact: FailureRowFact
   readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
 } => {
-  const syntax = SyntaxTree.directNode(node, 'FailureRow')
-  if (syntax === undefined)
-    return Object.freeze({
-      fact: Object.freeze({
-        _tag: 'FailureRow',
-        members: Object.freeze([]),
-        parameters: Object.freeze([]),
-        failures: Object.freeze([]),
-        available: true,
-        expression: emptyRowExpression,
-        row: emptyFailureRow,
-      }),
-      diagnostics: Object.freeze([]),
-    })
-  const declared = syntax.children.find((element): element is SyntaxTree.Node =>
-    SyntaxTree.isNode(element),
-  )
-  if (declared === undefined)
-    return Object.freeze({
-      fact: Object.freeze({
-        _tag: 'FailureRow',
-        members: Object.freeze([]),
-        parameters: Object.freeze([]),
-        failures: Object.freeze([]),
-        syntax,
-        available: false,
-        expression: Object.freeze({ _tag: 'UnavailableRowExpression', syntax }),
-        row: emptyFailureRow,
-      }),
-      diagnostics: Object.freeze([]),
-    })
+  if (failures === undefined)
+    return Object.freeze({ fact: absentFailureRow, diagnostics: noDiagnostics })
   const expression = collectRowExpression(
-    source,
-    declared,
+    context,
+    failures,
     typeParameters,
     'Failure',
     false,
     lifetimeContext,
   )
-  let syntaxMembers: readonly SyntaxTree.Node[]
-  if (declared.kind === 'UnionType') {
-    syntaxMembers = declared.children.filter(isDeclaredTypeNode)
-  } else if (isDeclaredTypeNode(declared)) {
-    syntaxMembers = Object.freeze([declared])
-  } else {
-    syntaxMembers = Object.freeze([])
-  }
-  // The legacy member facts remain the single diagnostic owner while the row
-  // expression is retained as the semantic shape. Reporting both would emit
-  // the same kind/type error twice for one source member.
+  // The member facts remain the single diagnostic owner while the row expression is retained as
+  // the semantic shape. Reporting both would emit one source member's error twice.
   const diagnostics: Array<Diagnostic.Diagnostic> = []
-  const members = syntaxMembers.flatMap((member): ReadonlyArray<DeclaredTypeFact> => {
-    const parameter = parameterAtTypePath(source, member, typeParameters)
+  const members = failureMembers(failures).flatMap((member): ReadonlyArray<DeclaredTypeFact> => {
+    const parameter = parameterAtType(context, member, typeParameters)
     if (parameter?.kind === 'RequirementRow') {
-      const token = SyntaxTree.directToken(member, 'Identifier')
-      if (token !== undefined)
+      const segment = firstSegment(context, member)
+      if (segment !== undefined)
         diagnostics.push(
           Diagnostic.genericParameterKindMismatch(
-            spelling(source, token),
+            segment.spelling,
             'Value',
             parameter.kind,
-            token.span,
+            context.spanOf(segment.anchor),
           ),
         )
       return []
     }
-    const analyzed = analyzeDeclaredType(source, member, typeParameters, false, lifetimeContext)
+    const analyzed = analyzeDeclaredType(context, member, typeParameters, false, lifetimeContext)
     diagnostics.push(...analyzed.diagnostics)
     return [analyzed.fact]
   })
@@ -2362,7 +2108,7 @@ const collectFailureRow = (
       members: Object.freeze(members),
       parameters: Object.freeze([]),
       failures: Object.freeze([]),
-      syntax,
+      anchor: failures.anchor,
       available: false,
       expression: expression.fact,
       row: emptyFailureRow,
@@ -2372,83 +2118,64 @@ const collectFailureRow = (
 }
 
 const collectRequirementRow = (
-  source: SourceFile.SourceFile,
-  node: SyntaxTree.Node,
+  context: Context,
+  row: AuthoredHir.RequirementRow | undefined,
   typeParameters: ReadonlyMap<string, Type.Parameter>,
   lifetimeContext?: DeclarationLifetime.Context,
 ): {
   readonly fact: RequirementRowFact
   readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
 } => {
-  const syntax = SyntaxTree.directNode(node, 'RequirementRow')
-  if (syntax === undefined)
-    return Object.freeze({
-      fact: Object.freeze({
-        _tag: 'RequirementRow',
-        entries: Object.freeze([]),
-        parameters: Object.freeze([]),
-        requirements: Object.freeze([]),
-        available: true,
-        expression: emptyRowExpression,
-        row: emptyRequirementRow,
-      }),
-      diagnostics: Object.freeze([]),
-    })
+  if (row === undefined)
+    return Object.freeze({ fact: absentRequirementRow, diagnostics: noDiagnostics })
   const diagnostics: Array<Diagnostic.Diagnostic> = []
-  const rowNodes = syntax.children.filter((element): element is SyntaxTree.Node =>
-    SyntaxTree.isNode(element),
-  )
-  // Entry collection below owns source diagnostics. The expression facts are
-  // structural and must not duplicate the same diagnostic occurrence.
-  const expression = rowExpressionOf(source, syntax, rowNodes, typeParameters, lifetimeContext)
-  const entries = SyntaxTree.directNodes(syntax, 'Requirement').map((requirement) => {
-    const capabilitySyntax = requirement.children.find(isDeclaredTypeNode)
-    const analyzed =
-      capabilitySyntax === undefined
-        ? Object.freeze({
-            fact: Object.freeze({ _tag: 'Unavailable' as const, syntax: requirement }),
-            diagnostics: Object.freeze<ReadonlyArray<Diagnostic.Diagnostic>>([]),
-          })
-        : analyzeDeclaredType(source, capabilitySyntax, typeParameters, false, lifetimeContext)
+  // Entry collection owns the source diagnostics; the expression facts are structural and must
+  // not duplicate the same diagnostic occurrence.
+  const expression = rowExpressionOf(context, row, typeParameters, lifetimeContext)
+  const entries = row.members.flatMap((member) => {
+    if (member._tag !== 'Requirement') return []
+    const analyzed = analyzeDeclaredType(
+      context,
+      member.capability,
+      typeParameters,
+      false,
+      lifetimeContext,
+    )
     diagnostics.push(...analyzed.diagnostics)
-    return Object.freeze({
-      capability: analyzed.fact,
-      role: collectedRequirementRole(source, requirement),
-      access:
-        SyntaxTree.directToken(requirement, 'MutKeyword') === undefined
-          ? ('Shared' as const)
-          : ('Exclusive' as const),
-      syntax: requirement,
-    })
+    return [
+      Object.freeze({
+        capability: analyzed.fact,
+        role: collectedRequirementRole(context, member),
+        access: member.access === 'Mutable' ? ('Exclusive' as const) : ('Shared' as const),
+        anchor: member.anchor,
+      }),
+    ]
   })
-  const parameters = SyntaxTree.directNodes(syntax, 'TypePath').flatMap(
-    (path): ReadonlyArray<Type.Parameter> => {
-      const token = SyntaxTree.directToken(path, 'Identifier')
-      const parameter = parameterAtTypePath(source, path, typeParameters)
-      if (parameter?.kind === 'RequirementRow') return [parameter]
-      if (token !== undefined) {
-        if (parameter === undefined)
-          diagnostics.push(Diagnostic.unknownType(spelling(source, token), token.span))
-        else
-          diagnostics.push(
-            Diagnostic.genericParameterKindMismatch(
-              spelling(source, token),
+  const parameters = row.members.flatMap((member): ReadonlyArray<Type.Parameter> => {
+    if (member._tag === 'Requirement' || member._tag !== 'NamedType') return []
+    const parameter = parameterAtType(context, member, typeParameters)
+    if (parameter?.kind === 'RequirementRow') return [parameter]
+    const segment = firstSegment(context, member)
+    if (segment !== undefined)
+      diagnostics.push(
+        parameter === undefined
+          ? Diagnostic.unknownType(segment.spelling, context.spanOf(segment.anchor))
+          : Diagnostic.genericParameterKindMismatch(
+              segment.spelling,
               'RequirementRow',
               parameter.kind,
-              token.span,
+              context.spanOf(segment.anchor),
             ),
-          )
-      }
-      return []
-    },
-  )
+      )
+    return []
+  })
   return Object.freeze({
     fact: Object.freeze({
       _tag: 'RequirementRow',
       entries: Object.freeze(entries),
       parameters: Object.freeze(parameters),
       requirements: Object.freeze([]),
-      syntax,
+      anchor: row.anchor,
       available: false,
       expression,
       row: emptyRequirementRow,
@@ -2457,162 +2184,294 @@ const collectRequirementRow = (
   })
 }
 
-const nestedNodes = (syntax: SyntaxTree.Node): ReadonlyArray<SyntaxTree.Node> =>
-  syntax.children.flatMap((element): ReadonlyArray<SyntaxTree.Node> =>
-    SyntaxTree.isNode(element) ? [element, ...nestedNodes(element)] : [],
-  )
-
-const constraintDomain = (
-  source: SourceFile.SourceFile,
-  syntax: SyntaxTree.Node,
+/** Whether any operand below one row expression names a requirement-row binder. */
+const mentionsRowParameter = (
+  context: Context,
+  operand: AuthoredHir.RowOperand,
   typeParameters: ReadonlyMap<string, Type.Parameter>,
-): 'Failure' | 'Requirement' => {
-  for (const path of [syntax, ...nestedNodes(syntax)]) {
-    const parameter = parameterAtTypePath(source, path, typeParameters)
-    if (parameter?.kind === 'RequirementRow') return 'Requirement'
-  }
-  return 'Failure'
+): boolean => {
+  if (operand._tag === 'Requirement') return true
+  if (operand._tag === 'RowWithout')
+    return (
+      mentionsRowParameter(context, operand.source, typeParameters) ||
+      mentionsRowParameter(context, operand.removed, typeParameters)
+    )
+  if (operand._tag === 'UnionType')
+    return operand.members.some((member) => mentionsRowParameter(context, member, typeParameters))
+  return parameterAtType(context, operand, typeParameters)?.kind === 'RequirementRow'
 }
 
+const constraintDomain = (
+  context: Context,
+  operand: AuthoredHir.RowOperand,
+  typeParameters: ReadonlyMap<string, Type.Parameter>,
+): 'Failure' | 'Requirement' =>
+  mentionsRowParameter(context, operand, typeParameters) ? 'Requirement' : 'Failure'
+
 const collectConstraints = (
-  source: SourceFile.SourceFile,
-  node: SyntaxTree.Node,
+  context: Context,
+  constraints: ReadonlyArray<AuthoredHir.Constraint>,
   typeParameters: ReadonlyMap<string, Type.Parameter>,
 ): {
   readonly facts: ReadonlyArray<ConstraintFact>
   readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
 } => {
-  const where = SyntaxTree.directNode(node, 'WhereClause')
-  if (where === undefined)
-    return Object.freeze({ facts: Object.freeze([]), diagnostics: Object.freeze([]) })
+  if (constraints.length === 0)
+    return Object.freeze({ facts: Object.freeze([]), diagnostics: noDiagnostics })
   const diagnostics: Array<Diagnostic.Diagnostic> = []
-  const facts = where.children.flatMap((element): ReadonlyArray<ConstraintFact> => {
-    if (!SyntaxTree.isNode(element)) return []
-    const operands = element.children.filter((child): child is SyntaxTree.Node =>
-      SyntaxTree.isNode(child),
-    )
-    if (element.kind === 'MembershipConstraint') {
-      const selectedSyntax = operands.at(0)
-      const sourceSyntax = operands.at(1)
-      if (selectedSyntax === undefined || sourceSyntax === undefined) return []
-      const domain = constraintDomain(source, sourceSyntax, typeParameters)
-      const selected =
-        domain === 'Requirement'
-          ? collectRowExpression(source, selectedSyntax, typeParameters, 'Requirement')
-          : collectRowExpression(source, selectedSyntax, typeParameters, 'Failure')
-      const sourceRow =
-        domain === 'Requirement'
-          ? collectRowExpression(source, sourceSyntax, typeParameters, 'Requirement')
-          : collectRowExpression(source, sourceSyntax, typeParameters, 'Failure')
+  const facts = constraints.map((constraint): ConstraintFact => {
+    if (constraint._tag === 'MembershipConstraint') {
+      const domain = constraintDomain(context, constraint.source, typeParameters)
+      const selected = collectRowExpression(context, constraint.subject, typeParameters, domain)
+      const sourceRow = collectRowExpression(context, constraint.source, typeParameters, domain)
       diagnostics.push(...selected.diagnostics, ...sourceRow.diagnostics)
-      return [
-        Object.freeze({
-          _tag: 'MembershipConstraint',
-          domain,
-          selected: selected.fact,
-          source: sourceRow.fact,
-          syntax: element,
-        }),
-      ]
-    }
-    if (element.kind !== 'ProviderConstraint') return []
-    const providerSyntax = operands.at(0)
-    const selectedSyntax = operands.at(1)
-    const sourceSyntax = operands.at(2)
-    if (providerSyntax === undefined || selectedSyntax === undefined || sourceSyntax === undefined)
-      return []
-    const providerTypeSyntax =
-      providerSyntax.kind === 'ReferenceType'
-        ? providerSyntax.children.find(isDeclaredTypeNode)
-        : providerSyntax
-    const provider =
-      providerTypeSyntax === undefined
-        ? Object.freeze({
-            fact: Object.freeze({ _tag: 'Unavailable' as const, syntax: providerSyntax }),
-            diagnostics: Object.freeze<ReadonlyArray<Diagnostic.Diagnostic>>([]),
-          })
-        : analyzeDeclaredType(source, providerTypeSyntax, typeParameters)
-    const selected = collectRowExpression(source, selectedSyntax, typeParameters, 'Requirement')
-    const sourceRow = collectRowExpression(source, sourceSyntax, typeParameters, 'Requirement')
-    diagnostics.push(...provider.diagnostics, ...selected.diagnostics, ...sourceRow.diagnostics)
-    let mode: Type.CallableMode
-    if (providerSyntax.kind !== 'ReferenceType') mode = 'Take'
-    else if (SyntaxTree.directToken(providerSyntax, 'MutKeyword') === undefined) mode = 'Shared'
-    else mode = 'Exclusive'
-    return [
-      Object.freeze({
-        _tag: 'ProviderConstraint',
-        mode,
-        provider: provider.fact,
+      return Object.freeze({
+        _tag: 'MembershipConstraint',
+        domain,
         selected: selected.fact,
         source: sourceRow.fact,
-        syntax: element,
-      }),
-    ]
+        anchor: constraint.anchor,
+      })
+    }
+    // A provider written as a borrow selects a shared or exclusive mode; a bare type takes it.
+    const provider = constraint.provider
+    const providerType = provider._tag === 'ReferenceType' ? provider.referent : provider
+    const analyzed = analyzeDeclaredType(context, providerType, typeParameters)
+    const selected = collectRowExpression(
+      context,
+      constraint.selected,
+      typeParameters,
+      'Requirement',
+    )
+    const sourceRow = collectRowExpression(
+      context,
+      constraint.source,
+      typeParameters,
+      'Requirement',
+    )
+    diagnostics.push(...analyzed.diagnostics, ...selected.diagnostics, ...sourceRow.diagnostics)
+    let mode: Type.CallableMode
+    if (provider._tag !== 'ReferenceType') mode = 'Take'
+    else if (provider.access === 'Mutable') mode = 'Exclusive'
+    else mode = 'Shared'
+    return Object.freeze({
+      _tag: 'ProviderConstraint',
+      mode,
+      provider: analyzed.fact,
+      selected: selected.fact,
+      source: sourceRow.fact,
+      anchor: constraint.anchor,
+    })
   })
   return Object.freeze({ facts: Object.freeze(facts), diagnostics: Object.freeze(diagnostics) })
 }
 
-const tightSpan = (syntax: SyntaxTree.Element): SourceSpan.SourceSpan => {
-  if (!SyntaxTree.isNode(syntax)) return syntax.span
-  const tokens = SyntaxTree.tokens(syntax).filter(
-    (token) =>
-      token.kind !== 'Whitespace' &&
-      token.kind !== 'LineComment' &&
-      token.kind !== 'DocComment' &&
-      token.kind !== 'ModuleDocComment' &&
-      token.kind !== 'EndOfFile',
+/**
+ * The header a nested callable expression owns, so elaboration can treat it as a declaration.
+ *
+ * Lowering already mints an anonymous callable as its own owner, so the contract it carries is a
+ * complete header: wrapping it is a view over authored structure, not a synthesized declaration.
+ */
+const missingName = (anchor: AuthoredHir.Anchor, origin: AuthoredHir.Origin): AuthoredHir.Name => ({
+  _tag: 'MissingName',
+  anchor,
+  origin,
+  causes: [{ _tag: 'Cause', anchor, code: 'AnonymousCallable' }],
+})
+
+const anonymousDeclaration = (
+  node: Extract<AuthoredHir.Expression, { readonly _tag: 'CallableExpression' }>,
+): AuthoredHir.Declaration =>
+  Object.freeze({
+    _tag: 'Declaration',
+    owner: node.anchor.owner,
+    header: Object.freeze({
+      _tag: 'FunctionHeader',
+      anchor: node.anchor,
+      origin: node.origin,
+      causes: node.causes,
+      // A hidden callable has no authored name; the canonical identity supplies its spelling.
+      name: missingName(node.anchor, node.origin),
+      public: false,
+      contract: node.contract,
+      linkage: undefined,
+      properties: Object.freeze([]),
+    }),
+    body: Object.freeze({ _tag: 'CallableBody', block: node.body }),
+  })
+
+/**
+ * Collects the declaration-shaped contract owned by one anonymous callable occurrence.
+ *
+ * The occurrence elaborates and lowers as a hidden private declaration carrying the enclosing
+ * declaration's binders, so a call through it infers exactly as a named function would.
+ */
+export const collectAnonymousCallableDeclaration = (
+  context: Context,
+  node: AuthoredHir.Expression,
+  id: DeclarationId,
+  canonical: CanonicalId,
+  inheritedTypeParameters: ReadonlyArray<TypeParameterFact>,
+): {
+  readonly fact: DeclarationFact
+  readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
+} => {
+  const environment = new Map(
+    inheritedTypeParameters.flatMap((parameter) =>
+      parameter.name._tag === 'Present' ? [[parameter.name.spelling, parameter.type] as const] : [],
+    ),
   )
-  const first = tokens.at(0)
-  const last = tokens.at(-1)
-  return first === undefined || last === undefined
-    ? syntax.span
-    : (SourceSpan.fromOffsets(syntax.span.sourceId, first.span.start, last.span.end) ?? syntax.span)
+  const name: DeclaredName =
+    node._tag === 'CallableExpression'
+      ? Object.freeze({ _tag: 'Present', spelling: canonical.name, anchor: node.anchor })
+      : Object.freeze({ _tag: 'Unavailable', anchor: node.anchor })
+  if (node._tag !== 'CallableExpression')
+    return Object.freeze({
+      fact: Object.freeze({
+        _tag: 'FunctionDeclaration',
+        id,
+        canonical: Object.freeze({ _tag: 'Canonical', id: canonical }),
+        visibility: 'Private',
+        phase: 'Runtime',
+        functionKind: 'Ordinary',
+        unsafe: false,
+        typeParameters: Object.freeze([...inheritedTypeParameters]),
+        parameterCount: 0,
+        parameters: Object.freeze([]),
+        name,
+        returnType: unavailable(node.anchor),
+        failureRow: absentFailureRow,
+        requirementRow: absentRequirementRow,
+        constraints: Object.freeze([]),
+        constraintContracts: Object.freeze([]),
+        owner: node.anchor.owner,
+        anchor: node.anchor,
+      }),
+      diagnostics: noDiagnostics,
+    })
+  const declaration = anonymousDeclaration(node)
+  const contract = node.contract
+  const lifetimeContext = DeclarationLifetime.forHeader(
+    context,
+    canonical,
+    declaration,
+    environment,
+  )
+  const parameters = contract.parameters.map((parameter, ordinal) =>
+    analyzeParameter(context, parameter, id, ordinal, environment, lifetimeContext),
+  )
+  const returnType: {
+    readonly fact: ReturnTypeFact
+    readonly opaqueResult?: OpaqueResultFact
+    readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
+  } =
+    contract.result === undefined
+      ? Object.freeze({
+          fact: unavailable(node.anchor),
+          diagnostics: noDiagnostics,
+        })
+      : collectReturnType(
+          context,
+          declaration,
+          contract.result,
+          canonical.name,
+          inheritedTypeParameters,
+          environment,
+          lifetimeContext,
+        )
+  const failureRow = collectFailureRow(context, contract.failures, environment, lifetimeContext)
+  const requirementRow = collectRequirementRow(
+    context,
+    contract.requirements,
+    environment,
+    lifetimeContext,
+  )
+  const parameterFacts = Object.freeze(parameters.map((parameter) => parameter.fact))
+  const diagnostics = Object.freeze([
+    ...lifetimeContext.diagnostics,
+    ...parameters.flatMap((parameter) => parameter.diagnostics),
+    ...duplicateParameterDiagnostics(context, parameterFacts),
+    ...returnType.diagnostics,
+    ...failureRow.diagnostics,
+    ...requirementRow.diagnostics,
+    ...(!contract.effect && failureRow.fact.anchor !== undefined
+      ? [Diagnostic.failureChannelOnOrdinary(context.spanOf(failureRow.fact.anchor))]
+      : []),
+  ])
+  return Object.freeze({
+    fact: Object.freeze({
+      _tag: 'FunctionDeclaration',
+      lifetimeElaboration: lifetimeContext,
+      id,
+      canonical: Object.freeze({ _tag: 'Canonical', id: canonical }),
+      visibility: 'Private',
+      phase: 'Runtime',
+      functionKind: contract.effect ? 'Effect' : 'Ordinary',
+      unsafe: false,
+      typeParameters: Object.freeze([
+        ...inheritedTypeParameters,
+        ...implicitLifetimeParameters(lifetimeContext, environment),
+      ]),
+      parameterCount: parameterFacts.length,
+      parameters: parameterFacts,
+      name,
+      returnType: returnType.fact,
+      ...(returnType.opaqueResult === undefined ? {} : { opaqueResult: returnType.opaqueResult }),
+      failureRow: failureRow.fact,
+      requirementRow: requirementRow.fact,
+      constraints: Object.freeze([]),
+      constraintContracts: Object.freeze([]),
+      owner: node.anchor.owner,
+      anchor: node.anchor,
+    }),
+    diagnostics,
+  })
 }
 
 const enumRepresentation = (
-  source: SourceFile.SourceFile,
-  node: SyntaxTree.Node,
+  context: Context,
+  header: Extract<AuthoredHir.DeclarationHeader, { readonly _tag: 'EnumHeader' }>,
   diagnostics: Array<Diagnostic.Diagnostic>,
 ): EnumRepresentationFact => {
-  const explicit = SyntaxTree.directToken(node, 'LeftParenthesis') !== undefined
-  if (!explicit)
+  const representation = header.representation
+  if (representation === undefined)
     return Object.freeze({
       _tag: 'Available',
       scalar: Scalar.defaultEnumRepresentation,
       explicit: false,
-      syntax: node,
+      anchor: header.anchor,
     })
-  const syntax = node.children.find(isDeclaredTypeNode)
-  if (syntax === undefined || !SyntaxTree.isAvailableSyntax(syntax))
-    return Object.freeze({
-      _tag: 'Unavailable',
-      explicit: true,
-      syntax: syntax ?? node,
-    })
-  const token = SyntaxTree.tokens(syntax).find((candidate) => candidate.kind === 'Identifier')
-  const representationSpelling = token === undefined ? '<unavailable>' : spelling(source, token)
-  const scalar = Scalar.enumRepresentation(representationSpelling)
+  if (representation._tag === 'MissingType' || representation._tag === 'InvalidType')
+    return Object.freeze({ _tag: 'Unavailable', explicit: true, anchor: representation.anchor })
+  const segment = firstSegment(context, representation)
+  const spelling = segment?.spelling ?? '<unavailable>'
+  const scalar = Scalar.enumRepresentation(spelling)
   if (scalar !== undefined)
-    return Object.freeze({ _tag: 'Available', scalar, explicit: true, syntax })
+    return Object.freeze({
+      _tag: 'Available',
+      scalar,
+      explicit: true,
+      anchor: representation.anchor,
+    })
   const diagnostic = Diagnostic.unsupportedEnumRepresentation(
-    representationSpelling,
+    spelling,
     Scalar.enumRepresentations().map((candidate) => candidate.spelling),
-    tightSpan(syntax),
+    context.spanOf(representation.anchor),
   )
   diagnostics.push(diagnostic)
   return Object.freeze({
     _tag: 'Unavailable',
     explicit: true,
-    syntax,
-    spelling: representationSpelling,
+    anchor: representation.anchor,
+    spelling,
     cause: Diagnostic.identity(diagnostic),
   })
 }
 
 const collectEnum = (
-  source: SourceFile.SourceFile,
-  node: SyntaxTree.Node,
+  context: Context,
+  declaration: AuthoredHir.Declaration,
+  header: Extract<AuthoredHir.DeclarationHeader, { readonly _tag: 'EnumHeader' }>,
   id: DeclarationId,
   canonical: CanonicalState,
   visibility: 'Private' | 'Public',
@@ -2620,33 +2479,31 @@ const collectEnum = (
   diagnostics: Array<Diagnostic.Diagnostic>,
 ): EnumFact => {
   const enumDiagnostics: Array<Diagnostic.Diagnostic> = []
-  const representation = enumRepresentation(source, node, enumDiagnostics)
-  const memberNodes = SyntaxTree.directNodes(node, 'EnumMember')
-  if (memberNodes.length === 0) {
+  const representation = enumRepresentation(context, header, enumDiagnostics)
+  if (header.members.length === 0)
     enumDiagnostics.push(
       Diagnostic.emptyEnum(
         name._tag === 'Present' ? name.spelling : '<anonymous>',
-        tightSpan(node),
+        context.spanOf(header.anchor),
       ),
     )
-  }
   const firstNames = new Map<
     string,
     {
       readonly id: EnumMemberId
       readonly canonical?: CanonicalEnumMemberId
-      readonly token: Token.Token
+      readonly anchor: AuthoredHir.Anchor
     }
   >()
-  const firstDiscriminants = new Map<bigint, SyntaxTree.Node>()
+  const firstDiscriminants = new Map<bigint, AuthoredHir.Anchor>()
   const representationScalar =
     representation._tag === 'Available' ? representation.scalar : undefined
   const range =
     representationScalar === undefined ? undefined : Scalar.range(representationScalar, 64)
   let previous: bigint | undefined
-  const members = memberNodes.map((memberNode, ordinal): EnumMemberFact => {
+  const members = header.members.map((member, ordinal): EnumMemberFact => {
     const memberId: EnumMemberId = Object.freeze({ _tag: 'EnumMemberId', enum: id, ordinal })
-    const memberName = presentName(source, memberNode)
+    const memberName = declaredName(context, member.name)
     let memberCanonical: EnumMemberFact['canonical'] = Object.freeze({ _tag: 'Unidentified' })
     if (memberName._tag === 'Present') {
       const original = firstNames.get(memberName.spelling)
@@ -2663,7 +2520,7 @@ const collectEnum = (
           memberName.spelling,
           Object.freeze({
             id: memberId,
-            token: memberName.token,
+            anchor: memberName.anchor,
             ...(canonicalMember === undefined ? {} : { canonical: canonicalMember }),
           }),
         )
@@ -2672,8 +2529,8 @@ const collectEnum = (
       } else {
         const diagnostic = Diagnostic.duplicateEnumMemberName(
           memberName.spelling,
-          original.token.span,
-          memberName.token.span,
+          context.spanOf(original.anchor),
+          context.spanOf(memberName.anchor),
         )
         enumDiagnostics.push(diagnostic)
         if (original.canonical !== undefined)
@@ -2684,24 +2541,23 @@ const collectEnum = (
           })
       }
     }
-
-    const explicitSyntax = SyntaxTree.directNode(memberNode, 'IntegerLiteralExpression')
+    const explicit = member.value
     const sourceKind: EnumDiscriminantFact['source'] =
-      explicitSyntax === undefined ? 'Implicit' : 'Explicit'
+      explicit === undefined ? 'Implicit' : 'Explicit'
     let attempted: bigint | undefined
-    if (explicitSyntax !== undefined) {
-      const literal = constantLiteral(source, explicitSyntax)
+    if (explicit !== undefined) {
+      const literal = constantLiteral(context, explicit)
       if (literal._tag === 'IntegerLiteral') attempted = literal.value
     } else if (ordinal === 0) attempted = 0n
     else if (previous !== undefined) attempted = previous + 1n
 
     let discriminant: EnumDiscriminantFact
-    const discriminantSyntax = explicitSyntax ?? memberNode
+    const discriminantAnchor = explicit?.anchor ?? member.anchor
     if (attempted === undefined || range === undefined || representationScalar === undefined) {
       discriminant = Object.freeze({
         _tag: 'Unavailable',
         source: sourceKind,
-        syntax: discriminantSyntax,
+        anchor: discriminantAnchor,
         ...(attempted === undefined ? {} : { attempted }),
         ...(representation._tag === 'Unavailable' && representation.cause !== undefined
           ? { cause: representation.cause }
@@ -2715,13 +2571,13 @@ const collectEnum = (
       const diagnostic = Diagnostic.unsignedEnumNegativeDiscriminant(
         representationScalar.spelling,
         attempted,
-        tightSpan(discriminantSyntax),
+        context.spanOf(discriminantAnchor),
       )
       enumDiagnostics.push(diagnostic)
       discriminant = Object.freeze({
         _tag: 'Unavailable',
         source: sourceKind,
-        syntax: discriminantSyntax,
+        anchor: discriminantAnchor,
         attempted,
         cause: Diagnostic.identity(diagnostic),
       })
@@ -2733,43 +2589,43 @@ const collectEnum = (
               attempted,
               range.minimum,
               range.maximum,
-              tightSpan(discriminantSyntax),
+              context.spanOf(discriminantAnchor),
             )
           : Diagnostic.enumImplicitDiscriminantOverflow(
               representationScalar.spelling,
               previous ?? range.maximum,
               range.maximum,
-              tightSpan(memberNode),
+              context.spanOf(member.anchor),
             )
       enumDiagnostics.push(diagnostic)
       discriminant = Object.freeze({
         _tag: 'Unavailable',
         source: sourceKind,
-        syntax: discriminantSyntax,
+        anchor: discriminantAnchor,
         attempted,
         cause: Diagnostic.identity(diagnostic),
       })
     } else {
       const original = firstDiscriminants.get(attempted)
       if (original === undefined) {
-        firstDiscriminants.set(attempted, memberNode)
+        firstDiscriminants.set(attempted, member.anchor)
         discriminant = Object.freeze({
           _tag: 'Available',
           value: attempted,
           source: sourceKind,
-          syntax: discriminantSyntax,
+          anchor: discriminantAnchor,
         })
       } else {
         const diagnostic = Diagnostic.duplicateEnumDiscriminant(
           attempted,
-          tightSpan(original),
-          tightSpan(memberNode),
+          context.spanOf(original),
+          context.spanOf(member.anchor),
         )
         enumDiagnostics.push(diagnostic)
         discriminant = Object.freeze({
           _tag: 'Unavailable',
           source: sourceKind,
-          syntax: discriminantSyntax,
+          anchor: discriminantAnchor,
           attempted,
           cause: Diagnostic.identity(diagnostic),
         })
@@ -2788,7 +2644,7 @@ const collectEnum = (
       canonical: memberCanonical,
       name: memberName,
       discriminant,
-      syntax: memberNode,
+      anchor: member.anchor,
     })
   })
   diagnostics.push(...enumDiagnostics)
@@ -2822,13 +2678,14 @@ const collectEnum = (
             enumDiagnostics.map((diagnostic) => Diagnostic.identity(diagnostic)),
           ),
         }),
-    syntax: node,
+    anchor: declaration.header.anchor,
   })
 }
 
 const collectUnion = (
-  source: SourceFile.SourceFile,
-  node: SyntaxTree.Node,
+  context: Context,
+  declaration: AuthoredHir.Declaration,
+  header: Extract<AuthoredHir.DeclarationHeader, { readonly _tag: 'UnionHeader' }>,
   id: DeclarationId,
   canonical: CanonicalState,
   visibility: 'Private' | 'Public',
@@ -2837,29 +2694,25 @@ const collectUnion = (
   diagnostics: Array<Diagnostic.Diagnostic>,
 ): UnionFact => {
   const unionDiagnostics: Array<Diagnostic.Diagnostic> = []
-  const variantNodes = SyntaxTree.directNodes(node, 'UnionVariant')
-  if (variantNodes.length === 0) {
+  if (header.variants.length === 0)
     unionDiagnostics.push(
       Diagnostic.emptyNominalUnion(
         name._tag === 'Present' ? name.spelling : '<anonymous>',
-        tightSpan(node),
+        context.spanOf(header.anchor),
       ),
     )
-  }
   const first = new Map<
     string,
     {
       readonly id: UnionVariantId
       readonly canonical?: CanonicalUnionVariantId
-      readonly token: Token.Token
+      readonly anchor: AuthoredHir.Anchor
     }
   >()
-  const variants = variantNodes.map((variantNode, ordinal): UnionVariantFact => {
+  const variants = header.variants.map((variant, ordinal): UnionVariantFact => {
     const variantId: UnionVariantId = Object.freeze({ _tag: 'UnionVariantId', union: id, ordinal })
-    const variantName = presentName(source, variantNode)
-    let variantCanonical: UnionVariantFact['canonical'] = Object.freeze({
-      _tag: 'Unidentified',
-    })
+    const variantName = declaredName(context, variant.name)
+    let variantCanonical: UnionVariantFact['canonical'] = Object.freeze({ _tag: 'Unidentified' })
     if (variantName._tag === 'Present') {
       const original = first.get(variantName.spelling)
       if (original === undefined) {
@@ -2875,56 +2728,31 @@ const collectUnion = (
           variantName.spelling,
           Object.freeze({
             id: variantId,
-            token: variantName.token,
+            anchor: variantName.anchor,
             ...(canonicalVariant === undefined ? {} : { canonical: canonicalVariant }),
           }),
         )
-        if (canonicalVariant !== undefined) {
+        if (canonicalVariant !== undefined)
           variantCanonical = Object.freeze({ _tag: 'Canonical', id: canonicalVariant })
-        }
       } else {
         const diagnostic = Diagnostic.duplicateUnionVariant(
           variantName.spelling,
-          original.token.span,
-          variantName.token.span,
+          context.spanOf(original.anchor),
+          context.spanOf(variantName.anchor),
         )
         unionDiagnostics.push(diagnostic)
-        if (original.canonical !== undefined) {
+        if (original.canonical !== undefined)
           variantCanonical = Object.freeze({
             _tag: 'Duplicate',
             original: original.canonical,
             cause: Diagnostic.identity(diagnostic),
           })
-        }
       }
     }
-    const hasFieldBody = SyntaxTree.directToken(variantNode, 'LeftBrace') !== undefined
-    const fieldNodes = SyntaxTree.directNodes(variantNode, 'UnionVariantField')
-    if (
-      hasFieldBody &&
-      fieldNodes.every(
-        (fieldNode) =>
-          SyntaxTree.tokens(fieldNode).filter(
-            (token) =>
-              token.kind !== 'Whitespace' &&
-              token.kind !== 'LineComment' &&
-              token.kind !== 'DocComment' &&
-              token.kind !== 'ModuleDocComment',
-          ).length === 0,
-      )
-    ) {
-      unionDiagnostics.push(
-        Diagnostic.emptyUnionVariant(
-          variantName._tag === 'Present' ? variantName.spelling : '<anonymous>',
-          tightSpan(variantNode),
-        ),
-      )
-    }
     const collected = collectFields(
-      source,
-      variantNode,
+      context,
+      variant.fields,
       Object.freeze({ _tag: 'UnionVariantFieldOwnerId', variant: variantId }),
-      'UnionVariantField',
       typeParameters.environment,
       typeParameters.lifetimeContext,
     )
@@ -2934,15 +2762,14 @@ const collectUnion = (
       id: variantId,
       canonical: variantCanonical,
       name: variantName,
-      kind: hasFieldBody ? 'Fields' : 'Unit',
+      kind: variant.fields.length === 0 ? 'Unit' : 'Fields',
       fields: collected.fields,
-      syntax: variantNode,
+      anchor: variant.anchor,
     })
   })
   diagnostics.push(...unionDiagnostics)
   const valid =
     unionDiagnostics.length === 0 &&
-    SyntaxTree.isAvailableSyntax(node) &&
     variants.length > 0 &&
     variants.every(
       (variant) =>
@@ -2968,79 +2795,82 @@ const collectUnion = (
             unionDiagnostics.map((diagnostic) => Diagnostic.identity(diagnostic)),
           ),
         }),
-    syntax: node,
+    anchor: declaration.header.anchor,
   })
 }
 
-const decodedText = (source: SourceFile.SourceFile, token: Token.Token): string | undefined => {
-  const bytes = Option.getOrUndefined(SourceFile.slice(source, token.span))
-  const form = bytes === undefined ? undefined : LiteralForm.recognize(bytes)
-  if (bytes === undefined || form === undefined) return undefined
-  const decoded = StaticText.decode(Array.from(bytes), form)
-  return decoded._tag === 'Decoded'
-    ? textDecoder.decode(Uint8Array.from(decoded.data.bytes))
-    : undefined
-}
+/** The text an authored ABI or symbol operand carries; a computed expression has none. */
+const literalText = (
+  context: Context,
+  value: AuthoredHir.TextLiteral | AuthoredHir.MissingExpression | AuthoredHir.InvalidExpression,
+): string | undefined => (value._tag === 'TextLiteral' ? context.textOf(value.value) : undefined)
 
 /** A malformed or unsupported foreign marker is retained without granting a layout promise. */
 const collectStructLayout = (
-  source: SourceFile.SourceFile,
-  node: SyntaxTree.Node,
+  context: Context,
+  header: Extract<AuthoredHir.DeclarationHeader, { readonly _tag: 'StructHeader' }>,
 ): {
   readonly fact: StructFact['layout']
   readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
 } => {
-  const marker = SyntaxTree.directToken(node, 'ExternKeyword')
+  const marker = header.abi
   if (marker === undefined)
+    return Object.freeze({ fact: Object.freeze({ _tag: 'Silk' }), diagnostics: noDiagnostics })
+  const abiSpan = context.spanOf(marker.anchor)
+  const abi = literalText(context, marker)
+  if (abi === undefined)
     return Object.freeze({
-      fact: Object.freeze({ _tag: 'Silk' }),
-      diagnostics: Object.freeze([]),
+      fact: Object.freeze({ _tag: 'InvalidForeign', abi: undefined, abiSpan }),
+      diagnostics: noDiagnostics,
     })
-  const abiToken = SyntaxTree.directToken(node, 'TextLiteral')
-  if (abiToken === undefined)
-    return Object.freeze({
-      fact: Object.freeze({ _tag: 'InvalidForeign', abi: undefined, abiSpan: marker.span }),
-      diagnostics: Object.freeze([]),
-    })
-  const abi = decodedText(source, abiToken)
   if (abi === 'C')
     return Object.freeze({
-      fact: Object.freeze({ _tag: 'Foreign', abi, abiSpan: abiToken.span }),
-      diagnostics: Object.freeze([]),
+      fact: Object.freeze({ _tag: 'Foreign', abi, abiSpan }),
+      diagnostics: noDiagnostics,
     })
   return Object.freeze({
-    fact: Object.freeze({ _tag: 'InvalidForeign', abi, abiSpan: abiToken.span }),
-    diagnostics: Object.freeze([Diagnostic.unsupportedForeignAbi(abi ?? '', abiToken.span)]),
+    fact: Object.freeze({ _tag: 'InvalidForeign', abi, abiSpan }),
+    diagnostics: Object.freeze([Diagnostic.unsupportedForeignAbi(abi, abiSpan)]),
   })
 }
 
-const textDecoder = new TextDecoder()
-
-const sharedForeignRestrictions: ReadonlyArray<
-  readonly [kind: Token.TokenKind | SyntaxTree.NodeKind, restriction: string]
-> = [
-  ['StaticKeyword', 'static'],
-  ['EffectKeyword', 'effect'],
-  ['TypeParameterList', 'type parameters'],
-  ['FailureRow', 'failure row'],
-  ['RequirementRow', 'requirement row'],
-  ['WhereClause', 'where clause'],
-]
-
-/** A foreign header has no body; exports permit unsafe only for explicit boundary promises. */
-const foreignRestrictions: Record<'Foreign' | 'Export', typeof sharedForeignRestrictions> = {
-  Foreign: [...sharedForeignRestrictions, ['Block', 'body']],
-  Export: [...sharedForeignRestrictions, ['UnsafeKeyword', 'unsafe']],
+/** The header shapes a foreign or exported function may not carry, with the written wording. */
+const foreignRestrictions = (
+  context: Context,
+  contract: AuthoredHir.CallableContract,
+  body: AuthoredHir.DeclarationBody,
+  direction: 'Foreign' | 'Export',
+): ReadonlyArray<readonly [detail: string, anchor: AuthoredHir.Anchor]> => {
+  const found: Array<readonly [string, AuthoredHir.Anchor]> = []
+  if (contract.static) found.push(['static', contract.anchor])
+  if (contract.effect) found.push(['effect', contract.anchor])
+  // An exported header may still bind lifetimes; any other binder is rejected.
+  const rejectedBinders =
+    direction === 'Export'
+      ? contract.generics.filter((generic) => generic._tag !== 'LifetimeParameter')
+      : contract.generics
+  if (rejectedBinders.length > 0)
+    found.push(['type parameters', rejectedBinders[0]?.anchor ?? contract.anchor])
+  if (contract.failures !== undefined) found.push(['failure row', contract.failures.anchor])
+  if (contract.requirements !== undefined)
+    found.push(['requirement row', contract.requirements.anchor])
+  if (contract.constraints.length > 0)
+    found.push(['where clause', contract.constraints[0]?.anchor ?? contract.anchor])
+  if (direction === 'Foreign' && body._tag === 'CallableBody' && body.block !== undefined)
+    found.push(['body', body.block.anchor])
+  if (direction === 'Export' && contract.unsafe) found.push(['unsafe', contract.anchor])
+  return Object.freeze(found)
 }
 
 /**
- * The syntax-level checks shared by `extern` and `export` headers: ABI, the mandatory `unsafe` on
- * a foreign header, retained Silk-only syntax, and the native symbol. Type admission needs
- * resolved types and runs at completion.
+ * The header checks shared by `extern` and `export` functions: ABI, the mandatory `unsafe` on a
+ * foreign header, retained Silk-only shapes, and the native symbol. Type admission needs resolved
+ * types and runs at completion.
  */
 const collectForeign = (
-  source: SourceFile.SourceFile,
-  node: SyntaxTree.Node,
+  context: Context,
+  declaration: AuthoredHir.Declaration,
+  header: Extract<AuthoredHir.DeclarationHeader, { readonly _tag: 'FunctionHeader' }>,
   name: DeclaredName,
   direction: 'Foreign' | 'Export',
   parameters: ReadonlyArray<ParameterFact>,
@@ -3049,90 +2879,79 @@ const collectForeign = (
   readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
 } => {
   const diagnostics: Array<Diagnostic.Diagnostic> = []
-  const list = SyntaxTree.directNode(node, 'ParameterList')
-  const ellipsis = list === undefined ? undefined : SyntaxTree.directToken(list, 'Ellipsis')
-  if (ellipsis !== undefined && (direction !== 'Foreign' || parameters.length === 0))
+  const contract = header.contract
+  const declarationSpan = context.spanOf(name._tag === 'Present' ? name.anchor : header.anchor)
+  const spellingOf = name._tag === 'Present' ? name.spelling : '#foreign'
+  if (contract.variadic && (direction !== 'Foreign' || parameters.length === 0))
     diagnostics.push(
       Diagnostic.foreignDeclarationRestriction(
         'ellipsis requires an external C declaration with at least one fixed parameter',
-        ellipsis.span,
+        context.spanOf(contract.anchor),
       ),
     )
-  const declarationSpan = name._tag === 'Present' ? name.token.span : node.span
-  const spellingOf = name._tag === 'Present' ? name.spelling : '#foreign'
-  const abiToken = SyntaxTree.directToken(node, 'TextLiteral')
-  // A missing ABI literal is already a parser diagnostic.
-  if (abiToken !== undefined) {
-    const abi = decodedText(source, abiToken)
-    if (abi !== 'C') diagnostics.push(Diagnostic.unsupportedForeignAbi(abi ?? '', abiToken.span))
-  }
-  if (direction === 'Foreign' && SyntaxTree.directToken(node, 'UnsafeKeyword') === undefined)
-    diagnostics.push(Diagnostic.foreignFunctionRequiresUnsafe(spellingOf, declarationSpan))
-  for (const child of node.children) {
-    const kind = SyntaxTree.isMissingToken(child) ? undefined : child.kind
-    const restriction = foreignRestrictions[direction].find(([expected]) => expected === kind)?.[1]
-    if (
-      restriction !== undefined &&
-      !(
-        direction === 'Export' &&
-        SyntaxTree.isNode(child) &&
-        child.kind === 'TypeParameterList' &&
-        child.children
-          .filter(SyntaxTree.isNode)
-          .every((parameter) => parameter.kind === 'LifetimeParameter')
-      ) &&
-      !(
-        direction === 'Export' &&
-        kind === 'UnsafeKeyword' &&
-        (MachineFunction.analyze(source, node).properties !== undefined ||
-          DeclarationProperty.clauses(node).some(
-            (clause) => DeclarationProperty.owner(source, clause) === 'Intrinsic.foreign',
-          ))
+  const linkage = header.linkage
+  if (linkage !== undefined) {
+    const abi = literalText(context, linkage.abi)
+    if (linkage.abi._tag === 'TextLiteral' && abi !== 'C')
+      diagnostics.push(
+        Diagnostic.unsupportedForeignAbi(abi ?? '', context.spanOf(linkage.abi.anchor)),
       )
-    )
-      diagnostics.push(Diagnostic.foreignDeclarationRestriction(restriction, child.span))
   }
-  const asIndex = node.children.findIndex(
-    (child) => SyntaxTree.isToken(child) && child.kind === 'AsKeyword',
+  if (direction === 'Foreign' && !contract.unsafe)
+    diagnostics.push(Diagnostic.foreignFunctionRequiresUnsafe(spellingOf, declarationSpan))
+  const machine = MachineFunction.analyze(context, declaration)
+  const foreignClause = header.properties.some(
+    (clause) => DeclarationProperty.authoredOwner(context, clause) === 'Intrinsic.foreign',
   )
-  const symbolToken = node.children
-    .slice(asIndex + 1)
-    .find(
-      (child): child is Token.Token => SyntaxTree.isToken(child) && child.kind === 'TextLiteral',
+  for (const [detail, anchor] of foreignRestrictions(
+    context,
+    contract,
+    declaration.body,
+    direction,
+  )) {
+    // An exported machine or explicitly-contracted function carries its own safety promise.
+    if (
+      direction === 'Export' &&
+      detail === 'unsafe' &&
+      (machine.properties !== undefined || foreignClause)
     )
-  const renamed =
-    asIndex >= 0 && symbolToken !== undefined ? decodedText(source, symbolToken) : undefined
+      continue
+    diagnostics.push(Diagnostic.foreignDeclarationRestriction(detail, context.spanOf(anchor)))
+  }
+  const renamed = linkage?.symbol === undefined ? undefined : literalText(context, linkage.symbol)
   const symbol = renamed ?? spellingOf
   const symbolSpan =
-    renamed === undefined ? declarationSpan : (symbolToken?.span ?? declarationSpan)
+    renamed === undefined || linkage?.symbol === undefined
+      ? declarationSpan
+      : context.spanOf(linkage.symbol.anchor)
   if (!ForeignSymbol.isValidSpelling(symbol))
     diagnostics.push(Diagnostic.invalidForeignSymbol(symbol, symbolSpan))
   else if (ForeignSymbol.isReserved(symbol))
     diagnostics.push(Diagnostic.reservedForeignSymbol(symbol, symbolSpan))
   const behavior = ForeignContract.analyze(
-    source,
-    DeclarationProperty.clauses(node).find(
+    context,
+    header.properties.find(
       (clause) =>
         !['Intrinsic.native', 'Intrinsic.machine'].includes(
-          DeclarationProperty.owner(source, clause),
+          DeclarationProperty.authoredOwner(context, clause),
         ),
     ),
     parameters.map((parameter) => ({
       name: parameter.name._tag === 'Present' ? parameter.name.spelling : '',
       type: undefined,
-      span: parameter.syntax.span,
+      span: context.spanOf(parameter.anchor),
     })),
     undefined,
   )
   if (
     direction === 'Export' &&
     ForeignContract.key(behavior.contract) !== ForeignContract.key(ForeignContract.conservative) &&
-    SyntaxTree.directToken(node, 'UnsafeKeyword') === undefined
+    !contract.unsafe
   )
     diagnostics.push(
       Diagnostic.foreignDeclarationRestriction(
         'stronger exported foreign contracts require unsafe export',
-        node.span,
+        context.spanOf(header.anchor),
       ),
     )
   diagnostics.push(...behavior.diagnostics)
@@ -3141,7 +2960,7 @@ const collectForeign = (
       abi: 'C' as const,
       symbol,
       contract: behavior.contract,
-      variadic: ellipsis !== undefined,
+      variadic: contract.variadic,
     }),
     diagnostics: Object.freeze(diagnostics),
   })
@@ -3149,34 +2968,28 @@ const collectForeign = (
 
 /** Collects the ABI and symbol spelling shared by imported and exported data declarations. */
 const collectForeignStatic = (
-  source: SourceFile.SourceFile,
-  node: SyntaxTree.Node,
+  context: Context,
+  header: Extract<AuthoredHir.DeclarationHeader, { readonly _tag: 'StaticHeader' }>,
   name: DeclaredName,
 ): {
   readonly fact: ForeignStaticFact['foreign']
   readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
 } => {
   const diagnostics: Array<Diagnostic.Diagnostic> = []
-  const declarationSpan = name._tag === 'Present' ? name.token.span : node.span
+  const declarationSpan = context.spanOf(name._tag === 'Present' ? name.anchor : header.anchor)
   const spellingOf = name._tag === 'Present' ? name.spelling : '#foreign-static'
-  const abiToken = SyntaxTree.directToken(node, 'TextLiteral')
-  if (abiToken !== undefined) {
-    const abi = decodedText(source, abiToken)
-    if (abi !== 'C') diagnostics.push(Diagnostic.unsupportedForeignAbi(abi ?? '', abiToken.span))
-  }
-  const asIndex = node.children.findIndex(
-    (child) => SyntaxTree.isToken(child) && child.kind === 'AsKeyword',
-  )
-  const symbolToken = node.children
-    .slice(asIndex + 1)
-    .find(
-      (child): child is Token.Token => SyntaxTree.isToken(child) && child.kind === 'TextLiteral',
+  const linkage = header.linkage
+  const abi = literalText(context, linkage.abi)
+  if (linkage.abi._tag === 'TextLiteral' && abi !== 'C')
+    diagnostics.push(
+      Diagnostic.unsupportedForeignAbi(abi ?? '', context.spanOf(linkage.abi.anchor)),
     )
-  const renamed =
-    asIndex >= 0 && symbolToken !== undefined ? decodedText(source, symbolToken) : undefined
+  const renamed = linkage.symbol === undefined ? undefined : literalText(context, linkage.symbol)
   const symbol = renamed ?? spellingOf
   const symbolSpan =
-    renamed === undefined ? declarationSpan : (symbolToken?.span ?? declarationSpan)
+    renamed === undefined || linkage.symbol === undefined
+      ? declarationSpan
+      : context.spanOf(linkage.symbol.anchor)
   if (!ForeignSymbol.isValidSpelling(symbol))
     diagnostics.push(Diagnostic.invalidForeignSymbol(symbol, symbolSpan))
   else if (ForeignSymbol.isReserved(symbol))
@@ -3187,262 +3000,239 @@ const collectForeignStatic = (
   })
 }
 
-const collectModule = (
-  syntax: SyntaxFile.SyntaxFile,
-  declarations: ReadonlyArray<SyntaxTree.Node>,
-  imports: ModuleClosure.Module['imports'],
-): ModuleHeaders => {
-  const source = syntax.source
-  const nodes = declarations.filter(
-    (element): element is SyntaxTree.Node =>
-      SyntaxTree.isNode(element) &&
-      (element.kind === 'FunctionDeclaration' ||
-        element.kind === 'ForeignFunctionDeclaration' ||
-        element.kind === 'StructDeclaration' ||
-        element.kind === 'TupleDeclaration' ||
-        element.kind === 'EnumDeclaration' ||
-        element.kind === 'UnionDeclaration' ||
-        element.kind === 'ServiceDeclaration' ||
-        element.kind === 'InterfaceDeclaration' ||
-        element.kind === 'RoleDeclaration' ||
-        element.kind === 'ConstantDeclaration' ||
-        element.kind === 'PackageParameterDeclaration' ||
-        element.kind === 'ForeignStaticDeclaration' ||
-        element.kind === 'ExportStaticDeclaration' ||
-        element.kind === 'TypeAliasDeclaration'),
-  )
-  const first = new Map<string, { readonly id: CanonicalId; readonly token: Token.Token }>()
+/** The declaration kinds that occupy an ordinal in the module's own declaration sequence. */
+const isOwnDeclaration = (header: AuthoredHir.DeclarationHeader): boolean =>
+  header._tag === 'FunctionHeader' ||
+  header._tag === 'StructHeader' ||
+  header._tag === 'TupleHeader' ||
+  header._tag === 'EnumHeader' ||
+  header._tag === 'UnionHeader' ||
+  header._tag === 'ServiceHeader' ||
+  header._tag === 'InterfaceHeader' ||
+  header._tag === 'RoleHeader' ||
+  header._tag === 'ConstantHeader' ||
+  header._tag === 'PackageParameterHeader' ||
+  header._tag === 'StaticHeader' ||
+  header._tag === 'AliasHeader'
+
+/** The members an impl declaration owns, flattened through any nested conditional group. */
+const implMembers = (
+  declaration: AuthoredHir.Declaration,
+): ReadonlyArray<AuthoredHir.Declaration> =>
+  declaration.body._tag === 'MembersBody' ? declaration.body.members : Object.freeze([])
+
+/** A function header's linkage direction, which distinguishes `extern` from `export`. */
+const linkageDirection = (
+  header: AuthoredHir.DeclarationHeader,
+): 'Import' | 'Export' | undefined =>
+  'linkage' in header && header.linkage !== undefined ? header.linkage.direction : undefined
+
+const collectModule = (module: ModuleClosure.Module): ModuleHeaders => {
+  const context = SemanticContext.make(module.authored)
+  const lowered = module.authored
+  const moduleName = context.module.owner.module
+  const declarations = module.declarations
+  const own = declarations.filter((declaration) => isOwnDeclaration(declaration.header))
+  const first = new Map<string, { readonly id: CanonicalId; readonly anchor: AuthoredHir.Anchor }>()
   const diagnostics: Array<Diagnostic.Diagnostic> = []
-  const implNodes = declarations.filter(
-    (element): element is SyntaxTree.Node =>
-      SyntaxTree.isNode(element) && element.kind === 'ImplDeclaration',
+  const implDeclarations = declarations.filter(
+    (declaration) => declaration.header._tag === 'ImplHeader',
   )
-  const isConformanceImpl = (node: SyntaxTree.Node): boolean =>
-    SyntaxTree.directToken(node, 'ForKeyword') !== undefined
-  const conformances = implNodes.filter(isConformanceImpl).map((node, ordinal): ConformanceFact => {
-    const collected = collectTypeParameters(source, node, `impl#${ordinal}`)
-    diagnostics.push(...collected.diagnostics)
-    const selfType = Type.parameter({ module: source.id, name: `impl#${ordinal}` }, -1, 'Self')
-    const environment = new Map(collected.environment)
-    environment.set('Self', selfType)
-    const types = node.children.filter(isDeclaredTypeNode)
-    const capabilitySyntax = types.at(0)
-    const providerSyntax = types.at(1)
-    const capability =
-      capabilitySyntax === undefined
-        ? Object.freeze({ _tag: 'Unavailable' as const, syntax: node })
-        : analyzeDeclaredType(source, capabilitySyntax, environment).fact
-    const provider =
-      providerSyntax === undefined
-        ? Object.freeze({ _tag: 'Unavailable' as const, syntax: node })
-        : analyzeDeclaredType(source, providerSyntax, environment).fact
-    // A binder's bound is re-analyzed here rather than reused from the parameter collection,
-    // because a conditional requirement may name any binder the header declares — including the
-    // one it bounds — and only the completed environment can resolve those occurrences.
-    const requirements = collected.facts.flatMap(
-      (parameter): ReadonlyArray<ConformanceRequirementFact> => {
-        if (parameter.duplicateOf !== undefined) return []
-        const bounds: ReadonlyArray<ConformanceRequirementFact> = parameter.bounds.map((bound) =>
-          Object.freeze({
-            _tag: 'ConformanceRequirement' as const,
-            parameter: parameter.type,
-            spelling: bound.spelling,
-            capability: analyzeDeclaredType(source, bound.path.syntax, environment).fact,
-            syntax: bound.path.syntax,
-          }),
-        )
-        if (SyntaxTree.isAvailableSyntax(parameter.syntax)) return bounds
-        // Recovery can retain a binder while its missing bound has no identifier to collect.
-        // Keep that damaged header as an unavailable obligation, never as an unbounded witness.
+  const implHeaderOf = (declaration: AuthoredHir.Declaration) =>
+    declaration.header._tag === 'ImplHeader' ? declaration.header : undefined
+  const conformances = implDeclarations
+    .filter((declaration) => implHeaderOf(declaration)?.target !== undefined)
+    .map((declaration, ordinal): ConformanceFact => {
+      const header = implHeaderOf(declaration)
+      if (header === undefined) throw new RangeError('Conformance head lost its impl header')
+      const collected = collectTypeParameters(
+        context,
+        declaration,
+        header.generics,
+        `impl#${ordinal}`,
+      )
+      diagnostics.push(...collected.diagnostics)
+      const selfType = Type.parameter({ module: moduleName, name: `impl#${ordinal}` }, -1, 'Self')
+      const environment = new Map(collected.environment)
+      environment.set('Self', selfType)
+      const capability = analyzeDeclaredType(context, header.subject, environment).fact
+      const provider =
+        header.target === undefined
+          ? unavailable(header.anchor)
+          : analyzeDeclaredType(context, header.target, environment).fact
+      // A binder's bound is re-analyzed here rather than reused from the parameter collection,
+      // because a conditional requirement may name any binder the header declares — including the
+      // one it bounds — and only the completed environment can resolve those occurrences.
+      const requirements = collected.facts.flatMap(
+        (parameter): ReadonlyArray<ConformanceRequirementFact> => {
+          if (parameter.duplicateOf !== undefined) return []
+          return parameter.bounds.flatMap((bound) => {
+            const application = bound._tag === 'UnresolvedBound' ? bound.application : undefined
+            if (application === undefined) return []
+            return Object.freeze({
+              _tag: 'ConformanceRequirement' as const,
+              parameter: parameter.type,
+              spelling: bound.spelling,
+              capability: application,
+              anchor: bound.path.anchor,
+            })
+          })
+        },
+      )
+      const members = implMembers(declaration)
+      const mappedOperations = members.flatMap((member) => {
+        if (member.header._tag !== 'ImplAliasHeader') return []
+        const path = typePathOf(context, member.header.target)
         return [
-          ...bounds,
           Object.freeze({
-            _tag: 'ConformanceRequirement' as const,
-            parameter: parameter.type,
-            spelling: Type.encode(parameter.type),
-            capability: Object.freeze({ _tag: 'Unavailable' as const, syntax: parameter.syntax }),
-            syntax: parameter.syntax,
+            name: declaredName(context, member.header.name),
+            target:
+              path ?? Object.freeze({ _tag: 'Unavailable' as const, anchor: member.header.anchor }),
+            form: 'Mapped' as const,
+            anchor: member.header.anchor,
           }),
         ]
-      },
-    )
-    const mappedOperations = SyntaxTree.directNodes(node, 'ImplOperation').map((operation) => {
-      const name = presentName(source, operation)
-      const targetSyntax = SyntaxTree.directNode(operation, 'TypePath')
-      const target =
-        targetSyntax === undefined
-          ? Object.freeze({ _tag: 'Unavailable' as const, syntax: operation })
-          : (() => {
-              const tokens = SyntaxTree.tokens(targetSyntax).filter(
-                (token) => token.kind === 'Identifier',
-              )
-              return tokens.length === 0
-                ? Object.freeze({ _tag: 'Unavailable' as const, syntax: targetSyntax })
-                : Object.freeze({
-                    _tag: 'TypePath' as const,
-                    spelling: tokens.map((token) => spelling(source, token)).join('.'),
-                    segments: Object.freeze(
-                      tokens.map((token) =>
-                        Object.freeze({ spelling: spelling(source, token), token }),
-                      ),
-                    ),
-                    syntax: targetSyntax,
-                  })
-            })()
-      return Object.freeze({ name, target, form: 'Mapped' as const, syntax: operation })
-    })
-    const inlineOperations = SyntaxTree.directNodes(node, 'FunctionDeclaration').flatMap(
-      (operation): ReadonlyArray<ConformanceFact['operations'][number]> => {
-        if (SyntaxTree.directToken(operation, 'DropKeyword') !== undefined) return []
-        const name = presentName(source, operation)
-        const providerToken = providerSyntax
-          ? SyntaxTree.tokens(providerSyntax).find((token) => token.kind === 'Identifier')
-          : undefined
-        if (name._tag !== 'Present' || providerToken === undefined)
-          return Object.freeze([
+      })
+      const providerSegment =
+        header.target === undefined ? undefined : firstSegment(context, header.target)
+      const inlineOperations = members.flatMap(
+        (member): ReadonlyArray<ConformanceFact['operations'][number]> => {
+          if (member.header._tag !== 'FunctionHeader') return []
+          if (isDropHook(context, member.header)) return []
+          const name = declaredName(context, member.header.name)
+          if (name._tag !== 'Present' || providerSegment === undefined)
+            return [
+              Object.freeze({
+                name,
+                target: Object.freeze({
+                  _tag: 'Unavailable' as const,
+                  anchor: member.header.anchor,
+                }),
+                form: 'Inline' as const,
+                anchor: member.header.anchor,
+              }),
+            ]
+          const targetName = `impl@${ordinal}.${name.spelling}`
+          return [
             Object.freeze({
               name,
-              target: Object.freeze({ _tag: 'Unavailable' as const, syntax: operation }),
+              target: Object.freeze({
+                _tag: 'TypePath' as const,
+                spelling: `${providerSegment.spelling}.${targetName}`,
+                segments: Object.freeze([
+                  Object.freeze({
+                    spelling: providerSegment.spelling,
+                    anchor: providerSegment.anchor,
+                  }),
+                  Object.freeze({ spelling: targetName, anchor: name.anchor }),
+                ]),
+                anchor: member.header.anchor,
+              }),
               form: 'Inline' as const,
-              syntax: operation,
+              anchor: member.header.anchor,
             }),
-          ])
-        const targetName = `impl@${ordinal}.${name.spelling}`
-        return Object.freeze([
-          Object.freeze({
-            name,
-            target: Object.freeze({
-              _tag: 'TypePath' as const,
-              spelling: `${spelling(source, providerToken)}.${targetName}`,
-              segments: Object.freeze([
-                Object.freeze({
-                  spelling: spelling(source, providerToken),
-                  token: providerToken,
+          ]
+        },
+      )
+      const hookDeclaration = members.find(
+        (member) => member.header._tag === 'FunctionHeader' && isDropHook(context, member.header),
+      )
+      const hook =
+        hookDeclaration === undefined || hookDeclaration.header._tag !== 'FunctionHeader'
+          ? undefined
+          : (() => {
+              const hookHeader = hookDeclaration.header
+              const hookLifetimes = DeclarationLifetime.forHeader(
+                context,
+                { module: moduleName, name: `drop@impl#${ordinal}` },
+                hookDeclaration,
+                environment,
+              )
+              const parameter = hookHeader.contract.parameters.at(0)
+              const failure = collectFailureRow(
+                context,
+                hookHeader.contract.failures,
+                environment,
+                hookLifetimes,
+              )
+              const requirementRow = collectRequirementRow(
+                context,
+                hookHeader.contract.requirements,
+                environment,
+                hookLifetimes,
+              )
+              diagnostics.push(...failure.diagnostics, ...requirementRow.diagnostics)
+              return Object.freeze({
+                _tag: 'DropHookDeclaration' as const,
+                name: Object.freeze({
+                  _tag: 'Present' as const,
+                  spelling: 'drop',
+                  anchor: hookHeader.name.anchor,
                 }),
-                Object.freeze({ spelling: targetName, token: name.token }),
-              ]),
-              syntax: operation,
-            }),
-            form: 'Inline' as const,
-            syntax: operation,
-          }),
-        ])
-      },
-    )
-    const hookSyntax = SyntaxTree.directNodes(node, 'FunctionDeclaration').find(
-      (operation) => SyntaxTree.directToken(operation, 'DropKeyword') !== undefined,
-    )
-    const hook =
-      hookSyntax === undefined
-        ? undefined
-        : (() => {
-            const hookLifetimes = DeclarationLifetime.forHeader(
-              source,
-              { module: source.id, name: `drop@impl#${ordinal}` },
-              hookSyntax,
-              environment,
-            )
-            const parameterList = SyntaxTree.directNode(hookSyntax, 'ParameterList')
-            const parameters =
-              parameterList === undefined
-                ? []
-                : SyntaxTree.directNodes(parameterList, 'ParameterDeclaration')
-            const parameter = parameters.at(0)
-            const parameterTypeSyntax =
-              parameter === undefined
-                ? undefined
-                : parameter.children.find((element): element is SyntaxTree.Node =>
-                    isDeclaredTypeNode(element),
-                  )
-            const returnSyntax = SyntaxTree.directNode(hookSyntax, 'ReturnType')
-            const returnTypeSyntax = returnSyntax?.children.find(
-              (element): element is SyntaxTree.Node => isDeclaredTypeNode(element),
-            )
-            const failure = collectFailureRow(source, hookSyntax, environment)
-            const requirements = collectRequirementRow(source, hookSyntax, environment)
-            const hookNameToken = SyntaxTree.directToken(hookSyntax, 'DropKeyword')
-            diagnostics.push(...failure.diagnostics, ...requirements.diagnostics)
-            return Object.freeze({
-              _tag: 'DropHookDeclaration' as const,
-              name:
-                hookNameToken === undefined
-                  ? presentName(source, hookSyntax)
-                  : Object.freeze({
-                      _tag: 'Present' as const,
-                      spelling: 'drop',
-                      token: hookNameToken,
-                    }),
-              functionKind:
-                SyntaxTree.directToken(hookSyntax, 'EffectKeyword') === undefined
-                  ? ('Ordinary' as const)
-                  : ('Effect' as const),
-              typeParameterCount:
-                SyntaxTree.directNode(hookSyntax, 'TypeParameterList') === undefined
-                  ? 0
-                  : SyntaxTree.directNodes(
-                      childNode(hookSyntax, 'TypeParameterList'),
-                      'TypeParameter',
-                    ).length,
-              parameterCount: parameters.length,
-              parameterName:
-                parameter === undefined
-                  ? Object.freeze({ _tag: 'Unavailable' as const, syntax: hookSyntax })
-                  : presentName(source, parameter),
-              parameterType:
-                parameterTypeSyntax === undefined
-                  ? Object.freeze({
-                      _tag: 'Unavailable' as const,
-                      syntax: parameter ?? hookSyntax,
-                    })
-                  : analyzeDeclaredType(
-                      source,
-                      parameterTypeSyntax,
-                      environment,
-                      false,
-                      hookLifetimes,
-                    ).fact,
-              returnType:
-                returnTypeSyntax === undefined
-                  ? Object.freeze({
-                      _tag: 'Unavailable' as const,
-                      syntax: returnSyntax ?? hookSyntax,
-                    })
-                  : analyzeDeclaredType(source, returnTypeSyntax, environment, false, hookLifetimes)
-                      .fact,
-              failureRow: failure.fact,
-              requirementRow: requirements.fact,
-              syntax: hookSyntax,
-            })
-          })()
-    return Object.freeze({
-      _tag: 'ConformanceDeclaration',
-      lifetimeElaboration: collected.lifetimeContext,
-      module: source.id,
-      ordinal,
-      self: selfType,
-      typeParameters: collected.facts,
-      requirements: Object.freeze(requirements),
-      capability,
-      provider,
-      visibility: 'Public',
-      operations: Object.freeze([...mappedOperations, ...inlineOperations]),
-      ...(hook === undefined ? {} : { hook }),
-      // Coherence and termination are program-wide questions, so both stay unanswered until
-      // every module's headers have resolved.
-      coherence: Object.freeze({ _tag: 'Coherent' as const }),
-      termination: Object.freeze({ _tag: 'UnavailableTermination' as const }),
-      validity: Object.freeze({ _tag: 'UncheckedConformance' as const }),
-      syntax: node,
+                functionKind: hookHeader.contract.effect
+                  ? ('Effect' as const)
+                  : ('Ordinary' as const),
+                typeParameterCount: hookHeader.contract.generics.length,
+                parameterCount: hookHeader.contract.parameters.length,
+                parameterName:
+                  parameter === undefined
+                    ? Object.freeze({ _tag: 'Unavailable' as const, anchor: hookHeader.anchor })
+                    : declaredName(context, parameter.name),
+                parameterType:
+                  parameter === undefined
+                    ? unavailable(hookHeader.anchor)
+                    : analyzeDeclaredType(
+                        context,
+                        parameter.type,
+                        environment,
+                        false,
+                        hookLifetimes,
+                      ).fact,
+                returnType:
+                  hookHeader.contract.result === undefined
+                    ? unavailable(hookHeader.anchor)
+                    : analyzeDeclaredType(
+                        context,
+                        hookHeader.contract.result,
+                        environment,
+                        false,
+                        hookLifetimes,
+                      ).fact,
+                failureRow: failure.fact,
+                requirementRow: requirementRow.fact,
+                anchor: hookHeader.anchor,
+              })
+            })()
+      return Object.freeze({
+        _tag: 'ConformanceDeclaration',
+        lifetimeElaboration: collected.lifetimeContext,
+        module: moduleName,
+        ordinal,
+        self: selfType,
+        typeParameters: collected.facts,
+        requirements: Object.freeze(requirements),
+        capability,
+        provider,
+        visibility: 'Public',
+        operations: Object.freeze([...mappedOperations, ...inlineOperations]),
+        ...(hook === undefined ? {} : { hook }),
+        // Coherence and termination are program-wide questions, so both stay unanswered until
+        // every module's headers have resolved.
+        coherence: Object.freeze({ _tag: 'Coherent' as const }),
+        termination: Object.freeze({ _tag: 'UnavailableTermination' as const }),
+        validity: Object.freeze({ _tag: 'UncheckedConformance' as const }),
+        anchor: header.anchor,
+      })
     })
-  })
-  let nestedDeclarationOrdinal = nodes.length
-  const ownMembers = nodes.map((node, ordinal): MemberFact => {
+  let nestedDeclarationOrdinal = own.length
+  const ownMembers = own.map((declaration, ordinal): MemberFact => {
+    const header = declaration.header
     const id: DeclarationId = Object.freeze({
       _tag: 'DeclarationId',
-      sourceId: source.id,
+      sourceId: moduleName,
       ordinal,
     })
-    const name = presentName(source, node)
+    const name = headerName(context, header)
     let canonical: CanonicalState
     if (name._tag !== 'Present') canonical = Object.freeze({ _tag: 'Unidentified' })
     else {
@@ -3450,16 +3240,16 @@ const collectModule = (
       if (original === undefined) {
         const canonicalId: CanonicalId = Object.freeze({
           _tag: 'CanonicalDeclarationId',
-          module: source.id,
+          module: moduleName,
           name: name.spelling,
         })
-        first.set(name.spelling, Object.freeze({ id: canonicalId, token: name.token }))
+        first.set(name.spelling, Object.freeze({ id: canonicalId, anchor: name.anchor }))
         canonical = Object.freeze({ _tag: 'Canonical', id: canonicalId })
       } else {
         const diagnostic = Diagnostic.duplicateDeclarationName(
           name.spelling,
-          original.token.span,
-          name.token.span,
+          context.spanOf(original.anchor),
+          context.spanOf(name.anchor),
         )
         diagnostics.push(diagnostic)
         canonical = Object.freeze({
@@ -3470,25 +3260,22 @@ const collectModule = (
       }
     }
     const visibility: 'Private' | 'Public' =
-      SyntaxTree.directToken(node, 'PubKeyword') === undefined ? 'Private' : 'Public'
+      'public' in header && header.public ? 'Public' : 'Private'
+    const generics = headerGenerics(header)
     const typeParameters = collectTypeParameters(
-      source,
-      node,
+      context,
+      declaration,
+      generics,
       name._tag === 'Present' ? name.spelling : `#${ordinal}`,
     )
     diagnostics.push(...typeParameters.diagnostics)
-    if (node.kind === 'TypeAliasDeclaration') {
-      const parameterList = SyntaxTree.directNode(node, 'TypeParameterList')
-      const targetSyntax = node.children.find(isDeclaredTypeNode)
+    if (header._tag === 'AliasHeader') {
       // A parameterized alias is rejected as a whole, so its target is never analyzed: analyzing
       // it would only report the parameters it names as unknown types on top of the rejection.
-      const target =
-        parameterList !== undefined || targetSyntax === undefined
-          ? Object.freeze({
-              fact: Object.freeze({ _tag: 'Unavailable' as const, syntax: node }),
-              diagnostics: Object.freeze([]),
-            })
-          : analyzeDeclaredType(source, targetSyntax)
+      const parameterized = header.generics.length > 0
+      const target = parameterized
+        ? unavailableResolution(header.anchor)
+        : analyzeDeclaredType(context, header.target)
       diagnostics.push(...target.diagnostics)
       return Object.freeze({
         _tag: 'AliasDeclaration',
@@ -3498,22 +3285,20 @@ const collectModule = (
         typeParameters: Object.freeze([]),
         name,
         target: target.fact,
-        ...(parameterList === undefined ? {} : { parameterList }),
-        syntax: node,
+        ...(parameterized ? { parameterList: header.generics[0]?.anchor ?? header.anchor } : {}),
+        anchor: header.anchor,
       })
     }
-    if (node.kind === 'ConstantDeclaration' || node.kind === 'PackageParameterDeclaration') {
-      const initializer =
-        node.children.find(
-          (element): element is SyntaxTree.Node =>
-            SyntaxTree.isNode(element) &&
-            element.kind !== 'PackageParameterValidation' &&
-            !isDeclaredTypeNode(element),
-        ) ?? node
-      const declaredType = analyzeDeclaredType(source, declaredTypeNode(node))
+    if (header._tag === 'ConstantHeader' || header._tag === 'PackageParameterHeader') {
+      const declaredType =
+        header.type === undefined
+          ? unavailableResolution(header.anchor)
+          : analyzeDeclaredType(context, header.type)
       diagnostics.push(...declaredType.diagnostics)
-      const validation = SyntaxTree.directNode(node, 'PackageParameterValidation')
-      const predicate = validation?.children.find(SyntaxTree.isNode)
+      const body = declaration.body
+      const initializer = declaredInitializer(body)
+      const predicate = body._tag === 'PackageParameterBody' ? body.validation : undefined
+      const initializerExpression = initializer ?? missingExpression(header.anchor)
       const base = {
         id,
         canonical,
@@ -3521,33 +3306,34 @@ const collectModule = (
         typeParameters: Object.freeze([]),
         name,
         declaredType: declaredType.fact,
-        initializerTemplate: staticExpressionTemplate(source, initializer),
+        initializerTemplate: staticExpressionTemplate(lowered, declaration, initializerExpression),
         literal:
-          node.kind === 'PackageParameterDeclaration'
-            ? Object.freeze({ _tag: 'Unavailable' as const, syntax: initializer })
-            : constantLiteral(source, initializer),
-        initializer,
-        syntax: node,
+          header._tag === 'PackageParameterHeader'
+            ? Object.freeze({ _tag: 'Unavailable' as const, anchor: initializerExpression.anchor })
+            : constantLiteral(context, initializerExpression),
+        initializer: initializerExpression,
+        anchor: header.anchor,
       }
-      return node.kind === 'PackageParameterDeclaration'
+      return header._tag === 'PackageParameterHeader'
         ? Object.freeze({
             ...base,
             _tag: 'PackageParameterDeclaration',
-            hasDefault: SyntaxTree.directToken(node, 'Equals') !== undefined,
+            hasDefault: initializer !== undefined,
             ...(predicate === undefined
               ? {}
-              : { predicate, predicateTemplate: staticExpressionTemplate(source, predicate) }),
+              : {
+                  predicate,
+                  predicateTemplate: staticExpressionTemplate(lowered, declaration, predicate),
+                }),
           })
         : Object.freeze({ ...base, _tag: 'ConstantDeclaration' })
     }
-    if (node.kind === 'ForeignStaticDeclaration' || node.kind === 'ExportStaticDeclaration') {
-      const declaredType = analyzeDeclaredType(source, declaredTypeNode(node))
-      const foreign = collectForeignStatic(source, node, name)
+    if (header._tag === 'StaticHeader') {
+      const declaredType = analyzeDeclaredType(context, header.type)
+      const foreign = collectForeignStatic(context, header, name)
       diagnostics.push(...declaredType.diagnostics, ...foreign.diagnostics)
-      const initializer = node.children.find(
-        (element): element is SyntaxTree.Node =>
-          SyntaxTree.isNode(element) && !isDeclaredTypeNode(element),
-      )
+      const initializer =
+        declaration.body._tag === 'InitializerBody' ? declaration.body.value : undefined
       return Object.freeze({
         _tag: 'ForeignStaticDeclaration',
         id,
@@ -3555,20 +3341,20 @@ const collectModule = (
         visibility: 'Private',
         typeParameters: Object.freeze([]),
         name,
-        direction: node.kind === 'ForeignStaticDeclaration' ? 'Import' : 'Export',
+        direction: header.linkage.direction,
         foreign: foreign.fact,
         declaredType: declaredType.fact,
         ...(initializer === undefined
           ? {}
           : {
-              initializerTemplate: staticExpressionTemplate(source, initializer),
-              literal: constantLiteral(source, initializer),
+              initializerTemplate: staticExpressionTemplate(lowered, declaration, initializer),
+              literal: constantLiteral(context, initializer),
               initializer,
             }),
-        syntax: node,
+        anchor: header.anchor,
       })
     }
-    if (node.kind === 'RoleDeclaration') {
+    if (header._tag === 'RoleHeader')
       return Object.freeze({
         _tag: 'RoleDeclaration',
         id,
@@ -3576,15 +3362,15 @@ const collectModule = (
         visibility,
         typeParameters: Object.freeze([]),
         name,
-        syntax: node,
+        anchor: header.anchor,
       })
-    }
-    if (node.kind === 'EnumDeclaration')
-      return collectEnum(source, node, id, canonical, visibility, name, diagnostics)
-    if (node.kind === 'UnionDeclaration')
+    if (header._tag === 'EnumHeader')
+      return collectEnum(context, declaration, header, id, canonical, visibility, name, diagnostics)
+    if (header._tag === 'UnionHeader')
       return collectUnion(
-        source,
-        node,
+        context,
+        declaration,
+        header,
         id,
         canonical,
         visibility,
@@ -3592,13 +3378,12 @@ const collectModule = (
         typeParameters,
         diagnostics,
       )
-    if (node.kind === 'StructDeclaration') {
-      const layout = collectStructLayout(source, node)
+    if (header._tag === 'StructHeader') {
+      const layout = collectStructLayout(context, header)
       const collected = collectFields(
-        source,
-        node,
+        context,
+        header.fields,
         Object.freeze({ _tag: 'StructFieldOwnerId', declaration: id }),
-        'StructField',
         typeParameters.environment,
         typeParameters.lifetimeContext,
       )
@@ -3613,18 +3398,18 @@ const collectModule = (
         typeParameters: typeParameters.facts,
         name,
         ...(name._tag === 'Present'
-          ? { identity: AggregateIdentity.source(source.id, name.spelling, 'Named') }
+          ? { identity: AggregateIdentity.source(moduleName, name.spelling, 'Named') }
           : {}),
         aggregateKind: 'Named',
         fields: collected.fields,
         dependency: Object.freeze({ _tag: 'Available', types: Object.freeze([]) }),
-        syntax: node,
+        anchor: header.anchor,
       })
     }
-    if (node.kind === 'TupleDeclaration') {
+    if (header._tag === 'TupleHeader') {
       const collected = collectPositionalFields(
-        source,
-        node,
+        context,
+        header.elements,
         Object.freeze({ _tag: 'StructFieldOwnerId', declaration: id }),
         typeParameters.environment,
         typeParameters.lifetimeContext,
@@ -3640,38 +3425,38 @@ const collectModule = (
         typeParameters: typeParameters.facts,
         name,
         ...(name._tag === 'Present'
-          ? { identity: AggregateIdentity.source(source.id, name.spelling, 'Positional') }
+          ? { identity: AggregateIdentity.source(moduleName, name.spelling, 'Positional') }
           : {}),
         aggregateKind: 'Positional',
         fields: collected.fields,
         dependency: Object.freeze({ _tag: 'Available', types: Object.freeze([]) }),
-        syntax: node,
+        anchor: header.anchor,
       })
     }
-    if (node.kind === 'ServiceDeclaration' || node.kind === 'InterfaceDeclaration') {
-      const selfType = Type.parameter(
-        {
-          module: source.id,
-          name: name._tag === 'Present' ? name.spelling : `#${ordinal}`,
-        },
-        -1,
-        'Self',
-      )
+    if (header._tag === 'ServiceHeader' || header._tag === 'InterfaceHeader') {
+      const ownerName = name._tag === 'Present' ? name.spelling : `#${ordinal}`
+      const selfType = Type.parameter({ module: moduleName, name: ownerName }, -1, 'Self')
       const contractEnvironment = new Map(typeParameters.environment)
       contractEnvironment.set('Self', selfType)
       const operationFirst = new Map<
         string,
-        { readonly id: ServiceOperationId; readonly token: Token.Token }
+        { readonly id: ServiceOperationId; readonly anchor: AuthoredHir.Anchor }
       >()
-      const operations = SyntaxTree.directNodes(node, 'ServiceOperation').map(
+      const operationDeclarations = implMembers(declaration).filter(
+        (member) => member.header._tag === 'OperationHeader',
+      )
+      const operations = operationDeclarations.map(
         (operation, operationOrdinal): ServiceOperationFact => {
+          const operationHeader = operation.header
+          if (operationHeader._tag !== 'OperationHeader')
+            throw new RangeError('Service operation lost its operation header')
           const operationId: DeclarationId = Object.freeze({
             _tag: 'DeclarationId',
-            sourceId: source.id,
+            sourceId: moduleName,
             ordinal: nestedDeclarationOrdinal,
           })
           nestedDeclarationOrdinal += 1
-          const operationName = presentName(source, operation)
+          const operationName = declaredName(context, operationHeader.name)
           let operationState: ServiceOperationState
           if (operationName._tag !== 'Present') {
             operationState = Object.freeze({ _tag: 'Unidentified' })
@@ -3685,14 +3470,14 @@ const collectModule = (
               })
               operationFirst.set(
                 operationName.spelling,
-                Object.freeze({ id: serviceOperationId, token: operationName.token }),
+                Object.freeze({ id: serviceOperationId, anchor: operationName.anchor }),
               )
               operationState = Object.freeze({ _tag: 'Unique', id: serviceOperationId })
             } else {
               const diagnostic = Diagnostic.duplicateDeclarationName(
                 operationName.spelling,
-                original.token.span,
-                operationName.token.span,
+                context.spanOf(original.anchor),
+                context.spanOf(operationName.anchor),
               )
               diagnostics.push(diagnostic)
               operationState = Object.freeze({
@@ -3703,9 +3488,10 @@ const collectModule = (
             }
           }
           const operationTypeParameters = collectTypeParameters(
-            source,
+            context,
             operation,
-            `${name._tag === 'Present' ? name.spelling : `#${ordinal}`}.$${operationOrdinal}`,
+            operationHeader.contract.generics,
+            `${ownerName}.$${operationOrdinal}`,
             typeParameters.facts.length,
             typeParameters.facts,
           )
@@ -3714,11 +3500,10 @@ const collectModule = (
             ...contractEnvironment,
             ...operationTypeParameters.environment,
           ])
-          const parameterList = childNode(operation, 'ParameterList')
-          const parameters = SyntaxTree.directNodes(parameterList, 'ParameterDeclaration').map(
+          const parameters = operationHeader.contract.parameters.map(
             (parameter, parameterOrdinal) =>
               analyzeParameter(
-                source,
+                context,
                 parameter,
                 operationId,
                 parameterOrdinal,
@@ -3726,79 +3511,68 @@ const collectModule = (
                 operationTypeParameters.lifetimeContext,
               ),
           )
-          const returnSyntax = SyntaxTree.directNode(operation, 'ReturnType')
+          const result = operationHeader.contract.result
           const returnType: {
             readonly fact: ReturnTypeFact
             readonly opaqueResult?: OpaqueResultFact
             readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
           } =
-            returnSyntax === undefined
-              ? (() => {
-                  const token = SyntaxTree.directToken(parameterList, 'RightParenthesis')
-                  if (token === undefined)
-                    return Object.freeze({
-                      fact: Object.freeze({
-                        _tag: 'Unavailable' as const,
-                        syntax: parameterList,
-                      }),
-                      diagnostics: Object.freeze<ReadonlyArray<Diagnostic.Diagnostic>>([]),
-                    })
-                  return Object.freeze({
-                    fact: Object.freeze({
-                      _tag: 'Resolved' as const,
-                      type: Type.unit,
-                      spelling: '()',
-                      token,
-                      syntax: parameterList,
-                    }),
-                    diagnostics: Object.freeze<ReadonlyArray<Diagnostic.Diagnostic>>([]),
-                  })
-                })()
+            result === undefined
+              ? Object.freeze({
+                  fact: Object.freeze({
+                    _tag: 'Resolved' as const,
+                    type: Type.unit,
+                    spelling: '()',
+                    anchor: operationHeader.contract.anchor,
+                  }),
+                  diagnostics: noDiagnostics,
+                })
               : collectReturnType(
-                  source,
-                  returnSyntax,
-                  `${name._tag === 'Present' ? name.spelling : `#${ordinal}`}.$${operationOrdinal}`,
+                  context,
+                  operation,
+                  result,
+                  `${ownerName}.$${operationOrdinal}`,
                   [...typeParameters.facts, ...operationTypeParameters.facts],
                   contractEnvironment,
                   operationTypeParameters.lifetimeContext,
                 )
           const failureRow = collectFailureRow(
-            source,
-            operation,
+            context,
+            operationHeader.contract.failures,
             environment,
             operationTypeParameters.lifetimeContext,
           )
           const requirementRow = collectRequirementRow(
-            source,
-            operation,
+            context,
+            operationHeader.contract.requirements,
             environment,
             operationTypeParameters.lifetimeContext,
           )
-          const constraints = collectConstraints(source, operation, environment)
-          const body = SyntaxTree.directNode(operation, 'Block')
+          const constraints = collectConstraints(
+            context,
+            operationHeader.contract.constraints,
+            environment,
+          )
           const parameterFacts = Object.freeze(parameters.map((parameter) => parameter.fact))
-          const functionKind =
-            SyntaxTree.directToken(operation, 'EffectKeyword') === undefined
-              ? ('Ordinary' as const)
-              : ('Effect' as const)
-          const propertyClauses = DeclarationProperty.clauses(operation)
-          const validNonParking = propertyClauses.filter((clause) => {
-            const owner = DeclarationProperty.owner(source, clause)
-            const arguments_ = SyntaxTree.directNodes(clause, 'FunctionProperty')
+          const functionKind = operationHeader.contract.effect
+            ? ('Effect' as const)
+            : ('Ordinary' as const)
+          const validNonParking = operationHeader.properties.filter((clause) => {
+            const owner = DeclarationProperty.authoredOwner(context, clause)
             if (owner !== 'Intrinsic.nonParking') {
               diagnostics.push(
                 Diagnostic.invalidServiceDeclaration(
                   `unsupported operation property ${owner || '<missing>'}`,
-                  clause.span,
+                  context.spanOf(clause.anchor),
                 ),
               )
               return false
             }
-            if (arguments_.length > 0) {
+            if (clause.properties.length > 0) {
               diagnostics.push(
                 Diagnostic.invalidServiceDeclaration(
                   'Intrinsic.nonParking takes no arguments on an operation',
-                  clause.span,
+                  context.spanOf(clause.anchor),
                 ),
               )
               return false
@@ -3807,76 +3581,74 @@ const collectModule = (
               diagnostics.push(
                 Diagnostic.invalidServiceDeclaration(
                   'Intrinsic.nonParking applies only to effect operations',
-                  clause.span,
+                  context.spanOf(clause.anchor),
                 ),
               )
               return false
             }
             return true
           })
-          if (validNonParking.length > 1)
-            for (const duplicate of validNonParking.slice(1))
-              diagnostics.push(
-                Diagnostic.invalidServiceDeclaration(
-                  'duplicate Intrinsic.nonParking operation property',
-                  duplicate.span,
-                ),
-              )
+          for (const duplicate of validNonParking.slice(1))
+            diagnostics.push(
+              Diagnostic.invalidServiceDeclaration(
+                'duplicate Intrinsic.nonParking operation property',
+                context.spanOf(duplicate.anchor),
+              ),
+            )
           const staticProperties: ReadonlyArray<Type.SealedStaticProperty> =
             validNonParking.length === 0
               ? Object.freeze([])
               : Object.freeze(['Intrinsic.NonParking'])
-          const operatorSyntax = SyntaxTree.directNode(operation, 'OperatorMarker')
-          const operatorToken = operatorSyntax?.children.find(
-            (element): element is Token.Token =>
-              SyntaxTree.isToken(element) && Operator.isDeclarationToken(element.kind),
-          )
+          const operatorName = operationHeader.operator
+          const operatorSpelling =
+            operatorName === undefined ? undefined : nameText(context, operatorName)
           const selectedOperator =
-            operatorToken === undefined
+            operatorSpelling === undefined
               ? undefined
-              : Operator.declaration(operatorToken.kind, parameterFacts.length)
+              : eligibleOperator(operatorSpelling, parameterFacts.length)
           diagnostics.push(
             ...parameters.flatMap((parameter) => parameter.diagnostics),
-            ...duplicateParameterDiagnostics(parameterFacts),
+            ...duplicateParameterDiagnostics(context, parameterFacts),
             ...returnType.diagnostics,
             ...failureRow.diagnostics,
             ...requirementRow.diagnostics,
             ...constraints.diagnostics,
           )
-          if (operatorSyntax !== undefined) {
+          if (operatorName !== undefined) {
             let detail: string | undefined
-            if (node.kind !== 'InterfaceDeclaration') {
+            if (header._tag !== 'InterfaceHeader') {
               detail = 'only interface operations may declare an operator'
             } else if (
               operationTypeParameters.facts.some((parameter) => parameter.type.kind !== 'Lifetime')
             ) {
               detail = 'operator operations cannot declare operation-local value or row parameters'
             } else if (selectedOperator === undefined) {
-              detail = `${operatorToken === undefined ? 'the marker' : Token.describe(operatorToken.kind)} is not an eligible ${parameterFacts.length}-operand operator`
+              detail = `${operatorSpelling ?? 'the marker'} is not an eligible ${parameterFacts.length}-operand operator`
             } else {
               detail = undefined
             }
             if (detail !== undefined)
-              diagnostics.push(Diagnostic.invalidOperatorContract(detail, operatorSyntax.span))
+              diagnostics.push(
+                Diagnostic.invalidOperatorContract(detail, context.spanOf(operatorName.anchor)),
+              )
           }
-          if (body !== undefined)
+          if (operation.body._tag === 'CallableBody' && operation.body.block !== undefined)
             diagnostics.push(
               Diagnostic.invalidServiceDeclaration(
                 'service operations declare contracts and cannot contain bodies',
-                body.span,
+                context.spanOf(operation.body.block.anchor),
               ),
             )
-          if (
-            SyntaxTree.directToken(operation, 'EffectKeyword') === undefined &&
-            failureRow.fact.syntax !== undefined
-          )
-            diagnostics.push(Diagnostic.failureChannelOnOrdinary(failureRow.fact.syntax.span))
+          if (!operationHeader.contract.effect && failureRow.fact.anchor !== undefined)
+            diagnostics.push(
+              Diagnostic.failureChannelOnOrdinary(context.spanOf(failureRow.fact.anchor)),
+            )
           return Object.freeze({
             _tag: 'ServiceOperation',
             id: operationId,
             state: operationState,
             functionKind,
-            unsafe: SyntaxTree.directToken(operation, 'UnsafeKeyword') !== undefined,
+            unsafe: operationHeader.contract.unsafe,
             staticProperties,
             typeParameters: operationTypeParameters.facts,
             lifetimeElaboration: Object.freeze({
@@ -3888,16 +3660,14 @@ const collectModule = (
             }),
             parameterCount: parameterFacts.length,
             parameters: parameterFacts,
-            ...(operatorSyntax !== undefined &&
-            operatorToken !== undefined &&
+            ...(operatorName !== undefined &&
             selectedOperator !== undefined &&
-            node.kind === 'InterfaceDeclaration' &&
+            header._tag === 'InterfaceHeader' &&
             operationTypeParameters.facts.every((parameter) => parameter.type.kind === 'Lifetime')
               ? {
                   operator: Object.freeze({
                     operator: selectedOperator,
-                    token: operatorToken,
-                    syntax: operatorSyntax,
+                    anchor: operatorName.anchor,
                   }),
                 }
               : {}),
@@ -3910,7 +3680,7 @@ const collectModule = (
             requirementRow: requirementRow.fact,
             constraints: constraints.facts,
             constraintContracts: Object.freeze([]),
-            syntax: operation,
+            anchor: operationHeader.anchor,
           })
         },
       )
@@ -3922,10 +3692,10 @@ const collectModule = (
         typeParameters: typeParameters.facts,
         name,
         operations: Object.freeze(operations),
-        syntax: node,
+        anchor: header.anchor,
       }
       const contract =
-        node.kind === 'InterfaceDeclaration'
+        header._tag === 'InterfaceHeader'
           ? Object.freeze({
               _tag: 'InterfaceDeclaration' as const,
               dependencyEligible: false as const,
@@ -3941,71 +3711,62 @@ const collectModule = (
         operationContracts: interfaceOperationContracts(contract, operations),
       })
     }
-    const parameterList = childNode(node, 'ParameterList')
-    const parameters = SyntaxTree.directNodes(parameterList, 'ParameterDeclaration').map(
-      (parameter, parameterOrdinal) =>
-        analyzeParameter(
-          source,
-          parameter,
-          id,
-          parameterOrdinal,
-          typeParameters.environment,
-          typeParameters.lifetimeContext,
-        ),
+    if (header._tag !== 'FunctionHeader')
+      throw new RangeError(`Declaration collection reached an unexpected header ${header._tag}`)
+    const contract = header.contract
+    const parameters = contract.parameters.map((parameter, parameterOrdinal) =>
+      analyzeParameter(
+        context,
+        parameter,
+        id,
+        parameterOrdinal,
+        typeParameters.environment,
+        typeParameters.lifetimeContext,
+      ),
     )
-    const returnSyntax = SyntaxTree.directNode(node, 'ReturnType')
     const returnType: {
       readonly fact: ReturnTypeFact
       readonly opaqueResult?: OpaqueResultFact
       readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
     } =
-      returnSyntax === undefined
-        ? (() => {
-            const parameterList = childNode(node, 'ParameterList')
-            const token = SyntaxTree.directToken(parameterList, 'RightParenthesis')
-            if (token === undefined)
-              return Object.freeze({
-                fact: Object.freeze({
-                  _tag: 'Unavailable' as const,
-                  syntax: parameterList,
-                }),
-                diagnostics: Object.freeze<ReadonlyArray<Diagnostic.Diagnostic>>([]),
-              })
-            return Object.freeze({
-              fact: Object.freeze({
-                _tag: 'Resolved' as const,
-                type: Type.unit,
-                spelling: '()',
-                token,
-                syntax: parameterList,
-              }),
-              diagnostics: Object.freeze<ReadonlyArray<Diagnostic.Diagnostic>>([]),
-            })
-          })()
+      contract.result === undefined
+        ? Object.freeze({
+            fact: Object.freeze({
+              _tag: 'Resolved' as const,
+              type: Type.unit,
+              spelling: '()',
+              anchor: contract.anchor,
+            }),
+            diagnostics: noDiagnostics,
+          })
         : collectReturnType(
-            source,
-            returnSyntax,
+            context,
+            declaration,
+            contract.result,
             name._tag === 'Present' ? name.spelling : `#${ordinal}`,
             typeParameters.facts,
             new Map(),
             typeParameters.lifetimeContext,
           )
-    const functionKind =
-      SyntaxTree.directToken(node, 'EffectKeyword') === undefined ? 'Ordinary' : 'Effect'
+    const functionKind = contract.effect ? 'Effect' : 'Ordinary'
     const failureRow = collectFailureRow(
-      source,
-      node,
+      context,
+      contract.failures,
       typeParameters.environment,
       typeParameters.lifetimeContext,
     )
     const requirementRow = collectRequirementRow(
-      source,
-      node,
+      context,
+      contract.requirements,
       typeParameters.environment,
       typeParameters.lifetimeContext,
     )
-    const constraints = collectConstraints(source, node, typeParameters.environment)
-    const staticFunction = SyntaxTree.directToken(node, 'StaticKeyword') !== undefined
+    const constraints = collectConstraints(
+      context,
+      contract.constraints,
+      typeParameters.environment,
+    )
+    const staticFunction = contract.static
     const facts = Object.freeze(
       parameters.map((parameter) =>
         staticFunction && parameter.fact.phase !== 'Static'
@@ -4015,35 +3776,29 @@ const collectModule = (
     )
     diagnostics.push(
       ...parameters.flatMap((parameter) => parameter.diagnostics),
-      ...duplicateParameterDiagnostics(facts),
+      ...duplicateParameterDiagnostics(context, facts),
       ...returnType.diagnostics,
       ...failureRow.diagnostics,
       ...requirementRow.diagnostics,
       ...constraints.diagnostics,
     )
-    const ellipsis =
-      parameterList === undefined ? undefined : SyntaxTree.directToken(parameterList, 'Ellipsis')
-    if (
-      ellipsis !== undefined &&
-      node.kind !== 'ForeignFunctionDeclaration' &&
-      SyntaxTree.directToken(node, 'ExportKeyword') === undefined
-    )
+    const direction = linkageDirection(header)
+    if (contract.variadic && direction === undefined)
       diagnostics.push(
         Diagnostic.foreignDeclarationRestriction(
           'variadic definitions are not admitted',
-          ellipsis.span,
+          context.spanOf(contract.anchor),
         ),
       )
     const foreign =
-      node.kind === 'ForeignFunctionDeclaration'
-        ? collectForeign(source, node, name, 'Foreign', facts)
+      direction === 'Import'
+        ? collectForeign(context, declaration, header, name, 'Foreign', facts)
         : undefined
     const foreignExport =
-      node.kind === 'FunctionDeclaration' &&
-      SyntaxTree.directToken(node, 'ExportKeyword') !== undefined
-        ? collectForeign(source, node, name, 'Export', facts)
+      direction === 'Export'
+        ? collectForeign(context, declaration, header, name, 'Export', facts)
         : undefined
-    const machine = MachineFunction.analyze(source, node)
+    const machine = MachineFunction.analyze(context, declaration)
     diagnostics.push(...machine.diagnostics)
     if (foreign !== undefined && machine.properties !== undefined)
       diagnostics.push(
@@ -4052,33 +3807,35 @@ const collectModule = (
           machine.properties.span,
         ),
       )
-    const properties = DeclarationProperty.clauses(node)
-    const behavior = properties.filter(
+    const behavior = header.properties.filter(
       (clause) =>
-        DeclarationProperty.owner(source, clause) !== 'Intrinsic.native' &&
-        DeclarationProperty.owner(source, clause) !== 'Intrinsic.machine',
+        DeclarationProperty.authoredOwner(context, clause) !== 'Intrinsic.native' &&
+        DeclarationProperty.authoredOwner(context, clause) !== 'Intrinsic.machine',
     )
     for (const property of behavior.slice(1))
       diagnostics.push(
-        Diagnostic.foreignDeclarationRestriction('duplicate foreign contract', property.span),
+        Diagnostic.foreignDeclarationRestriction(
+          'duplicate foreign contract',
+          context.spanOf(property.anchor),
+        ),
       )
-    for (const property of properties)
+    for (const property of header.properties)
       if (
         foreign === undefined &&
         foreignExport === undefined &&
-        DeclarationProperty.owner(source, property) !== 'Intrinsic.machine'
+        DeclarationProperty.authoredOwner(context, property) !== 'Intrinsic.machine'
       )
         diagnostics.push(
           Diagnostic.foreignDeclarationRestriction(
             'foreign contract on a non-foreign function',
-            property.span,
+            context.spanOf(property.anchor),
           ),
         )
     const native = foreign ?? foreignExport
-    if (native === undefined && functionKind === 'Ordinary' && failureRow.fact.syntax !== undefined)
-      diagnostics.push(Diagnostic.failureChannelOnOrdinary(failureRow.fact.syntax.span))
+    if (native === undefined && functionKind === 'Ordinary' && failureRow.fact.anchor !== undefined)
+      diagnostics.push(Diagnostic.failureChannelOnOrdinary(context.spanOf(failureRow.fact.anchor)))
     if (native !== undefined) diagnostics.push(...native.diagnostics)
-    const retainedBody = foreign === undefined ? bodyTemplate(source, node) : undefined
+    const retainedBody = foreign === undefined ? bodyTemplate(lowered, declaration) : undefined
     return Object.freeze({
       _tag: 'FunctionDeclaration',
       lifetimeElaboration: typeParameters.lifetimeContext,
@@ -4087,7 +3844,7 @@ const collectModule = (
       visibility,
       phase: foreign === undefined && staticFunction ? 'Static' : 'Runtime',
       functionKind: foreign === undefined ? functionKind : 'Ordinary',
-      unsafe: SyntaxTree.directToken(node, 'UnsafeKeyword') !== undefined,
+      unsafe: contract.unsafe,
       ...(machine.properties === undefined ? {} : { machine: machine.properties }),
       ...(foreign === undefined ? {} : { foreign: foreign.fact }),
       // A rejected export publishes no symbol, so discovery never roots it.
@@ -4103,7 +3860,7 @@ const collectModule = (
       // repeated errors.
       returnType:
         native !== undefined && native.diagnostics.length > 0
-          ? Object.freeze({ _tag: 'Unavailable' as const, syntax: returnType.fact.syntax })
+          ? unavailable(returnType.fact.anchor)
           : returnType.fact,
       ...(returnType.opaqueResult === undefined ? {} : { opaqueResult: returnType.opaqueResult }),
       failureRow: failureRow.fact,
@@ -4111,7 +3868,8 @@ const collectModule = (
       constraints: constraints.facts,
       constraintContracts: Object.freeze([]),
       ...(retainedBody === undefined ? {} : { bodyTemplate: retainedBody }),
-      syntax: node,
+      owner: declaration.owner,
+      anchor: header.anchor,
     })
   })
   // Owner binders precede the member's own, so `Option.map<i32, i64>` reads T then U; a binder
@@ -4121,16 +3879,12 @@ const collectModule = (
   // (`Fiber.cancel(canceller: CompletionCanceller)`) would otherwise carry a binder no call
   // could ever infer.
   const joinedTypeParameters = (
-    member: SyntaxTree.Node,
+    member: AuthoredHir.Declaration,
     headBinders: ReadonlyArray<TypeParameterFact>,
     built: Pick<DeclarationFact, 'typeParameters'>,
     refinedBinders: ReadonlyMap<string, TypeParameterFact>,
   ): ReadonlyArray<TypeParameterFact> => {
-    const mentioned = new Set(
-      SyntaxTree.tokens(member)
-        .filter((token) => token.kind === 'Identifier' || token.kind === 'Lifetime')
-        .map((token) => spelling(source, token)),
-    )
+    const mentioned = mentionedNames(context, member)
     const namesSelf = mentioned.has('Self')
     return Object.freeze([
       ...headBinders
@@ -4159,7 +3913,8 @@ const collectModule = (
   // ordinary declaration carrying the impl's binders ahead of its own and `Self` bound to the
   // head's binder. The caller supplies identity, visibility, and the membership back-reference.
   const implMember = (
-    node: SyntaxTree.Node,
+    member: AuthoredHir.Declaration,
+    header: Extract<AuthoredHir.DeclarationHeader, { readonly _tag: 'FunctionHeader' }>,
     id: DeclarationId,
     ownerName: string,
     headBinders: ReadonlyArray<TypeParameterFact>,
@@ -4167,27 +3922,30 @@ const collectModule = (
   ): Omit<DeclarationFact, 'canonical' | 'visibility' | 'name' | 'id'> & {
     readonly refinedBinders: ReadonlyMap<string, TypeParameterFact>
   } => {
-    const targetName = ownerName
     // `Self` is in scope for the member's own binder bounds (`U: Like<Self>`) exactly as the
     // head binders are, so it rides along as a synthetic enclosing binder.
-    const selfToken = SyntaxTree.tokens(node).find((token) => token.kind === 'FnKeyword')
-    const selfBinder: ReadonlyArray<TypeParameterFact> =
-      selfToken === undefined
-        ? []
-        : [
-            Object.freeze({
-              _tag: 'TypeParameterDeclaration' as const,
-              type: self,
-              name: Object.freeze({ _tag: 'Present' as const, spelling: 'Self', token: selfToken }),
-              syntax: node,
-              bounds: Object.freeze([]),
-              staticProperties: Object.freeze([]),
-            }),
-          ]
-    const collected = collectTypeParameters(source, node, targetName, headBinders.length, [
-      ...headBinders,
-      ...selfBinder,
-    ])
+    const selfBinder: ReadonlyArray<TypeParameterFact> = [
+      Object.freeze({
+        _tag: 'TypeParameterDeclaration' as const,
+        type: self,
+        name: Object.freeze({
+          _tag: 'Present' as const,
+          spelling: 'Self',
+          anchor: header.anchor,
+        }),
+        anchor: header.anchor,
+        bounds: Object.freeze([]),
+        staticProperties: Object.freeze([]),
+      }),
+    ]
+    const collected = collectTypeParameters(
+      context,
+      member,
+      header.contract.generics,
+      ownerName,
+      headBinders.length,
+      [...headBinders, ...selfBinder],
+    )
     // A member may redeclare an owner binder to refine its bounds for that member alone
     // (`fn get<K: HashKey + Copy, V: Copy>` inside `impl<K, V> HashMap<K, V>`): the binder keeps
     // the head's identity and gains the member's bounds, and no duplicate is reported.
@@ -4223,76 +3981,64 @@ const collectModule = (
     )
     const environment = new Map(collected.environment)
     environment.set('Self', self)
-    const parameterList = childNode(node, 'ParameterList')
-    const parameters = SyntaxTree.directNodes(parameterList, 'ParameterDeclaration').map(
-      (parameter, ordinal) =>
-        analyzeParameter(source, parameter, id, ordinal, environment, collected.lifetimeContext),
+    const contract = header.contract
+    const parameters = contract.parameters.map((parameter, ordinal) =>
+      analyzeParameter(context, parameter, id, ordinal, environment, collected.lifetimeContext),
     )
-    const returnSyntax = SyntaxTree.directNode(node, 'ReturnType')
     const returnType =
-      returnSyntax === undefined
-        ? (() => {
-            const token = SyntaxTree.directToken(parameterList, 'RightParenthesis')
-            return token === undefined
-              ? Object.freeze({
-                  fact: Object.freeze({
-                    _tag: 'Unavailable' as const,
-                    syntax: parameterList,
-                  }),
-                  diagnostics: Object.freeze<ReadonlyArray<Diagnostic.Diagnostic>>([]),
-                })
-              : Object.freeze({
-                  fact: Object.freeze({
-                    _tag: 'Resolved' as const,
-                    type: Type.unit,
-                    spelling: '()',
-                    token,
-                    syntax: parameterList,
-                  }),
-                  diagnostics: Object.freeze<ReadonlyArray<Diagnostic.Diagnostic>>([]),
-                })
-          })()
+      contract.result === undefined
+        ? Object.freeze({
+            fact: Object.freeze({
+              _tag: 'Resolved' as const,
+              type: Type.unit,
+              spelling: '()',
+              anchor: contract.anchor,
+            }),
+            diagnostics: noDiagnostics,
+          })
         : collectReturnType(
-            source,
-            returnSyntax,
-            targetName,
+            context,
+            member,
+            contract.result,
+            ownerName,
             collected.facts,
             environment,
             collected.lifetimeContext,
           )
-    const failureRow = collectFailureRow(source, node, environment, collected.lifetimeContext)
-    const requirementRow = collectRequirementRow(
-      source,
-      node,
+    const failureRow = collectFailureRow(
+      context,
+      contract.failures,
       environment,
       collected.lifetimeContext,
     )
-    const constraints = collectConstraints(source, node, environment)
-    const staticFunction = SyntaxTree.directToken(node, 'StaticKeyword') !== undefined
+    const requirementRow = collectRequirementRow(
+      context,
+      contract.requirements,
+      environment,
+      collected.lifetimeContext,
+    )
+    const constraints = collectConstraints(context, contract.constraints, environment)
     const parameterFacts = Object.freeze(
       parameters.map((parameter) =>
-        staticFunction && parameter.fact.phase !== 'Static'
+        contract.static && parameter.fact.phase !== 'Static'
           ? Object.freeze({ ...parameter.fact, phase: 'Static' as const })
           : parameter.fact,
       ),
     )
     diagnostics.push(
       ...parameters.flatMap((parameter) => parameter.diagnostics),
-      ...duplicateParameterDiagnostics(parameterFacts),
+      ...duplicateParameterDiagnostics(context, parameterFacts),
       ...returnType.diagnostics,
       ...failureRow.diagnostics,
       ...requirementRow.diagnostics,
       ...constraints.diagnostics,
     )
-    const retainedBody = bodyTemplate(source, node)
+    const retainedBody = bodyTemplate(lowered, member)
     return Object.freeze({
       _tag: 'FunctionDeclaration' as const,
-      phase: staticFunction ? ('Static' as const) : ('Runtime' as const),
-      functionKind:
-        SyntaxTree.directToken(node, 'EffectKeyword') === undefined
-          ? ('Ordinary' as const)
-          : ('Effect' as const),
-      unsafe: SyntaxTree.directToken(node, 'UnsafeKeyword') !== undefined,
+      phase: contract.static ? ('Static' as const) : ('Runtime' as const),
+      functionKind: contract.effect ? ('Effect' as const) : ('Ordinary' as const),
+      unsafe: contract.unsafe,
       typeParameters: ownFacts,
       lifetimeElaboration: collected.lifetimeContext,
       refinedBinders,
@@ -4307,107 +4053,119 @@ const collectModule = (
       constraints: constraints.facts,
       constraintContracts: Object.freeze([]),
       ...(retainedBody === undefined ? {} : { bodyTemplate: retainedBody }),
-      syntax: node,
+      owner: member.owner,
+      anchor: header.anchor,
     })
   }
   // Inline conformance operations elaborate and lower as private ordinary declarations. Their
   // canonical names are implementation identities, not source-visible actor members.
+  const conformanceDeclarations = implDeclarations.filter(
+    (declaration) => implHeaderOf(declaration)?.target !== undefined,
+  )
   const inlineMembers = conformances.flatMap(
-    (conformance, conformanceIndex): ReadonlyArray<MemberFact> =>
-      conformance.operations.flatMap((operation, operationIndex): ReadonlyArray<MemberFact> => {
-        if (operation.form !== 'Inline' || operation.target._tag !== 'TypePath') return []
-        const targetName = operation.target.segments.at(1)?.spelling
-        const targetToken = operation.target.segments.at(1)?.token
-        if (targetName === undefined || targetToken === undefined) return []
-        const node = operation.syntax
-        const id: DeclarationId = Object.freeze({
-          _tag: 'DeclarationId',
-          sourceId: source.id,
-          ordinal: nestedDeclarationOrdinal + conformanceIndex * 1024 + operationIndex,
-        })
-        const {
-          bodyTemplate: _retained,
-          refinedBinders,
-          ...built
-        } = implMember(node, id, targetName, conformance.typeParameters, conformance.self)
-        return [
-          Object.freeze({
-            ...built,
-            // A generic conformance's inline body is generic in the header's binders exactly as a
-            // mapped witness is; the proof that selects the witness supplies their arguments.
-            typeParameters: joinedTypeParameters(
-              node,
-              conformance.typeParameters,
-              built,
-              refinedBinders,
-            ),
+    (conformance, conformanceIndex): ReadonlyArray<MemberFact> => {
+      const head = conformanceDeclarations[conformanceIndex]
+      if (head === undefined) return []
+      const inlineDeclarations = implMembers(head).filter(
+        (member) => member.header._tag === 'FunctionHeader' && !isDropHook(context, member.header),
+      )
+      return conformance.operations.flatMap(
+        (operation, operationIndex): ReadonlyArray<MemberFact> => {
+          if (operation.form !== 'Inline' || operation.target._tag !== 'TypePath') return []
+          const targetSegment = operation.target.segments.at(1)
+          if (targetSegment === undefined) return []
+          const member = inlineDeclarations.find(
+            (candidate) =>
+              AuthoredIdentity.anchorKey(candidate.header.anchor) ===
+              AuthoredIdentity.anchorKey(operation.anchor),
+          )
+          if (member === undefined || member.header._tag !== 'FunctionHeader') return []
+          const id: DeclarationId = Object.freeze({
+            _tag: 'DeclarationId',
+            sourceId: moduleName,
+            ordinal: nestedDeclarationOrdinal + conformanceIndex * 1024 + operationIndex,
+          })
+          const {
+            bodyTemplate: _retained,
+            refinedBinders,
+            ...built
+          } = implMember(
+            member,
+            member.header,
             id,
-            canonical: Object.freeze({
-              _tag: 'Canonical' as const,
-              id: Object.freeze({
-                _tag: 'CanonicalDeclarationId' as const,
-                module: source.id,
-                name: targetName,
+            targetSegment.spelling,
+            conformance.typeParameters,
+            conformance.self,
+          )
+          return [
+            Object.freeze({
+              ...built,
+              // A generic conformance's inline body is generic in the header's binders exactly as a
+              // mapped witness is; the proof that selects the witness supplies their arguments.
+              typeParameters: joinedTypeParameters(
+                member,
+                conformance.typeParameters,
+                built,
+                refinedBinders,
+              ),
+              id,
+              canonical: Object.freeze({
+                _tag: 'Canonical' as const,
+                id: Object.freeze({
+                  _tag: 'CanonicalDeclarationId' as const,
+                  module: moduleName,
+                  name: targetSegment.spelling,
+                }),
+              }),
+              visibility: 'Private' as const,
+              name: Object.freeze({
+                _tag: 'Present' as const,
+                spelling: targetSegment.spelling,
+                anchor:
+                  operation.name._tag === 'Present' ? operation.name.anchor : targetSegment.anchor,
+              }),
+              conformanceImplementation: Object.freeze({
+                ordinal: conformance.ordinal,
+                operation:
+                  operation.name._tag === 'Present'
+                    ? operation.name.spelling
+                    : targetSegment.spelling,
+                self: conformance.self,
               }),
             }),
-            visibility: 'Private' as const,
-            name: Object.freeze({
-              _tag: 'Present' as const,
-              spelling: targetName,
-              token: operation.name._tag === 'Present' ? operation.name.token : targetToken,
-            }),
-            conformanceImplementation: Object.freeze({
-              ordinal: conformance.ordinal,
-              operation: operation.name._tag === 'Present' ? operation.name.spelling : targetName,
-              self: conformance.self,
-            }),
-          }),
-        ]
-      }),
+          ]
+        },
+      )
+    },
   )
-  // Inherent impls: `impl [<Binders>] Owner { fn ... }`. The head is validated syntactically here
+  // Inherent impls: `impl [<Binders>] Owner { fn ... }`. The head is validated structurally here
   // (whole-family arguments, unbounded binders); ownership and collisions need the resolved owner
   // and are decided at declaration completion.
-  const inherentNodes = implNodes.filter((node) => !isConformanceImpl(node))
+  const inherentDeclarations = implDeclarations.filter(
+    (declaration) => implHeaderOf(declaration)?.target === undefined,
+  )
   const inherentImpls: Array<InherentImplFact> = []
   const inherentMembers: Array<DeclarationFact> = []
-  inherentNodes.forEach((node, ordinal) => {
+  inherentDeclarations.forEach((declaration, ordinal) => {
+    const header = implHeaderOf(declaration)
+    if (header === undefined) return
     const headName = `inherent#${ordinal}`
-    const collected = collectTypeParameters(source, node, headName)
+    const collected = collectTypeParameters(context, declaration, header.generics, headName)
     diagnostics.push(...collected.diagnostics)
-    const selfType = Type.parameter({ module: source.id, name: headName }, -1, 'Self')
+    const selfType = Type.parameter({ module: moduleName, name: headName }, -1, 'Self')
     const environment = new Map(collected.environment)
     environment.set('Self', selfType)
-    const ownerSyntax = node.children.find(isDeclaredTypeNode)
-    const owner: DeclaredTypeFact =
-      ownerSyntax === undefined
-        ? Object.freeze({ _tag: 'Unavailable' as const, syntax: node })
-        : analyzeDeclaredType(source, ownerSyntax, environment).fact
-    const ownerPath = ownerPathOf(ownerSyntax)
-    const ownerTokens =
-      ownerPath === undefined
-        ? []
-        : SyntaxTree.tokens(ownerPath).filter((token) => token.kind === 'Identifier')
-    const ownerSpelling = ownerTokens.map((token) => spelling(source, token)).join('.')
-    const headSpan = ownerTokens.at(0)?.span ?? ownerSyntax?.span ?? node.span
+    const ownerType = header.subject
+    const owner = analyzeDeclaredType(context, ownerType, environment).fact
+    const ownerPath = nominalPath(context, ownerType)
+    const ownerSpelling = ownerPath?.spelling ?? ''
+    const headAnchor = ownerPath?.segments.at(0)?.anchor ?? ownerType.anchor
     // Whole-family check: the applied arguments must be exactly this impl's binders, in order.
     const binders = collected.facts.filter((parameter) => parameter.duplicateOf === undefined)
-    const argumentNodes =
-      ownerSyntax?.kind === 'AppliedType'
-        ? childNode(ownerSyntax, 'TypeArgumentList').children.filter(
-            (child): child is SyntaxTree.Node =>
-              SyntaxTree.isNode(child) &&
-              (child.kind === 'LifetimeType' || isDeclaredTypeNode(child)),
-          )
+    const argumentSpellings =
+      ownerType._tag === 'AppliedType'
+        ? ownerType.arguments.arguments.map((argument) => binderArgumentName(context, argument))
         : []
-    const argumentSpellings = argumentNodes.map((argument) =>
-      argument.kind === 'TypePath' || argument.kind === 'LifetimeType'
-        ? SyntaxTree.tokens(argument)
-            .filter((token) => token.kind === 'Identifier' || token.kind === 'Lifetime')
-            .map((token) => spelling(source, token))
-            .join('.')
-        : undefined,
-    )
     // Completed owner arity includes omitted lifetimes and is checked during completion.
     const wholeFamily =
       argumentSpellings.length === binders.length &&
@@ -4419,12 +4177,24 @@ const collectModule = (
       (binder) => binder.bounds.length > 0 || binder.representationBound !== undefined,
     )
     let headDiagnostic: Diagnostic.Diagnostic | undefined
-    if (ownerPath === undefined || ownerTokens.length !== 1) {
-      headDiagnostic = Diagnostic.invalidInherentHead(ownerSpelling || '?', 'NotNominal', headSpan)
+    if (ownerPath === undefined || ownerPath.segments.length !== 1) {
+      headDiagnostic = Diagnostic.invalidInherentHead(
+        ownerSpelling || '?',
+        'NotNominal',
+        context.spanOf(headAnchor),
+      )
     } else if (!wholeFamily) {
-      headDiagnostic = Diagnostic.invalidInherentHead(ownerSpelling, 'Specialized', headSpan)
+      headDiagnostic = Diagnostic.invalidInherentHead(
+        ownerSpelling,
+        'Specialized',
+        context.spanOf(headAnchor),
+      )
     } else if (bounded) {
-      headDiagnostic = Diagnostic.invalidInherentHead(ownerSpelling, 'Bounded', headSpan)
+      headDiagnostic = Diagnostic.invalidInherentHead(
+        ownerSpelling,
+        'Bounded',
+        context.spanOf(headAnchor),
+      )
     } else {
       headDiagnostic = undefined
     }
@@ -4433,7 +4203,7 @@ const collectModule = (
       Object.freeze({
         _tag: 'InherentImplDeclaration' as const,
         lifetimeElaboration: collected.lifetimeContext,
-        module: source.id,
+        module: moduleName,
         ordinal,
         self: selfType,
         typeParameters: collected.facts,
@@ -4446,83 +4216,93 @@ const collectModule = (
                 _tag: 'Invalid' as const,
                 cause: Diagnostic.identity(headDiagnostic),
               }),
-        syntax: node,
+        anchor: header.anchor,
       }),
     )
-    for (const mapped of SyntaxTree.directNodes(node, 'ImplOperation')) {
-      const name = presentName(source, mapped)
+    const members = implMembers(declaration)
+    for (const mapped of members) {
+      if (mapped.header._tag !== 'ImplAliasHeader') continue
+      const name = declaredName(context, mapped.header.name)
       diagnostics.push(
         Diagnostic.invalidInherentMember(
           ownerSpelling,
           name._tag === 'Present' ? name.spelling : '?',
           'MappedOperation',
-          mapped.span,
+          context.spanOf(mapped.header.anchor),
         ),
       )
     }
-    SyntaxTree.directNodes(node, 'FunctionDeclaration').forEach((member, memberIndex) => {
-      const name = presentName(source, member)
-      if (SyntaxTree.directToken(member, 'DropKeyword') !== undefined) {
-        diagnostics.push(
-          Diagnostic.invalidInherentMember(ownerSpelling, 'drop', 'DropHook', member.span),
+    members
+      .filter((member) => member.header._tag === 'FunctionHeader')
+      .forEach((member, memberIndex) => {
+        const memberHeader = member.header
+        if (memberHeader._tag !== 'FunctionHeader') return
+        const name = declaredName(context, memberHeader.name)
+        if (isDropHook(context, memberHeader)) {
+          diagnostics.push(
+            Diagnostic.invalidInherentMember(
+              ownerSpelling,
+              'drop',
+              'DropHook',
+              context.spanOf(memberHeader.anchor),
+            ),
+          )
+          return
+        }
+        const id: DeclarationId = Object.freeze({
+          _tag: 'DeclarationId',
+          sourceId: moduleName,
+          ordinal: nestedDeclarationOrdinal + (conformances.length + ordinal) * 1024 + memberIndex,
+        })
+        const memberName = name._tag === 'Present' ? name.spelling : `member#${memberIndex}`
+        // The member's own binders are minted under the member's identity, not the owner's, so two
+        // members' `?R` binders never share one key and one member can call another with inference.
+        const { refinedBinders, ...built } = implMember(
+          member,
+          memberHeader,
+          id,
+          `${ownerSpelling}.${memberName}`,
+          collected.facts,
+          selfType,
         )
-        return
-      }
-      const id: DeclarationId = Object.freeze({
-        _tag: 'DeclarationId',
-        sourceId: source.id,
-        ordinal: nestedDeclarationOrdinal + (conformances.length + ordinal) * 1024 + memberIndex,
+        const shared = Object.freeze({
+          ...built,
+          typeParameters: joinedTypeParameters(member, collected.facts, built, refinedBinders),
+        })
+        const receiverParameter = shared.parameters.at(0)
+        const receiver =
+          receiverParameter !== undefined &&
+          receiverParameter.name._tag === 'Present' &&
+          receiverParameter.name.spelling === 'self' &&
+          declaredTypeNamesOwner(receiverParameter.declaredType, selfType, ownerSpelling)
+        const canonicalName = `${ownerSpelling}.${memberName}`
+        inherentMembers.push(
+          Object.freeze({
+            ...shared,
+            id,
+            canonical:
+              headDiagnostic === undefined && name._tag === 'Present'
+                ? Object.freeze({
+                    _tag: 'Canonical' as const,
+                    id: Object.freeze({
+                      _tag: 'CanonicalDeclarationId' as const,
+                      module: moduleName,
+                      name: canonicalName,
+                    }),
+                  })
+                : Object.freeze({ _tag: 'Unidentified' as const }),
+            visibility: memberHeader.public ? ('Public' as const) : ('Private' as const),
+            name,
+            associatedMember: Object.freeze({
+              ordinal,
+              ownerSpelling,
+              name: memberName,
+              self: selfType,
+              receiver,
+            }),
+          }),
+        )
       })
-      const memberName = name._tag === 'Present' ? name.spelling : `member#${memberIndex}`
-      // The member's own binders are minted under the member's identity, not the owner's, so two
-      // members' `?R` binders never share one key and one member can call another with inference.
-      const { refinedBinders, ...built } = implMember(
-        member,
-        id,
-        `${ownerSpelling}.${memberName}`,
-        collected.facts,
-        selfType,
-      )
-      const shared = Object.freeze({
-        ...built,
-        typeParameters: joinedTypeParameters(member, collected.facts, built, refinedBinders),
-      })
-      const receiverParameter = shared.parameters.at(0)
-      const receiver =
-        receiverParameter !== undefined &&
-        receiverParameter.name._tag === 'Present' &&
-        receiverParameter.name.spelling === 'self' &&
-        declaredTypeNamesOwner(receiverParameter.declaredType, selfType, ownerSpelling)
-      const canonicalName = `${ownerSpelling}.${memberName}`
-      const fact: DeclarationFact = Object.freeze({
-        ...shared,
-        id,
-        canonical:
-          headDiagnostic === undefined && name._tag === 'Present'
-            ? Object.freeze({
-                _tag: 'Canonical' as const,
-                id: Object.freeze({
-                  _tag: 'CanonicalDeclarationId' as const,
-                  module: source.id,
-                  name: canonicalName,
-                }),
-              })
-            : Object.freeze({ _tag: 'Unidentified' as const }),
-        visibility:
-          SyntaxTree.directToken(member, 'PubKeyword') === undefined
-            ? ('Private' as const)
-            : ('Public' as const),
-        name,
-        associatedMember: Object.freeze({
-          ordinal,
-          ownerSpelling,
-          name: memberName,
-          self: selfType,
-          receiver,
-        }),
-      })
-      inherentMembers.push(fact)
-    })
   })
   // A name declared twice for one owner has no winner: both facts become duplicates of the shared
   // identity, so neither is reachable and both sites are diagnosed with the other related.
@@ -4544,12 +4324,12 @@ const collectModule = (
         member.canonical._tag === 'Canonical' &&
         candidate.canonical.id.name === member.canonical.id.name,
     )
-    const otherSpan = nameSpanOf(others.at(0) ?? member)
+    const other = others.at(0) ?? member
     const diagnostic = Diagnostic.duplicateInherentMember(
       association?.ownerSpelling ?? '?',
       association?.name ?? '?',
-      member.name._tag === 'Present' ? member.name.token.span : member.syntax.span,
-      otherSpan,
+      context.spanOf(member.name._tag === 'Present' ? member.name.anchor : member.anchor),
+      context.spanOf(other.name._tag === 'Present' ? other.name.anchor : other.anchor),
     )
     diagnostics.push(diagnostic)
     return Object.freeze({
@@ -4566,11 +4346,17 @@ const collectModule = (
   // elaboration, ownership, and lowering machinery compile it without a hook-shaped special case.
   const hookMembers = conformances.flatMap((conformance, hookIndex): ReadonlyArray<MemberFact> => {
     const hook = conformance.hook
-    if (hook === undefined) return []
-    const node = hook.syntax
+    const head = conformanceDeclarations[hookIndex]
+    if (hook === undefined || head === undefined) return []
+    const member = implMembers(head).find(
+      (candidate) =>
+        candidate.header._tag === 'FunctionHeader' && isDropHook(context, candidate.header),
+    )
+    if (member === undefined || member.header._tag !== 'FunctionHeader') return []
+    const memberHeader = member.header
     const id: DeclarationId = Object.freeze({
       _tag: 'DeclarationId',
-      sourceId: source.id,
+      sourceId: moduleName,
       ordinal: nestedDeclarationOrdinal + inlineMembers.length + hookIndex,
     })
     const environment = new Map<string, Type.Parameter>(
@@ -4581,24 +4367,25 @@ const collectModule = (
       ),
     )
     const lifetimeContext = DeclarationLifetime.forHeader(
-      source,
-      { module: source.id, name: `drop@impl#${conformance.ordinal}` },
-      node,
+      context,
+      { module: moduleName, name: `drop@impl#${conformance.ordinal}` },
+      member,
       environment,
     )
     diagnostics.push(...lifetimeContext.diagnostics)
-    const parameterList = childNode(node, 'ParameterList')
-    const parameters = SyntaxTree.directNodes(parameterList, 'ParameterDeclaration').map(
-      (parameter, parameterOrdinal) =>
-        analyzeParameter(source, parameter, id, parameterOrdinal, environment, lifetimeContext),
+    const parameters = memberHeader.contract.parameters.map((parameter, parameterOrdinal) =>
+      analyzeParameter(context, parameter, id, parameterOrdinal, environment, lifetimeContext),
     )
-    const returnType = analyzeDeclaredType(
-      source,
-      declaredTypeNode(childNode(node, 'ReturnType')),
-      environment,
-      false,
-      lifetimeContext,
-    )
+    const returnType =
+      memberHeader.contract.result === undefined
+        ? unavailableResolution(memberHeader.anchor)
+        : analyzeDeclaredType(
+            context,
+            memberHeader.contract.result,
+            environment,
+            false,
+            lifetimeContext,
+          )
     const facts = Object.freeze(parameters.map((parameter) => parameter.fact))
     return [
       Object.freeze({
@@ -4608,7 +4395,7 @@ const collectModule = (
           _tag: 'Canonical' as const,
           id: Object.freeze({
             _tag: 'CanonicalDeclarationId' as const,
-            module: source.id,
+            module: moduleName,
             name: `drop@impl#${conformance.ordinal}`,
           }),
         }),
@@ -4625,34 +4412,38 @@ const collectModule = (
         requirementRow: hook.requirementRow,
         constraints: Object.freeze([]),
         constraintContracts: Object.freeze([]),
-        syntax: node,
+        owner: member.owner,
+        anchor: memberHeader.anchor,
       }),
     ]
   })
   const nativeRequirements: Array<NativeRequirement.NativeRequirement> = []
   for (const declaration of declarations) {
-    for (const clause of DeclarationProperty.clauses(declaration)) {
-      const moduleClause = declaration.kind === 'ModulePropertyDeclaration'
-      if (!moduleClause && DeclarationProperty.owner(source, clause) !== 'Intrinsic.native')
-        continue
+    const header = declaration.header
+    const moduleClause = header._tag === 'ModulePropertyHeader'
+    for (const clause of headerProperties(header)) {
       if (
         !moduleClause &&
-        declaration.kind !== 'ForeignFunctionDeclaration' &&
-        declaration.kind !== 'ForeignStaticDeclaration'
+        DeclarationProperty.authoredOwner(context, clause) !== 'Intrinsic.native'
       )
         continue
-      const token = SyntaxTree.directToken(declaration, 'Identifier')
-      const member = ownMembers.find((entry) => entry.syntax === declaration)
+      const direction = linkageDirection(header)
+      if (!moduleClause && direction !== 'Import') continue
+      const name = headerName(context, header)
+      const member = ownMembers.find(
+        (entry) =>
+          AuthoredIdentity.anchorKey(entry.anchor) === AuthoredIdentity.anchorKey(header.anchor),
+      )
       const canonical =
         member?.canonical._tag === 'Canonical' ? member.canonical.id.name : undefined
       const scope: NativeRequirement.Scope = moduleClause
-        ? { kind: 'module', module: source.id }
+        ? { kind: 'module', module: moduleName }
         : {
             kind: 'declaration',
-            module: source.id,
-            declaration: canonical ?? (token === undefined ? '' : spelling(source, token)),
+            module: moduleName,
+            declaration: canonical ?? (name._tag === 'Present' ? name.spelling : ''),
           }
-      const analyzed = NativeRequirement.analyze(source, clause, scope)
+      const analyzed = NativeRequirement.analyze(context, clause, scope)
       diagnostics.push(...analyzed.diagnostics)
       if (analyzed.requirement !== undefined) nativeRequirements.push(analyzed.requirement)
     }
@@ -4665,37 +4456,26 @@ const collectModule = (
   ]
   return Object.freeze({
     _tag: 'ModuleHeaders',
-    module: source.id,
+    module: moduleName,
     nativeRequirements: Object.freeze(nativeRequirements),
     publications: Object.freeze(
       declarations.flatMap((declaration): ModuleHeaders['publications'] => {
-        if (
-          declaration.kind !== 'ImportDeclaration' ||
-          SyntaxTree.directToken(declaration, 'PubKeyword') === undefined
-        )
-          return []
-        const path = SyntaxTree.directNode(declaration, 'ImportPath')
-        const list = SyntaxTree.directNode(declaration, 'ImportMemberList')
-        const module =
-          path === undefined
-            ? undefined
-            : (imports.find((imported) => imported.syntax === declaration)?.canonicalTarget ??
-              ImportPath.canonicalTarget(source, path))
-        if (module === undefined || list === undefined) return []
-        return SyntaxTree.directNodes(list, 'ImportMember').flatMap((member) => {
-          const original = SyntaxTree.directToken(member, 'Identifier')
-          if (original === undefined || !SyntaxTree.isAvailableSyntax(member)) return []
-          const alias = SyntaxTree.directNode(member, 'ImportAlias')
-          const token =
-            (alias === undefined ? undefined : SyntaxTree.directToken(alias, 'Identifier')) ??
-            original
+        const header = declaration.header
+        if (header._tag !== 'ImportHeader' || !header.public) return []
+        const target = module.imports.find((imported) =>
+          AuthoredIdentity.equals(imported.declaration.owner, declaration.owner),
+        )?.canonicalTarget
+        if (target === undefined || header.members === undefined) return []
+        return header.members.flatMap((imported) => {
+          const original = nameText(context, imported.name)
+          if (original === undefined) return []
+          const alias = imported.alias === undefined ? undefined : nameText(context, imported.alias)
           return [
             Object.freeze({
-              module,
-              original: spelling(source, original),
-              spelling: spelling(source, token),
-              syntax: member,
-              token,
+              module: target,
+              original,
+              spelling: alias ?? original,
+              anchor: (imported.alias ?? imported.name).anchor,
             }),
           ]
         })
@@ -4732,16 +4512,225 @@ const collectModule = (
   })
 }
 
-/** The type path of an inherent impl head: bare or applied. */
-const ownerPathOf = (ownerSyntax: SyntaxTree.Node | undefined): SyntaxTree.Node | undefined => {
-  if (ownerSyntax === undefined) return undefined
-  if (ownerSyntax.kind === 'AppliedType') return SyntaxTree.directNode(ownerSyntax, 'TypePath')
-  return ownerSyntax.kind === 'TypePath' ? ownerSyntax : undefined
+/** The property clauses one header carries, across the header shapes that admit them. */
+const headerProperties = (
+  header: AuthoredHir.DeclarationHeader,
+): ReadonlyArray<AuthoredHir.PropertyClause> =>
+  'properties' in header ? header.properties : Object.freeze([])
+
+/** The generic binders one header declares, across contract-carrying and nominal headers. */
+const headerGenerics = (
+  header: AuthoredHir.DeclarationHeader,
+): ReadonlyArray<AuthoredHir.GenericParameter> => {
+  if ('contract' in header) return header.contract.generics
+  if ('generics' in header) return header.generics
+  return Object.freeze([])
 }
 
-/** The span a declaration is reported at: its name when present, else its whole syntax. */
-const nameSpanOf = (member: DeclarationFact): SourceSpan.SourceSpan =>
-  member.name._tag === 'Present' ? member.name.token.span : member.syntax.span
+/**
+ * The eligible operator one authored marker spells, disambiguated by operand count.
+ *
+ * The authored marker keeps the written spelling rather than a token, so selection matches on
+ * the operator table's own canonical spellings instead of a lexer token kind.
+ */
+const eligibleOperator = (spelling: string, arity: number): Operator.Eligible | undefined => {
+  const unary: ReadonlyArray<Operator.Eligible> = ['Negate', 'Not', 'BitNot']
+  const binary: ReadonlyArray<Operator.Eligible> = [
+    'Multiply',
+    'Divide',
+    'Remainder',
+    'Add',
+    'Subtract',
+    'LessThan',
+    'LessOrEqual',
+    'GreaterThan',
+    'GreaterOrEqual',
+    'Equals',
+    'NotEquals',
+    'BitAnd',
+    'BitOr',
+    'BitXor',
+  ]
+  let candidates: ReadonlyArray<Operator.Eligible>
+  if (arity === 1) candidates = unary
+  else if (arity === 2) candidates = binary
+  else candidates = []
+  return candidates.find((candidate) => Operator.spelling(candidate) === spelling)
+}
+
+/** A conformance's destructor hook, which the source spells `drop` rather than a name. */
+const isDropHook = (
+  context: Context,
+  header: Extract<AuthoredHir.DeclarationHeader, { readonly _tag: 'FunctionHeader' }>,
+): boolean => nameText(context, header.name) === 'drop'
+
+/** A lifetime name's spelling, normalized to include its leading tick. */
+const tickedLifetimeName = (context: Context, name: AuthoredHir.Name): string | undefined => {
+  const spelling = nameText(context, name)
+  if (spelling === undefined) return undefined
+  return spelling.startsWith("'") ? spelling : `'${spelling}`
+}
+
+/** The nominal path a named or applied type names, ignoring its arguments. */
+const nominalPath = (context: Context, type: AuthoredHir.Type): TypePathFact | undefined => {
+  if (type._tag === 'NamedType') return typePathOf(context, type.path)
+  if (type._tag === 'AppliedType' && type.target._tag === 'NamedType')
+    return typePathOf(context, type.target.path)
+  return undefined
+}
+
+/** The semantic access mode one authored callable mode names. */
+const callableMode = (mode: AuthoredHir.CallableMode | undefined): Type.CallableMode => {
+  if (mode === 'Once') return 'Take'
+  if (mode === 'Mutable') return 'Exclusive'
+  return 'Shared'
+}
+
+/** The written name an inherent head's argument spells, for the whole-family comparison. */
+const binderArgumentName = (
+  context: Context,
+  argument: AuthoredHir.GenericArgument,
+): string | undefined => {
+  if (argument._tag === 'Lifetime') return tickedLifetimeName(context, argument.name)
+  if (argument._tag === 'NamedType') return typePathOf(context, argument.path)?.spelling
+  return undefined
+}
+
+/** The annotation a generic argument contributes to an anchor search. */
+const argumentTypes = (argument: AuthoredHir.GenericArgument): ReadonlyArray<AuthoredHir.Type> => {
+  if (argument._tag === 'Lifetime') return []
+  if (argument._tag === 'RequirementSelector') return [argument.subject]
+  return [argument]
+}
+
+/** The initializer a constant or package-parameter body supplies, if it declares one. */
+const declaredInitializer = (
+  body: AuthoredHir.DeclarationBody,
+): AuthoredHir.Expression | undefined => {
+  if (body._tag === 'InitializerBody') return body.value
+  if (body._tag === 'PackageParameterBody') return body.default
+  return undefined
+}
+
+/** An absent authored initializer, so a header without one still publishes a stable template. */
+const missingExpression = (anchor: AuthoredHir.Anchor): AuthoredHir.Expression =>
+  Object.freeze({
+    _tag: 'MissingExpression',
+    anchor,
+    origin: Object.freeze({ _tag: 'Authored' }),
+    causes: Object.freeze([
+      Object.freeze({ _tag: 'Cause' as const, anchor, code: 'MissingInitializer' }),
+    ]) as AuthoredHir.RecoveryCauses,
+  })
+
+/** Every name an impl member mentions, which decides the owner binders it inherits. */
+const mentionedNames = (context: Context, member: AuthoredHir.Declaration): ReadonlySet<string> => {
+  const found = new Set<string>()
+  const addName = (name: AuthoredHir.Name): void => {
+    const spelling = nameText(context, name)
+    if (spelling === undefined) return
+    found.add(spelling)
+    if (spelling.startsWith("'")) found.add(spelling)
+    else found.add(`'${spelling}`)
+  }
+  const visitType = (type: AuthoredHir.Type | AuthoredHir.Lifetime): void => {
+    if (type._tag === 'Lifetime') return addName(type.name)
+    switch (type._tag) {
+      case 'NamedType':
+        for (const segment of type.path.segments) addName(segment)
+        return
+      case 'AppliedType':
+        visitType(type.target)
+        for (const argument of type.arguments.arguments) visitArgument(argument)
+        if (type.arguments.failures !== undefined) visitType(type.arguments.failures)
+        if (type.arguments.requirements !== undefined) visitRow(type.arguments.requirements)
+        for (const environment of type.arguments.environment ?? []) visitType(environment)
+        return
+      case 'FixedArrayType':
+        return visitType(type.element)
+      case 'SliceType':
+        visitType(type.element)
+        if (type.lifetime !== undefined) visitType(type.lifetime)
+        return
+      case 'ReferenceType':
+        visitType(type.referent)
+        if (type.lifetime !== undefined) visitType(type.lifetime)
+        if (type.role !== undefined) addName(type.role)
+        return
+      case 'PointerType':
+        return visitType(type.pointee)
+      case 'CallableType':
+        for (const binder of type.binders) visitGeneric(binder)
+        if (type.environment !== undefined) visitType(type.environment)
+        for (const parameter of type.parameters) visitType(parameter)
+        return visitType(type.result)
+      case 'ForeignFunctionType':
+        for (const binder of type.binders) visitGeneric(binder)
+        for (const parameter of type.parameters) visitType(parameter)
+        return visitType(type.result)
+      case 'ExactRepresentationType':
+        return visitType(type.subject)
+      case 'OpaqueResultType':
+        for (const binder of type.binders) visitGeneric(binder)
+        return visitType(type.result)
+      case 'UnionType':
+        for (const operand of type.members) visitRowOperand(operand)
+        return
+      case 'RowWithout':
+        visitRowOperand(type.source)
+        return visitRowOperand(type.removed)
+      default:
+        return
+    }
+  }
+  const visitArgument = (argument: AuthoredHir.GenericArgument): void => {
+    if (argument._tag === 'RequirementSelector') {
+      visitType(argument.subject)
+      for (const segment of argument.role.segments) addName(segment)
+      return
+    }
+    visitType(argument)
+  }
+  const visitRowOperand = (operand: AuthoredHir.RowOperand): void => {
+    if (operand._tag !== 'Requirement') return visitType(operand)
+    visitType(operand.capability)
+    if (operand.role !== undefined) for (const segment of operand.role.segments) addName(segment)
+  }
+  const visitRow = (row: AuthoredHir.RequirementRow): void => {
+    for (const operand of row.members) visitRowOperand(operand)
+  }
+  const visitGeneric = (generic: AuthoredHir.GenericParameter): void => {
+    addName(generic.name)
+    if (generic._tag === 'RowParameter') return
+    for (const bound of generic.bounds) visitType(bound)
+  }
+  const header = member.header
+  if ('contract' in header) {
+    const contract = header.contract
+    for (const generic of contract.generics) visitGeneric(generic)
+    for (const parameter of contract.parameters) {
+      addName(parameter.name)
+      visitType(parameter.type)
+    }
+    if (contract.result !== undefined) visitType(contract.result)
+    if (contract.failures !== undefined) visitType(contract.failures)
+    if (contract.requirements !== undefined) visitRow(contract.requirements)
+    for (const environment of contract.environment ?? []) visitType(environment)
+    for (const constraint of contract.constraints) {
+      if (constraint._tag === 'MembershipConstraint') {
+        visitRowOperand(constraint.subject)
+        visitRowOperand(constraint.source)
+      } else {
+        visitType(constraint.provider)
+        visitRowOperand(constraint.selected)
+        visitRowOperand(constraint.source)
+      }
+    }
+  }
+  // A member's body may name an owner binder only through its header, so the body is not walked:
+  // an inherited binder must appear in the signature for any call to infer it.
+  return found
+}
 
 /**
  * Whether a receiver parameter's declared type names the owner: `Self`, `&Self`, `&mut Self`, or
@@ -4765,26 +4754,13 @@ const declaredTypeNamesOwner = (
 
 /** Collects identities and raw type paths for the complete closure before scope resolution. */
 export const collect = (closure: ModuleClosure.Facts): DeclarationIndex.Index => {
-  const modules = Object.freeze(
-    closure.modules.map((module) =>
-      collectModule(module.syntax, module.declarations, module.imports),
-    ),
-  )
+  const modules = Object.freeze(closure.modules.map((module) => collectModule(module)))
   return DeclarationIndex.make(
     'Collected',
     modules,
     Diagnostic.merge(...modules.map((module) => module.diagnostics)),
   )
 }
-
-/**
- * Resolves one `typeof` item to the exact representation of a named callable declaration.
- *
- * The item must resolve to exactly one callable declaration whose generic parameters are all
- * supplied, because an exact representation names one construction, not a family. The resulting
- * identity is built from the declaration's canonical module and name plus its canonical argument
- * keys, so it never depends on spelling, span, or source path.
- */
 
 /** Replays header elision after nominal declarations have published their lifetime arity. */
 export const finalizeLifetimeHeader = (
@@ -4806,6 +4782,8 @@ export const finalizeLifetimeHeader = (
   | ConformanceFact => {
   const prior = member.lifetimeElaboration
   if (prior === undefined) return member
+  const context = prior.context
+  const declaration = prior.declaration
   // Owner lifetimes stay lexical while the member elaborates its own input/result relationship.
   // Inherent members retain otherwise unmentioned owner binders only through Self. Conformance
   // witnesses retain the entire head contract because selection supplies all its binders.
@@ -4815,17 +4793,15 @@ export const finalizeLifetimeHeader = (
   const retainsOwner =
     ambient.length > 0 &&
     (implHead?._tag === 'ConformanceDeclaration' ||
-      SyntaxTree.tokens(prior.syntax).some(
-        (token) => token.kind === 'Identifier' && spelling(prior.source, token) === 'Self',
-      ))
-  const context = DeclarationLifetime.forHeader(
-    prior.source,
+      mentionedNames(context, declaration).has('Self'))
+  const elaborated = DeclarationLifetime.forHeader(
+    context,
     prior.owner,
-    prior.syntax,
+    declaration,
     environment,
     undefined,
-    (path) => {
-      const analyzed = analyzeDeclaredType(prior.source, path, environment, true, prior)
+    (type) => {
+      const analyzed = analyzeDeclaredType(context, type, environment, true, prior)
       if (analyzed.fact._tag === 'Resolved' && Type.isNominal(analyzed.fact.type))
         return (
           (member._tag === 'InherentImplDeclaration' && analyzed.fact.path !== undefined
@@ -4836,7 +4812,7 @@ export const finalizeLifetimeHeader = (
     },
   )
   const parameters = new Map(environment)
-  const implicit: ReadonlyArray<TypeParameterFact> = context.implicit.map((binder) => {
+  const implicit: ReadonlyArray<TypeParameterFact> = elaborated.implicit.map((binder) => {
     parameters.set(binder.parameter.name, binder.parameter)
     return Object.freeze({
       _tag: 'TypeParameterDeclaration',
@@ -4844,9 +4820,9 @@ export const finalizeLifetimeHeader = (
       name: Object.freeze({
         _tag: 'Present',
         spelling: binder.parameter.name,
-        token: binder.token,
+        anchor: binder.anchor,
       }),
-      syntax: binder.syntax,
+      anchor: binder.anchor,
       bounds: Object.freeze([]),
       staticProperties: Object.freeze([]),
       lifetimeBounds: Object.freeze([]),
@@ -4866,6 +4842,8 @@ export const finalizeLifetimeHeader = (
     ...(retainsOwner ? ambient : []),
     ...implicit,
   ])
+  // Only an annotation whose failure was a lifetime question is worth re-analyzing; the authored
+  // node behind it is found through the anchor the first analysis recorded.
   const declared = (fact: DeclaredTypeFact): DeclaredTypeFact => {
     if (
       fact._tag === 'Unavailable' &&
@@ -4873,9 +4851,10 @@ export const finalizeLifetimeHeader = (
       fact.cause?.code !== Diagnostic.unknownLifetimeCode
     )
       return fact
-    return SyntaxTree.isNode(fact.syntax) && isDeclaredTypeNode(fact.syntax)
-      ? analyzeDeclaredType(prior.source, fact.syntax, parameters, false, context).fact
-      : fact
+    const type = typeAt(declaration, fact.anchor)
+    return type === undefined
+      ? fact
+      : analyzeDeclaredType(context, type, parameters, false, elaborated).fact
   }
   const fields = (values: ReadonlyArray<FieldFact>): ReadonlyArray<FieldFact> =>
     Object.freeze(
@@ -4887,7 +4866,7 @@ export const finalizeLifetimeHeader = (
     return Object.freeze({
       ...member,
       typeParameters,
-      lifetimeElaboration: context,
+      lifetimeElaboration: elaborated,
       capability: declared(member.capability),
       provider: declared(member.provider),
       requirements: Object.freeze(
@@ -4900,43 +4879,44 @@ export const finalizeLifetimeHeader = (
     return Object.freeze({
       ...member,
       typeParameters,
-      lifetimeElaboration: context,
+      lifetimeElaboration: elaborated,
       owner: declared(member.owner),
     })
   if (member._tag === 'StructDeclaration')
     return Object.freeze({
       ...member,
       typeParameters,
-      lifetimeElaboration: context,
+      lifetimeElaboration: elaborated,
       fields: fields(member.fields),
     })
   if (member._tag === 'UnionDeclaration')
     return Object.freeze({
       ...member,
       typeParameters,
-      lifetimeElaboration: context,
+      lifetimeElaboration: elaborated,
       variants: Object.freeze(
         member.variants.map((variant) =>
           Object.freeze({ ...variant, fields: fields(variant.fields) }),
         ),
       ),
     })
-  const returnSyntax = SyntaxTree.directNode(prior.syntax, 'ReturnType')
+  const contract = 'contract' in declaration.header ? declaration.header.contract : undefined
   const opaqueReturn =
-    member.opaqueResult === undefined || returnSyntax === undefined
+    member.opaqueResult === undefined || contract?.result === undefined
       ? undefined
       : collectReturnType(
-          prior.source,
-          returnSyntax,
+          context,
+          declaration,
+          contract.result,
           prior.owner.name,
           typeParameters,
           parameters,
-          context,
+          elaborated,
         )
   return Object.freeze({
     ...member,
     typeParameters,
-    lifetimeElaboration: context,
+    lifetimeElaboration: elaborated,
     parameters: Object.freeze(
       member.parameters.map((parameter) =>
         Object.freeze({ ...parameter, declaredType: declared(parameter.declaredType) }),
@@ -4946,7 +4926,105 @@ export const finalizeLifetimeHeader = (
     ...(opaqueReturn?.opaqueResult === undefined
       ? {}
       : { opaqueResult: opaqueReturn.opaqueResult }),
-    failureRow: collectFailureRow(prior.source, prior.syntax, parameters, context).fact,
-    requirementRow: collectRequirementRow(prior.source, prior.syntax, parameters, context).fact,
+    failureRow: collectFailureRow(context, contract?.failures, parameters, elaborated).fact,
+    requirementRow: collectRequirementRow(context, contract?.requirements, parameters, elaborated)
+      .fact,
   })
+}
+
+/** The authored type annotation one anchor names below a declaration header. */
+const typeAt = (
+  declaration: AuthoredHir.Declaration,
+  anchor: AuthoredHir.Anchor,
+): AuthoredHir.Type | undefined => {
+  const key = AuthoredIdentity.anchorKey(anchor)
+  let found: AuthoredHir.Type | undefined
+  const visit = (type: AuthoredHir.Type | AuthoredHir.Lifetime): void => {
+    if (found !== undefined || type._tag === 'Lifetime') return
+    if (AuthoredIdentity.anchorKey(type.anchor) === key) {
+      found = type
+      return
+    }
+    for (const child of typeChildren(type)) visit(child)
+  }
+  for (const type of headerTypes(declaration.header)) visit(type)
+  return found
+}
+
+/** The annotations one header owns directly, as the roots of an annotation search. */
+const headerTypes = (header: AuthoredHir.DeclarationHeader): ReadonlyArray<AuthoredHir.Type> => {
+  const found: Array<AuthoredHir.Type> = []
+  if ('contract' in header) {
+    const contract = header.contract
+    for (const generic of contract.generics)
+      if (generic._tag !== 'RowParameter')
+        for (const bound of generic.bounds) if (bound._tag !== 'Lifetime') found.push(bound)
+    for (const parameter of contract.parameters) found.push(parameter.type)
+    if (contract.result !== undefined) found.push(contract.result)
+    if (contract.failures !== undefined) found.push(contract.failures)
+    for (const member of contract.requirements?.members ?? [])
+      found.push(member._tag === 'Requirement' ? member.capability : member)
+    for (const constraint of contract.constraints)
+      if (constraint._tag === 'ProviderConstraint') found.push(constraint.provider)
+  }
+  if (header._tag === 'ImplHeader') {
+    found.push(header.subject)
+    if (header.target !== undefined) found.push(header.target)
+  }
+  if (header._tag === 'StructHeader') for (const field of header.fields) found.push(field.type)
+  if (header._tag === 'UnionHeader')
+    for (const variant of header.variants)
+      for (const field of variant.fields) found.push(field.type)
+  if (header._tag === 'TupleHeader') found.push(...header.elements)
+  if (header._tag === 'AliasHeader') found.push(header.target)
+  if (header._tag === 'ConstantHeader' && header.type !== undefined) found.push(header.type)
+  if (header._tag === 'PackageParameterHeader') found.push(header.type)
+  if (header._tag === 'StaticHeader') found.push(header.type)
+  if ('generics' in header)
+    for (const generic of header.generics)
+      if (generic._tag !== 'RowParameter')
+        for (const bound of generic.bounds) if (bound._tag !== 'Lifetime') found.push(bound)
+  return Object.freeze(found)
+}
+
+/** The annotations nested directly below one type, for an anchor search. */
+const typeChildren = (type: AuthoredHir.Type): ReadonlyArray<AuthoredHir.Type> => {
+  switch (type._tag) {
+    case 'AppliedType':
+      return [
+        type.target,
+        ...type.arguments.arguments.flatMap(argumentTypes),
+        ...(type.arguments.failures === undefined ? [] : [type.arguments.failures]),
+        ...(type.arguments.requirements?.members ?? []).map((member) =>
+          member._tag === 'Requirement' ? member.capability : member,
+        ),
+      ]
+    case 'FixedArrayType':
+    case 'SliceType':
+      return [type.element]
+    case 'ReferenceType':
+      return [type.referent]
+    case 'PointerType':
+      return [type.pointee]
+    case 'CallableType':
+    case 'ForeignFunctionType':
+      return [...type.parameters, type.result]
+    case 'ExactRepresentationType':
+      return [type.subject]
+    case 'OpaqueResultType':
+      return [type.result]
+    case 'UnionType':
+      return type.members.map((member) =>
+        member._tag === 'Requirement' ? member.capability : member,
+      )
+    case 'RowWithout':
+      return [
+        type.source._tag === 'Requirement' ? type.source.capability : type.source,
+        type.removed._tag === 'Requirement' ? type.removed.capability : type.removed,
+      ]
+    case 'InvalidType':
+      return type.retained
+    default:
+      return []
+  }
 }

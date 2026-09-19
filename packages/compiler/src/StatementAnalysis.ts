@@ -1,3 +1,7 @@
+import type * as AuthoredHir from './AuthoredHir.js'
+import * as AuthoredIdentity from './AuthoredIdentity.js'
+import * as AuthoredWalk from './AuthoredWalk.js'
+import * as SemanticContext from './SemanticContext.js'
 import * as MachineFunction from './MachineFunction.js'
 import * as Lifetime from './Lifetime.js'
 import * as BodyLifetime from './BodyLifetime.js'
@@ -22,13 +26,10 @@ import type {
 import {
   assignmentRoot,
   assignmentRootAccess,
-  childNode,
   compatible,
   declaredReturnTypesCompatible,
   expressionChildren,
-  isExpressionNode,
   representationJoinDiagnostic,
-  spelling,
   typesCompatible,
   unavailableCompatibility,
   unionConversionDiagnostic,
@@ -51,28 +52,26 @@ import {
   enumFactByType,
   representationOfExpression,
   patternCoverage,
-  statementExpressionNode,
   unsafeCallAuthorized,
 } from './ExpressionAnalysis.js'
 import type * as Tir from './Tir.js'
 import { directStatementExpressions } from './TirLowering.js'
 import * as Match from './Match.js'
 import * as NameResolution from './NameResolution.js'
-import * as Presentation from './Presentation.js'
-import type * as SourceFile from './SourceFile.js'
+import * as SemanticDisplay from './SemanticDisplay.js'
 import type * as SourceSpan from './SourceSpan.js'
 import * as StaticEvaluation from './StaticEvaluation.js'
 import * as StaticValue from './StaticValue.js'
-import * as SyntaxTree from './SyntaxTree.js'
 import * as Type from './Type.js'
 export const unsafeCallDiagnostic = (
   unsafe: boolean,
   spelling: string,
-  call: SyntaxTree.Node,
+  call: AuthoredHir.Expression,
+  callSpan: SourceSpan.SourceSpan,
   resolution: ResolutionContext | undefined,
 ): Diagnostic.Diagnostic | undefined =>
-  unsafe && !unsafeCallAuthorized(resolution, call)
-    ? Diagnostic.missingUnsafeBoundary(spelling, call.span)
+  unsafe && !unsafeCallAuthorized(resolution, call, callSpan)
+    ? Diagnostic.missingUnsafeBoundary(spelling, callSpan)
     : undefined
 
 interface StaticIterationElement {
@@ -96,6 +95,22 @@ const staticIterationElements = (
     )
   return undefined
 }
+
+/** `return` with no value returns unit; a synthetic literal stands in for the absent expression. */
+const unitValueOf = (
+  statement: Extract<AuthoredHir.Statement, { readonly _tag: 'ReturnStatement' }>,
+): AuthoredHir.Expression =>
+  Object.freeze({
+    _tag: 'UnitLiteral',
+    anchor: statement.anchor,
+    origin: Object.freeze({
+      _tag: 'Synthetic',
+      anchor: statement.anchor,
+      role: 'value',
+      occurrence: 0,
+    }),
+    causes: Object.freeze([]),
+  })
 
 const residualNodeCount = (statements: ReadonlyArray<StatementFact>): number => {
   let nodes = 0
@@ -123,7 +138,7 @@ const nestedStaticIterationNodeCount = (iterations: ReadonlyArray<StaticIteratio
 
 export const analyzeStatements = (
   context: BodyContext,
-  blockNode: SyntaxTree.Node,
+  blockNode: AuthoredHir.Block,
   initialScope: Scope,
   loopStack: ReadonlyArray<Tir.LoopId> = Object.freeze([]),
   introducedPatterns: ReadonlyArray<PatternBindingFact> = Object.freeze([]),
@@ -141,7 +156,7 @@ export const analyzeStatements = (
   const blockBindings = new Map<string, SourceSpan.SourceSpan>(
     introducedPatterns.flatMap((binding) =>
       binding.name._tag === 'Present'
-        ? [[binding.name.spelling, binding.name.token.span] as const]
+        ? [[binding.name.spelling, context.context.spanOf(binding.name.anchor)] as const]
         : [],
     ),
   )
@@ -356,12 +371,16 @@ export const analyzeStatements = (
     )
 
   const analyzePatternSelection = (
-    element: SyntaxTree.Node,
+    element: Extract<
+      AuthoredHir.Statement,
+      { readonly _tag: 'PatternBindingStatement' | 'PatternConditionalStatement' }
+    >,
     selectionScope: Scope,
   ): PatternSelectionFact => {
-    const initializerNode = statementExpressionNode(element)
+    const initializerNode =
+      element._tag === 'PatternBindingStatement' ? element.initializer : element.subject
     const initializer = analyzeExpression(
-      context.source,
+      context.context,
       initializerNode,
       context.declarations,
       context.declaration,
@@ -370,7 +389,7 @@ export const analyzeStatements = (
       undefined,
     )
     if (initializer === undefined) {
-      throw new RangeError(`Semantic analysis cannot analyze ${initializerNode.kind}`)
+      throw new RangeError(`Semantic analysis cannot analyze ${initializerNode._tag}`)
     }
     context.diagnostics.push(...initializer.diagnostics)
     let access: Match.Access
@@ -388,21 +407,12 @@ export const analyzeStatements = (
     const id: Match.MatchId = Object.freeze({
       _tag: 'MatchId',
       function: context.declaration.id,
-      span: element.span,
+      span: context.context.spanOf(element.anchor),
     })
     const arm: Match.ArmId = Object.freeze({ _tag: 'MatchArmId', match: id, ordinal: 0 })
-    const patternNode =
-      SyntaxTree.directNode(element, 'ErrorPattern') ??
-      SyntaxTree.directNode(element, 'EnumMemberPattern') ??
-      SyntaxTree.directNode(element, 'IntegerPattern') ??
-      SyntaxTree.directNode(element, 'UnionVariantPattern') ??
-      SyntaxTree.directNode(element, 'NominalPattern') ??
-      SyntaxTree.directNode(element, 'BindingPattern') ??
-      SyntaxTree.directNode(element, 'UniversalPattern')
-    if (patternNode === undefined) throw new RangeError('Pattern statement requires a pattern')
     const pattern = analyzePattern(
-      context.source,
-      patternNode,
+      context.context,
+      element.pattern,
       arm,
       access,
       selectionScope,
@@ -447,11 +457,11 @@ export const analyzeStatements = (
         Diagnostic.matchMemberNotInScrutinee(
           Type.encode(member.type),
           Type.encode(subject.type.type),
-          pattern.fact.syntax.span,
+          context.context.spanOf(pattern.fact.anchor),
         ),
       )
     }
-    const tests = patternTests(context.resolution.index, pattern.fact)
+    const tests = patternTests(context.context, context.resolution.index, pattern.fact)
     const coverage = Match.cover(
       members,
       Object.freeze([
@@ -476,20 +486,26 @@ export const analyzeStatements = (
       pattern: pattern.fact,
       bindings: pattern.fact.bindings,
       irrefutable: coverage.exhaustive && complete,
-      loanEnd: element.kind === 'PatternBindingStatement' ? blockNode.span : element.span,
-      syntax: element,
+      loanEnd:
+        element._tag === 'PatternBindingStatement'
+          ? context.context.spanOf(blockNode.anchor)
+          : context.context.spanOf(element.anchor),
+      anchor: element.anchor,
     })
   }
 
   const analyzeConditional = (
-    element: SyntaxTree.Node,
+    element: Extract<
+      AuthoredHir.Conditional,
+      { readonly _tag: 'ConditionalStatement' | 'StaticConditionalStatement' }
+    >,
     armScope: Scope,
     armLoopStack: ReadonlyArray<Tir.LoopId>,
   ): StatementFact => {
     const region = nextRegion()
-    const conditionNode = statementExpressionNode(element)
+    const conditionNode = element.condition
     const condition = analyzeExpression(
-      context.source,
+      context.context,
       conditionNode,
       context.declarations,
       context.declaration,
@@ -497,7 +513,7 @@ export const analyzeStatements = (
       ordinaryControlContext.resolution,
     )
     if (condition === undefined) {
-      throw new RangeError(`Semantic analysis cannot analyze ${conditionNode.kind}`)
+      throw new RangeError(`Semantic analysis cannot analyze ${conditionNode._tag}`)
     }
     context.diagnostics.push(...condition.diagnostics)
     if (
@@ -508,30 +524,18 @@ export const analyzeStatements = (
       context.diagnostics.push(
         Diagnostic.conditionNotBool(
           Type.encode(condition.fact.type.type),
-          condition.fact.syntax.span,
+          context.context.spanOf(condition.fact.anchor),
         ),
       )
     }
 
-    const arms = SyntaxTree.directNodes(element, 'Block')
-    const firstArm = arms.at(0)
     const branchEntry = snapshotCallableWrites()
     const taken = analyzePath(branchEntry, () =>
-      firstArm === undefined
-        ? []
-        : analyzeStatements(ordinaryControlContext, firstArm, armScope, armLoopStack),
+      analyzeStatements(ordinaryControlContext, element.thenBranch, armScope, armLoopStack),
     )
-    const chained = SyntaxTree.directNode(element, 'ConditionalStatement')
-    const otherwiseArm = arms.at(1)
-    const otherwise = analyzePath(branchEntry, () => {
-      if (chained !== undefined) {
-        return [analyzeConditional(chained, armScope, armLoopStack)]
-      }
-      if (otherwiseArm === undefined) {
-        return []
-      }
-      return analyzeStatements(ordinaryControlContext, otherwiseArm, armScope, armLoopStack)
-    })
+    const otherwise = analyzePath(branchEntry, () =>
+      analyzeElseBranch(element.elseBranch, armScope, armLoopStack),
+    )
     const takenFallsThrough = returnFlowOf(taken.value, false).fallsThrough
     const otherwiseFallsThrough = returnFlowOf(otherwise.value, false).fallsThrough
     mergeCallableWrites(
@@ -545,12 +549,26 @@ export const analyzeStatements = (
       taken: Object.freeze([...taken.value]),
       otherwise: Object.freeze([...otherwise.value]),
       region,
-      syntax: element,
+      anchor: element.anchor,
     })
   }
 
+  /** Both authored arms are present; an absent else branch contributes no statements. */
+  const analyzeElseBranch = (
+    branch: AuthoredHir.Block | AuthoredHir.Conditional | undefined,
+    armScope: Scope,
+    armLoopStack: ReadonlyArray<Tir.LoopId>,
+  ): ReadonlyArray<StatementFact> => {
+    if (branch === undefined) return Object.freeze([])
+    if (branch._tag === 'Block')
+      return analyzeStatements(ordinaryControlContext, branch, armScope, armLoopStack)
+    return branch._tag === 'PatternConditionalStatement'
+      ? [analyzePatternConditional(branch, armScope, armLoopStack)]
+      : [analyzeConditional(branch, armScope, armLoopStack)]
+  }
+
   const analyzePatternConditional = (
-    element: SyntaxTree.Node,
+    element: Extract<AuthoredHir.Conditional, { readonly _tag: 'PatternConditionalStatement' }>,
     armScope: Scope,
     armLoopStack: ReadonlyArray<Tir.LoopId>,
   ): StatementFact => {
@@ -561,30 +579,13 @@ export const analyzeStatements = (
       bindings: armScope.bindings,
       patternBindings: Object.freeze([...armScope.patternBindings, ...selection.bindings]),
     })
-    const arms = SyntaxTree.directNodes(element, 'Block')
-    const firstArm = arms.at(0)
     const branchEntry = snapshotCallableWrites()
     const taken = analyzePath(branchEntry, () =>
-      firstArm === undefined
-        ? []
-        : analyzeStatements(ordinaryControlContext, firstArm, takenScope, armLoopStack),
+      analyzeStatements(ordinaryControlContext, element.thenBranch, takenScope, armLoopStack),
     )
-    const chained =
-      SyntaxTree.directNode(element, 'ConditionalStatement') ??
-      SyntaxTree.directNode(element, 'PatternConditionalStatement')
-    const otherwiseArm = arms.at(1)
-    const otherwise = analyzePath(branchEntry, () => {
-      if (chained?.kind === 'PatternConditionalStatement') {
-        return [analyzePatternConditional(chained, armScope, armLoopStack)]
-      }
-      if (chained !== undefined) {
-        return [analyzeConditional(chained, armScope, armLoopStack)]
-      }
-      if (otherwiseArm === undefined) {
-        return []
-      }
-      return analyzeStatements(ordinaryControlContext, otherwiseArm, armScope, armLoopStack)
-    })
+    const otherwise = analyzePath(branchEntry, () =>
+      analyzeElseBranch(element.elseBranch, armScope, armLoopStack),
+    )
     const takenFallsThrough = returnFlowOf(taken.value, false).fallsThrough
     const otherwiseFallsThrough = returnFlowOf(otherwise.value, false).fallsThrough
     mergeCallableWrites(
@@ -598,48 +599,36 @@ export const analyzeStatements = (
       taken: Object.freeze([...taken.value]),
       otherwise: Object.freeze([...otherwise.value]),
       region,
-      syntax: element,
+      anchor: element.anchor,
     })
   }
 
-  for (const element of blockNode.children) {
-    if (!SyntaxTree.isNode(element)) continue
-
-    if (element.kind === 'UnsafeStatement') {
+  for (const element of blockNode.statements) {
+    if (element._tag === 'UnsafeStatement') {
       const region = nextRegion()
-      const body = SyntaxTree.directNode(element, 'Block')
-      const statements =
-        body === undefined
-          ? Object.freeze<StatementFact[]>([])
-          : analyzeStatements(context, body, scope, loopStack)
+      const statements = analyzeStatements(context, element.body, scope, loopStack)
       facts.push(
         Object.freeze({
           _tag: 'UnsafeStatement',
           statements,
           region,
-          syntax: element,
+          anchor: element.anchor,
         }),
       )
       continue
     }
 
-    if (element.kind === 'BindingStatement') {
+    if (element._tag === 'BindingStatement') {
       const region = nextRegion()
       const bindingOrdinal = context.nextBindingOrdinal.value
       context.nextBindingOrdinal.value += 1
-      const initializerNode = statementExpressionNode(element)
-      const declaredSyntax =
-        SyntaxTree.directToken(element, 'Colon') === undefined
-          ? undefined
-          : element.children.find(
-              (child): child is SyntaxTree.Node =>
-                SyntaxTree.isNode(child) && DeclarationCollection.isDeclaredTypeNode(child),
-            )
+      const initializerNode = element.initializer
+      const declaredSyntax = element.type
       const analyzedDeclared =
         declaredSyntax === undefined
           ? undefined
           : DeclarationCollection.analyzeDeclaredType(
-              context.source,
+              context.context,
               declaredSyntax,
               new Map(
                 context.declaration.typeParameters.flatMap((parameter) =>
@@ -649,12 +638,13 @@ export const analyzeStatements = (
                 ),
               ),
               false,
-              context.resolution.bodyLifetimes === undefined
+              context.resolution.bodyLifetimes === undefined ||
+                context.resolution.authoredDeclaration === undefined
                 ? undefined
                 : DeclarationLifetime.forBody(
-                    context.source,
+                    context.context,
                     context.resolution.bodyLifetimes,
-                    declaredSyntax,
+                    context.resolution.authoredDeclaration,
                     new Map(
                       context.declaration.typeParameters.flatMap((parameter) =>
                         parameter.name._tag === 'Present'
@@ -667,14 +657,16 @@ export const analyzeStatements = (
       const nameResolution: NameResolution.Resolution = Object.freeze({
         _tag: 'NameResolution',
         modules: Object.freeze([context.resolution.scope]),
+        contexts: SemanticContext.registry([context.context]),
         diagnostics: Object.freeze([]),
       })
       const resolvedDeclared =
         analyzedDeclared === undefined
           ? undefined
           : DeclarationResolution.resolveTypeFact(
+              context.context.spanOf,
               context.resolution.index,
-              context.source.id,
+              context.context.presentation.sourceId,
               analyzedDeclared.fact,
               (module, path) =>
                 NameResolution.resolveType(nameResolution, context.resolution.index, module, path),
@@ -684,7 +676,7 @@ export const analyzeStatements = (
       const expected =
         resolvedDeclared?.fact._tag === 'Resolved' ? resolvedDeclared.fact.type : undefined
       const initializer = analyzeExpression(
-        context.source,
+        context.context,
         initializerNode,
         context.declarations,
         context.declaration,
@@ -693,7 +685,7 @@ export const analyzeStatements = (
         expected,
       )
       if (initializer === undefined) {
-        throw new RangeError(`Semantic analysis cannot analyze ${initializerNode.kind}`)
+        throw new RangeError(`Semantic analysis cannot analyze ${initializerNode._tag}`)
       }
       context.diagnostics.push(...initializer.diagnostics)
       if (
@@ -705,18 +697,16 @@ export const analyzeStatements = (
           Diagnostic.assignmentTypeMismatch(
             Type.encode(expected),
             Type.encode(initializer.type),
-            initializerNode.span,
+            context.context.spanOf(initializerNode.anchor),
           ),
         )
 
-      if (
-        SyntaxTree.directToken(element, 'MutKeyword') !== undefined &&
-        initializer.type !== undefined &&
-        Type.isEffect(initializer.type)
-      )
-        context.diagnostics.push(Diagnostic.mutableEffectRecipe(element.span))
+      if (element.mutable && initializer.type !== undefined && Type.isEffect(initializer.type))
+        context.diagnostics.push(
+          Diagnostic.mutableEffectRecipe(context.context.spanOf(element.anchor)),
+        )
 
-      const name = bindingName(context.source, element)
+      const name = bindingName(context.context, element.name)
       const exactCallable = exactCallableOf(
         initializer.fact,
         context.resolution.writtenCallableBindings,
@@ -726,10 +716,7 @@ export const analyzeStatements = (
         context.resolution.writtenCallableBindings,
       )
       const phase: 'Runtime' | 'Static' =
-        context.declaration.phase === 'Static' ||
-        SyntaxTree.directToken(element, 'StaticKeyword') !== undefined
-          ? 'Static'
-          : 'Runtime'
+        context.declaration.phase === 'Static' || element.static ? 'Static' : 'Runtime'
       const bindingType = expected ?? initializer.type
       if (
         phase === 'Runtime' &&
@@ -741,7 +728,7 @@ export const analyzeStatements = (
             'runtime binding of a phase-only value',
             context.staticContext?.environment.target ?? 'unselected-target',
             Object.freeze([]),
-            element.span,
+            context.context.spanOf(element.anchor),
           ),
         )
       const evaluated =
@@ -764,8 +751,7 @@ export const analyzeStatements = (
         }),
         name,
         phase,
-        mutability:
-          SyntaxTree.directToken(element, 'MutKeyword') === undefined ? 'Immutable' : 'Mutable',
+        mutability: element.mutable ? 'Mutable' : 'Immutable',
         ...(resolvedDeclared === undefined ? {} : { declaredType: resolvedDeclared.fact }),
         // A declared union is the binding's type: the initializer injects at the binding boundary.
         inferredType:
@@ -779,7 +765,7 @@ export const analyzeStatements = (
         ...(staticValue === undefined ? {} : { staticValue }),
         ...(exactCallable === undefined ? {} : { exactCallable }),
         ...(hasConcreteCallableIdentity ? { concreteCallableIdentity: true as const } : {}),
-        syntax: element,
+        anchor: element.anchor,
       })
       context.bindings.push(binding)
       if (staticValue !== undefined && context.staticContext !== undefined) {
@@ -796,7 +782,7 @@ export const analyzeStatements = (
       if (name._tag === 'Present') {
         const originalSpan = blockBindings.get(name.spelling)
         if (originalSpan === undefined) {
-          blockBindings.set(name.spelling, name.token.span)
+          blockBindings.set(name.spelling, context.context.spanOf(name.anchor))
           scope = Object.freeze({
             parameters: scope.parameters,
             bindings: Object.freeze([...scope.bindings, binding]),
@@ -804,26 +790,30 @@ export const analyzeStatements = (
           })
         } else {
           context.diagnostics.push(
-            Diagnostic.rebindingName(name.spelling, originalSpan, name.token.span),
+            Diagnostic.rebindingName(
+              name.spelling,
+              originalSpan,
+              context.context.spanOf(name.anchor),
+            ),
           )
         }
       }
       continue
     }
 
-    if (element.kind === 'PatternBindingStatement') {
+    if (element._tag === 'PatternBindingStatement') {
       const region = nextRegion()
       const selection = analyzePatternSelection(element, scope)
       if (selection.pattern._tag === 'UniversalPattern') {
         if (selection.subject.type._tag === 'Available')
           context.diagnostics.push(
             Diagnostic.expressionStatementResult(
-              Presentation.type(
+              SemanticDisplay.type(
                 selection.subject.type.type,
-                context.source.id,
+                context.context.presentation.sourceId,
                 context.resolution.scope,
               ),
-              selection.pattern.syntax.span,
+              context.context.spanOf(selection.pattern.anchor),
             ),
           )
       } else if (selection.pattern._tag !== 'UnavailablePattern' && !selection.irrefutable) {
@@ -844,16 +834,16 @@ export const analyzeStatements = (
         context.diagnostics.push(
           Diagnostic.refutableLetPattern(
             selection.subject.type._tag === 'Available'
-              ? Presentation.type(
+              ? SemanticDisplay.type(
                   selection.subject.type.type,
-                  context.source.id,
+                  context.context.presentation.sourceId,
                   context.resolution.scope,
                 )
               : '<unavailable>',
             selection.members
               .filter((member) => selected === undefined || !Match.selects(selected, member))
               .map(Match.encodeIdentity),
-            selection.pattern.syntax.span,
+            context.context.spanOf(selection.pattern.anchor),
           ),
         )
       }
@@ -862,14 +852,14 @@ export const analyzeStatements = (
           _tag: 'PatternBindStatement',
           selection,
           region,
-          syntax: element,
+          anchor: element.anchor,
         }),
       )
       for (const binding of selection.bindings) {
         if (binding.name._tag !== 'Present') continue
         const originalSpan = blockBindings.get(binding.name.spelling)
         if (originalSpan === undefined)
-          blockBindings.set(binding.name.spelling, binding.name.token.span)
+          blockBindings.set(binding.name.spelling, context.context.spanOf(binding.name.anchor))
       }
       scope = Object.freeze({
         parameters: scope.parameters,
@@ -879,11 +869,11 @@ export const analyzeStatements = (
       continue
     }
 
-    if (element.kind === 'ExpressionStatement') {
+    if (element._tag === 'ExpressionStatement') {
       const region = nextRegion()
-      const expressionNode = statementExpressionNode(element)
+      const expressionNode = element.expression
       const expression = analyzeExpression(
-        context.source,
+        context.context,
         expressionNode,
         context.declarations,
         context.declaration,
@@ -891,7 +881,7 @@ export const analyzeStatements = (
         context.resolution,
       )
       if (expression === undefined) {
-        throw new RangeError(`Semantic analysis cannot analyze ${expressionNode.kind}`)
+        throw new RangeError(`Semantic analysis cannot analyze ${expressionNode._tag}`)
       }
       context.diagnostics.push(...expression.diagnostics)
       if (
@@ -907,7 +897,7 @@ export const analyzeStatements = (
             _tag: 'ExpressionStatement',
             expression: expression.fact,
             region,
-            syntax: element,
+            anchor: element.anchor,
           }),
         )
         continue
@@ -919,8 +909,12 @@ export const analyzeStatements = (
       ) {
         context.diagnostics.push(
           Diagnostic.expressionStatementResult(
-            Presentation.type(expression.type, context.source.id, context.resolution.scope),
-            expressionNode.span,
+            SemanticDisplay.type(
+              expression.type,
+              context.context.presentation.sourceId,
+              context.resolution.scope,
+            ),
+            context.context.spanOf(expressionNode.anchor),
           ),
         )
       }
@@ -929,17 +923,17 @@ export const analyzeStatements = (
           _tag: 'ExpressionStatement',
           expression: expression.fact,
           region,
-          syntax: element,
+          anchor: element.anchor,
         }),
       )
       continue
     }
 
-    if (element.kind === 'StaticForStatement') {
+    if (element._tag === 'StaticForStatement') {
       const checkpoint = staticExpansionCheckpoint()
-      const iterableNode = statementExpressionNode(element)
+      const iterableNode = element.iterable
       const iterable = analyzeExpression(
-        context.source,
+        context.context,
         iterableNode,
         context.declarations,
         context.declaration,
@@ -947,7 +941,7 @@ export const analyzeStatements = (
         context.resolution,
       )
       if (iterable === undefined)
-        throw new RangeError(`Semantic analysis cannot analyze ${iterableNode.kind}`)
+        throw new RangeError(`Semantic analysis cannot analyze ${iterableNode._tag}`)
       context.diagnostics.push(...iterable.diagnostics)
       const reject = (): void => {
         restoreStaticExpansion(checkpoint)
@@ -957,7 +951,7 @@ export const analyzeStatements = (
             iterable: iterable.fact,
             state: 'Rejected',
             scopes: Object.freeze([]),
-            syntax: element,
+            anchor: element.anchor,
           }),
         )
       }
@@ -968,7 +962,7 @@ export const analyzeStatements = (
             iterable: iterable.fact,
             state: 'Deferred',
             scopes: Object.freeze([]),
-            syntax: element,
+            anchor: element.anchor,
           }),
         )
         continue
@@ -990,37 +984,24 @@ export const analyzeStatements = (
             'static for requires a finite static sequence or field collection',
             context.staticContext.environment.target,
             Object.freeze([]),
-            iterableNode.span,
+            context.context.spanOf(iterableNode.anchor),
           ),
         )
         reject()
         continue
       }
-      const bindingToken = SyntaxTree.directToken(element, 'Identifier')
-      const missingBinding = element.children.find(
-        (child) =>
-          SyntaxTree.isMissingToken(child) &&
-          child.expected === 'Identifier' &&
-          (bindingToken === undefined || child.span.start <= bindingToken.span.start),
-      )
-      const name: DeclarationFacts.DeclaredName =
-        bindingToken === undefined || missingBinding !== undefined
-          ? Object.freeze({
-              _tag: 'Unavailable',
-              syntax: missingBinding ?? SyntaxTree.unavailableChild(element, 'Identifier'),
-            })
-          : Object.freeze({
-              _tag: 'Present',
-              spelling: spelling(context.source, bindingToken),
-              token: bindingToken,
-            })
-      const body = SyntaxTree.directNode(element, 'Block')
+      const name: DeclarationFacts.DeclaredName = bindingName(context.context, element.binding)
+      const body = element.body
       const scopes: Array<StaticIterationFact['scopes'][number]> = []
       let failed = false
       for (const [ordinal, current] of elements.entries()) {
         const iterationTrace = StaticEvaluation.appendTrace(
           context.staticContext.trace,
-          StaticEvaluation.staticIterationFrame(ordinal, current.value, element.span),
+          StaticEvaluation.staticIterationFrame(
+            ordinal,
+            current.value,
+            context.context.spanOf(element.anchor),
+          ),
         )
         const iterationStaticContext = Object.freeze({
           ...context.staticContext,
@@ -1039,7 +1020,7 @@ export const analyzeStatements = (
           inferredType: Object.freeze({ _tag: 'Available', type: current.type }),
           initializer: iterable.fact,
           staticValue: current.value,
-          syntax: element,
+          anchor: element.anchor,
         })
         context.nextBindingOrdinal.value += 1
         context.bindings.push(binding)
@@ -1110,18 +1091,18 @@ export const analyzeStatements = (
         iterable: iterable.fact,
         state: 'Expanded',
         scopes: Object.freeze(scopes),
-        syntax: element,
+        anchor: element.anchor,
       })
       context.staticIterations.push(iteration)
       for (const iterationScope of scopes) facts.push(...iterationScope.statements)
       continue
     }
 
-    if (element.kind === 'StaticConditionalStatement') {
+    if (element._tag === 'StaticConditionalStatement') {
       if (context.staticContext === undefined) continue
-      const conditionNode = statementExpressionNode(element)
+      const conditionNode = element.condition
       const condition = analyzeExpression(
-        context.source,
+        context.context,
         conditionNode,
         context.declarations,
         context.declaration,
@@ -1130,7 +1111,7 @@ export const analyzeStatements = (
         'bool',
       )
       if (condition === undefined)
-        throw new RangeError(`Semantic analysis cannot analyze ${conditionNode.kind}`)
+        throw new RangeError(`Semantic analysis cannot analyze ${conditionNode._tag}`)
       context.diagnostics.push(...condition.diagnostics)
       const evaluated = StaticEvaluation.evaluateFact(condition.fact, context.staticContext)
       if (evaluated._tag === 'Failed') {
@@ -1143,21 +1124,21 @@ export const analyzeStatements = (
             'static if condition must evaluate to bool',
             context.staticContext.environment.target,
             Object.freeze([]),
-            conditionNode.span,
+            context.context.spanOf(conditionNode.anchor),
           ),
         )
         continue
       }
-      const arms = SyntaxTree.directNodes(element, 'Block')
-      const selected = arms.at(evaluated.value.value ? 0 : 1)
-      if (selected !== undefined) {
+      // Both authored arms are present; selection picks one and the other is not elaborated.
+      const selected = evaluated.value.value ? element.thenBranch : element.elseBranch
+      if (selected !== undefined && selected._tag === 'Block') {
         const staticContext = Object.freeze({
           ...context.staticContext,
           trace: StaticEvaluation.appendTrace(
             context.staticContext.trace,
             StaticEvaluation.selectedArmFrame(
               evaluated.value.value ? 'Taken' : 'Otherwise',
-              selected.span,
+              context.context.spanOf(selected.anchor),
             ),
           ),
         })
@@ -1177,29 +1158,22 @@ export const analyzeStatements = (
       continue
     }
 
-    if (element.kind === 'ConditionalStatement') {
+    if (element._tag === 'ConditionalStatement') {
       facts.push(analyzeConditional(element, scope, loopStack))
       continue
     }
 
-    if (element.kind === 'PatternConditionalStatement') {
+    if (element._tag === 'PatternConditionalStatement') {
       facts.push(analyzePatternConditional(element, scope, loopStack))
       continue
     }
 
-    if (element.kind === 'AssignmentStatement') {
+    if (element._tag === 'AssignmentStatement') {
       const region = nextRegion()
-      const nodes = element.children.filter(
-        (child): child is SyntaxTree.Node => SyntaxTree.isNode(child) && isExpressionNode(child),
-      )
-      const destinationNode = nodes.at(0)
-      const valueNode = nodes.at(1)
-      if (destinationNode === undefined || valueNode === undefined) {
-        context.diagnostics.push(Diagnostic.invalidAssignmentPlace(element.span))
-        continue
-      }
+      const destinationNode = element.target
+      const valueNode = element.value
       const destination = analyzeExpression(
-        context.source,
+        context.context,
         destinationNode,
         context.declarations,
         context.declaration,
@@ -1207,7 +1181,7 @@ export const analyzeStatements = (
         context.resolution,
       )
       if (destination === undefined) {
-        throw new RangeError(`Semantic analysis cannot analyze ${destinationNode.kind}`)
+        throw new RangeError(`Semantic analysis cannot analyze ${destinationNode._tag}`)
       }
       context.diagnostics.push(...destination.diagnostics)
       const root = assignmentRoot(destination.fact)
@@ -1219,15 +1193,15 @@ export const analyzeStatements = (
           : BodyLifetime.activatedCompatibility(
               context.resolution.bodyLifetimes,
               context.resolution.lifetimeCompatibility,
-              element,
-              root?.syntax,
+              element.anchor,
+              root?.anchor,
             )
       const writeResolution: ResolutionContext = {
         ...context.resolution,
         ...(writeCompatibility === undefined ? {} : { lifetimeCompatibility: writeCompatibility }),
       }
       const value = analyzeExpression(
-        context.source,
+        context.context,
         valueNode,
         context.declarations,
         context.declaration,
@@ -1236,7 +1210,7 @@ export const analyzeStatements = (
         destination.type,
       )
       if (value === undefined) {
-        throw new RangeError(`Semantic analysis cannot analyze ${valueNode.kind}`)
+        throw new RangeError(`Semantic analysis cannot analyze ${valueNode._tag}`)
       }
       context.diagnostics.push(...value.diagnostics)
       if (destination.fact._tag === 'ForeignStatic') {
@@ -1245,18 +1219,20 @@ export const analyzeStatements = (
             destination.fact.declaration.name._tag === 'Present'
               ? destination.fact.declaration.name.spelling
               : '?',
-            destinationNode.span,
+            context.context.spanOf(destinationNode.anchor),
           ),
         )
       } else if (root === undefined) {
-        if (SyntaxTree.isAvailableSyntax(destinationNode) && destination.diagnostics.length === 0) {
-          context.diagnostics.push(Diagnostic.invalidAssignmentPlace(destinationNode.span))
+        if (AuthoredWalk.isAvailable(destinationNode) && destination.diagnostics.length === 0) {
+          context.diagnostics.push(
+            Diagnostic.invalidAssignmentPlace(context.context.spanOf(destinationNode.anchor)),
+          )
         }
       } else if (assignmentRootAccess(root, destination.fact) === 'ImmutableOwned') {
         context.diagnostics.push(
           Diagnostic.immutableAssignment(
             root.name._tag === 'Present' ? root.name.spelling : '?',
-            destinationNode.span,
+            context.context.spanOf(destinationNode.anchor),
           ),
         )
       } else if (
@@ -1266,7 +1242,9 @@ export const analyzeStatements = (
           destination.fact._tag !== 'ReferentProjection' &&
           destination.fact._tag !== 'FieldProjection')
       ) {
-        context.diagnostics.push(Diagnostic.invalidAssignmentPlace(destinationNode.span))
+        context.diagnostics.push(
+          Diagnostic.invalidAssignmentPlace(context.context.spanOf(destinationNode.anchor)),
+        )
       }
       const compatible =
         destination.type !== undefined &&
@@ -1274,25 +1252,27 @@ export const analyzeStatements = (
         typesCompatible(value.type, destination.type, writeCompatibility)
       if (destination.type !== undefined && value.type !== undefined && !compatible) {
         const expectedOrigin =
-          root?._tag === 'BindingFact' ? root.initializer.syntax.span : destinationNode.span
+          root?._tag === 'BindingFact'
+            ? context.context.spanOf(root.initializer.anchor)
+            : context.context.spanOf(destinationNode.anchor)
         context.diagnostics.push(
           representationJoinDiagnostic(
             destination.type,
             value.type,
             expectedOrigin,
-            valueNode.span,
-            valueNode.span,
+            context.context.spanOf(valueNode.anchor),
+            context.context.spanOf(valueNode.anchor),
           ) ??
             unionConversionDiagnostic(
               value.type,
               destination.type,
-              valueNode.span,
+              context.context.spanOf(valueNode.anchor),
               context.resolution?.lifetimeCompatibility,
             ) ??
             Diagnostic.assignmentTypeMismatch(
               Type.encode(destination.type),
               Type.encode(value.type),
-              valueNode.span,
+              context.context.spanOf(valueNode.anchor),
             ),
         )
       }
@@ -1305,7 +1285,7 @@ export const analyzeStatements = (
         // callable of another construction site would erase that identity behind the structural type.
         // Deferred writes inside an Effect body are governed by the captured-callable mutation rule.
         const identityOf = (expression: ExpressionFact): string | undefined => {
-          const representation = representationOfExpression(expression)
+          const representation = representationOfExpression(context.context, expression)
           return representation !== undefined &&
             Type.isExactRepresentationArgument(representation) &&
             Type.isCallableIdentityArgument(representation.identity)
@@ -1322,7 +1302,9 @@ export const analyzeStatements = (
           written !== undefined &&
           current !== written
         )
-          context.diagnostics.push(Diagnostic.callableIdentityErasure(valueNode.span))
+          context.diagnostics.push(
+            Diagnostic.callableIdentityErasure(context.context.spanOf(valueNode.anchor)),
+          )
         context.resolution.writtenCallableBindings?.add(root.id.ordinal)
       }
       facts.push(
@@ -1336,18 +1318,22 @@ export const analyzeStatements = (
             compatible
               ? (context.resolution.bodyLifetimes?.activatedConstraints
                   .slice(activatedStart)
-                  .filter(({ installed }) => installed === element)
+                  .filter(
+                    ({ installed }) =>
+                      AuthoredIdentity.anchorKey(installed) ===
+                      AuthoredIdentity.anchorKey(element.anchor),
+                  )
                   .map(({ bound }) => bound) ?? [])
               : [],
           ).bounds,
           region,
-          syntax: element,
+          anchor: element.anchor,
         }),
       )
       continue
     }
 
-    if (element.kind === 'WhileStatement') {
+    if (element._tag === 'WhileStatement') {
       const region = nextRegion()
       const loop = Object.freeze({
         _tag: 'TirLoop' as const,
@@ -1355,7 +1341,7 @@ export const analyzeStatements = (
         ordinal: context.loops.length,
       })
       context.loops.push(loop)
-      const bodyNode = SyntaxTree.directNode(element, 'Block')
+      const bodyNode = element.body
       const loopEntry = snapshotCallableWrites()
       const checkpoint = Object.freeze({
         bindings: context.bindings.length,
@@ -1366,9 +1352,9 @@ export const analyzeStatements = (
       })
       const analyzeLoopPass = (entry: ReadonlySet<number>) => {
         restoreCallableWrites(entry)
-        const conditionNode = statementExpressionNode(element)
+        const conditionNode = element.condition
         const condition = analyzeExpression(
-          context.source,
+          context.context,
           conditionNode,
           context.declarations,
           context.declaration,
@@ -1376,7 +1362,7 @@ export const analyzeStatements = (
           ordinaryControlContext.resolution,
         )
         if (condition === undefined) {
-          throw new RangeError(`Semantic analysis cannot analyze ${conditionNode.kind}`)
+          throw new RangeError(`Semantic analysis cannot analyze ${conditionNode._tag}`)
         }
         context.diagnostics.push(...condition.diagnostics)
         if (
@@ -1385,7 +1371,10 @@ export const analyzeStatements = (
           !Type.isNever(condition.fact.type.type)
         ) {
           context.diagnostics.push(
-            Diagnostic.conditionNotBool(Type.encode(condition.fact.type.type), conditionNode.span),
+            Diagnostic.conditionNotBool(
+              Type.encode(condition.fact.type.type),
+              context.context.spanOf(conditionNode.anchor),
+            ),
           )
         }
         const bodyEntry = snapshotCallableWrites()
@@ -1428,39 +1417,40 @@ export const analyzeStatements = (
           condition: analyzed.condition,
           body: Object.freeze([...analyzed.body]),
           region,
-          syntax: element,
+          anchor: element.anchor,
         }),
       )
       continue
     }
 
-    if (element.kind === 'BreakStatement' || element.kind === 'ContinueStatement') {
+    if (element._tag === 'BreakStatement' || element._tag === 'ContinueStatement') {
       const region = nextRegion()
       const target = loopStack.at(-1)
       if (target === undefined) {
         context.diagnostics.push(
           Diagnostic.transferOutsideLoop(
-            element.kind === 'BreakStatement' ? 'break' : 'continue',
-            element.span,
+            element._tag === 'BreakStatement' ? 'break' : 'continue',
+            context.context.spanOf(element.anchor),
           ),
         )
       }
       facts.push(
         Object.freeze({
-          _tag: element.kind,
+          _tag: element._tag,
           ...(target === undefined ? {} : { target }),
           region,
-          syntax: element,
+          anchor: element.anchor,
         }),
       )
       continue
     }
 
-    if (element.kind === 'ReturnStatement') {
+    if (element._tag === 'ReturnStatement') {
       const region = nextRegion()
-      const expressionNode = statementExpressionNode(element)
+      // `return` without a value returns unit; the authored unit literal stands in for it.
+      const expressionNode = element.value ?? unitValueOf(element)
       const expression = analyzeExpression(
-        context.source,
+        context.context,
         expressionNode,
         context.declarations,
         context.declaration,
@@ -1469,7 +1459,7 @@ export const analyzeStatements = (
         !context.effectBlock ? context.returnType : undefined,
       )
       if (expression === undefined) {
-        throw new RangeError(`Semantic analysis cannot analyze ${expressionNode.kind}`)
+        throw new RangeError(`Semantic analysis cannot analyze ${expressionNode._tag}`)
       }
       context.diagnostics.push(...expression.diagnostics)
       if (
@@ -1479,24 +1469,26 @@ export const analyzeStatements = (
         expression.type.mode !== 'Shared' &&
         !concreteCallableIdentity(expression.fact, context.resolution.writtenCallableBindings)
       ) {
-        context.diagnostics.push(Diagnostic.unknownOwnedCallableReturn(expressionNode.span))
+        context.diagnostics.push(
+          Diagnostic.unknownOwnedCallableReturn(context.context.spanOf(expressionNode.anchor)),
+        )
       }
       facts.push(
         Object.freeze({
           _tag: 'ReturnStatement',
           expression: expression.fact,
           region,
-          syntax: element,
+          anchor: element.anchor,
         }),
       )
       break
     }
 
-    if (element.kind === 'FailStatement') {
+    if (element._tag === 'FailStatement') {
       const region = nextRegion()
-      const expressionNode = statementExpressionNode(element)
+      const expressionNode = element.value
       const expression = analyzeExpression(
-        context.source,
+        context.context,
         expressionNode,
         context.declarations,
         context.declaration,
@@ -1504,17 +1496,22 @@ export const analyzeStatements = (
         context.resolution,
       )
       if (expression === undefined)
-        throw new RangeError(`Semantic analysis cannot analyze ${expressionNode.kind}`)
+        throw new RangeError(`Semantic analysis cannot analyze ${expressionNode._tag}`)
       context.diagnostics.push(...expression.diagnostics)
       const failure =
         expression.type !== undefined && Type.isFailureValue(expression.type)
           ? expression.type
           : undefined
       if (!context.effectBlock && context.declaration.functionKind !== 'Effect')
-        context.diagnostics.push(Diagnostic.failOutsideEffect(element.span))
+        context.diagnostics.push(
+          Diagnostic.failOutsideEffect(context.context.spanOf(element.anchor)),
+        )
       if (expression.type !== undefined && failure === undefined)
         context.diagnostics.push(
-          Diagnostic.invalidFailureType(Type.encode(expression.type), expressionNode.span),
+          Diagnostic.invalidFailureType(
+            Type.encode(expression.type),
+            context.context.spanOf(expressionNode.anchor),
+          ),
         )
       if (
         !context.effectBlock &&
@@ -1530,26 +1527,29 @@ export const analyzeStatements = (
         )
       )
         context.diagnostics.push(
-          Diagnostic.undeclaredFailure(Type.encode(failure), expressionNode.span),
+          Diagnostic.undeclaredFailure(
+            Type.encode(failure),
+            context.context.spanOf(expressionNode.anchor),
+          ),
         )
       facts.push(
         Object.freeze({
           _tag: 'FailStatement',
           expression: expression.fact,
           ...(failure === undefined ? {} : { failure }),
-          transfer: SyntaxTree.directToken(element, 'MoveKeyword') === undefined ? 'Copy' : 'Move',
+          transfer: element.move ? 'Move' : 'Copy',
           region,
-          syntax: element,
+          anchor: element.anchor,
         }),
       )
       break
     }
 
-    if (element.kind === 'DropStatement') {
+    if (element._tag === 'DropStatement') {
       const region = nextRegion()
-      const expressionNode = statementExpressionNode(element)
+      const expressionNode = element.value
       const expression = analyzeExpression(
-        context.source,
+        context.context,
         expressionNode,
         context.declarations,
         context.declaration,
@@ -1557,14 +1557,14 @@ export const analyzeStatements = (
         context.resolution,
       )
       if (expression === undefined)
-        throw new RangeError(`Semantic analysis cannot analyze ${expressionNode.kind}`)
+        throw new RangeError(`Semantic analysis cannot analyze ${expressionNode._tag}`)
       context.diagnostics.push(...expression.diagnostics)
       facts.push(
         Object.freeze({
           _tag: 'DropStatement',
           expression: expression.fact,
           region,
-          syntax: element,
+          anchor: element.anchor,
         }),
       )
     }
@@ -1580,7 +1580,7 @@ export interface ReturnFlow {
 
 export const implicitReturn = (
   statement: Extract<StatementFact, { readonly _tag: 'ReturnStatement' }>,
-): boolean => SyntaxTree.directToken(statement.syntax, 'ReturnKeyword') === undefined
+): boolean => statement.implicit === true
 
 /** Eager expression flow; constructing a callable or Effect never executes its body. */
 export const expressionReturnFlow = (expression: ExpressionFact): ReturnFlow => {
@@ -1817,7 +1817,7 @@ const returnSiteEffectJoin = (
   const alternatives: Array<Type.ExactRepresentationArgument> = []
   const missing: Array<SourceSpan.SourceSpan> = []
   for (const statement of sites) {
-    const representation = representationOfExpression(statement.expression)
+    const representation = representationOfExpression(context.context, statement.expression)
     if (
       representation !== undefined &&
       Type.isExactRepresentationArgument(representation) &&
@@ -1829,7 +1829,7 @@ const returnSiteEffectJoin = (
       Type.isCompositeEffectRepresentationArgument(representation)
     )
       alternatives.push(...representation.alternatives)
-    else missing.push(statement.expression.syntax.span)
+    else missing.push(context.context.spanOf(statement.expression.anchor))
   }
   const composite = Type.compositeEffectRepresentationArgument(declared, alternatives)
   if (composite.alternatives.length < 2 && missing.length === 0) return undefined
@@ -1848,7 +1848,7 @@ const returnSiteEffectJoin = (
 }
 
 export const analyzeFunctionBody = (
-  source: SourceFile.SourceFile,
+  semantic: SemanticContext.SemanticContext,
   declaration: DeclarationFact,
   declarations: ReadonlyArray<DeclarationFact>,
   resolution: ResolutionContext,
@@ -1859,13 +1859,12 @@ export const analyzeFunctionBody = (
     declaration.returnType._tag === 'Resolved'
       ? Type.substitute(declaration.returnType.type, staticContext?.typeSubstitution ?? new Map())
       : undefined
-  const blockNode = childNode(declaration.syntax, 'Block')
-  const unsafeSpans: Array<SourceSpan.SourceSpan> = []
-  const collectUnsafeSpans = (node: SyntaxTree.Node): void => {
-    if (node.kind === 'UnsafeStatement') unsafeSpans.push(node.span)
-    for (const child of node.children) if (SyntaxTree.isNode(child)) collectUnsafeSpans(child)
-  }
-  collectUnsafeSpans(declaration.syntax)
+  const blockNode = AuthoredWalk.bodyBlock(semantic, declaration)
+  const unsafeSpans = Object.freeze(
+    AuthoredWalk.statements(blockNode)
+      .filter((statement) => statement._tag === 'UnsafeStatement')
+      .map((statement) => semantic.spanOf(statement.anchor)),
+  )
   const nextBindingOrdinal = { value: 0 }
   const declaredOutlives = TypeOutlives.context(resolution.index.modules)
   const outlivesScope =
@@ -1880,19 +1879,24 @@ export const analyzeFunctionBody = (
   const bodyLifetimes = BodyLifetime.make(
     declaration.canonical._tag === 'Canonical'
       ? declaration.canonical.id
-      : { module: source.id, name: `#${declaration.id.ordinal}` },
-    declaration.syntax,
+      : {
+          module: semantic.presentation.sourceId,
+          name: `#${declaration.id.ordinal}`,
+        },
+    AuthoredWalk.anchors(blockNode),
     outlivesScope.parameterBounds,
   )
+  const authoredDeclaration = AuthoredWalk.declarationOf(semantic.module, declaration.owner)
   const bodyResolution: ResolutionContext = Object.freeze({
     ...resolution,
-    unsafeSpans: Object.freeze(unsafeSpans),
+    ...(authoredDeclaration === undefined ? {} : { authoredDeclaration }),
+    unsafeSpans,
     nextBindingOrdinal,
     executableFunction: declaration.id,
     ...(declaration.canonical._tag === 'Canonical'
       ? { executableOwner: declaration.canonical.id }
       : {}),
-    executableSites: executableSites(declaration.syntax),
+    executableSites: executableSites(blockNode),
     bodyLifetimes,
     lifetimeCompatibility: BodyLifetime.compatibility(
       bodyLifetimes,
@@ -1909,7 +1913,7 @@ export const analyzeFunctionBody = (
     ...(staticContext === undefined ? {} : { staticContext }),
   })
   const context: BodyContext = {
-    source,
+    context: semantic,
     declaration,
     declarations,
     bindings: [],
@@ -1922,7 +1926,7 @@ export const analyzeFunctionBody = (
     ...(staticContext === undefined ? {} : { staticContext }),
     ...(returnType === undefined ? {} : { returnType }),
   }
-  context.diagnostics.push(...MachineFunction.bodyDiagnostics(source, declaration))
+  context.diagnostics.push(...MachineFunction.bodyDiagnostics(semantic, declaration))
   if (declaration.phase === 'Runtime') {
     const target = staticContext?.environment.target ?? 'unselected-target'
     for (const parameter of declaration.parameters) {
@@ -1936,7 +1940,7 @@ export const analyzeFunctionBody = (
             'runtime parameter with a phase-only type',
             target,
             Object.freeze([]),
-            parameter.syntax.span,
+            context.context.spanOf(parameter.anchor),
           ),
         )
     }
@@ -1949,7 +1953,7 @@ export const analyzeFunctionBody = (
           'runtime return with a phase-only type',
           target,
           Object.freeze([]),
-          declaration.returnType.syntax.span,
+          context.context.spanOf(declaration.returnType.anchor),
         ),
       )
   }
@@ -1959,12 +1963,12 @@ export const analyzeFunctionBody = (
     initialScope ??
       Object.freeze({ parameters: declaration.parameters, bindings: [], patternBindings: [] }),
   )
-  const containsDeferredStaticControl = (node: SyntaxTree.Node): boolean =>
-    node.kind === 'StaticConditionalStatement' ||
-    node.kind === 'StaticForStatement' ||
-    node.children.some((child) => SyntaxTree.isNode(child) && containsDeferredStaticControl(child))
   const hasDeferredStaticControl =
-    staticContext === undefined && containsDeferredStaticControl(blockNode)
+    staticContext === undefined &&
+    AuthoredWalk.statements(blockNode).some(
+      (statement) =>
+        statement._tag === 'StaticConditionalStatement' || statement._tag === 'StaticForStatement',
+    )
   type Terminal = Extract<StatementFact, { _tag: 'ReturnStatement' | 'FailStatement' }>
   const terminalOf = (body: ReadonlyArray<StatementFact>): Terminal | undefined => {
     for (const statement of [...body].reverse()) {
@@ -2008,6 +2012,7 @@ export const analyzeFunctionBody = (
       if (
         staticContext?.typeSubstitution === undefined
           ? declaredReturnTypesCompatible(
+              semantic,
               declaration,
               returned.expression,
               bodyResolution?.lifetimeCompatibility,
@@ -2024,20 +2029,20 @@ export const analyzeFunctionBody = (
         representationJoinDiagnostic(
           returnType ?? declaration.returnType.type,
           actual,
-          declaration.returnType.syntax.span,
-          returned.expression.syntax.span,
-          returned.expression.syntax.span,
+          context.context.spanOf(declaration.returnType.anchor),
+          context.context.spanOf(returned.expression.anchor),
+          context.context.spanOf(returned.expression.anchor),
         ) ??
           unionConversionDiagnostic(
             actual,
             returnType ?? declaration.returnType.type,
-            returned.expression.syntax.span,
+            context.context.spanOf(returned.expression.anchor),
             bodyResolution?.lifetimeCompatibility,
           ) ??
           Diagnostic.returnTypeMismatch(
             Type.encode(returnType ?? declaration.returnType.type),
             Type.encode(actual),
-            returned.expression.syntax.span,
+            context.context.spanOf(returned.expression.anchor),
           ),
       )
     }
@@ -2051,7 +2056,7 @@ export const analyzeFunctionBody = (
       context.diagnostics.push(
         Diagnostic.missingReturn(
           Type.encode(returnType ?? declaration.returnType.type),
-          SyntaxTree.directToken(blockNode, 'RightBrace')?.span ?? blockNode.span,
+          semantic.spanOf(blockNode.anchor),
         ),
       )
     }
@@ -2065,6 +2070,7 @@ export const analyzeFunctionBody = (
     statements,
     bodyLifetimes,
     resolution.index,
+    semantic,
     outlivesScope,
   )
   context.diagnostics.push(...lifetimeFlow.diagnostics)

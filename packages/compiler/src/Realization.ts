@@ -4,6 +4,7 @@ import type * as ArtifactPlan from './ArtifactPlan.js'
 import * as ArtifactComposition from './ArtifactComposition.js'
 import type * as ModuleClosure from './ModuleClosure.js'
 import * as ModuleSelection from './ModuleSelection.js'
+import * as SemanticContext from './SemanticContext.js'
 import * as Effect from 'effect/Effect'
 import * as Result from 'effect/Result'
 import * as CompilationProfile from './CompilationProfile.js'
@@ -35,6 +36,7 @@ const instanceViolationDiagnostics = (
 const foreignStaticTargetDiagnostics = (
   index: DeclarationIndex.Index,
   target: Target.Target,
+  registry: SemanticContext.Registry,
 ): ReadonlyArray<Diagnostic.Diagnostic> =>
   index.modules.flatMap((module) =>
     module.members.flatMap((member): ReadonlyArray<Diagnostic.Diagnostic> => {
@@ -55,7 +57,7 @@ const foreignStaticTargetDiagnostics = (
       return [
         Diagnostic.invalidConstant(
           `the exported C static initializer is outside ${scalar.spelling} on ${target.id}`,
-          member.initializer?.span ?? member.syntax.span,
+          registry.spanOf(member.initializer?.anchor ?? member.anchor),
         ),
       ]
     }),
@@ -69,6 +71,7 @@ const discoverInstances = Effect.fn('Realization.discoverInstances')(function* (
   prepareForEmission: boolean,
   report: Array<PhaseReport.PhaseReport>,
   options: Options,
+  registry: SemanticContext.Registry,
 ) {
   const trace = yield* CompilerTrace.capture()
   const instances = PhaseReport.measureInto(
@@ -80,11 +83,12 @@ const discoverInstances = Effect.fn('Realization.discoverInstances')(function* (
       completion === undefined ||
       self.composition === undefined ||
       (!prepareForEmission && specializationInvalid)
-        ? Instances.invalid(self.closure.rootModule)
+        ? Instances.invalid(self.closure.rootModule, registry)
         : Instances.discover(
             self.closure.rootModule,
             self.results,
             self.index,
+            registry,
             completion,
             self.resolution,
             self.composition,
@@ -159,6 +163,7 @@ const buildTargetLayout = Effect.fn('Realization.buildTargetLayout')(function* (
   const catalog = yield* Layout.catalog(
     selection.target,
     self.index,
+    instances.registry,
     instances,
     OpaqueRealization.catalogOf(self),
   )
@@ -259,6 +264,7 @@ const discoverAndLowerEffect = Effect.fn('Realization.discoverAndLower')(functio
     'realization.mode': prepareForEmission ? 'prepare' : 'analyze',
     'mir.normalize': options.normalizeMir !== false,
   })
+  const registry = SemanticContext.fromModules(self.closure.modules)
   const report = [...self.report]
   if (prepareForEmission && Diagnostic.hasErrors(self.diagnostics))
     return Object.freeze({
@@ -269,13 +275,13 @@ const discoverAndLowerEffect = Effect.fn('Realization.discoverAndLower')(functio
 
   const specializationInvalid =
     Diagnostic.hasGenericSpecializationErrors(self.diagnostics) ||
-    hasInvalidGenericBody(self.index, self.diagnostics)
+    hasInvalidGenericBody(self.index, self.diagnostics, registry)
   // Static specialization is target-relative. Resolve the closed target before constructing any
   // executable worklist so no candidate body can observe a missing or host-inferred target.
   const targetSelection = Target.select(targetId)
   const foreignStaticDiagnostics =
     targetSelection._tag === 'Resolved'
-      ? foreignStaticTargetDiagnostics(self.index, targetSelection.target)
+      ? foreignStaticTargetDiagnostics(self.index, targetSelection.target, registry)
       : Object.freeze([])
   const instances = yield* discoverInstances(
     self,
@@ -285,6 +291,7 @@ const discoverAndLowerEffect = Effect.fn('Realization.discoverAndLower')(functio
     prepareForEmission,
     report,
     options,
+    registry,
   )
   const baseDiagnostics = yield* collectInstanceDiagnostics(
     self,
@@ -571,7 +578,7 @@ export const configure = Effect.fn('Realization.configure')(function* (
     })
     const completion = yield* ProfileBootstrap.complete(
       initial,
-      { ...self, modules },
+      { ...self, contexts: SemanticContext.fromModules(self.closure.modules), modules },
       configuration?.bindings,
     )
     if (
@@ -639,9 +646,19 @@ export const configure = Effect.fn('Realization.configure')(function* (
           ['default requires conditional declaration availability'],
           result.failure.staticFailure,
         )
+  // The root module stands for the whole configuration when no origin carries a span.
+  const rootContext = SemanticContext.fromModules(self.closure.modules).contexts.get(
+    self.closure.rootModule,
+  )
   const span =
     failure.origins.find((origin) => origin.span !== undefined)?.span ??
-    self.closure.modules.find((module) => module.name === self.closure.rootModule)?.syntax.root.span
+    (rootContext === undefined
+      ? undefined
+      : rootContext.spanOf({
+          _tag: 'AuthoredAnchor',
+          owner: rootContext.module.owner,
+          path: [],
+        }))
   if (span === undefined) throw new RangeError('Profile bootstrap lost root source span')
   return {
     frontend: OpaqueRealization.withCatalog(
@@ -802,16 +819,17 @@ export type Preparation =
 const hasInvalidGenericBody = (
   index: DeclarationIndex.Index,
   diagnostics: ReadonlyArray<Diagnostic.Diagnostic>,
+  registry: SemanticContext.Registry,
 ): boolean =>
   index.modules.some((module) =>
-    module.members.some(
-      (member) =>
-        member.typeParameters.length > 0 &&
-        diagnostics.some(
-          (diagnostic) =>
-            diagnostic.span.sourceId === member.syntax.span.sourceId &&
-            diagnostic.span.start >= member.syntax.span.start &&
-            diagnostic.span.end <= member.syntax.span.end,
-        ),
-    ),
+    module.members.some((member) => {
+      if (member.typeParameters.length === 0) return false
+      const span = registry.spanOf(member.anchor)
+      return diagnostics.some(
+        (diagnostic) =>
+          diagnostic.span.sourceId === span.sourceId &&
+          diagnostic.span.start >= span.start &&
+          diagnostic.span.end <= span.end,
+      )
+    }),
   )

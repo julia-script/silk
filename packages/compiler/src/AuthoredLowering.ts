@@ -3235,32 +3235,24 @@ const allDeclarations = (module: AuthoredHir.Module): ReadonlyArray<AuthoredHir.
   return found
 }
 
-const headerSpans = new WeakMap<Lowered, ReadonlyMap<string, AuthoredHir.Declaration>>()
+const byOwner = new WeakMap<Lowered, ReadonlyMap<string, AuthoredHir.Declaration>>()
 
-/** Finds the authored declaration whose header presents at one declaration syntax node. */
-export const declarationFor = (
+/** The authored declaration one owner identity names, at any nesting depth of the module. */
+export const declarationOf = (
   self: Lowered,
-  syntax: SyntaxTree.Node,
+  owner: AuthoredIdentity.Identity,
 ): AuthoredHir.Declaration | undefined => {
-  let index = headerSpans.get(self)
+  let index = byOwner.get(self)
   if (index === undefined) {
-    const byOwner = new Map(
+    index = new Map(
       allDeclarations(self.module).map((declaration) => [
         identityKey(declaration.owner),
         declaration,
       ]),
     )
-    const built = new Map<string, AuthoredHir.Declaration>()
-    for (const entry of self.presentation.entries) {
-      const [segment] = entry.anchor.path
-      if (entry.anchor.path.length !== 1 || segment?.role !== 'header') continue
-      const declaration = byOwner.get(identityKey(entry.anchor.owner))
-      if (declaration !== undefined) built.set(spanKey(entry.span), declaration)
-    }
-    index = built
-    headerSpans.set(self, built)
+    byOwner.set(self, index)
   }
-  return index.get(spanKey(spanOf(syntax)))
+  return index.get(identityKey(owner))
 }
 
 const textOf = (module: AuthoredHir.Module, reference: AuthoredPool.TextRef): string =>

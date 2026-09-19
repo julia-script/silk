@@ -6,6 +6,7 @@ import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Result from 'effect/Result'
 import * as Analysis from '../src/Analysis.js'
+import * as SemanticContext from '../src/SemanticContext.js'
 import * as Tir from '../src/Tir.js'
 import * as Lexer from '../src/Lexer.js'
 import * as MovePath from '../src/MovePath.js'
@@ -2276,6 +2277,7 @@ fn bad() -> i32 { let value = 42 return choose(move value, value) }`
       const result =
         snapshot.results.get(snapshot.closure.rootModule) ?? unreachable('expected source result')
       const plan = Ownership.localSharedAccessBoundaryPlan(snapshot.results)
+      const context = SemanticContext.make(result.authored)
       const selected = (name: string): Ownership.CheckInput => {
         const fn =
           result.tir.functions.find(
@@ -2286,7 +2288,7 @@ fn bad() -> i32 { let value = 42 return choose(move value, value) }`
         const fact =
           result.functions.find((candidate) => candidate.declaration === fn.declaration) ??
           unreachable('expected semantic function')
-        return Ownership.input(fn, fact, snapshot.index, plan)
+        return Ownership.input(fn, fact, snapshot.index, plan, context)
       }
       const good = selected('good')
       const bad = selected('bad')
@@ -2313,8 +2315,8 @@ fn bad() -> i32 { let value = 42 return choose(move value, value) }`
         { ...good, function: { ...good.function } },
         { ...good, semantic: { ...(good.semantic ?? unreachable('expected semantic fact')) } },
         { ...good, index: { ...good.index } },
-        { ...good, boundaries: [good.function.declaration.syntax.span] },
-        { ...good, resultBoundaries: [good.function.declaration.syntax.span] },
+        { ...good, boundaries: [context.spanOf(good.function.declaration.anchor)] },
+        { ...good, resultBoundaries: [context.spanOf(good.function.declaration.anchor)] },
       ]
       for (const input of changed) {
         assert.isUndefined(Ownership.sourceProof(input))

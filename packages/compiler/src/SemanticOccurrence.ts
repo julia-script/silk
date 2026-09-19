@@ -1,3 +1,4 @@
+import type * as AuthoredHir from './AuthoredHir.js'
 import * as DeclarationFacts from './DeclarationFacts.js'
 import type * as DeclarationIndex from './DeclarationIndex.js'
 import type * as Diagnostic from './Diagnostic.js'
@@ -6,12 +7,9 @@ import type * as Tir from './Tir.js'
 import * as Intrinsic from './Intrinsic.js'
 import type * as Match from './Match.js'
 import * as NameResolution from './NameResolution.js'
-import * as SourceFile from './SourceFile.js'
 import type * as SourceSpan from './SourceSpan.js'
-import * as SyntaxTree from './SyntaxTree.js'
-import type * as Token from './Token.js'
+import * as SemanticContext from './SemanticContext.js'
 import * as Type from './Type.js'
-import * as Option from 'effect/Option'
 
 /** The exact source location and name selection of one source-backed declaration. */
 export interface DeclarationLocation {
@@ -112,12 +110,13 @@ const aliasAtPath = (
   path: DeclarationFacts.TypePathFact | undefined,
   scope: NameResolution.ModuleScope | undefined,
   index: DeclarationIndex.Index,
+  spans: SemanticContext.Registry,
 ): DeclarationFacts.AliasFact | undefined => {
   if (path === undefined || scope === undefined) return undefined
   const result = NameResolution.lookupPath(scope, index, path, {
     kind: 'ToolingPath',
     key: path.spelling,
-    span: path.syntax.span,
+    span: spans.spanOf(path.anchor),
   })
   return result._tag === 'Resolved' && result.declaration._tag === 'AliasDeclaration'
     ? result.declaration
@@ -140,58 +139,94 @@ const currentDeclaration = (
 
 const locationOfDeclaration = (
   index: DeclarationIndex.Index,
+  spans: SemanticContext.Registry,
   declaration: DeclarationFacts.MemberFact,
 ): DeclarationLocation | undefined => {
   const current = currentDeclaration(index, declaration)
   return current.name._tag === 'Present'
-    ? location(current.name.token.span.sourceId, current.syntax.span, current.name.token.span)
+    ? location(
+        current.name.anchor.owner.module,
+        spans.spanOf(current.anchor),
+        spans.spanOf(current.name.anchor),
+      )
     : undefined
 }
 
 const locationOfParameter = (
+  spans: SemanticContext.Registry,
   parameter: DeclarationFacts.ParameterFact,
 ): DeclarationLocation | undefined =>
   parameter.name._tag === 'Present'
-    ? location(parameter.name.token.span.sourceId, parameter.syntax.span, parameter.name.token.span)
+    ? location(
+        parameter.name.anchor.owner.module,
+        spans.spanOf(parameter.anchor),
+        spans.spanOf(parameter.name.anchor),
+      )
     : undefined
 
 const locationOfServiceOperation = (
+  spans: SemanticContext.Registry,
   operation: DeclarationFacts.ServiceOperationFact,
 ): DeclarationLocation | undefined =>
   operation.name._tag === 'Present'
-    ? location(operation.name.token.span.sourceId, operation.syntax.span, operation.name.token.span)
+    ? location(
+        operation.name.anchor.owner.module,
+        spans.spanOf(operation.anchor),
+        spans.spanOf(operation.name.anchor),
+      )
     : undefined
 
 const locationOfTypeParameter = (
+  spans: SemanticContext.Registry,
   parameter: DeclarationFacts.TypeParameterFact,
 ): DeclarationLocation | undefined =>
   parameter.implicitLifetime !== true && parameter.name._tag === 'Present'
-    ? location(parameter.name.token.span.sourceId, parameter.syntax.span, parameter.name.token.span)
+    ? location(
+        parameter.name.anchor.owner.module,
+        spans.spanOf(parameter.anchor),
+        spans.spanOf(parameter.name.anchor),
+      )
     : undefined
 
 const locationOfBinding = (
+  spans: SemanticContext.Registry,
   binding: Elaboration.BindingDeclarationFact | Elaboration.PatternBindingFact,
 ): DeclarationLocation | undefined =>
   binding.name._tag === 'Present'
-    ? location(binding.name.token.span.sourceId, binding.syntax.span, binding.name.token.span)
+    ? location(
+        binding.name.anchor.owner.module,
+        spans.spanOf(binding.anchor),
+        spans.spanOf(binding.name.anchor),
+      )
     : undefined
 
 const locationOfEnumMember = (
+  spans: SemanticContext.Registry,
   member: DeclarationFacts.EnumMemberFact,
 ): DeclarationLocation | undefined =>
   member.name._tag === 'Present'
-    ? location(member.name.token.span.sourceId, member.syntax.span, member.name.token.span)
+    ? location(
+        member.name.anchor.owner.module,
+        spans.spanOf(member.anchor),
+        spans.spanOf(member.name.anchor),
+      )
     : undefined
 
 const locationOfUnionVariant = (
+  spans: SemanticContext.Registry,
   variant: DeclarationFacts.UnionVariantFact,
 ): DeclarationLocation | undefined =>
   variant.name._tag === 'Present'
-    ? location(variant.name.token.span.sourceId, variant.syntax.span, variant.name.token.span)
+    ? location(
+        variant.name.anchor.owner.module,
+        spans.spanOf(variant.anchor),
+        spans.spanOf(variant.name.anchor),
+      )
     : undefined
 
 const locationOfField = (
   index: DeclarationIndex.Index,
+  spans: SemanticContext.Registry,
   field: DeclarationFacts.FieldFact,
 ): DeclarationLocation | undefined => {
   const declarationId = DeclarationFacts.fieldDeclaration(field.id)
@@ -208,7 +243,11 @@ const locationOfField = (
           ?.fields.find((candidate) => DeclarationFacts.sameFieldId(candidate.id, field.id))) ??
     field
   return current.name._tag === 'Present'
-    ? location(current.name.token.span.sourceId, current.syntax.span, current.name.token.span)
+    ? location(
+        current.name.anchor.owner.module,
+        spans.spanOf(current.anchor),
+        spans.spanOf(current.name.anchor),
+      )
     : undefined
 }
 
@@ -312,28 +351,29 @@ const typeParameterFact = (
 }
 
 const collectQualifier = (
-  token: Token.Token,
+  anchor: AuthoredHir.Anchor,
   spelling: string,
   scope: NameResolution.ModuleScope | undefined,
   index: DeclarationIndex.Index,
+  spans: SemanticContext.Registry,
   pending: Array<Pending>,
 ): void => {
   if (scope === undefined) {
-    push(pending, token.span, 'Actor', Object.freeze({ _tag: 'Unavailable' }))
+    push(pending, spans.spanOf(anchor), 'Actor', Object.freeze({ _tag: 'Unavailable' }))
     return
   }
   const lookup = NameResolution.lookup(scope, index, spelling, {
     kind: 'ToolingName',
     key: spelling,
-    span: token.span,
+    span: spans.spanOf(anchor),
   })
   if (lookup._tag === 'Resolved') {
     push(
       pending,
-      token.span,
+      spans.spanOf(anchor),
       'Actor',
       available(identityOfDeclaration(lookup.declaration)),
-      locationOfDeclaration(index, lookup.declaration),
+      locationOfDeclaration(index, spans, lookup.declaration),
     )
     return
   }
@@ -341,7 +381,7 @@ const collectQualifier = (
     const actor = Intrinsic.findActor(lookup.actor)
     push(
       pending,
-      token.span,
+      spans.spanOf(anchor),
       'Actor',
       actor === undefined
         ? Object.freeze({ _tag: 'Unavailable' })
@@ -355,11 +395,15 @@ const collectQualifier = (
     )
     const declaration =
       binding?._tag === 'ModuleNamespace'
-        ? location(binding.token.span.sourceId, binding.syntax.span, binding.token.span)
+        ? location(
+            spans.spanOf(binding.anchor).sourceId,
+            spans.spanOf(binding.anchor),
+            spans.spanOf(binding.anchor),
+          )
         : undefined
     push(
       pending,
-      token.span,
+      spans.spanOf(anchor),
       'Actor',
       available(
         Object.freeze({
@@ -375,18 +419,19 @@ const collectQualifier = (
   if (lookup._tag === 'Conflict') {
     push(
       pending,
-      token.span,
+      spans.spanOf(anchor),
       'Actor',
       Object.freeze({ _tag: 'Conflicting', cause: lookup.conflict.cause }),
     )
     return
   }
-  push(pending, token.span, 'Actor', Object.freeze({ _tag: 'Unavailable' }))
+  push(pending, spans.spanOf(anchor), 'Actor', Object.freeze({ _tag: 'Unavailable' }))
 }
 
 const collectResolvedType = (
   fact: Extract<DeclarationFacts.DeclaredTypeFact, { readonly _tag: 'Resolved' }>,
   index: DeclarationIndex.Index,
+  spans: SemanticContext.Registry,
   scope: NameResolution.ModuleScope | undefined,
   pending: Array<Pending>,
 ): void => {
@@ -394,38 +439,41 @@ const collectResolvedType = (
     const qualifier =
       fact.exactItem.path.segments.length > 1 ? fact.exactItem.path.segments.at(0) : undefined
     if (qualifier !== undefined)
-      collectQualifier(qualifier.token, qualifier.spelling, scope, index, pending)
+      collectQualifier(qualifier.anchor, qualifier.spelling, scope, index, spans, pending)
     const selected = fact.exactItem.path.segments.at(-1)
     const declaration = DeclarationFacts.byCanonical(index, fact.exactItem.declaration)
     push(
       pending,
-      selected?.token.span,
+      selected === undefined ? undefined : spans.spanOf(selected.anchor),
       'Value',
       declaration === undefined
         ? Object.freeze({ _tag: 'Unavailable' })
         : available(identityOfDeclaration(declaration)),
-      declaration === undefined ? undefined : locationOfDeclaration(index, declaration),
+      declaration === undefined ? undefined : locationOfDeclaration(index, spans, declaration),
     )
   }
   if (fact.components !== undefined) {
-    for (const component of fact.components) collectDeclaredType(component, index, scope, pending)
+    for (const component of fact.components)
+      collectDeclaredType(component, index, spans, scope, pending)
     // The lifetime argument supplements the named string type rather than replacing its token.
     if (!Type.isString(fact.type)) return
   }
   if (fact.unionSource !== undefined) {
     for (const member of fact.unionSource.members)
-      collectDeclaredType(member, index, scope, pending)
+      collectDeclaredType(member, index, spans, scope, pending)
     return
   }
-  const tokens = fact.path?.segments.map((segment) => segment.token) ?? Object.freeze([fact.token])
-  const token = tokens.at(-1) ?? fact.token
-  const qualifier = tokens.length > 1 ? tokens.at(0) : undefined
+  const anchors =
+    fact.path?.segments.map((segment) => segment.anchor) ?? Object.freeze([fact.anchor])
+  const token = anchors.at(-1) ?? fact.anchor
+  const qualifier = anchors.length > 1 ? anchors.at(0) : undefined
   if (qualifier !== undefined) {
     collectQualifier(
       qualifier,
       fact.spelling.split('.').at(0) ?? fact.spelling,
       scope,
       index,
+      spans,
       pending,
     )
   }
@@ -437,10 +485,10 @@ const collectResolvedType = (
     const declaration = typeParameterFact(index, parameter)
     push(
       pending,
-      token.span,
+      spans.spanOf(token),
       'Type',
       available(Object.freeze({ _tag: 'TypeParameterIdentity', id: parameter })),
-      declaration === undefined ? undefined : locationOfTypeParameter(declaration),
+      declaration === undefined ? undefined : locationOfTypeParameter(spans, declaration),
     )
     return
   }
@@ -448,21 +496,21 @@ const collectResolvedType = (
     const declaration = typeParameterFact(index, fact.type)
     push(
       pending,
-      token.span,
+      spans.spanOf(token),
       'Type',
       available(Object.freeze({ _tag: 'TypeParameterIdentity', id: fact.type })),
-      declaration === undefined ? undefined : locationOfTypeParameter(declaration),
+      declaration === undefined ? undefined : locationOfTypeParameter(spans, declaration),
     )
     return
   }
-  const alias = aliasAtPath(fact.path, scope, index)
+  const alias = aliasAtPath(fact.path, scope, index, spans)
   if (alias !== undefined) {
     push(
       pending,
-      token.span,
+      spans.spanOf(token),
       'Type',
       available(identityOfDeclaration(alias)),
-      locationOfDeclaration(index, alias),
+      locationOfDeclaration(index, spans, alias),
     )
     return
   }
@@ -471,17 +519,17 @@ const collectResolvedType = (
     if (declaration !== undefined) {
       push(
         pending,
-        token.span,
+        spans.spanOf(token),
         'Type',
         available(identityOfDeclaration(declaration)),
-        locationOfDeclaration(index, declaration),
+        locationOfDeclaration(index, spans, declaration),
       )
       return
     }
     const actor = Intrinsic.findActor(fact.type.name)
     push(
       pending,
-      token.span,
+      spans.spanOf(token),
       'Type',
       actor === undefined
         ? Object.freeze({ _tag: 'Unavailable' })
@@ -493,7 +541,7 @@ const collectResolvedType = (
     const actor = Intrinsic.findActor(Type.isString(fact.type) ? 'string' : fact.type)
     push(
       pending,
-      token.span,
+      spans.spanOf(token),
       'Type',
       actor === undefined
         ? Object.freeze({ _tag: 'Unavailable' })
@@ -505,26 +553,28 @@ const collectResolvedType = (
 const collectDeclaredType = (
   fact: DeclarationFacts.DeclaredTypeFact,
   index: DeclarationIndex.Index,
+  spans: SemanticContext.Registry,
   scope: NameResolution.ModuleScope | undefined,
   pending: Array<Pending>,
 ): void => {
   if (fact._tag === 'Resolved') {
-    collectResolvedType(fact, index, scope, pending)
+    collectResolvedType(fact, index, spans, scope, pending)
     return
   }
   if (fact._tag === 'Unresolved') {
     const qualifier = fact.path.segments.length > 1 ? fact.path.segments.at(0) : undefined
     if (qualifier !== undefined)
-      collectQualifier(qualifier.token, qualifier.spelling, scope, index, pending)
+      collectQualifier(qualifier.anchor, qualifier.spelling, scope, index, spans, pending)
     const selected = fact.path.segments.at(-1)
     let declarationLocation: DeclarationLocation | undefined
     if (fact.candidate !== undefined) {
       const declaration = declarationByNominal(index, fact.candidate)
-      if (declaration !== undefined) declarationLocation = locationOfDeclaration(index, declaration)
+      if (declaration !== undefined)
+        declarationLocation = locationOfDeclaration(index, spans, declaration)
     }
     push(
       pending,
-      selected?.token.span,
+      selected === undefined ? undefined : spans.spanOf(selected.anchor),
       'Type',
       Object.freeze({
         _tag: fact.candidate === undefined ? 'Missing' : 'Inaccessible',
@@ -535,38 +585,40 @@ const collectDeclaredType = (
     return
   }
   if (fact._tag === 'FixedArray' || fact._tag === 'Slice') {
-    collectDeclaredType(fact.element, index, scope, pending)
+    collectDeclaredType(fact.element, index, spans, scope, pending)
     return
   }
   if (fact._tag === 'Reference') {
-    collectDeclaredType(fact.target, index, scope, pending)
+    collectDeclaredType(fact.target, index, spans, scope, pending)
     return
   }
   if (fact._tag === 'Pointer') {
-    collectDeclaredType(fact.pointee, index, scope, pending)
+    collectDeclaredType(fact.pointee, index, spans, scope, pending)
     return
   }
   if (fact._tag === 'Callable' || fact._tag === 'ForeignFunction') {
-    for (const parameter of fact.parameters) collectDeclaredType(parameter, index, scope, pending)
-    collectDeclaredType(fact.result, index, scope, pending)
+    for (const parameter of fact.parameters)
+      collectDeclaredType(parameter, index, spans, scope, pending)
+    collectDeclaredType(fact.result, index, spans, scope, pending)
     return
   }
   if (fact._tag === 'Applied') {
-    collectDeclaredType(fact.target, index, scope, pending)
-    for (const argument of fact.arguments) collectDeclaredType(argument, index, scope, pending)
+    collectDeclaredType(fact.target, index, spans, scope, pending)
+    for (const argument of fact.arguments)
+      collectDeclaredType(argument, index, spans, scope, pending)
     return
   }
   if (fact._tag === 'Effect') {
-    collectDeclaredType(fact.success, index, scope, pending)
-    for (const failure of fact.failures) collectDeclaredType(failure, index, scope, pending)
+    collectDeclaredType(fact.success, index, spans, scope, pending)
+    for (const failure of fact.failures) collectDeclaredType(failure, index, spans, scope, pending)
     for (const requirement of fact.requirements)
-      collectDeclaredType(requirement.capability, index, scope, pending)
+      collectDeclaredType(requirement.capability, index, spans, scope, pending)
     return
   }
   if (fact._tag === 'ExactRepresentation') {
     const qualifier = fact.item.segments.length > 1 ? fact.item.segments.at(0) : undefined
     if (qualifier !== undefined)
-      collectQualifier(qualifier.token, qualifier.spelling, scope, index, pending)
+      collectQualifier(qualifier.anchor, qualifier.spelling, scope, index, spans, pending)
     const selected = fact.item.segments.at(-1)
     const declaration =
       fact.itemCandidate === undefined
@@ -574,35 +626,37 @@ const collectDeclaredType = (
         : DeclarationFacts.byCanonical(index, fact.itemCandidate)
     push(
       pending,
-      selected?.token.span,
+      selected === undefined ? undefined : spans.spanOf(selected.anchor),
       'Value',
       Object.freeze({
         _tag: 'Unavailable',
         ...(fact.cause === undefined ? {} : { cause: fact.cause }),
       }),
-      declaration === undefined ? undefined : locationOfDeclaration(index, declaration),
+      declaration === undefined ? undefined : locationOfDeclaration(index, spans, declaration),
     )
-    for (const argument of fact.arguments) collectDeclaredType(argument, index, scope, pending)
+    for (const argument of fact.arguments)
+      collectDeclaredType(argument, index, spans, scope, pending)
     return
   }
   if (fact._tag === 'RepresentationParameter') {
     const declaration = typeParameterFact(index, fact.parameter)
     push(
       pending,
-      fact.token.span,
+      spans.spanOf(fact.anchor),
       'Type',
       available(Object.freeze({ _tag: 'TypeParameterIdentity', id: fact.parameter })),
-      declaration === undefined ? undefined : locationOfTypeParameter(declaration),
+      declaration === undefined ? undefined : locationOfTypeParameter(spans, declaration),
     )
     return
   }
   if (fact._tag === 'Union')
-    for (const member of fact.members) collectDeclaredType(member, index, scope, pending)
+    for (const member of fact.members) collectDeclaredType(member, index, spans, scope, pending)
 }
 
 const collectRowExpression = (
   fact: DeclarationFacts.RowExpressionFact,
   index: DeclarationIndex.Index,
+  spans: SemanticContext.Registry,
   scope: NameResolution.ModuleScope | undefined,
   pending: Array<Pending>,
 ): void => {
@@ -612,30 +666,28 @@ const collectRowExpression = (
       return
     case 'RowParameterExpression': {
       const declaration = typeParameterFact(index, fact.parameter)
-      const token = SyntaxTree.tokens(fact.syntax).find(
-        (candidate) => candidate.kind === 'Identifier',
-      )
       push(
         pending,
-        token?.span,
+        spans.spanOf(fact.anchor),
         'Type',
         available(Object.freeze({ _tag: 'TypeParameterIdentity', id: fact.parameter })),
-        declaration === undefined ? undefined : locationOfTypeParameter(declaration),
+        declaration === undefined ? undefined : locationOfTypeParameter(spans, declaration),
       )
       return
     }
     case 'FailureMemberExpression':
-      collectDeclaredType(fact.member, index, scope, pending)
+      collectDeclaredType(fact.member, index, spans, scope, pending)
       return
     case 'RequirementMemberExpression':
-      collectDeclaredType(fact.capability, index, scope, pending)
+      collectDeclaredType(fact.capability, index, spans, scope, pending)
       return
     case 'UnionRowExpression':
-      for (const operand of fact.operands) collectRowExpression(operand, index, scope, pending)
+      for (const operand of fact.operands)
+        collectRowExpression(operand, index, spans, scope, pending)
       return
     case 'WithoutRowExpression':
-      collectRowExpression(fact.source, index, scope, pending)
-      collectRowExpression(fact.selected, index, scope, pending)
+      collectRowExpression(fact.source, index, spans, scope, pending)
+      collectRowExpression(fact.selected, index, spans, scope, pending)
       return
   }
 }
@@ -643,19 +695,22 @@ const collectRowExpression = (
 const collectConstraint = (
   fact: DeclarationFacts.ConstraintFact,
   index: DeclarationIndex.Index,
+  spans: SemanticContext.Registry,
   scope: NameResolution.ModuleScope | undefined,
   pending: Array<Pending>,
 ): void => {
-  if (fact._tag === 'ProviderConstraint') collectDeclaredType(fact.provider, index, scope, pending)
-  collectRowExpression(fact.selected, index, scope, pending)
-  collectRowExpression(fact.source, index, scope, pending)
+  if (fact._tag === 'ProviderConstraint')
+    collectDeclaredType(fact.provider, index, spans, scope, pending)
+  collectRowExpression(fact.selected, index, spans, scope, pending)
+  collectRowExpression(fact.source, index, spans, scope, pending)
 }
 
 const parameterResolution = (
   reference: Elaboration.ParameterReferenceFact,
+  spans: SemanticContext.Registry,
 ): { readonly resolution: Resolution; readonly declaration?: DeclarationLocation } => {
   if (reference._tag === 'Resolved') {
-    const declaration = locationOfParameter(reference.parameter)
+    const declaration = locationOfParameter(spans, reference.parameter)
     return Object.freeze({
       resolution: available(
         Object.freeze({ _tag: 'ParameterIdentity', id: reference.parameter.id }),
@@ -664,14 +719,14 @@ const parameterResolution = (
     })
   }
   if (reference._tag === 'ResolvedBinding') {
-    const declaration = locationOfBinding(reference.binding)
+    const declaration = locationOfBinding(spans, reference.binding)
     return Object.freeze({
       resolution: available(Object.freeze({ _tag: 'BindingIdentity', id: reference.binding.id })),
       ...(declaration === undefined ? {} : { declaration }),
     })
   }
   if (reference._tag === 'ResolvedPattern') {
-    const declaration = locationOfBinding(reference.binding)
+    const declaration = locationOfBinding(spans, reference.binding)
     return Object.freeze({
       resolution: available(
         Object.freeze({ _tag: 'PatternBindingIdentity', id: reference.binding.id }),
@@ -696,9 +751,10 @@ const parameterResolution = (
 const callResolution = (
   reference: Elaboration.CallReferenceFact,
   index: DeclarationIndex.Index,
+  spans: SemanticContext.Registry,
 ): { readonly resolution: Resolution; readonly declaration?: DeclarationLocation } => {
   if (reference._tag === 'Resolved') {
-    const declaration = locationOfDeclaration(index, reference.declaration)
+    const declaration = locationOfDeclaration(index, spans, reference.declaration)
     return Object.freeze({
       resolution: available(identityOfDeclaration(reference.declaration)),
       ...(declaration === undefined ? {} : { declaration }),
@@ -719,7 +775,7 @@ const callResolution = (
   if (reference._tag === 'ResolvedInterfaceOperation') {
     // An interface operation is declared once and answered per specialization by a witness. The
     // declaration is what a reader navigates to, so that is what the occurrence names.
-    const declaration = locationOfServiceOperation(reference.declaration)
+    const declaration = locationOfServiceOperation(spans, reference.declaration)
     return Object.freeze({
       resolution:
         reference.declaration.state._tag === 'Unique'
@@ -734,7 +790,7 @@ const callResolution = (
     })
   }
   if (reference._tag === 'ResolvedServiceOperation') {
-    const declaration = locationOfServiceOperation(reference.operation)
+    const declaration = locationOfServiceOperation(spans, reference.operation)
     return Object.freeze({
       resolution:
         reference.operation.state._tag === 'Unique'
@@ -769,31 +825,35 @@ const collectCallReference = (
   reference: Elaboration.CallReferenceFact,
   path: Elaboration.ReferencePathFact | undefined,
   index: DeclarationIndex.Index,
+  spans: SemanticContext.Registry,
   scope: NameResolution.ModuleScope | undefined,
   pending: Array<Pending>,
   qualifierOwnedByTypeApplication = false,
 ): void => {
-  let tokens: ReadonlyArray<Token.Token>
+  let anchors: ReadonlyArray<AuthoredHir.Anchor>
   if (path?._tag === 'ReferencePath') {
-    tokens = Object.freeze([...(path.qualifier === undefined ? [] : [path.qualifier]), path.member])
-  } else if ('token' in reference) {
-    tokens = Object.freeze([reference.token])
+    anchors = Object.freeze([
+      ...(path.qualifierAnchor === undefined ? [] : [path.qualifierAnchor]),
+      path.memberAnchor,
+    ])
+  } else if ('anchor' in reference) {
+    anchors = Object.freeze([reference.anchor])
   } else {
-    tokens = Object.freeze([])
+    anchors = Object.freeze([])
   }
-  const qualifier = tokens.length > 1 ? tokens.at(0) : undefined
+  const qualifier = anchors.length > 1 ? anchors.at(0) : undefined
   if (qualifier !== undefined && !qualifierOwnedByTypeApplication) {
     const qualifierName = 'spelling' in reference ? reference.spelling.split('.').at(0) : undefined
     if (qualifierName !== undefined)
-      collectQualifier(qualifier, qualifierName, scope, index, pending)
+      collectQualifier(qualifier, qualifierName, scope, index, spans, pending)
   }
-  const selected = 'token' in reference ? reference.token : tokens.at(-1)
-  const resolved = callResolution(reference, index)
+  const selected = 'anchor' in reference ? reference.anchor : anchors.at(-1)
+  const resolved = callResolution(reference, index, spans)
   // A receiver-syntax call names its member without a qualifier token; the member keeps its
   // identity and gains the method role, so hover presents the receiver-bound contract.
   const receiverSyntax =
     path?._tag === 'ReferencePath' &&
-    path.qualifier === undefined &&
+    path.qualifierAnchor === undefined &&
     reference._tag === 'Resolved' &&
     reference.declaration._tag === 'FunctionDeclaration' &&
     reference.declaration.associatedMember?.receiver === true
@@ -809,12 +869,19 @@ const collectCallReference = (
   } else {
     role = 'Value'
   }
-  push(pending, selected?.span, role, resolved.resolution, resolved.declaration)
+  push(
+    pending,
+    selected === undefined ? undefined : spans.spanOf(selected),
+    role,
+    resolved.resolution,
+    resolved.declaration,
+  )
 }
 
 const collectIntrinsicReference = (
   reference: Elaboration.IntrinsicReferenceFact,
   index: DeclarationIndex.Index,
+  spans: SemanticContext.Registry,
   pending: Array<Pending>,
 ): void => {
   if (reference._tag === 'UnavailableIntrinsicReference') return
@@ -825,11 +892,11 @@ const collectIntrinsicReference = (
   const actorDeclaration =
     reference.actor._tag === 'IntrinsicActor'
       ? undefined
-      : locationOfDeclaration(index, reference.actor)
-  push(pending, reference.actorToken.span, 'Actor', actorResolution, actorDeclaration)
+      : locationOfDeclaration(index, spans, reference.actor)
+  push(pending, spans.spanOf(reference.actorAnchor), 'Actor', actorResolution, actorDeclaration)
   push(
     pending,
-    reference.operationToken.span,
+    spans.spanOf(reference.operationAnchor),
     'Operation',
     available(Object.freeze({ _tag: 'IntrinsicOperationIdentity', id: reference.operation.id })),
   )
@@ -838,6 +905,7 @@ const collectIntrinsicReference = (
 const collectPattern = (
   pattern: Elaboration.PatternFact,
   index: DeclarationIndex.Index,
+  spans: SemanticContext.Registry,
   scope: NameResolution.ModuleScope | undefined,
   pending: Array<Pending>,
 ): void => {
@@ -848,65 +916,60 @@ const collectPattern = (
     if (binding.name._tag === 'Present')
       push(
         pending,
-        binding.name.token.span,
+        spans.spanOf(binding.name.anchor),
         'Declaration',
         available(Object.freeze({ _tag: 'PatternBindingIdentity', id: binding.id })),
-        locationOfBinding(binding),
+        locationOfBinding(spans, binding),
       )
   if (pattern._tag === 'EnumMemberPattern') {
     if (pattern.enum !== undefined)
       push(
         pending,
-        pattern.qualifierToken?.span,
+        pattern.qualifierAnchor === undefined ? undefined : spans.spanOf(pattern.qualifierAnchor),
         'Type',
         available(identityOfDeclaration(pattern.enum)),
-        locationOfDeclaration(index, pattern.enum),
+        locationOfDeclaration(index, spans, pattern.enum),
       )
     if (pattern.member?.canonical._tag === 'Canonical')
       push(
         pending,
-        pattern.memberToken?.span,
+        pattern.memberAnchor === undefined ? undefined : spans.spanOf(pattern.memberAnchor),
         'Value',
         available(Object.freeze({ _tag: 'EnumMemberIdentity', id: pattern.member.canonical.id })),
       )
   } else if (pattern._tag === 'NominalPattern') {
-    const token = pattern.target._tag === 'Resolved' ? pattern.target.token : undefined
     if (pattern.target._tag === 'Resolved')
       push(
         pending,
-        token?.span,
+        pattern.target.anchor === undefined ? undefined : spans.spanOf(pattern.target.anchor),
         'Type',
         available(identityOfDeclaration(pattern.target.struct)),
-        locationOfDeclaration(index, pattern.target.struct),
+        locationOfDeclaration(index, spans, pattern.target.struct),
       )
     for (const field of pattern.fields) {
-      const fieldToken = field.token
       if (field.state._tag === 'Resolved')
         push(
           pending,
-          fieldToken?.span,
+          spans.spanOf(field.anchor),
           'Field',
           available(Object.freeze({ _tag: 'FieldIdentity', id: field.state.field.id })),
-          locationOfField(index, field.state.field),
+          locationOfField(index, spans, field.state.field),
         )
-      if (field.nested !== undefined) collectPattern(field.nested, index, scope, pending)
+      if (field.nested !== undefined) collectPattern(field.nested, index, spans, scope, pending)
     }
   } else if (pattern._tag === 'UnionVariantPattern') {
     if (pattern.target._tag === 'Resolved') {
-      const parentToken = SyntaxTree.tokens(pattern.syntax).find(
-        (token) => token.kind === 'Identifier',
-      )
       push(
         pending,
-        parentToken?.span,
+        spans.spanOf(pattern.anchor),
         'Type',
         available(identityOfDeclaration(pattern.target.union)),
-        locationOfDeclaration(index, pattern.target.union),
+        locationOfDeclaration(index, spans, pattern.target.union),
       )
       if (pattern.target.variant.canonical._tag === 'Canonical')
         push(
           pending,
-          pattern.target.token.span,
+          spans.spanOf(pattern.target.anchor),
           'Value',
           available(
             Object.freeze({
@@ -914,28 +977,29 @@ const collectPattern = (
               id: pattern.target.variant.canonical.id,
             }),
           ),
-          locationOfUnionVariant(pattern.target.variant),
+          locationOfUnionVariant(spans, pattern.target.variant),
         )
     }
     for (const field of pattern.fields) {
       if (field.state._tag === 'Resolved')
         push(
           pending,
-          field.token?.span,
+          spans.spanOf(field.anchor),
           'Field',
           available(Object.freeze({ _tag: 'FieldIdentity', id: field.state.field.id })),
-          locationOfField(index, field.state.field),
+          locationOfField(index, spans, field.state.field),
         )
-      if (field.nested !== undefined) collectPattern(field.nested, index, scope, pending)
+      if (field.nested !== undefined) collectPattern(field.nested, index, spans, scope, pending)
     }
   } else if (pattern._tag === 'TypePattern') {
-    collectDeclaredType(pattern.declared, index, scope, pending)
+    collectDeclaredType(pattern.declared, index, spans, scope, pending)
   }
 }
 
 const collectExpression = (
   expression: Elaboration.ExpressionFact,
   index: DeclarationIndex.Index,
+  spans: SemanticContext.Registry,
   scope: NameResolution.ModuleScope | undefined,
   pending: Array<Pending>,
 ): void => {
@@ -943,14 +1007,14 @@ const collectExpression = (
     case 'EnumMember':
       push(
         pending,
-        expression.qualifierToken.span,
+        spans.spanOf(expression.qualifierAnchor),
         'Type',
         available(identityOfDeclaration(expression.enum)),
-        locationOfDeclaration(index, expression.enum),
+        locationOfDeclaration(index, spans, expression.enum),
       )
       push(
         pending,
-        expression.memberToken.span,
+        spans.spanOf(expression.memberAnchor),
         'Value',
         expression.member?.canonical._tag === 'Canonical'
           ? available(
@@ -968,7 +1032,7 @@ const collectExpression = (
     case 'EnumValue':
       push(
         pending,
-        expression.qualifierToken.span,
+        spans.spanOf(expression.qualifierAnchor),
         'Type',
         available(
           Object.freeze({
@@ -979,7 +1043,7 @@ const collectExpression = (
       )
       push(
         pending,
-        expression.operationToken.span,
+        spans.spanOf(expression.operationAnchor),
         'Operation',
         available(
           Object.freeze({
@@ -988,22 +1052,22 @@ const collectExpression = (
           }),
         ),
       )
-      collectExpression(expression.argument, index, scope, pending)
+      collectExpression(expression.argument, index, spans, scope, pending)
       return
     case 'Constant':
       push(
         pending,
-        expression.token.span,
+        spans.spanOf(expression.anchor),
         'Value',
         available(identityOfDeclaration(expression.declaration)),
-        locationOfDeclaration(index, expression.declaration),
+        locationOfDeclaration(index, spans, expression.declaration),
       )
       return
     case 'Identifier': {
-      const resolved = parameterResolution(expression.reference)
+      const resolved = parameterResolution(expression.reference, spans)
       push(
         pending,
-        'token' in expression.reference ? expression.reference.token.span : undefined,
+        'token' in expression.reference ? spans.spanOf(expression.reference.anchor) : undefined,
         'Value',
         resolved.resolution,
         resolved.declaration,
@@ -1015,32 +1079,33 @@ const collectExpression = (
         expression.reference,
         expression.path,
         index,
+        spans,
         scope,
         pending,
         expression.interfaceApplication !== undefined,
       )
       if (expression.interfaceApplication !== undefined)
-        collectDeclaredType(expression.interfaceApplication, index, scope, pending)
+        collectDeclaredType(expression.interfaceApplication, index, spans, scope, pending)
       for (const typeArgument of expression.typeArguments)
-        collectDeclaredType(typeArgument.declared, index, scope, pending)
+        collectDeclaredType(typeArgument.declared, index, spans, scope, pending)
       for (const argument of expression.arguments)
-        collectExpression(argument.expression, index, scope, pending)
+        collectExpression(argument.expression, index, spans, scope, pending)
       return
     case 'Operator':
-      collectCallReference(expression.reference, undefined, index, scope, pending)
+      collectCallReference(expression.reference, undefined, index, spans, scope, pending)
       for (const argument of expression.arguments)
-        collectExpression(argument.expression, index, scope, pending)
+        collectExpression(argument.expression, index, spans, scope, pending)
       return
     case 'ShortCircuit':
       for (const argument of expression.arguments)
-        collectExpression(argument.expression, index, scope, pending)
+        collectExpression(argument.expression, index, spans, scope, pending)
       return
     case 'FunctionItem':
-      collectCallReference(expression.reference, expression.path, index, scope, pending)
+      collectCallReference(expression.reference, expression.path, index, spans, scope, pending)
       return
     case 'CallableSection':
       if (expression.anonymous === undefined) {
-        collectCallReference(expression.reference, expression.path, index, scope, pending)
+        collectCallReference(expression.reference, expression.path, index, spans, scope, pending)
       } else if (expression.reference._tag === 'Resolved') {
         const declaration = expression.reference.declaration
         for (const parameter of declaration.parameters.slice(
@@ -1050,41 +1115,41 @@ const collectExpression = (
           if (parameter.name._tag === 'Present')
             push(
               pending,
-              parameter.name.token.span,
+              spans.spanOf(parameter.name.anchor),
               'Declaration',
               available(Object.freeze({ _tag: 'ParameterIdentity', id: parameter.id })),
-              locationOfParameter(parameter),
+              locationOfParameter(spans, parameter),
             )
-          collectDeclaredType(parameter.declaredType, index, scope, pending)
+          collectDeclaredType(parameter.declaredType, index, spans, scope, pending)
         }
-        collectDeclaredType(declaration.returnType, index, scope, pending)
-        collectRowExpression(declaration.failureRow.expression, index, scope, pending)
-        collectRowExpression(declaration.requirementRow.expression, index, scope, pending)
+        collectDeclaredType(declaration.returnType, index, spans, scope, pending)
+        collectRowExpression(declaration.failureRow.expression, index, spans, scope, pending)
+        collectRowExpression(declaration.requirementRow.expression, index, spans, scope, pending)
       }
       for (const capture of expression.captures)
-        collectExpression(capture.expression, index, scope, pending)
+        collectExpression(capture.expression, index, spans, scope, pending)
       return
     case 'ForeignApply':
     case 'CallableApply':
-      collectExpression(expression.callee, index, scope, pending)
+      collectExpression(expression.callee, index, spans, scope, pending)
       for (const argument of expression.arguments)
-        collectExpression(argument.expression, index, scope, pending)
+        collectExpression(argument.expression, index, spans, scope, pending)
       return
     case 'FieldProjection': {
-      collectExpression(expression.subject, index, scope, pending)
-      const token = expression.fieldToken
+      collectExpression(expression.subject, index, spans, scope, pending)
+      const token = expression.anchor
       if (expression.state._tag === 'Resolved')
         push(
           pending,
-          token?.span,
+          token === undefined ? undefined : spans.spanOf(token),
           'Field',
           available(Object.freeze({ _tag: 'FieldIdentity', id: expression.state.field.id })),
-          locationOfField(index, expression.state.field),
+          locationOfField(index, spans, expression.state.field),
         )
       else
         push(
           pending,
-          token?.span,
+          token === undefined ? undefined : spans.spanOf(token),
           'Field',
           Object.freeze({
             _tag: 'Unavailable',
@@ -1096,35 +1161,35 @@ const collectExpression = (
       return
     }
     case 'StructLiteral': {
-      const token = expression.target._tag === 'Resolved' ? expression.target.token : undefined
+      const token = expression.target._tag === 'Resolved' ? expression.target.anchor : undefined
       if (expression.target._tag === 'Resolved')
         push(
           pending,
-          token?.span,
+          token === undefined ? undefined : spans.spanOf(token),
           'Type',
           available(identityOfDeclaration(expression.target.struct)),
-          locationOfDeclaration(index, expression.target.struct),
+          locationOfDeclaration(index, spans, expression.target.struct),
         )
       for (const initializer of expression.initializers) {
-        const fieldToken = initializer.token
+        const fieldToken = initializer.anchor
         if (initializer.state._tag === 'Resolved' || initializer.state._tag === 'Inaccessible')
           push(
             pending,
-            fieldToken?.span,
+            fieldToken === undefined ? undefined : spans.spanOf(fieldToken),
             'Field',
             available(Object.freeze({ _tag: 'FieldIdentity', id: initializer.state.field.id })),
-            locationOfField(index, initializer.state.field),
+            locationOfField(index, spans, initializer.state.field),
           )
-        collectExpression(initializer.expression, index, scope, pending)
+        collectExpression(initializer.expression, index, spans, scope, pending)
       }
       return
     }
     case 'UnionVariant': {
-      const token = expression.target._tag === 'Resolved' ? expression.target.token : undefined
+      const token = expression.target._tag === 'Resolved' ? expression.target.anchor : undefined
       if (expression.target._tag === 'Resolved')
         push(
           pending,
-          token?.span,
+          token === undefined ? undefined : spans.spanOf(token),
           'Value',
           expression.target.variant.canonical._tag === 'Canonical'
             ? available(
@@ -1134,67 +1199,64 @@ const collectExpression = (
                 }),
               )
             : Object.freeze({ _tag: 'Unavailable' }),
-          locationOfUnionVariant(expression.target.variant),
+          locationOfUnionVariant(spans, expression.target.variant),
         )
       for (const initializer of expression.initializers) {
-        const fieldToken = initializer.token
+        const fieldToken = initializer.anchor
         if (initializer.state._tag === 'Resolved' || initializer.state._tag === 'Inaccessible')
           push(
             pending,
-            fieldToken?.span,
+            fieldToken === undefined ? undefined : spans.spanOf(fieldToken),
             'Field',
             available(Object.freeze({ _tag: 'FieldIdentity', id: initializer.state.field.id })),
-            locationOfField(index, initializer.state.field),
+            locationOfField(index, spans, initializer.state.field),
           )
-        collectExpression(initializer.expression, index, scope, pending)
+        collectExpression(initializer.expression, index, spans, scope, pending)
       }
       return
     }
     case 'Move':
     case 'Borrow':
     case 'Run':
-      collectExpression(expression.subject, index, scope, pending)
+      collectExpression(expression.subject, index, spans, scope, pending)
       return
     case 'PlaceReplace':
-      collectIntrinsicReference(expression.reference, index, pending)
-      collectExpression(expression.destination, index, scope, pending)
-      collectExpression(expression.value, index, scope, pending)
+      collectIntrinsicReference(expression.reference, index, spans, pending)
+      collectExpression(expression.destination, index, spans, scope, pending)
+      collectExpression(expression.value, index, spans, scope, pending)
       return
     case 'IndexProjection':
-      collectExpression(expression.subject, index, scope, pending)
-      collectExpression(expression.index, index, scope, pending)
+      collectExpression(expression.subject, index, spans, scope, pending)
+      collectExpression(expression.index, index, spans, scope, pending)
       return
     case 'ArrayLiteral':
       for (const element of expression.elements)
-        collectExpression(element.expression, index, scope, pending)
-      return
-    case 'Grouped':
-      collectExpression(expression.expression, index, scope, pending)
+        collectExpression(element.expression, index, spans, scope, pending)
       return
     case 'Match':
-      collectExpression(expression.scrutinee, index, scope, pending)
+      collectExpression(expression.scrutinee, index, spans, scope, pending)
       for (const arm of expression.arms) {
-        collectPattern(arm.pattern, index, scope, pending)
-        if (arm.guard !== undefined) collectExpression(arm.guard, index, scope, pending)
+        collectPattern(arm.pattern, index, spans, scope, pending)
+        if (arm.guard !== undefined) collectExpression(arm.guard, index, spans, scope, pending)
         if (arm.body._tag === 'Expression')
-          collectExpression(arm.body.expression, index, scope, pending)
+          collectExpression(arm.body.expression, index, spans, scope, pending)
         else
           for (const statement of arm.body.statements)
-            collectStatement(statement, index, scope, pending)
+            collectStatement(statement, index, spans, scope, pending)
       }
       return
     case 'EffectBlock':
       for (const statement of expression.statements)
-        collectStatement(statement, index, scope, pending)
+        collectStatement(statement, index, spans, scope, pending)
       return
     case 'EffectCatch':
-      collectIntrinsicReference(expression.reference, index, pending)
-      collectExpression(expression.protected, index, scope, pending)
-      collectExpression(expression.handler, index, scope, pending)
+      collectIntrinsicReference(expression.reference, index, spans, pending)
+      collectExpression(expression.protected, index, spans, scope, pending)
+      collectExpression(expression.handler, index, spans, scope, pending)
       return
     case 'EffectBindRequirement':
-      collectIntrinsicReference(expression.reference, index, pending)
-      collectExpression(expression.protected, index, scope, pending)
+      collectIntrinsicReference(expression.reference, index, spans, pending)
+      collectExpression(expression.protected, index, spans, scope, pending)
       return
     case 'Integer':
     case 'Boolean':
@@ -1205,56 +1267,60 @@ const collectExpression = (
 const collectStatement = (
   statement: Elaboration.StatementFact,
   index: DeclarationIndex.Index,
+  spans: SemanticContext.Registry,
   scope: NameResolution.ModuleScope | undefined,
   pending: Array<Pending>,
 ): void => {
   switch (statement._tag) {
     case 'UnsafeStatement':
-      for (const nested of statement.statements) collectStatement(nested, index, scope, pending)
+      for (const nested of statement.statements)
+        collectStatement(nested, index, spans, scope, pending)
       return
     case 'BindStatement':
       if (statement.binding.name._tag === 'Present')
         push(
           pending,
-          statement.binding.name.token.span,
+          spans.spanOf(statement.binding.name.anchor),
           'Declaration',
           available(Object.freeze({ _tag: 'BindingIdentity', id: statement.binding.id })),
-          locationOfBinding(statement.binding),
+          locationOfBinding(spans, statement.binding),
         )
       if (statement.binding.declaredType !== undefined)
-        collectDeclaredType(statement.binding.declaredType, index, scope, pending)
-      collectExpression(statement.binding.initializer, index, scope, pending)
+        collectDeclaredType(statement.binding.declaredType, index, spans, scope, pending)
+      collectExpression(statement.binding.initializer, index, spans, scope, pending)
       return
     case 'PatternBindStatement':
-      collectPattern(statement.selection.pattern, index, scope, pending)
-      collectExpression(statement.selection.source, index, scope, pending)
+      collectPattern(statement.selection.pattern, index, spans, scope, pending)
+      collectExpression(statement.selection.source, index, spans, scope, pending)
       return
     case 'ExpressionStatement':
-      collectExpression(statement.expression, index, scope, pending)
+      collectExpression(statement.expression, index, spans, scope, pending)
       return
     case 'ReturnStatement':
     case 'FailStatement':
     case 'DropStatement':
-      collectExpression(statement.expression, index, scope, pending)
+      collectExpression(statement.expression, index, spans, scope, pending)
       return
     case 'IfStatement':
-      collectExpression(statement.condition, index, scope, pending)
-      for (const nested of statement.taken) collectStatement(nested, index, scope, pending)
-      for (const nested of statement.otherwise) collectStatement(nested, index, scope, pending)
+      collectExpression(statement.condition, index, spans, scope, pending)
+      for (const nested of statement.taken) collectStatement(nested, index, spans, scope, pending)
+      for (const nested of statement.otherwise)
+        collectStatement(nested, index, spans, scope, pending)
       return
     case 'IfLetStatement':
-      collectPattern(statement.selection.pattern, index, scope, pending)
-      collectExpression(statement.selection.source, index, scope, pending)
-      for (const nested of statement.taken) collectStatement(nested, index, scope, pending)
-      for (const nested of statement.otherwise) collectStatement(nested, index, scope, pending)
+      collectPattern(statement.selection.pattern, index, spans, scope, pending)
+      collectExpression(statement.selection.source, index, spans, scope, pending)
+      for (const nested of statement.taken) collectStatement(nested, index, spans, scope, pending)
+      for (const nested of statement.otherwise)
+        collectStatement(nested, index, spans, scope, pending)
       return
     case 'WriteStatement':
-      collectExpression(statement.destination, index, scope, pending)
-      collectExpression(statement.value, index, scope, pending)
+      collectExpression(statement.destination, index, spans, scope, pending)
+      collectExpression(statement.value, index, spans, scope, pending)
       return
     case 'WhileStatement':
-      collectExpression(statement.condition, index, scope, pending)
-      for (const nested of statement.body) collectStatement(nested, index, scope, pending)
+      collectExpression(statement.condition, index, spans, scope, pending)
+      for (const nested of statement.body) collectStatement(nested, index, spans, scope, pending)
       return
     case 'BreakStatement':
     case 'ContinueStatement':
@@ -1265,14 +1331,15 @@ const collectStatement = (
 const collectMember = (
   member: DeclarationFacts.MemberFact,
   index: DeclarationIndex.Index,
+  spans: SemanticContext.Registry,
   scope: NameResolution.ModuleScope | undefined,
   pending: Array<Pending>,
 ): void => {
-  const declaration = locationOfDeclaration(index, member)
+  const declaration = locationOfDeclaration(index, spans, member)
   if (member.name._tag === 'Present')
     push(
       pending,
-      member.name.token.span,
+      spans.spanOf(member.name.anchor),
       'Declaration',
       available(identityOfDeclaration(member)),
       declaration,
@@ -1282,12 +1349,12 @@ const collectMember = (
     if (typeParameter.implicitLifetime === true) continue
     // An inherent member carries its impl head's binders ahead of its own; the head declares
     // those once (see `collectInherentImpl`), so only binders spelled inside the member count.
-    if (typeParameter.syntax.span.start < member.syntax.span.start) continue
-    const parameterLocation = locationOfTypeParameter(typeParameter)
+    if (spans.spanOf(typeParameter.anchor).start < spans.spanOf(member.anchor).start) continue
+    const parameterLocation = locationOfTypeParameter(spans, typeParameter)
     if (typeParameter.name._tag === 'Present')
       push(
         pending,
-        typeParameter.name.token.span,
+        spans.spanOf(typeParameter.name.anchor),
         'Declaration',
         available(Object.freeze({ _tag: 'TypeParameterIdentity', id: typeParameter.type })),
         parameterLocation,
@@ -1298,27 +1365,27 @@ const collectMember = (
     if (opaqueBinder?.name._tag === 'Present')
       push(
         pending,
-        opaqueBinder.name.token.span,
+        spans.spanOf(opaqueBinder.name.anchor),
         'Declaration',
         available(Object.freeze({ _tag: 'TypeParameterIdentity', id: opaqueBinder.type })),
-        locationOfTypeParameter(opaqueBinder),
+        locationOfTypeParameter(spans, opaqueBinder),
       )
     for (const parameter of member.parameters) {
       if (parameter.name._tag === 'Present')
         push(
           pending,
-          parameter.name.token.span,
+          spans.spanOf(parameter.name.anchor),
           'Declaration',
           available(Object.freeze({ _tag: 'ParameterIdentity', id: parameter.id })),
-          locationOfParameter(parameter),
+          locationOfParameter(spans, parameter),
         )
-      collectDeclaredType(parameter.declaredType, index, scope, pending)
+      collectDeclaredType(parameter.declaredType, index, spans, scope, pending)
     }
-    collectDeclaredType(member.returnType, index, scope, pending)
-    collectRowExpression(member.failureRow.expression, index, scope, pending)
-    collectRowExpression(member.requirementRow.expression, index, scope, pending)
+    collectDeclaredType(member.returnType, index, spans, scope, pending)
+    collectRowExpression(member.failureRow.expression, index, spans, scope, pending)
+    collectRowExpression(member.requirementRow.expression, index, spans, scope, pending)
     for (const constraint of member.constraints)
-      collectConstraint(constraint, index, scope, pending)
+      collectConstraint(constraint, index, spans, scope, pending)
     return
   }
   if (
@@ -1326,11 +1393,11 @@ const collectMember = (
     member._tag === 'PackageParameterDeclaration' ||
     member._tag === 'ForeignStaticDeclaration'
   ) {
-    collectDeclaredType(member.declaredType, index, scope, pending)
+    collectDeclaredType(member.declaredType, index, spans, scope, pending)
     return
   }
   if (member._tag === 'AliasDeclaration') {
-    collectDeclaredType(member.target, index, scope, pending)
+    collectDeclaredType(member.target, index, spans, scope, pending)
     return
   }
   if (member._tag === 'ServiceDeclaration' || member._tag === 'InterfaceDeclaration') {
@@ -1339,27 +1406,27 @@ const collectMember = (
       if (opaqueBinder?.name._tag === 'Present')
         push(
           pending,
-          opaqueBinder.name.token.span,
+          spans.spanOf(opaqueBinder.name.anchor),
           'Declaration',
           available(Object.freeze({ _tag: 'TypeParameterIdentity', id: opaqueBinder.type })),
-          locationOfTypeParameter(opaqueBinder),
+          locationOfTypeParameter(spans, opaqueBinder),
         )
       for (const typeParameter of operation.typeParameters) {
-        const parameterLocation = locationOfTypeParameter(typeParameter)
+        const parameterLocation = locationOfTypeParameter(spans, typeParameter)
         if (typeParameter.name._tag === 'Present')
           push(
             pending,
-            typeParameter.name.token.span,
+            spans.spanOf(typeParameter.name.anchor),
             'Declaration',
             available(Object.freeze({ _tag: 'TypeParameterIdentity', id: typeParameter.type })),
             parameterLocation,
           )
       }
-      const operationLocation = locationOfServiceOperation(operation)
+      const operationLocation = locationOfServiceOperation(spans, operation)
       if (operation.name._tag === 'Present' && operation.state._tag === 'Unique')
         push(
           pending,
-          operation.name.token.span,
+          spans.spanOf(operation.name.anchor),
           'Declaration',
           available(Object.freeze({ _tag: 'ServiceOperationIdentity', id: operation.state.id })),
           operationLocation,
@@ -1368,18 +1435,18 @@ const collectMember = (
         if (parameter.name._tag === 'Present')
           push(
             pending,
-            parameter.name.token.span,
+            spans.spanOf(parameter.name.anchor),
             'Declaration',
             available(Object.freeze({ _tag: 'ParameterIdentity', id: parameter.id })),
-            locationOfParameter(parameter),
+            locationOfParameter(spans, parameter),
           )
-        collectDeclaredType(parameter.declaredType, index, scope, pending)
+        collectDeclaredType(parameter.declaredType, index, spans, scope, pending)
       }
-      collectDeclaredType(operation.returnType, index, scope, pending)
-      collectRowExpression(operation.failureRow.expression, index, scope, pending)
-      collectRowExpression(operation.requirementRow.expression, index, scope, pending)
+      collectDeclaredType(operation.returnType, index, spans, scope, pending)
+      collectRowExpression(operation.failureRow.expression, index, spans, scope, pending)
+      collectRowExpression(operation.requirementRow.expression, index, spans, scope, pending)
       for (const constraint of operation.constraints)
-        collectConstraint(constraint, index, scope, pending)
+        collectConstraint(constraint, index, spans, scope, pending)
     }
     return
   }
@@ -1388,10 +1455,10 @@ const collectMember = (
       if (enumMember.name._tag === 'Present' && enumMember.canonical._tag === 'Canonical')
         push(
           pending,
-          enumMember.name.token.span,
+          spans.spanOf(enumMember.name.anchor),
           'Declaration',
           available(Object.freeze({ _tag: 'EnumMemberIdentity', id: enumMember.canonical.id })),
-          locationOfEnumMember(enumMember),
+          locationOfEnumMember(spans, enumMember),
         )
     return
   }
@@ -1401,21 +1468,21 @@ const collectMember = (
       if (variant.name._tag === 'Present' && variant.canonical._tag === 'Canonical')
         push(
           pending,
-          variant.name.token.span,
+          spans.spanOf(variant.name.anchor),
           'Declaration',
           available(Object.freeze({ _tag: 'UnionVariantIdentity', id: variant.canonical.id })),
-          locationOfUnionVariant(variant),
+          locationOfUnionVariant(spans, variant),
         )
       for (const field of variant.fields) {
         if (field.name._tag === 'Present')
           push(
             pending,
-            field.name.token.span,
+            spans.spanOf(field.name.anchor),
             'Declaration',
             available(Object.freeze({ _tag: 'FieldIdentity', id: field.id })),
-            locationOfField(index, field),
+            locationOfField(index, spans, field),
           )
-        collectDeclaredType(field.declaredType, index, scope, pending)
+        collectDeclaredType(field.declaredType, index, spans, scope, pending)
       }
     }
     return
@@ -1425,12 +1492,12 @@ const collectMember = (
     if (field.name._tag === 'Present')
       push(
         pending,
-        field.name.token.span,
+        spans.spanOf(field.name.anchor),
         'Declaration',
         available(Object.freeze({ _tag: 'FieldIdentity', id: field.id })),
-        locationOfField(index, field),
+        locationOfField(index, spans, field),
       )
-    collectDeclaredType(field.declaredType, index, scope, pending)
+    collectDeclaredType(field.declaredType, index, spans, scope, pending)
   }
 }
 
@@ -1438,6 +1505,7 @@ const collectMember = (
 const collectInherentImpl = (
   head: DeclarationFacts.InherentImplFact,
   index: DeclarationIndex.Index,
+  spans: SemanticContext.Registry,
   scope: NameResolution.ModuleScope | undefined,
   pending: Array<Pending>,
 ): void => {
@@ -1445,12 +1513,12 @@ const collectInherentImpl = (
     if (typeParameter.name._tag === 'Present')
       push(
         pending,
-        typeParameter.name.token.span,
+        spans.spanOf(typeParameter.name.anchor),
         'Declaration',
         available(Object.freeze({ _tag: 'TypeParameterIdentity', id: typeParameter.type })),
-        locationOfTypeParameter(typeParameter),
+        locationOfTypeParameter(spans, typeParameter),
       )
-  collectDeclaredType(head.owner, index, scope, pending)
+  collectDeclaredType(head.owner, index, spans, scope, pending)
 }
 
 const unavailableLookupResolution = (
@@ -1476,36 +1544,37 @@ const unavailableLookupResolution = (
 const collectTypePath = (
   path: DeclarationFacts.TypePathFact,
   index: DeclarationIndex.Index,
+  spans: SemanticContext.Registry,
   scope: NameResolution.ModuleScope | undefined,
   pending: Array<Pending>,
 ): void => {
   const qualifier = path.segments.length > 1 ? path.segments.at(0) : undefined
   if (qualifier !== undefined)
-    collectQualifier(qualifier.token, qualifier.spelling, scope, index, pending)
+    collectQualifier(qualifier.anchor, qualifier.spelling, scope, index, spans, pending)
   const selected = path.segments.at(-1)
   if (selected === undefined || scope === undefined) return
   const lookup = NameResolution.lookupPath(scope, index, path, {
     kind: 'ToolingPath',
     key: path.spelling,
-    span: path.syntax.span,
+    span: spans.spanOf(path.anchor),
   })
   if (lookup._tag === 'Resolved') {
     push(
       pending,
-      selected.token.span,
+      spans.spanOf(selected.anchor),
       'Value',
       available(identityOfDeclaration(lookup.declaration)),
-      locationOfDeclaration(index, lookup.declaration),
+      locationOfDeclaration(index, spans, lookup.declaration),
     )
     return
   }
   push(
     pending,
-    selected.token.span,
+    spans.spanOf(selected.anchor),
     'Value',
     unavailableLookupResolution(lookup),
     'declaration' in lookup && lookup.declaration !== undefined
-      ? locationOfDeclaration(index, lookup.declaration)
+      ? locationOfDeclaration(index, spans, lookup.declaration)
       : undefined,
   )
 }
@@ -1513,6 +1582,7 @@ const collectTypePath = (
 const collectConformance = (
   conformance: DeclarationFacts.ConformanceFact,
   index: DeclarationIndex.Index,
+  spans: SemanticContext.Registry,
   scope: NameResolution.ModuleScope | undefined,
   pending: Array<Pending>,
 ): void => {
@@ -1520,29 +1590,30 @@ const collectConformance = (
     if (typeParameter.name._tag === 'Present')
       push(
         pending,
-        typeParameter.name.token.span,
+        spans.spanOf(typeParameter.name.anchor),
         'Declaration',
         available(Object.freeze({ _tag: 'TypeParameterIdentity', id: typeParameter.type })),
-        locationOfTypeParameter(typeParameter),
+        locationOfTypeParameter(spans, typeParameter),
       )
   for (const requirement of conformance.requirements)
-    collectDeclaredType(requirement.capability, index, scope, pending)
-  collectDeclaredType(conformance.capability, index, scope, pending)
-  collectDeclaredType(conformance.provider, index, scope, pending)
+    collectDeclaredType(requirement.capability, index, spans, scope, pending)
+  collectDeclaredType(conformance.capability, index, spans, scope, pending)
+  collectDeclaredType(conformance.provider, index, spans, scope, pending)
   for (const operation of conformance.operations)
     if (operation.target._tag === 'TypePath')
-      collectTypePath(operation.target, index, scope, pending)
+      collectTypePath(operation.target, index, spans, scope, pending)
   if (conformance.hook !== undefined) {
-    collectDeclaredType(conformance.hook.parameterType, index, scope, pending)
-    collectDeclaredType(conformance.hook.returnType, index, scope, pending)
-    collectRowExpression(conformance.hook.failureRow.expression, index, scope, pending)
-    collectRowExpression(conformance.hook.requirementRow.expression, index, scope, pending)
+    collectDeclaredType(conformance.hook.parameterType, index, spans, scope, pending)
+    collectDeclaredType(conformance.hook.returnType, index, spans, scope, pending)
+    collectRowExpression(conformance.hook.failureRow.expression, index, spans, scope, pending)
+    collectRowExpression(conformance.hook.requirementRow.expression, index, spans, scope, pending)
   }
 }
 
 const collectImports = (
   scope: NameResolution.ModuleScope | undefined,
   index: DeclarationIndex.Index,
+  spans: SemanticContext.Registry,
   pending: Array<Pending>,
 ): void => {
   for (const imported of scope?.imports ?? []) {
@@ -1550,8 +1621,8 @@ const collectImports = (
     for (const binding of imported.bindings) {
       if (binding._tag === 'LocalDeclaration' || binding._tag === 'IntrinsicActor') continue
       if (binding._tag === 'ModuleNamespace') {
-        const selection = binding.token.span
-        const declaration = location(selection.sourceId, binding.syntax.span, selection)
+        const selection = spans.spanOf(binding.anchor)
+        const declaration = location(selection.sourceId, spans.spanOf(binding.anchor), selection)
         push(
           pending,
           selection,
@@ -1571,28 +1642,29 @@ const collectImports = (
         const declarationFact = DeclarationFacts.byCanonical(index, binding.declaration)
         const identity =
           declarationFact === undefined ? undefined : identityOfDeclaration(declarationFact)
-        const tokens =
-          binding.sourceToken.span.start === binding.localToken.span.start &&
-          binding.sourceToken.span.end === binding.localToken.span.end
-            ? Object.freeze([binding.sourceToken])
-            : Object.freeze([binding.sourceToken, binding.localToken])
-        for (const token of tokens)
+        const sourceSpan = spans.spanOf(binding.sourceAnchor)
+        const localSpan = spans.spanOf(binding.localAnchor)
+        const selected =
+          sourceSpan.start === localSpan.start && sourceSpan.end === localSpan.end
+            ? Object.freeze([sourceSpan])
+            : Object.freeze([sourceSpan, localSpan])
+        for (const span of selected)
           push(
             pending,
-            token.span,
+            span,
             'Import',
             identity === undefined ? Object.freeze({ _tag: 'Unavailable' }) : available(identity),
             declarationFact === undefined
               ? undefined
-              : locationOfDeclaration(index, declarationFact),
+              : locationOfDeclaration(index, spans, declarationFact),
           )
         continue
       }
       if (binding._tag === 'Unavailable')
-        for (const token of binding.tokens)
+        for (const anchor of binding.anchors)
           push(
             pending,
-            token.span,
+            spans.spanOf(anchor),
             'Import',
             Object.freeze({
               _tag: 'Unavailable',
@@ -1603,49 +1675,38 @@ const collectImports = (
   }
 }
 
-const isTrivia = (token: Token.Token): boolean =>
-  token.kind === 'Whitespace' ||
-  token.kind === 'LineComment' ||
-  token.kind === 'DocComment' ||
-  token.kind === 'ModuleDocComment'
-
-const qualifiedOccurrenceStarts = (tokens: ReadonlyArray<Token.Token>): ReadonlySet<number> => {
-  const starts = new Set<number>()
-  let previous: Token.Token | undefined
-  for (const token of tokens) {
-    if (isTrivia(token)) continue
-    if (token.kind === 'Identifier' && previous?.kind === 'Dot') starts.add(token.span.start)
-    previous = token
-  }
-  return starts
-}
-
+/**
+ * The authored import name that supplied one unqualified occurrence.
+ *
+ * An occurrence is attributed to an import binding when it resolves to exactly what that binding
+ * introduced. Qualified members are excluded because the qualifier already carries the namespace
+ * occurrence, and an `Actor` occurrence is precisely that qualifier.
+ */
 const importBindingFor = (
   occurrence: Omit<SemanticOccurrence, 'ordinal'>,
-  syntax: Elaboration.Result['syntax'],
-  bindings: ReadonlyMap<string, NameResolution.Binding>,
-  qualifiedStarts: ReadonlySet<number>,
+  spans: SemanticContext.Registry,
+  bindings: ReadonlyArray<NameResolution.Binding>,
 ): SourceSpan.SourceSpan | undefined => {
   if (occurrence.role === 'Import' || occurrence.resolution._tag !== 'Available') return undefined
-  const spelling = Option.getOrUndefined(SourceFile.spelling(syntax.source, occurrence.span))
-  if (spelling === undefined) return undefined
-  const binding = bindings.get(spelling)
-  if (binding?._tag === 'ModuleNamespace') {
-    const identity = occurrence.resolution.identity
-    return identity._tag === 'ImportNamespaceIdentity' &&
-      identity.module === binding.module &&
-      identity.spelling === binding.spelling
-      ? binding.token.span
-      : undefined
-  }
-  if (binding?._tag !== 'ImportedMember' || qualifiedStarts.has(occurrence.span.start))
-    return undefined
   const identity = occurrence.resolution.identity
-  return identity._tag === 'DeclarationIdentity' &&
-    identityKey(identity) ===
-      identityKey(Object.freeze({ _tag: 'DeclarationIdentity', id: binding.declaration }))
-    ? binding.localToken.span
-    : undefined
+  if (identity._tag === 'ImportNamespaceIdentity') {
+    const binding = bindings.find(
+      (candidate) =>
+        candidate._tag === 'ModuleNamespace' &&
+        candidate.module === identity.module &&
+        candidate.spelling === identity.spelling,
+    )
+    return binding?._tag === 'ModuleNamespace' ? spans.spanOf(binding.anchor) : undefined
+  }
+  if (identity._tag !== 'DeclarationIdentity' || occurrence.role === 'Actor') return undefined
+  const key = identityKey(identity)
+  const binding = bindings.find(
+    (candidate) =>
+      candidate._tag === 'ImportedMember' &&
+      identityKey(Object.freeze({ _tag: 'DeclarationIdentity', id: candidate.declaration })) ===
+        key,
+  )
+  return binding?._tag === 'ImportedMember' ? spans.spanOf(binding.localAnchor) : undefined
 }
 
 /** Builds one module's immutable exact-token occurrence index from recovered compiler facts. */
@@ -1653,31 +1714,25 @@ export const makeModule = (
   module: string,
   result: Elaboration.Result,
   index: DeclarationIndex.Index,
+  spans: SemanticContext.Registry,
   resolution: NameResolution.Resolution,
   conditions: ReadonlyArray<Elaboration.ExpressionFact> = [],
 ): ModuleIndex => {
   const pending: Array<Pending> = []
   const scope = NameResolution.scopeOf(resolution, module)
   const headers = index.modules.find((candidate) => candidate.module === module)
-  for (const member of headers?.members ?? []) collectMember(member, index, scope, pending)
-  for (const head of headers?.inherentImpls ?? []) collectInherentImpl(head, index, scope, pending)
+  for (const member of headers?.members ?? []) collectMember(member, index, spans, scope, pending)
+  for (const head of headers?.inherentImpls ?? [])
+    collectInherentImpl(head, index, spans, scope, pending)
   for (const conformance of headers?.conformances ?? [])
-    collectConformance(conformance, index, scope, pending)
+    collectConformance(conformance, index, spans, scope, pending)
   for (const fn of Elaboration.executableFunctions(result))
-    for (const statement of fn.statements) collectStatement(statement, index, scope, pending)
-  for (const condition of conditions) collectExpression(condition, index, scope, pending)
-  collectImports(scope, index, pending)
-  const qualifiedStarts = qualifiedOccurrenceStarts(result.syntax.tokens)
-  const bindings = new Map<string, NameResolution.Binding>()
-  for (const binding of scope?.bindings ?? [])
-    if (!bindings.has(binding.spelling)) bindings.set(binding.spelling, binding)
+    for (const statement of fn.statements) collectStatement(statement, index, spans, scope, pending)
+  for (const condition of conditions) collectExpression(condition, index, spans, scope, pending)
+  collectImports(scope, index, spans, pending)
+  const bindings = scope?.bindings ?? Object.freeze([])
   const attributed = pending.map((entry): Pending => {
-    const importBinding = importBindingFor(
-      entry.occurrence,
-      result.syntax,
-      bindings,
-      qualifiedStarts,
-    )
+    const importBinding = importBindingFor(entry.occurrence, spans, bindings)
     return importBinding === undefined
       ? entry
       : Object.freeze({
@@ -1733,15 +1788,17 @@ export const make = (
   results: ReadonlyMap<string, Elaboration.Result>,
   index: DeclarationIndex.Index,
   resolution: NameResolution.Resolution,
-): Index =>
-  compose(
+): Index => {
+  const spans = SemanticContext.fromModules([...results.values()])
+  return compose(
     new Map(
       [...results].map(([module, result]) => [
         module,
-        makeModule(module, result, index, resolution),
+        makeModule(module, result, index, spans, resolution),
       ]),
     ),
   )
+}
 
 const withCurrentDeclaration = (
   self: Index,

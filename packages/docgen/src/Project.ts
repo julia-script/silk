@@ -1,10 +1,11 @@
 import * as Analysis from '@silklang/compiler/Analysis'
 import * as DeclarationFacts from '@silklang/compiler/DeclarationFacts'
-import * as Presentation from '@silklang/compiler/Presentation'
+import * as SemanticDisplay from '@silklang/compiler/SemanticDisplay'
 import * as Type from '@silklang/compiler/Type'
 import * as ProjectAnalysis from '@silklang/compiler/ProjectAnalysis'
 import type * as SourceFile from '@silklang/compiler/SourceFile'
-import type * as SyntaxTree from '@silklang/compiler/SyntaxTree'
+import type * as AuthoredHir from '@silklang/compiler/AuthoredHir'
+import type * as SemanticContext from '@silklang/compiler/SemanticContext'
 import * as Document from './Document.js'
 
 export type ItemKind =
@@ -131,20 +132,21 @@ const itemKind = (member: DeclarationFacts.MemberFact): ItemKind => {
   }
 }
 
-const rangeOf = (node: SyntaxTree.Node): Document.SourceRange =>
-  Object.freeze({
-    sourceId: node.span.sourceId,
-    start: node.span.start,
-    end: node.span.end,
-  })
+const rangeOf = (
+  spans: SemanticContext.Registry,
+  anchor: AuthoredHir.Anchor,
+): Document.SourceRange => {
+  const span = spans.spanOf(anchor)
+  return Object.freeze({ sourceId: span.sourceId, start: span.start, end: span.end })
+}
 
 const parsedDocumentation = (
   snapshot: Analysis.FrontendSnapshot,
-  module: string,
   source: SourceFile.SourceFile,
-  node: SyntaxTree.Node,
+  spans: SemanticContext.Registry,
+  anchor: AuthoredHir.Anchor,
 ): Document.Document | undefined => {
-  const raw = Analysis.documentationOfSyntax(snapshot, module, node)
+  const raw = Analysis.documentationOfAnchor(snapshot, anchor)
   return raw === undefined ? undefined : Document.parse(source, raw)
 }
 
@@ -289,16 +291,17 @@ const typeParameterItem = (
   snapshot: Analysis.FrontendSnapshot,
   module: string,
   source: SourceFile.SourceFile,
+  spans: SemanticContext.Registry,
   ownerId: string,
   parameter: DeclarationFacts.TypeParameterFact,
   ordinal: number,
   owner: DeclarationFacts.CanonicalId | undefined,
 ): Item => {
-  const presentation = Presentation.typeParameter(parameter)
+  const presentation = SemanticDisplay.typeParameter(parameter)
   const documentation = resolveDocumentation(
     snapshot,
     module,
-    parsedDocumentation(snapshot, module, source, parameter.syntax),
+    parsedDocumentation(snapshot, source, parameter.anchor),
     owner,
   )
   return Object.freeze({
@@ -307,7 +310,7 @@ const typeParameterItem = (
     name: nameOf(parameter.name, parameter.type.name),
     visibility: 'Inherited',
     signature: Object.freeze({ text: presentation.text }),
-    source: rangeOf(parameter.syntax),
+    source: rangeOf(spans, parameter.anchor),
     ...(documentation === undefined ? {} : { documentation }),
     children: Object.freeze([]),
   })
@@ -317,15 +320,16 @@ const parameterItem = (
   snapshot: Analysis.FrontendSnapshot,
   module: string,
   source: SourceFile.SourceFile,
+  spans: SemanticContext.Registry,
   ownerId: string,
   parameter: DeclarationFacts.ParameterFact,
   owner: DeclarationFacts.CanonicalId | undefined,
 ): Item => {
-  const presentation = Presentation.parameter(parameter)
+  const presentation = SemanticDisplay.parameter(parameter)
   const documentation = resolveDocumentation(
     snapshot,
     module,
-    parsedDocumentation(snapshot, module, source, parameter.syntax),
+    parsedDocumentation(snapshot, source, parameter.anchor),
     owner,
   )
   return Object.freeze({
@@ -334,7 +338,7 @@ const parameterItem = (
     name: nameOf(parameter.name, '_'),
     visibility: 'Inherited',
     signature: Object.freeze({ text: presentation.text }),
-    source: rangeOf(parameter.syntax),
+    source: rangeOf(spans, parameter.anchor),
     ...(documentation === undefined ? {} : { documentation }),
     children: Object.freeze([]),
   })
@@ -344,15 +348,16 @@ const fieldItem = (
   snapshot: Analysis.FrontendSnapshot,
   module: string,
   source: SourceFile.SourceFile,
+  spans: SemanticContext.Registry,
   ownerId: string,
   field: DeclarationFacts.FieldFact,
   owner: DeclarationFacts.CanonicalId | undefined,
 ): Item => {
-  const presentation = Presentation.field(field)
+  const presentation = SemanticDisplay.field(field)
   const documentation = resolveDocumentation(
     snapshot,
     module,
-    parsedDocumentation(snapshot, module, source, field.syntax),
+    parsedDocumentation(snapshot, source, field.anchor),
     owner,
   )
   return Object.freeze({
@@ -361,7 +366,7 @@ const fieldItem = (
     name: nameOf(field.name, '_'),
     visibility: field.visibility,
     signature: Object.freeze({ text: presentation.text }),
-    source: rangeOf(field.syntax),
+    source: rangeOf(spans, field.anchor),
     ...(documentation === undefined ? {} : { documentation }),
     children: Object.freeze([]),
   })
@@ -371,23 +376,24 @@ const serviceOperationItem = (
   snapshot: Analysis.FrontendSnapshot,
   module: string,
   source: SourceFile.SourceFile,
+  spans: SemanticContext.Registry,
   ownerId: string,
   operation: DeclarationFacts.ServiceOperationFact,
   owner: DeclarationFacts.CanonicalId | undefined,
 ): Item => {
-  const presentation = Presentation.serviceOperation(operation)
+  const presentation = SemanticDisplay.serviceOperation(operation)
   const documentation = resolveDocumentation(
     snapshot,
     module,
-    parsedDocumentation(snapshot, module, source, operation.syntax),
+    parsedDocumentation(snapshot, source, operation.anchor),
     owner,
   )
   const id = `${ownerId}::operation:${nameOf(operation.name, '_')}`
   const typeParameters = operation.typeParameters.map((parameter, ordinal) =>
-    typeParameterItem(snapshot, module, source, id, parameter, ordinal, owner),
+    typeParameterItem(snapshot, module, source, spans, id, parameter, ordinal, owner),
   )
   const parameters = operation.parameters.map((parameter) =>
-    parameterItem(snapshot, module, source, id, parameter, owner),
+    parameterItem(snapshot, module, source, spans, id, parameter, owner),
   )
   return Object.freeze({
     id,
@@ -395,7 +401,7 @@ const serviceOperationItem = (
     name: nameOf(operation.name, '_'),
     visibility: 'Inherited',
     signature: Object.freeze({ text: presentation.text }),
-    source: rangeOf(operation.syntax),
+    source: rangeOf(spans, operation.anchor),
     ...(documentation === undefined ? {} : { documentation }),
     children: Object.freeze([...typeParameters, ...parameters]),
   })
@@ -405,6 +411,7 @@ const enumMemberItem = (
   snapshot: Analysis.FrontendSnapshot,
   module: string,
   source: SourceFile.SourceFile,
+  spans: SemanticContext.Registry,
   parent: string,
   member: DeclarationFacts.EnumMemberFact,
   owner: DeclarationFacts.CanonicalId | undefined,
@@ -415,7 +422,7 @@ const enumMemberItem = (
   const documentation = resolveDocumentation(
     snapshot,
     module,
-    parsedDocumentation(snapshot, module, source, member.syntax),
+    parsedDocumentation(snapshot, source, member.anchor),
     owner,
   )
   return Object.freeze({
@@ -424,7 +431,7 @@ const enumMemberItem = (
     name,
     visibility: 'Inherited',
     signature: Object.freeze({ text: `${name}${discriminant}` }),
-    source: rangeOf(member.syntax),
+    source: rangeOf(spans, member.anchor),
     ...(documentation === undefined ? {} : { documentation }),
     children: Object.freeze([]),
   })
@@ -434,6 +441,7 @@ const unionVariantItem = (
   snapshot: Analysis.FrontendSnapshot,
   module: string,
   source: SourceFile.SourceFile,
+  spans: SemanticContext.Registry,
   parent: string,
   union: DeclarationFacts.UnionFact,
   variant: DeclarationFacts.UnionVariantFact,
@@ -444,7 +452,7 @@ const unionVariantItem = (
   const documentation = resolveDocumentation(
     snapshot,
     module,
-    parsedDocumentation(snapshot, module, source, variant.syntax),
+    parsedDocumentation(snapshot, source, variant.anchor),
     owner,
   )
   const id = `${parent}::variant:${variant.id.ordinal}`
@@ -453,13 +461,13 @@ const unionVariantItem = (
     kind: 'UnionVariant',
     name,
     visibility: 'Inherited',
-    signature: Object.freeze({ text: Presentation.unionVariant(union, variant).text }),
-    source: rangeOf(variant.syntax),
+    signature: Object.freeze({ text: SemanticDisplay.unionVariant(union, variant).text }),
+    source: rangeOf(spans, variant.anchor),
     ...(documentation === undefined ? {} : { documentation }),
     children: Object.freeze(
       variant.fields
         .filter((field) => options.includePrivate === true || field.visibility === 'Public')
-        .map((field) => fieldItem(snapshot, module, source, id, field, owner)),
+        .map((field) => fieldItem(snapshot, module, source, spans, id, field, owner)),
     ),
   })
 }
@@ -467,25 +475,25 @@ const unionVariantItem = (
 const memberPresentation = (member: DeclarationFacts.MemberFact) => {
   switch (member._tag) {
     case 'FunctionDeclaration':
-      return Presentation.functionDeclaration(member)
+      return SemanticDisplay.functionDeclaration(member)
     case 'StructDeclaration':
-      return Presentation.structDeclaration(member)
+      return SemanticDisplay.structDeclaration(member)
     case 'EnumDeclaration':
-      return Presentation.enumDeclaration(member)
+      return SemanticDisplay.enumDeclaration(member)
     case 'UnionDeclaration':
-      return Presentation.unionDeclaration(member)
+      return SemanticDisplay.unionDeclaration(member)
     case 'ServiceDeclaration':
     case 'InterfaceDeclaration':
-      return Presentation.serviceDeclaration(member)
+      return SemanticDisplay.serviceDeclaration(member)
     case 'RoleDeclaration':
-      return Presentation.roleDeclaration(member)
+      return SemanticDisplay.roleDeclaration(member)
     case 'PackageParameterDeclaration':
     case 'ConstantDeclaration':
-      return Presentation.constantDeclaration(member)
+      return SemanticDisplay.constantDeclaration(member)
     case 'ForeignStaticDeclaration':
-      return Presentation.foreignStaticDeclaration(member)
+      return SemanticDisplay.foreignStaticDeclaration(member)
     case 'AliasDeclaration':
-      return Presentation.aliasDeclaration(member)
+      return SemanticDisplay.aliasDeclaration(member)
   }
 }
 
@@ -493,6 +501,7 @@ const ownedChildren = (
   snapshot: Analysis.FrontendSnapshot,
   module: string,
   source: SourceFile.SourceFile,
+  spans: SemanticContext.Registry,
   id: string,
   member: DeclarationFacts.MemberFact,
   options: Options,
@@ -501,24 +510,24 @@ const ownedChildren = (
   switch (member._tag) {
     case 'FunctionDeclaration':
       return member.parameters.map((parameter) =>
-        parameterItem(snapshot, module, source, id, parameter, owner),
+        parameterItem(snapshot, module, source, spans, id, parameter, owner),
       )
     case 'StructDeclaration':
       return member.fields
         .filter((field) => options.includePrivate === true || field.visibility === 'Public')
-        .map((field) => fieldItem(snapshot, module, source, id, field, owner))
+        .map((field) => fieldItem(snapshot, module, source, spans, id, field, owner))
     case 'EnumDeclaration':
       return member.members.map((enumMember) =>
-        enumMemberItem(snapshot, module, source, id, enumMember, owner),
+        enumMemberItem(snapshot, module, source, spans, id, enumMember, owner),
       )
     case 'UnionDeclaration':
       return member.variants.map((variant) =>
-        unionVariantItem(snapshot, module, source, id, member, variant, options, owner),
+        unionVariantItem(snapshot, module, source, spans, id, member, variant, options, owner),
       )
     case 'ServiceDeclaration':
     case 'InterfaceDeclaration':
       return member.operations.map((operation) =>
-        serviceOperationItem(snapshot, module, source, id, operation, owner),
+        serviceOperationItem(snapshot, module, source, spans, id, operation, owner),
       )
     default:
       return []
@@ -529,6 +538,7 @@ const memberItem = (
   snapshot: Analysis.FrontendSnapshot,
   module: string,
   source: SourceFile.SourceFile,
+  spans: SemanticContext.Registry,
   member: DeclarationFacts.MemberFact,
   options: Options,
   associated: ReadonlyArray<DeclarationFacts.MemberFact>,
@@ -539,15 +549,15 @@ const memberItem = (
   const documentation = resolveDocumentation(
     snapshot,
     module,
-    parsedDocumentation(snapshot, module, source, member.syntax),
+    parsedDocumentation(snapshot, source, member.anchor),
     owner,
   )
   const typeParameters = member.typeParameters.map((parameter, ordinal) =>
-    typeParameterItem(snapshot, module, source, id, parameter, ordinal, owner),
+    typeParameterItem(snapshot, module, source, spans, id, parameter, ordinal, owner),
   )
-  const children = ownedChildren(snapshot, module, source, id, member, options, owner)
+  const children = ownedChildren(snapshot, module, source, spans, id, member, options, owner)
   const members = associated.map((candidate) =>
-    memberItem(snapshot, module, source, candidate, options, []),
+    memberItem(snapshot, module, source, spans, candidate, options, []),
   )
   return Object.freeze({
     id,
@@ -557,7 +567,7 @@ const memberItem = (
       : nameOf(member.name, '_'),
     visibility: member.visibility,
     signature: Object.freeze({ text: presentation.text }),
-    source: rangeOf(member.syntax),
+    source: rangeOf(spans, member.anchor),
     ...(documentation === undefined ? {} : { documentation }),
     children: Object.freeze([...typeParameters, ...children, ...members]),
   })
@@ -570,6 +580,7 @@ const conformanceItem = (
   snapshot: Analysis.FrontendSnapshot,
   module: string,
   source: SourceFile.SourceFile,
+  spans: SemanticContext.Registry,
   conformance: DeclarationFacts.ConformanceFact,
 ): Item => {
   const id = `${module}::implementation:${conformance.ordinal}`
@@ -586,7 +597,7 @@ const conformanceItem = (
   const documentation = resolveDocumentation(
     snapshot,
     module,
-    parsedDocumentation(snapshot, module, source, conformance.syntax),
+    parsedDocumentation(snapshot, source, conformance.anchor),
     undefined,
   )
   const children = conformance.operations.map((operation, ordinal): Item => {
@@ -594,7 +605,7 @@ const conformanceItem = (
     const operationDocumentation = resolveDocumentation(
       snapshot,
       module,
-      parsedDocumentation(snapshot, module, source, operation.syntax),
+      parsedDocumentation(snapshot, source, operation.anchor),
       undefined,
     )
     return Object.freeze({
@@ -605,7 +616,7 @@ const conformanceItem = (
       signature: Object.freeze({
         text: `${operationName} = ${operation.target._tag === 'TypePath' ? operation.target.spelling : '_'}`,
       }),
-      source: rangeOf(operation.syntax),
+      source: rangeOf(spans, operation.anchor),
       ...(operationDocumentation === undefined ? {} : { documentation: operationDocumentation }),
       children: Object.freeze([]),
     })
@@ -618,7 +629,7 @@ const conformanceItem = (
     signature: Object.freeze({
       text: `impl ${declaredType(conformance.capability)} for ${declaredType(conformance.provider)}`,
     }),
-    source: rangeOf(conformance.syntax),
+    source: rangeOf(spans, conformance.anchor),
     ...(documentation === undefined ? {} : { documentation }),
     children: Object.freeze(children),
   })
@@ -629,8 +640,9 @@ const moduleModel = (
   headers: DeclarationFacts.ModuleHeaders,
   options: Options,
 ): Module | undefined => {
-  const syntax = Analysis.moduleAnalysis(snapshot, headers.module)?.syntax
-  if (syntax === undefined) return undefined
+  const source = snapshot.closure.sources.get(headers.module)
+  if (source === undefined) return undefined
+  const spans = snapshot.resolution.contexts
   // A profile with no selected declarations has no module API examples to execute.
   const raw =
     snapshot.profile !== undefined &&
@@ -642,7 +654,7 @@ const moduleModel = (
   const documentation = resolveDocumentation(
     snapshot,
     headers.module,
-    raw === undefined ? undefined : Document.parse(syntax.source, raw),
+    raw === undefined ? undefined : Document.parse(source, raw),
     undefined,
   )
   const visible = (member: DeclarationFacts.MemberFact): boolean =>
@@ -663,7 +675,7 @@ const moduleModel = (
   const members = headers.members
     .filter((member) => !isAssociated(member) && visible(member))
     .map((member) =>
-      memberItem(snapshot, headers.module, syntax.source, member, options, associatedOf(member)),
+      memberItem(snapshot, headers.module, source, spans, member, options, associatedOf(member)),
     )
   const publications: Array<Item> = []
   const published = new Set(members.map((member) => member.name))
@@ -687,13 +699,13 @@ const moduleModel = (
         name: publication.spelling,
         visibility: 'Public',
         signature: { text: `pub import ${publication.module.replaceAll('/', '.')} { ${alias} }` },
-        source: rangeOf(publication.syntax),
+        source: rangeOf(spans, publication.anchor),
         children: Object.freeze([]),
       }),
     )
   }
   const conformances = headers.conformances
-    .map((conformance) => conformanceItem(snapshot, headers.module, syntax.source, conformance))
+    .map((conformance) => conformanceItem(snapshot, headers.module, source, spans, conformance))
     .filter((item) => options.includePrivate === true || item.visibility !== 'Private')
   return Object.freeze({
     name: headers.module,

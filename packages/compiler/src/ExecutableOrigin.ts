@@ -10,6 +10,7 @@ import * as FunctionIndex from './internal/FunctionIndex.js'
 import type * as Instances from './Instances.js'
 import * as Intrinsic from './Intrinsic.js'
 import * as Lifetime from './Lifetime.js'
+import type * as SemanticContext from './SemanticContext.js'
 import * as TypeInference from './internal/TypeInference.js'
 import * as RowAlgebra from './RowAlgebra.js'
 import * as Specialization from './Specialization.js'
@@ -177,6 +178,7 @@ const compareSpans = (left: Tir.Expression['span'], right: Tir.Expression['span'
 export const reachableForeignCalls = (
   instances: ReadonlyArray<Instance>,
   index: DeclarationIndex.Index,
+  registry: SemanticContext.Registry,
   target: Target.Target,
 ): ReadonlyArray<ForeignCall> => {
   const retained = new Map<string, ForeignCall>()
@@ -198,7 +200,7 @@ export const reachableForeignCalls = (
               symbol: fact.foreign.symbol,
               signature: foreignSignature(fact, target),
               declaration: expression.target,
-              declarationSpan: fact.name.token.span,
+              declarationSpan: registry.spanOf(fact.name.anchor),
               callSpan: expression.span,
             }),
           )

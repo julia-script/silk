@@ -306,7 +306,7 @@ export const lowerSequence = (
       outcome: {
         _tag: 'Forward',
         target: region,
-        provenance: generated(fn.owner.function.declaration.syntax.span),
+        provenance: generated(fn.registry.spanOf(fn.owner.function.declaration.anchor)),
       },
     })
   }

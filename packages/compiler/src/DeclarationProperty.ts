@@ -1,4 +1,6 @@
 import * as Option from 'effect/Option'
+import type * as AuthoredHir from './AuthoredHir.js'
+import * as SemanticContext from './SemanticContext.js'
 import * as LiteralForm from './LiteralForm.js'
 import * as SourceFile from './SourceFile.js'
 import type * as SourceSpan from './SourceSpan.js'
@@ -34,3 +36,23 @@ export const text = (source: SourceFile.SourceFile, node: SyntaxTree.Node): stri
     ? new TextDecoder().decode(Uint8Array.from(decoded.data.bytes))
     : undefined
 }
+
+/**
+ * An authored clause's `namespace.operation` owner, as semantic consumers address it.
+ *
+ * The syntax helpers above remain for `AuthoredLowering` and the native-requirement readers that
+ * still parse concrete syntax; nothing semantic should reach for them.
+ */
+export const authoredOwner = (
+  context: SemanticContext.SemanticContext,
+  clause: AuthoredHir.PropertyClause,
+): string =>
+  `${SemanticContext.nameText(context, clause.namespace) ?? ''}.${
+    SemanticContext.nameText(context, clause.operation) ?? ''
+  }`
+
+/** An authored clause's literal text operand; computed expressions stay unavailable. */
+export const authoredText = (
+  context: SemanticContext.SemanticContext,
+  value: AuthoredHir.Expression,
+): string | undefined => (value._tag === 'TextLiteral' ? context.textOf(value.value) : undefined)

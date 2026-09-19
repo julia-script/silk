@@ -397,7 +397,7 @@ pub fn main() -> i32 { return run forward(relay()) }`)
       )
       assert.notStrictEqual(owner, undefined)
       if (owner === undefined) continue
-      const ownerSpan = owner.function.declaration.syntax.span
+      const ownerSpan = discovery.registry.spanOf(owner.function.declaration.anchor)
       assert.strictEqual(call.span.sourceId, ownerSpan.sourceId)
       assert.isAtLeast(call.span.start, ownerSpan.start)
       assert.isAtMost(call.span.end, ownerSpan.end)

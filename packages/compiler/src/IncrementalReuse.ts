@@ -24,33 +24,33 @@ export const checkpointModuleBatch = Effect.fn('IncrementalReuse.checkpointModul
   if (ordinal > 0 && ordinal % moduleBatchSize === 0) yield* Effect.yieldNow
 })
 
-/** Retains elaborations whose parser tree is structurally shared with the previous revision. */
-export const syntaxRetained = (
+/** Retains elaborations whose authored module is structurally shared with the previous revision. */
+export const authoredRetained = (
   closure: ModuleClosure.Facts,
   previous?: ProjectReuseBasis,
 ): ReadonlyMap<string, Elaboration.Result> =>
   new Map(
     closure.modules.flatMap((module) => {
       const artifact = previous?.semantics.get(module.name)
-      return artifact?.elaboration.syntax === module.syntax
+      return artifact?.elaboration.authored === module.authored
         ? ([[module.name, artifact.elaboration]] as const)
         : []
     }),
   )
 
-/** Classifies current module syntax identities for semantic invalidation. */
+/** Classifies current authored module identities for semantic invalidation. */
 export const revisions = (
   closure: ModuleClosure.Facts,
   previous?: ProjectReuseBasis,
 ): ReadonlyMap<string, SemanticInvalidation.LocalRevision> => {
-  const previousSyntax = new Map(
-    previous?.closure.modules.map((module) => [module.name, module.syntax]),
+  const previousAuthored = new Map(
+    previous?.closure.modules.map((module) => [module.name, module.authored]),
   )
   return new Map(
     closure.modules.map((module): readonly [string, SemanticInvalidation.LocalRevision] => {
-      const prior = previousSyntax.get(module.name)
+      const prior = previousAuthored.get(module.name)
       if (prior === undefined) return [module.name, Object.freeze({ _tag: 'Fresh' })]
-      if (prior === module.syntax) return [module.name, Object.freeze({ _tag: 'Reused' })]
+      if (prior === module.authored) return [module.name, Object.freeze({ _tag: 'Reused' })]
       return [module.name, Object.freeze({ _tag: 'Changed' })]
     }),
   )
@@ -84,7 +84,7 @@ export const invalidate = (options: {
         }),
   })
 
-/** Selects prior semantic artifacts approved by invalidation and syntax identity. */
+/** Selects prior semantic artifacts approved by invalidation and authored identity. */
 export const retainedSemantics = Effect.fnUntraced(function* (
   closure: ModuleClosure.Facts,
   previous: ProjectReuseBasis,
@@ -103,7 +103,7 @@ export const retainedSemantics = Effect.fnUntraced(function* (
     if (
       artifact !== undefined &&
       artifact.module === module.name &&
-      artifact.elaboration.syntax === module.syntax
+      artifact.elaboration.authored === module.authored
     )
       retained.set(module.name, artifact)
   }

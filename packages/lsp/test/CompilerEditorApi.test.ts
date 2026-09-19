@@ -2,7 +2,7 @@ import { assert, it } from '@effect/vitest'
 import * as Analysis from '@silklang/compiler/Analysis'
 import type * as Completion from '@silklang/compiler/Completion'
 import * as Intrinsic from '@silklang/compiler/Intrinsic'
-import * as Presentation from '@silklang/compiler/Presentation'
+import * as SemanticDisplay from '@silklang/compiler/SemanticDisplay'
 import * as SemanticOccurrence from '@silklang/compiler/SemanticOccurrence'
 import * as TypeHint from '@silklang/compiler/TypeHint'
 
@@ -29,7 +29,7 @@ it('exports the immutable compiler editor API through public subpaths', () => {
   assert.strictEqual(typeof occurrenceQuery, 'function')
   assert.strictEqual(typeof completionQuery, 'function')
   assert.strictEqual(typeof hintQuery, 'function')
-  assert.strictEqual(typeof Presentation.type, 'function')
+  assert.strictEqual(typeof SemanticDisplay.type, 'function')
   assert.strictEqual(typeof SemanticOccurrence.at, 'function')
   assert.strictEqual(typeof TypeHint.make, 'function')
   assert.isTrue(Object.isFrozen(Intrinsic.all()))

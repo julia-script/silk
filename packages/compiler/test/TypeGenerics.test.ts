@@ -397,10 +397,13 @@ pub fn main() -> i32 { return 0 }`),
     )
     assert.isDefined(fn)
     if (fn === undefined) return
-    assert.isUndefined(Instances.specialize(fn, new Map(), Analysis.declarationIndex(snapshot)))
+    const registry = snapshot.resolution.contexts
+    assert.isUndefined(
+      Instances.specialize(fn, new Map(), Analysis.declarationIndex(snapshot), registry),
+    )
     const diagnostic = Diagnostic.nonConcreteSpecialization(
       `${module}.forward`,
-      fn.declaration.syntax.span,
+      registry.spanOf(fn.declaration.anchor),
     )
     assert.strictEqual(diagnostic.code, 'SEM0122')
     assert.strictEqual(diagnostic.reason._tag, 'NonConcreteSpecialization')

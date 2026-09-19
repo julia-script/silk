@@ -20,7 +20,9 @@ import * as TypeInference from './internal/TypeInference.js'
 import type * as NameResolution from './NameResolution.js'
 import * as Ownership from './Ownership.js'
 import * as ProviderSelection from './ProviderSelection.js'
+import * as AuthoredIdentity from './AuthoredIdentity.js'
 import * as Residualization from './Residualization.js'
+import * as SemanticContext from './SemanticContext.js'
 import * as ResidualOwnership from './ResidualOwnership.js'
 import * as RowAlgebra from './RowAlgebra.js'
 import type * as SourceSpan from './SourceSpan.js'
@@ -228,6 +230,8 @@ export interface Discovery {
   readonly retention: ReadonlyArray<InstanceKey>
   readonly _tag: 'InstanceDiscovery'
   readonly rootModule: string
+  /** Spans of authored positions reachable from any module of the discovered closure. */
+  readonly registry: SemanticContext.Registry
   readonly instances: ReadonlyArray<Instance>
   /** Demanded residual specializations rejected before executable reachability. */
   readonly unavailableOwnership: ReadonlyArray<UnavailableResidualOwnership>
@@ -276,7 +280,7 @@ export interface PolymorphicRecursion {
 export interface NonConcreteSpecialization {
   readonly _tag: 'NonConcreteSpecialization'
   readonly key: InstanceKey
-  readonly span: Tir.TirFunction['declaration']['syntax']['span']
+  readonly span: SourceSpan.SourceSpan
 }
 
 const requirementBindingsCache = new WeakMap<
@@ -349,11 +353,15 @@ const forwardedRequirementBinding = (
 }
 
 /** Produces empty discovery when frontend errors prevent reachability analysis. */
-export const invalid = (rootModule: string): Discovery =>
+export const invalid = (
+  rootModule: string,
+  registry: SemanticContext.Registry = SemanticContext.registry([]),
+): Discovery =>
   Object.freeze({
     _tag: 'InstanceDiscovery',
     retention: Object.freeze([]),
     rootModule,
+    registry,
     instances: Object.freeze([]),
     unavailableOwnership: Object.freeze([]),
     callables: Object.freeze([]),
@@ -600,6 +608,7 @@ export const specialize = (
   fn: Tir.TirFunction,
   substitution: Type.Substitution,
   index: DeclarationIndex.Index,
+  registry: SemanticContext.Registry,
   compatibility?: TypeCompatibility.Context,
 ): ConcreteSpecialization | undefined => {
   if (fn.contract._tag !== 'Contract') return undefined
@@ -635,7 +644,7 @@ export const specialize = (
   )
     return undefined
 
-  const origin = fn.declaration.syntax.span
+  const origin = registry.spanOf(fn.declaration.anchor)
   const constraints = fn.contract.constraints.map((constraint) =>
     Constraint.substitute(constraint, substitution),
   )
@@ -1068,6 +1077,7 @@ export const representedEffectSuspensionOf = (
 const exportRoots = (
   index: DeclarationIndex.Index,
   target: Target.Target,
+  registry: SemanticContext.Registry,
 ): ReadonlyArray<ForeignExport> =>
   Object.freeze(
     [...index.modules]
@@ -1107,7 +1117,7 @@ const exportRoots = (
                 fact.typeParameters.map((parameter) => Type.parameterArgument(parameter.type)),
               ),
               declaration: fact.canonical.id,
-              declarationSpan: fact.name.token.span,
+              declarationSpan: registry.spanOf(fact.name.anchor),
             }),
           ]
         }),
@@ -1122,6 +1132,7 @@ export const discover = (
   rootModule: string,
   results: ReadonlyMap<string, Elaboration.Result>,
   index: DeclarationIndex.Index,
+  registry: SemanticContext.Registry,
   completion: ProfileBootstrap.Completion,
   resolution: NameResolution.Resolution,
   composition: ArtifactComposition.Resolved,
@@ -1132,7 +1143,14 @@ export const discover = (
   if (root === undefined) {
     throw new RangeError(`Instance discovery lost its root module ${rootModule}`)
   }
-  const foreignExports = exportRoots(index, target)
+  const foreignExports = exportRoots(index, target, registry)
+  // The root module's own span: its context's first presented entry stands for the whole module.
+  const rootContext = registry.contexts.get(rootModule)
+  const rootSpan = registry.spanOf(
+    rootContext === undefined
+      ? { _tag: 'AuthoredAnchor', owner: AuthoredIdentity.module('', rootModule), path: [] }
+      : { _tag: 'AuthoredAnchor', owner: rootContext.module.owner, path: [] },
+  )
   const retention: Array<InstanceKey> = []
   const rootDiagnostics: Array<Diagnostic.Diagnostic> = []
   for (const selector of composition.retention) {
@@ -1159,7 +1177,7 @@ export const discover = (
           ConfigurationOrigin.snapshot({
             source: selector.module,
             provenance: 'literal',
-            span: candidate.syntax.span,
+            span: registry.spanOf(candidate.anchor),
           }),
         ),
       ]
@@ -1171,14 +1189,16 @@ export const discover = (
             'retention root must name one monomorphic runtime definition',
             origins,
           ),
-          selector.origin.span ?? related[0]?.syntax.span ?? root.syntax.root.span,
+          selector.origin.span ??
+            (related[0] === undefined ? undefined : registry.spanOf(related[0].anchor)) ??
+            rootSpan,
         ),
       )
     } else retention.push(keyOf(declaration.canonical.id, Tir.contractOf(declaration)))
   }
   if (rootDiagnostics.length > 0)
     return Object.freeze({
-      ...invalid(rootModule),
+      ...invalid(rootModule, registry),
       foreignExports,
       residualizationDiagnostics: Object.freeze(rootDiagnostics),
     })
@@ -1191,6 +1211,15 @@ export const discover = (
     completion.values,
   )
   const residualOwnership = ResidualOwnership.make()
+  // Ownership reads spans and evaluation order from the module that authored the body it checks.
+  const contextOf = (fn: Tir.TirFunction): SemanticContext.SemanticContext => {
+    const context = registry.of(fn.declaration.anchor)
+    if (context === undefined)
+      throw new RangeError(
+        `Instance discovery lost the authored module ${fn.declaration.anchor.owner.module}`,
+      )
+    return context
+  }
   const accessBoundaryPlan = trace('Instances.planAccessBoundaries', () =>
     Ownership.localSharedAccessBoundaryPlan(results),
   )
@@ -1211,12 +1240,13 @@ export const discover = (
   for (const module of index.modules) {
     const moduleDiagnostics = results.get(module.module)?.diagnostics ?? Object.freeze([])
     for (const declaration of module.constants) {
+      const declarationSpan = registry.spanOf(declaration.anchor)
       const declarationHasError = moduleDiagnostics.some(
         (diagnostic) =>
           diagnostic.severity === 'error' &&
-          diagnostic.span.sourceId === declaration.syntax.span.sourceId &&
-          declaration.syntax.span.start <= diagnostic.span.start &&
-          diagnostic.span.end <= declaration.syntax.span.end,
+          declarationSpan.sourceId === diagnostic.span.sourceId &&
+          declarationSpan.start <= diagnostic.span.start &&
+          diagnostic.span.end <= declarationSpan.end,
       )
       if (declarationHasError) continue
       const selected = Residualization.evaluateConstant(residualization, declaration)
@@ -1682,7 +1712,7 @@ export const discover = (
             ? undefined
             : trace(
                 'Instances.specialize',
-                () => specialize(fn, substitution, index, selected?.compatibility),
+                () => specialize(fn, substitution, index, registry, selected?.compatibility),
                 {
                   'function.module': key.declaration.module,
                   'function.name': key.declaration.name,
@@ -1694,7 +1724,7 @@ export const discover = (
             Object.freeze({
               _tag: 'NonConcreteSpecialization',
               key,
-              span: fn.declaration.syntax.span,
+              span: registry.spanOf(fn.declaration.anchor),
             }),
           )
           continue
@@ -2011,7 +2041,13 @@ export const discover = (
           () =>
             ResidualOwnership.check(
               residualOwnership,
-              Ownership.input(instance.function, fact, index, accessBoundaryPlan),
+              Ownership.input(
+                instance.function,
+                fact,
+                index,
+                accessBoundaryPlan,
+                contextOf(instance.function),
+              ),
               Residualization.selectionReason(residualization, instance.key) === undefined
                 ? 'UnchangedBody'
                 : 'SelectedStaticBody',
@@ -2049,7 +2085,13 @@ export const discover = (
       [...preparedUnavailableOwnership.values()].map((candidate) => {
         const checked = ResidualOwnership.check(
           residualOwnership,
-          Ownership.input(candidate.function, candidate.fact, index, accessBoundaryPlan),
+          Ownership.input(
+            candidate.function,
+            candidate.fact,
+            index,
+            accessBoundaryPlan,
+            contextOf(candidate.function),
+          ),
           Residualization.selectionReason(residualization, candidate.key) === undefined
             ? 'UnchangedBody'
             : 'SelectedStaticBody',
@@ -2114,13 +2156,14 @@ export const discover = (
     _tag: 'InstanceDiscovery',
     retention: Object.freeze(retention),
     rootModule,
+    registry,
     instances,
     unavailableOwnership,
     callables: Object.freeze([...recordedCallables.values()]),
     effects,
     calls: callInstances,
     intrinsics: ExecutableOrigin.reachableIntrinsics(instances, index),
-    foreignCalls: ExecutableOrigin.reachableForeignCalls(instances, index, target),
+    foreignCalls: ExecutableOrigin.reachableForeignCalls(instances, index, registry, target),
     foreignExports,
     constants: Object.freeze(selectedConstants),
     contextFreeTerminalObservations: finalGraph.contextFreeTerminalObservations,

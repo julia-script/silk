@@ -13,6 +13,7 @@
 import * as Analysis from './Analysis.js'
 import * as Tir from './Tir.js'
 import { projectDataFlow } from './InspectorFlowModel.js'
+import * as SemanticContext from './SemanticContext.js'
 import { backendEmission, toolchainCommands } from './InspectorPanels.js'
 import {
   artifactPlanRows,
@@ -42,7 +43,18 @@ import {
 } from './InspectorProjectSyntax.js'
 import type { RowModel } from './InspectorRow.js'
 import * as MirVerification from './MirVerification.js'
+import type * as SyntaxFile from './SyntaxFile.js'
 import * as ToolchainPlan from './ToolchainPlan.js'
+
+/** The root module's retained syntax view, which only the syntax panels read. */
+const rootSyntax = (snapshot: Analysis.FrontendSnapshot): SyntaxFile.SyntaxFile => {
+  const module = snapshot.closure.modules.find(
+    (candidate) => candidate.name === snapshot.closure.rootModule,
+  )
+  if (module === undefined)
+    throw new RangeError(`Snapshot lost its root module ${snapshot.closure.rootModule}`)
+  return module.syntax
+}
 
 export const viewIds = [
   'source',
@@ -131,7 +143,7 @@ export const views: ReadonlyArray<ViewDefinition> = [
     group: 'syntax',
     hasFilter: true,
     project: ({ snapshot, showTrivia, filter }) => {
-      const syntax = Analysis.rootAnalysis(snapshot).syntax
+      const syntax = rootSyntax(snapshot)
       const rows = tokenRows(syntax, showTrivia, filter)
       return { rows, meta: `${rows.length}/${syntax.tokens.length}` }
     },
@@ -144,7 +156,7 @@ export const views: ReadonlyArray<ViewDefinition> = [
     group: 'syntax',
     hasFilter: true,
     project: ({ snapshot, showTrivia, filter }) => {
-      const syntax = Analysis.rootAnalysis(snapshot).syntax
+      const syntax = rootSyntax(snapshot)
       const rows = treeRows(syntax, showTrivia, filter)
       const missing = rows.filter((row) => row.dot === 'missing').length
       return {
@@ -162,7 +174,7 @@ export const views: ReadonlyArray<ViewDefinition> = [
     project: ({ snapshot }) => {
       const closure = snapshot.closure
       return {
-        rows: closureRows(closure),
+        rows: closureRows(closure, SemanticContext.fromModules(closure.modules)),
         meta: `${closure.modules.length} mod`,
       }
     },
@@ -175,9 +187,10 @@ export const views: ReadonlyArray<ViewDefinition> = [
     group: 'modules',
     project: ({ snapshot }) => {
       const index = Analysis.declarationIndex(snapshot)
+      const spans = SemanticContext.fromModules(snapshot.closure.modules)
       const declarations = index.modules.reduce((total, module) => total + module.members.length, 0)
       return {
-        rows: indexRows(index),
+        rows: indexRows(index, spans),
         meta: `${declarations} decl`,
       }
     },
@@ -190,9 +203,10 @@ export const views: ReadonlyArray<ViewDefinition> = [
     group: 'names',
     project: ({ snapshot }) => {
       const resolution = Analysis.nameResolution(snapshot)
+      const spans = resolution.contexts
       const bindings = resolution.modules.reduce((total, scope) => total + scope.bindings.length, 0)
       return {
-        rows: resolutionRows(resolution),
+        rows: resolutionRows(resolution, spans),
         meta: `${bindings} bind`,
       }
     },
@@ -210,7 +224,7 @@ export const views: ReadonlyArray<ViewDefinition> = [
         .flatMap(Tir.expressionTree)
         .filter((expression) => expression._tag === 'UnionConvert')
       return {
-        rows: tirRows(tir),
+        rows: tirRows(tir, SemanticContext.fromModules(snapshot.closure.modules)),
         facts:
           conversions.length === 0
             ? undefined
@@ -258,7 +272,12 @@ export const views: ReadonlyArray<ViewDefinition> = [
       const layout = Analysis.layoutOf(snapshot)
       const shapes = layout._tag === 'Available' ? layout.value.callingShapes : []
       return {
-        rows: structValueRows(literals, projections, shapes),
+        rows: structValueRows(
+          SemanticContext.fromModules(snapshot.closure.modules),
+          literals,
+          projections,
+          shapes,
+        ),
         meta: `${literals.length} lit · ${projections.length} proj`,
       }
     },
@@ -275,6 +294,7 @@ export const views: ReadonlyArray<ViewDefinition> = [
       const projections = Analysis.indexProjectionsOf(snapshot, root)
       return {
         rows: arrayValueRows(
+          SemanticContext.fromModules(snapshot.closure.modules),
           types,
           literals,
           projections,
@@ -307,7 +327,7 @@ export const views: ReadonlyArray<ViewDefinition> = [
       }
       if (loans > 0) summaryFacts.push({ text: `${loans} lexical loan`, tone: 'symbol' })
       return {
-        rows: ownershipRows(facts),
+        rows: ownershipRows(facts, SemanticContext.fromModules(snapshot.closure.modules)),
         facts: summaryFacts.length === 0 ? undefined : summaryFacts,
         meta: `${facts.functions.length} fn${matches.length === 0 ? '' : ` · ${matches.length} match`}${loans === 0 ? '' : ` · ${loans} loan`}`,
       }
@@ -322,7 +342,10 @@ export const views: ReadonlyArray<ViewDefinition> = [
     project: ({ snapshot }) => {
       const discovery = Analysis.instancesOf(snapshot)
       return {
-        rows: [...instanceRows(discovery), ...artifactPlanRows(snapshot.artifactPlan)],
+        rows: [
+          ...instanceRows(discovery, SemanticContext.fromModules(snapshot.closure.modules)),
+          ...artifactPlanRows(snapshot.artifactPlan),
+        ],
         meta: `${discovery.instances.length} inst`,
       }
     },
@@ -502,7 +525,7 @@ export const views: ReadonlyArray<ViewDefinition> = [
       const phases = [
         {
           phase: 'syntax (lex + parse)',
-          outputs: `${analysis.syntax.tokens.length} tokens · ${analysis.functions.length} declarations`,
+          outputs: `${rootSyntax(snapshot).tokens.length} tokens · ${analysis.functions.length} declarations`,
           diagnostics: countFor('lexical') + countFor('parser'),
         },
         {
@@ -582,9 +605,10 @@ export const views: ReadonlyArray<ViewDefinition> = [
     group: 'all',
     project: ({ snapshot }) => {
       const analysis = Analysis.rootAnalysis(snapshot)
+      const syntax = rootSyntax(snapshot)
       const entries = diagnosticEntries(
-        analysis.syntax.lexicalDiagnostics,
-        analysis.syntax.parserDiagnostics,
+        syntax.lexicalDiagnostics,
+        syntax.parserDiagnostics,
         analysis.diagnostics,
       )
       const counts = diagnosticCounts(entries)

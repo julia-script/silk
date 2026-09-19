@@ -19,7 +19,7 @@ export const elaborate = (syntax: SyntaxFile.SyntaxFile): Elaboration.Result => 
     name: syntax.source.id,
     syntax,
     authored,
-    declarations: ModuleClosure.selectedDeclarations(syntax.root, new Map()),
+    declarations: ModuleClosure.selectedDeclarations(authored.module, new Map()),
     imports: Object.freeze([]),
   })
   const closure: ModuleClosure.Closure = Object.freeze({
@@ -38,7 +38,7 @@ export const elaborate = (syntax: SyntaxFile.SyntaxFile): Elaboration.Result => 
   const scope = NameResolution.scopeOf(analyzed.resolution, syntax.source.id)
   if (headers === undefined || scope === undefined)
     throw new RangeError('Single-module elaboration fixture lost its module')
-  const result = Elaboration.elaborateModule({ syntax, authored, headers, scope, index })
+  const result = Elaboration.elaborateModule({ authored, headers, scope, index })
   indices.set(result, index)
   return result
 }
@@ -50,6 +50,8 @@ export const ownership = (result: Elaboration.Result): Ownership.ModuleOwnership
   return Ownership.checkModule(
     result,
     index,
-    Ownership.localSharedAccessBoundaryPlan(new Map([[result.syntax.source.id, result]])),
+    Ownership.localSharedAccessBoundaryPlan(
+      new Map([[result.authored.presentation.sourceId, result]]),
+    ),
   )
 }

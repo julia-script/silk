@@ -75,6 +75,18 @@ interface UnitInfo {
   readonly subordinateMaximum?: bigint
 }
 
+/** Nanoseconds one whole unit denotes; authored components carry a magnitude and this unit. */
+export const unitNanoseconds: Readonly<Record<Unit, bigint>> = Object.freeze({
+  w: 604_800_000_000_000n,
+  d: 86_400_000_000_000n,
+  h: 3_600_000_000_000n,
+  m: 60_000_000_000n,
+  s: 1_000_000_000n,
+  ms: 1_000_000n,
+  us: 1_000n,
+  ns: 1n,
+})
+
 const unitInfo = (spelling: string): UnitInfo | undefined => {
   switch (spelling) {
     case 'w':

@@ -1,4 +1,6 @@
+import * as AuthoredIdentity from './AuthoredIdentity.js'
 import type * as Elaboration from './Elaboration.js'
+import * as SemanticContext from './SemanticContext.js'
 import type * as SourceSpan from './SourceSpan.js'
 import * as Type from './Type.js'
 
@@ -110,8 +112,6 @@ const directReference = (
       return expression.reference
     case 'Move':
       return directReference(expression.subject)
-    case 'Grouped':
-      return directReference(expression.expression)
     case 'Borrow':
       return directReference(expression.subject)
     default:
@@ -131,8 +131,6 @@ const argumentLabel = (argument: Elaboration.ArgumentFact): string => {
     return `move ${argumentLabel({ ...argument, expression: expression.subject })}`
   }
   if (expression._tag === 'Boolean') return String(expression.value)
-  if (expression._tag === 'Grouped')
-    return `(${argumentLabel({ ...argument, expression: expression.expression })})`
   if (expression._tag === 'Operator') return `${expression.operator} expression`
   if (expression._tag === 'CallableApply') return 'callable result'
   if (expression._tag === 'StructLiteral')
@@ -155,7 +153,7 @@ const argumentLabel = (argument: Elaboration.ArgumentFact): string => {
   return 'unavailable integer'
 }
 
-const callId = (call: CallFact): string => `call-${call.syntax.span.start}-${call.syntax.span.end}`
+const callId = (call: CallFact): string => `call-${AuthoredIdentity.anchorKey(call.anchor)}`
 
 const sameDeclaration = (
   left: Elaboration.DeclarationFact,
@@ -235,6 +233,7 @@ const functionFor = (
 
 const projectCall = (
   analysis: Elaboration.Result,
+  context: SemanticContext.SemanticContext,
   draft: ProjectionDraft,
   caller: Elaboration.DeclarationFact,
   call: CallFact,
@@ -247,12 +246,12 @@ const projectCall = (
   const group: GroupDraft = {
     id,
     label: `${callName(call)} call site`,
-    detail: `${declarationName(caller)} call at [${call.syntax.span.start}, ${call.syntax.span.end})`,
+    detail: `${declarationName(caller)} call at [${context.spanOf(call.anchor).start}, ${context.spanOf(call.anchor).end})`,
     depth,
     ordinal,
     parentId,
     state: groupState(call),
-    span: call.syntax.span,
+    span: context.spanOf(call.anchor),
     nodeIds: [],
     edgeIds: [],
     target: groupTarget,
@@ -265,6 +264,7 @@ const projectCall = (
     if (argument.expression._tag !== 'Call') continue
     const nested = projectCall(
       analysis,
+      context,
       draft,
       caller,
       argument.expression,
@@ -289,7 +289,7 @@ const projectCall = (
         `Argument #${argument.id.ordinal}: ${argumentLabel(argument)}`,
         argument.type._tag === 'Available' ? typeText(argument.type.type) : 'Unavailable type',
         call.contract._tag === 'Compatible' && nestedComplete !== false ? 'Connected' : 'Unmatched',
-        argument.syntax.span,
+        context.spanOf(argument.anchor),
         argument.id.ordinal,
       ),
     )
@@ -305,15 +305,14 @@ const projectCall = (
           argumentId,
           'supplies nested result to',
           'Connected',
-          argument.syntax.span,
+          context.spanOf(argument.anchor),
         ),
       )
     }
   }
 
   if (call.reference._tag !== 'Resolved') {
-    const referenceSpan =
-      call.reference._tag === 'Unavailable' ? call.reference.syntax.span : call.reference.token.span
+    const referenceSpan = context.spanOf(call.reference.anchor)
     const referenceId = `${id}-reference`
     addNode(
       draft,
@@ -343,7 +342,7 @@ const projectCall = (
             `Candidate ${declarationName(declaration)}`,
             `function #${declaration.id.ordinal}`,
             'Branched',
-            declaration.syntax.span,
+            context.spanOf(declaration.anchor),
           ),
         )
         addEdge(
@@ -372,7 +371,7 @@ const projectCall = (
           'Data flow stops: no unique target',
           call.contract._tag === 'Unavailable' ? call.contract.reason._tag : call.reference._tag,
           'Stopped',
-          call.syntax.span,
+          context.spanOf(call.anchor),
         ),
       )
       addEdge(
@@ -385,7 +384,7 @@ const projectCall = (
           terminalId,
           'stops at',
           'Stopped',
-          call.syntax.span,
+          context.spanOf(call.anchor),
         ),
       )
     }
@@ -407,7 +406,7 @@ const projectCall = (
         call.mappings.some((mapping) => mapping.parameter === parameter)
           ? 'Connected'
           : 'Unmatched',
-        parameter.syntax.span,
+        context.spanOf(parameter.anchor),
         parameter.id.ordinal,
       ),
     )
@@ -423,7 +422,7 @@ const projectCall = (
         `${id}-parameter-${mapping.parameter.id.ordinal}`,
         'binds positionally to',
         'Connected',
-        mapping.argument.syntax.span,
+        context.spanOf(mapping.argument.anchor),
       ),
     )
   }
@@ -442,7 +441,7 @@ const projectCall = (
           ? `${call.contract.actualCount} actual / ${call.contract.expectedCount} expected`
           : call.contract.reason._tag,
         'Stopped',
-        call.syntax.span,
+        context.spanOf(call.anchor),
       ),
     )
     const origins =
@@ -460,7 +459,7 @@ const projectCall = (
           terminalId,
           'contract stops at',
           'Stopped',
-          call.syntax.span,
+          context.spanOf(call.anchor),
         ),
       )
     }
@@ -479,7 +478,7 @@ const projectCall = (
         'Data flow stops: nested argument has no result',
         'The enclosing semantic result is not drawn.',
         'Stopped',
-        call.syntax.span,
+        context.spanOf(call.anchor),
       ),
     )
     return Object.freeze({ groupId: id, resultId: undefined, complete: false })
@@ -500,7 +499,7 @@ const projectCall = (
         'Data flow stops: target return path is not directly available',
         returned === undefined ? 'No function fact' : `${returned._tag} target return`,
         'Stopped',
-        target.syntax.span,
+        context.spanOf(target.anchor),
       ),
     )
     return Object.freeze({ groupId: id, resultId: undefined, complete: false })
@@ -520,7 +519,7 @@ const projectCall = (
           : 'Unavailable returned literal',
         returned.integer._tag,
         returned.integer._tag === 'Available' ? 'Connected' : 'Stopped',
-        returned.syntax.span,
+        context.spanOf(returned.anchor),
       ),
     )
     if (returned.integer._tag !== 'Available') {
@@ -546,7 +545,7 @@ const projectCall = (
         `Returned reference: ${referenceLabel}`,
         returnedReference._tag,
         returnedState,
-        returned.syntax.span,
+        context.spanOf(returned.anchor),
       ),
     )
     if (returnedReference._tag === 'Ambiguous') {
@@ -561,7 +560,7 @@ const projectCall = (
             returnedId,
             'could be read by',
             'Branched',
-            returned.syntax.span,
+            context.spanOf(returned.anchor),
           ),
         )
       }
@@ -576,7 +575,7 @@ const projectCall = (
           returnedId,
           'is read by',
           'Connected',
-          returned.syntax.span,
+          context.spanOf(returned.anchor),
         ),
       )
     }
@@ -596,7 +595,7 @@ const projectCall = (
       `${declarationName(target)} call result`,
       call.type._tag === 'Available' ? typeText(call.type.type) : 'Unavailable type',
       'Connected',
-      call.syntax.span,
+      context.spanOf(call.anchor),
     ),
   )
   addEdge(
@@ -609,7 +608,7 @@ const projectCall = (
       resultId,
       'produces',
       'Connected',
-      returned.syntax.span,
+      context.spanOf(returned.anchor),
     ),
   )
   return Object.freeze({ groupId: id, resultId, complete: true })
@@ -627,6 +626,7 @@ const emptyModel = (): FlowModel =>
 
 /** Projects semantic relationships for the inspector. */
 export const projectDataFlow = (analysis: Elaboration.Result): FlowModel => {
+  const context = SemanticContext.make(analysis.authored)
   const caller = analysis.functions.find((fact) => fact.returnedExpression._tag === 'Call')
   if (caller === undefined || caller.returnedExpression._tag !== 'Call') {
     return emptyModel()
@@ -635,6 +635,7 @@ export const projectDataFlow = (analysis: Elaboration.Result): FlowModel => {
   const draft: ProjectionDraft = { groups: [], nodes: [], edges: [] }
   const root = projectCall(
     analysis,
+    context,
     draft,
     caller.declaration,
     caller.returnedExpression,
@@ -656,7 +657,7 @@ export const projectDataFlow = (analysis: Elaboration.Result): FlowModel => {
           `${declarationName(caller.declaration)} return`,
           caller.returnCompatibility._tag,
           'Connected',
-          caller.returnedExpression.syntax.span,
+          context.spanOf(caller.returnedExpression.anchor),
         ),
       )
       addEdge(
@@ -669,7 +670,7 @@ export const projectDataFlow = (analysis: Elaboration.Result): FlowModel => {
           returnId,
           'is returned by',
           'Connected',
-          caller.returnedExpression.syntax.span,
+          context.spanOf(caller.returnedExpression.anchor),
         ),
       )
     }

@@ -7,6 +7,7 @@ import * as ConfigurationOrigin from './ConfigurationOrigin.js'
 import * as ConfigurationValue from './ConfigurationValue.js'
 import type * as DeclarationFacts from './DeclarationFacts.js'
 import type * as DeclarationIndex from './DeclarationIndex.js'
+import type * as SemanticContext from './SemanticContext.js'
 import * as PackageParameter from './PackageParameter.js'
 import type * as StaticValue from './StaticValue.js'
 import type * as Target from './Target.js'
@@ -37,6 +38,8 @@ export interface Parameter extends CompilationProfile.ParameterIdentity {
 /** Resolves source identities and all explicit tiers before any default may execute. */
 export const prepare = Effect.fn('PackageConfiguration.prepare')(function* (
   index: DeclarationIndex.Index,
+  /** Spans of every loaded module, so a schema's provenance survives without its source. */
+  contexts: SemanticContext.Registry,
   target: Target.Target,
   modules: ReadonlyArray<Module>,
   bindings: ReadonlyArray<Binding>,
@@ -106,7 +109,7 @@ export const prepare = Effect.fn('PackageConfiguration.prepare')(function* (
       const origin = ConfigurationOrigin.snapshot({
         source: `${owner.package}/${owner.module}/${declaration.name.spelling}`,
         provenance: 'literal',
-        span: declaration.syntax.span,
+        span: contexts.spanOf(declaration.anchor),
       })
       const schema = yield* PackageParameter.describe(
         context,

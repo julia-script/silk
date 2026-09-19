@@ -22,7 +22,7 @@ import * as SyntaxTree from '../src/SyntaxTree.js'
 import * as Type from '../src/Type.js'
 import { invalidMatchCorpus } from './support/corpus.js'
 import * as Projections from './support/projections.js'
-import { unreachable } from './support/raise.js'
+import { raise, unreachable } from './support/raise.js'
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
@@ -228,7 +228,10 @@ it.effect('constructs frontend snapshots for deterministic damaged-source edits'
           ),
         ),
       )
-      assert.strictEqual(Analysis.rootAnalysis(self).syntax.source.id, `damaged-${ordinal}`)
+      assert.strictEqual(
+        Analysis.moduleSyntax(self, self.closure.rootModule)?.source.id,
+        `damaged-${ordinal}`,
+      )
     }
   }),
 )
@@ -625,7 +628,8 @@ it.effect('keeps an over-budget expression queryable through the analysis facade
     const source = `fn damaged() -> i32 { return ${rejected} }
 fn after() -> i32 { return 42 }`
     const frontend = yield* Analysis.ofSource('main', ascii(source))
-    const syntax = Analysis.rootAnalysis(frontend).syntax
+    const syntax =
+      Analysis.moduleSyntax(frontend, frontend.closure.rootModule) ?? raise('root syntax')
 
     assert.strictEqual(frontend._tag, 'AnalysisSnapshot')
     assert.strictEqual(

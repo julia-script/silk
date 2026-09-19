@@ -94,7 +94,7 @@ const analyzeHeaders = Effect.fn('Frontend.analyzeHeaders')(function* (
     () => {
       const preliminary = NameResolution.resolve(closure, collected)
       const resolvers = NameResolution.makeResolvers(preliminary, collected)
-      const completed = DeclarationCompletion.complete(collected, resolvers)
+      const completed = DeclarationCompletion.complete(collected, resolvers, preliminary.contexts)
       ResolutionWork.share(completed, collected)
       return completed
     },
@@ -157,7 +157,6 @@ const elaborateModules = Effect.fn('Frontend.elaborateModules')(function* (
       if (moduleHeaders === undefined || scope === undefined)
         throw new RangeError(`Pipeline lost module facts for ${module.name}`)
       const result = Elaboration.elaborateModule({
-        syntax: module.syntax,
         authored: module.authored,
         headers: moduleHeaders,
         scope,
@@ -356,7 +355,6 @@ const bootstrapFacts = Effect.fn('Frontend.bootstrapFacts')(function* (
     results.set(
       module.name,
       Elaboration.elaborateModule({
-        syntax: module.syntax,
         authored: module.authored,
         headers: { ...moduleHeaders, declarations: [], constants: [] },
         scope,

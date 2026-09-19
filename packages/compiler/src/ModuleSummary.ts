@@ -3,6 +3,7 @@ import * as DeclarationFacts from './DeclarationFacts.js'
 import type * as DeclarationIndex from './DeclarationIndex.js'
 import type * as ModuleClosure from './ModuleClosure.js'
 import * as ImportPath from './ImportPath.js'
+import * as SemanticContext from './SemanticContext.js'
 import * as SourceFile from './SourceFile.js'
 import type * as SourceSpan from './SourceSpan.js'
 import type * as SyntaxFile from './SyntaxFile.js'
@@ -40,6 +41,36 @@ export interface ModuleSummary {
   readonly source: SourceFile.SourceFile
   readonly imports: ReadonlyArray<string>
   readonly publicDeclarations: ReadonlyArray<PublicDeclaration>
+}
+
+/** The import-relevant kind of one collected member fact. */
+const memberKind = (
+  member: DeclarationFacts.MemberFact,
+): { readonly declarationKind: DeclarationKind; readonly namespace: Namespace } | undefined => {
+  switch (member._tag) {
+    case 'FunctionDeclaration':
+      return { declarationKind: 'Function', namespace: 'Value' }
+    case 'ConstantDeclaration':
+    case 'PackageParameterDeclaration':
+    case 'ForeignStaticDeclaration':
+      return { declarationKind: 'Constant', namespace: 'Value' }
+    case 'StructDeclaration':
+      return { declarationKind: 'Struct', namespace: 'ValueAndType' }
+    case 'UnionDeclaration':
+      return { declarationKind: 'Union', namespace: 'ValueAndType' }
+    case 'EnumDeclaration':
+      return { declarationKind: 'Enum', namespace: 'ValueAndType' }
+    case 'RoleDeclaration':
+      return { declarationKind: 'Role', namespace: 'ValueAndType' }
+    case 'ServiceDeclaration':
+      return { declarationKind: 'Service', namespace: 'Type' }
+    case 'InterfaceDeclaration':
+      return { declarationKind: 'Interface', namespace: 'Type' }
+    case 'AliasDeclaration':
+      return { declarationKind: 'Alias', namespace: 'Type' }
+    default:
+      return undefined
+  }
 }
 
 const declarationKind = (
@@ -166,6 +197,7 @@ export const matchesSource = (self: ModuleSummary, source: SourceFile.SourceFile
 export const selected = (
   module: ModuleClosure.ProjectClosure['modules'][number],
   index: DeclarationIndex.Index,
+  context: SemanticContext.SemanticContext = SemanticContext.make(module.authored),
 ): ModuleSummary => {
   const headers = index.modules.find((candidate) => candidate.module === module.name)
   const names = new Set([
@@ -181,7 +213,7 @@ export const selected = (
     const member = found.declaration
     if (member.visibility !== 'Public' || member.name._tag !== 'Present') continue
     if (member._tag === 'FunctionDeclaration' && member.associatedMember !== undefined) continue
-    const kind = declarationKind(member.syntax.kind)
+    const kind = memberKind(member)
     if (kind === undefined) continue
     publicDeclarations.push(
       Object.freeze({
@@ -189,7 +221,7 @@ export const selected = (
         spelling: name,
         ...kind,
         ordinal: member.id.ordinal,
-        selectionSpan: member.name.token.span,
+        selectionSpan: context.spanOf(member.name.anchor),
       }),
     )
   }

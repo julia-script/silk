@@ -1,5 +1,6 @@
+import * as AuthoredIdentity from './AuthoredIdentity.js'
+import type * as SemanticContext from './SemanticContext.js'
 import * as SourceSpan from './SourceSpan.js'
-import * as SyntaxTree from './SyntaxTree.js'
 
 /** An adjacent-revision correspondence for immutable syntax and semantic fact graphs. */
 export interface SemanticRebinding {
@@ -52,25 +53,31 @@ export const pair = (self: SemanticRebinding, previous: unknown, current: unknow
   visit(previous, current)
 }
 
-const significant = (value: SyntaxTree.Element): boolean =>
-  !SyntaxTree.isToken(value) ||
-  !['Whitespace', 'LineComment', 'DocComment', 'ModuleDocComment'].includes(value.kind)
-
-/** Matches source nodes by grammar position after trivia and binder spelling changes. */
-export const syntax = (
+/**
+ * Records the current span of every anchor the previous revision also presented, so spans a cached
+ * fact still embeds (diagnostics, borrow identities) move with the authored position they named.
+ */
+export const pairPresentations = (
   self: SemanticRebinding,
-  previous: SyntaxTree.Element,
-  current: SyntaxTree.Element,
+  previous: SemanticContext.SemanticContext,
+  current: SemanticContext.SemanticContext,
 ): void => {
-  self.replacements.set(previous, current)
-  pair(self, previous.span, current.span)
-  if (!SyntaxTree.isNode(previous) || !SyntaxTree.isNode(current)) return
-  const left = previous.children.filter(significant)
-  const right = current.children.filter(significant)
-  if (left.length !== right.length) return
-  for (const [ordinal, child] of left.entries()) {
-    const next = right[ordinal]
-    if (next !== undefined) syntax(self, child, next)
+  const sourceId = previous.presentation.sourceId
+  const currentSpans = new Map<string, SourceSpan.SourceSpan>()
+  for (const entry of current.presentation.entries) {
+    const key = AuthoredIdentity.anchorKey(entry.anchor)
+    if (!currentSpans.has(key)) currentSpans.set(key, current.spanOf(entry.anchor))
+  }
+  for (const entry of previous.presentation.entries) {
+    const replacement = currentSpans.get(AuthoredIdentity.anchorKey(entry.anchor))
+    if (replacement === undefined) continue
+    const before = SourceSpan.fromOffsets(sourceId, entry.span.start, entry.span.end)
+    if (before === undefined) continue
+    if (!self.spans.has(spanKey(before))) self.spans.set(spanKey(before), replacement)
+    if (!self.positions.has(`${sourceId}:${before.start}`))
+      self.positions.set(`${sourceId}:${before.start}`, replacement.start)
+    if (!self.positions.has(`${sourceId}:${before.end}`))
+      self.positions.set(`${sourceId}:${before.end}`, replacement.end)
   }
 }
 
