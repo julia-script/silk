@@ -71,6 +71,8 @@ A3: authored HIR + explicit semantic context → one typed TIR body + indexed re
 static evaluation serves ordinary semantics and preparation. Delete duplicate executable fact trees,
 syntax-backed semantic checking and cache rebinding. Preserve diagnostics through current presentation
 and preserve positive and negative ProjectAnalysis reuse witnesses; hashes alone are insufficient.
+The final TIR schema, its result tables, representative artifacts, the consumer map and the
+implementation steps are fixed in `tir-contract.md`.
 
 A4: canonical roots + intent/profile/composition → prepared bundle. Normalize package configuration,
 select imports using A3, and for executable intent discover demanded runtime components to a monotone
