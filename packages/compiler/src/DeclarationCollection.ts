@@ -657,6 +657,9 @@ export const analyzeDeclaredType = (
     })
   if (type._tag === 'MissingType' || type._tag === 'InvalidType')
     return unavailableResolution(anchor)
+  // Recovery keeps an absent type as a named type over a missing name: the parser owns that damage.
+  if (type._tag === 'NamedType' && type.path.segments.some((segment) => segment._tag !== 'Name'))
+    return unavailableResolution(anchor)
   if (type._tag === 'CallableType') {
     const lifetimes =
       lifetimeContext === undefined

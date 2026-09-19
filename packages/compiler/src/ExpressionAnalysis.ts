@@ -561,7 +561,8 @@ export const analyzeIdentifier = (
 ): IdentifierResult => {
   const spellingText =
     node._tag === 'IdentifierExpression' ? SemanticContext.nameText(context, node.name) : undefined
-  if (node._tag !== 'IdentifierExpression' || spellingText === undefined)
+  // A damaged identifier stays parser-owned: its spelling is not a reference to resolve.
+  if (node._tag !== 'IdentifierExpression' || spellingText === undefined || node.causes.length > 0)
     return Object.freeze({
       fact: Object.freeze({
         _tag: 'Identifier',

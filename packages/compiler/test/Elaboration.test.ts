@@ -577,7 +577,7 @@ fn main() -> i32 {
     },
     {
       access: 'Shared',
-      provider: 'effect://moved-provider.FixedClock',
+      provider: 'effect/moved-provider.FixedClock',
       capture: 'Copy',
     },
   )

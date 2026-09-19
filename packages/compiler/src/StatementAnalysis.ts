@@ -1800,7 +1800,6 @@ export const reachableCallableWrites = (
   return writes
 }
 
-
 /**
  * Where a body that falls off its end is reported: the closing brace, which a presented block
  * span always ends with unless recovery left the block damaged.

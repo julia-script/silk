@@ -437,6 +437,8 @@ export const bodyTypes = (block: AuthoredHir.Block): ReadonlyArray<AuthoredHir.T
 export const isAvailable = (
   node: AuthoredHir.Expression | AuthoredHir.Pattern | AuthoredHir.Type,
 ): boolean =>
+  // Recovery keeps an absent operand as an identifier over a missing name.
+  !(node._tag === 'IdentifierExpression' && node.name._tag !== 'Name') &&
   node._tag !== 'MissingExpression' &&
   node._tag !== 'InvalidExpression' &&
   node._tag !== 'MissingPattern' &&

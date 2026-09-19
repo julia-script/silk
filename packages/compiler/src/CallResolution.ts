@@ -82,7 +82,13 @@ export const analyzeArgumentNodes = (
 ): ArgumentsResult => {
   const inferred = new Map<string, Type.GenericArgument>()
   const lifetimes = selectedCallLifetimes(site, [], resolution)
-  const analyzed = nodes.flatMap((element, ordinal): ReadonlyArray<ExpressionResult> => {
+  // An operand recovery invented to fill an empty position is not an argument the author wrote.
+  const written = nodes.filter(
+    (element) =>
+      element._tag !== 'MissingExpression' &&
+      !(element._tag === 'IdentifierExpression' && element.name._tag !== 'Name'),
+  )
+  const analyzed = written.flatMap((element, ordinal): ReadonlyArray<ExpressionResult> => {
     const pattern = expectedTypes.at(ordinal)
     const expected = pattern === undefined ? undefined : Type.substitute(pattern, inferred)
     const result = analyzeExpression(
