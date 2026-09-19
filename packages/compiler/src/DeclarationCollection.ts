@@ -2000,6 +2000,26 @@ const collectRowExpression = (
         diagnostics: analyzed.diagnostics,
       })
     }
+    // A row position that parses as a type spells a borrowed requirement as a reference type.
+    if (operand._tag === 'ReferenceType') {
+      const analyzed = analyzeDeclaredType(
+        context,
+        operand.referent,
+        typeParameters,
+        false,
+        lifetimeContext,
+      )
+      return Object.freeze({
+        fact: Object.freeze({
+          _tag: 'RequirementMemberExpression',
+          capability: analyzed.fact,
+          access: operand.access === 'Mutable' ? 'Exclusive' : 'Shared',
+          role: Object.freeze({ _tag: 'DefaultRole' }),
+          anchor,
+        }),
+        diagnostics: analyzed.diagnostics,
+      })
+    }
     return Object.freeze({
       fact: Object.freeze({ _tag: 'UnavailableRowExpression', anchor }),
       diagnostics: noDiagnostics,

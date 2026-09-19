@@ -56,9 +56,16 @@ export const make = (lowered: AuthoredLowering.Lowered): SemanticContext => {
   const orders = new Map<string, number>()
   // The first presented entry of each owner (its header) anchors everything the owner fails to present.
   const ownerEntries = new Map<string, AuthoredPresentation.Entry>()
-  for (const [ordinal, entry] of lowered.presentation.entries.entries()) {
+  // Lowering presents a node once its children are lowered, so publication order is not document
+  // order. An enclosing node starts no later than what it encloses and ends no earlier.
+  const documentOrder = [...lowered.presentation.entries].sort(
+    (left, right) => left.span.start - right.span.start || right.span.end - left.span.end,
+  )
+  for (const [ordinal, entry] of documentOrder.entries()) {
     const key = AuthoredIdentity.anchorKey(entry.anchor)
     if (!orders.has(key)) orders.set(key, ordinal)
+  }
+  for (const entry of lowered.presentation.entries) {
     const owner = AuthoredIdentity.key(entry.anchor.owner)
     if (!ownerEntries.has(owner)) ownerEntries.set(owner, entry)
   }

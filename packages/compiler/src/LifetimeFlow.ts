@@ -194,19 +194,8 @@ export const analyze = (
 ): LifetimeFlow => {
   const applicationDiagnostics = new Map<string, Diagnostic.Diagnostic>()
   // Points are the authored positions BodyLifetime enumerated, addressed by anchor key.
-  const anchorsByKey = new Map<string, AuthoredHir.Anchor>()
-  Elaboration.visitStatementFacts(statements, {
-    statement: (statement) => {
-      const anchor =
-        statement._tag === 'BindStatement' ? statement.binding.anchor : statement.anchor
-      anchorsByKey.set(AuthoredIdentity.anchorKey(anchor), anchor)
-    },
-    expression: (expression) => {
-      anchorsByKey.set(AuthoredIdentity.anchorKey(expression.anchor), expression.anchor)
-    },
-  })
   const entries = [...body.points].flatMap(([key, point]) => {
-    const anchor = anchorsByKey.get(key)
+    const anchor = body.anchors.get(key)
     return anchor === undefined ? [] : [[anchor, point] as const]
   })
   const root = entries.at(0)?.[0] ?? declaration.anchor

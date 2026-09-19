@@ -8,6 +8,8 @@ import * as TypeCompatibility from './TypeCompatibility.js'
 export interface BodyLifetime {
   readonly owner: Lifetime.Owner
   readonly points: ReadonlyMap<string, number>
+  /** Every registered position by its point key, so a solver can walk the whole domain. */
+  readonly anchors: ReadonlyMap<string, AuthoredHir.Anchor>
   readonly constraints: Map<string, Lifetime.Outlives>
   readonly activatedConstraints: Array<{
     readonly bound: Lifetime.Outlives
@@ -28,13 +30,17 @@ export const make = (
   parameterBounds: ReadonlyMap<string, ReadonlyArray<Lifetime.Lifetime>> = new Map(),
 ): BodyLifetime => {
   const points = new Map<string, number>()
+  const registered = new Map<string, AuthoredHir.Anchor>()
   for (const anchor of anchors) {
     const key = AuthoredIdentity.anchorKey(anchor)
-    if (!points.has(key)) points.set(key, points.size)
+    if (points.has(key)) continue
+    points.set(key, points.size)
+    registered.set(key, anchor)
   }
   return {
     owner: Object.freeze({ ...owner }),
     points,
+    anchors: registered,
     constraints: new Map(),
     activatedConstraints: [],
     parameterBounds,

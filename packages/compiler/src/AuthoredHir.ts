@@ -177,12 +177,16 @@ export type Type = Node &
 
 export type Constraint = Node &
   (
-    | { readonly _tag: 'MembershipConstraint'; readonly subject: Type; readonly source: Type }
+    | {
+        readonly _tag: 'MembershipConstraint'
+        readonly subject: RowOperand
+        readonly source: RowOperand
+      }
     | {
         readonly _tag: 'ProviderConstraint'
         readonly provider: Type
-        readonly selected: Type
-        readonly source: Type
+        readonly selected: RowOperand
+        readonly source: RowOperand
       }
   )
 

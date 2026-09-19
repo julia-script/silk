@@ -1230,20 +1230,27 @@ const constraints = (
         ? missingType(draft, child(own, role), spanOf(constraint))
         : type(draft, child(own, role), operandSyntax)
     }
+    // A row position admits a written requirement such as `&Work`, which is not a type.
+    const row = (index: number, role: string): AuthoredHir.RowOperand => {
+      const operandSyntax = operands[index]
+      return operandSyntax === undefined
+        ? missingType(draft, child(own, role), spanOf(constraint))
+        : rowOperand(draft, child(own, role), operandSyntax)
+    }
     const lowered: AuthoredHir.Constraint =
       constraint.kind === 'MembershipConstraint'
         ? {
             ...base,
             _tag: 'MembershipConstraint',
-            subject: operand(0, 'subject'),
-            source: operand(1, 'source'),
+            subject: row(0, 'subject'),
+            source: row(1, 'source'),
           }
         : {
             ...base,
             _tag: 'ProviderConstraint',
             provider: operand(0, 'provider'),
-            selected: operand(1, 'selected'),
-            source: operand(2, 'source'),
+            selected: row(1, 'selected'),
+            source: row(2, 'source'),
           }
     return withCauses(lowered, damage(draft, own, constraint))
   })
