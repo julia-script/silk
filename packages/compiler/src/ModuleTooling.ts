@@ -1,3 +1,4 @@
+import type * as SyntaxFile from './SyntaxFile.js'
 import type * as DeclarationIndex from './DeclarationIndex.js'
 import * as Elaboration from './Elaboration.js'
 import type * as ModuleSemantics from './ModuleSemantics.js'
@@ -75,6 +76,7 @@ export const semanticOccurrenceIndex = (
   spans: SemanticContext.Registry,
   resolution: NameResolution.Resolution,
   conditions: ReadonlyArray<Elaboration.ExpressionFact> = [],
+  syntax?: SyntaxFile.SyntaxFile,
 ): SemanticOccurrence.ModuleIndex =>
   SemanticOccurrence.makeModule(
     semantics.module,
@@ -83,6 +85,7 @@ export const semanticOccurrenceIndex = (
     spans,
     resolution,
     conditions,
+    syntax,
   )
 
 /** Closes already-built module indexes into one reusable tooling artifact. */

@@ -1,3 +1,4 @@
+import type * as ModuleClosure from './ModuleClosure.js'
 import * as Effect from 'effect/Effect'
 import type * as DeclarationIndex from './DeclarationIndex.js'
 import type * as ModuleSemantics from './ModuleSemantics.js'
@@ -22,6 +23,8 @@ export interface FrontendTooling {
 export const make = Effect.fn('FrontendTooling.make')(function* (
   frontend: {
     readonly selection?: ModuleSelection.ModuleSelection
+    /** Loaded modules with their syntax, which import attribution reads spellings from. */
+    readonly closure?: ModuleClosure.Facts
     readonly semantics: ReadonlyMap<string, ModuleSemantics.ModuleSemantics>
     readonly index: DeclarationIndex.Index
     readonly resolution: NameResolution.Resolution
@@ -53,6 +56,7 @@ export const make = Effect.fn('FrontendTooling.make')(function* (
           frontend.resolution.contexts,
           frontend.resolution,
           frontend.selection?.conditions.get(module),
+          frontend.closure?.modules.find((candidate) => candidate.name === module)?.syntax,
         ),
       ),
       () => 1,

@@ -1,3 +1,7 @@
+import * as Option from 'effect/Option'
+import * as SourceFile from './SourceFile.js'
+import type * as SyntaxFile from './SyntaxFile.js'
+import type * as Token from './Token.js'
 import type * as AuthoredHir from './AuthoredHir.js'
 import * as DeclarationFacts from './DeclarationFacts.js'
 import type * as DeclarationIndex from './DeclarationIndex.js'
@@ -1675,38 +1679,49 @@ const collectImports = (
   }
 }
 
+/** Starts of identifiers written after a `.`: members reached through a qualifier. */
+const qualifiedOccurrenceStarts = (tokens: ReadonlyArray<Token.Token>): ReadonlySet<number> => {
+  const starts = new Set<number>()
+  let previous: Token.Token | undefined
+  for (const token of tokens) {
+    if (token.kind === 'Whitespace' || token.kind.endsWith('Comment')) continue
+    if (token.kind === 'Identifier' && previous?.kind === 'Dot') starts.add(token.span.start)
+    previous = token
+  }
+  return starts
+}
+
 /**
  * The authored import name that supplied one unqualified occurrence.
  *
- * An occurrence is attributed to an import binding when it resolves to exactly what that binding
- * introduced. Qualified members are excluded because the qualifier already carries the namespace
- * occurrence, and an `Actor` occurrence is precisely that qualifier.
+ * Which import a use spends is a fact about what was written: two aliases of one declaration are
+ * told apart only by the spelling at the use, and `geo.area` spends `geo`, not a direct `area`
+ * selector beside it. Both come from the module's syntax, which this tooling index is built with.
  */
 const importBindingFor = (
   occurrence: Omit<SemanticOccurrence, 'ordinal'>,
   spans: SemanticContext.Registry,
-  bindings: ReadonlyArray<NameResolution.Binding>,
+  bindings: ReadonlyMap<string, NameResolution.Binding>,
+  syntax: SyntaxFile.SyntaxFile,
+  qualifiedStarts: ReadonlySet<number>,
 ): SourceSpan.SourceSpan | undefined => {
   if (occurrence.role === 'Import' || occurrence.resolution._tag !== 'Available') return undefined
+  const spelling = Option.getOrUndefined(SourceFile.spelling(syntax.source, occurrence.span))
+  const binding = spelling === undefined ? undefined : bindings.get(spelling)
   const identity = occurrence.resolution.identity
-  if (identity._tag === 'ImportNamespaceIdentity') {
-    const binding = bindings.find(
-      (candidate) =>
-        candidate._tag === 'ModuleNamespace' &&
-        candidate.module === identity.module &&
-        candidate.spelling === identity.spelling,
-    )
-    return binding?._tag === 'ModuleNamespace' ? spans.spanOf(binding.anchor) : undefined
-  }
-  if (identity._tag !== 'DeclarationIdentity' || occurrence.role === 'Actor') return undefined
-  const key = identityKey(identity)
-  const binding = bindings.find(
-    (candidate) =>
-      candidate._tag === 'ImportedMember' &&
-      identityKey(Object.freeze({ _tag: 'DeclarationIdentity', id: candidate.declaration })) ===
-        key,
-  )
-  return binding?._tag === 'ImportedMember' ? spans.spanOf(binding.localAnchor) : undefined
+  if (binding?._tag === 'ModuleNamespace')
+    return identity._tag === 'ImportNamespaceIdentity' &&
+      identity.module === binding.module &&
+      identity.spelling === binding.spelling
+      ? spans.spanOf(binding.anchor)
+      : undefined
+  if (binding?._tag !== 'ImportedMember' || qualifiedStarts.has(occurrence.span.start))
+    return undefined
+  return identity._tag === 'DeclarationIdentity' &&
+    identityKey(identity) ===
+      identityKey(Object.freeze({ _tag: 'DeclarationIdentity', id: binding.declaration }))
+    ? spans.spanOf(binding.localAnchor)
+    : undefined
 }
 
 /** Builds one module's immutable exact-token occurrence index from recovered compiler facts. */
@@ -1717,6 +1732,7 @@ export const makeModule = (
   spans: SemanticContext.Registry,
   resolution: NameResolution.Resolution,
   conditions: ReadonlyArray<Elaboration.ExpressionFact> = [],
+  syntax?: SyntaxFile.SyntaxFile,
 ): ModuleIndex => {
   const pending: Array<Pending> = []
   const scope = NameResolution.scopeOf(resolution, module)
@@ -1730,9 +1746,17 @@ export const makeModule = (
     for (const statement of fn.statements) collectStatement(statement, index, spans, scope, pending)
   for (const condition of conditions) collectExpression(condition, index, spans, scope, pending)
   collectImports(scope, index, spans, pending)
-  const bindings = scope?.bindings ?? Object.freeze([])
+  // The first binding of a spelling is the effective one; later ones are conflicts.
+  const bindings = new Map<string, NameResolution.Binding>()
+  for (const binding of scope?.bindings ?? [])
+    if (!bindings.has(binding.spelling)) bindings.set(binding.spelling, binding)
+  const qualifiedStarts =
+    syntax === undefined ? new Set<number>() : qualifiedOccurrenceStarts(syntax.tokens)
   const attributed = pending.map((entry): Pending => {
-    const importBinding = importBindingFor(entry.occurrence, spans, bindings)
+    const importBinding =
+      syntax === undefined
+        ? undefined
+        : importBindingFor(entry.occurrence, spans, bindings, syntax, qualifiedStarts)
     return importBinding === undefined
       ? entry
       : Object.freeze({
