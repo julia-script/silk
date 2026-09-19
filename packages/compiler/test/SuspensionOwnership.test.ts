@@ -91,7 +91,7 @@ it.effect('classifies exact post-normalization MIR locals across relay', () =>
     const self = yield* snapshot(source)
     assert.deepEqual(Analysis.diagnostics(self), [])
     const ownership = available(self)
-    const sharedStart = source.indexOf(' run shared(&owner)')
+    const sharedStart = source.indexOf('run shared(&owner)')
     const caller = Analysis.loweredMir(self).functions.find((fn) => fn.id.name === 'main')
     const loan =
       caller === undefined
