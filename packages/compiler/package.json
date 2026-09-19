@@ -50,6 +50,30 @@
       "types": "./dist/ArtifactPlan.d.ts",
       "default": "./dist/ArtifactPlan.js"
     },
+    "./AuthoredEncoding": {
+      "types": "./dist/AuthoredEncoding.d.ts",
+      "import": "./dist/AuthoredEncoding.js"
+    },
+    "./AuthoredHir": {
+      "types": "./dist/AuthoredHir.d.ts",
+      "import": "./dist/AuthoredHir.js"
+    },
+    "./AuthoredIdentity": {
+      "types": "./dist/AuthoredIdentity.d.ts",
+      "import": "./dist/AuthoredIdentity.js"
+    },
+    "./AuthoredModule": {
+      "types": "./dist/AuthoredModule.d.ts",
+      "import": "./dist/AuthoredModule.js"
+    },
+    "./AuthoredPool": {
+      "types": "./dist/AuthoredPool.d.ts",
+      "import": "./dist/AuthoredPool.js"
+    },
+    "./AuthoredPresentation": {
+      "types": "./dist/AuthoredPresentation.d.ts",
+      "import": "./dist/AuthoredPresentation.js"
+    },
     "./AutoImport": {
       "types": "./dist/AutoImport.d.ts",
       "import": "./dist/AutoImport.js"
