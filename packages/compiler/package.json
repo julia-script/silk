@@ -422,6 +422,10 @@
       "types": "./dist/Preparation.d.ts",
       "import": "./dist/Preparation.js"
     },
+    "./SemanticContext": {
+      "types": "./dist/SemanticContext.d.ts",
+      "import": "./dist/SemanticContext.js"
+    },
     "./Presentation": {
       "types": "./dist/Presentation.d.ts",
       "import": "./dist/Presentation.js"
