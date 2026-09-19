@@ -343,7 +343,7 @@ fn invalid<'env, A, F: once fn<'env>(A) -> A>(parse: F) -> i32 {
   assert.strictEqual(diagnostic?.reason._tag, 'IncompatibleRepresentationBound')
   assert.deepEqual(
     [diagnostic?.span.start, diagnostic?.span.end],
-    [source.indexOf(' move parse'), source.indexOf('move parse') + 'move parse'.length],
+    [source.indexOf('move parse'), source.indexOf('move parse') + 'move parse'.length],
   )
   assert.deepEqual(
     diagnostic?.relatedSpans?.map((related) => related.label),

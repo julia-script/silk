@@ -516,7 +516,7 @@ pub fn main() -> i32 { return run handleA(risky(true)) }`
         code: diagnostic.code,
         source: source.slice(diagnostic.span.start, diagnostic.span.end),
       })),
-      [{ code: 'SEM0052', source: ' handleA(risky(true))' }],
+      [{ code: 'SEM0052', source: 'handleA(risky(true))' }],
     )
   }),
 )

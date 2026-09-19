@@ -2722,8 +2722,8 @@ fn twice(value: Initialized<i32>) -> i32 {
       [
         ['SEM0012', 'move value'],
         ['SEM0012', 'move output'],
-        ['SEM0052', ' inspect(address)'],
-        ['SEM0082', ' Uninitialized.assumeInitialized<i32>(move value)'],
+        ['SEM0052', 'inspect(address)'],
+        ['SEM0082', 'Uninitialized.assumeInitialized<i32>(move value)'],
         ['OWN0001', 'move value'],
       ],
     )
@@ -2779,11 +2779,11 @@ fn into(value: Initialized<Vector<i32>>) -> Vector<i32> {
         source.slice(diagnostic.span.start, diagnostic.span.end),
       ]),
       [
-        ' Uninitialized.make<Vector<i32>>()',
-        ' Uninitialized.address<Vector<i32>>(move value)',
-        ' Uninitialized.initialize<Vector<i32>>(move value, move item)',
-        ' Uninitialized.assumeInitialized<Vector<i32>>(move value)',
-        ' Initialized.into<Vector<i32>>(move value)',
+        'Uninitialized.make<Vector<i32>>()',
+        'Uninitialized.address<Vector<i32>>(move value)',
+        'Uninitialized.initialize<Vector<i32>>(move value, move item)',
+        'Uninitialized.assumeInitialized<Vector<i32>>(move value)',
+        'Initialized.into<Vector<i32>>(move value)',
       ].map((call) => ['SEM0083', call]),
     )
   }),

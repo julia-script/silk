@@ -727,7 +727,7 @@ pub fn main() -> i32 { return invoke(application) }`
     )
     assert.strictEqual(
       diagnostics.find((diagnostic) => diagnostic.code === 'SEM0139')?.span.start,
-      source.indexOf(' invoke(application)'),
+      source.indexOf('invoke(application)'),
     )
   }),
 )
@@ -842,7 +842,7 @@ pub fn main() -> i32 {
     )
     assert.strictEqual(
       diagnostics.at(0)?.span.start,
-      rejectedSource.indexOf(' Effect.useReleaseNonParking'),
+      rejectedSource.indexOf('Effect.useReleaseNonParking'),
     )
   }),
 )
@@ -886,7 +886,7 @@ pub effect fn main() -> i32 ? &FinalizerSource {
       )
       assert.strictEqual(
         diagnostics.at(0)?.span.start,
-        source.indexOf(' Effect.ensuringNonParking'),
+        source.indexOf('Effect.ensuringNonParking'),
       )
     }
   }),
@@ -1284,11 +1284,11 @@ pub fn main() -> i32 {
       if (name === 'escape') {
         assert.strictEqual(
           diagnostics.at(0)?.span.start,
-          program.indexOf(' Effect.useReleaseNonParking'),
+          program.indexOf('Effect.useReleaseNonParking'),
         )
         assert.strictEqual(
           diagnostics.at(0)?.span.end,
-          program.indexOf('\n', program.indexOf(' Effect.useReleaseNonParking')),
+          program.indexOf('\n', program.indexOf('Effect.useReleaseNonParking')),
         )
       }
       if (name !== 'escape') {
