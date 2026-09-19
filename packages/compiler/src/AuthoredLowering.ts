@@ -265,7 +265,8 @@ const triviaKinds: ReadonlySet<Token.TokenKind> = new Set<Token.TokenKind>([
   'ModuleDocComment',
 ])
 
-const firstSignificantStart = (element: SyntaxTree.Element): number | undefined => {
+/** Where a syntax element is presented from: its first byte that is not leading trivia. */
+export const firstSignificantStart = (element: SyntaxTree.Element): number | undefined => {
   if (SyntaxTree.isToken(element))
     return triviaKinds.has(element.kind) ? undefined : element.span.start
   if (SyntaxTree.isMissingToken(element)) return element.span.start

@@ -2,6 +2,7 @@ import type * as ArtifactPlan from './ArtifactPlan.js'
 import type * as ArtifactComposition from './ArtifactComposition.js'
 import type * as ConfigurationError from './ConfigurationError.js'
 import type * as CompilationProfile from './CompilationProfile.js'
+import * as AuthoredLowering from './AuthoredLowering.js'
 import * as Data from 'effect/Data'
 import * as Effect from 'effect/Effect'
 import * as DeclarationFacts from './DeclarationFacts.js'
@@ -688,7 +689,12 @@ const receiverTypeAt = (
   visit(root)
   return subject === undefined
     ? undefined
-    : anonymousExpressionAt(self, module, subject.span.start)?.type
+    : // Facts are presented without the leading trivia a syntax node's span carries.
+      anonymousExpressionAt(
+        self,
+        module,
+        AuthoredLowering.firstSignificantStart(subject) ?? subject.span.start,
+      )?.type
 }
 
 /** The receiver-bound presentation of a member reached through receiver syntax. */
