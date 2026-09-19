@@ -1130,8 +1130,20 @@ export const analyzeStatements = (
         continue
       }
       // Both authored arms are present; selection picks one and the other is not elaborated.
-      const selected = evaluated.value.value ? element.thenBranch : element.elseBranch
-      if (selected !== undefined && selected._tag === 'Block') {
+      const branch = evaluated.value.value ? element.thenBranch : element.elseBranch
+      // `else static if …` chains the next conditional where a block would be: it is analyzed as
+      // that one statement, so its own selection still contributes its returns.
+      const selected: AuthoredHir.Block | undefined =
+        branch === undefined || branch._tag === 'Block'
+          ? branch
+          : {
+              _tag: 'Block',
+              anchor: branch.anchor,
+              origin: branch.origin,
+              causes: [],
+              statements: [branch],
+            }
+      if (selected !== undefined) {
         const staticContext = Object.freeze({
           ...context.staticContext,
           trace: StaticEvaluation.appendTrace(

@@ -985,32 +985,15 @@ export const evaluateParameterPredicate = (
         declaration.predicate,
       )
 
-/** Whether one authored else branch — a block or a chained conditional — selects statically. */
-const elseHasStaticControlFlow = (
-  branch: AuthoredHir.Block | AuthoredHir.Conditional | undefined,
-  nested: (statement: AuthoredHir.Statement) => boolean,
-): boolean => {
-  if (branch === undefined) return false
-  return branch._tag === 'Block' ? blockHasStaticControlFlow(branch) : nested(branch)
-}
-
-/** Whether one authored block nests a static conditional or static iteration at any depth. */
+/**
+ * Whether one authored block nests a static conditional or static iteration at any depth,
+ * including inside match arms and effect blocks, which hold statements without being statements.
+ */
 const blockHasStaticControlFlow = (block: AuthoredHir.Block): boolean =>
-  block.statements.some(function nested(statement: AuthoredHir.Statement): boolean {
-    if (statement._tag === 'StaticConditionalStatement' || statement._tag === 'StaticForStatement')
-      return true
-    if (
-      statement._tag === 'ConditionalStatement' ||
-      statement._tag === 'PatternConditionalStatement'
-    )
-      return (
-        blockHasStaticControlFlow(statement.thenBranch) ||
-        elseHasStaticControlFlow(statement.elseBranch, nested)
-      )
-    if (statement._tag === 'WhileStatement' || statement._tag === 'UnsafeStatement')
-      return blockHasStaticControlFlow(statement.body)
-    return false
-  })
+  AuthoredWalk.statements(block).some(
+    (statement) =>
+      statement._tag === 'StaticConditionalStatement' || statement._tag === 'StaticForStatement',
+  )
 
 /** Whether the authored body behind one declaration fact selects on static control flow. */
 const hasStaticControlFlow = (
