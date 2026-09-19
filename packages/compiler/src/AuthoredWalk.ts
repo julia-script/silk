@@ -420,6 +420,8 @@ export const bodyTypes = (block: AuthoredHir.Block): ReadonlyArray<AuthoredHir.T
     if (expression._tag === 'MemberExpression') found.push(expression.selector.subject)
     if (expression._tag === 'MatchExpression')
       for (const arm of expression.arms) found.push(...patternTypes(arm.pattern))
+    // A nested callable's body elides regions in the enclosing declaration's domain.
+    if (expression._tag === 'CallableExpression') found.push(...bodyTypes(expression.body))
     for (const child of expressionChildren(expression)) visitExpression(child)
   }
   for (const statement of statements(block)) {
