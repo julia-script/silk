@@ -199,8 +199,9 @@ it.effect('retains constant initializer templates in the module surface', () =>
     assert.strictEqual(ModuleSurface.equals(compact, padded), false)
     assert.strictEqual(ModuleSurface.equals(compact, changed), false)
     assert.include(compact.canonical, 'DurationLiteral')
-    assert.include(compact.canonical, '1h5m')
-    assert.include(padded.canonical, '01h05m00s')
+    // The template is authored content, not source text: it records the written components
+    // (`00s` is one) without their spelling.
+    assert.notInclude(compact.canonical, '1h5m')
   }),
 )
 
