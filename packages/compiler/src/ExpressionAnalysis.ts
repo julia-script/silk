@@ -8991,22 +8991,30 @@ const analyzeAnonymousCallable = (
     diagnostics: Object.freeze([]),
   })
   const resolvers = NameResolution.makeResolvers(nameResolution, resolution.index)
-  const finalized = DeclarationCollection.finalizeLifetimeHeader(context, initial.fact, (path) => {
-    const resolved = resolvers.type(AuthoredWalk.moduleName(context), path)
-    if (
-      resolved.fact._tag !== 'Resolved' ||
-      !Type.isNominal(resolved.fact.type) ||
-      resolved.fact.type.arguments.length > 0
-    )
-      return undefined
-    return (
-      DeclarationResolution.memberByNominal(
-        resolution.index.modules,
-        resolved.fact.type,
-      )?.typeParameters.map((parameter) => parameter.type) ??
-      Type.intrinsicNominalParameters(resolved.fact.type)
-    )
-  })
+  const finalized = DeclarationCollection.finalizeLifetimeHeader(
+    context,
+    initial.fact,
+    (path) => {
+      const resolved = resolvers.type(AuthoredWalk.moduleName(context), path)
+      if (
+        resolved.fact._tag !== 'Resolved' ||
+        !Type.isNominal(resolved.fact.type) ||
+        resolved.fact.type.arguments.length > 0
+      )
+        return undefined
+      return (
+        DeclarationResolution.memberByNominal(
+          resolution.index.modules,
+          resolved.fact.type,
+        )?.typeParameters.map((parameter) => parameter.type) ??
+        Type.intrinsicNominalParameters(resolved.fact.type)
+      )
+    },
+    undefined,
+    node._tag === 'CallableExpression'
+      ? DeclarationCollection.anonymousDeclaration(node)
+      : undefined,
+  )
   const collected = Object.freeze({
     ...initial,
     fact: finalized._tag === 'FunctionDeclaration' ? finalized : initial.fact,

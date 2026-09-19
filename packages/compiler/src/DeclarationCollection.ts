@@ -2310,7 +2310,7 @@ const missingName = (anchor: AuthoredHir.Anchor, origin: AuthoredHir.Origin): Au
   causes: [{ _tag: 'Cause', anchor, code: 'AnonymousCallable' }],
 })
 
-const anonymousDeclaration = (
+export const anonymousDeclaration = (
   node: Extract<AuthoredHir.Expression, { readonly _tag: 'CallableExpression' }>,
 ): AuthoredHir.Declaration =>
   Object.freeze({
@@ -4837,6 +4837,8 @@ export const finalizeLifetimeHeader = (
     | ConformanceFact,
   nominalParameters: (path: TypePathFact) => ReadonlyArray<Type.Parameter> | undefined,
   implHead?: InherentImplFact | ConformanceFact,
+  // An anonymous callable is its own owner and is not listed among the module's declarations.
+  authored?: AuthoredHir.Declaration,
 ):
   | DeclarationFact
   | ServiceOperationFact
@@ -4846,7 +4848,7 @@ export const finalizeLifetimeHeader = (
   | ConformanceFact => {
   const prior = member.lifetimeElaboration
   if (prior === undefined) return member
-  const declaration = AuthoredWalk.declarationOf(context.module, member.anchor.owner)
+  const declaration = authored ?? AuthoredWalk.declarationOf(context.module, member.anchor.owner)
   if (declaration === undefined) return member
   // Owner lifetimes stay lexical while the member elaborates its own input/result relationship.
   // Inherent members retain otherwise unmentioned owner binders only through Self. Conformance
