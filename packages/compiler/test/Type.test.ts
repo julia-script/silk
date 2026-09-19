@@ -1988,7 +1988,7 @@ fn caller() -> i32 { let local = 2 let view = identity(&local) return view.* }`
         diagnostics
           .filter((diagnostic) => diagnostic.code === Diagnostic.expiredLifetimeCode)
           .map((diagnostic) => diagnostic.span.start),
-        source.indexOf('return view') + 'return'.length,
+        source.indexOf('return view') + 'return '.length,
       )
       assert.isFalse(
         diagnostics.some((diagnostic) => diagnostic.span.start >= source.indexOf('fn caller')),

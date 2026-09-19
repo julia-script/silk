@@ -175,7 +175,7 @@ fn wrong<'call, 'view: 'call, T, H: Handle<T>>(
         code: diagnostic.code,
         start: diagnostic.span.start,
       })),
-      [{ code: 'SEM0012', start: source.lastIndexOf(' true') }],
+      [{ code: 'SEM0012', start: source.lastIndexOf('true') }],
     )
   }),
 )
