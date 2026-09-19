@@ -911,7 +911,7 @@ export const analyze = (
           const diagnostic = Diagnostic.unsatisfiedLifetimeBound(
             Type.encode(parameter),
             Lifetime.display(required),
-            context.spanOf(root),
+            context.spanOf(declaration.anchor),
           )
           universalDiagnostics.set(`${Type.key(parameter)}:${Lifetime.key(required)}`, diagnostic)
         }
@@ -920,7 +920,7 @@ export const analyze = (
     }
     const available = entries.map(([, point]) => point)
     if (allProven && publicObligations > 0) available.push(...boundaries.values())
-    restrict(lifetime, available, { lifetime, span: context.spanOf(root) })
+    restrict(lifetime, available, { lifetime, span: context.spanOf(declaration.anchor) })
   }
   for (const target of regions.values()) {
     if (
@@ -949,7 +949,7 @@ export const analyze = (
         const diagnostic = Diagnostic.unsatisfiedLifetimeBound(
           Lifetime.display(source),
           Lifetime.display(target.lifetime),
-          finiteStorage ? origin.span : context.spanOf(root),
+          finiteStorage ? origin.span : context.spanOf(declaration.anchor),
         )
         universalDiagnostics.set(
           `${Lifetime.key(source)}:${Lifetime.key(target.lifetime)}`,
@@ -993,7 +993,7 @@ export const analyze = (
   const diagnostics = Object.freeze([
     ...applicationDiagnostics.values(),
     ...universalDiagnostics.values(),
-    ...diagnosticsOf(solution, origins, spans, context.spanOf(root)),
+    ...diagnosticsOf(solution, origins, spans, context.spanOf(declaration.anchor)),
   ])
   return Object.freeze({
     controlFlow,
