@@ -1434,6 +1434,8 @@ export interface FunctionFact {
   readonly generatedAggregates: ReadonlyArray<DeclarationFacts.StructFact>
   /** Static-only authored loops and their independently elaborated target-selected scopes. */
   readonly staticIterations: ReadonlyArray<StaticIterationFact>
+  /** The authored names this body resolves, published for navigation and never executed. */
+  readonly occurrences: ReadonlyArray<import('./SemanticOccurrence.js').LocatedOccurrence>
 }
 
 /** Stable identity of one parent-linked lexical scope in an elaborated function. */

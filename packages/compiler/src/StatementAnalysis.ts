@@ -1,3 +1,4 @@
+import * as SemanticOccurrence from './SemanticOccurrence.js'
 import * as Location from './Location.js'
 import type * as AuthoredHir from './AuthoredHir.js'
 import * as AuthoredIdentity from './AuthoredIdentity.js'
@@ -2103,6 +2104,7 @@ export const analyzeFunctionBody = (
       ...(resultRepresentation === undefined ? {} : { resultRepresentation }),
       generatedAggregates: Object.freeze([...(bodyResolution.generatedAggregates?.values() ?? [])]),
       staticIterations: Object.freeze([...context.staticIterations]),
+      occurrences: SemanticOccurrence.ofStatements(statements, resolution.index, resolution.scope),
     }),
     diagnostics: Object.freeze([...context.diagnostics]),
   })
