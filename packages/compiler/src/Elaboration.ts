@@ -1438,6 +1438,8 @@ export interface FunctionFact {
   readonly occurrences: ReadonlyArray<import('./SemanticOccurrence.js').LocatedOccurrence>
   /** What the body infers that its author did not write, published for editor hints. */
   readonly hints: ReadonlyArray<import('./TypeHint.js').Row>
+  /** What each returned expression shows about the opaque result this body produces. */
+  readonly opaqueEvidence: ReadonlyArray<import('./OpaqueRealization.js').Evidence>
 }
 
 /** Stable identity of one parent-linked lexical scope in an elaborated function. */

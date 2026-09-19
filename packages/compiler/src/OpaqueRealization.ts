@@ -1,3 +1,4 @@
+import type * as AuthoredHir from './AuthoredHir.js'
 import type * as DeclarationFacts from './DeclarationFacts.js'
 import * as Diagnostic from './Diagnostic.js'
 import * as Elaboration from './Elaboration.js'
@@ -80,13 +81,21 @@ export const catalogOf = (self: object): Catalog => {
 /** Reads an associated private catalog when an artifact has retained its compiler identity. */
 export const catalogOption = (self: object): Catalog | undefined => catalogs.get(self)
 
-interface Evidence {
+/**
+ * What one returned expression of a producer shows about its opaque result.
+ *
+ * Construction publishes these with the body; realization never reads the body again.
+ */
+export interface Evidence {
   readonly argument: Type.RepresentationArgument
-  readonly expression: Elaboration.ExpressionFact
+  /** The returned expression, for diagnostics. */
+  readonly at: AuthoredHir.Anchor
+  readonly captures: ReadonlyArray<Capture>
+  readonly suspendable: boolean
 }
 
 interface Producer {
-  readonly function: Elaboration.FunctionFact
+  readonly declaration: DeclarationFacts.DeclarationFact
   readonly instance: Type.OpaqueRepresentationArgument
   readonly evidence: ReadonlyArray<Evidence>
   readonly bodyFingerprint: string
@@ -119,6 +128,17 @@ const returnExpressions = (
   return Object.freeze(found)
 }
 
+const evidence = (
+  argument: Type.RepresentationArgument,
+  expression: Elaboration.ExpressionFact,
+): Evidence =>
+  Object.freeze({
+    argument,
+    at: expression.anchor,
+    captures: capturesOf(expression),
+    suspendable: expressionSuspends(expression),
+  })
+
 const evidenceOf = (
   context: SemanticContext.SemanticContext,
   expression: Elaboration.ExpressionFact,
@@ -130,13 +150,13 @@ const evidenceOf = (
       ? Type.opaqueRepresentationEvidence(expression.type.type, expected, family)
       : Object.freeze([])
   if (structural.length > 0)
-    return Object.freeze(structural.map((argument) => Object.freeze({ argument, expression })))
+    return Object.freeze(structural.map((argument) => evidence(argument, expression)))
   const nestedFamily = Type.opaqueRepresentationArguments(expected).some((argument) =>
     Type.equalsOpaqueFamily(argument.family, family),
   )
   if (nestedFamily) {
     const argument = ExpressionAnalysis.representationOfExpression(context, expression)
-    if (argument !== undefined) return Object.freeze([Object.freeze({ argument, expression })])
+    if (argument !== undefined) return Object.freeze([evidence(argument, expression)])
   }
   const expectedArgument = Type.isRepresented(expected)
     ? expected.representation.argument
@@ -150,7 +170,7 @@ const evidenceOf = (
   const argument = ExpressionAnalysis.representationOfExpression(context, expression)
   return argument === undefined
     ? Object.freeze([])
-    : Object.freeze([Object.freeze({ argument, expression })])
+    : Object.freeze([evidence(argument, expression)])
 }
 
 /**
@@ -170,10 +190,25 @@ const sourceBodyFingerprint = (
   ])
 }
 
+/** The opaque-result evidence of one body, which is empty unless its declaration produces one. */
+export const evidenceOfBody = (
+  context: SemanticContext.SemanticContext,
+  declaration: DeclarationFacts.DeclarationFact,
+  statements: ReadonlyArray<Elaboration.StatementFact>,
+): ReadonlyArray<Evidence> => {
+  const opaque = declaration.opaqueResult
+  const expected = declaration.returnType
+  if (opaque === undefined || expected._tag !== 'Resolved') return Object.freeze([])
+  return Object.freeze(
+    returnExpressions(statements).flatMap((expression) =>
+      evidenceOf(context, expression, expected.type, opaque.family),
+    ),
+  )
+}
+
 const producers = (results: ReadonlyMap<string, Elaboration.Result>): ReadonlyArray<Producer> =>
   Object.freeze(
     [...results.values()].flatMap((result) => {
-      const context = SemanticContext.make(result.authored)
       return result.functions.flatMap((function_): ReadonlyArray<Producer> => {
         const opaque = function_.declaration.opaqueResult
         const expected = function_.declaration.returnType
@@ -184,13 +219,9 @@ const producers = (results: ReadonlyMap<string, Elaboration.Result>): ReadonlyAr
         if (instance === undefined) return []
         return [
           Object.freeze({
-            function: function_,
+            declaration: function_.declaration,
             instance,
-            evidence: Object.freeze(
-              returnExpressions(function_.statements).flatMap((expression) =>
-                evidenceOf(context, expression, expected.type, opaque.family),
-              ),
-            ),
+            evidence: function_.opaqueEvidence,
             bodyFingerprint: sourceBodyFingerprint(result, function_.declaration),
           }),
         ]
@@ -355,15 +386,14 @@ const fingerprints = (
 const definition = (
   producer: Producer,
   realization: Type.RepresentationArgument,
-  source: Elaboration.ExpressionFact | undefined,
+  source: Evidence | undefined,
   inherited: Definition | undefined,
 ): Definition => {
   const captures =
-    source === undefined ? (inherited?.captures ?? Object.freeze([])) : capturesOf(source)
+    source === undefined ? (inherited?.captures ?? Object.freeze([])) : source.captures
   const access = accessOf(realization)
   const cleanup = captures.some((capture) => capture.access === 'Take') ? 'Required' : 'Trivial'
-  const suspendable =
-    source === undefined ? (inherited?.suspendable ?? false) : expressionSuspends(source)
+  const suspendable = source === undefined ? (inherited?.suspendable ?? false) : source.suspendable
   const computedFingerprints = fingerprints(
     producer.instance,
     realization,
@@ -377,7 +407,7 @@ const definition = (
     family: producer.instance.family,
     instance: producer.instance,
     parameters: Object.freeze(
-      producer.function.declaration.typeParameters.map((parameter) => parameter.type),
+      producer.declaration.typeParameters.map((parameter) => parameter.type),
     ),
     realization,
     construction: constructionOf(producer, realization, inherited),
@@ -398,7 +428,7 @@ const specializeRealization = (
   realization: Type.RepresentationArgument,
 ): Type.RepresentationArgument | undefined => {
   const substitution = TypeInference.substitution(
-    producer.function.declaration.typeParameters.map((parameter) => parameter.type),
+    producer.declaration.typeParameters.map((parameter) => parameter.type),
     instance.arguments,
   )
   if (substitution === undefined) return undefined
@@ -549,10 +579,7 @@ export const analyze = (results: ReadonlyMap<string, Elaboration.Result>): Catal
     diagnostics.push(
       Diagnostic.opaqueRealizationCycle(
         cycle,
-        spanOf(
-          producer.function.declaration.opaqueResult?.anchor ??
-            producer.function.declaration.anchor,
-        ),
+        spanOf(producer.declaration.opaqueResult?.anchor ?? producer.declaration.anchor),
       ),
     )
   }
@@ -573,11 +600,8 @@ export const analyze = (results: ReadonlyMap<string, Elaboration.Result>): Catal
         Diagnostic.divergentOpaqueRealization(
           key,
           alternatives.map(([identity]) => identity),
-          producer.evidence.map((evidence) => spanOf(evidence.expression.anchor)),
-          spanOf(
-            producer.function.declaration.opaqueResult?.anchor ??
-              producer.function.declaration.anchor,
-          ),
+          producer.evidence.map((evidence) => spanOf(evidence.at)),
+          spanOf(producer.declaration.opaqueResult?.anchor ?? producer.declaration.anchor),
         ),
       )
     } else if (alternatives.length === 0 && !cyclic.has(key)) {
@@ -585,10 +609,7 @@ export const analyze = (results: ReadonlyMap<string, Elaboration.Result>): Catal
       diagnostics.push(
         Diagnostic.missingOpaqueRealization(
           key,
-          spanOf(
-            producer.function.declaration.opaqueResult?.anchor ??
-              producer.function.declaration.anchor,
-          ),
+          spanOf(producer.declaration.opaqueResult?.anchor ?? producer.declaration.anchor),
         ),
       )
     }
@@ -625,7 +646,7 @@ export const analyze = (results: ReadonlyMap<string, Elaboration.Result>): Catal
         )
         .find((candidate) => candidate !== undefined)
       if (direct === undefined && dependency === undefined) continue
-      const built = definition(producer, realization, direct?.expression, dependency)
+      const built = definition(producer, realization, direct, dependency)
       definitions.set(key, built)
       progress = true
     }
@@ -641,10 +662,7 @@ export const analyze = (results: ReadonlyMap<string, Elaboration.Result>): Catal
     diagnostics.push(
       Diagnostic.inlineOpaqueLayoutCycle(
         cycle,
-        spanOf(
-          producer.function.declaration.opaqueResult?.anchor ??
-            producer.function.declaration.anchor,
-        ),
+        spanOf(producer.declaration.opaqueResult?.anchor ?? producer.declaration.anchor),
       ),
     )
   }

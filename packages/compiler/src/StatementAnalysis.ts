@@ -1,3 +1,4 @@
+import * as OpaqueRealization from './OpaqueRealization.js'
 import * as TypeHint from './TypeHint.js'
 import * as SemanticOccurrence from './SemanticOccurrence.js'
 import * as Location from './Location.js'
@@ -2109,6 +2110,7 @@ export const analyzeFunctionBody = (
       staticIterations: Object.freeze([...context.staticIterations]),
       occurrences: SemanticOccurrence.ofStatements(statements, resolution.index, resolution.scope),
       hints: TypeHint.rows(context.bindings, statements),
+      opaqueEvidence: OpaqueRealization.evidenceOfBody(semantic, declaration, statements),
     }),
     diagnostics: Object.freeze([...context.diagnostics]),
   })
