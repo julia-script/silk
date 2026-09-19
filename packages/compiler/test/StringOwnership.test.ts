@@ -1,7 +1,7 @@
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
-import * as Hir from '../src/Hir.js'
+import * as Tir from '../src/Tir.js'
 import * as OwnershipEncoding from '../src/OwnershipEncoding.js'
 import * as Projections from './support/projections.js'
 
@@ -62,18 +62,18 @@ pub fn main() -> i32 { return 0 }`
       assert.include(OwnershipEncoding.encode(moduleOwnership), 'returned-view')
     }
 
-    const hir = Projections.hirOf(self, 'string/ownership')
-    assert.isDefined(hir)
-    if (hir !== undefined) {
-      const views = hir.functions.flatMap((fn) =>
+    const tir = Projections.tirOf(self, 'string/ownership')
+    assert.isDefined(tir)
+    if (tir !== undefined) {
+      const views = tir.functions.flatMap((fn) =>
         fn.statements
-          .flatMap(Hir.statementExpressions)
-          .flatMap(Hir.expressionTree)
+          .flatMap(Tir.statementExpressions)
+          .flatMap(Tir.expressionTree)
           .filter((expression) => expression._tag === 'RuntimeStringView'),
       )
       assert.strictEqual(views.length, 2)
       assert.isTrue(views.every((view) => view.heldLoans.length === 1))
-      assert.deepEqual(Hir.verify(hir), [])
+      assert.deepEqual(Tir.verify(tir), [])
     }
   }),
 )

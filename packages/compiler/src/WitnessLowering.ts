@@ -6,7 +6,7 @@ import type { LoweredExpression } from './EffectLowering.js'
 import type {} from './EntryAssembly.js'
 import type {} from './Forwarding.js'
 import type { FunctionLowering } from './FunctionLowering.js'
-import * as Hir from './Hir.js'
+import * as Tir from './Tir.js'
 import * as Instances from './Instances.js'
 import type * as Intrinsic from './Intrinsic.js'
 import * as TypeInference from './internal/TypeInference.js'
@@ -26,7 +26,7 @@ export const emitWitnessDispatch = (
   resultType: Mir.Type,
   span: SourceSpan.SourceSpan,
 ): Mir.LocalId | undefined => {
-  const borrows: Array<{ readonly borrow: Hir.BorrowId; readonly local: Mir.LocalId }> = []
+  const borrows: Array<{ readonly borrow: Tir.BorrowId; readonly local: Mir.LocalId }> = []
   const arguments_: Array<Mir.LocalId> = []
   for (const [ordinal, argument] of argumentLocals.entries()) {
     const operand = operandTypes.at(ordinal)
@@ -95,7 +95,7 @@ export const emitWitnessDispatch = (
 
 export const lowerInterfaceWitnessCall = (
   fn: FunctionLowering,
-  expression: Extract<Hir.Expression, { readonly _tag: 'BuiltinCall' }>,
+  expression: Extract<Tir.Expression, { readonly _tag: 'BuiltinCall' }>,
   argumentLocals: ReadonlyArray<Mir.LocalId>,
 ): Mir.LocalId | undefined => {
   const bound = expression.interfaceOperation
@@ -128,12 +128,12 @@ export const lowerInterfaceWitnessCall = (
 
 export interface WitnessArguments {
   readonly arguments: ReadonlyArray<Mir.LocalId>
-  readonly reborrows: ReadonlyArray<{ readonly borrow: Hir.BorrowId; readonly local: Mir.LocalId }>
+  readonly reborrows: ReadonlyArray<{ readonly borrow: Tir.BorrowId; readonly local: Mir.LocalId }>
 }
 
 export interface InterfaceOperands {
   readonly arguments: ReadonlyArray<Mir.LocalId>
-  readonly borrows: ReadonlyArray<{ readonly borrow: Hir.BorrowId; readonly local: Mir.LocalId }>
+  readonly borrows: ReadonlyArray<{ readonly borrow: Tir.BorrowId; readonly local: Mir.LocalId }>
 }
 
 export interface InterfaceOperandLoweringFailure {
@@ -150,14 +150,14 @@ export interface InterfaceOperandLoweringFailure {
 
 export const lowerInterfaceOperands = (
   fn: FunctionLowering,
-  arguments_: ReadonlyArray<Hir.Expression>,
+  arguments_: ReadonlyArray<Tir.Expression>,
   operands: ReadonlyArray<DeclarationFacts.InterfaceOperandFact>,
   span: SourceSpan.SourceSpan,
 ): InterfaceOperands | InterfaceOperandLoweringFailure | 'Transferred' => {
   if (arguments_.length !== operands.length)
     return Object.freeze({ _tag: 'InterfaceOperandLoweringFailure', reason: 'Arity' })
   const lowered: Array<Mir.LocalId> = []
-  const borrows: Array<{ readonly borrow: Hir.BorrowId; readonly local: Mir.LocalId }> = []
+  const borrows: Array<{ readonly borrow: Tir.BorrowId; readonly local: Mir.LocalId }> = []
   for (const [ordinal, argument] of arguments_.entries()) {
     const value = lowerExpression(fn, argument)
     if (value === 'Transferred') return value
@@ -261,7 +261,7 @@ export const sourceWitnessArguments = (
   const parameters = sourceWitnessParameterTypes(fn, target)
   if (parameters === undefined || parameters.length !== arguments_.length) return undefined
   const lowered: Array<Mir.LocalId> = []
-  const reborrows: Array<{ readonly borrow: Hir.BorrowId; readonly local: Mir.LocalId }> = []
+  const reborrows: Array<{ readonly borrow: Tir.BorrowId; readonly local: Mir.LocalId }> = []
   for (const [ordinal, argument] of arguments_.entries()) {
     const actual = fn.localTypes.at(argument.ordinal)
     const expected = parameters.at(ordinal)
@@ -371,7 +371,7 @@ export const endWitnessReborrows = (
 }
 
 export const witnessEffectContract = (
-  expression: Extract<Hir.Expression, { readonly _tag: 'BuiltinCall' | 'InterfaceOperationCall' }>,
+  expression: Extract<Tir.Expression, { readonly _tag: 'BuiltinCall' | 'InterfaceOperationCall' }>,
 ): DeclarationFacts.InterfaceOperationApplicationFact | undefined =>
   expression._tag === 'InterfaceOperationCall'
     ? expression.contract
@@ -379,7 +379,7 @@ export const witnessEffectContract = (
 
 export const lowerWitnessEffect = (
   fn: FunctionLowering,
-  expression: Extract<Hir.Expression, { readonly _tag: 'BuiltinCall' | 'InterfaceOperationCall' }>,
+  expression: Extract<Tir.Expression, { readonly _tag: 'BuiltinCall' | 'InterfaceOperationCall' }>,
 ): LoweredExpression | undefined => {
   const site = expression.witnessEffectSite
   const contract = witnessEffectContract(expression)
@@ -389,7 +389,7 @@ export const lowerWitnessEffect = (
   }
   if (site === undefined) return fail(Object.freeze({ _tag: 'WitnessEffectMissingSite' }))
   if (contract === undefined) return fail(Object.freeze({ _tag: 'WitnessEffectMissingContract' }))
-  const siteKey = Hir.executableSiteKey(site)
+  const siteKey = Tir.executableSiteKey(site)
   const capability = fn.semantic(
     expression._tag === 'InterfaceOperationCall'
       ? expression.capability
@@ -401,7 +401,7 @@ export const lowerWitnessEffect = (
       : (expression.interfaceOperation?.provider ?? 'never'),
   )
   const inherited = fn.witnessTargets?.find((candidate) =>
-    Hir.sameExecutableSite(candidate.site, site),
+    Tir.sameExecutableSite(candidate.site, site),
   )
   if (!Type.isNominal(capability) && inherited === undefined)
     return fail(
@@ -409,7 +409,7 @@ export const lowerWitnessEffect = (
         _tag: 'WitnessEffectMissingTarget',
         site: siteKey,
         publishedSites: Object.freeze(
-          fn.witnessTargets?.map((candidate) => Hir.executableSiteKey(candidate.site)) ?? [],
+          fn.witnessTargets?.map((candidate) => Tir.executableSiteKey(candidate.site)) ?? [],
         ),
       }),
     )
@@ -445,7 +445,7 @@ export const lowerWitnessEffect = (
         _tag: 'WitnessEffectMissingTarget',
         site: siteKey,
         publishedSites: Object.freeze(
-          fn.witnessTargets?.map((candidate) => Hir.executableSiteKey(candidate.site)) ?? [],
+          fn.witnessTargets?.map((candidate) => Tir.executableSiteKey(candidate.site)) ?? [],
         ),
       }),
     )
@@ -464,7 +464,7 @@ export const lowerWitnessEffect = (
               (candidate) =>
                 Instances.keyText(candidate.instance) === Instances.keyText(fn.owner.key),
             )
-            .map((candidate) => Hir.executableSiteKey(candidate.site)),
+            .map((candidate) => Tir.executableSiteKey(candidate.site)),
         ),
       }),
     )
@@ -485,7 +485,7 @@ export const lowerWitnessEffect = (
       }),
     )
   const destination = fn.alloc(type)
-  const runner = Hir.effectRunnerId(fn.owner.key.declaration, site)
+  const runner = Tir.effectRunnerId(fn.owner.key.declaration, site)
   fn.emit(
     Object.freeze({
       _tag: 'MakeEffect',
@@ -532,7 +532,7 @@ export const lowerWitnessEffect = (
  */
 export const lowerStaticInterfaceWitnessCall = (
   fn: FunctionLowering,
-  expression: Extract<Hir.Expression, { readonly _tag: 'InterfaceOperationCall' }>,
+  expression: Extract<Tir.Expression, { readonly _tag: 'InterfaceOperationCall' }>,
   provider: Type.Type,
   capability: Type.Nominal,
   argumentLocals: ReadonlyArray<Mir.LocalId>,
@@ -575,7 +575,7 @@ export const lowerStaticInterfaceWitnessCall = (
  */
 export const lowerBuiltinArguments = (
   fn: FunctionLowering,
-  expression: Extract<Hir.Expression, { readonly _tag: 'BuiltinCall' }>,
+  expression: Extract<Tir.Expression, { readonly _tag: 'BuiltinCall' }>,
   intrinsic: Intrinsic.BuiltinOperation,
 ): ReadonlyArray<Mir.LocalId> | 'Transferred' | undefined => {
   const loweredArguments: Array<Mir.LocalId> = []

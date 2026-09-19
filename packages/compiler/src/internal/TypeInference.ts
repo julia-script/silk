@@ -1217,7 +1217,7 @@ export interface SelectedSubstitution {
 
 /**
  * Rebinds a complete invocation selected by semantic checking. Only Instances and ExecutableOrigin
- * may use this boundary: the caller must supply already checked HIR arguments. Kind, access and
+ * may use this boundary: the caller must supply already checked TIR arguments. Kind, access and
  * representation structure are verified again; only their accepted lifetime relations are carried
  * forward as explicit assumptions. Detached and NonParking obligations remain independently checked.
  */

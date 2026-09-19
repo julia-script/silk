@@ -175,7 +175,7 @@ the declaration, selection reason, and actual ownership branch; grouping observa
 counter totals. The distinct-branch artifact attributes its extra entry check to `StaticCall`
 and the selected function checks to `StaticArguments`.
 
-The ownership cache requires the same HIR function, semantic fact, declaration index, and ordered
+The ownership cache requires the same TIR function, semantic fact, declaration index, and ordered
 local-shared boundary spans. Changed checker inputs are not inferred to be reusable from a
 matching declaration name. These cold-snapshot samples exercise the source-proof handoff and
 same-coordinator reuse; they do not measure cross-revision residual reuse, target changes, failed

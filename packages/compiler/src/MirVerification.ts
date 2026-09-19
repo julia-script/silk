@@ -14,7 +14,7 @@ import * as ExecutionPackage from './ExecutionPackage.js'
 import * as ExecutionTransition from './ExecutionTransition.js'
 import * as EffectExecutionContract from './internal/EffectExecutionContract.js'
 import * as FieldRealization from './FieldRealization.js'
-import * as Hir from './Hir.js'
+import * as Tir from './Tir.js'
 import * as Instances from './Instances.js'
 import * as Layout from './Layout.js'
 import * as LayoutVerify from './LayoutVerify.js'
@@ -1515,13 +1515,13 @@ const enumRepresentationMatches = (
 export const targetText = (target: DeclarationFacts.CanonicalId): string =>
   `${target.module}.${target.name}`
 
-export const callableTargetText = (target: Hir.CallableTarget): string =>
+export const callableTargetText = (target: Tir.CallableTarget): string =>
   target._tag === 'DeclarationCallableTarget'
     ? targetText(target.declaration)
     : `${target.actor}.${target.operation}`
 
 const storedCallableTargetText = (target: SilkType.CallableIdentityArgument['target']): string =>
-  callableTargetText(Hir.callableTargetFromIdentity(target))
+  callableTargetText(Tir.callableTargetFromIdentity(target))
 
 export const storedExecutableText = (
   stored: NonNullable<
@@ -1532,7 +1532,7 @@ export const storedExecutableText = (
     ? storedCallableTargetText(stored.realization.target)
     : targetText(stored.realization.runner)
 
-const borrowKey = (borrow: Hir.BorrowId): string =>
+const borrowKey = (borrow: Tir.BorrowId): string =>
   `${borrow.function.sourceId}:${borrow.function.ordinal}:${borrow.callSpan.start}:${borrow.callSpan.end}:${borrow.ordinal}`
 
 export const instanceText = Instances.keyText
@@ -1705,7 +1705,7 @@ const effectEnvironmentCleanupValid = (
   return (
     cleanup._tag === 'EffectCleanup' &&
     SilkType.equals(cleanup.type, environment.effect) &&
-    Hir.sameExecutableSite(cleanup.site, environment.site) &&
+    Tir.sameExecutableSite(cleanup.site, environment.site) &&
     cleanup.slots.length === expected.length &&
     cleanup.slots.every((slot, ordinal) => {
       const candidate = [...expected].reverse().at(ordinal)
@@ -1743,7 +1743,7 @@ const cleanupMatchesSemanticType = (
         const environment = layout.effectEnvironments.find(
           (candidate): candidate is EffectEnvironment =>
             candidate._tag === 'EffectEnvironment' &&
-            Hir.effectRepresentationIdentity(candidate.site) === identity.identity &&
+            Tir.effectRepresentationIdentity(candidate.site) === identity.identity &&
             identity.owner !== undefined &&
             candidate.instance.declaration.module === identity.owner.declaration.module &&
             candidate.instance.declaration.name === identity.owner.declaration.name &&
@@ -1940,7 +1940,7 @@ const storedEffectCleanupPlanValid = (
   representation: Extract<Layout.Representation, { readonly _tag: 'StoredEffectEnvironment' }>,
   cleanup: Extract<CleanupPlan.CleanupPlan, { readonly _tag: 'EffectCleanup' }>,
 ): boolean => {
-  if (!Hir.sameExecutableSite(cleanup.site, representation.realization.site)) return false
+  if (!Tir.sameExecutableSite(cleanup.site, representation.realization.site)) return false
   const shape = Layout.callingShape(layout, type)?.tree
   if (shape?._tag !== 'EffectEnvironmentShape') return false
   const ranges = representation.fields.map((field, ordinal) => {
@@ -4057,7 +4057,7 @@ const computeVerify = Effect.fnUntraced(function* (
           )
         }
         const heldStringLoansValid = (
-          heldLoans: ReadonlyArray<Hir.BorrowId>,
+          heldLoans: ReadonlyArray<Tir.BorrowId>,
           source?: LocalId,
         ): boolean => {
           const keys = heldLoans.map(borrowKey)
@@ -6159,7 +6159,7 @@ const computeVerify = Effect.fnUntraced(function* (
             cleanup._tag !== 'EffectCleanup' ||
             (dropped?._tag === 'EffectValue' &&
               (dropped.storage === undefined
-                ? Hir.sameExecutableSite(cleanup.site, dropped.site)
+                ? Tir.sameExecutableSite(cleanup.site, dropped.site)
                 : storedEffectCleanupValid(self.layout, dropped, cleanup)))
           const compositeCleanupValid =
             cleanup._tag !== 'EffectCompositeCleanup' ||
@@ -6240,7 +6240,7 @@ const computeVerify = Effect.fnUntraced(function* (
                 TypeCompatibility.isCompatible(
                   TypeCompatibility.check(valueType.type, field.stored.realization.contract),
                 ) &&
-                Hir.matchesCallableTargetIdentity(
+                Tir.matchesCallableTargetIdentity(
                   valueType.target,
                   field.stored.realization.target,
                 ) &&
@@ -6255,10 +6255,10 @@ const computeVerify = Effect.fnUntraced(function* (
                 TypeCompatibility.isCompatible(
                   TypeCompatibility.check(valueType.type, field.stored.realization.contract),
                 ) &&
-                Hir.sameExecutableSite(valueType.site, field.stored.realization.site) &&
-                Hir.effectRunnerId(valueType.environment.instance.declaration, valueType.site)
+                Tir.sameExecutableSite(valueType.site, field.stored.realization.site) &&
+                Tir.effectRunnerId(valueType.environment.instance.declaration, valueType.site)
                   .module === field.stored.realization.runner.module &&
-                Hir.effectRunnerId(valueType.environment.instance.declaration, valueType.site)
+                Tir.effectRunnerId(valueType.environment.instance.declaration, valueType.site)
                   .name === field.stored.realization.runner.name &&
                 RepresentationField.belongsTo(field.stored.realization.field, field.field) &&
                 field.stored.realization.instance.module === operation.type.type.module &&
@@ -6313,7 +6313,7 @@ const computeVerify = Effect.fnUntraced(function* (
                 TypeCompatibility.isCompatible(
                   TypeCompatibility.check(valueType.type, field.stored.realization.contract),
                 ) &&
-                Hir.matchesCallableTargetIdentity(
+                Tir.matchesCallableTargetIdentity(
                   valueType.target,
                   field.stored.realization.target,
                 ) &&
@@ -6328,10 +6328,10 @@ const computeVerify = Effect.fnUntraced(function* (
                 TypeCompatibility.isCompatible(
                   TypeCompatibility.check(valueType.type, field.stored.realization.contract),
                 ) &&
-                Hir.sameExecutableSite(valueType.site, field.stored.realization.site) &&
-                Hir.effectRunnerId(valueType.environment.instance.declaration, valueType.site)
+                Tir.sameExecutableSite(valueType.site, field.stored.realization.site) &&
+                Tir.effectRunnerId(valueType.environment.instance.declaration, valueType.site)
                   .module === field.stored.realization.runner.module &&
-                Hir.effectRunnerId(valueType.environment.instance.declaration, valueType.site)
+                Tir.effectRunnerId(valueType.environment.instance.declaration, valueType.site)
                   .name === field.stored.realization.runner.name &&
                 RepresentationField.belongsTo(field.stored.realization.field, field.field) &&
                 field.stored.realization.instance.module === operation.type.type.module &&
@@ -6619,7 +6619,7 @@ const computeVerify = Effect.fnUntraced(function* (
             }) &&
             (operation.type._tag === 'EffectValue' && target.result._tag === 'EffectValue'
               ? EffectExecutionContract.equals(operation.type.type, target.result.type) &&
-                Hir.sameExecutableSite(operation.type.site, target.result.site) &&
+                Tir.sameExecutableSite(operation.type.site, target.result.site) &&
                 instanceText(operation.type.environment.instance) ===
                   instanceText(target.result.environment.instance)
               : sameRuntimeType(semanticType(operation.type), semanticType(target.result)))
@@ -6657,7 +6657,7 @@ const computeVerify = Effect.fnUntraced(function* (
             baseFields !== undefined &&
             (operation.base === undefined ||
               (base?._tag === 'CallableValue' &&
-                Hir.sameCallableTarget(base.target, operation.target) &&
+                Tir.sameCallableTarget(base.target, operation.target) &&
                 baseFields.every((field, ordinal) => {
                   const target = fields.at(ordinal)
                   return (
@@ -6687,13 +6687,13 @@ const computeVerify = Effect.fnUntraced(function* (
           const valid =
             destination?._tag === 'CallableValue' &&
             SilkType.equals(destination.type, operation.type.type) &&
-            Hir.sameCallableTarget(destination.target, operation.target) &&
-            Hir.sameCallableTarget(operation.type.target, operation.target) &&
+            Tir.sameCallableTarget(destination.target, operation.target) &&
+            Tir.sameCallableTarget(operation.type.target, operation.target) &&
             operation.typeArguments.every(SilkType.isRuntimeConcreteGenericArgument) &&
             (environment === undefined
               ? operation.captures.length === 0
               : capturesValid &&
-                Hir.sameCallableTarget(environment.callable.target, operation.target) &&
+                Tir.sameCallableTarget(environment.callable.target, operation.target) &&
                 environment.callable.mode === operation.type.type.mode)
           if (!valid) {
             violations.push(
@@ -6940,7 +6940,7 @@ const computeVerify = Effect.fnUntraced(function* (
             fn.localTypes.at(operation.matched.ordinal)?._tag !== 'bool' ||
             !SilkType.equals(destination.type, operation.type.type) ||
             !SilkType.equals(selected.type, operation.type.type) ||
-            !Hir.sameExecutableSite(selected.site, operation.type.site)
+            !Tir.sameExecutableSite(selected.site, operation.type.site)
           )
             violations.push(
               Object.freeze({
@@ -6962,7 +6962,7 @@ const computeVerify = Effect.fnUntraced(function* (
             selected === undefined ||
             !SilkType.equals(destination.type, operation.type.type) ||
             !SilkType.equals(source.type, selected.type) ||
-            !Hir.sameExecutableSite(source.site, selected.site)
+            !Tir.sameExecutableSite(source.site, selected.site)
           )
             violations.push(
               Object.freeze({
@@ -7065,7 +7065,7 @@ const computeVerify = Effect.fnUntraced(function* (
                     base?.staticArguments ?? operation.runnerStaticArguments ?? Object.freeze([])
                   const expectedBase =
                     stored?.realization.runner ??
-                    Hir.effectRunnerId(
+                    Tir.effectRunnerId(
                       effectValue.environment.instance.declaration,
                       effectValue.site,
                     )
@@ -7258,7 +7258,7 @@ const computeVerify = Effect.fnUntraced(function* (
               return (
                 expected !== undefined &&
                 SilkType.equals(expected.type, alternative.type.type) &&
-                Hir.sameExecutableSite(expected.site, alternative.type.site) &&
+                Tir.sameExecutableSite(expected.site, alternative.type.site) &&
                 runner !== undefined &&
                 runnerOutcomeMatches(runner, alternative.type.type) &&
                 parametersValid &&

@@ -1,7 +1,7 @@
 import * as Lifetime from './Lifetime.js'
 import * as CallableContract from './CallableContract.js'
 import * as Constraint from './Constraint.js'
-import type * as Hir from './Hir.js'
+import type * as Tir from './Tir.js'
 import * as RowAlgebra from './RowAlgebra.js'
 import * as Scalar from './Scalar.js'
 import * as SourceSpan from './SourceSpan.js'
@@ -61,7 +61,7 @@ export const normalizeRuntimeTargets = (
 export type Rule =
   | {
       readonly _tag: 'BuiltinRule'
-      readonly operation: Hir.BuiltinOperation
+      readonly operation: Tir.BuiltinOperation
       readonly typeParameters: ReadonlyArray<Type.Parameter>
       readonly parameters: ReadonlyArray<Type.Type>
       readonly result: Type.Type
@@ -234,7 +234,7 @@ const pointerInvariants: ReadonlyMap<string, string> = new Map([
 const builtin = (options: {
   readonly actor: string
   readonly name: string
-  readonly operation: Hir.BuiltinOperation
+  readonly operation: Tir.BuiltinOperation
   readonly typeParameters?: ReadonlyArray<string>
   readonly semanticTypeParameters?: ReadonlyArray<Type.Parameter>
   readonly parameters: ReadonlyArray<ValueParameter>
@@ -2496,7 +2496,7 @@ export interface InventoryEntry {
   readonly invariant?: string
   readonly admission: AdmissionCategory
   readonly consumer: string
-  readonly hir?: string
+  readonly tir?: string
   readonly mir?: string
   readonly targets: ReadonlyArray<Target.Id>
 }
@@ -2569,7 +2569,7 @@ export const inventory = (): ReadonlyArray<InventoryEntry> =>
         ...(operation.invariant === undefined ? {} : { invariant: operation.invariant }),
         admission: operation.admission,
         consumer: operation.consumer,
-        ...(identity === undefined ? {} : { hir: identity, mir: identity }),
+        ...(identity === undefined ? {} : { tir: identity, mir: identity }),
         targets: operation.targets,
       })
     }),

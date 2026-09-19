@@ -13,7 +13,7 @@ import type * as DeclarationIndex from './DeclarationIndex.js'
 import * as Diagnostic from './Diagnostic.js'
 import * as Elaboration from './Elaboration.js'
 import * as ExecutableOrigin from './ExecutableOrigin.js'
-import * as Hir from './Hir.js'
+import * as Tir from './Tir.js'
 import * as FunctionIndex from './internal/FunctionIndex.js'
 import type * as Intrinsic from './Intrinsic.js'
 import * as TypeInference from './internal/TypeInference.js'
@@ -50,18 +50,18 @@ export interface InstanceKey {
   readonly staticArguments: ReadonlyArray<StaticValue.Value>
 }
 
-/** One discovered instance with its elaborated HIR function. */
+/** One discovered instance with its elaborated TIR function. */
 export interface Instance {
   readonly _tag: 'Instance'
   readonly key: InstanceKey
-  readonly function: Hir.HirFunction
+  readonly function: Tir.TirFunction
   readonly substitution: Type.Substitution
   readonly specialization: ConcreteSpecialization
   readonly ownership: Ownership.FunctionOwnership
   readonly resultCallable?: Type.CallableIdentityArgument
   readonly resultEffect?: string
   readonly effectSuccesses?: ReadonlyArray<{
-    readonly site: Hir.EffectSiteId
+    readonly site: Tir.EffectSiteId
     readonly identity: string
   }>
 }
@@ -90,8 +90,8 @@ export interface ConcreteSpecialization {
 export interface CallableInstance {
   readonly _tag: 'CallableInstance'
   readonly owner: InstanceKey
-  readonly site: Hir.CallableSiteId
-  readonly target: Hir.CallableTarget
+  readonly site: Tir.CallableSiteId
+  readonly target: Tir.CallableTarget
   readonly typeArguments: ReadonlyArray<Type.GenericArgument>
   readonly substitution: Type.Substitution
   readonly captureTypes: ReadonlyArray<Type.Type>
@@ -113,7 +113,7 @@ export interface EffectInstance {
   readonly representationIdentity: string
   readonly identity: string
   readonly owner: InstanceKey
-  readonly site: Hir.EffectSiteId
+  readonly site: Tir.EffectSiteId
   readonly runner: DeclarationFacts.CanonicalId
   readonly typeArguments: ReadonlyArray<Type.GenericArgument>
   readonly captures: ReadonlyArray<{
@@ -157,7 +157,7 @@ export interface CallProvider {
 export interface CallInstance {
   readonly _tag: 'CallInstance'
   readonly owner: InstanceKey
-  readonly span: Hir.Expression['span']
+  readonly span: Tir.Expression['span']
   readonly target: InstanceKey
   /** Caller-authored metadata aligned with target static arguments, outside instance identity. */
   readonly staticArgumentOrigins?: ReadonlyArray<StaticEvaluation.TextOrigin | undefined>
@@ -183,7 +183,7 @@ export const callMatchesProviders = (
 export interface IntrinsicCall {
   readonly _tag: 'ReachableIntrinsicCall'
   readonly operation: Intrinsic.OperationId
-  readonly span: Hir.Expression['span']
+  readonly span: Tir.Expression['span']
 }
 
 /** One reachable foreign (`extern "C"`) declaration, classified for the selected target. */
@@ -276,25 +276,25 @@ export interface PolymorphicRecursion {
 export interface NonConcreteSpecialization {
   readonly _tag: 'NonConcreteSpecialization'
   readonly key: InstanceKey
-  readonly span: Hir.HirFunction['declaration']['syntax']['span']
+  readonly span: Tir.TirFunction['declaration']['syntax']['span']
 }
 
 const requirementBindingsCache = new WeakMap<
-  Hir.HirFunction,
-  ReadonlyArray<Extract<Hir.Expression, { readonly _tag: 'EffectBindRequirement' }>>
+  Tir.TirFunction,
+  ReadonlyArray<Extract<Tir.Expression, { readonly _tag: 'EffectBindRequirement' }>>
 >()
 
 export const requirementBindings = (
-  fn: Hir.HirFunction,
-): ReadonlyArray<Extract<Hir.Expression, { readonly _tag: 'EffectBindRequirement' }>> => {
+  fn: Tir.TirFunction,
+): ReadonlyArray<Extract<Tir.Expression, { readonly _tag: 'EffectBindRequirement' }>> => {
   const cached = requirementBindingsCache.get(fn)
   if (cached !== undefined) return cached
   // Discovery revisits one immutable residual body under different ancestor contexts. Its
   // binding sites are structural; witness selection still runs with each caller's inputs.
   const bindings = Object.freeze(
     fn.statements.flatMap((statement) =>
-      Hir.statementExpressions(statement).flatMap((expression) =>
-        Hir.expressionTree(expression).flatMap((candidate) =>
+      Tir.statementExpressions(statement).flatMap((expression) =>
+        Tir.expressionTree(expression).flatMap((candidate) =>
           candidate._tag === 'EffectBindRequirement' ? [candidate] : [],
         ),
       ),
@@ -305,14 +305,14 @@ export const requirementBindings = (
 }
 
 const selectedRequirement = (
-  binding: Extract<Hir.Expression, { readonly _tag: 'EffectBindRequirement' }>,
+  binding: Extract<Tir.Expression, { readonly _tag: 'EffectBindRequirement' }>,
   substitution: Type.Substitution,
 ): Type.Requirement | undefined => {
-  return Hir.selectedRequirement(binding.provider, substitution)
+  return Tir.selectedRequirement(binding.provider, substitution)
 }
 
 const requirementBindingWitness = (
-  binding: Extract<Hir.Expression, { readonly _tag: 'EffectBindRequirement' }>,
+  binding: Extract<Tir.Expression, { readonly _tag: 'EffectBindRequirement' }>,
   substitution: Type.Substitution,
   index: DeclarationIndex.Index,
 ): DeclarationFacts.ConformanceWitness | undefined => {
@@ -324,8 +324,8 @@ const requirementBindingWitness = (
 }
 
 const forwardedRequirementBinding = (
-  fn: Hir.HirFunction,
-): Extract<Hir.Expression, { readonly _tag: 'EffectBindRequirement' }> | undefined => {
+  fn: Tir.TirFunction,
+): Extract<Tir.Expression, { readonly _tag: 'EffectBindRequirement' }> | undefined => {
   const returned = fn.statements.at(-1)
   if (fn.statements.length !== 1 || returned?._tag !== 'Return') return undefined
   const block = returned.expression
@@ -415,7 +415,7 @@ const carriedSectionArgument = (argument: Type.GenericArgument): Type.GenericArg
 
 const keyOf = (
   declaration: DeclarationFacts.CanonicalId,
-  contract: Hir.ContractFact,
+  contract: Tir.ContractFact,
   typeParameters: ReadonlyArray<Type.Parameter> = [],
   rawTypeArguments: ReadonlyArray<Type.GenericArgument> = [],
   staticArguments: ReadonlyArray<StaticValue.Value> = [],
@@ -561,16 +561,16 @@ const specializeEvidence = (
   )
 }
 
-const hirEvidence = (
-  fn: Hir.HirFunction,
+const tirEvidence = (
+  fn: Tir.TirFunction,
 ): ReadonlyArray<{
   readonly evidence: Constraint.ConstraintEvidence
   readonly origin: SourceSpan.SourceSpan
 }> =>
   Object.freeze(
     fn.statements
-      .flatMap(Hir.statementExpressions)
-      .flatMap(Hir.expressionTree)
+      .flatMap(Tir.statementExpressions)
+      .flatMap(Tir.expressionTree)
       .flatMap((expression) => {
         let evidence: ReadonlyArray<Constraint.ConstraintEvidence> = Object.freeze([])
         if (expression._tag === 'EffectBindRequirement') {
@@ -582,13 +582,13 @@ const hirEvidence = (
       }),
   )
 
-const hirSymbolicConformances = (
-  fn: Hir.HirFunction,
+const tirSymbolicConformances = (
+  fn: Tir.TirFunction,
 ): ReadonlyArray<ConformanceProof.SymbolicConformanceSelection> =>
   Object.freeze(
     fn.statements
-      .flatMap(Hir.statementExpressions)
-      .flatMap(Hir.expressionTree)
+      .flatMap(Tir.statementExpressions)
+      .flatMap(Tir.expressionTree)
       .flatMap((expression) =>
         expression._tag === 'Call' || expression._tag === 'EffectConstruct'
           ? expression.symbolicConformances
@@ -597,7 +597,7 @@ const hirSymbolicConformances = (
   )
 
 export const specialize = (
-  fn: Hir.HirFunction,
+  fn: Tir.TirFunction,
   substitution: Type.Substitution,
   index: DeclarationIndex.Index,
   compatibility?: TypeCompatibility.Context,
@@ -645,12 +645,12 @@ export const specialize = (
     if (solved === undefined) return undefined
     concreteEvidence.push(...solved)
   }
-  for (const occurrence of hirEvidence(fn)) {
+  for (const occurrence of tirEvidence(fn)) {
     const solved = specializeEvidence(occurrence.evidence, substitution, occurrence.origin, index)
     if (solved === undefined) return undefined
     concreteEvidence.push(...solved)
   }
-  for (const symbolic of hirSymbolicConformances(fn)) {
+  for (const symbolic of tirSymbolicConformances(fn)) {
     const provider = Type.substitute(symbolic.provider, substitution, compatibility)
     const capability = Type.substitute(symbolic.capability, substitution, compatibility)
     if (!Type.isRuntimeConcrete(provider) || !Type.isNominal(capability)) return undefined
@@ -687,10 +687,10 @@ export const specialize = (
   })
 }
 
-/** Returns the exact branded provider proof attached to one specialized HIR binding. */
+/** Returns the exact branded provider proof attached to one specialized TIR binding. */
 export const requirementSelection = (
   instance: Instance,
-  provider: Extract<Hir.Expression, { readonly _tag: 'EffectBindRequirement' }>['provider'],
+  provider: Extract<Tir.Expression, { readonly _tag: 'EffectBindRequirement' }>['provider'],
 ): Extract<ConcreteEvidence, { readonly _tag: 'RequirementSelection' }> | undefined => {
   const wantedKeys = new Set(
     provider.evidence.flatMap((proof) => {
@@ -741,17 +741,17 @@ export const matchingSpecialization = (
   return index.get(Specialization.runtimeKey(specialization)) ?? Object.freeze([])
 }
 
-export const effectIdentity = (owner: InstanceKey, site: Hir.EffectSiteId): string =>
-  `${keyText(owner)}\u0004${Hir.executableSiteKey(site)}`
+export const effectIdentity = (owner: InstanceKey, site: Tir.EffectSiteId): string =>
+  `${keyText(owner)}\u0004${Tir.executableSiteKey(site)}`
 
-// HIR and instance keys are immutable. Hidden-parameter queries repeatedly reconstructed the
+// TIR and instance keys are immutable. Hidden-parameter queries repeatedly reconstructed the
 // same selected substitution; retain only its immutable map, not mutable proof bookkeeping.
 const instanceSubstitutions = new WeakMap<
-  Hir.HirFunction,
+  Tir.TirFunction,
   WeakMap<InstanceKey, Type.Substitution | undefined>
 >()
 const instanceSubstitution = (
-  fn: Hir.HirFunction,
+  fn: Tir.TirFunction,
   key: InstanceKey,
 ): Type.Substitution | undefined => {
   let cache = instanceSubstitutions.get(fn)
@@ -775,11 +775,11 @@ interface ExecutableParameters {
 // Effect and callable ordinals inspect the same specialized parameters. Computing both in one
 // traversal avoids repeating type substitution, and later hidden-parameter queries reuse it.
 const executableParameterCache = new WeakMap<
-  Hir.HirFunction,
+  Tir.TirFunction,
   WeakMap<Type.Substitution, ExecutableParameters>
 >()
 const executableParameters = (
-  fn: Hir.HirFunction,
+  fn: Tir.TirFunction,
   substitution: Type.Substitution,
 ): ExecutableParameters => {
   let cache = executableParameterCache.get(fn)
@@ -804,12 +804,12 @@ const executableParameters = (
   return result
 }
 const effectParameterOrdinals = (
-  fn: Hir.HirFunction,
+  fn: Tir.TirFunction,
   substitution: Type.Substitution,
 ): ReadonlyArray<number> => executableParameters(fn, substitution).effects
 
 export const parameterEffectRepresentationArgument = (
-  fn: Hir.HirFunction,
+  fn: Tir.TirFunction,
   key: InstanceKey,
   ordinal: number,
 ): Type.EffectIdentityArgument | Type.CompositeEffectRepresentationArgument | undefined => {
@@ -829,7 +829,7 @@ export const parameterEffectRepresentationArgument = (
 }
 
 export const parameterEffectIdentityArgument = (
-  fn: Hir.HirFunction,
+  fn: Tir.TirFunction,
   key: InstanceKey,
   ordinal: number,
 ): Type.EffectIdentityArgument | undefined => {
@@ -838,14 +838,14 @@ export const parameterEffectIdentityArgument = (
 }
 
 export const parameterEffectIdentity = (
-  fn: Hir.HirFunction,
+  fn: Tir.TirFunction,
   key: InstanceKey,
   ordinal: number,
 ): string | undefined => parameterEffectIdentityArgument(fn, key, ordinal)?.identity
 
 /** Replaces an owner-scoped represented Effect parameter with its concrete hidden identity. */
 export const concreteEffectRepresentationArgument = (
-  fn: Hir.HirFunction,
+  fn: Tir.TirFunction,
   key: InstanceKey,
   argument: Type.GenericArgument,
 ): Type.GenericArgument => {
@@ -877,12 +877,12 @@ export const concreteEffectRepresentationArgument = (
 }
 
 const callableParameterOrdinals = (
-  fn: Hir.HirFunction,
+  fn: Tir.TirFunction,
   substitution: Type.Substitution,
 ): ReadonlyArray<number> => executableParameters(fn, substitution).callables
 
 export const parameterCallableIdentity = (
-  fn: Hir.HirFunction,
+  fn: Tir.TirFunction,
   key: InstanceKey,
   ordinal: number,
 ): Type.CallableIdentityArgument | undefined => {
@@ -894,13 +894,13 @@ export const parameterCallableIdentity = (
 }
 
 export const callableIdentity = (self: CallableInstance): string =>
-  `${keyText(self.owner)}\u0001${Hir.executableSiteKey(self.site)}\u0001${Type.runtimeArgumentKeys(self.typeArguments).join('\u0000')}`
+  `${keyText(self.owner)}\u0001${Tir.executableSiteKey(self.site)}\u0001${Type.runtimeArgumentKeys(self.typeArguments).join('\u0000')}`
 
 /** Returns the canonical specialized identity of one discovered callable environment. */
 export const callableEnvironmentIdentity = (
   self: CallableInstance,
 ): Type.CallableEnvironmentIdentity =>
-  Hir.callableEnvironmentIdentity(self.site, {
+  Tir.callableEnvironmentIdentity(self.site, {
     declaration: Object.freeze({
       module: self.owner.declaration.module,
       name: self.owner.declaration.name,
@@ -1102,7 +1102,7 @@ const exportRoots = (
               signature: ExecutableOrigin.foreignSignature(fact, target),
               key: keyOf(
                 fact.canonical.id,
-                Hir.contractOf(fact),
+                Tir.contractOf(fact),
                 fact.typeParameters.map((parameter) => parameter.type),
                 fact.typeParameters.map((parameter) => Type.parameterArgument(parameter.type)),
               ),
@@ -1174,7 +1174,7 @@ export const discover = (
           selector.origin.span ?? related[0]?.syntax.span ?? root.syntax.root.span,
         ),
       )
-    } else retention.push(keyOf(declaration.canonical.id, Hir.contractOf(declaration)))
+    } else retention.push(keyOf(declaration.canonical.id, Tir.contractOf(declaration)))
   }
   if (rootDiagnostics.length > 0)
     return Object.freeze({
@@ -1200,7 +1200,7 @@ export const discover = (
   }
   interface PreparedUnavailableOwnership {
     readonly key: InstanceKey
-    readonly function: Hir.HirFunction
+    readonly function: Tir.TirFunction
     readonly fact: Elaboration.FunctionFact
     readonly diagnostic: Diagnostic.Diagnostic
   }
@@ -1248,7 +1248,7 @@ export const discover = (
       if (
         Type.runtimeCallableEnvironmentIdentityKey(environment) ===
           Type.runtimeCallableEnvironmentIdentityKey(callableEnvironmentIdentity(candidate)) &&
-        Hir.matchesCallableTargetIdentity(candidate.target, identity.target) &&
+        Tir.matchesCallableTargetIdentity(candidate.target, identity.target) &&
         candidate.typeArguments.length === identity.typeArguments.length &&
         candidate.typeArguments.every((argument, ordinal) => {
           const expected = identity.typeArguments.at(ordinal)
@@ -1563,7 +1563,7 @@ export const discover = (
   }
   for (const root of roots) schedule(root)
   const cleanupPrepassTargets = (
-    fn: Hir.HirFunction,
+    fn: Tir.TirFunction,
     fact: Elaboration.FunctionFact,
     substitution: Type.Substitution,
   ): ReadonlyArray<CallTarget> => {
@@ -1588,8 +1588,8 @@ export const discover = (
   const cleanupRootsOf = (ancestor: InstanceKey, target: InstanceKey): ReadonlyArray<Type.Type> =>
     typeArgumentsOf(ancestor).filter((type) =>
       hookCalls(CleanupPlan.cleanupPlan(index, type), index).some((call) => {
-        const fn = FunctionIndex.hirByName(
-          results.get(call.declaration.module)?.hir,
+        const fn = FunctionIndex.tirByName(
+          results.get(call.declaration.module)?.tir,
           call.declaration.name,
         )
         if (fn === undefined) return false
@@ -1830,8 +1830,8 @@ export const discover = (
         for (const call of calls.values()) {
           const identity = identityOfCall(call)
           const target = call.declaration
-          const targetFunction = FunctionIndex.hirByName(
-            results.get(target.module)?.hir,
+          const targetFunction = FunctionIndex.tirByName(
+            results.get(target.module)?.tir,
             target.name,
           )
           if (targetFunction === undefined) continue

@@ -1,7 +1,7 @@
 import * as ConformanceProof from './ConformanceProof.js'
 import type {} from './EntryAssembly.js'
 import type { FunctionLowering } from './FunctionLowering.js'
-import type * as Hir from './Hir.js'
+import type * as Tir from './Tir.js'
 import * as Instances from './Instances.js'
 import type { DelayedEffectState, ProvidedRequirement } from './Lower.js'
 import type {} from './LowerExpression.js'
@@ -28,7 +28,7 @@ export const restoreDelayedEffectState = (
 
 export const directForwardedRequirementBinding = (
   instance: Instances.Instance,
-): Extract<Hir.Expression, { readonly _tag: 'EffectBindRequirement' }> | undefined => {
+): Extract<Tir.Expression, { readonly _tag: 'EffectBindRequirement' }> | undefined => {
   const returned = instance.function.statements.at(-1)
   if (instance.function.statements.length !== 1 || returned?._tag !== 'Return') return undefined
   const block = returned.expression
@@ -59,7 +59,7 @@ export const forwardedRequirementBinding = (
 ):
   | {
       readonly instance: Instances.Instance
-      readonly binding: Extract<Hir.Expression, { readonly _tag: 'EffectBindRequirement' }>
+      readonly binding: Extract<Tir.Expression, { readonly _tag: 'EffectBindRequirement' }>
     }
   | undefined => {
   const direct = directForwardedRequirementBinding(instance)
@@ -125,7 +125,7 @@ export const forwardedCallableParameter = (
   const next = new Set(resolving).add(key_)
   const forwardedBindings = new Set<number>()
   const expression = (
-    current: Hir.Expression,
+    current: Tir.Expression,
     resolvingBindings: ReadonlySet<number> = new Set(),
   ): number | undefined => {
     if (current._tag === 'Move') return expression(current.subject, resolvingBindings)
@@ -162,13 +162,13 @@ export const forwardedCallableParameter = (
 
 const forwardedReferenceProvider = (
   fn: FunctionLowering,
-  provider: Hir.Expression,
+  provider: Tir.Expression,
   access: 'Shared' | 'Exclusive' | 'Take',
   providerType: Type.Type,
 ):
   | {
       readonly parameter: Extract<
-        Hir.Expression,
+        Tir.Expression,
         { readonly _tag: 'ParameterReference' }
       >['parameter']
       readonly captureAccess: 'Copy' | 'Take'
@@ -187,11 +187,11 @@ const forwardedReferenceProvider = (
 
 export const staticallyForwardedCallableRecipe = (
   fn: FunctionLowering,
-  current: Hir.Expression,
-  owner: Hir.HirFunction,
-  arguments_: ReadonlyArray<Hir.Expression> = Object.freeze([]),
+  current: Tir.Expression,
+  owner: Tir.TirFunction,
+  arguments_: ReadonlyArray<Tir.Expression> = Object.freeze([]),
   resolving: ReadonlySet<string> = new Set(),
-): Extract<Hir.Expression, { readonly _tag: 'CallableSection' }> | undefined => {
+): Extract<Tir.Expression, { readonly _tag: 'CallableSection' }> | undefined => {
   if (current._tag === 'CallableSection') return current
   if (current._tag === 'Move')
     return staticallyForwardedCallableRecipe(fn, current.subject, owner, arguments_, resolving)
@@ -206,7 +206,7 @@ export const staticallyForwardedCallableRecipe = (
       (statement) =>
         statement._tag === 'Bind' && statement.binding.ordinal === current.binding.ordinal,
     )
-    let stored: Hir.Expression | undefined
+    let stored: Tir.Expression | undefined
     if (owner === fn.owner.function) {
       stored = fn.callableRecipes.get(current.binding.ordinal)
     } else if (localBinding?._tag === 'Bind') {
@@ -242,9 +242,9 @@ export const staticallyForwardedCallableRecipe = (
 
 export const callableRecipe = (
   fn: FunctionLowering,
-  expression: Hir.Expression,
+  expression: Tir.Expression,
   resolving: ReadonlySet<number> = new Set(),
-): Extract<Hir.Expression, { readonly _tag: 'CallableSection' }> | undefined => {
+): Extract<Tir.Expression, { readonly _tag: 'CallableSection' }> | undefined => {
   if (expression._tag === 'CallableSection') return expression
   if (expression._tag === 'Move') return callableRecipe(fn, expression.subject, resolving)
   if (expression._tag === 'BindingReference') {
@@ -288,9 +288,9 @@ export const callableRecipe = (
 
 export const effectRecipe = (
   fn: FunctionLowering,
-  expression: Hir.Expression,
+  expression: Tir.Expression,
   resolving: ReadonlySet<number> = new Set(),
-): Hir.Expression => {
+): Tir.Expression => {
   if (expression._tag === 'BindingReference') {
     const ordinal = expression.binding.ordinal
     if (resolving.has(ordinal)) return expression
@@ -308,12 +308,12 @@ export const effectRecipe = (
 
 export const movedEffectRecipe = (
   fn: FunctionLowering,
-  expression: Hir.Expression,
+  expression: Tir.Expression,
 ):
   | {
       readonly source: number
-      readonly recipe: Hir.Expression
-      readonly loanEnds: ReadonlyArray<Hir.BorrowId>
+      readonly recipe: Tir.Expression
+      readonly loanEnds: ReadonlyArray<Tir.BorrowId>
     }
   | undefined => {
   if (expression._tag !== 'Move' || expression.subject._tag !== 'BindingReference') return undefined
@@ -330,9 +330,9 @@ export const movedEffectRecipe = (
 
 export const callableApplicationArgument = (
   fn: FunctionLowering,
-  expression: Extract<Hir.Expression, { readonly _tag: 'CallableApply' }>,
+  expression: Extract<Tir.Expression, { readonly _tag: 'CallableApply' }>,
   ordinal: number,
-): Hir.Expression | undefined => {
+): Tir.Expression | undefined => {
   const section = callableRecipe(fn, expression.callee)
   if (section === undefined) return expression.arguments.at(ordinal)
   const captured = section.captures.find((capture) => capture.parameterOrdinal === ordinal)
@@ -343,11 +343,11 @@ export const callableApplicationArgument = (
 
 export const inlineForwardedRequirement = (
   fn: FunctionLowering,
-  expression: Hir.Expression,
+  expression: Tir.Expression,
 ):
   | {
-      readonly binding: Extract<Hir.Expression, { readonly _tag: 'EffectBindRequirement' }>
-      readonly provider: Hir.Expression
+      readonly binding: Extract<Tir.Expression, { readonly _tag: 'EffectBindRequirement' }>
+      readonly provider: Tir.Expression
       readonly selection: Omit<ProvidedRequirement, 'local'>
     }
   | undefined => {
@@ -364,7 +364,7 @@ export const inlineForwardedRequirement = (
   const section =
     expression._tag === 'CallableApply' ? callableRecipe(fn, expression.callee) : undefined
   let declaration:
-    | Extract<Hir.Expression, { readonly _tag: 'EffectConstruct' }>['target']
+    | Extract<Tir.Expression, { readonly _tag: 'EffectConstruct' }>['target']
     | undefined
   if (expression._tag === 'EffectConstruct') {
     declaration = expression.target

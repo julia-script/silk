@@ -753,9 +753,9 @@ it.effect('mints the callable environment identity in exactly one frontend modul
       if (source.includes('Type.callableEnvironmentIdentity(')) minting.push(name)
     }
 
-    // HIR is the only actor allowed to project an executable site into a semantic environment
+    // TIR is the only actor allowed to project an executable site into a semantic environment
     // identity. Every later phase delegates to that projection rather than parsing an encoding.
-    assert.deepEqual(minting, ['Hir.ts'])
+    assert.deepEqual(minting, ['Tir.ts'])
   }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
 )
 
@@ -774,9 +774,9 @@ it.effect('mints the represented Effect origin in exactly one frontend module', 
       if (source.includes(originMint)) minting.push(name)
     }
 
-    // HIR owns the semantic origin projection. Realization and lowering both delegate to it, so a
+    // TIR owns the semantic origin projection. Realization and lowering both delegate to it, so a
     // second minting site would be a syntax-recovery path around the shared Effect fact.
-    assert.deepEqual(minting, ['Hir.ts'])
+    assert.deepEqual(minting, ['Tir.ts'])
   }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
 )
 

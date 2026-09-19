@@ -6,6 +6,7 @@ import * as Effect from 'effect/Effect'
 import * as Data from 'effect/Data'
 import * as Option from 'effect/Option'
 import * as Result from 'effect/Result'
+import * as AuthoredLowering from './AuthoredLowering.js'
 import * as Diagnostic from './Diagnostic.js'
 import * as ImportPath from './ImportPath.js'
 import * as Graph from './internal/Graph.js'
@@ -89,6 +90,8 @@ export interface Module {
   readonly _tag: 'Module'
   readonly name: string
   readonly syntax: SyntaxFile.SyntaxFile
+  /** The source-free authored module and its current presentation, lowered once per parse. */
+  readonly authored: AuthoredLowering.Lowered
   readonly imports: ReadonlyArray<ImportFact>
   /** Selected module declarations, retaining their identities in the complete parsed syntax. */
   readonly declarations: ReadonlyArray<SyntaxTree.Node>
@@ -164,6 +167,7 @@ const unavailableSyntax = (parent: SyntaxTree.Node): SyntaxTree.Element =>
 interface ParsedModule {
   readonly name: string
   readonly syntax: SyntaxFile.SyntaxFile
+  readonly authored: AuthoredLowering.Lowered
   readonly declarations: ReadonlyArray<SyntaxTree.Node>
   readonly imports: ReadonlyArray<{
     readonly syntax: SyntaxTree.Node
@@ -179,18 +183,22 @@ interface ModuleAnalysis {
   readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
 }
 
-const parseModule = (
+const parseModule = Effect.fnUntraced(function* (
   name: string,
   source: SourceResolver.ResolvedSource,
   previous?: Module,
   selection: ReadonlyMap<number, boolean> = new Map(),
   application?: string,
-): ParsedModule => {
+): Effect.fn.Return<ParsedModule> {
   const currentSource = SourceFile.make(name, source.bytes, source.origin)
-  const syntax =
-    previous !== undefined && SourceFile.equals(previous.syntax.source, currentSource)
-      ? previous.syntax
-      : Parser.parse(Lexer.lex(currentSource))
+  const reused = previous !== undefined && SourceFile.equals(previous.syntax.source, currentSource)
+  const syntax = reused ? previous.syntax : Parser.parse(Lexer.lex(currentSource))
+  // Lowering a parser artifact cannot fail for source mistakes; a rejection is a compiler defect.
+  const authored = reused
+    ? previous.authored
+    : yield* Effect.orDie(
+        AuthoredLowering.lower(syntax, AuthoredLowering.moduleOwner(name, currentSource.origin)),
+      )
   const declarations = selectedDeclarations(syntax.root, selection)
   const imports = declarations.flatMap((element): ParsedModule['imports'] => {
     if (!SyntaxTree.isNode(element) || element.kind !== 'ImportDeclaration') return []
@@ -211,8 +219,8 @@ const parseModule = (
     if (token === undefined) throw new RangeError('Available import path lost its first segment')
     return [Object.freeze({ syntax: element, path, sourceSpelling, canonicalTarget, token })]
   })
-  return Object.freeze({ name, syntax, declarations, imports: Object.freeze(imports) })
-}
+  return Object.freeze({ name, syntax, authored, declarations, imports: Object.freeze(imports) })
+})
 
 /** Flattens only decided declaration groups without changing the lossless syntax artifact. */
 export const selectedDeclarations = (
@@ -330,6 +338,7 @@ const analyzeModule = Effect.fnUntraced(function* (
       _tag: 'Module',
       name: parsed.name,
       syntax: parsed.syntax,
+      authored: parsed.authored,
       declarations: parsed.declarations,
       imports: Object.freeze(imports),
     }),
@@ -434,7 +443,7 @@ export const loadProject = Effect.fn('ModuleClosure.loadProject')(function* (
     const resolution = resolutions.get(name) ?? (yield* resolve(name))
     if (resolution?._tag !== 'Found') continue
     const analysis = yield* analyzeModule(
-      parseModule(
+      yield* parseModule(
         name,
         resolution.source,
         previousModules.get(name),

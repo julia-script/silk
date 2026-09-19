@@ -4,7 +4,7 @@ import * as CleanupPlan from './CleanupPlan.js'
 import type * as DeclarationIndex from './DeclarationIndex.js'
 import * as ExecutionAffinity from './ExecutionAffinity.js'
 import type * as ExecutionPackage from './ExecutionPackage.js'
-import type * as Hir from './Hir.js'
+import type * as Tir from './Tir.js'
 import * as Instances from './Instances.js'
 import * as SetOf from './internal/SetOf.js'
 import * as Layout from './Layout.js'
@@ -20,7 +20,7 @@ import * as Type from './Type.js'
 /** Post-normalization MIR-local ownership facts for provisional complete-or-relay control. */
 
 export type BorrowIdentity =
-  | { readonly _tag: 'MirLoan'; readonly borrow: Hir.BorrowId }
+  | { readonly _tag: 'MirLoan'; readonly borrow: Tir.BorrowId }
   | { readonly _tag: 'BorrowedParameter'; readonly parameterOrdinal: number }
   | { readonly _tag: 'BorrowedLocal'; readonly local: Mir.LocalId }
 

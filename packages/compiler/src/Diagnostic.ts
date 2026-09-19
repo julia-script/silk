@@ -3397,7 +3397,7 @@ export const staticRetainedValueLimit = (
   })
 }
 
-/** Creates a diagnostic for exhaustion of residual HIR growth. */
+/** Creates a diagnostic for exhaustion of residual TIR growth. */
 export const staticResidualGrowthLimit = (
   limit: number,
   target: string,

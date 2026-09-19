@@ -1,4 +1,5 @@
 import type * as NativeAssembly from './NativeAssembly.js'
+import type * as AuthoredLowering from './AuthoredLowering.js'
 import * as BodyQuery from './BodyQuery.js'
 import { dual } from 'effect/Function'
 import * as Option from 'effect/Option'
@@ -10,7 +11,7 @@ import * as DeclarationFacts from './DeclarationFacts.js'
 import type * as DeclarationIndex from './DeclarationIndex.js'
 import * as Diagnostic from './Diagnostic.js'
 import * as NominalVariance from './NominalVariance.js'
-import * as Hir from './Hir.js'
+import * as Tir from './Tir.js'
 import type * as Intrinsic from './Intrinsic.js'
 import type * as Match from './Match.js'
 import type * as NameResolution from './NameResolution.js'
@@ -55,7 +56,7 @@ export type ParameterLookup = DeclarationFacts.ParameterLookup
 /** One `let` binding declaration with its inferred type and initializer facts. */
 export interface BindingDeclarationFact {
   readonly _tag: 'BindingFact'
-  readonly id: Hir.BindingId
+  readonly id: Tir.BindingId
   readonly name: DeclaredName
   readonly phase: 'Runtime' | 'Static'
   readonly mutability: 'Immutable' | 'Mutable'
@@ -208,7 +209,7 @@ export type CallReferenceFact =
       readonly spelling: string
       readonly token: Token.Token
       readonly actor: string
-      readonly operation: Hir.BuiltinOperation
+      readonly operation: Tir.BuiltinOperation
       readonly intrinsic: Intrinsic.OperationId
       readonly parameters: ReadonlyArray<SemanticType>
       readonly result: SemanticType
@@ -364,7 +365,7 @@ export type BorrowRootFact =
     }
   | {
       readonly _tag: 'TemporaryRoot'
-      readonly owner: Hir.TemporaryOwnerId
+      readonly owner: Tir.TemporaryOwnerId
       readonly value: ExpressionFact
       readonly path: ReadonlyArray<BorrowSelectorFact>
     }
@@ -838,7 +839,7 @@ export interface OperatorExpressionFact {
   readonly mappings: ReadonlyArray<BuiltinArgumentMappingFact>
   readonly contract: CallContractFact
   readonly interfaceOperation?: InterfaceOperationFact
-  readonly witnessEffectSite?: Hir.EffectSiteId
+  readonly witnessEffectSite?: Tir.EffectSiteId
   readonly type: ExpressionTypeFact
   readonly syntax: SyntaxTree.Node
 }
@@ -893,7 +894,7 @@ export interface AnonymousCaptureFact {
 export interface CallableSectionExpressionFact {
   readonly _tag: 'CallableSection'
   readonly selectedConformances?: ReadonlyArray<ConformanceGoal.Proof>
-  readonly site: Hir.CallableSiteId
+  readonly site: Tir.CallableSiteId
   readonly reference: CallReferenceFact
   readonly path: ReferencePathFact
   readonly remainingParameters: ReadonlyArray<number>
@@ -942,7 +943,7 @@ export interface CallableApplyExpressionFact {
    * invoking it, splicing these captures after the value's own environment.
    */
   readonly staged?: {
-    readonly site: Hir.CallableSiteId
+    readonly site: Tir.CallableSiteId
     readonly captures: ReadonlyArray<CallableCaptureFact>
   }
   readonly provenance:
@@ -987,12 +988,12 @@ export interface EffectRequirementBindingFact {
 /** One lazy imperative effect block and its capture-derived execution contract. */
 export interface EffectExpressionFact {
   readonly _tag: 'EffectBlock'
-  readonly site: Hir.EffectSiteId
+  readonly site: Tir.EffectSiteId
   readonly representationOwner?: Type.ExecutableSpecializationOwner
   readonly statements: ReadonlyArray<StatementFact>
   readonly captures: ReadonlyArray<EffectCaptureFact>
   readonly bindings: ReadonlyArray<BindingDeclarationFact>
-  readonly regions: ReadonlyArray<Hir.RegionId>
+  readonly regions: ReadonlyArray<Tir.RegionId>
   readonly type: ExpressionTypeFact
   readonly syntax: SyntaxTree.Node
 }
@@ -1134,7 +1135,7 @@ export type ExpressionFact =
       readonly staticFailure?: StaticEvaluation.StaticFailure
       readonly mappings: ReadonlyArray<ArgumentMappingFact>
       readonly contract: CallContractFact
-      readonly witnessEffectSite?: Hir.EffectSiteId
+      readonly witnessEffectSite?: Tir.EffectSiteId
       readonly type: ExpressionTypeFact
       readonly syntax: SyntaxTree.Node
     }
@@ -1331,24 +1332,24 @@ export type StatementFact =
   | {
       readonly _tag: 'UnsafeStatement'
       readonly statements: ReadonlyArray<StatementFact>
-      readonly region: Hir.RegionId
+      readonly region: Tir.RegionId
       readonly syntax: SyntaxTree.Node
     }
   | {
       readonly _tag: 'BindStatement'
       readonly binding: BindingDeclarationFact
-      readonly region: Hir.RegionId
+      readonly region: Tir.RegionId
     }
   | {
       readonly _tag: 'PatternBindStatement'
       readonly selection: PatternSelectionFact
-      readonly region: Hir.RegionId
+      readonly region: Tir.RegionId
       readonly syntax: SyntaxTree.Node
     }
   | {
       readonly _tag: 'ExpressionStatement'
       readonly expression: ExpressionFact
-      readonly region: Hir.RegionId
+      readonly region: Tir.RegionId
       readonly syntax: SyntaxTree.Node
     }
   | {
@@ -1356,7 +1357,7 @@ export type StatementFact =
       readonly condition: ExpressionFact
       readonly taken: ReadonlyArray<StatementFact>
       readonly otherwise: ReadonlyArray<StatementFact>
-      readonly region: Hir.RegionId
+      readonly region: Tir.RegionId
       readonly syntax: SyntaxTree.Node
     }
   | {
@@ -1364,7 +1365,7 @@ export type StatementFact =
       readonly selection: PatternSelectionFact
       readonly taken: ReadonlyArray<StatementFact>
       readonly otherwise: ReadonlyArray<StatementFact>
-      readonly region: Hir.RegionId
+      readonly region: Tir.RegionId
       readonly syntax: SyntaxTree.Node
     }
   | {
@@ -1375,34 +1376,34 @@ export type StatementFact =
       readonly compatible: boolean
       /** Checked conversion bounds for this value; installation still controls region validity. */
       readonly lifetimeProof: ReadonlyArray<Lifetime.Outlives>
-      readonly region: Hir.RegionId
+      readonly region: Tir.RegionId
       readonly syntax: SyntaxTree.Node
     }
   | {
       readonly _tag: 'WhileStatement'
-      readonly loop: Hir.LoopId
-      readonly parent?: Hir.LoopId
+      readonly loop: Tir.LoopId
+      readonly parent?: Tir.LoopId
       readonly condition: ExpressionFact
       readonly body: ReadonlyArray<StatementFact>
-      readonly region: Hir.RegionId
+      readonly region: Tir.RegionId
       readonly syntax: SyntaxTree.Node
     }
   | {
       readonly _tag: 'BreakStatement'
-      readonly target?: Hir.LoopId
-      readonly region: Hir.RegionId
+      readonly target?: Tir.LoopId
+      readonly region: Tir.RegionId
       readonly syntax: SyntaxTree.Node
     }
   | {
       readonly _tag: 'ContinueStatement'
-      readonly target?: Hir.LoopId
-      readonly region: Hir.RegionId
+      readonly target?: Tir.LoopId
+      readonly region: Tir.RegionId
       readonly syntax: SyntaxTree.Node
     }
   | {
       readonly _tag: 'ReturnStatement'
       readonly expression: ExpressionFact
-      readonly region: Hir.RegionId
+      readonly region: Tir.RegionId
       readonly syntax: SyntaxTree.Node
     }
   | {
@@ -1410,13 +1411,13 @@ export type StatementFact =
       readonly expression: ExpressionFact
       readonly failure?: Type.Type
       readonly transfer: 'Copy' | 'Move'
-      readonly region: Hir.RegionId
+      readonly region: Tir.RegionId
       readonly syntax: SyntaxTree.Node
     }
   | {
       readonly _tag: 'DropStatement'
       readonly expression: ExpressionFact
-      readonly region: Hir.RegionId
+      readonly region: Tir.RegionId
       readonly syntax: SyntaxTree.Node
     }
 
@@ -1428,7 +1429,7 @@ export interface FunctionFact {
   readonly declaration: DeclarationFact
   readonly statements: ReadonlyArray<StatementFact>
   readonly bindings: ReadonlyArray<BindingDeclarationFact>
-  readonly regionOrder: ReadonlyArray<Hir.RegionId>
+  readonly regionOrder: ReadonlyArray<Tir.RegionId>
   readonly returnedExpression: ExpressionFact
   readonly returnCompatibility: ReturnCompatibility
   /** The finite composite Effect representation joined across distinct return sites. */
@@ -1463,12 +1464,14 @@ export type DeclarationLookup = DeclarationFacts.DeclarationLookup
 export interface Result {
   readonly _tag: 'Elaboration'
   readonly syntax: SyntaxFile.SyntaxFile
+  /** The authored module this elaboration consumed; reuse keys derive from it, not from syntax. */
+  readonly authored: AuthoredLowering.Lowered
   readonly functions: ReadonlyArray<FunctionFact>
   /** Compiler-private executable bodies that never participate in source declaration lookup. */
   readonly hiddenFunctions: ReadonlyArray<FunctionFact>
   readonly generatedAggregates: ReadonlyArray<DeclarationFacts.StructFact>
   readonly lexicalScopes: ReadonlyArray<LexicalScopeFact>
-  readonly hir: Hir.Module
+  readonly tir: Tir.Module
   readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
 }
 
@@ -1816,7 +1819,7 @@ import {
   directStatementExpressions,
   lowerStatements,
   statementSpan,
-} from './HirLowering.js'
+} from './TirLowering.js'
 import { analyzeFunctionBody } from './StatementAnalysis.js'
 export interface FactVisitor {
   readonly statement?: (statement: StatementFact) => void
@@ -2148,16 +2151,17 @@ const lexicalScopesOf = (
   return Object.freeze(scopes)
 }
 
-/** Elaborates every declaration body into immutable facts and the module's HIR. */
+/** Elaborates every declaration body into immutable facts and the module's TIR. */
 export interface Input {
   readonly bodyQuery?: BodyQuery.BodyQuery
   readonly syntax: SyntaxFile.SyntaxFile
+  readonly authored: AuthoredLowering.Lowered
   readonly headers: DeclarationFacts.ModuleHeaders
   readonly scope: NameResolution.ModuleScope
   readonly index: DeclarationIndex.Index
 }
 
-const runtimeHirFunction = (fact: FunctionFact, index: DeclarationIndex.Index): Hir.HirFunction => {
+const runtimeTirFunction = (fact: FunctionFact, index: DeclarationIndex.Index): Tir.TirFunction => {
   const lifetimeAssumptions = Lifetime.assumptions(fact.lifetimeFlow?.input.constraints ?? [])
   const lifetimeCompatibility = TypeCompatibility.context({
     assumptions: lifetimeAssumptions,
@@ -2166,11 +2170,11 @@ const runtimeHirFunction = (fact: FunctionFact, index: DeclarationIndex.Index): 
   const originalEntryRegion =
     fact.regionOrder.at(0) ??
     Object.freeze({
-      _tag: 'HirRegion' as const,
+      _tag: 'TirRegion' as const,
       function: fact.declaration.id,
       ordinal: 0,
     })
-  const baseContract = Hir.contractOf(fact.declaration)
+  const baseContract = Tir.contractOf(fact.declaration)
   if (
     fact.declaration.functionKind === 'Effect' &&
     fact.declaration.returnType._tag === 'Resolved' &&
@@ -2256,12 +2260,12 @@ const runtimeHirFunction = (fact: FunctionFact, index: DeclarationIndex.Index): 
     )
     const body = SyntaxTree.directNode(fact.declaration.syntax, 'Block')
     const siteSpan = body?.span ?? fact.declaration.syntax.span
-    const entryRegion: Hir.RegionId = Object.freeze({
-      _tag: 'HirRegion',
+    const entryRegion: Tir.RegionId = Object.freeze({
+      _tag: 'TirRegion',
       function: fact.declaration.id,
       ordinal: Math.max(-1, ...fact.regionOrder.map((region) => region.ordinal)) + 1,
     })
-    const effectBlock: Extract<Hir.Expression, { readonly _tag: 'EffectBlock' }> = Object.freeze({
+    const effectBlock: Extract<Tir.Expression, { readonly _tag: 'EffectBlock' }> = Object.freeze({
       _tag: 'EffectBlock',
       site: Object.freeze({
         _tag: 'EffectSiteId',
@@ -2301,7 +2305,7 @@ const runtimeHirFunction = (fact: FunctionFact, index: DeclarationIndex.Index): 
       span: siteSpan,
     })
     return Object.freeze({
-      _tag: 'HirFunction',
+      _tag: 'TirFunction',
       declaration: fact.declaration,
       contract: Object.freeze({
         _tag: 'Contract',
@@ -2323,7 +2327,7 @@ const runtimeHirFunction = (fact: FunctionFact, index: DeclarationIndex.Index): 
     })
   }
   return Object.freeze({
-    _tag: 'HirFunction',
+    _tag: 'TirFunction',
     declaration: fact.declaration,
     contract: baseContract,
     entryRegion: originalEntryRegion,
@@ -2346,18 +2350,18 @@ const runtimeHirFunction = (fact: FunctionFact, index: DeclarationIndex.Index): 
   })
 }
 
-/** Lowers one already-residual runtime function fact into backend-facing HIR. */
-export const residualHirFunction = (
+/** Lowers one already-residual runtime function fact into backend-facing TIR. */
+export const residualTirFunction = (
   fact: FunctionFact,
   index: DeclarationIndex.Index,
-): Hir.HirFunction => {
+): Tir.TirFunction => {
   if (fact.declaration.phase === 'Static')
-    throw new RangeError('Static functions have no runtime HIR body')
-  return runtimeHirFunction(fact, index)
+    throw new RangeError('Static functions have no runtime TIR body')
+  return runtimeTirFunction(fact, index)
 }
 
 export const elaborateModule = (input: Input): Result => {
-  const { syntax, headers, scope, index } = input
+  const { syntax, authored, headers, scope, index } = input
   const source = syntax.source
   const declarations = headers.declarations
   const hiddenFunctions: Array<FunctionFact> = []
@@ -2374,7 +2378,15 @@ export const elaborateModule = (input: Input): Result => {
         )
       return input.bodyQuery === undefined
         ? compute()
-        : BodyQuery.check(input.bodyQuery, source, scope, declaration, hiddenFunctions, compute)
+        : BodyQuery.check(
+            input.bodyQuery,
+            source,
+            authored,
+            scope,
+            declaration,
+            hiddenFunctions,
+            compute,
+          )
     })
   const constantDiagnostics = headers.constants.flatMap((constant) =>
     constant.name._tag === 'Present'
@@ -2389,12 +2401,12 @@ export const elaborateModule = (input: Input): Result => {
     ...analyzed.flatMap((result) => result.diagnostics),
     ...constrainedCallableEscapeDiagnostics(functions),
   ].sort(compareDiagnostics)
-  const hir: Hir.Module = Object.freeze({
-    _tag: 'HirModule',
+  const tir: Tir.Module = Object.freeze({
+    _tag: 'TirModule',
     module: source.id,
     functions: Object.freeze(
       allRuntimeFunctions.flatMap((fact) =>
-        fact.declaration.phase === 'Static' ? [] : [runtimeHirFunction(fact, index)],
+        fact.declaration.phase === 'Static' ? [] : [runtimeTirFunction(fact, index)],
       ),
     ),
   })
@@ -2402,13 +2414,14 @@ export const elaborateModule = (input: Input): Result => {
   return Object.freeze({
     _tag: 'Elaboration',
     syntax,
+    authored,
     functions,
     hiddenFunctions: Object.freeze([...hiddenFunctions]),
     generatedAggregates: Object.freeze(
       allRuntimeFunctions.flatMap((fact) => fact.generatedAggregates),
     ),
     lexicalScopes: lexicalScopesOf(syntax.source, allRuntimeFunctions),
-    hir,
+    tir,
     diagnostics: Object.freeze(diagnostics),
   })
 }

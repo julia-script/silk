@@ -4,7 +4,7 @@ import type * as CleanupPlan from './CleanupPlan.js'
 import * as Constraint from './Constraint.js'
 import type * as DeclarationFacts from './DeclarationFacts.js'
 import type * as DeclarationIndex from './DeclarationIndex.js'
-import type * as Hir from './Hir.js'
+import type * as Tir from './Tir.js'
 import * as Instances from './Instances.js'
 import type * as Layout from './Layout.js'
 import type { ExecutableEffectType, ProvidedRequirement } from './Lower.js'
@@ -126,7 +126,7 @@ export const selectCall = (
 
 export interface LoweringFailure {
   readonly boundary: 'Expression' | 'Statement'
-  readonly construct: Hir.Expression['_tag'] | Hir.Statement['_tag']
+  readonly construct: Tir.Expression['_tag'] | Tir.Statement['_tag']
   readonly provenance: Mir.Provenance
   readonly reason?:
     | {
@@ -173,16 +173,16 @@ export class FunctionLowering {
   >()
   readonly initializationFlagRoots = new Map<string, Mir.LocalId>()
   initializationStarted = false
-  readonly effectRecipes = new Map<number, Hir.Expression>()
-  readonly callableRecipes = new Map<number, Hir.Expression>()
-  readonly effectLoanEnds = new Map<number, ReadonlyArray<Hir.BorrowId>>()
+  readonly effectRecipes = new Map<number, Tir.Expression>()
+  readonly callableRecipes = new Map<number, Tir.Expression>()
+  readonly effectLoanEnds = new Map<number, ReadonlyArray<Tir.BorrowId>>()
   readonly realizedRecipeBorrows = new Set<string>()
   readonly issuedBorrowKeys: Set<string>
   readonly patternLocals = new Map<string, Mir.LocalId>()
   readonly loanLocals = new Map<string, Mir.LocalId>()
-  readonly loanIds = new Map<string, Hir.BorrowId>()
+  readonly loanIds = new Map<string, Tir.BorrowId>()
   readonly loanParents = new Map<string, string>()
-  readonly slotLoans = new Map<number, ReadonlyArray<Hir.BorrowId>>()
+  readonly slotLoans = new Map<number, ReadonlyArray<Tir.BorrowId>>()
   readonly callableDefinitions = new Map<
     number,
     Extract<Mir.Operation, { readonly _tag: 'MakeCallable' }>
@@ -204,8 +204,8 @@ export class FunctionLowering {
   activeRequirements: ReadonlyArray<ProvidedRequirement> | undefined
   private operations: Array<Mir.Operation> = []
   private syntheticBorrowOrdinal = 0
-  private replayBorrowSubstitution: Map<string, Hir.BorrowId> | undefined
-  private readonly directBorrowSubstitution = new Map<string, Hir.BorrowId>()
+  private replayBorrowSubstitution: Map<string, Tir.BorrowId> | undefined
+  private readonly directBorrowSubstitution = new Map<string, Tir.BorrowId>()
   loweringFailure: LoweringFailure | undefined
 
   constructor(
@@ -238,9 +238,9 @@ export class FunctionLowering {
     return id
   }
 
-  freshSyntheticBorrow(span: SourceSpan.SourceSpan): Hir.BorrowId {
+  freshSyntheticBorrow(span: SourceSpan.SourceSpan): Tir.BorrowId {
     while (true) {
-      const borrow: Hir.BorrowId = Object.freeze({
+      const borrow: Tir.BorrowId = Object.freeze({
         _tag: 'BorrowId',
         function: this.owner.function.declaration.id,
         callSpan: span,
@@ -264,7 +264,7 @@ export class FunctionLowering {
     }
   }
 
-  beginRecipeBorrow(authored: Hir.BorrowId): Hir.BorrowId {
+  beginRecipeBorrow(authored: Tir.BorrowId): Tir.BorrowId {
     const key = borrowKey(authored)
     if (this.replayBorrowSubstitution === undefined) {
       const realized = this.realizedRecipeBorrows.has(key)
@@ -286,7 +286,7 @@ export class FunctionLowering {
     return realized
   }
 
-  recipeBorrow(authored: Hir.BorrowId): Hir.BorrowId {
+  recipeBorrow(authored: Tir.BorrowId): Tir.BorrowId {
     const key = borrowKey(authored)
     return (
       this.replayBorrowSubstitution?.get(key) ?? this.directBorrowSubstitution.get(key) ?? authored

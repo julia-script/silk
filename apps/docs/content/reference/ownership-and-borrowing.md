@@ -623,7 +623,7 @@ Passing a fixed array directly where a slice is expected reports `SEM0059` and r
 borrow. A temporary-derived view that escapes its hidden owner reports the applicable returned-view
 or stored-borrow diagnostic at the escape boundary.
 
-The compiler materializes temporary owners and retains indexed-place selectors through HIR and MIR.
+The compiler materializes temporary owners and retains indexed-place selectors through TIR and MIR.
 `SEM0056` remains appropriate only for operands that cannot denote or produce owned storage.
 
 **Evidence:** [runtime-slice specification](../../../../openspec/specs/bootstrap-runtime-slices/spec.md),

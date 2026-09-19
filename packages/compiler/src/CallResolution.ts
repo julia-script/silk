@@ -60,7 +60,7 @@ import {
   strongestEffectAccess,
   unavailableExpression,
 } from './ExpressionAnalysis.js'
-import type * as Hir from './Hir.js'
+import type * as Tir from './Tir.js'
 import * as Intrinsic from './Intrinsic.js'
 import * as TypeInference from './internal/TypeInference.js'
 import * as NameResolution from './NameResolution.js'
@@ -2249,7 +2249,7 @@ export const copyAssumptionsOf = (declaration: DeclarationFact): ReadonlySet<str
 
 export interface BuiltinSignature {
   readonly id: Intrinsic.OperationId
-  readonly operation: Hir.BuiltinOperation
+  readonly operation: Tir.BuiltinOperation
   readonly typeParameters?: ReadonlyArray<Type.Parameter>
   readonly parameters: ReadonlyArray<SemanticType>
   readonly result: SemanticType
@@ -3393,17 +3393,17 @@ export function executableSite(
   tag: 'CallableSiteId',
   resolution: ResolutionContext,
   node: SyntaxTree.Node,
-): Hir.CallableSiteId
+): Tir.CallableSiteId
 export function executableSite(
   tag: 'EffectSiteId',
   resolution: ResolutionContext,
   node: SyntaxTree.Node,
-): Hir.EffectSiteId
+): Tir.EffectSiteId
 export function executableSite(
   tag: 'CallableSiteId' | 'EffectSiteId',
   resolution: ResolutionContext,
   node: SyntaxTree.Node,
-): Hir.CallableSiteId | Hir.EffectSiteId {
+): Tir.CallableSiteId | Tir.EffectSiteId {
   const ordinal = resolution.executableSites?.get(node) ?? 0
   return Object.freeze({
     _tag: tag,

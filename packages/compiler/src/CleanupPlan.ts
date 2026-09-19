@@ -2,13 +2,13 @@ import * as ConformanceProof from './ConformanceProof.js'
 import * as DeclarationFacts from './DeclarationFacts.js'
 import type * as DeclarationIndex from './DeclarationIndex.js'
 import type * as FieldRealization from './FieldRealization.js'
-import type * as Hir from './Hir.js'
+import type * as Tir from './Tir.js'
 import * as TypeInference from './internal/TypeInference.js'
 import * as MovePath from './MovePath.js'
 import * as Type from './Type.js'
 
 export type CallableEnvironmentLocator =
-  | { readonly _tag: 'CallableEnvironmentSite'; readonly site: Hir.CallableSiteId }
+  | { readonly _tag: 'CallableEnvironmentSite'; readonly site: Tir.CallableSiteId }
   | {
       readonly _tag: 'CallableEnvironmentIdentity'
       readonly identity: Type.CallableEnvironmentIdentity
@@ -113,7 +113,7 @@ export type CleanupPlan =
   | {
       readonly _tag: 'EffectCleanup'
       readonly type: Type.Effect
-      readonly site: Hir.EffectSiteId
+      readonly site: Tir.EffectSiteId
       readonly slots: ReadonlyArray<{
         readonly ordinal: number
         readonly laneOffset: number

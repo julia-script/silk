@@ -1,4 +1,4 @@
-hir-module golden://accepted.silk
+tir-module golden://accepted.silk
 fn golden://accepted.silk.identity (i32) -> i32 entry=r0 regions=r0
   return r0 [43, 49)
     param fn0.p0 : i32 [43, 49)

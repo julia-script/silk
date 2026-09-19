@@ -3,7 +3,7 @@ import * as DeclarationFacts from './DeclarationFacts.js'
 import type * as DeclarationIndex from './DeclarationIndex.js'
 import * as Diagnostic from './Diagnostic.js'
 import * as FieldRealization from './FieldRealization.js'
-import * as Hir from './Hir.js'
+import * as Tir from './Tir.js'
 import * as Instances from './Instances.js'
 import * as TypeInference from './internal/TypeInference.js'
 import * as RepresentationField from './RepresentationField.js'
@@ -162,8 +162,8 @@ export const representedNominals = (
   const found = new Map<string, Type.Nominal>()
   for (const instance of self.instances) {
     const expressions = instance.function.statements
-      .flatMap(Hir.statementExpressions)
-      .flatMap(Hir.expressionTree)
+      .flatMap(Tir.statementExpressions)
+      .flatMap(Tir.expressionTree)
     for (const expression of expressions) {
       if (
         expression._tag !== 'Construct' &&
@@ -277,8 +277,8 @@ const storedExecutableViolations = (
   return Object.freeze(
     self.instances.flatMap((instance) =>
       instance.function.statements
-        .flatMap(Hir.statementExpressions)
-        .flatMap(Hir.expressionTree)
+        .flatMap(Tir.statementExpressions)
+        .flatMap(Tir.expressionTree)
         .flatMap((expression) => {
           if (
             expression._tag !== 'Construct' &&
@@ -417,8 +417,8 @@ export const unlowerableWitnessViolations = (
   Object.freeze(
     self.instances.flatMap((instance) =>
       instance.function.statements
-        .flatMap(Hir.statementExpressions)
-        .flatMap(Hir.expressionTree)
+        .flatMap(Tir.statementExpressions)
+        .flatMap(Tir.expressionTree)
         .flatMap((expression) => {
           if (expression._tag !== 'InterfaceOperationCall') return []
           const capability = Type.substitute(

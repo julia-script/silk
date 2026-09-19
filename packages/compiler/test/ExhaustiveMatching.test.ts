@@ -7,7 +7,7 @@ import * as MirLinearization from '../src/MirLinearization.js'
 import * as MirVerification from '../src/MirVerification.js'
 import * as NativeFunction from '../src/NativeFunction.js'
 import * as Elaboration from '../src/Elaboration.js'
-import * as Hir from '../src/Hir.js'
+import * as Tir from '../src/Tir.js'
 import * as Lexer from '../src/Lexer.js'
 import * as Match from '../src/Match.js'
 import * as OwnershipEncoding from '../src/OwnershipEncoding.js'
@@ -28,7 +28,7 @@ const returnedMatch = (
   return returned?._tag === 'Match' ? returned : raise('expected returned match fact')
 }
 
-it('publishes guarded source-order coverage, narrowed bindings, and acyclic HIR', () => {
+it('publishes guarded source-order coverage, narrowed bindings, and acyclic TIR', () => {
   const result = analyze(
     'main',
     `pub struct Token { kind: i32 }
@@ -81,15 +81,15 @@ pub fn inspect(event: Token | End) -> i32 {
     if (body.expression._tag === 'Identifier')
       assert.strictEqual(body.expression.reference._tag, 'ResolvedPattern')
   }
-  const hir = result.hir.functions.at(0)?.statements.at(-1)
-  assert.strictEqual(hir?._tag, 'Return')
-  if (hir?._tag !== 'Return') return
-  assert.strictEqual(hir.expression._tag, 'Match')
+  const tir = result.tir.functions.at(0)?.statements.at(-1)
+  assert.strictEqual(tir?._tag, 'Return')
+  if (tir?._tag !== 'Return') return
+  assert.strictEqual(tir.expression._tag, 'Match')
   assert.strictEqual(
-    Hir.expressionTree(hir.expression).filter((item) => item._tag === 'Match').length,
+    Tir.expressionTree(tir.expression).filter((item) => item._tag === 'Match').length,
     1,
   )
-  assert.include(Hir.encode(result.hir), 'match shared members=main.End,main.Token : i32')
+  assert.include(Tir.encode(result.tir), 'match shared members=main.End,main.Token : i32')
 })
 
 it('covers scalar enums by canonical member identity without payload bindings', () => {
@@ -147,13 +147,13 @@ fn inspect(value: Status) -> i32 {
   assert.strictEqual(match.scrutinee.type._tag, 'Available')
   if (match.scrutinee.type._tag === 'Available')
     assert.strictEqual(Type.encode(match.scrutinee.type.type), 'enum-coverage.Status')
-  const returned = result.hir.functions.at(0)?.statements.at(-1)
+  const returned = result.tir.functions.at(0)?.statements.at(-1)
   assert.strictEqual(returned?._tag, 'Return')
   if (returned?._tag !== 'Return' || returned.expression._tag !== 'Match') return
   assert.strictEqual(returned.expression.arms[0]?.member?._tag, 'EnumMember')
-  assert.deepEqual(Hir.verify(result.hir), [])
+  assert.deepEqual(Tir.verify(result.tir), [])
   assert.include(
-    Hir.encode(result.hir),
+    Tir.encode(result.tir),
     'match copy members=enum-coverage.Status.Unknown,enum-coverage.Status.Ready : i32',
   )
 })
@@ -321,7 +321,7 @@ pub fn inspect(event: Token, offset: i32) -> i32 {
   assert.strictEqual(match.type._tag, 'Unavailable')
 })
 
-it('joins nominal arm results and records explicit MatchArm widening in HIR', () => {
+it('joins nominal arm results and records explicit MatchArm widening in TIR', () => {
   const result = analyze(
     'joining',
     `pub struct Left {}
@@ -336,7 +336,7 @@ pub fn select(input: HasLeft | HasRight) -> Left | Right {
 }`,
   )
   const match = returnedMatch(result)
-  const returned = result.hir.functions.at(0)?.statements.at(-1)
+  const returned = result.tir.functions.at(0)?.statements.at(-1)
 
   assert.deepEqual(result.diagnostics, [])
   assert.strictEqual(match.type._tag, 'Available')
@@ -356,14 +356,14 @@ pub fn select(input: HasLeft | HasRight) -> Left | Right {
       { context: 'MatchArm', target: 'joining.Left | joining.Right' },
     ],
   )
-  assert.deepEqual(Hir.verify(result.hir), [])
-  const fn = result.hir.functions.at(0) ?? raise('expected joining HIR function')
+  assert.deepEqual(Tir.verify(result.tir), [])
+  const fn = result.tir.functions.at(0) ?? raise('expected joining TIR function')
   const reversedMatch = Object.freeze({
     ...returned.expression,
     arms: Object.freeze([...returned.expression.arms].reverse()),
   })
-  const invalidModule: Hir.Module = Object.freeze({
-    ...result.hir,
+  const invalidModule: Tir.Module = Object.freeze({
+    ...result.tir,
     functions: Object.freeze([
       Object.freeze({
         ...fn,
@@ -372,7 +372,7 @@ pub fn select(input: HasLeft | HasRight) -> Left | Right {
     ]),
   })
   assert.include(
-    Hir.verify(invalidModule).map((issue) => issue._tag),
+    Tir.verify(invalidModule).map((issue) => issue._tag),
     'InvalidMatchArmOrder',
   )
 })
@@ -627,10 +627,10 @@ fn inner(value: Choice) {
       [true, true],
     ],
   )
-  assert.deepEqual(Hir.verify(result.hir), [])
-  for (const fn of result.hir.functions)
-    for (const root of fn.statements.flatMap(Hir.statementExpressions)) {
-      for (const match of Hir.expressionTree(root).filter(
+  assert.deepEqual(Tir.verify(result.tir), [])
+  for (const fn of result.tir.functions)
+    for (const root of fn.statements.flatMap(Tir.statementExpressions)) {
+      for (const match of Tir.expressionTree(root).filter(
         (expression) => expression._tag === 'Match',
       )) {
         assert.isTrue(
@@ -716,10 +716,10 @@ fn invalidBorrow(values: &[i32], value: Choice) -> &[i32] { return match value {
     [' 2', ' 3'],
   )
   const guarded =
-    result.hir.functions.find(
+    result.tir.functions.find(
       (fn) => fn.declaration.name._tag === 'Present' && fn.declaration.name.spelling === 'guarded',
     ) ?? raise('expected guarded function')
-  assert.deepEqual(Hir.verify({ ...result.hir, functions: [guarded] }), [])
+  assert.deepEqual(Tir.verify({ ...result.tir, functions: [guarded] }), [])
 })
 
 it('shares lexical loop destinations and enclosing failure contracts without crossing explicit boundaries', () => {

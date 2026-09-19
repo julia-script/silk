@@ -1,6 +1,6 @@
 import * as ConformanceProof from './ConformanceProof.js'
 import type * as DeclarationIndex from './DeclarationIndex.js'
-import * as Hir from './Hir.js'
+import * as Tir from './Tir.js'
 import * as Lifetime from './Lifetime.js'
 import type * as Instances from './Instances.js'
 import * as RepresentationField from './RepresentationField.js'
@@ -81,7 +81,7 @@ export interface CallableRealization {
   /** Present when the target is reached through a capturing section rather than a named function. */
   readonly environment?: Type.CallableEnvironmentIdentity
   /** The specialized environment's own site, which names its lanes to layout, MIR, and cleanup. */
-  readonly site?: Hir.CallableSiteId
+  readonly site?: Tir.CallableSiteId
   readonly captures: ReadonlyArray<CaptureSlot>
   readonly invocation: ReceiverAccess
   readonly loans: ReadonlyArray<LoanDependency>
@@ -137,7 +137,7 @@ export interface EffectRealization {
   readonly runner: Instances.EffectInstance['runner']
   readonly runnerInstance: Instances.InstanceKey
   readonly runnerArguments: ReadonlyArray<Type.GenericArgument>
-  readonly site: Hir.EffectSiteId
+  readonly site: Tir.EffectSiteId
   readonly rows: EffectRows
   readonly access: Type.Effect['access']
   readonly environment: ReadonlyArray<EffectEnvironmentSlot>
@@ -336,7 +336,7 @@ type EnvironmentCaptures =
   | {
       readonly _tag: 'ResolvedEnvironment'
       readonly slots: ReadonlyArray<CaptureSlot>
-      readonly site?: Hir.CallableSiteId
+      readonly site?: Tir.CallableSiteId
     }
   | { readonly _tag: 'UnresolvedEnvironment'; readonly reason: UnsupportedReason }
 
@@ -379,13 +379,13 @@ export const matchesIdentity = (
   identity.environment !== undefined &&
   Type.runtimeCallableEnvironmentIdentityKey(identity.environment) ===
     Type.runtimeCallableEnvironmentIdentityKey(
-      Hir.callableEnvironmentIdentity(candidate.site, {
+      Tir.callableEnvironmentIdentity(candidate.site, {
         declaration: candidate.owner.declaration,
         typeArguments: candidate.owner.typeArguments,
         staticArgumentKeys: Object.freeze(candidate.owner.staticArguments.map(StaticValue.key)),
       }),
     ) &&
-  Hir.matchesCallableTargetIdentity(candidate.target, identity.target) &&
+  Tir.matchesCallableTargetIdentity(candidate.target, identity.target) &&
   sameArguments(identity.typeArguments, candidate.typeArguments)
 
 /** One capture shape signature, used only to detect indistinguishable environments. */
@@ -708,13 +708,13 @@ export const matchesCallable = (
   candidate: Instances.CallableInstance,
 ): boolean =>
   self.site !== undefined &&
-  Hir.sameExecutableSite(self.site, candidate.site) &&
-  Hir.matchesCallableTargetIdentity(candidate.target, self.target) &&
+  Tir.sameExecutableSite(self.site, candidate.site) &&
+  Tir.matchesCallableTargetIdentity(candidate.target, self.target) &&
   sameArguments(self.targetArguments, candidate.typeArguments) &&
   self.environment !== undefined &&
   Type.runtimeCallableEnvironmentIdentityKey(self.environment) ===
     Type.runtimeCallableEnvironmentIdentityKey(
-      Hir.callableEnvironmentIdentity(candidate.site, {
+      Tir.callableEnvironmentIdentity(candidate.site, {
         declaration: candidate.owner.declaration,
         typeArguments: candidate.owner.typeArguments,
         staticArgumentKeys: Object.freeze(candidate.owner.staticArguments.map(StaticValue.key)),
@@ -725,9 +725,9 @@ export const matchesCallable = (
 const equalsCallable = (left: CallableRealization, right: CallableRealization): boolean =>
   key(left.instance, left.field) === key(right.instance, right.field) &&
   Type.runtimeKey(left.contract) === Type.runtimeKey(right.contract) &&
-  Hir.sameCallableTarget(
-    Hir.callableTargetFromIdentity(left.target),
-    Hir.callableTargetFromIdentity(right.target),
+  Tir.sameCallableTarget(
+    Tir.callableTargetFromIdentity(left.target),
+    Tir.callableTargetFromIdentity(right.target),
   ) &&
   sameArguments(left.targetArguments, right.targetArguments) &&
   ((left.environment === undefined && right.environment === undefined) ||
@@ -738,7 +738,7 @@ const equalsCallable = (left: CallableRealization, right: CallableRealization): 
   ((left.site === undefined && right.site === undefined) ||
     (left.site !== undefined &&
       right.site !== undefined &&
-      Hir.sameExecutableSite(left.site, right.site))) &&
+      Tir.sameExecutableSite(left.site, right.site))) &&
   left.captures.length === right.captures.length &&
   left.captures.every((capture, ordinal) => {
     const candidate = right.captures.at(ordinal)
@@ -802,7 +802,7 @@ const equalsEffect = (left: EffectRealization, right: EffectRealization): boolea
   left.runner.module === right.runner.module &&
   left.runner.name === right.runner.name &&
   sameArguments(left.runnerArguments, right.runnerArguments) &&
-  Hir.sameExecutableSite(left.site, right.site) &&
+  Tir.sameExecutableSite(left.site, right.site) &&
   equalsEffectEnvironment(left.environment, right.environment) &&
   left.access === right.access &&
   left.cleanup.consumedByRun === right.cleanup.consumedByRun &&

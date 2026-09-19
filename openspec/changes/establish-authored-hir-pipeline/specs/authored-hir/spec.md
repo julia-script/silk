@@ -100,3 +100,23 @@ access. A1's foundation MUST NOT independently land as an unused competing pipel
 
 - **WHEN** a request asks only for analysis
 - **THEN** preparation performs no instance/MIR/backend work and later execution requires a new preparation request
+
+### Requirement: Semantic reuse keys derive from authored content
+
+Every loaded module SHALL be lowered to its authored module and presentation once per parse and
+carried beside its syntax through the closure and elaboration inputs. Body-query reuse SHALL key
+implementations by the canonical authored body, alpha-normalizing header lifetime binders to their
+declaration ordinal, and SHALL key scope sensitivity by the authored names spelled in the body; it
+MUST NOT tokenize or slice source to build a key. Hidden anonymous bodies SHALL take their
+snapshot-local declaration identity from their enclosing declaration and callable site, never from a
+byte offset. The typed executable representation is named TIR; authored HIR is the untyped input.
+
+#### Scenario: Alpha-rename a lifetime
+
+- **WHEN** a library renames `'a` to `'long` in a generic function without changing its meaning
+- **THEN** its body query and every consumer body are reused without executing a checker, and consumers observe the new spelling through current declaration facts
+
+#### Scenario: Insert an unrelated declaration
+
+- **WHEN** a declaration is inserted above a function that owns an anonymous callable
+- **THEN** the hidden body's identity moves with its enclosing declaration ordinal and the cached body is rebound without re-checking

@@ -1,3 +1,6 @@
+import * as Effect from 'effect/Effect'
+import * as AuthoredIdentity from '../../src/AuthoredIdentity.js'
+import * as AuthoredLowering from '../../src/AuthoredLowering.js'
 import * as Elaboration from '../../src/Elaboration.js'
 import type * as DeclarationIndex from '../../src/DeclarationIndex.js'
 import * as ModuleClosure from '../../src/ModuleClosure.js'
@@ -8,10 +11,14 @@ import type * as SyntaxFile from '../../src/SyntaxFile.js'
 const indices = new WeakMap<Elaboration.Result, DeclarationIndex.Index>()
 
 export const elaborate = (syntax: SyntaxFile.SyntaxFile): Elaboration.Result => {
+  const authored = Effect.runSync(
+    AuthoredLowering.lower(syntax, AuthoredIdentity.module('memory', 'fixture/module')),
+  )
   const module = Object.freeze({
     _tag: 'Module' as const,
     name: syntax.source.id,
     syntax,
+    authored,
     declarations: ModuleClosure.selectedDeclarations(syntax.root, new Map()),
     imports: Object.freeze([]),
   })
@@ -31,7 +38,7 @@ export const elaborate = (syntax: SyntaxFile.SyntaxFile): Elaboration.Result => 
   const scope = NameResolution.scopeOf(analyzed.resolution, syntax.source.id)
   if (headers === undefined || scope === undefined)
     throw new RangeError('Single-module elaboration fixture lost its module')
-  const result = Elaboration.elaborateModule({ syntax, headers, scope, index })
+  const result = Elaboration.elaborateModule({ syntax, authored, headers, scope, index })
   indices.set(result, index)
   return result
 }

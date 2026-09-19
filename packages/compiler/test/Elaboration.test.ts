@@ -7,7 +7,7 @@ import * as CallableContract from '../src/CallableContract.js'
 import * as DeclarationFacts from '../src/DeclarationFacts.js'
 import * as Diagnostic from '../src/Diagnostic.js'
 import * as Elaboration from '../src/Elaboration.js'
-import * as Hir from '../src/Hir.js'
+import * as Tir from '../src/Tir.js'
 import * as Lexer from '../src/Lexer.js'
 import * as Parser from '../src/Parser.js'
 import * as SourceFile from '../src/SourceFile.js'
@@ -496,13 +496,13 @@ fn main() -> i32 {
   return 0
 }`,
   )
-  const statement = result.hir.functions.at(1)?.statements.at(1)
+  const statement = result.tir.functions.at(1)?.statements.at(1)
   const binding = statement?._tag === 'Bind' ? statement.initializer : undefined
 
   assert.deepEqual(result.diagnostics, [])
   assert.strictEqual(binding?._tag, 'EffectBindRequirement')
   if (binding?._tag !== 'EffectBindRequirement') return
-  assert.strictEqual(Hir.selectedRequirement(binding.provider, new Map())?.access, 'Shared')
+  assert.strictEqual(Tir.selectedRequirement(binding.provider, new Map())?.access, 'Shared')
   assert.strictEqual(binding.provider.selectionAccess, 'Exclusive')
   assert.strictEqual(binding.provider.captureAccess, 'Exclusive')
 })
@@ -546,7 +546,7 @@ fn main() -> i32 {
   )
   const main = result.functions.at(1)
   const recipe = main?.bindings.at(1)?.initializer
-  const statement = result.hir.functions.at(1)?.statements.at(1)
+  const statement = result.tir.functions.at(1)?.statements.at(1)
   const binding = statement?._tag === 'Bind' ? statement.initializer : undefined
 
   assert.deepEqual(result.diagnostics, [])
@@ -586,7 +586,7 @@ fn main() -> i32 {
 }`,
   )
   const recipe = result.functions.at(2)?.bindings.at(1)?.initializer
-  const statement = result.hir.functions.at(2)?.statements.at(1)
+  const statement = result.tir.functions.at(2)?.statements.at(1)
   const binding = statement?._tag === 'Bind' ? statement.initializer : undefined
 
   assert.deepEqual(result.diagnostics, [])
@@ -617,12 +617,12 @@ fn main() -> i32 {
     )
     const main = result.functions.at(2)
     const recipe = main?.bindings.at(0)?.initializer
-    const hirRecipe = result.hir.functions.at(2)?.statements.at(0)
+    const tirRecipe = result.tir.functions.at(2)?.statements.at(0)
 
     assert.deepEqual(result.diagnostics, [])
     assert.strictEqual(recipe?._tag, 'CallableApply')
     assert.strictEqual(
-      hirRecipe?._tag === 'Bind' ? hirRecipe.initializer._tag : undefined,
+      tirRecipe?._tag === 'Bind' ? tirRecipe.initializer._tag : undefined,
       'CallableApply',
     )
     assert.strictEqual(recipe?.type._tag, 'Available')
@@ -1789,9 +1789,9 @@ effect fn nestedValue() -> Effect<'static; i32> { return inner() }`,
       },
     ],
   )
-  assert.deepEqual(result.hir.functions.length, result.functions.length)
+  assert.deepEqual(result.tir.functions.length, result.functions.length)
   assert.deepEqual(
-    result.hir.functions.at(0)?.statements.map((statement) => statement._tag),
+    result.tir.functions.at(0)?.statements.map((statement) => statement._tag),
     ['If'],
   )
 })
@@ -2465,7 +2465,7 @@ effect fn main() -> i32 ? &Logger { return run Logger.value() }`,
   if (returned.subject._tag !== 'Call') return
   assert.strictEqual(returned.subject.reference._tag, 'ResolvedServiceOperation')
   assert.include(
-    Hir.encode(result.hir),
+    Tir.encode(result.tir),
     'service-call service://call.Logger.value@DefaultRole:shared',
   )
 })

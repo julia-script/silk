@@ -43,7 +43,7 @@ it.effect('accepts the compiler-shaped fold through every static compiler phase'
     assert.deepEqual(Analysis.diagnostics(self), [])
     for (const name of moduleNames) {
       assert.isDefined(Projections.syntaxOf(self, name))
-      assert.isDefined(Projections.hirOf(self, name))
+      assert.isDefined(Projections.tirOf(self, name))
       assert.isDefined(Analysis.ownershipOf(self, name))
     }
     assert.isAbove(Analysis.instancesOf(self).instances.length, 0)

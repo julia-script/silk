@@ -3,7 +3,7 @@ import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
-import * as Hir from '../src/Hir.js'
+import * as Tir from '../src/Tir.js'
 import * as InstanceDiagnostics from '../src/InstanceDiagnostics.js'
 import * as Mir from '../src/Mir.js'
 import * as MirVerification from '../src/MirVerification.js'
@@ -158,13 +158,13 @@ pub fn main() -> i32 {
       Analysis.diagnostics(missing).map((diagnostic) => diagnostic.code),
       'SEM0121',
     )
-    const calls = Projections.hirOf(
+    const calls = Projections.tirOf(
       missing,
       'interface-operation-witness/missing-conformance',
     )?.functions.flatMap((fn) =>
       fn.statements
-        .flatMap(Hir.statementExpressions)
-        .flatMap(Hir.expressionTree)
+        .flatMap(Tir.statementExpressions)
+        .flatMap(Tir.expressionTree)
         .filter((expression) => expression._tag === 'InterfaceOperationCall'),
     )
     assert.deepEqual(calls, [])
@@ -361,13 +361,13 @@ impl Encodable<i32> for Age {
       Analysis.diagnostics(inaccessible).map((diagnostic) => diagnostic.code),
       'SEM0009',
     )
-    const inaccessibleCalls = Projections.hirOf(
+    const inaccessibleCalls = Projections.tirOf(
       inaccessible,
       `${module}/inaccessible`,
     )?.functions.flatMap((fn) =>
       fn.statements
-        .flatMap(Hir.statementExpressions)
-        .flatMap(Hir.expressionTree)
+        .flatMap(Tir.statementExpressions)
+        .flatMap(Tir.expressionTree)
         .filter((expression) => expression._tag === 'InterfaceOperationCall'),
     )
     assert.deepEqual(inaccessibleCalls, [])
@@ -628,11 +628,11 @@ pub fn main() -> i32 {
     )
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
     assert.deepEqual(yield* MirVerification.verify(Analysis.loweredMir(snapshot)), [])
-    const functions = Projections.hirOf(snapshot, sourceModule)?.functions ?? []
+    const functions = Projections.tirOf(snapshot, sourceModule)?.functions ?? []
     const calls = functions.flatMap((fn) =>
       fn.statements
-        .flatMap(Hir.statementExpressions)
-        .flatMap(Hir.expressionTree)
+        .flatMap(Tir.statementExpressions)
+        .flatMap(Tir.expressionTree)
         .filter((expression) => expression._tag === 'InterfaceOperationCall'),
     )
     assert.deepEqual(
@@ -662,12 +662,12 @@ pub fn main() -> i32 {
 it.effect('retains exact witness failure and requirement rows at interface boundaries', () =>
   Effect.gen(function* () {
     const callOf = (snapshot: Analysis.FrontendSnapshot, sourceModule: string, name: string) =>
-      Projections.hirOf(snapshot, sourceModule)
+      Projections.tirOf(snapshot, sourceModule)
         ?.functions.find(
           (fn) => fn.declaration.name._tag === 'Present' && fn.declaration.name.spelling === name,
         )
-        ?.statements.flatMap(Hir.statementExpressions)
-        .flatMap(Hir.expressionTree)
+        ?.statements.flatMap(Tir.statementExpressions)
+        .flatMap(Tir.expressionTree)
         .find((expression) => expression._tag === 'InterfaceOperationCall')
 
     const inlineModule = 'bound-operation-witness/inline-scalar-effect'

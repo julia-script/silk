@@ -6,7 +6,7 @@ import type * as DeclarationIndex from './DeclarationIndex.js'
 import * as Diagnostic from './Diagnostic.js'
 import * as ExecutionPackage from './ExecutionPackage.js'
 import * as FieldRealization from './FieldRealization.js'
-import * as Hir from './Hir.js'
+import * as Tir from './Tir.js'
 import * as InstanceDiagnostics from './InstanceDiagnostics.js'
 import * as Instances from './Instances.js'
 import { alignUp } from './internal/Align.js'
@@ -300,7 +300,7 @@ export type EffectEnvironment =
   | {
       readonly _tag: 'EffectEnvironment'
       readonly instance: Instances.InstanceKey
-      readonly site: Hir.EffectSiteId
+      readonly site: Tir.EffectSiteId
       readonly effect: Type.Effect
       readonly successEffectIdentity?: string
       readonly fields: ReadonlyArray<EffectEnvironmentField>
@@ -311,7 +311,7 @@ export type EffectEnvironment =
   | {
       readonly _tag: 'UnavailableEffectEnvironment'
       readonly instance: Instances.InstanceKey
-      readonly site: Hir.EffectSiteId
+      readonly site: Tir.EffectSiteId
       readonly effect: Type.Effect
       readonly reason: string
     }
@@ -742,7 +742,7 @@ const collectInstanceTypes = Effect.fn('Layout.collectInstanceTypes')(function* 
         yield* addReferenced(referenced, requirement.capability)
     }
     for (const statement of instance.function.statements) {
-      for (const expression of Hir.statementExpressions(statement))
+      for (const expression of Tir.statementExpressions(statement))
         yield* addSpecializedExpression(referenced, substitution, expression)
       yield* addPatternStatementTypes(referenced, substitution, statement)
     }
@@ -1896,17 +1896,17 @@ const addReferenced = Effect.fnUntraced(function* (
 const addSpecializedExpression = Effect.fnUntraced(function* (
   referenced: Map<string, Type.Type>,
   substitution: Type.Substitution,
-  expression: Hir.Expression,
+  expression: Tir.Expression,
 ): Effect.fn.Return<void> {
   if (expression._tag === 'Unavailable') return
   yield* addReferenced(referenced, Type.substitute(expression.type, substitution))
   if (expression._tag === 'UnionConvert')
     yield* addReferenced(referenced, Type.substitute(expression.sourceType, substitution))
-  for (const child of Hir.expressionTree(expression).slice(1)) {
+  for (const child of Tir.expressionTree(expression).slice(1)) {
     if (child._tag !== 'Unavailable')
       yield* addReferenced(referenced, Type.substitute(child.type, substitution))
   }
-  for (const child of Hir.expressionTree(expression)) {
+  for (const child of Tir.expressionTree(expression)) {
     if (child._tag === 'BuiltinCall') {
       if (Scalar.isCheckedOperation(child.operation)) yield* addReferenced(referenced, 'bool')
       for (const argument of child.typeArguments) {
@@ -1932,7 +1932,7 @@ const addSpecializedExpression = Effect.fnUntraced(function* (
 const addPatternStatementTypes = Effect.fnUntraced(function* (
   referenced: Map<string, Type.Type>,
   substitution: Type.Substitution,
-  statement: Hir.Statement,
+  statement: Tir.Statement,
 ): Effect.fn.Return<void> {
   if (statement._tag === 'PatternBind' || statement._tag === 'IfLet') {
     yield* addReferenced(referenced, 'bool')
@@ -2046,8 +2046,8 @@ const collectReachableTypes = Effect.fn('Layout.collectReachableTypes')(function
   for (const effect of discovery.effects) reached.set(Type.runtimeKey(effect.type), effect.type)
   for (const instance of discovery.instances) {
     for (const expression of instance.function.statements
-      .flatMap(Hir.statementExpressions)
-      .flatMap(Hir.expressionTree)) {
+      .flatMap(Tir.statementExpressions)
+      .flatMap(Tir.expressionTree)) {
       if (expression._tag === 'EffectCatch') reached.set(Type.runtimeKey('bool'), 'bool')
       if (
         expression._tag !== 'BuiltinCall' ||
@@ -2124,7 +2124,7 @@ const addFunctionTypes = Effect.fnUntraced(function* (
 
 const addStatementTypes = Effect.fnUntraced(function* (
   types: Map<string, DeclarationFacts.SemanticType>,
-  statements: ReadonlyArray<Hir.Statement>,
+  statements: ReadonlyArray<Tir.Statement>,
   substitution: Type.Substitution = new Map(),
 ): Effect.fn.Return<void> {
   for (const statement of statements) {
@@ -2186,7 +2186,7 @@ const addStatementTypes = Effect.fnUntraced(function* (
 
 const addExpressionTypes = Effect.fnUntraced(function* (
   types: Map<string, DeclarationFacts.SemanticType>,
-  expression: Hir.Expression,
+  expression: Tir.Expression,
   substitution: Type.Substitution = new Map(),
 ): Effect.fn.Return<void> {
   if (expression._tag === 'Unavailable') return
@@ -2408,8 +2408,8 @@ const checkLocalSharedLayouts = Effect.fn('Layout.checkLocalSharedLayouts')(func
   const localSharedDiagnostics: Array<Diagnostic.Diagnostic> = []
   for (const instance of discovery.instances) {
     for (const expression of instance.function.statements
-      .flatMap(Hir.statementExpressions)
-      .flatMap(Hir.expressionTree)) {
+      .flatMap(Tir.statementExpressions)
+      .flatMap(Tir.expressionTree)) {
       if (expression._tag !== 'BuiltinCall' || expression.operation !== 'SharedLayout') continue
       const raw = expression.typeArguments.at(0)
       const element =
@@ -2541,8 +2541,8 @@ const planExecutionPackages = Effect.fn('Layout.planExecutionPackages')(function
   const executionDiagnostics: Array<Diagnostic.Diagnostic> = []
   for (const instance of discovery.instances) {
     for (const expression of instance.function.statements
-      .flatMap(Hir.statementExpressions)
-      .flatMap(Hir.expressionTree)) {
+      .flatMap(Tir.statementExpressions)
+      .flatMap(Tir.expressionTree)) {
       if (
         expression._tag !== 'BuiltinCall' ||
         (expression.operation !== 'ExecutionLayout' &&
@@ -2647,8 +2647,8 @@ const planStaticData = Effect.fn('Layout.planStaticData')(function* (
   const staticDataById = new Map<string, StaticText.Data>()
   for (const instance of discovery.instances) {
     const expressions = instance.function.statements
-      .flatMap(Hir.statementExpressions)
-      .flatMap(Hir.runtimeExpressionTree)
+      .flatMap(Tir.statementExpressions)
+      .flatMap(Tir.runtimeExpressionTree)
     for (const expression of expressions) {
       if (expression._tag === 'StaticStringLiteral' || expression._tag === 'StaticByteViewLiteral')
         staticDataById.set(expression.data.id, expression.data)
@@ -2716,8 +2716,8 @@ const planLiteralVerdicts = Effect.fn('Layout.planLiteralVerdicts')(function* (
     addWordLiteral(state, constant.type, constant.value, constant.span)
   for (const instance of discovery.instances) {
     const expressions = instance.function.statements
-      .flatMap(Hir.statementExpressions)
-      .flatMap(Hir.runtimeExpressionTree)
+      .flatMap(Tir.statementExpressions)
+      .flatMap(Tir.runtimeExpressionTree)
     for (const expression of expressions) {
       if (expression._tag !== 'IntegerLiteral' || expression.constant !== undefined) continue
       const type = Type.substitute(
@@ -2854,7 +2854,7 @@ const planEffectEnvironments = Effect.fn('Layout.planEffectEnvironments')(functi
       (left, right) =>
         left.instance.declaration.module.localeCompare(right.instance.declaration.module) ||
         left.instance.declaration.name.localeCompare(right.instance.declaration.name) ||
-        Hir.compareExecutableSites(left.site, right.site) ||
+        Tir.compareExecutableSites(left.site, right.site) ||
         Type.key(left.effect).localeCompare(Type.key(right.effect)),
     ),
   )
@@ -2882,7 +2882,7 @@ const collectEffectBindings = Effect.fnUntraced(function* (
   instance: Instances.Instance,
   bindingTypes: Map<number, Type.Type>,
   patternTypes: Map<string, Type.Type>,
-  statements: ReadonlyArray<Hir.Statement>,
+  statements: ReadonlyArray<Tir.Statement>,
 ): Effect.fn.Return<void> {
   for (const statement of statements) {
     if (statement._tag === 'PatternBind' || statement._tag === 'IfLet')
@@ -2903,8 +2903,8 @@ const collectEffectBindings = Effect.fnUntraced(function* (
       yield* collectEffectBindings(instance, bindingTypes, patternTypes, statement.body)
     else if (statement._tag === 'Unsafe')
       yield* collectEffectBindings(instance, bindingTypes, patternTypes, statement.statements)
-    for (const expression of Hir.statementExpressions(statement)) {
-      for (const child of Hir.expressionTree(expression)) {
+    for (const expression of Tir.statementExpressions(statement)) {
+      for (const child of Tir.expressionTree(expression)) {
         if (child._tag === 'EffectBlock')
           yield* collectEffectBindings(instance, bindingTypes, patternTypes, child.statements)
         if (child._tag === 'Match') {
@@ -2926,7 +2926,7 @@ const collectEffectBindings = Effect.fnUntraced(function* (
 
 const collectEffectPatterns = (
   patternTypes: Map<string, Type.Type>,
-  bindings: ReadonlyArray<Hir.PatternBinding>,
+  bindings: ReadonlyArray<Tir.PatternBinding>,
 ): void => {
   for (const binding of bindings) patternTypes.set(effectPatternKey(binding.id), binding.type)
 }
@@ -2936,27 +2936,27 @@ const effectPatternKey = (id: Match.BindingId): string =>
 
 const collectEffectSites = (instance: Instances.Instance) => {
   const blocks = instance.function.statements
-    .flatMap(Hir.statementExpressions)
-    .flatMap(Hir.expressionTree)
+    .flatMap(Tir.statementExpressions)
+    .flatMap(Tir.expressionTree)
     .filter(
       (
         expression,
       ): expression is Extract<
-        Hir.Expression,
+        Tir.Expression,
         {
           readonly _tag: 'EffectBlock'
         }
       > => expression._tag === 'EffectBlock',
     )
   const catchSites = instance.function.statements
-    .flatMap(Hir.statementExpressions)
-    .flatMap(Hir.expressionTree)
+    .flatMap(Tir.statementExpressions)
+    .flatMap(Tir.expressionTree)
     .flatMap((expression) =>
       expression._tag !== 'EffectCatch'
         ? []
         : [
             Object.freeze({
-              site: Hir.effectCatchSite(
+              site: Tir.effectCatchSite(
                 instance.function.declaration.id,
                 instance.key.declaration,
                 expression.span,
@@ -2980,8 +2980,8 @@ const collectEffectSites = (instance: Instances.Instance) => {
           ],
     )
   const builtinSites = instance.function.statements
-    .flatMap(Hir.statementExpressions)
-    .flatMap(Hir.expressionTree)
+    .flatMap(Tir.statementExpressions)
+    .flatMap(Tir.expressionTree)
     .flatMap((expression) => {
       if (expression._tag !== 'BuiltinCall' || expression.witnessEffectSite !== undefined) return []
       const type = Type.substitute(
@@ -2992,7 +2992,7 @@ const collectEffectSites = (instance: Instances.Instance) => {
       if (!Type.isEffect(type)) return []
       return [
         Object.freeze({
-          site: Hir.builtinEffectSite(
+          site: Tir.builtinEffectSite(
             instance.function.declaration.id,
             instance.key.declaration,
             expression.span,
@@ -3041,8 +3041,8 @@ const collectEffectSites = (instance: Instances.Instance) => {
 
 const collectWitnessEffects = (instance: Instances.Instance) => {
   const witnessEffects = instance.function.statements
-    .flatMap(Hir.statementExpressions)
-    .flatMap(Hir.expressionTree)
+    .flatMap(Tir.statementExpressions)
+    .flatMap(Tir.expressionTree)
     .flatMap((expression) => {
       if (expression._tag !== 'InterfaceOperationCall' && expression._tag !== 'BuiltinCall')
         return []
@@ -3129,7 +3129,7 @@ const planEffectSite = Effect.fn('Layout.planEffectSite')(function* (
   }
   const packed = placeEffectFields(fieldInputs)
   const successEffectIdentity = (instance.effectSuccesses ?? []).find((success) =>
-    Hir.sameExecutableSite(success.site, block.site),
+    Tir.sameExecutableSite(success.site, block.site),
   )?.identity
   environments.push(
     Object.freeze({
@@ -3745,7 +3745,7 @@ export const effectEnvironmentByIdentity = (
   // contract select it separately; this helper owns only the capture placement.
   if (concrete.length > 0) return concrete.at(0)
   const represented = available.filter(
-    (candidate) => Hir.effectRepresentationIdentity(candidate.site) === identity.identity,
+    (candidate) => Tir.effectRepresentationIdentity(candidate.site) === identity.identity,
   )
   const owner = identity.owner
   if (owner === undefined) return represented.length === 1 ? represented.at(0) : undefined

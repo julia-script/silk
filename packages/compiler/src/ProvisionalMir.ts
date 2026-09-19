@@ -2,7 +2,7 @@ import * as ConformanceProof from './ConformanceProof.js'
 import type * as DeclarationFacts from './DeclarationFacts.js'
 import type * as DeclarationIndex from './DeclarationIndex.js'
 import type * as FieldRealization from './FieldRealization.js'
-import * as Hir from './Hir.js'
+import * as Tir from './Tir.js'
 import * as Instances from './Instances.js'
 import * as Layout from './Layout.js'
 import type * as SourceSpan from './SourceSpan.js'
@@ -31,7 +31,7 @@ export type ExecutionKey =
         | 'WitnessEffectRunnerExecution'
         | 'BuiltinEffectRunnerExecution'
       readonly owner: Instances.InstanceKey
-      readonly site: Hir.EffectSiteId
+      readonly site: Tir.EffectSiteId
       readonly identity: string
       readonly runner: DeclarationFacts.CanonicalId
     }
@@ -42,7 +42,7 @@ export type ExecutionKey =
         | 'WitnessEffectRunnerExecution'
         | 'BuiltinEffectRunnerExecution'
       readonly owner: Instances.InstanceKey
-      readonly site: Hir.EffectSiteId
+      readonly site: Tir.EffectSiteId
       readonly identity: string
       readonly effectIdentity: string
       readonly runner: DeclarationFacts.CanonicalId
@@ -138,7 +138,7 @@ const executionInstance = (key: ExecutionKey): Instances.InstanceKey => {
       staticArguments: key.owner.staticArguments,
       contractRow: Object.freeze([
         ...key.owner.contractRow,
-        `${siteKind}:${Hir.executableSiteKey(key.site)}`,
+        `${siteKind}:${Tir.executableSiteKey(key.site)}`,
         ...(key._tag === 'ProvidedEffectRunnerExecution'
           ? key.providers.map(providedContractEntry)
           : []),
@@ -309,30 +309,30 @@ const providerKey = (provider: Provider): string =>
 
 const providedContractEntry = (provider: Provider): string => `provided:${providerKey(provider)}`
 
-// HIR nodes are immutable. Rewalking and freezing the same trees accounted for 37% of the
-// provisional-build CPU profile. Cache queried roots by weak identity so discarded HIR is collectible.
-const expressionTrees = new WeakMap<Hir.Expression, ReadonlyArray<Hir.Expression>>()
-const statementExpressionLists = new WeakMap<Hir.Statement, ReadonlyArray<Hir.Expression>>()
+// TIR nodes are immutable. Rewalking and freezing the same trees accounted for 37% of the
+// provisional-build CPU profile. Cache queried roots by weak identity so discarded TIR is collectible.
+const expressionTrees = new WeakMap<Tir.Expression, ReadonlyArray<Tir.Expression>>()
+const statementExpressionLists = new WeakMap<Tir.Statement, ReadonlyArray<Tir.Expression>>()
 
-const expressionTree = (expression: Hir.Expression): ReadonlyArray<Hir.Expression> => {
+const expressionTree = (expression: Tir.Expression): ReadonlyArray<Tir.Expression> => {
   const cached = expressionTrees.get(expression)
   if (cached !== undefined) return cached
-  const tree = Hir.expressionTree(expression)
+  const tree = Tir.expressionTree(expression)
   expressionTrees.set(expression, tree)
   return tree
 }
 
-const statementExpressions = (statement: Hir.Statement): ReadonlyArray<Hir.Expression> => {
+const statementExpressions = (statement: Tir.Statement): ReadonlyArray<Tir.Expression> => {
   const cached = statementExpressionLists.get(statement)
   if (cached !== undefined) return cached
-  const expressions = Object.freeze(Hir.statementExpressions(statement))
+  const expressions = Object.freeze(Tir.statementExpressions(statement))
   statementExpressionLists.set(statement, expressions)
   return expressions
 }
 
 const bindingsOfStatements = (
-  statements: ReadonlyArray<Hir.Statement>,
-): ReadonlyMap<number, Hir.Expression> =>
+  statements: ReadonlyArray<Tir.Statement>,
+): ReadonlyMap<number, Tir.Expression> =>
   new Map(
     statements.flatMap((statement) => {
       if (statement._tag === 'Bind') {
@@ -347,7 +347,7 @@ const bindingsOfStatements = (
     }),
   )
 
-const bindingsOf = (fn: Hir.HirFunction): ReadonlyMap<number, Hir.Expression> =>
+const bindingsOf = (fn: Tir.TirFunction): ReadonlyMap<number, Tir.Expression> =>
   bindingsOfStatements(fn.statements)
 
 type AvailableEnvironment = Extract<
@@ -414,13 +414,13 @@ interface BuildContext {
   readonly layout: Layout.Plan
   readonly index: DeclarationIndex.Index
   readonly instance: Instances.Instance
-  readonly bindings: ReadonlyMap<number, Hir.Expression>
+  readonly bindings: ReadonlyMap<number, Tir.Expression>
   readonly effectClassifications: ClassificationReads
   readonly ambientProviders: ReadonlyArray<Provider>
 }
 
 const storedEffectRealizationOf = (
-  expression: Hir.Expression,
+  expression: Tir.Expression,
   context: BuildContext,
 ): FieldRealization.EffectRealization | undefined => {
   if (expression._tag === 'BindingReference') {
@@ -444,7 +444,7 @@ const storedEffectRealizationOf = (
 }
 
 const serviceResultEffectOf = (
-  expression: Extract<Hir.Expression, { readonly _tag: 'ServiceEffectConstruct' }>,
+  expression: Extract<Tir.Expression, { readonly _tag: 'ServiceEffectConstruct' }>,
   context: BuildContext,
 ): string | undefined => {
   const capability = Type.substitute(
@@ -482,7 +482,7 @@ const serviceResultEffectOf = (
 }
 
 const effectIdentityOf = (
-  expression: Hir.Expression,
+  expression: Tir.Expression,
   context: BuildContext,
 ): string | undefined => {
   if (expression._tag === 'BindingReference') {
@@ -529,7 +529,7 @@ const effectIdentityOf = (
   )
     return Instances.effectIdentity(
       context.instance.key,
-      Hir.builtinEffectSite(
+      Tir.builtinEffectSite(
         context.instance.function.declaration.id,
         context.instance.key.declaration,
         expression.span,
@@ -540,7 +540,7 @@ const effectIdentityOf = (
   if (expression._tag === 'EffectCatch')
     return Instances.effectIdentity(
       context.instance.key,
-      Hir.effectCatchSite(
+      Tir.effectCatchSite(
         context.instance.function.declaration.id,
         context.instance.key.declaration,
         expression.span,
@@ -594,7 +594,7 @@ const effectIdentityOf = (
 }
 
 const providersOf = (
-  expression: Hir.Expression,
+  expression: Tir.Expression,
   context: BuildContext,
 ): ReadonlyArray<Provider> => {
   if (expression._tag === 'BindingReference') {
@@ -628,9 +628,9 @@ const providersOf = (
 
 const witnessExpressionAt = (
   instance: Instances.Instance,
-  site: Hir.EffectSiteId,
+  site: Tir.EffectSiteId,
 ):
-  | Extract<Hir.Expression, { readonly _tag: 'InterfaceOperationCall' | 'BuiltinCall' }>
+  | Extract<Tir.Expression, { readonly _tag: 'InterfaceOperationCall' | 'BuiltinCall' }>
   | undefined =>
   instance.function.statements
     .flatMap(statementExpressions)
@@ -639,27 +639,27 @@ const witnessExpressionAt = (
       (
         expression,
       ): expression is Extract<
-        Hir.Expression,
+        Tir.Expression,
         { readonly _tag: 'InterfaceOperationCall' | 'BuiltinCall' }
       > =>
         (expression._tag === 'InterfaceOperationCall' || expression._tag === 'BuiltinCall') &&
         expression.witnessEffectSite !== undefined &&
-        Hir.sameExecutableSite(expression.witnessEffectSite, site),
+        Tir.sameExecutableSite(expression.witnessEffectSite, site),
     )
 
 const builtinExpressionAt = (
   instance: Instances.Instance,
-  site: Hir.EffectSiteId,
-): Extract<Hir.Expression, { readonly _tag: 'BuiltinCall' }> | undefined =>
+  site: Tir.EffectSiteId,
+): Extract<Tir.Expression, { readonly _tag: 'BuiltinCall' }> | undefined =>
   instance.function.statements
     .flatMap(statementExpressions)
     .flatMap(expressionTree)
     .find(
-      (expression): expression is Extract<Hir.Expression, { readonly _tag: 'BuiltinCall' }> =>
+      (expression): expression is Extract<Tir.Expression, { readonly _tag: 'BuiltinCall' }> =>
         expression._tag === 'BuiltinCall' &&
         expression.witnessEffectSite === undefined &&
-        Hir.sameExecutableSite(
-          Hir.builtinEffectSite(
+        Tir.sameExecutableSite(
+          Tir.builtinEffectSite(
             instance.function.declaration.id,
             instance.key.declaration,
             expression.span,
@@ -672,9 +672,9 @@ const builtinExpressionAt = (
 // collecting provided runners. Cache only inside the exact build context: providers, bindings,
 // substitutions, and classification reads are shared there, and a later pass uses a new context.
 // Explicitly resolved runners have additional inputs and bypass this cache.
-const runnerCache = new WeakMap<BuildContext, WeakMap<Hir.Expression, Runner>>()
+const runnerCache = new WeakMap<BuildContext, WeakMap<Tir.Expression, Runner>>()
 const runnerOf = (
-  expression: Hir.Expression,
+  expression: Tir.Expression,
   context: BuildContext,
   resolved?: {
     readonly identity: string
@@ -696,7 +696,7 @@ const runnerOf = (
 }
 
 const computeRunner = (
-  expression: Hir.Expression,
+  expression: Tir.Expression,
   context: BuildContext,
   resolved?: {
     readonly identity: string
@@ -817,7 +817,7 @@ const computeRunner = (
     site: stored?.site ?? environment.site,
     identity,
     runner:
-      stored?.runner ?? Hir.effectRunnerId(environment.instance.declaration, environment.site),
+      stored?.runner ?? Tir.effectRunnerId(environment.instance.declaration, environment.site),
   })
   const providedIdentity =
     providers.length === 0
@@ -862,7 +862,7 @@ const computeRunner = (
       .find(
         (candidate) =>
           candidate._tag === 'EffectBlock' &&
-          Hir.sameExecutableSite(candidate.site, environment.site),
+          Tir.sameExecutableSite(candidate.site, environment.site),
       )
     // Provider substitution can only change suspendability through service constructions in an
     // explicit effect block. Bound-operation and forwarded environments have no such local
@@ -890,7 +890,7 @@ const computeRunner = (
       .filter(
         (
           candidate,
-        ): candidate is Extract<Hir.Expression, { readonly _tag: 'ServiceEffectConstruct' }> =>
+        ): candidate is Extract<Tir.Expression, { readonly _tag: 'ServiceEffectConstruct' }> =>
           candidate._tag === 'ServiceEffectConstruct',
       )) {
       const resultEffect = serviceResultEffectOf(service, specializedContext)
@@ -977,7 +977,7 @@ const reifyPolicy = (
   })
 }
 
-const isSuspendOrigin = (expression: Hir.Expression, context: BuildContext): boolean => {
+const isSuspendOrigin = (expression: Tir.Expression, context: BuildContext): boolean => {
   if (expression._tag === 'BindingReference') {
     const initializer = context.bindings.get(expression.binding.ordinal)
     return initializer !== undefined && isSuspendOrigin(initializer, context)
@@ -990,9 +990,9 @@ const isSuspendOrigin = (expression: Hir.Expression, context: BuildContext): boo
 }
 
 const deferredOf = (
-  expression: Hir.Expression,
+  expression: Tir.Expression,
   context: BuildContext,
-): Hir.Expression | undefined => {
+): Tir.Expression | undefined => {
   if (expression._tag === 'BindingReference') {
     const initializer = context.bindings.get(expression.binding.ordinal)
     return initializer === undefined ? undefined : deferredOf(initializer, context)
@@ -1006,10 +1006,10 @@ const deferredOf = (
 }
 
 const effectCatchOf = (
-  expression: Hir.Expression,
+  expression: Tir.Expression,
   context: BuildContext,
   resolving: ReadonlySet<number> = new Set(),
-): Extract<Hir.Expression, { readonly _tag: 'EffectCatch' }> | undefined => {
+): Extract<Tir.Expression, { readonly _tag: 'EffectCatch' }> | undefined => {
   if (expression._tag === 'BindingReference') {
     const ordinal = expression.binding.ordinal
     if (resolving.has(ordinal)) return undefined
@@ -1023,8 +1023,8 @@ const effectCatchOf = (
 }
 
 const runSpanOfCatch = (
-  statements: ReadonlyArray<Hir.Statement>,
-  target: Extract<Hir.Expression, { readonly _tag: 'EffectCatch' }>,
+  statements: ReadonlyArray<Tir.Statement>,
+  target: Extract<Tir.Expression, { readonly _tag: 'EffectCatch' }>,
   context: BuildContext,
 ): SourceSpan.SourceSpan =>
   statements
@@ -1036,7 +1036,7 @@ const runSpanOfCatch = (
     )?.span ?? target.span
 
 const catchHandlerRunner = (
-  expression: Extract<Hir.Expression, { readonly _tag: 'EffectCatch' }>,
+  expression: Extract<Tir.Expression, { readonly _tag: 'EffectCatch' }>,
   context: BuildContext,
 ): Runner | undefined => {
   if (expression.handler._tag === 'Unavailable') return undefined
@@ -1087,7 +1087,7 @@ const catchHandlerRunner = (
 }
 
 const callableIdentityOf = (
-  expression: Hir.Expression,
+  expression: Tir.Expression,
   context: BuildContext,
 ): Type.CallableIdentityArgument | undefined => {
   if (expression._tag === 'Unavailable') return undefined
@@ -1115,14 +1115,14 @@ const callableIdentityOf = (
       expression.parameter.ordinal,
     )
   if (expression._tag !== 'CallableSection' && expression._tag !== 'FunctionItem') return undefined
-  const target = Hir.callableTargetIdentity(expression.target)
+  const target = Tir.callableTargetIdentity(expression.target)
   const callable =
     expression._tag !== 'CallableSection'
       ? undefined
       : context.discovery.callables.find(
           (candidate) =>
             Instances.keyText(candidate.owner) === Instances.keyText(context.instance.key) &&
-            Hir.executableSiteKey(candidate.site) === Hir.executableSiteKey(expression.site),
+            Tir.executableSiteKey(candidate.site) === Tir.executableSiteKey(expression.site),
         )
   if (
     expression._tag === 'CallableSection' &&
@@ -1148,7 +1148,7 @@ const callableIdentityOf = (
 }
 
 const builtinEffectCallbackRunner = (
-  expression: Extract<Hir.Expression, { readonly _tag: 'BuiltinCall' }>,
+  expression: Extract<Tir.Expression, { readonly _tag: 'BuiltinCall' }>,
   argumentOrdinal: number,
   context: BuildContext,
 ): Runner | undefined => {
@@ -1203,7 +1203,7 @@ const builtinEffectCallbackRunner = (
 }
 
 const controlsOfCatch = (
-  expression: Extract<Hir.Expression, { readonly _tag: 'EffectCatch' }>,
+  expression: Extract<Tir.Expression, { readonly _tag: 'EffectCatch' }>,
   execution: ExecutionKey,
   context: BuildContext,
   ordinalOffset = 0,
@@ -1342,7 +1342,7 @@ const controlsOfCatch = (
 }
 
 const controlsOfExpressions = (
-  expressions: ReadonlyArray<Hir.Expression>,
+  expressions: ReadonlyArray<Tir.Expression>,
   execution: ExecutionKey,
   executionClassification: Classification,
   context: BuildContext,
@@ -1354,7 +1354,7 @@ const controlsOfExpressions = (
     expressions
       .flatMap(expressionTree)
       .some((candidate) => candidate._tag === 'EffectBindRequirement')
-  const visit = (expression: Hir.Expression): void => {
+  const visit = (expression: Tir.Expression): void => {
     if (expression._tag === 'EffectBlock') return
     if (expression._tag === 'Run') {
       const idOrdinal = ordinal
@@ -1402,7 +1402,7 @@ const controlsOfExpressions = (
           )
         }
         ordinal += 1
-        for (const child of Hir.expressionChildren(expression.subject)) visit(child)
+        for (const child of Tir.expressionChildren(expression.subject)) visit(child)
         return
       }
       if (
@@ -1453,7 +1453,7 @@ const controlsOfExpressions = (
           )
         }
         ordinal += 1
-        for (const child of Hir.expressionChildren(expression.subject)) visit(child)
+        for (const child of Tir.expressionChildren(expression.subject)) visit(child)
         return
       }
       const caught = effectCatchOf(expression.subject, context)
@@ -1500,7 +1500,7 @@ const controlsOfExpressions = (
           !storedSuspendable &&
           (fixedClassification === undefined || fixedClassification === 'Synchronous')
         ) {
-          for (const child of Hir.expressionChildren(expression)) visit(child)
+          for (const child of Tir.expressionChildren(expression)) visit(child)
           return
         }
         if (runner.classification !== 'Synchronous') {
@@ -1542,14 +1542,14 @@ const controlsOfExpressions = (
         }
       }
     }
-    for (const child of Hir.expressionChildren(expression)) visit(child)
+    for (const child of Tir.expressionChildren(expression)) visit(child)
   }
   for (const expression of expressions) visit(expression)
   return Object.freeze(regions)
 }
 
 const controlsOf = (
-  statements: ReadonlyArray<Hir.Statement>,
+  statements: ReadonlyArray<Tir.Statement>,
   execution: ExecutionKey,
   classification: Classification,
   context: BuildContext,
@@ -1562,7 +1562,7 @@ const controlsOf = (
   )
 
 const builtinExecution = (
-  expression: Extract<Hir.Expression, { readonly _tag: 'BuiltinCall' }>,
+  expression: Extract<Tir.Expression, { readonly _tag: 'BuiltinCall' }>,
   context: BuildContext,
 ): Execution | undefined => {
   const effect = Type.substitute(
@@ -1571,7 +1571,7 @@ const builtinExecution = (
     context.instance.specialization.compatibility,
   )
   if (!Type.isEffect(effect)) return undefined
-  const site = Hir.builtinEffectSite(
+  const site = Tir.builtinEffectSite(
     context.instance.function.declaration.id,
     context.instance.key.declaration,
     expression.span,
@@ -1582,7 +1582,7 @@ const builtinExecution = (
     owner: context.instance.key,
     site,
     identity,
-    runner: Hir.effectRunnerId(context.instance.key.declaration, site),
+    runner: Tir.effectRunnerId(context.instance.key.declaration, site),
   })
   const classification = classificationOfEffect(context.discovery, identity)
   const regions = controlsOfExpressions(
@@ -1607,11 +1607,11 @@ const builtinExecution = (
 }
 
 const providedRunnersOf = (
-  expressions: ReadonlyArray<Hir.Expression>,
+  expressions: ReadonlyArray<Tir.Expression>,
   context: BuildContext,
 ): ReadonlyArray<Runner> => {
   const runners: Array<Runner> = []
-  const visit = (expression: Hir.Expression): void => {
+  const visit = (expression: Tir.Expression): void => {
     if (expression._tag === 'EffectBlock') return
     if (expression._tag === 'EffectCatch') {
       const protectedRunner = runnerOf(expression.protected, context)
@@ -1636,7 +1636,7 @@ const providedRunnersOf = (
       const runner = runnerOf(protected_, context)
       if (runner.execution._tag === 'ProvidedEffectRunnerExecution') runners.push(runner)
     }
-    for (const child of Hir.expressionChildren(expression)) visit(child)
+    for (const child of Tir.expressionChildren(expression)) visit(child)
   }
   for (const expression of expressions) visit(expression)
   return Object.freeze(runners)
@@ -1644,7 +1644,7 @@ const providedRunnersOf = (
 
 /** The adapter itself runs the selected implementation's returned Effect. */
 const witnessExecution = (
-  expression: Extract<Hir.Expression, { readonly _tag: 'InterfaceOperationCall' | 'BuiltinCall' }>,
+  expression: Extract<Tir.Expression, { readonly _tag: 'InterfaceOperationCall' | 'BuiltinCall' }>,
   context: BuildContext,
   providedKey?: Extract<ExecutionKey, { readonly _tag: 'ProvidedEffectRunnerExecution' }>,
 ): { readonly execution: Execution; readonly selectedRunner?: Runner } | undefined => {
@@ -1678,7 +1678,7 @@ const witnessExecution = (
       owner: context.instance.key,
       site,
       identity: Instances.effectIdentity(context.instance.key, site),
-      runner: Hir.effectRunnerId(context.instance.key.declaration, site),
+      runner: Tir.effectRunnerId(context.instance.key.declaration, site),
     })
   const regions: Array<Region> = []
   let classification: Classification = 'Unknown'
@@ -1900,7 +1900,7 @@ const buildInstance = (context: BuildContext): BuildFragment => {
     const site =
       expression._tag === 'EffectBlock'
         ? expression.site
-        : Hir.effectCatchSite(
+        : Tir.effectCatchSite(
             instance.function.declaration.id,
             instance.key.declaration,
             expression.span,
@@ -1911,7 +1911,7 @@ const buildInstance = (context: BuildContext): BuildFragment => {
       owner: instance.key,
       site,
       identity,
-      runner: Hir.effectRunnerId(instance.key.declaration, site),
+      runner: Tir.effectRunnerId(instance.key.declaration, site),
     })
     const runnerClassification =
       readClassification(context.effectClassifications, identity) ??
@@ -1984,10 +1984,10 @@ const buildProvidedRunner = (runner: Runner, context: BuildContext): BuildFragme
     .flatMap(statementExpressions)
     .flatMap(expressionTree)
     .find((candidate) => {
-      if (candidate._tag === 'EffectBlock') return Hir.sameExecutableSite(candidate.site, key.site)
+      if (candidate._tag === 'EffectBlock') return Tir.sameExecutableSite(candidate.site, key.site)
       if (candidate._tag !== 'EffectCatch') return false
-      return Hir.sameExecutableSite(
-        Hir.effectCatchSite(owner.function.declaration.id, owner.key.declaration, candidate.span),
+      return Tir.sameExecutableSite(
+        Tir.effectCatchSite(owner.function.declaration.id, owner.key.declaration, candidate.span),
         key.site,
       )
     })
@@ -2174,7 +2174,7 @@ export const build = (
   let result = buildPass(state, classifications)
   const transitions = new Map<string, number>()
   // Each pass exhausts its finite provider-specialization worklist. Across passes, newly observed
-  // identities come only from the finite specialized HIR/provider facts, while the joined safety
+  // identities come only from the finite specialized TIR/provider facts, while the joined safety
   // classification for each actual identity is monotone:
   // absent -> synchronous -> unknown -> suspendable.
   for (;;) {

@@ -14,9 +14,10 @@
 
 ## 3. A3 — JUL-207 HIR-to-TIR semantics (separate work package)
 
-- [ ] 3.1 Extend existing semantic/reuse specification deltas and migrate declaration, resolution, typing, conformance, static and ownership consumers to authored HIR with explicit context.
-- [ ] 3.2 Publish one typed TIR body plus necessary indexed results, remove duplicate executable facts and syntax-backed rebinding, and migrate public/tooling terminology and goldens.
-- [ ] 3.3 Preserve dependency-sensitive positive/negative editor reuse and source-free semantic/static fixtures, including alpha renaming and current presentation remapping.
+- [x] 3.1 Carry the authored module and presentation beside every loaded module through the closure and elaboration inputs, and derive body-query implementation/scope keys and hidden anonymous identities from authored content instead of source tokens and byte offsets, preserving the positive/negative reuse witnesses including alpha renaming.
+- [ ] 3.2 Extend the remaining semantic/reuse specification deltas and migrate declaration, resolution, typing, conformance, static and ownership consumers to authored HIR with explicit context.
+- [ ] 3.3 Publish one typed TIR body plus necessary indexed results, remove duplicate executable facts and syntax-backed rebinding, and migrate public/tooling terminology and goldens.
+- [ ] 3.4 Preserve source-free semantic/static fixtures with current presentation remapping for diagnostics and navigation.
 
 ## 4. A4 — JUL-208 sealed preparation (separate work package)
 

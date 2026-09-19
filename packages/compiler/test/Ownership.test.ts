@@ -6,7 +6,7 @@ import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Result from 'effect/Result'
 import * as Analysis from '../src/Analysis.js'
-import * as Hir from '../src/Hir.js'
+import * as Tir from '../src/Tir.js'
 import * as Lexer from '../src/Lexer.js'
 import * as MovePath from '../src/MovePath.js'
 import * as MirVerification from '../src/MirVerification.js'
@@ -78,14 +78,14 @@ fn branches<'a>(x: &'a i32, flag: bool) -> &'a i32 {
         ),
       )
       const stopped =
-        Analysis.rootAnalysis(snapshot).hir.functions.find(
+        Analysis.rootAnalysis(snapshot).tir.functions.find(
           (fn) =>
             fn.declaration.name._tag === 'Present' && fn.declaration.name.spelling === 'stopped',
         ) ?? unreachable('expected stopped function')
       assert.isFalse(
         stopped.statements
-          .flatMap(Hir.statementExpressions)
-          .flatMap(Hir.expressionTree)
+          .flatMap(Tir.statementExpressions)
+          .flatMap(Tir.expressionTree)
           .some((expression) => expression._tag === 'Unavailable'),
       )
     }),
@@ -158,18 +158,18 @@ fn sibling() -> i32 {
         )
       for (const name of ['valid', 'replacedAgain']) {
         const fn =
-          Analysis.rootAnalysis(snapshot).hir.functions.find(
+          Analysis.rootAnalysis(snapshot).tir.functions.find(
             (candidate) =>
               candidate.declaration.name._tag === 'Present' &&
               candidate.declaration.name.spelling === name,
           ) ?? unreachable('expected valid replacement function')
         assert.isFalse(
           fn.statements
-            .flatMap(Hir.statementExpressions)
-            .flatMap(Hir.expressionTree)
+            .flatMap(Tir.statementExpressions)
+            .flatMap(Tir.expressionTree)
             .some((expression) => expression._tag === 'Unavailable'),
-          Hir.encode({
-            _tag: 'HirModule',
+          Tir.encode({
+            _tag: 'TirModule',
             module: 'ownership/installed-reference',
             functions: [fn],
           }),
@@ -2278,11 +2278,11 @@ fn bad() -> i32 { let value = 42 return choose(move value, value) }`
       const plan = Ownership.localSharedAccessBoundaryPlan(snapshot.results)
       const selected = (name: string): Ownership.CheckInput => {
         const fn =
-          result.hir.functions.find(
+          result.tir.functions.find(
             (candidate) =>
               candidate.declaration.name._tag === 'Present' &&
               candidate.declaration.name.spelling === name,
-          ) ?? unreachable('expected HIR function')
+          ) ?? unreachable('expected TIR function')
         const fact =
           result.functions.find((candidate) => candidate.declaration === fn.declaration) ??
           unreachable('expected semantic function')

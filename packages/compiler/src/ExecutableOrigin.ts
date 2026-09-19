@@ -5,7 +5,7 @@ import * as Constraint from './Constraint.js'
 import * as DeclarationFacts from './DeclarationFacts.js'
 import type * as DeclarationIndex from './DeclarationIndex.js'
 import type * as Elaboration from './Elaboration.js'
-import * as Hir from './Hir.js'
+import * as Tir from './Tir.js'
 import * as FunctionIndex from './internal/FunctionIndex.js'
 import type * as Instances from './Instances.js'
 import * as Intrinsic from './Intrinsic.js'
@@ -75,8 +75,8 @@ export const reachableIntrinsics = (
   const retained = new Map<string, IntrinsicCall>()
   for (const instance of instances) {
     for (const statement of instance.function.statements) {
-      for (const root of Hir.statementExpressions(statement)) {
-        for (const expression of Hir.expressionTree(root)) {
+      for (const root of Tir.statementExpressions(statement)) {
+        for (const expression of Tir.expressionTree(root)) {
           const selected =
             expression._tag === 'InterfaceOperationCall'
               ? (() => {
@@ -120,7 +120,7 @@ export const reachableIntrinsics = (
             intrinsic.targets.length === 0
           )
             throw new RangeError(
-              `Runtime HIR retained non-runtime intrinsic ${Intrinsic.operationText(operation)}`,
+              `Runtime TIR retained non-runtime intrinsic ${Intrinsic.operationText(operation)}`,
             )
           const span = expression.span
           const key = `${Intrinsic.operationText(operation)}\u0000${span.sourceId}\u0000${span.start}\u0000${span.end}`
@@ -149,7 +149,7 @@ export const foreignSignature = (
   const declared = (type: DeclarationFacts.DeclaredTypeFact): Type.Type => {
     if (type._tag !== 'Resolved')
       throw new RangeError(
-        `Runtime HIR reached foreign function ${fact.canonical._tag === 'Canonical' ? fact.canonical.id.name : fact.id.ordinal} with an unresolved type`,
+        `Runtime TIR reached foreign function ${fact.canonical._tag === 'Canonical' ? fact.canonical.id.name : fact.id.ordinal} with an unresolved type`,
       )
     return type.type
   }
@@ -167,7 +167,7 @@ const compareForeignCalls = (left: ForeignCall, right: ForeignCall): number =>
   left.declaration.module.localeCompare(right.declaration.module) ||
   left.declaration.name.localeCompare(right.declaration.name)
 
-const compareSpans = (left: Hir.Expression['span'], right: Hir.Expression['span']): number =>
+const compareSpans = (left: Tir.Expression['span'], right: Tir.Expression['span']): number =>
   left.sourceId.localeCompare(right.sourceId) || left.start - right.start || left.end - right.end
 
 /**
@@ -182,8 +182,8 @@ export const reachableForeignCalls = (
   const retained = new Map<string, ForeignCall>()
   for (const instance of instances) {
     for (const statement of instance.function.statements) {
-      for (const root of Hir.statementExpressions(statement)) {
-        for (const expression of Hir.expressionTree(root)) {
+      for (const root of Tir.statementExpressions(statement)) {
+        for (const expression of Tir.expressionTree(root)) {
           if (expression._tag !== 'Call') continue
           const fact = foreignFact(index, expression.target)
           if (fact?.foreign === undefined || fact.name._tag !== 'Present') continue
@@ -246,7 +246,7 @@ export interface Operations {
   ) => Type.Type
   readonly keyOf: (
     declaration: DeclarationFacts.CanonicalId,
-    contract: Hir.ContractFact,
+    contract: Tir.ContractFact,
     typeParameters?: ReadonlyArray<Type.Parameter>,
     typeArguments?: ReadonlyArray<Type.GenericArgument>,
     staticArguments?: ReadonlyArray<StaticValue.Value>,
@@ -254,48 +254,48 @@ export interface Operations {
   ) => Instances.InstanceKey
   readonly keyText: (key: Instances.InstanceKey) => string
   readonly requirementBindings: (
-    fn: Hir.HirFunction,
-  ) => ReadonlyArray<Extract<Hir.Expression, { readonly _tag: 'EffectBindRequirement' }>>
+    fn: Tir.TirFunction,
+  ) => ReadonlyArray<Extract<Tir.Expression, { readonly _tag: 'EffectBindRequirement' }>>
   readonly selectedRequirement: (
-    binding: Extract<Hir.Expression, { readonly _tag: 'EffectBindRequirement' }>,
+    binding: Extract<Tir.Expression, { readonly _tag: 'EffectBindRequirement' }>,
     substitution: Type.Substitution,
   ) => Type.Requirement | undefined
   readonly requirementBindingWitness: (
-    binding: Extract<Hir.Expression, { readonly _tag: 'EffectBindRequirement' }>,
+    binding: Extract<Tir.Expression, { readonly _tag: 'EffectBindRequirement' }>,
     substitution: Type.Substitution,
     index: DeclarationIndex.Index,
   ) => DeclarationFacts.ConformanceWitness | undefined
   readonly forwardedRequirementBinding: (
-    fn: Hir.HirFunction,
-  ) => Extract<Hir.Expression, { readonly _tag: 'EffectBindRequirement' }> | undefined
+    fn: Tir.TirFunction,
+  ) => Extract<Tir.Expression, { readonly _tag: 'EffectBindRequirement' }> | undefined
   readonly instanceSubstitution: (
-    fn: Hir.HirFunction,
+    fn: Tir.TirFunction,
     key: Instances.InstanceKey,
   ) => Type.Substitution | undefined
   readonly effectParameterOrdinals: (
-    fn: Hir.HirFunction,
+    fn: Tir.TirFunction,
     substitution: Type.Substitution,
   ) => ReadonlyArray<number>
   readonly callableParameterOrdinals: (
-    fn: Hir.HirFunction,
+    fn: Tir.TirFunction,
     substitution: Type.Substitution,
   ) => ReadonlyArray<number>
   readonly parameterEffectIdentity: (
-    fn: Hir.HirFunction,
+    fn: Tir.TirFunction,
     key: Instances.InstanceKey,
     ordinal: number,
   ) => string | undefined
   readonly parameterEffectRepresentationArgument: (
-    fn: Hir.HirFunction,
+    fn: Tir.TirFunction,
     key: Instances.InstanceKey,
     ordinal: number,
   ) => Type.EffectIdentityArgument | Type.CompositeEffectRepresentationArgument | undefined
   readonly parameterCallableIdentity: (
-    fn: Hir.HirFunction,
+    fn: Tir.TirFunction,
     key: Instances.InstanceKey,
     ordinal: number,
   ) => Type.CallableIdentityArgument | undefined
-  readonly effectIdentity: (owner: Instances.InstanceKey, site: Hir.EffectSiteId) => string
+  readonly effectIdentity: (owner: Instances.InstanceKey, site: Tir.EffectSiteId) => string
   readonly callableIdentity: (self: Instances.CallableInstance) => string
   readonly callableEnvironmentIdentity: (
     self: Instances.CallableInstance,
@@ -504,7 +504,7 @@ export const make = (operations: Operations) => {
    * that parameter to one, exactly as if the type had been spelled at the call.
    */
   const carriesHiddenIdentity = (
-    expression: Extract<Hir.Expression, { readonly _tag: 'Call' | 'EffectConstruct' }>,
+    expression: Extract<Tir.Expression, { readonly _tag: 'Call' | 'EffectConstruct' }>,
     substitution: Type.Substitution,
   ): boolean => {
     const carrier = (type: Type.Type): boolean => {
@@ -520,7 +520,7 @@ export const make = (operations: Operations) => {
   }
 
   const callTargets = (
-    expression: Hir.Expression,
+    expression: Tir.Expression,
     index: DeclarationIndex.Index,
     substitution: Type.Substitution,
   ): ReadonlyArray<CallTarget> => {
@@ -542,7 +542,7 @@ export const make = (operations: Operations) => {
       ]
     }
     if (expression._tag === 'Replace')
-      return Hir.expressionChildren(expression).flatMap((child) =>
+      return Tir.expressionChildren(expression).flatMap((child) =>
         callTargets(child, index, substitution),
       )
     if (expression._tag === 'Move') return callTargets(expression.subject, index, substitution)
@@ -575,7 +575,7 @@ export const make = (operations: Operations) => {
       ]
     }
     if (expression._tag === 'SliceBorrow' || expression._tag === 'ValueBorrow') {
-      return Hir.expressionChildren(expression).flatMap((child) =>
+      return Tir.expressionChildren(expression).flatMap((child) =>
         callTargets(child, index, substitution),
       )
     }
@@ -609,7 +609,7 @@ export const make = (operations: Operations) => {
               ...(arm.guard === undefined ? [] : callTargets(arm.guard, index, substitution)),
               ...(arm.body._tag === 'Expression'
                 ? [arm.body.expression]
-                : arm.body.statements.flatMap(Hir.statementExpressions)
+                : arm.body.statements.flatMap(Tir.statementExpressions)
               ).flatMap((child) => callTargets(child, index, substitution)),
             ]
           }
@@ -619,7 +619,7 @@ export const make = (operations: Operations) => {
     }
     if (expression._tag === 'EffectBlock') {
       return expression.statements.flatMap((statement) =>
-        Hir.statementExpressions(statement).flatMap((child) =>
+        Tir.statementExpressions(statement).flatMap((child) =>
           callTargets(child, index, substitution),
         ),
       )
@@ -654,18 +654,18 @@ export const make = (operations: Operations) => {
   }
 
   const bodyCallTargets = (
-    fn: Hir.HirFunction,
+    fn: Tir.TirFunction,
     index: DeclarationIndex.Index,
     substitution: Type.Substitution,
   ): ReadonlyArray<CallTarget> =>
     fn.statements.flatMap((statement) =>
-      Hir.statementExpressions(statement).flatMap((expression) =>
+      Tir.statementExpressions(statement).flatMap((expression) =>
         callTargets(expression, index, substitution),
       ),
     )
 
   const requirementBindingCallTargets = (
-    fn: Hir.HirFunction,
+    fn: Tir.TirFunction,
     substitution: Type.Substitution,
     index: DeclarationIndex.Index,
   ): ReadonlyArray<CallTarget> =>
@@ -696,11 +696,11 @@ export const make = (operations: Operations) => {
     })
 
   const slotDropHookTargets = (
-    fn: Hir.HirFunction,
+    fn: Tir.TirFunction,
     index: DeclarationIndex.Index,
     substitution: Type.Substitution,
   ): ReadonlyArray<CallTarget> => {
-    const walk = (expression: Hir.Expression): ReadonlyArray<CallTarget> => {
+    const walk = (expression: Tir.Expression): ReadonlyArray<CallTarget> => {
       const own =
         expression._tag === 'BuiltinCall' &&
         (expression.operation === 'SlotDrop' || expression.operation === 'ExecutionPark')
@@ -726,7 +726,7 @@ export const make = (operations: Operations) => {
                 ...(arm.guard === undefined ? [] : walk(arm.guard)),
                 ...(arm.body._tag === 'Expression'
                   ? [arm.body.expression]
-                  : arm.body.statements.flatMap(Hir.statementExpressions)
+                  : arm.body.statements.flatMap(Tir.statementExpressions)
                 ).flatMap(walk),
               ]
             }
@@ -734,9 +734,9 @@ export const make = (operations: Operations) => {
           }),
         ]
       }
-      return [...own, ...Hir.expressionChildren(expression).flatMap(walk)]
+      return [...own, ...Tir.expressionChildren(expression).flatMap(walk)]
     }
-    return fn.statements.flatMap((statement) => Hir.statementExpressions(statement).flatMap(walk))
+    return fn.statements.flatMap((statement) => Tir.statementExpressions(statement).flatMap(walk))
   }
 
   /**
@@ -749,11 +749,11 @@ export const make = (operations: Operations) => {
    * intrinsic and contributes no target.
    */
   const interfaceWitnessTargets = (
-    fn: Hir.HirFunction,
+    fn: Tir.TirFunction,
     index: DeclarationIndex.Index,
     substitution: Type.Substitution,
   ): ReadonlyArray<CallTarget> => {
-    const walk = (expression: Hir.Expression): ReadonlyArray<CallTarget> => {
+    const walk = (expression: Tir.Expression): ReadonlyArray<CallTarget> => {
       let selection:
         | {
             readonly capability: Type.Nominal
@@ -830,7 +830,7 @@ export const make = (operations: Operations) => {
                 ...(arm.guard === undefined ? [] : walk(arm.guard)),
                 ...(arm.body._tag === 'Expression'
                   ? [arm.body.expression]
-                  : arm.body.statements.flatMap(Hir.statementExpressions)
+                  : arm.body.statements.flatMap(Tir.statementExpressions)
                 ).flatMap(walk),
               ]
             }
@@ -838,14 +838,14 @@ export const make = (operations: Operations) => {
           }),
         ]
       }
-      return [...own, ...Hir.expressionChildren(expression).flatMap(walk)]
+      return [...own, ...Tir.expressionChildren(expression).flatMap(walk)]
     }
-    return fn.statements.flatMap((statement) => Hir.statementExpressions(statement).flatMap(walk))
+    return fn.statements.flatMap((statement) => Tir.statementExpressions(statement).flatMap(walk))
   }
 
-  const callableBindings = (fn: Hir.HirFunction): ReadonlyMap<number, Hir.Expression> => {
-    const bindings = new Map<number, Hir.Expression>()
-    const expression = (value: Hir.Expression): void => {
+  const callableBindings = (fn: Tir.TirFunction): ReadonlyMap<number, Tir.Expression> => {
+    const bindings = new Map<number, Tir.Expression>()
+    const expression = (value: Tir.Expression): void => {
       if (value._tag === 'EffectBlock') {
         statements(value.statements)
         return
@@ -861,9 +861,9 @@ export const make = (operations: Operations) => {
         }
         return
       }
-      for (const child of Hir.expressionChildren(value)) expression(child)
+      for (const child of Tir.expressionChildren(value)) expression(child)
     }
-    const statements = (body: ReadonlyArray<Hir.Statement>): void => {
+    const statements = (body: ReadonlyArray<Tir.Statement>): void => {
       for (const statement of body) {
         if (statement._tag === 'Bind') {
           bindings.set(statement.binding.ordinal, statement.initializer)
@@ -878,7 +878,7 @@ export const make = (operations: Operations) => {
           expression(statement.condition)
           statements(statement.body)
         } else if (statement._tag !== 'Bind') {
-          for (const root of Hir.statementExpressions(statement)) expression(root)
+          for (const root of Tir.statementExpressions(statement)) expression(root)
         }
       }
     }
@@ -892,7 +892,7 @@ export const make = (operations: Operations) => {
    * computed callables, opaque declarations, and recursion stop the proof.
    */
   const forwardedCallableParameter = (
-    fn: Hir.HirFunction,
+    fn: Tir.TirFunction,
     results: ReadonlyMap<string, Elaboration.Result>,
     resolving: ReadonlySet<string> = new Set(),
   ): number | undefined => {
@@ -913,7 +913,7 @@ export const make = (operations: Operations) => {
     const forwardedBindings = new Set<number>()
     const next = new Set(resolving).add(key_)
     const expression = (
-      current: Hir.Expression,
+      current: Tir.Expression,
       bindings: ReadonlySet<number> = new Set(),
     ): number | undefined => {
       if (current._tag === 'Move') return expression(current.subject, bindings)
@@ -946,12 +946,12 @@ export const make = (operations: Operations) => {
   }
 
   const staticallyForwardedCallable = (
-    expression: Hir.Expression,
-    fn: Hir.HirFunction,
+    expression: Tir.Expression,
+    fn: Tir.TirFunction,
     results: ReadonlyMap<string, Elaboration.Result>,
-    arguments_: ReadonlyArray<Hir.Expression> = Object.freeze([]),
+    arguments_: ReadonlyArray<Tir.Expression> = Object.freeze([]),
     resolving: ReadonlySet<string> = new Set(),
-  ): Hir.Expression | undefined => {
+  ): Tir.Expression | undefined => {
     if (expression._tag === 'Move')
       return staticallyForwardedCallable(expression.subject, fn, results, arguments_, resolving)
     if (expression._tag === 'BindingReference') {
@@ -983,7 +983,7 @@ export const make = (operations: Operations) => {
   }
 
   const callableOriginOf = (
-    expression: Hir.Expression,
+    expression: Tir.Expression,
     context: EffectOriginContext,
   ): Type.CallableIdentityArgument | undefined => {
     if (expression._tag !== 'Unavailable') {
@@ -1000,7 +1000,7 @@ export const make = (operations: Operations) => {
         return specialized.representation.argument.identity
     }
     if (expression._tag === 'FunctionItem') {
-      const target = Hir.callableTargetIdentity(expression.target)
+      const target = Tir.callableTargetIdentity(expression.target)
       const typeArguments = expression.typeArguments.map((argument) =>
         Type.substituteGenericArgument(argument, context.substitution, context.compatibility),
       )
@@ -1017,7 +1017,7 @@ export const make = (operations: Operations) => {
       const environment =
         expression.captures.length === 0
           ? undefined
-          : Hir.callableEnvironmentIdentity(expression.site, {
+          : Tir.callableEnvironmentIdentity(expression.site, {
               declaration: Object.freeze({
                 module: context.owner.declaration.module,
                 name: context.owner.declaration.name,
@@ -1025,7 +1025,7 @@ export const make = (operations: Operations) => {
               typeArguments: context.owner.typeArguments,
               staticArgumentKeys: Object.freeze(context.owner.staticArguments.map(StaticValue.key)),
             })
-      const target = Hir.callableTargetIdentity(expression.target)
+      const target = Tir.callableTargetIdentity(expression.target)
       const identity =
         target._tag === 'Declaration'
           ? `declaration:${target.module}:${target.name}`
@@ -1065,7 +1065,7 @@ export const make = (operations: Operations) => {
             base.identity,
             base.target,
             base.typeArguments,
-            Hir.callableEnvironmentIdentity(expression.staged.site, {
+            Tir.callableEnvironmentIdentity(expression.staged.site, {
               declaration: Object.freeze({
                 module: context.owner.declaration.module,
                 name: context.owner.declaration.name,
@@ -1093,7 +1093,7 @@ export const make = (operations: Operations) => {
   }
 
   const callableSubstitutionOf = (
-    expression: Hir.Expression,
+    expression: Tir.Expression,
     context: EffectOriginContext,
   ): Type.Substitution => {
     if (expression._tag === 'CallableSection')
@@ -1118,7 +1118,7 @@ export const make = (operations: Operations) => {
   }
 
   const appliedCallableOriginOf = (
-    expression: Extract<Hir.Expression, { readonly _tag: 'CallableApply' }>,
+    expression: Extract<Tir.Expression, { readonly _tag: 'CallableApply' }>,
     context: EffectOriginContext,
   ): Type.CallableIdentityArgument | undefined => {
     const callable = callableOriginOf(expression.callee, context)
@@ -1152,10 +1152,10 @@ export const make = (operations: Operations) => {
   }
 
   const callableApplicationArgument = (
-    expression: Extract<Hir.Expression, { readonly _tag: 'CallableApply' }>,
+    expression: Extract<Tir.Expression, { readonly _tag: 'CallableApply' }>,
     ordinal: number,
     context: EffectOriginContext,
-  ): Hir.Expression | undefined => {
+  ): Tir.Expression | undefined => {
     const callable = callableValue(expression.callee, callableBindings(context.fn))
     const section = callable?._tag === 'CallableSection' ? callable : undefined
     if (section === undefined) return expression.arguments.at(ordinal)
@@ -1166,7 +1166,7 @@ export const make = (operations: Operations) => {
   }
 
   const resolveTargetKeyOfCallableApply = (
-    expression: Extract<Hir.Expression, { readonly _tag: 'CallableApply' }>,
+    expression: Extract<Tir.Expression, { readonly _tag: 'CallableApply' }>,
     context: EffectOriginContext,
   ): InstanceKey | undefined => {
     const callable = appliedCallableOriginOf(expression, context)
@@ -1248,7 +1248,7 @@ export const make = (operations: Operations) => {
   }
 
   const selectedCompatibility = (
-    fn: Hir.HirFunction,
+    fn: Tir.TirFunction,
     owner: InstanceKey,
   ): TypeCompatibility.Context | undefined =>
     TypeInference.selectedSubstitution(
@@ -1257,7 +1257,7 @@ export const make = (operations: Operations) => {
     )?.compatibility
 
   interface EffectOriginContext {
-    readonly fn: Hir.HirFunction
+    readonly fn: Tir.TirFunction
     readonly owner: InstanceKey
     readonly substitution: Type.Substitution
     readonly compatibility: TypeCompatibility.Context | undefined
@@ -1267,7 +1267,7 @@ export const make = (operations: Operations) => {
     readonly resolveEffectIdentity?: (identity: Type.EffectIdentityArgument) => string | undefined
     /** The call whose callee body is being traced, so a parameter resolves to its argument. */
     readonly parameterArguments?: {
-      readonly arguments: ReadonlyArray<Hir.Expression>
+      readonly arguments: ReadonlyArray<Tir.Expression>
       readonly context: EffectOriginContext
     }
     /** Resolves the success identity of an already-minted effect identity (post-discovery). */
@@ -1280,11 +1280,11 @@ export const make = (operations: Operations) => {
       resolving: ReadonlySet<string>,
     ) => ReadonlyArray<ServiceEffectRecipe>
     readonly resolveServiceEffectIdentity?: (
-      expression: Extract<Hir.Expression, { readonly _tag: 'ServiceEffectConstruct' }>,
+      expression: Extract<Tir.Expression, { readonly _tag: 'ServiceEffectConstruct' }>,
     ) => string | undefined
     readonly recordResolvedCall?: (
       expression: Extract<
-        Hir.Expression,
+        Tir.Expression,
         { readonly _tag: 'Call' | 'EffectConstruct' | 'CallableApply' }
       >,
       target: InstanceKey,
@@ -1292,7 +1292,7 @@ export const make = (operations: Operations) => {
   }
 
   interface ServiceEffectRecipe {
-    readonly expression: Extract<Hir.Expression, { readonly _tag: 'ServiceEffectConstruct' }>
+    readonly expression: Extract<Tir.Expression, { readonly _tag: 'ServiceEffectConstruct' }>
     readonly context: EffectOriginContext
   }
 
@@ -1308,14 +1308,14 @@ export const make = (operations: Operations) => {
   }
 
   function resultCallableIdentity(
-    fn: Hir.HirFunction,
+    fn: Tir.TirFunction,
     owner: InstanceKey,
     results: ReadonlyMap<string, Elaboration.Result>,
     index: DeclarationIndex.Index,
     resolving: ReadonlySet<string> = new Set(),
   ): Type.CallableIdentityArgument | undefined {
     const substitution = instanceSubstitution(fn, owner)
-    const expressions = Hir.returnExpressions(fn.statements)
+    const expressions = Tir.returnExpressions(fn.statements)
     if (substitution === undefined || expressions.length === 0 || fn.contract._tag !== 'Contract')
       return undefined
     const result = Type.substitute(
@@ -1344,7 +1344,7 @@ export const make = (operations: Operations) => {
   }
 
   function serviceEffectRecipes(
-    expression: Hir.Expression,
+    expression: Tir.Expression,
     context: EffectOriginContext,
     resolving: ReadonlySet<number> = new Set(),
   ): ReadonlyArray<ServiceEffectRecipe> {
@@ -1353,7 +1353,7 @@ export const make = (operations: Operations) => {
     if (expression._tag === 'EffectBlock')
       return Object.freeze(
         expression.statements.flatMap((statement) =>
-          Hir.statementExpressions(statement).flatMap((nested) =>
+          Tir.statementExpressions(statement).flatMap((nested) =>
             serviceEffectRecipes(nested, context, resolving),
           ),
         ),
@@ -1390,7 +1390,7 @@ export const make = (operations: Operations) => {
         ),
       )
     if (expression._tag === 'ForeignApply')
-      return Hir.expressionChildren(expression).flatMap((child) =>
+      return Tir.expressionChildren(expression).flatMap((child) =>
         serviceEffectRecipes(child, context, resolving),
       )
     if (expression._tag === 'CallableApply') {
@@ -1428,7 +1428,7 @@ export const make = (operations: Operations) => {
   }
 
   const serviceEffectRecipe = (
-    expression: Hir.Expression,
+    expression: Tir.Expression,
     context: EffectOriginContext,
   ): ServiceEffectRecipe | undefined => {
     const recipes = serviceEffectRecipes(expression, context)
@@ -1436,7 +1436,7 @@ export const make = (operations: Operations) => {
   }
 
   const constrainedServiceTarget = (
-    target: Hir.HirFunction,
+    target: Tir.TirFunction,
     targetSubstitution: Type.Substitution,
     effectParameter: number,
     service: ServiceEffectRecipe,
@@ -1505,8 +1505,8 @@ export const make = (operations: Operations) => {
   }
 
   function forwardedServiceTargetOfCallableApply(
-    expression: Extract<Hir.Expression, { readonly _tag: 'CallableApply' }>,
-    target: Hir.HirFunction,
+    expression: Extract<Tir.Expression, { readonly _tag: 'CallableApply' }>,
+    target: Tir.TirFunction,
     targetSubstitution: Type.Substitution,
     effectParameter: number,
     context: EffectOriginContext,
@@ -1555,8 +1555,8 @@ export const make = (operations: Operations) => {
   }
 
   const forwardedServiceTargetOfCall = (
-    expression: Extract<Hir.Expression, { readonly _tag: 'Call' | 'EffectConstruct' }>,
-    target: Hir.HirFunction,
+    expression: Extract<Tir.Expression, { readonly _tag: 'Call' | 'EffectConstruct' }>,
+    target: Tir.TirFunction,
     targetSubstitution: Type.Substitution,
     effectParameter: number,
     context: EffectOriginContext,
@@ -1605,7 +1605,7 @@ export const make = (operations: Operations) => {
   }
 
   const compositeEffectRepresentationOf = (
-    expression: Hir.Expression,
+    expression: Tir.Expression,
     context: EffectOriginContext,
   ): Type.CompositeEffectRepresentationArgument | undefined => {
     if (expression._tag === 'Unavailable') return undefined
@@ -1652,7 +1652,7 @@ export const make = (operations: Operations) => {
         targetKey === undefined || target === undefined
           ? undefined
           : instanceSubstitution(target, targetKey)
-      const returned = target === undefined ? [] : Hir.returnExpressions(target.statements)
+      const returned = target === undefined ? [] : Tir.returnExpressions(target.statements)
       if (
         substitution === undefined ||
         returned.length === 0 ||
@@ -1681,7 +1681,7 @@ export const make = (operations: Operations) => {
         targetKey === undefined || target === undefined
           ? undefined
           : instanceSubstitution(target, targetKey)
-      const returned = target === undefined ? [] : Hir.returnExpressions(target.statements)
+      const returned = target === undefined ? [] : Tir.returnExpressions(target.statements)
       if (
         substitution === undefined ||
         returned.length === 0 ||
@@ -1707,7 +1707,7 @@ export const make = (operations: Operations) => {
 
   const callTargetCache = new WeakMap<
     EffectOriginContext,
-    WeakMap<Hir.Expression, InstanceKey | undefined>
+    WeakMap<Tir.Expression, InstanceKey | undefined>
   >()
 
   const canCacheCallTarget = (context: EffectOriginContext): boolean => {
@@ -1732,7 +1732,7 @@ export const make = (operations: Operations) => {
   // substitution, and recursion state. Unresolved results are stable within that context too.
   const targetKeyOfInvocation = (
     expression: Extract<
-      Hir.Expression,
+      Tir.Expression,
       { readonly _tag: 'Call' | 'EffectConstruct' | 'CallableApply' }
     >,
     context: EffectOriginContext,
@@ -1755,7 +1755,7 @@ export const make = (operations: Operations) => {
   }
 
   const resolveTargetKeyOfCall = (
-    expression: Extract<Hir.Expression, { readonly _tag: 'Call' | 'EffectConstruct' }>,
+    expression: Extract<Tir.Expression, { readonly _tag: 'Call' | 'EffectConstruct' }>,
     context: EffectOriginContext,
   ): InstanceKey | undefined => {
     const target = targetFunction(context.results, expression.target)
@@ -1848,7 +1848,7 @@ export const make = (operations: Operations) => {
   }
 
   function targetKeyOfServiceCall(
-    expression: Extract<Hir.Expression, { readonly _tag: 'ServiceEffectConstruct' }>,
+    expression: Extract<Tir.Expression, { readonly _tag: 'ServiceEffectConstruct' }>,
     witness: Extract<
       DeclarationFacts.ConformanceWitness,
       { readonly _tag: 'SourceConformanceWitness' }
@@ -1985,14 +1985,14 @@ export const make = (operations: Operations) => {
   }
 
   const resultEffectIdentity = (
-    fn: Hir.HirFunction,
+    fn: Tir.TirFunction,
     owner: InstanceKey,
     results: ReadonlyMap<string, Elaboration.Result>,
     index: DeclarationIndex.Index,
     resolving: ReadonlySet<string> = new Set(),
   ): string | undefined => {
     const substitution = instanceSubstitution(fn, owner)
-    const expressions = Hir.returnExpressions(fn.statements)
+    const expressions = Tir.returnExpressions(fn.statements)
     if (substitution === undefined || expressions.length === 0) return undefined
     if (fn.contract._tag !== 'Contract') return undefined
     const result = Type.substitute(
@@ -2021,7 +2021,7 @@ export const make = (operations: Operations) => {
   }
 
   const effectOriginOf = (
-    expression: Hir.Expression,
+    expression: Tir.Expression,
     context: EffectOriginContext,
   ): string | undefined => {
     const exactIdentity = (type: Type.Type): string | undefined => {
@@ -2088,7 +2088,7 @@ export const make = (operations: Operations) => {
     if (expression._tag === 'EffectCatch')
       return effectIdentity(
         context.owner,
-        Hir.effectCatchSite(context.fn.declaration.id, context.owner.declaration, expression.span),
+        Tir.effectCatchSite(context.fn.declaration.id, context.owner.declaration, expression.span),
       )
     if (expression._tag === 'BuiltinCall' && expression.witnessEffectSite === undefined) {
       const specialized = Specialization.specializeType(context.owner, expression.type, [
@@ -2097,7 +2097,7 @@ export const make = (operations: Operations) => {
       if (Type.isEffect(specialized))
         return effectIdentity(
           context.owner,
-          Hir.builtinEffectSite(
+          Tir.builtinEffectSite(
             context.fn.declaration.id,
             context.owner.declaration,
             expression.span,
@@ -2169,12 +2169,12 @@ export const make = (operations: Operations) => {
    * to the caller's argument while a call chain is open, otherwise through the minted identity.
    */
   const successEffectOriginOf = (
-    expression: Hir.Expression,
+    expression: Tir.Expression,
     context: EffectOriginContext,
   ): string | undefined => {
     if (expression._tag === 'EffectBlock') {
       return commonOrigin(
-        Hir.returnExpressions(expression.statements).map((returned) =>
+        Tir.returnExpressions(expression.statements).map((returned) =>
           effectOriginOf(returned, context),
         ),
         (identity) => identity,
@@ -2217,7 +2217,7 @@ export const make = (operations: Operations) => {
       targetKey === undefined ? undefined : targetFunction(context.results, expression.target)
     if (targetKey === undefined || target === undefined) return undefined
     const substitution = instanceSubstitution(target, targetKey)
-    const returned = Hir.returnExpressions(target.statements)
+    const returned = Tir.returnExpressions(target.statements)
     if (substitution === undefined || returned.length === 0) return undefined
     const marker = `success:${keyText(targetKey)}`
     if (context.resolving.has(marker)) return undefined
@@ -2281,7 +2281,7 @@ export const make = (operations: Operations) => {
   }
 
   const effectSuccesses = (
-    fn: Hir.HirFunction,
+    fn: Tir.TirFunction,
     owner: InstanceKey,
     substitution: Type.Substitution,
     results: ReadonlyMap<string, Elaboration.Result>,
@@ -2315,11 +2315,11 @@ export const make = (operations: Operations) => {
 
   const interfaceCallOf = (
     expression: Extract<
-      Hir.Expression,
+      Tir.Expression,
       { readonly _tag: 'InterfaceOperationCall' | 'BuiltinCall' }
     >,
     context: EffectOriginContext,
-  ): Extract<Hir.Expression, { readonly _tag: 'Call' }> | undefined => {
+  ): Extract<Tir.Expression, { readonly _tag: 'Call' }> | undefined => {
     const bound =
       expression._tag === 'InterfaceOperationCall' ? expression : expression.interfaceOperation
     if (bound === undefined || expression.witnessEffectSite !== undefined) return undefined
@@ -2354,18 +2354,18 @@ export const make = (operations: Operations) => {
   }
 
   const directCallInstances = (
-    fn: Hir.HirFunction,
+    fn: Tir.TirFunction,
     owner: InstanceKey,
     substitution: Type.Substitution,
     results: ReadonlyMap<string, Elaboration.Result>,
     index: DeclarationIndex.Index,
   ): ReadonlyArray<CallInstance> => {
-    const expressions = fn.statements.flatMap(Hir.statementExpressions).flatMap(Hir.expressionTree)
+    const expressions = fn.statements.flatMap(Tir.statementExpressions).flatMap(Tir.expressionTree)
     const expressionOrder = new Map(expressions.map((expression, ordinal) => [expression, ordinal]))
     const calls = new Map<string, { readonly call: CallInstance; readonly ordinal: number }>()
     const record = (
       expression: Extract<
-        Hir.Expression,
+        Tir.Expression,
         { readonly _tag: 'Call' | 'EffectConstruct' | 'CallableApply' }
       >,
       target: InstanceKey,
@@ -2451,9 +2451,9 @@ export const make = (operations: Operations) => {
   }
 
   const callableValue = (
-    expression: Hir.Expression,
-    bindings: ReadonlyMap<number, Hir.Expression>,
-  ): Extract<Hir.Expression, { readonly _tag: 'FunctionItem' | 'CallableSection' }> | undefined => {
+    expression: Tir.Expression,
+    bindings: ReadonlyMap<number, Tir.Expression>,
+  ): Extract<Tir.Expression, { readonly _tag: 'FunctionItem' | 'CallableSection' }> | undefined => {
     if (expression._tag === 'FunctionItem' || expression._tag === 'CallableSection')
       return expression
     if (expression._tag === 'BindingReference') {
@@ -2469,27 +2469,27 @@ export const make = (operations: Operations) => {
     second: Type.Substitution,
   ): Type.Substitution => new Map([...first, ...second])
 
-  const callableExpressions = (fn: Hir.HirFunction): ReadonlyArray<Hir.Expression> =>
+  const callableExpressions = (fn: Tir.TirFunction): ReadonlyArray<Tir.Expression> =>
     fn.statements.flatMap((statement) =>
-      Hir.statementExpressions(statement).flatMap(Hir.expressionTree),
+      Tir.statementExpressions(statement).flatMap(Tir.expressionTree),
     )
 
   const declarationTarget = (
-    target: Hir.CallableTarget,
+    target: Tir.CallableTarget,
   ): DeclarationFacts.CanonicalId | undefined =>
     target._tag === 'DeclarationCallableTarget' ? target.declaration : undefined
 
   function targetFunction(
     results: ReadonlyMap<string, Elaboration.Result>,
     target: DeclarationFacts.CanonicalId,
-  ): Hir.HirFunction | undefined {
-    return FunctionIndex.hirByName(results.get(target.module)?.hir, target.name)
+  ): Tir.TirFunction | undefined {
+    return FunctionIndex.tirByName(results.get(target.module)?.tir, target.name)
   }
 
   // A quantified function item omits its invocation regions; those universal proofs do not
   // create runtime specializations. Keep declaration order and require every other argument.
   const callableTargetArguments = (
-    fn: Hir.HirFunction,
+    fn: Tir.TirFunction,
     arguments_: ReadonlyArray<Type.GenericArgument>,
   ): ReadonlyArray<Type.GenericArgument> | undefined => {
     const parameters = fn.declaration.typeParameters
@@ -2525,7 +2525,7 @@ export const make = (operations: Operations) => {
   }
 
   const targetArguments = (
-    target: Hir.CallableTarget,
+    target: Tir.CallableTarget,
     substitution: Type.Substitution,
     results: ReadonlyMap<string, Elaboration.Result>,
   ): ReadonlyArray<Type.GenericArgument> | undefined => {
@@ -2551,7 +2551,7 @@ export const make = (operations: Operations) => {
   }
 
   const callableCallTargets = (
-    fn: Hir.HirFunction,
+    fn: Tir.TirFunction,
     owner: InstanceKey,
     ownerSubstitution: Type.Substitution,
     results: ReadonlyMap<string, Elaboration.Result>,
@@ -2685,7 +2685,7 @@ export const make = (operations: Operations) => {
     })
 
   const concreteCallables = (
-    fn: Hir.HirFunction,
+    fn: Tir.TirFunction,
     owner: InstanceKey,
     ownerSubstitution: Type.Substitution,
     results: ReadonlyMap<string, Elaboration.Result>,
@@ -2709,7 +2709,7 @@ export const make = (operations: Operations) => {
       resolving: new Set<string>(),
     })
     for (const section of sections) {
-      const site = Hir.executableSiteKey(section.site)
+      const site = Tir.executableSiteKey(section.site)
       if (seen.has(site)) continue
       seen.add(site)
       const applications = expressions.flatMap((expression) =>
@@ -2803,7 +2803,7 @@ export const make = (operations: Operations) => {
     for (const expression of expressions) {
       if (expression._tag !== 'CallableApply' || expression.staged === undefined) continue
       const staged = expression.staged
-      const site = Hir.executableSiteKey(staged.site)
+      const site = Tir.executableSiteKey(staged.site)
       if (seen.has(site)) continue
       seen.add(site)
       const identity = callableOriginOf(expression.callee, context)
@@ -2816,7 +2816,7 @@ export const make = (operations: Operations) => {
               (candidate) =>
                 Type.runtimeCallableEnvironmentIdentityKey(environment) ===
                 Type.runtimeCallableEnvironmentIdentityKey(
-                  Hir.callableEnvironmentIdentity(candidate.site, {
+                  Tir.callableEnvironmentIdentity(candidate.site, {
                     declaration: candidate.owner.declaration,
                     typeArguments: candidate.owner.typeArguments,
                     staticArgumentKeys: Object.freeze(
@@ -2883,7 +2883,7 @@ export const make = (operations: Operations) => {
           _tag: 'CallableInstance',
           owner,
           site: staged.site,
-          target: Hir.callableTargetFromIdentity(identity.target),
+          target: Tir.callableTargetFromIdentity(identity.target),
           typeArguments: identity.typeArguments,
           substitution: base?.substitution ?? new Map(),
           captureTypes: Object.freeze(captureTypes),
@@ -2928,8 +2928,8 @@ export const make = (operations: Operations) => {
         ])
         if (!Type.isEffect(specializedType) || !Type.isRuntimeConcrete(specializedType)) continue
         const providedRequirements = block.statements
-          .flatMap(Hir.statementExpressions)
-          .flatMap(Hir.expressionTree)
+          .flatMap(Tir.statementExpressions)
+          .flatMap(Tir.expressionTree)
           .flatMap((expression) => {
             if (expression._tag !== 'EffectBindRequirement') return []
             const selected = selectedRequirement(expression, instance.substitution)
@@ -3115,11 +3115,11 @@ export const make = (operations: Operations) => {
           identity,
           Object.freeze({
             _tag: 'EffectInstance',
-            representationIdentity: Hir.effectRepresentationIdentity(block.site),
+            representationIdentity: Tir.effectRepresentationIdentity(block.site),
             identity,
             owner: instance.key,
             site: block.site,
-            runner: Hir.effectRunnerId(instance.key.declaration, block.site),
+            runner: Tir.effectRunnerId(instance.key.declaration, block.site),
             typeArguments: Object.freeze([...instance.key.typeArguments]),
             captures: Object.freeze(captures),
             type: specializedType,
@@ -3151,7 +3151,7 @@ export const make = (operations: Operations) => {
           handlerIdentity === undefined
         )
           continue
-        const site = Hir.effectCatchSite(
+        const site = Tir.effectCatchSite(
           instance.function.declaration.id,
           instance.key.declaration,
           catch_.span,
@@ -3161,11 +3161,11 @@ export const make = (operations: Operations) => {
           identity,
           Object.freeze({
             _tag: 'EffectInstance',
-            representationIdentity: Hir.effectRepresentationIdentity(site),
+            representationIdentity: Tir.effectRepresentationIdentity(site),
             identity,
             owner: instance.key,
             site,
-            runner: Hir.effectRunnerId(instance.key.declaration, site),
+            runner: Tir.effectRunnerId(instance.key.declaration, site),
             typeArguments: Object.freeze([...instance.key.typeArguments]),
             captures: Object.freeze([
               Object.freeze({
@@ -3229,7 +3229,7 @@ export const make = (operations: Operations) => {
           ]
         })
         if (captures.length !== builtin.arguments.length) continue
-        const site = Hir.builtinEffectSite(
+        const site = Tir.builtinEffectSite(
           instance.function.declaration.id,
           instance.key.declaration,
           builtin.span,
@@ -3239,11 +3239,11 @@ export const make = (operations: Operations) => {
           identity,
           Object.freeze({
             _tag: 'EffectInstance',
-            representationIdentity: Hir.effectRepresentationIdentity(site),
+            representationIdentity: Tir.effectRepresentationIdentity(site),
             identity,
             owner: instance.key,
             site,
-            runner: Hir.effectRunnerId(instance.key.declaration, site),
+            runner: Tir.effectRunnerId(instance.key.declaration, site),
             typeArguments: Object.freeze([...instance.key.typeArguments]),
             captures: Object.freeze(captures),
             type,
@@ -3258,7 +3258,7 @@ export const make = (operations: Operations) => {
           identity.environment !== undefined &&
           Type.runtimeCallableEnvironmentIdentityKey(identity.environment) ===
             Type.runtimeCallableEnvironmentIdentityKey(
-              Hir.callableEnvironmentIdentity(candidate.site, {
+              Tir.callableEnvironmentIdentity(candidate.site, {
                 declaration: candidate.owner.declaration,
                 typeArguments: candidate.owner.typeArguments,
                 staticArgumentKeys: Object.freeze(
@@ -3266,7 +3266,7 @@ export const make = (operations: Operations) => {
                 ),
               }),
             ) &&
-          Hir.matchesCallableTargetIdentity(candidate.target, identity.target) &&
+          Tir.matchesCallableTargetIdentity(candidate.target, identity.target) &&
           identity.typeArguments.length === candidate.typeArguments.length &&
           identity.typeArguments.every((argument, ordinal) => {
             const expected = candidate.typeArguments.at(ordinal)
@@ -3338,8 +3338,8 @@ export const make = (operations: Operations) => {
   const functionByKey = (
     results: ReadonlyMap<string, Elaboration.Result>,
     key: InstanceKey,
-  ): Hir.HirFunction | undefined =>
-    FunctionIndex.hirByName(results.get(key.declaration.module)?.hir, key.declaration.name)
+  ): Tir.TirFunction | undefined =>
+    FunctionIndex.tirByName(results.get(key.declaration.module)?.tir, key.declaration.name)
 
   const instanceNode = (key: InstanceKey): string => `instance\u0000${keyText(key)}`
 
@@ -3387,7 +3387,7 @@ export const make = (operations: Operations) => {
     const deferredCalls = new Map<
       string,
       {
-        readonly expression: Extract<Hir.Expression, { readonly _tag: 'Call' | 'EffectConstruct' }>
+        readonly expression: Extract<Tir.Expression, { readonly _tag: 'Call' | 'EffectConstruct' }>
         readonly context: EffectOriginContext
       }
     >()
@@ -3399,7 +3399,7 @@ export const make = (operations: Operations) => {
         readonly access: 'Shared' | 'Exclusive'
         readonly operation: string
         readonly nonParking: boolean
-        readonly expression: Extract<Hir.Expression, { readonly _tag: 'ServiceEffectConstruct' }>
+        readonly expression: Extract<Tir.Expression, { readonly _tag: 'ServiceEffectConstruct' }>
         readonly context: EffectOriginContext
       }
     >()
@@ -3408,7 +3408,7 @@ export const make = (operations: Operations) => {
       const candidates = instances.flatMap((instance) =>
         callableExpressions(instance.function).flatMap((expression) =>
           expression._tag === 'EffectBlock' &&
-          Hir.effectRepresentationIdentity(expression.site) === identity.identity
+          Tir.effectRepresentationIdentity(expression.site) === identity.identity
             ? [
                 Object.freeze({
                   owner: instance.key,
@@ -3445,7 +3445,7 @@ export const make = (operations: Operations) => {
       const candidates = instances.filter((candidate) => candidate.resultEffect === identity)
       const candidate = candidates.length === 1 ? candidates.at(0) : undefined
       const expressions =
-        candidate === undefined ? [] : Hir.returnExpressions(candidate.function.statements)
+        candidate === undefined ? [] : Tir.returnExpressions(candidate.function.statements)
       if (candidate === undefined || expressions.length === 0) return Object.freeze([])
       const recipeContext: EffectOriginContext = {
         fn: candidate.function,
@@ -3488,12 +3488,12 @@ export const make = (operations: Operations) => {
     }
     const serviceCallNode = (
       owner: InstanceKey,
-      expression: Extract<Hir.Expression, { readonly _tag: 'ServiceEffectConstruct' }>,
+      expression: Extract<Tir.Expression, { readonly _tag: 'ServiceEffectConstruct' }>,
     ): string =>
       `service\0${keyText(owner)}\0${expression.span.sourceId}:${expression.span.start}:${expression.span.end}`
     const providerBindingNode = (
       owner: InstanceKey,
-      expression: Extract<Hir.Expression, { readonly _tag: 'EffectBindRequirement' }>,
+      expression: Extract<Tir.Expression, { readonly _tag: 'EffectBindRequirement' }>,
     ): string =>
       `provider\0${keyText(owner)}\0${expression.span.sourceId}:${expression.span.start}:${expression.span.end}`
     for (const instance of instances) {
@@ -3510,7 +3510,7 @@ export const make = (operations: Operations) => {
         serviceRecipesOfIdentity,
       }
       const deferredCallNode = (
-        expression: Extract<Hir.Expression, { readonly _tag: 'Call' | 'EffectConstruct' }>,
+        expression: Extract<Tir.Expression, { readonly _tag: 'Call' | 'EffectConstruct' }>,
       ): string => {
         const node = `call\0${keyText(instance.key)}\0${expression.span.sourceId}:${expression.span.start}:${expression.span.end}`
         deferredCalls.set(node, { expression, context })
@@ -3518,7 +3518,7 @@ export const make = (operations: Operations) => {
       }
       const bindings = callableBindings(instance.function)
 
-      const effectOrigins = (expression: Hir.Expression): ReadonlyArray<string> => {
+      const effectOrigins = (expression: Tir.Expression): ReadonlyArray<string> => {
         if (expression._tag === 'EffectBindRequirement') return effectOrigins(expression.protected)
         if (expression._tag === 'BindingReference') {
           const initializer = bindings.get(expression.binding.ordinal)
@@ -3552,7 +3552,7 @@ export const make = (operations: Operations) => {
 
       const selectedInterfaceEffectTarget = (
         expression: Extract<
-          Hir.Expression,
+          Tir.Expression,
           { readonly _tag: 'InterfaceOperationCall' | 'BuiltinCall' }
         >,
       ): InstanceKey | undefined => {
@@ -3590,7 +3590,7 @@ export const make = (operations: Operations) => {
             )
       }
 
-      const callableApplicationTarget = (expression: Hir.Expression): string | undefined => {
+      const callableApplicationTarget = (expression: Tir.Expression): string | undefined => {
         const origin = callableOriginOf(expression, context)
         if (origin?.target._tag !== 'Declaration') return undefined
         const declaration: DeclarationFacts.CanonicalId = Object.freeze({
@@ -3613,7 +3613,7 @@ export const make = (operations: Operations) => {
                   Type.runtimeCallableEnvironmentIdentityKey(
                     operations.callableEnvironmentIdentity(candidate),
                   ) === Type.runtimeCallableEnvironmentIdentityKey(environment) &&
-                  Hir.matchesCallableTargetIdentity(candidate.target, origin.target) &&
+                  Tir.matchesCallableTargetIdentity(candidate.target, origin.target) &&
                   sameVisibleTypeArguments(candidate.typeArguments, arguments_),
               )
         if (environment !== undefined && captured === undefined) return undefined
@@ -3632,7 +3632,7 @@ export const make = (operations: Operations) => {
         return executionNodeForKey(selectedKey)
       }
       const addBuiltinCallbacks = (
-        expression: Extract<Hir.Expression, { readonly _tag: 'BuiltinCall' }>,
+        expression: Extract<Tir.Expression, { readonly _tag: 'BuiltinCall' }>,
         execution: string,
       ): void => {
         let ordinals: ReadonlyArray<number>
@@ -3672,7 +3672,7 @@ export const make = (operations: Operations) => {
         }
       }
 
-      const executionTargets = (expression: Hir.Expression): ReadonlyArray<string> => {
+      const executionTargets = (expression: Tir.Expression): ReadonlyArray<string> => {
         if (expression._tag === 'EffectBindRequirement')
           return Object.freeze([providerBindingNode(instance.key, expression)])
         if (expression._tag === 'BindingReference') {
@@ -3710,7 +3710,7 @@ export const make = (operations: Operations) => {
             instance.specialization.compatibility,
           )
           if (Type.isEffect(type)) {
-            const site = Hir.builtinEffectSite(
+            const site = Tir.builtinEffectSite(
               instance.function.declaration.id,
               instance.key.declaration,
               expression.span,
@@ -3802,7 +3802,7 @@ export const make = (operations: Operations) => {
       }
 
       const nonParkingExecutionTargets = (
-        expression: Hir.Expression,
+        expression: Tir.Expression,
       ): { readonly targets: ReadonlyArray<string>; readonly complete: boolean } => {
         if (expression._tag === 'BindingReference') {
           const initializer = bindings.get(expression.binding.ordinal)
@@ -3855,7 +3855,7 @@ export const make = (operations: Operations) => {
         return Object.freeze({ targets, complete: targets.length > 0 })
       }
 
-      const carriesNonParkingProof = (expression: Hir.Expression): boolean =>
+      const carriesNonParkingProof = (expression: Tir.Expression): boolean =>
         expression._tag !== 'Unavailable' &&
         Type.isRepresented(expression.type) &&
         Type.isRepresentationParameterArgument(expression.type.representation.argument) &&
@@ -3863,7 +3863,7 @@ export const make = (operations: Operations) => {
           'Intrinsic.NonParking',
         )
 
-      const isSuspensionSubject = (expression: Hir.Expression): boolean => {
+      const isSuspensionSubject = (expression: Tir.Expression): boolean => {
         if (expression._tag === 'BuiltinCall') return expression.operation === 'EffectSuspend'
         if (expression._tag === 'BindingReference') {
           const initializer = bindings.get(expression.binding.ordinal)
@@ -3876,7 +3876,7 @@ export const make = (operations: Operations) => {
         return false
       }
 
-      const isExternalParkSubject = (expression: Hir.Expression): boolean => {
+      const isExternalParkSubject = (expression: Tir.Expression): boolean => {
         if (expression._tag === 'BuiltinCall' && expression.operation === 'ExecutionPark')
           return true
         if (expression._tag === 'BindingReference') {
@@ -3889,7 +3889,7 @@ export const make = (operations: Operations) => {
       }
 
       const recordForwardedServiceTargets = (
-        expression: Extract<Hir.Expression, { readonly _tag: 'Call' | 'EffectConstruct' }>,
+        expression: Extract<Tir.Expression, { readonly _tag: 'Call' | 'EffectConstruct' }>,
         execution: string,
       ): void => {
         const wrapperKey = targetKeyOfInvocation(expression, context)
@@ -3932,7 +3932,7 @@ export const make = (operations: Operations) => {
       }
 
       const recordForwardedCallableServiceTargets = (
-        expression: Extract<Hir.Expression, { readonly _tag: 'CallableApply' }>,
+        expression: Extract<Tir.Expression, { readonly _tag: 'CallableApply' }>,
         execution: string,
       ): void => {
         const wrapperKey = targetKeyOfInvocation(expression, context)
@@ -3994,7 +3994,7 @@ export const make = (operations: Operations) => {
           addDependency(execution, instanceNode(targetKey))
         }
       }
-      const recordRegions = (statement: Hir.Statement, execution: string): void => {
+      const recordRegions = (statement: Tir.Statement, execution: string): void => {
         cleanupRegions.set(statement.region.ordinal, execution)
         if (statement._tag === 'Unsafe') {
           for (const child of statement.statements) recordRegions(child, execution)
@@ -4029,7 +4029,7 @@ export const make = (operations: Operations) => {
             addOwnedEffectCleanup(capture.effectIdentity, execution, next)
         }
       }
-      const scanExpression = (expression: Hir.Expression, execution: string): void => {
+      const scanExpression = (expression: Tir.Expression, execution: string): void => {
         if (expression._tag === 'EffectBlock') {
           const identity = effectIdentity(instance.key, expression.site)
           effectIdentities.add(identity)
@@ -4037,7 +4037,7 @@ export const make = (operations: Operations) => {
           return
         }
         if (expression._tag === 'EffectCatch') {
-          const site = Hir.effectCatchSite(
+          const site = Tir.effectCatchSite(
             instance.function.declaration.id,
             instance.key.declaration,
             expression.span,
@@ -4222,15 +4222,15 @@ export const make = (operations: Operations) => {
             for (const target of targets) addDependency(execution, target)
           }
         }
-        for (const child of Hir.expressionChildren(expression)) scanExpression(child, execution)
+        for (const child of Tir.expressionChildren(expression)) scanExpression(child, execution)
       }
       const scanStatements = (
-        statements: ReadonlyArray<Hir.Statement>,
+        statements: ReadonlyArray<Tir.Statement>,
         execution: string,
       ): void => {
         for (const statement of statements) {
           recordRegions(statement, execution)
-          for (const expression of Hir.statementExpressions(statement))
+          for (const expression of Tir.statementExpressions(statement))
             scanExpression(expression, execution)
         }
       }

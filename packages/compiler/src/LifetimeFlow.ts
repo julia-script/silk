@@ -5,7 +5,7 @@ import * as DeclarationFacts from './DeclarationFacts.js'
 import type * as DeclarationIndex from './DeclarationIndex.js'
 import * as Diagnostic from './Diagnostic.js'
 import * as Elaboration from './Elaboration.js'
-import * as HirLowering from './HirLowering.js'
+import * as TirLowering from './TirLowering.js'
 import * as Lifetime from './Lifetime.js'
 import type * as MovePath from './MovePath.js'
 import * as Ownership from './Ownership.js'
@@ -24,7 +24,7 @@ export interface Origin {
   readonly span: SourceSpan.SourceSpan
 }
 
-/** Inspectable finite region proof retained independently of HIR and runtime specialization. */
+/** Inspectable finite region proof retained independently of TIR and runtime specialization. */
 export interface LifetimeFlow {
   readonly controlFlow: BodyControlFlow.BodyControlFlow
   readonly retiredUses: ReadonlyMap<string, ReadonlySet<number>>
@@ -554,7 +554,7 @@ export const analyze = (
           statement.selection.source,
           statement.selection.access,
         )
-      for (const expression of HirLowering.directStatementExpressions(statement))
+      for (const expression of TirLowering.directStatementExpressions(statement))
         visitExpression(
           expression,
           syntax,

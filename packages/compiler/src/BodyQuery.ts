@@ -1,4 +1,4 @@
-import * as Option from 'effect/Option'
+import * as AuthoredLowering from './AuthoredLowering.js'
 import type * as DeclarationFacts from './DeclarationFacts.js'
 import type * as DeclarationIndex from './DeclarationIndex.js'
 import type * as Elaboration from './Elaboration.js'
@@ -6,10 +6,10 @@ import type * as ExpressionAnalysis from './ExpressionAnalysis.js'
 import * as ModuleSurface from './ModuleSurface.js'
 import type * as NameResolution from './NameResolution.js'
 import type * as Ownership from './Ownership.js'
+import * as Tir from './Tir.js'
 import * as SemanticRebinding from './SemanticRebinding.js'
-import * as SourceFile from './SourceFile.js'
+import type * as SourceFile from './SourceFile.js'
 import * as SourceOrigin from './SourceOrigin.js'
-import * as SyntaxTree from './SyntaxTree.js'
 
 /** Actual source-body query work, independent of module invalidation observations. */
 export interface Counters {
@@ -168,61 +168,28 @@ export const make = (
   }
 }
 
-const spelling = (source: SourceFile.SourceFile, node: SyntaxTree.Element): string =>
-  Option.getOrElse(SourceFile.spelling(source, node.span), () => '')
-
-const body = (declaration: DeclarationFacts.DeclarationFact): SyntaxTree.Node =>
-  declaration.syntax.children.filter(SyntaxTree.isNode).find((node) => node.kind === 'Block') ??
-  declaration.syntax
-
-const tokens = (
-  source: SourceFile.SourceFile,
-  node: SyntaxTree.Node,
-): ReadonlyArray<readonly [string, string]> => {
-  const result: Array<readonly [string, string]> = []
-  const visit = (element: SyntaxTree.Element): void => {
-    if (SyntaxTree.isNode(element)) for (const child of element.children) visit(child)
-    else if (
-      SyntaxTree.isToken(element) &&
-      !['Whitespace', 'LineComment', 'DocComment', 'ModuleDocComment'].includes(element.kind)
-    )
-      result.push([element.kind, spelling(source, element)])
-  }
-  visit(node)
-  return result
-}
-
-const implementation = (
-  source: SourceFile.SourceFile,
+/** The authored declaration behind one indexed declaration; the pipeline lowers every module. */
+const authoredDeclaration = (
+  authored: AuthoredLowering.Lowered,
   declaration: DeclarationFacts.DeclarationFact,
-): string => {
-  const lifetimes = new Map(
-    declaration.typeParameters
-      .filter((parameter) => parameter.type.kind === 'Lifetime')
-      .flatMap((parameter) =>
-        parameter.name._tag === 'Present'
-          ? [[parameter.name.spelling, parameter.type.ordinal] as const]
-          : [],
-      ),
-  )
-  return JSON.stringify(
-    tokens(source, body(declaration)).map(([kind, text]) => [
-      kind,
-      kind === 'Lifetime' ? (lifetimes.get(text) ?? text) : text,
-    ]),
-  )
-}
+) =>
+  AuthoredLowering.declarationFor(authored, declaration.syntax) ??
+  (() => {
+    throw new RangeError(`Authored module lost declaration ${memberKey(declaration)}`)
+  })()
+
+/** The canonical authored body up to lifetime alpha-renaming: the syntax-free implementation key. */
+const implementation = (
+  authored: AuthoredLowering.Lowered,
+  declaration: DeclarationFacts.DeclarationFact,
+): string => AuthoredLowering.canonicalBody(authored, authoredDeclaration(authored, declaration))
 
 const scopeSignature = (
-  source: SourceFile.SourceFile,
+  authored: AuthoredLowering.Lowered,
   declaration: DeclarationFacts.DeclarationFact,
   scope: NameResolution.ModuleScope,
 ): string => {
-  const names = new Set(
-    tokens(source, body(declaration))
-      .filter(([kind]) => kind === 'Identifier')
-      .map(([, text]) => text),
-  )
+  const names = AuthoredLowering.bodyNames(authored, authoredDeclaration(authored, declaration))
   return JSON.stringify(
     scope.bindings
       .filter((binding) => names.has(binding.spelling))
@@ -382,6 +349,7 @@ const validateDependencies = (
 export const check = (
   self: BodyQuery,
   source: SourceFile.SourceFile,
+  authored: AuthoredLowering.Lowered,
   scope: NameResolution.ModuleScope,
   declaration: DeclarationFacts.DeclarationFact,
   hiddenFunctions: Array<Elaboration.FunctionFact>,
@@ -390,8 +358,8 @@ export const check = (
   const key = memberKey(declaration)
   const prior = self.previous.get(key)
   const signature = self.signatures.get(key) ?? ModuleSurface.memberSignature(declaration)
-  const bodyKey = implementation(source, declaration)
-  const scopeKey = scopeSignature(source, declaration, scope)
+  const bodyKey = implementation(authored, declaration)
+  const scopeKey = scopeSignature(authored, declaration, scope)
   const valid =
     prior !== undefined &&
     SourceOrigin.equals(prior.source.origin, source.origin) &&
@@ -415,10 +383,15 @@ export const check = (
     if (rebinding !== undefined) {
       SemanticRebinding.pair(rebinding, prior.source, source)
       for (const hidden of prior.hidden) {
-        const syntax = SemanticRebinding.rebind(rebinding, hidden.declaration.syntax)
+        // The hidden body keeps its site; only its enclosing declaration's ordinal can move.
+        const site =
+          hidden.declaration.canonical._tag === 'Canonical'
+            ? Tir.anonymousCallableSite(hidden.declaration.canonical.id)
+            : undefined
+        if (site === undefined) throw new RangeError('Hidden body lost its anonymous callable site')
         SemanticRebinding.pair(rebinding, hidden.declaration.id, {
           ...hidden.declaration.id,
-          ordinal: 0x70000000 + syntax.span.start,
+          ordinal: Tir.hiddenDeclarationOrdinal(declaration.id.ordinal, site),
         })
       }
     }

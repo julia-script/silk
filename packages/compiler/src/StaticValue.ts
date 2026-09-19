@@ -110,7 +110,7 @@ export interface AggregateValue {
   readonly _tag: 'AggregateValue'
   readonly identity: AggregateIdentity
   readonly fields: ReadonlyArray<AggregateField>
-  /** Snapshot-local field identities used only when embedding the canonical value into HIR. */
+  /** Snapshot-local field identities used only when embedding the canonical value into TIR. */
   readonly runtimeFields?: ReadonlyArray<{
     readonly id: DeclarationFacts.FieldId
     readonly type: Type.Type

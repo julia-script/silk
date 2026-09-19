@@ -2,7 +2,7 @@ import * as Layer from 'effect/Layer'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
-import * as Hir from '../src/Hir.js'
+import * as Tir from '../src/Tir.js'
 import * as Type from '../src/Type.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
@@ -196,8 +196,8 @@ pub fn main() -> i32 { let value = deferred() drop value return 42 }`)
     assert.deepEqual(codes(self), [])
     const blocks = self.instances.instances
       .flatMap((instance) => instance.function.statements)
-      .flatMap(Hir.statementExpressions)
-      .flatMap(Hir.expressionTree)
+      .flatMap(Tir.statementExpressions)
+      .flatMap(Tir.expressionTree)
       .flatMap((expression) =>
         expression._tag === 'EffectBlock' && expression.type.success === 'usize'
           ? [expression]

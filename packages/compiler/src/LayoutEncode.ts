@@ -1,6 +1,6 @@
 import * as DeclarationFacts from './DeclarationFacts.js'
 import * as ExecutionPackage from './ExecutionPackage.js'
-import * as Hir from './Hir.js'
+import * as Tir from './Tir.js'
 import type {
   CallingScalar,
   Catalog,
@@ -163,12 +163,12 @@ export const encode = (self: Plan): string =>
     ),
     ...self.effectEnvironments.map((environment) =>
       environment._tag === 'UnavailableEffectEnvironment'
-        ? `effect-environment ${environment.instance.declaration.module}.${environment.instance.declaration.name}@${Hir.executableSiteLabel(environment.site)} unavailable=${environment.reason}`
-        : `effect-environment ${environment.instance.declaration.module}.${environment.instance.declaration.name}@${Hir.executableSiteLabel(environment.site)} size=${environment.size} align=${environment.alignment} fields=${environment.fields.map((field) => `${field.source.toLowerCase()}${field.ordinal}:${field.access.toLowerCase()}:${field.representation.toLowerCase()}@${field.offset}`).join(',') || 'none'}`,
+        ? `effect-environment ${environment.instance.declaration.module}.${environment.instance.declaration.name}@${Tir.executableSiteLabel(environment.site)} unavailable=${environment.reason}`
+        : `effect-environment ${environment.instance.declaration.module}.${environment.instance.declaration.name}@${Tir.executableSiteLabel(environment.site)} size=${environment.size} align=${environment.alignment} fields=${environment.fields.map((field) => `${field.source.toLowerCase()}${field.ordinal}:${field.access.toLowerCase()}:${field.representation.toLowerCase()}@${field.offset}`).join(',') || 'none'}`,
     ),
     ...self.callableEnvironments.map((environment) => {
       const callable = environment.callable
-      const identity = `${callable.owner.declaration.module}.${callable.owner.declaration.name}@${Hir.executableSiteLabel(callable.site)}`
+      const identity = `${callable.owner.declaration.module}.${callable.owner.declaration.name}@${Tir.executableSiteLabel(callable.site)}`
       return environment._tag === 'UnavailableCallableEnvironment'
         ? `callable-environment ${identity} unavailable=${environment.reason} view=code@${environment.view.codeOffset},env@${environment.view.environmentOffset},size=${environment.view.size}`
         : `callable-environment ${identity} mode=${callable.mode.toLowerCase()} size=${environment.size} align=${environment.alignment} fields=${environment.fields.map((field) => `capture${field.ordinal}->p${field.parameterOrdinal}:${field.access.toLowerCase()}:${field.representation.toLowerCase()}@${field.offset}`).join(',') || 'none'} view=code@${environment.view.codeOffset},env@${environment.view.environmentOffset},size=${environment.view.size}`

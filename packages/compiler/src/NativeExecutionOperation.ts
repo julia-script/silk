@@ -23,7 +23,7 @@ import { suspensionPointKey } from './Backend.js'
 import * as CoroutineFrame from './CoroutineFrame.js'
 import * as ExecutionPackage from './ExecutionPackage.js'
 import * as ExecutionTransition from './ExecutionTransition.js'
-import * as Hir from './Hir.js'
+import * as Tir from './Tir.js'
 import * as Layout from './Layout.js'
 import * as LayoutVerify from './LayoutVerify.js'
 import * as Mir from './Mir.js'
@@ -200,7 +200,7 @@ const exactEffect = (context: Context, package_: ExecutionPackage.Plan) => {
       : context.declared.find((candidate) =>
           Mir.matchesEffectInstance(
             candidate.fn,
-            Hir.effectRunnerId(environment.instance.declaration, environment.site),
+            Tir.effectRunnerId(environment.instance.declaration, environment.site),
             environment.instance.typeArguments,
             environment.instance.staticArguments,
             SilkType.isEffect(contract) ? contract : environment.effect,
@@ -258,7 +258,7 @@ const notifyReady = Effect.fnUntraced(function* (
       ? representation.identity
       : undefined
   const targetIdentity =
-    identity === undefined ? undefined : Hir.callableTargetFromIdentity(identity.target)
+    identity === undefined ? undefined : Tir.callableTargetFromIdentity(identity.target)
   const environment =
     identity?.environment === undefined
       ? undefined

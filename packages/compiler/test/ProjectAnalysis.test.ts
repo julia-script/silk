@@ -6,6 +6,7 @@ import * as Fiber from 'effect/Fiber'
 import * as Analysis from '../src/Analysis.js'
 import * as Elaboration from '../src/Elaboration.js'
 import * as FrontendTooling from '../src/FrontendTooling.js'
+import * as Tir from '../src/Tir.js'
 import * as ProjectAnalysis from '../src/ProjectAnalysis.js'
 import * as SourceCatalog from '../src/SourceCatalog.js'
 import * as Ownership from '../src/Ownership.js'
@@ -627,15 +628,19 @@ fn broken() -> i32 { return missing() }`
       assert.strictEqual(diagnostic.span.end, oldDiagnostic.span.end + prefix.length)
       const result = view.results.get('query/Rebind') ?? raise('rebound module')
       const hidden = result.hiddenFunctions.at(0) ?? raise('rebound anonymous function')
-      assert.strictEqual(
-        hidden.declaration.id.ordinal,
-        0x70000000 + hidden.declaration.syntax.span.start,
-      )
       const callback =
         result.functions.find(
           (fn) =>
             fn.declaration.name._tag === 'Present' && fn.declaration.name.spelling === 'callback',
         ) ?? raise('rebound callback')
+      // The hidden identity follows its enclosing declaration and callable site, not byte offsets.
+      assert.strictEqual(
+        hidden.declaration.id.ordinal,
+        Tir.hiddenDeclarationOrdinal(callback.declaration.id.ordinal, 0),
+      )
+      const oldResult = oldView.results.get('query/Rebind') ?? raise('original module')
+      const oldHidden = oldResult.hiddenFunctions.at(0) ?? raise('original anonymous function')
+      assert.strictEqual(hidden.declaration.id.ordinal - oldHidden.declaration.id.ordinal, 65536)
       Elaboration.visitStatementFacts(callback.statements, {
         expression: (expression) => {
           if (expression._tag === 'Identifier' && expression.reference._tag === 'ResolvedPattern') {
@@ -904,7 +909,7 @@ it.effect('reuses exact unchanged syntax and module semantics inside one coheren
     assert.strictEqual(currentView.results.get('app/B'), previousView.results.get('app/B'))
     assert.strictEqual(currentView.ownership.get('app/B'), previousView.ownership.get('app/B'))
     const retainedResult = currentView.results.get('shared/Core') ?? raise('retained library')
-    const retainedFunction = retainedResult.hir.functions.at(0) ?? raise('retained HIR function')
+    const retainedFunction = retainedResult.tir.functions.at(0) ?? raise('retained TIR function')
     const retainedFact = retainedResult.functions.at(0) ?? raise('retained semantic function')
     const ownershipInput = Ownership.input(
       retainedFunction,
@@ -1122,7 +1127,7 @@ unsafe fn probe(core: &Intrinsic.SharedCore<i32>) -> i32 { return 1 }`
       const beforeResult = before.results.get('shared/Callbacks') ?? raise('initial callbacks')
       const afterResult = after.results.get('shared/Callbacks') ?? raise('revised callbacks')
       assert.strictEqual(afterResult, beforeResult)
-      const fn = afterResult.hir.functions.at(0) ?? raise('callback HIR')
+      const fn = afterResult.tir.functions.at(0) ?? raise('callback TIR')
       const fact = afterResult.functions.at(0) ?? raise('callback fact')
       const previousInput = Ownership.input(
         fn,

@@ -1,4 +1,4 @@
-hir-module golden/operator
+tir-module golden/operator
 fn golden/operator.main () -> i32 entry=r0 regions=r0
   return r0 [45, 69)
     callable-apply access=shared evaluation=LeftThenCallable realization=DirectErasedSection substitution=none ends=none held=none : i32 [45, 69)

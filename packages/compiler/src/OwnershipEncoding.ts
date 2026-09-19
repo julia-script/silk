@@ -1,7 +1,7 @@
 import type * as CleanupPlan from './CleanupPlan.js'
 import type * as DeclarationFacts from './DeclarationFacts.js'
 import * as ExecutionAffinity from './ExecutionAffinity.js'
-import * as Hir from './Hir.js'
+import * as Tir from './Tir.js'
 import * as LocalSharedOwnership from './LocalSharedOwnership.js'
 import * as Match from './Match.js'
 import * as MovePath from './MovePath.js'
@@ -84,12 +84,12 @@ const cleanupText = (cleanup: CleanupPlan.CleanupPlan): string => {
   if (cleanup._tag === 'CallableCleanup') {
     const environment =
       cleanup.environment._tag === 'CallableEnvironmentSite'
-        ? Hir.executableSiteLabel(cleanup.environment.site)
+        ? Tir.executableSiteLabel(cleanup.environment.site)
         : Type.callableEnvironmentKey(cleanup.environment.identity)
     return `callable:${Type.encode(cleanup.type)} environment=${environment} slots=${cleanup.slots.map((slot) => `#${slot.ordinal}(${cleanupText(slot.cleanup)})`).join(',') || 'none'}`
   }
   if (cleanup._tag === 'EffectCleanup') {
-    return `effect:${Type.encode(cleanup.type)} site=${Hir.executableSiteLabel(cleanup.site)} slots=${cleanup.slots.map((slot) => `#${slot.ordinal}(${cleanupText(slot.cleanup)})`).join(',') || 'none'}`
+    return `effect:${Type.encode(cleanup.type)} site=${Tir.executableSiteLabel(cleanup.site)} slots=${cleanup.slots.map((slot) => `#${slot.ordinal}(${cleanupText(slot.cleanup)})`).join(',') || 'none'}`
   }
   if (cleanup._tag === 'EffectCompositeCleanup') {
     return `effect-composite:${Type.encode(cleanup.type)} alternatives=${cleanup.alternatives.map((alternative, ordinal) => `${ordinal}(${cleanupText(alternative)})`).join(',')}`
@@ -146,7 +146,7 @@ export const encode = (self: ModuleOwnership): string =>
       ),
       ...fn.callables.map(
         (callable) =>
-          `  callable ${Hir.executableSiteLabel(callable.site)} ${callable.mode.toLowerCase()} affinity=${ExecutionAffinity.encode(callable.executionAffinity)} obligations=${LocalSharedOwnership.encode(callable.localSharedObligations)} slots=${callable.slots.map((slot) => `#${slot.ordinal}:p${slot.parameterOrdinal}:${slot.access.toLowerCase()}:${slot.type === undefined ? '?' : Type.encode(slot.type)}:${ExecutionAffinity.encode(slot.executionAffinity)}:${LocalSharedOwnership.encode(slot.localSharedObligations)}:${cleanupText(slot.cleanup)}`).join(',') || 'none'} retained=${callable.retainedDependencies.join(',') || 'none'} drop=${callable.dropOrder.map((ordinal) => `#${ordinal}`).join(',') || 'none'}`,
+          `  callable ${Tir.executableSiteLabel(callable.site)} ${callable.mode.toLowerCase()} affinity=${ExecutionAffinity.encode(callable.executionAffinity)} obligations=${LocalSharedOwnership.encode(callable.localSharedObligations)} slots=${callable.slots.map((slot) => `#${slot.ordinal}:p${slot.parameterOrdinal}:${slot.access.toLowerCase()}:${slot.type === undefined ? '?' : Type.encode(slot.type)}:${ExecutionAffinity.encode(slot.executionAffinity)}:${LocalSharedOwnership.encode(slot.localSharedObligations)}:${cleanupText(slot.cleanup)}`).join(',') || 'none'} retained=${callable.retainedDependencies.join(',') || 'none'} drop=${callable.dropOrder.map((ordinal) => `#${ordinal}`).join(',') || 'none'}`,
       ),
       ...fn.transitions.map(
         (transition) =>

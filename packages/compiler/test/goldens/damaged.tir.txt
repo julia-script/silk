@@ -1,4 +1,4 @@
-hir-module golden://damaged.silk
+tir-module golden://damaged.silk
 fn golden://damaged.silk.puzzle contract-unavailable entry=r0 regions=r0
   return r0 [45, 51)
     unavailable [45, 51)

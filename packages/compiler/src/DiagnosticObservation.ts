@@ -1,5 +1,5 @@
 import * as Diagnostic from './Diagnostic.js'
-import * as Hir from './Hir.js'
+import * as Tir from './Tir.js'
 import * as Instances from './Instances.js'
 import * as Type from './Type.js'
 
@@ -38,8 +38,8 @@ export const violationDiagnostics = (
     return Diagnostic.merge(diagnostics)
   for (const instance of discovery.instances) {
     for (const statement of instance.function.statements) {
-      for (const root of Hir.statementExpressions(statement)) {
-        for (const expression of Hir.expressionTree(root)) {
+      for (const root of Tir.statementExpressions(statement)) {
+        for (const expression of Tir.expressionTree(root)) {
           if (
             expression._tag !== 'BuiltinCall' ||
             expression.operation !== 'EffectObserveDiagnostics'

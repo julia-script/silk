@@ -336,7 +336,7 @@ it('rejects missing lifetime solver inputs instead of treating them as unconstra
 it('keeps nominal identity independent of field shape and import spelling', () => {
   const first = Type.nominal('syntax/Tree', 'Node')
   const repeated = Type.nominal('syntax/Tree', 'Node')
-  const otherModule = Type.nominal('hir/Tree', 'Node')
+  const otherModule = Type.nominal('tir/Tree', 'Node')
 
   assert.strictEqual(Type.equals(first, repeated), true)
   assert.strictEqual(Type.equals(first, otherModule), false)

@@ -96,7 +96,7 @@ import {
   visitStatementFacts,
 } from './Elaboration.js'
 import * as FloatingPoint from './FloatingPoint.js'
-import * as Hir from './Hir.js'
+import * as Tir from './Tir.js'
 import * as Intrinsic from './Intrinsic.js'
 import * as DigitSeparator from './internal/DigitSeparator.js'
 import * as DurationLiteral from './internal/DurationLiteral.js'
@@ -3005,7 +3005,7 @@ export const analyzeMatch = (
     contributes(arm) &&
     arm.body._tag === 'Expression' &&
     arm.body.expression._tag === 'CallableSection'
-      ? [Hir.executableSiteKey(arm.body.expression.site)]
+      ? [Tir.executableSiteKey(arm.body.expression.site)]
       : [],
   )
   // Every reachable arm must construct the same exact callable: a structural callable type names
@@ -3140,7 +3140,7 @@ export const exactEffectDeclarationRepresentation = (
     typeArguments,
     staticArgumentKeys: Object.freeze(staticArguments.map(StaticValue.key)),
   })
-  const site: Hir.EffectSiteId = Object.freeze({
+  const site: Tir.EffectSiteId = Object.freeze({
     _tag: 'EffectSiteId',
     function: declaration.id,
     owner: declaration.canonical.id,
@@ -3148,7 +3148,7 @@ export const exactEffectDeclarationRepresentation = (
     span: declaration.syntax.span,
   })
   return Type.exactRepresentationArgument(
-    Type.effectIdentityArgument(Hir.effectRepresentationIdentity(site), owner),
+    Type.effectIdentityArgument(Tir.effectRepresentationIdentity(site), owner),
     contract,
   )
 }
@@ -3241,7 +3241,7 @@ export function representationOfExpression(
     if (expression.captures.length === 0)
       return exactCallableRepresentation(expression.reference, contract, expression.typeArguments)
     if (expression.environmentOwner === undefined) return undefined
-    const environment = Hir.callableEnvironmentIdentity(
+    const environment = Tir.callableEnvironmentIdentity(
       expression.site,
       expression.environmentOwner,
     )
@@ -3258,7 +3258,7 @@ export function representationOfExpression(
     const site = expression.site
     return Type.exactRepresentationArgument(
       Type.effectIdentityArgument(
-        Hir.effectRepresentationIdentity(site),
+        Tir.effectRepresentationIdentity(site),
         expression.representationOwner,
       ),
       contract,
@@ -6225,7 +6225,7 @@ export const analyzeGroupedExpression = (
 }
 
 /**
- * Analyzes `&&` or `||`. Both operands must be `bool` and the result is `bool`. HIR retains the
+ * Analyzes `&&` or `||`. Both operands must be `bool` and the result is `bool`. TIR retains the
  * right operand as a conditional region, so its ordinary effects, moves, loans, and cleanup stay
  * on the path that executes it.
  */
@@ -8667,9 +8667,9 @@ const analyzeAnonymousCallable = (
   const hiddenId: DeclarationId = Object.freeze({
     _tag: 'DeclarationId',
     sourceId: source.id,
-    ordinal: 0x70000000 + node.span.start,
+    ordinal: Tir.hiddenDeclarationOrdinal(declaration.id.ordinal, site.ordinal),
   })
-  const canonical = Hir.anonymousCallableId(owner, site)
+  const canonical = Tir.anonymousCallableId(owner, site)
   const initial = DeclarationCollection.collectAnonymousCallableDeclaration(
     source,
     node,
@@ -10557,8 +10557,8 @@ export interface BodyContext {
   readonly declarations: ReadonlyArray<DeclarationFact>
   readonly bindings: Array<BindingDeclarationFact>
   readonly diagnostics: Array<Diagnostic.Diagnostic>
-  readonly regions: Array<Hir.RegionId>
-  readonly loops: Array<Hir.LoopId>
+  readonly regions: Array<Tir.RegionId>
+  readonly loops: Array<Tir.LoopId>
   readonly staticIterations: Array<StaticIterationFact>
   readonly resolution: ResolutionContext
   readonly nextBindingOrdinal: { value: number }
@@ -10574,7 +10574,7 @@ export interface ResolutionContext {
   /** The current eager execution boundary and its lexical loop destinations. */
   readonly execution?: {
     readonly context: BodyContext
-    readonly loopStack: ReadonlyArray<Hir.LoopId>
+    readonly loopStack: ReadonlyArray<Tir.LoopId>
   }
   readonly scope: NameResolution.ModuleScope
   readonly index: DeclarationIndex.Index

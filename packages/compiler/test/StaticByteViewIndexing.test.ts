@@ -2,7 +2,7 @@ import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
-import * as Hir from '../src/Hir.js'
+import * as Tir from '../src/Tir.js'
 import * as Lifetime from '../src/Lifetime.js'
 import type * as Mir from '../src/Mir.js'
 import * as MirEncoding from '../src/MirEncoding.js'
@@ -52,16 +52,16 @@ const rewriteOperations = (
     ),
   })
 
-it.effect('keeps byte literals as shared u8 slices through semantic facts, HIR, and MIR', () =>
+it.effect('keeps byte literals as shared u8 slices through semantic facts, TIR, and MIR', () =>
   Effect.gen(function* () {
     const first = yield* AnalysisFixture.retainingMain(moduleName, ascii(directSource))
     const second = yield* AnalysisFixture.retainingMain(moduleName, ascii(directSource))
     assert.deepEqual(Analysis.diagnostics(first), [])
 
-    const hir = Projections.hirOf(first, moduleName)
+    const tir = Projections.tirOf(first, moduleName)
     const expressions =
-      hir?.functions.flatMap((fn) =>
-        fn.statements.flatMap(Hir.statementExpressions).flatMap(Hir.expressionTree),
+      tir?.functions.flatMap((fn) =>
+        fn.statements.flatMap(Tir.statementExpressions).flatMap(Tir.expressionTree),
       ) ?? []
     const literal = expressions.find((expression) => expression._tag === 'StaticByteViewLiteral')
     assert.strictEqual(literal?._tag, 'StaticByteViewLiteral')

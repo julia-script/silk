@@ -54,7 +54,7 @@ Defining intended semantics comes before a systematic implementation audit. A cu
 mismatch is recorded when stabilization work encounters one, but discovering every mismatch is not
 a prerequisite for confirming a language rule.
 
-Compiler representations such as HIR, MIR, generated runners, layouts, and backend instructions do
+Compiler representations such as TIR, MIR, generated runners, layouts, and backend instructions do
 not belong in a language rule unless a program can observe them.
 
 ## Contents

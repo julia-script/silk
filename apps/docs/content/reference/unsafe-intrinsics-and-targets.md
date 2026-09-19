@@ -547,7 +547,7 @@ initialized extent, live handle kind, valid UTF-8, non-aliasing access, or priva
 be unsafe” and “caller must use correctly” are not sufficient contracts.
 
 The same canonical contract drives name resolution, generic inference, signature help, hover,
-diagnostics, HIR, MIR, static evaluation, target validation, and LLVM lowering. Those consumers cannot
+diagnostics, TIR, MIR, static evaluation, target validation, and LLVM lowering. Those consumers cannot
 independently reconstruct or weaken it.
 
 **Boundary:** An intrinsic may still have defined typed failures or traps. Unsafe marks only the
@@ -1272,7 +1272,7 @@ outside an unsafe boundary report `SEM0082`; and reachable statics on non-native
 `SEM0208` naming the symbol and surface. Symbol spelling, reservation, and closure-wide collision
 rules reuse `SEM0190`–`SEM0192`.
 
-**Current compiler:** Aligned. The declaration surface, HIR/MIR, availability planner, LLVM global
+**Current compiler:** Aligned. The declaration surface, TIR/MIR, availability planner, LLVM global
 emission, artifact metadata, and native shared/static-library acceptance all retain the same symbol
 and C type.
 

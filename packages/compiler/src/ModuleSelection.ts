@@ -116,6 +116,7 @@ const coordinator = (
       module.name,
       Elaboration.elaborateModule({
         syntax: module.syntax,
+        authored: module.authored,
         headers: { ...headers, declarations: [], constants: [] },
         scope,
         index,

@@ -160,6 +160,7 @@ const elaborateModules = Effect.fn('Frontend.elaborateModules')(function* (
         throw new RangeError(`Pipeline lost module facts for ${module.name}`)
       const result = Elaboration.elaborateModule({
         syntax: module.syntax,
+        authored: module.authored,
         headers: moduleHeaders,
         scope,
         index: headers.index,
@@ -358,6 +359,7 @@ const bootstrapFacts = Effect.fn('Frontend.bootstrapFacts')(function* (
       module.name,
       Elaboration.elaborateModule({
         syntax: module.syntax,
+        authored: module.authored,
         headers: { ...moduleHeaders, declarations: [], constants: [] },
         scope,
         index: headers.index,

@@ -6,7 +6,7 @@ import type * as CleanupPlan from './CleanupPlan.js'
 import type * as DeclarationFacts from './DeclarationFacts.js'
 import type * as ExecutionPackage from './ExecutionPackage.js'
 import type * as ExecutionTransition from './ExecutionTransition.js'
-import * as Hir from './Hir.js'
+import * as Tir from './Tir.js'
 import type * as Instances from './Instances.js'
 import * as EffectExecutionContract from './internal/EffectExecutionContract.js'
 import * as Layout from './Layout.js'
@@ -66,7 +66,7 @@ export type Type =
   | {
       readonly _tag: 'EffectValue'
       readonly type: SilkType.Effect
-      readonly site: Hir.EffectSiteId
+      readonly site: Tir.EffectSiteId
       readonly environment: Extract<
         Layout.EffectEnvironment,
         { readonly _tag: 'EffectEnvironment' }
@@ -89,9 +89,9 @@ export type Type =
   | {
       readonly _tag: 'CallableValue'
       readonly type: SilkType.Callable
-      readonly target: Hir.CallableTarget
+      readonly target: Tir.CallableTarget
       readonly typeArguments?: ReadonlyArray<SilkType.GenericArgument>
-      readonly site?: Hir.CallableSiteId
+      readonly site?: Tir.CallableSiteId
       readonly environment?: Extract<
         Layout.CallableEnvironment,
         { readonly _tag: 'CallableEnvironment' }
@@ -250,7 +250,7 @@ export type BinaryOperator =
   | 'SaturatingMultiply'
   | 'TotalOrder'
 
-export const isBinaryOperator = (operation: Hir.BuiltinOperation): operation is BinaryOperator =>
+export const isBinaryOperator = (operation: Tir.BuiltinOperation): operation is BinaryOperator =>
   operation === 'Add' ||
   operation === 'Subtract' ||
   operation === 'Multiply' ||
@@ -358,7 +358,7 @@ export type Operation =
   | {
       readonly _tag: 'ForeignFunctionAddress'
       readonly destination: LocalId
-      readonly target: Hir.CallableTarget
+      readonly target: Tir.CallableTarget
       readonly symbol: string
       readonly type: Extract<Type, { readonly _tag: 'ForeignFunction' }>
       readonly provenance: Provenance
@@ -420,7 +420,7 @@ export type Operation =
       readonly _tag: 'StringFromUtf8Unchecked'
       readonly destination: LocalId
       readonly bytes: LocalId
-      readonly heldLoans: ReadonlyArray<Hir.BorrowId>
+      readonly heldLoans: ReadonlyArray<Tir.BorrowId>
       readonly authorization: 'Unsafe'
       readonly type: Extract<Type, { readonly _tag: 'String' }>
       readonly provenance: Provenance
@@ -434,7 +434,7 @@ export type Operation =
       readonly length: LocalId
       readonly element: DeclarationFacts.SemanticType
       readonly stride: number
-      readonly heldLoans: ReadonlyArray<Hir.BorrowId>
+      readonly heldLoans: ReadonlyArray<Tir.BorrowId>
       readonly type: Extract<Type, { readonly _tag: 'Slice' }>
       readonly provenance: Provenance
     }
@@ -442,7 +442,7 @@ export type Operation =
       readonly _tag: 'StringUtf8Bytes'
       readonly destination: LocalId
       readonly string: LocalId
-      readonly heldLoans: ReadonlyArray<Hir.BorrowId>
+      readonly heldLoans: ReadonlyArray<Tir.BorrowId>
       readonly type: Extract<Type, { readonly _tag: 'Slice' }>
       readonly provenance: Provenance
     }
@@ -716,9 +716,9 @@ export type Operation =
       readonly useCleanup: CleanupPlan.CleanupPlan
       readonly conflictCleanup: CleanupPlan.CleanupPlan
       /** Compiler-owned identity of the callback-scoped exclusive payload loan. */
-      readonly loan: Hir.BorrowId
+      readonly loan: Tir.BorrowId
       /** Must remain empty: no result or executable state may retain `loan`. */
-      readonly retainedLoans: ReadonlyArray<Hir.BorrowId>
+      readonly retainedLoans: ReadonlyArray<Tir.BorrowId>
       readonly type: Type
       readonly provenance: Provenance
     }
@@ -924,7 +924,7 @@ export type Operation =
     }
   | {
       readonly _tag: 'BeginLoan'
-      readonly borrow: Hir.BorrowId
+      readonly borrow: Tir.BorrowId
       readonly destination: LocalId
       readonly root: LocalId
       readonly selectors: ReadonlyArray<PlaceSelector>
@@ -983,7 +983,7 @@ export type Operation =
   | {
       readonly _tag: 'MakeCallable'
       readonly destination: LocalId
-      readonly target: Hir.CallableTarget
+      readonly target: Tir.CallableTarget
       readonly typeArguments: ReadonlyArray<SilkType.GenericArgument>
       /**
        * A callable value of the same target whose environment fields are spliced ahead of
@@ -1021,7 +1021,7 @@ export type Operation =
       readonly _tag: 'ApplyCallable'
       readonly destination: LocalId
       readonly callable?: LocalId
-      readonly target?: Hir.CallableTarget
+      readonly target?: Tir.CallableTarget
       readonly typeArguments: ReadonlyArray<SilkType.GenericArgument>
       readonly captures: ReadonlyArray<{
         readonly ordinal: number
@@ -1363,7 +1363,7 @@ export interface DropOperation {
 /** Ends one caller-owned loan on the dynamic path that contains this operation. */
 export interface EndLoanOperation {
   readonly _tag: 'EndLoan'
-  readonly borrow: Hir.BorrowId
+  readonly borrow: Tir.BorrowId
   readonly slice: LocalId
   readonly provenance: Provenance
 }
@@ -2212,7 +2212,7 @@ export const callArgumentCompatible = (actual: Type, expected: Type): boolean =>
   const realization = expected.storage.realization
   return (
     SilkType.equals(actual.type, realization.contract) &&
-    Hir.sameExecutableSite(actual.site, realization.site) &&
+    Tir.sameExecutableSite(actual.site, realization.site) &&
     instanceText(actual.environment.instance) === instanceText(realization.runnerInstance)
   )
 }
@@ -2224,7 +2224,7 @@ export const executionArgumentCompatible = (actual: Type, expected: Type): boole
   if (actual._tag === 'EffectValue' && expected._tag === 'EffectValue')
     return (
       EffectExecutionContract.equals(actual.type, expected.type) &&
-      Hir.sameExecutableSite(actual.site, expected.site) &&
+      Tir.sameExecutableSite(actual.site, expected.site) &&
       instanceText(actual.environment.instance) === instanceText(expected.environment.instance) &&
       actual.storage === expected.storage
     )
@@ -2235,7 +2235,7 @@ export const executionArgumentCompatible = (actual: Type, expected: Type): boole
     SilkType.isEffect(expected.type.result)
   )
     return (
-      Hir.sameCallableTarget(actual.target, expected.target) &&
+      Tir.sameCallableTarget(actual.target, expected.target) &&
       runtimeArgumentsEqual(actual.typeArguments ?? [], expected.typeArguments ?? []) &&
       actual.environment === expected.environment &&
       actual.type.unsafe === expected.type.unsafe &&

@@ -6,7 +6,7 @@ import * as Backend from '../src/Backend.js'
 import * as EntryAssembly from '../src/EntryAssembly.js'
 import * as ExecutableProperty from '../src/ExecutableProperty.js'
 import * as ExecutionBoundary from '../src/ExecutionBoundary.js'
-import * as Hir from '../src/Hir.js'
+import * as Tir from '../src/Tir.js'
 import * as Instances from '../src/Instances.js'
 import * as TypeInference from '../src/internal/TypeInference.js'
 import * as Lifetime from '../src/Lifetime.js'
@@ -250,8 +250,8 @@ ${main('recipes()')}`)
       (instance) => instance.key.declaration.name === 'recipes',
     )
     const synchronous = recipes?.function.statements
-      .flatMap(Hir.statementExpressions)
-      .flatMap(Hir.expressionTree)
+      .flatMap(Tir.statementExpressions)
+      .flatMap(Tir.expressionTree)
       .find((expression) => expression._tag === 'EffectBlock')
     const synchronousIdentity =
       recipes === undefined || synchronous?._tag !== 'EffectBlock'
