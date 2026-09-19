@@ -1,5 +1,6 @@
 import * as Option from 'effect/Option'
 import type * as AuthoredHir from './AuthoredHir.js'
+import type * as SemanticContext from './SemanticContext.js'
 import * as AuthoredIdentity from './AuthoredIdentity.js'
 import type * as DeclarationLifetime from './DeclarationLifetime.js'
 import * as Lifetime from './Lifetime.js'
@@ -141,13 +142,14 @@ const children = (type: AuthoredHir.Type): ReadonlyArray<AuthoredHir.Type> => {
  */
 export const makeExplicit = (
   syntax: SyntaxFile.SyntaxFile,
+  context: SemanticContext.SemanticContext,
+  declaration: AuthoredHir.Declaration,
   self: DeclarationLifetime.Context,
   executable?: Type.ExecutableLifetimes,
 ): Option.Option<LifetimeElision> => {
   if (self.diagnostics.length > 0) return Option.none()
   const source = syntax.source
-  const context = self.context
-  const declarationSpan = context.spanOf(self.declaration.header.anchor)
+  const declarationSpan = context.spanOf(declaration.header.anchor)
   const declarationNode = nodeAt(syntax.root, declarationSpan)
   if (declarationNode === undefined) return Option.none()
   const insertions = new Map<number, string>()
@@ -239,7 +241,7 @@ export const makeExplicit = (
       )
   }
   // Each elaborated region names an authored annotation; syntax supplies only its insertion point.
-  const authoredTypes = annotations(self.declaration)
+  const authoredTypes = annotations(declaration)
   for (const [key, type] of authoredTypes) {
     const lifetime = self.regions.get(key)
     const node = nodeAt(syntax.root, context.spanOf(type.anchor))

@@ -2745,8 +2745,8 @@ fn slice(value: &[i32]) -> [*]const i32 { return value }`
         diagnostic.span.end,
       ]),
       ['nullness', 'access', 'alignment', 'extent', 'slice'].map((name) => {
-        const start = source.indexOf(' value }', source.indexOf(`fn ${name}(`))
-        return ['SEM0129', start, start + ' value'.length]
+        const start = source.indexOf(' value }', source.indexOf(`fn ${name}(`)) + 1
+        return ['SEM0129', start, start + 'value'.length]
       }),
     )
   }),

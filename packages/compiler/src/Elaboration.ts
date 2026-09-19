@@ -1606,6 +1606,15 @@ export const callCallee = (node: AuthoredHir.Expression): AuthoredHir.Expression
   node._tag === 'CallExpression' ? node.callee : node
 
 /**
+ * The last name a type spells, seeing through an application so that an applied qualifier such as
+ * `Holder<i32>` names `Holder` exactly as the bare qualifier `Holder` does.
+ */
+const qualifierName = (type: AuthoredHir.Type): AuthoredHir.Name | undefined => {
+  if (type._tag === 'AppliedType') return qualifierName(type.target)
+  return type._tag === 'NamedType' ? type.path.segments.at(-1) : undefined
+}
+
+/**
  * The qualifier/member name pair a callee reference spells, taken from the authored vocabulary.
  * Grouped expressions do not exist in authored HIR, so no unwrapping is needed.
  */
@@ -1614,8 +1623,7 @@ export const referenceNames = (node: AuthoredHir.Expression): ReadonlyArray<Auth
   if (callee._tag === 'PipelineExpression') return referenceNames(callee.target)
   if (callee._tag === 'IdentifierExpression') return Object.freeze([callee.name])
   if (callee._tag === 'MemberExpression') {
-    const path = callee.selector.subject
-    const qualifier = path._tag === 'NamedType' ? path.path.segments.at(-1) : undefined
+    const qualifier = qualifierName(callee.selector.subject)
     return qualifier === undefined
       ? Object.freeze([])
       : Object.freeze([qualifier, callee.selector.member])

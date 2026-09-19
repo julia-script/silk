@@ -51,6 +51,8 @@ import * as SourceFile from './SourceFile.js'
 import * as SourceResolver from './SourceResolver.js'
 import type * as SourceSpan from './SourceSpan.js'
 import type * as AuthoredHir from './AuthoredHir.js'
+import * as AuthoredWalk from './AuthoredWalk.js'
+import type * as SemanticContext from './SemanticContext.js'
 import type * as SyntaxFile from './SyntaxFile.js'
 import * as SyntaxTree from './SyntaxTree.js'
 import * as Target from './Target.js'
@@ -398,14 +400,28 @@ export const explicitLifetimes = (
           declaration,
         ): ReadonlyArray<{
           readonly context: DeclarationLifetime.Context
+          readonly semantic: SemanticContext.SemanticContext
+          readonly authored: AuthoredHir.Declaration
           readonly header: SourceSpan.SourceSpan
           readonly body: SourceSpan.SourceSpan | undefined
           readonly executable: Type.ExecutableLifetimes | undefined
-        }> =>
-          'lifetimeElaboration' in declaration && declaration.lifetimeElaboration !== undefined
-            ? [
+        }> => {
+          if (
+            !('lifetimeElaboration' in declaration) ||
+            declaration.lifetimeElaboration === undefined
+          )
+            return []
+          const semantic = spans.of(declaration.anchor)
+          const authored =
+            semantic === undefined
+              ? undefined
+              : AuthoredWalk.declarationOf(semantic.module, declaration.anchor.owner)
+          if (semantic === undefined || authored === undefined) return []
+          return [
                 {
                   context: declaration.lifetimeElaboration,
+                  semantic,
+                  authored,
                   header: spans.spanOf(declaration.anchor),
                   body:
                     'bodyTemplate' in declaration && declaration.bodyTemplate !== undefined
@@ -418,10 +434,10 @@ export const explicitLifetimes = (
                       : undefined,
                 },
               ]
-            : [],
+        },
       )
     }) ?? []
-  return contexts.flatMap(({ context, header, body, executable }) => {
+  return contexts.flatMap(({ context, semantic, authored, header, body, executable }) => {
     // The header anchor presents the declaration head; the body anchor presents its block.
     const declarationEnd = body?.end ?? header.end
     if (header.start > end || declarationEnd < start) return []
@@ -440,7 +456,9 @@ export const explicitLifetimes = (
     const syntax = moduleSyntax(self, module)
     return syntax === undefined
       ? []
-      : Option.toArray(LifetimeElision.makeExplicit(syntax, context, executable))
+      : Option.toArray(
+          LifetimeElision.makeExplicit(syntax, semantic, authored, context, executable),
+        )
   })
 }
 

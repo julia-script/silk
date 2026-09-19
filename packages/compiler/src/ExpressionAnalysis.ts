@@ -3622,126 +3622,327 @@ export const analyzeAggregateLiteral = (
       : node._tag === 'MemberExpression'
         ? (node.fields ?? [])
         : []
-  const initializers = writtenFields.map(
-    (initializer): StructInitializerFact => {
-      const nameToken = initializer.name
-      const name =
-        nameToken === undefined ? undefined : (SemanticContext.nameText(context, nameToken) ?? '')
-      const fieldLookup =
-        aggregate === undefined || name === undefined
-          ? undefined
-          : DeclarationFacts.lookupField(aggregateFields, name)
-      const contextualFieldType =
-        fieldLookup?._tag === 'Resolved' && fieldLookup.field.declaredType._tag === 'Resolved'
-          ? Type.substitute(fieldLookup.field.declaredType.type, structSubstitution)
-          : undefined
-      const contextualExpected =
-        contextualFieldType !== undefined && Type.isRepresented(contextualFieldType)
-          ? contextualFieldType.contract
-          : contextualFieldType
-      const expressionNode = initializer.value
-      if (expressionNode === undefined) {
-        throw new RangeError('Struct initializer requires an expression node')
-      }
-      const expression = analyzeExpression(
-        context,
-        expressionNode,
-        declarations,
-        declaration,
-        scope,
-        resolution,
-        contextualExpected,
-      )
-      if (expression === undefined) {
-        throw new RangeError(`Cannot analyze struct initializer ${expressionNode._tag}`)
-      }
-      diagnostics.push(...expression.diagnostics)
-      let state: StructInitializerState = Object.freeze({ _tag: 'Unavailable' })
-      if (name !== undefined && nameToken !== undefined && aggregate !== undefined) {
-        const previous = seen.get(name)
-        if (forbiddenPositionalFields) {
-          state = Object.freeze({ _tag: 'Unavailable' })
-        } else if (fieldLookup?._tag !== 'Resolved') {
-          const diagnostic = Diagnostic.unknownStructField(
-            nominalLabel,
-            name,
-            context.spanOf(nameToken.anchor),
-          )
-          diagnostics.push(diagnostic)
-          state = Object.freeze({ _tag: 'Unknown', cause: Diagnostic.identity(diagnostic) })
-        } else if (previous !== undefined) {
-          const diagnostic = Diagnostic.duplicateStructInitializer(
-            name,
-            context.spanOf(previous.anchor),
-            context.spanOf(nameToken.anchor),
-          )
-          diagnostics.push(diagnostic)
-          state = Object.freeze({
-            _tag: 'Duplicate',
-            field: fieldLookup.field,
-            cause: Diagnostic.identity(diagnostic),
-          })
-        } else if (
-          fieldLookup.field.visibility === 'Private' &&
-          nominal !== undefined &&
-          nominal.module !== context.presentation.sourceId &&
-          accessDiagnostic !== undefined
-        ) {
-          state = Object.freeze({
-            _tag: 'Inaccessible',
-            field: fieldLookup.field,
-            cause: Diagnostic.identity(accessDiagnostic),
-          })
-        } else if (
-          fieldLookup.field.declaredType._tag === 'Resolved' &&
-          expression.type !== undefined
-        ) {
-          const expectedType = fieldLookup.field.declaredType.type
-          const expectedValue = Type.isRepresented(expectedType)
-            ? expectedType.contract
-            : expectedType
-          const actualValue = Type.isRepresented(expression.type)
-            ? expression.type.contract
-            : expression.type
-          let representationDiagnostic: Diagnostic.Diagnostic | undefined
-          if (Type.isRepresented(expectedType)) {
-            const currentSubstitution = new Map(structSubstitution)
-            for (const [parameterKey, inferred] of inferredArguments)
-              currentSubstitution.set(parameterKey, inferred.argument)
-            const candidateSubstitution = new Map(currentSubstitution)
-            if (
-              TypeInference.infer(
-                expectedType.contract,
-                actualValue,
-                candidateSubstitution,
-                representationInference,
+  const initializers = writtenFields.map((initializer): StructInitializerFact => {
+    const nameToken = initializer.name
+    const name =
+      nameToken === undefined ? undefined : (SemanticContext.nameText(context, nameToken) ?? '')
+    const fieldLookup =
+      aggregate === undefined || name === undefined
+        ? undefined
+        : DeclarationFacts.lookupField(aggregateFields, name)
+    const contextualFieldType =
+      fieldLookup?._tag === 'Resolved' && fieldLookup.field.declaredType._tag === 'Resolved'
+        ? Type.substitute(fieldLookup.field.declaredType.type, structSubstitution)
+        : undefined
+    const contextualExpected =
+      contextualFieldType !== undefined && Type.isRepresented(contextualFieldType)
+        ? contextualFieldType.contract
+        : contextualFieldType
+    const expressionNode = initializer.value
+    if (expressionNode === undefined) {
+      throw new RangeError('Struct initializer requires an expression node')
+    }
+    const expression = analyzeExpression(
+      context,
+      expressionNode,
+      declarations,
+      declaration,
+      scope,
+      resolution,
+      contextualExpected,
+    )
+    if (expression === undefined) {
+      throw new RangeError(`Cannot analyze struct initializer ${expressionNode._tag}`)
+    }
+    diagnostics.push(...expression.diagnostics)
+    let state: StructInitializerState = Object.freeze({ _tag: 'Unavailable' })
+    if (name !== undefined && nameToken !== undefined && aggregate !== undefined) {
+      const previous = seen.get(name)
+      if (forbiddenPositionalFields) {
+        state = Object.freeze({ _tag: 'Unavailable' })
+      } else if (fieldLookup?._tag !== 'Resolved') {
+        const diagnostic = Diagnostic.unknownStructField(
+          nominalLabel,
+          name,
+          context.spanOf(nameToken.anchor),
+        )
+        diagnostics.push(diagnostic)
+        state = Object.freeze({ _tag: 'Unknown', cause: Diagnostic.identity(diagnostic) })
+      } else if (previous !== undefined) {
+        const diagnostic = Diagnostic.duplicateStructInitializer(
+          name,
+          context.spanOf(previous.anchor),
+          context.spanOf(nameToken.anchor),
+        )
+        diagnostics.push(diagnostic)
+        state = Object.freeze({
+          _tag: 'Duplicate',
+          field: fieldLookup.field,
+          cause: Diagnostic.identity(diagnostic),
+        })
+      } else if (
+        fieldLookup.field.visibility === 'Private' &&
+        nominal !== undefined &&
+        nominal.module !== context.presentation.sourceId &&
+        accessDiagnostic !== undefined
+      ) {
+        state = Object.freeze({
+          _tag: 'Inaccessible',
+          field: fieldLookup.field,
+          cause: Diagnostic.identity(accessDiagnostic),
+        })
+      } else if (
+        fieldLookup.field.declaredType._tag === 'Resolved' &&
+        expression.type !== undefined
+      ) {
+        const expectedType = fieldLookup.field.declaredType.type
+        const expectedValue = Type.isRepresented(expectedType)
+          ? expectedType.contract
+          : expectedType
+        const actualValue = Type.isRepresented(expression.type)
+          ? expression.type.contract
+          : expression.type
+        let representationDiagnostic: Diagnostic.Diagnostic | undefined
+        if (Type.isRepresented(expectedType)) {
+          const currentSubstitution = new Map(structSubstitution)
+          for (const [parameterKey, inferred] of inferredArguments)
+            currentSubstitution.set(parameterKey, inferred.argument)
+          const candidateSubstitution = new Map(currentSubstitution)
+          if (
+            TypeInference.infer(
+              expectedType.contract,
+              actualValue,
+              candidateSubstitution,
+              representationInference,
+            )
+          ) {
+            const siteSubstitution = new Map<string, Type.GenericArgument>()
+            TypeInference.infer(
+              expectedType.contract,
+              actualValue,
+              siteSubstitution,
+              representationInference,
+            )
+            for (const parameter of aggregate.typeParameters) {
+              if (
+                parameter.type.kind === 'CallableRepresentation' ||
+                parameter.type.kind === 'EffectRepresentation'
               )
-            ) {
-              const siteSubstitution = new Map<string, Type.GenericArgument>()
-              TypeInference.infer(
-                expectedType.contract,
-                actualValue,
-                siteSubstitution,
-                representationInference,
-              )
-              for (const parameter of aggregate.typeParameters) {
-                if (
-                  parameter.type.kind === 'CallableRepresentation' ||
-                  parameter.type.kind === 'EffectRepresentation'
+                continue
+              const parameterKey = Type.key(parameter.type)
+              const inferred = siteSubstitution.get(parameterKey)
+              if (inferred === undefined || isOwnStructArgument(parameter.type, inferred)) continue
+              if (inferredArguments.get(parameterKey) === undefined)
+                inferredArguments.set(
+                  parameterKey,
+                  Object.freeze({
+                    argument: inferred,
+                    span: context.spanOf(expressionNode.anchor),
+                  }),
                 )
-                  continue
-                const parameterKey = Type.key(parameter.type)
-                const inferred = siteSubstitution.get(parameterKey)
-                if (inferred === undefined || isOwnStructArgument(parameter.type, inferred))
-                  continue
-                if (inferredArguments.get(parameterKey) === undefined)
+              argumentOrigins.set(
+                parameterKey,
+                Object.freeze([
+                  ...(argumentOrigins.get(parameterKey) ?? []),
+                  context.spanOf(expressionNode.anchor),
+                ]),
+              )
+            }
+          }
+          const representationSubstitution = new Map(structSubstitution)
+          for (const [parameterKey, inferred] of inferredArguments)
+            representationSubstitution.set(parameterKey, inferred.argument)
+          const specialized = Type.substitute(expectedType, representationSubstitution)
+          if (!Type.isRepresented(specialized))
+            throw new RangeError('represented struct field lost its representation contract')
+          const specializedExpectedType = specialized
+          const actualRepresentation = representationOfExpression(context, expression.fact)
+          const requiredArgument = expectedType.representation.argument
+          if (actualRepresentation === undefined) {
+            representationDiagnostic = Diagnostic.structFieldTypeMismatch(
+              name,
+              Type.display(specializedExpectedType),
+              Type.display(expression.type),
+              context.spanOf(expressionNode.anchor),
+            )
+          } else if (requiredArgument._tag === 'RepresentationParameterArgument') {
+            const parameter = requiredArgument.parameter
+            const parameterKey = Type.key(parameter)
+            const previousRepresentation = inferredArguments.get(parameterKey)
+            if (
+              previousRepresentation !== undefined &&
+              !Type.equalsGenericArgument(previousRepresentation.argument, actualRepresentation)
+            ) {
+              representationDiagnostic = Diagnostic.conflictingInitializerRepresentation(
+                parameter.name,
+                Type.encodeGenericArgument(previousRepresentation.argument),
+                Type.encodeGenericArgument(actualRepresentation),
+                previousRepresentation.span,
+                context.spanOf(expressionNode.anchor),
+              )
+            } else {
+              const represented = Type.represented(
+                Type.isCallable(actualValue) || Type.isEffect(actualValue)
+                  ? actualValue
+                  : specializedExpectedType.contract,
+                specializedExpectedType.representation.requiredBound,
+                actualRepresentation,
+              )
+              if (represented.representation.admissibility._tag === 'Unavailable') {
+                const requiredParameter = aggregate.typeParameters.find(
+                  (candidate) => Type.key(candidate.type) === Type.key(parameter),
+                )
+                const actualParameter =
+                  actualRepresentation._tag === 'RepresentationParameterArgument'
+                    ? declaration.typeParameters.find(
+                        (candidate) =>
+                          Type.key(candidate.type) === Type.key(actualRepresentation.parameter),
+                      )
+                    : undefined
+                representationDiagnostic = Diagnostic.incompatibleRepresentationBound(
+                  parameter.name,
+                  Type.display(specializedExpectedType.representation.requiredBound),
+                  Type.display(represented.contract),
+                  context.spanOf(expressionNode.anchor),
+                  {
+                    ...(requiredParameter === undefined
+                      ? {}
+                      : { requiredDeclarationSpan: context.spanOf(requiredParameter.anchor) }),
+                    ...(actualParameter === undefined
+                      ? {}
+                      : { actualDeclarationSpan: context.spanOf(actualParameter.anchor) }),
+                  },
+                )
+                if (previousRepresentation === undefined)
                   inferredArguments.set(
                     parameterKey,
                     Object.freeze({
-                      argument: inferred,
+                      argument: actualRepresentation,
                       span: context.spanOf(expressionNode.anchor),
                     }),
                   )
+              } else if (previousRepresentation === undefined) {
+                inferredArguments.set(
+                  parameterKey,
+                  Object.freeze({
+                    argument: actualRepresentation,
+                    span: context.spanOf(expressionNode.anchor),
+                  }),
+                )
+              }
+              if (
+                previousRepresentation === undefined ||
+                Type.equalsGenericArgument(previousRepresentation.argument, actualRepresentation)
+              )
+                argumentOrigins.set(
+                  parameterKey,
+                  Object.freeze([
+                    ...(argumentOrigins.get(parameterKey) ?? []),
+                    context.spanOf(expressionNode.anchor),
+                  ]),
+                )
+            }
+          } else if (!Type.equalsGenericArgument(requiredArgument, actualRepresentation)) {
+            representationDiagnostic = Diagnostic.structFieldTypeMismatch(
+              name,
+              Type.encodeGenericArgument(requiredArgument),
+              Type.encodeGenericArgument(actualRepresentation),
+              context.spanOf(expressionNode.anchor),
+            )
+          }
+        } else {
+          const currentSubstitution = new Map(structSubstitution)
+          for (const [parameterKey, inferred] of inferredArguments)
+            currentSubstitution.set(parameterKey, inferred.argument)
+          const candidateSubstitution = new Map(currentSubstitution)
+          if (
+            !TypeInference.infer(expectedType, expression.type, candidateSubstitution) &&
+            !typesCompatible(
+              actualValue,
+              Type.substitute(expectedType, currentSubstitution),
+              resolution?.lifetimeCompatibility,
+            )
+          ) {
+            const impliedSubstitution = new Map<string, Type.GenericArgument>()
+            if (TypeInference.infer(expectedType, expression.type, impliedSubstitution)) {
+              for (const parameter of aggregate.typeParameters) {
+                if (parameter.type.kind !== 'Value') continue
+                const parameterKey = Type.key(parameter.type)
+                const previous = inferredArguments.get(parameterKey)
+                const implied = impliedSubstitution.get(parameterKey)
+                if (
+                  previous === undefined ||
+                  implied === undefined ||
+                  Type.equalsGenericArgument(previous.argument, implied)
+                )
+                  continue
+                representationDiagnostic = Diagnostic.typeArgumentConflict(
+                  nominalLabel,
+                  parameter.type.name,
+                  Type.encodeGenericArgument(previous.argument),
+                  Type.encodeGenericArgument(implied),
+                  context.spanOf(expressionNode.anchor),
+                  previous.span,
+                )
+                break
+              }
+            }
+            const specializedExpected = Type.substitute(expectedType, currentSubstitution)
+            const divergence = Type.firstRepresentationDivergence(
+              specializedExpected,
+              expression.type,
+            )
+            if (representationDiagnostic === undefined && divergence !== undefined) {
+              const parameter = aggregate.typeParameters.find((candidate) => {
+                const inferred = inferredArguments.get(Type.key(candidate.type))
+                return (
+                  inferred !== undefined &&
+                  Type.equalsGenericArgument(inferred.argument, divergence.left)
+                )
+              })
+              const original =
+                parameter === undefined
+                  ? undefined
+                  : inferredArguments.get(Type.key(parameter.type))
+              if (parameter !== undefined && original !== undefined)
+                representationDiagnostic = Diagnostic.conflictingInitializerRepresentation(
+                  parameter.type.name,
+                  Type.encodeGenericArgument(divergence.left),
+                  Type.encodeGenericArgument(divergence.right),
+                  original.span,
+                  context.spanOf(expressionNode.anchor),
+                )
+            }
+          } else {
+            const siteSubstitution = new Map<string, Type.GenericArgument>()
+            TypeInference.infer(expectedType, expression.type, siteSubstitution)
+            for (const parameter of aggregate.typeParameters) {
+              const parameterKey = Type.key(parameter.type)
+              const inferred = siteSubstitution.get(parameterKey)
+              if (
+                inferredArguments.get(parameterKey) === undefined &&
+                inferred !== undefined &&
+                !isOwnStructArgument(parameter.type, inferred)
+              ) {
+                inferredArguments.set(
+                  parameterKey,
+                  Object.freeze({
+                    argument: inferred,
+                    span: context.spanOf(expressionNode.anchor),
+                  }),
+                )
+                argumentOrigins.set(
+                  parameterKey,
+                  Object.freeze([context.spanOf(expressionNode.anchor)]),
+                )
+              } else if (
+                inferred !== undefined &&
+                !isOwnStructArgument(parameter.type, inferred) &&
+                Type.equalsGenericArgument(
+                  inferredArguments.get(parameterKey)?.argument ?? inferred,
+                  inferred,
+                )
+              ) {
                 argumentOrigins.set(
                   parameterKey,
                   Object.freeze([
@@ -3751,258 +3952,54 @@ export const analyzeAggregateLiteral = (
                 )
               }
             }
-            const representationSubstitution = new Map(structSubstitution)
-            for (const [parameterKey, inferred] of inferredArguments)
-              representationSubstitution.set(parameterKey, inferred.argument)
-            const specialized = Type.substitute(expectedType, representationSubstitution)
-            if (!Type.isRepresented(specialized))
-              throw new RangeError('represented struct field lost its representation contract')
-            const specializedExpectedType = specialized
-            const actualRepresentation = representationOfExpression(context, expression.fact)
-            const requiredArgument = expectedType.representation.argument
-            if (actualRepresentation === undefined) {
-              representationDiagnostic = Diagnostic.structFieldTypeMismatch(
-                name,
-                Type.display(specializedExpectedType),
-                Type.display(expression.type),
-                context.spanOf(expressionNode.anchor),
-              )
-            } else if (requiredArgument._tag === 'RepresentationParameterArgument') {
-              const parameter = requiredArgument.parameter
-              const parameterKey = Type.key(parameter)
-              const previousRepresentation = inferredArguments.get(parameterKey)
-              if (
-                previousRepresentation !== undefined &&
-                !Type.equalsGenericArgument(previousRepresentation.argument, actualRepresentation)
-              ) {
-                representationDiagnostic = Diagnostic.conflictingInitializerRepresentation(
-                  parameter.name,
-                  Type.encodeGenericArgument(previousRepresentation.argument),
-                  Type.encodeGenericArgument(actualRepresentation),
-                  previousRepresentation.span,
-                  context.spanOf(expressionNode.anchor),
-                )
-              } else {
-                const represented = Type.represented(
-                  Type.isCallable(actualValue) || Type.isEffect(actualValue)
-                    ? actualValue
-                    : specializedExpectedType.contract,
-                  specializedExpectedType.representation.requiredBound,
-                  actualRepresentation,
-                )
-                if (represented.representation.admissibility._tag === 'Unavailable') {
-                  const requiredParameter = aggregate.typeParameters.find(
-                    (candidate) => Type.key(candidate.type) === Type.key(parameter),
-                  )
-                  const actualParameter =
-                    actualRepresentation._tag === 'RepresentationParameterArgument'
-                      ? declaration.typeParameters.find(
-                          (candidate) =>
-                            Type.key(candidate.type) === Type.key(actualRepresentation.parameter),
-                        )
-                      : undefined
-                  representationDiagnostic = Diagnostic.incompatibleRepresentationBound(
-                    parameter.name,
-                    Type.display(specializedExpectedType.representation.requiredBound),
-                    Type.display(represented.contract),
-                    context.spanOf(expressionNode.anchor),
-                    {
-                      ...(requiredParameter === undefined
-                        ? {}
-                        : { requiredDeclarationSpan: context.spanOf(requiredParameter.anchor) }),
-                      ...(actualParameter === undefined
-                        ? {}
-                        : { actualDeclarationSpan: context.spanOf(actualParameter.anchor) }),
-                    },
-                  )
-                  if (previousRepresentation === undefined)
-                    inferredArguments.set(
-                      parameterKey,
-                      Object.freeze({
-                        argument: actualRepresentation,
-                        span: context.spanOf(expressionNode.anchor),
-                      }),
-                    )
-                } else if (previousRepresentation === undefined) {
-                  inferredArguments.set(
-                    parameterKey,
-                    Object.freeze({
-                      argument: actualRepresentation,
-                      span: context.spanOf(expressionNode.anchor),
-                    }),
-                  )
-                }
-                if (
-                  previousRepresentation === undefined ||
-                  Type.equalsGenericArgument(previousRepresentation.argument, actualRepresentation)
-                )
-                  argumentOrigins.set(
-                    parameterKey,
-                    Object.freeze([
-                      ...(argumentOrigins.get(parameterKey) ?? []),
-                      context.spanOf(expressionNode.anchor),
-                    ]),
-                  )
-              }
-            } else if (!Type.equalsGenericArgument(requiredArgument, actualRepresentation)) {
-              representationDiagnostic = Diagnostic.structFieldTypeMismatch(
-                name,
-                Type.encodeGenericArgument(requiredArgument),
-                Type.encodeGenericArgument(actualRepresentation),
-                context.spanOf(expressionNode.anchor),
-              )
-            }
-          } else {
-            const currentSubstitution = new Map(structSubstitution)
-            for (const [parameterKey, inferred] of inferredArguments)
-              currentSubstitution.set(parameterKey, inferred.argument)
-            const candidateSubstitution = new Map(currentSubstitution)
-            if (
-              !TypeInference.infer(expectedType, expression.type, candidateSubstitution) &&
-              !typesCompatible(
-                actualValue,
-                Type.substitute(expectedType, currentSubstitution),
-                resolution?.lifetimeCompatibility,
-              )
-            ) {
-              const impliedSubstitution = new Map<string, Type.GenericArgument>()
-              if (TypeInference.infer(expectedType, expression.type, impliedSubstitution)) {
-                for (const parameter of aggregate.typeParameters) {
-                  if (parameter.type.kind !== 'Value') continue
-                  const parameterKey = Type.key(parameter.type)
-                  const previous = inferredArguments.get(parameterKey)
-                  const implied = impliedSubstitution.get(parameterKey)
-                  if (
-                    previous === undefined ||
-                    implied === undefined ||
-                    Type.equalsGenericArgument(previous.argument, implied)
-                  )
-                    continue
-                  representationDiagnostic = Diagnostic.typeArgumentConflict(
-                    nominalLabel,
-                    parameter.type.name,
-                    Type.encodeGenericArgument(previous.argument),
-                    Type.encodeGenericArgument(implied),
-                    context.spanOf(expressionNode.anchor),
-                    previous.span,
-                  )
-                  break
-                }
-              }
-              const specializedExpected = Type.substitute(expectedType, currentSubstitution)
-              const divergence = Type.firstRepresentationDivergence(
-                specializedExpected,
-                expression.type,
-              )
-              if (representationDiagnostic === undefined && divergence !== undefined) {
-                const parameter = aggregate.typeParameters.find((candidate) => {
-                  const inferred = inferredArguments.get(Type.key(candidate.type))
-                  return (
-                    inferred !== undefined &&
-                    Type.equalsGenericArgument(inferred.argument, divergence.left)
-                  )
-                })
-                const original =
-                  parameter === undefined
-                    ? undefined
-                    : inferredArguments.get(Type.key(parameter.type))
-                if (parameter !== undefined && original !== undefined)
-                  representationDiagnostic = Diagnostic.conflictingInitializerRepresentation(
-                    parameter.type.name,
-                    Type.encodeGenericArgument(divergence.left),
-                    Type.encodeGenericArgument(divergence.right),
-                    original.span,
-                    context.spanOf(expressionNode.anchor),
-                  )
-              }
-            } else {
-              const siteSubstitution = new Map<string, Type.GenericArgument>()
-              TypeInference.infer(expectedType, expression.type, siteSubstitution)
-              for (const parameter of aggregate.typeParameters) {
-                const parameterKey = Type.key(parameter.type)
-                const inferred = siteSubstitution.get(parameterKey)
-                if (
-                  inferredArguments.get(parameterKey) === undefined &&
-                  inferred !== undefined &&
-                  !isOwnStructArgument(parameter.type, inferred)
-                ) {
-                  inferredArguments.set(
-                    parameterKey,
-                    Object.freeze({
-                      argument: inferred,
-                      span: context.spanOf(expressionNode.anchor),
-                    }),
-                  )
-                  argumentOrigins.set(
-                    parameterKey,
-                    Object.freeze([context.spanOf(expressionNode.anchor)]),
-                  )
-                } else if (
-                  inferred !== undefined &&
-                  !isOwnStructArgument(parameter.type, inferred) &&
-                  Type.equalsGenericArgument(
-                    inferredArguments.get(parameterKey)?.argument ?? inferred,
-                    inferred,
-                  )
-                ) {
-                  argumentOrigins.set(
-                    parameterKey,
-                    Object.freeze([
-                      ...(argumentOrigins.get(parameterKey) ?? []),
-                      context.spanOf(expressionNode.anchor),
-                    ]),
-                  )
-                }
-              }
-            }
-          }
-          const compatibilitySubstitution = new Map(structSubstitution)
-          for (const [parameterKey, inferred] of inferredArguments)
-            compatibilitySubstitution.set(parameterKey, inferred.argument)
-          const compatibleExpected = Type.substitute(expectedValue, compatibilitySubstitution)
-          const compatibleValue = typesCompatible(
-            actualValue,
-            compatibleExpected,
-            resolution?.lifetimeCompatibility,
-          )
-          if (representationDiagnostic !== undefined || !compatibleValue) {
-            const diagnostic =
-              representationDiagnostic ??
-              unionConversionDiagnostic(
-                actualValue,
-                compatibleExpected,
-                context.spanOf(expressionNode.anchor),
-                resolution?.lifetimeCompatibility,
-              ) ??
-              Diagnostic.structFieldTypeMismatch(
-                name,
-                Type.display(compatibleExpected),
-                Type.display(actualValue),
-                context.spanOf(expressionNode.anchor),
-              )
-            diagnostics.push(diagnostic)
-            state = Object.freeze({
-              _tag: 'TypeMismatch',
-              field: fieldLookup.field,
-              cause: Diagnostic.identity(diagnostic),
-            })
-          } else {
-            state = Object.freeze({ _tag: 'Resolved', field: fieldLookup.field })
           }
         }
+        const compatibilitySubstitution = new Map(structSubstitution)
+        for (const [parameterKey, inferred] of inferredArguments)
+          compatibilitySubstitution.set(parameterKey, inferred.argument)
+        const compatibleExpected = Type.substitute(expectedValue, compatibilitySubstitution)
+        const compatibleValue = typesCompatible(
+          actualValue,
+          compatibleExpected,
+          resolution?.lifetimeCompatibility,
+        )
+        if (representationDiagnostic !== undefined || !compatibleValue) {
+          const diagnostic =
+            representationDiagnostic ??
+            unionConversionDiagnostic(
+              actualValue,
+              compatibleExpected,
+              context.spanOf(expressionNode.anchor),
+              resolution?.lifetimeCompatibility,
+            ) ??
+            Diagnostic.structFieldTypeMismatch(
+              name,
+              Type.display(compatibleExpected),
+              Type.display(actualValue),
+              context.spanOf(expressionNode.anchor),
+            )
+          diagnostics.push(diagnostic)
+          state = Object.freeze({
+            _tag: 'TypeMismatch',
+            field: fieldLookup.field,
+            cause: Diagnostic.identity(diagnostic),
+          })
+        } else {
+          state = Object.freeze({ _tag: 'Resolved', field: fieldLookup.field })
+        }
       }
-      const fact: StructInitializerFact = Object.freeze({
-        _tag: 'StructInitializer',
-        name,
-        ...(nameToken === undefined ? {} : { anchor: nameToken.anchor }),
-        expression: expression.fact,
-        state,
-        anchor: initializer.anchor,
-      })
-      if (name !== undefined && !seen.has(name)) seen.set(name, fact)
-      return fact
-    },
-  )
+    }
+    const fact: StructInitializerFact = Object.freeze({
+      _tag: 'StructInitializer',
+      name,
+      ...(nameToken === undefined ? {} : { anchor: nameToken.anchor }),
+      expression: expression.fact,
+      state,
+      anchor: initializer.anchor,
+    })
+    if (name !== undefined && !seen.has(name)) seen.set(name, fact)
+    return fact
+  })
 
   const completedArguments =
     aggregate === undefined || nominal === undefined
@@ -8983,7 +8980,7 @@ const analyzeAnonymousCallable = (
     diagnostics: Object.freeze([]),
   })
   const resolvers = NameResolution.makeResolvers(nameResolution, resolution.index)
-  const finalized = DeclarationCollection.finalizeLifetimeHeader(initial.fact, (path) => {
+  const finalized = DeclarationCollection.finalizeLifetimeHeader(context, initial.fact, (path) => {
     const resolved = resolvers.type(context.presentation.sourceId, path)
     if (
       resolved.fact._tag !== 'Resolved' ||
@@ -9317,6 +9314,14 @@ export function analyzeExpression(
   resolution: ResolutionContext,
   expected?: SemanticType,
 ): ExpressionResult | undefined {
+  // A recovery node carries no meaning to check. The parser already reported why it is damaged, so
+  // analysis yields the unavailable fact rather than leaving callers with nothing to record.
+  if (!AuthoredWalk.isAvailable(node))
+    return Object.freeze({
+      fact: unavailableExpression(node.anchor),
+      diagnostics: Object.freeze([]),
+      type: undefined,
+    })
   if (
     declaration.phase === 'Static' &&
     resolution.staticContext !== undefined &&

@@ -212,7 +212,9 @@ export const complete = (
           member.name.spelling === head.ownerSpelling &&
           NameResolution.isNominalOwner(member),
       )
-    const candidate = DeclarationCollection.finalizeLifetimeHeader(head, (path) => {
+    const headContext = registry.of(head.anchor)
+    if (headContext === undefined) return head
+    const candidate = DeclarationCollection.finalizeLifetimeHeader(headContext, head, (path) => {
       const owner =
         path.spelling === head.ownerSpelling && localOwner !== undefined
           ? finalize(localOwner)
@@ -228,7 +230,9 @@ export const complete = (
   const finalizeConformance = (head: ConformanceFact): ConformanceFact => {
     const cached = finalizedConformances.get(head)
     if (cached !== undefined) return cached
-    const candidate = DeclarationCollection.finalizeLifetimeHeader(head, (path) =>
+    const headContext = registry.of(head.anchor)
+    if (headContext === undefined) return head
+    const candidate = DeclarationCollection.finalizeLifetimeHeader(headContext, head, (path) =>
       nominalParameters(head.module, path),
     )
     const closed = candidate._tag === 'ConformanceDeclaration' ? candidate : head
@@ -258,11 +262,14 @@ export const complete = (
             )
         : undefined
     const completedHead = head === undefined ? undefined : finalizeHead(head)
+    const memberContext = registry.of(member.anchor)
     const candidate =
-      member._tag === 'FunctionDeclaration' ||
-      member._tag === 'StructDeclaration' ||
-      member._tag === 'UnionDeclaration'
+      (member._tag === 'FunctionDeclaration' ||
+        member._tag === 'StructDeclaration' ||
+        member._tag === 'UnionDeclaration') &&
+      memberContext !== undefined
         ? DeclarationCollection.finalizeLifetimeHeader(
+            memberContext,
             member,
             (path) => nominalParameters(module, path),
             conformance !== undefined ? finalizeConformance(conformance) : completedHead,
@@ -549,10 +556,15 @@ export const complete = (
           resolvedMemberTypeParameters,
         )
         const operations = member.operations.map((collectedOperation) => {
-          const finalizedOperation = DeclarationCollection.finalizeLifetimeHeader(
-            collectedOperation,
-            nominalParameters,
-          )
+          const operationContext = registry.of(collectedOperation.anchor)
+          const finalizedOperation =
+            operationContext === undefined
+              ? collectedOperation
+              : DeclarationCollection.finalizeLifetimeHeader(
+                  operationContext,
+                  collectedOperation,
+                  nominalParameters,
+                )
           const operation =
             finalizedOperation._tag === 'ServiceOperation' ? finalizedOperation : collectedOperation
           diagnostics.push(

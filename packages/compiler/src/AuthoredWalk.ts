@@ -152,11 +152,17 @@ export const statements = (block: AuthoredHir.Block): ReadonlyArray<AuthoredHir.
 /**
  * Preorder anchors of one authored body, assigning the stable finite lifetime domain.
  *
- * Only the positions body analysis can request a region for need a point, so statements and the
- * expressions they own are enumerated; annotation-only positions inherit their statement's point.
+ * Every position body analysis can request a region for needs a point. That is each statement and
+ * the expressions it owns, and also the types a body writes: elision keys a region by the
+ * annotation's own anchor, so a written `Opt<&[u8]>` needs points for the applied type and for the
+ * slice inside it, not just for the statement around them.
  */
 export const anchors = (block: AuthoredHir.Block): ReadonlyArray<AuthoredHir.Anchor> => {
   const found: Array<AuthoredHir.Anchor> = [block.anchor]
+  const visitType = (type: AuthoredHir.Type): void => {
+    found.push(type.anchor)
+    for (const nested of typeChildren(type)) visitType(nested)
+  }
   const visitExpression = (expression: AuthoredHir.Expression): void => {
     found.push(expression.anchor)
     for (const child of expressionChildren(expression)) visitExpression(child)
@@ -165,7 +171,58 @@ export const anchors = (block: AuthoredHir.Block): ReadonlyArray<AuthoredHir.Anc
     found.push(statement.anchor)
     for (const expression of statementExpressions(statement)) visitExpression(expression)
   }
+  for (const type of bodyTypes(block)) visitType(type)
   return Object.freeze(found)
+}
+
+/** A generic argument carries a type unless it is a lifetime. */
+const genericArgumentTypes = (
+  argument: AuthoredHir.GenericArgument,
+): ReadonlyArray<AuthoredHir.Type> => {
+  if (argument._tag === 'Lifetime') return []
+  if (argument._tag === 'RequirementSelector') return [argument.subject]
+  return [argument]
+}
+
+/** A row operand is a type outright, or a requirement whose capability is one. */
+const rowOperandTypes = (operand: AuthoredHir.RowOperand): ReadonlyArray<AuthoredHir.Type> =>
+  operand._tag === 'Requirement' ? [operand.capability] : [operand]
+
+/** The types one type owns directly, so elision can reach every nested annotation. */
+export const typeChildren = (type: AuthoredHir.Type): ReadonlyArray<AuthoredHir.Type> => {
+  switch (type._tag) {
+    case 'ReferenceType':
+      return [type.referent]
+    case 'SliceType':
+    case 'FixedArrayType':
+      return [type.element]
+    case 'PointerType':
+      return [type.pointee]
+    case 'ExactRepresentationType':
+      return [type.subject]
+    case 'OpaqueResultType':
+      return [type.result]
+    case 'UnionType':
+      return type.members.flatMap(rowOperandTypes)
+    case 'RowWithout':
+      return [...rowOperandTypes(type.source), ...rowOperandTypes(type.removed)]
+    case 'AppliedType':
+      return [
+        type.target,
+        ...type.arguments.arguments.flatMap(genericArgumentTypes),
+        ...(type.arguments.failures === undefined ? [] : [type.arguments.failures]),
+        ...(type.arguments.requirements === undefined
+          ? []
+          : type.arguments.requirements.members.flatMap(rowOperandTypes)),
+      ]
+    case 'CallableType':
+    case 'ForeignFunctionType':
+      return [...type.parameters, type.result]
+    case 'InvalidType':
+      return type.retained.filter((retained): retained is AuthoredHir.Type => 'anchor' in retained)
+    default:
+      return []
+  }
 }
 
 /** The expressions one statement owns directly, in evaluation order. */
@@ -282,8 +339,7 @@ const patternTypes = (pattern: AuthoredHir.Pattern): ReadonlyArray<AuthoredHir.T
     switch (current._tag) {
       case 'NominalPattern':
         found.push(current.type)
-        for (const field of current.fields)
-          if (field._tag === 'PatternField') visit(field.pattern)
+        for (const field of current.fields) if (field._tag === 'PatternField') visit(field.pattern)
         return
       case 'BindingPattern':
         if (current.type !== undefined) found.push(current.type)
@@ -319,9 +375,8 @@ const patternTags: ReadonlySet<string> = new Set([
   'InvalidPattern',
 ])
 
-const isPattern = (node: {
-  readonly _tag: string
-}): node is AuthoredHir.Pattern => patternTags.has(node._tag)
+const isPattern = (node: { readonly _tag: string }): node is AuthoredHir.Pattern =>
+  patternTags.has(node._tag)
 
 const isType = (node: { readonly _tag: string }): node is AuthoredHir.Type =>
   !patternTags.has(node._tag) && node._tag !== 'Name'

@@ -13,11 +13,16 @@ export interface ImplicitBinder {
   readonly anchor: AuthoredHir.Anchor
 }
 
-/** Header-only region elaboration shared by declaration collection and source presentation. */
+/**
+ * Header-only region elaboration shared by declaration collection and source presentation.
+ *
+ * This is plain data: anchors are keyed by `AuthoredIdentity.anchorKey`, and nothing here closes
+ * over a `SemanticContext` or retains an authored node. Two fresh analyses of one source must
+ * compare equal, so a consumer that needs spans or the authored declaration receives them as
+ * arguments instead of reading them back off this record.
+ */
 export interface Context {
   readonly owner: Lifetime.Owner
-  readonly context: SemanticContext.SemanticContext
-  readonly declaration: AuthoredHir.Declaration
   readonly parameters: ReadonlyMap<string, Type.Parameter>
   /** Keyed by `AuthoredIdentity.anchorKey`, since authored positions have no object identity. */
   readonly nominalArguments: ReadonlyMap<string, ReadonlyArray<Lifetime.Lifetime>>
@@ -584,8 +589,6 @@ export const forHeader = (
 
   return Object.freeze({
     owner,
-    context,
-    declaration,
     ...(explicitEnvironment === undefined ? {} : { explicitEnvironment }),
     parameters: new Map(parameters),
     nominalArguments,
@@ -602,4 +605,5 @@ export const forBody = (
   body: BodyLifetime.BodyLifetime,
   declaration: AuthoredHir.Declaration,
   parameters: ReadonlyMap<string, Type.Parameter>,
-): Context => forHeader(context, body.owner, declaration, parameters, body)
+  nominalParameters?: (type: AuthoredHir.Type) => ReadonlyArray<Type.Parameter> | undefined,
+): Context => forHeader(context, body.owner, declaration, parameters, body, nominalParameters)

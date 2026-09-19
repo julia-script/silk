@@ -62,6 +62,7 @@ import {
 } from './DeclarationFacts.js'
 import type * as AuthoredHir from './AuthoredHir.js'
 import * as AuthoredIdentity from './AuthoredIdentity.js'
+import * as AuthoredWalk from './AuthoredWalk.js'
 import * as AuthoredLowering from './AuthoredLowering.js'
 import * as DeclarationLifetime from './DeclarationLifetime.js'
 import * as Lifetime from './Lifetime.js'
@@ -145,11 +146,18 @@ const parameterAtType = (
   return spelling === undefined ? undefined : typeParameters.get(spelling)
 }
 
-/** The first spelled segment of a named type, for diagnostics that quote the written name. */
+/**
+ * The first spelled segment of a named type, for diagnostics that quote the written name.
+ *
+ * An applied type names the same nominal as its target, so `App<i32>` and `string<'text>` answer
+ * `App` and `string`; a conformance head spelled with arguments names a provider just as a bare
+ * one does.
+ */
 const firstSegment = (
   context: Context,
   type: AuthoredHir.Type,
 ): { readonly spelling: string; readonly anchor: AuthoredHir.Anchor } | undefined => {
+  if (type._tag === 'AppliedType') return firstSegment(context, type.target)
   if (type._tag !== 'NamedType') return undefined
   for (const segment of type.path.segments) {
     const spelling = nameText(context, segment)
@@ -4762,8 +4770,14 @@ export const collect = (closure: ModuleClosure.Facts): DeclarationIndex.Index =>
   )
 }
 
-/** Replays header elision after nominal declarations have published their lifetime arity. */
+/**
+ * Replays header elision after nominal declarations have published their lifetime arity.
+ *
+ * The elaboration record is plain data, so the authored declaration and its spans are supplied
+ * here rather than retained on the fact.
+ */
 export const finalizeLifetimeHeader = (
+  context: Context,
   member:
     | DeclarationFact
     | ServiceOperationFact
@@ -4782,8 +4796,8 @@ export const finalizeLifetimeHeader = (
   | ConformanceFact => {
   const prior = member.lifetimeElaboration
   if (prior === undefined) return member
-  const context = prior.context
-  const declaration = prior.declaration
+  const declaration = AuthoredWalk.declarationOf(context.module, member.anchor.owner)
+  if (declaration === undefined) return member
   // Owner lifetimes stay lexical while the member elaborates its own input/result relationship.
   // Inherent members retain otherwise unmentioned owner binders only through Self. Conformance
   // witnesses retain the entire head contract because selection supplies all its binders.
@@ -4802,13 +4816,16 @@ export const finalizeLifetimeHeader = (
     undefined,
     (type) => {
       const analyzed = analyzeDeclaredType(context, type, environment, true, prior)
-      if (analyzed.fact._tag === 'Resolved' && Type.isNominal(analyzed.fact.type))
+      // An applied type names its target's declaration, so `View<i32>` reports the binders of
+      // `View`; its own written arguments decide only which of them stayed unwritten.
+      const fact = analyzed.fact._tag === 'Applied' ? analyzed.fact.target : analyzed.fact
+      if (fact._tag === 'Resolved' && Type.isNominal(fact.type))
         return (
-          (member._tag === 'InherentImplDeclaration' && analyzed.fact.path !== undefined
-            ? nominalParameters(analyzed.fact.path)
-            : undefined) ?? Type.intrinsicNominalParameters(analyzed.fact.type)
+          (member._tag === 'InherentImplDeclaration' && fact.path !== undefined
+            ? nominalParameters(fact.path)
+            : undefined) ?? Type.intrinsicNominalParameters(fact.type)
         )
-      return analyzed.fact._tag === 'Unresolved' ? nominalParameters(analyzed.fact.path) : undefined
+      return fact._tag === 'Unresolved' ? nominalParameters(fact.path) : undefined
     },
   )
   const parameters = new Map(environment)

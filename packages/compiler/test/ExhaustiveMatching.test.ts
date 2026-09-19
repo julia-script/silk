@@ -678,9 +678,9 @@ fn scope(value: Choice) { match value { Choice.First => { let inner = 1 drop inn
         const span = spans.spanOf(match.anchor)
         return ['SEM0049', span.start, span.end]
       }),
-      ['SEM0087', source.indexOf('42') - 1, source.indexOf('42') + 2],
-      ['SEM0038', source.indexOf('break') - 1, source.indexOf('break') + 5],
-      ['SEM0038', source.indexOf('continue') - 1, source.indexOf('continue') + 8],
+      ['SEM0087', source.indexOf('42'), source.indexOf('42') + 2],
+      ['SEM0038', source.indexOf('break'), source.indexOf('break') + 5],
+      ['SEM0038', source.indexOf('continue'), source.indexOf('continue') + 8],
     ],
   )
   assert.isTrue(
@@ -708,11 +708,11 @@ fn invalidBorrow(values: &[i32], value: Choice) -> &[i32] { return match value {
       diagnostic.span.end,
     ]),
     [
-      ['SEM0129', source.indexOf('true') - 1, source.indexOf('true') + 4],
-      ['OWN0019', source.lastIndexOf('match value') - 1, source.lastIndexOf('} }') + 1],
-      ['OWN0019', source.indexOf('&local') - 1, source.indexOf('&local') + 6],
-      ['SEM0212', source.indexOf('&local') - 1, source.indexOf('&local') + 6],
-      ['OWN0019', source.lastIndexOf('values') - 1, source.lastIndexOf('values') + 6],
+      ['SEM0129', source.indexOf('true'), source.indexOf('true') + 4],
+      ['OWN0019', source.lastIndexOf('match value'), source.lastIndexOf('} }') + 1],
+      ['OWN0019', source.indexOf('&local'), source.indexOf('&local') + 6],
+      ['SEM0212', source.indexOf('&local'), source.indexOf('&local') + 6],
+      ['OWN0019', source.lastIndexOf('values'), source.lastIndexOf('values') + 6],
     ],
   )
   const operand =
@@ -787,7 +787,7 @@ fn conflict(value: Holder) { match value { Holder { item } => { let item = 1 dro
     result.diagnostics
       .filter((diagnostic) => diagnostic.code === 'SEM0038')
       .map((diagnostic) => [diagnostic.span.start, diagnostic.span.end]),
-    [[boundaryBreak - 1, boundaryBreak + 5]],
+    [[boundaryBreak, boundaryBreak + 5]],
   )
   const eager =
     result.functions.find(
