@@ -49,20 +49,33 @@ interface Region {
 
 /**
  * Structural enclosure: an authored anchor's local path extends its parent's, so an outer position
- * encloses an inner one exactly when it owns it and its path is a prefix. This replaces the source
- * containment test syntax spans provided, without consulting offsets.
+ * encloses an inner one exactly when it owns it and its path is a prefix.
+ *
+ * A nested callable is its own owner, so its positions carry no path below the body that wrote
+ * it. Those fall back to presented containment, the only record of where the nested owner sits.
  */
-const encloses = (outer: AuthoredHir.Anchor, inner: AuthoredHir.Anchor): boolean =>
-  AuthoredIdentity.key(outer.owner) === AuthoredIdentity.key(inner.owner) &&
-  outer.path.length <= inner.path.length &&
-  outer.path.every((segment, index) => {
-    const candidate = inner.path[index]
-    return (
-      candidate !== undefined &&
-      segment.role === candidate.role &&
-      segment.occurrence === candidate.occurrence
-    )
-  })
+const encloses = (
+  context: SemanticContext.SemanticContext,
+  outer: AuthoredHir.Anchor,
+  inner: AuthoredHir.Anchor,
+): boolean => {
+  if (AuthoredIdentity.key(outer.owner) !== AuthoredIdentity.key(inner.owner)) {
+    const outerSpan = context.spanOf(outer)
+    const innerSpan = context.spanOf(inner)
+    return outerSpan.start <= innerSpan.start && innerSpan.end <= outerSpan.end
+  }
+  return (
+    outer.path.length <= inner.path.length &&
+    outer.path.every((segment, index) => {
+      const candidate = inner.path[index]
+      return (
+        candidate !== undefined &&
+        segment.role === candidate.role &&
+        segment.occurrence === candidate.occurrence
+      )
+    })
+  )
+}
 
 const rootSite = (root: Elaboration.BorrowRootFact): Ownership.BindingSite => {
   switch (root._tag) {
@@ -370,7 +383,7 @@ export const analyze = (
     const available = entries
       .filter(
         ([position]) =>
-          encloses(scope, position) &&
+          encloses(context, scope, position) &&
           (source._tag !== 'BindingRoot' || context.orderOf(position) >= bindingOrder),
       )
       .map(([, point]) => point)
@@ -779,7 +792,9 @@ export const analyze = (
           })
         const relevant = replacements.filter(
           (replacement) =>
-            !(origin.anchor !== undefined && encloses(replacement.anchor, origin.anchor)) &&
+            !(
+              origin.anchor !== undefined && encloses(context, replacement.anchor, origin.anchor)
+            ) &&
             Ownership.siteKey(replacement.root) === Ownership.siteKey(rootSite(carrier)) &&
             replacement.lifetimes.some((lifetime) => storageOutlives(origin.lifetime, lifetime)),
         )

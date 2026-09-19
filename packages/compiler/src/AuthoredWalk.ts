@@ -175,6 +175,17 @@ export const anchors = (block: AuthoredHir.Block): ReadonlyArray<AuthoredHir.Anc
   }
   const visitExpression = (expression: AuthoredHir.Expression): void => {
     found.push(expression.anchor)
+    // A nested callable owns its body, but what it captures borrows from this body's regions, so
+    // its header and body positions belong to the same finite domain.
+    if (expression._tag === 'CallableExpression') {
+      const contract = expression.contract
+      for (const parameter of contract.parameters) visitType(parameter.type)
+      if (contract.result !== undefined) visitType(contract.result)
+      if (contract.failures !== undefined) visitType(contract.failures)
+      for (const member of contract.requirements?.members ?? [])
+        for (const type of rowOperandTypes(member)) visitType(type)
+      found.push(...anchors(expression.body))
+    }
     for (const child of expressionChildren(expression)) visitExpression(child)
   }
   for (const statement of statements(block)) {
