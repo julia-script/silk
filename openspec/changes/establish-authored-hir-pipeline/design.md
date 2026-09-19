@@ -4,7 +4,7 @@
 
 See proposal.md. At `6b66ea9b095f4319f2670188caa0c831539cd900`, `Hir.HirFunction` owns
 semantic `DeclarationFact` and `ContractFact`, and `DeclarationId` uses a source ordinal.
-`SyntaxTree.NodeKind` enumerates 132 categories including structural containers. Source roots
+`SyntaxTree.NodeKind` enumerates semantic categories and structural containers. Source roots
 already use resolver-canonical module strings; physical paths belong to source provenance.
 
 ## Goals / Non-Goals
