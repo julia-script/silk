@@ -1,5 +1,6 @@
 import * as Lifetime from './Lifetime.js'
 import { callableSectionOf, genericArgumentOfTypeArgument } from './CallResolution.js'
+import type * as AuthoredHir from './AuthoredHir.js'
 import * as Diagnostic from './Diagnostic.js'
 import type * as Location from './Location.js'
 import type {
@@ -21,7 +22,7 @@ import {
   retainsLifetimes,
 } from './Elaboration.js'
 import { representationOfExpression } from './ExpressionAnalysis.js'
-import type * as Tir from './Tir.js'
+import * as Tir from './Tir.js'
 import * as Intrinsic from './Intrinsic.js'
 import * as TypeInference from './internal/TypeInference.js'
 import * as SemanticContext from './SemanticContext.js'
@@ -43,15 +44,18 @@ const publishedCause = (
 export const tirReference = (
   reference: ParameterReferenceFact,
   type: ExpressionTypeFact,
-  span: SourceSpan.SourceSpan,
+  anchor: AuthoredHir.Anchor,
   context: SemanticContext.SemanticContext,
 ): Tir.Expression => {
+  const span = context.spanOf(anchor)
+  const origin = Tir.authored(anchor)
   if (reference._tag === 'Resolved' && type._tag === 'Available') {
     return Object.freeze({
       _tag: 'ParameterReference',
       parameter: reference.parameter.id,
       type: type.type,
       span,
+      origin,
     })
   }
   if (reference._tag === 'ResolvedBinding' && type._tag === 'Available') {
@@ -60,6 +64,7 @@ export const tirReference = (
       binding: reference.binding.id,
       type: type.type,
       span,
+      origin,
     })
   }
   if (reference._tag === 'ResolvedPattern' && type._tag === 'Available') {
@@ -68,31 +73,55 @@ export const tirReference = (
       binding: reference.binding.id,
       type: type.type,
       span,
+      origin,
     })
   }
   return Object.freeze({
     _tag: 'Unavailable',
     span,
+    origin,
     ...(reference._tag === 'Missing' && reference.cause !== undefined
       ? { cause: publishedCause(context, reference.cause) }
       : {}),
   })
 }
 
+/** The literal nodes of a value the evaluator produced for the authored position `anchor`. */
 const staticValueExpression = (
   value: StaticValue.Value,
   type: SemanticType,
-  span: SourceSpan.SourceSpan,
+  anchor: AuthoredHir.Anchor,
+  context: SemanticContext.SemanticContext,
 ): Tir.Expression => {
+  const span = context.spanOf(anchor)
+  const origin = Tir.synthetic(anchor, 'static-result')
   switch (value._tag) {
     case 'UnitValue':
-      return Object.freeze({ _tag: 'UnitLiteral', type: Type.unit, span })
+      return Object.freeze({ _tag: 'UnitLiteral', type: Type.unit, span, origin })
     case 'BooleanValue':
-      return Object.freeze({ _tag: 'BooleanLiteral', value: value.value, type: 'bool', span })
+      return Object.freeze({
+        _tag: 'BooleanLiteral',
+        value: value.value,
+        type: 'bool',
+        span,
+        origin,
+      })
     case 'CharacterValue':
-      return Object.freeze({ _tag: 'CharacterLiteral', value: value.value, type: 'char', span })
+      return Object.freeze({
+        _tag: 'CharacterLiteral',
+        value: value.value,
+        type: 'char',
+        span,
+        origin,
+      })
     case 'IntegerValue':
-      return Object.freeze({ _tag: 'IntegerLiteral', value: value.value, type: value.type, span })
+      return Object.freeze({
+        _tag: 'IntegerLiteral',
+        value: value.value,
+        type: value.type,
+        span,
+        origin,
+      })
     case 'FloatValue':
       return Object.freeze({
         _tag: 'FloatingLiteral',
@@ -100,6 +129,7 @@ const staticValueExpression = (
         spelling: `${value.type}(bits=0x${value.bits.toString(16)})`,
         type: value.type,
         span,
+        origin,
       })
     case 'TextValue': {
       const data: StaticText.Data = Object.freeze({
@@ -114,6 +144,7 @@ const staticValueExpression = (
         data,
         type: Type.string(Lifetime.staticLifetime),
         span,
+        origin,
       })
     }
     case 'EnumValue':
@@ -129,16 +160,17 @@ const staticValueExpression = (
             discriminant: value.discriminant,
             type,
             span,
+            origin,
           })
-        : Object.freeze({ _tag: 'Unavailable', span })
+        : Object.freeze({ _tag: 'Unavailable', span, origin })
     case 'AggregateValue': {
       if (value.identity._tag === 'ArrayAggregateIdentity' && Type.isFixedArray(type)) {
         const elements = value.fields.map((field) =>
-          staticValueExpression(field.value, type.element, span),
+          staticValueExpression(field.value, type.element, anchor, context),
         )
         return elements.some((element) => element._tag === 'Unavailable')
-          ? Object.freeze({ _tag: 'Unavailable', span })
-          : Object.freeze({ _tag: 'ArrayConstruct', elements, type, span })
+          ? Object.freeze({ _tag: 'Unavailable', span, origin })
+          : Object.freeze({ _tag: 'ArrayConstruct', elements, type, span, origin })
       }
       if (
         value.identity._tag !== 'NominalAggregateIdentity' ||
@@ -146,18 +178,19 @@ const staticValueExpression = (
         value.runtimeFields === undefined ||
         value.runtimeFields.length !== value.fields.length
       )
-        return Object.freeze({ _tag: 'Unavailable', span })
+        return Object.freeze({ _tag: 'Unavailable', span, origin })
       const fields = value.fields.flatMap((field) => {
         const runtime = value.runtimeFields?.find(
           (candidate) => candidate.id.ordinal === field.ordinal,
         )
         if (runtime === undefined) return []
-        const expression = staticValueExpression(field.value, runtime.type, span)
+        const expression = staticValueExpression(field.value, runtime.type, anchor, context)
         return expression._tag === 'Unavailable'
           ? []
           : [Object.freeze({ field: runtime.id, value: expression })]
       })
-      if (fields.length !== value.fields.length) return Object.freeze({ _tag: 'Unavailable', span })
+      if (fields.length !== value.fields.length)
+        return Object.freeze({ _tag: 'Unavailable', span, origin })
       const evaluationOrder = Object.freeze(fields.map((field) => field.field))
       const variant = value.identity.variant
       return variant === undefined
@@ -168,6 +201,7 @@ const staticValueExpression = (
             fields: Object.freeze(fields),
             type,
             span,
+            origin,
           })
         : Object.freeze({
             _tag: 'ConstructUnionVariant',
@@ -182,13 +216,14 @@ const staticValueExpression = (
             fields: Object.freeze(fields),
             type,
             span,
+            origin,
           })
     }
     case 'TypeDescriptorValue':
     case 'FieldDescriptorValue':
     case 'FieldCollectionValue':
     case 'StaticSequenceValue':
-      return Object.freeze({ _tag: 'Unavailable', span })
+      return Object.freeze({ _tag: 'Unavailable', span, origin })
   }
 }
 
@@ -232,6 +267,7 @@ export const tirPatternSelection = (
                 type: binding.type.type,
                 access: binding.access,
                 span: options.context.spanOf(binding.anchor),
+                origin: Tir.authored(binding.anchor),
               }),
             ]
           : [],
@@ -240,6 +276,7 @@ export const tirPatternSelection = (
     cleanup: selection.pattern.omitted,
     irrefutable: selection.irrefutable,
     span: options.context.spanOf(selection.anchor),
+    origin: Tir.authored(selection.anchor),
   })
 }
 
@@ -283,6 +320,7 @@ export const lowerStatements = (
             statements: lowerStatements(statement.statements, options),
             region: statement.region,
             span: options.context.spanOf(statement.anchor),
+            origin: Tir.authored(statement.anchor),
           })
         if (statement._tag === 'BindStatement') {
           const binding = statement.binding
@@ -309,6 +347,7 @@ export const lowerStatements = (
             initializer: initializer(),
             region: statement.region,
             span: options.context.spanOf(binding.anchor),
+            origin: Tir.authored(binding.anchor),
           })
         }
         if (statement._tag === 'PatternBindStatement')
@@ -317,6 +356,7 @@ export const lowerStatements = (
             selection: tirPatternSelection(statement.selection, options),
             region: statement.region,
             span: options.context.spanOf(statement.anchor),
+            origin: Tir.authored(statement.anchor),
           })
         if (statement._tag === 'ExpressionStatement')
           return Object.freeze({
@@ -324,6 +364,7 @@ export const lowerStatements = (
             expression: tirExpression(statement.expression, options),
             region: statement.region,
             span: options.context.spanOf(statement.anchor),
+            origin: Tir.authored(statement.anchor),
           })
         if (statement._tag === 'IfStatement')
           return Object.freeze({
@@ -333,6 +374,7 @@ export const lowerStatements = (
             otherwise: lowerStatements(statement.otherwise, options),
             region: statement.region,
             span: options.context.spanOf(statement.anchor),
+            origin: Tir.authored(statement.anchor),
           })
         if (statement._tag === 'IfLetStatement')
           return Object.freeze({
@@ -342,6 +384,7 @@ export const lowerStatements = (
             otherwise: lowerStatements(statement.otherwise, options),
             region: statement.region,
             span: options.context.spanOf(statement.anchor),
+            origin: Tir.authored(statement.anchor),
           })
         if (statement._tag === 'WriteStatement') {
           const place =
@@ -353,6 +396,7 @@ export const lowerStatements = (
               _tag: 'UnavailableStatement',
               region: statement.region,
               span: options.context.spanOf(statement.anchor),
+              origin: Tir.authored(statement.anchor),
             })
           let valueOptions = options
           if (statement.lifetimeProof.length > 0) {
@@ -385,6 +429,7 @@ export const lowerStatements = (
             ),
             region: statement.region,
             span: options.context.spanOf(statement.anchor),
+            origin: Tir.authored(statement.anchor),
           })
         }
         if (statement._tag === 'WhileStatement')
@@ -396,6 +441,7 @@ export const lowerStatements = (
             body: lowerStatements(statement.body, options),
             region: statement.region,
             span: options.context.spanOf(statement.anchor),
+            origin: Tir.authored(statement.anchor),
           })
         if (statement._tag === 'BreakStatement' || statement._tag === 'ContinueStatement')
           return statement.target === undefined
@@ -403,12 +449,14 @@ export const lowerStatements = (
                 _tag: 'UnavailableStatement',
                 region: statement.region,
                 span: options.context.spanOf(statement.anchor),
+                origin: Tir.authored(statement.anchor),
               })
             : Object.freeze({
                 _tag: statement._tag === 'BreakStatement' ? 'Break' : 'Continue',
                 target: statement.target,
                 region: statement.region,
                 span: options.context.spanOf(statement.anchor),
+                origin: Tir.authored(statement.anchor),
               })
         if (statement._tag === 'ReturnStatement')
           return Object.freeze({
@@ -428,6 +476,7 @@ export const lowerStatements = (
             ),
             region: statement.region,
             span: options.context.spanOf(statement.expression.anchor),
+            origin: Tir.authored(statement.expression.anchor),
           })
         if (statement._tag === 'DropStatement')
           return Object.freeze({
@@ -435,12 +484,14 @@ export const lowerStatements = (
             expression: tirExpression(statement.expression, options),
             region: statement.region,
             span: options.context.spanOf(statement.anchor),
+            origin: Tir.authored(statement.anchor),
           })
         if (statement.failure === undefined)
           return Object.freeze({
             _tag: 'UnavailableStatement',
             region: statement.region,
             span: options.context.spanOf(statement.anchor),
+            origin: Tir.authored(statement.anchor),
           })
         return Object.freeze({
           _tag: 'Fail',
@@ -454,12 +505,14 @@ export const lowerStatements = (
                       ? statement.expression.type.type
                       : statement.failure,
                   span: options.context.spanOf(statement.expression.anchor),
+                  origin: Tir.authored(statement.expression.anchor),
                 })
               : tirExpression(statement.expression, options),
           failure: statement.failure,
           transfer: statement.transfer,
           region: statement.region,
           span: options.context.spanOf(statement.anchor),
+          origin: Tir.authored(statement.anchor),
         })
       }),
   )
@@ -527,17 +580,29 @@ export const tirExpression = (
   borrow?: Tir.BorrowId,
 ): Tir.Expression => {
   if (fact._tag === 'CompileError')
-    return Object.freeze({ _tag: 'Unavailable', span: options.context.spanOf(fact.anchor) })
+    return Object.freeze({
+      _tag: 'Unavailable',
+      span: options.context.spanOf(fact.anchor),
+      origin: Tir.authored(fact.anchor),
+    })
   if (fact._tag === 'ShortCircuit') {
     const left = fact.arguments.at(0)
     const right = fact.arguments.at(1)
     if (left === undefined || right === undefined || fact.type._tag !== 'Available') {
-      return Object.freeze({ _tag: 'Unavailable', span: options.context.spanOf(fact.anchor) })
+      return Object.freeze({
+        _tag: 'Unavailable',
+        span: options.context.spanOf(fact.anchor),
+        origin: Tir.authored(fact.anchor),
+      })
     }
     const loweredLeft = tirExpression(left.expression, options)
     const loweredRight = tirExpression(right.expression, options)
     return loweredLeft._tag === 'Unavailable' || loweredRight._tag === 'Unavailable'
-      ? Object.freeze({ _tag: 'Unavailable', span: options.context.spanOf(fact.anchor) })
+      ? Object.freeze({
+          _tag: 'Unavailable',
+          span: options.context.spanOf(fact.anchor),
+          origin: Tir.authored(fact.anchor),
+        })
       : Object.freeze({
           _tag: 'ShortCircuit',
           operator: fact.operator,
@@ -545,6 +610,7 @@ export const tirExpression = (
           right: loweredRight,
           type: fact.type.type,
           span: options.context.spanOf(fact.anchor),
+          origin: Tir.authored(fact.anchor),
         })
   }
   if (fact._tag === 'Integer') {
@@ -554,8 +620,13 @@ export const tirExpression = (
           value: fact.integer.value,
           type: fact.integer.type,
           span: options.context.spanOf(fact.anchor),
+          origin: Tir.authored(fact.anchor),
         })
-      : Object.freeze({ _tag: 'Unavailable', span: options.context.spanOf(fact.anchor) })
+      : Object.freeze({
+          _tag: 'Unavailable',
+          span: options.context.spanOf(fact.anchor),
+          origin: Tir.authored(fact.anchor),
+        })
   }
   if (fact._tag === 'Duration') {
     return fact.value !== undefined && fact.type._tag === 'Available'
@@ -564,8 +635,13 @@ export const tirExpression = (
           value: fact.value,
           type: 'u64',
           span: options.context.spanOf(fact.anchor),
+          origin: Tir.authored(fact.anchor),
         })
-      : Object.freeze({ _tag: 'Unavailable', span: options.context.spanOf(fact.anchor) })
+      : Object.freeze({
+          _tag: 'Unavailable',
+          span: options.context.spanOf(fact.anchor),
+          origin: Tir.authored(fact.anchor),
+        })
   }
   if (fact._tag === 'Floating') {
     return fact.floating._tag === 'Available'
@@ -575,12 +651,21 @@ export const tirExpression = (
           spelling: fact.floating.spelling,
           type: fact.floating.type,
           span: options.context.spanOf(fact.anchor),
+          origin: Tir.authored(fact.anchor),
         })
-      : Object.freeze({ _tag: 'Unavailable', span: options.context.spanOf(fact.anchor) })
+      : Object.freeze({
+          _tag: 'Unavailable',
+          span: options.context.spanOf(fact.anchor),
+          origin: Tir.authored(fact.anchor),
+        })
   }
   if (fact._tag === 'StaticText') {
     if (fact.data === undefined) {
-      return Object.freeze({ _tag: 'Unavailable', span: options.context.spanOf(fact.anchor) })
+      return Object.freeze({
+        _tag: 'Unavailable',
+        span: options.context.spanOf(fact.anchor),
+        origin: Tir.authored(fact.anchor),
+      })
     }
     if (fact.data.kind === 'Text') {
       return Object.freeze({
@@ -588,6 +673,7 @@ export const tirExpression = (
         data: fact.data,
         type: Type.string(Lifetime.staticLifetime),
         span: options.context.spanOf(fact.anchor),
+        origin: Tir.authored(fact.anchor),
       })
     }
     return Object.freeze({
@@ -595,6 +681,7 @@ export const tirExpression = (
       data: fact.data,
       type: Type.slice('Shared', 'u8', Lifetime.staticLifetime),
       span: options.context.spanOf(fact.anchor),
+      origin: Tir.authored(fact.anchor),
     })
   }
   if (fact._tag === 'Unit') {
@@ -602,6 +689,7 @@ export const tirExpression = (
       _tag: 'UnitLiteral',
       type: Type.unit,
       span: options.context.spanOf(fact.anchor),
+      origin: Tir.authored(fact.anchor),
     })
   }
   if (fact._tag === 'Boolean') {
@@ -611,8 +699,13 @@ export const tirExpression = (
           value: fact.value,
           type: fact.type.type,
           span: options.context.spanOf(fact.anchor),
+          origin: Tir.authored(fact.anchor),
         })
-      : Object.freeze({ _tag: 'Unavailable', span: options.context.spanOf(fact.anchor) })
+      : Object.freeze({
+          _tag: 'Unavailable',
+          span: options.context.spanOf(fact.anchor),
+          origin: Tir.authored(fact.anchor),
+        })
   }
   if (fact._tag === 'Character') {
     return fact.type._tag === 'Available' && fact.value !== undefined
@@ -621,8 +714,13 @@ export const tirExpression = (
           value: fact.value,
           type: fact.type.type,
           span: options.context.spanOf(fact.anchor),
+          origin: Tir.authored(fact.anchor),
         })
-      : Object.freeze({ _tag: 'Unavailable', span: options.context.spanOf(fact.anchor) })
+      : Object.freeze({
+          _tag: 'Unavailable',
+          span: options.context.spanOf(fact.anchor),
+          origin: Tir.authored(fact.anchor),
+        })
   }
   if (fact._tag === 'Constant') {
     if (fact.value?._tag === 'Character')
@@ -631,6 +729,7 @@ export const tirExpression = (
         value: fact.value.value,
         type: 'char',
         span: options.context.spanOf(fact.anchor),
+        origin: Tir.authored(fact.anchor),
       })
     if (fact.value?._tag === 'Boolean')
       return Object.freeze({
@@ -638,6 +737,7 @@ export const tirExpression = (
         value: fact.value.value,
         type: 'bool',
         span: options.context.spanOf(fact.anchor),
+        origin: Tir.authored(fact.anchor),
       })
     if (fact.value?._tag === 'Integer')
       return Object.freeze({
@@ -648,6 +748,7 @@ export const tirExpression = (
           ? { constant: fact.declaration.canonical.id }
           : {}),
         span: options.context.spanOf(fact.anchor),
+        origin: Tir.authored(fact.anchor),
       })
     if (fact.value?._tag === 'Floating')
       return Object.freeze({
@@ -656,6 +757,7 @@ export const tirExpression = (
         spelling: fact.value.spelling,
         type: fact.value.type,
         span: options.context.spanOf(fact.anchor),
+        origin: Tir.authored(fact.anchor),
       })
     if (fact.value?._tag === 'String')
       return Object.freeze({
@@ -663,8 +765,13 @@ export const tirExpression = (
         data: fact.value.data,
         type: Type.string(Lifetime.staticLifetime),
         span: options.context.spanOf(fact.anchor),
+        origin: Tir.authored(fact.anchor),
       })
-    return Object.freeze({ _tag: 'Unavailable', span: options.context.spanOf(fact.anchor) })
+    return Object.freeze({
+      _tag: 'Unavailable',
+      span: options.context.spanOf(fact.anchor),
+      origin: Tir.authored(fact.anchor),
+    })
   }
   if (fact._tag === 'ForeignStatic') {
     return fact.type._tag === 'Available' && fact.declaration.canonical._tag === 'Canonical'
@@ -675,8 +782,13 @@ export const tirExpression = (
           symbol: fact.declaration.foreign.symbol,
           type: fact.type.type,
           span: options.context.spanOf(fact.anchor),
+          origin: Tir.authored(fact.anchor),
         })
-      : Object.freeze({ _tag: 'Unavailable', span: options.context.spanOf(fact.anchor) })
+      : Object.freeze({
+          _tag: 'Unavailable',
+          span: options.context.spanOf(fact.anchor),
+          origin: Tir.authored(fact.anchor),
+        })
   }
   if (fact._tag === 'EnumMember') {
     if (
@@ -689,6 +801,7 @@ export const tirExpression = (
       return Object.freeze({
         _tag: 'Unavailable',
         span: options.context.spanOf(fact.anchor),
+        origin: Tir.authored(fact.anchor),
         ...(fact.cause === undefined ? {} : { cause: publishedCause(options.context, fact.cause) }),
       })
     return Object.freeze({
@@ -698,12 +811,17 @@ export const tirExpression = (
       discriminant: fact.member.discriminant.value,
       type: fact.type.type,
       span: options.context.spanOf(fact.anchor),
+      origin: Tir.authored(fact.anchor),
     })
   }
   if (fact._tag === 'EnumValue') {
     const value = tirExpression(fact.argument, options)
     return fact.type._tag !== 'Available' || value._tag === 'Unavailable'
-      ? Object.freeze({ _tag: 'Unavailable', span: options.context.spanOf(fact.anchor) })
+      ? Object.freeze({
+          _tag: 'Unavailable',
+          span: options.context.spanOf(fact.anchor),
+          origin: Tir.authored(fact.anchor),
+        })
       : Object.freeze({
           _tag: 'EnumValue',
           enum: fact.operation.enum,
@@ -711,15 +829,12 @@ export const tirExpression = (
           intrinsic: fact.operation.intrinsic,
           type: fact.operation.result.spelling,
           span: options.context.spanOf(fact.anchor),
+          origin: Tir.authored(fact.anchor),
         })
   }
   if (fact._tag === 'Identifier') {
     if (fact.staticValue !== undefined && fact.type._tag === 'Available')
-      return staticValueExpression(
-        fact.staticValue,
-        fact.type.type,
-        options.context.spanOf(fact.anchor),
-      )
+      return staticValueExpression(fact.staticValue, fact.type.type, fact.anchor, options.context)
     if (
       fact.reference._tag === 'ResolvedBinding' &&
       fact.reference.binding.staticValue !== undefined &&
@@ -728,21 +843,21 @@ export const tirExpression = (
       return staticValueExpression(
         fact.reference.binding.staticValue,
         fact.type.type,
-        options.context.spanOf(fact.anchor),
+        fact.anchor,
+        options.context,
       )
-    return tirReference(
-      fact.reference,
-      fact.type,
-      options.context.spanOf(fact.anchor),
-      options.context,
-    )
+    return tirReference(fact.reference, fact.type, fact.anchor, options.context)
   }
   if (fact._tag === 'Move') {
     const subject = tirExpression(fact.subject, options)
     if (subject._tag === 'Unavailable' || fact.type._tag !== 'Available') {
       return subject._tag === 'Unavailable'
         ? subject
-        : Object.freeze({ _tag: 'Unavailable', span: options.context.spanOf(fact.anchor) })
+        : Object.freeze({
+            _tag: 'Unavailable',
+            span: options.context.spanOf(fact.anchor),
+            origin: Tir.authored(fact.anchor),
+          })
     }
     return Object.freeze({
       _tag: 'Move',
@@ -752,6 +867,7 @@ export const tirExpression = (
           : subject,
       type: fact.type.type,
       span: options.context.spanOf(fact.anchor),
+      origin: Tir.authored(fact.anchor),
     })
   }
   if (fact._tag === 'PlaceReplace') {
@@ -760,7 +876,11 @@ export const tirExpression = (
         ? undefined
         : tirAssignmentWritePlace(fact.destination, fact.root, options)
     if (place === undefined || !fact.compatible || fact.type._tag !== 'Available') {
-      return Object.freeze({ _tag: 'Unavailable', span: options.context.spanOf(fact.anchor) })
+      return Object.freeze({
+        _tag: 'Unavailable',
+        span: options.context.spanOf(fact.anchor),
+        origin: Tir.authored(fact.anchor),
+      })
     }
     return Object.freeze({
       _tag: 'Replace',
@@ -768,11 +888,16 @@ export const tirExpression = (
       value: tirExpectedExpression(fact.value, place.type, 'Assignment', place.span, options),
       type: fact.type.type,
       span: options.context.spanOf(fact.anchor),
+      origin: Tir.authored(fact.anchor),
     })
   }
   if (fact._tag === 'EffectBlock') {
     if (fact.type._tag !== 'Available' || !Type.isEffect(fact.type.type))
-      return Object.freeze({ _tag: 'Unavailable', span: options.context.spanOf(fact.anchor) })
+      return Object.freeze({
+        _tag: 'Unavailable',
+        span: options.context.spanOf(fact.anchor),
+        origin: Tir.authored(fact.anchor),
+      })
     return Object.freeze({
       _tag: 'EffectBlock',
       site: fact.site,
@@ -808,17 +933,23 @@ export const tirExpression = (
       ),
       type: fact.type.type,
       span: options.context.spanOf(fact.anchor),
+      origin: Tir.authored(fact.anchor),
     })
   }
   if (fact._tag === 'Run') {
     const subject = tirExpression(fact.subject, options)
     if (subject._tag === 'Unavailable' || fact.type._tag !== 'Available')
-      return Object.freeze({ _tag: 'Unavailable', span: options.context.spanOf(fact.anchor) })
+      return Object.freeze({
+        _tag: 'Unavailable',
+        span: options.context.spanOf(fact.anchor),
+        origin: Tir.authored(fact.anchor),
+      })
     return Object.freeze({
       _tag: 'Run',
       subject,
       type: fact.type.type,
       span: options.context.spanOf(fact.anchor),
+      origin: Tir.authored(fact.anchor),
     })
   }
   if (fact._tag === 'EffectCatch') {
@@ -832,7 +963,11 @@ export const tirExpression = (
       fact.type._tag !== 'Available' ||
       !Type.isEffect(fact.type.type)
     )
-      return Object.freeze({ _tag: 'Unavailable', span: options.context.spanOf(fact.anchor) })
+      return Object.freeze({
+        _tag: 'Unavailable',
+        span: options.context.spanOf(fact.anchor),
+        origin: Tir.authored(fact.anchor),
+      })
     return Object.freeze({
       _tag: 'EffectCatch',
       intrinsic: fact.reference.operation.id,
@@ -845,6 +980,7 @@ export const tirExpression = (
       evidence: fact.evidence,
       type: fact.type.type,
       span: options.context.spanOf(fact.anchor),
+      origin: Tir.authored(fact.anchor),
     })
   }
   if (fact._tag === 'EffectBindRequirement') {
@@ -855,7 +991,11 @@ export const tirExpression = (
       fact.type._tag !== 'Available' ||
       !Type.isEffect(fact.type.type)
     )
-      return Object.freeze({ _tag: 'Unavailable', span: options.context.spanOf(fact.anchor) })
+      return Object.freeze({
+        _tag: 'Unavailable',
+        span: options.context.spanOf(fact.anchor),
+        origin: Tir.authored(fact.anchor),
+      })
     return Object.freeze({
       _tag: 'EffectBindRequirement',
       protected: protected_,
@@ -875,6 +1015,7 @@ export const tirExpression = (
       }),
       type: fact.type.type,
       span: options.context.spanOf(fact.anchor),
+      origin: Tir.authored(fact.anchor),
     })
   }
   if (fact._tag === 'Match') {
@@ -885,7 +1026,11 @@ export const tirExpression = (
         ? Object.freeze({ ...loweredScrutinee, access: 'ConsumeRequested' as const })
         : loweredScrutinee
     if (scrutinee._tag === 'Unavailable' || fact.type._tag !== 'Available') {
-      return Object.freeze({ _tag: 'Unavailable', span: options.context.spanOf(fact.anchor) })
+      return Object.freeze({
+        _tag: 'Unavailable',
+        span: options.context.spanOf(fact.anchor),
+        origin: Tir.authored(fact.anchor),
+      })
     }
     const target = fact.type.type
     return Object.freeze({
@@ -924,6 +1069,7 @@ export const tirExpression = (
                         type: binding.type.type,
                         access: binding.access,
                         span: options.context.spanOf(binding.anchor),
+                        origin: Tir.authored(binding.anchor),
                       }),
                     ]
                   : [],
@@ -949,6 +1095,7 @@ export const tirExpression = (
                         ? arm.body.type.type
                         : target,
                     span: options.context.spanOf(arm.body.anchor),
+                    origin: Tir.authored(arm.body.anchor),
                   })
                 : Object.freeze({
                     _tag: 'Block' as const,
@@ -956,16 +1103,19 @@ export const tirExpression = (
                     completion: arm.body.completion,
                     type: arm.body.type._tag === 'Available' ? arm.body.type.type : target,
                     span: options.context.spanOf(arm.body.anchor),
+                    origin: Tir.authored(arm.body.anchor),
                   }),
             before: arm.before,
             after: arm.after,
             reachable: arm.reachable,
             span: options.context.spanOf(arm.anchor),
+            origin: Tir.authored(arm.anchor),
           })
         }),
       ),
       type: target,
       span: options.context.spanOf(fact.anchor),
+      origin: Tir.authored(fact.anchor),
     })
   }
   if (fact._tag === 'StructLiteral') {
@@ -977,6 +1127,7 @@ export const tirExpression = (
       return Object.freeze({
         _tag: 'Unavailable',
         span: options.context.spanOf(fact.anchor),
+        origin: Tir.authored(fact.anchor),
         ...(fact.target._tag === 'Unavailable' && fact.target.cause !== undefined
           ? { cause: publishedCause(options.context, fact.target.cause) }
           : {}),
@@ -1012,6 +1163,7 @@ export const tirExpression = (
       ),
       type: fact.type.type,
       span: options.context.spanOf(fact.anchor),
+      origin: Tir.authored(fact.anchor),
     })
   }
   if (fact._tag === 'UnionVariant') {
@@ -1024,6 +1176,7 @@ export const tirExpression = (
       return Object.freeze({
         _tag: 'Unavailable',
         span: options.context.spanOf(fact.anchor),
+        origin: Tir.authored(fact.anchor),
         ...(fact.target._tag === 'Unavailable' && fact.target.cause !== undefined
           ? { cause: publishedCause(options.context, fact.target.cause) }
           : {}),
@@ -1061,11 +1214,16 @@ export const tirExpression = (
       ),
       type: fact.type.type,
       span: options.context.spanOf(fact.anchor),
+      origin: Tir.authored(fact.anchor),
     })
   }
   if (fact._tag === 'ArrayLiteral') {
     if (fact.state._tag !== 'Complete' || fact.type._tag !== 'Available') {
-      return Object.freeze({ _tag: 'Unavailable', span: options.context.spanOf(fact.anchor) })
+      return Object.freeze({
+        _tag: 'Unavailable',
+        span: options.context.spanOf(fact.anchor),
+        origin: Tir.authored(fact.anchor),
+      })
     }
     return Object.freeze({
       _tag: 'ArrayConstruct',
@@ -1084,15 +1242,12 @@ export const tirExpression = (
       ),
       type: fact.state.type,
       span: options.context.spanOf(fact.anchor),
+      origin: Tir.authored(fact.anchor),
     })
   }
   if (fact._tag === 'FieldProjection') {
     if (fact.staticValue !== undefined && fact.type._tag === 'Available')
-      return staticValueExpression(
-        fact.staticValue,
-        fact.type.type,
-        options.context.spanOf(fact.anchor),
-      )
+      return staticValueExpression(fact.staticValue, fact.type.type, fact.anchor, options.context)
     if (fact.state._tag === 'SliceLength' && fact.type._tag === 'Available') {
       const slice = tirExpression(fact.subject, options)
       return slice._tag === 'Unavailable'
@@ -1102,6 +1257,7 @@ export const tirExpression = (
             slice,
             type: 'usize',
             span: options.context.spanOf(fact.anchor),
+            origin: Tir.authored(fact.anchor),
           })
     }
     if (
@@ -1112,6 +1268,7 @@ export const tirExpression = (
       return Object.freeze({
         _tag: 'Unavailable',
         span: options.context.spanOf(fact.anchor),
+        origin: Tir.authored(fact.anchor),
         ...(fact.state._tag === 'Unavailable' && fact.state.cause !== undefined
           ? { cause: publishedCause(options.context, fact.state.cause) }
           : {}),
@@ -1126,6 +1283,7 @@ export const tirExpression = (
       ...(fact.borrowAccess === undefined ? {} : { borrowAccess: fact.borrowAccess }),
       type: fact.type.type,
       span: options.context.spanOf(fact.anchor),
+      origin: Tir.authored(fact.anchor),
     })
   }
   if (fact._tag === 'IndexProjection') {
@@ -1147,6 +1305,7 @@ export const tirExpression = (
         sourceType: fact.slice,
         type: fact.type.type,
         span: options.context.spanOf(fact.anchor),
+        origin: Tir.authored(fact.anchor),
       })
     }
     if (
@@ -1157,6 +1316,7 @@ export const tirExpression = (
       return Object.freeze({
         _tag: 'Unavailable',
         span: options.context.spanOf(fact.anchor),
+        origin: Tir.authored(fact.anchor),
         ...(fact.bounds._tag === 'Invalid'
           ? { cause: publishedCause(options.context, fact.bounds.cause) }
           : {}),
@@ -1176,6 +1336,7 @@ export const tirExpression = (
       bounds: fact.bounds,
       type: fact.type.type,
       span: options.context.spanOf(fact.anchor),
+      origin: Tir.authored(fact.anchor),
     })
   }
   if (fact._tag === 'ReferentProjection') {
@@ -1188,6 +1349,7 @@ export const tirExpression = (
       return Object.freeze({
         _tag: 'Unavailable',
         span: options.context.spanOf(fact.anchor),
+        origin: Tir.authored(fact.anchor),
         ...(fact.state._tag === 'Unavailable' && fact.state.cause !== undefined
           ? { cause: publishedCause(options.context, fact.state.cause) }
           : {}),
@@ -1201,6 +1363,7 @@ export const tirExpression = (
       borrowAccess: fact.borrowAccess,
       type: fact.type.type,
       span: options.context.spanOf(fact.anchor),
+      origin: Tir.authored(fact.anchor),
     })
   }
   if (fact._tag === 'Borrow') {
@@ -1224,6 +1387,7 @@ export const tirExpression = (
       return Object.freeze({
         _tag: 'Unavailable',
         span: options.context.spanOf(fact.anchor),
+        origin: Tir.authored(fact.anchor),
         ...(fact.formation._tag === 'Unavailable' && fact.formation.cause !== undefined
           ? { cause: publishedCause(options.context, fact.formation.cause) }
           : {}),
@@ -1266,7 +1430,11 @@ export const tirExpression = (
       if (selector._tag === 'SliceIndex') {
         const index = tirExpression(selector.index, options)
         if (index._tag === 'Unavailable') {
-          return Object.freeze({ _tag: 'Unavailable', span: options.context.spanOf(fact.anchor) })
+          return Object.freeze({
+            _tag: 'Unavailable',
+            span: options.context.spanOf(fact.anchor),
+            origin: Tir.authored(fact.anchor),
+          })
         }
         selectors.push(
           Object.freeze({
@@ -1280,7 +1448,11 @@ export const tirExpression = (
       }
       const index = tirExpression(selector.index, options)
       if (index._tag === 'Unavailable') {
-        return Object.freeze({ _tag: 'Unavailable', span: options.context.spanOf(fact.anchor) })
+        return Object.freeze({
+          _tag: 'Unavailable',
+          span: options.context.spanOf(fact.anchor),
+          origin: Tir.authored(fact.anchor),
+        })
       }
       selectors.push(
         Object.freeze({
@@ -1308,12 +1480,21 @@ export const tirExpression = (
         suspendsParent: fact.formation._tag === 'ValueReborrow' && fact.formation.suspendsParent,
         type: fact.type.type,
         span: options.context.spanOf(fact.anchor),
+        origin: Tir.authored(fact.anchor),
       })
     }
     if (fact.formation._tag === 'ValueBorrow' || fact.formation._tag === 'ValueReborrow')
-      return Object.freeze({ _tag: 'Unavailable', span: options.context.spanOf(fact.anchor) })
+      return Object.freeze({
+        _tag: 'Unavailable',
+        span: options.context.spanOf(fact.anchor),
+        origin: Tir.authored(fact.anchor),
+      })
     if (!Type.isSlice(fact.type.type))
-      return Object.freeze({ _tag: 'Unavailable', span: options.context.spanOf(fact.anchor) })
+      return Object.freeze({
+        _tag: 'Unavailable',
+        span: options.context.spanOf(fact.anchor),
+        origin: Tir.authored(fact.anchor),
+      })
     return Object.freeze({
       _tag: 'SliceBorrow',
       borrow,
@@ -1326,12 +1507,17 @@ export const tirExpression = (
       suspendsParent: fact.formation._tag === 'SliceReborrow' && fact.formation.suspendsParent,
       type: fact.type.type,
       span: options.context.spanOf(fact.anchor),
+      origin: Tir.authored(fact.anchor),
     })
   }
   if (fact._tag === 'FunctionItem') {
     const target = tirCallableTarget(fact.reference)
     if (target === undefined || fact.type._tag !== 'Available')
-      return Object.freeze({ _tag: 'Unavailable', span: options.context.spanOf(fact.anchor) })
+      return Object.freeze({
+        _tag: 'Unavailable',
+        span: options.context.spanOf(fact.anchor),
+        origin: Tir.authored(fact.anchor),
+      })
     if (fact.foreignAddress !== undefined && Type.isForeignFunction(fact.type.type))
       return Object.freeze({
         _tag: 'ForeignFunctionAddress',
@@ -1339,21 +1525,31 @@ export const tirExpression = (
         symbol: fact.foreignAddress.symbol,
         type: fact.type.type,
         span: options.context.spanOf(fact.anchor),
+        origin: Tir.authored(fact.anchor),
       })
     if (!Type.isCallable(fact.type.type))
-      return Object.freeze({ _tag: 'Unavailable', span: options.context.spanOf(fact.anchor) })
+      return Object.freeze({
+        _tag: 'Unavailable',
+        span: options.context.spanOf(fact.anchor),
+        origin: Tir.authored(fact.anchor),
+      })
     return Object.freeze({
       _tag: 'FunctionItem',
       target,
       typeArguments: fact.typeArguments,
       type: fact.type.type,
       span: options.context.spanOf(fact.anchor),
+      origin: Tir.authored(fact.anchor),
     })
   }
   if (fact._tag === 'CallableSection') {
     const target = tirCallableTarget(fact.reference)
     if (target === undefined || fact.type._tag !== 'Available' || !Type.isCallable(fact.type.type))
-      return Object.freeze({ _tag: 'Unavailable', span: options.context.spanOf(fact.anchor) })
+      return Object.freeze({
+        _tag: 'Unavailable',
+        span: options.context.spanOf(fact.anchor),
+        origin: Tir.authored(fact.anchor),
+      })
     return Object.freeze({
       _tag: 'CallableSection',
       site: fact.site,
@@ -1384,11 +1580,16 @@ export const tirExpression = (
       mode: fact.mode,
       type: fact.type.type,
       span: options.context.spanOf(fact.anchor),
+      origin: Tir.authored(fact.anchor),
     })
   }
   if (fact._tag === 'ForeignApply') {
     if (fact.type._tag !== 'Available')
-      return { _tag: 'Unavailable', span: options.context.spanOf(fact.anchor) }
+      return {
+        _tag: 'Unavailable',
+        span: options.context.spanOf(fact.anchor),
+        origin: Tir.authored(fact.anchor),
+      }
     return {
       _tag: 'ForeignApply',
       evaluation: fact.evaluation,
@@ -1400,11 +1601,16 @@ export const tirExpression = (
       loanEnds: loanEndsOf(fact.arguments, () => true),
       type: fact.type.type,
       span: options.context.spanOf(fact.anchor),
+      origin: Tir.authored(fact.anchor),
     }
   }
   if (fact._tag === 'CallableApply') {
     if (fact.type._tag !== 'Available')
-      return Object.freeze({ _tag: 'Unavailable', span: options.context.spanOf(fact.anchor) })
+      return Object.freeze({
+        _tag: 'Unavailable',
+        span: options.context.spanOf(fact.anchor),
+        origin: Tir.authored(fact.anchor),
+      })
     const resultType = fact.type.type
     const retainedOrdinals = new Set(
       retainedResultArguments(fact, options.lifetimeAssumptions ?? Lifetime.assumptions([])).map(
@@ -1472,6 +1678,7 @@ export const tirExpression = (
       realization: fact.callee._tag === 'CallableSection' ? 'DirectErasedSection' : 'Environment',
       type: fact.type.type,
       span: options.context.spanOf(fact.anchor),
+      origin: Tir.authored(fact.anchor),
     })
   }
   if (
@@ -1497,6 +1704,7 @@ export const tirExpression = (
       loanEnds: borrowIds,
       type: fact.type.type,
       span: options.context.spanOf(fact.anchor),
+      origin: Tir.authored(fact.anchor),
     })
   }
   if (
@@ -1512,7 +1720,11 @@ export const tirExpression = (
       right === undefined ||
       left._tag === 'Unavailable' ||
       right._tag === 'Unavailable'
-      ? Object.freeze({ _tag: 'Unavailable', span: options.context.spanOf(fact.anchor) })
+      ? Object.freeze({
+          _tag: 'Unavailable',
+          span: options.context.spanOf(fact.anchor),
+          origin: Tir.authored(fact.anchor),
+        })
       : Object.freeze({
           _tag: 'EnumEquality',
           enum: fact.reference.enum,
@@ -1521,6 +1733,7 @@ export const tirExpression = (
           negated: fact.reference.operator === 'NotEquals',
           type: Scalar.boolean.spelling,
           span: options.context.spanOf(fact.anchor),
+          origin: Tir.authored(fact.anchor),
         })
   }
   if (
@@ -1562,13 +1775,18 @@ export const tirExpression = (
     if (fact.reference.operation === 'StringFromUtf8Unchecked') {
       const source = arguments_.at(0)
       return source === undefined || source._tag === 'Unavailable' || !Type.isSlice(source.type)
-        ? Object.freeze({ _tag: 'Unavailable', span: options.context.spanOf(fact.anchor) })
+        ? Object.freeze({
+            _tag: 'Unavailable',
+            span: options.context.spanOf(fact.anchor),
+            origin: Tir.authored(fact.anchor),
+          })
         : Object.freeze({
             _tag: 'RuntimeStringView',
             source,
             heldLoans,
             type: Type.string(source.type.lifetime),
             span: options.context.spanOf(fact.anchor),
+            origin: Tir.authored(fact.anchor),
           })
     }
     if (fact.reference.operation === 'StringEqualsExact') {
@@ -1578,7 +1796,11 @@ export const tirExpression = (
         right === undefined ||
         left._tag === 'Unavailable' ||
         right._tag === 'Unavailable'
-        ? Object.freeze({ _tag: 'Unavailable', span: options.context.spanOf(fact.anchor) })
+        ? Object.freeze({
+            _tag: 'Unavailable',
+            span: options.context.spanOf(fact.anchor),
+            origin: Tir.authored(fact.anchor),
+          })
         : Object.freeze({
             _tag: 'StringEquality',
             left,
@@ -1587,6 +1809,7 @@ export const tirExpression = (
             intrinsic: fact.reference.intrinsic,
             type: Scalar.boolean.spelling,
             span: options.context.spanOf(fact.anchor),
+            origin: Tir.authored(fact.anchor),
           })
     }
     return Object.freeze({
@@ -1624,6 +1847,7 @@ export const tirExpression = (
       heldLoans,
       type: fact.type.type,
       span: options.context.spanOf(fact.anchor),
+      origin: Tir.authored(fact.anchor),
     })
   }
   if (
@@ -1647,7 +1871,11 @@ export const tirExpression = (
       Type.equals(candidate.capability, service),
     )
     if (requirement === undefined)
-      return Object.freeze({ _tag: 'Unavailable', span: options.context.spanOf(fact.anchor) })
+      return Object.freeze({
+        _tag: 'Unavailable',
+        span: options.context.spanOf(fact.anchor),
+        origin: Tir.authored(fact.anchor),
+      })
     const substitution = fact.contract.substitution
     const target = fact.reference.operation
     const staticArgumentOrigins = Object.freeze(
@@ -1702,6 +1930,7 @@ export const tirExpression = (
       ),
       type: fact.type.type,
       span: options.context.spanOf(fact.anchor),
+      origin: Tir.authored(fact.anchor),
     })
   }
   if (
@@ -1711,11 +1940,7 @@ export const tirExpression = (
     fact.type._tag === 'Available'
   ) {
     if (fact._tag === 'Call' && fact.staticValue !== undefined)
-      return staticValueExpression(
-        fact.staticValue,
-        fact.type.type,
-        options.context.spanOf(fact.anchor),
-      )
+      return staticValueExpression(fact.staticValue, fact.type.type, fact.anchor, options.context)
     const target = fact.reference.declaration
     const substitution = fact.contract.substitution
     const retainedOrdinals = new Set(
@@ -1779,6 +2004,7 @@ export const tirExpression = (
       ),
       type: fact.type.type,
       span: options.context.spanOf(fact.anchor),
+      origin: Tir.authored(fact.anchor),
     }
     return Type.isEffect(fact.type.type) &&
       fact.reference._tag === 'Resolved' &&
@@ -1795,6 +2021,7 @@ export const tirExpression = (
   return Object.freeze({
     _tag: 'Unavailable',
     span: options.context.spanOf(fact.anchor),
+    origin: Tir.authored(fact.anchor),
     ...(cause === undefined ? {} : { cause: publishedCause(options.context, cause) }),
   })
 }
@@ -1824,6 +2051,7 @@ const effectJoinConvert = (
     expectedAt,
     type: target,
     span: source.span,
+    origin: source.origin,
   })
 }
 
@@ -1847,6 +2075,7 @@ export const tirExpectedExpression = (
       value: fact.integer.value,
       type: target,
       span: options.context.spanOf(fact.anchor),
+      origin: Tir.authored(fact.anchor),
     })
   const loweredSource = tirExpression(fact, options, borrow)
   if (loweredSource._tag === 'Unavailable') return loweredSource
@@ -1897,7 +2126,11 @@ export const tirExpectedExpression = (
     return source
   if (compatibility._tag === 'Bottom') return source
   if (compatibility._tag === 'Incompatible') {
-    return Object.freeze({ _tag: 'Unavailable', span: options.context.spanOf(fact.anchor) })
+    return Object.freeze({
+      _tag: 'Unavailable',
+      span: options.context.spanOf(fact.anchor),
+      origin: Tir.authored(fact.anchor),
+    })
   }
   return Object.freeze({
     _tag: 'UnionConvert',
@@ -1911,6 +2144,7 @@ export const tirExpectedExpression = (
     expectedAt,
     type: compatibility.target,
     span: options.context.spanOf(fact.anchor),
+    origin: Tir.authored(fact.anchor),
   })
 }
 
@@ -1946,6 +2180,7 @@ export const tirWritePlace = (
           field: current.state.field.id,
           type: current.type.type,
           span: options.context.spanOf(current.anchor),
+          origin: Tir.authored(current.anchor),
         }),
       )
       return true
@@ -1969,6 +2204,7 @@ export const tirWritePlace = (
           bounds: current.bounds,
           type: current.type.type,
           span: options.context.spanOf(current.anchor),
+          origin: Tir.authored(current.anchor),
         }),
       )
       return true
@@ -1988,6 +2224,7 @@ export const tirWritePlace = (
     selectors: Object.freeze(selectors),
     type: fact.type.type,
     span: options.context.spanOf(fact.anchor),
+    origin: Tir.authored(fact.anchor),
   })
 }
 
@@ -2037,6 +2274,7 @@ export const tirBorrowedWritePlace = (
           field: current.state.field.id,
           type: current.type.type,
           span: options.context.spanOf(current.anchor),
+          origin: Tir.authored(current.anchor),
         }),
       )
       return true
@@ -2065,6 +2303,7 @@ export const tirBorrowedWritePlace = (
             slice: current.slice,
             type: current.type.type,
             span: options.context.spanOf(current.anchor),
+            origin: Tir.authored(current.anchor),
           }),
         )
         return true
@@ -2083,6 +2322,7 @@ export const tirBorrowedWritePlace = (
           bounds: current.bounds,
           type: current.type.type,
           span: options.context.spanOf(current.anchor),
+          origin: Tir.authored(current.anchor),
         }),
       )
       return true
@@ -2100,6 +2340,7 @@ export const tirBorrowedWritePlace = (
     selectors: Object.freeze(selectors),
     type: fact.type.type,
     span: options.context.spanOf(fact.anchor),
+    origin: Tir.authored(fact.anchor),
   })
 }
 

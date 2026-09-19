@@ -544,6 +544,7 @@ export const inlineForwardedRequirement = (
       }),
       type,
       span: expression.span,
+      origin: expression.origin,
     }),
     provider,
     selection: Object.freeze({

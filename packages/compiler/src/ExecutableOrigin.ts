@@ -2352,6 +2352,7 @@ export const make = (operations: Operations) => {
       heldLoans: expression._tag === 'BuiltinCall' ? expression.heldLoans : [],
       type: expression.type,
       span: expression.span,
+      origin: expression.origin,
     }
   }
 

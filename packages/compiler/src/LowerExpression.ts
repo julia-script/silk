@@ -2386,6 +2386,7 @@ function lowerMatchExpression(
             _tag: 'UnitLiteral',
             type: Type.unit,
             span: body.span,
+            origin: body.origin,
           }),
         )
         if (unit === undefined || unit === 'Transferred') return undefined
@@ -2983,6 +2984,7 @@ function lowerInterfaceOperationCallExpression(
       heldLoans: Object.freeze([]),
       type: expression.type,
       span: expression.span,
+      origin: expression.origin,
     }),
   )
 }

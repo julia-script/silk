@@ -2180,7 +2180,8 @@ const runtimeTirFunction = (
       access,
       fact.declaration.requirementRow.row,
     )
-    const siteSpan = context.spanOf(fact.bodyAnchor ?? fact.declaration.anchor)
+    const siteAnchor = fact.bodyAnchor ?? fact.declaration.anchor
+    const siteSpan = context.spanOf(siteAnchor)
     const entryRegion: Tir.RegionId = Object.freeze({
       _tag: 'TirRegion',
       function: fact.declaration.id,
@@ -2225,6 +2226,7 @@ const runtimeTirFunction = (
       ),
       type,
       span: siteSpan,
+      origin: Tir.synthetic(siteAnchor, 'effect-body'),
     })
     return Object.freeze({
       _tag: 'TirFunction',
@@ -2244,6 +2246,7 @@ const runtimeTirFunction = (
           expression: effectBlock,
           region: entryRegion,
           span: siteSpan,
+          origin: Tir.synthetic(siteAnchor, 'effect-return'),
         }),
       ]),
     })

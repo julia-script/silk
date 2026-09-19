@@ -3,6 +3,7 @@ import * as Lifetime from './Lifetime.js'
 import * as Constraint from './Constraint.js'
 import type * as ConformanceProof from './ConformanceProof.js'
 import type * as DeclarationFacts from './DeclarationFacts.js'
+import type * as AuthoredIdentity from './AuthoredIdentity.js'
 import type * as Diagnostic from './Diagnostic.js'
 import type * as Location from './Location.js'
 import * as Intrinsic from './Intrinsic.js'
@@ -59,6 +60,27 @@ export interface BindingId {
   readonly function: DeclarationFacts.DeclarationId
   readonly ordinal: number
 }
+
+/**
+ * Where a node comes from, in the authored vocabulary and never in source coordinates.
+ *
+ * A synthetic node is one the compiler made for an authored position: `role` and `occurrence` tell
+ * apart several nodes made for the same position.
+ */
+export type Origin =
+  | { readonly _tag: 'Authored'; readonly anchor: AuthoredIdentity.Anchor }
+  | {
+      readonly _tag: 'Synthetic'
+      readonly anchor: AuthoredIdentity.Anchor
+      readonly role: string
+      readonly occurrence: number
+    }
+
+export const authored = (anchor: AuthoredIdentity.Anchor): Origin =>
+  Object.freeze({ _tag: 'Authored', anchor })
+
+export const synthetic = (anchor: AuthoredIdentity.Anchor, role: string, occurrence = 0): Origin =>
+  Object.freeze({ _tag: 'Synthetic', anchor, role, occurrence })
 
 /** A canonical source-ordered region identity local to one function. */
 export interface RegionId {
@@ -382,6 +404,7 @@ export interface OwnedWritePlace {
   readonly selectors: ReadonlyArray<WriteSelector>
   readonly type: DeclarationFacts.SemanticType
   readonly span: SourceSpan.SourceSpan
+  readonly origin: Origin
 }
 
 export type BorrowedWriteSelector =
@@ -391,6 +414,7 @@ export type BorrowedWriteSelector =
       readonly slice: Type.Slice
       readonly type: DeclarationFacts.SemanticType
       readonly span: SourceSpan.SourceSpan
+      readonly origin: Origin
     }
   | Extract<WriteSelector, { readonly _tag: 'Field' | 'Index' }>
 
@@ -402,6 +426,7 @@ export interface BorrowedWritePlace {
   readonly selectors: ReadonlyArray<BorrowedWriteSelector>
   readonly type: DeclarationFacts.SemanticType
   readonly span: SourceSpan.SourceSpan
+  readonly origin: Origin
 }
 
 export type WritePlace = OwnedWritePlace | BorrowedWritePlace
@@ -415,6 +440,7 @@ export interface PatternBinding {
   readonly type: DeclarationFacts.SemanticType
   readonly access: Match.Access
   readonly span: SourceSpan.SourceSpan
+  readonly origin: Origin
 }
 
 export interface PatternSelection {
@@ -430,6 +456,7 @@ export interface PatternSelection {
   readonly cleanup: ReadonlyArray<ReadonlyArray<DeclarationFacts.FieldId>>
   readonly irrefutable: boolean
   readonly span: SourceSpan.SourceSpan
+  readonly origin: Origin
 }
 
 /** One typed core semantic operation with exact source provenance. */
@@ -440,6 +467,7 @@ export type MatchArmBody =
       readonly expression: Expression
       readonly type: Type.Type
       readonly span: SourceSpan.SourceSpan
+      readonly origin: Origin
     }
   | {
       readonly _tag: 'Block'
@@ -447,6 +475,7 @@ export type MatchArmBody =
       readonly completion: { readonly fallsThrough: boolean }
       readonly type: Type.Type
       readonly span: SourceSpan.SourceSpan
+      readonly origin: Origin
     }
 
 export type Expression =
@@ -456,6 +485,7 @@ export type Expression =
       readonly type: DeclarationFacts.SemanticType
       readonly constant?: DeclarationFacts.CanonicalId
       readonly span: SourceSpan.SourceSpan
+      readonly origin: Origin
     }
   | {
       readonly _tag: 'FloatingLiteral'
@@ -463,35 +493,41 @@ export type Expression =
       readonly spelling: string
       readonly type: Scalar.FloatSpelling
       readonly span: SourceSpan.SourceSpan
+      readonly origin: Origin
     }
   | {
       readonly _tag: 'StaticStringLiteral'
       readonly data: StaticText.Data
       readonly type: Type.String
       readonly span: SourceSpan.SourceSpan
+      readonly origin: Origin
     }
   | {
       readonly _tag: 'StaticByteViewLiteral'
       readonly data: StaticText.Data
       readonly type: Type.Slice
       readonly span: SourceSpan.SourceSpan
+      readonly origin: Origin
     }
   | {
       readonly _tag: 'UnitLiteral'
       readonly type: typeof Type.unit
       readonly span: SourceSpan.SourceSpan
+      readonly origin: Origin
     }
   | {
       readonly _tag: 'BooleanLiteral'
       readonly value: boolean
       readonly type: DeclarationFacts.SemanticType
       readonly span: SourceSpan.SourceSpan
+      readonly origin: Origin
     }
   | {
       readonly _tag: 'CharacterLiteral'
       readonly value: number
       readonly type: DeclarationFacts.SemanticType
       readonly span: SourceSpan.SourceSpan
+      readonly origin: Origin
     }
   | {
       readonly _tag: 'EnumMember'
@@ -500,6 +536,7 @@ export type Expression =
       readonly discriminant: bigint
       readonly type: Type.Nominal
       readonly span: SourceSpan.SourceSpan
+      readonly origin: Origin
     }
   | {
       readonly _tag: 'EnumValue'
@@ -508,6 +545,7 @@ export type Expression =
       readonly intrinsic: Intrinsic.OperationId
       readonly type: Scalar.EnumRepresentationSpelling
       readonly span: SourceSpan.SourceSpan
+      readonly origin: Origin
     }
   | {
       readonly _tag: 'EnumEquality'
@@ -517,12 +555,14 @@ export type Expression =
       readonly negated: boolean
       readonly type: 'bool'
       readonly span: SourceSpan.SourceSpan
+      readonly origin: Origin
     }
   | {
       readonly _tag: 'ParameterReference'
       readonly parameter: DeclarationFacts.ParameterId
       readonly type: DeclarationFacts.SemanticType
       readonly span: SourceSpan.SourceSpan
+      readonly origin: Origin
     }
   | {
       readonly _tag: 'ForeignStaticLoad'
@@ -531,24 +571,28 @@ export type Expression =
       readonly symbol: string
       readonly type: DeclarationFacts.SemanticType
       readonly span: SourceSpan.SourceSpan
+      readonly origin: Origin
     }
   | {
       readonly _tag: 'BindingReference'
       readonly binding: BindingId
       readonly type: DeclarationFacts.SemanticType
       readonly span: SourceSpan.SourceSpan
+      readonly origin: Origin
     }
   | {
       readonly _tag: 'PatternBindingReference'
       readonly binding: Match.BindingId
       readonly type: DeclarationFacts.SemanticType
       readonly span: SourceSpan.SourceSpan
+      readonly origin: Origin
     }
   | {
       readonly _tag: 'Move'
       readonly subject: Expression
       readonly type: DeclarationFacts.SemanticType
       readonly span: SourceSpan.SourceSpan
+      readonly origin: Origin
     }
   | {
       /** Atomically reads one writable place and stores a replacement, yielding the old value. */
@@ -557,6 +601,7 @@ export type Expression =
       readonly value: Expression
       readonly type: DeclarationFacts.SemanticType
       readonly span: SourceSpan.SourceSpan
+      readonly origin: Origin
     }
   | {
       readonly _tag: 'UnionConvert'
@@ -577,6 +622,7 @@ export type Expression =
       readonly expectedAt: SourceSpan.SourceSpan
       readonly type: Type.StructuralUnion | Type.Effect | Type.Represented
       readonly span: SourceSpan.SourceSpan
+      readonly origin: Origin
     }
   | {
       readonly _tag: 'Match'
@@ -600,6 +646,7 @@ export type Expression =
       }>
       readonly type: DeclarationFacts.SemanticType
       readonly span: SourceSpan.SourceSpan
+      readonly origin: Origin
     }
   | {
       /**
@@ -614,6 +661,7 @@ export type Expression =
       readonly right: Expression
       readonly type: DeclarationFacts.SemanticType
       readonly span: SourceSpan.SourceSpan
+      readonly origin: Origin
     }
   | {
       readonly _tag: 'Construct'
@@ -626,6 +674,7 @@ export type Expression =
       }>
       readonly type: DeclarationFacts.SemanticType
       readonly span: SourceSpan.SourceSpan
+      readonly origin: Origin
     }
   | {
       readonly _tag: 'ConstructUnionVariant'
@@ -640,12 +689,14 @@ export type Expression =
       }>
       readonly type: DeclarationFacts.SemanticType
       readonly span: SourceSpan.SourceSpan
+      readonly origin: Origin
     }
   | {
       readonly _tag: 'ArrayConstruct'
       readonly elements: ReadonlyArray<Expression>
       readonly type: Type.FixedArray
       readonly span: SourceSpan.SourceSpan
+      readonly origin: Origin
     }
   | {
       readonly _tag: 'Project'
@@ -656,6 +707,7 @@ export type Expression =
       readonly borrowAccess?: Type.BorrowAccess
       readonly type: DeclarationFacts.SemanticType
       readonly span: SourceSpan.SourceSpan
+      readonly origin: Origin
     }
   | {
       /** One explicit place rooted at the target of a reference value. */
@@ -666,6 +718,7 @@ export type Expression =
       readonly borrowAccess: Type.BorrowAccess
       readonly type: DeclarationFacts.SemanticType
       readonly span: SourceSpan.SourceSpan
+      readonly origin: Origin
     }
   | {
       readonly _tag: 'IndexPlace'
@@ -676,6 +729,7 @@ export type Expression =
       readonly bounds: BoundsMode
       readonly type: DeclarationFacts.SemanticType
       readonly span: SourceSpan.SourceSpan
+      readonly origin: Origin
     }
   | {
       readonly _tag: 'SliceBorrow'
@@ -688,6 +742,7 @@ export type Expression =
       readonly suspendsParent: boolean
       readonly type: Type.Slice
       readonly span: SourceSpan.SourceSpan
+      readonly origin: Origin
     }
   | {
       readonly _tag: 'ValueBorrow'
@@ -700,6 +755,7 @@ export type Expression =
       readonly suspendsParent: boolean
       readonly type: Type.Reference
       readonly span: SourceSpan.SourceSpan
+      readonly origin: Origin
     }
   | {
       readonly _tag: 'RuntimeStringView'
@@ -707,6 +763,7 @@ export type Expression =
       readonly heldLoans: ReadonlyArray<BorrowId>
       readonly type: Type.String
       readonly span: SourceSpan.SourceSpan
+      readonly origin: Origin
     }
   | {
       readonly _tag: 'StringEquality'
@@ -716,12 +773,14 @@ export type Expression =
       readonly intrinsic: Intrinsic.OperationId
       readonly type: 'bool'
       readonly span: SourceSpan.SourceSpan
+      readonly origin: Origin
     }
   | {
       readonly _tag: 'SliceLength'
       readonly slice: Expression
       readonly type: 'usize'
       readonly span: SourceSpan.SourceSpan
+      readonly origin: Origin
     }
   | {
       readonly _tag: 'SliceIndexPlace'
@@ -731,6 +790,7 @@ export type Expression =
       readonly sourceType: Type.Slice
       readonly type: DeclarationFacts.SemanticType
       readonly span: SourceSpan.SourceSpan
+      readonly origin: Origin
     }
   | {
       readonly _tag: 'Call'
@@ -748,6 +808,7 @@ export type Expression =
       readonly heldLoans: ReadonlyArray<BorrowId>
       readonly type: DeclarationFacts.SemanticType
       readonly span: SourceSpan.SourceSpan
+      readonly origin: Origin
     }
   | {
       readonly _tag: 'FunctionItem'
@@ -755,6 +816,7 @@ export type Expression =
       readonly typeArguments: ReadonlyArray<Type.GenericArgument>
       readonly type: Type.Callable
       readonly span: SourceSpan.SourceSpan
+      readonly origin: Origin
     }
   | {
       /** Address of an exact, synchronous, noncapturing `export "C"` function. */
@@ -763,6 +825,7 @@ export type Expression =
       readonly symbol: string
       readonly type: Type.ForeignFunction
       readonly span: SourceSpan.SourceSpan
+      readonly origin: Origin
     }
   | {
       readonly _tag: 'CallableSection'
@@ -781,6 +844,7 @@ export type Expression =
       readonly mode: Type.CallableMode
       readonly type: Type.Callable
       readonly span: SourceSpan.SourceSpan
+      readonly origin: Origin
     }
   | {
       readonly _tag: 'ForeignApply'
@@ -791,6 +855,7 @@ export type Expression =
       readonly loanEnds: ReadonlyArray<BorrowId>
       readonly type: DeclarationFacts.SemanticType
       readonly span: SourceSpan.SourceSpan
+      readonly origin: Origin
     }
   | {
       readonly _tag: 'CallableApply'
@@ -816,6 +881,7 @@ export type Expression =
       }
       readonly type: DeclarationFacts.SemanticType
       readonly span: SourceSpan.SourceSpan
+      readonly origin: Origin
     }
   | {
       readonly _tag: 'EffectConstruct'
@@ -830,6 +896,7 @@ export type Expression =
       readonly loanEnds: ReadonlyArray<BorrowId>
       readonly type: Type.Effect
       readonly span: SourceSpan.SourceSpan
+      readonly origin: Origin
     }
   | {
       readonly _tag: 'ServiceEffectConstruct'
@@ -845,6 +912,7 @@ export type Expression =
       readonly loanEnds: ReadonlyArray<BorrowId>
       readonly type: Type.Effect
       readonly span: SourceSpan.SourceSpan
+      readonly origin: Origin
     }
   | {
       readonly _tag: 'EffectBlock'
@@ -859,12 +927,14 @@ export type Expression =
       }>
       readonly type: Type.Effect
       readonly span: SourceSpan.SourceSpan
+      readonly origin: Origin
     }
   | {
       readonly _tag: 'Run'
       readonly subject: Expression
       readonly type: DeclarationFacts.SemanticType
       readonly span: SourceSpan.SourceSpan
+      readonly origin: Origin
     }
   | {
       /**
@@ -883,6 +953,7 @@ export type Expression =
       readonly evidence: ReadonlyArray<Constraint.ConstraintEvidence>
       readonly type: Type.Effect
       readonly span: SourceSpan.SourceSpan
+      readonly origin: Origin
     }
   | {
       readonly _tag: 'EffectBindRequirement'
@@ -902,6 +973,7 @@ export type Expression =
       }
       readonly type: Type.Effect
       readonly span: SourceSpan.SourceSpan
+      readonly origin: Origin
     }
   | {
       readonly _tag: 'BuiltinCall'
@@ -926,6 +998,7 @@ export type Expression =
       readonly heldLoans: ReadonlyArray<BorrowId>
       readonly type: DeclarationFacts.SemanticType
       readonly span: SourceSpan.SourceSpan
+      readonly origin: Origin
     }
   /**
    * One statically selected interface-operation call. It records the conformance question rather
@@ -944,10 +1017,12 @@ export type Expression =
       readonly loanEnds: ReadonlyArray<BorrowId>
       readonly type: DeclarationFacts.SemanticType
       readonly span: SourceSpan.SourceSpan
+      readonly origin: Origin
     }
   | {
       readonly _tag: 'Unavailable'
       readonly span: SourceSpan.SourceSpan
+      readonly origin: Origin
       readonly cause?: Diagnostic.Identity
     }
 
@@ -957,12 +1032,14 @@ export type Statement =
       readonly _tag: 'UnavailableStatement'
       readonly region: RegionId
       readonly span: SourceSpan.SourceSpan
+      readonly origin: Origin
     }
   | {
       readonly _tag: 'Unsafe'
       readonly statements: ReadonlyArray<Statement>
       readonly region: RegionId
       readonly span: SourceSpan.SourceSpan
+      readonly origin: Origin
     }
   | {
       readonly _tag: 'Bind'
@@ -972,18 +1049,21 @@ export type Statement =
       readonly initializer: Expression
       readonly region: RegionId
       readonly span: SourceSpan.SourceSpan
+      readonly origin: Origin
     }
   | {
       readonly _tag: 'PatternBind'
       readonly selection: PatternSelection
       readonly region: RegionId
       readonly span: SourceSpan.SourceSpan
+      readonly origin: Origin
     }
   | {
       readonly _tag: 'Evaluate'
       readonly expression: Expression
       readonly region: RegionId
       readonly span: SourceSpan.SourceSpan
+      readonly origin: Origin
     }
   | {
       readonly _tag: 'If'
@@ -992,6 +1072,7 @@ export type Statement =
       readonly otherwise: ReadonlyArray<Statement>
       readonly region: RegionId
       readonly span: SourceSpan.SourceSpan
+      readonly origin: Origin
     }
   | {
       readonly _tag: 'IfLet'
@@ -1000,6 +1081,7 @@ export type Statement =
       readonly otherwise: ReadonlyArray<Statement>
       readonly region: RegionId
       readonly span: SourceSpan.SourceSpan
+      readonly origin: Origin
     }
   | {
       readonly _tag: 'Write'
@@ -1007,6 +1089,7 @@ export type Statement =
       readonly value: Expression
       readonly region: RegionId
       readonly span: SourceSpan.SourceSpan
+      readonly origin: Origin
     }
   | {
       readonly _tag: 'While'
@@ -1016,24 +1099,28 @@ export type Statement =
       readonly body: ReadonlyArray<Statement>
       readonly region: RegionId
       readonly span: SourceSpan.SourceSpan
+      readonly origin: Origin
     }
   | {
       readonly _tag: 'Break'
       readonly target: LoopId
       readonly region: RegionId
       readonly span: SourceSpan.SourceSpan
+      readonly origin: Origin
     }
   | {
       readonly _tag: 'Continue'
       readonly target: LoopId
       readonly region: RegionId
       readonly span: SourceSpan.SourceSpan
+      readonly origin: Origin
     }
   | {
       readonly _tag: 'Return'
       readonly expression: Expression
       readonly region: RegionId
       readonly span: SourceSpan.SourceSpan
+      readonly origin: Origin
     }
   | {
       readonly _tag: 'Fail'
@@ -1042,12 +1129,14 @@ export type Statement =
       readonly transfer: 'Copy' | 'Move'
       readonly region: RegionId
       readonly span: SourceSpan.SourceSpan
+      readonly origin: Origin
     }
   | {
       readonly _tag: 'Drop'
       readonly expression: Expression
       readonly region: RegionId
       readonly span: SourceSpan.SourceSpan
+      readonly origin: Origin
     }
 
 /** One elaborated function: its header, normalized contract, and desugared body statements. */
