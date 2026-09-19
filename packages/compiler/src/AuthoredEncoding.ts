@@ -74,6 +74,36 @@ const localKey = (value: unknown): string | undefined => {
   return JSON.stringify([owner, parts])
 }
 
+const isWithinOwner = (value: unknown, parent: unknown): boolean => {
+  if (
+    value === null ||
+    typeof value !== 'object' ||
+    parent === null ||
+    typeof parent !== 'object'
+  ) {
+    return false
+  }
+  if (
+    property(value, 'namespace') !== property(parent, 'namespace') ||
+    property(value, 'module') !== property(parent, 'module')
+  )
+    return false
+  const path = property(value, 'path')
+  const parentPath = property(parent, 'path')
+  if (!Array.isArray(path) || !Array.isArray(parentPath) || path.length < parentPath.length)
+    return false
+  const segmentKey = (part: unknown): string | undefined => {
+    if (part === null || typeof part !== 'object') return undefined
+    return JSON.stringify([
+      property(part, 'kind'),
+      property(part, 'name'),
+      property(part, 'role'),
+      property(part, 'occurrence'),
+    ])
+  }
+  return parentPath.every((part, index) => segmentKey(part) === segmentKey(path[index]))
+}
+
 const binderTags = new Set([
   'Parameter',
   'TypeParameter',
@@ -94,17 +124,46 @@ const validateOwnership = Effect.fnUntraced(function* (
   const binders = new Set<string>()
   const references: string[] = []
   const visited = new Set<object>()
-  const pending: unknown[] = [self]
+  const pending: Array<{ readonly value: unknown; readonly owner: unknown }> = [
+    { value: self, owner: self.owner },
+  ]
   while (pending.length > 0) {
-    const value = pending.pop()
+    const item = pending.pop()
+    if (item === undefined) break
+    const value = item.value
     if (value === null || typeof value !== 'object') continue
     const tag = property(value, '_tag')
+    let owner = item.owner
     if (tag === 'Declaration') {
-      const key = identityKey(property(value, 'owner'))
-      if (key === undefined || declarations.has(key)) {
+      owner = property(value, 'owner')
+      const key = identityKey(owner)
+      if (
+        key === undefined ||
+        declarations.has(key) ||
+        key === identityKey(item.owner) ||
+        !isWithinOwner(owner, item.owner)
+      ) {
         return yield* invalid('Declaration owners must be distinct within a module')
       }
       declarations.add(key)
+    }
+    const anchor = property(value, 'anchor')
+    if (anchor !== undefined && anchor !== null && typeof anchor === 'object') {
+      const anchorOwner = property(anchor, 'owner')
+      if (tag === 'CallableExpression') {
+        if (identityKey(anchorOwner) === identityKey(owner) || !isWithinOwner(anchorOwner, owner)) {
+          return yield* invalid('Anonymous callable must introduce a nested authored owner')
+        }
+        owner = anchorOwner
+      } else if (tag === 'Synthetic') {
+        if (!isWithinOwner(owner, anchorOwner))
+          return yield* invalid('Synthetic origin must be local or enclosing')
+      } else if (identityKey(anchorOwner) !== identityKey(owner)) {
+        return yield* invalid('Node anchor must belong to its containing authored owner')
+      }
+    }
+    if (tag === 'LexicalReference' && !isWithinOwner(owner, property(value, 'owner'))) {
+      return yield* invalid('Lexical captures must target the current or an enclosing owner')
     }
     if (visited.has(value)) continue
     visited.add(value)
@@ -125,7 +184,7 @@ const validateOwnership = Effect.fnUntraced(function* (
       if (key === undefined) return yield* invalid('Invalid lexical reference')
       references.push(key)
     }
-    for (const child of Object.values(value)) pending.push(child)
+    for (const child of Object.values(value)) pending.push({ value: child, owner })
   }
   if (references.some((key) => !binders.has(key))) {
     return yield* invalid('Lexical reference has no authored binder in its module')

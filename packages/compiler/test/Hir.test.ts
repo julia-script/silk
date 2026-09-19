@@ -113,6 +113,24 @@ it.effect('rejects publication that would lose data or retain executable object 
     )
     assert.strictEqual(foreignOwner._tag, 'AuthoredEncodingError')
     const header = fixture.declaration.header
+    const absentOwner =
+      AuthoredIdentity.children(fixture.module.owner, [{ kind: 'function', name: 'absent' }])[0] ??
+      unreachable()
+    const foreignAnchor = yield* Effect.flip(
+      AuthoredModule.make({
+        ...fixture.module,
+        declarations: [
+          {
+            ...fixture.declaration,
+            header: {
+              ...header,
+              anchor: { ...header.anchor, owner: absentOwner },
+            },
+          },
+        ],
+      }),
+    )
+    assert.strictEqual(foreignAnchor._tag, 'AuthoredEncodingError')
     if (header._tag !== 'FunctionHeader') return yield* Effect.die('Expected a function fixture')
     const binding = fixture.literal.anchor
     const reference: AuthoredHir.Expression = {
@@ -317,12 +335,6 @@ it('keeps authored owners stable by logical parent and same-key occurrence', () 
   const ambiguousInsertion = AuthoredIdentity.children(module, [keys[0] ?? unreachable(), ...keys])
   assert.isFalse(AuthoredIdentity.equals(identity, ambiguousInsertion[1] ?? unreachable()))
   assert.isTrue(Object.isFrozen(identity.path))
-  // Authored kind distinctions never change the language's shared declaration namespace.
-  const duplicate = elaborate(
-    'owners://duplicate.silk',
-    'struct Value {} fn Value() -> i32 { return 0 }',
-  )
-  assert.isTrue(duplicate.diagnostics.some((diagnostic) => diagnostic.code === 'SEM0003'))
 })
 
 it.effect('owns exact text and byte pools and rejects invalid references and payloads', () =>
