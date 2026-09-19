@@ -430,20 +430,79 @@ It is not a failure of the compiler.
 | | Construction | Evaluation |
 |---|---|---|
 | **Completed, accepted** | artifact with no diagnostics; executable | `Value { value, provenance }` |
-| **Completed, rejected** | immutable artifact **with** diagnostics; damaged nodes are `Unavailable`, healthy structure is preserved; inspectable by tooling, **never executable** | `Rejected { failure, locations }`: `compileError`, a phase violation, an exhausted deterministic budget, a non-terminating evaluation |
+| **Completed, rejected** | immutable artifact **with** diagnostics; damaged nodes are `Unavailable`, healthy structure is preserved; inspectable by tooling, **never executable** | `Rejected { failure, locations }`: `compileError`, a phase violation, a non-terminating evaluation; budget exhaustion only as § Budgets allows |
 | **Aborted** | cancellation, interruption, an internal defect: **no artifact, no partial artifact** | cancellation or a transient or internal failure: **no outcome recorded** |
 
 A completed rejection is deterministic for its request, so it is published and recorded like any
 other completed result; the residual `compileError` artifacts in the examples above are completed
 rejections. An aborted request leaves nothing behind and can simply be asked again.
 
-**Reuse policy is explicit.** Whether a completed, diagnostic-bearing result may be reused is a
-validity policy, stated with the rest of `Validity` rather than implied by publication. The policy
-for this milestone keeps today's behaviour: a completed artifact is reusable under the ordinary
-validity check whether or not it carries diagnostics; an artifact whose authored owner carries parser
-recovery damage is reusable only while that authored content is byte-identical, which its body
-fingerprint already enforces; nothing is ever reusable from an aborted request. Changing any of this
-later is a policy change, not a schema change.
+**Reuse policy is explicit.** Publication and reuse are separate questions; whether a completed,
+diagnostic-bearing result may be reused is stated here, as part of `Validity`, not implied.
+
+The authored HIR specification already says: *"Damaged owners MUST NOT be eligible for successful
+semantic reuse or selected executable publication."* This contract keeps that rule and makes its two
+halves precise, rather than claiming a behaviour the current implementation has not been shown to
+have (`BodyQuery` today applies one validity check and has no recovery-specific rule):
+
+- **Reuse never upgrades a result.** A reused completed rejection is still a rejection. No artifact
+  that carries an error diagnostic, an `Unavailable` node or an owner with recovery causes is ever
+  admitted as a successfully checked body or selected for executable publication, whether it was
+  just built or reused. That is what "successful semantic reuse" forbids, and it stays forbidden.
+- **A completed rejection may be reused as a rejection** when everything it was derived from still
+  holds: the owner's *canonical authored content* (header and body encodings, which include the
+  recovery causes and the retained healthy structure), its scope signature, and every recorded
+  observation.
+- **"Identical" means canonical authored content, never source bytes.** A presentation-only edit
+  (whitespace, comments, moving the declaration) changes source bytes and leaves authored content
+  equal: the rejection is reused and its diagnostics are published at the new positions. Any edit
+  that changes the recovery structure changes the authored content.
+- **Repair invalidates.** Repairing damaged source changes that owner's authored content, so its
+  result fails validation and is rebuilt.
+- **Healthy neighbours are independent.** Validity is per owner. An owner whose own content and
+  observations still hold is reused regardless of damage elsewhere in the module, unless it observed
+  the damaged owner, in which case its observation of that owner is what decides.
+- **Nothing is reusable from an aborted request.**
+
+Changing any of this later is a policy change, not a schema change.
+
+**Budgets.** A budget limit is deterministic, but an exhaustion is not always a fact about the
+evaluation that hit it. A nested evaluation can run out of what its callers left, and succeed when
+asked again with a fresh allowance. The accounting is therefore defined so that neither caching nor
+ordering can change what the language accepts:
+
+```text
+Allowance   { steps, callDepth, retainedValueBytes, residualNodes }   from the profile's limits
+Cost        what one completed evaluation consumed, in the same units; depth relative to its entry
+```
+
+- **Root requests get a fresh allowance.** An evaluation requested by elaboration or selection
+  starts with the full allowance. The limits and the accounting version are part of
+  `EvaluationKey.context`, so they are part of every validated request.
+- **Nested requests draw from their root.** They run against what remains.
+- **An outcome records its cost.** A `Value` or a semantic `Rejected` recorded under a key means:
+  *evaluated to completion, consuming `cost`*. Because accounting is additive and depth is relative,
+  that cost is a function of the key alone.
+- **A cache hit is charged like an execution.** The requester is charged the recorded cost, and the
+  recorded relative depth is checked against the current depth. If what remains cannot pay, the
+  requester exhausts exactly as it would have by executing. Cache warmth therefore never changes
+  acceptance, only time.
+- **Exhaustion is stored only where it is a function of the key.** A *root* evaluation that exhausts
+  a fresh full allowance is a deterministic fact about its key (which includes the limits): it is
+  recorded as `Rejected(BudgetExhausted)` and reusable. A *nested* evaluation that exhausts a
+  remainder is a fact about its ancestors' spending: **nothing is recorded under its key**; the
+  exhaustion is reported for the current attempt, and it surfaces as the root's outcome.
+- **Completion under less implies completion under more.** A nested evaluation that *completes*
+  within a remainder would complete identically with a full allowance, so its `Value` and cost are
+  recorded normally.
+
+```text
+root  eval(@f, …)      fresh allowance 1000; spends 990; calls g
+  nested eval(@g, …)   remaining 10; needs 40 → exhausts
+                       nothing recorded for g; f is Rejected(BudgetExhausted), recorded for f
+later root eval(@g, …) fresh allowance 1000 → Value, cost 40, recorded
+later root eval(@h, …) spends 100; calls g → cache hit, charged 40, continues
+```
 
 **Publication.** `builder.finish()` validates (dense ids, references in range, closed vocabulary,
 `Parameter` sources only where the artifact has parameters to name), freezes, fingerprints through

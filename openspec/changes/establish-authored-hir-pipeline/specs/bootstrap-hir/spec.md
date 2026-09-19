@@ -165,24 +165,59 @@ freezing and MUST NOT be modified afterwards.
 ### Requirement: Completed rejections are published and aborted requests are not
 
 A construction that completes with source errors SHALL publish an immutable artifact carrying its
-diagnostics, with damaged nodes unavailable and healthy structure preserved, and that artifact MUST
-NOT be executed. An evaluation that completes with a semantic rejection — a compile error, a phase
-violation, an exhausted deterministic budget or a non-terminating evaluation — SHALL be recorded as
-an outcome. A cancelled, interrupted or internally failed construction or evaluation SHALL publish
-no artifact, no partial artifact and no outcome. Whether a completed diagnostic-bearing result may
-be reused SHALL be an explicit validity policy; this change keeps the existing policy, under which
-it is reusable subject to ordinary validation and an owner with parser recovery damage only while
-its authored content is byte-identical.
+diagnostics, with damaged nodes unavailable and healthy structure preserved. An evaluation that
+completes with a semantic rejection (a compile error, a phase violation or a non-terminating
+evaluation) SHALL be recorded as an outcome. A cancelled, interrupted or internally failed
+construction or evaluation SHALL publish no artifact, no partial artifact and no outcome.
+
+Reuse SHALL never upgrade a result: an artifact carrying an error diagnostic, an unavailable node or
+an owner with recovery causes MUST NOT be admitted as a successfully checked body or selected for
+executable publication, whether freshly built or reused. A completed rejection MAY be reused as a
+rejection only while the owner's canonical authored content (its header and body encodings,
+including recovery causes), its scope signature and its recorded observations remain valid.
+Identity of content SHALL mean canonical authored content and MUST NOT mean source bytes. Repairing
+damaged source SHALL invalidate the affected result. Owners whose own content and observations
+remain valid SHALL stay independently reusable.
 
 #### Scenario: A rejected body remains inspectable
 
 - **WHEN** a body calls an unknown function beside a valid statement
 - **THEN** an artifact is published with the diagnostic, the valid statement's nodes, and an unavailable node for the call, and executable admission rejects it
 
+#### Scenario: A reused rejection is still a rejection
+
+- **WHEN** a comment is inserted above a damaged declaration and the module is analyzed again
+- **THEN** the damaged owner's artifact is reused, its diagnostics are published at the new positions, and executable admission still rejects it
+
+#### Scenario: Repair invalidates only the repaired owner
+
+- **WHEN** a missing operand is repaired while an adjacent healthy declaration is unchanged
+- **THEN** the repaired owner's artifact is rebuilt and the healthy owner's artifact is reused by identity
+
 #### Scenario: An interrupted build leaves nothing
 
 - **WHEN** construction is interrupted before it finishes
 - **THEN** no artifact and no outcome exist for the request, and asking again builds it from the start
+
+### Requirement: Evaluation budgets do not depend on cache state
+
+A root evaluation SHALL start with the full allowance of its profile, and the limits and accounting
+version SHALL be part of the evaluation identity. Nested evaluations SHALL draw from their root's
+remaining allowance. A completed outcome SHALL record the cost it consumed, and a request answered
+from a recorded outcome SHALL be charged that cost, including its relative call depth, exactly as if
+it had executed. Exhaustion of a fresh full allowance by a root evaluation MAY be recorded as a
+reusable rejection. Exhaustion of a remaining allowance by a nested evaluation MUST NOT be recorded
+under that evaluation's identity; it SHALL be reported for the current attempt only.
+
+#### Scenario: An exhausted nested attempt does not poison a later request
+
+- **WHEN** an evaluation is first requested nested with insufficient remaining budget and exhausts it, and is later requested with sufficient budget
+- **THEN** the first attempt records nothing under that evaluation's identity, the enclosing root evaluation is rejected for exhaustion, and the later request completes and records its value
+
+#### Scenario: A warm cache does not change acceptance
+
+- **WHEN** an evaluation that would exhaust its remaining budget by executing a callee instead finds the callee's outcome recorded
+- **THEN** it is charged the recorded cost and exhausts all the same
 
 ### Requirement: Occurrences are a supplementary authored index
 

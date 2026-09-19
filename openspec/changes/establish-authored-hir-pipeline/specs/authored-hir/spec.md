@@ -58,12 +58,22 @@ Presentation SHALL own revision-specific spans, raw spelling/trivia/docs and dia
 Nodes/binders/causes SHALL have owner-local references; synthetic nodes SHALL identify authored origin
 by local role/path/occurrence. Missing and invalid records MUST retain causes and healthy surrounding
 structure. Damaged owners MUST NOT be eligible for successful semantic reuse or selected executable
-publication. Recovery cause encoding MUST exclude absolute spans and global diagnostic ordinals.
+publication: a damaged owner's semantic result is a completed rejection, and neither building nor
+reusing it may admit it as successfully checked. Such a rejection MAY be reused as a rejection only
+while the owner's canonical authored content, including its recovery causes, and its semantic
+dependencies remain valid; repairing the damage changes that content and SHALL invalidate it, and
+healthy neighbouring owners SHALL remain independently reusable. Recovery cause encoding MUST
+exclude absolute spans and global diagnostic ordinals.
 
 #### Scenario: Repair damaged source
 
 - **WHEN** a missing operand is repaired while an adjacent declaration is unchanged
 - **THEN** the damaged owner's content changes and the healthy owner's content stays equal
+
+#### Scenario: A presentation-only edit keeps a damaged owner's content
+
+- **WHEN** whitespace or a comment changes around a damaged declaration without changing its recovery structure
+- **THEN** its canonical authored content stays equal although its source bytes differ, so its rejection may be reused and is published at the new positions
 
 ### Requirement: Header and body encodings are canonical authored content
 
