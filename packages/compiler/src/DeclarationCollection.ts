@@ -354,6 +354,17 @@ export const constantLiteral = (
       spelling: floatingSpelling(initializer),
       anchor,
     })
+  if (initializer._tag === 'InvalidExpression') {
+    // A literal that lexes but does not decode keeps the decoder's reason in its presentation.
+    const key = AuthoredIdentity.anchorKey(anchor)
+    const undecodable = context.presentation.diagnostics.find(
+      (entry) =>
+        entry.code === Diagnostic.invalidStaticLiteralCode &&
+        AuthoredIdentity.anchorKey(entry.anchor) === key,
+    )
+    if (undecodable !== undefined)
+      return Object.freeze({ _tag: 'Malformed', detail: undecodable.message, anchor })
+  }
   if (initializer._tag === 'TextLiteral')
     return Object.freeze({
       _tag: 'StringLiteral',
