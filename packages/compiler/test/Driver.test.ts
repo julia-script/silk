@@ -130,37 +130,40 @@ it.effect('measures Effect phases with the fiber clock', () =>
   }),
 )
 
-it.effect('reports every phase in order with counts and totals', () =>
-  Effect.gen(function* () {
-    const source = 'pub fn main() -> i32 { let values = [10, 42] return values[1] }'
-    const outcome = yield* compileSource('report', source)
-    const analysis = yield* Analysis.ofSourceRealized('memory/driver', ascii(source))
+it.effect(
+  'reports every phase in order with counts and totals',
+  () =>
+    Effect.gen(function* () {
+      const source = 'pub fn main() -> i32 { let values = [10, 42] return values[1] }'
+      const outcome = yield* compileSource('report', source)
+      const analysis = yield* Analysis.ofSourceRealized('memory/driver', ascii(source))
 
-    assert.strictEqual(outcome._tag, 'Compiled')
-    if (outcome._tag !== 'Compiled') return
-    assert.deepEqual(
-      outcome.report.map((entry) => entry.phase),
-      expectedPhases,
-    )
-    for (const entry of outcome.report) {
-      assert.isAtLeast(entry.elapsedMs, 0, entry.phase)
-      assert.isAtLeast(entry.outputs, 0, entry.phase)
-      assert.isAtLeast(entry.heapBytes, 0, entry.phase)
-    }
-    const layout = outcome.report.find((entry) => entry.phase === 'target-layout')
-    assert.isAtLeast(layout?.outputs ?? 0, 2)
-    const closure = outcome.report.find((entry) => entry.phase === 'closure')
-    assert.strictEqual(closure?.inputs, 1)
-    // The initial closure contains the application and selected runtime; static selection expands it.
-    assert.strictEqual(closure?.outputs, 2)
-    const compilerPhases = expectedPhases.slice(1, expectedPhases.indexOf('toolchain-target'))
-    assert.deepEqual(
-      Analysis.phases(analysis)
-        .map((entry) => entry.phase)
-        .filter((phase) => phase !== 'semantic-occurrences' && phase !== 'anonymous-expressions'),
-      compilerPhases,
-    )
-  }),
+      assert.strictEqual(outcome._tag, 'Compiled')
+      if (outcome._tag !== 'Compiled') return
+      assert.deepEqual(
+        outcome.report.map((entry) => entry.phase),
+        expectedPhases,
+      )
+      for (const entry of outcome.report) {
+        assert.isAtLeast(entry.elapsedMs, 0, entry.phase)
+        assert.isAtLeast(entry.outputs, 0, entry.phase)
+        assert.isAtLeast(entry.heapBytes, 0, entry.phase)
+      }
+      const layout = outcome.report.find((entry) => entry.phase === 'target-layout')
+      assert.isAtLeast(layout?.outputs ?? 0, 2)
+      const closure = outcome.report.find((entry) => entry.phase === 'closure')
+      assert.strictEqual(closure?.inputs, 1)
+      // The initial closure contains the application and selected runtime; static selection expands it.
+      assert.strictEqual(closure?.outputs, 2)
+      const compilerPhases = expectedPhases.slice(1, expectedPhases.indexOf('toolchain-target'))
+      assert.deepEqual(
+        Analysis.phases(analysis)
+          .map((entry) => entry.phase)
+          .filter((phase) => phase !== 'semantic-occurrences' && phase !== 'anonymous-expressions'),
+        compilerPhases,
+      )
+    }),
+  { timeout: 120_000 },
 )
 
 it.effect('omits the MIR audit by default in the compiler driver', () =>

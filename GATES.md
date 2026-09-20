@@ -36,7 +36,7 @@ Scope: finish OpenSpec tasks 3.3.2 and 3.3.5 so JUL-207 publishes one portable, 
       EXPECT: JUL207_OPENSPEC_COMPLETE
       EVIDENCE: JUL207_OPENSPEC_COMPLETE
 
-- [x] G6: required pull-request checks pass on the branch head
+- [ ] G6: required pull-request checks pass on the branch head
       CHECK: gh pr checks --required && echo JUL207_PR_CI_OK
       EXPECT: JUL207_PR_CI_OK
-      EVIDENCE: JUL207_PR_CI_OK — CI run 35543032157 completed successfully on exact head a2d40d2ca63c45bfa6739ee95c4e93359d892553 (https://github.com/julia-script/silk/actions/runs/35543032157)
+      EVIDENCE: pending
