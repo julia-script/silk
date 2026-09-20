@@ -1510,6 +1510,10 @@ export type DeclarationLookup = DeclarationFacts.DeclarationLookup
  * reused body keeps its results unchanged and each revision presents them again.
  */
 export interface BodyResults {
+  /** Authoritative selected-evidence payloads, addressed densely by executable nodes. */
+  readonly evidence: ReadonlyArray<ReadonlyArray<Constraint.ConstraintEvidence>>
+  /** Authoritative revision-free unavailable causes, addressed densely by executable nodes. */
+  readonly causes: ReadonlyArray<Diagnostic.Identity<Location.Location>>
   /** The authored names the body resolves: navigation reads these and never the body. */
   readonly occurrences: ReadonlyArray<import('./SemanticOccurrence.js').LocatedOccurrence>
   /** What the body infers that its author did not write, for editor hints. */
@@ -2601,6 +2605,8 @@ export const checkedBody = (
   )
   const staticStructure = staticStructureOf(fact)
   const results: BodyResults = Object.freeze({
+    evidence: Object.freeze(Array.from(builder.evidence)),
+    causes: Object.freeze(Array.from(builder.causes)),
     occurrences: fact.occurrences,
     hints: fact.hints,
     opaqueEvidence: fact.opaqueEvidence,

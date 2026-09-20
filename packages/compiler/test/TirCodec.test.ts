@@ -61,6 +61,8 @@ for (const [category, program] of categories)
         locals.map((_, ordinal) => ordinal),
       )
       for (const local of locals) assert.strictEqual(Tir.localOf(body.function, local.id), local)
+      assert.isArray(body.results.evidence)
+      assert.isArray(body.results.causes)
       const text = TirCodec.encode(body)
       const decoded = TirCodec.decode(
         text,
