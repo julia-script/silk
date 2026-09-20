@@ -1284,12 +1284,9 @@ const assignmentPlaceBorrowAccess = (place: ExpressionFact): Type.BorrowAccess |
     return undefined
   }
   const inherited = assignmentPlaceBorrowAccess(place.subject)
-  const current =
-    place._tag === 'ReferentProjection'
-      ? place.borrowAccess
-      : place._tag === 'IndexProjection'
-        ? place.slice?.access
-        : undefined
+  let current: Type.BorrowAccess | undefined
+  if (place._tag === 'ReferentProjection') current = place.borrowAccess
+  else if (place._tag === 'IndexProjection') current = place.slice?.access
   if (inherited === 'Shared' || current === 'Shared') return 'Shared'
   if (inherited === 'Exclusive' || current === 'Exclusive') return 'Exclusive'
   return undefined
@@ -1323,12 +1320,10 @@ export const assignmentRootAccess = (
       ? type.access
       : undefined
   const placeBorrowAccess = assignmentPlaceBorrowAccess(place)
-  const borrowAccess =
-    rootBorrowAccess === 'Shared' || placeBorrowAccess === 'Shared'
-      ? 'Shared'
-      : rootBorrowAccess === 'Exclusive' || placeBorrowAccess === 'Exclusive'
-        ? 'Exclusive'
-        : undefined
+  let borrowAccess: Type.BorrowAccess | undefined
+  if (rootBorrowAccess === 'Shared' || placeBorrowAccess === 'Shared') borrowAccess = 'Shared'
+  else if (rootBorrowAccess === 'Exclusive' || placeBorrowAccess === 'Exclusive')
+    borrowAccess = 'Exclusive'
   if (borrowAccess !== undefined)
     return borrowAccess === 'Exclusive' ? 'ExclusiveBorrowed' : 'SharedBorrowed'
   const mutability = root._tag === 'ParameterDeclaration' ? root.bindingMutability : root.mutability
