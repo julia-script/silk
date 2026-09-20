@@ -1111,6 +1111,8 @@ export type Expression =
       readonly span: SourceSpan.SourceSpan
       readonly origin: Origin
       readonly cause?: Diagnostic.Identity
+      /** The revision-free cause `cause` presents. */
+      readonly causeAt?: Diagnostic.Identity<Location.Location>
     }
 
 /** One elaborated body statement in source order. */
@@ -2491,13 +2493,18 @@ export const present = (
   self: TirFunction,
   spanOf: (anchor: AuthoredIdentity.Anchor) => SourceSpan.SourceSpan,
   declaration: DeclarationFacts.DeclarationFact = self.declaration,
+  publish?: Publish,
 ): TirFunction =>
-  Object.freeze({ ...stamp({ ...self, declaration: undefined }, spanOf), declaration })
+  Object.freeze({ ...stamp({ ...self, declaration: undefined }, spanOf, publish), declaration })
+
+/** Publishes a revision-free cause through one revision's presentation. */
+export type Publish = (cause: Diagnostic.Identity<Location.Location>) => Diagnostic.Identity
 
 /** Stamps every position in a value that has its authored node beside it. */
 export const stamp = <A>(
   self: A,
   spanOf: (anchor: AuthoredIdentity.Anchor) => SourceSpan.SourceSpan,
+  publish?: Publish,
 ): A => {
   const copies = new WeakMap<object, unknown>()
   const visit = (input: unknown): unknown => {
@@ -2521,6 +2528,8 @@ export const stamp = <A>(
       const at = source[anchor] as AuthoredIdentity.Anchor | undefined
       if (at !== undefined && span in source) result[span] = spanOf(at)
     }
+    const causeAt = source['causeAt'] as Diagnostic.Identity<Location.Location> | undefined
+    if (publish !== undefined && causeAt !== undefined) result['cause'] = publish(causeAt)
     // A node's own position comes from its origin, whatever else it names.
     if (origin?.anchor !== undefined && 'span' in source) result['span'] = spanOf(origin.anchor)
     return Object.freeze(result)

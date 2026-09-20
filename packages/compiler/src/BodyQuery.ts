@@ -3,7 +3,7 @@ import * as AuthoredIdentity from './AuthoredIdentity.js'
 import * as AuthoredLowering from './AuthoredLowering.js'
 import type * as DeclarationFacts from './DeclarationFacts.js'
 import type * as DeclarationIndex from './DeclarationIndex.js'
-import type * as Elaboration from './Elaboration.js'
+import * as Elaboration from './Elaboration.js'
 import * as ModuleSurface from './ModuleSurface.js'
 import type * as NameResolution from './NameResolution.js'
 import type * as Ownership from './Ownership.js'
@@ -486,23 +486,26 @@ const present = (
   Object.freeze({
     diagnostics: renumber(previous.diagnostics, moved),
     bodies: Object.freeze(
-      previous.bodies.map((body): Elaboration.CheckedBody => {
+      previous.bodies.map((body) =>
         // A source body belongs to this revision's header object, which is never copied; a
         // compiler-made body owns its declaration, which is renumbered with the rest.
-        const current = body.hidden ? renumber(body.declaration, moved) : declaration
-        const fn =
-          body.function === undefined
-            ? undefined
-            : renumber({ ...body.function, declaration: undefined }, moved)
-        return Object.freeze({
-          declaration: current,
-          hidden: body.hidden,
-          ...(fn === undefined
-            ? {}
-            : { function: Tir.present({ ...fn, declaration: current }, context.spanOf) }),
-          results: renumber(body.results, moved),
-        })
-      }),
+        Elaboration.presentBody(
+          {
+            declaration: body.hidden ? renumber(body.declaration, moved) : declaration,
+            hidden: body.hidden,
+            ...(body.function === undefined
+              ? {}
+              : {
+                  function: {
+                    ...renumber({ ...body.function, declaration: undefined }, moved),
+                    declaration,
+                  },
+                }),
+            results: renumber(body.results, moved),
+          },
+          context,
+        ),
+      ),
     ),
   })
 

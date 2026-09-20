@@ -5,6 +5,7 @@ import * as AuthoredIdentity from './AuthoredIdentity.js'
 import * as AuthoredLowering from './AuthoredLowering.js'
 import * as SemanticContext from './SemanticContext.js'
 import * as BodyQuery from './BodyQuery.js'
+import * as LifetimeFlow from './LifetimeFlow.js'
 import { dual } from 'effect/Function'
 import type * as CallableContract from './CallableContract.js'
 import * as ConformanceProof from './ConformanceProof.js'
@@ -2503,6 +2504,40 @@ const expressionTypesOf = (fact: FunctionFact): ReadonlyArray<ExpressionTypeRow>
     },
   })
   return Object.freeze(rows)
+}
+
+/**
+ * A checked body as one revision reads it. The body itself names authored nodes only; every
+ * position it shows is stamped here from the node beside it, and its header is this revision's.
+ */
+export const presentBody = (
+  self: CheckedBody,
+  context: SemanticContext.SemanticContext,
+  declaration: DeclarationFact = self.declaration,
+): CheckedBody => {
+  const stamped = Tir.stamp(self.results, context.spanOf)
+  const results =
+    stamped.lifetimes === undefined
+      ? stamped
+      : Object.freeze({
+          ...stamped,
+          lifetimes: LifetimeFlow.present(stamped.lifetimes, context),
+        })
+  // The inspection seam follows the body it describes.
+  const record = recordsOf.get(self.results)
+  if (record !== undefined) recordsOf.set(results, record)
+  return Object.freeze({
+    declaration,
+    hidden: self.hidden,
+    ...(self.function === undefined
+      ? {}
+      : {
+          function: Tir.present(self.function, context.spanOf, declaration, (cause) =>
+            Diagnostic.publishIdentity(cause, SemanticContext.registryOf(context)),
+          ),
+        }),
+    results,
+  })
 }
 
 /** Publishes one analyzed body: its nodes, when it runs, and the tables later stages read. */

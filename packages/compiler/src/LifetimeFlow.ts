@@ -1064,6 +1064,14 @@ export const present = (
   })
 }
 
+/** The proof without positions: what a cache or an encoding holds, and `present` completes. */
+export const content = (self: LifetimeFlow): LifetimeFlow =>
+  Object.freeze({
+    ...self,
+    controlFlow: BodyControlFlow.content(self.controlFlow),
+    spans: new Map(),
+  })
+
 /** Tests concrete loan liveness at an access using the solved holder uses and source CFG. */
 export const liveAt = (
   self: LifetimeFlow,

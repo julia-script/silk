@@ -1,4 +1,5 @@
 import { assert, it } from '@effect/vitest'
+import * as Elaboration from '../src/Elaboration.js'
 import * as Lexer from '../src/Lexer.js'
 import * as LifetimeFlow from '../src/LifetimeFlow.js'
 import * as Parser from '../src/Parser.js'
@@ -119,4 +120,21 @@ it('encodes a body without positions, so moved source encodes the same', () => {
   assert.notDeepEqual(before.tir, after.tir)
   assert.strictEqual(Tir.encode(after.tir), Tir.encode(before.tir))
   assert.notMatch(Tir.encode(before.tir), /\[\d+, \d+\)/)
+})
+
+it('presents the region proof of a moved body where the next revision builds it', () => {
+  const before = analyze(program)
+  const after = analyze(`// a comment that moves every declaration\n\n${program}`)
+  const context = SemanticContext.make(after.authored)
+  for (const [ordinal, body] of before.bodies.entries()) {
+    const current = after.bodies.at(ordinal) ?? raise('expected the same bodies')
+    const presented = Elaboration.presentBody(body, context, current.declaration)
+    assert.deepEqual(presented.results.lifetimes?.spans, current.results.lifetimes?.spans)
+    assert.deepEqual(
+      presented.results.lifetimes?.controlFlow.spans,
+      current.results.lifetimes?.controlFlow.spans,
+    )
+    assert.deepEqual(presented.results.scopes, current.results.scopes)
+    assert.deepEqual(presented.results.occurrences, current.results.occurrences)
+  }
 })

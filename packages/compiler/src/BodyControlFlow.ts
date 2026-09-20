@@ -212,6 +212,15 @@ export const present = (
   return { ...self, spans, writes, queries: new Map(self.queries) }
 }
 
+/** The graph without what one revision derived from it: positions and answered queries. */
+export const content = (self: BodyControlFlow): BodyControlFlow => ({
+  ...self,
+  spans: new Map(),
+  writes: new Map(),
+  queries: new Map(),
+  work: { queries: 0, cacheHits: 0, visitedEdges: 0 },
+})
+
 /** Finds an exact semantic boundary; unexecuted annotation syntax has none. */
 export const at = (self: BodyControlFlow, span: SourceSpan.SourceSpan): Boundary | undefined =>
   self.spans.get(spanKey(span))

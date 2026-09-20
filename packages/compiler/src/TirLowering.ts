@@ -35,11 +35,20 @@ import type * as StaticValue from './StaticValue.js'
 import * as Type from './Type.js'
 import * as TypeCompatibility from './TypeCompatibility.js'
 
-/** TIR still reports in source coordinates, so a cause gets its span where it enters TIR. */
+/**
+ * TIR still reports in source coordinates, so a cause gets its span where it enters TIR. The
+ * located cause stays beside it: presentation publishes it again for each revision.
+ */
 const publishedCause = (
   context: SemanticContext.SemanticContext,
   cause: Diagnostic.Identity<Location.Location>,
-): Diagnostic.Identity => Diagnostic.publishIdentity(cause, SemanticContext.registryOf(context))
+): {
+  readonly cause: Diagnostic.Identity
+  readonly causeAt: Diagnostic.Identity<Location.Location>
+} => ({
+  cause: Diagnostic.publishIdentity(cause, SemanticContext.registryOf(context)),
+  causeAt: cause,
+})
 
 export const tirReference = (
   reference: ParameterReferenceFact,
@@ -81,7 +90,7 @@ export const tirReference = (
     span,
     origin,
     ...(reference._tag === 'Missing' && reference.cause !== undefined
-      ? { cause: publishedCause(context, reference.cause) }
+      ? publishedCause(context, reference.cause)
       : {}),
   })
 }
@@ -913,7 +922,7 @@ const residualExpression = (
         _tag: 'Unavailable',
         span: options.context.spanOf(fact.anchor),
         origin: Tir.authored(fact.anchor),
-        ...(fact.cause === undefined ? {} : { cause: publishedCause(options.context, fact.cause) }),
+        ...(fact.cause === undefined ? {} : publishedCause(options.context, fact.cause)),
       })
     return Object.freeze({
       _tag: 'EnumMember',
@@ -1258,7 +1267,7 @@ const residualExpression = (
         span: options.context.spanOf(fact.anchor),
         origin: Tir.authored(fact.anchor),
         ...(fact.target._tag === 'Unavailable' && fact.target.cause !== undefined
-          ? { cause: publishedCause(options.context, fact.target.cause) }
+          ? publishedCause(options.context, fact.target.cause)
           : {}),
       })
     }
@@ -1307,7 +1316,7 @@ const residualExpression = (
         span: options.context.spanOf(fact.anchor),
         origin: Tir.authored(fact.anchor),
         ...(fact.target._tag === 'Unavailable' && fact.target.cause !== undefined
-          ? { cause: publishedCause(options.context, fact.target.cause) }
+          ? publishedCause(options.context, fact.target.cause)
           : {}),
       })
     }
@@ -1403,7 +1412,7 @@ const residualExpression = (
         span: options.context.spanOf(fact.anchor),
         origin: Tir.authored(fact.anchor),
         ...(fact.state._tag === 'Unavailable' && fact.state.cause !== undefined
-          ? { cause: publishedCause(options.context, fact.state.cause) }
+          ? publishedCause(options.context, fact.state.cause)
           : {}),
       })
     }
@@ -1451,7 +1460,7 @@ const residualExpression = (
         span: options.context.spanOf(fact.anchor),
         origin: Tir.authored(fact.anchor),
         ...(fact.bounds._tag === 'Invalid'
-          ? { cause: publishedCause(options.context, fact.bounds.cause) }
+          ? publishedCause(options.context, fact.bounds.cause)
           : {}),
       })
     }
@@ -1484,7 +1493,7 @@ const residualExpression = (
         span: options.context.spanOf(fact.anchor),
         origin: Tir.authored(fact.anchor),
         ...(fact.state._tag === 'Unavailable' && fact.state.cause !== undefined
-          ? { cause: publishedCause(options.context, fact.state.cause) }
+          ? publishedCause(options.context, fact.state.cause)
           : {}),
       })
     }
@@ -1523,7 +1532,7 @@ const residualExpression = (
         span: options.context.spanOf(fact.anchor),
         origin: Tir.authored(fact.anchor),
         ...(fact.formation._tag === 'Unavailable' && fact.formation.cause !== undefined
-          ? { cause: publishedCause(options.context, fact.formation.cause) }
+          ? publishedCause(options.context, fact.formation.cause)
           : {}),
       })
     }
@@ -2166,7 +2175,7 @@ const residualExpression = (
     _tag: 'Unavailable',
     span: options.context.spanOf(fact.anchor),
     origin: Tir.authored(fact.anchor),
-    ...(cause === undefined ? {} : { cause: publishedCause(options.context, cause) }),
+    ...(cause === undefined ? {} : publishedCause(options.context, cause)),
   })
 }
 
