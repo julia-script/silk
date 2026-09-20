@@ -4440,7 +4440,7 @@ const checkFunction = (
           frame: frames.length - 1,
           release: Object.freeze({
             ordinal: payloadOrdinal,
-            id: expression.id,
+            id: expression.match,
             arm: arm.id,
             cleanup: Object.freeze([
               { path: Object.freeze([]), cleanup: cleanupPlan(state, payloadType) },
@@ -4479,7 +4479,7 @@ const checkFunction = (
           frame: frames.length - 1,
           release: Object.freeze({
             ordinal: payloadOrdinal,
-            id: expression.id,
+            id: expression.match,
             arm: arm.id,
             cleanup,
           }),
@@ -4531,7 +4531,7 @@ const checkFunction = (
     state.matches.push(
       Object.freeze({
         _tag: 'MatchOwnership',
-        id: expression.id,
+        id: expression.match,
         access: expression.access,
         span: expression.span,
         arms: Object.freeze(armFacts),

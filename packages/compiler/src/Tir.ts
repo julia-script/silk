@@ -93,6 +93,58 @@ export interface ArtifactId {
   readonly parent?: ArtifactId
 }
 
+/** A dense zero-based identity for one node inside a typed artifact. */
+export interface NodeId {
+  readonly _tag: 'TirNode'
+  readonly ordinal: number
+}
+
+/** A dense zero-based identity for one parameter, binding, capture, or pattern local. */
+export interface LocalId {
+  readonly _tag: 'TirLocal'
+  readonly ordinal: number
+}
+
+/** A node identity that remains unambiguous when it crosses an artifact boundary. */
+export interface NodeRef {
+  readonly artifact: ArtifactId
+  readonly node: NodeId
+}
+
+/** A dense reference into a checked body's selected-evidence table. */
+export interface EvidenceRef {
+  readonly _tag: 'TirEvidence'
+  readonly ordinal: number
+}
+
+/** A dense reference into a checked body's unavailable-cause table. */
+export interface CauseRef {
+  readonly _tag: 'TirCause'
+  readonly ordinal: number
+}
+
+/** Identity and revision-independent origin shared by executable TIR nodes. */
+export interface Node {
+  /** Present on every published body; omitted only while its private builder owns the node. */
+  readonly id?: NodeId
+  readonly origin: Origin
+}
+
+/** A node after its private builder has assigned its dense artifact-local identity. */
+export interface PublishedNode extends Node {
+  readonly id: NodeId
+}
+
+/** One parameter, binding, pattern value, or capture in the body's unified local namespace. */
+export interface Local {
+  readonly id: LocalId
+  readonly kind: 'Parameter' | 'Binding' | 'Pattern' | 'Capture'
+  readonly name?: string
+  readonly type: Type.Type
+  readonly mutability: 'Immutable' | 'Mutable'
+  readonly capture?: LocalId
+}
+
 /** The canonical text of an artifact identity: the key a body is requested and stored under. */
 export const artifactKey = (self: ArtifactId): string =>
   JSON.stringify([
@@ -522,7 +574,9 @@ export type MatchArmBody =
       readonly origin: Origin
     }
 
-export type Expression =
+export type Expression = ExpressionNode & Node
+
+type ExpressionNode =
   | {
       readonly _tag: 'IntegerLiteral'
       readonly value: bigint
@@ -718,7 +772,7 @@ export type Expression =
     }
   | {
       readonly _tag: 'Match'
-      readonly id: Match.MatchId
+      readonly match: Match.MatchId
       readonly access: Match.Access
       readonly scrutinee: Expression
       readonly members: ReadonlyArray<Match.CoverageIdentity>
@@ -1140,7 +1194,9 @@ export type Expression =
     }
 
 /** One elaborated body statement in source order. */
-export type Statement =
+export type Statement = StatementNode & Node
+
+type StatementNode =
   | {
       readonly _tag: 'UnavailableStatement'
       /** Operands of a write whose place has no lowered form; they still evaluate and hold loans. */
@@ -1263,8 +1319,35 @@ export interface TirFunction {
   readonly contract: ContractFact
   readonly entryRegion: RegionId
   readonly regionOrder: ReadonlyArray<RegionId>
+  /** Present on every published body; private construction fills it before publication. */
+  readonly locals?: ReadonlyArray<Local>
   readonly statements: ReadonlyArray<Statement>
 }
+
+/** Every numbered semantic node in dense identity order. */
+export const nodesOf = (self: TirFunction): ReadonlyArray<PublishedNode> => {
+  const nodes: Array<PublishedNode> = []
+  const seen = new WeakSet<object>()
+  const visit = (input: unknown): void => {
+    if (typeof input !== 'object' || input === null || seen.has(input)) return
+    if (input instanceof Map || input instanceof Set || SourceSpanModule.isSourceSpan(input)) return
+    seen.add(input)
+    if (Array.isArray(input)) {
+      for (const item of input) visit(item)
+      return
+    }
+    const value = input as Readonly<Record<string, unknown>>
+    const id = value['id'] as NodeId | undefined
+    if (id?._tag === 'TirNode') nodes[id.ordinal] = value as unknown as PublishedNode
+    for (const child of Object.values(value)) visit(child)
+  }
+  visit(self.statements)
+  return Object.freeze(nodes)
+}
+
+/** Resolves an artifact-local node identity without consulting source presentation. */
+export const nodeOf = (self: TirFunction, id: NodeId): PublishedNode | undefined =>
+  nodesOf(self).at(id.ordinal)
 
 /** The terminal return expression; throws when the body ends in another control-flow shape. */
 export const returned = (self: TirFunction): Expression => {

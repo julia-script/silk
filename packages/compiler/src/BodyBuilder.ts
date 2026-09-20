@@ -1,0 +1,183 @@
+import type * as Constraint from './Constraint.js'
+import type * as Diagnostic from './Diagnostic.js'
+import type * as Location from './Location.js'
+import * as SourceSpan from './SourceSpan.js'
+import type * as Tir from './Tir.js'
+
+/** Private, single-use construction state for one checked artifact. */
+export interface BodyBuilder {
+  readonly artifact: Tir.ArtifactId
+  readonly nodes: Array<Tir.PublishedNode>
+  readonly locals: Array<Tir.Local>
+  readonly evidence: Array<ReadonlyArray<Constraint.ConstraintEvidence>>
+  readonly causes: Array<Diagnostic.Identity<Location.Location>>
+}
+
+export const make = (artifact: Tir.ArtifactId): BodyBuilder => ({
+  artifact,
+  nodes: [],
+  locals: [],
+  evidence: [],
+  causes: [],
+})
+
+/** Publishes one node and assigns the next dense artifact-local identity. */
+export const node = <A extends { readonly origin: Tir.Origin }>(
+  self: BodyBuilder,
+  value: A,
+): Readonly<A & Tir.Node> => {
+  const result = Object.freeze({
+    ...value,
+    id: Object.freeze({ _tag: 'TirNode' as const, ordinal: self.nodes.length }),
+  })
+  self.nodes.push(result)
+  return result
+}
+
+/** Returns an unambiguous reference to a node already published by this builder. */
+export const reference = (self: BodyBuilder, value: Tir.PublishedNode): Tir.NodeRef =>
+  Object.freeze({ artifact: self.artifact, node: value.id })
+
+/** Adds one local to the body's unified dense namespace. */
+export const local = (self: BodyBuilder, value: Omit<Tir.Local, 'id'>): Tir.Local => {
+  const result = Object.freeze({
+    ...value,
+    id: Object.freeze({ _tag: 'TirLocal' as const, ordinal: self.locals.length }),
+  })
+  self.locals.push(result)
+  return result
+}
+
+/** Stores selected conformance evidence once and returns its dense table reference. */
+export const selectedEvidence = (
+  self: BodyBuilder,
+  value: ReadonlyArray<Constraint.ConstraintEvidence>,
+): Tir.EvidenceRef => {
+  const ref = Object.freeze({ _tag: 'TirEvidence' as const, ordinal: self.evidence.length })
+  self.evidence.push(Object.freeze(Array.from(value)))
+  return ref
+}
+
+/** Stores one revision-free unavailable cause and returns its dense table reference. */
+export const cause = (
+  self: BodyBuilder,
+  value: Diagnostic.Identity<Location.Location>,
+): Tir.CauseRef => {
+  const ref = Object.freeze({ _tag: 'TirCause' as const, ordinal: self.causes.length })
+  self.causes.push(value)
+  return ref
+}
+
+/**
+ * Numbers an already typed body while the direct-construction migration is in progress.
+ *
+ * This walks TIR itself, not a second executable schema. Direct construction replaces this final
+ * numbering walk once every analysis constructor owns the builder.
+ */
+export const index = (self: BodyBuilder, fn: Tir.TirFunction): Tir.TirFunction => {
+  const localKeys = new Set<string>()
+  const localKey = (input: unknown): string | undefined => {
+    if (typeof input !== 'object' || input === null) return undefined
+    const id = input as Readonly<Record<string, unknown>>
+    const tag = id['_tag']
+    const ordinal = id['ordinal']
+    if (typeof ordinal !== 'number') return undefined
+    if (tag === 'ParameterId') {
+      const owner = id['function'] as Readonly<Record<string, unknown>> | undefined
+      return owner === undefined
+        ? undefined
+        : `parameter:${String(owner['sourceId'])}:${String(owner['ordinal'])}:${ordinal}`
+    }
+    if (tag === 'TirBinding') {
+      const owner = id['function'] as Readonly<Record<string, unknown>> | undefined
+      return owner === undefined
+        ? undefined
+        : `binding:${String(owner['sourceId'])}:${String(owner['ordinal'])}:${ordinal}`
+    }
+    if (tag === 'PatternBindingId') {
+      const arm = id['arm'] as Readonly<Record<string, unknown>> | undefined
+      const match = arm?.['match'] as Readonly<Record<string, unknown>> | undefined
+      const owner = match?.['function'] as Readonly<Record<string, unknown>> | undefined
+      const span = match?.['span'] as Readonly<Record<string, unknown>> | undefined
+      return owner === undefined || arm === undefined
+        ? undefined
+        : `pattern:${String(owner['sourceId'])}:${String(owner['ordinal'])}:${String(span?.['start'])}:${String(span?.['end'])}:${String(arm['ordinal'])}:${ordinal}`
+    }
+    return undefined
+  }
+  const addLocal = (key: string, value: Omit<Tir.Local, 'id'>): void => {
+    if (localKeys.has(key)) return
+    localKeys.add(key)
+    local(self, value)
+  }
+  for (const parameter of fn.declaration.parameters) {
+    const key = localKey(parameter.id)
+    if (key === undefined) continue
+    addLocal(key, {
+      kind: 'Parameter',
+      ...(parameter.name._tag === 'Present' ? { name: parameter.name.spelling } : {}),
+      type: parameter.declaredType._tag === 'Resolved' ? parameter.declaredType.type : 'never',
+      mutability: parameter.bindingMutability,
+    })
+  }
+  const discover = (input: unknown, seen: WeakSet<object>): void => {
+    if (typeof input !== 'object' || input === null || seen.has(input)) return
+    if (input instanceof Map || input instanceof Set || SourceSpan.isSourceSpan(input)) return
+    seen.add(input)
+    if (Array.isArray(input)) {
+      for (const item of input) discover(item, seen)
+      return
+    }
+    const value = input as Readonly<Record<string, unknown>>
+    if (value['_tag'] === 'Bind') {
+      const key = localKey(value['binding'])
+      const initializer = value['initializer'] as Readonly<Record<string, unknown>> | undefined
+      if (key !== undefined)
+        addLocal(key, {
+          kind: 'Binding',
+          ...(typeof value['name'] === 'string' ? { name: value['name'] } : {}),
+          type: (initializer?.['type'] as import('./Type.js').Type | undefined) ?? 'never',
+          mutability: value['mutability'] === 'Mutable' ? 'Mutable' : 'Immutable',
+        })
+    }
+    const patternId = value['id']
+    const patternKey = localKey(patternId)
+    if (patternKey?.startsWith('pattern:') === true && Array.isArray(value['path']))
+      addLocal(patternKey, {
+        kind: 'Pattern',
+        ...(typeof value['name'] === 'string' ? { name: value['name'] } : {}),
+        type: (value['type'] as import('./Type.js').Type | undefined) ?? 'never',
+        mutability: value['access'] === 'Place' ? 'Mutable' : 'Immutable',
+      })
+    for (const child of Object.values(value)) discover(child, seen)
+  }
+  discover(fn.statements, new WeakSet())
+  const copies = new WeakMap<object, unknown>()
+  const visit = (input: unknown): unknown => {
+    if (typeof input !== 'object' || input === null) return input
+    if (input instanceof Map || input instanceof Set || SourceSpan.isSourceSpan(input)) return input
+    const known = copies.get(input)
+    if (known !== undefined) return known
+    if (Array.isArray(input)) {
+      const items: Array<unknown> = []
+      copies.set(input, items)
+      for (const item of input) items.push(visit(item))
+      return Object.freeze(items)
+    }
+    const source = input as Readonly<Record<string, unknown>>
+    const result: Record<string, unknown> = {}
+    copies.set(input, result)
+    const origin = source['origin'] as Tir.Origin | undefined
+    const isNode = origin !== undefined && typeof source['_tag'] === 'string'
+    if (isNode) {
+      result['id'] = Object.freeze({ _tag: 'TirNode' as const, ordinal: self.nodes.length })
+      self.nodes.push(result as unknown as Tir.PublishedNode)
+    }
+    for (const key of Object.keys(source)) {
+      if (!isNode || key !== 'id') result[key] = visit(source[key])
+    }
+    return Object.freeze(result)
+  }
+  const indexed = visit(fn) as Tir.TirFunction
+  return Object.freeze({ ...indexed, locals: Object.freeze(Array.from(self.locals)) })
+}

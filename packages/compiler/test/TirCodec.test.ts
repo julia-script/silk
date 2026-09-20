@@ -48,6 +48,18 @@ for (const [category, program] of categories)
     for (const body of result.bodies) {
       // Every body publishes nodes, a `static fn` included.
       assert.isAbove(body.function.statements.length, 0)
+      const nodes = Tir.nodesOf(body.function)
+      assert.isAbove(nodes.length, 0)
+      assert.deepEqual(
+        nodes.map((node) => node.id.ordinal),
+        nodes.map((_, ordinal) => ordinal),
+      )
+      for (const node of nodes) assert.strictEqual(Tir.nodeOf(body.function, node.id), node)
+      const locals = body.function.locals ?? raise('published local table')
+      assert.deepEqual(
+        locals.map((local) => local.id.ordinal),
+        locals.map((_, ordinal) => ordinal),
+      )
       const text = TirCodec.encode(body)
       const decoded = TirCodec.decode(
         text,

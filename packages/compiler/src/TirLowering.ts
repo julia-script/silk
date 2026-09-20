@@ -1169,7 +1169,7 @@ const residualExpression = (
     const target = fact.type.type
     return Object.freeze({
       _tag: 'Match',
-      id: fact.id,
+      match: fact.id,
       access: fact.access,
       scrutinee,
       members: fact.members,

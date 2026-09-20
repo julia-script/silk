@@ -5,6 +5,7 @@ import * as AuthoredIdentity from './AuthoredIdentity.js'
 import * as AuthoredLowering from './AuthoredLowering.js'
 import * as SemanticContext from './SemanticContext.js'
 import * as BodyQuery from './BodyQuery.js'
+import * as BodyBuilder from './BodyBuilder.js'
 import * as LifetimeFlow from './LifetimeFlow.js'
 import { dual } from 'effect/Function'
 import type * as CallableContract from './CallableContract.js'
@@ -2591,10 +2592,13 @@ export const checkedBody = (
     request,
     ...(parent === undefined ? {} : { parent }),
   })
-  const lowered =
+  const builder = BodyBuilder.make(artifact)
+  const lowered = BodyBuilder.index(
+    builder,
     fact.declaration.phase === 'Static'
       ? staticTirFunction(context, fact)
-      : runtimeTirFunction(context, fact, index)
+      : runtimeTirFunction(context, fact, index),
+  )
   const staticStructure = staticStructureOf(fact)
   const results: BodyResults = Object.freeze({
     occurrences: fact.occurrences,

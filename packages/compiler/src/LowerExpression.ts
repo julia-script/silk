@@ -2177,8 +2177,8 @@ function lowerMatchExpression(
   }
   const ownership = fn.ownership?.matches.find(
     (candidate) =>
-      candidate.id.span.start === expression.id.span.start &&
-      candidate.id.span.end === expression.id.span.end,
+      candidate.id.span.start === expression.match.span.start &&
+      candidate.id.span.end === expression.match.span.end,
   )
   const specializeMember = (member: Match.CoverageIdentity): Match.CoverageIdentity => {
     if (member._tag === 'StructuralTypeMember')
@@ -2280,8 +2280,8 @@ function lowerMatchExpression(
       exit.matches
         .filter(
           (selected) =>
-            selected.id.span.start === expression.id.span.start &&
-            selected.id.span.end === expression.id.span.end &&
+            selected.id.span.start === expression.match.span.start &&
+            selected.id.span.end === expression.match.span.end &&
             selected.arm.ordinal === arm.id.ordinal,
         )
         .flatMap((selected) => selected.cleanup),
@@ -2481,7 +2481,7 @@ function lowerMatchExpression(
   fn.emit(
     Object.freeze({
       _tag: 'Match',
-      id: expression.id,
+      id: expression.match,
       ...(destination === undefined ? {} : { destination }),
       scrutinee: scrutinee.result,
       ...(selectors === undefined ? {} : { selectors }),
