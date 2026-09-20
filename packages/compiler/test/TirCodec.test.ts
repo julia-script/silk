@@ -1,5 +1,6 @@
 import { assert, it } from '@effect/vitest'
 import * as Lexer from '../src/Lexer.js'
+import * as BodyView from '../src/BodyView.js'
 import * as Parser from '../src/Parser.js'
 import * as SemanticContext from '../src/SemanticContext.js'
 import * as SourceFile from '../src/SourceFile.js'
@@ -63,6 +64,9 @@ for (const [category, program] of categories)
       for (const local of locals) assert.strictEqual(Tir.localOf(body.function, local.id), local)
       assert.isArray(body.results.evidence)
       assert.isArray(body.results.causes)
+      const view = BodyView.make(body)
+      for (const node of nodes) assert.strictEqual(BodyView.node(view, node.id), node)
+      for (const local of locals) assert.strictEqual(BodyView.local(view, local.id), local)
       const text = TirCodec.encode(body)
       const decoded = TirCodec.decode(
         text,
