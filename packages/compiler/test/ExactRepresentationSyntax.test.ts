@@ -1,3 +1,4 @@
+import { records } from './support/records.js'
 import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
@@ -158,7 +159,7 @@ pub fn main() -> i32 {
 }`
 
 const identityFacts = (snapshot: Analysis.FrontendSnapshot) => {
-  const main = Analysis.rootAnalysis(snapshot).functions.find(
+  const main = records(Analysis.rootAnalysis(snapshot)).functions.find(
     (fact) => fact.declaration.name._tag === 'Present' && fact.declaration.name.spelling === 'main',
   )
   const instances = (main?.statements ?? []).flatMap((statement) =>

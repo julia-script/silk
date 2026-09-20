@@ -665,7 +665,7 @@ export const lowerReferencePlace = (
   return { root, selectors: Object.freeze(remaining) }
 }
 
-/** Loads stored reference descriptors before continuing a checked write through their referents. */
+/** Lowers an owned selector prefix and loads stored references before writing their referents. */
 export const lowerBorrowedWritePlace = (
   fn: FunctionLowering,
   initialRoot: Mir.LocalId,

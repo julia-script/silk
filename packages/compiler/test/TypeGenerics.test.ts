@@ -1,3 +1,4 @@
+import { records } from './support/records.js'
 import * as Layer from 'effect/Layer'
 import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { assert, it } from '@effect/vitest'
@@ -272,7 +273,7 @@ pub fn main() -> i32 {
       Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
       [],
     )
-    const returned = Analysis.rootAnalysis(snapshot).functions.find(
+    const returned = records(Analysis.rootAnalysis(snapshot)).functions.find(
       (candidate) =>
         candidate.declaration.name._tag === 'Present' &&
         candidate.declaration.name.spelling === 'main',
@@ -1716,7 +1717,7 @@ pub fn main() -> i32 {
     )
     const root = Analysis.rootAnalysis(snapshot)
     const returnedCall = (name: string) => {
-      const fn = root.functions.find(
+      const fn = records(root).functions.find(
         (candidate) =>
           candidate.declaration.name._tag === 'Present' &&
           candidate.declaration.name.spelling === name,

@@ -1,11 +1,12 @@
 import type * as CompilationProfile from './CompilationProfile.js'
-import * as Constraint from './Constraint.js'
 import type * as AuthoredHir from './AuthoredHir.js'
 import type * as DeclarationFacts from './DeclarationFacts.js'
 import * as Diagnostic from './Diagnostic.js'
 import type * as Elaboration from './Elaboration.js'
 import * as FloatingPoint from './FloatingPoint.js'
 import * as Location from './Location.js'
+import * as Provenance from './Provenance.js'
+import type * as Match from './Match.js'
 import type * as Tir from './Tir.js'
 import * as Canonical from './internal/Canonical.js'
 import * as TypeInference from './internal/TypeInference.js'
@@ -121,12 +122,10 @@ export type Trace = ReadonlyArray<TraceFrame>
 
 /** Source-independent provenance for one static text result. */
 export type TextOrigin = StaticValue.TextOrigin
-export type SourceTextOrigin = StaticValue.SourceTextOrigin
-export type ParameterTextOrigin = StaticValue.ParameterTextOrigin
 
 /** Creates provenance for one decoded source text value of `byteLength` bytes. */
 export const sourceTextOrigin = (at: AuthoredHir.Anchor, byteLength: number): TextOrigin =>
-  Object.freeze({ _tag: 'SourceTextOrigin', at, start: 0, end: byteLength })
+  Provenance.literal(at, byteLength)
 
 /** Creates caller-relative provenance for one static text parameter. */
 export const parameterTextOrigin = (
@@ -136,13 +135,7 @@ export const parameterTextOrigin = (
 ): TextOrigin => {
   if (!Number.isSafeInteger(byteLength) || byteLength < 0)
     throw new RangeError('Static text parameter lengths must be non-negative safe integers')
-  return Object.freeze({
-    _tag: 'ParameterTextOrigin',
-    ...(scope === undefined ? {} : { scope }),
-    ordinal,
-    start: 0,
-    end: byteLength,
-  })
+  return Provenance.parameter(ordinal, byteLength, scope)
 }
 
 /** Composes one half-open byte slice into existing text provenance. */
@@ -150,27 +143,36 @@ export const sliceTextOrigin = (
   origin: TextOrigin,
   start: number,
   end: number,
-): TextOrigin | undefined => {
-  if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start < 0 || start > end)
-    return undefined
-  if (end > origin.end - origin.start) return undefined
-  return Object.freeze({ ...origin, start: origin.start + start, end: origin.start + end })
-}
+): TextOrigin | undefined =>
+  !Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start < 0 || start > end
+    ? undefined
+    : Provenance.slice(origin, start, end)
+
+/** Joins the provenance of two texts; a side that was computed contributes no segment. */
+export const concatTextOrigin = (
+  left: TextOrigin | undefined,
+  leftLength: number,
+  right: TextOrigin | undefined,
+): TextOrigin | undefined =>
+  left === undefined && right === undefined
+    ? undefined
+    : Provenance.concat(left ?? [], leftLength, right ?? [])
 
 /**
- * The location of the written bytes behind static text provenance.
+ * The location of the written bytes behind static text provenance: every part, in value order.
  *
- * Parameter-relative provenance has none until a caller substitutes its argument. `fallback` is the
- * node reported when the literal's presentation cannot map the range.
+ * A parameter part has no position until a call site substitutes what it passed, so a location
+ * that keeps one is shared between the calls that select it. `fallback` is the node reported when
+ * no part resolves.
  */
 export const textOriginLocation = (
   origin: TextOrigin,
   fallback: AuthoredHir.Anchor,
 ): Location.Location | undefined =>
-  origin._tag === 'ParameterTextOrigin'
+  origin.length === 0
     ? undefined
     : Location.within(
-        [{ _tag: 'Literal', at: origin.at, range: { start: origin.start, end: origin.end } }],
+        origin.map((segment) => segment.from),
         fallback,
       )
 
@@ -852,7 +854,7 @@ export const staticTextByteAt = (
       )
 }
 
-/** Concatenates two admitted static texts while retaining the left operand as the source anchor. */
+/** Concatenates two admitted static texts; each side keeps the provenance of its own bytes. */
 export const staticTextConcat = (
   environment: TargetEnvironment,
   left: StaticValue.TextValue,
@@ -865,7 +867,9 @@ export const staticTextConcat = (
     {
       _tag: 'TextValue',
       bytes: Object.freeze([...left.bytes, ...right.bytes]),
-      ...(left.origin === undefined ? {} : { origin: left.origin }),
+      ...(left.origin === undefined && right.origin === undefined
+        ? {}
+        : { origin: concatTextOrigin(left.origin, left.bytes.length, right.origin) }),
     },
     'StaticEvaluation.staticTextConcat',
     literal,
@@ -1032,30 +1036,49 @@ export const profileFact = (
 }
 
 /** Stable environment key for one source parameter or local binding. */
+const idKey = (id: {
+  readonly function: DeclarationFacts.DeclarationId
+  readonly ordinal: number
+}) => `${id.function.sourceId}:${id.function.ordinal}:${id.ordinal}`
+
+/** The key of a parameter's value in an evaluation environment. */
+export const parameterKey = (id: DeclarationFacts.ParameterId): string => `parameter:${idKey(id)}`
+
+/** The key of a `let` binding's value in an evaluation environment. */
+export const bindingKey = (id: Tir.BindingId): string => `binding:${idKey(id)}`
+
+/** The key of a pattern binding's value in an evaluation environment. */
+export const patternKey = (id: Match.BindingId): string =>
+  `pattern:${id.arm.match.function.sourceId}:${id.arm.match.function.ordinal}:${id.arm.match.span.start}:${id.arm.ordinal}:${id.ordinal}`
+
 export const localValueKey = (
   value:
     | DeclarationFacts.ParameterFact
     | Elaboration.BindingDeclarationFact
     | Elaboration.PatternBindingFact,
 ): string => {
-  if (value._tag === 'PatternBinding')
-    return `pattern:${value.id.arm.match.function.sourceId}:${value.id.arm.match.function.ordinal}:${value.id.arm.match.span.start}:${value.id.arm.ordinal}:${value.id.ordinal}`
-  const kind = value._tag === 'ParameterDeclaration' ? 'parameter' : 'binding'
-  return `${kind}:${value.id.function.sourceId}:${value.id.function.ordinal}:${value.id.ordinal}`
+  if (value._tag === 'PatternBinding') return patternKey(value.id)
+  return value._tag === 'ParameterDeclaration' ? parameterKey(value.id) : bindingKey(value.id)
 }
 
-export interface FactEvaluationContext {
+/**
+ * What the evaluator reads besides the nodes it interprets.
+ *
+ * Nodes name declarations by id. `lookup` answers the header behind an id; it is the evaluator's
+ * whole view of the program outside the body in hand.
+ */
+export interface NodeContext {
   readonly environment: TargetEnvironment
-  /** Current-revision span of an authored position, for diagnostics and provenance only. */
   /** Concrete declaration arguments retained while interpreting a generic static body. */
   readonly typeSubstitution?: Type.Substitution
+  readonly lookup: (id: DeclarationFacts.CanonicalId) => DeclarationFacts.MemberFact | undefined
   readonly values: ReadonlyMap<string, StaticValue.Value>
   /** Source provenance retained separately from canonical value identity. */
   readonly valueSpans: ReadonlyMap<string, Location.Location>
   readonly valueOrigins: ReadonlyMap<string, TextOrigin>
-  /** Per-expression provenance retained outside canonical value identity. */
-  readonly expressionSpans: Map<Elaboration.ExpressionFact, Location.Location>
-  readonly expressionOrigins: Map<Elaboration.ExpressionFact, TextOrigin>
+  /** Per-node provenance retained outside canonical value identity. */
+  readonly expressionSpans: Map<Tir.Expression, Location.Location>
+  readonly expressionOrigins: Map<Tir.Expression, TextOrigin>
   /** Return provenance written by one static-function statement evaluation. */
   readonly returnedTextSpan?: { value: Location.Location | undefined }
   readonly returnedTextOrigin?: { value: TextOrigin | undefined }
@@ -1078,7 +1101,7 @@ export interface FactEvaluationContext {
       readonly evidence: ReadonlyArray<string>
       readonly contractRow: ReadonlyArray<string>
     },
-  ) => FactCallResult
+  ) => CallResult
   readonly constant?: (
     declaration: DeclarationFacts.ConstantFact,
     span: Location.Location,
@@ -1087,82 +1110,42 @@ export interface FactEvaluationContext {
   readonly step?: (span: Location.Location, trace: Trace) => StaticFailure | undefined
 }
 
-export interface FactCallResult {
+export interface CallResult {
   readonly outcome: Outcome<StaticValue.Value>
   readonly textSpan?: Location.Location
   readonly textOrigin?: TextOrigin
 }
 
-const unavailableFact = (
-  fact: Elaboration.ExpressionFact,
-  context: FactEvaluationContext,
+/** Where a node reports: the authored position it was made for. */
+const at = (node: { readonly origin: Tir.Origin }): Location.Location =>
+  Location.at(node.origin.anchor)
+
+const unavailable = (
+  node: { readonly origin: Tir.Origin },
+  context: NodeContext,
   detail: string,
 ): Outcome<StaticValue.Value> =>
-  primitiveFailure('StaticEvaluation.evaluateFact', detail, Location.at(fact.anchor), context.trace)
+  primitiveFailure('StaticEvaluation.evaluate', detail, at(node), context.trace)
 
-const valueOfConstant = (
-  fact: Elaboration.ConstantExpressionFact,
-  context: FactEvaluationContext,
-): Outcome<StaticValue.Value> => {
-  const value = fact.value
-  if (value?._tag === 'Boolean') return complete(StaticValue.boolean(value.value))
-  if (value?._tag === 'Character')
-    return admittedValue(
-      context.environment,
-      { _tag: 'CharacterValue', value: value.value },
-      'StaticEvaluation.evaluateFact',
-      Location.at(fact.anchor),
-      context.trace,
-    )
-  if (value?._tag === 'Integer')
-    return admittedValue(
-      context.environment,
-      { _tag: 'IntegerValue', type: value.type, value: value.value },
-      'StaticEvaluation.evaluateFact',
-      Location.at(fact.anchor),
-      context.trace,
-    )
-  if (value?._tag === 'Floating')
-    return admittedValue(
-      context.environment,
-      { _tag: 'FloatValue', type: value.type, bits: value.bits },
-      'StaticEvaluation.evaluateFact',
-      Location.at(fact.anchor),
-      context.trace,
-    )
-  if (value?._tag === 'String')
-    return admittedValue(
-      context.environment,
-      { _tag: 'TextValue', bytes: value.data.bytes },
-      'StaticEvaluation.evaluateFact',
-      Location.at(fact.anchor),
-      context.trace,
-    )
-  if (context.constant !== undefined)
-    return context.constant(fact.declaration, Location.at(fact.anchor), context.trace)
-  return unavailableFact(fact, context, 'constant has no selected static value')
-}
-
-const evaluateArguments = (
-  arguments_: ReadonlyArray<Elaboration.ArgumentFact>,
-  context: FactEvaluationContext,
+const evaluateAll = (
+  nodes: ReadonlyArray<Tir.Expression>,
+  context: NodeContext,
 ): ExecutionOutcome<ReadonlyArray<StaticValue.Value>> => {
   const values: Array<StaticValue.Value> = []
-  for (const argument of arguments_) {
-    const evaluated = evaluateExpression(argument.expression, context)
+  for (const node of nodes) {
+    const evaluated = evaluateExpression(node, context)
     if (evaluated._tag !== 'Complete') return evaluated
     values.push(evaluated.value)
   }
   return complete(Object.freeze(values))
 }
 
-const intrinsicTypeArgument = (
-  fact: Extract<Elaboration.ExpressionFact, { readonly _tag: 'Call' }>,
+const typeArgumentAt = (
+  node: Extract<Tir.Expression, { readonly _tag: 'StaticIntrinsic' }>,
   ordinal: number,
   substitution: Type.Substitution = new Map(),
 ): Type.Type | undefined => {
-  if (fact.contract._tag !== 'Compatible') return undefined
-  const argument = fact.contract.typeArguments.at(ordinal)
+  const argument = node.typeArguments.at(ordinal)
   if (argument === undefined) return undefined
   const specialized = Type.substituteGenericArgument(argument, substitution)
   return Type.isTypeArgument(specialized) ? specialized : undefined
@@ -1181,129 +1164,68 @@ const reflectedAggregateKindCode = (kind: StaticValue.AggregateKind): bigint => 
   }
 }
 
+/** A conversion or a move changes how a value is held, never which text it is. */
+const transparent = (node: Tir.Expression): Tir.Expression | undefined => {
+  if (node._tag === 'Move') return node.subject
+  if (node._tag === 'UnionConvert') return node.source
+  return undefined
+}
+
+const localKeyOf = (node: Tir.Expression): string | undefined => {
+  if (node._tag === 'ParameterReference') return parameterKey(node.parameter)
+  if (node._tag === 'BindingReference') return bindingKey(node.binding)
+  if (node._tag === 'PatternBindingReference') return patternKey(node.binding)
+  return undefined
+}
+
+const isTextOperation = (node: Tir.Expression): boolean =>
+  node._tag === 'StaticIntrinsic' &&
+  (node.operation === 'staticTextSlice' || node.operation === 'staticTextConcat')
+
+/** The literal a static text value was written as, when one expression still names it. */
 const staticTextSpan = (
-  fact: Elaboration.ExpressionFact,
-  context: FactEvaluationContext,
+  node: Tir.Expression,
+  context: NodeContext,
 ): Location.Location | undefined => {
-  const evaluated = context.expressionSpans.get(fact)
+  const evaluated = context.expressionSpans.get(node)
   if (evaluated !== undefined) return evaluated
-  if (fact._tag === 'Call' && fact.staticTextSpan !== undefined) return fact.staticTextSpan
-  // Caller provenance points inside the literal the caller wrote, not at the expression the fact
-  // is anchored to once the value has flowed through a parameter.
-  if (fact._tag === 'StaticText') return Location.at(fact.literal ?? fact.anchor)
-  if (fact._tag === 'Move') return staticTextSpan(fact.subject, context)
-  if (fact._tag === 'Identifier') {
-    if (fact.reference._tag === 'Resolved')
-      return context.valueSpans.get(localValueKey(fact.reference.parameter))
-    if (fact.reference._tag === 'ResolvedBinding' || fact.reference._tag === 'ResolvedPattern')
-      return context.valueSpans.get(localValueKey(fact.reference.binding))
-  }
-  if (
-    fact._tag === 'Call' &&
-    fact.reference._tag === 'ResolvedIntrinsicContract' &&
-    fact.reference.intrinsic.id.actor === 'Intrinsic' &&
-    (fact.reference.intrinsic.id.name === 'staticTextSlice' ||
-      fact.reference.intrinsic.id.name === 'staticTextConcat')
-  ) {
-    const subject = fact.arguments.at(0)
-    return subject === undefined ? undefined : staticTextSpan(subject.expression, context)
+  if (node._tag === 'StaticCall' && node.text !== undefined) return node.text
+  if (node._tag === 'StaticStringLiteral') return at(node)
+  const inner = transparent(node)
+  if (inner !== undefined) return staticTextSpan(inner, context)
+  const local = localKeyOf(node)
+  if (local !== undefined) return context.valueSpans.get(local)
+  if (node._tag === 'StaticIntrinsic' && isTextOperation(node)) {
+    const subject = node.arguments.at(0)
+    return subject === undefined ? undefined : staticTextSpan(subject, context)
   }
   return undefined
 }
 
-/** Resolves static-text provenance for one analyzed expression without changing value identity. */
+/** Resolves static-text provenance for one node without changing value identity. */
 export interface TextOriginContext {
   readonly valueOrigins: ReadonlyMap<string, TextOrigin>
-  readonly expressionOrigins: ReadonlyMap<Elaboration.ExpressionFact, TextOrigin>
+  readonly expressionOrigins: ReadonlyMap<Tir.Expression, TextOrigin>
 }
 
 export const staticTextOrigin = (
-  fact: Elaboration.ExpressionFact,
+  node: Tir.Expression,
   context: TextOriginContext,
 ): TextOrigin | undefined => {
-  const evaluated = context.expressionOrigins.get(fact)
+  const evaluated = context.expressionOrigins.get(node)
   if (evaluated !== undefined) return evaluated
-  if (fact._tag === 'Call' && fact.staticTextOrigin !== undefined) return fact.staticTextOrigin
-  if (fact._tag === 'StaticText')
-    return sourceTextOrigin(fact.literal ?? fact.anchor, fact.data?.bytes.length ?? 0)
-  if (fact._tag === 'Move') return staticTextOrigin(fact.subject, context)
-  if (fact._tag === 'Identifier') {
-    if (fact.reference._tag === 'Resolved')
-      return context.valueOrigins.get(localValueKey(fact.reference.parameter))
-    if (fact.reference._tag === 'ResolvedBinding' || fact.reference._tag === 'ResolvedPattern')
-      return context.valueOrigins.get(localValueKey(fact.reference.binding))
-  }
-  if (
-    fact._tag === 'Call' &&
-    fact.reference._tag === 'ResolvedIntrinsicContract' &&
-    fact.reference.intrinsic.id.actor === 'Intrinsic' &&
-    (fact.reference.intrinsic.id.name === 'staticTextSlice' ||
-      fact.reference.intrinsic.id.name === 'staticTextConcat')
-  ) {
-    const subject = fact.arguments.at(0)
-    return subject === undefined ? undefined : staticTextOrigin(subject.expression, context)
+  if (node._tag === 'StaticCall' && node.textOrigin !== undefined) return node.textOrigin
+  if (node._tag === 'StaticStringLiteral')
+    return sourceTextOrigin(node.origin.anchor, node.data.bytes.length)
+  const inner = transparent(node)
+  if (inner !== undefined) return staticTextOrigin(inner, context)
+  const local = localKeyOf(node)
+  if (local !== undefined) return context.valueOrigins.get(local)
+  if (node._tag === 'StaticIntrinsic' && isTextOperation(node)) {
+    const subject = node.arguments.at(0)
+    return subject === undefined ? undefined : staticTextOrigin(subject, context)
   }
   return undefined
-}
-
-/** Compares admitted values against the resolved, target-neutral pattern tree. */
-const matchesPattern = (
-  pattern: Elaboration.PatternFact,
-  value: StaticValue.Value,
-  context: FactEvaluationContext,
-): boolean => {
-  switch (pattern._tag) {
-    case 'UnavailablePattern':
-      return false
-    case 'UniversalPattern':
-      return true
-    case 'IntegerPattern':
-      return value._tag === 'IntegerValue' && value.value === pattern.value
-    case 'EnumMemberPattern': {
-      const canonical = pattern.enum?.canonical
-      return (
-        canonical?._tag === 'Canonical' &&
-        value._tag === 'EnumValue' &&
-        value.type.module === canonical.id.module &&
-        value.type.name === canonical.id.name &&
-        pattern.member?.name._tag === 'Present' &&
-        value.member === pattern.member.name.spelling
-      )
-    }
-    case 'TypePattern':
-      return (
-        pattern.member !== undefined &&
-        valueHasType(value, Type.substitute(pattern.member, context.typeSubstitution ?? new Map()))
-      )
-    case 'NominalPattern':
-    case 'UnionVariantPattern': {
-      if (
-        pattern.member === undefined ||
-        !valueHasType(
-          value,
-          Type.substitute(pattern.member, context.typeSubstitution ?? new Map()),
-        ) ||
-        value._tag !== 'AggregateValue'
-      )
-        return false
-      if (
-        pattern._tag === 'UnionVariantPattern' &&
-        (pattern.target._tag !== 'Resolved' ||
-          value.identity._tag !== 'NominalAggregateIdentity' ||
-          value.identity.variant?.ordinal !== pattern.target.variant.id.ordinal)
-      )
-        return false
-      return pattern.fields.every((field) => {
-        if (field.state._tag !== 'Resolved') return false
-        const ordinal = field.state.field.id.ordinal
-        const child = value.fields.find((candidate) => candidate.ordinal === ordinal)
-        return (
-          child !== undefined &&
-          (field.nested === undefined || matchesPattern(field.nested, child.value, context))
-        )
-      })
-    }
-  }
 }
 
 const valueHasType = (value: StaticValue.Value, type: Type.Type): boolean => {
@@ -1336,656 +1258,590 @@ const valueHasType = (value: StaticValue.Value, type: Type.Type): boolean => {
   }
 }
 
-/** Pattern IDs are lexical, so adding provisional values cannot shadow another arm's bindings. */
+/** Whether a value is the inhabitant one coverage member names. */
+const inhabits = (
+  value: StaticValue.Value,
+  member: Match.CoverageIdentity,
+  context: NodeContext,
+): boolean => {
+  const substitution = context.typeSubstitution ?? new Map()
+  if (member._tag === 'EnumMember')
+    return (
+      value._tag === 'EnumValue' &&
+      value.type.module === member.enum.module &&
+      value.type.name === member.enum.name &&
+      value.member === member.member.name
+    )
+  if (member._tag === 'NominalUnionVariant')
+    return (
+      valueHasType(value, Type.substitute(member.type, substitution)) &&
+      value._tag === 'AggregateValue' &&
+      value.identity._tag === 'NominalAggregateIdentity' &&
+      value.identity.variant?.ordinal === member.variantOrdinal
+    )
+  return valueHasType(value, Type.substitute(member.type, substitution))
+}
+
+const valueAt = (
+  value: StaticValue.Value,
+  path: ReadonlyArray<DeclarationFacts.FieldId>,
+): StaticValue.Value | undefined => {
+  let current: StaticValue.Value | undefined = value
+  for (const field of path)
+    current =
+      current?._tag === 'AggregateValue'
+        ? current.fields.find((candidate) => candidate.ordinal === field.ordinal)?.value
+        : undefined
+  return current
+}
+
+interface Selection {
+  readonly member?: Match.CoverageIdentity
+  readonly integer?: bigint
+  readonly universal: boolean
+  readonly tests?: ReadonlyArray<Match.PatternTest>
+}
+
+/** Whether one arm or `let` pattern selects a value: its member, then every nested test. */
+const selects = (selection: Selection, value: StaticValue.Value, context: NodeContext): boolean => {
+  if (selection.integer !== undefined)
+    return value._tag === 'IntegerValue' && value.value === selection.integer
+  if (!selection.universal) {
+    if (selection.member === undefined || !inhabits(value, selection.member, context)) return false
+  }
+  return (selection.tests ?? []).every((test) => {
+    const nested = valueAt(value, test.path)
+    return nested !== undefined && inhabits(nested, test.member, context)
+  })
+}
+
+/** Pattern ids are lexical, so adding provisional values cannot shadow another arm's bindings. */
 const bindPattern = (
-  bindings: ReadonlyArray<Elaboration.PatternBindingFact>,
+  bindings: ReadonlyArray<Tir.PatternBinding>,
   scrutinee: StaticValue.Value,
-  context: FactEvaluationContext,
-): Outcome<FactEvaluationContext> => {
+  context: NodeContext,
+): Outcome<NodeContext> => {
   const values = context.values instanceof Map ? context.values : new Map(context.values)
   for (const binding of bindings) {
-    let value: StaticValue.Value | undefined = scrutinee
-    for (const field of binding.path) {
-      value =
-        value?._tag === 'AggregateValue'
-          ? value.fields.find((candidate) => candidate.ordinal === field.ordinal)?.value
-          : undefined
-    }
+    const value = valueAt(scrutinee, binding.path)
     if (value === undefined)
       return failed(
         phaseViolation(
           'StaticEvaluation.bindPattern',
           'selected pattern binding has no static payload',
-          Location.at(binding.anchor),
+          at(binding),
           context.trace,
         ),
       )
-    values.set(localValueKey(binding), value)
+    values.set(patternKey(binding.id), value)
   }
   return complete(Object.freeze({ ...context, values }))
 }
 
-/** Evaluates an expression at a static application boundary, where no lexical transfer may escape. */
-export const evaluateFact = (
-  fact: Elaboration.ExpressionFact,
-  context: FactEvaluationContext,
+/** Evaluates a node at a static application boundary, where no lexical transfer may escape. */
+export const evaluate = (
+  node: Tir.Expression,
+  context: NodeContext,
 ): Outcome<StaticValue.Value> => {
-  const result = evaluateExpression(fact, context)
+  const result = evaluateExpression(node, context)
   return result._tag === 'Transfer'
-    ? unavailableFact(fact, context, 'control transfer has no enclosing static statement context')
+    ? unavailable(node, context, 'control transfer has no enclosing static statement context')
     : result
 }
 
-/** Evaluates one already-resolved expression fact without consulting a runtime engine. */
-const evaluateExpression = (
-  fact: Elaboration.ExpressionFact,
-  context: FactEvaluationContext,
-): ExecutionOutcome<StaticValue.Value> => {
-  switch (fact._tag) {
-    case 'Unit':
-      return complete(StaticValue.unit())
-    case 'Boolean':
-      return complete(StaticValue.boolean(fact.value))
-    case 'Character':
-      return fact.value === undefined
-        ? unavailableFact(fact, context, 'character value is unavailable')
-        : admittedValue(
-            context.environment,
-            { _tag: 'CharacterValue', value: fact.value },
-            'StaticEvaluation.evaluateFact',
-            Location.at(fact.anchor),
-            context.trace,
-          )
-    case 'Integer':
-      return fact.integer._tag !== 'Available' || !Scalar.isIntegerSpelling(fact.integer.type)
-        ? unavailableFact(fact, context, 'integer value is unavailable')
-        : admittedValue(
-            context.environment,
-            { _tag: 'IntegerValue', type: fact.integer.type, value: fact.integer.value },
-            'StaticEvaluation.evaluateFact',
-            Location.at(fact.anchor),
-            context.trace,
-          )
-    case 'Duration':
-      return fact.value === undefined
-        ? unavailableFact(fact, context, 'duration value is unavailable')
-        : admittedValue(
-            context.environment,
-            { _tag: 'IntegerValue', type: 'u64', value: fact.value },
-            'StaticEvaluation.evaluateFact',
-            Location.at(fact.anchor),
-            context.trace,
-          )
-    case 'Floating':
-      return fact.floating._tag !== 'Available'
-        ? unavailableFact(fact, context, 'floating value is unavailable')
-        : admittedValue(
-            context.environment,
-            {
-              _tag: 'FloatValue',
-              type: fact.floating.type,
-              bits: fact.floating.bits,
-            },
-            'StaticEvaluation.evaluateFact',
-            Location.at(fact.anchor),
-            context.trace,
-          )
-    case 'StaticText':
-      return fact.data === undefined || fact.data.kind !== 'Text'
-        ? unavailableFact(fact, context, 'static text value is unavailable')
-        : admittedValue(
-            context.environment,
+const primitiveOf = (operation: string): PrimitiveOperation | undefined => {
+  const name = operation.slice(operation.lastIndexOf('.') + 1)
+  switch (name) {
+    case 'Add':
+    case 'Subtract':
+    case 'Multiply':
+    case 'Divide':
+    case 'Remainder':
+    case 'Negate':
+    case 'Equals':
+    case 'NotEquals':
+    case 'LessThan':
+    case 'LessOrEqual':
+    case 'GreaterThan':
+    case 'GreaterOrEqual':
+    case 'Not':
+      return name
+    default:
+      return undefined
+  }
+}
+
+const runtimeFieldsOf = (
+  fields: ReadonlyArray<DeclarationFacts.FieldFact>,
+  parameters: ReadonlyArray<DeclarationFacts.TypeParameterFact>,
+  arguments_: ReadonlyArray<Type.GenericArgument>,
+) => {
+  const substitution =
+    TypeInference.substitution(
+      parameters.map((parameter) => parameter.type),
+      arguments_,
+    ) ?? new Map<string, Type.GenericArgument>()
+  return fields.flatMap((field) =>
+    field.declaredType._tag === 'Resolved'
+      ? [
+          Object.freeze({
+            id: field.id,
+            type: Type.substitute(field.declaredType.type, substitution),
+          }),
+        ]
+      : [],
+  )
+}
+
+const evaluateIntrinsic = (
+  node: Extract<Tir.Expression, { readonly _tag: 'StaticIntrinsic' }>,
+  arguments_: ReadonlyArray<StaticValue.Value>,
+  context: NodeContext,
+): Outcome<StaticValue.Value> => {
+  const operation = node.operation
+  const profile = profileFact(context.environment, operation, arguments_, at(node), context.trace)
+  if (profile !== undefined) return profile
+  const typeArgument = typeArgumentAt(node, 0, context.typeSubstitution)
+  if (operation === 'reflectType' || operation === 'reflectFields') {
+    if (typeArgument === undefined)
+      return unavailable(node, context, `${operation} requires one concrete owner type`)
+    return context.reflect(
+      typeArgument,
+      operation === 'reflectType' ? 'Type' : 'Fields',
+      at(node),
+      context.trace,
+    )
+  }
+  const admit = (value: unknown, name: string) =>
+    admittedValue(context.environment, value, `StaticEvaluation.${name}`, at(node), context.trace)
+  if (operation === 'reflectTypeKind') {
+    const descriptor = arguments_.at(0)
+    if (descriptor?._tag !== 'TypeDescriptorValue')
+      return unavailable(node, context, `${operation} requires one type descriptor`)
+    return admit(
+      { _tag: 'IntegerValue', type: 'u8', value: reflectedAggregateKindCode(descriptor.kind) },
+      operation,
+    )
+  }
+  if (operation.startsWith('reflectField')) {
+    const descriptor = arguments_.at(0)
+    if (descriptor?._tag !== 'FieldDescriptorValue')
+      return unavailable(node, context, `${operation} requires one field descriptor`)
+    if (operation === 'reflectFieldKind')
+      return admit(
+        {
+          _tag: 'IntegerValue',
+          type: 'u8',
+          value: descriptor.member._tag === 'LabeledField' ? 0n : 1n,
+        },
+        operation,
+      )
+    if (operation === 'reflectFieldLabel')
+      return descriptor.member._tag === 'LabeledField'
+        ? admit(
             {
               _tag: 'TextValue',
-              bytes: fact.data.bytes,
-              origin: sourceTextOrigin(fact.literal ?? fact.anchor, fact.data.bytes.length),
+              bytes: Array.from(new TextEncoder().encode(descriptor.member.label)),
             },
-            'StaticEvaluation.evaluateFact',
-            Location.at(fact.anchor),
-            context.trace,
+            operation,
           )
-    case 'Constant':
-      return valueOfConstant(fact, context)
+        : unavailable(node, context, `${operation} cannot read a positional field`)
+    if (operation === 'reflectFieldOrdinal')
+      return descriptor.member._tag === 'PositionalField'
+        ? admit(
+            { _tag: 'IntegerValue', type: 'usize', value: BigInt(descriptor.member.ordinal) },
+            operation,
+          )
+        : unavailable(node, context, `${operation} cannot read a labeled field`)
+    return unavailable(node, context, `${operation} is not admitted reflection metadata`)
+  }
+  if (operation === 'staticSequenceEmpty') {
+    if (typeArgument === undefined)
+      return unavailable(node, context, `${operation} requires one concrete element type`)
+    return admit(StaticValue.emptySequence(typeArgument), operation)
+  }
+  if (operation.startsWith('staticSequence')) {
+    if (typeArgument === undefined)
+      return unavailable(node, context, `${operation} requires one concrete element type`)
+    const sequence = arguments_.at(0)
+    if (sequence?._tag !== 'StaticSequenceValue')
+      return unavailable(node, context, `${operation} requires one static sequence`)
+    if (operation === 'staticSequenceLength')
+      return admit(
+        {
+          _tag: 'IntegerValue',
+          type: 'usize',
+          value: BigInt(StaticValue.sequenceLength(sequence)),
+        },
+        operation,
+      )
+    if (operation === 'staticSequenceAppend') {
+      const value = arguments_.at(1)
+      if (value === undefined)
+        return unavailable(node, context, `${operation} requires one static value`)
+      const appended = StaticValue.appendSequence(sequence, typeArgument, value)
+      return appended === undefined
+        ? unavailable(node, context, `${operation} element type does not match`)
+        : admit(appended, operation)
+    }
+    if (operation === 'staticSequenceConcat') {
+      const right = arguments_.at(1)
+      if (right?._tag !== 'StaticSequenceValue')
+        return unavailable(node, context, `${operation} requires two static sequences`)
+      const concatenated = StaticValue.concatenateSequences(sequence, right)
+      return concatenated === undefined
+        ? unavailable(node, context, `${operation} element types do not match`)
+        : admit(concatenated, operation)
+    }
+    if (operation === 'staticSequenceAt') {
+      const index = arguments_.at(1)
+      if (
+        index?._tag !== 'IntegerValue' ||
+        index.value < 0n ||
+        index.value > BigInt(Number.MAX_SAFE_INTEGER)
+      )
+        return unavailable(node, context, `${operation} requires one static index`)
+      const element = StaticValue.sequenceElement(sequence, Number(index.value))
+      return element === undefined
+        ? unavailable(node, context, `${operation} index is out of bounds`)
+        : complete(element)
+    }
+    return unavailable(node, context, `${operation} is not an admitted sequence operation`)
+  }
+  const text = arguments_.at(0)
+  const argument = node.arguments.at(0)
+  const literal =
+    (argument === undefined ? undefined : staticTextSpan(argument, context)) ?? at(node)
+  if (text?._tag !== 'TextValue')
+    return unavailable(node, context, `${operation} requires static text`)
+  if (operation === 'staticTextByteLength')
+    return staticTextByteLength(context.environment, text, literal, context.trace)
+  if (operation === 'staticTextConcat') {
+    const right = arguments_.at(1)
+    if (right?._tag !== 'TextValue')
+      return unavailable(node, context, `${operation} requires two static texts`)
+    const concatenated = staticTextConcat(context.environment, text, right, literal, context.trace)
+    if (concatenated._tag === 'Complete') {
+      const rightArgument = node.arguments.at(1)
+      const origin = concatTextOrigin(
+        argument === undefined ? undefined : staticTextOrigin(argument, context),
+        text.bytes.length,
+        rightArgument === undefined ? undefined : staticTextOrigin(rightArgument, context),
+      )
+      if (origin !== undefined) context.expressionOrigins.set(node, origin)
+      context.expressionSpans.set(node, literal)
+      if (origin !== undefined && concatenated.value._tag === 'TextValue')
+        return complete(Object.freeze({ ...concatenated.value, origin }))
+    }
+    return concatenated
+  }
+  const first = arguments_.at(1)
+  if (first?._tag !== 'IntegerValue')
+    return unavailable(node, context, `${operation} requires a static index`)
+  if (operation === 'staticTextByteAt')
+    return staticTextByteAt(context.environment, text, first.value, literal, context.trace)
+  const second = arguments_.at(2)
+  if (operation === 'staticTextSlice' && second?._tag === 'IntegerValue') {
+    const sliced = staticTextSlice(
+      context.environment,
+      text,
+      first.value,
+      second.value,
+      literal,
+      context.trace,
+    )
+    if (sliced._tag === 'Complete') {
+      const origin = argument === undefined ? undefined : staticTextOrigin(argument, context)
+      const slicedOrigin =
+        origin === undefined
+          ? undefined
+          : sliceTextOrigin(origin, Number(first.value), Number(second.value))
+      if (slicedOrigin !== undefined) context.expressionOrigins.set(node, slicedOrigin)
+      context.expressionSpans.set(node, literal)
+      if (slicedOrigin !== undefined && sliced.value._tag === 'TextValue')
+        return complete(Object.freeze({ ...sliced.value, origin: slicedOrigin }))
+    }
+    return sliced
+  }
+  return unavailable(node, context, `${operation} is not admitted statically`)
+}
+
+/** Evaluates one typed node without consulting a runtime engine. */
+const evaluateExpression = (
+  node: Tir.Expression,
+  context: NodeContext,
+): ExecutionOutcome<StaticValue.Value> => {
+  const admit = (value: unknown) =>
+    admittedValue(context.environment, value, 'StaticEvaluation.evaluate', at(node), context.trace)
+  switch (node._tag) {
+    case 'UnitLiteral':
+      return complete(StaticValue.unit())
+    case 'BooleanLiteral':
+      return complete(StaticValue.boolean(node.value))
+    case 'CharacterLiteral':
+      return admit({ _tag: 'CharacterValue', value: node.value })
+    case 'IntegerLiteral':
+      return typeof node.type === 'string' && Scalar.isIntegerSpelling(node.type)
+        ? admit({ _tag: 'IntegerValue', type: node.type, value: node.value })
+        : unavailable(node, context, 'integer value is unavailable')
+    case 'FloatingLiteral':
+      return admit({ _tag: 'FloatValue', type: node.type, bits: node.bits })
+    case 'StaticStringLiteral':
+      return admit({
+        _tag: 'TextValue',
+        bytes: node.data.bytes,
+        origin: sourceTextOrigin(node.origin.anchor, node.data.bytes.length),
+      })
+    case 'ConstantReference': {
+      const declaration = context.lookup(node.declaration)
+      return context.constant !== undefined &&
+        (declaration?._tag === 'ConstantDeclaration' ||
+          declaration?._tag === 'PackageParameterDeclaration')
+        ? context.constant(declaration, at(node), context.trace)
+        : unavailable(node, context, 'constant has no selected static value')
+    }
     case 'Move':
-      return evaluateExpression(fact.subject, context)
+      return evaluateExpression(node.subject, context)
+    case 'UnionConvert':
+      // A static value of a union is the member value itself; widening changes no value.
+      return evaluateExpression(node.source, context)
     case 'Match': {
-      const scrutinee = evaluateExpression(fact.scrutinee, context)
+      const scrutinee = evaluateExpression(node.scrutinee, context)
       if (scrutinee._tag !== 'Complete') return scrutinee
-      for (const arm of fact.arms) {
-        if (!arm.reachable || !matchesPattern(arm.pattern, scrutinee.value, context)) continue
+      for (const arm of node.arms) {
+        if (!arm.reachable || !selects(arm, scrutinee.value, context)) continue
         const bound = bindPattern(arm.bindings, scrutinee.value, context)
         if (bound._tag === 'Failed') return bound
         if (arm.guard !== undefined) {
           const guard = evaluateExpression(arm.guard, bound.value)
           if (guard._tag !== 'Complete') return guard
           if (guard.value._tag !== 'BooleanValue')
-            return unavailableFact(fact, context, 'match guard is not bool')
+            return unavailable(node, context, 'match guard is not bool')
           if (!guard.value.value) continue
         }
         return arm.body._tag === 'Expression'
           ? evaluateExpression(arm.body.expression, bound.value)
           : evaluateStatementSequence(arm.body.statements, bound.value)
       }
-      return unavailableFact(fact, context, 'match has no selected arm')
+      return unavailable(node, context, 'match has no selected arm')
     }
-    case 'StructLiteral': {
-      if (
-        fact.target._tag !== 'Resolved' ||
-        fact.target.struct.canonical._tag !== 'Canonical' ||
-        fact.type._tag !== 'Available'
-      )
-        return unavailableFact(fact, context, 'struct value is unavailable')
+    case 'Construct':
+    case 'ConstructUnionVariant': {
       const fields: Array<StaticValue.AggregateField> = []
-      for (const initializer of fact.initializers) {
-        if (initializer.state._tag !== 'Resolved')
-          return unavailableFact(fact, context, 'struct initializer is unavailable')
-        const value = evaluateExpression(initializer.expression, context)
+      for (const field of node.fields) {
+        const value = evaluateExpression(field.value, context)
         if (value._tag !== 'Complete') return value
-        fields.push(
-          Object.freeze({ ordinal: initializer.state.field.id.ordinal, value: value.value }),
+        fields.push(Object.freeze({ ordinal: field.field.ordinal, value: value.value }))
+      }
+      fields.sort((left, right) => left.ordinal - right.ordinal)
+      const declaration = context.lookup({
+        _tag: 'CanonicalDeclarationId',
+        module: node.nominal.module,
+        name: node.nominal.name,
+      })
+      const identity = {
+        _tag: 'NominalAggregateIdentity' as const,
+        declaration: Object.freeze({
+          _tag: 'CanonicalDeclarationId' as const,
+          module: node.nominal.module,
+          name: node.nominal.name,
+        }),
+        typeArguments: Object.freeze(node.nominal.arguments.map(Type.genericArgumentKey)),
+      }
+      if (node._tag === 'Construct') {
+        if (declaration?._tag !== 'StructDeclaration')
+          return unavailable(node, context, 'struct value is unavailable')
+        return constructAggregate(
+          context.environment,
+          Object.freeze(identity),
+          fields,
+          at(node),
+          context.trace,
+          runtimeFieldsOf(declaration.fields, declaration.typeParameters, node.nominal.arguments),
         )
       }
-      const substitution =
-        TypeInference.substitution(
-          fact.target.struct.typeParameters.map((parameter) => parameter.type),
-          fact.target.type.arguments,
-        ) ?? new Map<string, Type.GenericArgument>()
+      const variant =
+        declaration?._tag === 'UnionDeclaration'
+          ? declaration.variants.find((candidate) => candidate.id.ordinal === node.variantOrdinal)
+          : undefined
+      if (declaration?._tag !== 'UnionDeclaration' || variant === undefined)
+        return unavailable(node, context, 'union value is unavailable')
       return constructAggregate(
         context.environment,
         Object.freeze({
-          _tag: 'NominalAggregateIdentity',
-          declaration: fact.target.struct.canonical.id,
-          typeArguments: Object.freeze(fact.target.type.arguments.map(Type.genericArgumentKey)),
+          ...identity,
+          variant: Object.freeze({ ordinal: node.variantOrdinal, name: node.variant.name }),
         }),
         fields,
-        Location.at(fact.anchor),
+        at(node),
         context.trace,
-        fact.target.struct.fields.flatMap((field) =>
-          field.declaredType._tag === 'Resolved'
-            ? [
-                Object.freeze({
-                  id: field.id,
-                  type: Type.substitute(field.declaredType.type, substitution),
-                }),
-              ]
-            : [],
-        ),
+        runtimeFieldsOf(variant.fields, declaration.typeParameters, node.nominal.arguments),
       )
     }
-    case 'UnionVariant': {
-      if (
-        fact.target._tag !== 'Resolved' ||
-        fact.target.union.canonical._tag !== 'Canonical' ||
-        fact.target.variant.canonical._tag !== 'Canonical' ||
-        fact.type._tag !== 'Available'
-      )
-        return unavailableFact(fact, context, 'union value is unavailable')
+    case 'ArrayConstruct': {
       const fields: Array<StaticValue.AggregateField> = []
-      for (const initializer of fact.initializers) {
-        if (initializer.state._tag !== 'Resolved')
-          return unavailableFact(fact, context, 'union initializer is unavailable')
-        const value = evaluateExpression(initializer.expression, context)
+      for (const [ordinal, element] of node.elements.entries()) {
+        const value = evaluateExpression(element, context)
         if (value._tag !== 'Complete') return value
-        fields.push(
-          Object.freeze({ ordinal: initializer.state.field.id.ordinal, value: value.value }),
-        )
-      }
-      const substitution =
-        TypeInference.substitution(
-          fact.target.union.typeParameters.map((parameter) => parameter.type),
-          fact.target.type.arguments,
-        ) ?? new Map<string, Type.GenericArgument>()
-      return constructAggregate(
-        context.environment,
-        Object.freeze({
-          _tag: 'NominalAggregateIdentity',
-          declaration: fact.target.union.canonical.id,
-          typeArguments: Object.freeze(fact.target.type.arguments.map(Type.genericArgumentKey)),
-          variant: Object.freeze({
-            ordinal: fact.target.variant.id.ordinal,
-            name: fact.target.variant.canonical.id.name,
-          }),
-        }),
-        fields,
-        Location.at(fact.anchor),
-        context.trace,
-        fact.target.variant.fields.flatMap((field) =>
-          field.declaredType._tag === 'Resolved'
-            ? [
-                Object.freeze({
-                  id: field.id,
-                  type: Type.substitute(field.declaredType.type, substitution),
-                }),
-              ]
-            : [],
-        ),
-      )
-    }
-    case 'ArrayLiteral': {
-      if (fact.state._tag !== 'Complete')
-        return unavailableFact(fact, context, 'array value is unavailable')
-      const fields: Array<StaticValue.AggregateField> = []
-      for (const element of fact.elements) {
-        const value = evaluateExpression(element.expression, context)
-        if (value._tag !== 'Complete') return value
-        fields.push(Object.freeze({ ordinal: element.ordinal, value: value.value }))
+        fields.push(Object.freeze({ ordinal, value: value.value }))
       }
       return constructAggregate(
         context.environment,
         Object.freeze({
           _tag: 'ArrayAggregateIdentity',
-          element: Type.key(fact.state.type.element),
-          length: fact.state.type.length,
+          element: Type.key(node.type.element),
+          length: node.type.length,
         }),
         fields,
-        Location.at(fact.anchor),
+        at(node),
         context.trace,
       )
     }
-    case 'FieldProjection': {
-      if (fact.state._tag !== 'Resolved')
-        return unavailableFact(fact, context, 'projected static field is unavailable')
-      const subject = evaluateExpression(fact.subject, context)
+    case 'Project': {
+      const subject = evaluateExpression(node.subject, context)
       if (subject._tag !== 'Complete') return subject
       if (subject.value._tag !== 'AggregateValue')
-        return unavailableFact(fact, context, 'field projection depends on runtime storage')
-      const ordinal = fact.state.field.id.ordinal
-      const field = subject.value.fields.find((candidate) => candidate.ordinal === ordinal)
+        return unavailable(node, context, 'field projection depends on runtime storage')
+      const field = subject.value.fields.find(
+        (candidate) => candidate.ordinal === node.field.ordinal,
+      )
       return field === undefined
-        ? unavailableFact(fact, context, 'projected static field has no admitted value')
+        ? unavailable(node, context, 'projected static field has no admitted value')
         : complete(field.value)
     }
-    case 'IndexProjection': {
-      const subject = evaluateExpression(fact.subject, context)
+    case 'IndexPlace': {
+      const subject = evaluateExpression(node.subject, context)
       if (subject._tag !== 'Complete') return subject
-      const index = evaluateStaticIndex(fact, context)
+      const index = evaluateStaticIndex(node.index, node.array, node, context)
       if (index._tag !== 'Complete') return index
       if (
         subject.value._tag !== 'AggregateValue' ||
         subject.value.identity._tag !== 'ArrayAggregateIdentity'
       )
-        return unavailableFact(fact, context, 'array projection depends on runtime storage')
+        return unavailable(node, context, 'array projection depends on runtime storage')
       const field = subject.value.fields.find((candidate) => candidate.ordinal === index.value)
       return field === undefined
-        ? unavailableFact(fact, context, 'projected static element has no admitted value')
+        ? unavailable(node, context, 'projected static element has no admitted value')
         : complete(field.value)
     }
-    case 'Identifier': {
-      const reference = fact.reference
-      let value: StaticValue.Value | undefined
-      if (reference._tag === 'Resolved')
-        value = context.values.get(localValueKey(reference.parameter))
-      else if (reference._tag === 'ResolvedBinding' || reference._tag === 'ResolvedPattern')
-        value = context.values.get(localValueKey(reference.binding))
+    case 'ParameterReference':
+    case 'BindingReference':
+    case 'PatternBindingReference': {
+      const key = localKeyOf(node)
+      const value = key === undefined ? undefined : context.values.get(key)
       if (value === undefined)
-        return unavailableFact(fact, context, 'identifier depends on runtime storage')
-      const origin = staticTextOrigin(fact, context)
+        return unavailable(node, context, 'identifier depends on runtime storage')
+      const origin = staticTextOrigin(node, context)
       return value._tag === 'TextValue' && origin !== undefined
         ? complete(Object.freeze({ ...value, origin }))
         : complete(value)
     }
     case 'EnumMember': {
-      const member = fact.member
-      const type = fact.enum.canonical
-      const representation = fact.enum.representation
+      const declaration = context.lookup(node.enum)
       if (
-        member?.name._tag !== 'Present' ||
-        member.discriminant._tag !== 'Available' ||
-        type._tag !== 'Canonical' ||
-        representation._tag !== 'Available'
+        declaration?._tag !== 'EnumDeclaration' ||
+        declaration.representation._tag !== 'Available'
       )
-        return unavailableFact(fact, context, 'enum member is unavailable')
+        return unavailable(node, context, 'enum member is unavailable')
       return constructEnum(
         context.environment,
-        type.id,
-        member.name.spelling,
-        representation.scalar.spelling,
-        member.discriminant.value,
-        Location.at(fact.anchor),
+        node.enum,
+        node.member.name,
+        declaration.representation.scalar.spelling,
+        node.discriminant,
+        at(node),
         context.trace,
       )
     }
     case 'ShortCircuit': {
-      const left = fact.arguments.at(0)
-      const right = fact.arguments.at(1)
-      if (left === undefined || right === undefined)
-        return unavailableFact(fact, context, 'short-circuit operands are unavailable')
-      const selected = evaluateExpression(left.expression, context)
+      const selected = evaluateExpression(node.left, context)
       if (selected._tag !== 'Complete') return selected
       if (selected.value._tag !== 'BooleanValue')
-        return unavailableFact(fact, context, 'short-circuit condition is not bool')
-      if (fact.operator === 'And' && !selected.value.value) return selected
-      if (fact.operator === 'Or' && selected.value.value) return selected
-      return evaluateExpression(right.expression, context)
+        return unavailable(node, context, 'short-circuit condition is not bool')
+      if (node.operator === 'And' && !selected.value.value) return selected
+      if (node.operator === 'Or' && selected.value.value) return selected
+      return evaluateExpression(node.right, context)
     }
-    case 'Operator': {
-      const operands = evaluateArguments(fact.arguments, context)
+    case 'EnumEquality':
+    case 'StringEquality': {
+      const operands = evaluateAll([node.left, node.right], context)
       if (operands._tag !== 'Complete') return operands
       const left = operands.value.at(0)
       const right = operands.value.at(1)
-      if (
-        (fact.operator === 'Equals' || fact.operator === 'NotEquals') &&
-        left?._tag === 'EnumValue' &&
-        right?._tag === 'EnumValue'
-      )
-        return evaluateEnumEquality(
-          fact.operator,
-          left,
-          right,
-          Location.at(fact.anchor),
-          context.trace,
-        )
-      if (
-        fact.operator === 'Add' ||
-        fact.operator === 'Subtract' ||
-        fact.operator === 'Multiply' ||
-        fact.operator === 'Divide' ||
-        fact.operator === 'Remainder' ||
-        fact.operator === 'Negate' ||
-        fact.operator === 'Equals' ||
-        fact.operator === 'NotEquals' ||
-        fact.operator === 'LessThan' ||
-        fact.operator === 'LessOrEqual' ||
-        fact.operator === 'GreaterThan' ||
-        fact.operator === 'GreaterOrEqual' ||
-        fact.operator === 'Not'
-      )
-        return evaluatePrimitive(
-          context.environment,
-          fact.operator,
-          operands.value,
-          Location.at(fact.anchor),
-          context.trace,
-        )
-      return unavailableFact(fact, context, `${fact.operator} is not admitted statically`)
+      const operator = node.negated ? 'NotEquals' : 'Equals'
+      return left?._tag === 'EnumValue' && right?._tag === 'EnumValue'
+        ? evaluateEnumEquality(operator, left, right, at(node), context.trace)
+        : evaluatePrimitive(context.environment, operator, operands.value, at(node), context.trace)
     }
-    case 'Call': {
-      if (fact.staticFailure !== undefined) return failed(fact.staticFailure)
-      const arguments_ = evaluateArguments(fact.arguments, context)
+    case 'BuiltinCall': {
+      const operands = evaluateAll(node.arguments, context)
+      if (operands._tag !== 'Complete') return operands
+      const operator = primitiveOf(node.operation)
+      return operator === undefined
+        ? unavailable(node, context, `${node.operation} is not admitted statically`)
+        : evaluatePrimitive(context.environment, operator, operands.value, at(node), context.trace)
+    }
+    case 'StaticIntrinsic': {
+      const arguments_ = evaluateAll(node.arguments, context)
       if (arguments_._tag !== 'Complete') return arguments_
-      if (
-        fact.reference._tag === 'ResolvedIntrinsicContract' &&
-        fact.reference.intrinsic.id.actor === 'Intrinsic'
-      ) {
-        const operation = fact.reference.intrinsic.id.name
-        const profile = profileFact(
-          context.environment,
-          operation,
-          arguments_.value,
-          Location.at(fact.anchor),
-          context.trace,
-        )
-        if (profile !== undefined) return profile
-        const typeArgument = intrinsicTypeArgument(fact, 0, context.typeSubstitution)
-        if (operation === 'reflectType' || operation === 'reflectFields') {
-          if (typeArgument === undefined)
-            return unavailableFact(fact, context, `${operation} requires one concrete owner type`)
-          return context.reflect(
-            typeArgument,
-            operation === 'reflectType' ? 'Type' : 'Fields',
-            Location.at(fact.anchor),
-            context.trace,
-          )
-        }
-        if (operation === 'reflectTypeKind') {
-          const descriptor = arguments_.value.at(0)
-          if (descriptor?._tag !== 'TypeDescriptorValue')
-            return unavailableFact(fact, context, `${operation} requires one type descriptor`)
-          return admittedValue(
-            context.environment,
-            {
-              _tag: 'IntegerValue',
-              type: 'u8',
-              value: reflectedAggregateKindCode(descriptor.kind),
-            },
-            'StaticEvaluation.reflectTypeKind',
-            Location.at(fact.anchor),
-            context.trace,
-          )
-        }
-        if (operation.startsWith('reflectField')) {
-          const descriptor = arguments_.value.at(0)
-          if (descriptor?._tag !== 'FieldDescriptorValue')
-            return unavailableFact(fact, context, `${operation} requires one field descriptor`)
-          if (operation === 'reflectFieldKind')
-            return admittedValue(
-              context.environment,
-              {
-                _tag: 'IntegerValue',
-                type: 'u8',
-                value: descriptor.member._tag === 'LabeledField' ? 0n : 1n,
-              },
-              'StaticEvaluation.reflectFieldKind',
-              Location.at(fact.anchor),
-              context.trace,
-            )
-          if (operation === 'reflectFieldLabel')
-            return descriptor.member._tag === 'LabeledField'
-              ? admittedValue(
-                  context.environment,
-                  {
-                    _tag: 'TextValue',
-                    bytes: Array.from(new TextEncoder().encode(descriptor.member.label)),
-                  },
-                  'StaticEvaluation.reflectFieldLabel',
-                  Location.at(fact.anchor),
-                  context.trace,
-                )
-              : unavailableFact(fact, context, `${operation} cannot read a positional field`)
-          if (operation === 'reflectFieldOrdinal')
-            return descriptor.member._tag === 'PositionalField'
-              ? admittedValue(
-                  context.environment,
-                  {
-                    _tag: 'IntegerValue',
-                    type: 'usize',
-                    value: BigInt(descriptor.member.ordinal),
-                  },
-                  'StaticEvaluation.reflectFieldOrdinal',
-                  Location.at(fact.anchor),
-                  context.trace,
-                )
-              : unavailableFact(fact, context, `${operation} cannot read a labeled field`)
-          return unavailableFact(fact, context, `${operation} is not admitted reflection metadata`)
-        }
-        if (operation === 'staticSequenceEmpty') {
-          if (typeArgument === undefined)
-            return unavailableFact(fact, context, `${operation} requires one concrete element type`)
-          return admittedValue(
-            context.environment,
-            StaticValue.emptySequence(typeArgument),
-            'StaticEvaluation.staticSequenceEmpty',
-            Location.at(fact.anchor),
-            context.trace,
-          )
-        }
-        if (operation.startsWith('staticSequence')) {
-          if (typeArgument === undefined)
-            return unavailableFact(fact, context, `${operation} requires one concrete element type`)
-          const sequence = arguments_.value.at(0)
-          if (sequence?._tag !== 'StaticSequenceValue')
-            return unavailableFact(fact, context, `${operation} requires one static sequence`)
-          if (operation === 'staticSequenceLength')
-            return admittedValue(
-              context.environment,
-              {
-                _tag: 'IntegerValue',
-                type: 'usize',
-                value: BigInt(StaticValue.sequenceLength(sequence)),
-              },
-              'StaticEvaluation.staticSequenceLength',
-              Location.at(fact.anchor),
-              context.trace,
-            )
-          if (operation === 'staticSequenceAppend') {
-            const value = arguments_.value.at(1)
-            if (value === undefined)
-              return unavailableFact(fact, context, `${operation} requires one static value`)
-            const appended = StaticValue.appendSequence(sequence, typeArgument, value)
-            return appended === undefined
-              ? unavailableFact(fact, context, `${operation} element type does not match`)
-              : admittedValue(
-                  context.environment,
-                  appended,
-                  'StaticEvaluation.staticSequenceAppend',
-                  Location.at(fact.anchor),
-                  context.trace,
-                )
-          }
-          if (operation === 'staticSequenceConcat') {
-            const right = arguments_.value.at(1)
-            if (right?._tag !== 'StaticSequenceValue')
-              return unavailableFact(fact, context, `${operation} requires two static sequences`)
-            const concatenated = StaticValue.concatenateSequences(sequence, right)
-            return concatenated === undefined
-              ? unavailableFact(fact, context, `${operation} element types do not match`)
-              : admittedValue(
-                  context.environment,
-                  concatenated,
-                  'StaticEvaluation.staticSequenceConcat',
-                  Location.at(fact.anchor),
-                  context.trace,
-                )
-          }
-          if (operation === 'staticSequenceAt') {
-            const index = arguments_.value.at(1)
-            if (
-              index?._tag !== 'IntegerValue' ||
-              index.value < 0n ||
-              index.value > BigInt(Number.MAX_SAFE_INTEGER)
-            )
-              return unavailableFact(fact, context, `${operation} requires one static index`)
-            const element = StaticValue.sequenceElement(sequence, Number(index.value))
-            return element === undefined
-              ? unavailableFact(fact, context, `${operation} index is out of bounds`)
-              : complete(element)
-          }
-          return unavailableFact(
-            fact,
-            context,
-            `${operation} is not an admitted sequence operation`,
-          )
-        }
-        const text = arguments_.value.at(0)
-        const argument = fact.arguments.at(0)
-        const literal =
-          (argument === undefined ? undefined : staticTextSpan(argument.expression, context)) ??
-          Location.at(fact.anchor)
-        if (text?._tag !== 'TextValue')
-          return unavailableFact(fact, context, `${operation} requires static text`)
-        if (operation === 'staticTextByteLength')
-          return staticTextByteLength(context.environment, text, literal, context.trace)
-        if (operation === 'staticTextConcat') {
-          const right = arguments_.value.at(1)
-          if (right?._tag !== 'TextValue')
-            return unavailableFact(fact, context, `${operation} requires two static texts`)
-          const concatenated = staticTextConcat(
-            context.environment,
-            text,
-            right,
-            literal,
-            context.trace,
-          )
-          if (concatenated._tag === 'Complete') {
-            const origin =
-              argument === undefined ? undefined : staticTextOrigin(argument.expression, context)
-            if (origin !== undefined) context.expressionOrigins.set(fact, origin)
-            context.expressionSpans.set(fact, literal)
-            if (origin !== undefined && concatenated.value._tag === 'TextValue')
-              return complete(Object.freeze({ ...concatenated.value, origin }))
-          }
-          return concatenated
-        }
-        const first = arguments_.value.at(1)
-        if (first?._tag !== 'IntegerValue')
-          return unavailableFact(fact, context, `${operation} requires a static index`)
-        if (operation === 'staticTextByteAt')
-          return staticTextByteAt(context.environment, text, first.value, literal, context.trace)
-        const second = arguments_.value.at(2)
-        if (operation === 'staticTextSlice' && second?._tag === 'IntegerValue') {
-          const sliced = staticTextSlice(
-            context.environment,
-            text,
-            first.value,
-            second.value,
-            literal,
-            context.trace,
-          )
-          if (sliced._tag === 'Complete') {
-            const origin =
-              argument === undefined ? undefined : staticTextOrigin(argument.expression, context)
-            const slicedOrigin =
-              origin === undefined
-                ? undefined
-                : sliceTextOrigin(origin, Number(first.value), Number(second.value))
-            if (slicedOrigin !== undefined) {
-              context.expressionOrigins.set(fact, slicedOrigin)
-            }
-            context.expressionSpans.set(fact, literal)
-            if (slicedOrigin !== undefined && sliced.value._tag === 'TextValue')
-              return complete(Object.freeze({ ...sliced.value, origin: slicedOrigin }))
-          }
-          return sliced
-        }
-      }
-      if (fact.reference._tag === 'Resolved' && fact.reference.declaration.phase === 'Static') {
-        const called = context.call(
-          fact.reference.declaration,
-          arguments_.value,
-          Object.freeze(
-            fact.arguments.map((argument) => staticTextSpan(argument.expression, context)),
-          ),
-          Object.freeze(
-            fact.arguments.map((argument, ordinal) => {
-              const value = arguments_.value.at(ordinal)
-              return (
-                staticTextOrigin(argument.expression, context) ??
-                (value?._tag === 'TextValue' ? value.origin : undefined)
-              )
-            }),
-          ),
-          Location.at(fact.anchor),
-          context.trace,
-          Object.freeze({
-            typeArguments: Object.freeze(
-              fact.contract._tag === 'Compatible'
-                ? fact.contract.typeArguments.map((argument) =>
-                    Type.substituteGenericArgument(argument, context.typeSubstitution ?? new Map()),
-                  )
-                : [],
-            ),
-            evidence: Object.freeze(
-              fact.contract._tag === 'Compatible'
-                ? fact.contract.evidence.map(Constraint.evidenceKey)
-                : [],
-            ),
-            contractRow: Object.freeze([]),
-          }),
-        )
-        if (called.textSpan !== undefined) context.expressionSpans.set(fact, called.textSpan)
-        if (called.textOrigin !== undefined) context.expressionOrigins.set(fact, called.textOrigin)
-        return called.outcome
-      }
-      return unavailableFact(fact, context, 'ordinary calls are runtime operations')
+      return evaluateIntrinsic(node, arguments_.value, context)
     }
+    case 'StaticCall': {
+      if (node.failure !== undefined) return failed(node.failure)
+      const arguments_ = evaluateAll(node.arguments, context)
+      if (arguments_._tag !== 'Complete') return arguments_
+      const declaration = context.lookup(node.target)
+      if (declaration?._tag !== 'FunctionDeclaration')
+        return unavailable(node, context, 'static call target is unavailable')
+      const called = context.call(
+        declaration,
+        arguments_.value,
+        Object.freeze(node.arguments.map((argument) => staticTextSpan(argument, context))),
+        Object.freeze(
+          node.arguments.map((argument, ordinal) => {
+            const value = arguments_.value.at(ordinal)
+            return (
+              staticTextOrigin(argument, context) ??
+              (value?._tag === 'TextValue' ? value.origin : undefined)
+            )
+          }),
+        ),
+        at(node),
+        context.trace,
+        Object.freeze({
+          typeArguments: Object.freeze(
+            node.typeArguments.map((argument) =>
+              Type.substituteGenericArgument(argument, context.typeSubstitution ?? new Map()),
+            ),
+          ),
+          evidence: node.evidence,
+          contractRow: Object.freeze([]),
+        }),
+      )
+      if (called.textSpan !== undefined) context.expressionSpans.set(node, called.textSpan)
+      if (called.textOrigin !== undefined) context.expressionOrigins.set(node, called.textOrigin)
+      return called.outcome
+    }
+    case 'Call':
+      return unavailable(node, context, 'ordinary calls are runtime operations')
     case 'CompileError': {
-      const message = evaluateExpression(fact.message, context)
+      const message = evaluateExpression(node.message, context)
       if (message._tag !== 'Complete') return message
       if (message.value._tag !== 'TextValue')
-        return unavailableFact(fact, context, 'compileError message must be static text')
-      const origin = staticTextOrigin(fact.message, context) ?? message.value.origin
+        return unavailable(node, context, 'compileError message must be static text')
+      const origin = staticTextOrigin(node.message, context) ?? message.value.origin
       return failed(
         compileError(
           new TextDecoder().decode(Uint8Array.from(message.value.bytes)),
-          (origin === undefined ? undefined : textOriginLocation(origin, fact.anchor)) ??
-            Location.at(fact.anchor),
+          (origin === undefined ? undefined : textOriginLocation(origin, node.origin.anchor)) ??
+            at(node),
           context.trace,
           origin,
         ),
       )
     }
     default:
-      return unavailableFact(fact, context, `${fact._tag} is not admitted statically`)
+      return unavailable(node, context, `${node._tag} is not admitted statically`)
   }
 }
 
@@ -2002,54 +1858,45 @@ type ExecutionOutcome<A> =
     }
 
 const evaluateStaticIndex = (
-  fact: Elaboration.IndexProjectionExpressionFact,
-  context: FactEvaluationContext,
+  index: Tir.Expression,
+  array: Type.FixedArray,
+  node: { readonly origin: Tir.Origin },
+  context: NodeContext,
 ): ExecutionOutcome<number> => {
-  const index = evaluateExpression(fact.index, context)
-  if (index._tag !== 'Complete') return index
+  const evaluated = evaluateExpression(index, context)
+  if (evaluated._tag !== 'Complete') return evaluated
   if (
-    fact.array === undefined ||
-    index.value._tag !== 'IntegerValue' ||
-    index.value.value < 0n ||
-    index.value.value >= BigInt(fact.array.length)
+    evaluated.value._tag !== 'IntegerValue' ||
+    evaluated.value.value < 0n ||
+    evaluated.value.value >= BigInt(array.length)
   )
     return failed(
       phaseViolation(
-        'StaticEvaluation.evaluateFact',
+        'StaticEvaluation.evaluate',
         'array projection requires an in-bounds static index',
-        Location.at(fact.anchor),
+        at(node),
         context.trace,
       ),
     )
-  return complete(Number(index.value.value))
+  return complete(Number(evaluated.value.value))
 }
 
 /** Resolves destination selectors before evaluating the incoming value, as ordinary writes do. */
 const staticWritePath = (
-  destination: Elaboration.ExpressionFact,
-  context: FactEvaluationContext,
+  place: Tir.OwnedWritePlace,
+  context: NodeContext,
 ): ExecutionOutcome<ReadonlyArray<number>> => {
-  if (destination._tag === 'Identifier') return complete([])
-  if (destination._tag === 'FieldProjection' && destination.state._tag === 'Resolved') {
-    const parent = staticWritePath(destination.subject, context)
-    return parent._tag === 'Complete'
-      ? complete([...parent.value, destination.state.field.id.ordinal])
-      : parent
+  const path: Array<number> = []
+  for (const selector of place.selectors) {
+    if (selector._tag === 'Field') {
+      path.push(selector.field.ordinal)
+      continue
+    }
+    const index = evaluateStaticIndex(selector.index, selector.array, place, context)
+    if (index._tag !== 'Complete') return index
+    path.push(index.value)
   }
-  if (destination._tag === 'IndexProjection') {
-    const parent = staticWritePath(destination.subject, context)
-    if (parent._tag !== 'Complete') return parent
-    const index = evaluateStaticIndex(destination, context)
-    return index._tag === 'Complete' ? complete([...parent.value, index.value]) : index
-  }
-  return failed(
-    phaseViolation(
-      'StaticEvaluation.evaluateStatements',
-      'assignment destination is not an owned static place',
-      Location.at(destination.anchor),
-      context.trace,
-    ),
-  )
+  return complete(path)
 }
 
 const replaceStaticPlace = (
@@ -2057,7 +1904,7 @@ const replaceStaticPlace = (
   path: ReadonlyArray<number>,
   incoming: StaticValue.Value,
   span: Location.Location,
-  context: FactEvaluationContext,
+  context: NodeContext,
 ): Outcome<StaticValue.Value> => {
   const ordinal = path.at(0)
   if (ordinal === undefined) return complete(incoming)
@@ -2094,163 +1941,159 @@ const sameLoop = (left: Tir.LoopId | undefined, right: Tir.LoopId): boolean =>
   left.function.sourceId === right.function.sourceId &&
   left.function.ordinal === right.function.ordinal
 
+const writeRootKey = (root: Tir.OwnedWriteRoot): string => {
+  if (root._tag === 'BindingWriteRoot') return bindingKey(root.binding)
+  return root._tag === 'PatternWriteRoot' ? patternKey(root.binding) : parameterKey(root.parameter)
+}
+
 const evaluateStatementSequence = (
-  statements: ReadonlyArray<Elaboration.StatementFact>,
-  context: FactEvaluationContext,
+  statements: ReadonlyArray<Tir.Statement>,
+  context: NodeContext,
 ): ExecutionOutcome<StaticValue.Value> => {
   const values = context.values instanceof Map ? context.values : new Map(context.values)
   const valueSpans =
     context.valueSpans instanceof Map ? context.valueSpans : new Map(context.valueSpans)
-  const nestedContext: FactEvaluationContext = Object.freeze({ ...context, values, valueSpans })
   const valueOrigins =
     context.valueOrigins instanceof Map ? context.valueOrigins : new Map(context.valueOrigins)
-  const contextual: FactEvaluationContext = Object.freeze({
-    ...nestedContext,
+  const contextual: NodeContext = Object.freeze({
+    ...context,
+    values,
+    valueSpans,
     valueOrigins,
   })
-  for (const statement of statements) {
-    const statementSpan =
-      statement._tag === 'BindStatement'
-        ? Location.at(statement.binding.anchor)
-        : Location.at(statement.anchor)
-    const exhausted = context.step?.(statementSpan, context.trace)
-    if (exhausted !== undefined) return failed(exhausted)
-    if (statement._tag === 'BindStatement') {
-      const value = evaluateExpression(statement.binding.initializer, contextual)
-      if (value._tag !== 'Complete') return value
-      const key = localValueKey(statement.binding)
-      values.set(key, value.value)
-      const span = staticTextSpan(statement.binding.initializer, contextual)
-      if (span === undefined) valueSpans.delete(key)
-      else valueSpans.set(key, span)
-      const origin = staticTextOrigin(statement.binding.initializer, contextual)
-      if (origin === undefined) valueOrigins.delete(key)
-      else valueOrigins.set(key, origin)
-      continue
-    }
-    if (statement._tag === 'ExpressionStatement' || statement._tag === 'DropStatement') {
-      const value = evaluateExpression(statement.expression, contextual)
-      if (value._tag !== 'Complete') return value
-      continue
-    }
-    if (statement._tag === 'ReturnStatement') {
-      const value = evaluateExpression(statement.expression, contextual)
-      if (value._tag === 'Complete' && context.returnedTextSpan !== undefined)
-        context.returnedTextSpan.value = staticTextSpan(statement.expression, contextual)
-      if (value._tag === 'Complete' && context.returnedTextOrigin !== undefined)
-        context.returnedTextOrigin.value = staticTextOrigin(statement.expression, contextual)
-      return value._tag !== 'Complete'
-        ? value
-        : Object.freeze({
-            _tag: 'Transfer',
-            span: Location.at(statement.anchor),
-            control: Object.freeze({ _tag: 'Return', value: value.value }),
-          })
-    }
-    if (statement._tag === 'IfStatement') {
-      const condition = evaluateExpression(statement.condition, contextual)
-      if (condition._tag !== 'Complete') return condition
-      if (condition.value._tag !== 'BooleanValue')
-        return failed(
-          phaseViolation(
-            'StaticEvaluation.evaluateStatements',
-            'if condition is not bool',
-            Location.at(statement.condition.anchor),
-            context.trace,
-          ),
-        )
-      const selected = evaluateStatementSequence(
-        condition.value.value ? statement.taken : statement.otherwise,
-        contextual,
-      )
-      if (selected._tag !== 'Complete') return selected
-      continue
-    }
-    if (statement._tag === 'WhileStatement') {
-      while (true) {
-        const condition = evaluateExpression(statement.condition, contextual)
-        if (condition._tag !== 'Complete') return condition
-        if (condition.value._tag !== 'BooleanValue')
-          return failed(
-            phaseViolation(
-              'StaticEvaluation.evaluateStatements',
-              'while condition is not bool',
-              Location.at(statement.condition.anchor),
-              context.trace,
-            ),
-          )
-        if (!condition.value.value) break
-        const body = evaluateStatementSequence(statement.body, contextual)
-        if (body._tag === 'Failed') return body
-        if (body._tag === 'Transfer') {
-          if (body.control._tag === 'Return' || !sameLoop(body.control.target, statement.loop))
-            return body
-          if (body.control._tag === 'Break') break
-        }
-      }
-      continue
-    }
-    if (statement._tag === 'WriteStatement') {
-      if (statement.root?._tag !== 'BindingFact' || statement.root.phase !== 'Static')
-        return failed(
-          phaseViolation(
-            'StaticEvaluation.evaluateStatements',
-            'assignment does not replace one static local',
-            Location.at(statement.anchor),
-            context.trace,
-          ),
-        )
-      const path = staticWritePath(statement.destination, contextual)
-      if (path._tag !== 'Complete') return path
-      const value = evaluateExpression(statement.value, contextual)
-      if (value._tag !== 'Complete') return value
-      const key = localValueKey(statement.root)
-      const replaced = replaceStaticPlace(
-        values.get(key),
-        path.value,
-        value.value,
-        Location.at(statement.destination.anchor),
-        contextual,
-      )
-      if (replaced._tag !== 'Complete') return replaced
-      values.set(key, replaced.value)
-      if (path.value.length > 0) continue
-      const span = staticTextSpan(statement.value, contextual)
-      if (span === undefined) valueSpans.delete(key)
-      else valueSpans.set(key, span)
-      const origin = staticTextOrigin(statement.value, contextual)
-      if (origin === undefined) valueOrigins.delete(key)
-      else valueOrigins.set(key, origin)
-      continue
-    }
-    if (statement._tag === 'BreakStatement')
-      return Object.freeze({
-        _tag: 'Transfer',
-        span: Location.at(statement.anchor),
-        control: Object.freeze({ _tag: 'Break', target: statement.target }),
-      })
-    if (statement._tag === 'ContinueStatement')
-      return Object.freeze({
-        _tag: 'Transfer',
-        span: Location.at(statement.anchor),
-        control: Object.freeze({ _tag: 'Continue', target: statement.target }),
-      })
-    return failed(
+  const remember = (key: string, source: Tir.Expression): void => {
+    const span = staticTextSpan(source, contextual)
+    if (span === undefined) valueSpans.delete(key)
+    else valueSpans.set(key, span)
+    const origin = staticTextOrigin(source, contextual)
+    if (origin === undefined) valueOrigins.delete(key)
+    else valueOrigins.set(key, origin)
+  }
+  const notBool = (condition: Tir.Expression, what: string) =>
+    failed(
       phaseViolation(
         'StaticEvaluation.evaluateStatements',
-        `${statement._tag} is not admitted in a static function`,
-        Location.at(statement.anchor),
+        `${what} condition is not bool`,
+        at(condition),
         context.trace,
       ),
     )
+  for (const statement of statements) {
+    const exhausted = context.step?.(at(statement), context.trace)
+    if (exhausted !== undefined) return failed(exhausted)
+    switch (statement._tag) {
+      case 'Unsafe': {
+        const nested = evaluateStatementSequence(statement.statements, contextual)
+        if (nested._tag !== 'Complete') return nested
+        continue
+      }
+      case 'Bind': {
+        const value = evaluateExpression(statement.initializer, contextual)
+        if (value._tag !== 'Complete') return value
+        const key = bindingKey(statement.binding)
+        values.set(key, value.value)
+        remember(key, statement.initializer)
+        continue
+      }
+      case 'Evaluate':
+      case 'Drop': {
+        const value = evaluateExpression(statement.expression, contextual)
+        if (value._tag !== 'Complete') return value
+        continue
+      }
+      case 'Return': {
+        const value = evaluateExpression(statement.expression, contextual)
+        if (value._tag !== 'Complete') return value
+        if (context.returnedTextSpan !== undefined)
+          context.returnedTextSpan.value = staticTextSpan(statement.expression, contextual)
+        if (context.returnedTextOrigin !== undefined)
+          context.returnedTextOrigin.value = staticTextOrigin(statement.expression, contextual)
+        return Object.freeze({
+          _tag: 'Transfer',
+          span: at(statement),
+          control: Object.freeze({ _tag: 'Return', value: value.value }),
+        })
+      }
+      case 'If': {
+        const condition = evaluateExpression(statement.condition, contextual)
+        if (condition._tag !== 'Complete') return condition
+        if (condition.value._tag !== 'BooleanValue') return notBool(statement.condition, 'if')
+        const selected = evaluateStatementSequence(
+          condition.value.value ? statement.taken : statement.otherwise,
+          contextual,
+        )
+        if (selected._tag !== 'Complete') return selected
+        continue
+      }
+      case 'While': {
+        while (true) {
+          const condition = evaluateExpression(statement.condition, contextual)
+          if (condition._tag !== 'Complete') return condition
+          if (condition.value._tag !== 'BooleanValue') return notBool(statement.condition, 'while')
+          if (!condition.value.value) break
+          const body = evaluateStatementSequence(statement.body, contextual)
+          if (body._tag === 'Failed') return body
+          if (body._tag === 'Transfer') {
+            if (body.control._tag === 'Return' || !sameLoop(body.control.target, statement.loop))
+              return body
+            if (body.control._tag === 'Break') break
+          }
+        }
+        continue
+      }
+      case 'Write': {
+        const key =
+          statement.place._tag === 'WritePlace' ? writeRootKey(statement.place.root) : undefined
+        if (statement.place._tag !== 'WritePlace' || key === undefined || !values.has(key))
+          return failed(
+            phaseViolation(
+              'StaticEvaluation.evaluateStatements',
+              'assignment does not replace one static local',
+              at(statement),
+              context.trace,
+            ),
+          )
+        const path = staticWritePath(statement.place, contextual)
+        if (path._tag !== 'Complete') return path
+        const value = evaluateExpression(statement.value, contextual)
+        if (value._tag !== 'Complete') return value
+        const replaced = replaceStaticPlace(
+          values.get(key),
+          path.value,
+          value.value,
+          at(statement.place),
+          contextual,
+        )
+        if (replaced._tag !== 'Complete') return replaced
+        values.set(key, replaced.value)
+        if (path.value.length === 0) remember(key, statement.value)
+        continue
+      }
+      case 'Break':
+      case 'Continue':
+        return Object.freeze({
+          _tag: 'Transfer',
+          span: at(statement),
+          control: Object.freeze({ _tag: statement._tag, target: statement.target }),
+        })
+      default:
+        return failed(
+          phaseViolation(
+            'StaticEvaluation.evaluateStatements',
+            `${statement._tag} is not admitted in a static function`,
+            at(statement),
+            context.trace,
+          ),
+        )
+    }
   }
   return complete(StaticValue.unit())
 }
 
-/** Executes one fully analyzed static function body to a complete immutable value. */
+/** Executes one static function body to a complete immutable value. */
 export const evaluateStatements = (
-  statements: ReadonlyArray<Elaboration.StatementFact>,
-  context: FactEvaluationContext,
+  statements: ReadonlyArray<Tir.Statement>,
+  context: NodeContext,
 ): Outcome<StaticValue.Value> => {
   const result = evaluateStatementSequence(statements, context)
   if (result._tag !== 'Transfer') return result
@@ -2311,14 +2154,27 @@ export interface Pending {
   readonly trace: Trace
 }
 
+/**
+ * What one completed evaluation consumed. Accounting is additive and depth is counted from the
+ * evaluation's own entry, so a cost is a function of the evaluation's key alone.
+ */
+export interface Cost {
+  readonly steps: number
+  readonly callDepth: number
+  readonly retainedValueBytes: number
+  readonly residualNodes: number
+}
+
 export interface Complete<A> {
   readonly _tag: 'Complete'
   readonly value: A
+  readonly cost?: Cost
 }
 
 export interface Failed {
   readonly _tag: 'Failed'
   readonly failure: StaticFailure
+  readonly cost?: Cost
 }
 
 export interface CacheEntry<A> {
@@ -2546,6 +2402,34 @@ const contextOf = <A>(
       evaluateAt(self, nested, callback, trace),
   })
 
+const isLimit = (failure: StaticFailure): boolean =>
+  failure._tag === 'StepLimit' ||
+  failure._tag === 'CallDepthLimit' ||
+  failure._tag === 'RetainedValueLimit' ||
+  failure._tag === 'ResidualGrowthLimit'
+
+/** Charges a requester what a recorded evaluation consumed, exactly as executing it would have. */
+const chargeCost = <A>(
+  self: Evaluation<A>,
+  cost: Cost,
+  trace: Trace,
+): StaticFailure | undefined => {
+  const state = self[stateSymbol]
+  if (state.budget.failure !== undefined) return state.budget.failure
+  const depth = state.budget.callDepth + cost.callDepth
+  state.budget.maximumCallDepth = Math.max(state.budget.maximumCallDepth, depth)
+  if (depth > self.limits.callDepth) {
+    const failure = limitFailure('CallDepthLimit', self.limits.callDepth, depth, trace)
+    state.budget.failure = failure
+    return failure
+  }
+  return (
+    charge(self, 'steps', cost.steps, 'StepLimit', trace) ??
+    charge(self, 'retainedValueBytes', cost.retainedValueBytes, 'RetainedValueLimit', trace) ??
+    charge(self, 'residualNodes', cost.residualNodes, 'ResidualGrowthLimit', trace)
+  )
+}
+
 const evaluateAt = <A>(
   self: Evaluation<A>,
   application: Application,
@@ -2554,10 +2438,25 @@ const evaluateAt = <A>(
 ): ApplicationResult<A> => {
   const key = applicationKey(self.environment, application)
   const state = self[stateSymbol]
-  const cached = state.cache.get(key)
-  if (cached?._tag === 'Complete' || cached?._tag === 'Failed')
-    return resultOf(self, key, cached, true)
+  // A request made while nothing is being evaluated is a root: it gets the whole allowance.
+  // Everything it asks for draws from what it has left.
+  const root = state.budget.callDepth === 0
+  if (root) {
+    state.budget.steps = 0
+    state.budget.maximumCallDepth = 0
+    state.budget.retainedValueBytes = 0
+    state.budget.residualNodes = 0
+    delete state.budget.failure
+  }
   const trace = appendTrace(parentTrace, applicationFrame(self.environment, application))
+  const cached = state.cache.get(key)
+  if (cached?._tag === 'Complete' || cached?._tag === 'Failed') {
+    // Cache warmth never changes what is accepted: a hit costs what the evaluation cost.
+    const unpaid = cached.cost === undefined ? undefined : chargeCost(self, cached.cost, trace)
+    return unpaid === undefined
+      ? resultOf(self, key, cached, true)
+      : resultOf(self, key, Object.freeze({ _tag: 'Failed', failure: unpaid }), false)
+  }
   if (cached?._tag === 'Pending') {
     const failure: Cycle = Object.freeze({
       _tag: 'Cycle',
@@ -2569,29 +2468,40 @@ const evaluateAt = <A>(
   }
 
   state.cache.set(key, Object.freeze({ _tag: 'Pending', trace }))
+  const before = { ...state.budget }
   const depthFailure = enterCall(self, trace)
-  if (depthFailure !== undefined) {
-    const failedState: Failed = Object.freeze({ _tag: 'Failed', failure: depthFailure })
-    state.cache.set(key, failedState)
-    return resultOf(self, key, failedState, false)
-  }
-
   let outcome: Outcome<A>
-  try {
-    outcome = callback(contextOf(self, application, trace))
-  } catch (defect) {
-    state.cache.delete(key)
-    throw defect
-  } finally {
-    leaveCall(self)
-  }
+  if (depthFailure === undefined) {
+    // Depth is measured from this entry, so the recorded cost does not depend on the caller.
+    state.budget.maximumCallDepth = state.budget.callDepth
+    try {
+      outcome = callback(contextOf(self, application, trace))
+    } catch (defect) {
+      state.cache.delete(key)
+      throw defect
+    } finally {
+      leaveCall(self)
+    }
+  } else outcome = failed<A>(depthFailure)
   const finalOutcome =
     state.budget.failure === undefined ? outcome : failed<A>(state.budget.failure)
+  const cost: Cost = Object.freeze({
+    steps: state.budget.steps - before.steps,
+    callDepth: state.budget.maximumCallDepth - before.callDepth,
+    retainedValueBytes: state.budget.retainedValueBytes - before.retainedValueBytes,
+    residualNodes: state.budget.residualNodes - before.residualNodes,
+  })
+  state.budget.maximumCallDepth = Math.max(before.maximumCallDepth, state.budget.maximumCallDepth)
   const completedState: Complete<A> | Failed =
     finalOutcome._tag === 'Complete'
-      ? Object.freeze({ _tag: 'Complete', value: finalOutcome.value })
-      : Object.freeze({ _tag: 'Failed', failure: finalOutcome.failure })
-  state.cache.set(key, completedState)
+      ? Object.freeze({ _tag: 'Complete', value: finalOutcome.value, cost })
+      : Object.freeze({ _tag: 'Failed', failure: finalOutcome.failure, cost })
+  // Running out of a remainder is a fact about what the callers spent, not about this evaluation:
+  // nothing is recorded under its key, and the exhaustion surfaces as the root's outcome. A root
+  // that exhausts the whole allowance is a fact about its key, which includes the limits.
+  if (!root && completedState._tag === 'Failed' && isLimit(completedState.failure))
+    state.cache.delete(key)
+  else state.cache.set(key, completedState)
   return resultOf(self, key, completedState, false)
 }
 

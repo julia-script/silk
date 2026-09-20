@@ -1,3 +1,4 @@
+import { records } from './support/records.js'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as AuthoredIdentity from '../src/AuthoredIdentity.js'
@@ -85,7 +86,7 @@ it.effect(
       assert.deepEqual(result.diagnostics, [])
       assert.deepEqual(ownership.diagnostics, [])
       // The hidden anonymous body is published beside the named ones.
-      assert.isAbove(result.hiddenFunctions.length, 0)
+      assert.isAbove(records(result).hiddenFunctions.length, 0)
       assert.include(Tir.encode(result.tir), 'fn source-free/main.main')
     }),
 )

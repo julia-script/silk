@@ -7,7 +7,7 @@
  */
 
 import * as Diagnostic from './Diagnostic.js'
-import type * as Elaboration from './Elaboration.js'
+import * as Elaboration from './Elaboration.js'
 import type * as Tir from './Tir.js'
 import type { FlowModel } from './InspectorFlowModel.js'
 import type { RowModel, RowTone, Span } from './InspectorRow.js'
@@ -657,4 +657,4 @@ export const diagnosticCounts = (
 })
 
 export const elaborationSummary = (analysis: Elaboration.Result): string =>
-  `${analysis.functions.length} fn`
+  `${Elaboration.sourceBodyCount(analysis)} fn`

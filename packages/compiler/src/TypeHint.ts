@@ -58,10 +58,54 @@ const selectorFacts = (
   return Object.freeze([])
 }
 
-/** Projects available inferred editor facts into one half-open byte range. */
+/**
+ * What a body infers that its author did not write, as construction publishes it.
+ *
+ * Rows name authored nodes, never positions, so a reused body keeps them.
+ */
+export type Row =
+  | {
+      readonly _tag: 'Binding'
+      readonly at: AuthoredHir.Anchor
+      readonly type: Elaboration.SemanticType
+    }
+  | {
+      readonly _tag: 'ProviderSelectors'
+      /** The callee the omitted selectors would be spelled after. */
+      readonly callee: AuthoredHir.Anchor
+      readonly selectors: ReadonlyArray<Elaboration.InferredProviderSelector>
+    }
+
+/** The inference rows of one body. */
+export const rows = (
+  bindings: ReadonlyArray<Elaboration.BindingDeclarationFact>,
+  statements: ReadonlyArray<Elaboration.StatementFact>,
+): ReadonlyArray<Row> => {
+  const found: Array<Row> = []
+  for (const binding of bindings)
+    if (binding.name._tag === 'Present' && binding.inferredType._tag === 'Available')
+      found.push(
+        Object.freeze({
+          _tag: 'Binding',
+          at: binding.name.anchor,
+          type: binding.inferredType.type,
+        }),
+      )
+  Elaboration.visitStatementFacts(statements, {
+    expression: (expression) => {
+      const selectors = selectorFacts(expression)
+      const callee = selectors.length === 0 ? undefined : selectorCallee(expression)
+      if (callee !== undefined)
+        found.push(Object.freeze({ _tag: 'ProviderSelectors', callee, selectors }))
+    },
+  })
+  return Object.freeze(found)
+}
+
+/** Projects published inference rows into one half-open byte range. */
 export const make = (
   context: SemanticContext.SemanticContext,
-  functions: ReadonlyArray<Elaboration.FunctionFact>,
+  published: ReadonlyArray<Row>,
   module: string,
   scope: NameResolution.ModuleScope | undefined,
   start: number,
@@ -69,9 +113,9 @@ export const make = (
 ): ReadonlyArray<TypeHint> => {
   const seen = new Set<string>()
   const hints: Array<TypeHint> = []
-  for (const binding of functions.flatMap((fn) => fn.bindings)) {
-    if (binding.name._tag !== 'Present' || binding.inferredType._tag !== 'Available') continue
-    const span = context.spanOf(binding.name.anchor)
+  for (const binding of published) {
+    if (binding._tag !== 'Binding') continue
+    const span = context.spanOf(binding.at)
     if (span.start < start || span.end > end) continue
     const key = `${span.sourceId}:${span.start}:${span.end}`
     if (seen.has(key)) continue
@@ -80,7 +124,7 @@ export const make = (
       Object.freeze({
         _tag: 'BindingTypeHint',
         span,
-        presentation: SemanticDisplay.expressionType(binding.inferredType.type, module, scope),
+        presentation: SemanticDisplay.expressionType(binding.type, module, scope),
       }),
     )
   }
@@ -92,28 +136,22 @@ export const make = (
       readonly selectors: Map<string, Elaboration.InferredProviderSelector>
     }
   >()
-  for (const fn of functions)
-    Elaboration.visitStatementFacts(fn.statements, {
-      expression: (expression) => {
-        const selectors = selectorFacts(expression)
-        if (selectors.length === 0) return
-        const callee = selectorCallee(expression)
-        if (callee === undefined) return
-        const calleeSpan = context.spanOf(callee)
-        const span = SourceSpan.fromOffsets(calleeSpan.sourceId, calleeSpan.end, calleeSpan.end)
-        if (span === undefined || span.start < start || span.start >= end) return
-        const key = `${span.sourceId}:${span.start}`
-        const group = selectorGroups.get(key) ?? Object.freeze({ span, selectors: new Map() })
-        for (const selector of selectors) {
-          if (!Type.isNominal(selector.selected.capability)) continue
-          group.selectors.set(
-            `${Type.key(selector.parameter)}:${Type.key(selector.selected.capability)}@${selector.selected.role}`,
-            selector,
-          )
-        }
-        selectorGroups.set(key, group)
-      },
-    })
+  for (const row of published) {
+    if (row._tag !== 'ProviderSelectors') continue
+    const calleeSpan = context.spanOf(row.callee)
+    const span = SourceSpan.fromOffsets(calleeSpan.sourceId, calleeSpan.end, calleeSpan.end)
+    if (span === undefined || span.start < start || span.start >= end) continue
+    const key = `${span.sourceId}:${span.start}`
+    const group = selectorGroups.get(key) ?? Object.freeze({ span, selectors: new Map() })
+    for (const selector of row.selectors) {
+      if (!Type.isNominal(selector.selected.capability)) continue
+      group.selectors.set(
+        `${Type.key(selector.parameter)}:${Type.key(selector.selected.capability)}@${selector.selected.role}`,
+        selector,
+      )
+    }
+    selectorGroups.set(key, group)
+  }
   for (const group of selectorGroups.values()) {
     const selectors = [...group.selectors.values()].sort(
       (left, right) =>

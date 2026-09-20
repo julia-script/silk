@@ -1,10 +1,10 @@
+import { records } from './support/records.js'
 import * as Layer from 'effect/Layer'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Exit from 'effect/Exit'
 import * as Fiber from 'effect/Fiber'
 import * as Analysis from '../src/Analysis.js'
-import * as Elaboration from '../src/Elaboration.js'
 import * as FrontendTooling from '../src/FrontendTooling.js'
 import * as Tir from '../src/Tir.js'
 import * as ProjectAnalysis from '../src/ProjectAnalysis.js'
@@ -412,17 +412,26 @@ pub fn value() -> i32 { return privateValue() }`
       const view = ProjectAnalysis.view(renamed, 'query/Main') ?? raise('renamed query view')
       assert.deepEqual(Analysis.diagnostics(view), [])
       const consumers = view.results.get('query/Main') ?? raise('consumer facts')
+      // A reused consumer names its callee by id, so it reads the renamed header of this revision.
       const selectedNames: Array<string> = []
-      for (const fn of consumers.functions)
-        Elaboration.visitStatementFacts(fn.statements, {
-          expression: (expression) => {
-            if (expression._tag === 'Call' && expression.reference._tag === 'Resolved')
-              for (const parameter of expression.reference.declaration.typeParameters)
-                if (parameter.name._tag === 'Present') selectedNames.push(parameter.name.spelling)
-          },
-        })
+      const visit = (expression: Tir.Expression): void => {
+        if (expression._tag === 'Call')
+          for (const module of view.index.modules)
+            for (const declaration of module.declarations)
+              if (
+                declaration.canonical._tag === 'Canonical' &&
+                declaration.canonical.id.module === expression.target.module &&
+                declaration.canonical.id.name === expression.target.name
+              )
+                for (const parameter of declaration.typeParameters)
+                  if (parameter.name._tag === 'Present') selectedNames.push(parameter.name.spelling)
+        Tir.expressionChildren(expression).forEach(visit)
+      }
+      for (const fn of consumers.tir.functions)
+        fn.statements.flatMap(Tir.statementExpressions).forEach(visit)
       assert.deepEqual(selectedNames, ["'long"])
-      const functions = view.results.get('shared/Core')?.functions ?? raise('library facts')
+      const functions =
+        records(view.results.get('shared/Core'))?.functions ?? raise('library facts')
       const value = functions.at(-1) ?? raise('last library function')
       // The presented header span is trivia-free, so it slices the declaration exactly.
       const valueSpan = view.resolution.contexts.spanOf(value.declaration.anchor)
@@ -630,28 +639,34 @@ fn broken() -> i32 { return missing() }`
       assert.strictEqual(diagnostic.span.start, oldDiagnostic.span.start + prefix.length)
       assert.strictEqual(diagnostic.span.end, oldDiagnostic.span.end + prefix.length)
       const result = view.results.get('query/Rebind') ?? raise('rebound module')
-      const hidden = result.hiddenFunctions.at(0) ?? raise('rebound anonymous function')
+      const hidden = result.bodies.find((body) => body.hidden) ?? raise('rebound anonymous body')
       const callback =
-        result.functions.find(
-          (fn) =>
-            fn.declaration.name._tag === 'Present' && fn.declaration.name.spelling === 'callback',
+        result.bodies.find(
+          (body) =>
+            body.declaration.name._tag === 'Present' &&
+            body.declaration.name.spelling === 'callback',
         ) ?? raise('rebound callback')
       // The hidden identity follows its enclosing declaration and callable site, not byte offsets.
       assert.strictEqual(
         hidden.declaration.id.ordinal,
         Tir.hiddenDeclarationOrdinal(callback.declaration.id.ordinal, 0),
       )
+      assert.deepEqual(hidden.function?.declaration.id, hidden.declaration.id)
       const oldResult = oldView.results.get('query/Rebind') ?? raise('original module')
-      const oldHidden = oldResult.hiddenFunctions.at(0) ?? raise('original anonymous function')
+      const oldHidden =
+        oldResult.bodies.find((body) => body.hidden) ?? raise('original anonymous body')
       assert.strictEqual(hidden.declaration.id.ordinal - oldHidden.declaration.id.ordinal, 65536)
-      Elaboration.visitStatementFacts(callback.statements, {
-        expression: (expression) => {
-          if (expression._tag === 'Identifier' && expression.reference._tag === 'ResolvedPattern') {
-            const span = view.resolution.contexts.spanOf(expression.reference.binding.name.anchor)
-            assert.strictEqual(currentSource.slice(span.start, span.end), 'value')
-          }
-        },
-      })
+      // The reused body names its pattern binding where the binding now stands.
+      const bound = callback.results.occurrences.filter(
+        (occurrence) =>
+          occurrence.resolution._tag === 'Available' &&
+          occurrence.resolution.identity._tag === 'PatternBindingIdentity',
+      )
+      assert.isAbove(bound.length, 0)
+      for (const occurrence of bound) {
+        const span = view.resolution.contexts.spanOf(occurrence.at)
+        assert.strictEqual(currentSource.slice(span.start, span.end), 'value')
+      }
     }),
 )
 
@@ -913,10 +928,10 @@ it.effect('reuses exact unchanged syntax and module semantics inside one coheren
     assert.strictEqual(currentView.ownership.get('app/B'), previousView.ownership.get('app/B'))
     const retainedResult = currentView.results.get('shared/Core') ?? raise('retained library')
     const retainedFunction = retainedResult.tir.functions.at(0) ?? raise('retained TIR function')
-    const retainedFact = retainedResult.functions.at(0) ?? raise('retained semantic function')
+    const retainedBody = retainedResult.bodies.at(0) ?? raise('retained checked body')
     const ownershipInput = Ownership.input(
       retainedFunction,
-      retainedFact,
+      retainedBody.results.lifetimes,
       currentView.index,
       Ownership.localSharedAccessBoundaryPlan(currentView.results),
       NameResolution.scopeOf(currentView.resolution, 'shared/Core')?.context ??
@@ -1133,10 +1148,10 @@ unsafe fn probe(core: &Intrinsic.SharedCore<i32>) -> i32 { return 1 }`
       const afterResult = after.results.get('shared/Callbacks') ?? raise('revised callbacks')
       assert.strictEqual(afterResult, beforeResult)
       const fn = afterResult.tir.functions.at(0) ?? raise('callback TIR')
-      const fact = afterResult.functions.at(0) ?? raise('callback fact')
+      const body = afterResult.bodies.at(0) ?? raise('callback body')
       const previousInput = Ownership.input(
         fn,
-        fact,
+        body.results.lifetimes,
         before.index,
         Ownership.localSharedAccessBoundaryPlan(before.results),
         NameResolution.scopeOf(before.resolution, 'shared/Callbacks')?.context ??
@@ -1144,7 +1159,7 @@ unsafe fn probe(core: &Intrinsic.SharedCore<i32>) -> i32 { return 1 }`
       )
       const currentInput = Ownership.input(
         fn,
-        fact,
+        body.results.lifetimes,
         after.index,
         Ownership.localSharedAccessBoundaryPlan(after.results),
         NameResolution.scopeOf(after.resolution, 'shared/Callbacks')?.context ??

@@ -1,3 +1,4 @@
+import type * as AuthoredIdentity from './AuthoredIdentity.js'
 import * as DeclarationFacts from './DeclarationFacts.js'
 import * as Lifetime from './Lifetime.js'
 import * as RowAlgebra from './RowAlgebra.js'
@@ -13,6 +14,8 @@ export interface MatchId {
   readonly _tag: 'MatchId'
   readonly function: DeclarationFacts.DeclarationId
   readonly span: SourceSpan.SourceSpan
+  /** The authored node `span` presents; presentation stamps the span from it. */
+  readonly at?: AuthoredIdentity.Anchor
 }
 
 /** Stable source-order identity for one arm. */
@@ -128,6 +131,8 @@ export interface PatternTest {
   readonly member: CoverageIdentity
   readonly domain: ReadonlyArray<CoverageIdentity>
   readonly span: SourceSpan.SourceSpan
+  /** The authored node `span` presents; presentation stamps the span from it. */
+  readonly at?: AuthoredIdentity.Anchor
 }
 
 /** One source decision reduced to the facts that affect coverage. */

@@ -1,3 +1,6 @@
+import * as OpaqueRealization from './OpaqueRealization.js'
+import * as TypeHint from './TypeHint.js'
+import * as SemanticOccurrence from './SemanticOccurrence.js'
 import * as Location from './Location.js'
 import type * as AuthoredHir from './AuthoredHir.js'
 import * as AuthoredIdentity from './AuthoredIdentity.js'
@@ -45,6 +48,7 @@ import type {
 } from './ExpressionAnalysis.js'
 import {
   analyzeExpression,
+  evaluateStatic,
   analyzePattern,
   patternTests,
   bindingName,
@@ -409,6 +413,7 @@ export const analyzeStatements = (
       _tag: 'MatchId',
       function: context.declaration.id,
       span: context.context.spanOf(element.anchor),
+      at: element.anchor,
     })
     const arm: Match.ArmId = Object.freeze({ _tag: 'MatchArmId', match: id, ordinal: 0 })
     const pattern = analyzePattern(
@@ -491,6 +496,7 @@ export const analyzeStatements = (
         element._tag === 'PatternBindingStatement'
           ? context.context.spanOf(blockNode.anchor)
           : context.context.spanOf(element.anchor),
+      loanEndAt: element._tag === 'PatternBindingStatement' ? blockNode.anchor : element.anchor,
       anchor: element.anchor,
     })
   }
@@ -735,7 +741,7 @@ export const analyzeStatements = (
         context.staticContext !== undefined &&
         context.resolution.deferStaticCalls !== true &&
         !containsOrdinaryArm(initializerNode)
-          ? StaticEvaluation.evaluateFact(initializer.fact, context.staticContext)
+          ? evaluateStatic(initializer.fact, context.staticContext, context.resolution)
           : undefined
       if (evaluated?._tag === 'Failed')
         context.diagnostics.push(staticDiagnostic(evaluated.failure))
@@ -770,9 +776,10 @@ export const analyzeStatements = (
       if (staticValue !== undefined && context.staticContext !== undefined) {
         const key = StaticEvaluation.localValueKey(binding)
         context.staticContext.values.set(key, staticValue)
-        const staticTextSpan = context.staticContext.expressionSpans.get(initializer.fact)
+        const evaluatedNode = context.staticContext.nodes.expression(initializer.fact)
+        const staticTextSpan = context.staticContext.expressionSpans.get(evaluatedNode)
         if (staticTextSpan !== undefined) context.staticContext.valueSpans.set(key, staticTextSpan)
-        const staticTextOrigin = context.staticContext.expressionOrigins.get(initializer.fact)
+        const staticTextOrigin = context.staticContext.expressionOrigins.get(evaluatedNode)
         if (staticTextOrigin !== undefined)
           context.staticContext.valueOrigins.set(key, staticTextOrigin)
       }
@@ -884,7 +891,7 @@ export const analyzeStatements = (
         context.declaration.phase !== 'Static' &&
         expression.fact._tag === 'CompileError'
       ) {
-        const evaluated = StaticEvaluation.evaluateFact(expression.fact, context.staticContext)
+        const evaluated = evaluateStatic(expression.fact, context.staticContext, context.resolution)
         if (evaluated._tag === 'Failed')
           context.diagnostics.push(staticDiagnostic(evaluated.failure))
         facts.push(
@@ -966,7 +973,7 @@ export const analyzeStatements = (
         reject()
         continue
       }
-      const evaluated = StaticEvaluation.evaluateFact(iterable.fact, context.staticContext)
+      const evaluated = evaluateStatic(iterable.fact, context.staticContext, context.resolution)
       if (evaluated._tag === 'Failed') {
         context.diagnostics.push(staticDiagnostic(evaluated.failure))
         reject()
@@ -1108,7 +1115,7 @@ export const analyzeStatements = (
       if (condition === undefined)
         throw new RangeError(`Semantic analysis cannot analyze ${conditionNode._tag}`)
       context.diagnostics.push(...condition.diagnostics)
-      const evaluated = StaticEvaluation.evaluateFact(condition.fact, context.staticContext)
+      const evaluated = evaluateStatic(condition.fact, context.staticContext, context.resolution)
       if (evaluated._tag === 'Failed') {
         context.diagnostics.push(staticDiagnostic(evaluated.failure))
         continue
@@ -2103,6 +2110,9 @@ export const analyzeFunctionBody = (
       ...(resultRepresentation === undefined ? {} : { resultRepresentation }),
       generatedAggregates: Object.freeze([...(bodyResolution.generatedAggregates?.values() ?? [])]),
       staticIterations: Object.freeze([...context.staticIterations]),
+      occurrences: SemanticOccurrence.ofStatements(statements, resolution.index, resolution.scope),
+      hints: TypeHint.rows(context.bindings, statements),
+      opaqueEvidence: OpaqueRealization.evidenceOfBody(semantic, declaration, statements),
     }),
     diagnostics: Object.freeze([...context.diagnostics]),
   })

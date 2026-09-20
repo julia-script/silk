@@ -8,6 +8,7 @@ import * as DeclarationFacts from './DeclarationFacts.js'
 import type * as DeclarationIndex from './DeclarationIndex.js'
 import * as Diagnostic from './Diagnostic.js'
 import * as Elaboration from './Elaboration.js'
+import * as LoanView from './LoanView.js'
 import * as ExecutionAffinity from './ExecutionAffinity.js'
 import * as FieldRealization from './FieldRealization.js'
 import * as Tir from './Tir.js'
@@ -91,7 +92,7 @@ export type BorrowId = Tir.BorrowId
 /** One concrete validity dependency, retaining its precise known subplace. */
 export interface LoanReferent {
   readonly root: BindingSite
-  readonly path: ReadonlyArray<Elaboration.BorrowSelectorFact>
+  readonly path: ReadonlyArray<LoanView.Selector>
 }
 
 /** Canonical subplace identity for inspection and dependency-set normalization. */
@@ -1745,7 +1746,7 @@ interface LoanAnalysis {
   readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
 }
 
-const borrowSite = (root: Elaboration.BorrowRootFact): BindingSite => {
+const borrowSite = (root: LoanView.BorrowRoot): BindingSite => {
   if (root._tag === 'BindingRoot') {
     return Object.freeze({ _tag: 'Let', binding: root.binding.id })
   }
@@ -1773,7 +1774,7 @@ interface LoanEndpoint {
 }
 
 const analyzeLoans = (
-  fn: Elaboration.FunctionFact,
+  fn: LoanView.Body,
   index: DeclarationIndex.Index,
   copyAssumptions: ReadonlySet<string>,
   cleanupExits: ReadonlyArray<ExitPlan>,
@@ -1784,7 +1785,7 @@ const analyzeLoans = (
   const diagnostics: Array<Diagnostic.Diagnostic> = []
 
   const directSite = (
-    expression: Elaboration.ExpressionFact,
+    expression: LoanView.Expression,
   ): { readonly site: BindingSite; readonly spelling: string } | undefined => {
     if (
       expression._tag === 'Move' ||
@@ -1814,9 +1815,7 @@ const analyzeLoans = (
     return undefined
   }
 
-  const movedExecutableBindings = (
-    expression: Elaboration.ExpressionFact,
-  ): ReadonlyArray<number> => {
+  const movedExecutableBindings = (expression: LoanView.Expression): ReadonlyArray<number> => {
     if (expression._tag === 'Move') {
       const site = directSite(expression.subject)?.site
       return site?._tag === 'Let' &&
@@ -1877,7 +1876,7 @@ const analyzeLoans = (
   // not merely while evaluating its identifier. Otherwise a hidden backing owner can be dropped
   // between constructing a call argument and invoking the callee that reads it.
   const scanRunEnds = (
-    expression: Elaboration.ExpressionFact,
+    expression: LoanView.Expression,
     region: Tir.RegionId,
     useAnchor: AuthoredHir.Anchor = expression.anchor,
   ): void => {
@@ -2038,7 +2037,7 @@ const analyzeLoans = (
         return
     }
   }
-  const scanStatementRunEnds = (facts: ReadonlyArray<Elaboration.StatementFact>): void => {
+  const scanStatementRunEnds = (facts: ReadonlyArray<LoanView.Statement>): void => {
     for (const statement of facts) {
       switch (statement._tag) {
         case 'UnsafeStatement':
@@ -2113,18 +2112,16 @@ const analyzeLoans = (
     `${AuthoredIdentity.anchorKey(anchor)}:${ordinal}`
   const returnedCallableCaptures = new Set<string>()
   const bindings = [...fn.bindings]
-  Elaboration.visitStatementFacts(fn.statements, {
-    expression: (expression) => {
-      if (expression._tag === 'EffectBlock') bindings.push(...expression.bindings)
-    },
+  LoanView.visitExpressions(fn.statements, (expression) => {
+    if (expression._tag === 'EffectBlock') bindings.push(...expression.bindings)
   })
   const bindingInitializers = new Map(
     bindings.map((binding) => [binding.id.ordinal, binding.initializer] as const),
   )
   const returnedCallable = (
-    expression: Elaboration.ExpressionFact,
+    expression: LoanView.Expression,
     seen: ReadonlySet<number> = new Set(),
-  ): Extract<Elaboration.ExpressionFact, { readonly _tag: 'CallableSection' }> | undefined => {
+  ): Extract<LoanView.Expression, { readonly _tag: 'CallableSection' }> | undefined => {
     if (expression._tag === 'Move') return returnedCallable(expression.subject, seen)
     if (expression._tag === 'CallableSection') return expression
     const site = directSite(expression)?.site
@@ -2135,9 +2132,9 @@ const analyzeLoans = (
       : returnedCallable(initializer, new Set(seen).add(site.binding.ordinal))
   }
   const returnedExpressions = (
-    statements: ReadonlyArray<Elaboration.StatementFact>,
-  ): ReadonlyArray<Elaboration.ExpressionFact> =>
-    statements.flatMap((statement): ReadonlyArray<Elaboration.ExpressionFact> => {
+    statements: ReadonlyArray<LoanView.Statement>,
+  ): ReadonlyArray<LoanView.Expression> =>
+    statements.flatMap((statement): ReadonlyArray<LoanView.Expression> => {
       switch (statement._tag) {
         case 'ReturnStatement':
           return [statement.expression]
@@ -2158,7 +2155,7 @@ const analyzeLoans = (
   // The root a captured loan is tied to. A borrow of a borrowed parameter reborrows the caller's
   // loan, so the callable may leave this function with it; only a root this function owns ends here.
   const capturedLoanRoot = (
-    expression: Elaboration.ExpressionFact,
+    expression: LoanView.Expression,
   ): { readonly spelling: string; readonly ownedHere: boolean } | undefined => {
     if (expression._tag === 'Move') return capturedLoanRoot(expression.subject)
     if (expression._tag === 'Borrow') return capturedLoanRoot(expression.subject)
@@ -2240,23 +2237,21 @@ const analyzeLoans = (
   }
 
   const assumptions = Lifetime.assumptions(fn.lifetimeFlow?.input.constraints ?? [])
-  const returnedArgumentOrdinals = (expression: Elaboration.ExpressionFact): ReadonlySet<number> =>
+  const returnedArgumentOrdinals = (expression: LoanView.Expression): ReadonlySet<number> =>
     new Set(
-      Elaboration.retainedResultArguments(expression, assumptions).map(
+      LoanView.retainedResultArguments(expression, assumptions).map(
         (argument) => argument.id.ordinal,
       ),
     )
-  const returnedSources = (
-    expression: Elaboration.ExpressionFact,
-  ): ReadonlyArray<Elaboration.ExpressionFact> => {
-    const arguments_ = Elaboration.retainedResultArguments(expression, assumptions).map(
+  const returnedSources = (expression: LoanView.Expression): ReadonlyArray<LoanView.Expression> => {
+    const arguments_ = LoanView.retainedResultArguments(expression, assumptions).map(
       (argument) => argument.expression,
     )
     if (
       expression._tag === 'CallableApply' &&
       expression.callee.type._tag === 'Available' &&
       expression.type._tag === 'Available' &&
-      Elaboration.retainsLifetimes(expression.callee.type.type, expression.type.type, assumptions)
+      LoanView.retainsLifetimes(expression.callee.type.type, expression.type.type, assumptions)
     )
       return [...arguments_, expression.callee]
     return arguments_
@@ -2265,14 +2260,14 @@ const analyzeLoans = (
   const viewAliases = new Map<number, ReadonlyArray<number>>()
   const rootsOf = (
     root: BindingSite,
-    path: ReadonlyArray<Elaboration.BorrowSelectorFact> = [],
+    path: ReadonlyArray<LoanView.Selector> = [],
   ): ReadonlyArray<LoanReferent> => {
     const sources = root._tag === 'Let' ? viewRoots.get(root.binding.ordinal) : undefined
     return sources === undefined
       ? [{ root, path }]
       : sources.map((source) => ({ root: source.root, path: [...source.path, ...path] }))
   }
-  const physicalPlace = (expression: Elaboration.ExpressionFact): LoanReferent | undefined => {
+  const physicalPlace = (expression: LoanView.Expression): LoanReferent | undefined => {
     if (expression._tag === 'Move') return physicalPlace(expression.subject)
     if (expression._tag === 'Borrow' && expression.formation._tag !== 'Unavailable')
       return { root: borrowSite(expression.formation.root), path: expression.formation.root.path }
@@ -2317,7 +2312,7 @@ const analyzeLoans = (
     const direct = directSite(expression)?.site
     return direct === undefined ? undefined : { root: direct, path: [] }
   }
-  const borrowedRootType = (expression: Elaboration.ExpressionFact): Type.Type | undefined => {
+  const borrowedRootType = (expression: LoanView.Expression): Type.Type | undefined => {
     if (expression._tag === 'Borrow') return borrowedRootType(expression.subject)
     if (
       expression._tag === 'FieldProjection' ||
@@ -2334,7 +2329,7 @@ const analyzeLoans = (
     const type = expression.type.type
     return Type.isReference(type) || Type.isSlice(type) ? type : undefined
   }
-  const sourceReferents = (expression: Elaboration.ExpressionFact): ReadonlyArray<LoanReferent> => {
+  const sourceReferents = (expression: LoanView.Expression): ReadonlyArray<LoanReferent> => {
     if (expression._tag === 'Borrow' && expression.formation._tag !== 'Unavailable') {
       const formation = expression.formation
       const root = borrowSite(formation.root)
@@ -2383,7 +2378,7 @@ const analyzeLoans = (
     if (
       binding.initializer._tag === 'CallableApply' &&
       binding.initializer.callee.type._tag === 'Available' &&
-      Elaboration.retainsLifetimes(
+      LoanView.retainsLifetimes(
         binding.initializer.callee.type.type,
         binding.inferredType.type,
         assumptions,
@@ -2393,7 +2388,7 @@ const analyzeLoans = (
         for (const capture of binding.initializer.callee.captures) {
           if (
             capture.expression.type._tag === 'Available' &&
-            Elaboration.retainsLifetimes(
+            LoanView.retainsLifetimes(
               capture.expression.type.type,
               binding.inferredType.type,
               assumptions,
@@ -2414,14 +2409,12 @@ const analyzeLoans = (
       }
     }
   }
-  const expressionsByAnchor = new Map<string, Elaboration.ExpressionFact>()
-  Elaboration.visitStatementFacts(fn.statements, {
-    expression: (expression) => {
-      const key = AuthoredIdentity.anchorKey(expression.anchor)
-      // An implicit receiver borrow shares its syntax with its subject. Preserve the borrow's
-      // storage provenance instead of replacing it with the subject's retained payload loans.
-      if (expressionsByAnchor.get(key)?._tag !== 'Borrow') expressionsByAnchor.set(key, expression)
-    },
+  const expressionsByAnchor = new Map<string, LoanView.Expression>()
+  LoanView.visitExpressions(fn.statements, (expression) => {
+    const key = AuthoredIdentity.anchorKey(expression.anchor)
+    // An implicit receiver borrow shares its syntax with its subject. Preserve the borrow's
+    // storage provenance instead of replacing it with the subject's retained payload loans.
+    if (expressionsByAnchor.get(key)?._tag !== 'Borrow') expressionsByAnchor.set(key, expression)
   })
   const referentsAt = (
     root: BindingSite,
@@ -2514,10 +2507,7 @@ const analyzeLoans = (
     readonly anchor?: AuthoredHir.Anchor
   }
   const captureRoots = (
-    reference:
-      | Elaboration.BindingDeclarationFact
-      | DeclarationFacts.ParameterFact
-      | Elaboration.PatternBindingFact,
+    reference: LoanView.Local,
     access: 'Copy' | 'Shared' | 'Exclusive' | 'Take',
   ): ReadonlyArray<BindingSite> => {
     if (reference._tag === 'BindingFact') {
@@ -2540,7 +2530,7 @@ const analyzeLoans = (
       : []
   }
   const effectEscapes = (
-    expression: Elaboration.ExpressionFact,
+    expression: LoanView.Expression,
     seen: ReadonlySet<number> = new Set(),
   ): ReadonlyArray<EscapingCapture> => {
     switch (expression._tag) {
@@ -2655,7 +2645,7 @@ const analyzeLoans = (
     })
 
   const checkDirectAccess = (
-    expression: Elaboration.ExpressionFact,
+    expression: LoanView.Expression,
     active: ReadonlyArray<LoanFact>,
     access: 'Read' | 'Write' | 'Move',
   ): void => {
@@ -2686,14 +2676,14 @@ const analyzeLoans = (
     }
   }
 
-  const naturalAccess = (expression: Elaboration.ExpressionFact): 'Read' | 'Move' =>
+  const naturalAccess = (expression: LoanView.Expression): 'Read' | 'Move' =>
     expression.type._tag === 'Available' &&
     categoryOf(index, expression.type.type, copyAssumptions)._tag === 'MoveOnly'
       ? 'Move'
       : 'Read'
 
   const inspect = (
-    expression: Elaboration.ExpressionFact,
+    expression: LoanView.Expression,
     region: Tir.RegionId,
     active: ReadonlyArray<LoanFact>,
     access: 'Read' | 'Write' | 'Move' = 'Read',
@@ -2814,7 +2804,8 @@ const analyzeLoans = (
         return
       case 'Operator': {
         const callActive: Array<LoanFact> = [...active]
-        for (const [ordinal, argument] of expression.arguments.entries()) {
+        for (const argument of expression.arguments) {
+          const ordinal = argument.id.ordinal
           const candidate = argument.expression
           const operand = expression.interfaceOperation?.contract.operands.at(ordinal)
           const operandType = operand?.type._tag === 'Resolved' ? operand.type.type : undefined
@@ -2954,7 +2945,8 @@ const analyzeLoans = (
           inspect(expression.callee, region, active, access, delayedEnd)
         }
         const inspectArguments = (): void => {
-          for (const [argumentOrdinal, argument] of expression.arguments.entries()) {
+          for (const argument of expression.arguments) {
+            const argumentOrdinal = argument.id.ordinal
             const candidate = argument.expression
             if (candidate._tag === 'Borrow' && candidate.formation._tag !== 'Unavailable') {
               const directRoot = borrowSite(candidate.formation.root)
@@ -3041,7 +3033,8 @@ const analyzeLoans = (
             expression.reference.operation === 'SlotTake' ||
             expression.reference.operation === 'SlotCopy' ||
             expression.reference.operation === 'SlotDrop')
-        for (const [argumentOrdinal, argument] of expression.arguments.entries()) {
+        for (const argument of expression.arguments) {
+          const argumentOrdinal = argument.id.ordinal
           const candidate = argument.expression
           const returnedOrdinal = returnedArgumentOrdinals(expression)
           if (candidate._tag !== 'Borrow' || candidate.formation._tag === 'Unavailable') {
@@ -3230,7 +3223,7 @@ const analyzeLoans = (
   }
 
   const statements = (
-    facts: ReadonlyArray<Elaboration.StatementFact>,
+    facts: ReadonlyArray<LoanView.Statement>,
     active: ReadonlyArray<LoanFact> = [],
   ): void => {
     for (const statement of facts) {
@@ -3371,7 +3364,7 @@ const checkFunction = (
   fn: Tir.TirFunction,
   index: DeclarationIndex.Index,
   context: SemanticContext.SemanticContext,
-  semantic?: Elaboration.FunctionFact,
+  lifetimes?: LifetimeFlow.LifetimeFlow,
   localSharedBoundaries: ReadonlyArray<SourceSpan.SourceSpan> = Object.freeze([]),
   localSharedResultBoundaries: ReadonlyArray<SourceSpan.SourceSpan> = Object.freeze([]),
 ): CheckedFunction => {
@@ -4650,21 +4643,24 @@ const checkFunction = (
     ),
   )
 
-  const loanSemantic =
-    semantic?.lifetimeFlow === undefined
-      ? semantic
-      : {
-          ...semantic,
-          lifetimeFlow: LifetimeFlow.withCleanupUses(semantic.lifetimeFlow, cleanupExits),
-        }
+  // Loans are read off the checked body itself; the region proof is the one result construction
+  // publishes beside it, extended by the cleanup this pass just planned.
+  const loanLifetimes =
+    lifetimes === undefined ? undefined : LifetimeFlow.withCleanupUses(lifetimes, cleanupExits)
   const loanAnalysis =
-    loanSemantic === undefined
+    loanLifetimes === undefined
       ? Object.freeze({
           loanAccessChecks: 0,
           loans: Object.freeze([]),
           diagnostics: Object.freeze([]),
         })
-      : analyzeLoans(loanSemantic, index, copyAssumptions, cleanupExits, context)
+      : analyzeLoans(
+          { ...LoanView.ofTir(fn, index), lifetimeFlow: loanLifetimes },
+          index,
+          copyAssumptions,
+          cleanupExits,
+          context,
+        )
   state.work.loanAccessChecks = loanAnalysis.loanAccessChecks
   state.diagnostics.push(...loanAnalysis.diagnostics)
   const exitPlans = Object.freeze(
@@ -4716,9 +4712,8 @@ const checkFunction = (
       _tag: 'FunctionOwnership' as const,
       work: Object.freeze({ ...state.work }),
       cleanupLifetimeWork: Object.freeze(
-        loanSemantic?.lifetimeFlow !== semantic?.lifetimeFlow &&
-          loanSemantic?.lifetimeFlow?.solution._tag === 'Solved'
-          ? { liveness: loanSemantic.lifetimeFlow.solution.work }
+        loanLifetimes !== lifetimes && loanLifetimes?.solution._tag === 'Solved'
+          ? { liveness: loanLifetimes.solution.work }
           : {},
       ),
       declaration,
@@ -4755,9 +4750,8 @@ const checkFunction = (
     }),
     diagnostics: Object.freeze([...state.diagnostics]),
   })
-  if (semantic?.lifetimeFlow === undefined || checked.ownership.verdict._tag !== 'Satisfied')
-    return checked
-  const cleanup = LifetimeFlow.validateCleanup(semantic.lifetimeFlow, checked.ownership, context)
+  if (lifetimes === undefined || checked.ownership.verdict._tag !== 'Satisfied') return checked
+  const cleanup = LifetimeFlow.validateCleanup(lifetimes, checked.ownership, context)
   const firstCleanupViolation = cleanup.diagnostics.at(0)
   return Object.freeze({
     ownership: Object.freeze({
@@ -4783,7 +4777,8 @@ const checkFunction = (
 /** Every input read by the ownership checker, after callback boundaries are selected. */
 export interface CheckInput {
   readonly function: Tir.TirFunction
-  readonly semantic: Elaboration.FunctionFact | undefined
+  /** The region proof published with the body; absent for a body construction never analyzed. */
+  readonly lifetimes: LifetimeFlow.LifetimeFlow | undefined
   readonly index: DeclarationIndex.Index
   /** Spans and evaluation order of this function's authored module. */
   readonly context: SemanticContext.SemanticContext
@@ -4794,14 +4789,14 @@ export interface CheckInput {
 /** Resolves ownership inputs without running the checker or reconstructing prior diagnostics. */
 export const input = (
   fn: Tir.TirFunction,
-  semantic: Elaboration.FunctionFact | undefined,
+  lifetimes: LifetimeFlow.LifetimeFlow | undefined,
   index: DeclarationIndex.Index,
   accessBoundaryPlan: LocalSharedAccessBoundaryPlan,
   context: SemanticContext.SemanticContext,
 ): CheckInput =>
   Object.freeze({
     function: fn,
-    semantic,
+    lifetimes,
     index,
     context,
     boundaries:
@@ -4835,7 +4830,7 @@ const sameBoundarySpans = (
 /** Requires identical semantic authorities and equal ordered access-boundary spans. */
 export const matchesInput = (self: CheckInput, other: CheckInput): boolean =>
   self.function === other.function &&
-  self.semantic === other.semantic &&
+  self.lifetimes === other.lifetimes &&
   self.index === other.index &&
   self.context === other.context &&
   sameBoundarySpans(self.boundaries, other.boundaries) &&
@@ -4847,7 +4842,7 @@ export const check = (self: CheckInput): CheckedFunction =>
     self.function,
     self.index,
     self.context,
-    self.semantic,
+    self.lifetimes,
     self.boundaries,
     self.resultBoundaries,
   )
@@ -5090,19 +5085,16 @@ export const checkModule = (
   bodyQuery?: BodyQuery.BodyQuery,
 ): ModuleOwnership => {
   const context = SemanticContext.make(result.authored)
-  const executableFacts = Elaboration.executableFunctions(result)
-  const checked = result.tir.functions.map((fn) => {
-    const semantic = executableFacts.find(
-      (fact) =>
-        fact.declaration.id.sourceId === fn.declaration.id.sourceId &&
-        fact.declaration.id.ordinal === fn.declaration.id.ordinal,
-    )
-    const selected = input(fn, semantic, index, accessBoundaryPlan, context)
+  const checked = result.bodies.flatMap((body) => {
+    // A `static fn` runs in the evaluator: it owns nothing at run time.
+    if (body.declaration.phase === 'Static') return []
+    const fn = body.function
+    const selected = input(fn, body.results.lifetimes, index, accessBoundaryPlan, context)
     const compute = () => check(selected)
     const checked =
       bodyQuery === undefined ? compute() : BodyQuery.ownership(bodyQuery, selected, compute)
     publishSourceProof(selected, checked)
-    return checked
+    return [checked]
   })
   return Object.freeze({
     _tag: 'OwnershipFacts',

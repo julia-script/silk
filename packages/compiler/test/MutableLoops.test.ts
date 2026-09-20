@@ -1,3 +1,4 @@
+import { records } from './support/records.js'
 import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
@@ -50,8 +51,8 @@ pub fn main() -> i32 { return 42 }`)
     const analysis = Analysis.rootAnalysis(self)
     const syntax = Projections.syntaxOf(self, 'mutable-loops/main')
     assert.isAbove(syntax?.parserDiagnostics.length ?? 0, 0)
-    assert.strictEqual(analysis.functions.length, 2)
-    const name = analysis.functions.at(1)?.declaration.name
+    assert.strictEqual(records(analysis).functions.length, 2)
+    const name = records(analysis).functions.at(1)?.declaration.name
     assert.strictEqual(name?._tag, 'Present')
     if (name?._tag === 'Present') assert.strictEqual(name.spelling, 'main')
   }),

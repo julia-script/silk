@@ -109,7 +109,7 @@ export const analyzeArgumentNodes = (
     return result === undefined ? [] : [result]
   })
   const facts = analyzed.map((result, ordinal) =>
-    argumentFact(declaration, context.spanOf(site.anchor), result.fact, ordinal),
+    argumentFact(declaration, context, site.anchor, result.fact, ordinal),
   )
 
   return Object.freeze({
@@ -3429,6 +3429,7 @@ export function executableSite(
     ...(resolution.executableOwner === undefined ? {} : { owner: resolution.executableOwner }),
     ordinal,
     span,
+    at: node.anchor,
   })
 }
 
@@ -4214,6 +4215,7 @@ export const finishCallableApplication = (
             evidence,
             providerCapture.expression,
             context.spanOf(providerCapture.expression.anchor),
+            providerCapture.expression.anchor,
             resolution?.index,
           )
     return Object.freeze({

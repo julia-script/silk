@@ -11,6 +11,7 @@
  */
 
 import * as Analysis from './Analysis.js'
+import * as Elaboration from './Elaboration.js'
 import * as Tir from './Tir.js'
 import { projectDataFlow } from './InspectorFlowModel.js'
 import * as Diagnostic from './Diagnostic.js'
@@ -526,7 +527,7 @@ export const views: ReadonlyArray<ViewDefinition> = [
       const phases = [
         {
           phase: 'syntax (lex + parse)',
-          outputs: `${rootSyntax(snapshot).tokens.length} tokens · ${analysis.functions.length} declarations`,
+          outputs: `${rootSyntax(snapshot).tokens.length} tokens · ${Elaboration.sourceBodyCount(analysis)} declarations`,
           diagnostics: countFor('lexical') + countFor('parser'),
         },
         {

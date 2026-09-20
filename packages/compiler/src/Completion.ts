@@ -178,12 +178,12 @@ const enclosingFunction = (
   context: SemanticContext.SemanticContext,
   result: Elaboration.Result,
   offset: number,
-): Elaboration.FunctionFact | undefined => {
-  const width = (fn: Elaboration.FunctionFact): number => {
+): Elaboration.CheckedBody | undefined => {
+  const width = (fn: Elaboration.CheckedBody): number => {
     const span = context.spanOf(fn.declaration.anchor)
     return span.end - span.start
   }
-  return Elaboration.executableFunctions(result)
+  return result.bodies
     .filter((fn) => {
       const span = context.spanOf(fn.declaration.anchor)
       return span.start <= offset && offset <= span.end
@@ -198,23 +198,26 @@ const sameDeclaration = (
 ): boolean => left.sourceId === right.sourceId && left.ordinal === right.ordinal
 
 const scopeChain = (
+  context: SemanticContext.SemanticContext,
   result: Elaboration.Result,
-  fn: Elaboration.FunctionFact | undefined,
+  fn: Elaboration.CheckedBody | undefined,
   offset: number,
 ): ReadonlyArray<Elaboration.LexicalScopeFact> => {
   if (fn === undefined) return Object.freeze([])
   const candidates = result.lexicalScopes
-    .filter(
-      (scope) =>
-        sameDeclaration(scope.id.function, fn.declaration.id) &&
-        scope.span.start <= offset &&
-        offset <= scope.span.end,
-    )
+    .filter((scope) => sameDeclaration(scope.id.function, fn.declaration.id))
+    .map((scope) => ({
+      scope,
+      start: context.spanOf(scope.first).start,
+      end: context.spanOf(scope.last).end,
+    }))
+    .filter(({ start, end }) => start <= offset && offset <= end)
     .sort(
       (left, right) =>
-        left.span.end - left.span.start - (right.span.end - right.span.start) ||
-        right.id.ordinal - left.id.ordinal,
+        left.end - left.start - (right.end - right.start) ||
+        right.scope.id.ordinal - left.scope.id.ordinal,
     )
+    .map(({ scope }) => scope)
   const byOrdinal = new Map(
     result.lexicalScopes
       .filter((scope) => sameDeclaration(scope.id.function, fn.declaration.id))
@@ -232,11 +235,11 @@ const scopeChain = (
 const visibleBindings = (
   context: SemanticContext.SemanticContext,
   result: Elaboration.Result,
-  fn: Elaboration.FunctionFact | undefined,
+  fn: Elaboration.CheckedBody | undefined,
   offset: number,
-): ReadonlyArray<Elaboration.BindingDeclarationFact> => {
-  const selected = new Map<string, Elaboration.BindingDeclarationFact>()
-  for (const scope of scopeChain(result, fn, offset))
+): ReadonlyArray<Elaboration.ScopeBinding> => {
+  const selected = new Map<string, Elaboration.ScopeBinding>()
+  for (const scope of scopeChain(context, result, fn, offset))
     for (const binding of scope.bindings.toReversed())
       if (
         binding.name._tag === 'Present' &&
@@ -254,11 +257,11 @@ const visibleBindings = (
 const visiblePatternBindings = (
   context: SemanticContext.SemanticContext,
   result: Elaboration.Result,
-  fn: Elaboration.FunctionFact | undefined,
+  fn: Elaboration.CheckedBody | undefined,
   offset: number,
 ): ReadonlyArray<Elaboration.PatternBindingFact> => {
   const selected = new Map<string, Elaboration.PatternBindingFact>()
-  for (const scope of scopeChain(result, fn, offset))
+  for (const scope of scopeChain(context, result, fn, offset))
     for (const binding of scope.patternBindings.toReversed())
       if (
         binding.name._tag === 'Present' &&
@@ -431,7 +434,7 @@ const valueLookup = (
   context: SemanticContext.SemanticContext,
   spelling: string,
   result: Elaboration.Result,
-  fn: Elaboration.FunctionFact | undefined,
+  fn: Elaboration.CheckedBody | undefined,
   offset: number,
 ): ValueLookup => {
   const binding = visibleBindings(context, result, fn, offset).find(
@@ -577,7 +580,7 @@ const suppliedOperationCandidates = (
 
 /** The receiver operations a generic value obtains from its parameter's declared bounds. */
 const boundOperationCandidates = (
-  fn: Elaboration.FunctionFact | undefined,
+  fn: Elaboration.CheckedBody | undefined,
   type: Type.Parameter | undefined,
 ): ReadonlyArray<Candidate> => {
   if (fn === undefined || type === undefined) return Object.freeze([])
@@ -649,7 +652,7 @@ const typeCandidates = (
   module: string,
   index: DeclarationIndex.Index,
   scope: NameResolution.ModuleScope | undefined,
-  fn: Elaboration.FunctionFact | undefined,
+  fn: Elaboration.CheckedBody | undefined,
 ): ReadonlyArray<Candidate> => {
   const candidates: Array<Candidate> = [
     candidate({
@@ -753,7 +756,7 @@ const expressionCandidates = (
   index: DeclarationIndex.Index,
   scope: NameResolution.ModuleScope | undefined,
   result: Elaboration.Result,
-  fn: Elaboration.FunctionFact | undefined,
+  fn: Elaboration.CheckedBody | undefined,
   offset: number,
 ): ReadonlyArray<Candidate> => {
   const candidates: Array<Candidate> = []

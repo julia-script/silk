@@ -21,6 +21,9 @@ export const canonicalName = (sourceId: string): string => sourceId.replace(/:\/
  * `located` is the revision-free result itself, for a test that hands it to a later stage.
  */
 export type Elaborated = Omit<Elaboration.Result, 'diagnostics'> & {
+  /** The working records construction built the bodies from, which these tests examine. */
+  readonly functions: ReadonlyArray<Elaboration.FunctionFact>
+  readonly hiddenFunctions: ReadonlyArray<Elaboration.FunctionFact>
   readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
   readonly located: Elaboration.Result
 }
@@ -60,6 +63,7 @@ export const elaborate = (syntax: SyntaxFile.SyntaxFile): Elaborated => {
   indices.set(result, index)
   return Object.freeze({
     ...result,
+    ...Elaboration.records(result),
     // Published the way the frontend publishes: spans first, then the one deterministic order.
     diagnostics: Diagnostic.merge(
       Diagnostic.publishAll(

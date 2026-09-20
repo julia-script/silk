@@ -1061,6 +1061,7 @@ export const borrowRoot = (
               _tag: 'Field' as const,
               field: subject.state.field.id,
               span: context.spanOf(subject.anchor),
+              at: subject.anchor,
             }),
           ]),
         })
@@ -1083,6 +1084,7 @@ export const borrowRoot = (
               array: subject.array,
               bounds: subject.bounds,
               span: context.spanOf(subject.anchor),
+              at: subject.anchor,
             }),
           ]),
         })
@@ -1104,6 +1106,7 @@ export const borrowRoot = (
               index: subject.index,
               slice: subject.slice,
               span: context.spanOf(subject.anchor),
+              at: subject.anchor,
             }),
           ]),
         })
@@ -1240,6 +1243,7 @@ export const borrowSubject = (
             _tag: 'TemporaryOwnerId' as const,
             function: declaration.id,
             span: context.spanOf(subject.anchor),
+            at: subject.anchor,
             ordinal: 0,
           }),
           value: subject,
@@ -2717,6 +2721,7 @@ export const patternTests = (
               member: nested.coverage,
               domain: coverageMembersOf(index, nested.member),
               span: context.spanOf(nested.anchor),
+              at: nested.anchor,
             },
           ]
         : []
@@ -2746,6 +2751,7 @@ export const analyzeMatch = (
     _tag: 'MatchId',
     function: declaration.id,
     span: context.spanOf(node.anchor),
+    at: node.anchor,
   })
   const access = matchAccess(node)
   const scrutineeNode = node.subject
@@ -3329,6 +3335,7 @@ export const exactEffectDeclarationRepresentation = (
     owner: declaration.canonical.id,
     ordinal: -1,
     span: context.spanOf(declaration.anchor),
+    at: declaration.anchor,
   })
   return Type.exactRepresentationArgument(
     Type.effectIdentityArgument(Tir.effectRepresentationIdentity(site), owner),
@@ -4560,7 +4567,7 @@ export const analyzeProjection = (
   const evaluated =
     resolution.staticContext === undefined
       ? undefined
-      : StaticEvaluation.evaluateFact(projection, resolution.staticContext)
+      : evaluateStatic(projection, resolution.staticContext, resolution)
   const fact: FieldProjectionExpressionFact =
     evaluated?._tag === 'Complete'
       ? Object.freeze({ ...projection, staticValue: evaluated.value })
@@ -4874,6 +4881,7 @@ export const effectBindingProvider = (
   evidence: ReadonlyArray<Constraint.ConstraintEvidence>,
   provider: ExpressionFact,
   span: SourceSpan.SourceSpan,
+  at: AuthoredHir.Anchor,
   index?: DeclarationIndex.Index,
 ): EffectRequirementBindingFact | undefined => {
   if (
@@ -4920,6 +4928,7 @@ export const effectBindingProvider = (
         ? 'Copy'
         : captureAccess(provider, index),
     span,
+    at,
   })
 }
 
@@ -5098,9 +5107,10 @@ const mixedFieldProjection = (
       type: type._tag === 'Available' ? type.type : undefined,
     })
   }
-  const evaluated = StaticEvaluation.evaluateFact(
+  const evaluated = evaluateStatic(
     descriptorArgument.expression,
     resolution.staticContext,
+    resolution,
   )
   if (evaluated._tag === 'Failed' || evaluated.value._tag !== 'FieldDescriptorValue') {
     const diagnostic =
@@ -5451,6 +5461,7 @@ export const finishIntrinsicContractCall = (
           evidence,
           provider.expression,
           context.spanOf(provider.anchor),
+          provider.anchor,
           resolution.index,
         )
   const bindingAvailable =
@@ -7639,9 +7650,7 @@ const finishBoundMethod = (
       declaration: candidate.declaration,
     }),
     Object.freeze({
-      facts: Object.freeze([
-        argumentFact(declaration, context.spanOf(node.anchor), receiver.fact, 0),
-      ]),
+      facts: Object.freeze([argumentFact(declaration, context, node.anchor, receiver.fact, 0)]),
       diagnostics: receiver.diagnostics,
     }),
     analyzeCallTypeArguments(context, node, declaration, resolution),
@@ -7726,14 +7735,9 @@ const analyzeMethodCall = (
         reference,
         Object.freeze({
           facts: Object.freeze([
-            argumentFact(declaration, context.spanOf(node.anchor), subjectResult.fact, 0),
+            argumentFact(declaration, context, node.anchor, subjectResult.fact, 0),
             ...written.facts.map((argument, ordinal) =>
-              argumentFact(
-                declaration,
-                context.spanOf(node.anchor),
-                argument.expression,
-                ordinal + 1,
-              ),
+              argumentFact(declaration, context, node.anchor, argument.expression, ordinal + 1),
             ),
           ]),
           diagnostics: written.diagnostics,
@@ -7894,9 +7898,9 @@ const analyzeMethodCall = (
   )
   const argumentsResult: ArgumentsResult = Object.freeze({
     facts: Object.freeze([
-      argumentFact(declaration, context.spanOf(node.anchor), receiver.fact, 0),
+      argumentFact(declaration, context, node.anchor, receiver.fact, 0),
       ...written.facts.map((argument, ordinal) =>
-        argumentFact(declaration, context.spanOf(node.anchor), argument.expression, ordinal + 1),
+        argumentFact(declaration, context, node.anchor, argument.expression, ordinal + 1),
       ),
     ]),
     diagnostics: Object.freeze([...receiver.diagnostics, ...written.diagnostics]),
@@ -8369,9 +8373,7 @@ export const analyzePipelineExpression = (
       node,
       appliedTarget,
       Object.freeze({
-        facts: Object.freeze([
-          argumentFact(declaration, context.spanOf(node.anchor), inputFact, 0),
-        ]),
+        facts: Object.freeze([argumentFact(declaration, context, node.anchor, inputFact, 0)]),
         diagnostics: input?.diagnostics ?? Object.freeze([]),
       }),
       Object.freeze({ explicit: false, facts: Object.freeze([]), diagnostics: Object.freeze([]) }),
@@ -8412,7 +8414,7 @@ export const analyzePipelineExpression = (
     node,
     callableResult,
     Object.freeze({
-      facts: Object.freeze([argumentFact(declaration, context.spanOf(node.anchor), inputFact, 0)]),
+      facts: Object.freeze([argumentFact(declaration, context, node.anchor, inputFact, 0)]),
       diagnostics: input?.diagnostics ?? Object.freeze([]),
     }),
     Object.freeze({
@@ -10626,11 +10628,13 @@ export const finishDeclarationCall = (
       if (parameter.phase !== 'Static') continue
       const argument = argumentsResult.facts.at(parameter.id.ordinal)
       if (argument === undefined) continue
-      const evaluated = StaticEvaluation.evaluateFact(argument.expression, resolution.staticContext)
+      const evaluated = evaluateStatic(argument.expression, resolution.staticContext, resolution)
       if (evaluated._tag === 'Complete') {
         const textOrigin =
-          StaticEvaluation.staticTextOrigin(argument.expression, resolution.staticContext) ??
-          (evaluated.value._tag === 'TextValue' ? evaluated.value.origin : undefined)
+          StaticEvaluation.staticTextOrigin(
+            resolution.staticContext.nodes.expression(argument.expression),
+            resolution.staticContext,
+          ) ?? (evaluated.value._tag === 'TextValue' ? evaluated.value.origin : undefined)
         values.push(
           Object.freeze({
             parameter,
@@ -10719,7 +10723,7 @@ export const finishDeclarationCall = (
     staticContext !== undefined &&
     resolution.deferStaticCalls !== true &&
     expressionType._tag === 'Available'
-      ? StaticEvaluation.evaluateFact(fact, staticContext)
+      ? evaluateStatic(fact, staticContext, resolution)
       : undefined
   const staticDiagnostics =
     staticResult?._tag === 'Failed' && staticContext !== undefined
@@ -10727,8 +10731,11 @@ export const finishDeclarationCall = (
       : []
   let resolvedFact = fact
   if (staticResult?._tag === 'Complete') {
-    const staticTextSpan = staticContext?.expressionSpans.get(fact)
-    const staticTextOrigin = staticContext?.expressionOrigins.get(fact)
+    const evaluatedNode = staticContext?.nodes.expression(fact)
+    const staticTextSpan =
+      evaluatedNode === undefined ? undefined : staticContext?.expressionSpans.get(evaluatedNode)
+    const staticTextOrigin =
+      evaluatedNode === undefined ? undefined : staticContext?.expressionOrigins.get(evaluatedNode)
     resolvedFact = Object.freeze({
       ...fact,
       staticValue: staticResult.value,
@@ -10886,19 +10893,39 @@ export const scopeSpanFor = (
   return parameter?.name._tag === 'Present' ? Location.at(parameter.name.anchor) : undefined
 }
 
+/**
+ * Evaluates what construction has analyzed so far.
+ *
+ * Aggregates this body generated are not in the declaration index yet, so they are answered from
+ * the body's own resolution before the index is asked.
+ */
+export const evaluateStatic = (
+  fact: ExpressionFact,
+  staticContext: StaticAnalysisContext,
+  resolution: Pick<ResolutionContext, 'generatedAggregates'> | undefined,
+): StaticEvaluation.Outcome<StaticValue.Value> =>
+  StaticEvaluation.evaluate(staticContext.nodes.expression(fact), {
+    ...staticContext,
+    lookup: (id) =>
+      resolution?.generatedAggregates?.get(`${id.module}:${id.name}`) ?? staticContext.lookup(id),
+  })
+
 export interface StaticAnalysisContext {
   readonly environment: StaticEvaluation.TargetEnvironment
   readonly typeSubstitution?: Type.Substitution
   readonly values: Map<string, StaticValue.Value>
   readonly valueSpans: Map<string, Location.Location>
   readonly valueOrigins: Map<string, StaticEvaluation.TextOrigin>
-  readonly expressionSpans: Map<ExpressionFact, Location.Location>
-  readonly expressionOrigins: Map<ExpressionFact, StaticEvaluation.TextOrigin>
+  readonly expressionSpans: Map<Tir.Expression, Location.Location>
+  readonly expressionOrigins: Map<Tir.Expression, StaticEvaluation.TextOrigin>
   readonly returnedTextSpan?: { value: Location.Location | undefined }
   readonly trace: StaticEvaluation.Trace
-  readonly call: StaticEvaluation.FactEvaluationContext['call']
-  readonly reflect: StaticEvaluation.FactEvaluationContext['reflect']
-  readonly constant?: NonNullable<StaticEvaluation.FactEvaluationContext['constant']>
+  /** The nodes of what this body has analyzed so far, which is what the evaluator interprets. */
+  readonly nodes: import('./TirLowering.js').StaticLowering
+  readonly lookup: StaticEvaluation.NodeContext['lookup']
+  readonly call: StaticEvaluation.NodeContext['call']
+  readonly reflect: StaticEvaluation.NodeContext['reflect']
+  readonly constant?: NonNullable<StaticEvaluation.NodeContext['constant']>
   /** Charges one fully analyzed iteration before any of its residual facts are published. */
   readonly chargeStaticIteration?: (
     trace: StaticEvaluation.Trace,

@@ -1,3 +1,4 @@
+import { records } from './support/records.js'
 import * as Layer from 'effect/Layer'
 import * as CompilerTrace from '../src/CompilerTrace.js'
 import * as AnalysisFixture from './support/AnalysisFixture.js'
@@ -245,7 +246,7 @@ it.effect('resolves imported declarations as stored callable values', () =>
       ['lib', 'pub fn identity(value: i32) -> i32 { return value }'],
     ])
     const root = self.results.get('root')
-    const main = root?.functions.at(0)
+    const main = records(root)?.functions.at(0)
     const binding = main?.statements.at(0)
 
     assert.strictEqual(
@@ -290,7 +291,7 @@ it.effect('retains inaccessible imported callable targets without inventing a va
       ['lib', 'fn hidden(value: i32) -> i32 { return value }'],
     ])
     const root = self.results.get('root')
-    const binding = root?.functions.at(0)?.statements.at(0)
+    const binding = records(root)?.functions.at(0)?.statements.at(0)
     const initializer = binding?._tag === 'BindStatement' ? binding.binding.initializer : undefined
 
     assert.strictEqual(initializer?._tag, 'FunctionItem')
@@ -339,7 +340,7 @@ it.effect('reports only actionable diagnostics for empty and final-expression so
   Effect.gen(function* () {
     const empty = yield* AnalysisFixture.declarations('memory/empty', new Uint8Array())
     assert.deepEqual(Analysis.diagnostics(empty), [])
-    assert.deepEqual(Analysis.rootAnalysis(empty).functions, [])
+    assert.deepEqual(records(Analysis.rootAnalysis(empty)).functions, [])
 
     const recovered = yield* AnalysisFixture.retainingMain(
       'memory/recovered-return',

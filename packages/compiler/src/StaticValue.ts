@@ -1,5 +1,6 @@
 import type * as AuthoredIdentity from './AuthoredIdentity.js'
 import type * as DeclarationFacts from './DeclarationFacts.js'
+import type * as Provenance from './Provenance.js'
 import * as FloatingPoint from './FloatingPoint.js'
 import * as Canonical from './internal/Canonical.js'
 import * as Scalar from './Scalar.js'
@@ -61,30 +62,12 @@ export interface TextValue {
   readonly origin?: TextOrigin
 }
 
-/** Source provenance retained as non-identity metadata on static text values. */
-export type TextOrigin = SourceTextOrigin | ParameterTextOrigin
-
 /**
- * A half-open byte range of one written literal's decoded value.
- *
- * Both offsets are value coordinates. Which source bytes spell them is a question for the literal's
- * presentation, asked when a diagnostic is published.
+ * Where the bytes of a static text were written: non-identity metadata, in value coordinates. It is
+ * a list of segments, so text built by slicing, joining and calling still names every literal it
+ * was copied from.
  */
-export interface SourceTextOrigin {
-  readonly _tag: 'SourceTextOrigin'
-  readonly at: AuthoredIdentity.Anchor
-  readonly start: number
-  readonly end: number
-}
-
-export interface ParameterTextOrigin {
-  readonly _tag: 'ParameterTextOrigin'
-  /** Static application whose parameter coordinates this origin uses. */
-  readonly scope?: string
-  readonly ordinal: number
-  readonly start: number
-  readonly end: number
-}
+export type TextOrigin = Provenance.Provenance
 
 /** The declaration-independent identity needed to distinguish canonical aggregate values. */
 export type AggregateIdentity = NominalAggregateIdentity | ArrayAggregateIdentity
@@ -324,47 +307,47 @@ const floatValue = (type: Scalar.FloatSpelling, bits: bigint): Admission => {
   )
 }
 
-const textOrigin = (value: unknown): TextOrigin | undefined => {
+const offset = (value: unknown): value is number =>
+  typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
+
+const textRange = (value: unknown): Provenance.Range | undefined =>
+  isRecord(value) && offset(value.start) && offset(value.end) && value.start <= value.end
+    ? Object.freeze({ start: value.start, end: value.end })
+    : undefined
+
+const textSource = (value: unknown): Provenance.Source | undefined => {
   if (!isRecord(value)) return undefined
-  if (value._tag === 'ParameterTextOrigin') {
-    if (
-      typeof value.ordinal !== 'number' ||
-      typeof value.start !== 'number' ||
-      typeof value.end !== 'number' ||
-      !Number.isSafeInteger(value.ordinal) ||
-      !Number.isSafeInteger(value.start) ||
-      !Number.isSafeInteger(value.end) ||
-      value.ordinal < 0 ||
-      value.start < 0 ||
-      value.start > value.end
-    )
-      return undefined
-    return Object.freeze({
-      _tag: 'ParameterTextOrigin',
-      ...(typeof value.scope === 'string' ? { scope: value.scope } : {}),
-      ordinal: value.ordinal,
-      start: value.start,
-      end: value.end,
-    })
+  const range = textRange(value.range)
+  if (range === undefined) return undefined
+  if (value._tag === 'Parameter')
+    return offset(value.ordinal)
+      ? Object.freeze({
+          _tag: 'Parameter',
+          ...(typeof value.scope === 'string' ? { scope: value.scope } : {}),
+          ordinal: value.ordinal,
+          range,
+        })
+      : undefined
+  return value._tag === 'Literal' && isRecord(value.at) && value.at._tag === 'AuthoredAnchor'
+    ? Object.freeze({
+        _tag: 'Literal',
+        at: value.at as unknown as AuthoredIdentity.Anchor,
+        range,
+      })
+    : undefined
+}
+
+/** Admits provenance only whole: one malformed segment discards it, and the text stays valid. */
+const textOrigin = (value: unknown): TextOrigin | undefined => {
+  if (!Array.isArray(value)) return undefined
+  const segments: Array<Provenance.Segment> = []
+  for (const segment of value) {
+    const range = isRecord(segment) ? textRange(segment.value) : undefined
+    const from = isRecord(segment) ? textSource(segment.from) : undefined
+    if (range === undefined || from === undefined) return undefined
+    segments.push(Object.freeze({ value: range, from }))
   }
-  if (
-    value._tag !== 'SourceTextOrigin' ||
-    !isRecord(value.at) ||
-    value.at._tag !== 'AuthoredAnchor' ||
-    typeof value.start !== 'number' ||
-    typeof value.end !== 'number' ||
-    !Number.isSafeInteger(value.start) ||
-    !Number.isSafeInteger(value.end) ||
-    value.start < 0 ||
-    value.start > value.end
-  )
-    return undefined
-  return Object.freeze({
-    _tag: 'SourceTextOrigin',
-    at: value.at as unknown as AuthoredIdentity.Anchor,
-    start: value.start,
-    end: value.end,
-  })
+  return Object.freeze(segments)
 }
 
 const textValue = (bytes: unknown, origin?: unknown): Admission => {

@@ -3,7 +3,7 @@ import * as Lifetime from './Lifetime.js'
 import * as Constraint from './Constraint.js'
 import type * as ConformanceProof from './ConformanceProof.js'
 import type * as DeclarationFacts from './DeclarationFacts.js'
-import type * as AuthoredIdentity from './AuthoredIdentity.js'
+import * as AuthoredIdentity from './AuthoredIdentity.js'
 import type * as Diagnostic from './Diagnostic.js'
 import type * as Location from './Location.js'
 import * as Intrinsic from './Intrinsic.js'
@@ -12,6 +12,7 @@ import type * as Operator from './Operator.js'
 import * as RowAlgebra from './RowAlgebra.js'
 import type * as Scalar from './Scalar.js'
 import type * as SourceSpan from './SourceSpan.js'
+import * as SourceSpanModule from './SourceSpan.js'
 import type * as StaticEvaluation from './StaticEvaluation.js'
 import type * as StaticText from './StaticText.js'
 import * as StaticValue from './StaticValue.js'
@@ -76,6 +77,30 @@ export type Origin =
       readonly occurrence: number
     }
 
+/**
+ * Which typed body this is. "Checking `f`" is not one thing: the generic body is one artifact and
+ * each semantic application that must be specialized is another. Provenance never takes part, so
+ * two applications with equal static values are the same artifact wherever they were written.
+ */
+export interface ArtifactId {
+  /** The authored owner whose body this is; a compiler-made body is its own owner. */
+  readonly owner: AuthoredIdentity.Identity
+  readonly request:
+    | { readonly _tag: 'Check' }
+    /** The canonical key of the application: type and static arguments, evidence, contract row. */
+    | { readonly _tag: 'Specialize'; readonly application: string }
+  /** The artifact that produced a compiler-made body, which tells apart bodies made per parent. */
+  readonly parent?: ArtifactId
+}
+
+/** The canonical text of an artifact identity: the key a body is requested and stored under. */
+export const artifactKey = (self: ArtifactId): string =>
+  JSON.stringify([
+    AuthoredIdentity.key(self.owner),
+    self.request._tag === 'Check' ? null : self.request.application,
+    self.parent === undefined ? null : artifactKey(self.parent),
+  ])
+
 export const authored = (anchor: AuthoredIdentity.Anchor): Origin =>
   Object.freeze({ _tag: 'Authored', anchor })
 
@@ -94,6 +119,8 @@ export interface BorrowId {
   readonly _tag: 'BorrowId'
   readonly function: DeclarationFacts.DeclarationId
   readonly callSpan: SourceSpan.SourceSpan
+  /** The authored call `callSpan` presents; presentation stamps the span from it. */
+  readonly call?: AuthoredIdentity.Anchor
   readonly ordinal: number
 }
 
@@ -102,6 +129,8 @@ export interface TemporaryOwnerId {
   readonly _tag: 'TemporaryOwnerId'
   readonly function: DeclarationFacts.DeclarationId
   readonly span: SourceSpan.SourceSpan
+  /** The authored node `span` presents; presentation stamps the span from it. */
+  readonly at?: AuthoredIdentity.Anchor
   readonly ordinal: number
 }
 
@@ -113,6 +142,8 @@ interface ExecutableSiteId {
   readonly owner?: DeclarationFacts.CanonicalId
   readonly ordinal: number
   readonly span: SourceSpan.SourceSpan
+  /** The authored node `span` presents; presentation stamps the span from it. */
+  readonly at?: AuthoredIdentity.Anchor
 }
 
 /** Hidden nominal identity for one source `effect {}` construction site. */
@@ -357,6 +388,7 @@ export type BorrowSelector =
       readonly _tag: 'Field'
       readonly field: DeclarationFacts.FieldId
       readonly span: SourceSpan.SourceSpan
+      readonly at?: AuthoredIdentity.Anchor
     }
   | {
       readonly _tag: 'Index'
@@ -364,12 +396,14 @@ export type BorrowSelector =
       readonly array: Type.FixedArray
       readonly bounds: BoundsMode
       readonly span: SourceSpan.SourceSpan
+      readonly at?: AuthoredIdentity.Anchor
     }
   | {
       readonly _tag: 'SliceIndex'
       readonly index: Expression
       readonly slice: Type.Slice
       readonly span: SourceSpan.SourceSpan
+      readonly at?: AuthoredIdentity.Anchor
     }
 
 /** One selector in a writable place, retained in source evaluation order. */
@@ -379,6 +413,7 @@ export type WriteSelector =
       readonly field: DeclarationFacts.FieldId
       readonly type: DeclarationFacts.SemanticType
       readonly span: SourceSpan.SourceSpan
+      readonly at?: AuthoredIdentity.Anchor
     }
   | {
       readonly _tag: 'Index'
@@ -387,6 +422,7 @@ export type WriteSelector =
       readonly bounds: BoundsMode
       readonly type: DeclarationFacts.SemanticType
       readonly span: SourceSpan.SourceSpan
+      readonly at?: AuthoredIdentity.Anchor
     }
 
 export type OwnedWriteRoot =
@@ -421,8 +457,8 @@ export type BorrowedWriteSelector =
 export interface BorrowedWritePlace {
   readonly _tag: 'BorrowedWritePlace'
   readonly root: Extract<SliceRoot, { readonly _tag: 'BindingSliceRoot' | 'ParameterSliceRoot' }>
-  /** The borrowed root: an exclusive slice, or an exclusive reference written through. */
-  readonly slice: Type.Slice | Type.Reference
+  /** Semantic type of the storage root before the path enters borrowed storage. */
+  readonly rootType: DeclarationFacts.SemanticType
   readonly selectors: ReadonlyArray<BorrowedWriteSelector>
   readonly type: DeclarationFacts.SemanticType
   readonly span: SourceSpan.SourceSpan
@@ -449,12 +485,20 @@ export interface PatternSelection {
   readonly arm: Match.ArmId
   readonly access: Match.Access
   readonly subject: Expression
+  /**
+   * The authored expression matched, borrow included, kept as evidence for loan analysis. `subject`
+   * and `access` are what executes.
+   */
+  readonly source?: Expression
   readonly members: ReadonlyArray<Match.CoverageIdentity>
   readonly member?: Match.CoverageIdentity
   readonly universal: boolean
   readonly bindings: ReadonlyArray<PatternBinding>
   readonly cleanup: ReadonlyArray<ReadonlyArray<DeclarationFacts.FieldId>>
   readonly irrefutable: boolean
+  /** Where a loan taken by matching the subject ends. */
+  readonly loanEnd: SourceSpan.SourceSpan
+  readonly loanEndAt?: AuthoredIdentity.Anchor
   readonly span: SourceSpan.SourceSpan
   readonly origin: Origin
 }
@@ -558,6 +602,52 @@ export type Expression =
       readonly origin: Origin
     }
   | {
+      /**
+       * `compileError(message)`: static structure. It is reached only while a body is evaluated at
+       * compile time, so no residual body holds one.
+       */
+      readonly _tag: 'CompileError'
+      readonly message: Expression
+      readonly type: DeclarationFacts.SemanticType
+      readonly span: SourceSpan.SourceSpan
+      readonly origin: Origin
+    }
+  | {
+      /** A call of a `static fn`, with every argument kept: static structure. */
+      readonly _tag: 'StaticCall'
+      readonly target: DeclarationFacts.CanonicalId
+      readonly typeArguments: ReadonlyArray<Type.GenericArgument>
+      /** Canonical keys of the evidence the call selected, which are part of its application. */
+      readonly evidence: ReadonlyArray<string>
+      readonly arguments: ReadonlyArray<Expression>
+      /** A rejection already reached while construction selected this call's application. */
+      readonly failure?: StaticEvaluation.StaticFailure
+      /** Where the text this call returns was written, when construction already knows. */
+      readonly text?: Location.Location
+      readonly textOrigin?: StaticEvaluation.TextOrigin
+      readonly type: DeclarationFacts.SemanticType
+      readonly span: SourceSpan.SourceSpan
+      readonly origin: Origin
+    }
+  | {
+      /** A compile-time intrinsic (profile facts, reflection, static text and sequences). */
+      readonly _tag: 'StaticIntrinsic'
+      readonly operation: string
+      readonly typeArguments: ReadonlyArray<Type.GenericArgument>
+      readonly arguments: ReadonlyArray<Expression>
+      readonly type: DeclarationFacts.SemanticType
+      readonly span: SourceSpan.SourceSpan
+      readonly origin: Origin
+    }
+  | {
+      /** A constant whose value is selected by evaluating its initializer: static structure. */
+      readonly _tag: 'ConstantReference'
+      readonly declaration: DeclarationFacts.CanonicalId
+      readonly type: DeclarationFacts.SemanticType
+      readonly span: SourceSpan.SourceSpan
+      readonly origin: Origin
+    }
+  | {
       readonly _tag: 'ParameterReference'
       readonly parameter: DeclarationFacts.ParameterId
       readonly type: DeclarationFacts.SemanticType
@@ -620,6 +710,8 @@ export type Expression =
         | 'Binding'
         | 'MatchArm'
       readonly expectedAt: SourceSpan.SourceSpan
+      /** The authored node `expectedAt` presents. */
+      readonly expected?: AuthoredIdentity.Anchor
       readonly type: Type.StructuralUnion | Type.Effect | Type.Represented
       readonly span: SourceSpan.SourceSpan
       readonly origin: Origin
@@ -634,6 +726,8 @@ export type Expression =
         readonly tests?: ReadonlyArray<Match.PatternTest>
         readonly id: Match.ArmId
         readonly member?: Match.CoverageIdentity
+        /** An integer pattern selects one value; it is static structure with no coverage member. */
+        readonly integer?: bigint
         readonly universal: boolean
         readonly bindings: ReadonlyArray<PatternBinding>
         readonly cleanup: ReadonlyArray<ReadonlyArray<DeclarationFacts.FieldId>>
@@ -643,6 +737,7 @@ export type Expression =
         readonly after: ReadonlyArray<Match.CoverageIdentity>
         readonly reachable: boolean
         readonly span: SourceSpan.SourceSpan
+        readonly at?: AuthoredIdentity.Anchor
       }>
       readonly type: DeclarationFacts.SemanticType
       readonly span: SourceSpan.SourceSpan
@@ -733,6 +828,11 @@ export type Expression =
     }
   | {
       readonly _tag: 'SliceBorrow'
+      /**
+       * The authored place this borrows, kept as evidence for loan analysis. It is never
+       * evaluated: `root` and `selectors` are what executes.
+       */
+      readonly place?: Expression
       readonly borrow: BorrowId
       readonly root: SliceRoot
       readonly selectors: ReadonlyArray<BorrowSelector>
@@ -746,6 +846,11 @@ export type Expression =
     }
   | {
       readonly _tag: 'ValueBorrow'
+      /**
+       * The authored place this borrows, kept as evidence for loan analysis. It is never
+       * evaluated: `root` and `selectors` are what executes.
+       */
+      readonly place?: Expression
       readonly borrow: BorrowId
       readonly root: SliceRoot
       readonly selectors: ReadonlyArray<BorrowSelector>
@@ -924,6 +1029,9 @@ export type Expression =
         readonly parameter?: DeclarationFacts.ParameterId
         readonly access: 'Copy' | 'Shared' | 'Exclusive' | 'Take'
         readonly span: SourceSpan.SourceSpan
+        readonly at?: AuthoredIdentity.Anchor
+        /** The first authored use that captured the local, when one names it. */
+        readonly use?: AuthoredIdentity.Anchor
       }>
       readonly type: Type.Effect
       readonly span: SourceSpan.SourceSpan
@@ -970,6 +1078,7 @@ export type Expression =
         readonly selectionAccess: 'Shared' | 'Exclusive' | 'Take'
         readonly captureAccess: 'Copy' | 'Shared' | 'Exclusive' | 'Take'
         readonly span: SourceSpan.SourceSpan
+        readonly at?: AuthoredIdentity.Anchor
       }
       readonly type: Type.Effect
       readonly span: SourceSpan.SourceSpan
@@ -1008,6 +1117,8 @@ export type Expression =
    */
   | {
       readonly _tag: 'InterfaceOperationCall'
+      /** Written as an operator, whose reference operands are borrowed implicitly. */
+      readonly operator?: true
       readonly capability: Type.Nominal
       readonly provider: Type.Type
       readonly operation: string
@@ -1024,12 +1135,16 @@ export type Expression =
       readonly span: SourceSpan.SourceSpan
       readonly origin: Origin
       readonly cause?: Diagnostic.Identity
+      /** The revision-free cause `cause` presents. */
+      readonly causeAt?: Diagnostic.Identity<Location.Location>
     }
 
 /** One elaborated body statement in source order. */
 export type Statement =
   | {
       readonly _tag: 'UnavailableStatement'
+      /** Operands of a write whose place has no lowered form; they still evaluate and hold loans. */
+      readonly write?: { readonly destination: Expression; readonly value: Expression }
       readonly region: RegionId
       readonly span: SourceSpan.SourceSpan
       readonly origin: Origin
@@ -1085,6 +1200,8 @@ export type Statement =
     }
   | {
       readonly _tag: 'Write'
+      /** The authored destination, kept as evidence for loan analysis and never evaluated. */
+      readonly destination?: Expression
       readonly place: WritePlace
       readonly value: Expression
       readonly region: RegionId
@@ -1167,7 +1284,9 @@ export const returned = (self: TirFunction): Expression => {
 export const statementExpressions = (statement: Statement): ReadonlyArray<Expression> => {
   switch (statement._tag) {
     case 'UnavailableStatement':
-      return []
+      return statement.write === undefined
+        ? []
+        : [statement.write.destination, statement.write.value]
     case 'Unsafe':
       return statement.statements.flatMap(statementExpressions)
     case 'Bind':
@@ -1252,11 +1371,15 @@ export const expressionChildren = (expression: Expression): ReadonlyArray<Expres
       case 'ArrayConstruct':
         return expression.elements
       case 'Call':
+      case 'StaticCall':
+      case 'StaticIntrinsic':
       case 'EffectConstruct':
       case 'ServiceEffectConstruct':
       case 'BuiltinCall':
       case 'InterfaceOperationCall':
         return expression.arguments
+      case 'CompileError':
+        return [expression.message]
       case 'CallableSection':
         return expression.captures.map((capture) => capture.value)
       case 'ForeignApply':
@@ -1815,16 +1938,25 @@ export const verify = (self: Module): ReadonlyArray<VerificationIssue> => {
             else if (expression._tag === 'EffectBlock') statements(expression.statements)
           }
         if (statement._tag === 'Write' && statement.place._tag === 'BorrowedWritePlace') {
-          const [first, ...rest] = statement.place.selectors
-          const wellFormed = Type.isReference(statement.place.slice)
-            ? statement.place.slice.access === 'Exclusive' &&
-              statement.place.selectors.every(
-                (selector) => selector._tag === 'Field' || selector._tag === 'Index',
-              )
-            : statement.place.slice.access === 'Exclusive' &&
-              first?._tag === 'SliceIndex' &&
-              Type.equals(first.slice, statement.place.slice) &&
-              !rest.some((selector) => selector._tag !== 'Field')
+          const accesses: Array<Type.BorrowAccess> = []
+          if (Type.isReference(statement.place.rootType))
+            accesses.push(statement.place.rootType.access)
+          if (Type.isSlice(statement.place.rootType)) {
+            const first = statement.place.selectors.at(0)
+            if (
+              first?._tag !== 'SliceIndex' ||
+              !Type.equals(first.slice, statement.place.rootType)
+            ) {
+              accesses.push('Shared')
+            } else {
+              accesses.push(statement.place.rootType.access)
+            }
+          }
+          for (const selector of statement.place.selectors) {
+            if (selector._tag === 'SliceIndex') accesses.push(selector.slice.access)
+            else if (Type.isReference(selector.type)) accesses.push(selector.type.access)
+          }
+          const wellFormed = accesses.includes('Exclusive') && !accesses.includes('Shared')
           if (!wellFormed) {
             issues.push(Object.freeze({ _tag: 'InvalidBorrowedWrite', span: statement.place.span }))
           }
@@ -1889,7 +2021,19 @@ export const contractOf = (declaration: DeclarationFacts.DeclarationFact): Contr
   })
 }
 
-const spanText = (span: SourceSpan.SourceSpan): string => `[${span.start}, ${span.end})`
+/**
+ * A node's place in the encoding: the authored node it came from, inside its owner. It names no
+ * offset, so the encoding of a body is the same for every spelling of the same authored content.
+ */
+const anchorText = (anchor: AuthoredIdentity.Anchor | undefined): string =>
+  anchor === undefined
+    ? '@?'
+    : `@${anchor.path.map((part) => `${part.role}#${part.occurrence}`).join('/') || '.'}`
+
+const originText = (origin: Origin): string =>
+  origin._tag === 'Authored'
+    ? anchorText(origin.anchor)
+    : `${anchorText(origin.anchor)}!${origin.role}#${origin.occurrence}`
 
 const identityLabel = (declaration: DeclarationFacts.DeclarationFact): string => {
   switch (declaration.canonical._tag) {
@@ -1916,7 +2060,7 @@ const sliceRootText = (root: SliceRoot): string => {
     case 'PatternSliceRoot':
       return `a${root.binding.arm.ordinal}.b${root.binding.ordinal}`
     case 'TemporarySliceRoot':
-      return `t${root.owner.span.start}.${root.owner.ordinal}`
+      return `t${anchorText(root.owner.at)}.${root.owner.ordinal}`
   }
 }
 
@@ -1934,59 +2078,59 @@ const encodeExpression = (expression: Expression, depth: number): string => {
   const indent = '  '.repeat(depth)
   switch (expression._tag) {
     case 'IntegerLiteral':
-      return `${indent}literal ${expression.value} : ${Type.encode(expression.type)}${expression.constant === undefined ? '' : ` constant=${expression.constant.module}::${expression.constant.name}`} ${spanText(expression.span)}`
+      return `${indent}literal ${expression.value} : ${Type.encode(expression.type)}${expression.constant === undefined ? '' : ` constant=${expression.constant.module}::${expression.constant.name}`} ${originText(expression.origin)}`
     case 'ForeignStaticLoad':
-      return `${indent}foreign-static ${expression.symbol} : ${Type.encode(expression.type)} ${spanText(expression.span)}`
+      return `${indent}foreign-static ${expression.symbol} : ${Type.encode(expression.type)} ${originText(expression.origin)}`
     case 'ForeignFunctionAddress':
-      return `${indent}foreign-address ${expression.symbol} : ${Type.encode(expression.type)} ${spanText(expression.span)}`
+      return `${indent}foreign-address ${expression.symbol} : ${Type.encode(expression.type)} ${originText(expression.origin)}`
     case 'FloatingLiteral':
-      return `${indent}literal ${expression.spelling} bits=0x${expression.bits.toString(16)} : ${expression.type} ${spanText(expression.span)}`
+      return `${indent}literal ${expression.spelling} bits=0x${expression.bits.toString(16)} : ${expression.type} ${originText(expression.origin)}`
     case 'StaticStringLiteral':
-      return `${indent}static-string ${expression.data.id} bytes=${expression.data.bytes.map((byte) => byte.toString(16).padStart(2, '0')).join('')} length=${expression.data.bytes.length} provenance=program : string ${spanText(expression.span)}`
+      return `${indent}static-string ${expression.data.id} bytes=${expression.data.bytes.map((byte) => byte.toString(16).padStart(2, '0')).join('')} length=${expression.data.bytes.length} provenance=program : string ${originText(expression.origin)}`
     case 'StaticByteViewLiteral':
-      return `${indent}static-bytes ${expression.data.id} bytes=${expression.data.bytes.map((byte) => byte.toString(16).padStart(2, '0')).join('')} length=${expression.data.bytes.length} : ${Type.encode(expression.type)} ${spanText(expression.span)}`
+      return `${indent}static-bytes ${expression.data.id} bytes=${expression.data.bytes.map((byte) => byte.toString(16).padStart(2, '0')).join('')} length=${expression.data.bytes.length} : ${Type.encode(expression.type)} ${originText(expression.origin)}`
     case 'UnitLiteral':
-      return `${indent}unit : () ${spanText(expression.span)}`
+      return `${indent}unit : () ${originText(expression.origin)}`
     case 'BooleanLiteral':
-      return `${indent}literal ${expression.value} : ${Type.encode(expression.type)} ${spanText(expression.span)}`
+      return `${indent}literal ${expression.value} : ${Type.encode(expression.type)} ${originText(expression.origin)}`
     case 'CharacterLiteral':
-      return `${indent}literal U+${expression.value.toString(16).toUpperCase().padStart(4, '0')} : ${Type.encode(expression.type)} ${spanText(expression.span)}`
+      return `${indent}literal U+${expression.value.toString(16).toUpperCase().padStart(4, '0')} : ${Type.encode(expression.type)} ${originText(expression.origin)}`
     case 'ParameterReference':
-      return `${indent}param fn${expression.parameter.function.ordinal}.p${expression.parameter.ordinal} : ${Type.encode(expression.type)} ${spanText(expression.span)}`
+      return `${indent}param fn${expression.parameter.function.ordinal}.p${expression.parameter.ordinal} : ${Type.encode(expression.type)} ${originText(expression.origin)}`
     case 'BindingReference':
-      return `${indent}binding fn${expression.binding.function.ordinal}.b${expression.binding.ordinal} : ${Type.encode(expression.type)} ${spanText(expression.span)}`
+      return `${indent}binding fn${expression.binding.function.ordinal}.b${expression.binding.ordinal} : ${Type.encode(expression.type)} ${originText(expression.origin)}`
     case 'PatternBindingReference':
-      return `${indent}pattern-binding a${expression.binding.arm.ordinal}.b${expression.binding.ordinal} : ${Type.encode(expression.type)} ${spanText(expression.span)}`
+      return `${indent}pattern-binding a${expression.binding.arm.ordinal}.b${expression.binding.ordinal} : ${Type.encode(expression.type)} ${originText(expression.origin)}`
     case 'Move':
       return [
-        `${indent}move : ${Type.encode(expression.type)} ${spanText(expression.span)}`,
+        `${indent}move : ${Type.encode(expression.type)} ${originText(expression.origin)}`,
         encodeExpression(expression.subject, depth + 1),
       ].join('\n')
     case 'RuntimeStringView':
       return [
-        `${indent}runtime-string-view loans=${expression.heldLoans.map(borrowText).join(',') || 'none'} : string ${spanText(expression.span)}`,
+        `${indent}runtime-string-view loans=${expression.heldLoans.map(borrowText).join(',') || 'none'} : string ${originText(expression.origin)}`,
         encodeExpression(expression.source, depth + 1),
       ].join('\n')
     case 'StringEquality':
       return [
-        `${indent}string-${expression.negated ? 'not-equals' : 'equals'} intrinsic=${Intrinsic.operationText(expression.intrinsic)} : bool ${spanText(expression.span)}`,
+        `${indent}string-${expression.negated ? 'not-equals' : 'equals'} intrinsic=${Intrinsic.operationText(expression.intrinsic)} : bool ${originText(expression.origin)}`,
         encodeExpression(expression.left, depth + 1),
         encodeExpression(expression.right, depth + 1),
       ].join('\n')
     case 'ShortCircuit':
       return [
-        `${indent}short-circuit ${expression.operator === 'And' ? '&&' : '||'} : ${Type.encode(expression.type)} ${spanText(expression.span)}`,
+        `${indent}short-circuit ${expression.operator === 'And' ? '&&' : '||'} : ${Type.encode(expression.type)} ${originText(expression.origin)}`,
         encodeExpression(expression.left, depth + 1),
         encodeExpression(expression.right, depth + 1),
       ].join('\n')
     case 'Replace':
       return [
-        `${indent}replace : ${Type.encode(expression.type)} ${spanText(expression.span)}`,
+        `${indent}replace : ${Type.encode(expression.type)} ${originText(expression.origin)}`,
         encodeExpression(expression.value, depth + 1),
       ].join('\n')
     case 'Run':
       return [
-        `${indent}run : ${Type.encode(expression.type)} ${spanText(expression.span)}`,
+        `${indent}run : ${Type.encode(expression.type)} ${originText(expression.origin)}`,
         encodeExpression(expression.subject, depth + 1),
       ].join('\n')
     case 'EffectCatch':
@@ -2009,7 +2153,7 @@ const encodeExpression = (expression: Expression, depth: number): string => {
           Type.encode,
           (parameter) => parameter.name,
           (member) => member.parameter.name,
-        )} : ${Type.encode(expression.type)} ${spanText(expression.span)}`,
+        )} : ${Type.encode(expression.type)} ${originText(expression.origin)}`,
         encodeExpression(expression.protected, depth + 1),
         encodeExpression(expression.handler, depth + 1),
       ].join('\n')
@@ -2025,23 +2169,23 @@ const encodeExpression = (expression: Expression, depth: number): string => {
                 (member) => member.capability.name,
               )
             : Type.encode(expression.provider.capability)
-        }@${expression.provider.role ?? 'DefaultRole'} selection=${expression.provider.selectionAccess.toLowerCase()} capture=${expression.provider.captureAccess.toLowerCase()} : ${Type.encode(expression.type)} ${spanText(expression.span)}`,
+        }@${expression.provider.role ?? 'DefaultRole'} selection=${expression.provider.selectionAccess.toLowerCase()} capture=${expression.provider.captureAccess.toLowerCase()} : ${Type.encode(expression.type)} ${originText(expression.origin)}`,
         encodeExpression(expression.protected, depth + 1),
       ].join('\n')
     case 'EffectBlock':
       return [
-        `${indent}effect-block site=${executableSiteLabel(expression.site)} access=${expression.type.access.toLowerCase()} captures=${expression.captures.map((capture) => `${[capture.pattern === undefined ? '' : `pattern${capture.pattern.arm.match.span.start}.${capture.pattern.arm.ordinal}.${capture.pattern.ordinal}`, capture.binding === undefined ? '' : `b${capture.binding.ordinal}`, capture.parameter === undefined ? '' : `p${capture.parameter.ordinal}`].join('')}:${capture.access.toLowerCase()}`).join(',') || 'none'} : ${Type.encode(expression.type)} ${spanText(expression.span)}`,
+        `${indent}effect-block site=${executableSiteLabel(expression.site)} access=${expression.type.access.toLowerCase()} captures=${expression.captures.map((capture) => `${[capture.pattern === undefined ? '' : `pattern${anchorText(capture.pattern.arm.match.at)}.${capture.pattern.arm.ordinal}.${capture.pattern.ordinal}`, capture.binding === undefined ? '' : `b${capture.binding.ordinal}`, capture.parameter === undefined ? '' : `p${capture.parameter.ordinal}`].join('')}:${capture.access.toLowerCase()}`).join(',') || 'none'} : ${Type.encode(expression.type)} ${originText(expression.origin)}`,
         ...expression.statements.map((statement) => encodeStatement(statement, depth + 1)),
       ].join('\n')
     case 'UnionConvert':
       return [
-        `${indent}union-${expression.conversion.toLowerCase()} ${Type.encode(expression.sourceType)} -> ${Type.encode(expression.target)} access=${expression.access} context=${expression.context} expected=${spanText(expression.expectedAt)} ${spanText(expression.span)}`,
+        `${indent}union-${expression.conversion.toLowerCase()} ${Type.encode(expression.sourceType)} -> ${Type.encode(expression.target)} access=${expression.access} context=${expression.context} expected=${anchorText(expression.expected)} ${originText(expression.origin)}`,
         `${indent}  mapping ${expression.mappings.map((mapping) => `${Type.encode(mapping.source)}#${mapping.sourceOrdinal}->${Type.encode(mapping.target)}#${mapping.targetOrdinal}`).join(', ') || 'empty'}`,
         encodeExpression(expression.source, depth + 1),
       ].join('\n')
     case 'Match':
       return [
-        `${indent}match ${expression.access.toLowerCase()} members=${expression.members.map(Match.encodeIdentity).join(',') || 'none'} : ${Type.encode(expression.type)} ${spanText(expression.span)}`,
+        `${indent}match ${expression.access.toLowerCase()} members=${expression.members.map(Match.encodeIdentity).join(',') || 'none'} : ${Type.encode(expression.type)} ${originText(expression.origin)}`,
         `${indent}  scrutinee`,
         encodeExpression(expression.scrutinee, depth + 2),
         ...expression.arms.flatMap((arm) => {
@@ -2049,10 +2193,10 @@ const encodeExpression = (expression: Expression, depth: number): string => {
           if (arm.universal) pattern = '_'
           else if (arm.member !== undefined) pattern = Match.encodeIdentity(arm.member)
           return [
-            `${indent}  arm #${arm.id.ordinal} ${pattern} reachable=${arm.reachable} before=${arm.before.map(Match.encodeIdentity).join(',') || 'empty'} after=${arm.after.map(Match.encodeIdentity).join(',') || 'empty'} ${spanText(arm.span)}`,
+            `${indent}  arm #${arm.id.ordinal} ${pattern} reachable=${arm.reachable} before=${arm.before.map(Match.encodeIdentity).join(',') || 'empty'} after=${arm.after.map(Match.encodeIdentity).join(',') || 'empty'} ${anchorText(arm.at)}`,
             ...arm.bindings.map(
               (binding) =>
-                `${indent}    binding #${binding.id.ordinal} ${binding.name ?? '?'} path=${binding.path.map((field) => `#${field.ordinal}`).join('.') || 'root'} access=${binding.access} : ${Type.encode(binding.type)} ${spanText(binding.span)}`,
+                `${indent}    binding #${binding.id.ordinal} ${binding.name ?? '?'} path=${binding.path.map((field) => `#${field.ordinal}`).join('.') || 'root'} access=${binding.access} : ${Type.encode(binding.type)} ${originText(binding.origin)}`,
             ),
             `${indent}    cleanup ${arm.cleanup.map((path) => path.map((field) => `#${field.ordinal}`).join('.') || 'payload').join(',') || 'none'}`,
             ...(arm.guard === undefined
@@ -2070,7 +2214,7 @@ const encodeExpression = (expression: Expression, depth: number): string => {
       ].join('\n')
     case 'Construct':
       return [
-        `${indent}construct ${Type.encode(expression.nominal)} : ${Type.encode(expression.type)} ${spanText(expression.span)}`,
+        `${indent}construct ${Type.encode(expression.nominal)} : ${Type.encode(expression.type)} ${originText(expression.origin)}`,
         `${indent}  evaluation-order ${expression.evaluationOrder.map((field) => `#${field.ordinal}`).join(', ') || 'empty'}`,
         ...expression.fields.map(
           ({ field, value }) =>
@@ -2079,7 +2223,7 @@ const encodeExpression = (expression: Expression, depth: number): string => {
       ].join('\n')
     case 'ConstructUnionVariant':
       return [
-        `${indent}construct-variant ${Type.encode(expression.nominal)}.${expression.variant.name}#${expression.variantOrdinal} : ${Type.encode(expression.type)} ${spanText(expression.span)}`,
+        `${indent}construct-variant ${Type.encode(expression.nominal)}.${expression.variant.name}#${expression.variantOrdinal} : ${Type.encode(expression.type)} ${originText(expression.origin)}`,
         `${indent}  evaluation-order ${expression.evaluationOrder.map((field) => `#${field.ordinal}`).join(', ') || 'empty'}`,
         ...expression.fields.map(
           ({ field, value }) =>
@@ -2088,7 +2232,7 @@ const encodeExpression = (expression: Expression, depth: number): string => {
       ].join('\n')
     case 'ArrayConstruct':
       return [
-        `${indent}construct-array ${Type.encode(expression.type)} elements=${expression.elements.length} ${spanText(expression.span)}`,
+        `${indent}construct-array ${Type.encode(expression.type)} elements=${expression.elements.length} ${originText(expression.origin)}`,
         ...expression.elements.map(
           (element, index) =>
             `${indent}  element #${index}\n${encodeExpression(element, depth + 2)}`,
@@ -2096,12 +2240,12 @@ const encodeExpression = (expression: Expression, depth: number): string => {
       ].join('\n')
     case 'Project':
       return [
-        `${indent}project ${expression.access} ${Type.encode(expression.nominal)}.#${expression.field.ordinal} : ${Type.encode(expression.type)} ${spanText(expression.span)}`,
+        `${indent}project ${expression.access} ${Type.encode(expression.nominal)}.#${expression.field.ordinal} : ${Type.encode(expression.type)} ${originText(expression.origin)}`,
         encodeExpression(expression.subject, depth + 1),
       ].join('\n')
     case 'ReferentPlace':
       return [
-        `${indent}referent ${expression.access} ${expression.borrowAccess.toLowerCase()} source=${Type.encode(expression.reference)} : ${Type.encode(expression.type)} ${spanText(expression.span)}`,
+        `${indent}referent ${expression.access} ${expression.borrowAccess.toLowerCase()} source=${Type.encode(expression.reference)} : ${Type.encode(expression.type)} ${originText(expression.origin)}`,
         encodeExpression(expression.subject, depth + 1),
       ].join('\n')
     case 'IndexPlace':
@@ -2110,35 +2254,35 @@ const encodeExpression = (expression: Expression, depth: number): string => {
           expression.bounds._tag === 'Runtime'
             ? `runtime:${expression.bounds.length}`
             : `proven:${expression.bounds.index}/${expression.bounds.length}`
-        } : ${Type.encode(expression.type)} ${spanText(expression.span)}`,
+        } : ${Type.encode(expression.type)} ${originText(expression.origin)}`,
         encodeExpression(expression.subject, depth + 1),
         encodeExpression(expression.index, depth + 1),
       ].join('\n')
     case 'SliceBorrow':
-      return `${indent}${expression.reborrow ? 'reborrow-slice' : 'borrow-slice'} l${expression.borrow.ordinal} ${expression.access.toLowerCase()} ${sliceRootText(expression.root)}${borrowSelectorsText(expression.selectors)} source=${Type.encode(expression.source)} : ${Type.encode(expression.type)} suspended=${expression.suspendsParent} ${spanText(expression.span)}`
+      return `${indent}${expression.reborrow ? 'reborrow-slice' : 'borrow-slice'} l${expression.borrow.ordinal} ${expression.access.toLowerCase()} ${sliceRootText(expression.root)}${borrowSelectorsText(expression.selectors)} source=${Type.encode(expression.source)} : ${Type.encode(expression.type)} suspended=${expression.suspendsParent} ${originText(expression.origin)}`
     case 'ValueBorrow':
-      return `${indent}${expression.reborrow ? 'reborrow-value' : 'borrow-value'} l${expression.borrow.ordinal} ${expression.access.toLowerCase()} ${sliceRootText(expression.root)}${borrowSelectorsText(expression.selectors)} source=${Type.encode(expression.source)} : ${Type.encode(expression.type)} suspended=${expression.suspendsParent} ${spanText(expression.span)}`
+      return `${indent}${expression.reborrow ? 'reborrow-value' : 'borrow-value'} l${expression.borrow.ordinal} ${expression.access.toLowerCase()} ${sliceRootText(expression.root)}${borrowSelectorsText(expression.selectors)} source=${Type.encode(expression.source)} : ${Type.encode(expression.type)} suspended=${expression.suspendsParent} ${originText(expression.origin)}`
     case 'SliceLength':
       return [
-        `${indent}slice-length : i32 ${spanText(expression.span)}`,
+        `${indent}slice-length : i32 ${originText(expression.origin)}`,
         encodeExpression(expression.slice, depth + 1),
       ].join('\n')
     case 'SliceIndexPlace':
       return [
-        `${indent}slice-index ${expression.access.toLowerCase()} bounds=runtime : ${Type.encode(expression.type)} ${spanText(expression.span)}`,
+        `${indent}slice-index ${expression.access.toLowerCase()} bounds=runtime : ${Type.encode(expression.type)} ${originText(expression.origin)}`,
         encodeExpression(expression.slice, depth + 1),
         encodeExpression(expression.index, depth + 1),
       ].join('\n')
     case 'EnumMember':
-      return `${indent}enum-member ${expression.member.enum.module}.${expression.member.enum.name}.${expression.member.name} discriminant=${expression.discriminant} : ${Type.encode(expression.type)} ${spanText(expression.span)}`
+      return `${indent}enum-member ${expression.member.enum.module}.${expression.member.enum.name}.${expression.member.name} discriminant=${expression.discriminant} : ${Type.encode(expression.type)} ${originText(expression.origin)}`
     case 'EnumValue':
       return [
-        `${indent}enum-value ${expression.enum.module}.${expression.enum.name} via ${Intrinsic.operationText(expression.intrinsic)} : ${expression.type} ${spanText(expression.span)}`,
+        `${indent}enum-value ${expression.enum.module}.${expression.enum.name} via ${Intrinsic.operationText(expression.intrinsic)} : ${expression.type} ${originText(expression.origin)}`,
         encodeExpression(expression.value, depth + 1),
       ].join('\n')
     case 'EnumEquality':
       return [
-        `${indent}enum-${expression.negated ? 'not-equals' : 'equals'} ${expression.enum.module}.${expression.enum.name} : bool ${spanText(expression.span)}`,
+        `${indent}enum-${expression.negated ? 'not-equals' : 'equals'} ${expression.enum.module}.${expression.enum.name} : bool ${originText(expression.origin)}`,
         encodeExpression(expression.left, depth + 1),
         encodeExpression(expression.right, depth + 1),
       ].join('\n')
@@ -2147,14 +2291,14 @@ const encodeExpression = (expression: Expression, depth: number): string => {
         expression.target._tag === 'DeclarationCallableTarget'
           ? `${expression.target.declaration.module}.${expression.target.declaration.name}`
           : `${expression.target.actor}.${expression.target.operation}`
-      }<${expression.typeArguments.map(Type.genericArgumentKey).join(',')}> : ${Type.encode(expression.type)} ${spanText(expression.span)}`
+      }<${expression.typeArguments.map(Type.genericArgumentKey).join(',')}> : ${Type.encode(expression.type)} ${originText(expression.origin)}`
     case 'CallableSection':
       return [
         `${indent}callable-section site=${executableSiteLabel(expression.site)} mode=${expression.mode.toLowerCase()} remaining=${expression.remainingParameters.map((ordinal) => `p${ordinal}`).join(',')} target=${
           expression.target._tag === 'DeclarationCallableTarget'
             ? `${expression.target.declaration.module}.${expression.target.declaration.name}`
             : `${expression.target.actor}.${expression.target.operation}`
-        } : ${Type.encode(expression.type)} ${spanText(expression.span)}`,
+        } : ${Type.encode(expression.type)} ${originText(expression.origin)}`,
         ...expression.captures.map(
           (capture) =>
             `${indent}  capture #${capture.ordinal}->p${capture.parameterOrdinal} ${capture.access.toLowerCase()}\n${encodeExpression(capture.value, depth + 2)}`,
@@ -2162,13 +2306,13 @@ const encodeExpression = (expression: Expression, depth: number): string => {
       ].join('\n')
     case 'ForeignApply':
       return [
-        `${indent}foreign-apply ${Type.encode(expression.contract)} ${spanText(expression.span)}`,
+        `${indent}foreign-apply ${Type.encode(expression.contract)} ${originText(expression.origin)}`,
         encodeExpression(expression.callee, depth + 1),
         ...expression.arguments.map((argument) => encodeExpression(argument, depth + 1)),
       ].join('\n')
     case 'CallableApply':
       return [
-        `${indent}callable-apply access=${expression.access.toLowerCase()} evaluation=${expression.evaluation} realization=${expression.realization}${expression.staged === undefined ? '' : ` staged=${executableSiteLabel(expression.staged.site)}[${expression.staged.captures.map((capture) => `#${capture.ordinal}:${capture.access.toLowerCase()}`).join(',')}]`} substitution=${[...expression.substitution.entries()].map(([parameter, argument]) => `${parameter}=${Type.encodeGenericArgument(argument)}`).join(',') || 'none'} ends=${expression.loanEnds.map(borrowText).join(',') || 'none'} held=${expression.heldLoans.map(borrowText).join(',') || 'none'} : ${Type.encode(expression.type)} ${spanText(expression.span)}`,
+        `${indent}callable-apply access=${expression.access.toLowerCase()} evaluation=${expression.evaluation} realization=${expression.realization}${expression.staged === undefined ? '' : ` staged=${executableSiteLabel(expression.staged.site)}[${expression.staged.captures.map((capture) => `#${capture.ordinal}:${capture.access.toLowerCase()}`).join(',')}]`} substitution=${[...expression.substitution.entries()].map(([parameter, argument]) => `${parameter}=${Type.encodeGenericArgument(argument)}`).join(',') || 'none'} ends=${expression.loanEnds.map(borrowText).join(',') || 'none'} held=${expression.heldLoans.map(borrowText).join(',') || 'none'} : ${Type.encode(expression.type)} ${originText(expression.origin)}`,
         ...(expression.evaluation === 'LeftThenCallable'
           ? [
               ...expression.arguments.map(
@@ -2194,12 +2338,12 @@ const encodeExpression = (expression: Expression, depth: number): string => {
           expression.typeArguments.length === 0
             ? ''
             : `<${expression.typeArguments.map(Type.encodeGenericArgument).join(', ')}>`
-        }${expression.evidence.length === 0 ? '' : ` evidence=${expression.evidence.map(Constraint.evidenceKey).join(',')}`}${expression.staticArguments.length === 0 ? '' : ` static=${expression.staticArguments.map(StaticValue.presentation).join(',')}`} : ${Type.encode(expression.type)} loan-ends=${expression.loanEnds.map((loan) => `l${loan.ordinal}`).join(',') || 'none'} ${spanText(expression.span)}`,
+        }${expression.evidence.length === 0 ? '' : ` evidence=${expression.evidence.map(Constraint.evidenceKey).join(',')}`}${expression.staticArguments.length === 0 ? '' : ` static=${expression.staticArguments.map(StaticValue.presentation).join(',')}`} : ${Type.encode(expression.type)} loan-ends=${expression.loanEnds.map((loan) => `l${loan.ordinal}`).join(',') || 'none'} ${originText(expression.origin)}`,
         ...expression.arguments.map((argument) => encodeExpression(argument, depth + 1)),
       ].join('\n')
     case 'ServiceEffectConstruct':
       return [
-        `${indent}service-call ${Type.encode(expression.service)}.${expression.operation}@${expression.role}:${expression.access.toLowerCase()}${expression.staticArguments.length === 0 ? '' : ` static=${expression.staticArguments.map(StaticValue.presentation).join(',')}`} : ${Type.encode(expression.type)} loan-ends=${expression.loanEnds.map((loan) => `l${loan.ordinal}`).join(',') || 'none'} ${spanText(expression.span)}`,
+        `${indent}service-call ${Type.encode(expression.service)}.${expression.operation}@${expression.role}:${expression.access.toLowerCase()}${expression.staticArguments.length === 0 ? '' : ` static=${expression.staticArguments.map(StaticValue.presentation).join(',')}`} : ${Type.encode(expression.type)} loan-ends=${expression.loanEnds.map((loan) => `l${loan.ordinal}`).join(',') || 'none'} ${originText(expression.origin)}`,
         ...expression.arguments.map((argument) => encodeExpression(argument, depth + 1)),
       ].join('\n')
     case 'BuiltinCall': {
@@ -2207,17 +2351,34 @@ const encodeExpression = (expression: Expression, depth: number): string => {
       const actor =
         first === undefined || first._tag === 'Unavailable' ? '?' : Type.encode(first.type)
       return [
-        `${indent}builtin ${actor}.${expression.operation} : ${Type.encode(expression.type)} ${spanText(expression.span)}`,
+        `${indent}builtin ${actor}.${expression.operation} : ${Type.encode(expression.type)} ${originText(expression.origin)}`,
         ...expression.arguments.map((argument) => encodeExpression(argument, depth + 1)),
       ].join('\n')
     }
     case 'InterfaceOperationCall':
       return [
-        `${indent}interface ${Type.encode(expression.capability)}.${expression.operation} over ${Type.encode(expression.provider)} : ${Type.encode(expression.type)} ${spanText(expression.span)}`,
+        `${indent}interface ${Type.encode(expression.capability)}.${expression.operation} over ${Type.encode(expression.provider)} : ${Type.encode(expression.type)} ${originText(expression.origin)}`,
         ...expression.arguments.map((argument) => encodeExpression(argument, depth + 1)),
       ].join('\n')
+    case 'CompileError':
+      return [
+        `${indent}compile-error ${originText(expression.origin)}`,
+        encodeExpression(expression.message, depth + 1),
+      ].join('\n')
+    case 'StaticCall':
+      return [
+        `${indent}static-call ${expression.target.module}::${expression.target.name}${expression.typeArguments.length === 0 ? '' : `<${expression.typeArguments.map(Type.encodeGenericArgument).join(',')}>`} : ${Type.encode(expression.type)} ${originText(expression.origin)}`,
+        ...expression.arguments.map((argument) => encodeExpression(argument, depth + 1)),
+      ].join('\n')
+    case 'StaticIntrinsic':
+      return [
+        `${indent}static-intrinsic ${expression.operation}${expression.typeArguments.length === 0 ? '' : `<${expression.typeArguments.map(Type.encodeGenericArgument).join(',')}>`} : ${Type.encode(expression.type)} ${originText(expression.origin)}`,
+        ...expression.arguments.map((argument) => encodeExpression(argument, depth + 1)),
+      ].join('\n')
+    case 'ConstantReference':
+      return `${indent}constant ${expression.declaration.module}::${expression.declaration.name} : ${Type.encode(expression.type)} ${originText(expression.origin)}`
     case 'Unavailable':
-      return `${indent}unavailable ${spanText(expression.span)}`
+      return `${indent}unavailable ${originText(expression.origin)}`
   }
 }
 
@@ -2225,22 +2386,22 @@ const encodeStatement = (statement: Statement, depth: number): string => {
   const indent = '  '.repeat(depth)
   switch (statement._tag) {
     case 'UnavailableStatement':
-      return `${indent}unavailable-statement r${statement.region.ordinal} ${spanText(statement.span)}`
+      return `${indent}unavailable-statement r${statement.region.ordinal} ${originText(statement.origin)}`
     case 'Unsafe':
       return [
-        `${indent}unsafe r${statement.region.ordinal} ${spanText(statement.span)}`,
+        `${indent}unsafe r${statement.region.ordinal} ${originText(statement.origin)}`,
         ...statement.statements.map((inner) => encodeStatement(inner, depth + 1)),
       ].join('\n')
     case 'Bind':
       return [
-        `${indent}bind ${statement.mutability.toLowerCase()} b${statement.binding.ordinal} ${statement.name ?? '?'} r${statement.region.ordinal} ${spanText(statement.span)}`,
+        `${indent}bind ${statement.mutability.toLowerCase()} b${statement.binding.ordinal} ${statement.name ?? '?'} r${statement.region.ordinal} ${originText(statement.origin)}`,
         encodeExpression(statement.initializer, depth + 1),
       ].join('\n')
     case 'PatternBind':
-      return `${indent}pattern-bind ${statement.selection.access.toLowerCase()} members=${statement.selection.members.map(Match.encodeIdentity).join(',')} r${statement.region.ordinal} ${spanText(statement.span)}`
+      return `${indent}pattern-bind ${statement.selection.access.toLowerCase()} members=${statement.selection.members.map(Match.encodeIdentity).join(',')} r${statement.region.ordinal} ${originText(statement.origin)}`
     case 'Evaluate':
       return [
-        `${indent}evaluate r${statement.region.ordinal} ${spanText(statement.span)}`,
+        `${indent}evaluate r${statement.region.ordinal} ${originText(statement.origin)}`,
         encodeExpression(statement.expression, depth + 1),
       ].join('\n')
     case 'Write': {
@@ -2266,13 +2427,13 @@ const encodeStatement = (statement: Statement, depth: number): string => {
         })
         .join('')
       return [
-        `${indent}write ${root}${selectors} : ${Type.encode(statement.place.type)} r${statement.region.ordinal} ${spanText(statement.span)}`,
+        `${indent}write ${root}${selectors} : ${Type.encode(statement.place.type)} r${statement.region.ordinal} ${originText(statement.origin)}`,
         encodeExpression(statement.value, depth + 1),
       ].join('\n')
     }
     case 'If':
       return [
-        `${indent}if r${statement.region.ordinal} ${spanText(statement.span)}`,
+        `${indent}if r${statement.region.ordinal} ${originText(statement.origin)}`,
         encodeExpression(statement.condition, depth + 1),
         `${indent}then`,
         ...statement.taken.map((inner) => encodeStatement(inner, depth + 1)),
@@ -2285,32 +2446,32 @@ const encodeStatement = (statement: Statement, depth: number): string => {
       ].join('\n')
     case 'IfLet':
       return [
-        `${indent}if-let ${statement.selection.access.toLowerCase()} members=${statement.selection.members.map(Match.encodeIdentity).join(',')} r${statement.region.ordinal} ${spanText(statement.span)}`,
+        `${indent}if-let ${statement.selection.access.toLowerCase()} members=${statement.selection.members.map(Match.encodeIdentity).join(',')} r${statement.region.ordinal} ${originText(statement.origin)}`,
         ...statement.taken.map((inner) => encodeStatement(inner, depth + 1)),
         ...statement.otherwise.map((inner) => encodeStatement(inner, depth + 1)),
       ].join('\n')
     case 'While':
       return [
-        `${indent}while loop${statement.loop.ordinal} r${statement.region.ordinal}${statement.parent === undefined ? '' : ` parent=loop${statement.parent.ordinal}`} ${spanText(statement.span)}`,
+        `${indent}while loop${statement.loop.ordinal} r${statement.region.ordinal}${statement.parent === undefined ? '' : ` parent=loop${statement.parent.ordinal}`} ${originText(statement.origin)}`,
         encodeExpression(statement.condition, depth + 1),
         ...statement.body.map((inner) => encodeStatement(inner, depth + 1)),
       ].join('\n')
     case 'Break':
     case 'Continue':
-      return `${indent}${statement._tag.toLowerCase()} loop${statement.target.ordinal} r${statement.region.ordinal} ${spanText(statement.span)}`
+      return `${indent}${statement._tag.toLowerCase()} loop${statement.target.ordinal} r${statement.region.ordinal} ${originText(statement.origin)}`
     case 'Return':
       return [
-        `${indent}return r${statement.region.ordinal} ${spanText(statement.span)}`,
+        `${indent}return r${statement.region.ordinal} ${originText(statement.origin)}`,
         encodeExpression(statement.expression, depth + 1),
       ].join('\n')
     case 'Fail':
       return [
-        `${indent}fail ${Type.encode(statement.failure)} r${statement.region.ordinal} ${spanText(statement.span)}`,
+        `${indent}fail ${Type.encode(statement.failure)} r${statement.region.ordinal} ${originText(statement.origin)}`,
         encodeExpression(statement.expression, depth + 1),
       ].join('\n')
     case 'Drop':
       return [
-        `${indent}drop r${statement.region.ordinal} ${spanText(statement.span)}`,
+        `${indent}drop r${statement.region.ordinal} ${originText(statement.origin)}`,
         encodeExpression(statement.expression, depth + 1),
       ].join('\n')
   }
@@ -2333,3 +2494,70 @@ export const encode = (self: Module): string =>
     ]),
     '',
   ].join('\n')
+
+/** Each position a body holds, and the authored node beside it that says where it is. */
+const presented: ReadonlyArray<readonly [span: string, anchor: string]> = [
+  ['span', 'at'],
+  ['callSpan', 'call'],
+  ['loanEnd', 'loanEndAt'],
+  ['expectedAt', 'expected'],
+]
+
+/**
+ * Stamps a body's positions for one revision.
+ *
+ * A checked body names authored nodes. Stages that still work in source coordinates read the spans
+ * beside those nodes, and a span is only ever this function of its node and the current
+ * presentation: a reused body is presented again and nothing in it is matched against the revision
+ * it was built in. The declaration is the current header of the same id.
+ *
+ * ponytail: walks the whole body, types included; present per node kind if this shows in profiles.
+ */
+export const present = (
+  self: TirFunction,
+  spanOf: (anchor: AuthoredIdentity.Anchor) => SourceSpan.SourceSpan,
+  declaration: DeclarationFacts.DeclarationFact = self.declaration,
+  publish?: Publish,
+): TirFunction =>
+  Object.freeze({ ...stamp({ ...self, declaration: undefined }, spanOf, publish), declaration })
+
+/** Publishes a revision-free cause through one revision's presentation. */
+export type Publish = (cause: Diagnostic.Identity<Location.Location>) => Diagnostic.Identity
+
+/** Stamps every position in a value that has its authored node beside it. */
+export const stamp = <A>(
+  self: A,
+  spanOf: (anchor: AuthoredIdentity.Anchor) => SourceSpan.SourceSpan,
+  publish?: Publish,
+): A => {
+  const copies = new WeakMap<object, unknown>()
+  const visit = (input: unknown): unknown => {
+    if (typeof input !== 'object' || input === null) return input
+    if (input instanceof Map || input instanceof Set || SourceSpanModule.isSourceSpan(input))
+      return input
+    const known = copies.get(input)
+    if (known !== undefined) return known
+    if (Array.isArray(input)) {
+      const items: Array<unknown> = []
+      copies.set(input, items)
+      for (const item of input) items.push(visit(item))
+      return Object.freeze(items)
+    }
+    const source = input as Readonly<Record<string, unknown>>
+    const result: Record<string, unknown> = {}
+    copies.set(input, result)
+    for (const key of Object.keys(source)) result[key] = visit(source[key])
+    const origin = source['origin'] as Origin | undefined
+    for (const [span, anchor] of presented) {
+      const at = source[anchor] as AuthoredIdentity.Anchor | undefined
+      if (at !== undefined && span in source) result[span] = spanOf(at)
+    }
+    const causeAt = source['causeAt'] as Diagnostic.Identity<Location.Location> | undefined
+    if (publish !== undefined && causeAt !== undefined) result['cause'] = publish(causeAt)
+    // A node's own position comes from its origin, whatever else it names.
+    if (origin?.anchor !== undefined && 'span' in source) result['span'] = spanOf(origin.anchor)
+    return Object.freeze(result)
+  }
+  // The walk rebuilds the same shape and changes only spans that have an anchor beside them.
+  return visit(self) as A
+}

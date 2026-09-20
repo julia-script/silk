@@ -1,3 +1,4 @@
+import { records } from './support/records.js'
 import * as Layer from 'effect/Layer'
 import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { assert, it } from '@effect/vitest'
@@ -427,7 +428,7 @@ pub fn main() -> i32 {
   return 0
 }`
     const snapshot = yield* Analysis.ofSource(module, encoder.encode(source))
-    const main = Analysis.rootAnalysis(snapshot).functions.find(
+    const main = records(Analysis.rootAnalysis(snapshot)).functions.find(
       (fact) =>
         fact.declaration.name._tag === 'Present' && fact.declaration.name.spelling === 'main',
     )
@@ -482,7 +483,7 @@ pub fn main() -> i32 {
     const first = yield* analyzeAt(module, source, '/workspace/first/Main.silk')
     const moved = yield* analyzeAt(module, shifted, '/relocated/project/Main.silk')
     const representedInstances = (snapshot: Analysis.SingleRootFrontendSnapshot) => {
-      const main = Analysis.rootAnalysis(snapshot).functions.find(
+      const main = records(Analysis.rootAnalysis(snapshot)).functions.find(
         (fact) =>
           fact.declaration.name._tag === 'Present' && fact.declaration.name.spelling === 'main',
       )

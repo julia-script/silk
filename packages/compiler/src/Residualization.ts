@@ -1,4 +1,5 @@
 import * as Location from './Location.js'
+import * as Provenance from './Provenance.js'
 import * as Effect from 'effect/Effect'
 import * as ToolchainIntegrity from './ToolchainIntegrity.js'
 import type * as CompilationProfile from './CompilationProfile.js'
@@ -9,6 +10,7 @@ import type * as Diagnostic from './Diagnostic.js'
 import * as Elaboration from './Elaboration.js'
 import { analyzeExpression } from './ExpressionAnalysis.js'
 import type * as Tir from './Tir.js'
+import * as TirLowering from './TirLowering.js'
 import * as FunctionIndex from './internal/FunctionIndex.js'
 import * as TypeInference from './internal/TypeInference.js'
 import * as Canonical from './internal/Canonical.js'
@@ -31,14 +33,13 @@ export interface ApplicationKey {
   readonly evidence: ReadonlyArray<string>
   readonly contractRow: ReadonlyArray<string>
   readonly staticArguments: ReadonlyArray<StaticValue.Value>
-  /** Caller-authored metadata aligned with static arguments; never part of specialization identity. */
-  readonly staticArgumentOrigins?: ReadonlyArray<StaticEvaluation.TextOrigin | undefined>
 }
 
 export interface ResidualBody {
   readonly _tag: 'ResidualBody'
   readonly function: Tir.TirFunction
-  readonly fact: Elaboration.FunctionFact
+  /** The tables the body published, which later stages read beside its nodes. */
+  readonly results: Elaboration.BodyResults
   readonly diagnostics: ReadonlyArray<Diagnostic.Located>
 }
 
@@ -476,12 +477,10 @@ const resolveTextOrigin = (
   arguments_: ReadonlyArray<StaticEvaluation.TextOrigin | undefined>,
   scope: string,
 ): StaticEvaluation.TextOrigin | undefined => {
-  if (origin?._tag !== 'ParameterTextOrigin') return origin
-  if (origin.scope !== undefined && origin.scope !== scope) return origin
-  const argument = arguments_.at(origin.ordinal)
-  return argument === undefined
-    ? undefined
-    : StaticEvaluation.sliceTextOrigin(argument, origin.start, origin.end)
+  if (origin === undefined) return undefined
+  // Each parameter part becomes what this caller wrote for it; a computed argument leaves none.
+  const resolved = Provenance.substitute(origin, arguments_, scope)
+  return resolved.length === 0 ? undefined : resolved
 }
 
 const resolveValueOrigins = (
@@ -517,13 +516,29 @@ const resolveValueOrigins = (
   return value
 }
 
+/** The headers a body can name: the index, and before it the aggregates the body generated. */
+const bodyLookup =
+  (
+    lookup: StaticEvaluation.NodeContext['lookup'],
+    generated: ReadonlyArray<DeclarationFacts.StructFact>,
+  ): StaticEvaluation.NodeContext['lookup'] =>
+  (id) =>
+    generated.find(
+      (aggregate) =>
+        aggregate.canonical._tag === 'Canonical' &&
+        aggregate.canonical.id.module === id.module &&
+        aggregate.canonical.id.name === id.name,
+    ) ?? lookup(id)
+
 const resolveTextSpan = (
   origin: StaticEvaluation.TextOrigin | undefined,
   arguments_: ReadonlyArray<Location.Location | undefined>,
-): Location.Location | undefined =>
-  origin?._tag === 'SourceTextOrigin'
-    ? Location.at(origin.at)
-    : arguments_.at(origin?.ordinal ?? -1)
+): Location.Location | undefined => {
+  // The node a result is reported at is where its text begins: a literal, or this call's argument.
+  const first = origin?.at(0)?.from
+  if (first === undefined) return undefined
+  return first._tag === 'Literal' ? Location.at(first.at) : arguments_.at(first.ordinal)
+}
 
 const evaluateStaticFunction = (
   self: EvaluationCoordinator,
@@ -531,10 +546,10 @@ const evaluateStaticFunction = (
   arguments_: ReadonlyArray<StaticValue.Value>,
   argumentSpans: ReadonlyArray<Location.Location | undefined>,
   argumentOrigins: ReadonlyArray<StaticEvaluation.TextOrigin | undefined>,
-  span: Parameters<StaticEvaluation.FactEvaluationContext['call']>[4],
+  span: Parameters<StaticEvaluation.NodeContext['call']>[4],
   parentTrace: StaticEvaluation.Trace,
-  identity: Parameters<StaticEvaluation.FactEvaluationContext['call']>[6],
-): StaticEvaluation.FactCallResult => {
+  identity: Parameters<StaticEvaluation.NodeContext['call']>[6],
+): StaticEvaluation.CallResult => {
   if (declaration.canonical._tag !== 'Canonical')
     return Object.freeze({
       outcome: StaticEvaluation.failed(
@@ -585,7 +600,7 @@ const evaluateStaticFunction = (
             evaluation.trace,
           ),
         )
-      const call: StaticEvaluation.FactEvaluationContext['call'] = (
+      const call: StaticEvaluation.NodeContext['call'] = (
         callee,
         nestedArguments,
         nestedArgumentSpans,
@@ -610,8 +625,11 @@ const evaluateStaticFunction = (
         values: bindings.values,
         valueSpans: bindings.valueSpans,
         valueOrigins: bindings.valueOrigins,
-        expressionSpans: new Map<Elaboration.ExpressionFact, Location.Location>(),
-        expressionOrigins: new Map<Elaboration.ExpressionFact, StaticEvaluation.TextOrigin>(),
+        expressionSpans: new Map<Tir.Expression, Location.Location>(),
+        expressionOrigins: new Map<Tir.Expression, StaticEvaluation.TextOrigin>(),
+        nodes: TirLowering.staticLowering(SemanticContext.make(input.result.authored)),
+        lookup: (id: DeclarationFacts.CanonicalId) =>
+          DeclarationFacts.byCanonical(self[stateSymbol].index, id),
         returnedTextSpan: { value: undefined },
         returnedTextOrigin: { value: undefined },
         trace: evaluation.trace,
@@ -662,10 +680,14 @@ const evaluateStaticFunction = (
           ),
         )
       }
-      const value = StaticEvaluation.evaluateStatements(analyzed.fact.statements, {
-        ...staticContext,
-        step: () => evaluation.step(),
-      })
+      const value = StaticEvaluation.evaluateStatements(
+        staticContext.nodes.statements(analyzed.fact.statements),
+        {
+          ...staticContext,
+          lookup: bodyLookup(staticContext.lookup, analyzed.fact.generatedAggregates),
+          step: () => evaluation.step(),
+        },
+      )
       if (value._tag === 'Complete') {
         if (staticContext.returnedTextOrigin.value !== undefined)
           self[stateSymbol].staticResultOrigins.set(
@@ -785,7 +807,7 @@ function evaluateConstantValue(
             evaluation.trace,
           ),
         )
-      const call: StaticEvaluation.FactEvaluationContext['call'] = (
+      const call: StaticEvaluation.NodeContext['call'] = (
         callee,
         arguments_,
         argumentSpans,
@@ -804,7 +826,7 @@ function evaluateConstantValue(
           trace,
           identity,
         )
-      const constant: NonNullable<StaticEvaluation.FactEvaluationContext['constant']> = (
+      const constant: NonNullable<StaticEvaluation.NodeContext['constant']> = (
         nested,
         nestedSpan,
         trace,
@@ -814,8 +836,11 @@ function evaluateConstantValue(
         values: new Map<string, StaticValue.Value>(),
         valueSpans: new Map<string, Location.Location>(),
         valueOrigins: new Map<string, StaticEvaluation.TextOrigin>(),
-        expressionSpans: new Map<Elaboration.ExpressionFact, Location.Location>(),
-        expressionOrigins: new Map<Elaboration.ExpressionFact, StaticEvaluation.TextOrigin>(),
+        expressionSpans: new Map<Tir.Expression, Location.Location>(),
+        expressionOrigins: new Map<Tir.Expression, StaticEvaluation.TextOrigin>(),
+        nodes: TirLowering.staticLowering(SemanticContext.make(input.result.authored)),
+        lookup: (id: DeclarationFacts.CanonicalId) =>
+          DeclarationFacts.byCanonical(self[stateSymbol].index, id),
         trace: evaluation.trace,
         call,
         reflect: (
@@ -866,7 +891,7 @@ function evaluateConstantValue(
             evaluation.trace,
           ),
         )
-      const value = StaticEvaluation.evaluateFact(analyzed.fact, {
+      const value = StaticEvaluation.evaluate(staticContext.nodes.expression(analyzed.fact), {
         ...staticContext,
         step: () => evaluation.step(),
       })
@@ -1028,40 +1053,10 @@ export const selectionReason = (
     if (scope !== undefined && hasStaticControlFlow(scope.context.module, declaration))
       return 'StaticControlFlow'
     const input = moduleInput(self, declaration)
-    const fact =
-      input === undefined
-        ? undefined
-        : Elaboration.executableFunctions(input.result).find(
-            (candidate) => candidate.declaration.id.ordinal === declaration.id.ordinal,
-          )
-    if (fact === undefined) return 'UnavailableBody'
-    let found: SelectionReason | undefined
-    Elaboration.visitStatementFacts(fact.statements, {
-      statement: (statement) => {
-        if (
-          found === undefined &&
-          statement._tag === 'BindStatement' &&
-          statement.binding.phase === 'Static'
-        )
-          found = 'StaticBinding'
-      },
-      expression: (expression) => {
-        if (found !== undefined) return
-        if (expression._tag === 'Constant' && expression.value === undefined)
-          found = 'UnresolvedConstant'
-        else if (expression._tag === 'CompileError') found = 'CompileError'
-        else if (
-          expression._tag === 'Call' &&
-          expression.reference._tag === 'Resolved' &&
-          (expression.reference.declaration.phase === 'Static' ||
-            expression.reference.declaration.parameters.some(
-              (parameter) => parameter.phase === 'Static',
-            ))
-        )
-          found = 'StaticCall'
-      },
-    })
-    return found
+    const body = input?.result.bodies.find(
+      (candidate) => candidate.declaration.id.ordinal === declaration.id.ordinal,
+    )
+    return body === undefined ? 'UnavailableBody' : body.results.staticStructure
   }
   const selected = reason()
   cache.set(declaration, selected)
@@ -1075,12 +1070,9 @@ export const residualize = (self: Coordinator, key: ApplicationKey): Result => {
   const bindings =
     declaration === undefined
       ? undefined
-      : bindStaticParameters(
-          declaration,
-          key.staticArguments,
-          Object.freeze([]),
-          key.staticArgumentOrigins,
-        )
+      : // A residual body is shared by every call that selects it, so its static text names its own
+        // parameters; each selecting call site substitutes what it passed when it reports.
+        bindStaticParameters(declaration, key.staticArguments)
   if (declaration === undefined || input === undefined || bindings === undefined) {
     // A declaration that is gone has no node; its module's root resolves to that module's start.
     const span = Location.at(
@@ -1107,16 +1099,15 @@ export const residualize = (self: Coordinator, key: ApplicationKey): Result => {
   }
   const reason = selectionReason(self, key)
   if (reason === undefined) {
-    const fact = Elaboration.executableFunctions(input.result).find(
+    const body = input.result.bodies.find(
       (candidate) => candidate.declaration.id.ordinal === declaration.id.ordinal,
     )
-    const fn = FunctionIndex.tirByCanonical(input.result.tir, key.declaration)
-    if (fact !== undefined && fn !== undefined) {
+    if (body !== undefined) {
       record(self, key.declaration, 'UnchangedBody', 'sourceReused', false)
       return Object.freeze({
         _tag: 'ResidualBody',
-        function: fn,
-        fact,
+        function: body.function,
+        results: body.results,
         diagnostics: Object.freeze([]),
       })
     }
@@ -1148,7 +1139,7 @@ export const residualize = (self: Coordinator, key: ApplicationKey): Result => {
             evaluation.trace,
           ),
         )
-      const call: StaticEvaluation.FactEvaluationContext['call'] = (
+      const call: StaticEvaluation.NodeContext['call'] = (
         callee,
         arguments_,
         argumentSpans,
@@ -1167,7 +1158,7 @@ export const residualize = (self: Coordinator, key: ApplicationKey): Result => {
           trace,
           identity,
         )
-      const constant: NonNullable<StaticEvaluation.FactEvaluationContext['constant']> = (
+      const constant: NonNullable<StaticEvaluation.NodeContext['constant']> = (
         declaration,
         span,
         trace,
@@ -1184,8 +1175,11 @@ export const residualize = (self: Coordinator, key: ApplicationKey): Result => {
           values: bindings.values,
           valueSpans: bindings.valueSpans,
           valueOrigins: bindings.valueOrigins,
-          expressionSpans: new Map<Elaboration.ExpressionFact, Location.Location>(),
-          expressionOrigins: new Map<Elaboration.ExpressionFact, StaticEvaluation.TextOrigin>(),
+          expressionSpans: new Map<Tir.Expression, Location.Location>(),
+          expressionOrigins: new Map<Tir.Expression, StaticEvaluation.TextOrigin>(),
+          nodes: TirLowering.staticLowering(SemanticContext.make(input.result.authored)),
+          lookup: (id: DeclarationFacts.CanonicalId) =>
+            DeclarationFacts.byCanonical(self[stateSymbol].index, id),
           trace: evaluation.trace,
           call,
           chargeStaticIteration: (trace: StaticEvaluation.Trace, residualNodes: number) => {
@@ -1216,15 +1210,26 @@ export const residualize = (self: Coordinator, key: ApplicationKey): Result => {
         chargedStaticIterationNodes.value === 0 ? Math.max(1, remainingNodes) : remainingNodes,
       )
       if (growthFailure !== undefined) return StaticEvaluation.failed(growthFailure)
+      const body = Elaboration.checkedBody(
+        SemanticContext.make(input.result.authored),
+        self[stateSymbol].index,
+        analyzed.fact,
+        undefined,
+        Object.freeze({
+          _tag: 'Specialize',
+          application: StaticEvaluation.applicationKey(
+            self[stateSymbol].environment,
+            evaluation.application,
+          ),
+        }),
+      )
+      if (declaration.phase === 'Static')
+        throw new RangeError('Static functions have no runtime TIR body')
       return StaticEvaluation.complete(
         Object.freeze({
           _tag: 'ResidualBody' as const,
-          function: Elaboration.residualTirFunction(
-            SemanticContext.make(input.result.authored),
-            analyzed.fact,
-            self[stateSymbol].index,
-          ),
-          fact: analyzed.fact,
+          function: body.function,
+          results: body.results,
           diagnostics: analyzed.diagnostics,
         }),
       )

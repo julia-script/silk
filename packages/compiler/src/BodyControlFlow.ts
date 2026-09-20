@@ -15,6 +15,10 @@ export interface Boundary {
 /** Finite semantic control flow, independent of source offsets and backend lowering. */
 export interface BodyControlFlow {
   readonly boundaries: ReadonlyMap<string, Boundary>
+  /** The authored node behind each boundary key, and behind each write's installation point. */
+  readonly anchors: ReadonlyMap<string, AuthoredHir.Anchor>
+  readonly writeAnchors: ReadonlyMap<string, number>
+  /** `boundaries` and `writeAnchors` by the span their nodes have in one revision. */
   readonly spans: ReadonlyMap<string, Boundary>
   readonly writes: ReadonlyMap<string, number>
   readonly edges: ReadonlyArray<ReadonlyArray<number>>
@@ -35,6 +39,8 @@ export const make = (
 ): BodyControlFlow => {
   const edges: Array<Array<number>> = []
   const boundaries = new Map<string, Boundary>()
+  const anchors = new Map<string, AuthoredHir.Anchor>()
+  const writeAnchors = new Map<string, number>()
   const spans = new Map<string, Boundary>()
   const writes = new Map<string, number>()
   const point = (): number => {
@@ -50,6 +56,7 @@ export const make = (
     if (found !== undefined) return found
     const value = { before: point(), after: point() }
     boundaries.set(key, value)
+    anchors.set(key, anchor)
     spans.set(spanKey(context.spanOf(anchor)), value)
     return value
   }
@@ -156,8 +163,12 @@ export const make = (
         else if (statement._tag === 'PatternBindStatement') values = [statement.selection.source]
         else values = [statement.expression]
         for (const value of [...values].reverse()) evaluated = expression(value, evaluated, loops)
-        if (statement._tag === 'WriteStatement')
-          writes.set(spanKey(context.spanOf(statement.destination.anchor)), own.after)
+        if (statement._tag === 'WriteStatement') {
+          const destination = statement.destination.anchor
+          anchors.set(AuthoredIdentity.anchorKey(destination), destination)
+          writeAnchors.set(AuthoredIdentity.anchorKey(destination), own.after)
+          writes.set(spanKey(context.spanOf(destination)), own.after)
+        }
         edge(own.before, evaluated)
         edge(own.after, previous)
       }
@@ -168,6 +179,8 @@ export const make = (
   edge(body.before, sequence(statements, body.after, new Map()))
   return {
     boundaries,
+    anchors,
+    writeAnchors,
     spans,
     writes,
     edges,
@@ -175,6 +188,38 @@ export const make = (
     work: { queries: 0, cacheHits: 0, visitedEdges: 0 },
   }
 }
+
+/**
+ * The same control flow under another revision's presentation.
+ *
+ * Boundaries belong to authored nodes. Only the span index over them belongs to a revision, so it
+ * is rebuilt and nothing else changes.
+ */
+export const present = (
+  self: BodyControlFlow,
+  context: SemanticContext.SemanticContext,
+): BodyControlFlow => {
+  const spans = new Map<string, Boundary>()
+  const writes = new Map<string, number>()
+  for (const [key, value] of self.boundaries) {
+    const anchor = self.anchors.get(key)
+    if (anchor !== undefined) spans.set(spanKey(context.spanOf(anchor)), value)
+  }
+  for (const [key, value] of self.writeAnchors) {
+    const anchor = self.anchors.get(key)
+    if (anchor !== undefined) writes.set(spanKey(context.spanOf(anchor)), value)
+  }
+  return { ...self, spans, writes, queries: new Map(self.queries) }
+}
+
+/** The graph without what one revision derived from it: positions and answered queries. */
+export const content = (self: BodyControlFlow): BodyControlFlow => ({
+  ...self,
+  spans: new Map(),
+  writes: new Map(),
+  queries: new Map(),
+  work: { queries: 0, cacheHits: 0, visitedEdges: 0 },
+})
 
 /** Finds an exact semantic boundary; unexecuted annotation syntax has none. */
 export const at = (self: BodyControlFlow, span: SourceSpan.SourceSpan): Boundary | undefined =>

@@ -1,3 +1,4 @@
+import { records } from './support/records.js'
 import { locationAt } from './support/location.js'
 import * as Layer from 'effect/Layer'
 import * as AnalysisFixture from './support/AnalysisFixture.js'
@@ -14,7 +15,9 @@ import * as ConfigurationOrigin from '../src/ConfigurationOrigin.js'
 import * as ConfigurationValue from '../src/ConfigurationValue.js'
 import * as PackageParameter from '../src/PackageParameter.js'
 import * as FloatingPoint from '../src/FloatingPoint.js'
+import * as DeclarationFacts from '../src/DeclarationFacts.js'
 import * as Tir from '../src/Tir.js'
+import * as TirLowering from '../src/TirLowering.js'
 import * as Instances from '../src/Instances.js'
 import * as Lexer from '../src/Lexer.js'
 import * as Lifetime from '../src/Lifetime.js'
@@ -232,6 +235,69 @@ it.effect('reports compile errors, phase violations, and four distinct determini
   }),
 )
 
+it.effect('accounts budgets so neither caching nor ordering changes what is accepted', () =>
+  Effect.gen(function* () {
+    const profile = yield* CompilationProfile.normalize({ target: Target.x8664UnknownLinuxGnu.id })
+    const evaluation = StaticEvaluation.make<string>(profile, {
+      steps: 10,
+      callDepth: 4,
+      retainedValueBytes: 10_000,
+      residualNodes: 10,
+    })
+    const spend =
+      (steps: number, nested?: string): StaticEvaluation.EvaluationCallback<string> =>
+      (context) => {
+        for (let step = 0; step < steps; step += 1) context.step()
+        if (nested === undefined) return StaticEvaluation.complete('done')
+        const inner = context.evaluate(application(nested), spend(4))
+        return inner._tag === 'Failed'
+          ? StaticEvaluation.failed(inner.failure)
+          : StaticEvaluation.complete('done')
+      }
+    const entry = (name: string) =>
+      StaticEvaluation.cacheEntries(evaluation).find((candidate) => candidate.key.includes(name))
+        ?.state
+
+    // `f` leaves its nested `g` too little: `f` is rejected, and nothing is recorded for `g`.
+    const f = StaticEvaluation.evaluateApplication(
+      evaluation,
+      application('outerFirst'),
+      spend(9, 'nestedWork'),
+    )
+    assert.strictEqual(f._tag === 'Failed' ? f.failure._tag : f._tag, 'StepLimit')
+    assert.strictEqual(entry('outerFirst')?._tag, 'Failed')
+    assert.isUndefined(entry('nestedWork'))
+
+    // Asked again as a root, `g` has the whole allowance and records what it cost.
+    const g = StaticEvaluation.evaluateApplication(evaluation, application('nestedWork'), spend(4))
+    assert.strictEqual(g._tag, 'Complete')
+    const recorded = entry('nestedWork')
+    assert.deepEqual(recorded?._tag === 'Complete' ? recorded.cost : undefined, {
+      steps: 4,
+      callDepth: 1,
+      retainedValueBytes: 0,
+      residualNodes: 0,
+    })
+
+    // A hit is charged like an execution: `h` continues, and `tight` exhausts exactly as it would
+    // have by executing `g` itself.
+    const h = StaticEvaluation.evaluateApplication(
+      evaluation,
+      application('outerSecond'),
+      spend(5, 'nestedWork'),
+    )
+    assert.strictEqual(h._tag, 'Complete')
+    assert.strictEqual(h.budget.steps, 9)
+    const tight = StaticEvaluation.evaluateApplication(
+      evaluation,
+      application('outerThird'),
+      spend(8, 'nestedWork'),
+    )
+    assert.strictEqual(tight._tag === 'Failed' ? tight.failure._tag : tight._tag, 'StepLimit')
+    assert.strictEqual(entry('nestedWork')?._tag, 'Complete')
+  }),
+)
+
 it('canonicalizes finite static values without observing construction identity', () => {
   const left = admitted(
     StaticValue.admit(
@@ -297,10 +363,10 @@ it('canonicalizes finite static values without observing construction identity',
 
 it('retains static text provenance without adding it to canonical identity', () => {
   const bytes = Array.from(encoder.encode('template'))
-  const originOrdinal = (value: StaticValue.Value | undefined): number | undefined =>
-    value?._tag === 'TextValue' && value.origin?._tag === 'ParameterTextOrigin'
-      ? value.origin.ordinal
-      : undefined
+  const originOrdinal = (value: StaticValue.Value | undefined): number | undefined => {
+    const from = value?._tag === 'TextValue' ? value.origin?.at(0)?.from : undefined
+    return from?._tag === 'Parameter' ? from.ordinal : undefined
+  }
   const left = admitted(
     StaticValue.admit(
       {
@@ -904,13 +970,11 @@ pub fn main() -> i32 { return invalid([1]) }`
     assert.isFalse(
       Analysis.diagnostics(snapshot).some((diagnostic) => diagnostic.code === 'SEM0177'),
     )
-    const declaration = snapshot.results
-      .get('static/runtime-iteration')
-      ?.functions.find(
-        (candidate) =>
-          candidate.declaration.name._tag === 'Present' &&
-          candidate.declaration.name.spelling === 'invalid',
-      )?.declaration
+    const declaration = records(snapshot.results.get('static/runtime-iteration'))?.functions.find(
+      (candidate) =>
+        candidate.declaration.name._tag === 'Present' &&
+        candidate.declaration.name.spelling === 'invalid',
+    )?.declaration
     assert.notStrictEqual(declaration, undefined)
     assert.strictEqual(snapshot.target._tag, 'Resolved')
     if (
@@ -937,9 +1001,9 @@ pub fn main() -> i32 { return invalid([1]) }`
     assert.strictEqual(residual._tag, 'ResidualBody')
     if (residual._tag !== 'ResidualBody') return
     assert.deepEqual(
-      residual.fact.staticIterations.map((iteration) => ({
+      residual.results.staticIterations.map((iteration) => ({
         state: iteration.state,
-        scopes: iteration.scopes.length,
+        scopes: iteration.elements.length,
       })),
       [{ state: 'Rejected', scopes: 0 }],
     )
@@ -979,13 +1043,11 @@ pub fn main() -> i32 { return rejected() }`),
       assert.isTrue(
         selectedFailure.reason.trace.some((frame) => frame.label === 'static for element 1'),
       )
-    const declaration = snapshot.results
-      .get('static/iteration-rollback')
-      ?.functions.find(
-        (candidate) =>
-          candidate.declaration.name._tag === 'Present' &&
-          candidate.declaration.name.spelling === 'rejected',
-      )?.declaration
+    const declaration = records(snapshot.results.get('static/iteration-rollback'))?.functions.find(
+      (candidate) =>
+        candidate.declaration.name._tag === 'Present' &&
+        candidate.declaration.name.spelling === 'rejected',
+    )?.declaration
     assert.notStrictEqual(declaration, undefined)
     assert.strictEqual(snapshot.target._tag, 'Resolved')
     if (
@@ -1012,9 +1074,9 @@ pub fn main() -> i32 { return rejected() }`),
     assert.strictEqual(residual._tag, 'ResidualBody')
     if (residual._tag !== 'ResidualBody') return
     assert.deepEqual(
-      residual.fact.staticIterations.map((iteration) => ({
+      residual.results.staticIterations.map((iteration) => ({
         state: iteration.state,
-        scopes: iteration.scopes.length,
+        scopes: iteration.elements.length,
       })),
       [{ state: 'Rejected', scopes: 0 }],
     )
@@ -1061,13 +1123,11 @@ pub fn main() -> i32 {
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
     assert.strictEqual(snapshot.target._tag, 'Resolved')
     if (snapshot.target._tag !== 'Resolved') return
-    const declaration = snapshot.results
-      .get(sourceId)
-      ?.functions.find(
-        (candidate) =>
-          candidate.declaration.name._tag === 'Present' &&
-          candidate.declaration.name.spelling === 'inspect',
-      )?.declaration
+    const declaration = records(snapshot.results.get(sourceId))?.functions.find(
+      (candidate) =>
+        candidate.declaration.name._tag === 'Present' &&
+        candidate.declaration.name.spelling === 'inspect',
+    )?.declaration
     assert.notStrictEqual(declaration, undefined)
     if (declaration === undefined || declaration.canonical._tag !== 'Canonical') return
     const declarationId = declaration.canonical.id
@@ -1090,13 +1150,11 @@ pub fn main() -> i32 {
       )
       assert.strictEqual(residual._tag, 'ResidualBody')
       if (residual._tag !== 'ResidualBody') return Object.freeze([])
-      const iteration = residual.fact.staticIterations.at(0)
+      const iteration = residual.results.staticIterations.at(0)
       assert.strictEqual(iteration?.state, 'Expanded')
       return Object.freeze(
-        (iteration?.scopes ?? []).flatMap((scope) =>
-          scope.binding.staticValue?._tag === 'FieldDescriptorValue'
-            ? [scope.binding.staticValue]
-            : [],
+        (iteration?.elements ?? []).flatMap((element) =>
+          element?._tag === 'FieldDescriptorValue' ? [element] : [],
         ),
       )
     }
@@ -1366,7 +1424,7 @@ pub fn main() -> i32 { return choose(true, 41) }`),
     )
     assert.strictEqual(
       sha256(tir),
-      'db781131cc72b6506fff095211b06c4ddf5f43fddbea828f4fb43849e037158f',
+      'fcef33365b1a6769fd2f505a439d34a9d8d8e2555597093b9886a2e62fb4dcc2',
     )
     assert.strictEqual(
       sha256(ownership),
@@ -1646,34 +1704,82 @@ pub fn main() -> i32 { return reject("aéz") }`
   }),
 )
 
-it.effect(
-  'chooses caller provenance deterministically without changing specialization identity',
-  () =>
-    Effect.gen(function* () {
-      const sourceId = 'static/compile-error-shared-specialization'
-      const program = `import silk.static_text { StaticText }
+it.effect('reports joined static text at every literal it was copied from', () =>
+  Effect.gen(function* () {
+    const sourceId = 'static/compile-error-concat'
+    const program = `import silk.static_text { StaticText }
+
+static fn label(value: string) -> string { return StaticText.concat("bad: ", value) }
+
+fn reject(static template: string) -> i32 { compileError(label(StaticText.slice(template, 1, 3))) }
+
+pub fn main() -> i32 { return reject("aéz") }`
+    const snapshot = yield* AnalysisFixture.retainingMain(
+      sourceId,
+      encoder.encode(program),
+      Target.x8664UnknownLinuxGnu.id,
+    )
+    const diagnostic = Analysis.diagnostics(snapshot).at(0)
+    assert.strictEqual(diagnostic?.code, 'SEM0177')
+    const bytesBefore = (text: string): number =>
+      encoder.encode(program.slice(0, program.lastIndexOf(text))).length
+    // The callee's literal comes first in the value; the caller's argument is the rest of it.
+    assert.deepEqual(
+      [
+        diagnostic?.span,
+        ...(diagnostic?.relatedSpans ?? [])
+          .filter((related) => related.label === 'continues here')
+          .map((related) => related.span),
+      ].map((span) => [span?.start, span?.end]),
+      [
+        [bytesBefore('"bad: "') + 1, bytesBefore('"bad: "') + 6],
+        [bytesBefore('"aéz"') + 2, bytesBefore('"aéz"') + 4],
+      ],
+    )
+  }),
+)
+
+it.effect('reports a shared residual failure at every call that selects it', () =>
+  Effect.gen(function* () {
+    const sourceId = 'static/compile-error-shared-specialization'
+    const program = `import silk.static_text { StaticText }
 
 fn reject(static template: string) -> i32 { compileError(StaticText.slice(template, 1, 3)) }
 
+fn relay(static forwarded: string) -> i32 { return reject(forwarded) }
+
 pub fn main() -> i32 {
   let first = reject("aéz")
+  let second = relay("bèy")
   return reject("aéz")
 }`
-      const snapshot = yield* AnalysisFixture.retainingMain(
-        sourceId,
-        encoder.encode(program),
-        Target.x8664UnknownLinuxGnu.id,
-      )
-      const diagnostics = Analysis.diagnostics(snapshot).filter(
-        (diagnostic) => diagnostic.code === 'SEM0177',
-      )
-      assert.strictEqual(diagnostics.length, 1)
-      const firstLiteralStart = program.indexOf('"aéz"')
-      const prefixBytes = encoder.encode(program.slice(0, firstLiteralStart)).length
-      assert.strictEqual(diagnostics.at(0)?.span.sourceId, sourceId)
-      assert.strictEqual(diagnostics.at(0)?.span.start, prefixBytes + 2)
-      assert.strictEqual(diagnostics.at(0)?.span.end, prefixBytes + 4)
-    }),
+    const snapshot = yield* AnalysisFixture.retainingMain(
+      sourceId,
+      encoder.encode(program),
+      Target.x8664UnknownLinuxGnu.id,
+    )
+    // One specialization per static value, whoever asks for it and wherever they wrote it.
+    assert.deepEqual(
+      Analysis.instancesOf(snapshot)
+        .unavailableOwnership.map((candidate) => candidate.key.declaration.name)
+        .sort(),
+      ['reject', 'reject'],
+    )
+    // The failure is one fact about the application; each selecting call is its own mistake, so
+    // each reports at what it wrote, also through a caller that only forwards it.
+    const bytesBefore = (index: number): number => encoder.encode(program.slice(0, index)).length
+    const literals = [
+      program.indexOf('"aéz"'),
+      program.indexOf('"bèy"'),
+      program.lastIndexOf('"aéz"'),
+    ].map(bytesBefore)
+    assert.deepEqual(
+      Analysis.diagnostics(snapshot)
+        .filter((diagnostic) => diagnostic.code === 'SEM0177')
+        .map((diagnostic) => [diagnostic.span.start, diagnostic.span.end]),
+      literals.map((start) => [start + 2, start + 4]),
+    )
+  }),
 )
 
 it.effect('retains ownership evidence for an unavailable selected residual specialization', () =>
@@ -1815,7 +1921,12 @@ it('composes decoded static-text ranges through source and parameter slices', ()
       3,
       8,
     ),
-    { _tag: 'ParameterTextOrigin', ordinal: 0, start: 3, end: 8 },
+    [
+      {
+        value: { start: 0, end: 5 },
+        from: { _tag: 'Parameter', ordinal: 0, range: { start: 3, end: 8 } },
+      },
+    ],
   )
 })
 
@@ -1927,19 +2038,26 @@ static fn computed() -> i32 {
       encoder.encode(source),
     )
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
-    const computed = Analysis.rootAnalysis(snapshot).functions.at(0) ?? unreachable('static body')
+    const computed =
+      records(Analysis.rootAnalysis(snapshot)).functions.at(0) ?? unreachable('static body')
     const result = completedValue(
-      StaticEvaluation.evaluateStatements(computed.statements, {
-        environment: StaticEvaluation.targetEnvironment(profilewasm32UnknownUnknown),
-        values: new Map(),
-        valueSpans: new Map(),
-        valueOrigins: new Map(),
-        expressionSpans: new Map(),
-        expressionOrigins: new Map(),
-        trace: [],
-        reflect: () => unreachable('fixture does not reflect'),
-        call: () => unreachable('fixture does not call another function'),
-      }),
+      StaticEvaluation.evaluateStatements(
+        TirLowering.staticLowering(
+          SemanticContext.make(Analysis.rootAnalysis(snapshot).authored),
+        ).statements(computed.statements),
+        {
+          environment: StaticEvaluation.targetEnvironment(profilewasm32UnknownUnknown),
+          lookup: (id) => DeclarationFacts.byCanonical(snapshot.index, id),
+          values: new Map(),
+          valueSpans: new Map(),
+          valueOrigins: new Map(),
+          expressionSpans: new Map(),
+          expressionOrigins: new Map(),
+          trace: [],
+          reflect: () => unreachable('fixture does not reflect'),
+          call: () => unreachable('fixture does not call another function'),
+        },
+      ),
     )
     assert.strictEqual(result._tag, 'IntegerValue')
     if (result._tag === 'IntegerValue') assert.strictEqual(result.value, 23n)
