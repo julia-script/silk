@@ -2589,6 +2589,7 @@ export const checkedBody = (
   /** Set for a compiler-made body: the artifact whose construction produced it. */
   parent?: Tir.ArtifactId,
   request: Tir.ArtifactId['request'] = Object.freeze({ _tag: 'Check' }),
+  construction?: BodyBuilder.BodyBuilder,
 ): CheckedBody => {
   const hidden = parent !== undefined
   const artifact: Tir.ArtifactId = Object.freeze({
@@ -2596,7 +2597,9 @@ export const checkedBody = (
     request,
     ...(parent === undefined ? {} : { parent }),
   })
-  const builder = BodyBuilder.make(artifact)
+  const builder = construction ?? BodyBuilder.make(artifact)
+  if (Tir.artifactKey(builder.artifact) !== Tir.artifactKey(artifact))
+    throw new RangeError('TIR body builder belongs to another artifact')
   const lowered = BodyBuilder.index(
     builder,
     fact.declaration.phase === 'Static'
@@ -2645,7 +2648,7 @@ export const records = (self: Result): Records => {
   const input = inputs.get(self)
   if (input === undefined) throw new RangeError('Only an elaborated module has working records')
   const context = SemanticContext.make(input.authored)
-  const hiddenFunctions: Array<FunctionFact> = []
+  const hiddenAnalyses: Array<import('./ExpressionAnalysis.js').FunctionAnalysis> = []
   const functions = input.headers.declarations
     .filter((declaration) => declaration.foreign === undefined)
     .map(
@@ -2654,12 +2657,16 @@ export const records = (self: Result): Records => {
           context,
           declaration,
           input.headers.declarations,
-          Object.freeze({ scope: input.scope, index: input.index, hiddenFunctions }),
+          Object.freeze({
+            scope: input.scope,
+            index: input.index,
+            hiddenFunctions: hiddenAnalyses,
+          }),
         ).fact,
     )
   const result = Object.freeze({
     functions: Object.freeze(functions),
-    hiddenFunctions: Object.freeze(hiddenFunctions),
+    hiddenFunctions: Object.freeze(hiddenAnalyses.map((analysis) => analysis.fact)),
   })
   inspected.set(self, result)
   return result
@@ -2674,19 +2681,28 @@ export const elaborateModule = (input: Input): Result => {
     .filter((declaration) => declaration.foreign === undefined)
     .map((declaration): CheckedUnit => {
       const build = (): BodyQuery.Built => {
-        const hiddenFunctions: Array<FunctionFact> = []
+        const hiddenFunctions: Array<import('./ExpressionAnalysis.js').FunctionAnalysis> = []
         const analysis = analyzeFunctionBody(
           context,
           declaration,
           declarations,
           Object.freeze({ scope, index, hiddenFunctions }),
         )
-        const own = checkedBody(context, index, analysis.fact)
+        const own = checkedBody(
+          context,
+          index,
+          analysis.fact,
+          undefined,
+          undefined,
+          analysis.builder,
+        )
         return {
           unit: Object.freeze({
             bodies: Object.freeze([
               own,
-              ...hiddenFunctions.map((fact) => checkedBody(context, index, fact, own.artifact)),
+              ...hiddenFunctions.map((hidden) =>
+                checkedBody(context, index, hidden.fact, own.artifact, undefined, hidden.builder),
+              ),
             ]),
             diagnostics: analysis.diagnostics,
           }),

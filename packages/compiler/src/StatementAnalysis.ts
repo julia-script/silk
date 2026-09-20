@@ -9,6 +9,7 @@ import * as SemanticContext from './SemanticContext.js'
 import * as MachineFunction from './MachineFunction.js'
 import * as Lifetime from './Lifetime.js'
 import * as BodyLifetime from './BodyLifetime.js'
+import * as BodyBuilder from './BodyBuilder.js'
 import * as LifetimeFlow from './LifetimeFlow.js'
 import * as NominalVariance from './NominalVariance.js'
 import * as TypeOutlives from './TypeOutlives.js'
@@ -1875,6 +1876,11 @@ export const analyzeFunctionBody = (
   staticContext?: BodyContext['staticContext'],
   initialScope?: Scope,
 ): FunctionAnalysis => {
+  const builder =
+    resolution.builder ??
+    BodyBuilder.make(
+      Object.freeze({ owner: declaration.owner, request: Object.freeze({ _tag: 'Check' }) }),
+    )
   const returnType =
     declaration.returnType._tag === 'Resolved'
       ? Type.substitute(declaration.returnType.type, staticContext?.typeSubstitution ?? new Map())
@@ -1909,6 +1915,7 @@ export const analyzeFunctionBody = (
   const authoredDeclaration = AuthoredWalk.declarationOf(semantic.module, declaration.owner)
   const bodyResolution: ResolutionContext = Object.freeze({
     ...resolution,
+    builder,
     ...(authoredDeclaration === undefined ? {} : { authoredDeclaration }),
     unsafeSpans,
     nextBindingOrdinal,
@@ -2115,5 +2122,6 @@ export const analyzeFunctionBody = (
       opaqueEvidence: OpaqueRealization.evidenceOfBody(semantic, declaration, statements),
     }),
     diagnostics: Object.freeze([...context.diagnostics]),
+    builder,
   })
 }

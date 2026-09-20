@@ -6,6 +6,7 @@ import * as SemanticContext from './SemanticContext.js'
 import * as NativeAssembly from './NativeAssembly.js'
 import * as AggregateIdentity from './AggregateIdentity.js'
 import * as BodyLifetime from './BodyLifetime.js'
+import * as BodyBuilder from './BodyBuilder.js'
 import * as Lifetime from './Lifetime.js'
 import * as TypeCompatibility from './TypeCompatibility.js'
 import * as CallableContract from './CallableContract.js'
@@ -9058,11 +9059,23 @@ const analyzeAnonymousCallable = (
     constraintContracts: declaration.constraintContracts,
   })
   const { hiddenFunctions: _hiddenFunctions, ...preliminaryResolution } = resolution
+  const anonymousBuilder = (owner: AuthoredIdentity.Identity): BodyBuilder.BodyBuilder =>
+    BodyBuilder.make(
+      Object.freeze({
+        owner,
+        request: Object.freeze({ _tag: 'Check' }),
+        ...(resolution.builder === undefined ? {} : { parent: resolution.builder.artifact }),
+      }),
+    )
   const preliminary = analyzeFunctionBody(
     context,
     preliminaryDeclaration,
     declarations,
-    Object.freeze({ ...preliminaryResolution, anonymousDepth: 1 }),
+    Object.freeze({
+      ...preliminaryResolution,
+      builder: anonymousBuilder(preliminaryDeclaration.owner),
+      anonymousDepth: 1,
+    }),
     undefined,
     anonymousOuterScope(authoredParameters, scope),
   )
@@ -9174,11 +9187,15 @@ const analyzeAnonymousCallable = (
     context,
     hiddenDeclaration,
     declarations,
-    Object.freeze({ ...preliminaryResolution, anonymousDepth: 1 }),
+    Object.freeze({
+      ...preliminaryResolution,
+      builder: anonymousBuilder(hiddenDeclaration.owner),
+      anonymousDepth: 1,
+    }),
     undefined,
     anonymousOuterScope(hiddenDeclaration.parameters, scope),
   )
-  resolution.hiddenFunctions?.push(hidden.fact)
+  resolution.hiddenFunctions?.push(hidden)
   const mode = anonymousCaptureMode(captures)
   let result: Type.Type | undefined =
     hiddenDeclaration.returnType._tag === 'Resolved' ? hiddenDeclaration.returnType.type : undefined
@@ -10859,6 +10876,7 @@ export const statementExpressionNode = (
 export interface FunctionAnalysis {
   readonly fact: FunctionFact
   readonly diagnostics: ReadonlyArray<Diagnostic.Located>
+  readonly builder: BodyBuilder.BodyBuilder
 }
 
 /** The declared name an authored `Name` supplies; recovery names are explicitly unavailable. */
@@ -10953,6 +10971,8 @@ export interface BodyContext {
 }
 
 export interface ResolutionContext {
+  /** The private publisher for the body currently being checked. */
+  readonly builder?: BodyBuilder.BodyBuilder
   readonly bodyLifetimes?: BodyLifetime.BodyLifetime
   readonly lifetimeCompatibility?: TypeCompatibility.Context
   /** The current eager execution boundary and its lexical loop destinations. */
@@ -10979,7 +10999,7 @@ export interface ResolutionContext {
   /** Static calls under ordinary control in a static function execute only after branch selection. */
   readonly deferStaticCalls?: true
   /** Hidden anonymous bodies discovered while analyzing the current context declaration. */
-  readonly hiddenFunctions?: Array<FunctionFact>
+  readonly hiddenFunctions?: Array<FunctionAnalysis>
   /** Anonymous bodies are parsed recursively but only the outermost body is admitted in slice one. */
   readonly anonymousDepth?: number
 }
