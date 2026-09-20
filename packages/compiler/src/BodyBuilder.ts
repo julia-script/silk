@@ -13,6 +13,7 @@ export interface BodyBuilder {
   readonly evidence: Array<ReadonlyArray<Constraint.ConstraintEvidence>>
   readonly causes: Array<Diagnostic.Identity<Location.Location>>
   readonly localIds: Map<string, Tir.LocalId>
+  readonly expressions: WeakMap<object, Tir.Expression>
 }
 
 export const make = (artifact: Tir.ArtifactId): BodyBuilder => ({
@@ -22,6 +23,7 @@ export const make = (artifact: Tir.ArtifactId): BodyBuilder => ({
   evidence: [],
   causes: [],
   localIds: new Map(),
+  expressions: new WeakMap(),
 })
 
 const semanticLocalKey = (input: unknown): string | undefined => {
@@ -125,6 +127,9 @@ export const cause = (
  * numbering walk once every analysis constructor owns the builder.
  */
 export const index = (self: BodyBuilder, fn: Tir.TirFunction): Tir.TirFunction => {
+  // Directly emitted expressions are already numbered. Until statements are emitted directly too,
+  // the completed tree is renumbered once as a unit so the published namespace has no gaps.
+  self.nodes.length = 0
   for (const parameter of fn.declaration.parameters) {
     semanticLocal(self, parameter.id, {
       kind: 'Parameter',

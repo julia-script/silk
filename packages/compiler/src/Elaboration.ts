@@ -2267,6 +2267,7 @@ const runtimeTirFunction = (
   context: SemanticContext.SemanticContext,
   fact: FunctionFact,
   index: DeclarationIndex.Index,
+  builder: BodyBuilder.BodyBuilder,
 ): Tir.TirFunction => {
   const lifetimeAssumptions = Lifetime.assumptions(fact.lifetimeFlow?.input.constraints ?? [])
   const lifetimeCompatibility = TypeCompatibility.context({
@@ -2387,6 +2388,7 @@ const runtimeTirFunction = (
       }),
       statements: lowerStatements(fact.statements, {
         context,
+        builder,
         lifetimeAssumptions,
         lifetimeCompatibility,
         ...(fact.declaration.opaqueResult === undefined
@@ -2446,6 +2448,7 @@ const runtimeTirFunction = (
     regionOrder: fact.regionOrder,
     statements: lowerStatements(fact.statements, {
       context,
+      builder,
       lifetimeAssumptions,
       lifetimeCompatibility,
       ...(fact.declaration.opaqueResult === undefined
@@ -2541,6 +2544,7 @@ const expressionTypesOf = (fact: FunctionFact): ReadonlyArray<ExpressionTypeRow>
 const staticTirFunction = (
   context: SemanticContext.SemanticContext,
   fact: FunctionFact,
+  builder: BodyBuilder.BodyBuilder,
 ): Tir.TirFunction =>
   Object.freeze({
     _tag: 'TirFunction',
@@ -2550,7 +2554,7 @@ const staticTirFunction = (
       fact.regionOrder.at(0) ??
       Object.freeze({ _tag: 'TirRegion' as const, function: fact.declaration.id, ordinal: 0 }),
     regionOrder: fact.regionOrder,
-    statements: staticLowering(context).statements(fact.statements),
+    statements: staticLowering(context, builder).statements(fact.statements),
   })
 
 /**
@@ -2603,8 +2607,8 @@ export const checkedBody = (
   const lowered = BodyBuilder.index(
     builder,
     fact.declaration.phase === 'Static'
-      ? staticTirFunction(context, fact)
-      : runtimeTirFunction(context, fact, index),
+      ? staticTirFunction(context, fact, builder)
+      : runtimeTirFunction(context, fact, index, builder),
   )
   const staticStructure = staticStructureOf(fact)
   const results: BodyResults = Object.freeze({

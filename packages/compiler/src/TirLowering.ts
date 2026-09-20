@@ -34,6 +34,7 @@ import type * as StaticText from './StaticText.js'
 import type * as StaticValue from './StaticValue.js'
 import * as Type from './Type.js'
 import * as TypeCompatibility from './TypeCompatibility.js'
+import * as BodyBuilder from './BodyBuilder.js'
 
 /**
  * TIR still reports in source coordinates, so a cause gets its span where it enters TIR. The
@@ -293,6 +294,8 @@ export const tirPatternSelection = (
 }
 
 export interface LowerStatementOptions {
+  /** The artifact-local publisher used by direct construction. */
+  readonly builder?: BodyBuilder.BodyBuilder
   /** Spans of the authored module being lowered; TIR retains spans for diagnostics only. */
   readonly context: SemanticContext.SemanticContext
   /**
@@ -686,11 +689,19 @@ export const tirExpression = (
   options: LowerStatementOptions,
   borrow?: Tir.BorrowId,
 ): Tir.Expression => {
-  if (options.static === undefined) return residualExpression(fact, options, borrow)
-  const known = options.static.get(fact)
+  const published = options.builder?.expressions.get(fact)
+  if (published !== undefined) return published
+  const known = options.static?.get(fact)
   if (known !== undefined) return known
-  const node = staticStructure(fact, options) ?? residualExpression(fact, options, borrow)
-  options.static.set(fact, node)
+  const lowered =
+    (options.static === undefined ? undefined : staticStructure(fact, options)) ??
+    residualExpression(fact, options, borrow)
+  const node =
+    options.builder === undefined || lowered.id !== undefined
+      ? lowered
+      : BodyBuilder.node(options.builder, lowered)
+  options.static?.set(fact, node)
+  options.builder?.expressions.set(fact, node)
   return node
 }
 
@@ -2608,8 +2619,15 @@ export interface StaticLowering {
   readonly statements: (facts: ReadonlyArray<StatementFact>) => ReadonlyArray<Tir.Statement>
 }
 
-export const staticLowering = (context: SemanticContext.SemanticContext): StaticLowering => {
-  const options: LowerStatementOptions = { context, static: new WeakMap() }
+export const staticLowering = (
+  context: SemanticContext.SemanticContext,
+  builder?: BodyBuilder.BodyBuilder,
+): StaticLowering => {
+  const options: LowerStatementOptions = {
+    context,
+    static: new WeakMap(),
+    ...(builder === undefined ? {} : { builder }),
+  }
   return Object.freeze({
     expression: (fact: ExpressionFact) => tirExpression(fact, options),
     statements: (facts: ReadonlyArray<StatementFact>) => lowerStatements(facts, options),
