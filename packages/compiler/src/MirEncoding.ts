@@ -7,6 +7,7 @@ import * as LayoutEncode from './LayoutEncode.js'
 import * as Match from './Match.js'
 import * as MovePath from './MovePath.js'
 import * as StaticValue from './StaticValue.js'
+import * as Tir from './Tir.js'
 import type {
   CoroutineFramePathPlan,
   CancellationFinalizer,
@@ -240,7 +241,7 @@ const operationText = (operation: Operation): string => {
     case 'Drop':
       return `drop ${localText(operation.local)}${selectorText(operation.selectors ?? [])}${operation.initialization === undefined ? '' : ` initialized=${MovePath.encodeState(operation.initialization.state)} flags=${operation.initialization.flags.map((flag) => `${MovePath.key(flag.path)}:${localText(flag.local)}`).join(',')}`}${operation.cleanup._tag === 'NoCleanup' ? '' : ` cleanup=${operation.cleanup._tag}`}${operation.localShared === undefined ? '' : ` element=${SilkType.encode(operation.localShared.element)} layout=${operation.localShared.block.provenance} transition=decrement-or-cleanup-release`} ${provenanceText(operation.provenance)}`
     case 'Match':
-      return `${operation.destination === undefined ? 'never' : localText(operation.destination)} = match#${operation.id.span.start} ${operation.access.toLowerCase()} ${localText(operation.scrutinee)}${selectorText(operation.selectors ?? [])} : ${typeText(operation.scrutineeType)} -> ${typeText(operation.type)}${operation.retainsBindings ? ' retain-bindings' : ''} ${provenanceText(operation.provenance)}`
+      return `${operation.destination === undefined ? 'never' : localText(operation.destination)} = match#${Tir.nodeRefKey(operation.id.node)} ${operation.access.toLowerCase()} ${localText(operation.scrutinee)}${selectorText(operation.selectors ?? [])} : ${typeText(operation.scrutineeType)} -> ${typeText(operation.type)}${operation.retainsBindings ? ' retain-bindings' : ''} ${provenanceText(operation.provenance)}`
     case 'DiagnosticScope':
       return `${localText(operation.destination)} = diagnostic-scope state=${localText(operation.state)} observer=${localText(operation.observer)} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
     case 'Conditional':

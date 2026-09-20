@@ -67,9 +67,8 @@ export const spanKey = (span: SourceSpan.SourceSpan): string => `${span.start}:$
 export const patternKey = (binding: Match.BindingId | Tir.LocalId): string =>
   binding._tag === 'TirLocal'
     ? `local:${binding.ordinal}`
-    : `${spanKey(binding.arm.match.span)}:${binding.arm.ordinal}:${binding.ordinal}`
-export const borrowKey = (borrow: Tir.BorrowId): string =>
-  `${borrow.function.sourceId}:${borrow.function.ordinal}:${borrow.callSpan.start}:${borrow.callSpan.end}:${borrow.ordinal}`
+    : `${Tir.nodeRefKey(binding.arm.match.node)}:${binding.arm.ordinal}:${binding.ordinal}`
+export const borrowKey = (borrow: Tir.BorrowId): string => Tir.borrowKey(borrow)
 
 export interface ProvidedRequirement {
   readonly capability: Type.Nominal
@@ -405,13 +404,24 @@ export const lowerProgram = (
   })
   const { effectResults, generatedRunners } = trace('Lower.prepareEffectRunners', () => {
     const effectResults = new Map<string, ExecutableEffectType>()
+    const ambiguousRuntimeResults = new Set<string>()
     const generatedRunners: Array<GeneratedEffectRunner> = []
-    for (const instance of runtimeInstances.values()) {
-      const resultKey = instanceText(
+    const publishEffectResult = (instance: Instances.Instance, type: ExecutableEffectType) => {
+      effectResults.set(Instances.keyText(instance.key), type)
+      const runtimeKey = instanceText(
         instance.key.declaration,
         instance.key.typeArguments,
         instance.key.staticArguments,
       )
+      if (ambiguousRuntimeResults.has(runtimeKey)) return
+      if (effectResults.has(runtimeKey)) {
+        effectResults.delete(runtimeKey)
+        ambiguousRuntimeResults.add(runtimeKey)
+        return
+      }
+      effectResults.set(runtimeKey, type)
+    }
+    for (const instance of runtimeInstances.values()) {
       const block = returnedEffectBlock(instance.function)
       const blockType =
         block === undefined
@@ -426,7 +436,7 @@ export const lowerProgram = (
           ? undefined
           : effectValueType(layout, instance.key, block, blockType)
       if (type !== undefined && block !== undefined) {
-        effectResults.set(resultKey, type)
+        publishEffectResult(instance, type)
         generatedRunners.push(
           Object.freeze({
             _tag: 'BlockEffectRunner',
@@ -447,7 +457,7 @@ export const lowerProgram = (
         instance.function,
         instance.substitution,
       )
-      if (returned?._tag === 'EffectComposite') effectResults.set(resultKey, returned)
+      if (returned?._tag === 'EffectComposite') publishEffectResult(instance, returned)
     }
     return { effectResults, generatedRunners }
   })

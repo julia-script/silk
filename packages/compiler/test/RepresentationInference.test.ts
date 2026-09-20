@@ -2,7 +2,6 @@ import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
-import type * as Elaboration from '../src/Elaboration.js'
 import * as Tir from '../src/Tir.js'
 import * as Lexer from '../src/Lexer.js'
 import * as Lifetime from '../src/Lifetime.js'
@@ -20,9 +19,9 @@ const analyze = (id: string, source: string): Elaborated =>
 const bindingInitializer = (
   result: Elaborated,
   functionOrdinal = 2,
-): Elaboration.ExpressionFact | undefined => {
+): Tir.Expression | undefined => {
   const statement = result.functions.at(functionOrdinal)?.statements.at(0)
-  return statement?._tag === 'BindStatement' ? statement.binding.initializer : undefined
+  return statement?._tag === 'Bind' ? statement.initializer : undefined
 }
 
 it('infers one exact callable representation through repeated fields', () => {
@@ -39,11 +38,11 @@ pub fn main() -> i32 {
   const literal = bindingInitializer(result)
 
   assert.deepEqual(result.diagnostics, [])
-  assert.strictEqual(literal?._tag, 'StructLiteral')
-  if (literal?._tag !== 'StructLiteral' || literal.type._tag !== 'Available') return
-  assert.strictEqual(Type.isNominal(literal.type.type), true)
-  if (!Type.isNominal(literal.type.type)) return
-  const representation = literal.type.type.arguments.at(2)
+  assert.strictEqual(literal?._tag, 'Construct')
+  if (literal?._tag !== 'Construct') return
+  assert.strictEqual(Type.isNominal(literal.type), true)
+  if (!Type.isNominal(literal.type)) return
+  const representation = literal.type.arguments.at(2)
   assert.strictEqual(Type.isExactRepresentationArgument(representation ?? 'never'), true)
   if (representation === undefined || !Type.isExactRepresentationArgument(representation)) return
   assert.strictEqual(
@@ -69,7 +68,7 @@ pub fn main() -> i32 {
   assert.include(diagnostic?.message ?? '', 'typeof(representation-inference/conflict.decode)')
   assert.include(diagnostic?.message ?? '', 'typeof(representation-inference/conflict.other)')
   assert.strictEqual(diagnostic?.relatedSpans?.at(0)?.label, 'representation first inferred here')
-  assert.strictEqual(bindingInitializer(result)?.type._tag, 'Unavailable')
+  assert.strictEqual(bindingInitializer(result)?._tag, 'Unavailable')
 })
 
 it('infers deterministic callable-section and Effect-site identities', () => {
@@ -86,8 +85,8 @@ pub fn main() -> i32 {
   )
   const statements = result.functions.at(1)?.statements ?? []
   const types = statements.flatMap((statement) =>
-    statement._tag === 'BindStatement' && statement.binding.inferredType._tag === 'Available'
-      ? [statement.binding.inferredType.type]
+    statement._tag === 'Bind' && statement.initializer._tag === 'Construct'
+      ? [statement.initializer.type]
       : [],
   )
   const identities = types.flatMap((type) => {
@@ -99,8 +98,8 @@ pub fn main() -> i32 {
   })
 
   assert.deepEqual(identities, [
-    'declaration:representation-inference/sites.main:site:0:owner=representation-inference/sites.main<>',
-    'effect:effect\u0000declaration:representation-inference/sites:main\u0000site:1',
+    'declaration:representation-inference/sites.main:site:2:owner=representation-inference/sites.main<>',
+    'effect:effect\u0000["memory:representation-inference/sites/function=main#0",null,null]:n7',
   ])
   assert.deepEqual(result.diagnostics, [])
 })
@@ -152,7 +151,7 @@ fn choose(input: First | Second) -> i32 {
   )
 
   assert.deepEqual(result.diagnostics, [])
-  assert.strictEqual(result.functions.at(2)?.returnedExpression.type._tag, 'Available')
+  assert.strictEqual(result.functions.at(2)?.returnedExpression._tag, 'Match')
 })
 
 it('reports divergent representations at assignment and aggregate joins', () => {
@@ -215,15 +214,15 @@ pub fn main() -> i32 {
   assert.strictEqual(returnType?._tag, 'Resolved')
   if (parameterType?._tag === 'Resolved' && returnType?._tag === 'Resolved')
     assert.strictEqual(Type.equals(parameterType.type, returnType.type), true)
-  assert.strictEqual(literal?._tag, 'StructLiteral')
-  if (literal?._tag !== 'StructLiteral' || literal.type._tag !== 'Available') return
-  assert.strictEqual(Type.isNominal(literal.type.type), true)
-  if (!Type.isNominal(literal.type.type)) return
+  assert.strictEqual(literal?._tag, 'Construct')
+  if (literal?._tag !== 'Construct') return
+  assert.strictEqual(Type.isNominal(literal.type), true)
+  if (!Type.isNominal(literal.type)) return
   assert.strictEqual(
-    Type.isExactRepresentationArgument(literal.type.type.arguments.at(2) ?? 'never'),
+    Type.isExactRepresentationArgument(literal.type.arguments.at(2) ?? 'never'),
     true,
   )
-  assert.deepEqual(literal.type.type.arguments.at(0), Lifetime.staticLifetime)
+  assert.deepEqual(literal.type.arguments.at(0), Lifetime.staticLifetime)
 })
 
 it('forwards an open represented parameter directly into a represented field', () => {
@@ -237,13 +236,13 @@ fn make<'env, A, F: fn<'env>(A) -> A>(parse: F) -> Parser<'env, A, F> {
   const make = result.functions.at(0)
   const returned = make?.returnedExpression
 
-  assert.strictEqual(returned?._tag, 'StructLiteral')
+  assert.strictEqual(returned?._tag, 'Construct')
   assert.deepEqual(result.diagnostics, [])
-  if (returned?._tag !== 'StructLiteral' || returned.type._tag !== 'Available') return
-  assert.strictEqual(Type.isNominal(returned.type.type), true)
-  if (!Type.isNominal(returned.type.type)) return
+  if (returned?._tag !== 'Construct') return
+  assert.strictEqual(Type.isNominal(returned.type), true)
+  if (!Type.isNominal(returned.type)) return
   assert.strictEqual(
-    Type.isRepresentationParameterArgument(returned.type.type.arguments.at(2) ?? 'never'),
+    Type.isRepresentationParameterArgument(returned.type.arguments.at(2) ?? 'never'),
     true,
   )
 })
@@ -314,19 +313,16 @@ fn make<A, E, ?R, 'env, F: once Effect<'env; A ! E ? R>>(
   )
   const returned = result.functions.at(0)?.returnedExpression
 
-  assert.strictEqual(returned?._tag, 'StructLiteral')
+  assert.strictEqual(returned?._tag, 'Construct')
   assert.deepEqual(result.diagnostics, [])
-  if (returned?._tag !== 'StructLiteral' || returned.type._tag !== 'Available') return
-  assert.strictEqual(Type.isNominal(returned.type.type), true)
-  if (!Type.isNominal(returned.type.type)) return
-  assert.strictEqual(Type.isTypeArgument(returned.type.type.arguments.at(0) ?? 'never'), true)
-  assert.strictEqual(Type.isTypeArgument(returned.type.type.arguments.at(1) ?? 'never'), true)
+  if (returned?._tag !== 'Construct') return
+  assert.strictEqual(Type.isNominal(returned.type), true)
+  if (!Type.isNominal(returned.type)) return
+  assert.strictEqual(Type.isTypeArgument(returned.type.arguments.at(0) ?? 'never'), true)
+  assert.strictEqual(Type.isTypeArgument(returned.type.arguments.at(1) ?? 'never'), true)
+  assert.strictEqual(Type.isRequirementRowArgument(returned.type.arguments.at(2) ?? 'never'), true)
   assert.strictEqual(
-    Type.isRequirementRowArgument(returned.type.type.arguments.at(2) ?? 'never'),
-    true,
-  )
-  assert.strictEqual(
-    Type.isRepresentationParameterArgument(returned.type.type.arguments.at(4) ?? 'never'),
+    Type.isRepresentationParameterArgument(returned.type.arguments.at(4) ?? 'never'),
     true,
   )
 })
@@ -349,7 +345,7 @@ fn invalid<'env, A, F: once fn<'env>(A) -> A>(parse: F) -> i32 {
     diagnostic?.relatedSpans?.map((related) => related.label),
     ['required representation bound declared here', 'supplied representation bound declared here'],
   )
-  assert.strictEqual(bindingInitializer(result, 0)?.type._tag, 'Unavailable')
+  assert.strictEqual(bindingInitializer(result, 0)?._tag, 'Unavailable')
 })
 
 it.effect('preserves open generic TIR and concrete representation instance keys', () =>

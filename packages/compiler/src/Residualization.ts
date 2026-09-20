@@ -11,7 +11,6 @@ import * as Elaboration from './Elaboration.js'
 import * as BodyBuilder from './BodyBuilder.js'
 import { analyzeExpression } from './ExpressionAnalysis.js'
 import type * as Tir from './Tir.js'
-import * as TirLowering from './TirLowering.js'
 import * as FunctionIndex from './internal/FunctionIndex.js'
 import * as TypeInference from './internal/TypeInference.js'
 import * as Canonical from './internal/Canonical.js'
@@ -99,7 +98,7 @@ export const noWork: Counters = Object.freeze(emptyCounters())
 
 interface State {
   conditionDiagnostics?: Array<Diagnostic.Located>
-  conditionExpression?: Elaboration.ExpressionFact
+  conditionExpression?: Elaboration.ExpressionDecision
   readonly target: Target.Target
   readonly dependencies: Map<string, string>
   readonly parameters: ReadonlyMap<string, StaticValue.Value>
@@ -318,7 +317,6 @@ const reflectAggregate = (
                 field.declaredType._tag !== 'Resolved'
               )
                 return []
-              const fieldSpan = self[stateSymbol].spans.spanOf(field.anchor)
               const member: StaticValue.ReflectedMember =
                 field.member._tag === 'LabeledAggregateMember'
                   ? Object.freeze({ _tag: 'LabeledField', label: field.member.label })
@@ -331,11 +329,7 @@ const reflectAggregate = (
                   member,
                   valueType: Type.substitute(field.declaredType.type, substitution),
                   authorization: authorizationId,
-                  provenance: Object.freeze({
-                    sourceId: fieldSpan.sourceId,
-                    start: fieldSpan.start,
-                    end: fieldSpan.end,
-                  }),
+                  provenance: Object.freeze({ anchor: field.anchor }),
                 }),
               ]
             }),
@@ -379,6 +373,20 @@ const moduleInput = (
   return result === undefined || scope === undefined || headers === undefined
     ? undefined
     : Object.freeze({ result, scope, declarations: headers.declarations })
+}
+
+/**
+ * Gives a synthetic module-condition declaration a deterministic non-source-position slot.
+ * The full authored key remains its canonical name; this compact ordinal only satisfies the
+ * declaration table's numeric carrier and occupies a range ordinary collected declarations never use.
+ */
+const moduleConditionOrdinal = (owner: AuthoredIdentity.Identity): number => {
+  let hash = 0x811c9dc5
+  for (const character of AuthoredIdentity.key(owner)) {
+    hash ^= character.codePointAt(0) ?? 0
+    hash = Math.imul(hash, 0x01000193) >>> 0
+  }
+  return 0x40000000 + (hash & 0x3fffffff)
 }
 
 const emptyFailureRow = (): DeclarationFacts.FailureRowFact =>
@@ -652,7 +660,7 @@ const evaluateStaticFunction = (
         valueOrigins: bindings.valueOrigins,
         expressionSpans: new Map<Tir.Expression, Location.Location>(),
         expressionOrigins: new Map<Tir.Expression, StaticEvaluation.TextOrigin>(),
-        nodes: TirLowering.staticLowering(semantic, builder),
+        nodes: BodyBuilder.staticLowering(semantic, builder),
         lookup: (id: DeclarationFacts.CanonicalId) =>
           DeclarationFacts.byCanonical(self[stateSymbol].index, id),
         returnedTextSpan: { value: undefined },
@@ -681,7 +689,7 @@ const evaluateStaticFunction = (
       )
       self[stateSymbol].conditionDiagnostics?.push(...analyzed.diagnostics)
       let nestedStaticFailure: StaticEvaluation.StaticFailure | undefined
-      Elaboration.visitStatementFacts(analyzed.fact.statements, {
+      Elaboration.visitStatements(analyzed.fact.statements, {
         expression: (expression) => {
           if (
             nestedStaticFailure === undefined &&
@@ -696,9 +704,6 @@ const evaluateStaticFunction = (
             nestedStaticFailure = expression.failure
             return
           }
-          const decision = BodyBuilder.expressionDecision(builder, expression)
-          if (decision?._tag === 'Call' && decision.staticFailure !== undefined)
-            nestedStaticFailure = decision.staticFailure
         },
       })
       if (nestedStaticFailure !== undefined) {
@@ -878,7 +883,7 @@ function evaluateConstantValue(
         valueOrigins: new Map<string, StaticEvaluation.TextOrigin>(),
         expressionSpans: new Map<Tir.Expression, Location.Location>(),
         expressionOrigins: new Map<Tir.Expression, StaticEvaluation.TextOrigin>(),
-        nodes: TirLowering.staticLowering(semantic, builder),
+        nodes: BodyBuilder.staticLowering(semantic, builder),
         lookup: (id: DeclarationFacts.CanonicalId) =>
           DeclarationFacts.byCanonical(self[stateSymbol].index, id),
         trace: evaluation.trace,
@@ -915,7 +920,7 @@ function evaluateConstantValue(
         self[stateSymbol].conditionExpression = analyzed.fact
       let nestedFailure: StaticEvaluation.StaticFailure | undefined
       if (analyzed !== undefined)
-        Elaboration.visitExpressionFacts(analyzed.fact, {
+        Elaboration.visitExpressionDecisions(analyzed.fact, {
           expression: (expression) => {
             if (
               nestedFailure === undefined &&
@@ -983,7 +988,7 @@ export const evaluateModuleCondition = Effect.fn('Residualization.evaluateModule
   ): Effect.Effect<{
     readonly outcome: StaticEvaluation.Outcome<StaticValue.Value>
     readonly diagnostics: ReadonlyArray<Diagnostic.Located>
-    readonly expression?: Elaboration.ExpressionFact
+    readonly expression?: Elaboration.ExpressionDecision
   }> =>
     Effect.sync(() => {
       const anchor: AuthoredHir.Anchor = {
@@ -992,8 +997,6 @@ export const evaluateModuleCondition = Effect.fn('Residualization.evaluateModule
         path: [],
       }
       const span = Location.at(anchor)
-      // ponytail: a span-derived ordinal; rebuilt as a node reference with the other identities (task 3.3.2).
-      const ordinal = self[stateSymbol].spans.spanOf(anchor).start
       if (declaration.header._tag !== 'ConditionalHeader')
         return {
           outcome: StaticEvaluation.failed(
@@ -1015,7 +1018,11 @@ export const evaluateModuleCondition = Effect.fn('Residualization.evaluateModule
       }
       const constant: DeclarationFacts.ConstantDeclaration = {
         _tag: 'ConstantDeclaration',
-        id: { _tag: 'DeclarationId', sourceId: declaration.owner.module, ordinal },
+        id: {
+          _tag: 'DeclarationId',
+          sourceId: declaration.owner.module,
+          ordinal: moduleConditionOrdinal(declaration.owner),
+        },
         canonical: { _tag: 'Canonical', id: canonical },
         visibility: 'Private',
         typeParameters: [],
@@ -1232,7 +1239,7 @@ export const residualize = (self: Coordinator, key: ApplicationKey): Result => {
           valueOrigins: bindings.valueOrigins,
           expressionSpans: new Map<Tir.Expression, Location.Location>(),
           expressionOrigins: new Map<Tir.Expression, StaticEvaluation.TextOrigin>(),
-          nodes: TirLowering.staticLowering(semantic, builder),
+          nodes: BodyBuilder.staticLowering(semantic, builder),
           lookup: (id: DeclarationFacts.CanonicalId) =>
             DeclarationFacts.byCanonical(self[stateSymbol].index, id),
           trace: evaluation.trace,
@@ -1252,7 +1259,7 @@ export const residualize = (self: Coordinator, key: ApplicationKey): Result => {
         }),
       )
       let nodes = 0
-      Elaboration.visitStatementFacts(analyzed.fact.statements, {
+      Elaboration.visitStatements(analyzed.fact.statements, {
         statement: () => {
           nodes += 1
         },

@@ -20,3 +20,4 @@ Format: date · symptom · fix · project. Check here first when tooling is slow
   `CI=true node scripts/turbo.mjs run build --filter=@silklang/lsp...` · compiler, lsp
 - 2026-09-19 · Three `ModuleVerification` cases fail locally with "Missing planned place" ·
   Identical on `main` locally and green on CI; not a regression, do not chase · compiler
+2026-09-20 · `pnpm --filter @silklang/compiler exec tsx -e` could not load compiler sources because the workspace LLVM package did not expose `@silklang/llvm/ByteString` · use focused Vitest fixtures (which build workspace dependencies correctly) for runtime inspection · silk

@@ -14,7 +14,6 @@ import type * as DeclarationIndex from './DeclarationIndex.js'
 
 import type * as Backend from './Backend.js'
 import type * as CleanupPlan from './CleanupPlan.js'
-import type * as Elaboration from './Elaboration.js'
 import type { RowModel, Span } from './InspectorRow.js'
 import { spanOf as asSpan } from './InspectorRow.js'
 import type * as Instances from './Instances.js'
@@ -26,6 +25,8 @@ import type * as ModuleClosure from './ModuleClosure.js'
 import type * as NameResolution from './NameResolution.js'
 import type * as Ownership from './Ownership.js'
 import * as Type from './Type.js'
+import * as Tir from './Tir.js'
+import * as BodyView from './BodyView.js'
 
 const typeText = (type: Type.Type): string => Type.encode(type)
 
@@ -343,7 +344,7 @@ const bindingSiteText = (fact: Ownership.BindingFact): string => {
     case 'Parameter':
       return `parameter #${fact.site.parameter.ordinal}`
     case 'Temporary':
-      return `temporary @${fact.site.owner.span.start}`
+      return `temporary n${fact.site.owner.node.node.ordinal}`
     case 'Let':
     case 'Pattern':
       return `let b${fact.site.binding.ordinal}`
@@ -359,7 +360,7 @@ const loanSiteText = (site: Ownership.BindingSite): string => {
     case 'Pattern':
       return `pattern b${site.binding.ordinal}`
     case 'Temporary':
-      return `temporary @${site.owner.span.start}`
+      return `temporary n${site.owner.node.node.ordinal}`
   }
 }
 
@@ -472,7 +473,7 @@ export const ownershipRows = (
     for (const loan of fn.loans) {
       const loanSpan = asSpan(loan.startSpan)
       rows.push({
-        key: `own-${fn.declaration.id.ordinal}-loan-${loan.id.callSpan.start}-${loan.id.ordinal}`,
+        key: `own-${fn.declaration.id.ordinal}-loan-${loan.id.call.node.ordinal}-${loan.id.ordinal}`,
         depth: 1,
         dot: 'symbol',
         tone: 'symbol',
@@ -485,7 +486,7 @@ export const ownershipRows = (
     for (const callable of fn.callables) {
       const callableSpan = asSpan(callable.span)
       rows.push({
-        key: `own-${fn.declaration.id.ordinal}-callable-${callable.site.span.start}`,
+        key: `own-${fn.declaration.id.ordinal}-callable-${callable.site.node.node.ordinal}`,
         depth: 1,
         dot: 'symbol',
         tone: 'symbol',
@@ -495,7 +496,7 @@ export const ownershipRows = (
       })
       for (const slot of callable.slots) {
         rows.push({
-          key: `own-${fn.declaration.id.ordinal}-callable-${callable.site.span.start}-slot${slot.ordinal}`,
+          key: `own-${fn.declaration.id.ordinal}-callable-${callable.site.node.node.ordinal}-slot${slot.ordinal}`,
           depth: 2,
           label: `slot #${slot.ordinal} → parameter #${slot.parameterOrdinal}`,
           detail: `${slot.access.toLowerCase()} · ${slot.type === undefined ? 'unavailable type' : typeText(slot.type)} · ${cleanupText(slot.cleanup)}`,
@@ -595,7 +596,11 @@ export const instanceRows = (
   }
 
   for (const [ordinal, callable] of discovery.callables.entries()) {
-    const span = asSpan(callable.site.span)
+    const owner = discovery.instances.find(
+      (instance) =>
+        Tir.artifactKey(instance.view.artifact) === Tir.artifactKey(callable.site.node.artifact),
+    )
+    const node = owner === undefined ? undefined : BodyView.node(owner.view, callable.site.node)
     rows.push({
       key: `callable-instance-${ordinal}`,
       depth: 1,
@@ -603,7 +608,7 @@ export const instanceRows = (
       tone: 'symbol',
       label: `callable ${callable.target._tag === 'DeclarationCallableTarget' ? callable.target.declaration.name : `${callable.target.actor}.${callable.target.operation}`}`,
       detail: `${typeText(callable.type)} · ${callable.mode.toLowerCase()} · ${callable.captures.map((capture) => `#${capture.ordinal}:${capture.access.toLowerCase()} ${typeText(capture.type)}`).join(', ') || 'no captures'}`,
-      span,
+      ...(node === undefined ? {} : { span: asSpan(node.span) }),
     })
   }
 
@@ -697,7 +702,6 @@ export const layoutRows = (
       })
     }
     for (const [ordinal, environment] of plan.callableEnvironments.entries()) {
-      const span = asSpan(environment.callable.site.span)
       const available = environment._tag === 'CallableEnvironment'
       rows.push({
         key: `plan-callable-${ordinal}`,
@@ -708,7 +712,6 @@ export const layoutRows = (
         detail: available
           ? `${environment.size} bytes · align ${environment.alignment} · ${environment.fields.map((field) => `#${field.ordinal}@${field.offset} ${field.representation.toLowerCase()}`).join(', ') || 'empty'} · view ${environment.view.pointerBits}-bit`
           : `unavailable · ${environment.reason}`,
-        span,
       })
     }
     if (plan.literalVerdicts.length > 0) {
@@ -1188,9 +1191,9 @@ export const symbolRows = (
  * on one row pair is what makes the reordering inspectable rather than folklore.
  */
 export const structValueRows = (
-  spans: SemanticContext.Registry,
-  literals: ReadonlyArray<Elaboration.StructLiteralExpressionFact>,
-  projections: ReadonlyArray<Elaboration.FieldProjectionExpressionFact>,
+  _spans: SemanticContext.Registry,
+  literals: ReadonlyArray<Extract<Tir.Expression, { readonly _tag: 'Construct' }>>,
+  projections: ReadonlyArray<Extract<Tir.Expression, { readonly _tag: 'Project' }>>,
   shapes: ReadonlyArray<Layout.CallingShape>,
 ): ReadonlyArray<RowModel> => {
   const rows: Array<RowModel> = []
@@ -1202,48 +1205,28 @@ export const structValueRows = (
     head: true,
   })
   for (const literal of literals) {
-    const span = asSpan(spans.spanOf(literal.anchor))
+    const span = asSpan(literal.span)
     const key = `lit-${span.start}-${span.end}`
     rows.push({
       key,
       depth: 1,
-      dot: literal.target._tag === 'Resolved' ? 'symbol' : 'warning',
-      label:
-        literal.target._tag === 'Resolved' ? typeText(literal.target.type) : 'unavailable target',
-      detail: literal.authorized ? 'fields visible' : 'field access denied',
+      dot: 'symbol',
+      label: typeText(literal.nominal),
+      detail: 'fields resolved',
       span,
-      ...(literal.target._tag === 'Resolved' && literal.authorized
-        ? {}
-        : { tone: 'warning' as const }),
     })
     rows.push({
       key: `${key}-source`,
       depth: 2,
       label: 'source order',
-      detail:
-        literal.initializers.map((initializer) => initializer.name ?? '?').join(', ') || 'empty',
+      detail: literal.evaluationOrder.map((field) => `#${field.ordinal}`).join(', ') || 'empty',
     })
     rows.push({
       key: `${key}-canonical`,
       depth: 2,
       label: 'canonical order',
-      detail:
-        literal.fields
-          .map(({ field }) => (field.name._tag === 'Present' ? field.name.spelling : '?'))
-          .join(', ') || 'empty',
+      detail: literal.fields.map(({ field }) => `#${field.ordinal}`).join(', ') || 'empty',
     })
-    if (literal.typeArguments.length > 0)
-      rows.push({
-        key: `${key}-arguments`,
-        depth: 2,
-        label: 'type arguments',
-        detail: literal.typeArguments
-          .map(
-            (argument) =>
-              `${argument.parameter.name}=${argument.argument === undefined ? '?' : Type.encodeGenericArgument(argument.argument)} (${argument.source.toLowerCase()})`,
-          )
-          .join(', '),
-      })
   }
 
   rows.push({
@@ -1253,16 +1236,12 @@ export const structValueRows = (
     head: true,
   })
   for (const projection of projections) {
-    const span = asSpan(spans.spanOf(projection.anchor))
-    const unresolved = projection.state._tag !== 'Resolved'
+    const span = asSpan(projection.span)
     rows.push({
       key: `proj-${span.start}-${span.end}`,
       depth: 1,
-      ...(unresolved ? { dot: 'warning' as const, tone: 'warning' as const } : {}),
-      label: `${projection.nominal === undefined ? '?' : typeText(projection.nominal)}.${
-        projection.fieldName ?? '?'
-      }`,
-      detail: projection.state._tag.toLowerCase(),
+      label: `${typeText(projection.nominal)}.#${projection.field.ordinal}`,
+      detail: projection.access.toLowerCase(),
       span,
     })
   }
@@ -1314,10 +1293,12 @@ const selectorPathText = (path: ReadonlyArray<Layout.Selector>): string =>
 
 /** Canonical array facts from syntax through backend-neutral ABI paths. */
 export const arrayValueRows = (
-  spans: SemanticContext.Registry,
+  _spans: SemanticContext.Registry,
   types: ReadonlyArray<Type.FixedArray>,
-  literals: ReadonlyArray<Elaboration.ArrayLiteralExpressionFact>,
-  projections: ReadonlyArray<Elaboration.IndexProjectionExpressionFact>,
+  literals: ReadonlyArray<Extract<Tir.Expression, { readonly _tag: 'ArrayConstruct' }>>,
+  projections: ReadonlyArray<
+    Extract<Tir.Expression, { readonly _tag: 'IndexPlace' | 'SliceIndexPlace' }>
+  >,
   layouts: ReadonlyArray<Layout.Entry>,
   shapes: ReadonlyArray<Layout.CallingShape>,
 ): ReadonlyArray<RowModel> => {
@@ -1345,32 +1326,27 @@ export const arrayValueRows = (
   ]
 
   for (const [literalOrdinal, literal] of literals.entries()) {
-    const span = asSpan(spans.spanOf(literal.anchor))
+    const span = asSpan(literal.span)
     const key = `array-literal-${literalOrdinal}`
-    let label: string
-    if (literal.state._tag === 'Complete') label = typeText(literal.state.type)
-    else if (literal.expected === undefined) label = 'unavailable array'
-    else label = typeText(literal.expected)
     rows.push({
       key,
       depth: 1,
-      dot: literal.state._tag === 'Complete' ? 'ok' : 'warning',
-      label,
-      detail: `${literal.length} element${literal.length === 1 ? '' : 's'} · ${literal.state._tag}`,
+      dot: 'ok',
+      label: typeText(literal.type),
+      detail: `${literal.elements.length} element${literal.elements.length === 1 ? '' : 's'}`,
       span,
-      ...(literal.state._tag === 'Complete' ? {} : { tone: 'warning' as const }),
     })
-    for (const element of literal.elements) {
-      const elementSpan = asSpan(spans.spanOf(element.anchor))
+    for (const [elementOrdinal, element] of literal.elements.entries()) {
+      const elementSpan = asSpan(element.span)
       rows.push({
-        key: `${key}-element-${element.ordinal}`,
+        key: `${key}-element-${elementOrdinal}`,
         depth: 2,
-        label: `[${element.ordinal}]`,
-        detail: element.compatibility._tag,
+        label: `[${elementOrdinal}]`,
+        detail: element._tag === 'Unavailable' ? 'unavailable' : typeText(element.type),
         span: elementSpan,
-        ...(element.compatibility._tag === 'Compatible'
-          ? {}
-          : { dot: 'warning' as const, tone: 'warning' as const }),
+        ...(element._tag === 'Unavailable'
+          ? { dot: 'warning' as const, tone: 'warning' as const }
+          : {}),
       })
     }
   }
@@ -1382,7 +1358,18 @@ export const arrayValueRows = (
     head: true,
   })
   for (const [ordinal, projection] of projections.entries()) {
-    const span = asSpan(spans.spanOf(projection.anchor))
+    const span = asSpan(projection.span)
+    if (projection._tag === 'SliceIndexPlace') {
+      rows.push({
+        key: `array-index-${ordinal}`,
+        depth: 1,
+        dot: 'ok',
+        label: `${typeText(projection.sourceType)}[index]`,
+        detail: `${projection.access} · runtime slice check`,
+        span,
+      })
+      continue
+    }
     let boundsDetail = 'bounds unavailable'
     switch (projection.bounds._tag) {
       case 'Proven':
@@ -1391,20 +1378,14 @@ export const arrayValueRows = (
       case 'Runtime':
         boundsDetail = `runtime check < ${projection.bounds.length}`
         break
-      case 'Invalid':
-        boundsDetail = `invalid ${projection.bounds.index}/${projection.bounds.length}`
-        break
-      default:
-        break
     }
     rows.push({
       key: `array-index-${ordinal}`,
       depth: 1,
-      dot: projection.bounds._tag === 'Invalid' ? 'warning' : 'ok',
-      label: projection.array === undefined ? '?[index]' : `${typeText(projection.array)}[index]`,
+      dot: 'ok',
+      label: `${typeText(projection.array)}[index]`,
       detail: `${projection.access} · ${boundsDetail}`,
       span,
-      ...(projection.bounds._tag === 'Invalid' ? { tone: 'warning' as const } : {}),
     })
   }
 

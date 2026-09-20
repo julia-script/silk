@@ -17,7 +17,7 @@ import * as PackageParameter from '../src/PackageParameter.js'
 import * as FloatingPoint from '../src/FloatingPoint.js'
 import * as DeclarationFacts from '../src/DeclarationFacts.js'
 import * as Tir from '../src/Tir.js'
-import * as TirLowering from '../src/TirLowering.js'
+import * as BodyBuilder from '../src/BodyBuilder.js'
 import * as Instances from '../src/Instances.js'
 import * as Lexer from '../src/Lexer.js'
 import * as Lifetime from '../src/Lifetime.js'
@@ -1166,7 +1166,7 @@ pub fn main() -> i32 {
           field.member._tag === 'LabeledField' ? field.member.label : `#${field.member.ordinal}`,
         valueType: Type.encode(field.valueType),
         authorization: `${field.authorization.module}.${field.authorization.name}`,
-        provenance: field.provenance.sourceId,
+        provenance: field.provenance.anchor.owner.module,
       }))
 
     assert.deepEqual(
@@ -2042,7 +2042,7 @@ static fn computed() -> i32 {
       records(Analysis.rootAnalysis(snapshot)).functions.at(0) ?? unreachable('static body')
     const result = completedValue(
       StaticEvaluation.evaluateStatements(
-        TirLowering.staticLowering(
+        BodyBuilder.staticLowering(
           SemanticContext.make(Analysis.rootAnalysis(snapshot).authored),
         ).statements(computed.statements),
         {

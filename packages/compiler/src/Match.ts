@@ -2,6 +2,7 @@ import type * as AuthoredIdentity from './AuthoredIdentity.js'
 import * as DeclarationFacts from './DeclarationFacts.js'
 import * as Lifetime from './Lifetime.js'
 import * as RowAlgebra from './RowAlgebra.js'
+import type * as Tir from './Tir.js'
 import type * as SourceSpan from './SourceSpan.js'
 import * as Type from './Type.js'
 import * as TypeCompatibility from './TypeCompatibility.js'
@@ -12,10 +13,7 @@ export type Access = 'Copy' | 'Move' | 'Place' | 'Shared' | 'Exclusive'
 /** Stable source identity for one match expression. */
 export interface MatchId {
   readonly _tag: 'MatchId'
-  readonly function: DeclarationFacts.DeclarationId
-  readonly span: SourceSpan.SourceSpan
-  /** The authored node `span` presents; presentation stamps the span from it. */
-  readonly at?: AuthoredIdentity.Anchor
+  readonly node: Tir.NodeRef
 }
 
 /** Stable source-order identity for one arm. */

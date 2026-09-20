@@ -19,7 +19,7 @@ const construction = (context: BodyContext): BodyBuilder.BodyBuilder => {
 import * as LifetimeFlow from './LifetimeFlow.js'
 import * as NominalVariance from './NominalVariance.js'
 import * as TypeOutlives from './TypeOutlives.js'
-import { concreteCallableIdentity, exactCallableOf, executableSites } from './CallResolution.js'
+import { concreteCallableIdentity, exactCallableOf } from './CallResolution.js'
 import * as DeclarationCollection from './DeclarationCollection.js'
 import * as DeclarationFacts from './DeclarationFacts.js'
 import * as DeclarationLifetime from './DeclarationLifetime.js'
@@ -28,10 +28,9 @@ import * as Diagnostic from './Diagnostic.js'
 import type {
   BindingDeclarationFact,
   DeclarationFact,
-  ExpressionFact,
+  ExpressionDecision,
   PatternSelectionFact,
   PatternBindingFact,
-  StatementFact,
   StaticIterationFact,
 } from './Elaboration.js'
 import {
@@ -43,12 +42,13 @@ import {
   declaredReturnTypesCompatible,
   expressionChildren,
   expressionNode,
+  isBindingDeclarationFact,
   representationJoinDiagnostic,
   typesCompatible,
   unavailableCompatibility,
   unionConversionDiagnostic,
-  visitExpressionFacts,
-  visitStatementFacts,
+  visitExpressionDecisions,
+  visitStatements,
 } from './Elaboration.js'
 import type {
   BodyContext,
@@ -70,7 +70,8 @@ import {
   unsafeCallAuthorized,
 } from './ExpressionAnalysis.js'
 import * as Tir from './Tir.js'
-import { directStatementExpressions } from './TirLowering.js'
+import type { StatementDraft } from './BodyBuilder.js'
+import { directStatementExpressions } from './BodyBuilder.js'
 import * as Match from './Match.js'
 import * as NameResolution from './NameResolution.js'
 import * as SemanticDisplay from './SemanticDisplay.js'
@@ -127,9 +128,9 @@ const unitValueOf = (
     causes: Object.freeze([]),
   })
 
-const residualNodeCount = (statements: ReadonlyArray<StatementFact>): number => {
+const residualNodeCount = (statements: ReadonlyArray<Tir.Statement>): number => {
   let nodes = 0
-  visitStatementFacts(statements, {
+  visitStatements(statements, {
     statement: () => {
       nodes += 1
     },
@@ -157,9 +158,30 @@ export const analyzeStatements = (
   initialScope: Scope,
   loopStack: ReadonlyArray<Tir.LoopId> = Object.freeze([]),
   introducedPatterns: ReadonlyArray<PatternBindingFact> = Object.freeze([]),
-): ReadonlyArray<StatementFact> => {
+): ReadonlyArray<Tir.Statement> => {
   context = { ...context, resolution: { ...context.resolution, execution: { context, loopStack } } }
-  const facts: Array<StatementFact> = []
+  const facts: Array<Tir.Statement> = []
+  const statementOptions: BodyBuilder.LowerStatementOptions = {
+    context: context.context,
+    builder: construction(context),
+    ...(context.declaration.phase === 'Static'
+      ? { static: construction(context).expressions }
+      : { eraseIntrinsicSections: true as const }),
+    ...(context.resolution.lifetimeCompatibility === undefined
+      ? {}
+      : { lifetimeCompatibility: context.resolution.lifetimeCompatibility }),
+    ...(context.returnType === undefined ? {} : { resultType: context.returnType }),
+    ...(context.declaration.opaqueResult === undefined
+      ? {}
+      : { opaqueResultFamily: context.declaration.opaqueResult.family }),
+    functionId: context.declaration.id,
+  }
+  const construct = (draft: StatementDraft): Tir.Statement | undefined =>
+    BodyBuilder.publishStatements([draft], statementOptions).at(0)
+  const append = (draft: StatementDraft): void => {
+    const statement = construct(draft)
+    if (statement !== undefined) facts.push(statement)
+  }
   let scope = initialScope
   const ordinaryControlContext: BodyContext =
     context.declaration.phase !== 'Static' || context.resolution.deferStaticCalls === true
@@ -239,23 +261,32 @@ export const analyzeStatements = (
     readonly continues?: ReadonlySet<number>
     readonly breaks?: ReadonlySet<number>
   }
+  const callableBinding = (place: Tir.WritePlace): BindingDeclarationFact | undefined => {
+    const local =
+      place.root._tag === 'BindingWriteRoot' || place.root._tag === 'BindingSliceRoot'
+        ? place.root.binding
+        : undefined
+    if (local === undefined) return undefined
+    const semantic = BodyBuilder.semanticOfLocal(construction(context), local)
+    return isBindingDeclarationFact(semantic) ? semantic : undefined
+  }
   const expressionWrites = (
-    expression: ExpressionFact | Tir.Expression,
+    expression: ExpressionDecision | Tir.Expression,
     initial: ReadonlySet<number>,
   ): ReadonlySet<number> => {
     const writes = new Set(initial)
-    visitExpressionFacts(expression, {
+    visitExpressionDecisions(expression, {
       descendEffectBlocks: false,
       statement: (statement) => {
+        const binding = statement._tag === 'Write' ? callableBinding(statement.place) : undefined
         if (
-          statement._tag === 'WriteStatement' &&
-          !expressionNever(statement.destination) &&
+          statement._tag === 'Write' &&
+          (statement.destination === undefined || !expressionNever(statement.destination)) &&
           !expressionNever(statement.value) &&
-          statement.root?._tag === 'BindingFact' &&
-          statement.root.inferredType._tag === 'Available' &&
-          Type.isCallable(statement.root.inferredType.type)
+          binding?.inferredType._tag === 'Available' &&
+          Type.isCallable(binding.inferredType.type)
         )
-          writes.add(statement.root.id.ordinal)
+          writes.add(binding.id.ordinal)
       },
       expression: (candidate) => {
         if (
@@ -272,7 +303,7 @@ export const analyzeStatements = (
     return writes
   }
   const callableWriteFlow = (
-    statements: ReadonlyArray<StatementFact>,
+    statements: ReadonlyArray<Tir.Statement>,
     initial: ReadonlySet<number>,
     targetLoop: Tir.LoopId,
   ): CallableWriteFlow => {
@@ -281,64 +312,66 @@ export const analyzeStatements = (
     let breaks: ReadonlySet<number> | undefined
     for (const statement of statements) {
       if (fallthrough === undefined) break
-      if (statement._tag === 'BindStatement') {
-        fallthrough = expressionWrites(statement.binding.initializer, fallthrough)
-        if (expressionNever(statement.binding.initializer)) fallthrough = undefined
+      if (statement._tag === 'Bind') {
+        fallthrough = expressionWrites(statement.initializer, fallthrough)
+        if (expressionNever(statement.initializer)) fallthrough = undefined
         continue
       }
-      if (statement._tag === 'PatternBindStatement') {
-        fallthrough = expressionWrites(statement.selection.source, fallthrough)
-        if (expressionNever(statement.selection.source)) fallthrough = undefined
+      if (statement._tag === 'PatternBind') {
+        fallthrough = expressionWrites(statement.selection.subject, fallthrough)
+        if (expressionNever(statement.selection.subject)) fallthrough = undefined
         continue
       }
-      if (statement._tag === 'ExpressionStatement' || statement._tag === 'DropStatement') {
+      if (statement._tag === 'Evaluate' || statement._tag === 'Drop') {
         fallthrough = expressionWrites(statement.expression, fallthrough)
         if (expressionNever(statement.expression)) fallthrough = undefined
         continue
       }
-      if (statement._tag === 'WriteStatement') {
-        fallthrough = expressionWrites(
-          statement.value,
-          expressionWrites(statement.destination, fallthrough),
-        )
+      if (statement._tag === 'Write') {
+        fallthrough = expressionWrites(statement.value, fallthrough)
+        if (statement.destination !== undefined)
+          fallthrough = expressionWrites(statement.destination, fallthrough)
+        const binding = callableBinding(statement.place)
         if (
-          statement.root?._tag === 'BindingFact' &&
-          statement.root.inferredType._tag === 'Available' &&
-          Type.isCallable(statement.root.inferredType.type)
+          binding?.inferredType._tag === 'Available' &&
+          Type.isCallable(binding.inferredType.type)
         )
-          fallthrough = new Set(fallthrough).add(statement.root.id.ordinal)
-        if (expressionNever(statement.destination) || expressionNever(statement.value))
+          fallthrough = new Set(fallthrough).add(binding.id.ordinal)
+        if (
+          (statement.destination !== undefined && expressionNever(statement.destination)) ||
+          expressionNever(statement.value)
+        )
           fallthrough = undefined
         continue
       }
-      if (statement._tag === 'ReturnStatement' || statement._tag === 'FailStatement') {
+      if (statement._tag === 'Return' || statement._tag === 'Fail') {
         expressionWrites(statement.expression, fallthrough)
         fallthrough = undefined
         continue
       }
-      if (statement._tag === 'BreakStatement' || statement._tag === 'ContinueStatement') {
+      if (statement._tag === 'Break' || statement._tag === 'Continue') {
         if (statement.target === targetLoop) {
-          if (statement._tag === 'BreakStatement') breaks = unionWriteStates(breaks, fallthrough)
+          if (statement._tag === 'Break') breaks = unionWriteStates(breaks, fallthrough)
           else continues = unionWriteStates(continues, fallthrough)
         }
         fallthrough = undefined
         continue
       }
-      if (statement._tag === 'UnsafeStatement') {
+      if (statement._tag === 'Unsafe') {
         const nested = callableWriteFlow(statement.statements, fallthrough, targetLoop)
         fallthrough = nested.fallthrough
         continues = unionWriteStates(continues, nested.continues)
         breaks = unionWriteStates(breaks, nested.breaks)
         continue
       }
-      if (statement._tag === 'IfStatement' || statement._tag === 'IfLetStatement') {
+      if (statement._tag === 'If' || statement._tag === 'IfLet') {
         const afterCondition = expressionWrites(
-          statement._tag === 'IfStatement' ? statement.condition : statement.selection.source,
+          statement._tag === 'If' ? statement.condition : statement.selection.subject,
           fallthrough,
         )
         if (
           expressionNever(
-            statement._tag === 'IfStatement' ? statement.condition : statement.selection.source,
+            statement._tag === 'If' ? statement.condition : statement.selection.subject,
           )
         ) {
           fallthrough = undefined
@@ -351,7 +384,7 @@ export const analyzeStatements = (
         breaks = unionWriteStates(breaks, taken.breaks, otherwise.breaks)
         continue
       }
-      if (statement._tag === 'WhileStatement') {
+      if (statement._tag === 'While') {
         const nestedEntry = expressionWrites(statement.condition, fallthrough)
         if (expressionNever(statement.condition)) {
           fallthrough = undefined
@@ -422,9 +455,7 @@ export const analyzeStatements = (
     const subjectType = constructionExpressionType(subject)
     const id: Match.MatchId = Object.freeze({
       _tag: 'MatchId',
-      function: context.declaration.id,
-      span: context.context.spanOf(element.anchor),
-      at: element.anchor,
+      node: Tir.nodeReference(construction(context).artifact, subject),
     })
     const arm: Match.ArmId = Object.freeze({ _tag: 'MatchArmId', match: id, ordinal: 0 })
     const pattern = analyzePattern(
@@ -519,7 +550,7 @@ export const analyzeStatements = (
     >,
     armScope: Scope,
     armLoopStack: ReadonlyArray<Tir.LoopId>,
-  ): StatementFact => {
+  ): Tir.Statement => {
     const region = nextRegion()
     const conditionNode = element.condition
     const condition = analyzeExpression(
@@ -561,14 +592,18 @@ export const analyzeStatements = (
       ...(otherwiseFallsThrough ? [otherwise.writes] : []),
       ...(!takenFallsThrough && !otherwiseFallsThrough ? [branchEntry] : []),
     )
-    return Object.freeze({
-      _tag: 'IfStatement',
-      condition: condition.fact,
-      taken: Object.freeze([...taken.value]),
-      otherwise: Object.freeze([...otherwise.value]),
-      region,
-      anchor: element.anchor,
-    })
+    const statement = construct(
+      Object.freeze({
+        _tag: 'IfStatement',
+        condition: expressionNode(condition),
+        taken: Object.freeze([...taken.value]),
+        otherwise: Object.freeze([...otherwise.value]),
+        region,
+        anchor: element.anchor,
+      }),
+    )
+    if (statement === undefined) throw new RangeError('conditional statement was not published')
+    return statement
   }
 
   /** Both authored arms are present; an absent else branch contributes no statements. */
@@ -576,7 +611,7 @@ export const analyzeStatements = (
     branch: AuthoredHir.Block | AuthoredHir.Conditional | undefined,
     armScope: Scope,
     armLoopStack: ReadonlyArray<Tir.LoopId>,
-  ): ReadonlyArray<StatementFact> => {
+  ): ReadonlyArray<Tir.Statement> => {
     if (branch === undefined) return Object.freeze([])
     if (branch._tag === 'Block')
       return analyzeStatements(ordinaryControlContext, branch, armScope, armLoopStack)
@@ -589,7 +624,7 @@ export const analyzeStatements = (
     element: Extract<AuthoredHir.Conditional, { readonly _tag: 'PatternConditionalStatement' }>,
     armScope: Scope,
     armLoopStack: ReadonlyArray<Tir.LoopId>,
-  ): StatementFact => {
+  ): Tir.Statement => {
     const region = nextRegion()
     const selection = analyzePatternSelection(element, armScope)
     const takenScope: Scope = Object.freeze({
@@ -611,21 +646,26 @@ export const analyzeStatements = (
       ...(otherwiseFallsThrough ? [otherwise.writes] : []),
       ...(!takenFallsThrough && !otherwiseFallsThrough ? [branchEntry] : []),
     )
-    return Object.freeze({
-      _tag: 'IfLetStatement',
-      selection,
-      taken: Object.freeze([...taken.value]),
-      otherwise: Object.freeze([...otherwise.value]),
-      region,
-      anchor: element.anchor,
-    })
+    const statement = construct(
+      Object.freeze({
+        _tag: 'IfLetStatement',
+        selection,
+        taken: Object.freeze([...taken.value]),
+        otherwise: Object.freeze([...otherwise.value]),
+        region,
+        anchor: element.anchor,
+      }),
+    )
+    if (statement === undefined)
+      throw new RangeError('pattern conditional statement was not published')
+    return statement
   }
 
   for (const element of blockNode.statements) {
     if (element._tag === 'UnsafeStatement') {
       const region = nextRegion()
       const statements = analyzeStatements(context, element.body, scope, loopStack)
-      facts.push(
+      append(
         Object.freeze({
           _tag: 'UnsafeStatement',
           statements,
@@ -804,7 +844,7 @@ export const analyzeStatements = (
         if (staticTextOrigin !== undefined)
           context.staticContext.valueOrigins.set(key, staticTextOrigin)
       }
-      facts.push(Object.freeze({ _tag: 'BindStatement', binding, region }))
+      append(Object.freeze({ _tag: 'BindStatement', binding, region }))
 
       if (name._tag === 'Present') {
         const originalSpan = blockBindings.get(name.spelling)
@@ -871,7 +911,7 @@ export const analyzeStatements = (
           ),
         )
       }
-      facts.push(
+      append(
         Object.freeze({
           _tag: 'PatternBindStatement',
           selection,
@@ -902,17 +942,17 @@ export const analyzeStatements = (
 
     if (element._tag === 'ExpressionStatement') {
       const region = nextRegion()
-      const expressionNode = element.expression
+      const authoredExpression = element.expression
       const expression = analyzeExpression(
         context.context,
-        expressionNode,
+        authoredExpression,
         context.declarations,
         context.declaration,
         scope,
         context.resolution,
       )
       if (expression === undefined) {
-        throw new RangeError(`Semantic analysis cannot analyze ${expressionNode._tag}`)
+        throw new RangeError(`Semantic analysis cannot analyze ${authoredExpression._tag}`)
       }
       context.diagnostics.push(...expression.diagnostics)
       if (
@@ -923,10 +963,10 @@ export const analyzeStatements = (
         const evaluated = evaluateStatic(expression.fact, context.staticContext, context.resolution)
         if (evaluated._tag === 'Failed')
           context.diagnostics.push(staticDiagnostic(evaluated.failure))
-        facts.push(
+        append(
           Object.freeze({
             _tag: 'ExpressionStatement',
-            expression: expression.fact,
+            expression: expressionNode(expression),
             region,
             anchor: element.anchor,
           }),
@@ -945,14 +985,14 @@ export const analyzeStatements = (
               AuthoredWalk.moduleName(context.context),
               context.resolution.scope,
             ),
-            Location.at(expressionNode.anchor),
+            Location.at(authoredExpression.anchor),
           ),
         )
       }
-      facts.push(
+      append(
         Object.freeze({
           _tag: 'ExpressionStatement',
-          expression: expression.fact,
+          expression: expressionNode(expression),
           region,
           anchor: element.anchor,
         }),
@@ -1338,7 +1378,7 @@ export const analyzeStatements = (
         // callable of another construction site would erase that identity behind the structural type.
         // Deferred writes inside an Effect body are governed by the captured-callable mutation rule.
         const identityOf = (
-          expression: ExpressionFact | Tir.Expression,
+          expression: ExpressionDecision | Tir.Expression,
         ): string | undefined => {
           const representation = representationOfExpression(
             context.context,
@@ -1366,12 +1406,12 @@ export const analyzeStatements = (
           )
         context.resolution.writtenCallableBindings?.add(root.id.ordinal)
       }
-      facts.push(
+      append(
         Object.freeze({
           _tag: 'WriteStatement',
-          destination: destination.fact,
+          destination: expressionNode(destination),
           ...(root === undefined ? {} : { root }),
-          value: value.fact,
+          value: expressionNode(value),
           compatible,
           lifetimeProof: Lifetime.assumptions(
             compatible
@@ -1448,7 +1488,13 @@ export const analyzeStatements = (
               )
         const flow = callableWriteFlow(body, bodyEntry, loop)
         const backedge = unionWriteStates(flow.fallthrough, flow.continues)
-        return Object.freeze({ condition: condition.fact, body, bodyEntry, flow, backedge })
+        return Object.freeze({
+          condition: expressionNode(condition),
+          body,
+          bodyEntry,
+          flow,
+          backedge,
+        })
       }
       let analyzed = analyzeLoopPass(loopEntry)
       const initialBackedge = analyzed.backedge
@@ -1468,7 +1514,7 @@ export const analyzeStatements = (
         ...(analyzed.flow.breaks === undefined ? [] : [analyzed.flow.breaks]),
       )
       const parent = loopStack.at(-1)
-      facts.push(
+      append(
         Object.freeze({
           _tag: 'WhileStatement',
           loop,
@@ -1493,7 +1539,7 @@ export const analyzeStatements = (
           ),
         )
       }
-      facts.push(
+      append(
         Object.freeze({
           _tag: element._tag,
           ...(target === undefined ? {} : { target }),
@@ -1507,10 +1553,10 @@ export const analyzeStatements = (
     if (element._tag === 'ReturnStatement') {
       const region = nextRegion()
       // `return` without a value returns unit; the authored unit literal stands in for it.
-      const expressionNode = element.value ?? unitValueOf(element)
+      const authoredExpression = element.value ?? unitValueOf(element)
       const expression = analyzeExpression(
         context.context,
-        expressionNode,
+        authoredExpression,
         context.declarations,
         context.declaration,
         scope,
@@ -1518,7 +1564,7 @@ export const analyzeStatements = (
         !context.effectBlock ? context.returnType : undefined,
       )
       if (expression === undefined) {
-        throw new RangeError(`Semantic analysis cannot analyze ${expressionNode._tag}`)
+        throw new RangeError(`Semantic analysis cannot analyze ${authoredExpression._tag}`)
       }
       context.diagnostics.push(...expression.diagnostics)
       if (
@@ -1529,13 +1575,13 @@ export const analyzeStatements = (
         !concreteCallableIdentity(expression.fact, context.resolution.writtenCallableBindings)
       ) {
         context.diagnostics.push(
-          Diagnostic.unknownOwnedCallableReturn(Location.at(expressionNode.anchor)),
+          Diagnostic.unknownOwnedCallableReturn(Location.at(authoredExpression.anchor)),
         )
       }
-      facts.push(
+      append(
         Object.freeze({
           _tag: 'ReturnStatement',
-          expression: expression.fact,
+          expression: expressionNode(expression),
           // A trailing block expression carries no `return` keyword, so lowering marks the
           // statement it synthesizes `implicit-return` instead of leaving a token to inspect.
           ...(element.origin._tag === 'Synthetic' && element.origin.role === 'implicit-return'
@@ -1550,35 +1596,35 @@ export const analyzeStatements = (
 
     if (element._tag === 'FailStatement') {
       const region = nextRegion()
-      const expressionNode = element.value
+      const authoredExpression = element.value
       const expression = analyzeExpression(
         context.context,
-        expressionNode,
+        authoredExpression,
         context.declarations,
         context.declaration,
         scope,
         context.resolution,
       )
       if (expression === undefined)
-        throw new RangeError(`Semantic analysis cannot analyze ${expressionNode._tag}`)
+        throw new RangeError(`Semantic analysis cannot analyze ${authoredExpression._tag}`)
       context.diagnostics.push(...expression.diagnostics)
-      const failure =
+      const validFailure =
         expression.type !== undefined && Type.isFailureValue(expression.type)
           ? expression.type
           : undefined
       if (!context.effectBlock && context.declaration.functionKind !== 'Effect')
         context.diagnostics.push(Diagnostic.failOutsideEffect(Location.at(element.anchor)))
-      if (expression.type !== undefined && failure === undefined)
+      if (expression.type !== undefined && validFailure === undefined)
         context.diagnostics.push(
           Diagnostic.invalidFailureType(
             Type.encode(expression.type),
-            Location.at(expressionNode.anchor),
+            Location.at(authoredExpression.anchor),
           ),
         )
       if (
         !context.effectBlock &&
-        failure !== undefined &&
-        !(Type.isUnion(failure) ? failure.members : [failure]).every((member) =>
+        validFailure !== undefined &&
+        !(Type.isUnion(validFailure) ? validFailure.members : [validFailure]).every((member) =>
           Type.isParameter(member)
             ? Type.failureMemberParameters(context.declaration.failureRow.row).some((parameter) =>
                 Type.equals(parameter, member),
@@ -1589,13 +1635,16 @@ export const analyzeStatements = (
         )
       )
         context.diagnostics.push(
-          Diagnostic.undeclaredFailure(Type.encode(failure), Location.at(expressionNode.anchor)),
+          Diagnostic.undeclaredFailure(
+            Type.encode(validFailure),
+            Location.at(authoredExpression.anchor),
+          ),
         )
-      facts.push(
+      append(
         Object.freeze({
           _tag: 'FailStatement',
-          expression: expression.fact,
-          ...(failure === undefined ? {} : { failure }),
+          expression: expressionNode(expression),
+          ...(expression.type === undefined ? {} : { failure: expression.type }),
           transfer: element.move ? 'Move' : 'Copy',
           region,
           anchor: element.anchor,
@@ -1606,22 +1655,22 @@ export const analyzeStatements = (
 
     if (element._tag === 'DropStatement') {
       const region = nextRegion()
-      const expressionNode = element.value
+      const authoredExpression = element.value
       const expression = analyzeExpression(
         context.context,
-        expressionNode,
+        authoredExpression,
         context.declarations,
         context.declaration,
         scope,
         context.resolution,
       )
       if (expression === undefined)
-        throw new RangeError(`Semantic analysis cannot analyze ${expressionNode._tag}`)
+        throw new RangeError(`Semantic analysis cannot analyze ${authoredExpression._tag}`)
       context.diagnostics.push(...expression.diagnostics)
-      facts.push(
+      append(
         Object.freeze({
           _tag: 'DropStatement',
-          expression: expression.fact,
+          expression: expressionNode(expression),
           region,
           anchor: element.anchor,
         }),
@@ -1634,19 +1683,19 @@ export const analyzeStatements = (
 
 export interface ReturnFlow {
   readonly fallsThrough: boolean
-  readonly returns: ReadonlyArray<Extract<StatementFact, { readonly _tag: 'ReturnStatement' }>>
+  readonly returns: ReadonlyArray<Extract<Tir.Statement, { readonly _tag: 'Return' }>>
 }
 
 export const implicitReturn = (
-  statement: Extract<StatementFact, { readonly _tag: 'ReturnStatement' }>,
+  statement: Extract<Tir.Statement, { readonly _tag: 'Return' }>,
 ): boolean => statement.implicit === true
 
 /** Eager expression flow; constructing a callable or Effect never executes its body. */
 export const expressionReturnFlow = (
-  expression: ExpressionFact | Tir.Expression,
+  expression: ExpressionDecision | Tir.Expression,
 ): ReturnFlow => {
-  const returns: Array<Extract<StatementFact, { readonly _tag: 'ReturnStatement' }>> = []
-  const visit = (child: ExpressionFact | Tir.Expression): boolean => {
+  const returns: Array<Extract<Tir.Statement, { readonly _tag: 'Return' }>> = []
+  const visit = (child: ExpressionDecision | Tir.Expression): boolean => {
     const flow = expressionReturnFlow(child)
     returns.push(...flow.returns)
     return flow.fallsThrough
@@ -1655,10 +1704,42 @@ export const expressionReturnFlow = (
   if ('origin' in expression) {
     if (expression._tag === 'EffectBlock')
       return Object.freeze({ fallsThrough, returns: Object.freeze(returns) })
-    for (const child of Tir.expressionChildren(expression)) {
-      if (!visit(child)) {
+    if (expression._tag === 'Match') {
+      fallsThrough = visit(expression.scrutinee)
+      if (fallsThrough) {
         fallsThrough = false
-        break
+        let remaining = [...expression.members]
+        for (const arm of expression.arms) {
+          const selected = remaining.filter(
+            (candidate) =>
+              arm.universal || (arm.member !== undefined && Match.selects(arm.member, candidate)),
+          )
+          if (!arm.reachable || selected.length === 0) continue
+          const guardCompletes = arm.guard === undefined || visit(arm.guard)
+          remaining = remaining.filter((candidate) =>
+            arm.after.some((member) => Match.identityEquals(candidate, member)),
+          )
+          if (!guardCompletes && (arm.tests?.length ?? 0) === 0)
+            remaining = remaining.filter((candidate) => !selected.includes(candidate))
+          if (!guardCompletes) continue
+          if (arm.body._tag === 'Expression') {
+            if (visit(arm.body.expression)) fallsThrough = true
+          } else {
+            const flow = returnFlowOf(arm.body.statements, false)
+            returns.push(...flow.returns)
+            if (flow.fallsThrough) fallsThrough = true
+          }
+        }
+      }
+    } else if (expression._tag === 'ShortCircuit') {
+      fallsThrough = visit(expression.left)
+      if (fallsThrough) visit(expression.right)
+    } else {
+      for (const child of Tir.expressionChildren(expression)) {
+        if (!visit(child)) {
+          fallsThrough = false
+          break
+        }
       }
     }
     const type = constructionExpressionType(expression)
@@ -1714,15 +1795,15 @@ export const expressionReturnFlow = (
   return Object.freeze({ fallsThrough, returns: Object.freeze(returns) })
 }
 
-export const expressionNever = (expression: ExpressionFact | Tir.Expression): boolean =>
+export const expressionNever = (expression: ExpressionDecision | Tir.Expression): boolean =>
   !expressionReturnFlow(expression).fallsThrough
 
 /** Ordinary statements share eager operand transfers with their current execution boundary. */
 export const returnFlowOf = (
-  body: ReadonlyArray<StatementFact>,
+  body: ReadonlyArray<Tir.Statement>,
   implicitReturnFallsThrough = true,
 ): ReturnFlow => {
-  const returns: Array<Extract<StatementFact, { readonly _tag: 'ReturnStatement' }>> = []
+  const returns: Array<Extract<Tir.Statement, { readonly _tag: 'Return' }>> = []
   let fallsThrough = true
   for (const statement of body) {
     if (!fallsThrough) break
@@ -1735,7 +1816,7 @@ export const returnFlowOf = (
       }
     }
     if (!fallsThrough) break
-    if (statement._tag === 'ReturnStatement') {
+    if (statement._tag === 'Return') {
       if (implicitReturn(statement)) {
         fallsThrough = implicitReturnFallsThrough
         if (!implicitReturnFallsThrough) returns.push(statement)
@@ -1744,21 +1825,21 @@ export const returnFlowOf = (
         fallsThrough = false
       }
     } else if (
-      statement._tag === 'FailStatement' ||
-      statement._tag === 'BreakStatement' ||
-      statement._tag === 'ContinueStatement'
+      statement._tag === 'Fail' ||
+      statement._tag === 'Break' ||
+      statement._tag === 'Continue'
     ) {
       fallsThrough = false
-    } else if (statement._tag === 'UnsafeStatement') {
+    } else if (statement._tag === 'Unsafe') {
       const nested = returnFlowOf(statement.statements, implicitReturnFallsThrough)
       returns.push(...nested.returns)
       fallsThrough = nested.fallsThrough
-    } else if (statement._tag === 'IfStatement' || statement._tag === 'IfLetStatement') {
+    } else if (statement._tag === 'If' || statement._tag === 'IfLet') {
       const taken = returnFlowOf(statement.taken, implicitReturnFallsThrough)
       const otherwise = returnFlowOf(statement.otherwise, implicitReturnFallsThrough)
       returns.push(...taken.returns, ...otherwise.returns)
       fallsThrough = taken.fallsThrough || otherwise.fallsThrough
-    } else if (statement._tag === 'WhileStatement') {
+    } else if (statement._tag === 'While') {
       returns.push(...returnFlowOf(statement.body, implicitReturnFallsThrough).returns)
     }
   }
@@ -1767,9 +1848,9 @@ export const returnFlowOf = (
 
 /** Keeps only statements that can execute, treating an implicit unit completion as a real return. */
 export const executableStatements = (
-  body: ReadonlyArray<StatementFact>,
-): ReadonlyArray<StatementFact> => {
-  const reachable: Array<StatementFact> = []
+  body: ReadonlyArray<Tir.Statement>,
+): ReadonlyArray<Tir.Statement> => {
+  const reachable: Array<Tir.Statement> = []
   for (const statement of body) {
     reachable.push(statement)
     if (!returnFlowOf([statement], false).fallsThrough) break
@@ -1779,13 +1860,22 @@ export const executableStatements = (
 
 /** Callable binding roots written on any reachable path through these already-analyzed facts. */
 export const reachableCallableWrites = (
-  body: ReadonlyArray<StatementFact>,
+  body: ReadonlyArray<Tir.Statement>,
+  builder: BodyBuilder.BodyBuilder,
 ): ReadonlySet<number> => {
   const writes = new Set<number>()
-  const expression = (fact: ExpressionFact | Tir.Expression): boolean => {
+  const expression = (fact: ExpressionDecision | Tir.Expression): boolean => {
     if ('origin' in fact) {
       if (fact._tag === 'EffectBlock') return true
       for (const child of Tir.expressionChildren(fact)) if (!expression(child)) return false
+      if (fact._tag === 'Replace') {
+        const binding = callableBinding(fact.place)
+        if (
+          binding?.inferredType._tag === 'Available' &&
+          Type.isCallable(binding.inferredType.type)
+        )
+          writes.add(binding.id.ordinal)
+      }
       return !expressionNever(fact)
     }
     if (fact._tag === 'EffectBlock') return true
@@ -1821,41 +1911,51 @@ export const reachableCallableWrites = (
       writes.add(fact.root.id.ordinal)
     return !expressionNever(fact)
   }
-  const visit = (statements: ReadonlyArray<StatementFact>): boolean => {
+  const callableBinding = (place: Tir.WritePlace): BindingDeclarationFact | undefined => {
+    const local =
+      place.root._tag === 'BindingWriteRoot' || place.root._tag === 'BindingSliceRoot'
+        ? place.root.binding
+        : undefined
+    if (local === undefined) return undefined
+    const semantic = BodyBuilder.semanticOfLocal(builder, local)
+    return isBindingDeclarationFact(semantic) ? semantic : undefined
+  }
+  const visit = (statements: ReadonlyArray<Tir.Statement>): boolean => {
     let fallsThrough = true
     for (const statement of statements) {
       if (!fallsThrough) break
-      if (statement._tag === 'BindStatement') {
-        fallsThrough = expression(statement.binding.initializer)
-      } else if (statement._tag === 'PatternBindStatement') {
-        fallsThrough = expression(statement.selection.source)
-      } else if (statement._tag === 'ExpressionStatement' || statement._tag === 'DropStatement') {
+      if (statement._tag === 'Bind') {
+        fallsThrough = expression(statement.initializer)
+      } else if (statement._tag === 'PatternBind') {
+        fallsThrough = expression(statement.selection.subject)
+      } else if (statement._tag === 'Evaluate' || statement._tag === 'Drop') {
         fallsThrough = expression(statement.expression)
-      } else if (statement._tag === 'WriteStatement') {
-        const destinationContinues = expression(statement.destination)
+      } else if (statement._tag === 'Write') {
+        const destinationContinues =
+          statement.destination === undefined || expression(statement.destination)
         if (!destinationContinues) {
           fallsThrough = false
           continue
         }
         const valueContinues = expression(statement.value)
+        const binding = callableBinding(statement.place)
         if (
           valueContinues &&
-          statement.root?._tag === 'BindingFact' &&
-          statement.root.inferredType._tag === 'Available' &&
-          Type.isCallable(statement.root.inferredType.type)
+          binding?.inferredType._tag === 'Available' &&
+          Type.isCallable(binding.inferredType.type)
         )
-          writes.add(statement.root.id.ordinal)
+          writes.add(binding.id.ordinal)
         fallsThrough = valueContinues
-      } else if (statement._tag === 'ReturnStatement' || statement._tag === 'FailStatement') {
+      } else if (statement._tag === 'Return' || statement._tag === 'Fail') {
         expression(statement.expression)
         fallsThrough = false
-      } else if (statement._tag === 'BreakStatement' || statement._tag === 'ContinueStatement') {
+      } else if (statement._tag === 'Break' || statement._tag === 'Continue') {
         fallsThrough = false
-      } else if (statement._tag === 'UnsafeStatement') {
+      } else if (statement._tag === 'Unsafe') {
         fallsThrough = visit(statement.statements)
-      } else if (statement._tag === 'IfStatement' || statement._tag === 'IfLetStatement') {
+      } else if (statement._tag === 'If' || statement._tag === 'IfLet') {
         const condition =
-          statement._tag === 'IfStatement' ? statement.condition : statement.selection.source
+          statement._tag === 'If' ? statement.condition : statement.selection.subject
         if (!expression(condition)) {
           fallsThrough = false
         } else {
@@ -1863,7 +1963,7 @@ export const reachableCallableWrites = (
           const otherwiseFallsThrough = visit(statement.otherwise)
           fallsThrough = takenFallsThrough || otherwiseFallsThrough
         }
-      } else {
+      } else if (statement._tag === 'While') {
         fallsThrough = expression(statement.condition)
         if (fallsThrough) visit(statement.body)
       }
@@ -1889,16 +1989,15 @@ const closingBraceSpan = (block: AuthoredHir.Block): Location.Location =>
 const returnSiteEffectJoin = (
   context: BodyContext,
   declaration: DeclarationFact,
-  returns: ReadonlyArray<Extract<StatementFact, { readonly _tag: 'ReturnStatement' }>>,
+  returns: ReadonlyArray<Extract<Tir.Statement, { readonly _tag: 'Return' }>>,
 ): Type.Type | undefined => {
   if (declaration.returnType._tag !== 'Resolved') return undefined
   const declared = declaration.returnType.type
   if (!Type.isEffect(declared) || returns.length < 2) return undefined
-  const sites = returns.filter(
-    (statement) =>
-      statement.expression.type._tag === 'Available' &&
-      !Type.isNever(statement.expression.type.type),
-  )
+  const sites = returns.filter((statement) => {
+    const type = constructionExpressionType(statement.expression)
+    return type._tag === 'Available' && !Type.isNever(type.type)
+  })
   const alternatives: Array<Type.ExactRepresentationArgument> = []
   const missing: Array<Location.Location> = []
   for (const statement of sites) {
@@ -1918,7 +2017,7 @@ const returnSiteEffectJoin = (
       Type.isCompositeEffectRepresentationArgument(representation)
     )
       alternatives.push(...representation.alternatives)
-    else missing.push(Location.at(statement.expression.anchor))
+    else missing.push(Location.at(constructionExpressionAnchor(statement.expression)))
   }
   const composite = Type.compositeEffectRepresentationArgument(declared, alternatives)
   if (composite.alternatives.length < 2 && missing.length === 0) return undefined
@@ -1988,6 +2087,13 @@ export const analyzeFunctionBody = (
     outlivesScope.parameterBounds,
   )
   const authoredDeclaration = AuthoredWalk.declarationOf(semantic.module, declaration.owner)
+  const occurrences = new Map<string, SemanticOccurrence.LocatedOccurrence>()
+  const publishOccurrence = (occurrence: SemanticOccurrence.LocatedOccurrence): void => {
+    occurrences.set(
+      `${AuthoredIdentity.anchorKey(occurrence.at)}\u0000${occurrence.role}`,
+      occurrence,
+    )
+  }
   const bodyResolution: ResolutionContext = Object.freeze({
     ...resolution,
     builder,
@@ -1998,7 +2104,6 @@ export const analyzeFunctionBody = (
     ...(declaration.canonical._tag === 'Canonical'
       ? { executableOwner: declaration.canonical.id }
       : {}),
-    executableSites: executableSites(blockNode),
     bodyLifetimes,
     lifetimeCompatibility: BodyLifetime.compatibility(
       bodyLifetimes,
@@ -2011,6 +2116,14 @@ export const analyzeFunctionBody = (
       NominalVariance.derive(resolution.index).summaries,
     ),
     writtenCallableBindings: new Set<number>(),
+    publishExpressionDecision: (decision: ExpressionDecision) => {
+      for (const occurrence of SemanticOccurrence.ofExpressionDecision(
+        decision,
+        resolution.index,
+        resolution.scope,
+      ))
+        publishOccurrence(occurrence)
+    },
     generatedAggregates: new Map(),
     ...(staticContext === undefined ? {} : { staticContext }),
   })
@@ -2071,15 +2184,14 @@ export const analyzeFunctionBody = (
       (statement) =>
         statement._tag === 'StaticConditionalStatement' || statement._tag === 'StaticForStatement',
     )
-  type Terminal = Extract<StatementFact, { _tag: 'ReturnStatement' | 'FailStatement' }>
-  const terminalOf = (body: ReadonlyArray<StatementFact>): Terminal | undefined => {
+  type Terminal = Extract<Tir.Statement, { _tag: 'Return' | 'Fail' }>
+  const terminalOf = (body: ReadonlyArray<Tir.Statement>): Terminal | undefined => {
     for (const statement of [...body].reverse()) {
-      if (statement._tag === 'ReturnStatement' || statement._tag === 'FailStatement')
-        return statement
-      if (statement._tag === 'UnsafeStatement') {
+      if (statement._tag === 'Return' || statement._tag === 'Fail') return statement
+      if (statement._tag === 'Unsafe') {
         const nested = terminalOf(statement.statements)
         if (nested !== undefined) return nested
-      } else if (statement._tag === 'IfStatement' || statement._tag === 'IfLetStatement') {
+      } else if (statement._tag === 'If' || statement._tag === 'IfLet') {
         const nested = terminalOf(statement.otherwise) ?? terminalOf(statement.taken)
         if (nested !== undefined) return nested
       }
@@ -2089,7 +2201,6 @@ export const analyzeFunctionBody = (
   const terminal = terminalOf(statements)
   if (terminal === undefined)
     throw new RangeError('Semantic analysis expected a terminal statement')
-  const expression = terminal.expression
   const returnFlow = returnFlowOf(statements)
   const staticEvaluationFailureCodes = new Set<Diagnostic.Code>([
     Diagnostic.staticPhaseViolationCode,
@@ -2106,11 +2217,12 @@ export const analyzeFunctionBody = (
   let validReturnContract = declaration.returnType._tag === 'Resolved'
   if (declaration.returnType._tag === 'Resolved') {
     for (const returned of returnFlow.returns) {
-      if (returned.expression.type._tag !== 'Available') {
+      const returnedType = constructionExpressionType(returned.expression)
+      if (returnedType._tag !== 'Available') {
         validReturnContract = false
         continue
       }
-      const actual = returned.expression.type.type
+      const actual = returnedType.type
       if (
         staticContext?.typeSubstitution === undefined
           ? declaredReturnTypesCompatible(
@@ -2132,19 +2244,19 @@ export const analyzeFunctionBody = (
           returnType ?? declaration.returnType.type,
           actual,
           Location.at(declaration.returnType.anchor),
-          Location.at(returned.expression.anchor),
-          Location.at(returned.expression.anchor),
+          Location.at(constructionExpressionAnchor(returned.expression)),
+          Location.at(constructionExpressionAnchor(returned.expression)),
         ) ??
           unionConversionDiagnostic(
             actual,
             returnType ?? declaration.returnType.type,
-            Location.at(returned.expression.anchor),
+            Location.at(constructionExpressionAnchor(returned.expression)),
             bodyResolution?.lifetimeCompatibility,
           ) ??
           Diagnostic.returnTypeMismatch(
             Type.encode(returnType ?? declaration.returnType.type),
             Type.encode(actual),
-            Location.at(returned.expression.anchor),
+            Location.at(constructionExpressionAnchor(returned.expression)),
           ),
       )
     }
@@ -2177,9 +2289,30 @@ export const analyzeFunctionBody = (
     outlivesScope,
   )
   context.diagnostics.push(...lifetimeFlow.diagnostics)
+  BodyBuilder.finalizeReturns(statements, {
+    context: semantic,
+    builder,
+    lifetimeAssumptions: Lifetime.assumptions(lifetimeFlow.input.constraints),
+    ...(bodyResolution.lifetimeCompatibility === undefined
+      ? {}
+      : { lifetimeCompatibility: bodyResolution.lifetimeCompatibility }),
+    ...(returnType === undefined ? {} : { resultType: returnType }),
+    ...(declaration.opaqueResult === undefined
+      ? {}
+      : { opaqueResultFamily: declaration.opaqueResult.family }),
+    ...(resultRepresentation === undefined ? {} : { resultRepresentation }),
+    functionId: declaration.id,
+  })
+  for (const occurrence of SemanticOccurrence.ofStatements(
+    statements,
+    resolution.index,
+    resolution.scope,
+    builder,
+  ))
+    publishOccurrence(occurrence)
   return Object.freeze({
     fact: Object.freeze({
-      _tag: 'FunctionFact',
+      _tag: 'FunctionConstruction',
       ...(bodyResolution.lifetimeCompatibility === undefined
         ? {}
         : { comparisonWork: Object.freeze({ ...bodyResolution.lifetimeCompatibility.work }) }),
@@ -2188,13 +2321,13 @@ export const analyzeFunctionBody = (
       statements,
       bindings: Object.freeze([...context.bindings]),
       regionOrder: Object.freeze([...context.regions]),
-      returnedExpression: expression,
+      returnedExpression: terminal.expression,
       returnCompatibility,
       ...(resultRepresentation === undefined ? {} : { resultRepresentation }),
       generatedAggregates: Object.freeze([...(bodyResolution.generatedAggregates?.values() ?? [])]),
       staticIterations: Object.freeze([...context.staticIterations]),
-      occurrences: SemanticOccurrence.ofStatements(statements, resolution.index, resolution.scope),
-      hints: TypeHint.rows(context.bindings, statements),
+      occurrences: Object.freeze([...occurrences.values()]),
+      hints: TypeHint.rows(context.bindings, statements, builder),
       opaqueEvidence: OpaqueRealization.evidenceOfBody(semantic, declaration, statements),
     }),
     diagnostics: Object.freeze([...context.diagnostics]),

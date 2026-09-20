@@ -885,7 +885,7 @@ pub fn main() -> i32 {
             )
     assert.deepEqual(
       sections.map((section) => ({
-        site: section.site.ordinal,
+        site: Tir.executableSiteOrdinal(section.site),
         target:
           section.target._tag === 'DeclarationCallableTarget'
             ? section.target.declaration.name

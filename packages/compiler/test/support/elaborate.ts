@@ -9,6 +9,7 @@ import * as ModuleClosure from '../../src/ModuleClosure.js'
 import * as NameResolution from '../../src/NameResolution.js'
 import * as Ownership from '../../src/Ownership.js'
 import type * as SyntaxFile from '../../src/SyntaxFile.js'
+import { records, type InspectedBody } from './records.js'
 
 const indices = new WeakMap<Elaboration.Result, DeclarationIndex.Index>()
 
@@ -21,9 +22,9 @@ export const canonicalName = (sourceId: string): string => sourceId.replace(/:\/
  * `located` is the revision-free result itself, for a test that hands it to a later stage.
  */
 export type Elaborated = Omit<Elaboration.Result, 'diagnostics'> & {
-  /** The working records construction built the bodies from, which these tests examine. */
-  readonly functions: ReadonlyArray<Elaboration.FunctionFact>
-  readonly hiddenFunctions: ReadonlyArray<Elaboration.FunctionFact>
+  /** The checked TIR bodies these tests examine. */
+  readonly functions: ReadonlyArray<InspectedBody>
+  readonly hiddenFunctions: ReadonlyArray<InspectedBody>
   readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
   readonly located: Elaboration.Result
 }
@@ -60,10 +61,11 @@ export const elaborate = (syntax: SyntaxFile.SyntaxFile): Elaborated => {
   if (headers === undefined || scope === undefined)
     throw new RangeError('Single-module elaboration fixture lost its module')
   const result = Elaboration.elaborateModule({ authored, headers, scope, index })
+  const inspected = records(result)
   indices.set(result, index)
   return Object.freeze({
     ...result,
-    ...Elaboration.records(result),
+    ...inspected,
     // Published the way the frontend publishes: spans first, then the one deterministic order.
     diagnostics: Diagnostic.merge(
       Diagnostic.publishAll(

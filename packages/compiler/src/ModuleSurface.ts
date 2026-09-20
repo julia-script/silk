@@ -1865,7 +1865,7 @@ const parameter = (value: DeclarationFacts.ParameterFact): string =>
     declaredType(value.declaredType),
   ])
 
-const rowExpression = (value: DeclarationFacts.RowExpressionFact): string => {
+const rowExpression = (value: DeclarationFacts.RowExpressionDecision): string => {
   switch (value._tag) {
     case 'EmptyRowExpression':
       return record('EmptyRowExpression')

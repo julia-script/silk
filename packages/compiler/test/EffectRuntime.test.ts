@@ -38,14 +38,12 @@ it.effect('unions both failure rows and both requirement rows through flatten', 
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
 
     const encoded = Analysis.expressionsOf(snapshot, module).flatMap((expression) =>
-      expression._tag === 'Call' &&
-      expression.type._tag === 'Available' &&
-      Type.isEffect(expression.type.type)
+      expression._tag === 'Call' && Type.isEffect(expression.type)
         ? [
             {
-              success: Type.encode(expression.type.type.success),
-              failures: Type.failureMembers(expression.type.type).map((type) => Type.encode(type)),
-              requirements: Type.requirementMembers(expression.type.type).map((requirement) =>
+              success: Type.encode(expression.type.success),
+              failures: Type.failureMembers(expression.type).map((type) => Type.encode(type)),
+              requirements: Type.requirementMembers(expression.type).map((requirement) =>
                 Type.encodeRequirement(requirement),
               ),
             },

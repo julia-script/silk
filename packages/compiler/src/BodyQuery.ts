@@ -376,7 +376,7 @@ const nominalDependenciesOf = (member: DeclarationFacts.MemberFact): ReadonlyArr
 
 const dependencies = (self: BodyQuery, built: Built): ReadonlyArray<Observation> => {
   const selected = new Set<string>()
-  visit(built.records, (value) => {
+  visit(built.unit, (value) => {
     const owner = self.owners.get(value)
     if (owner !== undefined) {
       selected.add(owner)
@@ -420,10 +420,18 @@ const dependencies = (self: BodyQuery, built: Built): ReadonlyArray<Observation>
 
 const callsOf = (self: BodyQuery, built: Built): ReadonlyArray<string> => {
   const calls = new Set<string>()
-  visit(built.records, (value) => {
+  visit(built.unit, (value) => {
     if (
       records(value) &&
-      (value._tag === 'Call' || value._tag === 'CallableSection') &&
+      value._tag === 'Call' &&
+      records(value.target) &&
+      typeof value.target.module === 'string' &&
+      typeof value.target.name === 'string'
+    ) {
+      calls.add(`${value.target.module}/${value.target.name}`)
+    } else if (
+      records(value) &&
+      value._tag === 'CallableSection' &&
       records(value.reference) &&
       records(value.reference.declaration)
     ) {
@@ -473,8 +481,6 @@ const validateDependencies = (
 /** What construction hands back for one declaration. */
 export interface Built {
   readonly unit: Elaboration.CheckedUnit
-  /** The working records of this build, read once for the inputs they consumed and then dropped. */
-  readonly records: unknown
 }
 
 const present = (

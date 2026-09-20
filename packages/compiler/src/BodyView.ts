@@ -1,4 +1,3 @@
-import type * as Constraint from './Constraint.js'
 import type * as Diagnostic from './Diagnostic.js'
 import type * as Elaboration from './Elaboration.js'
 import type * as Location from './Location.js'
@@ -8,7 +7,7 @@ import * as Tir from './Tir.js'
 export interface BodyView {
   readonly artifact: Tir.ArtifactId
   readonly function: Tir.TirFunction
-  readonly evidence: ReadonlyArray<ReadonlyArray<Constraint.ConstraintEvidence>>
+  readonly evidence: ReadonlyArray<Tir.SelectedEvidence>
   readonly causes: ReadonlyArray<Diagnostic.Identity<Location.Location>>
 }
 
@@ -36,7 +35,7 @@ export const local = (self: BodyView, ref: Tir.LocalId): Tir.Local | undefined =
 export const selectedEvidence = (
   self: BodyView,
   ref: Tir.EvidenceRef,
-): ReadonlyArray<Constraint.ConstraintEvidence> | undefined => self.evidence.at(ref.ordinal)
+): Tir.SelectedEvidence | undefined => self.evidence.at(ref.ordinal)
 
 export const cause = (
   self: BodyView,

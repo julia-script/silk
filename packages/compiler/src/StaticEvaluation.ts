@@ -7,7 +7,7 @@ import * as FloatingPoint from './FloatingPoint.js'
 import * as Location from './Location.js'
 import * as Provenance from './Provenance.js'
 import type * as Match from './Match.js'
-import type * as Tir from './Tir.js'
+import * as Tir from './Tir.js'
 import * as Canonical from './internal/Canonical.js'
 import * as TypeInference from './internal/TypeInference.js'
 import * as Scalar from './Scalar.js'
@@ -1049,7 +1049,7 @@ export const bindingKey = (id: Tir.BindingId): string => `binding:${idKey(id)}`
 
 /** The key of a pattern binding's value in an evaluation environment. */
 export const patternKey = (id: Match.BindingId): string =>
-  `pattern:${id.arm.match.function.sourceId}:${id.arm.match.function.ordinal}:${id.arm.match.span.start}:${id.arm.ordinal}:${id.ordinal}`
+  `pattern:${Tir.nodeRefKey(id.arm.match.node)}:${id.arm.ordinal}:${id.ordinal}`
 
 /** The value key of one published TIR local. */
 export const tirLocalKey = (id: Tir.LocalId): string => `local:${id.ordinal}`

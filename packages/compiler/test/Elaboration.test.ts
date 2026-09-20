@@ -102,7 +102,10 @@ pub fn main() -> i32 { return answer() }`,
   assert.strictEqual(result.bodies.length, 2)
   assert.strictEqual(result.bodies.at(0)?.declaration.phase, 'Static')
   assert.strictEqual(result.tir.functions.length, 1)
-  assert.strictEqual(Tir.returned(result.bodies.at(0)?.function ?? raise('expected static body'))._tag, 'IntegerLiteral')
+  assert.strictEqual(
+    Tir.returned(result.bodies.at(0)?.function ?? raise('expected static body'))._tag,
+    'IntegerLiteral',
+  )
 })
 
 it('publishes source names as supplementary occurrences instead of rebuilding a body', () => {

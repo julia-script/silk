@@ -14,7 +14,7 @@ import * as Canonical from './internal/Canonical.js'
 
 /** The exact text one elaborated literal operand denotes, decoded when the fact was built. */
 const literalText = (
-  expression: Elaboration.ExpressionFact | Tir.Expression,
+  expression: Elaboration.ExpressionDecision | Tir.Expression,
 ): string | undefined => {
   if (expression._tag === 'StaticText' && expression.data !== undefined)
     return new TextDecoder().decode(Uint8Array.from(expression.data.bytes))
@@ -221,9 +221,7 @@ export const analyze = (
     return reject('assembly metadata must be literal')
   const operands: Array<Type.Type> = []
   // A tuple literal is an occurrence-generated struct: it names no source constructor.
-  if (
-    tuple?._tag === 'Construct'
-  ) {
+  if (tuple?._tag === 'Construct') {
     for (const field of tuple.fields) {
       const expression = field.value
       const type = Elaboration.constructionExpressionType(expression)
@@ -231,8 +229,7 @@ export const analyze = (
         return reject('assembly operand type', Elaboration.constructionExpressionAnchor(expression))
       operands.push(type.type)
     }
-  } else if (tuple?._tag !== 'UnitLiteral')
-    return reject('assembly inputs require a tuple literal')
+  } else if (tuple?._tag !== 'UnitLiteral') return reject('assembly inputs require a tuple literal')
   const checked = inspect(
     {
       template,

@@ -428,7 +428,7 @@ export type DeclaredTypeFact =
       }>
       readonly requirementParameters: ReadonlyArray<Type.Parameter>
       /** The complete row expression, retained when the row subtracts (`Without<R, K>`). */
-      readonly requirementExpression?: RowExpressionFact
+      readonly requirementExpression?: RowExpressionDecision
       readonly spelling: string
       readonly anchor: AuthoredHir.Anchor
       readonly cause?: Diagnostic.Identity<Location.Location>
@@ -472,7 +472,7 @@ export interface UnionSourceFact {
 export type ReturnTypeFact = DeclaredTypeFact
 
 /** Source-shaped row structure retained before module resolution and symbolic normalization. */
-export type RowExpressionFact =
+export type RowExpressionDecision =
   | { readonly _tag: 'EmptyRowExpression' }
   | {
       readonly _tag: 'RowParameterExpression'
@@ -493,13 +493,13 @@ export type RowExpressionFact =
     }
   | {
       readonly _tag: 'UnionRowExpression'
-      readonly operands: ReadonlyArray<RowExpressionFact>
+      readonly operands: ReadonlyArray<RowExpressionDecision>
       readonly anchor: AuthoredHir.Anchor
     }
   | {
       readonly _tag: 'WithoutRowExpression'
-      readonly source: RowExpressionFact
-      readonly selected: RowExpressionFact
+      readonly source: RowExpressionDecision
+      readonly selected: RowExpressionDecision
       readonly anchor: AuthoredHir.Anchor
     }
   | { readonly _tag: 'UnavailableRowExpression'; readonly anchor: AuthoredHir.Anchor }
@@ -508,16 +508,16 @@ export type ConstraintFact =
   | {
       readonly _tag: 'MembershipConstraint'
       readonly domain: 'Failure' | 'Requirement' | 'Unavailable'
-      readonly selected: RowExpressionFact
-      readonly source: RowExpressionFact
+      readonly selected: RowExpressionDecision
+      readonly source: RowExpressionDecision
       readonly anchor: AuthoredHir.Anchor
     }
   | {
       readonly _tag: 'ProviderConstraint'
       readonly mode: 'Shared' | 'Exclusive' | 'Take'
       readonly provider: DeclaredTypeFact
-      readonly selected: RowExpressionFact
-      readonly source: RowExpressionFact
+      readonly selected: RowExpressionDecision
+      readonly source: RowExpressionDecision
       readonly anchor: AuthoredHir.Anchor
     }
 
@@ -529,7 +529,7 @@ export interface FailureRowFact {
   readonly failures: ReadonlyArray<Type.Type>
   readonly anchor?: AuthoredHir.Anchor
   readonly available: boolean
-  readonly expression: RowExpressionFact
+  readonly expression: RowExpressionDecision
   readonly row: Type.FailureRow
 }
 
@@ -546,7 +546,7 @@ export interface RequirementRowFact {
   readonly requirements: ReadonlyArray<Type.Requirement>
   readonly anchor?: AuthoredHir.Anchor
   readonly available: boolean
-  readonly expression: RowExpressionFact
+  readonly expression: RowExpressionDecision
   readonly row: Type.RequirementsRow
 }
 
@@ -1339,11 +1339,11 @@ const substituteDeclaredTypeFact = (
   return Object.freeze({ ...fact, type, spelling: Presentation.type(type, module) })
 }
 
-const substituteRowExpressionFact = (
-  fact: RowExpressionFact,
+const substituteRowExpressionDecision = (
+  fact: RowExpressionDecision,
   substitution: Type.Substitution,
   module: string,
-): RowExpressionFact => {
+): RowExpressionDecision => {
   switch (fact._tag) {
     case 'EmptyRowExpression':
     case 'RowParameterExpression':
@@ -1365,15 +1365,15 @@ const substituteRowExpressionFact = (
         ...fact,
         operands: Object.freeze(
           fact.operands.map((operand) =>
-            substituteRowExpressionFact(operand, substitution, module),
+            substituteRowExpressionDecision(operand, substitution, module),
           ),
         ),
       })
     case 'WithoutRowExpression':
       return Object.freeze({
         ...fact,
-        source: substituteRowExpressionFact(fact.source, substitution, module),
-        selected: substituteRowExpressionFact(fact.selected, substitution, module),
+        source: substituteRowExpressionDecision(fact.source, substitution, module),
+        selected: substituteRowExpressionDecision(fact.selected, substitution, module),
       })
   }
 }
@@ -1489,7 +1489,7 @@ const substituteFailureRowFact = (
   return Object.freeze({
     ...fact,
     members,
-    expression: substituteRowExpressionFact(fact.expression, substitution, module),
+    expression: substituteRowExpressionDecision(fact.expression, substitution, module),
     row: failureRowFromEffect(rows),
     parameters: Object.freeze([]),
     failures: Type.failureMembers(rows),
@@ -1516,7 +1516,7 @@ const substituteRequirementRowFact = (
   return Object.freeze({
     ...fact,
     entries,
-    expression: substituteRowExpressionFact(fact.expression, substitution, module),
+    expression: substituteRowExpressionDecision(fact.expression, substitution, module),
     row: requirementRowFromEffect(rows),
     parameters: Type.requirementRowParameters(rows),
     requirements: Type.requirementMembers(rows),

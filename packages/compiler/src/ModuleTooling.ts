@@ -8,6 +8,7 @@ import * as SemanticOccurrence from './SemanticOccurrence.js'
 import type * as SourceSpan from './SourceSpan.js'
 import * as SemanticContext from './SemanticContext.js'
 import type * as Type from './Type.js'
+import * as Tir from './Tir.js'
 
 /** One available anonymous expression type cached for position fallback. */
 export interface AnonymousExpression {
@@ -26,15 +27,8 @@ export interface ModuleTooling {
 }
 
 /** Returns every expression nested under one statement in deterministic source order. */
-export const statementExpressions = (
-  statement: Elaboration.StatementFact,
-): ReadonlyArray<Elaboration.ExpressionFact> => {
-  const expressions: Array<Elaboration.ExpressionFact> = []
-  Elaboration.visitStatementFacts([statement], {
-    expression: (expression) => expressions.push(expression),
-  })
-  return Object.freeze(expressions)
-}
+export const statementExpressions = (statement: Tir.Statement): ReadonlyArray<Tir.Expression> =>
+  Object.freeze(Tir.statementExpressions(statement).flatMap(Tir.expressionTree))
 
 /** Builds one module's anonymous-expression entries. */
 export const anonymousExpressionIndex = (
@@ -71,7 +65,7 @@ export const semanticOccurrenceIndex = (
   index: DeclarationIndex.Index,
   spans: SemanticContext.Registry,
   resolution: NameResolution.Resolution,
-  conditions: ReadonlyArray<Elaboration.ExpressionFact> = [],
+  conditions: ReadonlyArray<Elaboration.ExpressionDecision> = [],
   syntax?: SyntaxFile.SyntaxFile,
 ): SemanticOccurrence.ModuleIndex =>
   SemanticOccurrence.makeModule(

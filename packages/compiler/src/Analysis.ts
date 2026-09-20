@@ -59,6 +59,7 @@ import type * as SyntaxFile from './SyntaxFile.js'
 import * as SyntaxTree from './SyntaxTree.js'
 import * as Target from './Target.js'
 import * as Type from './Type.js'
+import * as Tir from './Tir.js'
 import * as TypeHint from './TypeHint.js'
 import type * as WorkspaceInventory from './WorkspaceInventory.js'
 
@@ -1052,30 +1053,32 @@ export const completionAt = (
       })
 }
 
-/** Returns every semantic expression fact in deterministic source nesting order. */
+/** Returns every typed expression node in deterministic artifact and node order. */
 export const expressionsOf = (
   self: FrontendSnapshot,
   module: string,
-): ReadonlyArray<Elaboration.ExpressionFact> =>
-  Object.freeze(
-    [self.results.get(module)].flatMap((result) =>
-      result === undefined
-        ? []
-        : Elaboration.records(result).functions.flatMap((fn) =>
-            fn.statements.flatMap(ModuleTooling.statementExpressions),
-          ),
-    ),
+): ReadonlyArray<Tir.Expression> => {
+  const result = self.results.get(module)
+  if (result === undefined) return Object.freeze([])
+  const found = new Set<Tir.Expression>()
+  for (const body of result.bodies)
+    for (const statement of body.function.statements)
+      for (const expression of Tir.statementExpressions(statement))
+        for (const nested of Tir.expressionTree(expression)) found.add(nested)
+  return Object.freeze(
+    [...found].sort((left, right) => (left.id?.ordinal ?? 0) - (right.id?.ordinal ?? 0)),
   )
+}
 
 /** Returns every canonical or explicitly unavailable field-projection step. */
 export const fieldProjectionsOf = (
   self: FrontendSnapshot,
   module: string,
-): ReadonlyArray<Elaboration.FieldProjectionExpressionFact> =>
+): ReadonlyArray<Extract<Tir.Expression, { readonly _tag: 'Project' }>> =>
   Object.freeze(
     expressionsOf(self, module).filter(
-      (expression): expression is Elaboration.FieldProjectionExpressionFact =>
-        expression._tag === 'FieldProjection',
+      (expression): expression is Extract<Tir.Expression, { readonly _tag: 'Project' }> =>
+        expression._tag === 'Project',
     ),
   )
 
@@ -1083,11 +1086,11 @@ export const fieldProjectionsOf = (
 export const referentProjectionsOf = (
   self: FrontendSnapshot,
   module: string,
-): ReadonlyArray<Elaboration.ReferentProjectionExpressionFact> =>
+): ReadonlyArray<Extract<Tir.Expression, { readonly _tag: 'ReferentPlace' }>> =>
   Object.freeze(
     expressionsOf(self, module).filter(
-      (expression): expression is Elaboration.ReferentProjectionExpressionFact =>
-        expression._tag === 'ReferentProjection',
+      (expression): expression is Extract<Tir.Expression, { readonly _tag: 'ReferentPlace' }> =>
+        expression._tag === 'ReferentPlace',
     ),
   )
 
@@ -1095,11 +1098,11 @@ export const referentProjectionsOf = (
 export const arrayLiteralsOf = (
   self: FrontendSnapshot,
   module: string,
-): ReadonlyArray<Elaboration.ArrayLiteralExpressionFact> =>
+): ReadonlyArray<Extract<Tir.Expression, { readonly _tag: 'ArrayConstruct' }>> =>
   Object.freeze(
     expressionsOf(self, module).filter(
-      (expression): expression is Elaboration.ArrayLiteralExpressionFact =>
-        expression._tag === 'ArrayLiteral',
+      (expression): expression is Extract<Tir.Expression, { readonly _tag: 'ArrayConstruct' }> =>
+        expression._tag === 'ArrayConstruct',
     ),
   )
 
@@ -1107,11 +1110,15 @@ export const arrayLiteralsOf = (
 export const indexProjectionsOf = (
   self: FrontendSnapshot,
   module: string,
-): ReadonlyArray<Elaboration.IndexProjectionExpressionFact> =>
+): ReadonlyArray<Extract<Tir.Expression, { readonly _tag: 'IndexPlace' | 'SliceIndexPlace' }>> =>
   Object.freeze(
     expressionsOf(self, module).filter(
-      (expression): expression is Elaboration.IndexProjectionExpressionFact =>
-        expression._tag === 'IndexProjection',
+      (
+        expression,
+      ): expression is Extract<
+        Tir.Expression,
+        { readonly _tag: 'IndexPlace' | 'SliceIndexPlace' }
+      > => expression._tag === 'IndexPlace' || expression._tag === 'SliceIndexPlace',
     ),
   )
 
@@ -1153,7 +1160,7 @@ export const fixedArrayTypesOf = (
     }
   }
   for (const expression of expressionsOf(self, module)) {
-    if (expression.type._tag === 'Available') add(expression.type.type)
+    if (expression._tag !== 'Unavailable') add(expression.type)
   }
   return Object.freeze([...found.values()])
 }

@@ -1050,8 +1050,7 @@ fn explicit(value: string<'static>) -> string<'static> { return value }`
       )
       assert.strictEqual(
         Analysis.expressionsOf(snapshot, 'main').some(
-          (expression) =>
-            expression.type._tag === 'Available' && Type.isString(expression.type.type),
+          (expression) => expression._tag !== 'Unavailable' && Type.isString(expression.type),
         ),
         true,
       )
@@ -1414,46 +1413,41 @@ pub fn make() -> Provider { return Provider {} }`
 
 it.effect(
   'retains exact semantic tokens for calls, constructors, initializers, and projections',
-  () =>
-    Analysis.ofSource(
-      'main',
-      encoder.encode(`import silk.allocator { Allocator }
+  () => {
+    const source = `import silk.allocator { Allocator }
 import silk.allocator { SystemAllocator }
 struct Pair { left: i32 }
 fn pick() -> i32 {
   let pair = Pair { left: 1 }
   let allocator = Allocator.systemAllocatorProvider()
   return pair.left
-}`),
-    ).pipe(
+}`
+    return Analysis.ofSource('main', encoder.encode(source)).pipe(
       Effect.map((snapshot) => {
-        const expressions = Analysis.expressionsOf(snapshot, 'main')
-        const call = expressions.find((expression) => expression._tag === 'Call')
-        const literal = expressions.find((expression) => expression._tag === 'StructLiteral')
-        const projection = expressions.find((expression) => expression._tag === 'FieldProjection')
-        assert.strictEqual(call?._tag === 'Call' ? call.path._tag : undefined, 'ReferencePath')
-        const spans = snapshot.resolution.contexts
-        assert.isTrue(
-          call?._tag === 'Call' &&
-            call.path._tag === 'ReferencePath' &&
-            call.path.qualifierAnchor !== undefined &&
-            spans.spanOf(call.path.qualifierAnchor).end <=
-              spans.spanOf(call.path.memberAnchor).start,
+        const selectedText = (spelling: string, from = 0): string | undefined => {
+          const offset = source.indexOf(spelling, from)
+          const occurrence = Analysis.semanticOccurrenceAt(snapshot, 'main', offset)
+          return occurrence === undefined
+            ? undefined
+            : source.slice(occurrence.span.start, occurrence.span.end)
+        }
+        const constructor = source.indexOf('Pair {')
+        const initializer = source.indexOf('left:', constructor)
+        const qualifier = source.indexOf('Allocator.system')
+        const member = source.indexOf('systemAllocatorProvider')
+        const projection = source.lastIndexOf('left')
+        assert.strictEqual(selectedText('Pair', constructor), 'Pair')
+        assert.strictEqual(selectedText('left', initializer), 'left')
+        assert.strictEqual(selectedText('Allocator', qualifier), 'Allocator')
+        assert.strictEqual(
+          selectedText('systemAllocatorProvider', member),
+          'systemAllocatorProvider',
         )
-        assert.isDefined(
-          literal?._tag === 'StructLiteral' && literal.target._tag === 'Resolved'
-            ? literal.target.anchor
-            : undefined,
-        )
-        assert.isDefined(
-          literal?._tag === 'StructLiteral' ? literal.initializers.at(0)?.anchor : undefined,
-        )
-        assert.isDefined(
-          projection?._tag === 'FieldProjection' ? projection.fieldAnchor : undefined,
-        )
+        assert.strictEqual(selectedText('left', projection), 'left')
         return undefined
       }),
-    ),
+    )
+  },
 )
 
 const genericNominalSource = `struct Problem {}
@@ -1528,9 +1522,7 @@ it.effect('completes from the innermost lexical scope and excludes later declara
       assert.strictEqual(values.length, 1)
       const innerBinding = records(analysis)
         .functions.at(0)
-        ?.bindings.filter(
-          (binding) => binding.name._tag === 'Present' && binding.name.spelling === 'value',
-        )
+        ?.bindings.filter((binding) => binding.name === 'value')
         .at(-1)
       const identity = values.at(0)?.identity
       assert.strictEqual(
@@ -1608,9 +1600,8 @@ pub fn main() -> i32 {
         'let value: i32',
       )
       assert.strictEqual(
-        Projections.statementsOf(snapshot, 'main').filter(
-          (statement) => statement._tag === 'BindStatement',
-        ).length,
+        Projections.statementsOf(snapshot, 'main').filter((statement) => statement._tag === 'Bind')
+          .length,
         5,
       )
       return undefined

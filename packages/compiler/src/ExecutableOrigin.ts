@@ -618,7 +618,9 @@ export const make = (operations: Operations) => {
           Object.freeze({
             declaration: expression.target,
             typeArguments: expression.typeArguments,
-            evidence: (evidence.at(expression.evidence.ordinal) ?? []).map(Type.runtimeEvidenceKey),
+            evidence: (evidence.at(expression.evidence.ordinal)?.constraints ?? []).map(
+              Type.runtimeEvidenceKey,
+            ),
             ...(expression._tag === 'Call' || expression._tag === 'EffectConstruct'
               ? { staticArguments: expression.staticArguments }
               : {}),
@@ -1835,7 +1837,9 @@ export const make = (operations: Operations) => {
       target.declaration.typeParameters.map((parameter) => parameter.type),
       [...typeArguments, ...hiddenArguments],
       expression.staticArguments,
-      (context.evidence.at(expression.evidence.ordinal) ?? []).map(Type.runtimeEvidenceKey),
+      (context.evidence.at(expression.evidence.ordinal)?.constraints ?? []).map(
+        Type.runtimeEvidenceKey,
+      ),
     )
     context.recordResolvedCall?.(expression, key)
     return key
@@ -2083,7 +2087,11 @@ export const make = (operations: Operations) => {
     if (expression._tag === 'EffectCatch')
       return effectIdentity(
         context.owner,
-        Tir.effectCatchSite(context.fn.declaration.id, context.owner.declaration, expression.span),
+        Tir.effectCatchSite(
+          Tir.nodeReference(Tir.functionArtifact(context.fn), expression),
+          context.owner.declaration,
+          context.fn.declaration.id.ordinal,
+        ),
       )
     if (expression._tag === 'BuiltinCall' && expression.witnessEffectSite === undefined) {
       const specialized = Specialization.specializeType(context.owner, expression.type, [
@@ -2093,9 +2101,9 @@ export const make = (operations: Operations) => {
         return effectIdentity(
           context.owner,
           Tir.builtinEffectSite(
-            context.fn.declaration.id,
+            Tir.nodeReference(Tir.functionArtifact(context.fn), expression),
             context.owner.declaration,
-            expression.span,
+            context.fn.declaration.id.ordinal,
           ),
         )
     }
@@ -3150,9 +3158,9 @@ export const make = (operations: Operations) => {
         )
           continue
         const site = Tir.effectCatchSite(
-          instance.function.declaration.id,
+          Tir.nodeReference(instance.view.artifact, catch_),
           instance.key.declaration,
-          catch_.span,
+          instance.function.declaration.id.ordinal,
         )
         const identity = effectIdentity(instance.key, site)
         effects.set(
@@ -3228,9 +3236,9 @@ export const make = (operations: Operations) => {
         })
         if (captures.length !== builtin.arguments.length) continue
         const site = Tir.builtinEffectSite(
-          instance.function.declaration.id,
+          Tir.nodeReference(instance.view.artifact, builtin),
           instance.key.declaration,
-          builtin.span,
+          instance.function.declaration.id.ordinal,
         )
         const identity = effectIdentity(instance.key, site)
         effects.set(
@@ -3279,7 +3287,7 @@ export const make = (operations: Operations) => {
       let changed = false
       const next = new Map(refined)
       for (const [identity, effect] of refined) {
-        if (effect.site.ordinal !== -1) continue
+        if (!('root' in effect.site)) continue
         const captures = effect.captures.map((capture) => {
           if (capture.source !== 'Parameter' || capture.access !== 'Take') return capture
           const capturedEffect =
@@ -3711,9 +3719,9 @@ export const make = (operations: Operations) => {
           )
           if (Type.isEffect(type)) {
             const site = Tir.builtinEffectSite(
-              instance.function.declaration.id,
+              Tir.nodeReference(instance.view.artifact, expression),
               instance.key.declaration,
-              expression.span,
+              instance.function.declaration.id.ordinal,
             )
             const identity = effectIdentity(instance.key, site)
             const execution = effectNode(identity)
@@ -4038,9 +4046,9 @@ export const make = (operations: Operations) => {
         }
         if (expression._tag === 'EffectCatch') {
           const site = Tir.effectCatchSite(
-            instance.function.declaration.id,
+            Tir.nodeReference(instance.view.artifact, expression),
             instance.key.declaration,
-            expression.span,
+            instance.function.declaration.id.ordinal,
           )
           const identity = effectIdentity(instance.key, site)
           const catchExecution = effectNode(identity)

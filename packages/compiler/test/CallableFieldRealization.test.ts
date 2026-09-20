@@ -9,6 +9,7 @@ import * as FieldRealization from '../src/FieldRealization.js'
 import * as InstanceDiagnostics from '../src/InstanceDiagnostics.js'
 import * as Lifetime from '../src/Lifetime.js'
 import * as RepresentationField from '../src/RepresentationField.js'
+import * as Tir from '../src/Tir.js'
 import * as Type from '../src/Type.js'
 import { unreachable } from './support/raise.js'
 
@@ -360,7 +361,9 @@ pub fn main() -> i32 {
     const nestedCallable = realization.environment.at(1)
     assert.strictEqual(
       snapshot.instances.effects.some(
-        (effect) => effect.identity === nestedEffect?.effectIdentity && effect.site.ordinal === 0,
+        (effect) =>
+          effect.identity === nestedEffect?.effectIdentity &&
+          Tir.executableSiteOrdinal(effect.site) === 0,
       ),
       true,
     )

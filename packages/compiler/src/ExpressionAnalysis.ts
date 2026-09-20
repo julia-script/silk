@@ -29,32 +29,32 @@ import type {
   BorrowRootFact,
   BoundsFact,
   BuiltinArgumentMappingFact,
-  CallableApplyExpressionFact,
-  CallableSectionExpressionFact,
+  CallableApplyExpressionDecision,
+  CallableSectionExpressionDecision,
   CallReferenceFact,
-  ConstantExpressionFact,
+  ConstantExpressionDecision,
   DeclarationFact,
   DeclarationId,
   DeclaredName,
-  DurationExpressionFact,
+  DurationExpressionDecision,
   EffectCaptureFact,
   EffectRequirementBindingFact,
-  ExpressionFact,
+  ExpressionDecision,
   ExpressionResult,
   ExpressionTypeFact,
-  FieldProjectionExpressionFact,
-  FloatingExpressionFact,
-  FunctionFact,
-  IdentifierExpressionFact,
+  FieldProjectionExpressionDecision,
+  FloatingExpressionDecision,
+  FunctionConstruction,
+  IdentifierExpressionDecision,
   IdentifierResult,
   IntegerResult,
-  IntegerExpressionFact,
+  IntegerExpressionDecision,
   InterfaceOperationFact,
   IntrinsicReferenceFact,
   MatchArmFact,
   MatchArmBodyFact,
-  MatchExpressionFact,
-  MoveExpressionFact,
+  MatchExpressionDecision,
+  MoveExpressionDecision,
   ParameterFact,
   ParameterReferenceFact,
   PatternBindingFact,
@@ -64,7 +64,6 @@ import type {
   ProjectionState,
   ReferentProjectionState,
   SemanticType,
-  StatementFact,
   StaticIterationFact,
   StructInitializerFact,
   StructInitializerState,
@@ -91,11 +90,10 @@ import {
   typesCompatible,
   unavailableExpressionType,
   unionConversionDiagnostic,
-  visitStatementFacts,
+  visitStatements,
 } from './Elaboration.js'
 import * as FloatingPoint from './FloatingPoint.js'
 import * as Tir from './Tir.js'
-import * as TirLowering from './TirLowering.js'
 import * as Intrinsic from './Intrinsic.js'
 import * as DurationLiteral from './internal/DurationLiteral.js'
 import * as TypeInference from './internal/TypeInference.js'
@@ -190,12 +188,12 @@ export const analyzeFloating = (
   node: AuthoredHir.Expression,
   expected?: SemanticType,
 ): {
-  readonly fact: FloatingExpressionFact
+  readonly fact: FloatingExpressionDecision
   readonly diagnostics: ReadonlyArray<Diagnostic.Located>
 } => {
   const unavailable = (
     diagnostics: ReadonlyArray<Diagnostic.Located>,
-  ): { readonly fact: FloatingExpressionFact; readonly diagnostics: typeof diagnostics } =>
+  ): { readonly fact: FloatingExpressionDecision; readonly diagnostics: typeof diagnostics } =>
     Object.freeze({
       fact: Object.freeze({ _tag: 'Unavailable', anchor: node.anchor }),
       diagnostics,
@@ -232,7 +230,7 @@ export const analyzeDuration = (
   context: SemanticContext.SemanticContext,
   node: AuthoredHir.Expression,
 ): {
-  readonly fact: DurationExpressionFact
+  readonly fact: DurationExpressionDecision
   readonly diagnostics: ReadonlyArray<Diagnostic.Located>
 } => {
   if (node._tag !== 'DurationLiteral')
@@ -318,7 +316,7 @@ export const analyzeConstant = (
 ): ExpressionResult => {
   const declared = declaration.declaredType
   const literal = declaration.literal
-  let value: ConstantExpressionFact['value']
+  let value: ConstantExpressionDecision['value']
   let type: SemanticType | undefined
   let detail: string | undefined
 
@@ -917,7 +915,7 @@ export const analyzeConstantReference = (
     resolution.staticContext.trace,
   )
   if (selected._tag === 'Failed') return result
-  const value: ConstantExpressionFact['value'] = (() => {
+  const value: ConstantExpressionDecision['value'] = (() => {
     const candidate = selected.value
     if (candidate._tag === 'BooleanValue')
       return Object.freeze({ _tag: 'Boolean' as const, value: candidate.value })
@@ -1008,7 +1006,7 @@ export const analyzeForeignStaticReference = (
 }
 
 export interface MoveResult {
-  readonly fact: MoveExpressionFact
+  readonly fact: MoveExpressionDecision
   readonly diagnostics: ReadonlyArray<Diagnostic.Located>
   readonly type: SemanticType | undefined
 }
@@ -1034,30 +1032,33 @@ export const analyzeMove = (
           Location.at(node.anchor),
         )
       : undefined
+  const callableMetadata = (() => {
+    const fact = subject.fact
+    if (fact._tag === 'FunctionItem' || fact._tag === 'CallableSection')
+      return { exactCallable: fact, concreteCallableIdentity: true as const }
+    if (fact._tag === 'Move' && fact.exactCallable !== undefined)
+      return {
+        exactCallable: fact.exactCallable,
+        ...(fact.concreteCallableIdentity === true
+          ? { concreteCallableIdentity: true as const }
+          : {}),
+      }
+    if (fact._tag === 'Identifier' && fact.reference._tag === 'ResolvedBinding')
+      return {
+        ...(fact.reference.binding.exactCallable === undefined
+          ? {}
+          : { exactCallable: fact.reference.binding.exactCallable }),
+        ...(fact.reference.binding.concreteCallableIdentity === true
+          ? { concreteCallableIdentity: true as const }
+          : {}),
+      }
+    return {}
+  })()
   return Object.freeze({
     fact: Object.freeze({
       _tag: 'Move',
       subject: expressionNode(subject),
-      ...(subject.fact._tag === 'FunctionItem' || subject.fact._tag === 'CallableSection'
-        ? { exactCallable: subject.fact, concreteCallableIdentity: true as const }
-        : subject.fact._tag === 'Move' && subject.fact.exactCallable !== undefined
-          ? {
-              exactCallable: subject.fact.exactCallable,
-              ...(subject.fact.concreteCallableIdentity === true
-                ? { concreteCallableIdentity: true as const }
-                : {}),
-            }
-          : subject.fact._tag === 'Identifier' &&
-              subject.fact.reference._tag === 'ResolvedBinding'
-            ? {
-                ...(subject.fact.reference.binding.exactCallable === undefined
-                  ? {}
-                  : { exactCallable: subject.fact.reference.binding.exactCallable }),
-                ...(subject.fact.reference.binding.concreteCallableIdentity === true
-                  ? { concreteCallableIdentity: true as const }
-                  : {}),
-              }
-            : {}),
+      ...callableMetadata,
       type: subject.fact.type,
       anchor: node.anchor,
     }),
@@ -1068,11 +1069,11 @@ export const analyzeMove = (
   })
 }
 
-const borrowsConstant = (subject: ExpressionFact): boolean => subject._tag === 'Constant'
+const borrowsConstant = (subject: ExpressionDecision): boolean => subject._tag === 'Constant'
 
 export const borrowRoot = (
   context: SemanticContext.SemanticContext,
-  subject: ExpressionFact,
+  subject: ExpressionDecision,
 ): BorrowRootFact | undefined => {
   if (
     subject._tag === 'ReferentProjection' ||
@@ -1196,7 +1197,7 @@ export const borrowSubject = (
   const subjectFact = subjectResult?.fact ?? unavailableExpression(node.anchor)
   const subject =
     subjectResult === undefined
-      ? TirLowering.tirExpression(subjectFact, {
+      ? BodyBuilder.tirExpression(subjectFact, {
           context,
           ...(resolution.builder === undefined ? {} : { builder: resolution.builder }),
           ...(declaration.phase === 'Static' && resolution.builder !== undefined
@@ -1229,10 +1230,14 @@ export const borrowSubject = (
           _tag: 'TemporaryRoot' as const,
           owner: Object.freeze({
             _tag: 'TemporaryOwnerId' as const,
-            function: declaration.id,
-            span: context.spanOf(subjectFact.anchor),
-            at: subjectFact.anchor,
-            ordinal: 0,
+            node: Tir.nodeReference(
+              (() => {
+                if (resolution.builder === undefined)
+                  throw new RangeError('temporary borrow requires its TIR body builder')
+                return resolution.builder.artifact
+              })(),
+              subject,
+            ),
           }),
           value: subject,
           path: Object.freeze([]),
@@ -2662,7 +2667,7 @@ export const analyzePattern = (
   })
 }
 
-export const unavailableExpression = (anchor: AuthoredHir.Anchor): ExpressionFact =>
+export const unavailableExpression = (anchor: AuthoredHir.Anchor): ExpressionDecision =>
   Object.freeze({
     _tag: 'Identifier',
     reference: Object.freeze({ _tag: 'Unavailable', anchor }),
@@ -2682,13 +2687,16 @@ const unavailableExpressionResult = (
     return Object.freeze({ fact, diagnostics: Object.freeze([]), type: undefined })
   return Object.freeze({
     fact,
-    node: TirLowering.tirExpression(fact, {
+    node: BodyBuilder.tirExpression(fact, {
       context,
       builder: resolution.builder,
       ...(declaration.phase === 'Static' ? { static: resolution.builder.expressions } : {}),
       ...(resolution.lifetimeCompatibility === undefined
         ? {}
         : { lifetimeCompatibility: resolution.lifetimeCompatibility }),
+      ...(declaration.opaqueResult === undefined
+        ? {}
+        : { opaqueResultFamily: declaration.opaqueResult.family }),
       functionId: declaration.id,
     }),
     diagnostics: Object.freeze([]),
@@ -2761,11 +2769,11 @@ export const analyzeMatch = (
   resolution: ResolutionContext,
   expected?: SemanticType,
 ): ExpressionResult => {
+  if (resolution.builder === undefined)
+    throw new RangeError('match analysis requires its TIR body builder')
   const id: Match.MatchId = Object.freeze({
     _tag: 'MatchId',
-    function: declaration.id,
-    span: context.spanOf(node.anchor),
-    at: node.anchor,
+    node: BodyBuilder.expressionReference(resolution.builder, node.anchor),
   })
   const access = matchAccess(node)
   const scrutineeNode = node.subject
@@ -3014,7 +3022,7 @@ export const analyzeMatch = (
       const expression = result?.fact ?? unavailableExpression((resultNode ?? armNode).anchor)
       const published =
         result === undefined
-          ? TirLowering.tirExpression(expression, {
+          ? BodyBuilder.tirExpression(expression, {
               context,
               ...(resolution.builder === undefined ? {} : { builder: resolution.builder }),
             })
@@ -3051,9 +3059,7 @@ export const analyzeMatch = (
   restoreWrites(continuationWrites)
   const contributes = (arm: MatchArmFact): boolean =>
     executedArms.has(arm.id.ordinal) &&
-    (arm.guard === undefined ||
-      arm.guard._tag === 'Unavailable' ||
-      !Type.isNever(arm.guard.type))
+    (arm.guard === undefined || arm.guard._tag === 'Unavailable' || !Type.isNever(arm.guard.type))
   if (
     members !== undefined &&
     !coverage.exhaustive &&
@@ -3288,7 +3294,7 @@ export const analyzeMatch = (
   } else {
     type = unavailableExpressionType
   }
-  const fact: MatchExpressionFact = Object.freeze({
+  const fact: MatchExpressionDecision = Object.freeze({
     _tag: 'Match',
     id,
     access,
@@ -3351,7 +3357,6 @@ export const exactCallableRepresentation = (
 }
 
 export const exactEffectDeclarationRepresentation = (
-  context: SemanticContext.SemanticContext,
   declaration: DeclarationFact,
   contract: Type.Effect,
   typeArguments: ReadonlyArray<Type.GenericArgument>,
@@ -3367,14 +3372,11 @@ export const exactEffectDeclarationRepresentation = (
     typeArguments,
     staticArgumentKeys: Object.freeze(staticArguments.map(StaticValue.key)),
   })
-  const site: Tir.EffectSiteId = Object.freeze({
-    _tag: 'EffectSiteId',
-    function: declaration.id,
-    owner: declaration.canonical.id,
-    ordinal: -1,
-    span: context.spanOf(declaration.anchor),
-    at: declaration.anchor,
-  })
+  const site = Tir.effectRootSite(
+    Object.freeze({ owner: declaration.owner, request: Object.freeze({ _tag: 'Check' }) }),
+    declaration.id.ordinal,
+    declaration.canonical.id,
+  )
   return Type.exactRepresentationArgument(
     Type.effectIdentityArgument(Tir.effectRepresentationIdentity(site), owner),
     contract,
@@ -3383,7 +3385,7 @@ export const exactEffectDeclarationRepresentation = (
 
 export const exactEffectIdentityOfExpression = (
   context: SemanticContext.SemanticContext,
-  expression: ExpressionFact | Tir.Expression,
+  expression: ExpressionDecision | Tir.Expression,
   builder?: BodyBuilder.BodyBuilder,
 ): Type.EffectIdentityArgument | undefined => {
   const representation = representationOfExpression(context, expression, builder)
@@ -3397,7 +3399,7 @@ export const hiddenEffectArguments = (
   context: SemanticContext.SemanticContext,
   declaration: DeclarationFact,
   substitution: Type.Substitution,
-  argumentAt: (ordinal: number) => ExpressionFact | Tir.Expression | undefined,
+  argumentAt: (ordinal: number) => ExpressionDecision | Tir.Expression | undefined,
   builder?: BodyBuilder.BodyBuilder,
 ): ReadonlyArray<Type.EffectIdentityArgument> =>
   Object.freeze(
@@ -3424,15 +3426,12 @@ export const exactEffectApplicationContract = (
 
 export const effectCallableApplicationRepresentation = (
   context: SemanticContext.SemanticContext,
-  expression: CallableApplyExpressionFact,
+  expression: CallableApplyExpressionDecision,
   contract: Type.Effect,
   builder?: BodyBuilder.BodyBuilder,
 ): Type.ExactRepresentationArgument | undefined => {
   const callee = expression.callee
-  if (
-    callee._tag !== 'CallableSection' ||
-    callee.target._tag !== 'DeclarationCallableTarget'
-  )
+  if (callee._tag !== 'CallableSection' || callee.target._tag !== 'DeclarationCallableTarget')
     return undefined
   const substitution = new Map(callee.substitution)
   for (const [parameter, argument] of expression.substitution) substitution.set(parameter, argument)
@@ -3459,14 +3458,7 @@ export const effectCallableApplicationRepresentation = (
     typeArguments: Object.freeze([...callee.typeArguments, ...hidden]),
     staticArgumentKeys: Object.freeze<ReadonlyArray<string>>([]),
   })
-  const site: Tir.EffectSiteId = Object.freeze({
-    _tag: 'EffectSiteId',
-    function: callee.site.function,
-    owner: target,
-    ordinal: -1,
-    span: callee.span,
-    at: callee.origin.anchor,
-  })
+  const site = Tir.effectRootSite(callee.site.node.artifact, callee.site.functionOrdinal, target)
   return Type.exactRepresentationArgument(
     Type.effectIdentityArgument(Tir.effectRepresentationIdentity(site), owner),
     contract,
@@ -3479,23 +3471,19 @@ export const effectCallableApplicationRepresentation = (
  */
 export function representationOfExpression(
   context: SemanticContext.SemanticContext,
-  expression: ExpressionFact | Tir.Expression,
+  expression: ExpressionDecision | Tir.Expression,
   builder?: BodyBuilder.BodyBuilder,
 ): Type.RepresentationArgument | undefined {
   if ('origin' in expression) {
+    if (expression.representation !== undefined) return expression.representation
     if (expression._tag !== 'Unavailable' && Type.isRepresented(expression.type))
       return expression.type.representation.argument
     if (expression._tag === 'Move')
       return representationOfExpression(context, expression.subject, builder)
-    if (builder !== undefined) {
-      const decision = BodyBuilder.expressionDecision(builder, expression)
-      if (decision !== undefined)
-        return representationOfExpression(context, decision, builder)
-      if (expression._tag === 'BindingReference') {
-        const semantic = BodyBuilder.semanticOfLocal(builder, expression.binding)
-        if (isProviderReferenceFact(semantic) && semantic._tag === 'BindingFact')
-          return representationOfExpression(context, semantic.initializer, builder)
-      }
+    if (builder !== undefined && expression._tag === 'BindingReference') {
+      const semantic = BodyBuilder.semanticOfLocal(builder, expression.binding)
+      if (isProviderReferenceFact(semantic) && semantic._tag === 'BindingFact')
+        return representationOfExpression(context, semantic.initializer, builder)
     }
     if (
       (expression._tag === 'FunctionItem' || expression._tag === 'CallableSection') &&
@@ -3574,7 +3562,6 @@ export function representationOfExpression(
     Type.isEffect(expression.type.type)
   ) {
     return exactEffectDeclarationRepresentation(
-      context,
       expression.reference.declaration,
       expression.type.type,
       Object.freeze([
@@ -3595,7 +3582,12 @@ export function representationOfExpression(
     expression.type._tag === 'Available' &&
     Type.isEffect(expression.type.type)
   ) {
-    return effectCallableApplicationRepresentation(context, expression, expression.type.type, builder)
+    return effectCallableApplicationRepresentation(
+      context,
+      expression,
+      expression.type.type,
+      builder,
+    )
   }
   if (expression._tag === 'Identifier' && expression.reference._tag === 'ResolvedBinding')
     return representationOfExpression(context, expression.reference.binding.initializer, builder)
@@ -4218,7 +4210,7 @@ export const analyzeAggregateLiteral = (
     complete && completedNominal !== undefined
       ? availableExpressionType(completedNominal)
       : unavailableExpressionType
-  let fact: ExpressionFact
+  let fact: ExpressionDecision
   if (unionTarget === undefined) {
     let structTarget: StructTargetFact
     if (target.fact._tag === 'Resolved' && 'struct' in target.fact) {
@@ -4489,39 +4481,39 @@ export const analyzeIndexProjection = (
       : undefined
   const placeBorrowAccess = combinedBorrowAccess(inheritedAccess, slice?.access)
   const baseBorrowRoot = borrowRoot(context, subject.fact)
-  const projectedBorrowRoot =
-    baseBorrowRoot === undefined
-      ? undefined
-      : array !== undefined && (bounds._tag === 'Proven' || bounds._tag === 'Runtime')
-        ? Object.freeze({
-            ...baseBorrowRoot,
-            path: Object.freeze([
-              ...baseBorrowRoot.path,
-              Object.freeze({
-                _tag: 'Index' as const,
-                index: expressionNode(index),
-                array,
-                bounds,
-                span: context.spanOf(node.anchor),
-                at: node.anchor,
-              }),
-            ]),
-          })
-        : slice !== undefined && bounds._tag === 'RuntimeSlice'
-          ? Object.freeze({
-              ...baseBorrowRoot,
-              path: Object.freeze([
-                ...baseBorrowRoot.path,
-                Object.freeze({
-                  _tag: 'SliceIndex' as const,
-                  index: expressionNode(index),
-                  slice,
-                  span: context.spanOf(node.anchor),
-                  at: node.anchor,
-                }),
-              ]),
-            })
-          : undefined
+  const projectedBorrowRoot = (() => {
+    if (baseBorrowRoot === undefined) return undefined
+    if (array !== undefined && (bounds._tag === 'Proven' || bounds._tag === 'Runtime'))
+      return Object.freeze({
+        ...baseBorrowRoot,
+        path: Object.freeze([
+          ...baseBorrowRoot.path,
+          Object.freeze({
+            _tag: 'Index' as const,
+            index: expressionNode(index),
+            array,
+            bounds,
+            span: context.spanOf(node.anchor),
+            at: node.anchor,
+          }),
+        ]),
+      })
+    if (slice !== undefined && bounds._tag === 'RuntimeSlice')
+      return Object.freeze({
+        ...baseBorrowRoot,
+        path: Object.freeze([
+          ...baseBorrowRoot.path,
+          Object.freeze({
+            _tag: 'SliceIndex' as const,
+            index: expressionNode(index),
+            slice,
+            span: context.spanOf(node.anchor),
+            at: node.anchor,
+          }),
+        ]),
+      })
+    return undefined
+  })()
   return Object.freeze({
     fact: Object.freeze({
       _tag: 'IndexProjection',
@@ -4726,7 +4718,7 @@ export const analyzeProjection = (
           ]),
         })
       : undefined
-  const projection: FieldProjectionExpressionFact = Object.freeze({
+  const projection: FieldProjectionExpressionDecision = Object.freeze({
     _tag: 'FieldProjection',
     subject: expressionNode(subject),
     ...(root === undefined ? {} : { root }),
@@ -4744,7 +4736,7 @@ export const analyzeProjection = (
     resolution.staticContext === undefined
       ? undefined
       : evaluateStatic(projection, resolution.staticContext, resolution)
-  const fact: FieldProjectionExpressionFact =
+  const fact: FieldProjectionExpressionDecision =
     evaluated?._tag === 'Complete'
       ? Object.freeze({ ...projection, staticValue: evaluated.value })
       : projection
@@ -4850,7 +4842,6 @@ import {
   ownedProviderCaptureAccess,
   serviceOperation,
   sourceCallable,
-  unavailableIdentifierFact,
 } from './CallResolution.js'
 export function analyzePlaceReplace(
   context: SemanticContext.SemanticContext,
@@ -5000,17 +4991,13 @@ export function analyzePlaceReplace(
   })
 }
 
-const isProviderReferenceFact = (
-  value: unknown,
-): value is BindingDeclarationFact | ParameterFact =>
+const isProviderReferenceFact = (value: unknown): value is BindingDeclarationFact | ParameterFact =>
   typeof value === 'object' &&
   value !== null &&
   '_tag' in value &&
   (value._tag === 'BindingFact' || value._tag === 'ParameterDeclaration')
 
-const isCaptureReferenceFact = (
-  value: unknown,
-): value is EffectCaptureFact['reference'] =>
+const isCaptureReferenceFact = (value: unknown): value is EffectCaptureFact['reference'] =>
   isProviderReferenceFact(value) ||
   (typeof value === 'object' &&
     value !== null &&
@@ -5018,7 +5005,7 @@ const isCaptureReferenceFact = (
     value._tag === 'PatternBinding')
 
 export const directProviderReference = (
-  expression: ExpressionFact | Tir.Expression,
+  expression: ExpressionDecision | Tir.Expression,
   builder?: BodyBuilder.BodyBuilder,
 ): BindingDeclarationFact | ParameterFact | undefined => {
   if ('origin' in expression) {
@@ -5106,7 +5093,7 @@ export const effectBindingProvider = (
   operation: Intrinsic.Operation,
   substitution: Type.Substitution,
   evidence: ReadonlyArray<Constraint.ConstraintEvidence>,
-  provider: ExpressionFact | Tir.Expression,
+  provider: ExpressionDecision | Tir.Expression,
   span: SourceSpan.SourceSpan,
   at: AuthoredHir.Anchor,
   index?: DeclarationIndex.Index,
@@ -5163,7 +5150,7 @@ export const effectBindingProvider = (
 }
 
 export const sectionIntrinsicReference = (
-  section: CallableSectionExpressionFact,
+  section: CallableSectionExpressionDecision,
 ): IntrinsicReferenceFact => {
   if (section.reference._tag !== 'ResolvedIntrinsicContract')
     return Object.freeze({ _tag: 'UnavailableIntrinsicReference', anchor: section.anchor })
@@ -5182,7 +5169,7 @@ export const sectionIntrinsicReference = (
 }
 
 const isDeferredStaticExpression = (
-  expression: ExpressionFact | Tir.Expression,
+  expression: ExpressionDecision | Tir.Expression,
   builder?: BodyBuilder.BodyBuilder,
 ): boolean => {
   if ('origin' in expression) {
@@ -5288,7 +5275,7 @@ const mixedFieldProjection = (
     sharedOwnerAvailable &&
     Type.isReference(result) &&
     result.access === 'Shared'
-  const callFact = (type: ExpressionTypeFact): ExpressionFact =>
+  const callFact = (type: ExpressionTypeFact): ExpressionDecision =>
     Object.freeze({
       _tag: 'Call',
       reference,
@@ -5338,10 +5325,7 @@ const mixedFieldProjection = (
     })
   }
   if (resolution.staticContext === undefined) {
-    const deferred = isDeferredStaticExpression(
-      descriptorArgument.expression,
-      resolution.builder,
-    )
+    const deferred = isDeferredStaticExpression(descriptorArgument.expression, resolution.builder)
     const diagnostic = deferred
       ? undefined
       : Diagnostic.staticPhaseViolation(
@@ -5477,7 +5461,7 @@ const mixedFieldProjection = (
       type: undefined,
     })
   }
-  const projection: FieldProjectionExpressionFact = Object.freeze({
+  const projection: FieldProjectionExpressionDecision = Object.freeze({
     _tag: 'FieldProjection',
     subject: ownerArgument.expression,
     ...(ownerArgument.borrowRoot === undefined
@@ -5522,7 +5506,7 @@ const mixedFieldProjection = (
   )
     BodyLifetime.constrain(resolution.bodyLifetimes, ownerArgument.type.type.lifetime, lifetime)
   const type = Type.reference('Shared', descriptor.valueType, lifetime)
-  const projectionNode = TirLowering.tirExpression(projection, {
+  const projectionNode = BodyBuilder.tirExpression(projection, {
     context,
     ...(resolution.builder === undefined ? {} : { builder: resolution.builder }),
     ...(resolution.lifetimeCompatibility === undefined
@@ -6080,17 +6064,15 @@ const generatedAggregate = (
   elements: ReadonlyArray<AggregateElementAnalysis & { readonly type: SemanticType }>,
   resolution: ResolutionContext,
 ): { readonly struct: DeclarationFacts.StructFact; readonly type: Type.Nominal } => {
-  const identity = AggregateIdentity.anonymous(
-    AuthoredWalk.moduleName(context),
-    context.spanOf(syntax.anchor),
-    kind,
-  )
+  if (resolution.builder === undefined)
+    throw new RangeError('anonymous aggregate analysis requires its TIR body builder')
+  const node = BodyBuilder.expressionReference(resolution.builder, syntax.anchor)
+  const identity = AggregateIdentity.anonymous(AuthoredWalk.moduleName(context), node, kind)
   const type = AggregateIdentity.nominal(identity)
   const id: DeclarationFacts.DeclarationId = Object.freeze({
     _tag: 'DeclarationId',
     sourceId: AuthoredWalk.moduleName(context),
-    ordinal:
-      -1 - context.spanOf(syntax.anchor).start * 2 - (kind === 'AnonymousPositional' ? 1 : 0),
+    ordinal: -1 - node.node.ordinal * 2 - (kind === 'AnonymousPositional' ? 1 : 0),
   })
   const fields = elements.map((element, ordinal): DeclarationFacts.FieldFact => {
     const fieldId: DeclarationFacts.FieldId = Object.freeze({
@@ -6260,7 +6242,7 @@ const analyzeAggregateElements = (
         expected !== undefined &&
         analyzed.type !== undefined &&
         !typesCompatible(analyzed.type, expected, resolution?.lifetimeCompatibility) &&
-        !contextualIntegerCompatible(analyzed.fact, expected)
+        !contextualIntegerCompatible(analyzed.fact, expected, resolution.builder)
       ) {
         const diagnostic = Diagnostic.structFieldTypeMismatch(
           element.label ?? `${ordinal}`,
@@ -6915,7 +6897,7 @@ export const operatorSelectionMatches = (
         expected !== undefined &&
         argument.type._tag === 'Available' &&
         (typesCompatible(argument.type.type, expected, lifetimes) ||
-          contextualIntegerCompatible(argument.expression, expected))
+          contextualIntegerCompatible(argument.expression, expected, resolution.builder))
       )
     })
   )
@@ -7005,12 +6987,7 @@ export const finishInterfaceOperator = (
       interfaceOperation: selection,
       ...(selection.contract.functionKind === 'Effect'
         ? {
-            witnessEffectSite: executableSite(
-              'EffectSiteId',
-              resolution,
-              node,
-              context.spanOf(node.anchor),
-            ),
+            witnessEffectSite: executableSite('EffectSiteId', resolution, node),
           }
         : {}),
       type,
@@ -7848,21 +7825,24 @@ const synthesizeReceiver = (
     )
   }
   if (borrowRoot(context, subjectResult.fact) === undefined) return subjectResult
+  const callableMetadata = (() => {
+    const fact = subjectResult.fact
+    if (fact._tag === 'FunctionItem' || fact._tag === 'CallableSection')
+      return { exactCallable: fact, concreteCallableIdentity: true as const }
+    if (fact._tag === 'Move' && fact.exactCallable !== undefined)
+      return {
+        exactCallable: fact.exactCallable,
+        ...(fact.concreteCallableIdentity === true
+          ? { concreteCallableIdentity: true as const }
+          : {}),
+      }
+    return {}
+  })()
   return Object.freeze({
     fact: Object.freeze({
       _tag: 'Move',
       subject: expressionNode(subjectResult),
-      ...(subjectResult.fact._tag === 'FunctionItem' ||
-      subjectResult.fact._tag === 'CallableSection'
-        ? { exactCallable: subjectResult.fact, concreteCallableIdentity: true as const }
-        : subjectResult.fact._tag === 'Move' && subjectResult.fact.exactCallable !== undefined
-          ? {
-              exactCallable: subjectResult.fact.exactCallable,
-              ...(subjectResult.fact.concreteCallableIdentity === true
-                ? { concreteCallableIdentity: true as const }
-                : {}),
-            }
-          : {}),
+      ...callableMetadata,
       type: subjectResult.fact.type,
       anchor: subjectNode.anchor,
     }),
@@ -7926,9 +7906,7 @@ const finishBoundMethod = (
       declaration: candidate.declaration,
     }),
     Object.freeze({
-      facts: Object.freeze([
-        argumentFact(declaration, context, node.anchor, receiver, 0),
-      ]),
+      facts: Object.freeze([argumentFact(declaration, context, node.anchor, receiver, 0)]),
       diagnostics: receiver.diagnostics,
     }),
     analyzeCallTypeArguments(context, node, declaration, resolution),
@@ -8056,10 +8034,19 @@ const analyzeMethodCall = (
       scope,
       resolution,
     )
+    const projected = analyzeExpression(
+      context,
+      calleeNode,
+      declarations,
+      declaration,
+      scope,
+      resolution,
+    )
+    if (projected === undefined) throw new RangeError('method callee projection was not analyzed')
     return finishCallableApplication(
       context,
       node,
-      analyzeProjection(context, calleeNode, declarations, declaration, scope, resolution),
+      projected,
       written,
       callTypeArguments,
       undefined,
@@ -8646,15 +8633,14 @@ export const analyzePipelineExpression = (
               : undefined,
           )
     const inputResult =
-      input ?? unavailableExpressionResult(context, (inputNode ?? node).anchor, declaration, resolution)
+      input ??
+      unavailableExpressionResult(context, (inputNode ?? node).anchor, declaration, resolution)
     return finishAppliedInterfaceOperation(
       context,
       node,
       appliedTarget,
       Object.freeze({
-        facts: Object.freeze([
-          argumentFact(declaration, context, node.anchor, inputResult, 0),
-        ]),
+        facts: Object.freeze([argumentFact(declaration, context, node.anchor, inputResult, 0)]),
         diagnostics: input?.diagnostics ?? Object.freeze([]),
       }),
       Object.freeze({ explicit: false, facts: Object.freeze([]), diagnostics: Object.freeze([]) }),
@@ -8683,7 +8669,8 @@ export const analyzePipelineExpression = (
           expectedInput,
         )
   const inputResult =
-    input ?? unavailableExpressionResult(context, (inputNode ?? node).anchor, declaration, resolution)
+    input ??
+    unavailableExpressionResult(context, (inputNode ?? node).anchor, declaration, resolution)
   const callableResult =
     callable ??
     unavailableExpressionResult(context, (target ?? node).anchor, declaration, resolution)
@@ -8692,9 +8679,7 @@ export const analyzePipelineExpression = (
     node,
     callableResult,
     Object.freeze({
-      facts: Object.freeze([
-        argumentFact(declaration, context, node.anchor, inputResult, 0),
-      ]),
+      facts: Object.freeze([argumentFact(declaration, context, node.anchor, inputResult, 0)]),
       diagnostics: input?.diagnostics ?? Object.freeze([]),
     }),
     Object.freeze({
@@ -8714,7 +8699,7 @@ export const analyzePipelineExpression = (
 }
 
 export const effectExpressionAccess = (
-  expression: ExpressionFact | Tir.Expression,
+  expression: ExpressionDecision | Tir.Expression,
   index: DeclarationIndex.Index | undefined,
   assumptions: ReadonlySet<string> = new Set(),
 ): Type.Effect['access'] => {
@@ -8846,7 +8831,7 @@ export const intrinsicReference = (
 /** Finalizes ordinary lexical captures for one context Effect body. */
 export const effectCaptureFacts = (
   context: SemanticContext.SemanticContext,
-  statements: ReadonlyArray<StatementFact>,
+  statements: ReadonlyArray<Tir.Statement>,
   firstLocalBinding: number,
   index?: DeclarationIndex.Index,
   assumptions: ReadonlySet<string> = new Set(),
@@ -8858,9 +8843,9 @@ export const effectCaptureFacts = (
 ): ReadonlyArray<EffectCaptureFact> => {
   const captures = new Map<string, EffectCaptureFact>()
   const patternKey = (id: Match.BindingId): string =>
-    `${id.arm.match.function.sourceId}:${id.arm.match.function.ordinal}:${id.arm.match.span.start}:${id.arm.ordinal}:${id.ordinal}`
+    `${Tir.nodeRefKey(id.arm.match.node)}:${id.arm.ordinal}:${id.ordinal}`
   const localPatterns = new Set<string>()
-  visitStatementFacts(statements, {
+  visitStatements(statements, {
     descendEffectBlocks: false,
     expression: (fact) => {
       if (fact._tag === 'Match')
@@ -8878,9 +8863,15 @@ export const effectCaptureFacts = (
       }
     },
     statement: (statement) => {
-      if (statement._tag === 'PatternBindStatement' || statement._tag === 'IfLetStatement')
-        for (const binding of statement.selection.bindings)
-          localPatterns.add(patternKey(binding.id))
+      if (
+        (statement._tag === 'PatternBind' || statement._tag === 'IfLet') &&
+        options.builder !== undefined
+      )
+        for (const binding of statement.selection.bindings) {
+          const semantic = BodyBuilder.semanticOfLocal(options.builder, binding.id)
+          if (isCaptureReferenceFact(semantic) && semantic._tag === 'PatternBinding')
+            localPatterns.add(patternKey(semantic.id))
+        }
     },
   })
   const rank = (access: EffectCaptureFact['access']): number => {
@@ -8949,7 +8940,10 @@ export const effectCaptureFacts = (
         }),
       )
   }
-  const record = (fact: IdentifierExpressionFact, requested: EffectCaptureFact['access']): void => {
+  const record = (
+    fact: IdentifierExpressionDecision,
+    requested: EffectCaptureFact['access'],
+  ): void => {
     let reference: EffectCaptureFact['reference'] | undefined
     if (fact.reference._tag === 'ResolvedBinding') {
       reference = fact.reference.binding
@@ -8970,16 +8964,10 @@ export const effectCaptureFacts = (
         (index === undefined
           ? typeof fact.type.type === 'string'
           : ConformanceProof.copyType(index, fact.type.type, assumptions)))
-    recordReference(
-      reference,
-      requested,
-      fact.anchor,
-      copy,
-      options.builder?.expressions.get(fact),
-    )
+    recordReference(reference, requested, fact.anchor, copy, options.builder?.expressions.get(fact))
   }
   const consumingAccess = (
-    fact: ExpressionFact | Tir.Expression,
+    fact: ExpressionDecision | Tir.Expression,
   ): EffectCaptureFact['access'] => {
     const expressionType = constructionExpressionType(fact)
     if (expressionType._tag !== 'Available') return 'Shared'
@@ -8992,7 +8980,7 @@ export const effectCaptureFacts = (
     return copy ? 'Shared' : 'Take'
   }
   const expression = (
-    fact: ExpressionFact | Tir.Expression,
+    fact: ExpressionDecision | Tir.Expression,
     requested: EffectCaptureFact['access'] = 'Shared',
   ): void => {
     if ('origin' in fact) {
@@ -9002,10 +8990,7 @@ export const effectCaptureFacts = (
         fact._tag === 'ParameterReference' ||
         fact._tag === 'PatternBindingReference'
       ) {
-        const local =
-          fact._tag === 'ParameterReference'
-            ? fact.parameter
-            : fact.binding
+        const local = fact._tag === 'ParameterReference' ? fact.parameter : fact.binding
         const semantic =
           options.builder === undefined
             ? undefined
@@ -9027,15 +9012,33 @@ export const effectCaptureFacts = (
         expression(fact.subject, 'Take')
         return
       }
-      if (fact._tag === 'ValueBorrow' || fact._tag === 'SliceBorrow') {
+      if (fact._tag === 'Replace') {
         const local =
-          fact.root._tag === 'BindingSliceRoot'
-            ? fact.root.binding
-            : fact.root._tag === 'ParameterSliceRoot'
-              ? fact.root.parameter
-              : fact.root._tag === 'PatternSliceRoot'
-                ? fact.root.binding
-                : undefined
+          fact.place.root._tag === 'ParameterWriteRoot' ||
+          fact.place.root._tag === 'ParameterSliceRoot'
+            ? fact.place.root.parameter
+            : fact.place.root.binding
+        const semantic =
+          options.builder === undefined
+            ? undefined
+            : BodyBuilder.semanticOfLocal(options.builder, local)
+        recordReference(
+          isCaptureReferenceFact(semantic) ? semantic : undefined,
+          'Exclusive',
+          fact.place.origin.anchor,
+          false,
+        )
+        for (const selector of fact.place.selectors)
+          if (selector._tag === 'Index' || selector._tag === 'SliceIndex')
+            expression(selector.index)
+        expression(fact.value)
+        return
+      }
+      if (fact._tag === 'ValueBorrow' || fact._tag === 'SliceBorrow') {
+        let local: Tir.LocalId | undefined
+        if (fact.root._tag === 'BindingSliceRoot') local = fact.root.binding
+        else if (fact.root._tag === 'ParameterSliceRoot') local = fact.root.parameter
+        else if (fact.root._tag === 'PatternSliceRoot') local = fact.root.binding
         const semantic =
           local === undefined || options.builder === undefined
             ? undefined
@@ -9056,12 +9059,7 @@ export const effectCaptureFacts = (
               ? undefined
               : BodyBuilder.semanticOfLocal(options.builder, local)
           const reference = isCaptureReferenceFact(semantic) ? semantic : undefined
-          recordReference(
-            reference,
-            capture.access,
-            capture.use ?? capture.at ?? anchor,
-            false,
-          )
+          recordReference(reference, capture.access, capture.use ?? capture.at ?? anchor, false)
         }
         return
       }
@@ -9174,48 +9172,49 @@ export const effectCaptureFacts = (
         return
     }
   }
-  const visit = (items: ReadonlyArray<StatementFact>): void => {
+  const visit = (items: ReadonlyArray<Tir.Statement>): void => {
     for (const statement of items) {
       switch (statement._tag) {
-        case 'UnsafeStatement':
+        case 'Unsafe':
           visit(statement.statements)
           break
-        case 'BindStatement':
-          expression(statement.binding.initializer)
+        case 'Bind':
+          expression(statement.initializer)
           break
-        case 'PatternBindStatement':
-          expression(statement.selection.source)
+        case 'PatternBind':
+          expression(statement.selection.subject)
           break
-        case 'ExpressionStatement':
+        case 'Evaluate':
           expression(statement.expression)
           break
-        case 'IfStatement':
+        case 'If':
           expression(statement.condition)
           visit(statement.taken)
           visit(statement.otherwise)
           break
-        case 'IfLetStatement':
-          expression(statement.selection.source)
+        case 'IfLet':
+          expression(statement.selection.subject)
           visit(statement.taken)
           visit(statement.otherwise)
           break
-        case 'WriteStatement':
-          expression(statement.destination, 'Exclusive')
+        case 'Write':
+          if (statement.destination !== undefined) expression(statement.destination, 'Exclusive')
           expression(statement.value)
           break
-        case 'WhileStatement':
+        case 'While':
           expression(statement.condition)
           visit(statement.body)
           break
-        case 'ReturnStatement':
-        case 'FailStatement':
-        case 'DropStatement':
+        case 'Return':
+        case 'Fail':
+        case 'Drop':
           // An owned affine operand leaves with the outcome or is cleaned here, so its capture is
           // consumed; a Copy value or a borrowed view is only read through its capture.
           expression(statement.expression, consumingAccess(statement.expression))
           break
-        case 'BreakStatement':
-        case 'ContinueStatement':
+        case 'Break':
+        case 'Continue':
+        case 'UnavailableStatement':
           break
       }
     }
@@ -9281,7 +9280,7 @@ const analyzeAnonymousCallable = (
     return Object.freeze({
       fact: Object.freeze({
         _tag: 'CallableSection',
-        site: executableSite('CallableSiteId', resolution, node, context.spanOf(node.anchor)),
+        site: executableSite('CallableSiteId', resolution, node),
         reference: Object.freeze({
           _tag: 'Unavailable',
           anchor: node.anchor,
@@ -9307,7 +9306,7 @@ const analyzeAnonymousCallable = (
   }
   const owner = resolution.executableOwner
   const function_ = resolution.executableFunction
-  const site = executableSite('CallableSiteId', resolution, node, context.spanOf(node.anchor))
+  const site = executableSite('CallableSiteId', resolution, node)
   if (owner === undefined || function_ === undefined) {
     return Object.freeze({
       fact: Object.freeze({
@@ -9339,7 +9338,7 @@ const analyzeAnonymousCallable = (
   const hiddenId: DeclarationId = Object.freeze({
     _tag: 'DeclarationId',
     sourceId: AuthoredWalk.moduleName(context),
-    ordinal: Tir.hiddenDeclarationOrdinal(declaration.id.ordinal, site.ordinal),
+    ordinal: Tir.hiddenDeclarationOrdinal(declaration.id.ordinal, site.node.node.ordinal),
   })
   const canonical = Tir.anonymousCallableId(owner, site)
   const initial = DeclarationCollection.collectAnonymousCallableDeclaration(
@@ -9707,7 +9706,7 @@ export const containsOrdinaryArm = (node: AuthoredHir.Expression): boolean => {
   return AuthoredWalk.expressionChildren(node).some(containsOrdinaryArm)
 }
 
-function analyzeExpressionFact(
+function analyzeExpressionDecision(
   context: SemanticContext.SemanticContext,
   node: AuthoredHir.Expression,
   declarations: ReadonlyArray<DeclarationFact>,
@@ -9830,7 +9829,7 @@ function analyzeExpressionFact(
     // Direct failures and executed computations belong to this boundary; nested Effects own theirs.
     const failures: Array<Type.Type> = []
     const executed: Array<Type.Effect> = []
-    const recordExecuted = (expression: ExpressionFact | Tir.Expression): void => {
+    const recordExecuted = (expression: ExpressionDecision | Tir.Expression): void => {
       if (expression._tag !== 'Run') return
       const subjectType = constructionExpressionType(expression.subject)
       if (subjectType._tag !== 'Available') return
@@ -9839,20 +9838,20 @@ function analyzeExpressionFact(
         : subjectType.type
       if (Type.isEffect(contract)) executed.push(contract)
     }
-    visitStatementFacts(statements, {
+    visitStatements(statements, {
       descendEffectBlocks: false,
       statement: (statement) => {
-        if (statement._tag === 'FailStatement' && statement.failure !== undefined)
-          failures.push(statement.failure)
+        if (statement._tag === 'Fail') failures.push(statement.failure)
       },
       expression: recordExecuted,
       node: recordExecuted,
     })
     // Every return site contributes to the success type through the one canonical join rule;
     // disagreeing sites are diagnosed instead of silently adopting the last return's type.
-    const returnedTypes = returned.flatMap((expression) =>
-      expression.type._tag === 'Available' ? [expression.type.type] : [],
-    )
+    const returnedTypes = returned.flatMap((expression) => {
+      const type = constructionExpressionType(expression)
+      return type._tag === 'Available' ? [type.type] : []
+    })
     let success: Type.Type | undefined
     // A block whose every path ends in `fail` never produces a value: its success type is `never`
     // (EFF-007), and the recorded failures still form its failure channel.
@@ -9868,14 +9867,16 @@ function analyzeExpressionFact(
         const offender =
           first === undefined
             ? undefined
-            : returned.find(
-                (expression) =>
-                  expression.type._tag === 'Available' && !Type.equals(expression.type.type, first),
-              )
+            : returned.find((expression) => {
+                const type = constructionExpressionType(expression)
+                return type._tag === 'Available' && !Type.equals(type.type, first)
+              })
         nested.diagnostics.push(
           Diagnostic.effectBlockReturnMismatch(
             joined.types.map(Type.encode),
-            Location.at(offender?.anchor ?? node.anchor),
+            Location.at(
+              offender === undefined ? node.anchor : constructionExpressionAnchor(offender),
+            ),
           ),
         )
       }
@@ -9886,11 +9887,11 @@ function analyzeExpressionFact(
       firstLocalBinding,
       resolution.index,
       copyAssumptionsOf(declaration),
-      Object.freeze({
-        ...(resolution.builder === undefined ? {} : { builder: resolution.builder }),
-      }),
+      Object.freeze(resolution.builder === undefined ? {} : { builder: resolution.builder }),
     )
-    const reachableWrites = reachableCallableWrites(statements)
+    const builder = resolution.builder
+    if (builder === undefined) throw new RangeError('effect analysis requires its TIR builder')
+    const reachableWrites = reachableCallableWrites(statements, builder)
     for (const capture of captures) {
       if (
         capture.reference._tag === 'BindingFact' &&
@@ -9945,7 +9946,7 @@ function analyzeExpressionFact(
     return Object.freeze({
       fact: Object.freeze({
         _tag: 'EffectBlock',
-        site: executableSite('EffectSiteId', resolution, node, context.spanOf(node.anchor)),
+        site: executableSite('EffectSiteId', resolution, node),
         ...(representationOwner === undefined ? {} : { representationOwner }),
         statements,
         captures,
@@ -10064,7 +10065,7 @@ function analyzeExpressionFact(
       const value = BigInt(scalar)
       const range = Scalar.range(selected, 64)
       const fits = value >= range.minimum && value <= range.maximum
-      const integer: IntegerExpressionFact = fits
+      const integer: IntegerExpressionDecision = fits
         ? Object.freeze({
             _tag: 'Available',
             type: selected.spelling,
@@ -10292,7 +10293,12 @@ function analyzeExpressionFact(
         ),
       )
     return Object.freeze({
-      fact: Object.freeze({ _tag: 'Run', subject: expressionNode(subject), type, anchor: node.anchor }),
+      fact: Object.freeze({
+        _tag: 'Run',
+        subject: expressionNode(subject),
+        type,
+        anchor: node.anchor,
+      }),
       diagnostics: Object.freeze(diagnostics),
       type: type._tag === 'Available' ? type.type : undefined,
     })
@@ -10939,7 +10945,7 @@ export function analyzeExpression(
   resolution: ResolutionContext,
   expected?: SemanticType,
 ): ExpressionResult | undefined {
-  const result = analyzeExpressionFact(
+  const result = analyzeExpressionDecision(
     context,
     node,
     declarations,
@@ -10948,14 +10954,19 @@ export function analyzeExpression(
     resolution,
     expected,
   )
-  if (result === undefined || resolution.builder === undefined) return result
-  const lowered = TirLowering.tirExpression(result.fact, {
+  if (result === undefined) return result
+  resolution.publishExpressionDecision?.(result.fact)
+  if (resolution.builder === undefined) return result
+  const lowered = BodyBuilder.tirExpression(result.fact, {
     context,
     builder: resolution.builder,
     ...(declaration.phase === 'Static' ? { static: resolution.builder.expressions } : {}),
     ...(resolution.lifetimeCompatibility === undefined
       ? {}
       : { lifetimeCompatibility: resolution.lifetimeCompatibility }),
+    ...(declaration.opaqueResult === undefined
+      ? {}
+      : { opaqueResultFamily: declaration.opaqueResult.family }),
     functionId: declaration.id,
   })
   return Object.freeze({ ...result, node: lowered })
@@ -11062,10 +11073,8 @@ export const finishDeclarationCall = (
       if (evaluated._tag === 'Complete') {
         const evaluatedNode = resolution.staticContext.nodes.expression(argument.expression)
         const textOrigin =
-          StaticEvaluation.staticTextOrigin(
-            evaluatedNode,
-            resolution.staticContext,
-          ) ?? (evaluated.value._tag === 'TextValue' ? evaluated.value.origin : undefined)
+          StaticEvaluation.staticTextOrigin(evaluatedNode, resolution.staticContext) ??
+          (evaluated.value._tag === 'TextValue' ? evaluated.value.origin : undefined)
         values.push(
           Object.freeze({
             parameter,
@@ -11134,7 +11143,7 @@ export const finishDeclarationCall = (
           })(),
         )
       : unavailableExpressionType
-  const fact: Extract<ExpressionFact, { readonly _tag: 'Call' }> = Object.freeze({
+  const fact: Extract<ExpressionDecision, { readonly _tag: 'Call' }> = Object.freeze({
     _tag: 'Call',
     reference,
     path,
@@ -11255,12 +11264,7 @@ export const finishInterfaceOperationCall = (
       ...(expressionType._tag === 'Available' &&
       reference.interfaceContract.functionKind === 'Effect'
         ? {
-            witnessEffectSite: executableSite(
-              'EffectSiteId',
-              resolution,
-              effectSiteNode,
-              context.spanOf(effectSiteNode.anchor),
-            ),
+            witnessEffectSite: executableSite('EffectSiteId', resolution, effectSiteNode),
           }
         : {}),
       type: expressionType,
@@ -11288,7 +11292,7 @@ export const statementExpressionNode = (
 }
 
 export interface FunctionAnalysis {
-  readonly fact: FunctionFact
+  readonly fact: FunctionConstruction
   readonly diagnostics: ReadonlyArray<Diagnostic.Located>
   readonly builder: BodyBuilder.BodyBuilder
 }
@@ -11332,7 +11336,7 @@ export const scopeSpanFor = (
  * the body's own resolution before the index is asked.
  */
 export const evaluateStatic = (
-  fact: ExpressionFact | Tir.Expression,
+  fact: ExpressionDecision | Tir.Expression,
   staticContext: StaticAnalysisContext,
   resolution: Pick<ResolutionContext, 'generatedAggregates'> | undefined,
 ): StaticEvaluation.Outcome<StaticValue.Value> =>
@@ -11353,7 +11357,7 @@ export interface StaticAnalysisContext {
   readonly returnedTextSpan?: { value: Location.Location | undefined }
   readonly trace: StaticEvaluation.Trace
   /** The nodes of what this body has analyzed so far, which is what the evaluator interprets. */
-  readonly nodes: import('./TirLowering.js').StaticLowering
+  readonly nodes: import('./BodyBuilder.js').StaticLowering
   readonly lookup: StaticEvaluation.NodeContext['lookup']
   readonly call: StaticEvaluation.NodeContext['call']
   readonly reflect: StaticEvaluation.NodeContext['reflect']
@@ -11406,9 +11410,10 @@ export interface ResolutionContext {
   readonly authoredDeclaration?: AuthoredHir.Declaration
   readonly executableFunction?: DeclarationId
   readonly executableOwner?: DeclarationFacts.CanonicalId
-  readonly executableSites?: ReadonlyMap<string, number>
   /** Mutable callable bindings whose authored initializer is no longer their exact runtime value. */
   readonly writtenCallableBindings?: Set<number>
+  /** Publishes tooling rows before the short-lived semantic decision is discarded. */
+  readonly publishExpressionDecision?: (decision: ExpressionDecision) => void
   readonly staticContext?: StaticAnalysisContext
   /** Static calls under ordinary control in a static function execute only after branch selection. */
   readonly deferStaticCalls?: true

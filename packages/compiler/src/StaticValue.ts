@@ -1,4 +1,4 @@
-import type * as AuthoredIdentity from './AuthoredIdentity.js'
+import * as AuthoredIdentity from './AuthoredIdentity.js'
 import type * as DeclarationFacts from './DeclarationFacts.js'
 import type * as Provenance from './Provenance.js'
 import * as FloatingPoint from './FloatingPoint.js'
@@ -121,11 +121,9 @@ export type ReflectedMember =
   | { readonly _tag: 'LabeledField'; readonly label: string }
   | { readonly _tag: 'PositionalField'; readonly ordinal: number }
 
-/** Deterministic source provenance retained without a source-file or syntax-node reference. */
+/** Revision-independent provenance of one reflected declaration field. */
 export interface DescriptorProvenance {
-  readonly sourceId: string
-  readonly start: number
-  readonly end: number
+  readonly anchor: AuthoredIdentity.Anchor
 }
 
 /** One owner-and-value-typed field descriptor with no address or callable behavior. */
@@ -446,18 +444,9 @@ const reflectedMember = (value: unknown): ReflectedMember | undefined => {
 }
 
 const descriptorProvenance = (value: unknown): DescriptorProvenance | undefined => {
-  if (
-    !isRecord(value) ||
-    typeof value.sourceId !== 'string' ||
-    typeof value.start !== 'number' ||
-    !Number.isSafeInteger(value.start) ||
-    value.start < 0 ||
-    typeof value.end !== 'number' ||
-    !Number.isSafeInteger(value.end) ||
-    value.end < value.start
-  )
+  if (!isRecord(value) || !isRecord(value.anchor) || value.anchor._tag !== 'AuthoredAnchor')
     return undefined
-  return Object.freeze({ sourceId: value.sourceId, start: value.start, end: value.end })
+  return Object.freeze({ anchor: value.anchor as unknown as AuthoredIdentity.Anchor })
 }
 
 const fieldDescriptorValue = (value: unknown): FieldDescriptorValue | undefined => {
@@ -783,9 +772,7 @@ const fieldDescriptorEncoding = (self: FieldDescriptorValue): string =>
     Type.key(self.valueType),
     self.authorization.module,
     self.authorization.name,
-    self.provenance.sourceId,
-    String(self.provenance.start),
-    String(self.provenance.end),
+    AuthoredIdentity.anchorKey(self.provenance.anchor),
   ])
 
 /** Encodes one static value without host identity or ambiguous concatenation. */

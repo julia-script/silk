@@ -2290,6 +2290,7 @@ fn bad() -> i32 { let value = 42 return choose(move value, value) }`
           unreachable('expected checked body')
         return Ownership.input(
           fn,
+          body.artifact,
           body.results.lifetimes,
           snapshot.index,
           plan,

@@ -1,6 +1,7 @@
 import type * as AuthoredHir from './AuthoredHir.js'
 import * as AuthoredIdentity from './AuthoredIdentity.js'
 import * as Elaboration from './Elaboration.js'
+import * as BodyBuilder from './BodyBuilder.js'
 import * as Tir from './Tir.js'
 import type * as SemanticContext from './SemanticContext.js'
 import type * as SourceSpan from './SourceSpan.js'
@@ -34,7 +35,7 @@ const loopKey = (loop: Tir.LoopId): string =>
 /** Builds structured branch exits and loop backedges once for one authored body. */
 export const make = (
   context: SemanticContext.SemanticContext,
-  statements: ReadonlyArray<Elaboration.StatementFact>,
+  statements: ReadonlyArray<Tir.Statement>,
   root: AuthoredHir.Anchor,
 ): BodyControlFlow => {
   const edges: Array<Array<number>> = []
@@ -61,8 +62,8 @@ export const make = (
     return value
   }
   type Loops = ReadonlyMap<string, { readonly exit: number; readonly repeat: number }>
-  type ConstructionExpression = Elaboration.ExpressionFact | Tir.Expression
-  type ConstructionStatement = Elaboration.StatementFact | Tir.Statement
+  type ConstructionExpression = Elaboration.ExpressionDecision | Tir.Expression
+  type ConstructionStatement = Tir.Statement
   const expression = (value: ConstructionExpression, next: number, loops: Loops): number => {
     const own = boundary(Elaboration.constructionExpressionAnchor(value))
     const expressionType = Elaboration.constructionExpressionType(value)
@@ -124,39 +125,19 @@ export const make = (
   ): number => {
     let start = next
     for (const statement of [...values].reverse()) {
-      const tirStatement = 'origin' in statement
-      const anchor = tirStatement
-        ? statement.origin.anchor
-        : statement._tag === 'BindStatement'
-          ? statement.binding.anchor
-          : statement.anchor
+      const anchor = statement.origin.anchor
       const own = boundary(anchor)
       const previous = start
       start = own.before
-      if (
-        statement._tag === 'ReturnStatement' ||
-        statement._tag === 'FailStatement' ||
-        statement._tag === 'Return' ||
-        statement._tag === 'Fail'
-      ) {
+      if (statement._tag === 'Return' || statement._tag === 'Fail') {
         edge(own.before, expression(statement.expression, own.after, loops))
-      } else if (
-        statement._tag === 'BreakStatement' ||
-        statement._tag === 'ContinueStatement' ||
-        statement._tag === 'Break' ||
-        statement._tag === 'Continue'
-      ) {
+      } else if (statement._tag === 'Break' || statement._tag === 'Continue') {
         const target =
           statement.target === undefined ? undefined : loops.get(loopKey(statement.target))
         edge(own.before, own.after)
         if (target !== undefined)
-          edge(
-            own.after,
-            statement._tag === 'BreakStatement' || statement._tag === 'Break'
-              ? target.exit
-              : target.repeat,
-          )
-      } else if (statement._tag === 'WhileStatement' || statement._tag === 'While') {
+          edge(own.after, statement._tag === 'Break' ? target.exit : target.repeat)
+      } else if (statement._tag === 'While') {
         const choice = point()
         const condition = expression(statement.condition, choice, loops)
         const nested = new Map(loops).set(loopKey(statement.loop), {
@@ -165,59 +146,34 @@ export const make = (
         })
         const body = sequence(statement.body, condition, nested)
         const boolean =
-          statement.condition._tag === 'Boolean'
-            ? statement.condition.value
-            : statement.condition._tag === 'BooleanLiteral'
-              ? statement.condition.value
-              : undefined
+          statement.condition._tag === 'BooleanLiteral' ? statement.condition.value : undefined
         if (boolean !== false) edge(choice, body)
-        if (boolean !== true)
-          edge(choice, own.after)
+        if (boolean !== true) edge(choice, own.after)
         edge(own.before, condition)
         edge(own.after, previous)
-      } else if (
-        statement._tag === 'IfStatement' ||
-        statement._tag === 'IfLetStatement' ||
-        statement._tag === 'If' ||
-        statement._tag === 'IfLet'
-      ) {
+      } else if (statement._tag === 'If' || statement._tag === 'IfLet') {
         const choice = point()
         const test =
-          statement._tag === 'IfStatement' || statement._tag === 'If'
+          statement._tag === 'If'
             ? statement.condition
             : (statement.selection.source ?? statement.selection.subject)
         const taken = sequence(statement.taken, own.after, loops)
         const otherwise = sequence(statement.otherwise, own.after, loops)
-        const boolean =
-          test._tag === 'Boolean'
-            ? test.value
-            : test._tag === 'BooleanLiteral'
-              ? test.value
-              : undefined
+        const boolean = test._tag === 'BooleanLiteral' ? test.value : undefined
         if (boolean !== false) edge(choice, taken)
         if (boolean !== true) edge(choice, otherwise)
         edge(own.before, expression(test, choice, loops))
         edge(own.after, previous)
-      } else if (statement._tag === 'UnsafeStatement' || statement._tag === 'Unsafe') {
+      } else if (statement._tag === 'Unsafe') {
         edge(own.before, sequence(statement.statements, own.after, loops))
         edge(own.after, previous)
       } else {
         let evaluated = own.after
-        const values: ReadonlyArray<ConstructionExpression> = tirStatement
-          ? Tir.statementExpressions(statement)
-          : statement._tag === 'BindStatement'
-            ? [statement.binding.initializer]
-            : statement._tag === 'WriteStatement'
-              ? [statement.destination, statement.value]
-              : statement._tag === 'PatternBindStatement'
-                ? [statement.selection.source]
-                : [statement.expression]
+        const values: ReadonlyArray<ConstructionExpression> =
+          BodyBuilder.directStatementExpressions(statement)
         for (const value of [...values].reverse()) evaluated = expression(value, evaluated, loops)
-        if (statement._tag === 'WriteStatement' || statement._tag === 'Write') {
-          const destination =
-            statement._tag === 'WriteStatement'
-              ? statement.destination.anchor
-              : (statement.destination?.origin.anchor ?? statement.place.origin.anchor)
+        if (statement._tag === 'Write') {
+          const destination = statement.destination?.origin.anchor ?? statement.place.origin.anchor
           anchors.set(AuthoredIdentity.anchorKey(destination), destination)
           writeAnchors.set(AuthoredIdentity.anchorKey(destination), own.after)
           writes.set(spanKey(context.spanOf(destination)), own.after)

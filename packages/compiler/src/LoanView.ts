@@ -21,6 +21,7 @@ export type ExpressionType =
 interface Base {
   readonly type: ExpressionType
   readonly anchor: AuthoredHir.Anchor
+  readonly ref: Tir.NodeRef
 }
 
 /** A local as loan analysis names it: its id, its spelling and, for a parameter, its declared type. */
@@ -485,7 +486,11 @@ export const retainsLifetimes = (
  * the expression it converts, a borrow's subject is the place the node kept as evidence, and a
  * local is found by the id a node names.
  */
-export const ofTir = (fn: Tir.TirFunction, index: DeclarationIndex.Index): Body => {
+export const ofTir = (
+  fn: Tir.TirFunction,
+  index: DeclarationIndex.Index,
+  artifact: Tir.ArtifactId,
+): Body => {
   const parameters = new Map<number, Extract<Local, { readonly _tag: 'ParameterDeclaration' }>>(
     fn.declaration.parameters.map((parameter) => [
       parameter.id.ordinal,
@@ -633,9 +638,11 @@ export const ofTir = (fn: Tir.TirFunction, index: DeclarationIndex.Index): Body 
     return found
   }
   const view = (node: Tir.Expression): Expression => {
+    if (node.id === undefined) throw new RangeError('loan analysis requires published TIR nodes')
     const base = {
       type: node._tag === 'Unavailable' ? ({ _tag: 'Unavailable' } as const) : available(node.type),
       anchor: node.origin.anchor,
+      ref: Object.freeze({ artifact, node: node.id }),
     }
     switch (node._tag) {
       case 'UnionConvert':
@@ -743,7 +750,12 @@ export const ofTir = (fn: Tir.TirFunction, index: DeclarationIndex.Index): Body 
           access: node.access,
           subject:
             node.place === undefined
-              ? { type: { _tag: 'Unavailable' }, anchor: base.anchor, _tag: 'Integer' }
+              ? {
+                  type: { _tag: 'Unavailable' },
+                  anchor: base.anchor,
+                  ref: base.ref,
+                  _tag: 'Integer',
+                }
               : expression(node.place),
           formation,
         }
@@ -918,6 +930,27 @@ export const ofTir = (fn: Tir.TirFunction, index: DeclarationIndex.Index): Body 
         }
       case 'CompileError':
         return { ...base, _tag: 'CompileError', message: expression(node.message) }
+      case 'Unavailable':
+        return node.call?.callee === undefined
+          ? {
+              ...base,
+              _tag: 'Call',
+              arguments: argumentsOf(node.call?.arguments ?? [], node.call?.target),
+              reference: { _tag: node.call?.target === undefined ? 'Unavailable' : 'Resolved' },
+            }
+          : {
+              ...base,
+              _tag: 'CallableApply',
+              callee: expression(node.call.callee),
+              arguments: argumentsOf(node.call.arguments),
+              mode: node.call.access ?? 'Shared',
+              provenance: {
+                _tag:
+                  node.call.evaluation === 'LeftThenCallable'
+                    ? 'PipelineCallableApplication'
+                    : 'DirectCallableApplication',
+              },
+            }
       case 'FunctionItem':
       case 'ForeignFunctionAddress':
         return { ...base, _tag: 'FunctionItem' }
@@ -994,7 +1027,12 @@ export const ofTir = (fn: Tir.TirFunction, index: DeclarationIndex.Index): Body 
               _tag: 'WriteStatement',
               destination:
                 node.destination === undefined
-                  ? { type: { _tag: 'Unavailable' }, anchor: at.anchor, _tag: 'Integer' }
+                  ? {
+                      type: { _tag: 'Unavailable' },
+                      anchor: at.anchor,
+                      ref: TirModule.nodeReference(artifact, node),
+                      _tag: 'Integer',
+                    }
                   : expression(node.destination),
               value: expression(node.value),
             },

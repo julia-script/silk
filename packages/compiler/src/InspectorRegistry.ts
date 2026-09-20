@@ -268,7 +268,8 @@ export const views: ReadonlyArray<ViewDefinition> = [
      */
     project: ({ snapshot, root }) => {
       const literals = Analysis.expressionsOf(snapshot, root).filter(
-        (expression) => expression._tag === 'StructLiteral',
+        (expression): expression is Extract<Tir.Expression, { readonly _tag: 'Construct' }> =>
+          expression._tag === 'Construct',
       )
       const projections = Analysis.fieldProjectionsOf(snapshot, root)
       const layout = Analysis.layoutOf(snapshot)

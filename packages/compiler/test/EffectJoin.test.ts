@@ -205,7 +205,7 @@ it.effect('normalizes both requirement rows and retains both provider targets', 
     const snapshot = yield* snapshotOf(module, requirementSource)
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
     const available = Analysis.expressionsOf(snapshot, module).flatMap((expression) =>
-      expression.type._tag === 'Available' ? [Type.encode(expression.type.type)] : [],
+      expression._tag === 'Unavailable' ? [] : [Type.encode(expression.type)],
     )
     assert.include(available, `Effect<'static; i32 ? &${module}.LeftClock | &${module}.RightClock>`)
     const targets = Analysis.instancesOf(snapshot)

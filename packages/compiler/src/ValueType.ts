@@ -165,7 +165,7 @@ export const effectValueType = (
   if (environment?._tag !== 'EffectEnvironment') return undefined
   return Object.freeze({
     _tag: 'EffectValue',
-    type: environment.effect,
+    type: requested,
     site: block.site,
     environment,
   })

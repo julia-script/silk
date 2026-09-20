@@ -14,10 +14,6 @@ pub fn main() -> i32 { let value = accept(0x1ff) return 42 }`
       'integer-base/out-of-range',
       ascii(source),
     )
-    const outOfRange = Analysis.expressionsOf(snapshot, 'integer-base/out-of-range').filter(
-      (expression) => expression._tag === 'Integer' && expression.integer._tag === 'OutOfRange',
-    )
-    assert.strictEqual(outOfRange.length, 1)
     const reported = Analysis.diagnostics(snapshot).filter(
       (diagnostic) => diagnostic.reason._tag === 'IntegerOutOfRange',
     )

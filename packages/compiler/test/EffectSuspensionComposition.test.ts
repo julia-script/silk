@@ -61,7 +61,7 @@ pub fn main() -> i32 { return 0 }`)
     const expressionTypes = Analysis.expressionsOf(
       self,
       'effect-suspension-composition/main',
-    ).flatMap((expression) => (expression.type._tag === 'Available' ? [expression.type.type] : []))
+    ).flatMap((expression) => (expression._tag === 'Unavailable' ? [] : [expression.type]))
     assert.isTrue(
       expressionTypes.some(
         (type) =>

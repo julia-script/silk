@@ -108,10 +108,7 @@ it.effect(
       )
       assert.isTrue(
         Analysis.expressionsOf(mismatch, 'integer/duration-mismatch').some(
-          (expression) =>
-            expression._tag === 'Duration' &&
-            expression.type._tag === 'Available' &&
-            expression.type.type === 'u64',
+          (expression) => expression._tag === 'IntegerLiteral' && expression.type === 'u64',
         ),
       )
 
@@ -135,11 +132,6 @@ it.effect('rejects contextual overflow and already-typed integer mismatches befo
       ),
     )
     assert.isAbove(Analysis.diagnostics(overflow).length, 0)
-    assert.isTrue(
-      Analysis.expressionsOf(overflow, 'integer/contextual-overflow').some(
-        (expression) => expression._tag === 'Integer' && expression.integer._tag === 'OutOfRange',
-      ),
-    )
     assert.notInclude(Tir.encode(Analysis.rootAnalysis(overflow).tir), 'literal 256')
 
     const mismatch = yield* AnalysisFixture.retainingMain(
@@ -168,11 +160,7 @@ it.effect('uses call and pipeline parameters as exact integer literal contexts',
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
     const contextualValues = Analysis.expressionsOf(snapshot, 'integer/contextual-calls').flatMap(
       (expression) =>
-        expression._tag === 'Integer' &&
-        expression.integer._tag === 'Available' &&
-        expression.integer.value === 42n
-          ? [expression.integer.type]
-          : [],
+        expression._tag === 'IntegerLiteral' && expression.value === 42n ? [expression.type] : [],
     )
     assert.isAtLeast(contextualValues.filter((type) => type === 'u8').length, 3)
     assert.include(Tir.encode(Analysis.rootAnalysis(snapshot).tir), 'literal 42 : u8')
@@ -197,11 +185,7 @@ pub fn main() -> i32 { return mixed(21) }`),
     )
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
     const fives = Analysis.expressionsOf(snapshot, id).flatMap((expression) =>
-      expression._tag === 'Integer' &&
-      expression.integer._tag === 'Available' &&
-      expression.integer.value === 5n
-        ? [expression.integer.type]
-        : [],
+      expression._tag === 'IntegerLiteral' && expression.value === 5n ? [expression.type] : [],
     )
     assert.isAtLeast(fives.filter((type) => type === 'u16').length, 2)
     assert.include(Tir.encode(Analysis.rootAnalysis(snapshot).tir), 'literal 5 : u16')

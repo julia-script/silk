@@ -110,7 +110,7 @@ it('keeps pressure-policy spellings out of the compiler privilege inventory', ()
     '../src/ExecutableProperty.ts',
     '../src/IntrinsicAvailability.ts',
     '../src/Tir.ts',
-    '../src/TirLowering.ts',
+    '../src/BodyBuilder.ts',
     '../src/EffectLowering.ts',
     '../src/FunctionLowering.ts',
     '../src/Mir.ts',

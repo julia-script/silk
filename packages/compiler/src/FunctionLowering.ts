@@ -240,12 +240,11 @@ export class FunctionLowering {
     return id
   }
 
-  freshSyntheticBorrow(span: SourceSpan.SourceSpan): Tir.BorrowId {
+  freshSyntheticBorrow(call: Tir.NodeRef): Tir.BorrowId {
     while (true) {
       const borrow: Tir.BorrowId = Object.freeze({
         _tag: 'BorrowId',
-        function: this.owner.function.declaration.id,
-        callSpan: span,
+        call,
         ordinal: this.syntheticBorrowOrdinal,
       })
       this.syntheticBorrowOrdinal += 1
@@ -270,7 +269,7 @@ export class FunctionLowering {
     const key = borrowKey(authored)
     if (this.replayBorrowSubstitution === undefined) {
       const realized = this.realizedRecipeBorrows.has(key)
-        ? this.freshSyntheticBorrow(authored.callSpan)
+        ? this.freshSyntheticBorrow(authored.call)
         : authored
       this.issuedBorrowKeys.add(borrowKey(realized))
       this.realizedRecipeBorrows.add(key)
@@ -280,7 +279,7 @@ export class FunctionLowering {
     const existing = this.replayBorrowSubstitution.get(key)
     if (existing !== undefined) return existing
     const realized = this.realizedRecipeBorrows.has(key)
-      ? this.freshSyntheticBorrow(authored.callSpan)
+      ? this.freshSyntheticBorrow(authored.call)
       : authored
     this.issuedBorrowKeys.add(borrowKey(realized))
     this.realizedRecipeBorrows.add(key)

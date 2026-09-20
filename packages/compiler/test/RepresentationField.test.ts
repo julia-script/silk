@@ -433,10 +433,10 @@ pub fn main() -> i32 {
         fact.declaration.name._tag === 'Present' && fact.declaration.name.spelling === 'main',
     )
     const instances = (main?.statements ?? []).flatMap((statement) =>
-      statement._tag === 'BindStatement' &&
-      statement.binding.inferredType._tag === 'Available' &&
-      Type.isNominal(statement.binding.inferredType.type)
-        ? [statement.binding.inferredType.type]
+      statement._tag === 'Bind' &&
+      statement.initializer._tag === 'Construct' &&
+      Type.isNominal(statement.initializer.type)
+        ? [statement.initializer.type]
         : [],
     )
     const resolutions = RepresentationField.resolveFields(snapshot.index, instances).resolutions
@@ -488,10 +488,10 @@ pub fn main() -> i32 {
           fact.declaration.name._tag === 'Present' && fact.declaration.name.spelling === 'main',
       )
       return (main?.statements ?? []).flatMap((statement) =>
-        statement._tag === 'BindStatement' &&
-        statement.binding.inferredType._tag === 'Available' &&
-        Type.isNominal(statement.binding.inferredType.type)
-          ? [statement.binding.inferredType.type]
+        statement._tag === 'Bind' &&
+        statement.initializer._tag === 'Construct' &&
+        Type.isNominal(statement.initializer.type)
+          ? [statement.initializer.type]
           : [],
       )
     }

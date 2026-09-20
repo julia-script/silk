@@ -163,10 +163,10 @@ const identityFacts = (snapshot: Analysis.FrontendSnapshot) => {
     (fact) => fact.declaration.name._tag === 'Present' && fact.declaration.name.spelling === 'main',
   )
   const instances = (main?.statements ?? []).flatMap((statement) =>
-    statement._tag === 'BindStatement' &&
-    statement.binding.inferredType._tag === 'Available' &&
-    Type.isNominal(statement.binding.inferredType.type)
-      ? [statement.binding.inferredType.type]
+    statement._tag === 'Bind' &&
+    statement.initializer._tag !== 'Unavailable' &&
+    Type.isNominal(statement.initializer.type)
+      ? [statement.initializer.type]
       : [],
   )
   return instances.flatMap((instance) => {

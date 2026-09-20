@@ -33,8 +33,8 @@ it.effect('unions the requirement rows of both arms before provisioning', () =>
     const snapshot = yield* Analysis.ofSource(module, ascii(requirements))
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
     const inferredRequirements = Analysis.expressionsOf(snapshot, module).flatMap((expression) => {
-      if (expression.type._tag !== 'Available' || !Type.isEffect(expression.type.type)) return []
-      const type = expression.type.type
+      if (expression._tag === 'Unavailable' || !Type.isEffect(expression.type)) return []
+      const type = expression.type
       return type.success === 'i32'
         ? [
             Type.requirementMembers(type).map(

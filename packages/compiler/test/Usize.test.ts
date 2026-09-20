@@ -47,9 +47,7 @@ it.effect('retains exact contextual magnitudes and target-owned usize layout fac
     assert.deepEqual(snapshot.diagnostics, [])
 
     const integers = Analysis.expressionsOf(snapshot, 'usize/program').flatMap((expression) =>
-      expression._tag === 'Integer' && expression.integer._tag === 'Available'
-        ? [expression.integer]
-        : [],
+      expression._tag === 'IntegerLiteral' ? [expression] : [],
     )
     assert.include(
       integers.map((integer) => integer.value),

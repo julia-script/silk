@@ -2958,9 +2958,9 @@ const collectEffectSites = (instance: Instances.Instance) => {
         : [
             Object.freeze({
               site: Tir.effectCatchSite(
-                instance.function.declaration.id,
+                Tir.nodeReference(instance.view.artifact, expression),
                 instance.key.declaration,
-                expression.span,
+                instance.function.declaration.id.ordinal,
               ),
               type: expression.type,
               captures: Object.freeze([
@@ -2994,9 +2994,9 @@ const collectEffectSites = (instance: Instances.Instance) => {
       return [
         Object.freeze({
           site: Tir.builtinEffectSite(
-            instance.function.declaration.id,
+            Tir.nodeReference(instance.view.artifact, expression),
             instance.key.declaration,
-            expression.span,
+            instance.function.declaration.id.ordinal,
           ),
           type: expression.type,
           captures: Object.freeze(

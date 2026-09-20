@@ -1,14 +1,13 @@
 import * as AuthoredIdentity from './AuthoredIdentity.js'
-import * as Elaboration from './Elaboration.js'
+import type * as DeclarationFacts from './DeclarationFacts.js'
+import * as Diagnostic from './Diagnostic.js'
+import type * as Elaboration from './Elaboration.js'
 import * as SemanticContext from './SemanticContext.js'
 import type * as SourceSpan from './SourceSpan.js'
-import type * as Tir from './Tir.js'
+import * as Tir from './Tir.js'
 import * as Type from './Type.js'
 
-const typeText = (type: Type.Type): string => Type.encode(type)
-
 export type FlowItemState = 'Connected' | 'Stopped' | 'Branched' | 'Unmatched'
-
 export type FlowNodeKind =
   | 'Argument'
   | 'Parameter'
@@ -66,8 +65,6 @@ export interface FlowModel {
   readonly edges: ReadonlyArray<FlowEdge>
 }
 
-type CallFact = Extract<Elaboration.ExpressionFact, { readonly _tag: 'Call' }>
-
 interface GroupDraft {
   readonly id: string
   readonly label: string
@@ -79,7 +76,6 @@ interface GroupDraft {
   readonly span: SourceSpan.SourceSpan
   readonly nodeIds: Array<string>
   readonly edgeIds: Array<string>
-  readonly target: Elaboration.DeclarationFact | undefined
 }
 
 interface ProjectionDraft {
@@ -88,81 +84,78 @@ interface ProjectionDraft {
   readonly edges: Array<FlowEdge>
 }
 
-interface CallProjection {
+interface Projection {
   readonly groupId: string
-  readonly resultId: string | undefined
+  readonly resultId?: string
   readonly complete: boolean
 }
 
-const declarationName = (declaration: Elaboration.DeclarationFact): string =>
-  declaration.name._tag === 'Present'
-    ? declaration.name.spelling
-    : `function #${declaration.id.ordinal}`
+const emptyModel = (): FlowModel =>
+  Object.freeze({
+    _tag: 'FlowModel',
+    status: 'Empty',
+    summary: 'No call expression is available for data-flow projection.',
+    groups: Object.freeze([]),
+    nodes: Object.freeze([]),
+    edges: Object.freeze([]),
+  })
+
+const canonicalEqual = (
+  left: DeclarationFacts.CanonicalId,
+  right: DeclarationFacts.CanonicalId,
+): boolean => left.module === right.module && left.name === right.name
+
+const bodyFor = (
+  analysis: Elaboration.Result,
+  target: DeclarationFacts.CanonicalId,
+): Elaboration.CheckedBody | undefined =>
+  analysis.bodies.find(
+    (body) =>
+      body.declaration.canonical._tag === 'Canonical' &&
+      canonicalEqual(body.declaration.canonical.id, target),
+  )
 
 const parameterName = (parameter: Elaboration.ParameterFact): string =>
   parameter.name._tag === 'Present' ? parameter.name.spelling : `parameter #${parameter.id.ordinal}`
 
-const callName = (call: CallFact): string =>
-  call.reference._tag === 'Unavailable' ? 'unavailable call' : call.reference.spelling
-
-const directReference = (
-  expression: Elaboration.ExpressionFact | Tir.Expression,
-): Elaboration.IdentifierExpressionFact['reference'] | undefined => {
-  if ('origin' in expression)
-    return expression._tag === 'Move' ? directReference(expression.subject) : undefined
+const expressionLabel = (expression: Tir.Expression): string => {
   switch (expression._tag) {
-    case 'Identifier':
-      return expression.reference
+    case 'ParameterReference':
+      return `parameter #${expression.parameter.ordinal}`
+    case 'BindingReference':
+      return `binding #${expression.binding.ordinal}`
+    case 'PatternBindingReference':
+      return `pattern binding #${expression.binding.ordinal}`
+    case 'Call':
+      return `${expression.target.name}(…)`
     case 'Move':
-      return directReference(expression.subject)
-    case 'Borrow':
-      return directReference(expression.subject)
+      return `move ${expressionLabel(expression.subject)}`
+    case 'BooleanLiteral':
+      return String(expression.value)
+    case 'IntegerLiteral':
+      return String(expression.value)
+    case 'BuiltinCall':
+      return `${expression.operation} expression`
+    case 'CallableApply':
+      return 'callable result'
+    case 'Construct':
+      return `${Type.encode(expression.type)} {…}`
+    case 'Project':
+      return `${expressionLabel(expression.subject)}.${expression.field.ordinal}`
+    case 'ArrayConstruct':
+      return `[${expression.elements.length} elements]`
+    case 'IndexPlace':
+      return `${expressionLabel(expression.subject)}[index]`
+    case 'Match':
+      return 'match result'
+    case 'ValueBorrow':
+    case 'SliceBorrow':
+      return `${expression.access === 'Exclusive' ? '&mut ' : '&'}borrowed value`
+    case 'Run':
+      return 'run result'
     default:
-      return undefined
+      return 'unavailable expression'
   }
-}
-
-const argumentLabel = (expression: Tir.Expression): string => {
-  if (expression._tag === 'ParameterReference') return `parameter #${expression.parameter.ordinal}`
-  if (expression._tag === 'BindingReference') return `binding #${expression.binding.ordinal}`
-  if (expression._tag === 'PatternBindingReference')
-    return `pattern binding #${expression.binding.ordinal}`
-  if (expression._tag === 'Call') return `${expression.target.name}(…)`
-  if (expression._tag === 'Move') {
-    return `move ${argumentLabel(expression.subject)}`
-  }
-  if (expression._tag === 'BooleanLiteral') return String(expression.value)
-  if (expression._tag === 'BuiltinCall') return `${expression.operation} expression`
-  if (expression._tag === 'CallableApply') return 'callable result'
-  if (expression._tag === 'Construct') return `${typeText(expression.type)} {…}`
-  if (expression._tag === 'Project')
-    return `${argumentLabel(expression.subject)}.${expression.field.ordinal}`
-  if (expression._tag === 'ArrayConstruct') return `[${expression.elements.length} elements]`
-  if (expression._tag === 'IndexPlace') return `${argumentLabel(expression.subject)}[index]`
-  if (expression._tag === 'Match') return 'match result'
-  if (expression._tag === 'ValueBorrow' || expression._tag === 'SliceBorrow')
-    return `${expression.access === 'Exclusive' ? '&mut ' : '&'}borrowed value`
-  if (expression._tag === 'Run') return 'run result'
-  if (expression._tag === 'IntegerLiteral') return String(expression.value)
-  return 'unavailable expression'
-}
-
-const callId = (call: CallFact): string => `call-${AuthoredIdentity.anchorKey(call.anchor)}`
-
-const sameDeclaration = (
-  left: Elaboration.DeclarationFact,
-  right: Elaboration.DeclarationFact,
-): boolean => left.id.sourceId === right.id.sourceId && left.id.ordinal === right.id.ordinal
-
-const groupState = (call: CallFact): FlowItemState => {
-  if (call.reference._tag === 'Ambiguous') return 'Branched'
-  if (
-    (call.reference._tag !== 'Resolved' && call.reference._tag !== 'ResolvedBuiltin') ||
-    call.contract._tag !== 'Compatible'
-  ) {
-    return 'Stopped'
-  }
-  return 'Connected'
 }
 
 const addNode = (draft: ProjectionDraft, group: GroupDraft, value: FlowNode): void => {
@@ -181,9 +174,9 @@ const semanticNode = (
   kind: FlowNodeKind,
   label: string,
   detail: string,
+  ordinal: number | undefined,
   state: FlowItemState,
   span: SourceSpan.SourceSpan,
-  ordinal?: number,
 ): FlowNode =>
   Object.freeze({
     _tag: 'FlowNode',
@@ -219,48 +212,144 @@ const semanticEdge = (
     span,
   })
 
-const functionFor = (
-  analysis: Elaboration.Result,
-  declaration: Elaboration.DeclarationFact,
-): Elaboration.FunctionFact | undefined =>
-  Elaboration.records(analysis).functions.find((fact) =>
-    sameDeclaration(fact.declaration, declaration),
+const occurrenceTarget = (
+  body: Elaboration.CheckedBody,
+  expression: Tir.Expression,
+): DeclarationFacts.CanonicalId | undefined => {
+  const key = AuthoredIdentity.anchorKey(expression.origin.anchor)
+  const occurrence = body.results.occurrences.find(
+    (candidate) =>
+      AuthoredIdentity.anchorKey(candidate.at) === key &&
+      candidate.resolution._tag === 'Available' &&
+      candidate.resolution.identity._tag === 'DeclarationIdentity' &&
+      'module' in candidate.resolution.identity.id,
   )
+  if (
+    occurrence?.resolution._tag !== 'Available' ||
+    occurrence.resolution.identity._tag !== 'DeclarationIdentity' ||
+    !('module' in occurrence.resolution.identity.id)
+  )
+    return undefined
+  return occurrence.resolution.identity.id
+}
+
+const unavailableReason = (
+  body: Elaboration.CheckedBody,
+  expression: Extract<Tir.Expression, { readonly _tag: 'Unavailable' }>,
+): string => {
+  if (
+    expression.call?.expectedCount !== undefined &&
+    expression.call.expectedCount !== expression.call.arguments.length
+  )
+    return 'ArityMismatch'
+  const cause =
+    expression.cause === undefined ? undefined : body.results.causes.at(expression.cause.ordinal)
+  return cause?.code === Diagnostic.wrongCallArityCode ? 'ArityMismatch' : 'Unavailable'
+}
+
+const expressionId = (body: Elaboration.CheckedBody, expression: Tir.Expression): string =>
+  `${Tir.artifactKey(body.artifact)}:${expression.id?.ordinal ?? AuthoredIdentity.anchorKey(expression.origin.anchor)}`
+
+const returned = (body: Elaboration.CheckedBody): Tir.Expression => Tir.returned(body.function)
 
 const projectCall = (
   analysis: Elaboration.Result,
   context: SemanticContext.SemanticContext,
   draft: ProjectionDraft,
-  caller: Elaboration.DeclarationFact,
-  call: CallFact,
+  caller: Elaboration.CheckedBody,
+  expression: Extract<Tir.Expression, { readonly _tag: 'Call' | 'Unavailable' }>,
   parentId: string | undefined,
   depth: number,
   ordinal: number,
-): CallProjection => {
-  const id = callId(call)
-  const groupTarget = call.reference._tag === 'Resolved' ? call.reference.declaration : undefined
+): Projection => {
+  const target =
+    expression._tag === 'Call'
+      ? expression.target
+      : (expression.call?.target ?? occurrenceTarget(caller, expression))
+  const callee = target === undefined ? undefined : bodyFor(analysis, target)
+  const id = `call-${expressionId(caller, expression)}`
+  const available = expression._tag === 'Call' && callee !== undefined
   const group: GroupDraft = {
     id,
-    label: `${callName(call)} call site`,
-    detail: `${declarationName(caller)} call at [${context.spanOf(call.anchor).start}, ${context.spanOf(call.anchor).end})`,
+    label: `${target?.name ?? 'unavailable'} call site`,
+    detail: `${caller.declaration.name._tag === 'Present' ? caller.declaration.name.spelling : 'function'} call at [${expression.span.start}, ${expression.span.end})`,
     depth,
     ordinal,
     parentId,
-    state: groupState(call),
-    span: context.spanOf(call.anchor),
+    state: available ? 'Connected' : 'Stopped',
+    span: expression.span,
     nodeIds: [],
     edgeIds: [],
-    target: groupTarget,
   }
   draft.groups.push(group)
 
-  const nestedResults = new Map<number, string>()
-  const nestedCompleteness = new Map<number, boolean>()
-  // Nested published calls are projected from TIR once this model no longer depends on records.
+  if (expression._tag === 'Unavailable') {
+    const reason = unavailableReason(caller, expression)
+    const arguments_ = expression.call?.arguments ?? []
+    for (const [argumentOrdinal, argument] of arguments_.entries()) {
+      const argumentId = `${id}-argument-${argumentOrdinal}`
+      addNode(
+        draft,
+        group,
+        semanticNode(
+          group,
+          argumentId,
+          'Argument',
+          expressionLabel(argument),
+          `Argument #${argumentOrdinal}`,
+          argumentOrdinal,
+          'Connected',
+          argument.span,
+        ),
+      )
+      if (
+        argument._tag === 'Call' ||
+        (argument._tag === 'Unavailable' && argument.call !== undefined)
+      )
+        projectCall(analysis, context, draft, caller, argument, id, depth + 1, argumentOrdinal)
+    }
+    addNode(
+      draft,
+      group,
+      semanticNode(
+        group,
+        `${id}-terminal`,
+        'Terminal',
+        `Data flow stops: ${reason}`,
+        reason,
+        undefined,
+        'Stopped',
+        expression.span,
+      ),
+    )
+    if (reason === 'ArityMismatch' && callee !== undefined)
+      for (const [parameterOrdinal, parameter] of callee.declaration.parameters
+        .filter((candidate) => candidate.phase === 'Runtime')
+        .entries())
+        addNode(
+          draft,
+          group,
+          semanticNode(
+            group,
+            `${id}-parameter-${parameterOrdinal}`,
+            'Parameter',
+            parameterName(parameter),
+            'No positional argument was supplied.',
+            parameterOrdinal,
+            'Unmatched',
+            context.spanOf(parameter.anchor),
+          ),
+        )
+    return Object.freeze({ groupId: id, complete: false })
+  }
 
-  for (const argument of call.arguments) {
-    const argumentId = `${id}-argument-${argument.id.ordinal}`
-    const nestedComplete = nestedCompleteness.get(argument.id.ordinal)
+  const parameters =
+    callee?.declaration.parameters.filter((parameter) => parameter.phase === 'Runtime') ?? []
+  let complete = callee !== undefined && expression.arguments.length === parameters.length
+  const argumentIds: Array<string> = []
+  for (const [argumentOrdinal, argument] of expression.arguments.entries()) {
+    const argumentId = `${id}-argument-${argumentOrdinal}`
+    argumentIds.push(argumentId)
     addNode(
       draft,
       group,
@@ -268,302 +357,146 @@ const projectCall = (
         group,
         argumentId,
         'Argument',
-        `Argument #${argument.id.ordinal}: ${argumentLabel(argument.expression)}`,
-        argument.type._tag === 'Available' ? typeText(argument.type.type) : 'Unavailable type',
-        call.contract._tag === 'Compatible' && nestedComplete !== false ? 'Connected' : 'Unmatched',
-        context.spanOf(argument.anchor),
-        argument.id.ordinal,
+        expressionLabel(argument),
+        `Argument #${argumentOrdinal}`,
+        argumentOrdinal,
+        'Connected',
+        argument.span,
       ),
     )
-    const nestedResult = nestedResults.get(argument.id.ordinal)
-    if (nestedResult !== undefined) {
-      addEdge(
+    if (argument._tag === 'Call' || argument._tag === 'Unavailable') {
+      const nested = projectCall(
+        analysis,
+        context,
         draft,
-        group,
-        semanticEdge(
-          group,
-          `${id}-nested-result-${argument.id.ordinal}`,
-          nestedResult,
-          argumentId,
-          'supplies nested result to',
-          'Connected',
-          context.spanOf(argument.anchor),
-        ),
+        caller,
+        argument,
+        id,
+        depth + 1,
+        argumentOrdinal,
       )
-    }
-  }
-
-  if (call.reference._tag !== 'Resolved') {
-    const referenceSpan = context.spanOf(call.reference.anchor)
-    const referenceId = `${id}-reference`
-    addNode(
-      draft,
-      group,
-      semanticNode(
-        group,
-        referenceId,
-        'Reference',
-        call.reference._tag === 'Unavailable'
-          ? 'Unavailable call target'
-          : `Call target: ${call.reference.spelling}`,
-        call.reference._tag,
-        call.reference._tag === 'Ambiguous' ? 'Branched' : 'Stopped',
-        referenceSpan,
-      ),
-    )
-    if (call.reference._tag === 'Ambiguous') {
-      for (const declaration of call.reference.declarations) {
-        const candidateId = `${id}-candidate-${declaration.id.ordinal}`
-        addNode(
-          draft,
-          group,
-          semanticNode(
-            group,
-            candidateId,
-            'Terminal',
-            `Candidate ${declarationName(declaration)}`,
-            `function #${declaration.id.ordinal}`,
-            'Branched',
-            context.spanOf(declaration.anchor),
-          ),
-        )
+      complete = complete && nested.complete
+      if (nested.resultId !== undefined)
         addEdge(
           draft,
           group,
           semanticEdge(
             group,
-            `${referenceId}-${candidateId}`,
-            referenceId,
-            candidateId,
-            'could target',
-            'Branched',
-            referenceSpan,
+            `${id}-nested-${argumentOrdinal}`,
+            nested.resultId,
+            argumentId,
+            'supplies nested result to',
+            'Connected',
+            argument.span,
           ),
         )
-      }
-    } else {
-      const terminalId = `${id}-target-stop`
-      addNode(
-        draft,
-        group,
-        semanticNode(
-          group,
-          terminalId,
-          'Terminal',
-          'Data flow stops: no unique target',
-          call.contract._tag === 'Unavailable' ? call.contract.reason._tag : call.reference._tag,
-          'Stopped',
-          context.spanOf(call.anchor),
-        ),
-      )
-      addEdge(
-        draft,
-        group,
-        semanticEdge(
-          group,
-          `${referenceId}-stop`,
-          referenceId,
-          terminalId,
-          'stops at',
-          'Stopped',
-          context.spanOf(call.anchor),
-        ),
-      )
     }
-    return Object.freeze({ groupId: id, resultId: undefined, complete: false })
   }
 
-  const target = call.reference.declaration
-
-  for (const parameter of target.parameters) {
+  for (const [parameterOrdinal, parameter] of parameters.entries()) {
+    const parameterId = `${id}-parameter-${parameterOrdinal}`
+    const argumentId = argumentIds.at(parameterOrdinal)
     addNode(
       draft,
       group,
       semanticNode(
         group,
-        `${id}-parameter-${parameter.id.ordinal}`,
+        parameterId,
         'Parameter',
-        `${declarationName(target)}.${parameterName(parameter)}`,
-        `parameter #${parameter.id.ordinal}`,
-        call.mappings.some((mapping) => mapping.parameter === parameter)
-          ? 'Connected'
-          : 'Unmatched',
+        parameterName(parameter),
+        `Parameter #${parameterOrdinal}`,
+        parameterOrdinal,
+        argumentId === undefined ? 'Unmatched' : 'Connected',
         context.spanOf(parameter.anchor),
-        parameter.id.ordinal,
       ),
     )
+    if (argumentId !== undefined)
+      addEdge(
+        draft,
+        group,
+        semanticEdge(
+          group,
+          `${id}-bind-${parameterOrdinal}`,
+          argumentId,
+          parameterId,
+          'binds positionally to',
+          'Connected',
+          expression.arguments.at(parameterOrdinal)?.span ?? expression.span,
+        ),
+      )
   }
-  for (const mapping of call.mappings) {
+
+  if (!complete || callee === undefined) {
+    const reason =
+      expression.arguments.length === parameters.length ? 'Unavailable' : 'ArityMismatch'
+    addNode(
+      draft,
+      group,
+      semanticNode(
+        group,
+        `${id}-terminal`,
+        'Terminal',
+        `Data flow stops: ${reason}`,
+        reason,
+        undefined,
+        'Stopped',
+        expression.span,
+      ),
+    )
+    return Object.freeze({ groupId: id, complete: false })
+  }
+
+  const result = returned(callee)
+  let producer: string
+  if (result._tag === 'ParameterReference') {
+    const parameterOrdinal = (callee.function.locals ?? []).findIndex(
+      (local) => local.id.ordinal === result.parameter.ordinal,
+    )
+    const parameterId = `${id}-parameter-${parameterOrdinal}`
+    producer = `${id}-reference`
+    addNode(
+      draft,
+      group,
+      semanticNode(
+        group,
+        producer,
+        'Reference',
+        expressionLabel(result),
+        'Callee return reference',
+        parameterOrdinal,
+        'Connected',
+        result.span,
+      ),
+    )
     addEdge(
       draft,
       group,
       semanticEdge(
         group,
-        `${id}-mapping-${mapping.argument.id.ordinal}`,
-        `${id}-argument-${mapping.argument.id.ordinal}`,
-        `${id}-parameter-${mapping.parameter.id.ordinal}`,
-        'binds positionally to',
+        `${id}-read`,
+        parameterId,
+        producer,
+        'is read by',
         'Connected',
-        context.spanOf(mapping.argument.anchor),
+        result.span,
       ),
     )
-  }
-
-  if (call.contract._tag !== 'Compatible') {
-    const terminalId = `${id}-contract-stop`
-    addNode(
-      draft,
-      group,
-      semanticNode(
-        group,
-        terminalId,
-        'Terminal',
-        `Data flow stops: ${call.contract._tag}`,
-        call.contract._tag === 'ArityMismatch'
-          ? `${call.contract.actualCount} actual / ${call.contract.expectedCount} expected`
-          : call.contract.reason._tag,
-        'Stopped',
-        context.spanOf(call.anchor),
-      ),
-    )
-    const origins =
-      call.mappings.length === 0
-        ? call.arguments.map((argument) => `${id}-argument-${argument.id.ordinal}`)
-        : call.mappings.map((mapping) => `${id}-parameter-${mapping.parameter.id.ordinal}`)
-    for (const origin of origins) {
-      addEdge(
-        draft,
-        group,
-        semanticEdge(
-          group,
-          `${origin}-contract-stop`,
-          origin,
-          terminalId,
-          'contract stops at',
-          'Stopped',
-          context.spanOf(call.anchor),
-        ),
-      )
-    }
-    return Object.freeze({ groupId: id, resultId: undefined, complete: false })
-  }
-
-  if (Array.from(nestedCompleteness.values()).some((complete) => !complete)) {
-    const terminalId = `${id}-nested-stop`
-    addNode(
-      draft,
-      group,
-      semanticNode(
-        group,
-        terminalId,
-        'Terminal',
-        'Data flow stops: nested argument has no result',
-        'The enclosing semantic result is not drawn.',
-        'Stopped',
-        context.spanOf(call.anchor),
-      ),
-    )
-    return Object.freeze({ groupId: id, resultId: undefined, complete: false })
-  }
-
-  const targetFact = functionFor(analysis, target)
-  const returned = targetFact?.returnedExpression
-  const returnedReference = returned === undefined ? undefined : directReference(returned)
-  if (returned === undefined || (returned._tag !== 'Integer' && returnedReference === undefined)) {
-    const terminalId = `${id}-return-stop`
-    addNode(
-      draft,
-      group,
-      semanticNode(
-        group,
-        terminalId,
-        'Terminal',
-        'Data flow stops: target return path is not directly available',
-        returned === undefined ? 'No function fact' : `${returned._tag} target return`,
-        'Stopped',
-        context.spanOf(target.anchor),
-      ),
-    )
-    return Object.freeze({ groupId: id, resultId: undefined, complete: false })
-  }
-
-  const returnedId = `${id}-target-returned`
-  if (returned._tag === 'Integer') {
-    addNode(
-      draft,
-      group,
-      semanticNode(
-        group,
-        returnedId,
-        'ReturnedValue',
-        returned.integer._tag === 'Available'
-          ? `Returned literal: ${returned.integer.value}`
-          : 'Unavailable returned literal',
-        returned.integer._tag,
-        returned.integer._tag === 'Available' ? 'Connected' : 'Stopped',
-        context.spanOf(returned.anchor),
-      ),
-    )
-    if (returned.integer._tag !== 'Available') {
-      return Object.freeze({ groupId: id, resultId: undefined, complete: false })
-    }
-  } else if (returnedReference === undefined) {
-    return Object.freeze({ groupId: id, resultId: undefined, complete: false })
   } else {
-    const referenceLabel =
-      returnedReference._tag === 'Unavailable'
-        ? 'Unavailable reference'
-        : returnedReference.spelling
-    let returnedState: FlowItemState = 'Stopped'
-    if (returnedReference._tag === 'Resolved') returnedState = 'Connected'
-    else if (returnedReference._tag === 'Ambiguous') returnedState = 'Branched'
+    producer = `${id}-returned`
     addNode(
       draft,
       group,
       semanticNode(
         group,
-        returnedId,
-        'Reference',
-        `Returned reference: ${referenceLabel}`,
-        returnedReference._tag,
-        returnedState,
-        context.spanOf(returned.anchor),
+        producer,
+        'ReturnedValue',
+        expressionLabel(result),
+        'Callee returned value',
+        undefined,
+        'Connected',
+        result.span,
       ),
     )
-    if (returnedReference._tag === 'Ambiguous') {
-      for (const parameter of returnedReference.parameters) {
-        addEdge(
-          draft,
-          group,
-          semanticEdge(
-            group,
-            `${id}-parameter-${parameter.id.ordinal}-branch`,
-            `${id}-parameter-${parameter.id.ordinal}`,
-            returnedId,
-            'could be read by',
-            'Branched',
-            context.spanOf(returned.anchor),
-          ),
-        )
-      }
-    } else if (returnedReference._tag === 'Resolved') {
-      addEdge(
-        draft,
-        group,
-        semanticEdge(
-          group,
-          `${id}-parameter-reference`,
-          `${id}-parameter-${returnedReference.parameter.id.ordinal}`,
-          returnedId,
-          'is read by',
-          'Connected',
-          context.spanOf(returned.anchor),
-        ),
-      )
-    }
-    if (returnedReference._tag !== 'Resolved') {
-      return Object.freeze({ groupId: id, resultId: undefined, complete: false })
-    }
   }
 
   const resultId = `${id}-result`
@@ -574,10 +507,11 @@ const projectCall = (
       group,
       resultId,
       'CallResult',
-      `${declarationName(target)} call result`,
-      call.type._tag === 'Available' ? typeText(call.type.type) : 'Unavailable type',
+      `${expression.target.name} result`,
+      Type.encode(expression.type),
+      undefined,
       'Connected',
-      context.spanOf(call.anchor),
+      expression.span,
     ),
   )
   addEdge(
@@ -585,48 +519,37 @@ const projectCall = (
     group,
     semanticEdge(
       group,
-      `${id}-returned-result`,
-      returnedId,
+      `${id}-produces`,
+      producer,
       resultId,
       'produces',
       'Connected',
-      context.spanOf(returned.anchor),
+      expression.span,
     ),
   )
   return Object.freeze({ groupId: id, resultId, complete: true })
 }
 
-const emptyModel = (): FlowModel =>
-  Object.freeze({
-    _tag: 'FlowModel',
-    status: 'Empty',
-    summary: 'No call expression is available for data-flow projection.',
-    groups: Object.freeze([]),
-    nodes: Object.freeze([]),
-    edges: Object.freeze([]),
-  })
-
-/** Projects semantic relationships for the inspector. */
+/** Projects semantic relationships directly from checked TIR and its supplementary tables. */
 export const projectDataFlow = (analysis: Elaboration.Result): FlowModel => {
-  const context = SemanticContext.make(analysis.authored)
-  const caller = Elaboration.records(analysis).functions.find(
-    (fact) => fact.returnedExpression._tag === 'Call',
+  const caller = analysis.bodies.find((body) => {
+    if (body.hidden) return false
+    const expression = returned(body)
+    return (
+      expression._tag === 'Call' ||
+      (expression._tag === 'Unavailable' && expression.call !== undefined)
+    )
+  })
+  if (caller === undefined) return emptyModel()
+  const rootExpression = returned(caller)
+  if (
+    rootExpression._tag !== 'Call' &&
+    (rootExpression._tag !== 'Unavailable' || rootExpression.call === undefined)
   )
-  if (caller === undefined || caller.returnedExpression._tag !== 'Call') {
     return emptyModel()
-  }
-
+  const context = SemanticContext.make(analysis.authored)
   const draft: ProjectionDraft = { groups: [], nodes: [], edges: [] }
-  const root = projectCall(
-    analysis,
-    context,
-    draft,
-    caller.declaration,
-    caller.returnedExpression,
-    undefined,
-    0,
-    0,
-  )
+  const root = projectCall(analysis, context, draft, caller, rootExpression, undefined, 0, 0)
   if (root.resultId !== undefined) {
     const group = draft.groups.find((candidate) => candidate.id === root.groupId)
     if (group !== undefined) {
@@ -638,10 +561,11 @@ export const projectDataFlow = (analysis: Elaboration.Result): FlowModel => {
           group,
           returnId,
           'FunctionReturn',
-          `${declarationName(caller.declaration)} return`,
-          caller.returnCompatibility._tag,
+          'function return',
+          'Caller returns the call result.',
+          undefined,
           'Connected',
-          context.spanOf(caller.returnedExpression.anchor),
+          rootExpression.span,
         ),
       )
       addEdge(
@@ -649,42 +573,40 @@ export const projectDataFlow = (analysis: Elaboration.Result): FlowModel => {
         group,
         semanticEdge(
           group,
-          `${group.id}-result-return`,
+          `${group.id}-returned-by`,
           root.resultId,
           returnId,
           'is returned by',
           'Connected',
-          context.spanOf(caller.returnedExpression.anchor),
+          rootExpression.span,
         ),
       )
     }
   }
-
-  const groups = draft.groups.map((group): FlowGroup =>
-    Object.freeze({
-      _tag: 'FlowGroup',
-      id: group.id,
-      label: group.label,
-      detail: group.detail,
-      depth: group.depth,
-      ordinal: group.ordinal,
-      parentId: group.parentId,
-      state: group.state,
-      span: group.span,
-      nodeIds: Object.freeze([...group.nodeIds]),
-      edgeIds: Object.freeze([...group.edgeIds]),
-    }),
-  )
-  const nodes = draft.nodes.map((item): FlowNode => Object.freeze(item))
-  const edges = draft.edges.map((item): FlowEdge => Object.freeze(item))
-  const nestedCount = Math.max(0, groups.length - 1)
-  const modeSummary = 'Semantic relationships only.'
   return Object.freeze({
     _tag: 'FlowModel',
     status: root.complete ? 'Complete' : 'Incomplete',
-    summary: `${nestedCount === 0 ? 'One call site' : `${nestedCount + 1} nested call sites`} projected. ${modeSummary}`,
-    groups: Object.freeze(groups),
-    nodes: Object.freeze(nodes),
-    edges: Object.freeze(edges),
+    summary: root.complete
+      ? 'Typed TIR connects every projected call argument to its returned result.'
+      : 'Typed TIR preserves a stopped or unmatched call boundary.',
+    groups: Object.freeze(
+      draft.groups.map((group) =>
+        Object.freeze({
+          _tag: 'FlowGroup' as const,
+          id: group.id,
+          label: group.label,
+          detail: group.detail,
+          depth: group.depth,
+          ordinal: group.ordinal,
+          parentId: group.parentId,
+          state: group.state,
+          span: group.span,
+          nodeIds: Object.freeze([...group.nodeIds]),
+          edgeIds: Object.freeze([...group.edgeIds]),
+        }),
+      ),
+    ),
+    nodes: Object.freeze([...draft.nodes]),
+    edges: Object.freeze([...draft.edges]),
   })
 }

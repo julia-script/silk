@@ -1,6 +1,7 @@
 import type * as NativeAssembly from './NativeAssembly.js'
 import * as Lifetime from './Lifetime.js'
 import * as Constraint from './Constraint.js'
+import type * as ConformanceGoal from './ConformanceGoal.js'
 import type * as ConformanceProof from './ConformanceProof.js'
 import type * as DeclarationFacts from './DeclarationFacts.js'
 import * as AuthoredIdentity from './AuthoredIdentity.js'
@@ -117,6 +118,12 @@ export interface EvidenceRef {
   readonly ordinal: number
 }
 
+/** The selected proofs one executable node retains outside its compact typed shape. */
+export interface SelectedEvidence {
+  readonly constraints: ReadonlyArray<Constraint.ConstraintEvidence>
+  readonly conformances: ReadonlyArray<ConformanceGoal.Proof>
+}
+
 /** A dense reference into a checked body's unavailable-cause table. */
 export interface CauseRef {
   readonly _tag: 'TirCause'
@@ -133,6 +140,7 @@ export interface Node {
 /** A node after its private builder has assigned its dense artifact-local identity. */
 export interface PublishedNode extends Node {
   readonly id: NodeId
+  readonly span: SourceSpan.SourceSpan
 }
 
 /** One parameter, binding, pattern value, or capture in the body's unified local namespace. */
@@ -153,6 +161,21 @@ export const artifactKey = (self: ArtifactId): string =>
     self.parent === undefined ? null : artifactKey(self.parent),
   ])
 
+/** Canonical identity of one executable node across checked artifacts. */
+export const nodeRefKey = (self: NodeRef): string =>
+  `${artifactKey(self.artifact)}:n${self.node.ordinal}`
+
+/** Tests node identity without consulting source presentation. */
+export const nodeRefEquals = (left: NodeRef, right: NodeRef): boolean =>
+  left.node.ordinal === right.node.ordinal &&
+  artifactKey(left.artifact) === artifactKey(right.artifact)
+
+/** Names a published node from the artifact that owns it. */
+export const nodeReference = (artifact: ArtifactId, node: Node): NodeRef => {
+  if (node.id === undefined) throw new RangeError('TIR node reference requires a published node')
+  return Object.freeze({ artifact, node: node.id })
+}
+
 export const authored = (anchor: AuthoredIdentity.Anchor): Origin =>
   Object.freeze({ _tag: 'Authored', anchor })
 
@@ -169,52 +192,50 @@ export interface RegionId {
 /** Compiler-only identity for one explicit call argument borrow. */
 export interface BorrowId {
   readonly _tag: 'BorrowId'
-  readonly function: DeclarationFacts.DeclarationId
-  readonly callSpan: SourceSpan.SourceSpan
-  /** The authored call `callSpan` presents; presentation stamps the span from it. */
-  readonly call?: AuthoredIdentity.Anchor
+  readonly call: NodeRef
   readonly ordinal: number
 }
 
 /** Stable compiler-owned identity for one materialized borrowable temporary. */
 export interface TemporaryOwnerId {
   readonly _tag: 'TemporaryOwnerId'
-  readonly function: DeclarationFacts.DeclarationId
-  readonly span: SourceSpan.SourceSpan
-  /** The authored node `span` presents; presentation stamps the span from it. */
-  readonly at?: AuthoredIdentity.Anchor
-  readonly ordinal: number
+  readonly node: NodeRef
 }
 
-const borrowText = (borrow: BorrowId): string =>
-  `${borrow.function.sourceId}:${borrow.function.ordinal}:${borrow.callSpan.start}:${borrow.callSpan.end}:${borrow.ordinal}`
+export const borrowKey = (borrow: BorrowId): string =>
+  `${nodeRefKey(borrow.call)}:${borrow.ordinal}`
 
-interface ExecutableSiteId {
-  readonly function: DeclarationFacts.DeclarationId
+interface ExecutableNodeSiteId {
+  readonly node: NodeRef
   readonly owner?: DeclarationFacts.CanonicalId
-  readonly ordinal: number
-  readonly span: SourceSpan.SourceSpan
-  /** The authored node `span` presents; presentation stamps the span from it. */
-  readonly at?: AuthoredIdentity.Anchor
+  readonly functionOrdinal: number
 }
 
 /** Hidden nominal identity for one source `effect {}` construction site. */
-export interface EffectSiteId extends ExecutableSiteId {
-  readonly _tag: 'EffectSiteId'
-}
+export type EffectSiteId =
+  | (ExecutableNodeSiteId & { readonly _tag: 'EffectSiteId' })
+  | {
+      readonly _tag: 'EffectSiteId'
+      readonly artifact: ArtifactId
+      readonly owner?: DeclarationFacts.CanonicalId
+      readonly functionOrdinal: number
+      readonly root: true
+    }
 
 /** Hidden nominal identity for one automatic callable-section construction site. */
-export interface CallableSiteId extends ExecutableSiteId {
+export interface CallableSiteId extends ExecutableNodeSiteId {
   readonly _tag: 'CallableSiteId'
 }
 
 /** Returns the path- and span-independent structural identity of one executable site. */
 export const executableSiteKey = (self: EffectSiteId | CallableSiteId): string =>
   `${self._tag === 'EffectSiteId' ? 'effect' : 'callable'}\u0000${
-    self.owner === undefined
-      ? `recovered:${self.function.ordinal}`
-      : `declaration:${self.owner.module}:${self.owner.name}`
-  }\u0000site:${self.ordinal}`
+    'root' in self ? `root:${AuthoredIdentity.key(self.artifact.owner)}` : nodeRefKey(self.node)
+  }`
+
+/** The artifact-local ordinal used only to name compiler-generated declarations. */
+export const executableSiteOrdinal = (self: EffectSiteId | CallableSiteId): number =>
+  'root' in self ? -1 : self.node.node.ordinal
 
 /** Tests structural executable-site identity without consulting diagnostic provenance. */
 export const sameExecutableSite = (
@@ -222,36 +243,44 @@ export const sameExecutableSite = (
   right: EffectSiteId | CallableSiteId,
 ): boolean => executableSiteKey(left) === executableSiteKey(right)
 
-/** Stable hidden Effect site for a compiler-backed selective-catch expression. */
-export const effectCatchSite = (
-  function_: DeclarationFacts.DeclarationId,
-  owner: DeclarationFacts.CanonicalId,
-  span: SourceSpan.SourceSpan,
+/** Names the implicit Effect environment of an Effect function artifact. */
+export const effectRootSite = (
+  artifact: ArtifactId,
+  functionOrdinal: number,
+  owner?: DeclarationFacts.CanonicalId,
 ): EffectSiteId =>
   Object.freeze({
     _tag: 'EffectSiteId',
-    function: function_,
+    artifact,
+    functionOrdinal,
+    root: true,
+    ...(owner === undefined ? {} : { owner }),
+  })
+
+/** Stable hidden Effect site for a compiler-backed selective-catch expression. */
+export const effectCatchSite = (
+  node: NodeRef,
+  owner: DeclarationFacts.CanonicalId,
+  functionOrdinal: number,
+): EffectSiteId =>
+  Object.freeze({
+    _tag: 'EffectSiteId',
+    node,
     owner,
-    // Authored/recovered effect-block ordinals occupy the small signed range. Catch sites derive
-    // from byte offsets in a disjoint positive range so their identity is stable across targets.
-    ordinal: 0x40000000 + span.start,
-    span,
+    functionOrdinal,
   })
 
 /** Stable hidden Effect site for one compiler-backed Effect-valued builtin call. */
 export const builtinEffectSite = (
-  function_: DeclarationFacts.DeclarationId,
+  node: NodeRef,
   owner: DeclarationFacts.CanonicalId,
-  span: SourceSpan.SourceSpan,
+  functionOrdinal: number,
 ): EffectSiteId =>
   Object.freeze({
     _tag: 'EffectSiteId',
-    function: function_,
+    node,
     owner,
-    // Effect blocks and selective catches already occupy the authored and 0x40000000 ranges.
-    // Builtin recipes use a third disjoint range while retaining target-independent source order.
-    ordinal: 0x60000000 + span.start,
-    span,
+    functionOrdinal,
   })
 
 /** Orders executable sites by their stable structural identities. */
@@ -274,8 +303,8 @@ export const callableEnvironmentSite = (self: CallableSiteId): Type.CallableEnvi
     self.owner === undefined
       ? undefined
       : Object.freeze({ module: self.owner.module, name: self.owner.name }),
-    self.function.ordinal,
-    self.ordinal,
+    self.functionOrdinal,
+    self.node.node.ordinal,
   )
 
 /** Retains one callable site's complete enclosing executable specialization. */
@@ -293,7 +322,7 @@ export const effectRunnerId = (
   Object.freeze({
     _tag: 'CanonicalDeclarationId',
     module: owner.module,
-    name: `${owner.name}$effect$${site.ordinal}`,
+    name: `${owner.name}$effect$${executableSiteOrdinal(site)}`,
   })
 
 /** Derives the private executable declaration owned by one anonymous callable site. */
@@ -304,7 +333,7 @@ export const anonymousCallableId = (
   Object.freeze({
     _tag: 'CanonicalDeclarationId',
     module: owner.module,
-    name: `${owner.name}$callable$${site.ordinal}`,
+    name: `${owner.name}$callable$${site.node.node.ordinal}`,
   })
 
 /** Tests whether a canonical declaration is owned by an anonymous callable expression site. */
@@ -568,7 +597,12 @@ export type MatchArmBody =
       readonly origin: Origin
     }
 
-export type Expression = ExpressionNode & Node
+/** Frontend-owned representation evidence retained directly on executable TIR. */
+export interface ExpressionMetadata {
+  readonly representation?: Type.RepresentationArgument
+}
+
+export type Expression = ExpressionNode & Node & ExpressionMetadata
 
 type ExpressionNode =
   | {
@@ -1180,6 +1214,16 @@ type ExpressionNode =
     }
   | {
       readonly _tag: 'Unavailable'
+      /** A checked call whose result contract is unavailable still retains its semantic inputs. */
+      readonly call?: {
+        readonly target?: DeclarationFacts.CanonicalId
+        /** Present for an indirect callable application. */
+        readonly callee?: Expression
+        readonly arguments: ReadonlyArray<Expression>
+        readonly expectedCount?: number
+        readonly access?: Type.CallableMode
+        readonly evaluation?: 'CalleeThenArguments' | 'LeftThenCallable'
+      }
       readonly span: SourceSpan.SourceSpan
       readonly origin: Origin
       readonly cause?: CauseRef
@@ -1283,6 +1327,8 @@ type StatementNode =
   | {
       readonly _tag: 'Return'
       readonly expression: Expression
+      /** True only for the synthetic completion of a body that falls through. */
+      readonly implicit?: true
       readonly region: RegionId
       readonly span: SourceSpan.SourceSpan
       readonly origin: Origin
@@ -1307,17 +1353,28 @@ type StatementNode =
 /** One elaborated function: its header, normalized contract, and desugared body statements. */
 export interface TirFunction {
   readonly _tag: 'TirFunction'
+  /** Present on every published body; private construction fills it before publication. */
+  readonly artifact?: ArtifactId
   readonly declaration: DeclarationFacts.DeclarationFact
   readonly contract: ContractFact
   readonly entryRegion: RegionId
   readonly regionOrder: ReadonlyArray<RegionId>
   /** Present on every published body; private construction fills it before publication. */
   readonly locals?: ReadonlyArray<Local>
+  /** Every executable node in dense artifact-local identity order. */
+  readonly nodes?: ReadonlyArray<PublishedNode>
   readonly statements: ReadonlyArray<Statement>
+}
+
+/** Reads the identity attached when a private function construction is published. */
+export const functionArtifact = (self: TirFunction): ArtifactId => {
+  if (self.artifact === undefined) throw new RangeError('TIR function has not been published')
+  return self.artifact
 }
 
 /** Every numbered semantic node in dense identity order. */
 export const nodesOf = (self: TirFunction): ReadonlyArray<PublishedNode> => {
+  if (self.nodes !== undefined) return self.nodes
   const nodes: Array<PublishedNode> = []
   const seen = new WeakSet<object>()
   const visit = (input: unknown): void => {
@@ -1484,6 +1541,8 @@ export const expressionChildren = (expression: Expression): ReadonlyArray<Expres
               : arm.body.statements.flatMap(statementExpressions)),
           ]),
         ]
+      case 'Unavailable':
+        return expression.call?.arguments ?? []
       default:
         return []
     }
@@ -1773,10 +1832,10 @@ export const verify = (self: Module): ReadonlyArray<VerificationIssue> => {
     if (expression._tag === 'RuntimeStringView') {
       const begins = expressionTree(expression.source).flatMap((candidate) =>
         candidate._tag === 'SliceBorrow' || candidate._tag === 'ValueBorrow'
-          ? [borrowText(candidate.borrow)]
+          ? [borrowKey(candidate.borrow)]
           : [],
       )
-      const held = expression.heldLoans.map(borrowText)
+      const held = expression.heldLoans.map(borrowKey)
       if (
         expression.source._tag === 'Unavailable' ||
         !Type.isString(expression.type) ||
@@ -1902,10 +1961,9 @@ export const verify = (self: Module): ReadonlyArray<VerificationIssue> => {
             candidate,
           ): candidate is Extract<Expression, { readonly _tag: 'SliceBorrow' | 'ValueBorrow' }> =>
             (candidate._tag === 'SliceBorrow' || candidate._tag === 'ValueBorrow') &&
-            candidate.borrow.callSpan.start === expression.span.start &&
-            candidate.borrow.callSpan.end === expression.span.end,
+            candidate.borrow.call.node.ordinal === expression.id?.ordinal,
         )
-        .map((candidate) => borrowText(candidate.borrow))
+        .map((candidate) => borrowKey(candidate.borrow))
       const authoredEnds = [
         ...expression.loanEnds,
         ...(expression._tag === 'InterfaceOperationCall' || expression._tag === 'ForeignApply'
@@ -1913,16 +1971,12 @@ export const verify = (self: Module): ReadonlyArray<VerificationIssue> => {
           : expression.heldLoans),
       ]
       const ends = authoredEnds
-        .filter(
-          (borrow) =>
-            borrow.callSpan.start === expression.span.start &&
-            borrow.callSpan.end === expression.span.end,
-        )
-        .map(borrowText)
+        .filter((borrow) => borrow.call.node.ordinal === expression.id?.ordinal)
+        .map(borrowKey)
       if (
         begins.length !== ends.length ||
         begins.some((begin, ordinal) => begin !== ends.at(ordinal)) ||
-        new Set(authoredEnds.map(borrowText)).size !== authoredEnds.length
+        new Set(authoredEnds.map(borrowKey)).size !== authoredEnds.length
       ) {
         issues.push(Object.freeze({ _tag: 'InvalidLoanEnd', span: expression.span }))
       }
@@ -2139,7 +2193,7 @@ const sliceRootText = (root: SliceRoot): string => {
     case 'PatternSliceRoot':
       return `l${root.binding.ordinal}`
     case 'TemporarySliceRoot':
-      return `t${anchorText(root.owner.at)}.${root.owner.ordinal}`
+      return `t${nodeRefKey(root.owner.node)}`
   }
 }
 
@@ -2186,7 +2240,7 @@ const encodeExpression = (expression: Expression, depth: number): string => {
       ].join('\n')
     case 'RuntimeStringView':
       return [
-        `${indent}runtime-string-view loans=${expression.heldLoans.map(borrowText).join(',') || 'none'} : string ${originText(expression.origin)}`,
+        `${indent}runtime-string-view loans=${expression.heldLoans.map(borrowKey).join(',') || 'none'} : string ${originText(expression.origin)}`,
         encodeExpression(expression.source, depth + 1),
       ].join('\n')
     case 'StringEquality':
@@ -2390,7 +2444,7 @@ const encodeExpression = (expression: Expression, depth: number): string => {
       ].join('\n')
     case 'CallableApply':
       return [
-        `${indent}callable-apply access=${expression.access.toLowerCase()} evaluation=${expression.evaluation} realization=${expression.realization}${expression.staged === undefined ? '' : ` staged=${executableSiteLabel(expression.staged.site)}[${expression.staged.captures.map((capture) => `#${capture.ordinal}:${capture.access.toLowerCase()}`).join(',')}]`} substitution=${[...expression.substitution.entries()].map(([parameter, argument]) => `${parameter}=${Type.encodeGenericArgument(argument)}`).join(',') || 'none'} ends=${expression.loanEnds.map(borrowText).join(',') || 'none'} held=${expression.heldLoans.map(borrowText).join(',') || 'none'} : ${Type.encode(expression.type)} ${originText(expression.origin)}`,
+        `${indent}callable-apply access=${expression.access.toLowerCase()} evaluation=${expression.evaluation} realization=${expression.realization}${expression.staged === undefined ? '' : ` staged=${executableSiteLabel(expression.staged.site)}[${expression.staged.captures.map((capture) => `#${capture.ordinal}:${capture.access.toLowerCase()}`).join(',')}]`} substitution=${[...expression.substitution.entries()].map(([parameter, argument]) => `${parameter}=${Type.encodeGenericArgument(argument)}`).join(',') || 'none'} ends=${expression.loanEnds.map(borrowKey).join(',') || 'none'} held=${expression.heldLoans.map(borrowKey).join(',') || 'none'} : ${Type.encode(expression.type)} ${originText(expression.origin)}`,
         ...(expression.evaluation === 'LeftThenCallable'
           ? [
               ...expression.arguments.map(
@@ -2576,7 +2630,6 @@ export const encode = (self: Module): string =>
 /** Each position a body holds, and the authored node beside it that says where it is. */
 const presented: ReadonlyArray<readonly [span: string, anchor: string]> = [
   ['span', 'at'],
-  ['callSpan', 'call'],
   ['loanEnd', 'loanEndAt'],
   ['expectedAt', 'expected'],
 ]

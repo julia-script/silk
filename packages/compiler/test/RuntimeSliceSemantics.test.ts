@@ -2,7 +2,6 @@ import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
-import type * as Elaboration from '../src/Elaboration.js'
 import * as Tir from '../src/Tir.js'
 import * as Lexer from '../src/Lexer.js'
 import * as Lifetime from '../src/Lifetime.js'
@@ -20,7 +19,7 @@ const analyze = (source: string): Elaborated =>
 const returnedCall = (
   result: Elaborated,
   ordinal: number,
-): Extract<Elaboration.ExpressionFact, { readonly _tag: 'Call' }> => {
+): Extract<Tir.Expression, { readonly _tag: 'Call' }> => {
   const expression = result.functions.at(ordinal)?.returnedExpression
   if (expression?._tag !== 'Call') throw new RangeError(`expected call in function ${ordinal}`)
   return expression
@@ -191,27 +190,22 @@ fn long() -> i32 { let mut values = [1, 2, 3, 4, 5, 6] return edit(&mut values) 
 pub fn main() -> i32 { return short() }`)
 
   assert.deepEqual(result.diagnostics, [])
-  const shared = returnedCall(result, 2).arguments.at(0)?.expression
-  const sharedLong = returnedCall(result, 3).arguments.at(0)?.expression
-  const exclusive = returnedCall(result, 4).arguments.at(0)?.expression
-  assert.strictEqual(shared?._tag, 'Borrow')
-  assert.strictEqual(exclusive?._tag, 'Borrow')
-  if (shared?._tag === 'Borrow' && shared.formation._tag === 'FixedArrayBorrow') {
+  const shared = returnedCall(result, 2).arguments.at(0)
+  const sharedLong = returnedCall(result, 3).arguments.at(0)
+  const exclusive = returnedCall(result, 4).arguments.at(0)
+  assert.strictEqual(shared?._tag, 'SliceBorrow')
+  assert.strictEqual(exclusive?._tag, 'SliceBorrow')
+  if (shared?._tag === 'SliceBorrow' && Type.isFixedArray(shared.source)) {
     assert.strictEqual(shared.access, 'Shared')
-    assert.strictEqual(shared.formation.array.length, 3)
-    assert.strictEqual(shared.type._tag === 'Available' && Type.isSlice(shared.type.type), true)
+    assert.strictEqual(shared.source.length, 3)
+    assert.strictEqual(Type.isSlice(shared.type), true)
   }
-  if (
-    shared?._tag === 'Borrow' &&
-    shared.type._tag === 'Available' &&
-    sharedLong?._tag === 'Borrow' &&
-    sharedLong.type._tag === 'Available'
-  ) {
-    assert.strictEqual(Type.runtimeKey(shared.type.type), Type.runtimeKey(sharedLong.type.type))
+  if (shared?._tag === 'SliceBorrow' && sharedLong?._tag === 'SliceBorrow') {
+    assert.strictEqual(Type.runtimeKey(shared.type), Type.runtimeKey(sharedLong.type))
   }
-  if (exclusive?._tag === 'Borrow' && exclusive.formation._tag === 'FixedArrayBorrow') {
+  if (exclusive?._tag === 'SliceBorrow' && Type.isFixedArray(exclusive.source)) {
     assert.strictEqual(exclusive.access, 'Exclusive')
-    assert.strictEqual(exclusive.formation.array.length, 6)
+    assert.strictEqual(exclusive.source.length, 6)
   }
   const tirCall = result.tir.functions.at(2)
   const returned = tirCall === undefined ? undefined : Tir.returned(tirCall)
@@ -238,20 +232,10 @@ pub fn main() -> i32 { return 0 }`)
     result.diagnostics.map((diagnostic) => diagnostic.code),
     ['SEM0058'],
   )
-  const shared = returnedCall(result, 2).arguments.at(0)?.expression
-  const exclusive = returnedCall(result, 3).arguments.at(0)?.expression
-  assert.strictEqual(
-    shared?._tag === 'Borrow' && shared.formation._tag === 'SliceReborrow'
-      ? shared.formation.suspendsParent
-      : undefined,
-    true,
-  )
-  assert.strictEqual(
-    exclusive?._tag === 'Borrow' && exclusive.formation._tag === 'SliceReborrow'
-      ? exclusive.formation.suspendsParent
-      : undefined,
-    true,
-  )
+  const shared = returnedCall(result, 2).arguments.at(0)
+  const exclusive = returnedCall(result, 3).arguments.at(0)
+  assert.strictEqual(shared?._tag === 'SliceBorrow' ? shared.suspendsParent : undefined, true)
+  assert.strictEqual(exclusive?._tag === 'SliceBorrow' ? exclusive.suspendsParent : undefined, true)
 })
 
 it('keeps uncaptured invocation lifetimes quantified in function items and sections', () => {
@@ -427,18 +411,15 @@ pub fn main() -> i32 { return 0 }`)
     result.diagnostics.map((diagnostic) => diagnostic.code),
     ['SEM0059', 'SEM0057'],
   )
-  const temporary = returnedCall(result, 5).arguments.at(0)?.expression
+  const temporary = returnedCall(result, 5).arguments.at(0)
   assert.strictEqual(
-    temporary?._tag === 'Borrow' ? temporary.formation._tag : undefined,
-    'FixedArrayBorrow',
+    temporary?._tag === 'SliceBorrow' ? temporary.root._tag : undefined,
+    'TemporarySliceRoot',
   )
-  if (temporary?._tag === 'Borrow' && temporary.formation._tag !== 'Unavailable') {
-    assert.strictEqual(temporary.formation.root._tag, 'TemporaryRoot')
-  }
-  const subplace = returnedCall(result, 6).arguments.at(0)?.expression
-  if (subplace?._tag === 'Borrow' && subplace.formation._tag !== 'Unavailable') {
-    assert.strictEqual(subplace.formation.root._tag, 'BindingRoot')
-    assert.strictEqual(subplace.formation.root.path.at(0)?._tag, 'Index')
+  const subplace = returnedCall(result, 6).arguments.at(0)
+  if (subplace?._tag === 'SliceBorrow') {
+    assert.strictEqual(subplace.root._tag, 'BindingSliceRoot')
+    assert.strictEqual(subplace.selectors.at(0)?._tag, 'Index')
   } else {
     assert.fail('expected a borrow retaining indexed-place provenance')
   }
@@ -456,29 +437,24 @@ pub fn main() -> i32 { return 0 }`)
 
   assert.deepEqual(result.diagnostics, [])
   const length = result.functions.at(0)?.returnedExpression
-  const lengthSubject = length?._tag === 'Call' ? length.arguments.at(0)?.expression : undefined
-  assert.strictEqual(
-    lengthSubject?._tag === 'FieldProjection' ? lengthSubject.state._tag : undefined,
-    'SliceLength',
-  )
+  const lengthSubject = length?._tag === 'BuiltinCall' ? length.arguments.at(0) : undefined
+  assert.strictEqual(lengthSubject?._tag, 'SliceLength')
 
   const projected = result.functions.at(1)?.returnedExpression
-  assert.strictEqual(projected?._tag, 'FieldProjection')
-  if (projected?._tag === 'FieldProjection') {
+  assert.strictEqual(projected?._tag, 'Project')
+  if (projected?._tag === 'Project') {
     assert.strictEqual(projected.borrowAccess, 'Shared')
-    assert.strictEqual(projected.subject._tag, 'IndexProjection')
-    if (projected.subject._tag === 'IndexProjection') {
-      assert.strictEqual(projected.subject.bounds._tag, 'RuntimeSlice')
-      assert.strictEqual(projected.subject.borrowAccess, 'Shared')
+    assert.strictEqual(projected.subject._tag, 'SliceIndexPlace')
+    if (projected.subject._tag === 'SliceIndexPlace') {
+      assert.strictEqual(projected.subject.access, 'Shared')
     }
   }
 
   const write = result.functions.at(2)?.statements.at(0)
-  assert.strictEqual(write?._tag, 'WriteStatement')
-  if (write?._tag === 'WriteStatement' && write.destination._tag === 'IndexProjection') {
-    assert.strictEqual(write.destination.bounds._tag, 'RuntimeSlice')
-    assert.strictEqual(write.destination.borrowAccess, 'Exclusive')
-    assert.strictEqual(write.root?._tag, 'ParameterDeclaration')
+  assert.strictEqual(write?._tag, 'Write')
+  if (write?._tag === 'Write' && write.place._tag === 'BorrowedWritePlace') {
+    assert.strictEqual(write.place.root._tag, 'ParameterSliceRoot')
+    assert.strictEqual(write.place.selectors.at(0)?._tag, 'SliceIndex')
   }
   const lengthTir = result.tir.functions.at(0)
   const lengthReturn = lengthTir === undefined ? undefined : Tir.returned(lengthTir)
@@ -511,13 +487,7 @@ pub fn main() -> i32 { return make<&[i32]>() }`)
 it('retains an unavailable borrow fact after damaged operand syntax', () => {
   const result = analyze(`fn read(values: &[i32]) -> i32 { return 0 }
 pub fn main() -> i32 { return read(&) }`)
-  const argument = returnedCall(result, 1).arguments.at(0)?.expression
-
-  assert.strictEqual(argument?._tag, 'Borrow')
-  assert.strictEqual(
-    argument?._tag === 'Borrow' ? argument.formation._tag : undefined,
-    'Unavailable',
-  )
+  assert.strictEqual(result.functions.at(1)?.returnedExpression._tag, 'Unavailable')
   const main = result.tir.functions.at(1)
   assert.notStrictEqual(main === undefined ? undefined : Tir.firstUnavailable(main), undefined)
 })

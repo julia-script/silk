@@ -105,8 +105,8 @@ interface Producer {
 const familyKey = (family: Type.OpaqueFamilyKey): string => Type.opaqueFamilyKey(family)
 
 const reachableResults = (
-  expression: Elaboration.ExpressionFact | Tir.Expression,
-): ReadonlyArray<Elaboration.ExpressionFact | Tir.Expression> => {
+  expression: Elaboration.ExpressionDecision | Tir.Expression,
+): ReadonlyArray<Elaboration.ExpressionDecision | Tir.Expression> => {
   if (expression._tag !== 'Match') return Object.freeze([expression])
   return Object.freeze(
     expression.arms.flatMap((arm) =>
@@ -116,14 +116,13 @@ const reachableResults = (
 }
 
 const returnExpressions = (
-  statements: ReadonlyArray<Elaboration.StatementFact>,
-): ReadonlyArray<Elaboration.ExpressionFact | Tir.Expression> => {
-  const found: Array<Elaboration.ExpressionFact | Tir.Expression> = []
-  Elaboration.visitStatementFacts(statements, {
+  statements: ReadonlyArray<Tir.Statement>,
+): ReadonlyArray<Elaboration.ExpressionDecision | Tir.Expression> => {
+  const found: Array<Elaboration.ExpressionDecision | Tir.Expression> = []
+  Elaboration.visitStatements(statements, {
     descendExpressions: false,
     statement: (statement) => {
-      if (statement._tag === 'ReturnStatement')
-        found.push(...reachableResults(statement.expression))
+      if (statement._tag === 'Return') found.push(...reachableResults(statement.expression))
     },
   })
   return Object.freeze(found)
@@ -131,7 +130,7 @@ const returnExpressions = (
 
 const evidence = (
   argument: Type.RepresentationArgument,
-  expression: Elaboration.ExpressionFact | Tir.Expression,
+  expression: Elaboration.ExpressionDecision | Tir.Expression,
 ): Evidence =>
   Object.freeze({
     argument,
@@ -142,7 +141,7 @@ const evidence = (
 
 const evidenceOf = (
   context: SemanticContext.SemanticContext,
-  expression: Elaboration.ExpressionFact | Tir.Expression,
+  expression: Elaboration.ExpressionDecision | Tir.Expression,
   expected: Type.Type,
   family: Type.OpaqueFamilyKey,
 ): ReadonlyArray<Evidence> => {
@@ -196,7 +195,7 @@ const sourceBodyFingerprint = (
 export const evidenceOfBody = (
   context: SemanticContext.SemanticContext,
   declaration: DeclarationFacts.DeclarationFact,
-  statements: ReadonlyArray<Elaboration.StatementFact>,
+  statements: ReadonlyArray<Tir.Statement>,
 ): ReadonlyArray<Evidence> => {
   const opaque = declaration.opaqueResult
   const expected = declaration.returnType
@@ -233,10 +232,14 @@ const producers = (results: ReadonlyMap<string, Elaboration.Result>): ReadonlyAr
   )
 
 const constructionExpression = (
-  expression: Elaboration.ExpressionFact | Tir.Expression,
-): Elaboration.ExpressionFact | Tir.Expression => {
+  expression: Elaboration.ExpressionDecision | Tir.Expression,
+): Elaboration.ExpressionDecision | Tir.Expression => {
   if (expression._tag === 'Move') return constructionExpression(expression.subject)
-  if (!('origin' in expression) && expression._tag === 'Identifier' && expression.reference._tag === 'ResolvedBinding')
+  if (
+    !('origin' in expression) &&
+    expression._tag === 'Identifier' &&
+    expression.reference._tag === 'ResolvedBinding'
+  )
     return constructionExpression(expression.reference.binding.initializer)
   return expression
 }
@@ -252,7 +255,7 @@ const captureType = (
 }
 
 const capturesOf = (
-  expression: Elaboration.ExpressionFact | Tir.Expression,
+  expression: Elaboration.ExpressionDecision | Tir.Expression,
 ): ReadonlyArray<Capture> => {
   const construction = constructionExpression(expression)
   if ('origin' in construction && construction._tag === 'CallableSection')
@@ -305,10 +308,10 @@ const capturesOf = (
 }
 
 const expressionSuspends = (
-  expression: Elaboration.ExpressionFact | Tir.Expression,
+  expression: Elaboration.ExpressionDecision | Tir.Expression,
 ): boolean => {
   let suspendable = false
-  Elaboration.visitExpressionFacts(expression, {
+  Elaboration.visitExpressionDecisions(expression, {
     expression: (current) => {
       if (current._tag === 'Run') suspendable = true
     },

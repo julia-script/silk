@@ -9,6 +9,7 @@ import type * as DeclarationIndex from './DeclarationIndex.js'
 import type * as Diagnostic from './Diagnostic.js'
 import * as Elaboration from './Elaboration.js'
 import * as Tir from './Tir.js'
+import * as BodyBuilder from './BodyBuilder.js'
 import * as Intrinsic from './Intrinsic.js'
 import type * as Match from './Match.js'
 import * as NameResolution from './NameResolution.js'
@@ -659,7 +660,7 @@ const collectDeclaredType = (
 }
 
 const collectRowExpression = (
-  fact: DeclarationFacts.RowExpressionFact,
+  fact: DeclarationFacts.RowExpressionDecision,
   index: DeclarationIndex.Index,
   scope: NameResolution.ModuleScope | undefined,
   pending: Array<Pending>,
@@ -845,7 +846,7 @@ const collectCallReference = (
     if (qualifierName !== undefined)
       collectQualifier(qualifier, qualifierName, scope, index, pending)
   }
-  const selected = 'anchor' in reference ? reference.anchor : anchors.at(-1)
+  const selected = anchors.at(-1)
   const resolved = callResolution(reference, index)
   // A receiver-syntax call names its member without a qualifier token; the member keeps its
   // identity and gains the method role, so hover presents the receiver-bound contract.
@@ -993,14 +994,21 @@ const collectPattern = (
 }
 
 const collectExpression = (
-  expression: Elaboration.ExpressionFact | Tir.Expression,
+  expression: Elaboration.ExpressionDecision | Tir.Expression,
   index: DeclarationIndex.Index,
   scope: NameResolution.ModuleScope | undefined,
   pending: Array<Pending>,
+  builder?: BodyBuilder.BodyBuilder,
 ): void => {
   if ('origin' in expression) {
+    const semantic =
+      builder === undefined ? undefined : BodyBuilder.semanticOfExpression(builder, expression)
+    if (semantic !== undefined) {
+      collectExpression(semantic, index, scope, pending, builder)
+      return
+    }
     for (const child of Tir.expressionChildren(expression))
-      collectExpression(child, index, scope, pending)
+      collectExpression(child, index, scope, pending, builder)
     return
   }
   switch (expression._tag) {
@@ -1052,7 +1060,7 @@ const collectExpression = (
           }),
         ),
       )
-      collectExpression(expression.argument, index, scope, pending)
+      collectExpression(expression.argument, index, scope, pending, builder)
       return
     case 'Constant':
       push(
@@ -1082,16 +1090,16 @@ const collectExpression = (
       for (const typeArgument of expression.typeArguments)
         collectDeclaredType(typeArgument.declared, index, scope, pending)
       for (const argument of expression.arguments)
-        collectExpression(argument.expression, index, scope, pending)
+        collectExpression(argument.expression, index, scope, pending, builder)
       return
     case 'Operator':
       collectCallReference(expression.reference, undefined, index, scope, pending)
       for (const argument of expression.arguments)
-        collectExpression(argument.expression, index, scope, pending)
+        collectExpression(argument.expression, index, scope, pending, builder)
       return
     case 'ShortCircuit':
       for (const argument of expression.arguments)
-        collectExpression(argument.expression, index, scope, pending)
+        collectExpression(argument.expression, index, scope, pending, builder)
       return
     case 'FunctionItem':
       collectCallReference(expression.reference, expression.path, index, scope, pending)
@@ -1119,17 +1127,34 @@ const collectExpression = (
         collectRowExpression(declaration.failureRow.expression, index, scope, pending)
         collectRowExpression(declaration.requirementRow.expression, index, scope, pending)
       }
+      for (const capture of expression.anonymous?.captures ?? []) {
+        let identity: Identity
+        if (Elaboration.isBindingDeclarationFact(capture.reference))
+          identity = Object.freeze({ _tag: 'BindingIdentity', id: capture.reference.id })
+        else if (Elaboration.isPatternBindingFact(capture.reference))
+          identity = Object.freeze({ _tag: 'PatternBindingIdentity', id: capture.reference.id })
+        else identity = Object.freeze({ _tag: 'ParameterIdentity', id: capture.reference.id })
+        push(
+          pending,
+          capture.expression.origin.anchor,
+          'Value',
+          available(identity),
+          Elaboration.isParameterFact(capture.reference)
+            ? locationOfParameter(capture.reference)
+            : locationOfBinding(capture.reference),
+        )
+      }
       for (const capture of expression.captures)
-        collectExpression(capture.expression, index, scope, pending)
+        collectExpression(capture.expression, index, scope, pending, builder)
       return
     case 'ForeignApply':
     case 'CallableApply':
-      collectExpression(expression.callee, index, scope, pending)
+      collectExpression(expression.callee, index, scope, pending, builder)
       for (const argument of expression.arguments)
-        collectExpression(argument.expression, index, scope, pending)
+        collectExpression(argument.expression, index, scope, pending, builder)
       return
     case 'FieldProjection': {
-      collectExpression(expression.subject, index, scope, pending)
+      collectExpression(expression.subject, index, scope, pending, builder)
       // The occurrence is the written field name, not the projection around it.
       const token = expression.fieldAnchor
       if (expression.state._tag === 'Resolved')
@@ -1174,7 +1199,7 @@ const collectExpression = (
             available(Object.freeze({ _tag: 'FieldIdentity', id: initializer.state.field.id })),
             locationOfField(index, initializer.state.field),
           )
-        collectExpression(initializer.expression, index, scope, pending)
+        collectExpression(initializer.expression, index, scope, pending, builder)
       }
       return
     }
@@ -1205,52 +1230,52 @@ const collectExpression = (
             available(Object.freeze({ _tag: 'FieldIdentity', id: initializer.state.field.id })),
             locationOfField(index, initializer.state.field),
           )
-        collectExpression(initializer.expression, index, scope, pending)
+        collectExpression(initializer.expression, index, scope, pending, builder)
       }
       return
     }
     case 'Move':
     case 'Borrow':
     case 'Run':
-      collectExpression(expression.subject, index, scope, pending)
+      collectExpression(expression.subject, index, scope, pending, builder)
       return
     case 'PlaceReplace':
       collectIntrinsicReference(expression.reference, index, pending)
-      collectExpression(expression.destination, index, scope, pending)
-      collectExpression(expression.value, index, scope, pending)
+      collectExpression(expression.destination, index, scope, pending, builder)
+      collectExpression(expression.value, index, scope, pending, builder)
       return
     case 'IndexProjection':
-      collectExpression(expression.subject, index, scope, pending)
-      collectExpression(expression.index, index, scope, pending)
+      collectExpression(expression.subject, index, scope, pending, builder)
+      collectExpression(expression.index, index, scope, pending, builder)
       return
     case 'ArrayLiteral':
       for (const element of expression.elements)
-        collectExpression(element.expression, index, scope, pending)
+        collectExpression(element.expression, index, scope, pending, builder)
       return
     case 'Match':
-      collectExpression(expression.scrutinee, index, scope, pending)
+      collectExpression(expression.scrutinee, index, scope, pending, builder)
       for (const arm of expression.arms) {
         collectPattern(arm.pattern, index, scope, pending)
-        if (arm.guard !== undefined) collectExpression(arm.guard, index, scope, pending)
+        if (arm.guard !== undefined) collectExpression(arm.guard, index, scope, pending, builder)
         if (arm.body._tag === 'Expression')
-          collectExpression(arm.body.expression, index, scope, pending)
+          collectExpression(arm.body.expression, index, scope, pending, builder)
         else
           for (const statement of arm.body.statements)
-            collectStatement(statement, index, scope, pending)
+            collectStatement(statement, index, scope, pending, builder)
       }
       return
     case 'EffectBlock':
       for (const statement of expression.statements)
-        collectStatement(statement, index, scope, pending)
+        collectStatement(statement, index, scope, pending, builder)
       return
     case 'EffectCatch':
       collectIntrinsicReference(expression.reference, index, pending)
-      collectExpression(expression.protected, index, scope, pending)
-      collectExpression(expression.handler, index, scope, pending)
+      collectExpression(expression.protected, index, scope, pending, builder)
+      collectExpression(expression.handler, index, scope, pending, builder)
       return
     case 'EffectBindRequirement':
       collectIntrinsicReference(expression.reference, index, pending)
-      collectExpression(expression.protected, index, scope, pending)
+      collectExpression(expression.protected, index, scope, pending, builder)
       return
     case 'Integer':
     case 'Boolean':
@@ -1258,62 +1283,104 @@ const collectExpression = (
   }
 }
 
+/** Resolves the authored names carried by one short-lived expression decision. */
+export const ofExpressionDecision = (
+  expression: Elaboration.ExpressionDecision,
+  index: DeclarationIndex.Index,
+  scope: NameResolution.ModuleScope | undefined,
+): ReadonlyArray<LocatedOccurrence> => {
+  const pending: Array<Pending> = []
+  collectExpression(expression, index, scope, pending)
+  return Object.freeze(pending)
+}
+
 const collectStatement = (
-  statement: Elaboration.StatementFact,
+  statement: Tir.Statement,
   index: DeclarationIndex.Index,
   scope: NameResolution.ModuleScope | undefined,
   pending: Array<Pending>,
+  builder?: BodyBuilder.BodyBuilder,
 ): void => {
   switch (statement._tag) {
-    case 'UnsafeStatement':
-      for (const nested of statement.statements) collectStatement(nested, index, scope, pending)
+    case 'Unsafe':
+      for (const nested of statement.statements)
+        collectStatement(nested, index, scope, pending, builder)
       return
-    case 'BindStatement':
-      if (statement.binding.name._tag === 'Present')
+    case 'Bind': {
+      const binding =
+        builder === undefined ? undefined : BodyBuilder.semanticOfLocal(builder, statement.binding)
+      if (Elaboration.isBindingDeclarationFact(binding) && binding.name._tag === 'Present')
         push(
           pending,
-          statement.binding.name.anchor,
+          binding.name.anchor,
           'Declaration',
-          available(Object.freeze({ _tag: 'BindingIdentity', id: statement.binding.id })),
-          locationOfBinding(statement.binding),
+          available(Object.freeze({ _tag: 'BindingIdentity', id: binding.id })),
+          locationOfBinding(binding),
         )
-      if (statement.binding.declaredType !== undefined)
-        collectDeclaredType(statement.binding.declaredType, index, scope, pending)
-      collectExpression(statement.binding.initializer, index, scope, pending)
+      if (Elaboration.isBindingDeclarationFact(binding) && binding.declaredType !== undefined)
+        collectDeclaredType(binding.declaredType, index, scope, pending)
+      collectExpression(statement.initializer, index, scope, pending, builder)
       return
-    case 'PatternBindStatement':
-      collectPattern(statement.selection.pattern, index, scope, pending)
-      collectExpression(statement.selection.source, index, scope, pending)
+    }
+    case 'PatternBind': {
+      const semantic =
+        builder === undefined
+          ? undefined
+          : BodyBuilder.semanticOfPatternSelection(builder, statement.selection)
+      if (semantic !== undefined) collectPattern(semantic.pattern, index, scope, pending)
+      collectExpression(
+        statement.selection.source ?? statement.selection.subject,
+        index,
+        scope,
+        pending,
+        builder,
+      )
       return
-    case 'ExpressionStatement':
-      collectExpression(statement.expression, index, scope, pending)
+    }
+    case 'Evaluate':
+      collectExpression(statement.expression, index, scope, pending, builder)
       return
-    case 'ReturnStatement':
-    case 'FailStatement':
-    case 'DropStatement':
-      collectExpression(statement.expression, index, scope, pending)
+    case 'Return':
+    case 'Fail':
+    case 'Drop':
+      collectExpression(statement.expression, index, scope, pending, builder)
       return
-    case 'IfStatement':
-      collectExpression(statement.condition, index, scope, pending)
-      for (const nested of statement.taken) collectStatement(nested, index, scope, pending)
-      for (const nested of statement.otherwise) collectStatement(nested, index, scope, pending)
+    case 'If':
+      collectExpression(statement.condition, index, scope, pending, builder)
+      for (const nested of statement.taken) collectStatement(nested, index, scope, pending, builder)
+      for (const nested of statement.otherwise)
+        collectStatement(nested, index, scope, pending, builder)
       return
-    case 'IfLetStatement':
-      collectPattern(statement.selection.pattern, index, scope, pending)
-      collectExpression(statement.selection.source, index, scope, pending)
-      for (const nested of statement.taken) collectStatement(nested, index, scope, pending)
-      for (const nested of statement.otherwise) collectStatement(nested, index, scope, pending)
+    case 'IfLet': {
+      const semantic =
+        builder === undefined
+          ? undefined
+          : BodyBuilder.semanticOfPatternSelection(builder, statement.selection)
+      if (semantic !== undefined) collectPattern(semantic.pattern, index, scope, pending)
+      collectExpression(
+        statement.selection.source ?? statement.selection.subject,
+        index,
+        scope,
+        pending,
+        builder,
+      )
+      for (const nested of statement.taken) collectStatement(nested, index, scope, pending, builder)
+      for (const nested of statement.otherwise)
+        collectStatement(nested, index, scope, pending, builder)
       return
-    case 'WriteStatement':
-      collectExpression(statement.destination, index, scope, pending)
-      collectExpression(statement.value, index, scope, pending)
+    }
+    case 'Write':
+      if (statement.destination !== undefined)
+        collectExpression(statement.destination, index, scope, pending, builder)
+      collectExpression(statement.value, index, scope, pending, builder)
       return
-    case 'WhileStatement':
-      collectExpression(statement.condition, index, scope, pending)
-      for (const nested of statement.body) collectStatement(nested, index, scope, pending)
+    case 'While':
+      collectExpression(statement.condition, index, scope, pending, builder)
+      for (const nested of statement.body) collectStatement(nested, index, scope, pending, builder)
       return
-    case 'BreakStatement':
-    case 'ContinueStatement':
+    case 'Break':
+    case 'Continue':
+    case 'UnavailableStatement':
       return
   }
 }
@@ -1668,12 +1735,13 @@ const collectImports = (
  * reused body keeps.
  */
 export const ofStatements = (
-  statements: ReadonlyArray<Elaboration.StatementFact>,
+  statements: ReadonlyArray<Tir.Statement>,
   index: DeclarationIndex.Index,
   scope: NameResolution.ModuleScope | undefined,
+  builder?: BodyBuilder.BodyBuilder,
 ): ReadonlyArray<LocatedOccurrence> => {
   const pending: Array<Pending> = []
-  for (const statement of statements) collectStatement(statement, index, scope, pending)
+  for (const statement of statements) collectStatement(statement, index, scope, pending, builder)
   return Object.freeze(pending)
 }
 
@@ -1728,7 +1796,7 @@ export const makeModule = (
   index: DeclarationIndex.Index,
   spans: SemanticContext.Registry,
   resolution: NameResolution.Resolution,
-  conditions: ReadonlyArray<Elaboration.ExpressionFact> = [],
+  conditions: ReadonlyArray<Elaboration.ExpressionDecision> = [],
   syntax?: SyntaxFile.SyntaxFile,
 ): ModuleIndex => {
   const pending: Array<Pending> = []
@@ -1860,6 +1928,30 @@ export const at = (self: Index, module: string, offset: number): SemanticOccurre
   if (moduleIndex === undefined) return undefined
   let cursor = lastStartAtOrBefore(moduleIndex.occurrences, offset)
   let selected: SemanticOccurrence | undefined
+  const rank = (occurrence: SemanticOccurrence): readonly [number, number, number] => {
+    let identityRank = 2
+    if (occurrence.resolution._tag === 'Available') {
+      const identity = occurrence.resolution.identity
+      if (identity._tag === 'BindingIdentity' || identity._tag === 'PatternBindingIdentity')
+        identityRank = 0
+      else if (identity._tag === 'ParameterIdentity') identityRank = 1
+    }
+    return [
+      occurrence.resolution._tag === 'Available' ? 0 : 1,
+      occurrence.role === 'Declaration' ? 0 : 1,
+      identityRank,
+    ]
+  }
+  const preferred = (left: SemanticOccurrence, right: SemanticOccurrence): boolean => {
+    const leftRank = rank(left)
+    const rightRank = rank(right)
+    for (let index = 0; index < leftRank.length; index += 1) {
+      const leftPart = leftRank.at(index) ?? 0
+      const rightPart = rightRank.at(index) ?? 0
+      if (leftPart !== rightPart) return leftPart < rightPart
+    }
+    return left.ordinal < right.ordinal
+  }
   while (cursor >= 0 && (moduleIndex.prefixMaximumEnd.at(cursor) ?? 0) > offset) {
     const candidate = moduleIndex.occurrences.at(cursor)
     if (
@@ -1869,7 +1961,7 @@ export const at = (self: Index, module: string, offset: number): SemanticOccurre
       (selected === undefined ||
         candidate.span.end - candidate.span.start < selected.span.end - selected.span.start ||
         (candidate.span.end - candidate.span.start === selected.span.end - selected.span.start &&
-          candidate.ordinal < selected.ordinal))
+          preferred(candidate, selected)))
     )
       selected = candidate
     cursor -= 1

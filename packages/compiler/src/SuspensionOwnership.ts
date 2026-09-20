@@ -4,7 +4,7 @@ import * as CleanupPlan from './CleanupPlan.js'
 import type * as DeclarationIndex from './DeclarationIndex.js'
 import * as ExecutionAffinity from './ExecutionAffinity.js'
 import type * as ExecutionPackage from './ExecutionPackage.js'
-import type * as Tir from './Tir.js'
+import * as Tir from './Tir.js'
 import * as Instances from './Instances.js'
 import * as SetOf from './internal/SetOf.js'
 import * as Layout from './Layout.js'
@@ -870,7 +870,7 @@ export const plan = (
 
 const borrowText = (borrow: BorrowIdentity): string => {
   if (borrow._tag === 'MirLoan') {
-    return `loan:${borrow.borrow.function.sourceId}:${borrow.borrow.callSpan.start}:${borrow.borrow.ordinal}`
+    return `loan:${Tir.borrowKey(borrow.borrow)}`
   }
   if (borrow._tag === 'BorrowedParameter') {
     return `parameter:${borrow.parameterOrdinal}`

@@ -435,12 +435,9 @@ pub fn main() -> i32 { return 42 }`
     const snapshot = yield* AnalysisFixture.retainingMain(module, encoder.encode(source))
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
     const suspended = Analysis.expressionsOf(snapshot, module).find(
-      (expression) =>
-        expression._tag === 'Call' &&
-        expression.reference._tag === 'ResolvedBuiltin' &&
-        expression.reference.operation === 'EffectSuspend',
+      (expression) => expression._tag === 'BuiltinCall' && expression.operation === 'EffectSuspend',
     )
-    const type = suspended?.type._tag === 'Available' ? suspended.type.type : undefined
+    const type = suspended?._tag === 'BuiltinCall' ? suspended.type : undefined
     assert.isTrue(type !== undefined && Type.isEffect(type))
     if (type !== undefined && Type.isEffect(type)) {
       assert.strictEqual(type.access, 'Take')
@@ -473,11 +470,10 @@ pub fn main() -> i32 { return 42 }`),
     const observed = Analysis.expressionsOf(snapshot, module).find(
       (expression) =>
         expression._tag === 'Call' &&
-        expression.type._tag === 'Available' &&
-        Type.isEffect(expression.type.type) &&
-        expression.type.type.success === 'i32',
+        Type.isEffect(expression.type) &&
+        expression.type.success === 'i32',
     )
-    const type = observed?.type._tag === 'Available' ? observed.type.type : undefined
+    const type = observed?._tag === 'Call' ? observed.type : undefined
     assert.isTrue(type !== undefined && Type.isEffect(type))
     if (type !== undefined && Type.isEffect(type)) {
       assert.strictEqual(type.access, 'Take')

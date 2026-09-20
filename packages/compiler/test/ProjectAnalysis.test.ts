@@ -931,6 +931,7 @@ it.effect('reuses exact unchanged syntax and module semantics inside one coheren
     const retainedBody = retainedResult.bodies.at(0) ?? raise('retained checked body')
     const ownershipInput = Ownership.input(
       retainedFunction,
+      Tir.functionArtifact(retainedFunction),
       retainedBody.results.lifetimes,
       currentView.index,
       Ownership.localSharedAccessBoundaryPlan(currentView.results),
@@ -1151,6 +1152,7 @@ unsafe fn probe(core: &Intrinsic.SharedCore<i32>) -> i32 { return 1 }`
       const body = afterResult.bodies.at(0) ?? raise('callback body')
       const previousInput = Ownership.input(
         fn,
+        Tir.functionArtifact(fn),
         body.results.lifetimes,
         before.index,
         Ownership.localSharedAccessBoundaryPlan(before.results),
@@ -1159,6 +1161,7 @@ unsafe fn probe(core: &Intrinsic.SharedCore<i32>) -> i32 { return 1 }`
       )
       const currentInput = Ownership.input(
         fn,
+        Tir.functionArtifact(fn),
         body.results.lifetimes,
         after.index,
         Ownership.localSharedAccessBoundaryPlan(after.results),

@@ -19,7 +19,7 @@ import * as StaticEvaluation from './StaticEvaluation.js'
 
 /** One completed profile's declaration choices and their full authored provenance. */
 export interface ModuleSelection {
-  readonly conditions: ReadonlyMap<string, ReadonlyArray<Elaboration.ExpressionFact>>
+  readonly conditions: ReadonlyMap<string, ReadonlyArray<Elaboration.ExpressionDecision>>
   readonly profile: CompilationProfile.CompilationProfile
   /** Decisions per module, keyed by the owner key of the authored conditional declaration. */
   readonly decisions: ReadonlyMap<string, ReadonlyMap<string, boolean>>
@@ -320,7 +320,7 @@ export const select = Effect.fn('ModuleSelection.select')(function* (
   const decisions = new Map<string, Map<string, boolean>>()
   const bootstrapModules = new Set(initial.modules.map((module) => module.name))
   const dependencies: Array<string> = []
-  const expressions = new Map<string, Map<number, Elaboration.ExpressionFact>>()
+  const expressions = new Map<string, Map<number, Elaboration.ExpressionDecision>>()
   let closure = initial
   let diagnostics: ReadonlyArray<Diagnostic.Diagnostic> = []
   while (true) {

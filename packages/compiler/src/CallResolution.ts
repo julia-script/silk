@@ -1,7 +1,6 @@
 import * as Location from './Location.js'
 import * as CAbi from './CAbi.js'
 import type * as AuthoredHir from './AuthoredHir.js'
-import * as AuthoredIdentity from './AuthoredIdentity.js'
 import * as AuthoredWalk from './AuthoredWalk.js'
 import * as SemanticContext from './SemanticContext.js'
 import * as BodyLifetime from './BodyLifetime.js'
@@ -21,13 +20,13 @@ import type {
   ArgumentFact,
   ArgumentMappingFact,
   ArgumentsResult,
-  CallableApplyExpressionFact,
+  CallableApplyExpressionDecision,
   CallableCaptureFact,
-  CallableSectionExpressionFact,
+  CallableSectionExpressionDecision,
   CallContractFact,
   CallReferenceFact,
   DeclarationFact,
-  ExpressionFact,
+  ExpressionDecision,
   ExpressionResult,
   InferredProviderSelector,
   ReferencePathFact,
@@ -59,7 +58,6 @@ import {
   resolveValueName,
   sectionIntrinsicReference,
   strongestEffectAccess,
-  unavailableExpression,
 } from './ExpressionAnalysis.js'
 import * as Tir from './Tir.js'
 import * as BodyBuilder from './BodyBuilder.js'
@@ -70,7 +68,6 @@ import * as ProviderSelection from './ProviderSelection.js'
 import * as ResolutionWork from './ResolutionWork.js'
 import * as RequirementRow from './RequirementRow.js'
 import * as RowAlgebra from './RowAlgebra.js'
-import type * as SourceSpan from './SourceSpan.js'
 import { unsafeCallDiagnostic } from './StatementAnalysis.js'
 import * as Type from './Type.js'
 import * as TypeCompatibility from './TypeCompatibility.js'
@@ -945,6 +942,7 @@ export const seededSpecialization = (
   deferred: ReadonlySet<string> = new Set(),
   enclosingSubstitution: Type.Substitution = new Map(),
   lifetimes?: SelectedCallLifetimes,
+  builder?: BodyBuilder.BodyBuilder,
 ): SeededSpecialization => {
   const written = new Map<string, TypeArgumentFact>()
   const selectedParameters = new Map<TypeArgumentFact, Type.Parameter>()
@@ -1016,7 +1014,7 @@ export const seededSpecialization = (
     const expected = Type.substitute(site.pattern, inferred)
     if (
       typesCompatible(site.actual, expected, lifetimes?.compatibility) ||
-      contextualIntegerCompatible(site.expression, expected)
+      contextualIntegerCompatible(site.expression, expected, builder)
     )
       continue
     rowFailure ??= TypeInference.inferenceFailure(
@@ -1764,6 +1762,7 @@ export const analyzeCallContract = (
       constraintDeferred,
       resolution?.staticContext?.typeSubstitution,
       callLifetimes,
+      resolution?.builder,
     )
     const conflict = seeded.conflicts.at(0)
     if (conflict !== undefined) {
@@ -2009,7 +2008,7 @@ export const analyzeCallContract = (
     const suppliedValue = Type.isRepresented(site.actual) ? site.actual.contract : site.actual
     if (
       !typesCompatible(suppliedValue, expectedValue, resolution?.lifetimeCompatibility) &&
-      !contextualIntegerCompatible(argument.expression, expectedValue)
+      !contextualIntegerCompatible(argument.expression, expectedValue, resolution?.builder)
     ) {
       let mismatch: Diagnostic.Located
       if (Type.isForeignFunction(expectedValue) && !Type.isForeignFunction(suppliedValue)) {
@@ -3156,6 +3155,7 @@ export const analyzeSectionContract = (
         ]),
         resolution?.staticContext?.typeSubstitution,
         callLifetimes,
+        resolution?.builder,
       )
       substitution = new Map(seeded.substitution)
       for (const conflict of seeded.conflicts) {
@@ -3264,7 +3264,7 @@ export const analyzeSectionContract = (
 }
 
 export const captureAccess = (
-  expression: ExpressionFact | Tir.Expression,
+  expression: ExpressionDecision | Tir.Expression,
   index: DeclarationIndex.Index | undefined,
   assumptions: ReadonlySet<string> = new Set(),
 ): CallableCaptureFact['access'] => {
@@ -3299,7 +3299,7 @@ export const captureAccess = (
 }
 
 export const ownedProviderCaptureAccess = (
-  expression: ExpressionFact | Tir.Expression,
+  expression: ExpressionDecision | Tir.Expression,
   index: DeclarationIndex.Index,
   assumptions: ReadonlySet<string> = new Set(),
 ): CallableCaptureFact['access'] => {
@@ -3313,12 +3313,12 @@ export const ownedProviderCaptureAccess = (
 }
 
 type ExactCallableFact = Extract<
-  ExpressionFact,
+  ExpressionDecision,
   { readonly _tag: 'FunctionItem' | 'CallableSection' }
 >
 
 export const exactCallableOf = (
-  expression: ExpressionFact,
+  expression: ExpressionDecision,
   writtenBindings: ReadonlySet<number> = new Set(),
 ): ExactCallableFact | undefined => {
   if (expression._tag === 'Move') {
@@ -3333,7 +3333,7 @@ export const exactCallableOf = (
 }
 
 export const concreteCallableIdentity = (
-  expression: ExpressionFact,
+  expression: ExpressionDecision,
   writtenBindings: ReadonlySet<number> = new Set(),
 ): boolean => {
   if (exactCallableOf(expression, writtenBindings) !== undefined) return true
@@ -3353,7 +3353,7 @@ export const callableMode = (captures: ReadonlyArray<CallableCaptureFact>): Type
   )
 
 const availableConstructionTypes = (
-  expressions: ReadonlyArray<ExpressionFact | Tir.Expression>,
+  expressions: ReadonlyArray<ExpressionDecision | Tir.Expression>,
 ): ReadonlyArray<Type.Type> =>
   expressions.flatMap((expression) => {
     const type = constructionExpressionType(expression)
@@ -3432,9 +3432,9 @@ export const sectionCallableType = (
 }
 
 export const callableSectionOf = (
-  expression: ExpressionFact,
+  expression: ExpressionDecision,
   writtenBindings: ReadonlySet<number> = new Set(),
-): CallableSectionExpressionFact | undefined => {
+): CallableSectionExpressionDecision | undefined => {
   const exact = exactCallableOf(expression, writtenBindings)
   return exact?._tag === 'CallableSection' ? exact : undefined
 }
@@ -3443,31 +3443,28 @@ export function executableSite(
   tag: 'CallableSiteId',
   resolution: ResolutionContext,
   node: AuthoredHir.Expression,
-  span: SourceSpan.SourceSpan,
 ): Tir.CallableSiteId
 export function executableSite(
   tag: 'EffectSiteId',
   resolution: ResolutionContext,
   node: AuthoredHir.Expression,
-  span: SourceSpan.SourceSpan,
 ): Tir.EffectSiteId
 export function executableSite(
   tag: 'CallableSiteId' | 'EffectSiteId',
   resolution: ResolutionContext,
   node: AuthoredHir.Expression,
-  span: SourceSpan.SourceSpan,
 ): Tir.CallableSiteId | Tir.EffectSiteId {
-  const ordinal = resolution.executableSites?.get(AuthoredIdentity.anchorKey(node.anchor)) ?? 0
-  return Object.freeze({
+  if (resolution.builder === undefined)
+    throw new RangeError('executable-site analysis requires its TIR body builder')
+  const site = {
     _tag: tag,
-    function:
-      resolution.executableFunction ??
-      Object.freeze({ _tag: 'DeclarationId', sourceId: span.sourceId, ordinal: 0 }),
+    node: BodyBuilder.expressionReference(resolution.builder, node.anchor),
+    functionOrdinal: resolution.executableFunction?.ordinal ?? 0,
     ...(resolution.executableOwner === undefined ? {} : { owner: resolution.executableOwner }),
-    ordinal,
-    span,
-    at: node.anchor,
-  })
+  }
+  return tag === 'CallableSiteId'
+    ? Object.freeze({ ...site, _tag: 'CallableSiteId' })
+    : Object.freeze({ ...site, _tag: 'EffectSiteId' })
 }
 
 /**
@@ -3477,38 +3474,6 @@ export function executableSite(
  * preorder walk of the authored body. Grouped expressions are absent, so a pipeline's target is
  * reached directly.
  */
-export const executableSites = (root: AuthoredHir.Block): ReadonlyMap<string, number> => {
-  const sites = new Map<string, number>()
-  const isAppliedInterfacePipeline = (node: AuthoredHir.Expression): boolean =>
-    node._tag === 'PipelineExpression' && node.target._tag === 'MemberExpression'
-  const record = (node: AuthoredHir.Expression): void => {
-    const key = AuthoredIdentity.anchorKey(node.anchor)
-    if (!sites.has(key)) sites.set(key, sites.size)
-  }
-  const visit = (node: AuthoredHir.Expression): void => {
-    if (
-      node._tag === 'CallExpression' ||
-      node._tag === 'EffectExpression' ||
-      node._tag === 'CallableExpression' ||
-      isAppliedInterfacePipeline(node)
-    )
-      record(node)
-    for (const child of AuthoredWalk.expressionChildren(node)) visit(child)
-  }
-  const roots = AuthoredWalk.statements(root).flatMap((statement) =>
-    AuthoredWalk.statementExpressions(statement),
-  )
-  for (const expression of roots) visit(expression)
-  // A bound method value is a section at a projection. Those sites follow every call site so the
-  // ordinals of existing sites never move.
-  const visitProjections = (node: AuthoredHir.Expression): void => {
-    if (node._tag === 'FieldExpression') record(node)
-    for (const child of AuthoredWalk.expressionChildren(node)) visitProjections(child)
-  }
-  for (const expression of roots) visitProjections(expression)
-  return sites
-}
-
 export const executableSpecializationOwner = (
   resolution: ResolutionContext,
 ): Type.ExecutableSpecializationOwner | undefined => {
@@ -3613,7 +3578,7 @@ export const finishCallableSection = (
     fact: Object.freeze({
       _tag: 'CallableSection',
       selectedConformances: constraints.proofs,
-      site: executableSite('CallableSiteId', resolution, node, context.spanOf(node.anchor)),
+      site: executableSite('CallableSiteId', resolution, node),
       reference,
       path,
       remainingParameters: remainingOf(
@@ -3652,7 +3617,7 @@ export const finishCallableApplication = (
   callee: ExpressionResult,
   argumentsResult: ArgumentsResult,
   callTypeArguments: CallTypeArgumentsResult,
-  provenance?: CallableApplyExpressionFact['provenance'],
+  provenance?: CallableApplyExpressionDecision['provenance'],
   resolution?: ResolutionContext,
   caller?: DeclarationFact,
 ): ExpressionResult => {
@@ -3780,7 +3745,7 @@ export const finishCallableApplication = (
     resolution !== undefined &&
     caller !== undefined
       ? Object.freeze({
-          site: executableSite('CallableSiteId', resolution, node, context.spanOf(node.anchor)),
+          site: executableSite('CallableSiteId', resolution, node),
           captures: Object.freeze(
             argumentsResult.facts.map((argument, ordinal) =>
               Object.freeze({
@@ -4100,9 +4065,7 @@ export const finishCallableApplication = (
         node.anchor,
         [
           callable,
-          ...availableConstructionTypes(
-            stagedValue.captures.map((capture) => capture.expression),
-          ),
+          ...availableConstructionTypes(stagedValue.captures.map((capture) => capture.expression)),
         ],
         stagedValue.captures
           .filter((capture) => capture.access === 'Shared' || capture.access === 'Exclusive')
@@ -4154,7 +4117,7 @@ export const finishCallableApplication = (
       fact: Object.freeze({
         _tag: 'CallableSection',
         selectedConformances: selectedConformances.proofs,
-        site: executableSite('CallableSiteId', resolution, node, context.spanOf(node.anchor)),
+        site: executableSite('CallableSiteId', resolution, node),
         reference: stagedSection.reference,
         path: stagedSection.path,
         remainingParameters: Object.freeze(
@@ -4206,8 +4169,7 @@ export const finishCallableApplication = (
         )
       const handlerTypeFact =
         handler === undefined ? undefined : constructionExpressionType(handler)
-      const handlerType =
-        handlerTypeFact?._tag === 'Available' ? handlerTypeFact.type : undefined
+      const handlerType = handlerTypeFact?._tag === 'Available' ? handlerTypeFact.type : undefined
       const handlerEffect =
         handlerType !== undefined &&
         Type.isCallable(handlerType) &&
@@ -4299,7 +4261,7 @@ export const finishCallableApplication = (
  * yields the place's previous value. The place stays initialized, so affine owners can leave a
  * struct field behind a reference without a partial move.
  */
-export const unavailableIdentifierFact = (node: AuthoredHir.Expression): ExpressionFact =>
+export const unavailableIdentifierFact = (node: AuthoredHir.Expression): ExpressionDecision =>
   Object.freeze({
     _tag: 'Identifier',
     reference: Object.freeze({ _tag: 'Unavailable' as const, anchor: node.anchor }),

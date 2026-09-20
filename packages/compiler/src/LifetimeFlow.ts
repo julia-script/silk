@@ -8,7 +8,6 @@ import type * as DeclarationIndex from './DeclarationIndex.js'
 import * as Diagnostic from './Diagnostic.js'
 import * as Elaboration from './Elaboration.js'
 import * as Tir from './Tir.js'
-import * as TirLowering from './TirLowering.js'
 import * as Lifetime from './Lifetime.js'
 import type * as MovePath from './MovePath.js'
 import * as Ownership from './Ownership.js'
@@ -101,16 +100,110 @@ const rootSite = (
 }
 
 const expressionRoot = (
-  expression: Elaboration.ExpressionFact | Tir.Expression,
+  expression: Elaboration.ExpressionDecision | Tir.Expression,
   context: SemanticContext.SemanticContext,
   builder: BodyBuilder.BodyBuilder,
   throughBorrow = false,
 ): Elaboration.BorrowRootFact | undefined => {
   if ('origin' in expression) {
-    const decision = BodyBuilder.expressionDecision(builder, expression)
-    return decision === undefined
-      ? undefined
-      : expressionRoot(decision, context, builder, throughBorrow)
+    const localRoot = (
+      local: Tir.LocalId,
+      kind: 'Binding' | 'Parameter' | 'Pattern',
+    ): Elaboration.BorrowRootFact | undefined => {
+      const semantic = BodyBuilder.semanticOfLocal(builder, local)
+      if (kind === 'Binding' && Elaboration.isBindingDeclarationFact(semantic))
+        return { _tag: 'BindingRoot', binding: semantic, path: [] }
+      if (kind === 'Parameter' && Elaboration.isParameterFact(semantic))
+        return { _tag: 'ParameterRoot', parameter: semantic, path: [] }
+      if (kind === 'Pattern' && Elaboration.isPatternBindingFact(semantic))
+        return { _tag: 'PatternRoot', binding: semantic, path: [] }
+      return undefined
+    }
+    const selector = (value: Tir.BorrowSelector): Elaboration.BorrowSelectorFact => {
+      if (value._tag === 'Field')
+        return {
+          _tag: 'Field',
+          field: value.field,
+          span: value.span,
+          ...(value.at === undefined ? {} : { at: value.at }),
+        }
+      if (value._tag === 'Index')
+        return {
+          _tag: 'Index',
+          index: value.index,
+          array: value.array,
+          bounds: value.bounds,
+          span: value.span,
+          ...(value.at === undefined ? {} : { at: value.at }),
+        }
+      return {
+        _tag: 'SliceIndex',
+        index: value.index,
+        slice: value.slice,
+        span: value.span,
+        ...(value.at === undefined ? {} : { at: value.at }),
+      }
+    }
+    const append = (
+      root: Elaboration.BorrowRootFact | undefined,
+      next: Elaboration.BorrowSelectorFact,
+    ): Elaboration.BorrowRootFact | undefined =>
+      root === undefined ? undefined : { ...root, path: [...root.path, next] }
+    if (expression._tag === 'BindingReference') return localRoot(expression.binding, 'Binding')
+    if (expression._tag === 'ParameterReference')
+      return localRoot(expression.parameter, 'Parameter')
+    if (expression._tag === 'PatternBindingReference')
+      return localRoot(expression.binding, 'Pattern')
+    if (expression._tag === 'Move')
+      return expressionRoot(expression.subject, context, builder, throughBorrow)
+    if (expression._tag === 'UnionConvert')
+      return expressionRoot(expression.source, context, builder, throughBorrow)
+    if (expression._tag === 'Project')
+      return append(expressionRoot(expression.subject, context, builder, throughBorrow), {
+        _tag: 'Field',
+        field: expression.field,
+        span: expression.span,
+        at: expression.origin.anchor,
+      })
+    if (expression._tag === 'IndexPlace')
+      return append(expressionRoot(expression.subject, context, builder, throughBorrow), {
+        _tag: 'Index',
+        index: expression.index,
+        array: expression.array,
+        bounds: expression.bounds,
+        span: expression.span,
+        at: expression.origin.anchor,
+      })
+    if (expression._tag === 'SliceIndexPlace')
+      return append(expressionRoot(expression.slice, context, builder, throughBorrow), {
+        _tag: 'SliceIndex',
+        index: expression.index,
+        slice: expression.sourceType,
+        span: expression.span,
+        at: expression.origin.anchor,
+      })
+    if (throughBorrow && expression._tag === 'ReferentPlace')
+      return expressionRoot(expression.subject, context, builder, true)
+    if (expression._tag === 'ValueBorrow' || expression._tag === 'SliceBorrow') {
+      const root = (() => {
+        if (expression.root._tag === 'BindingSliceRoot')
+          return localRoot(expression.root.binding, 'Binding')
+        if (expression.root._tag === 'ParameterSliceRoot')
+          return localRoot(expression.root.parameter, 'Parameter')
+        if (expression.root._tag === 'PatternSliceRoot')
+          return localRoot(expression.root.binding, 'Pattern')
+        return {
+          _tag: 'TemporaryRoot' as const,
+          owner: expression.root.owner,
+          value: expression.root.value,
+          path: Object.freeze([]),
+        }
+      })()
+      return root === undefined
+        ? undefined
+        : { ...root, path: [...root.path, ...expression.selectors.map(selector)] }
+    }
+    return undefined
   }
   if (expression._tag === 'Identifier') {
     if (expression.reference._tag === 'ResolvedBinding')
@@ -124,11 +217,7 @@ const expressionRoot = (
     return expressionRoot(expression.subject, context, builder, throughBorrow)
   if (expression._tag === 'FieldProjection' && expression.state._tag === 'Resolved') {
     const subjectType = Elaboration.constructionExpressionType(expression.subject)
-    if (
-      !throughBorrow &&
-      subjectType._tag === 'Available' &&
-      Type.isReference(subjectType.type)
-    )
+    if (!throughBorrow && subjectType._tag === 'Available' && Type.isReference(subjectType.type))
       return undefined
     const root = expressionRoot(expression.subject, context, builder, throughBorrow)
     return root === undefined
@@ -179,12 +268,24 @@ const expressionRoot = (
 // A referent read still demands the lifetime stored in its reference or slice carrier.
 // Keep this distinct from expressionRoot: a write through a borrow does not replace its carrier.
 const carrierExpression = (
-  expression: Elaboration.ExpressionFact | Tir.Expression,
-  builder: BodyBuilder.BodyBuilder,
-): Elaboration.ExpressionFact | Tir.Expression => {
+  expression: Elaboration.ExpressionDecision | Tir.Expression,
+): Elaboration.ExpressionDecision | Tir.Expression => {
   if ('origin' in expression) {
-    const decision = BodyBuilder.expressionDecision(builder, expression)
-    return decision === undefined ? expression : carrierExpression(decision, builder)
+    if (
+      expression._tag === 'Move' ||
+      expression._tag === 'ReferentPlace' ||
+      expression._tag === 'Project' ||
+      expression._tag === 'IndexPlace'
+    )
+      return carrierExpression(expression.subject)
+    if (expression._tag === 'SliceIndexPlace') return carrierExpression(expression.slice)
+    if (expression._tag === 'UnionConvert') return carrierExpression(expression.source)
+    if (
+      (expression._tag === 'ValueBorrow' || expression._tag === 'SliceBorrow') &&
+      expression.place !== undefined
+    )
+      return carrierExpression(expression.place)
+    return expression
   }
   const subjectType =
     expression._tag === 'FieldProjection'
@@ -199,7 +300,7 @@ const carrierExpression = (
       subjectType._tag === 'Available' &&
       Type.isReference(subjectType.type))
   )
-    return carrierExpression(expression.subject, builder)
+    return carrierExpression(expression.subject)
   return expression
 }
 
@@ -231,7 +332,7 @@ const pathsOverlap = (
 /** Validates one generic body using only its declared assumptions and selected semantic facts. */
 export const analyze = (
   declaration: DeclarationFacts.DeclarationFact,
-  statements: ReadonlyArray<Elaboration.StatementFact>,
+  statements: ReadonlyArray<Tir.Statement>,
   body: BodyLifetime.BodyLifetime,
   index: DeclarationIndex.Index,
   context: SemanticContext.SemanticContext,
@@ -250,17 +351,17 @@ export const analyze = (
   const bindingInitializers = new Set<string>()
   const terminalSpans = new Map<number, SourceSpan.SourceSpan>()
   const terminalAnchors = new Map<number, AuthoredHir.Anchor>()
-  Elaboration.visitStatementFacts(statements, {
+  Elaboration.visitStatements(statements, {
     statement: (statement) => {
-      if (statement._tag === 'BindStatement')
-        bindingInitializers.add(AuthoredIdentity.anchorKey(statement.binding.anchor))
-      if (statement._tag !== 'ReturnStatement' && statement._tag !== 'FailStatement') return
-      const key = AuthoredIdentity.anchorKey(statement.anchor)
+      if (statement._tag === 'Bind')
+        bindingInitializers.add(AuthoredIdentity.anchorKey(statement.origin.anchor))
+      if (statement._tag !== 'Return' && statement._tag !== 'Fail') return
+      const key = AuthoredIdentity.anchorKey(statement.origin.anchor)
       if (boundaries.has(key)) return
       const point = body.points.size + boundaries.size
       boundaries.set(key, point)
-      terminalSpans.set(point, context.spanOf(statement.expression.anchor))
-      terminalAnchors.set(point, statement.expression.anchor)
+      terminalSpans.set(point, statement.expression.span)
+      terminalAnchors.set(point, statement.expression.origin.anchor)
     },
   })
   const pointCount = body.points.size + boundaries.size
@@ -283,7 +384,8 @@ export const analyze = (
     readonly variant: number
     readonly anchor: AuthoredHir.Anchor
   }> = []
-  const expressionUses = new Map<string, Elaboration.ExpressionFact | Tir.Expression>()
+  const expressionUses = new Map<string, Elaboration.ExpressionDecision | Tir.Expression>()
+  const chargedExpressions = new Set<string>()
   const replacements: Array<{
     readonly root: Ownership.BindingSite
     readonly path: ReadonlyArray<Elaboration.BorrowSelectorFact>
@@ -293,7 +395,7 @@ export const analyze = (
   const invalidations: Array<{
     readonly root: Ownership.BindingSite
     readonly path: ReadonlyArray<Elaboration.BorrowSelectorFact>
-    readonly expression: Elaboration.ExpressionFact | Tir.Expression
+    readonly expression: Elaboration.ExpressionDecision | Tir.Expression
     readonly after?: AuthoredHir.Anchor
   }> = []
   // A block or match arm introduces a scope; the nearest such ancestor of an authored position is
@@ -442,7 +544,7 @@ export const analyze = (
     })
   }
   const borrowedCapture = (
-    expression: Elaboration.ExpressionFact | Tir.Expression,
+    expression: Elaboration.ExpressionDecision | Tir.Expression,
     statement: AuthoredHir.Anchor,
   ): void => {
     const source = expressionRoot(expression, context, builder)
@@ -466,7 +568,7 @@ export const analyze = (
   }
   const bindPatterns = (
     bindings: ReadonlyArray<Elaboration.PatternBindingFact>,
-    source: Elaboration.ExpressionFact | Tir.Expression,
+    source: Elaboration.ExpressionDecision | Tir.Expression,
     access: Elaboration.PatternSelectionFact['access'],
   ): void => {
     if (access === 'Move' || access === 'Copy') return
@@ -493,15 +595,24 @@ export const analyze = (
         )
   }
   const visitExpression = (
-    expression: Elaboration.ExpressionFact | Tir.Expression,
+    expression: Elaboration.ExpressionDecision | Tir.Expression,
     statement: AuthoredHir.Anchor,
     place = false,
   ): void => {
     const expressionAnchor = Elaboration.constructionExpressionAnchor(expression)
     const expressionType = Elaboration.constructionExpressionType(expression)
-    expressionUses.set(AuthoredIdentity.anchorKey(expressionAnchor), expression)
-    const point = body.points.get(AuthoredIdentity.anchorKey(expressionAnchor))
-    if (expressionType._tag === 'Available') {
+    // Synthetic TIR nodes are conversions and other compiler-inserted structure around one
+    // authored semantic operation. Their authored child owns the source point and its lifetime
+    // obligations; charging both nodes would duplicate requirements and diagnostics.
+    const authored = !('origin' in expression) || expression.origin._tag === 'Authored'
+    const expressionKey = AuthoredIdentity.anchorKey(expressionAnchor)
+    const charged = authored && !chargedExpressions.has(expressionKey)
+    if (charged) {
+      chargedExpressions.add(expressionKey)
+      expressionUses.set(expressionKey, expression)
+    }
+    const point = charged ? body.points.get(expressionKey) : undefined
+    if (charged && expressionType._tag === 'Available') {
       const value = Type.isRepresented(expressionType.type)
         ? expressionType.type.contract
         : expressionType.type
@@ -565,13 +676,114 @@ export const analyze = (
     }
     if (point !== undefined && expressionType._tag === 'Available' && !place)
       requireType(expressionType.type, point)
-    const current =
-      'origin' in expression ? BodyBuilder.expressionDecision(builder, expression) : expression
-    if (current === undefined) {
-      if ('origin' in expression)
-        for (const child of Tir.expressionChildren(expression)) visitExpression(child, statement)
+    if ('origin' in expression) {
+      if (expression._tag === 'Match') {
+        visitExpression(expression.scrutinee, statement, expression.access === 'Place')
+        for (const arm of expression.arms) {
+          if (!arm.reachable) continue
+          const bindings = arm.bindings.flatMap((binding) => {
+            const semantic = BodyBuilder.semanticOfLocal(builder, binding.id)
+            return Elaboration.isPatternBindingFact(semantic) ? [semantic] : []
+          })
+          bindPatterns(bindings, expression.scrutinee, expression.access)
+          const selectedRoot = expressionRoot(expression.scrutinee, context, builder)
+          if (
+            expression.access === 'Place' &&
+            selectedRoot !== undefined &&
+            arm.member?._tag === 'NominalUnionVariant'
+          )
+            variantBranches.push({
+              root: canonicalRoot(selectedRoot),
+              variant: arm.member.variantOrdinal,
+              anchor: arm.at ?? expression.origin.anchor,
+            })
+          if (arm.guard !== undefined) visitExpression(arm.guard, statement)
+          if (arm.body._tag === 'Expression') visitExpression(arm.body.expression, statement)
+          else visitStatements(arm.body.statements)
+        }
+        return
+      }
+      if (expression._tag === 'CallableSection') {
+        for (const capture of expression.captures) {
+          if (capture.access === 'Shared' || capture.access === 'Exclusive')
+            borrowedCapture(capture.value, statement)
+          visitExpression(capture.value, statement)
+        }
+        return
+      }
+      if (expression._tag === 'EffectBlock') {
+        visitStatements(expression.statements)
+        return
+      }
+      if (expression._tag === 'ValueBorrow' || expression._tag === 'SliceBorrow') {
+        const formation = expressionRoot(expression, context, builder)
+        const type = expression.type
+        if (formation !== undefined) {
+          if (
+            expression.reborrow &&
+            (Type.isReference(expression.source) || Type.isSlice(expression.source))
+          ) {
+            constrain(expression.source.lifetime, type.lifetime)
+            origins.set(Lifetime.key(type.lifetime), {
+              lifetime: type.lifetime,
+              root: rootSite(formation, builder),
+              path: formation.path,
+              parent: expression.source.lifetime,
+              span: context.spanOf(expressionAnchor),
+              at: expressionAnchor,
+              anchor: expressionAnchor,
+            })
+          } else anchor(type.lifetime, formation, statement, expressionAnchor)
+        }
+        if (expression.place !== undefined) visitExpression(expression.place, statement, true)
+        for (const child of Tir.expressionChildren(expression))
+          if (child !== expression.place) visitExpression(child, statement)
+        return
+      }
+      if (expression._tag === 'Replace') {
+        const source = expressionRoot(expression, context, builder)
+        if (source !== undefined)
+          invalidations.push({ root: rootSite(source, builder), path: source.path, expression })
+      }
+      if (expression._tag === 'Move') {
+        const source = expressionRoot(expression.subject, context, builder)
+        if (source !== undefined)
+          invalidations.push({ root: rootSite(source, builder), path: source.path, expression })
+      }
+      if (
+        expression._tag === 'Project' ||
+        expression._tag === 'IndexPlace' ||
+        expression._tag === 'SliceIndexPlace' ||
+        expression._tag === 'ReferentPlace'
+      ) {
+        const subject =
+          expression._tag === 'SliceIndexPlace' ? expression.slice : expression.subject
+        const subjectType = Elaboration.constructionExpressionType(subject)
+        if (
+          point !== undefined &&
+          subjectType._tag === 'Available' &&
+          (Type.isReference(subjectType.type) || Type.isSlice(subjectType.type))
+        )
+          ensure(subjectType.type.lifetime).required.add(point)
+      }
+      if (expression._tag === 'Project' || expression._tag === 'ReferentPlace') {
+        visitExpression(expression.subject, statement, true)
+        return
+      }
+      if (expression._tag === 'IndexPlace') {
+        visitExpression(expression.subject, statement, true)
+        visitExpression(expression.index, statement)
+        return
+      }
+      if (expression._tag === 'SliceIndexPlace') {
+        visitExpression(expression.slice, statement, true)
+        visitExpression(expression.index, statement)
+        return
+      }
+      for (const child of Tir.expressionChildren(expression)) visitExpression(child, statement)
       return
     }
+    const current = expression
     if (current._tag === 'Borrow') {
       const formation = current.formation
       const type = current.type._tag === 'Available' ? current.type.type : undefined
@@ -663,54 +875,55 @@ export const analyze = (
       visitStatements(current.statements)
       return
     }
-    for (const child of Elaboration.expressionChildren(current))
-      visitExpression(child, statement)
+    for (const child of Elaboration.expressionChildren(current)) visitExpression(child, statement)
   }
-  const visitStatements = (statements: ReadonlyArray<Elaboration.StatementFact>): void => {
+  const visitStatements = (statements: ReadonlyArray<Tir.Statement>): void => {
     for (const statement of statements) {
-      const syntax =
-        statement._tag === 'BindStatement' ? statement.binding.anchor : statement.anchor
-      if (statement._tag === 'PatternBindStatement' || statement._tag === 'IfLetStatement')
+      const syntax = statement.origin.anchor
+      if (statement._tag === 'PatternBind' || statement._tag === 'IfLet')
         bindPatterns(
-          statement.selection.bindings,
-          statement.selection.source,
+          statement.selection.bindings.flatMap((binding) => {
+            const semantic = BodyBuilder.semanticOfLocal(builder, binding.id)
+            return Elaboration.isPatternBindingFact(semantic) ? [semantic] : []
+          }),
+          statement.selection.source ?? statement.selection.subject,
           statement.selection.access,
         )
-      for (const expression of TirLowering.directStatementExpressions(statement))
+      for (const expression of BodyBuilder.directStatementExpressions(statement))
         visitExpression(
           expression,
           syntax,
-          statement._tag === 'WriteStatement' && expression === statement.destination,
+          statement._tag === 'Write' && expression === statement.destination,
         )
-      if (statement._tag === 'WriteStatement') {
+      if (statement._tag === 'Write' && statement.destination !== undefined) {
         const destination = expressionRoot(statement.destination, context, builder)
         const source = destination === undefined ? undefined : canonicalRoot(destination)
         if (source !== undefined) {
           const destinationType = Elaboration.constructionExpressionType(statement.destination)
-          if (statement.compatible && destinationType._tag === 'Available') {
+          if (destinationType._tag === 'Available') {
             const lifetimes = Type.storageLifetimes(destinationType.type)
             if (lifetimes.length > 0)
               replacements.push({
                 root: rootSite(source, builder),
                 path: source.path,
                 lifetimes,
-                anchor: statement.anchor,
+                anchor: statement.origin.anchor,
               })
           }
           invalidations.push({
             root: rootSite(source, builder),
             path: source.path,
             expression: statement.value,
-            after: statement.anchor,
+            after: statement.origin.anchor,
           })
         }
       }
-      if (statement._tag === 'ReturnStatement' || statement._tag === 'FailStatement') {
-        const boundary = boundaries.get(AuthoredIdentity.anchorKey(statement.anchor))
+      if (statement._tag === 'Return' || statement._tag === 'Fail') {
+        const boundary = boundaries.get(AuthoredIdentity.anchorKey(statement.origin.anchor))
         const expressionType = Elaboration.constructionExpressionType(statement.expression)
         if (expressionType._tag === 'Available' && boundary !== undefined)
           requireType(expressionType.type, boundary)
-      } else if (statement._tag === 'DropStatement') {
+      } else if (statement._tag === 'Drop') {
         const source = expressionRoot(statement.expression, context, builder)
         if (source !== undefined)
           invalidations.push({
@@ -719,11 +932,11 @@ export const analyze = (
             expression: statement.expression,
           })
       }
-      if (statement._tag === 'UnsafeStatement') visitStatements(statement.statements)
-      else if (statement._tag === 'IfStatement' || statement._tag === 'IfLetStatement') {
+      if (statement._tag === 'Unsafe') visitStatements(statement.statements)
+      else if (statement._tag === 'If' || statement._tag === 'IfLet') {
         visitStatements(statement.taken)
         visitStatements(statement.otherwise)
-      } else if (statement._tag === 'WhileStatement') visitStatements(statement.body)
+      } else if (statement._tag === 'While') visitStatements(statement.body)
     }
   }
   visitStatements(statements)
@@ -835,13 +1048,14 @@ export const analyze = (
       for (const [position, point] of entries) {
         const span = context.spanOf(position)
         const expression = expressionUses.get(AuthoredIdentity.anchorKey(position))
-        const value = expression === undefined ? undefined : carrierExpression(expression, builder)
-        const selected =
-          value === undefined ? undefined : expressionRoot(value, context, builder)
+        const value = expression === undefined ? undefined : carrierExpression(expression)
+        const selected = value === undefined ? undefined : expressionRoot(value, context, builder)
         const carrier = selected === undefined ? undefined : canonicalRoot(selected)
         const use = controlFlow.boundaries.get(AuthoredIdentity.anchorKey(position))
         const valueType =
-          value === undefined ? Elaboration.unavailableExpressionType : Elaboration.constructionExpressionType(value)
+          value === undefined
+            ? Elaboration.unavailableExpressionType
+            : Elaboration.constructionExpressionType(value)
         if (carrier === undefined || use === undefined || valueType._tag !== 'Available') continue
         const prefix = (
           left: ReadonlyArray<Elaboration.BorrowSelectorFact>,
