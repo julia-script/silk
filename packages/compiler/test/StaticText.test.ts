@@ -1364,7 +1364,7 @@ pub fn main() -> i32 { return choose(true, 41) }`),
     )
     assert.strictEqual(
       sha256(tir),
-      'db781131cc72b6506fff095211b06c4ddf5f43fddbea828f4fb43849e037158f',
+      'fcef33365b1a6769fd2f505a439d34a9d8d8e2555597093b9886a2e62fb4dcc2',
     )
     assert.strictEqual(
       sha256(ownership),

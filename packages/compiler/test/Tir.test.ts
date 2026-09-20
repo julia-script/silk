@@ -746,7 +746,7 @@ it('matches the damaged TIR golden encoding and names unavailable states', () =>
 
   assert.strictEqual(encoded, golden('damaged.tir.txt'))
   assert.include(encoded, 'contract-unavailable')
-  assert.include(encoded, 'unavailable [')
+  assert.include(encoded, 'unavailable @')
 })
 
 it('elaborates and encodes byte-identically across repeated fresh runs', () => {

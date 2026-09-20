@@ -1995,7 +1995,19 @@ export const contractOf = (declaration: DeclarationFacts.DeclarationFact): Contr
   })
 }
 
-const spanText = (span: SourceSpan.SourceSpan): string => `[${span.start}, ${span.end})`
+/**
+ * A node's place in the encoding: the authored node it came from, inside its owner. It names no
+ * offset, so the encoding of a body is the same for every spelling of the same authored content.
+ */
+const anchorText = (anchor: AuthoredIdentity.Anchor | undefined): string =>
+  anchor === undefined
+    ? '@?'
+    : `@${anchor.path.map((part) => `${part.role}#${part.occurrence}`).join('/') || '.'}`
+
+const originText = (origin: Origin): string =>
+  origin._tag === 'Authored'
+    ? anchorText(origin.anchor)
+    : `${anchorText(origin.anchor)}!${origin.role}#${origin.occurrence}`
 
 const identityLabel = (declaration: DeclarationFacts.DeclarationFact): string => {
   switch (declaration.canonical._tag) {
@@ -2022,7 +2034,7 @@ const sliceRootText = (root: SliceRoot): string => {
     case 'PatternSliceRoot':
       return `a${root.binding.arm.ordinal}.b${root.binding.ordinal}`
     case 'TemporarySliceRoot':
-      return `t${root.owner.span.start}.${root.owner.ordinal}`
+      return `t${anchorText(root.owner.at)}.${root.owner.ordinal}`
   }
 }
 
@@ -2040,59 +2052,59 @@ const encodeExpression = (expression: Expression, depth: number): string => {
   const indent = '  '.repeat(depth)
   switch (expression._tag) {
     case 'IntegerLiteral':
-      return `${indent}literal ${expression.value} : ${Type.encode(expression.type)}${expression.constant === undefined ? '' : ` constant=${expression.constant.module}::${expression.constant.name}`} ${spanText(expression.span)}`
+      return `${indent}literal ${expression.value} : ${Type.encode(expression.type)}${expression.constant === undefined ? '' : ` constant=${expression.constant.module}::${expression.constant.name}`} ${originText(expression.origin)}`
     case 'ForeignStaticLoad':
-      return `${indent}foreign-static ${expression.symbol} : ${Type.encode(expression.type)} ${spanText(expression.span)}`
+      return `${indent}foreign-static ${expression.symbol} : ${Type.encode(expression.type)} ${originText(expression.origin)}`
     case 'ForeignFunctionAddress':
-      return `${indent}foreign-address ${expression.symbol} : ${Type.encode(expression.type)} ${spanText(expression.span)}`
+      return `${indent}foreign-address ${expression.symbol} : ${Type.encode(expression.type)} ${originText(expression.origin)}`
     case 'FloatingLiteral':
-      return `${indent}literal ${expression.spelling} bits=0x${expression.bits.toString(16)} : ${expression.type} ${spanText(expression.span)}`
+      return `${indent}literal ${expression.spelling} bits=0x${expression.bits.toString(16)} : ${expression.type} ${originText(expression.origin)}`
     case 'StaticStringLiteral':
-      return `${indent}static-string ${expression.data.id} bytes=${expression.data.bytes.map((byte) => byte.toString(16).padStart(2, '0')).join('')} length=${expression.data.bytes.length} provenance=program : string ${spanText(expression.span)}`
+      return `${indent}static-string ${expression.data.id} bytes=${expression.data.bytes.map((byte) => byte.toString(16).padStart(2, '0')).join('')} length=${expression.data.bytes.length} provenance=program : string ${originText(expression.origin)}`
     case 'StaticByteViewLiteral':
-      return `${indent}static-bytes ${expression.data.id} bytes=${expression.data.bytes.map((byte) => byte.toString(16).padStart(2, '0')).join('')} length=${expression.data.bytes.length} : ${Type.encode(expression.type)} ${spanText(expression.span)}`
+      return `${indent}static-bytes ${expression.data.id} bytes=${expression.data.bytes.map((byte) => byte.toString(16).padStart(2, '0')).join('')} length=${expression.data.bytes.length} : ${Type.encode(expression.type)} ${originText(expression.origin)}`
     case 'UnitLiteral':
-      return `${indent}unit : () ${spanText(expression.span)}`
+      return `${indent}unit : () ${originText(expression.origin)}`
     case 'BooleanLiteral':
-      return `${indent}literal ${expression.value} : ${Type.encode(expression.type)} ${spanText(expression.span)}`
+      return `${indent}literal ${expression.value} : ${Type.encode(expression.type)} ${originText(expression.origin)}`
     case 'CharacterLiteral':
-      return `${indent}literal U+${expression.value.toString(16).toUpperCase().padStart(4, '0')} : ${Type.encode(expression.type)} ${spanText(expression.span)}`
+      return `${indent}literal U+${expression.value.toString(16).toUpperCase().padStart(4, '0')} : ${Type.encode(expression.type)} ${originText(expression.origin)}`
     case 'ParameterReference':
-      return `${indent}param fn${expression.parameter.function.ordinal}.p${expression.parameter.ordinal} : ${Type.encode(expression.type)} ${spanText(expression.span)}`
+      return `${indent}param fn${expression.parameter.function.ordinal}.p${expression.parameter.ordinal} : ${Type.encode(expression.type)} ${originText(expression.origin)}`
     case 'BindingReference':
-      return `${indent}binding fn${expression.binding.function.ordinal}.b${expression.binding.ordinal} : ${Type.encode(expression.type)} ${spanText(expression.span)}`
+      return `${indent}binding fn${expression.binding.function.ordinal}.b${expression.binding.ordinal} : ${Type.encode(expression.type)} ${originText(expression.origin)}`
     case 'PatternBindingReference':
-      return `${indent}pattern-binding a${expression.binding.arm.ordinal}.b${expression.binding.ordinal} : ${Type.encode(expression.type)} ${spanText(expression.span)}`
+      return `${indent}pattern-binding a${expression.binding.arm.ordinal}.b${expression.binding.ordinal} : ${Type.encode(expression.type)} ${originText(expression.origin)}`
     case 'Move':
       return [
-        `${indent}move : ${Type.encode(expression.type)} ${spanText(expression.span)}`,
+        `${indent}move : ${Type.encode(expression.type)} ${originText(expression.origin)}`,
         encodeExpression(expression.subject, depth + 1),
       ].join('\n')
     case 'RuntimeStringView':
       return [
-        `${indent}runtime-string-view loans=${expression.heldLoans.map(borrowText).join(',') || 'none'} : string ${spanText(expression.span)}`,
+        `${indent}runtime-string-view loans=${expression.heldLoans.map(borrowText).join(',') || 'none'} : string ${originText(expression.origin)}`,
         encodeExpression(expression.source, depth + 1),
       ].join('\n')
     case 'StringEquality':
       return [
-        `${indent}string-${expression.negated ? 'not-equals' : 'equals'} intrinsic=${Intrinsic.operationText(expression.intrinsic)} : bool ${spanText(expression.span)}`,
+        `${indent}string-${expression.negated ? 'not-equals' : 'equals'} intrinsic=${Intrinsic.operationText(expression.intrinsic)} : bool ${originText(expression.origin)}`,
         encodeExpression(expression.left, depth + 1),
         encodeExpression(expression.right, depth + 1),
       ].join('\n')
     case 'ShortCircuit':
       return [
-        `${indent}short-circuit ${expression.operator === 'And' ? '&&' : '||'} : ${Type.encode(expression.type)} ${spanText(expression.span)}`,
+        `${indent}short-circuit ${expression.operator === 'And' ? '&&' : '||'} : ${Type.encode(expression.type)} ${originText(expression.origin)}`,
         encodeExpression(expression.left, depth + 1),
         encodeExpression(expression.right, depth + 1),
       ].join('\n')
     case 'Replace':
       return [
-        `${indent}replace : ${Type.encode(expression.type)} ${spanText(expression.span)}`,
+        `${indent}replace : ${Type.encode(expression.type)} ${originText(expression.origin)}`,
         encodeExpression(expression.value, depth + 1),
       ].join('\n')
     case 'Run':
       return [
-        `${indent}run : ${Type.encode(expression.type)} ${spanText(expression.span)}`,
+        `${indent}run : ${Type.encode(expression.type)} ${originText(expression.origin)}`,
         encodeExpression(expression.subject, depth + 1),
       ].join('\n')
     case 'EffectCatch':
@@ -2115,7 +2127,7 @@ const encodeExpression = (expression: Expression, depth: number): string => {
           Type.encode,
           (parameter) => parameter.name,
           (member) => member.parameter.name,
-        )} : ${Type.encode(expression.type)} ${spanText(expression.span)}`,
+        )} : ${Type.encode(expression.type)} ${originText(expression.origin)}`,
         encodeExpression(expression.protected, depth + 1),
         encodeExpression(expression.handler, depth + 1),
       ].join('\n')
@@ -2131,23 +2143,23 @@ const encodeExpression = (expression: Expression, depth: number): string => {
                 (member) => member.capability.name,
               )
             : Type.encode(expression.provider.capability)
-        }@${expression.provider.role ?? 'DefaultRole'} selection=${expression.provider.selectionAccess.toLowerCase()} capture=${expression.provider.captureAccess.toLowerCase()} : ${Type.encode(expression.type)} ${spanText(expression.span)}`,
+        }@${expression.provider.role ?? 'DefaultRole'} selection=${expression.provider.selectionAccess.toLowerCase()} capture=${expression.provider.captureAccess.toLowerCase()} : ${Type.encode(expression.type)} ${originText(expression.origin)}`,
         encodeExpression(expression.protected, depth + 1),
       ].join('\n')
     case 'EffectBlock':
       return [
-        `${indent}effect-block site=${executableSiteLabel(expression.site)} access=${expression.type.access.toLowerCase()} captures=${expression.captures.map((capture) => `${[capture.pattern === undefined ? '' : `pattern${capture.pattern.arm.match.span.start}.${capture.pattern.arm.ordinal}.${capture.pattern.ordinal}`, capture.binding === undefined ? '' : `b${capture.binding.ordinal}`, capture.parameter === undefined ? '' : `p${capture.parameter.ordinal}`].join('')}:${capture.access.toLowerCase()}`).join(',') || 'none'} : ${Type.encode(expression.type)} ${spanText(expression.span)}`,
+        `${indent}effect-block site=${executableSiteLabel(expression.site)} access=${expression.type.access.toLowerCase()} captures=${expression.captures.map((capture) => `${[capture.pattern === undefined ? '' : `pattern${anchorText(capture.pattern.arm.match.at)}.${capture.pattern.arm.ordinal}.${capture.pattern.ordinal}`, capture.binding === undefined ? '' : `b${capture.binding.ordinal}`, capture.parameter === undefined ? '' : `p${capture.parameter.ordinal}`].join('')}:${capture.access.toLowerCase()}`).join(',') || 'none'} : ${Type.encode(expression.type)} ${originText(expression.origin)}`,
         ...expression.statements.map((statement) => encodeStatement(statement, depth + 1)),
       ].join('\n')
     case 'UnionConvert':
       return [
-        `${indent}union-${expression.conversion.toLowerCase()} ${Type.encode(expression.sourceType)} -> ${Type.encode(expression.target)} access=${expression.access} context=${expression.context} expected=${spanText(expression.expectedAt)} ${spanText(expression.span)}`,
+        `${indent}union-${expression.conversion.toLowerCase()} ${Type.encode(expression.sourceType)} -> ${Type.encode(expression.target)} access=${expression.access} context=${expression.context} expected=${anchorText(expression.expected)} ${originText(expression.origin)}`,
         `${indent}  mapping ${expression.mappings.map((mapping) => `${Type.encode(mapping.source)}#${mapping.sourceOrdinal}->${Type.encode(mapping.target)}#${mapping.targetOrdinal}`).join(', ') || 'empty'}`,
         encodeExpression(expression.source, depth + 1),
       ].join('\n')
     case 'Match':
       return [
-        `${indent}match ${expression.access.toLowerCase()} members=${expression.members.map(Match.encodeIdentity).join(',') || 'none'} : ${Type.encode(expression.type)} ${spanText(expression.span)}`,
+        `${indent}match ${expression.access.toLowerCase()} members=${expression.members.map(Match.encodeIdentity).join(',') || 'none'} : ${Type.encode(expression.type)} ${originText(expression.origin)}`,
         `${indent}  scrutinee`,
         encodeExpression(expression.scrutinee, depth + 2),
         ...expression.arms.flatMap((arm) => {
@@ -2155,10 +2167,10 @@ const encodeExpression = (expression: Expression, depth: number): string => {
           if (arm.universal) pattern = '_'
           else if (arm.member !== undefined) pattern = Match.encodeIdentity(arm.member)
           return [
-            `${indent}  arm #${arm.id.ordinal} ${pattern} reachable=${arm.reachable} before=${arm.before.map(Match.encodeIdentity).join(',') || 'empty'} after=${arm.after.map(Match.encodeIdentity).join(',') || 'empty'} ${spanText(arm.span)}`,
+            `${indent}  arm #${arm.id.ordinal} ${pattern} reachable=${arm.reachable} before=${arm.before.map(Match.encodeIdentity).join(',') || 'empty'} after=${arm.after.map(Match.encodeIdentity).join(',') || 'empty'} ${anchorText(arm.at)}`,
             ...arm.bindings.map(
               (binding) =>
-                `${indent}    binding #${binding.id.ordinal} ${binding.name ?? '?'} path=${binding.path.map((field) => `#${field.ordinal}`).join('.') || 'root'} access=${binding.access} : ${Type.encode(binding.type)} ${spanText(binding.span)}`,
+                `${indent}    binding #${binding.id.ordinal} ${binding.name ?? '?'} path=${binding.path.map((field) => `#${field.ordinal}`).join('.') || 'root'} access=${binding.access} : ${Type.encode(binding.type)} ${originText(binding.origin)}`,
             ),
             `${indent}    cleanup ${arm.cleanup.map((path) => path.map((field) => `#${field.ordinal}`).join('.') || 'payload').join(',') || 'none'}`,
             ...(arm.guard === undefined
@@ -2176,7 +2188,7 @@ const encodeExpression = (expression: Expression, depth: number): string => {
       ].join('\n')
     case 'Construct':
       return [
-        `${indent}construct ${Type.encode(expression.nominal)} : ${Type.encode(expression.type)} ${spanText(expression.span)}`,
+        `${indent}construct ${Type.encode(expression.nominal)} : ${Type.encode(expression.type)} ${originText(expression.origin)}`,
         `${indent}  evaluation-order ${expression.evaluationOrder.map((field) => `#${field.ordinal}`).join(', ') || 'empty'}`,
         ...expression.fields.map(
           ({ field, value }) =>
@@ -2185,7 +2197,7 @@ const encodeExpression = (expression: Expression, depth: number): string => {
       ].join('\n')
     case 'ConstructUnionVariant':
       return [
-        `${indent}construct-variant ${Type.encode(expression.nominal)}.${expression.variant.name}#${expression.variantOrdinal} : ${Type.encode(expression.type)} ${spanText(expression.span)}`,
+        `${indent}construct-variant ${Type.encode(expression.nominal)}.${expression.variant.name}#${expression.variantOrdinal} : ${Type.encode(expression.type)} ${originText(expression.origin)}`,
         `${indent}  evaluation-order ${expression.evaluationOrder.map((field) => `#${field.ordinal}`).join(', ') || 'empty'}`,
         ...expression.fields.map(
           ({ field, value }) =>
@@ -2194,7 +2206,7 @@ const encodeExpression = (expression: Expression, depth: number): string => {
       ].join('\n')
     case 'ArrayConstruct':
       return [
-        `${indent}construct-array ${Type.encode(expression.type)} elements=${expression.elements.length} ${spanText(expression.span)}`,
+        `${indent}construct-array ${Type.encode(expression.type)} elements=${expression.elements.length} ${originText(expression.origin)}`,
         ...expression.elements.map(
           (element, index) =>
             `${indent}  element #${index}\n${encodeExpression(element, depth + 2)}`,
@@ -2202,12 +2214,12 @@ const encodeExpression = (expression: Expression, depth: number): string => {
       ].join('\n')
     case 'Project':
       return [
-        `${indent}project ${expression.access} ${Type.encode(expression.nominal)}.#${expression.field.ordinal} : ${Type.encode(expression.type)} ${spanText(expression.span)}`,
+        `${indent}project ${expression.access} ${Type.encode(expression.nominal)}.#${expression.field.ordinal} : ${Type.encode(expression.type)} ${originText(expression.origin)}`,
         encodeExpression(expression.subject, depth + 1),
       ].join('\n')
     case 'ReferentPlace':
       return [
-        `${indent}referent ${expression.access} ${expression.borrowAccess.toLowerCase()} source=${Type.encode(expression.reference)} : ${Type.encode(expression.type)} ${spanText(expression.span)}`,
+        `${indent}referent ${expression.access} ${expression.borrowAccess.toLowerCase()} source=${Type.encode(expression.reference)} : ${Type.encode(expression.type)} ${originText(expression.origin)}`,
         encodeExpression(expression.subject, depth + 1),
       ].join('\n')
     case 'IndexPlace':
@@ -2216,35 +2228,35 @@ const encodeExpression = (expression: Expression, depth: number): string => {
           expression.bounds._tag === 'Runtime'
             ? `runtime:${expression.bounds.length}`
             : `proven:${expression.bounds.index}/${expression.bounds.length}`
-        } : ${Type.encode(expression.type)} ${spanText(expression.span)}`,
+        } : ${Type.encode(expression.type)} ${originText(expression.origin)}`,
         encodeExpression(expression.subject, depth + 1),
         encodeExpression(expression.index, depth + 1),
       ].join('\n')
     case 'SliceBorrow':
-      return `${indent}${expression.reborrow ? 'reborrow-slice' : 'borrow-slice'} l${expression.borrow.ordinal} ${expression.access.toLowerCase()} ${sliceRootText(expression.root)}${borrowSelectorsText(expression.selectors)} source=${Type.encode(expression.source)} : ${Type.encode(expression.type)} suspended=${expression.suspendsParent} ${spanText(expression.span)}`
+      return `${indent}${expression.reborrow ? 'reborrow-slice' : 'borrow-slice'} l${expression.borrow.ordinal} ${expression.access.toLowerCase()} ${sliceRootText(expression.root)}${borrowSelectorsText(expression.selectors)} source=${Type.encode(expression.source)} : ${Type.encode(expression.type)} suspended=${expression.suspendsParent} ${originText(expression.origin)}`
     case 'ValueBorrow':
-      return `${indent}${expression.reborrow ? 'reborrow-value' : 'borrow-value'} l${expression.borrow.ordinal} ${expression.access.toLowerCase()} ${sliceRootText(expression.root)}${borrowSelectorsText(expression.selectors)} source=${Type.encode(expression.source)} : ${Type.encode(expression.type)} suspended=${expression.suspendsParent} ${spanText(expression.span)}`
+      return `${indent}${expression.reborrow ? 'reborrow-value' : 'borrow-value'} l${expression.borrow.ordinal} ${expression.access.toLowerCase()} ${sliceRootText(expression.root)}${borrowSelectorsText(expression.selectors)} source=${Type.encode(expression.source)} : ${Type.encode(expression.type)} suspended=${expression.suspendsParent} ${originText(expression.origin)}`
     case 'SliceLength':
       return [
-        `${indent}slice-length : i32 ${spanText(expression.span)}`,
+        `${indent}slice-length : i32 ${originText(expression.origin)}`,
         encodeExpression(expression.slice, depth + 1),
       ].join('\n')
     case 'SliceIndexPlace':
       return [
-        `${indent}slice-index ${expression.access.toLowerCase()} bounds=runtime : ${Type.encode(expression.type)} ${spanText(expression.span)}`,
+        `${indent}slice-index ${expression.access.toLowerCase()} bounds=runtime : ${Type.encode(expression.type)} ${originText(expression.origin)}`,
         encodeExpression(expression.slice, depth + 1),
         encodeExpression(expression.index, depth + 1),
       ].join('\n')
     case 'EnumMember':
-      return `${indent}enum-member ${expression.member.enum.module}.${expression.member.enum.name}.${expression.member.name} discriminant=${expression.discriminant} : ${Type.encode(expression.type)} ${spanText(expression.span)}`
+      return `${indent}enum-member ${expression.member.enum.module}.${expression.member.enum.name}.${expression.member.name} discriminant=${expression.discriminant} : ${Type.encode(expression.type)} ${originText(expression.origin)}`
     case 'EnumValue':
       return [
-        `${indent}enum-value ${expression.enum.module}.${expression.enum.name} via ${Intrinsic.operationText(expression.intrinsic)} : ${expression.type} ${spanText(expression.span)}`,
+        `${indent}enum-value ${expression.enum.module}.${expression.enum.name} via ${Intrinsic.operationText(expression.intrinsic)} : ${expression.type} ${originText(expression.origin)}`,
         encodeExpression(expression.value, depth + 1),
       ].join('\n')
     case 'EnumEquality':
       return [
-        `${indent}enum-${expression.negated ? 'not-equals' : 'equals'} ${expression.enum.module}.${expression.enum.name} : bool ${spanText(expression.span)}`,
+        `${indent}enum-${expression.negated ? 'not-equals' : 'equals'} ${expression.enum.module}.${expression.enum.name} : bool ${originText(expression.origin)}`,
         encodeExpression(expression.left, depth + 1),
         encodeExpression(expression.right, depth + 1),
       ].join('\n')
@@ -2253,14 +2265,14 @@ const encodeExpression = (expression: Expression, depth: number): string => {
         expression.target._tag === 'DeclarationCallableTarget'
           ? `${expression.target.declaration.module}.${expression.target.declaration.name}`
           : `${expression.target.actor}.${expression.target.operation}`
-      }<${expression.typeArguments.map(Type.genericArgumentKey).join(',')}> : ${Type.encode(expression.type)} ${spanText(expression.span)}`
+      }<${expression.typeArguments.map(Type.genericArgumentKey).join(',')}> : ${Type.encode(expression.type)} ${originText(expression.origin)}`
     case 'CallableSection':
       return [
         `${indent}callable-section site=${executableSiteLabel(expression.site)} mode=${expression.mode.toLowerCase()} remaining=${expression.remainingParameters.map((ordinal) => `p${ordinal}`).join(',')} target=${
           expression.target._tag === 'DeclarationCallableTarget'
             ? `${expression.target.declaration.module}.${expression.target.declaration.name}`
             : `${expression.target.actor}.${expression.target.operation}`
-        } : ${Type.encode(expression.type)} ${spanText(expression.span)}`,
+        } : ${Type.encode(expression.type)} ${originText(expression.origin)}`,
         ...expression.captures.map(
           (capture) =>
             `${indent}  capture #${capture.ordinal}->p${capture.parameterOrdinal} ${capture.access.toLowerCase()}\n${encodeExpression(capture.value, depth + 2)}`,
@@ -2268,13 +2280,13 @@ const encodeExpression = (expression: Expression, depth: number): string => {
       ].join('\n')
     case 'ForeignApply':
       return [
-        `${indent}foreign-apply ${Type.encode(expression.contract)} ${spanText(expression.span)}`,
+        `${indent}foreign-apply ${Type.encode(expression.contract)} ${originText(expression.origin)}`,
         encodeExpression(expression.callee, depth + 1),
         ...expression.arguments.map((argument) => encodeExpression(argument, depth + 1)),
       ].join('\n')
     case 'CallableApply':
       return [
-        `${indent}callable-apply access=${expression.access.toLowerCase()} evaluation=${expression.evaluation} realization=${expression.realization}${expression.staged === undefined ? '' : ` staged=${executableSiteLabel(expression.staged.site)}[${expression.staged.captures.map((capture) => `#${capture.ordinal}:${capture.access.toLowerCase()}`).join(',')}]`} substitution=${[...expression.substitution.entries()].map(([parameter, argument]) => `${parameter}=${Type.encodeGenericArgument(argument)}`).join(',') || 'none'} ends=${expression.loanEnds.map(borrowText).join(',') || 'none'} held=${expression.heldLoans.map(borrowText).join(',') || 'none'} : ${Type.encode(expression.type)} ${spanText(expression.span)}`,
+        `${indent}callable-apply access=${expression.access.toLowerCase()} evaluation=${expression.evaluation} realization=${expression.realization}${expression.staged === undefined ? '' : ` staged=${executableSiteLabel(expression.staged.site)}[${expression.staged.captures.map((capture) => `#${capture.ordinal}:${capture.access.toLowerCase()}`).join(',')}]`} substitution=${[...expression.substitution.entries()].map(([parameter, argument]) => `${parameter}=${Type.encodeGenericArgument(argument)}`).join(',') || 'none'} ends=${expression.loanEnds.map(borrowText).join(',') || 'none'} held=${expression.heldLoans.map(borrowText).join(',') || 'none'} : ${Type.encode(expression.type)} ${originText(expression.origin)}`,
         ...(expression.evaluation === 'LeftThenCallable'
           ? [
               ...expression.arguments.map(
@@ -2300,12 +2312,12 @@ const encodeExpression = (expression: Expression, depth: number): string => {
           expression.typeArguments.length === 0
             ? ''
             : `<${expression.typeArguments.map(Type.encodeGenericArgument).join(', ')}>`
-        }${expression.evidence.length === 0 ? '' : ` evidence=${expression.evidence.map(Constraint.evidenceKey).join(',')}`}${expression.staticArguments.length === 0 ? '' : ` static=${expression.staticArguments.map(StaticValue.presentation).join(',')}`} : ${Type.encode(expression.type)} loan-ends=${expression.loanEnds.map((loan) => `l${loan.ordinal}`).join(',') || 'none'} ${spanText(expression.span)}`,
+        }${expression.evidence.length === 0 ? '' : ` evidence=${expression.evidence.map(Constraint.evidenceKey).join(',')}`}${expression.staticArguments.length === 0 ? '' : ` static=${expression.staticArguments.map(StaticValue.presentation).join(',')}`} : ${Type.encode(expression.type)} loan-ends=${expression.loanEnds.map((loan) => `l${loan.ordinal}`).join(',') || 'none'} ${originText(expression.origin)}`,
         ...expression.arguments.map((argument) => encodeExpression(argument, depth + 1)),
       ].join('\n')
     case 'ServiceEffectConstruct':
       return [
-        `${indent}service-call ${Type.encode(expression.service)}.${expression.operation}@${expression.role}:${expression.access.toLowerCase()}${expression.staticArguments.length === 0 ? '' : ` static=${expression.staticArguments.map(StaticValue.presentation).join(',')}`} : ${Type.encode(expression.type)} loan-ends=${expression.loanEnds.map((loan) => `l${loan.ordinal}`).join(',') || 'none'} ${spanText(expression.span)}`,
+        `${indent}service-call ${Type.encode(expression.service)}.${expression.operation}@${expression.role}:${expression.access.toLowerCase()}${expression.staticArguments.length === 0 ? '' : ` static=${expression.staticArguments.map(StaticValue.presentation).join(',')}`} : ${Type.encode(expression.type)} loan-ends=${expression.loanEnds.map((loan) => `l${loan.ordinal}`).join(',') || 'none'} ${originText(expression.origin)}`,
         ...expression.arguments.map((argument) => encodeExpression(argument, depth + 1)),
       ].join('\n')
     case 'BuiltinCall': {
@@ -2313,34 +2325,34 @@ const encodeExpression = (expression: Expression, depth: number): string => {
       const actor =
         first === undefined || first._tag === 'Unavailable' ? '?' : Type.encode(first.type)
       return [
-        `${indent}builtin ${actor}.${expression.operation} : ${Type.encode(expression.type)} ${spanText(expression.span)}`,
+        `${indent}builtin ${actor}.${expression.operation} : ${Type.encode(expression.type)} ${originText(expression.origin)}`,
         ...expression.arguments.map((argument) => encodeExpression(argument, depth + 1)),
       ].join('\n')
     }
     case 'InterfaceOperationCall':
       return [
-        `${indent}interface ${Type.encode(expression.capability)}.${expression.operation} over ${Type.encode(expression.provider)} : ${Type.encode(expression.type)} ${spanText(expression.span)}`,
+        `${indent}interface ${Type.encode(expression.capability)}.${expression.operation} over ${Type.encode(expression.provider)} : ${Type.encode(expression.type)} ${originText(expression.origin)}`,
         ...expression.arguments.map((argument) => encodeExpression(argument, depth + 1)),
       ].join('\n')
     case 'CompileError':
       return [
-        `${indent}compile-error ${spanText(expression.span)}`,
+        `${indent}compile-error ${originText(expression.origin)}`,
         encodeExpression(expression.message, depth + 1),
       ].join('\n')
     case 'StaticCall':
       return [
-        `${indent}static-call ${expression.target.module}::${expression.target.name}${expression.typeArguments.length === 0 ? '' : `<${expression.typeArguments.map(Type.encodeGenericArgument).join(',')}>`} : ${Type.encode(expression.type)} ${spanText(expression.span)}`,
+        `${indent}static-call ${expression.target.module}::${expression.target.name}${expression.typeArguments.length === 0 ? '' : `<${expression.typeArguments.map(Type.encodeGenericArgument).join(',')}>`} : ${Type.encode(expression.type)} ${originText(expression.origin)}`,
         ...expression.arguments.map((argument) => encodeExpression(argument, depth + 1)),
       ].join('\n')
     case 'StaticIntrinsic':
       return [
-        `${indent}static-intrinsic ${expression.operation}${expression.typeArguments.length === 0 ? '' : `<${expression.typeArguments.map(Type.encodeGenericArgument).join(',')}>`} : ${Type.encode(expression.type)} ${spanText(expression.span)}`,
+        `${indent}static-intrinsic ${expression.operation}${expression.typeArguments.length === 0 ? '' : `<${expression.typeArguments.map(Type.encodeGenericArgument).join(',')}>`} : ${Type.encode(expression.type)} ${originText(expression.origin)}`,
         ...expression.arguments.map((argument) => encodeExpression(argument, depth + 1)),
       ].join('\n')
     case 'ConstantReference':
-      return `${indent}constant ${expression.declaration.module}::${expression.declaration.name} : ${Type.encode(expression.type)} ${spanText(expression.span)}`
+      return `${indent}constant ${expression.declaration.module}::${expression.declaration.name} : ${Type.encode(expression.type)} ${originText(expression.origin)}`
     case 'Unavailable':
-      return `${indent}unavailable ${spanText(expression.span)}`
+      return `${indent}unavailable ${originText(expression.origin)}`
   }
 }
 
@@ -2348,22 +2360,22 @@ const encodeStatement = (statement: Statement, depth: number): string => {
   const indent = '  '.repeat(depth)
   switch (statement._tag) {
     case 'UnavailableStatement':
-      return `${indent}unavailable-statement r${statement.region.ordinal} ${spanText(statement.span)}`
+      return `${indent}unavailable-statement r${statement.region.ordinal} ${originText(statement.origin)}`
     case 'Unsafe':
       return [
-        `${indent}unsafe r${statement.region.ordinal} ${spanText(statement.span)}`,
+        `${indent}unsafe r${statement.region.ordinal} ${originText(statement.origin)}`,
         ...statement.statements.map((inner) => encodeStatement(inner, depth + 1)),
       ].join('\n')
     case 'Bind':
       return [
-        `${indent}bind ${statement.mutability.toLowerCase()} b${statement.binding.ordinal} ${statement.name ?? '?'} r${statement.region.ordinal} ${spanText(statement.span)}`,
+        `${indent}bind ${statement.mutability.toLowerCase()} b${statement.binding.ordinal} ${statement.name ?? '?'} r${statement.region.ordinal} ${originText(statement.origin)}`,
         encodeExpression(statement.initializer, depth + 1),
       ].join('\n')
     case 'PatternBind':
-      return `${indent}pattern-bind ${statement.selection.access.toLowerCase()} members=${statement.selection.members.map(Match.encodeIdentity).join(',')} r${statement.region.ordinal} ${spanText(statement.span)}`
+      return `${indent}pattern-bind ${statement.selection.access.toLowerCase()} members=${statement.selection.members.map(Match.encodeIdentity).join(',')} r${statement.region.ordinal} ${originText(statement.origin)}`
     case 'Evaluate':
       return [
-        `${indent}evaluate r${statement.region.ordinal} ${spanText(statement.span)}`,
+        `${indent}evaluate r${statement.region.ordinal} ${originText(statement.origin)}`,
         encodeExpression(statement.expression, depth + 1),
       ].join('\n')
     case 'Write': {
@@ -2389,13 +2401,13 @@ const encodeStatement = (statement: Statement, depth: number): string => {
         })
         .join('')
       return [
-        `${indent}write ${root}${selectors} : ${Type.encode(statement.place.type)} r${statement.region.ordinal} ${spanText(statement.span)}`,
+        `${indent}write ${root}${selectors} : ${Type.encode(statement.place.type)} r${statement.region.ordinal} ${originText(statement.origin)}`,
         encodeExpression(statement.value, depth + 1),
       ].join('\n')
     }
     case 'If':
       return [
-        `${indent}if r${statement.region.ordinal} ${spanText(statement.span)}`,
+        `${indent}if r${statement.region.ordinal} ${originText(statement.origin)}`,
         encodeExpression(statement.condition, depth + 1),
         `${indent}then`,
         ...statement.taken.map((inner) => encodeStatement(inner, depth + 1)),
@@ -2408,32 +2420,32 @@ const encodeStatement = (statement: Statement, depth: number): string => {
       ].join('\n')
     case 'IfLet':
       return [
-        `${indent}if-let ${statement.selection.access.toLowerCase()} members=${statement.selection.members.map(Match.encodeIdentity).join(',')} r${statement.region.ordinal} ${spanText(statement.span)}`,
+        `${indent}if-let ${statement.selection.access.toLowerCase()} members=${statement.selection.members.map(Match.encodeIdentity).join(',')} r${statement.region.ordinal} ${originText(statement.origin)}`,
         ...statement.taken.map((inner) => encodeStatement(inner, depth + 1)),
         ...statement.otherwise.map((inner) => encodeStatement(inner, depth + 1)),
       ].join('\n')
     case 'While':
       return [
-        `${indent}while loop${statement.loop.ordinal} r${statement.region.ordinal}${statement.parent === undefined ? '' : ` parent=loop${statement.parent.ordinal}`} ${spanText(statement.span)}`,
+        `${indent}while loop${statement.loop.ordinal} r${statement.region.ordinal}${statement.parent === undefined ? '' : ` parent=loop${statement.parent.ordinal}`} ${originText(statement.origin)}`,
         encodeExpression(statement.condition, depth + 1),
         ...statement.body.map((inner) => encodeStatement(inner, depth + 1)),
       ].join('\n')
     case 'Break':
     case 'Continue':
-      return `${indent}${statement._tag.toLowerCase()} loop${statement.target.ordinal} r${statement.region.ordinal} ${spanText(statement.span)}`
+      return `${indent}${statement._tag.toLowerCase()} loop${statement.target.ordinal} r${statement.region.ordinal} ${originText(statement.origin)}`
     case 'Return':
       return [
-        `${indent}return r${statement.region.ordinal} ${spanText(statement.span)}`,
+        `${indent}return r${statement.region.ordinal} ${originText(statement.origin)}`,
         encodeExpression(statement.expression, depth + 1),
       ].join('\n')
     case 'Fail':
       return [
-        `${indent}fail ${Type.encode(statement.failure)} r${statement.region.ordinal} ${spanText(statement.span)}`,
+        `${indent}fail ${Type.encode(statement.failure)} r${statement.region.ordinal} ${originText(statement.origin)}`,
         encodeExpression(statement.expression, depth + 1),
       ].join('\n')
     case 'Drop':
       return [
-        `${indent}drop r${statement.region.ordinal} ${spanText(statement.span)}`,
+        `${indent}drop r${statement.region.ordinal} ${originText(statement.origin)}`,
         encodeExpression(statement.expression, depth + 1),
       ].join('\n')
   }

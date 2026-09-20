@@ -110,3 +110,13 @@ it('presents the region proof of a body through the next revision', () => {
   }
   assert.isAbove(compared, 4)
 })
+
+it('encodes a body without positions, so moved source encodes the same', () => {
+  const before = analyze(program)
+  const after = analyze(
+    `// a comment that moves every declaration\n\n${program.replaceAll('  ', '\t')}`,
+  )
+  assert.notDeepEqual(before.tir, after.tir)
+  assert.strictEqual(Tir.encode(after.tir), Tir.encode(before.tir))
+  assert.notMatch(Tir.encode(before.tir), /\[\d+, \d+\)/)
+})

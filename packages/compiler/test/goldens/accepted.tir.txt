@@ -1,9 +1,9 @@
 tir-module golden/accepted.silk
 fn golden/accepted.silk.identity (i32) -> i32 entry=r0 regions=r0
-  return r0 [44, 49)
-    param fn0.p0 : i32 [44, 49)
+  return r0 @body#0/statement#0/value#0
+    param fn0.p0 : i32 @body#0/statement#0/value#0
 fn golden/accepted.silk.main () -> i32 entry=r0 regions=r0
-  return r0 [82, 104)
-    call golden/accepted.silk.identity : i32 loan-ends=none [82, 104)
-      call golden/accepted.silk.identity : i32 loan-ends=none [91, 103)
-        literal 42 : i32 [100, 102)
+  return r0 @body#0/statement#0/value#0
+    call golden/accepted.silk.identity : i32 loan-ends=none @body#0/statement#0/value#0
+      call golden/accepted.silk.identity : i32 loan-ends=none @body#0/statement#0/value#0/arguments-list#0/argument#0
+        literal 42 : i32 @body#0/statement#0/value#0/arguments-list#0/argument#0/arguments-list#0/argument#0
