@@ -6,7 +6,7 @@ const source = Path.join(import.meta.dirname, '..', 'src')
 
 /** Working records: what analysis builds a body from before it publishes nodes and tables. */
 const record =
-  /\b(FunctionFact|StatementFact|ExpressionFact)\b|\bvisit(Statement|Expression)Facts?\b|Elaboration\.(records|recordOf|executableFunctions)\b/
+  /\b(FunctionFact|StatementFact|ExpressionFact)\b|\bvisit(Statement|Expression)Facts?\b|Elaboration\.(records|executableFunctions)\b/
 
 /**
  * Construction, which builds records; the table builders it calls; the two coordinators that run

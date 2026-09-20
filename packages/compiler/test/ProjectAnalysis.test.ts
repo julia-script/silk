@@ -928,11 +928,10 @@ it.effect('reuses exact unchanged syntax and module semantics inside one coheren
     assert.strictEqual(currentView.ownership.get('app/B'), previousView.ownership.get('app/B'))
     const retainedResult = currentView.results.get('shared/Core') ?? raise('retained library')
     const retainedFunction = retainedResult.tir.functions.at(0) ?? raise('retained TIR function')
-    const retainedFact =
-      records(retainedResult).functions.at(0) ?? raise('retained semantic function')
+    const retainedBody = retainedResult.bodies.at(0) ?? raise('retained checked body')
     const ownershipInput = Ownership.input(
       retainedFunction,
-      retainedFact.lifetimeFlow,
+      retainedBody.results.lifetimes,
       currentView.index,
       Ownership.localSharedAccessBoundaryPlan(currentView.results),
       NameResolution.scopeOf(currentView.resolution, 'shared/Core')?.context ??
@@ -1149,10 +1148,10 @@ unsafe fn probe(core: &Intrinsic.SharedCore<i32>) -> i32 { return 1 }`
       const afterResult = after.results.get('shared/Callbacks') ?? raise('revised callbacks')
       assert.strictEqual(afterResult, beforeResult)
       const fn = afterResult.tir.functions.at(0) ?? raise('callback TIR')
-      const fact = records(afterResult).functions.at(0) ?? raise('callback fact')
+      const body = afterResult.bodies.at(0) ?? raise('callback body')
       const previousInput = Ownership.input(
         fn,
-        fact.lifetimeFlow,
+        body.results.lifetimes,
         before.index,
         Ownership.localSharedAccessBoundaryPlan(before.results),
         NameResolution.scopeOf(before.resolution, 'shared/Callbacks')?.context ??
@@ -1160,7 +1159,7 @@ unsafe fn probe(core: &Intrinsic.SharedCore<i32>) -> i32 { return 1 }`
       )
       const currentInput = Ownership.input(
         fn,
-        fact.lifetimeFlow,
+        body.results.lifetimes,
         after.index,
         Ownership.localSharedAccessBoundaryPlan(after.results),
         NameResolution.scopeOf(after.resolution, 'shared/Callbacks')?.context ??

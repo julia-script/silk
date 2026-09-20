@@ -655,7 +655,8 @@ duplicate body:
 
 - a working record never leaves construction: `Elaboration.Result` exposes checked bodies and their
   tables, and no stage after construction imports a record type. `Elaboration.records` is the one
-  seam, for tests of construction and for the inspector, which shows construction itself;
+  seam, for tests of construction and for the inspector, which shows construction itself. It keeps
+  nothing: it builds the records again from the module's inputs when it is asked;
 - nothing caches a record: reuse stores the checked body only;
 - everything a later stage or a tool needs is either on a node or in a table the body publishes
   (occurrences, inference rows, scopes and their locals, expression types, lifetimes, opaque-result

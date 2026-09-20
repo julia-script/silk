@@ -1527,6 +1527,16 @@ export interface BodyResults {
   readonly staticStructure?: StaticStructure
   /** The type each authored expression was given, in source order, for hover. */
   readonly expressionTypes: ReadonlyArray<ExpressionTypeRow>
+  /** How each authored `static for` ended, outermost first. */
+  readonly staticIterations: ReadonlyArray<StaticIterationRow>
+}
+
+/** One `static for` of a body: whether it was expanded, and the element each expansion bound. */
+export interface StaticIterationRow {
+  readonly at: AuthoredHir.Anchor
+  readonly state: StaticIterationFact['state']
+  readonly elements: ReadonlyArray<StaticValue.Value | undefined>
+  readonly nested: ReadonlyArray<ReadonlyArray<StaticIterationRow>>
 }
 
 /** One typed expression as hover shows it. */
@@ -2457,8 +2467,6 @@ export interface CheckedUnit {
   readonly diagnostics: ReadonlyArray<Diagnostic.Located>
 }
 
-const recordsOf = new WeakMap<BodyResults, FunctionFact>()
-
 const staticStructureOf = (fact: FunctionFact): StaticStructure | undefined => {
   let found: StaticStructure | undefined
   visitStatementFacts(fact.statements, {
@@ -2488,6 +2496,22 @@ const staticStructureOf = (fact: FunctionFact): StaticStructure | undefined => {
   })
   return found
 }
+
+const staticIterationRows = (
+  iterations: ReadonlyArray<StaticIterationFact>,
+): ReadonlyArray<StaticIterationRow> =>
+  Object.freeze(
+    iterations.map((iteration) =>
+      Object.freeze({
+        at: iteration.anchor,
+        state: iteration.state,
+        elements: Object.freeze(iteration.scopes.map((scope) => scope.binding.staticValue)),
+        nested: Object.freeze(
+          iteration.scopes.map((scope) => staticIterationRows(scope.staticIterations)),
+        ),
+      }),
+    ),
+  )
 
 const expressionTypesOf = (fact: FunctionFact): ReadonlyArray<ExpressionTypeRow> => {
   const rows: Array<ExpressionTypeRow> = []
@@ -2541,9 +2565,6 @@ export const presentBody = (
           ...stamped,
           lifetimes: LifetimeFlow.present(stamped.lifetimes, context),
         })
-  // The inspection seam follows the body it describes.
-  const record = recordsOf.get(self.results)
-  if (record !== undefined) recordsOf.set(results, record)
   return Object.freeze({
     artifact: self.artifact,
     declaration,
@@ -2585,8 +2606,8 @@ export const checkedBody = (
     callables: callableFlowOf(fact),
     ...(staticStructure === undefined ? {} : { staticStructure }),
     expressionTypes: expressionTypesOf(fact),
+    staticIterations: staticIterationRows(fact.staticIterations),
   })
-  recordsOf.set(results, fact)
   return Object.freeze({
     artifact,
     declaration: fact.declaration,
@@ -2596,27 +2617,42 @@ export const checkedBody = (
   })
 }
 
-/**
- * The working records construction built a module's bodies from, for tests and the inspector that
- * examine construction itself. No compiler stage reads them: a stage reads nodes and tables.
- */
-export const recordOf = (self: BodyResults): FunctionFact | undefined => recordsOf.get(self)
-
-/** Every working record of a module, source bodies apart from compiler-made ones. */
-export const records = (
-  self: Result,
-): {
+type Records = {
   readonly functions: ReadonlyArray<FunctionFact>
   readonly hiddenFunctions: ReadonlyArray<FunctionFact>
-} => {
-  const of = (hidden: boolean) =>
-    Object.freeze(
-      self.bodies.flatMap((body) => {
-        const fact = body.hidden === hidden ? recordsOf.get(body.results) : undefined
-        return fact === undefined ? [] : [fact]
-      }),
+}
+const inputs = new WeakMap<Result, Omit<Input, 'bodyQuery'>>()
+const inspected = new WeakMap<Result, Records>()
+
+/**
+ * The working records a module's bodies are built from, for tests of construction and for the
+ * inspector, which shows construction itself. Construction keeps none of them: they are built
+ * again here, from the same inputs, only when someone asks. No compiler stage reads them.
+ */
+export const records = (self: Result): Records => {
+  const known = inspected.get(self)
+  if (known !== undefined) return known
+  const input = inputs.get(self)
+  if (input === undefined) throw new RangeError('Only an elaborated module has working records')
+  const context = SemanticContext.make(input.authored)
+  const hiddenFunctions: Array<FunctionFact> = []
+  const functions = input.headers.declarations
+    .filter((declaration) => declaration.foreign === undefined)
+    .map(
+      (declaration) =>
+        analyzeFunctionBody(
+          context,
+          declaration,
+          input.headers.declarations,
+          Object.freeze({ scope: input.scope, index: input.index, hiddenFunctions }),
+        ).fact,
     )
-  return { functions: of(false), hiddenFunctions: of(true) }
+  const result = Object.freeze({
+    functions: Object.freeze(functions),
+    hiddenFunctions: Object.freeze(hiddenFunctions),
+  })
+  inspected.set(self, result)
+  return result
 }
 
 export const elaborateModule = (input: Input): Result => {
@@ -2669,7 +2705,7 @@ export const elaborateModule = (input: Input): Result => {
     ),
   })
 
-  return Object.freeze({
+  const result: Result = Object.freeze({
     _tag: 'Elaboration',
     authored,
     generatedAggregates: Object.freeze(bodies.flatMap((body) => body.results.aggregates)),
@@ -2683,6 +2719,8 @@ export const elaborateModule = (input: Input): Result => {
       ...constrainedCallableEscapeDiagnostics(bodies),
     ]),
   })
+  inputs.set(result, Object.freeze({ authored, headers, scope, index }))
+  return result
 }
 
 /** Looks up every present declaration with the exact requested spelling. */

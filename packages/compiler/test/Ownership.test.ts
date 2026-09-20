@@ -1,4 +1,3 @@
-import { records } from './support/records.js'
 import * as Layer from 'effect/Layer'
 import * as AnalysisFixture from './support/AnalysisFixture.js'
 import * as SourceResolver from '../src/SourceResolver.js'
@@ -2286,10 +2285,10 @@ fn bad() -> i32 { let value = 42 return choose(move value, value) }`
               candidate.declaration.name._tag === 'Present' &&
               candidate.declaration.name.spelling === name,
           ) ?? unreachable('expected TIR function')
-        const fact =
-          records(result).functions.find((candidate) => candidate.declaration === fn.declaration) ??
-          unreachable('expected semantic function')
-        return Ownership.input(fn, fact.lifetimeFlow, snapshot.index, plan, context)
+        const body =
+          result.bodies.find((candidate) => candidate.function === fn) ??
+          unreachable('expected checked body')
+        return Ownership.input(fn, body.results.lifetimes, snapshot.index, plan, context)
       }
       const good = selected('good')
       const bad = selected('bad')
