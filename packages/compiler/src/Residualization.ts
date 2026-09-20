@@ -8,6 +8,7 @@ import * as DeclarationFacts from './DeclarationFacts.js'
 import type * as DeclarationIndex from './DeclarationIndex.js'
 import type * as Diagnostic from './Diagnostic.js'
 import * as Elaboration from './Elaboration.js'
+import * as BodyBuilder from './BodyBuilder.js'
 import { analyzeExpression } from './ExpressionAnalysis.js'
 import type * as Tir from './Tir.js'
 import * as TirLowering from './TirLowering.js'
@@ -446,28 +447,47 @@ const bindStaticParameters = (
       const value = arguments_.at(ordinal)
       return value === undefined
         ? []
-        : [[StaticEvaluation.localValueKey(parameter), value] as const]
+        : [
+            [StaticEvaluation.localValueKey(parameter), value] as const,
+            [
+              StaticEvaluation.tirLocalKey({ _tag: 'TirLocal', ordinal: parameter.id.ordinal }),
+              value,
+            ] as const,
+          ]
     }),
   )
   const valueSpans = new Map(
     parameters.flatMap((parameter, ordinal) => {
       const span = argumentSpans.at(ordinal)
-      return span === undefined ? [] : [[StaticEvaluation.localValueKey(parameter), span] as const]
+      return span === undefined
+        ? []
+        : [
+            [StaticEvaluation.localValueKey(parameter), span] as const,
+            [
+              StaticEvaluation.tirLocalKey({ _tag: 'TirLocal', ordinal: parameter.id.ordinal }),
+              span,
+            ] as const,
+          ]
     }),
   )
   const valueOrigins = new Map(
-    parameters.map((parameter, ordinal) => {
+    parameters.flatMap((parameter, ordinal) => {
       const value = arguments_.at(ordinal)
       const origin = argumentOrigins.at(ordinal)
-      return [
-        StaticEvaluation.localValueKey(parameter),
+      const selected =
         origin ??
-          StaticEvaluation.parameterTextOrigin(
-            ordinal,
-            value?._tag === 'TextValue' ? value.bytes.length : 0,
-            originScope,
-          ),
-      ] as const
+        StaticEvaluation.parameterTextOrigin(
+          ordinal,
+          value?._tag === 'TextValue' ? value.bytes.length : 0,
+          originScope,
+        )
+      return [
+        [StaticEvaluation.localValueKey(parameter), selected] as const,
+        [
+          StaticEvaluation.tirLocalKey({ _tag: 'TirLocal', ordinal: parameter.id.ordinal }),
+          selected,
+        ] as const,
+      ]
     }),
   )
   return Object.freeze({ values, valueSpans, valueOrigins })
@@ -620,6 +640,10 @@ const evaluateStaticFunction = (
           trace,
           nestedIdentity,
         )
+      const semantic = SemanticContext.make(input.result.authored)
+      const builder = BodyBuilder.make(
+        Object.freeze({ owner: declaration.owner, request: Object.freeze({ _tag: 'Check' }) }),
+      )
       const staticContext = {
         environment: self[stateSymbol].environment,
         typeSubstitution,
@@ -628,7 +652,7 @@ const evaluateStaticFunction = (
         valueOrigins: bindings.valueOrigins,
         expressionSpans: new Map<Tir.Expression, Location.Location>(),
         expressionOrigins: new Map<Tir.Expression, StaticEvaluation.TextOrigin>(),
-        nodes: TirLowering.staticLowering(SemanticContext.make(input.result.authored)),
+        nodes: TirLowering.staticLowering(semantic, builder),
         lookup: (id: DeclarationFacts.CanonicalId) =>
           DeclarationFacts.byCanonical(self[stateSymbol].index, id),
         returnedTextSpan: { value: undefined },
@@ -649,10 +673,10 @@ const evaluateStaticFunction = (
         ) => evaluateConstantValue(self, constant, constantSpan, trace),
       }
       const analyzed = analyzeFunctionBody(
-        SemanticContext.make(input.result.authored),
+        semantic,
         declaration,
         input.declarations,
-        Object.freeze({ scope: input.scope, index: self[stateSymbol].index }),
+        Object.freeze({ scope: input.scope, index: self[stateSymbol].index, builder }),
         staticContext,
       )
       self[stateSymbol].conditionDiagnostics?.push(...analyzed.diagnostics)
@@ -832,6 +856,11 @@ function evaluateConstantValue(
         nestedSpan,
         trace,
       ) => evaluateConstantValue(self, nested, nestedSpan, trace)
+      const host = constantHost(declaration)
+      const semantic = SemanticContext.make(input.result.authored)
+      const builder = BodyBuilder.make(
+        Object.freeze({ owner: host.owner, request: Object.freeze({ _tag: 'Check' }) }),
+      )
       const staticContext = Object.freeze({
         environment: self[stateSymbol].environment,
         values: new Map<string, StaticValue.Value>(),
@@ -839,7 +868,7 @@ function evaluateConstantValue(
         valueOrigins: new Map<string, StaticEvaluation.TextOrigin>(),
         expressionSpans: new Map<Tir.Expression, Location.Location>(),
         expressionOrigins: new Map<Tir.Expression, StaticEvaluation.TextOrigin>(),
-        nodes: TirLowering.staticLowering(SemanticContext.make(input.result.authored)),
+        nodes: TirLowering.staticLowering(semantic, builder),
         lookup: (id: DeclarationFacts.CanonicalId) =>
           DeclarationFacts.byCanonical(self[stateSymbol].index, id),
         trace: evaluation.trace,
@@ -849,20 +878,25 @@ function evaluateConstantValue(
           kind: 'Type' | 'Fields',
           reflectSpan: Location.Location,
           trace: StaticEvaluation.Trace,
-        ) => reflectAggregate(self, constantHost(declaration), owner, kind, reflectSpan, trace),
+        ) => reflectAggregate(self, host, owner, kind, reflectSpan, trace),
         constant,
       })
       const analyzed = analyzeExpression(
-        SemanticContext.make(input.result.authored),
+        semantic,
         initializer,
         input.declarations,
-        constantHost(declaration),
+        host,
         Object.freeze({
           parameters: Object.freeze([]),
           bindings: Object.freeze([]),
           patternBindings: Object.freeze([]),
         }),
-        Object.freeze({ scope: input.scope, index: self[stateSymbol].index, staticContext }),
+        Object.freeze({
+          scope: input.scope,
+          index: self[stateSymbol].index,
+          staticContext,
+          builder,
+        }),
         expected,
       )
       if (analyzed !== undefined)
@@ -1166,11 +1200,20 @@ export const residualize = (self: Coordinator, key: ApplicationKey): Result => {
         trace,
       ) => evaluateConstantValue(self, declaration, span, trace)
       const chargedStaticIterationNodes = { value: 0 }
+      const semantic = SemanticContext.make(input.result.authored)
+      const request: Tir.ArtifactId['request'] = Object.freeze({
+        _tag: 'Specialize',
+        application: StaticEvaluation.applicationKey(
+          self[stateSymbol].environment,
+          evaluation.application,
+        ),
+      })
+      const builder = BodyBuilder.make(Object.freeze({ owner: declaration.owner, request }))
       const analyzed = analyzeFunctionBody(
-        SemanticContext.make(input.result.authored),
+        semantic,
         declaration,
         input.declarations,
-        Object.freeze({ scope: input.scope, index: self[stateSymbol].index }),
+        Object.freeze({ scope: input.scope, index: self[stateSymbol].index, builder }),
         Object.freeze({
           environment: self[stateSymbol].environment,
           typeSubstitution,
@@ -1179,7 +1222,7 @@ export const residualize = (self: Coordinator, key: ApplicationKey): Result => {
           valueOrigins: bindings.valueOrigins,
           expressionSpans: new Map<Tir.Expression, Location.Location>(),
           expressionOrigins: new Map<Tir.Expression, StaticEvaluation.TextOrigin>(),
-          nodes: TirLowering.staticLowering(SemanticContext.make(input.result.authored)),
+          nodes: TirLowering.staticLowering(semantic, builder),
           lookup: (id: DeclarationFacts.CanonicalId) =>
             DeclarationFacts.byCanonical(self[stateSymbol].index, id),
           trace: evaluation.trace,
@@ -1217,13 +1260,8 @@ export const residualize = (self: Coordinator, key: ApplicationKey): Result => {
         self[stateSymbol].index,
         analyzed.fact,
         undefined,
-        Object.freeze({
-          _tag: 'Specialize',
-          application: StaticEvaluation.applicationKey(
-            self[stateSymbol].environment,
-            evaluation.application,
-          ),
-        }),
+        request,
+        builder,
       )
       if (declaration.phase === 'Static')
         throw new RangeError('Static functions have no runtime TIR body')

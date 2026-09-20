@@ -1051,6 +1051,9 @@ export const bindingKey = (id: Tir.BindingId): string => `binding:${idKey(id)}`
 export const patternKey = (id: Match.BindingId): string =>
   `pattern:${id.arm.match.function.sourceId}:${id.arm.match.function.ordinal}:${id.arm.match.span.start}:${id.arm.ordinal}:${id.ordinal}`
 
+/** The value key of one published TIR local. */
+export const tirLocalKey = (id: Tir.LocalId): string => `local:${id.ordinal}`
+
 export const localValueKey = (
   value:
     | DeclarationFacts.ParameterFact
@@ -1172,9 +1175,9 @@ const transparent = (node: Tir.Expression): Tir.Expression | undefined => {
 }
 
 const localKeyOf = (node: Tir.Expression): string | undefined => {
-  if (node._tag === 'ParameterReference') return parameterKey(node.parameter)
-  if (node._tag === 'BindingReference') return bindingKey(node.binding)
-  if (node._tag === 'PatternBindingReference') return patternKey(node.binding)
+  if (node._tag === 'ParameterReference') return tirLocalKey(node.parameter)
+  if (node._tag === 'BindingReference' || node._tag === 'PatternBindingReference')
+    return tirLocalKey(node.binding)
   return undefined
 }
 
@@ -1333,7 +1336,7 @@ const bindPattern = (
           context.trace,
         ),
       )
-    values.set(patternKey(binding.id), value)
+    values.set(tirLocalKey(binding.id), value)
   }
   return complete(Object.freeze({ ...context, values }))
 }
@@ -1942,8 +1945,9 @@ const sameLoop = (left: Tir.LoopId | undefined, right: Tir.LoopId): boolean =>
   left.function.ordinal === right.function.ordinal
 
 const writeRootKey = (root: Tir.OwnedWriteRoot): string => {
-  if (root._tag === 'BindingWriteRoot') return bindingKey(root.binding)
-  return root._tag === 'PatternWriteRoot' ? patternKey(root.binding) : parameterKey(root.parameter)
+  if (root._tag === 'BindingWriteRoot' || root._tag === 'PatternWriteRoot')
+    return tirLocalKey(root.binding)
+  return tirLocalKey(root.parameter)
 }
 
 const evaluateStatementSequence = (
@@ -1990,7 +1994,7 @@ const evaluateStatementSequence = (
       case 'Bind': {
         const value = evaluateExpression(statement.initializer, contextual)
         if (value._tag !== 'Complete') return value
-        const key = bindingKey(statement.binding)
+        const key = tirLocalKey(statement.binding)
         values.set(key, value.value)
         remember(key, statement.initializer)
         continue

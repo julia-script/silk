@@ -2933,8 +2933,7 @@ const collectEffectPatterns = (
   for (const binding of bindings) patternTypes.set(effectPatternKey(binding.id), binding.type)
 }
 
-const effectPatternKey = (id: Match.BindingId): string =>
-  `${id.arm.match.function.sourceId}:${id.arm.match.function.ordinal}:${id.arm.match.span.start}:${id.arm.ordinal}:${id.ordinal}`
+const effectPatternKey = (id: Tir.LocalId): string => `${id.ordinal}`
 
 const collectEffectSites = (instance: Instances.Instance) => {
   const blocks = instance.function.statements

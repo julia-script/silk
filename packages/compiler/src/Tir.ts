@@ -55,7 +55,7 @@ export type ContractFact =
   /** Derived from a header without a presentation, so the cause is still revision-free. */
   | { readonly _tag: 'Unavailable'; readonly cause?: Diagnostic.Identity<Location.Location> }
 
-/** A deterministic binding identity local to its declaring function's statement order. */
+/** Private construction identity retained only until direct body construction is complete. */
 export interface BindingId {
   readonly _tag: 'TirBinding'
   readonly function: DeclarationFacts.DeclarationId
@@ -423,12 +423,9 @@ export type BoundsMode =
   | { readonly _tag: 'Runtime'; readonly length: number }
 
 export type SliceRoot =
-  | { readonly _tag: 'BindingSliceRoot'; readonly binding: BindingId }
-  | {
-      readonly _tag: 'ParameterSliceRoot'
-      readonly parameter: DeclarationFacts.ParameterId
-    }
-  | { readonly _tag: 'PatternSliceRoot'; readonly binding: Match.BindingId }
+  | { readonly _tag: 'BindingSliceRoot'; readonly binding: LocalId }
+  | { readonly _tag: 'ParameterSliceRoot'; readonly parameter: LocalId }
+  | { readonly _tag: 'PatternSliceRoot'; readonly binding: LocalId }
   | {
       readonly _tag: 'TemporarySliceRoot'
       readonly owner: TemporaryOwnerId
@@ -478,12 +475,9 @@ export type WriteSelector =
     }
 
 export type OwnedWriteRoot =
-  | { readonly _tag: 'BindingWriteRoot'; readonly binding: BindingId }
-  | { readonly _tag: 'PatternWriteRoot'; readonly binding: Match.BindingId }
-  | {
-      readonly _tag: 'ParameterWriteRoot'
-      readonly parameter: DeclarationFacts.ParameterId
-    }
+  | { readonly _tag: 'BindingWriteRoot'; readonly binding: LocalId }
+  | { readonly _tag: 'PatternWriteRoot'; readonly binding: LocalId }
+  | { readonly _tag: 'ParameterWriteRoot'; readonly parameter: LocalId }
 
 /** One complete typed replacement rooted in mutable owned storage. */
 export interface OwnedWritePlace {
@@ -520,7 +514,7 @@ export interface BorrowedWritePlace {
 export type WritePlace = OwnedWritePlace | BorrowedWritePlace
 
 export interface PatternBinding {
-  readonly id: Match.BindingId
+  readonly id: LocalId
   readonly name?: string
   /** Absent for a whole-member binding, which observes or owns the entire selected payload. */
   readonly field?: DeclarationFacts.FieldId
@@ -703,7 +697,7 @@ type ExpressionNode =
     }
   | {
       readonly _tag: 'ParameterReference'
-      readonly parameter: DeclarationFacts.ParameterId
+      readonly parameter: LocalId
       readonly type: DeclarationFacts.SemanticType
       readonly span: SourceSpan.SourceSpan
       readonly origin: Origin
@@ -719,14 +713,14 @@ type ExpressionNode =
     }
   | {
       readonly _tag: 'BindingReference'
-      readonly binding: BindingId
+      readonly binding: LocalId
       readonly type: DeclarationFacts.SemanticType
       readonly span: SourceSpan.SourceSpan
       readonly origin: Origin
     }
   | {
       readonly _tag: 'PatternBindingReference'
-      readonly binding: Match.BindingId
+      readonly binding: LocalId
       readonly type: DeclarationFacts.SemanticType
       readonly span: SourceSpan.SourceSpan
       readonly origin: Origin
@@ -1078,9 +1072,9 @@ type ExpressionNode =
       readonly site: EffectSiteId
       readonly statements: ReadonlyArray<Statement>
       readonly captures: ReadonlyArray<{
-        readonly pattern?: Match.BindingId
-        readonly binding?: BindingId
-        readonly parameter?: DeclarationFacts.ParameterId
+        readonly pattern?: LocalId
+        readonly binding?: LocalId
+        readonly parameter?: LocalId
         readonly access: 'Copy' | 'Shared' | 'Exclusive' | 'Take'
         readonly span: SourceSpan.SourceSpan
         readonly at?: AuthoredIdentity.Anchor
@@ -1121,8 +1115,8 @@ type ExpressionNode =
       readonly _tag: 'EffectBindRequirement'
       readonly protected: Expression
       readonly provider: {
-        readonly binding?: BindingId
-        readonly parameter?: DeclarationFacts.ParameterId
+        readonly binding?: LocalId
+        readonly parameter?: LocalId
         readonly selected: Type.RequirementsRow
         readonly evidence: EvidenceRef
         readonly capability?: Type.Nominal | Type.Parameter
@@ -1212,7 +1206,7 @@ type StatementNode =
     }
   | {
       readonly _tag: 'Bind'
-      readonly binding: BindingId
+      readonly binding: LocalId
       readonly name: string | undefined
       readonly mutability: 'Immutable' | 'Mutable'
       readonly initializer: Expression
@@ -1995,7 +1989,7 @@ export const verify = (self: Module): ReadonlyArray<VerificationIssue> => {
         }
         for (const binding of arm.bindings) {
           if (
-            binding.id.arm.ordinal !== index ||
+            binding.id.ordinal < 0 ||
             binding.path.length === 0 ||
             binding.access !== expression.access
           ) {
@@ -2139,11 +2133,11 @@ const contractText = (contract: ContractFact): string =>
 const sliceRootText = (root: SliceRoot): string => {
   switch (root._tag) {
     case 'BindingSliceRoot':
-      return `b${root.binding.ordinal}`
+      return `l${root.binding.ordinal}`
     case 'ParameterSliceRoot':
-      return `p${root.parameter.ordinal}`
+      return `l${root.parameter.ordinal}`
     case 'PatternSliceRoot':
-      return `a${root.binding.arm.ordinal}.b${root.binding.ordinal}`
+      return `l${root.binding.ordinal}`
     case 'TemporarySliceRoot':
       return `t${anchorText(root.owner.at)}.${root.owner.ordinal}`
   }
@@ -2181,11 +2175,10 @@ const encodeExpression = (expression: Expression, depth: number): string => {
     case 'CharacterLiteral':
       return `${indent}literal U+${expression.value.toString(16).toUpperCase().padStart(4, '0')} : ${Type.encode(expression.type)} ${originText(expression.origin)}`
     case 'ParameterReference':
-      return `${indent}param fn${expression.parameter.function.ordinal}.p${expression.parameter.ordinal} : ${Type.encode(expression.type)} ${originText(expression.origin)}`
+      return `${indent}local l${expression.parameter.ordinal} : ${Type.encode(expression.type)} ${originText(expression.origin)}`
     case 'BindingReference':
-      return `${indent}binding fn${expression.binding.function.ordinal}.b${expression.binding.ordinal} : ${Type.encode(expression.type)} ${originText(expression.origin)}`
     case 'PatternBindingReference':
-      return `${indent}pattern-binding a${expression.binding.arm.ordinal}.b${expression.binding.ordinal} : ${Type.encode(expression.type)} ${originText(expression.origin)}`
+      return `${indent}local l${expression.binding.ordinal} : ${Type.encode(expression.type)} ${originText(expression.origin)}`
     case 'Move':
       return [
         `${indent}move : ${Type.encode(expression.type)} ${originText(expression.origin)}`,
@@ -2259,7 +2252,7 @@ const encodeExpression = (expression: Expression, depth: number): string => {
       ].join('\n')
     case 'EffectBlock':
       return [
-        `${indent}effect-block site=${executableSiteLabel(expression.site)} access=${expression.type.access.toLowerCase()} captures=${expression.captures.map((capture) => `${[capture.pattern === undefined ? '' : `pattern${anchorText(capture.pattern.arm.match.at)}.${capture.pattern.arm.ordinal}.${capture.pattern.ordinal}`, capture.binding === undefined ? '' : `b${capture.binding.ordinal}`, capture.parameter === undefined ? '' : `p${capture.parameter.ordinal}`].join('')}:${capture.access.toLowerCase()}`).join(',') || 'none'} : ${Type.encode(expression.type)} ${originText(expression.origin)}`,
+        `${indent}effect-block site=${executableSiteLabel(expression.site)} access=${expression.type.access.toLowerCase()} captures=${expression.captures.map((capture) => `l${(capture.pattern ?? capture.binding ?? capture.parameter)?.ordinal ?? '?'}:${capture.access.toLowerCase()}`).join(',') || 'none'} : ${Type.encode(expression.type)} ${originText(expression.origin)}`,
         ...expression.statements.map((statement) => encodeStatement(statement, depth + 1)),
       ].join('\n')
     case 'UnionConvert':
@@ -2479,7 +2472,7 @@ const encodeStatement = (statement: Statement, depth: number): string => {
       ].join('\n')
     case 'Bind':
       return [
-        `${indent}bind ${statement.mutability.toLowerCase()} b${statement.binding.ordinal} ${statement.name ?? '?'} r${statement.region.ordinal} ${originText(statement.origin)}`,
+        `${indent}bind ${statement.mutability.toLowerCase()} l${statement.binding.ordinal} ${statement.name ?? '?'} r${statement.region.ordinal} ${originText(statement.origin)}`,
         encodeExpression(statement.initializer, depth + 1),
       ].join('\n')
     case 'PatternBind':

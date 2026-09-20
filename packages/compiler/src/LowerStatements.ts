@@ -60,7 +60,7 @@ import { effectValueForCall, instanceText } from './ValueType.js'
 
 export interface LoweredPatternSelection {
   readonly result: Mir.LocalId
-  readonly bindings: ReadonlyArray<Match.BindingId>
+  readonly bindings: ReadonlyArray<Tir.LocalId>
 }
 
 export const lowerPatternSelection = (

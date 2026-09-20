@@ -96,7 +96,8 @@ export const semanticLocal = (
 export const localId = (self: BodyBuilder, semantic: unknown): Tir.LocalId => {
   const key = semanticLocalKey(semantic)
   const known = key === undefined ? undefined : self.localIds.get(key)
-  if (known === undefined) throw new RangeError('TIR referenced an unregistered local')
+  if (known === undefined)
+    throw new RangeError(`TIR referenced an unregistered local: ${key ?? 'unknown identity'}`)
   return known
 }
 
@@ -148,7 +149,7 @@ export const index = (self: BodyBuilder, fn: Tir.TirFunction): Tir.TirFunction =
     }
     const value = input as Readonly<Record<string, unknown>>
     const tag = value['_tag']
-    if (value['_tag'] === 'Bind') {
+    if (tag === 'Bind' && semanticLocalKey(value['binding']) !== undefined) {
       const initializer = value['initializer'] as Readonly<Record<string, unknown>> | undefined
       semanticLocal(self, value['binding'], {
         kind: 'Binding',

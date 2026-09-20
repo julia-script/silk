@@ -2979,13 +2979,7 @@ export const make = (operations: Operations) => {
             const reference = callableExpressions(instance.function).find(
               (expression) =>
                 expression._tag === 'PatternBindingReference' &&
-                expression.binding.ordinal === pattern.ordinal &&
-                expression.binding.arm.ordinal === pattern.arm.ordinal &&
-                expression.binding.arm.match.span.start === pattern.arm.match.span.start &&
-                expression.binding.arm.match.function.sourceId ===
-                  pattern.arm.match.function.sourceId &&
-                expression.binding.arm.match.function.ordinal ===
-                  pattern.arm.match.function.ordinal,
+                expression.binding.ordinal === pattern.ordinal,
             )
             sourceType = reference?._tag === 'PatternBindingReference' ? reference.type : undefined
           } else if (source === 'Parameter') {

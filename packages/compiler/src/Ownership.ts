@@ -37,9 +37,9 @@ export type OwnershipCategory =
 
 /** Where one binding was introduced: a parameter or a `let` statement. */
 export type BindingSite =
-  | { readonly _tag: 'Parameter'; readonly parameter: DeclarationFacts.ParameterId }
-  | { readonly _tag: 'Let'; readonly binding: Tir.BindingId }
-  | { readonly _tag: 'Pattern'; readonly binding: Match.BindingId }
+  | { readonly _tag: 'Parameter'; readonly parameter: Tir.LocalId }
+  | { readonly _tag: 'Let'; readonly binding: Tir.LocalId }
+  | { readonly _tag: 'Pattern'; readonly binding: Tir.LocalId }
   | { readonly _tag: 'Temporary'; readonly owner: Tir.TemporaryOwnerId }
 
 const ownedWriteSite = (root: Tir.OwnedWriteRoot): BindingSite => {
@@ -92,8 +92,17 @@ export type BorrowId = Tir.BorrowId
 /** One concrete validity dependency, retaining its precise known subplace. */
 export interface LoanReferent {
   readonly root: BindingSite
-  readonly path: ReadonlyArray<LoanView.Selector>
+  readonly path: ReadonlyArray<ReferentSelector>
 }
+
+export type ReferentSelector =
+  | Extract<LoanView.Selector, { readonly _tag: 'Field' }>
+  | (Omit<Extract<LoanView.Selector, { readonly _tag: 'Index' }>, 'index'> & {
+      readonly index?: LoanView.Expression
+    })
+  | (Omit<Extract<LoanView.Selector, { readonly _tag: 'SliceIndex' }>, 'index'> & {
+      readonly index?: LoanView.Expression
+    })
 
 /** Canonical subplace identity for inspection and dependency-set normalization. */
 export const referentKey = (self: LoanReferent): string =>
@@ -386,7 +395,7 @@ export const siteKey = (site: BindingSite): string => {
     return `b${site.binding.ordinal}`
   }
   if (site._tag === 'Pattern') {
-    return `m${site.binding.arm.match.span.start}.a${site.binding.arm.ordinal}.p${site.binding.ordinal}`
+    return `l${site.binding.ordinal}`
   }
   return `t${site.owner.span.sourceId}:${site.owner.span.start}:${site.owner.span.end}:${site.owner.ordinal}`
 }
@@ -2268,7 +2277,7 @@ const analyzeLoans = (
   const viewAliases = new Map<number, ReadonlyArray<number>>()
   const rootsOf = (
     root: BindingSite,
-    path: ReadonlyArray<LoanView.Selector> = [],
+    path: ReadonlyArray<ReferentSelector> = [],
   ): ReadonlyArray<LoanReferent> => {
     const sources = root._tag === 'Let' ? viewRoots.get(root.binding.ordinal) : undefined
     return sources === undefined
@@ -2359,7 +2368,17 @@ const analyzeLoans = (
     }
     if (fn.lifetimeFlow !== undefined && expression.type._tag === 'Available') {
       const origins = LifetimeFlow.sources(fn.lifetimeFlow, expression.type.type).flatMap(
-        (origin) => (origin.root === undefined ? [] : rootsOf(origin.root, origin.path ?? [])),
+        (origin) =>
+          origin.root === undefined
+            ? []
+            : rootsOf(
+                origin.root,
+                (origin.path ?? []).map((selector): ReferentSelector => {
+                  if (selector._tag === 'Field') return selector
+                  const { index: _index, ...portable } = selector
+                  return portable
+                }),
+              ),
       )
       if (origins.length > 0) return origins
     }
@@ -2498,7 +2517,7 @@ const analyzeLoans = (
   const storedByValue = (type: Type.Type | undefined): boolean =>
     type !== undefined &&
     (Type.isReference(type) || Type.isSlice(type) || Type.isEffect(type) || Type.isCallable(type))
-  const ownedParameter = (parameter: DeclarationFacts.ParameterId): boolean => {
+  const ownedParameter = (parameter: Tir.LocalId): boolean => {
     const declared = fn.declaration.parameters.find(
       (candidate) => candidate.id.ordinal === parameter.ordinal,
     )
@@ -2776,7 +2795,8 @@ const analyzeLoans = (
             access,
           )
           for (const selector of place.path)
-            if (selector._tag !== 'Field') inspect(selector.index, region, active, 'Read')
+            if (selector._tag !== 'Field' && selector.index !== undefined)
+              inspect(selector.index, region, active, 'Read')
         }
         if (place === undefined && expression._tag === 'IndexProjection')
           inspect(expression.index, region, active, 'Read')
@@ -3542,7 +3562,10 @@ const checkFunction = (
     const cause = 'cause' in parameter.declaredType ? parameter.declaredType.cause : undefined
     const binding: MutableBinding = {
       ordinal: state.nextAcquisition++,
-      site: Object.freeze({ _tag: 'Parameter', parameter: parameter.id }),
+      site: Object.freeze({
+        _tag: 'Parameter',
+        parameter: Object.freeze({ _tag: 'TirLocal' as const, ordinal: parameter.id.ordinal }),
+      }),
       name: parameter.name._tag === 'Present' ? parameter.name.spelling : undefined,
       mutability: parameter.bindingMutability,
       liveFrom: context.spanOf(parameter.anchor),

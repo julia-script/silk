@@ -1108,7 +1108,7 @@ it('retains effect blocks as lazy statement regions with canonical captures', ()
   )
   assert.deepEqual(
     binding.initializer.captures.map((capture) => [capture.binding?.ordinal, capture.access]),
-    [[0, 'Exclusive']],
+    [[1, 'Exclusive']],
   )
   assert.include(
     Tir.encode(result.tir),
@@ -1173,7 +1173,7 @@ fn inspect(input: Box) -> i32 {
 
   assert.deepEqual(result.diagnostics, [])
   assert.include(Tir.encode(result.tir), 'borrow-value')
-  assert.include(Tir.encode(result.tir), 'a0.b0')
+  assert.include(Tir.encode(result.tir), 'binding #1 buffer')
   assert.include(Tir.encode(result.tir), 'RawBufferRead')
   assert.deepEqual(Tir.verify(result.tir), [])
 })

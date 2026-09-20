@@ -1,5 +1,6 @@
 import * as Location from './Location.js'
 import * as BodyLifetime from './BodyLifetime.js'
+import * as BodyBuilder from './BodyBuilder.js'
 import * as BodyControlFlow from './BodyControlFlow.js'
 import * as CleanupPlan from './CleanupPlan.js'
 import * as DeclarationFacts from './DeclarationFacts.js'
@@ -83,14 +84,17 @@ const encloses = (
   )
 }
 
-const rootSite = (root: Elaboration.BorrowRootFact): Ownership.BindingSite => {
+const rootSite = (
+  root: Elaboration.BorrowRootFact,
+  builder: BodyBuilder.BodyBuilder,
+): Ownership.BindingSite => {
   switch (root._tag) {
     case 'BindingRoot':
-      return { _tag: 'Let', binding: root.binding.id }
+      return { _tag: 'Let', binding: BodyBuilder.localId(builder, root.binding.id) }
     case 'ParameterRoot':
-      return { _tag: 'Parameter', parameter: root.parameter.id }
+      return { _tag: 'Parameter', parameter: BodyBuilder.localId(builder, root.parameter.id) }
     case 'PatternRoot':
-      return { _tag: 'Pattern', binding: root.binding.id }
+      return { _tag: 'Pattern', binding: BodyBuilder.localId(builder, root.binding.id) }
     case 'TemporaryRoot':
       return { _tag: 'Temporary', owner: root.owner }
   }
@@ -211,6 +215,7 @@ export const analyze = (
   body: BodyLifetime.BodyLifetime,
   index: DeclarationIndex.Index,
   context: SemanticContext.SemanticContext,
+  builder: BodyBuilder.BodyBuilder,
   outlivesScope: TypeOutlives.Context = TypeOutlives.context(index.modules),
 ): LifetimeFlow => {
   const applicationDiagnostics = new Map<string, Diagnostic.Located>()
@@ -248,7 +253,9 @@ export const analyze = (
   const patternRoots = new Map<string, Elaboration.BorrowRootFact>()
   const canonicalRoot = (root: Elaboration.BorrowRootFact): Elaboration.BorrowRootFact => {
     const alias =
-      root._tag === 'PatternRoot' ? patternRoots.get(Ownership.siteKey(rootSite(root))) : undefined
+      root._tag === 'PatternRoot'
+        ? patternRoots.get(Ownership.siteKey(rootSite(root, builder)))
+        : undefined
     return alias === undefined ? root : { ...alias, path: [...alias.path, ...root.path] }
   }
   const variantBranches: Array<{
@@ -323,7 +330,7 @@ export const analyze = (
     const span = context.spanOf(position)
     const alias =
       source._tag === 'PatternRoot'
-        ? patternRoots.get(Ownership.siteKey(rootSite(source)))
+        ? patternRoots.get(Ownership.siteKey(rootSite(source, builder)))
         : undefined
     if (alias !== undefined) {
       anchor(
@@ -342,7 +349,7 @@ export const analyze = (
       constrain(sliceIndex.slice.lifetime, lifetime)
       origins.set(Lifetime.key(lifetime), {
         lifetime,
-        root: rootSite(source),
+        root: rootSite(source, builder),
         path: source.path,
         parent: sliceIndex.slice.lifetime,
         span,
@@ -366,7 +373,7 @@ export const analyze = (
       constrain(rootType.lifetime, lifetime)
       origins.set(Lifetime.key(lifetime), {
         lifetime,
-        root: rootSite(source),
+        root: rootSite(source, builder),
         path: source.path,
         parent: rootType.lifetime,
         span,
@@ -401,7 +408,7 @@ export const analyze = (
       .map(([, point]) => point)
     restrict(lifetime, available, {
       lifetime,
-      root: rootSite(source),
+      root: rootSite(source, builder),
       path: source.path,
       span,
       at: position,
@@ -420,7 +427,7 @@ export const analyze = (
       constrain(type.lifetime, lifetime)
       origins.set(Lifetime.key(lifetime), {
         lifetime,
-        root: rootSite(source),
+        root: rootSite(source, builder),
         path: source.path,
         parent: type.lifetime,
         span: context.spanOf(expression.anchor),
@@ -438,18 +445,24 @@ export const analyze = (
     const root = expressionRoot(source, context, true)
     if (root !== undefined)
       for (const binding of bindings)
-        patternRoots.set(Ownership.siteKey({ _tag: 'Pattern', binding: binding.id }), {
-          ...root,
-          path: [
-            ...root.path,
-            ...binding.path.map((field): Elaboration.BorrowSelectorFact => ({
-              _tag: 'Field',
-              field,
-              span: context.spanOf(binding.anchor),
-              at: binding.anchor,
-            })),
-          ],
-        })
+        patternRoots.set(
+          Ownership.siteKey({
+            _tag: 'Pattern',
+            binding: BodyBuilder.localId(builder, binding.id),
+          }),
+          {
+            ...root,
+            path: [
+              ...root.path,
+              ...binding.path.map((field): Elaboration.BorrowSelectorFact => ({
+                _tag: 'Field',
+                field,
+                span: context.spanOf(binding.anchor),
+                at: binding.anchor,
+              })),
+            ],
+          },
+        )
   }
   const visitExpression = (
     expression: Elaboration.ExpressionFact,
@@ -534,7 +547,7 @@ export const analyze = (
           constrain(formation.parent.lifetime, type.lifetime)
           origins.set(Lifetime.key(type.lifetime), {
             lifetime: type.lifetime,
-            root: rootSite(formation.root),
+            root: rootSite(formation.root, builder),
             path: formation.root.path,
             parent: formation.parent.lifetime,
             span: context.spanOf(expression.anchor),
@@ -549,12 +562,12 @@ export const analyze = (
     if (expression._tag === 'PlaceReplace') {
       const source = expressionRoot(expression.destination, context)
       if (source !== undefined)
-        invalidations.push({ root: rootSite(source), path: source.path, expression })
+        invalidations.push({ root: rootSite(source, builder), path: source.path, expression })
     }
     if (expression._tag === 'Move') {
       const source = expressionRoot(expression.subject, context)
       if (source !== undefined)
-        invalidations.push({ root: rootSite(source), path: source.path, expression })
+        invalidations.push({ root: rootSite(source, builder), path: source.path, expression })
     }
     if (expression._tag === 'FieldProjection' || expression._tag === 'IndexProjection') {
       const subject = expression.subject.type
@@ -640,14 +653,14 @@ export const analyze = (
             const lifetimes = Type.storageLifetimes(statement.destination.type.type)
             if (lifetimes.length > 0)
               replacements.push({
-                root: rootSite(source),
+                root: rootSite(source, builder),
                 path: source.path,
                 lifetimes,
                 anchor: statement.anchor,
               })
           }
           invalidations.push({
-            root: rootSite(source),
+            root: rootSite(source, builder),
             path: source.path,
             expression: statement.value,
             after: statement.anchor,
@@ -662,7 +675,7 @@ export const analyze = (
         const source = expressionRoot(statement.expression, context)
         if (source !== undefined)
           invalidations.push({
-            root: rootSite(source),
+            root: rootSite(source, builder),
             path: source.path,
             expression: statement.expression,
           })
@@ -811,7 +824,7 @@ export const analyze = (
             !(
               origin.anchor !== undefined && encloses(context, replacement.anchor, origin.anchor)
             ) &&
-            Ownership.siteKey(replacement.root) === Ownership.siteKey(rootSite(carrier)) &&
+            Ownership.siteKey(replacement.root) === Ownership.siteKey(rootSite(carrier, builder)) &&
             replacement.lifetimes.some((lifetime) => storageOutlives(origin.lifetime, lifetime)),
         )
         const retiredPath = (
@@ -825,7 +838,8 @@ export const analyze = (
           })
           for (const branch of variantBranches) {
             if (
-              Ownership.siteKey(rootSite(branch.root)) !== Ownership.siteKey(rootSite(carrier)) ||
+              Ownership.siteKey(rootSite(branch.root, builder)) !==
+                Ownership.siteKey(rootSite(carrier, builder)) ||
               !prefix(branch.root.path, path)
             )
               continue

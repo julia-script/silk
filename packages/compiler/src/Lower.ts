@@ -64,8 +64,10 @@ export const mirType = (
 export const local = (ordinal: number): Mir.LocalId => Object.freeze({ _tag: 'Local', ordinal })
 
 export const spanKey = (span: SourceSpan.SourceSpan): string => `${span.start}:${span.end}`
-export const patternKey = (binding: Match.BindingId): string =>
-  `${spanKey(binding.arm.match.span)}:${binding.arm.ordinal}:${binding.ordinal}`
+export const patternKey = (binding: Match.BindingId | Tir.LocalId): string =>
+  binding._tag === 'TirLocal'
+    ? `local:${binding.ordinal}`
+    : `${spanKey(binding.arm.match.span)}:${binding.arm.ordinal}:${binding.ordinal}`
 export const borrowKey = (borrow: Tir.BorrowId): string =>
   `${borrow.function.sourceId}:${borrow.function.ordinal}:${borrow.callSpan.start}:${borrow.callSpan.end}:${borrow.ordinal}`
 

@@ -2910,6 +2910,15 @@ export const analyzeMatch = (
     const guardNode = armNode.guard
     const resultNode = armNode.result._tag === 'Block' ? undefined : armNode.result
     const blockNode = armNode.result._tag === 'Block' ? armNode.result : undefined
+    if (resolution.builder !== undefined)
+      for (const binding of pattern.bindings)
+        if (binding.type._tag === 'Available')
+          BodyBuilder.semanticLocal(resolution.builder, binding.id, {
+            kind: 'Pattern',
+            ...(binding.name._tag === 'Present' ? { name: binding.name.spelling } : {}),
+            type: binding.type.type,
+            mutability: binding.access === 'Place' ? 'Mutable' : 'Immutable',
+          })
     const armScope: Scope = Object.freeze({
       parameters: scope.parameters,
       bindings: scope.bindings,

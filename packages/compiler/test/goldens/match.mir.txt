@@ -21,14 +21,14 @@ fn golden/program.main params=0 locals=9 -> i32 entry=r0
       members golden/program.Box
       decision golden/program.Box candidates=#0
       arm #0 golden/program.Box before=golden/program.Box after=empty [220, 308)
-        bind #0 %4 <- #0 : golden/program.Token access=Move [226, 231)
+        bind #1 %4 <- #0 : golden/program.Token access=Move [226, 231)
         selected access=Move result=%7 end-borrow=false
           r2 operation:
             %7 = match#237 move %4 : golden/program.Token -> i32 [237, 308)
               members golden/program.Token
               decision golden/program.Token candidates=#0
               arm #0 golden/program.Token before=golden/program.Token after=empty [262, 302)
-                bind #0 %5 <- #0 : i32 access=Move [270, 282)
+                bind #2 %5 <- #0 : i32 access=Move [270, 282)
                 selected access=Move result=%6 end-borrow=false
                   r3 operation:
                     %6 = call golden/program.adjust(%5) : i32 [288, 302)

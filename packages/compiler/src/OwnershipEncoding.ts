@@ -42,7 +42,7 @@ const siteText = (site: BindingSite): string => {
     return `b${site.binding.ordinal}`
   }
   if (site._tag === 'Pattern') {
-    return `m${site.binding.arm.match.span.start}.a${site.binding.arm.ordinal}.p${site.binding.ordinal}`
+    return `l${site.binding.ordinal}`
   }
   return `t${site.owner.span.start}.${site.owner.ordinal}`
 }

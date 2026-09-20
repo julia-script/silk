@@ -2,7 +2,6 @@ import type * as AuthoredHir from './AuthoredHir.js'
 import * as DeclarationFacts from './DeclarationFacts.js'
 import type * as DeclarationIndex from './DeclarationIndex.js'
 import * as Lifetime from './Lifetime.js'
-import type * as Match from './Match.js'
 import type * as SourceSpan from './SourceSpan.js'
 import type * as Tir from './Tir.js'
 import * as TirModule from './Tir.js'
@@ -28,19 +27,19 @@ interface Base {
 export type Local =
   | {
       readonly _tag: 'BindingFact'
-      readonly id: Tir.BindingId
+      readonly id: Tir.LocalId
       readonly name: Name
       readonly inferredType: ExpressionType
     }
   | {
       readonly _tag: 'PatternBinding'
-      readonly id: Match.BindingId
+      readonly id: Tir.LocalId
       readonly name: Name
       readonly type: ExpressionType
     }
   | {
       readonly _tag: 'ParameterDeclaration'
-      readonly id: DeclarationFacts.ParameterId
+      readonly id: Tir.LocalId
       readonly name: Name
       readonly declaredType: DeclarationFacts.DeclaredTypeFact
     }
@@ -93,17 +92,17 @@ export type Selector =
 export type BorrowRoot =
   | {
       readonly _tag: 'BindingRoot'
-      readonly binding: { readonly id: Tir.BindingId }
+      readonly binding: { readonly id: Tir.LocalId }
       readonly path: ReadonlyArray<Selector>
     }
   | {
       readonly _tag: 'ParameterRoot'
-      readonly parameter: { readonly id: DeclarationFacts.ParameterId }
+      readonly parameter: { readonly id: Tir.LocalId }
       readonly path: ReadonlyArray<Selector>
     }
   | {
       readonly _tag: 'PatternRoot'
-      readonly binding: { readonly id: Match.BindingId }
+      readonly binding: { readonly id: Tir.LocalId }
       readonly path: ReadonlyArray<Selector>
     }
   | {
@@ -260,7 +259,7 @@ export type Expression =
   | (Base & { readonly _tag: 'CompileError'; readonly message: Expression })
 
 export interface Binding {
-  readonly id: Tir.BindingId
+  readonly id: Tir.LocalId
   readonly initializer: Expression
   readonly inferredType: ExpressionType
 }
@@ -487,13 +486,18 @@ export const retainsLifetimes = (
  * local is found by the id a node names.
  */
 export const ofTir = (fn: Tir.TirFunction, index: DeclarationIndex.Index): Body => {
-  const parameters = new Map(
-    fn.declaration.parameters.map((parameter) => [parameter.id.ordinal, parameter] as const),
+  const parameters = new Map<number, Extract<Local, { readonly _tag: 'ParameterDeclaration' }>>(
+    fn.declaration.parameters.map((parameter) => [
+      parameter.id.ordinal,
+      {
+        ...parameter,
+        id: Object.freeze({ _tag: 'TirLocal' as const, ordinal: parameter.id.ordinal }),
+      },
+    ]),
   )
   const bindings = new Map<number, Extract<Local, { readonly _tag: 'BindingFact' }>>()
   const patterns = new Map<string, Extract<Local, { readonly _tag: 'PatternBinding' }>>()
-  const patternKey = (id: Match.BindingId): string =>
-    `${id.arm.match.span.start}:${id.arm.ordinal}:${id.ordinal}`
+  const patternKey = (id: Tir.LocalId): string => `${id.ordinal}`
   const name = (spelling: string | undefined): Name =>
     spelling === undefined ? { _tag: 'Unavailable' } : { _tag: 'Present', spelling }
   const available = (type: DeclarationFacts.SemanticType): ExpressionType => ({
@@ -591,9 +595,9 @@ export const ofTir = (fn: Tir.TirFunction, index: DeclarationIndex.Index): Body 
     return { _tag: 'TemporaryRoot', owner: root.owner, path }
   }
   const localOf = (capture: {
-    readonly pattern?: Match.BindingId
-    readonly binding?: Tir.BindingId
-    readonly parameter?: DeclarationFacts.ParameterId
+    readonly pattern?: Tir.LocalId
+    readonly binding?: Tir.LocalId
+    readonly parameter?: Tir.LocalId
   }): Local | undefined => {
     if (capture.binding !== undefined) return bindings.get(capture.binding.ordinal)
     if (capture.pattern !== undefined) return patterns.get(patternKey(capture.pattern))

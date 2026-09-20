@@ -1261,10 +1261,9 @@ export const lowerEffectCatch = (
       match: innerMatch,
       ordinal,
     })
-    const bindingId: Match.BindingId = Object.freeze({
-      _tag: 'PatternBindingId',
-      arm: armId,
-      ordinal: 0,
+    const bindingId: Tir.LocalId = Object.freeze({
+      _tag: 'TirLocal',
+      ordinal,
     })
     const memberType = fn.type(member)
     if (memberType === undefined || memberType._tag === 'EffectOutcome') return undefined
@@ -1705,7 +1704,7 @@ export const borrowedWriteRoot = (
 /** Resolves a discriminant-only pattern alias to its original owned storage. */
 export const patternPlace = (
   fn: FunctionLowering,
-  binding: Match.BindingId,
+  binding: Tir.LocalId,
   span: SourceSpan.SourceSpan,
 ):
   | { readonly root: Mir.LocalId; readonly selectors: ReadonlyArray<Mir.PlaceSelector> }

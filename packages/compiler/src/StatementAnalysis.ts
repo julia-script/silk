@@ -10,6 +10,12 @@ import * as MachineFunction from './MachineFunction.js'
 import * as Lifetime from './Lifetime.js'
 import * as BodyLifetime from './BodyLifetime.js'
 import * as BodyBuilder from './BodyBuilder.js'
+
+const construction = (context: BodyContext): BodyBuilder.BodyBuilder => {
+  if (context.resolution.builder === undefined)
+    throw new RangeError('function-body analysis requires its TIR builder')
+  return context.resolution.builder
+}
 import * as LifetimeFlow from './LifetimeFlow.js'
 import * as NominalVariance from './NominalVariance.js'
 import * as TypeOutlives from './TypeOutlives.js'
@@ -773,10 +779,20 @@ export const analyzeStatements = (
         ...(hasConcreteCallableIdentity ? { concreteCallableIdentity: true as const } : {}),
         anchor: element.anchor,
       })
+      BodyBuilder.semanticLocal(construction(context), binding.id, {
+        kind: 'Binding',
+        ...(binding.name._tag === 'Present' ? { name: binding.name.spelling } : {}),
+        type: binding.inferredType._tag === 'Available' ? binding.inferredType.type : 'never',
+        mutability: binding.mutability,
+      })
       context.bindings.push(binding)
       if (staticValue !== undefined && context.staticContext !== undefined) {
         const key = StaticEvaluation.localValueKey(binding)
         context.staticContext.values.set(key, staticValue)
+        context.staticContext.values.set(
+          StaticEvaluation.tirLocalKey(BodyBuilder.localId(construction(context), binding.id)),
+          staticValue,
+        )
         const evaluatedNode = context.staticContext.nodes.expression(initializer.fact)
         const staticTextSpan = context.staticContext.expressionSpans.get(evaluatedNode)
         if (staticTextSpan !== undefined) context.staticContext.valueSpans.set(key, staticTextSpan)
@@ -858,6 +874,13 @@ export const analyzeStatements = (
           anchor: element.anchor,
         }),
       )
+      for (const binding of selection.bindings)
+        BodyBuilder.semanticLocal(construction(context), binding.id, {
+          kind: 'Pattern',
+          ...(binding.name._tag === 'Present' ? { name: binding.name.spelling } : {}),
+          type: binding.type._tag === 'Available' ? binding.type.type : 'never',
+          mutability: binding.access === 'Place' ? 'Mutable' : 'Immutable',
+        })
       for (const binding of selection.bindings) {
         if (binding.name._tag !== 'Present') continue
         const originalSpan = blockBindings.get(binding.name.spelling)
@@ -1025,9 +1048,19 @@ export const analyzeStatements = (
           staticValue: current.value,
           anchor: element.anchor,
         })
+        BodyBuilder.semanticLocal(construction(context), binding.id, {
+          kind: 'Binding',
+          ...(binding.name._tag === 'Present' ? { name: binding.name.spelling } : {}),
+          type: binding.inferredType._tag === 'Available' ? binding.inferredType.type : 'never',
+          mutability: binding.mutability,
+        })
         context.nextBindingOrdinal.value += 1
         context.bindings.push(binding)
         context.staticContext.values.set(StaticEvaluation.localValueKey(binding), current.value)
+        context.staticContext.values.set(
+          StaticEvaluation.tirLocalKey(BodyBuilder.localId(construction(context), binding.id)),
+          current.value,
+        )
         const diagnosticStart = context.diagnostics.length
         const nestedIterationStart = context.staticIterations.length
         const statements =
@@ -1881,6 +1914,13 @@ export const analyzeFunctionBody = (
     BodyBuilder.make(
       Object.freeze({ owner: declaration.owner, request: Object.freeze({ _tag: 'Check' }) }),
     )
+  for (const parameter of declaration.parameters)
+    BodyBuilder.semanticLocal(builder, parameter.id, {
+      kind: 'Parameter',
+      ...(parameter.name._tag === 'Present' ? { name: parameter.name.spelling } : {}),
+      type: parameter.declaredType._tag === 'Resolved' ? parameter.declaredType.type : 'never',
+      mutability: parameter.bindingMutability,
+    })
   const returnType =
     declaration.returnType._tag === 'Resolved'
       ? Type.substitute(declaration.returnType.type, staticContext?.typeSubstitution ?? new Map())
@@ -2098,6 +2138,7 @@ export const analyzeFunctionBody = (
     bodyLifetimes,
     resolution.index,
     semantic,
+    builder,
     outlivesScope,
   )
   context.diagnostics.push(...lifetimeFlow.diagnostics)

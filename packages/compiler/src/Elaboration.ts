@@ -2403,12 +2403,14 @@ const runtimeTirFunction = (
       captures: Object.freeze(
         captures.map((capture) =>
           Object.freeze({
-            ...(capture.reference._tag === 'BindingFact' ? { binding: capture.reference.id } : {}),
+            ...(capture.reference._tag === 'BindingFact'
+              ? { binding: BodyBuilder.localId(builder, capture.reference.id) }
+              : {}),
             ...(capture.reference._tag === 'PatternBinding'
-              ? { pattern: capture.reference.id }
+              ? { pattern: BodyBuilder.localId(builder, capture.reference.id) }
               : {}),
             ...(capture.reference._tag === 'ParameterDeclaration'
-              ? { parameter: capture.reference.id }
+              ? { parameter: BodyBuilder.localId(builder, capture.reference.id) }
               : {}),
             access: capture.access,
             span: capture.span,

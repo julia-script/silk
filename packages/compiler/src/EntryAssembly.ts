@@ -890,8 +890,7 @@ export const lowerBuiltinEffectRunner = (
               Object.freeze({
                 _tag: 'ParameterReference' as const,
                 parameter: Object.freeze({
-                  _tag: 'ParameterId' as const,
-                  function: spec.owner.function.declaration.id,
+                  _tag: 'TirLocal' as const,
                   ordinal,
                 }),
                 type: argument._tag === 'Unavailable' ? ('never' as const) : argument.type,
@@ -1101,7 +1100,10 @@ export const lowerWitnessEffectRunner = (
             contract.operands.map((operand) =>
               Object.freeze({
                 _tag: 'ParameterReference' as const,
-                parameter: operand.parameter.id,
+                parameter: Object.freeze({
+                  _tag: 'TirLocal' as const,
+                  ordinal: operand.parameter.id.ordinal,
+                }),
                 type: operand.type._tag === 'Resolved' ? operand.type.type : 'never',
                 span: spec.expression.span,
                 origin: spec.expression.origin,

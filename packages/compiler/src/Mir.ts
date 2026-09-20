@@ -1369,7 +1369,7 @@ export interface EndLoanOperation {
 }
 
 export interface MatchBinding {
-  readonly id: Match.BindingId
+  readonly id: Tir.LocalId
   readonly destination: LocalId
   readonly path: ReadonlyArray<DeclarationFacts.FieldId>
   readonly type: Type

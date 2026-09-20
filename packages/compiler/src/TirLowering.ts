@@ -52,6 +52,11 @@ const publishedEvidence = (
   return BodyBuilder.selectedEvidence(builder, evidence)
 }
 
+const localOf = (options: LowerStatementOptions, semantic: unknown): Tir.LocalId => {
+  if (options.builder === undefined) throw new RangeError('TIR local requires its body builder')
+  return BodyBuilder.localId(options.builder, semantic)
+}
+
 export const tirReference = (
   reference: ParameterReferenceFact,
   type: ExpressionTypeFact,
@@ -62,27 +67,51 @@ export const tirReference = (
   const span = context.spanOf(anchor)
   const origin = Tir.authored(anchor)
   if (reference._tag === 'Resolved' && type._tag === 'Available') {
+    if (builder === undefined) throw new RangeError('TIR local requires its body builder')
     return Object.freeze({
       _tag: 'ParameterReference',
-      parameter: reference.parameter.id,
+      parameter: BodyBuilder.semanticLocal(builder, reference.parameter.id, {
+        kind: 'Parameter',
+        ...(reference.parameter.name._tag === 'Present'
+          ? { name: reference.parameter.name.spelling }
+          : {}),
+        type: type.type,
+        mutability: reference.parameter.bindingMutability,
+      }),
       type: type.type,
       span,
       origin,
     })
   }
   if (reference._tag === 'ResolvedBinding' && type._tag === 'Available') {
+    if (builder === undefined) throw new RangeError('TIR local requires its body builder')
     return Object.freeze({
       _tag: 'BindingReference',
-      binding: reference.binding.id,
+      binding: BodyBuilder.semanticLocal(builder, reference.binding.id, {
+        kind: 'Binding',
+        ...(reference.binding.name._tag === 'Present'
+          ? { name: reference.binding.name.spelling }
+          : {}),
+        type: type.type,
+        mutability: reference.binding.mutability,
+      }),
       type: type.type,
       span,
       origin,
     })
   }
   if (reference._tag === 'ResolvedPattern' && type._tag === 'Available') {
+    if (builder === undefined) throw new RangeError('TIR local requires its body builder')
     return Object.freeze({
       _tag: 'PatternBindingReference',
-      binding: reference.binding.id,
+      binding: BodyBuilder.semanticLocal(builder, reference.binding.id, {
+        kind: 'Pattern',
+        ...(reference.binding.name._tag === 'Present'
+          ? { name: reference.binding.name.spelling }
+          : {}),
+        type: type.type,
+        mutability: reference.binding.access === 'Place' ? 'Mutable' : 'Immutable',
+      }),
       type: type.type,
       span,
       origin,
@@ -243,6 +272,8 @@ export const tirPatternSelection = (
   selection: PatternSelectionFact,
   options: LowerStatementOptions,
 ): Tir.PatternSelection => {
+  if (options.builder === undefined) throw new RangeError('TIR locals require their body builder')
+  const builder = options.builder
   let member: Match.CoverageIdentity | undefined
   if (selection.pattern._tag === 'EnumMemberPattern') {
     member = selection.pattern.coverage
@@ -273,7 +304,12 @@ export const tirPatternSelection = (
         binding.type._tag === 'Available'
           ? [
               Object.freeze({
-                id: binding.id,
+                id: BodyBuilder.semanticLocal(builder, binding.id, {
+                  kind: 'Pattern',
+                  ...(binding.name._tag === 'Present' ? { name: binding.name.spelling } : {}),
+                  type: binding.type.type,
+                  mutability: binding.access === 'Place' ? 'Mutable' : 'Immutable',
+                }),
                 ...(binding.name._tag === 'Present' ? { name: binding.name.spelling } : {}),
                 ...(binding.field === undefined ? {} : { field: binding.field.id }),
                 path: binding.path,
@@ -368,7 +404,12 @@ export const lowerStatements = (
           }
           return Object.freeze({
             _tag: 'Bind',
-            binding: binding.id,
+            binding:
+              options.builder === undefined
+                ? (() => {
+                    throw new RangeError('TIR local requires its body builder')
+                  })()
+                : BodyBuilder.localId(options.builder, binding.id),
             name: binding.name._tag === 'Present' ? binding.name.spelling : undefined,
             mutability: binding.mutability,
             initializer: initializer(),
@@ -1050,6 +1091,7 @@ const residualExpression = (
       statements: lowerStatements(fact.statements, {
         // Deferred bodies retain the enclosing borrow context but own their return boundary.
         context: options.context,
+        ...(options.builder === undefined ? {} : { builder: options.builder }),
         ...(options.functionId === undefined ? {} : { functionId: options.functionId }),
         ...(options.lifetimeAssumptions === undefined
           ? {}
@@ -1065,12 +1107,14 @@ const residualExpression = (
       captures: Object.freeze(
         fact.captures.map((capture) =>
           Object.freeze({
-            ...(capture.reference._tag === 'BindingFact' ? { binding: capture.reference.id } : {}),
+            ...(capture.reference._tag === 'BindingFact'
+              ? { binding: localOf(options, capture.reference.id) }
+              : {}),
             ...(capture.reference._tag === 'PatternBinding'
-              ? { pattern: capture.reference.id }
+              ? { pattern: localOf(options, capture.reference.id) }
               : {}),
             ...(capture.reference._tag === 'ParameterDeclaration'
-              ? { parameter: capture.reference.id }
+              ? { parameter: localOf(options, capture.reference.id) }
               : {}),
             access: capture.access,
             span: capture.span,
@@ -1149,8 +1193,8 @@ const residualExpression = (
       protected: protected_,
       provider: Object.freeze({
         ...(fact.provider.reference._tag === 'BindingFact'
-          ? { binding: fact.provider.reference.id }
-          : { parameter: fact.provider.reference.id }),
+          ? { binding: localOf(options, fact.provider.reference.id) }
+          : { parameter: localOf(options, fact.provider.reference.id) }),
         selected: fact.provider.selected,
         evidence: publishedEvidence(options.builder, fact.provider.evidence),
         ...(fact.provider.capability === undefined ? {} : { capability: fact.provider.capability }),
@@ -1214,7 +1258,19 @@ const residualExpression = (
                 binding.type._tag === 'Available'
                   ? [
                       Object.freeze({
-                        id: binding.id,
+                        id:
+                          options.builder === undefined
+                            ? (() => {
+                                throw new RangeError('TIR local requires its body builder')
+                              })()
+                            : BodyBuilder.semanticLocal(options.builder, binding.id, {
+                                kind: 'Pattern',
+                                ...(binding.name._tag === 'Present'
+                                  ? { name: binding.name.spelling }
+                                  : {}),
+                                type: binding.type.type,
+                                mutability: binding.access === 'Place' ? 'Mutable' : 'Immutable',
+                              }),
                         ...(binding.name._tag === 'Present' ? { name: binding.name.spelling } : {}),
                         ...(binding.field === undefined ? {} : { field: binding.field.id }),
                         path: binding.path,
@@ -1554,16 +1610,22 @@ const residualExpression = (
     let root: Tir.SliceRoot
     switch (fact.formation.root._tag) {
       case 'BindingRoot':
-        root = Object.freeze({ _tag: 'BindingSliceRoot', binding: fact.formation.root.binding.id })
+        root = Object.freeze({
+          _tag: 'BindingSliceRoot',
+          binding: localOf(options, fact.formation.root.binding.id),
+        })
         break
       case 'ParameterRoot':
         root = Object.freeze({
           _tag: 'ParameterSliceRoot',
-          parameter: fact.formation.root.parameter.id,
+          parameter: localOf(options, fact.formation.root.parameter.id),
         })
         break
       case 'PatternRoot':
-        root = Object.freeze({ _tag: 'PatternSliceRoot', binding: fact.formation.root.binding.id })
+        root = Object.freeze({
+          _tag: 'PatternSliceRoot',
+          binding: localOf(options, fact.formation.root.binding.id),
+        })
         break
       case 'TemporaryRoot':
         root = Object.freeze({
@@ -2387,10 +2449,10 @@ export const tirWritePlace = (
   if (!walk(fact) || fact.type._tag !== 'Available') return undefined
   let ownedRoot: Tir.OwnedWriteRoot
   if (root._tag === 'ParameterDeclaration')
-    ownedRoot = { _tag: 'ParameterWriteRoot', parameter: root.id }
+    ownedRoot = { _tag: 'ParameterWriteRoot', parameter: localOf(options, root.id) }
   else if (root._tag === 'PatternBinding')
-    ownedRoot = { _tag: 'PatternWriteRoot', binding: root.id }
-  else ownedRoot = { _tag: 'BindingWriteRoot', binding: root.id }
+    ownedRoot = { _tag: 'PatternWriteRoot', binding: localOf(options, root.id) }
+  else ownedRoot = { _tag: 'BindingWriteRoot', binding: localOf(options, root.id) }
   return Object.freeze({
     _tag: 'WritePlace',
     root: ownedRoot,
@@ -2504,8 +2566,14 @@ export const tirBorrowedWritePlace = (
     _tag: 'BorrowedWritePlace',
     root:
       root._tag === 'ParameterDeclaration'
-        ? Object.freeze({ _tag: 'ParameterSliceRoot' as const, parameter: root.id })
-        : Object.freeze({ _tag: 'BindingSliceRoot' as const, binding: root.id }),
+        ? Object.freeze({
+            _tag: 'ParameterSliceRoot' as const,
+            parameter: localOf(options, root.id),
+          })
+        : Object.freeze({
+            _tag: 'BindingSliceRoot' as const,
+            binding: localOf(options, root.id),
+          }),
     rootType,
     selectors: Object.freeze(selectors),
     type: fact.type.type,
