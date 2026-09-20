@@ -12,7 +12,9 @@ export interface BodyView {
   readonly causes: ReadonlyArray<Diagnostic.Identity<Location.Location>>
 }
 
-export const make = (body: Elaboration.CheckedBody): BodyView =>
+export const make = (
+  body: Pick<Elaboration.CheckedBody, 'artifact' | 'function' | 'results'>,
+): BodyView =>
   Object.freeze({
     artifact: body.artifact,
     function: body.function,

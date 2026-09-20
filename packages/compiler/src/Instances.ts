@@ -12,6 +12,7 @@ import * as DeclarationFacts from './DeclarationFacts.js'
 import type * as DeclarationIndex from './DeclarationIndex.js'
 import * as Diagnostic from './Diagnostic.js'
 import * as Elaboration from './Elaboration.js'
+import * as BodyView from './BodyView.js'
 import * as Location from './Location.js'
 import * as Provenance from './Provenance.js'
 import type * as LifetimeFlow from './LifetimeFlow.js'
@@ -60,6 +61,7 @@ export interface Instance {
   readonly _tag: 'Instance'
   readonly key: InstanceKey
   readonly function: Tir.TirFunction
+  readonly view: BodyView.BodyView
   readonly substitution: Type.Substitution
   readonly specialization: ConcreteSpecialization
   readonly ownership: Ownership.FunctionOwnership
@@ -574,13 +576,13 @@ const specializeEvidence = (
 }
 
 const tirEvidence = (
-  fn: Tir.TirFunction,
+  view: BodyView.BodyView,
 ): ReadonlyArray<{
   readonly evidence: Constraint.ConstraintEvidence
   readonly origin: SourceSpan.SourceSpan
 }> =>
   Object.freeze(
-    fn.statements
+    view.function.statements
       .flatMap(Tir.statementExpressions)
       .flatMap(Tir.expressionTree)
       .flatMap((expression) => {
@@ -609,12 +611,13 @@ const tirSymbolicConformances = (
   )
 
 export const specialize = (
-  fn: Tir.TirFunction,
+  view: BodyView.BodyView,
   substitution: Type.Substitution,
   index: DeclarationIndex.Index,
   registry: SemanticContext.Registry,
   compatibility?: TypeCompatibility.Context,
 ): ConcreteSpecialization | undefined => {
+  const fn = view.function
   if (fn.contract._tag !== 'Contract') return undefined
   const parameters = fn.contract.parameters.map((parameter) =>
     Type.substitute(parameter, substitution, compatibility),
@@ -658,7 +661,7 @@ export const specialize = (
     if (solved === undefined) return undefined
     concreteEvidence.push(...solved)
   }
-  for (const occurrence of tirEvidence(fn)) {
+  for (const occurrence of tirEvidence(view)) {
     const solved = specializeEvidence(occurrence.evidence, substitution, occurrence.origin, index)
     if (solved === undefined) return undefined
     concreteEvidence.push(...solved)
@@ -1756,6 +1759,7 @@ export const discover = (
           continue
         }
         const fn = residual.function
+        const view = BodyView.make(residual)
         const parameters = template.declaration.typeParameters.map((parameter) => parameter.type)
         const selected = TypeInference.selectedSubstitution(
           parameters,
@@ -1769,7 +1773,7 @@ export const discover = (
             ? undefined
             : trace(
                 'Instances.specialize',
-                () => specialize(fn, substitution, index, registry, selected?.compatibility),
+                () => specialize(view, substitution, index, registry, selected?.compatibility),
                 {
                   'function.module': key.declaration.module,
                   'function.name': key.declaration.name,
@@ -1799,6 +1803,7 @@ export const discover = (
                 _tag: 'Instance',
                 key,
                 function: fn,
+                view,
                 substitution,
                 specialization,
                 ...(resultCallable === undefined ? {} : { resultCallable }),

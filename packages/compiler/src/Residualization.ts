@@ -37,6 +37,7 @@ export interface ApplicationKey {
 
 export interface ResidualBody {
   readonly _tag: 'ResidualBody'
+  readonly artifact: Tir.ArtifactId
   readonly function: Tir.TirFunction
   /** The tables the body published, which later stages read beside its nodes. */
   readonly results: Elaboration.BodyResults
@@ -1106,6 +1107,7 @@ export const residualize = (self: Coordinator, key: ApplicationKey): Result => {
       record(self, key.declaration, 'UnchangedBody', 'sourceReused', false)
       return Object.freeze({
         _tag: 'ResidualBody',
+        artifact: body.artifact,
         function: body.function,
         results: body.results,
         diagnostics: Object.freeze([]),
@@ -1228,6 +1230,7 @@ export const residualize = (self: Coordinator, key: ApplicationKey): Result => {
       return StaticEvaluation.complete(
         Object.freeze({
           _tag: 'ResidualBody' as const,
+          artifact: body.artifact,
           function: body.function,
           results: body.results,
           diagnostics: analyzed.diagnostics,
