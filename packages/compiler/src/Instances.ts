@@ -493,6 +493,14 @@ export const keyText = (key: InstanceKey): string => {
   return cached
 }
 
+/** Identifies the machine body shared by proof contexts with one emitted contract. */
+export const runtimeKeyText = (key: InstanceKey): string =>
+  `${Specialization.runtimeKey({
+    declaration: key.declaration,
+    typeArguments: key.typeArguments,
+    staticArguments: key.staticArguments,
+  })}\u0002${key.contractRow.join('\u0000')}`
+
 const concreteConstraintEvidence = (
   wanted: Constraint.Constraint,
   origin: SourceSpan.SourceSpan,

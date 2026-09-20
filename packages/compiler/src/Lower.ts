@@ -393,12 +393,7 @@ export const lowerProgram = (
   const runtimeInstances = trace('Lower.selectRuntimeInstances', () => {
     const runtimeInstances = new Map<string, Instances.Instance>()
     for (const instance of discovery.instances) {
-      const key = `${instanceText(
-        instance.key.declaration,
-        instance.key.typeArguments,
-        instance.key.staticArguments,
-      )}\u0002${instance.key.contractRow.join('\u0000')}`
-      runtimeInstances.set(key, instance)
+      runtimeInstances.set(Instances.runtimeKeyText(instance.key), instance)
     }
     return runtimeInstances
   })

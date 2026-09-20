@@ -1805,8 +1805,8 @@ export const matchesCall = (
   (result._tag === 'EffectValue' && fn.result._tag === 'EffectValue'
     ? EffectExecutionContract.equals(result.type, fn.result.type) &&
       Tir.sameExecutableSite(result.site, fn.result.site) &&
-      Instances.keyText(result.environment.instance) ===
-        Instances.keyText(fn.result.environment.instance)
+      Instances.runtimeKeyText(result.environment.instance) ===
+        Instances.runtimeKeyText(fn.result.environment.instance)
     : SilkType.runtimeKey(semanticType(result)) === SilkType.runtimeKey(semanticType(fn.result)))
 
 /** Filters the concrete declaration before comparing its exact semantic Effect contract. */

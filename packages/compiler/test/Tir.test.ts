@@ -357,8 +357,8 @@ it('keeps executable identities structural and free of source-coordinate fields'
     Object.freeze({ _tag: 'BorrowId', call: node, ordinal: 0 }),
     Object.freeze({ _tag: 'TemporaryOwnerId', node }),
     Tir.effectRootSite(checked, 0),
-    Object.freeze({ _tag: 'EffectSiteId', node, functionOrdinal: 0 }),
-    Object.freeze({ _tag: 'CallableSiteId', node, functionOrdinal: 0 }),
+    Object.freeze({ _tag: 'EffectSiteId', node, ordinal: 0, functionOrdinal: 0 }),
+    Object.freeze({ _tag: 'CallableSiteId', node, ordinal: 0, functionOrdinal: 0 }),
   ]
   const identityTags = new Set(['BorrowId', 'TemporaryOwnerId', 'EffectSiteId', 'CallableSiteId'])
   const forbiddenFields = ['span', 'callSpan', 'function', 'at', 'occurrence']
@@ -1148,7 +1148,7 @@ it('retains effect blocks as lazy statement regions with canonical captures', ()
     {
       _tag: 'CanonicalDeclarationId',
       module: 'tir/effect-block.silk',
-      name: 'main$effect$9',
+      name: 'main$effect$0',
     },
   )
   assert.deepEqual(

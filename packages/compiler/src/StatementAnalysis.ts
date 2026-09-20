@@ -19,7 +19,7 @@ const construction = (context: BodyContext): BodyBuilder.BodyBuilder => {
 import * as LifetimeFlow from './LifetimeFlow.js'
 import * as NominalVariance from './NominalVariance.js'
 import * as TypeOutlives from './TypeOutlives.js'
-import { concreteCallableIdentity, exactCallableOf } from './CallResolution.js'
+import { concreteCallableIdentity, exactCallableOf, executableSites } from './CallResolution.js'
 import * as DeclarationCollection from './DeclarationCollection.js'
 import * as DeclarationFacts from './DeclarationFacts.js'
 import * as DeclarationLifetime from './DeclarationLifetime.js'
@@ -832,17 +832,22 @@ export const analyzeStatements = (
       context.bindings.push(binding)
       if (staticValue !== undefined && context.staticContext !== undefined) {
         const key = StaticEvaluation.localValueKey(binding)
-        context.staticContext.values.set(key, staticValue)
-        context.staticContext.values.set(
-          StaticEvaluation.tirLocalKey(BodyBuilder.localId(construction(context), binding.id)),
-          staticValue,
+        const localKey = StaticEvaluation.tirLocalKey(
+          BodyBuilder.localId(construction(context), binding.id),
         )
+        context.staticContext.values.set(key, staticValue)
+        context.staticContext.values.set(localKey, staticValue)
         const evaluatedNode = expressionNode(initializer)
         const staticTextSpan = context.staticContext.expressionSpans.get(evaluatedNode)
-        if (staticTextSpan !== undefined) context.staticContext.valueSpans.set(key, staticTextSpan)
+        if (staticTextSpan !== undefined) {
+          context.staticContext.valueSpans.set(key, staticTextSpan)
+          context.staticContext.valueSpans.set(localKey, staticTextSpan)
+        }
         const staticTextOrigin = context.staticContext.expressionOrigins.get(evaluatedNode)
-        if (staticTextOrigin !== undefined)
+        if (staticTextOrigin !== undefined) {
           context.staticContext.valueOrigins.set(key, staticTextOrigin)
+          context.staticContext.valueOrigins.set(localKey, staticTextOrigin)
+        }
       }
       append(Object.freeze({ _tag: 'BindStatement', binding, region }))
 
@@ -1091,6 +1096,7 @@ export const analyzeStatements = (
           inferredType: Object.freeze({ _tag: 'Available', type: current.type }),
           initializer: expressionNode(iterable),
           staticValue: current.value,
+          staticIteration: true,
           anchor: element.anchor,
         })
         BodyBuilder.semanticLocal(construction(context), binding, {
@@ -2060,6 +2066,7 @@ export const analyzeFunctionBody = (
       ? Type.substitute(declaration.returnType.type, staticContext?.typeSubstitution ?? new Map())
       : undefined
   const blockNode = AuthoredWalk.bodyBlock(semantic, declaration)
+  const executableSiteOrdinals = executableSites(blockNode)
   const unsafeSpans = Object.freeze(
     AuthoredWalk.statements(blockNode)
       .filter((statement) => statement._tag === 'UnsafeStatement')
@@ -2101,6 +2108,7 @@ export const analyzeFunctionBody = (
     unsafeSpans,
     nextBindingOrdinal,
     executableFunction: declaration.id,
+    executableSiteOrdinals,
     ...(declaration.canonical._tag === 'Canonical'
       ? { executableOwner: declaration.canonical.id }
       : {}),

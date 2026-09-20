@@ -211,9 +211,13 @@ interface ExecutableNodeSiteId {
   readonly functionOrdinal: number
 }
 
-/** Hidden nominal identity for one source `effect {}` construction site. */
+/** Hidden nominal identity for one source Effect construction site. */
 export type EffectSiteId =
-  | (ExecutableNodeSiteId & { readonly _tag: 'EffectSiteId' })
+  | (ExecutableNodeSiteId & {
+      readonly _tag: 'EffectSiteId'
+      /** Authored Effect-site ordinal, independent of TIR allocation order. */
+      readonly ordinal: number
+    })
   | {
       readonly _tag: 'EffectSiteId'
       readonly artifact: ArtifactId
@@ -225,17 +229,30 @@ export type EffectSiteId =
 /** Hidden nominal identity for one automatic callable-section construction site. */
 export interface CallableSiteId extends ExecutableNodeSiteId {
   readonly _tag: 'CallableSiteId'
+  /** Authored anonymous-callable ordinal, independent of TIR allocation order. */
+  readonly ordinal: number
 }
 
 /** Returns the path- and span-independent structural identity of one executable site. */
-export const executableSiteKey = (self: EffectSiteId | CallableSiteId): string =>
-  `${self._tag === 'EffectSiteId' ? 'effect' : 'callable'}\u0000${
-    'root' in self ? `root:${AuthoredIdentity.key(self.artifact.owner)}` : nodeRefKey(self.node)
-  }`
+export const executableSiteKey = (self: EffectSiteId | CallableSiteId): string => {
+  const kind = self._tag === 'EffectSiteId' ? 'effect' : 'callable'
+  let identity: string
+  if ('root' in self)
+    identity =
+      self.owner === undefined
+        ? `root:${AuthoredIdentity.key(self.artifact.owner)}`
+        : `root:declaration:${self.owner.module}:${self.owner.name}`
+  else
+    identity =
+      self.owner === undefined
+        ? `${artifactKey(self.node.artifact)}:${self.ordinal}`
+        : `declaration:${self.owner.module}:${self.owner.name}:site:${self.ordinal}`
+  return `${kind}\u0000${identity}`
+}
 
 /** The artifact-local ordinal used only to name compiler-generated declarations. */
 export const executableSiteOrdinal = (self: EffectSiteId | CallableSiteId): number =>
-  'root' in self ? -1 : self.node.node.ordinal
+  'root' in self ? -1 : self.ordinal
 
 /** Tests structural executable-site identity without consulting diagnostic provenance. */
 export const sameExecutableSite = (
@@ -266,6 +283,7 @@ export const effectCatchSite = (
   Object.freeze({
     _tag: 'EffectSiteId',
     node,
+    ordinal: node.node.ordinal,
     owner,
     functionOrdinal,
   })
@@ -279,6 +297,7 @@ export const builtinEffectSite = (
   Object.freeze({
     _tag: 'EffectSiteId',
     node,
+    ordinal: node.node.ordinal,
     owner,
     functionOrdinal,
   })
@@ -304,7 +323,7 @@ export const callableEnvironmentSite = (self: CallableSiteId): Type.CallableEnvi
       ? undefined
       : Object.freeze({ module: self.owner.module, name: self.owner.name }),
     self.functionOrdinal,
-    self.node.node.ordinal,
+    self.ordinal,
   )
 
 /** Retains one callable site's complete enclosing executable specialization. */
@@ -328,12 +347,12 @@ export const effectRunnerId = (
 /** Derives the private executable declaration owned by one anonymous callable site. */
 export const anonymousCallableId = (
   owner: DeclarationFacts.CanonicalId,
-  site: CallableSiteId,
+  authoredOrdinal: number,
 ): DeclarationFacts.CanonicalId =>
   Object.freeze({
     _tag: 'CanonicalDeclarationId',
     module: owner.module,
-    name: `${owner.name}$callable$${site.node.node.ordinal}`,
+    name: `${owner.name}$callable$${authoredOrdinal}`,
   })
 
 /** Tests whether a canonical declaration is owned by an anonymous callable expression site. */
@@ -624,6 +643,8 @@ type ExpressionNode =
   | {
       readonly _tag: 'StaticStringLiteral'
       readonly data: StaticText.Data
+      /** Static-text provenance retained when a residual value is materialized as a literal. */
+      readonly textOrigin?: StaticEvaluation.TextOrigin
       readonly type: Type.String
       readonly span: SourceSpan.SourceSpan
       readonly origin: Origin

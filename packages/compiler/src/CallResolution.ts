@@ -1,5 +1,6 @@
 import * as Location from './Location.js'
 import * as CAbi from './CAbi.js'
+import * as AuthoredIdentity from './AuthoredIdentity.js'
 import type * as AuthoredHir from './AuthoredHir.js'
 import * as AuthoredWalk from './AuthoredWalk.js'
 import * as SemanticContext from './SemanticContext.js'
@@ -3456,24 +3457,63 @@ export function executableSite(
 ): Tir.CallableSiteId | Tir.EffectSiteId {
   if (resolution.builder === undefined)
     throw new RangeError('executable-site analysis requires its TIR body builder')
+  const reference = BodyBuilder.expressionReference(resolution.builder, node.anchor)
+  const anchorKey = AuthoredIdentity.anchorKey(node.anchor)
+  const ordinal = resolution.executableSiteOrdinals?.get(anchorKey) ?? reference.node.ordinal
   const site = {
     _tag: tag,
-    node: BodyBuilder.expressionReference(resolution.builder, node.anchor),
+    node: reference,
     functionOrdinal: resolution.executableFunction?.ordinal ?? 0,
     ...(resolution.executableOwner === undefined ? {} : { owner: resolution.executableOwner }),
   }
   return tag === 'CallableSiteId'
-    ? Object.freeze({ ...site, _tag: 'CallableSiteId' })
-    : Object.freeze({ ...site, _tag: 'EffectSiteId' })
+    ? Object.freeze({
+        ...site,
+        _tag: 'CallableSiteId',
+        ordinal,
+      })
+    : Object.freeze({ ...site, _tag: 'EffectSiteId', ordinal })
 }
 
 /**
- * Executable site ordinals in authored traversal order, keyed by anchor.
+ * Assigns executable-site ordinals in authored traversal order, keyed by anchor.
  *
  * The order is the one `$callable$N` and `Tir.anonymousCallableSite` count in, so it must stay a
  * preorder walk of the authored body. Grouped expressions are absent, so a pipeline's target is
  * reached directly.
  */
+export const executableSites = (root: AuthoredHir.Block): ReadonlyMap<string, number> => {
+  const sites = new Map<string, number>()
+  const isAppliedInterfacePipeline = (node: AuthoredHir.Expression): boolean =>
+    node._tag === 'PipelineExpression' && node.target._tag === 'MemberExpression'
+  const record = (node: AuthoredHir.Expression): void => {
+    const key = AuthoredIdentity.anchorKey(node.anchor)
+    if (!sites.has(key)) sites.set(key, sites.size)
+  }
+  const visit = (node: AuthoredHir.Expression): void => {
+    if (
+      node._tag === 'CallExpression' ||
+      node._tag === 'EffectExpression' ||
+      node._tag === 'CallableExpression' ||
+      isAppliedInterfacePipeline(node)
+    )
+      record(node)
+    for (const child of AuthoredWalk.expressionChildren(node)) visit(child)
+  }
+  const roots = AuthoredWalk.statements(root).flatMap((statement) =>
+    AuthoredWalk.statementExpressions(statement),
+  )
+  for (const expression of roots) visit(expression)
+  // A bound method value is a section at a projection. Those sites follow every call site so the
+  // ordinals of existing sites never move.
+  const visitProjections = (node: AuthoredHir.Expression): void => {
+    if (node._tag === 'FieldExpression') record(node)
+    for (const child of AuthoredWalk.expressionChildren(node)) visitProjections(child)
+  }
+  for (const expression of roots) visitProjections(expression)
+  return sites
+}
+
 export const executableSpecializationOwner = (
   resolution: ResolutionContext,
 ): Type.ExecutableSpecializationOwner | undefined => {

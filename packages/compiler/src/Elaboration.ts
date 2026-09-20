@@ -65,6 +65,8 @@ export interface BindingDeclarationFact {
   readonly inferredType: ExpressionTypeFact
   readonly initializer: Tir.Expression
   readonly staticValue?: StaticValue.Value
+  /** This binding is one immutable element selected by an expanded `static for`. */
+  readonly staticIteration?: true
   /** Exact callable value captured when this binding was initialized, before later source writes. */
   readonly exactCallable?: Extract<
     ExpressionDecision,
@@ -903,7 +905,7 @@ export interface AnonymousCaptureFact {
   readonly reference: BindingDeclarationFact | ParameterFact | PatternBindingFact
   readonly access: CallableCaptureFact['access']
   readonly span: SourceSpan.SourceSpan
-  readonly expression: Tir.Expression
+  readonly anchor: AuthoredHir.Anchor
 }
 
 /** One hidden concrete section construction awaiting an ordered leading parameter prefix. */

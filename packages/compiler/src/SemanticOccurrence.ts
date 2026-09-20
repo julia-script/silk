@@ -1136,7 +1136,7 @@ const collectExpression = (
         else identity = Object.freeze({ _tag: 'ParameterIdentity', id: capture.reference.id })
         push(
           pending,
-          capture.expression.origin.anchor,
+          capture.anchor,
           'Value',
           available(identity),
           Elaboration.isParameterFact(capture.reference)

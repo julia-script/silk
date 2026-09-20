@@ -108,6 +108,8 @@ interface State {
   readonly spans: SemanticContext.Registry
   readonly resolution: NameResolution.Resolution
   readonly index: DeclarationIndex.Index
+  /** Generated declarations published by source and residual bodies in this session. */
+  readonly generatedAggregates: Map<string, DeclarationFacts.StructFact>
   readonly evaluation: StaticEvaluation.Evaluation<StaticValue.Value>
   readonly residuals: StaticEvaluation.Evaluation<ResidualBody>
   readonly staticResultOrigins: Map<string, StaticEvaluation.TextOrigin>
@@ -133,6 +135,29 @@ export interface BootstrapCoordinator extends EvaluationCoordinator {
   readonly _tag: 'ProfileBootstrapCoordinator'
 }
 
+const generatedAggregateKey = (id: DeclarationFacts.CanonicalId): string =>
+  `${id.module}:${id.name}`
+
+const lookupDeclaration = (
+  self: EvaluationCoordinator,
+  id: DeclarationFacts.CanonicalId,
+): DeclarationFacts.MemberFact | undefined =>
+  self[stateSymbol].generatedAggregates.get(generatedAggregateKey(id)) ??
+  DeclarationFacts.byCanonical(self[stateSymbol].index, id)
+
+const publishGeneratedAggregates = (
+  self: EvaluationCoordinator,
+  aggregates: Iterable<DeclarationFacts.StructFact>,
+): void => {
+  for (const aggregate of aggregates) {
+    if (aggregate.canonical._tag !== 'Canonical') continue
+    self[stateSymbol].generatedAggregates.set(
+      generatedAggregateKey(aggregate.canonical.id),
+      aggregate,
+    )
+  }
+}
+
 const makeState = (
   compilation: CompilationProfile.Initial | CompilationProfile.CompilationProfile,
   results: ReadonlyMap<string, Elaboration.Result>,
@@ -154,6 +179,7 @@ const makeState = (
         ),
     ),
   )
+  const generatedAggregates = new Map(index.generatedAggregates)
   return {
     target: compilation.target,
     parameters: new Map(parameters),
@@ -162,7 +188,8 @@ const makeState = (
     results,
     spans: SemanticContext.fromModules([...results.values()]),
     resolution,
-    index,
+    index: Object.freeze({ ...index, generatedAggregates }),
+    generatedAggregates,
     evaluation: StaticEvaluation.make<StaticValue.Value>(compilation, limits, sourceIdentity),
     residuals: StaticEvaluation.make<ResidualBody>(compilation, limits, sourceIdentity),
     staticResultOrigins: new Map<string, StaticEvaluation.TextOrigin>(),
@@ -259,6 +286,7 @@ const reflectAggregate = (
   kind: 'Type' | 'Fields',
   span: Location.Location,
   trace: StaticEvaluation.Trace,
+  lookup: StaticEvaluation.NodeContext['lookup'],
 ): StaticEvaluation.Outcome<StaticValue.Value> => {
   if (!Type.isNominal(owner) || authorization.canonical._tag !== 'Canonical')
     return StaticEvaluation.failed(
@@ -269,7 +297,7 @@ const reflectAggregate = (
         trace,
       ),
     )
-  const declaration = DeclarationFacts.byCanonical(self[stateSymbol].index, {
+  const declaration = lookup({
     _tag: 'CanonicalDeclarationId',
     module: owner.module,
     name: owner.name,
@@ -349,7 +377,7 @@ const declarationOf = (
   self: EvaluationCoordinator,
   identity: DeclarationFacts.CanonicalId,
 ): DeclarationFacts.DeclarationFact | undefined => {
-  const declaration = DeclarationFacts.byCanonical(self[stateSymbol].index, identity)
+  const declaration = lookupDeclaration(self, identity)
   if (declaration?._tag === 'FunctionDeclaration') return declaration
   return FunctionIndex.tirByCanonical(self[stateSymbol].results.get(identity.module)?.tir, identity)
     ?.declaration
@@ -578,6 +606,7 @@ const evaluateStaticFunction = (
   span: Parameters<StaticEvaluation.NodeContext['call']>[4],
   parentTrace: StaticEvaluation.Trace,
   identity: Parameters<StaticEvaluation.NodeContext['call']>[6],
+  lookup: Parameters<StaticEvaluation.NodeContext['call']>[7],
 ): StaticEvaluation.CallResult => {
   if (declaration.canonical._tag !== 'Canonical')
     return Object.freeze({
@@ -637,6 +666,7 @@ const evaluateStaticFunction = (
         callSpan,
         trace,
         nestedIdentity,
+        nestedLookup,
       ) =>
         evaluateStaticFunction(
           self,
@@ -647,6 +677,7 @@ const evaluateStaticFunction = (
           callSpan,
           trace,
           nestedIdentity,
+          nestedLookup,
         )
       const semantic = SemanticContext.make(input.result.authored)
       const builder = BodyBuilder.make(
@@ -661,8 +692,7 @@ const evaluateStaticFunction = (
         expressionSpans: new Map<Tir.Expression, Location.Location>(),
         expressionOrigins: new Map<Tir.Expression, StaticEvaluation.TextOrigin>(),
         nodes: BodyBuilder.staticLowering(semantic, builder),
-        lookup: (id: DeclarationFacts.CanonicalId) =>
-          DeclarationFacts.byCanonical(self[stateSymbol].index, id),
+        lookup,
         returnedTextSpan: { value: undefined },
         returnedTextOrigin: { value: undefined },
         trace: evaluation.trace,
@@ -673,7 +703,8 @@ const evaluateStaticFunction = (
           kind: 'Type' | 'Fields',
           reflectSpan: Location.Location,
           trace: StaticEvaluation.Trace,
-        ) => reflectAggregate(self, declaration, owner, kind, reflectSpan, trace),
+          lookup: StaticEvaluation.NodeContext['lookup'],
+        ) => reflectAggregate(self, declaration, owner, kind, reflectSpan, trace, lookup),
         constant: (
           constant: DeclarationFacts.ConstantFact,
           constantSpan: Location.Location,
@@ -687,6 +718,7 @@ const evaluateStaticFunction = (
         Object.freeze({ scope: input.scope, index: self[stateSymbol].index, builder }),
         staticContext,
       )
+      publishGeneratedAggregates(self, analyzed.fact.generatedAggregates)
       self[stateSymbol].conditionDiagnostics?.push(...analyzed.diagnostics)
       let nestedStaticFailure: StaticEvaluation.StaticFailure | undefined
       Elaboration.visitStatements(analyzed.fact.statements, {
@@ -855,6 +887,7 @@ function evaluateConstantValue(
         callSpan,
         trace,
         identity,
+        lookup,
       ) =>
         evaluateStaticFunction(
           self,
@@ -865,6 +898,7 @@ function evaluateConstantValue(
           callSpan,
           trace,
           identity,
+          lookup,
         )
       const constant: NonNullable<StaticEvaluation.NodeContext['constant']> = (
         nested,
@@ -876,6 +910,7 @@ function evaluateConstantValue(
       const builder = BodyBuilder.make(
         Object.freeze({ owner: host.owner, request: Object.freeze({ _tag: 'Check' }) }),
       )
+      const generatedAggregates = new Map<string, DeclarationFacts.StructFact>()
       const staticContext = Object.freeze({
         environment: self[stateSymbol].environment,
         values: new Map<string, StaticValue.Value>(),
@@ -884,8 +919,7 @@ function evaluateConstantValue(
         expressionSpans: new Map<Tir.Expression, Location.Location>(),
         expressionOrigins: new Map<Tir.Expression, StaticEvaluation.TextOrigin>(),
         nodes: BodyBuilder.staticLowering(semantic, builder),
-        lookup: (id: DeclarationFacts.CanonicalId) =>
-          DeclarationFacts.byCanonical(self[stateSymbol].index, id),
+        lookup: (id: DeclarationFacts.CanonicalId) => lookupDeclaration(self, id),
         trace: evaluation.trace,
         call,
         reflect: (
@@ -893,7 +927,8 @@ function evaluateConstantValue(
           kind: 'Type' | 'Fields',
           reflectSpan: Location.Location,
           trace: StaticEvaluation.Trace,
-        ) => reflectAggregate(self, host, owner, kind, reflectSpan, trace),
+          lookup: StaticEvaluation.NodeContext['lookup'],
+        ) => reflectAggregate(self, host, owner, kind, reflectSpan, trace, lookup),
         constant,
       })
       const analyzed = analyzeExpression(
@@ -911,9 +946,11 @@ function evaluateConstantValue(
           index: self[stateSymbol].index,
           staticContext,
           builder,
+          generatedAggregates,
         }),
         expected,
       )
+      publishGeneratedAggregates(self, generatedAggregates.values())
       if (analyzed !== undefined)
         self[stateSymbol].conditionDiagnostics?.push(...analyzed.diagnostics)
       if (analyzed !== undefined && predicate === undefined)
@@ -1200,6 +1237,7 @@ export const residualize = (self: Coordinator, key: ApplicationKey): Result => {
         span,
         trace,
         identity,
+        lookup,
       ) =>
         evaluateStaticFunction(
           self,
@@ -1210,6 +1248,7 @@ export const residualize = (self: Coordinator, key: ApplicationKey): Result => {
           span,
           trace,
           identity,
+          lookup,
         )
       const constant: NonNullable<StaticEvaluation.NodeContext['constant']> = (
         declaration,
@@ -1240,8 +1279,7 @@ export const residualize = (self: Coordinator, key: ApplicationKey): Result => {
           expressionSpans: new Map<Tir.Expression, Location.Location>(),
           expressionOrigins: new Map<Tir.Expression, StaticEvaluation.TextOrigin>(),
           nodes: BodyBuilder.staticLowering(semantic, builder),
-          lookup: (id: DeclarationFacts.CanonicalId) =>
-            DeclarationFacts.byCanonical(self[stateSymbol].index, id),
+          lookup: (id: DeclarationFacts.CanonicalId) => lookupDeclaration(self, id),
           trace: evaluation.trace,
           call,
           chargeStaticIteration: (trace: StaticEvaluation.Trace, residualNodes: number) => {
@@ -1254,10 +1292,12 @@ export const residualize = (self: Coordinator, key: ApplicationKey): Result => {
             kind: 'Type' | 'Fields',
             reflectSpan: Location.Location,
             trace: StaticEvaluation.Trace,
-          ) => reflectAggregate(self, declaration, owner, kind, reflectSpan, trace),
+            lookup: StaticEvaluation.NodeContext['lookup'],
+          ) => reflectAggregate(self, declaration, owner, kind, reflectSpan, trace, lookup),
           constant,
         }),
       )
+      publishGeneratedAggregates(self, analyzed.fact.generatedAggregates)
       let nodes = 0
       Elaboration.visitStatements(analyzed.fact.statements, {
         statement: () => {

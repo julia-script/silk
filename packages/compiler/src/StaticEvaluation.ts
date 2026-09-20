@@ -1091,6 +1091,7 @@ export interface NodeContext {
     kind: 'Type' | 'Fields',
     span: Location.Location,
     trace: Trace,
+    lookup: NodeContext['lookup'],
   ) => Outcome<StaticValue.Value>
   readonly call: (
     declaration: DeclarationFacts.DeclarationFact,
@@ -1104,6 +1105,7 @@ export interface NodeContext {
       readonly evidence: ReadonlyArray<string>
       readonly contractRow: ReadonlyArray<string>
     },
+    lookup: NodeContext['lookup'],
   ) => CallResult
   readonly constant?: (
     declaration: DeclarationFacts.ConstantFact,
@@ -1219,7 +1221,7 @@ export const staticTextOrigin = (
   if (evaluated !== undefined) return evaluated
   if (node._tag === 'StaticCall' && node.textOrigin !== undefined) return node.textOrigin
   if (node._tag === 'StaticStringLiteral')
-    return sourceTextOrigin(node.origin.anchor, node.data.bytes.length)
+    return node.textOrigin ?? sourceTextOrigin(node.origin.anchor, node.data.bytes.length)
   const inner = transparent(node)
   if (inner !== undefined) return staticTextOrigin(inner, context)
   const local = localKeyOf(node)
@@ -1413,6 +1415,7 @@ const evaluateIntrinsic = (
       operation === 'reflectType' ? 'Type' : 'Fields',
       at(node),
       context.trace,
+      context.lookup,
     )
   }
   const admit = (value: unknown, name: string) =>
@@ -1593,7 +1596,7 @@ const evaluateExpression = (
       return admit({
         _tag: 'TextValue',
         bytes: node.data.bytes,
-        origin: sourceTextOrigin(node.origin.anchor, node.data.bytes.length),
+        origin: node.textOrigin ?? sourceTextOrigin(node.origin.anchor, node.data.bytes.length),
       })
     case 'ConstantReference': {
       const declaration = context.lookup(node.declaration)
@@ -1820,6 +1823,7 @@ const evaluateExpression = (
           evidence: node.evidence,
           contractRow: Object.freeze([]),
         }),
+        context.lookup,
       )
       if (called.textSpan !== undefined) context.expressionSpans.set(node, called.textSpan)
       if (called.textOrigin !== undefined) context.expressionOrigins.set(node, called.textOrigin)

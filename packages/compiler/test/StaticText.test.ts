@@ -433,7 +433,7 @@ it('canonicalizes nominal reflection descriptors and heterogeneous field collect
       member: { _tag: 'LabeledField', label: 'age' },
       valueType: 'u32',
       authorization,
-      provenance: { sourceId: 'example/reflection.silk', start: 28, end: 36 },
+      provenance: { anchor: Location.anchorOf(locationAt('example/reflection.silk', 1)) },
     },
     {
       _tag: 'FieldDescriptorValue',
@@ -442,7 +442,7 @@ it('canonicalizes nominal reflection descriptors and heterogeneous field collect
       member: { _tag: 'LabeledField', label: 'name' },
       valueType: Type.string(Lifetime.staticLifetime),
       authorization,
-      provenance: { sourceId: 'example/reflection.silk', start: 12, end: 24 },
+      provenance: { anchor: Location.anchorOf(locationAt('example/reflection.silk')) },
     },
   ]
   const collection = admitted(
@@ -1424,11 +1424,11 @@ pub fn main() -> i32 { return choose(true, 41) }`),
     )
     assert.strictEqual(
       sha256(tir),
-      'fcef33365b1a6769fd2f505a439d34a9d8d8e2555597093b9886a2e62fb4dcc2',
+      '18f8e2e6289583115c89d808bc3bbdf50e6d810077cb4ae00e45cf933835ed63',
     )
     assert.strictEqual(
       sha256(ownership),
-      '3384de79ed4297f0d90ef90f51ebcb7ae207d6a2a37426b54e225ff2bdaaccae',
+      '785e3827b41ff0d0e9e5c4f115a5393445759a387becb85e6a38a60f3ea177d7',
     )
 
     const alternateEvidence = Object.freeze({

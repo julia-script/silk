@@ -202,6 +202,8 @@ export type Expression =
       readonly _tag: 'Call'
       readonly arguments: ReadonlyArray<Argument>
       readonly reference: { readonly _tag: string; readonly operation?: unknown }
+      /** Direct argument loans the TIR builder proved are retained by this call's result. */
+      readonly heldLoans?: ReadonlyArray<Tir.BorrowId>
     })
   | (Base & {
       readonly _tag: 'ForeignApply'
@@ -448,6 +450,10 @@ export const retainedResultArguments = (
     self.type._tag !== 'Available'
   )
     return []
+  if (self._tag === 'Call' && self.heldLoans !== undefined) {
+    const retained = new Set(self.heldLoans.map((loan) => loan.ordinal))
+    return self.arguments.filter((argument) => retained.has(argument.id.ordinal))
+  }
   const result = self.type.type
   return self.arguments.filter((argument) => {
     if (argument.type._tag !== 'Available') return false
@@ -826,6 +832,13 @@ export const ofTir = (
               interfaceOperation: { contract: node.interfaceOperation.contract },
             }
       case 'Call':
+        return {
+          ...base,
+          _tag: 'Call',
+          arguments: argumentsOf(node.arguments, node.target),
+          reference: { _tag: 'Resolved' },
+          heldLoans: node.heldLoans,
+        }
       case 'EffectConstruct':
         return {
           ...base,

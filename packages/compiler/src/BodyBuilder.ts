@@ -1,4 +1,5 @@
 import * as Lifetime from './Lifetime.js'
+import * as DeclarationFacts from './DeclarationFacts.js'
 import { genericArgumentOfTypeArgument } from './CallResolution.js'
 import type * as AuthoredHir from './AuthoredHir.js'
 import type * as ConformanceGoal from './ConformanceGoal.js'
@@ -231,9 +232,16 @@ const staticValueExpression = (
   type: SemanticType,
   anchor: AuthoredHir.Anchor,
   context: SemanticContext.SemanticContext,
+  builder?: BodyArena.BodyBuilder,
 ): Tir.Expression => {
   const span = context.spanOf(anchor)
   const origin = Tir.synthetic(anchor, 'static-result')
+  const nested = (value: StaticValue.Value, type: SemanticType): Tir.Expression => {
+    const expression = staticValueExpression(value, type, anchor, context, builder)
+    return expression._tag === 'Unavailable' || builder === undefined
+      ? expression
+      : BodyArena.node(builder, expression)
+  }
   switch (value._tag) {
     case 'UnitValue':
       return Object.freeze({ _tag: 'UnitLiteral', type: Type.unit, span, origin })
@@ -281,6 +289,7 @@ const staticValueExpression = (
       return Object.freeze({
         _tag: 'StaticStringLiteral',
         data,
+        ...(value.origin === undefined ? {} : { textOrigin: value.origin }),
         type: Type.string(Lifetime.staticLifetime),
         span,
         origin,
@@ -304,9 +313,7 @@ const staticValueExpression = (
         : Object.freeze({ _tag: 'Unavailable', span, origin })
     case 'AggregateValue': {
       if (value.identity._tag === 'ArrayAggregateIdentity' && Type.isFixedArray(type)) {
-        const elements = value.fields.map((field) =>
-          staticValueExpression(field.value, type.element, anchor, context),
-        )
+        const elements = value.fields.map((field) => nested(field.value, type.element))
         return elements.some((element) => element._tag === 'Unavailable')
           ? Object.freeze({ _tag: 'Unavailable', span, origin })
           : Object.freeze({ _tag: 'ArrayConstruct', elements, type, span, origin })
@@ -323,7 +330,7 @@ const staticValueExpression = (
           (candidate) => candidate.id.ordinal === field.ordinal,
         )
         if (runtime === undefined) return []
-        const expression = staticValueExpression(field.value, runtime.type, anchor, context)
+        const expression = nested(field.value, runtime.type)
         return expression._tag === 'Unavailable'
           ? []
           : [Object.freeze({ field: runtime.id, value: expression })]
@@ -475,6 +482,26 @@ const retainedArguments = (
   retainedResultArguments(fact, lifetimeAssumptionsOf(options), (longer, shorter) =>
     provesOutlives(options, longer, shorter),
   )
+
+const retainedDirectBorrowOrdinals = (
+  fact: ExpressionDecision,
+  retained: ReadonlySet<number>,
+): ReadonlySet<number> => {
+  if (fact._tag !== 'Call' || fact.reference._tag !== 'Resolved') return retained
+  const declaration = fact.reference.declaration
+  const returnType = declaration.returnType
+  if (declaration.functionKind !== 'Ordinary' || returnType._tag !== 'Resolved') return retained
+  const result = returnType.type
+  const assumptions = Lifetime.assumptions(
+    DeclarationFacts.executableLifetimes(declaration).lifetimeBounds ?? [],
+  )
+  return new Set(
+    [...retained].filter((ordinal) => {
+      const parameter = declaration.parameters.at(ordinal)?.declaredType
+      return parameter?._tag !== 'Resolved' || retainsLifetimes(parameter.type, result, assumptions)
+    }),
+  )
+}
 
 const publishExpression = (
   options: LowerStatementOptions,
@@ -932,8 +959,9 @@ export const tirExpression = (
       ? undefined
       : BodyArena.reservedReference(options.builder, reserved)
   const lowered =
-    (options.static === undefined ? undefined : staticStructure(fact, options)) ??
-    residualExpression(fact, options, borrow, self)
+    (options.static === undefined && fact._tag !== 'CompileError'
+      ? undefined
+      : staticStructure(fact, options)) ?? residualExpression(fact, options, borrow, self)
   const representation = representationOfExpression(options.context, fact, options.builder)
   const retained =
     representation === undefined ? lowered : Object.freeze({ ...lowered, representation })
@@ -1231,8 +1259,11 @@ const residualExpression = (
         })
   }
   if (fact._tag === 'Identifier') {
+    const materializeStaticReference =
+      options.static === undefined ||
+      (fact.reference._tag === 'ResolvedBinding' && fact.reference.binding.staticIteration === true)
     if (
-      options.static === undefined &&
+      materializeStaticReference &&
       fact.staticValue !== undefined &&
       fact.type._tag === 'Available'
     ) {
@@ -1241,11 +1272,12 @@ const residualExpression = (
         fact.type.type,
         fact.anchor,
         options.context,
+        options.builder,
       )
       if (value._tag !== 'Unavailable') return value
     }
     if (
-      options.static === undefined &&
+      materializeStaticReference &&
       fact.reference._tag === 'ResolvedBinding' &&
       fact.reference.binding.staticValue !== undefined &&
       fact.type._tag === 'Available'
@@ -1255,6 +1287,7 @@ const residualExpression = (
         fact.type.type,
         fact.anchor,
         options.context,
+        options.builder,
       )
       if (value._tag !== 'Unavailable') return value
     }
@@ -1680,6 +1713,7 @@ const residualExpression = (
         fact.type.type,
         fact.anchor,
         options.context,
+        options.builder,
       )
       if (value._tag !== 'Unavailable') return value
     }
@@ -2001,6 +2035,14 @@ const residualExpression = (
         span: options.context.spanOf(fact.anchor),
         origin: Tir.authored(fact.anchor),
       })
+    const typeArguments =
+      fact.reference._tag === 'Resolved'
+        ? fact.reference.declaration.typeParameters.map(
+            (parameter) =>
+              fact.substitution.get(Type.key(parameter.type)) ??
+              Type.parameterArgument(parameter.type),
+          )
+        : fact.typeArguments
     return Object.freeze({
       _tag: 'CallableSection',
       site: fact.site,
@@ -2028,7 +2070,7 @@ const residualExpression = (
           }),
         ),
       ),
-      typeArguments: fact.typeArguments,
+      typeArguments: Object.freeze(typeArguments),
       substitution: fact.substitution,
       retainedDependencies: fact.retainedDependencies,
       mode: fact.mode,
@@ -2422,6 +2464,7 @@ const residualExpression = (
         fact.type.type,
         fact.anchor,
         options.context,
+        options.builder,
       )
       if (value._tag !== 'Unavailable') return value
       const retainedStatic = staticStructure(fact, options)
@@ -2432,6 +2475,7 @@ const residualExpression = (
     const retainedOrdinals = new Set(
       retainedArguments(fact, options).map((argument) => argument.id.ordinal),
     )
+    const retainedBorrowOrdinals = retainedDirectBorrowOrdinals(fact, retainedOrdinals)
     const staticArgumentOrigins = Object.freeze(
       (fact._tag === 'Call' ? (fact.staticArguments ?? []) : []).map(
         (argument) => argument.textOrigin,
@@ -2485,13 +2529,13 @@ const residualExpression = (
         fact.arguments,
         self,
         (ordinal) =>
-          target.parameters.at(ordinal)?.phase !== 'Static' && !retainedOrdinals.has(ordinal),
+          target.parameters.at(ordinal)?.phase !== 'Static' && !retainedBorrowOrdinals.has(ordinal),
       ),
       heldLoans: loanEndsOf(
         fact.arguments,
         self,
         (ordinal) =>
-          target.parameters.at(ordinal)?.phase !== 'Static' && retainedOrdinals.has(ordinal),
+          target.parameters.at(ordinal)?.phase !== 'Static' && retainedBorrowOrdinals.has(ordinal),
       ),
       type: fact.type.type,
       span: options.context.spanOf(fact.anchor),

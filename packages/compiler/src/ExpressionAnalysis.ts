@@ -3455,7 +3455,12 @@ export const effectCallableApplicationRepresentation = (
   const target = callee.target.declaration
   const owner = Object.freeze({
     declaration: Object.freeze({ module: target.module, name: target.name }),
-    typeArguments: Object.freeze([...callee.typeArguments, ...hidden]),
+    typeArguments: Object.freeze([
+      ...callee.typeArguments.map((argument) =>
+        Type.substituteGenericArgument(argument, substitution),
+      ),
+      ...hidden,
+    ]),
     staticArgumentKeys: Object.freeze<ReadonlyArray<string>>([]),
   })
   const site = Tir.effectRootSite(callee.site.node.artifact, callee.site.functionOrdinal, target)
@@ -9355,12 +9360,17 @@ const analyzeAnonymousCallable = (
       type: undefined,
     })
   }
+  const authoredOrdinal = resolution.executableSiteOrdinals?.get(
+    AuthoredIdentity.anchorKey(node.anchor),
+  )
+  if (authoredOrdinal === undefined)
+    throw new RangeError('anonymous callable analysis lost its authored traversal ordinal')
   const hiddenId: DeclarationId = Object.freeze({
     _tag: 'DeclarationId',
     sourceId: AuthoredWalk.moduleName(context),
-    ordinal: Tir.hiddenDeclarationOrdinal(declaration.id.ordinal, site.node.node.ordinal),
+    ordinal: Tir.hiddenDeclarationOrdinal(declaration.id.ordinal, authoredOrdinal),
   })
-  const canonical = Tir.anonymousCallableId(owner, site)
+  const canonical = Tir.anonymousCallableId(owner, authoredOrdinal)
   const initial = DeclarationCollection.collectAnonymousCallableDeclaration(
     context,
     node,
@@ -9484,26 +9494,18 @@ const analyzeAnonymousCallable = (
   )
   const captures = Object.freeze(
     ordinaryCaptures
-      .flatMap((capture): ReadonlyArray<AnonymousCaptureFact> =>
-        capture.expression === undefined
-          ? []
-          : [
-              Object.freeze({
-                _tag: 'AnonymousCapture',
-                reference: capture.reference,
-                access: capture.access,
-                span: capture.span,
-                expression: capture.expression,
-              }),
-            ],
+      .map((capture): AnonymousCaptureFact =>
+        Object.freeze({
+          _tag: 'AnonymousCapture',
+          reference: capture.reference,
+          access: capture.access,
+          span: capture.span,
+          anchor: capture.anchor,
+        }),
       )
       .filter(
         (capture) =>
-          anonymousCapturedType(capture) !== undefined &&
-          capture.reference.name._tag === 'Present' &&
-          (capture.expression._tag === 'BindingReference' ||
-            capture.expression._tag === 'ParameterReference' ||
-            capture.expression._tag === 'PatternBindingReference'),
+          anonymousCapturedType(capture) !== undefined && capture.reference.name._tag === 'Present',
       )
       .sort((left, right) => left.span.start - right.span.start),
   )
@@ -9541,7 +9543,7 @@ const analyzeAnonymousCallable = (
     }),
     captures
       .filter((capture) => capture.access === 'Shared' || capture.access === 'Exclusive')
-      .map((capture) => capture.expression.origin.anchor),
+      .map((capture) => capture.anchor),
   )
   const hiddenDeclaration: DeclarationFact = Object.freeze({
     ...preliminaryDeclaration,
@@ -9637,6 +9639,47 @@ const analyzeAnonymousCallable = (
           declaration: hiddenDeclaration,
         })
   const environmentOwner = executableSpecializationOwner(resolution)
+  const enclosingBuilder = resolution.builder
+  if (enclosingBuilder === undefined)
+    throw new RangeError('anonymous callable capture requires its enclosing TIR builder')
+  const enclosingCapture = (capture: AnonymousCaptureFact): Tir.Expression => {
+    const type = anonymousCapturedType(capture)
+    if (type === undefined) throw new RangeError('anonymous callable capture lost its type')
+    const spelling =
+      capture.reference.name._tag === 'Present' ? capture.reference.name.spelling : '?'
+    let reference: ParameterReferenceFact
+    if (capture.reference._tag === 'BindingFact')
+      reference = Object.freeze({
+        _tag: 'ResolvedBinding' as const,
+        spelling,
+        anchor: capture.anchor,
+        binding: capture.reference,
+      })
+    else if (capture.reference._tag === 'PatternBinding')
+      reference = Object.freeze({
+        _tag: 'ResolvedPattern' as const,
+        spelling,
+        anchor: capture.anchor,
+        binding: capture.reference,
+      })
+    else
+      reference = Object.freeze({
+        _tag: 'Resolved' as const,
+        spelling,
+        anchor: capture.anchor,
+        parameter: capture.reference,
+      })
+    return BodyBuilder.node(
+      enclosingBuilder,
+      BodyBuilder.tirReference(
+        reference,
+        availableExpressionType(type),
+        capture.anchor,
+        context,
+        enclosingBuilder,
+      ),
+    )
+  }
   return Object.freeze({
     fact: Object.freeze({
       _tag: 'CallableSection',
@@ -9654,22 +9697,21 @@ const analyzeAnonymousCallable = (
       remainingParameters: Object.freeze(authoredParameters.map((_, ordinal) => ordinal)),
       captures: Object.freeze(
         captures.map((capture, ordinal) => {
-          const capturedType = constructionExpressionType(capture.expression)
+          const captured = enclosingCapture(capture)
+          const capturedType = constructionExpressionType(captured)
           const expression =
-            capture.access === 'Take' &&
-            capturedType._tag === 'Available' &&
-            resolution.builder !== undefined
+            capture.access === 'Take' && capturedType._tag === 'Available'
               ? BodyBuilder.node(
-                  resolution.builder,
+                  enclosingBuilder,
                   Object.freeze({
                     _tag: 'Move' as const,
-                    subject: capture.expression,
+                    subject: captured,
                     type: capturedType.type,
-                    span: capture.expression.span,
-                    origin: Tir.synthetic(capture.expression.origin.anchor, 'capture-move'),
+                    span: captured.span,
+                    origin: Tir.synthetic(captured.origin.anchor, 'capture-move'),
                   }),
                 )
-              : capture.expression
+              : captured
           return Object.freeze({
             _tag: 'CallableCapture',
             ordinal,
@@ -10980,7 +11022,9 @@ export function analyzeExpression(
   const lowered = BodyBuilder.tirExpression(result.fact, {
     context,
     builder: resolution.builder,
-    ...(declaration.phase === 'Static' ? { static: resolution.builder.expressions } : {}),
+    ...(declaration.phase === 'Static' || resolution.staticContext !== undefined
+      ? { static: resolution.builder.expressions }
+      : {}),
     ...(resolution.lifetimeCompatibility === undefined
       ? {}
       : { lifetimeCompatibility: resolution.lifetimeCompatibility }),
@@ -11430,6 +11474,8 @@ export interface ResolutionContext {
   readonly authoredDeclaration?: AuthoredHir.Declaration
   readonly executableFunction?: DeclarationId
   readonly executableOwner?: DeclarationFacts.CanonicalId
+  /** Stable authored executable-site ordinals keyed independently of TIR node allocation. */
+  readonly executableSiteOrdinals?: ReadonlyMap<string, number>
   /** Mutable callable bindings whose authored initializer is no longer their exact runtime value. */
   readonly writtenCallableBindings?: Set<number>
   /** Publishes tooling rows before the short-lived semantic decision is discarded. */
