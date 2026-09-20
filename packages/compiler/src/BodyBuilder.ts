@@ -935,6 +935,21 @@ const staticStructure = (
         })
       : unavailable()
   if (fact._tag !== 'Call') return undefined
+  if (
+    options.builder?.artifact.request._tag === 'Specialize' &&
+    fact.staticValue !== undefined &&
+    fact.staticValue._tag !== 'TextValue' &&
+    fact.type._tag === 'Available'
+  ) {
+    const value = staticValueExpression(
+      fact.staticValue,
+      fact.type.type,
+      fact.anchor,
+      options.context,
+      options.builder,
+    )
+    if (value._tag !== 'Unavailable') return value
+  }
   const typeArguments = fact.contract._tag === 'Compatible' ? fact.contract.typeArguments : []
   const arguments_ = Object.freeze(
     fact.arguments.map((argument) => tirExpression(argument.expression, options)),
@@ -1309,8 +1324,13 @@ const residualExpression = (
         })
   }
   if (fact._tag === 'Identifier') {
+    const specializedNonTextValue =
+      options.builder?.artifact.request._tag === 'Specialize' &&
+      fact.staticValue !== undefined &&
+      fact.staticValue._tag !== 'TextValue'
     const materializeStaticReference =
       options.static === undefined ||
+      specializedNonTextValue ||
       (fact.reference._tag === 'ResolvedBinding' && fact.reference.binding.staticIteration === true)
     if (
       materializeStaticReference &&

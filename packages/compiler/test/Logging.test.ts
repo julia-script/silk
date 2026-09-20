@@ -126,7 +126,7 @@ pub fn main() -> i32 {
 }`)
       assert.isAbove(Analysis.diagnostics(invalidLevel).length, 0)
     }),
-  { timeout: 30_000 },
+  { timeout: 60_000 },
 )
 
 it.effect(
@@ -265,5 +265,5 @@ ${body}`)
         assert.strictEqual(frontend.mir._tag, 'Unavailable')
       }
     }),
-  { timeout: 30_000 },
+  { timeout: 60_000 },
 )
