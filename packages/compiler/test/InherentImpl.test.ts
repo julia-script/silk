@@ -91,6 +91,15 @@ pub fn main() -> i32 { return Runner.go(Slot.zero()) }`)
   }),
 )
 
+it.effect('publishes an implicit receiver borrow before assembling a method call', () =>
+  Effect.gen(function* () {
+    const self = yield* analyze(`pub struct Value { stored: i32 }
+impl Value { pub fn read(self: &Self) -> i32 { return self.stored } }
+pub fn main(value: Value) -> i32 { return value.read() }`)
+    assert.deepEqual(codes(self), [])
+  }),
+)
+
 it.effect('resolves imported inherent members through their declaring owner', () =>
   Effect.gen(function* () {
     const self = yield* analyzeModules('app', [

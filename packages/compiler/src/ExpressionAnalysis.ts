@@ -7804,6 +7804,22 @@ const synthesizeReceiver = (
   resolution: ResolutionContext,
 ): ExpressionResult => {
   const subjectType = subjectResult.type
+  const publishReceiver = (result: ExpressionResult): ExpressionResult => {
+    if (result.node !== undefined || resolution.builder === undefined) return result
+    const node = BodyBuilder.tirExpression(result.fact, {
+      context,
+      builder: resolution.builder,
+      ...(declaration.phase === 'Static' ? { static: resolution.builder.expressions } : {}),
+      ...(resolution.lifetimeCompatibility === undefined
+        ? {}
+        : { lifetimeCompatibility: resolution.lifetimeCompatibility }),
+      ...(declaration.opaqueResult === undefined
+        ? {}
+        : { opaqueResultFamily: declaration.opaqueResult.family }),
+      functionId: declaration.id,
+    })
+    return Object.freeze({ ...result, node })
+  }
   if (parameterType !== undefined && Type.isReference(parameterType)) {
     // A reference receiver of the declared access passes through; any other reference reborrows
     // through the ordinary rules, so `&mut` reaches a `&Self` method and `&` never reaches `&mut`.
@@ -7812,19 +7828,21 @@ const synthesizeReceiver = (
       Type.isReference(subjectType) &&
       subjectType.access === parameterType.access
     )
-      return subjectResult
-    return borrowSubject(
-      context,
-      subjectNode,
-      subjectNode,
-      subjectResult,
-      parameterType.access,
-      parameterType,
-      declaration,
-      resolution,
+      return publishReceiver(subjectResult)
+    return publishReceiver(
+      borrowSubject(
+        context,
+        subjectNode,
+        subjectNode,
+        subjectResult,
+        parameterType.access,
+        parameterType,
+        declaration,
+        resolution,
+      ),
     )
   }
-  if (borrowRoot(context, subjectResult.fact) === undefined) return subjectResult
+  if (borrowRoot(context, subjectResult.fact) === undefined) return publishReceiver(subjectResult)
   const callableMetadata = (() => {
     const fact = subjectResult.fact
     if (fact._tag === 'FunctionItem' || fact._tag === 'CallableSection')
@@ -7838,17 +7856,19 @@ const synthesizeReceiver = (
       }
     return {}
   })()
-  return Object.freeze({
-    fact: Object.freeze({
-      _tag: 'Move',
-      subject: expressionNode(subjectResult),
-      ...callableMetadata,
-      type: subjectResult.fact.type,
-      anchor: subjectNode.anchor,
+  return publishReceiver(
+    Object.freeze({
+      fact: Object.freeze({
+        _tag: 'Move',
+        subject: expressionNode(subjectResult),
+        ...callableMetadata,
+        type: subjectResult.fact.type,
+        anchor: subjectNode.anchor,
+      }),
+      diagnostics: subjectResult.diagnostics,
+      type: subjectResult.type,
     }),
-    diagnostics: subjectResult.diagnostics,
-    type: subjectResult.type,
-  })
+  )
 }
 
 const declaredParameterType = (parameter: ParameterFact | undefined): SemanticType | undefined =>
