@@ -268,18 +268,14 @@ export const views: ReadonlyArray<ViewDefinition> = [
      */
     project: ({ snapshot, root }) => {
       const literals = Analysis.expressionsOf(snapshot, root).filter(
-        (expression) => expression._tag === 'StructLiteral',
+        (expression): expression is Extract<Tir.Expression, { readonly _tag: 'Construct' }> =>
+          expression._tag === 'Construct',
       )
       const projections = Analysis.fieldProjectionsOf(snapshot, root)
       const layout = Analysis.layoutOf(snapshot)
       const shapes = layout._tag === 'Available' ? layout.value.callingShapes : []
       return {
-        rows: structValueRows(
-          SemanticContext.fromModules(snapshot.closure.modules),
-          literals,
-          projections,
-          shapes,
-        ),
+        rows: structValueRows(snapshot.index, literals, projections, shapes),
         meta: `${literals.length} lit · ${projections.length} proj`,
       }
     },

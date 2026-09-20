@@ -5,6 +5,7 @@ import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as Backend from '../src/Backend.js'
+import * as BodyView from '../src/BodyView.js'
 import * as DeclarationFacts from '../src/DeclarationFacts.js'
 import * as Diagnostic from '../src/Diagnostic.js'
 import * as FormattedDocument from '../src/FormattedDocument.js'
@@ -23,6 +24,7 @@ import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
 import * as SourceSpan from '../src/SourceSpan.js'
 import type * as StaticValue from '../src/StaticValue.js'
+import * as Tir from '../src/Tir.js'
 import * as SyntaxFormatter from '../src/SyntaxFormatter.js'
 import * as SyntaxTree from '../src/SyntaxTree.js'
 import * as Type from '../src/Type.js'
@@ -280,9 +282,7 @@ pub fn main() -> i32 {
     )?.returnedExpression
     assert.strictEqual(returned?._tag, 'Call')
     if (returned?._tag !== 'Call') return
-    assert.strictEqual(returned.contract._tag, 'Compatible')
-    if (returned.contract._tag !== 'Compatible') return
-    assert.deepEqual(returned.contract.typeArguments.map(Type.encodeGenericArgument), [
+    assert.deepEqual(returned.typeArguments.map(Type.encodeGenericArgument), [
       `? &mut ${module}.Clock | &${module}.Logger`,
       '? ',
     ])
@@ -391,16 +391,23 @@ it.effect('rejects residual rows at the complete-application specialization fron
 }
 pub fn main() -> i32 { return 0 }`),
     )
-    const fn = Projections.tirOf(snapshot, module)?.functions.find(
+    const result = Analysis.rootAnalysis(snapshot)
+    const body = result.bodies.find(
       (candidate) =>
         candidate.declaration.canonical._tag === 'Canonical' &&
         candidate.declaration.canonical.id.name === 'forward',
     )
+    const fn = body?.function
     assert.isDefined(fn)
-    if (fn === undefined) return
+    if (body === undefined || fn === undefined) return
     const registry = snapshot.resolution.contexts
     assert.isUndefined(
-      Instances.specialize(fn, new Map(), Analysis.declarationIndex(snapshot), registry),
+      Instances.specialize(
+        BodyView.make(body),
+        new Map(),
+        Analysis.declarationIndex(snapshot),
+        registry,
+      ),
     )
     const diagnostic = Diagnostic.nonConcreteSpecialization(
       `${module}.forward`,
@@ -1727,11 +1734,24 @@ pub fn main() -> i32 {
       assert.strictEqual(returned?._tag, 'Call')
       return returned?._tag === 'Call' ? returned : undefined
     }
+    const selectedEvidenceCount = (
+      name: string,
+      call: Extract<Tir.Expression, { readonly _tag: 'Call' }> | undefined,
+    ): number | undefined => {
+      if (call === undefined) return undefined
+      const body = root.bodies.find(
+        (candidate) =>
+          candidate.declaration.name._tag === 'Present' &&
+          candidate.declaration.name.spelling === name,
+      )
+      return body === undefined
+        ? undefined
+        : BodyView.selectedEvidence(BodyView.make(body), call.evidence)?.conformances.length
+    }
     for (const name of ['positive', 'explicitAgrees', 'agrees']) {
       const call = returnedCall(name)
-      assert.strictEqual(call?.contract._tag, 'Compatible')
-      if (call?.contract._tag !== 'Compatible') continue
-      const arguments_ = call.contract.typeArguments.map(Type.encodeGenericArgument)
+      if (call === undefined) continue
+      const arguments_ = call.typeArguments.map(Type.encodeGenericArgument)
       assert.deepEqual(arguments_.slice(0, 5), [
         'generics/known-provider-conformance.Transport',
         'generics/known-provider-conformance.Output',
@@ -1740,19 +1760,16 @@ pub fn main() -> i32 {
         'generics/known-provider-conformance.Positive',
       ])
       assert.isTrue(arguments_.slice(5).every((argument) => argument.startsWith("'")))
-      assert.strictEqual(call.selectedConformances?.length, 1)
+      assert.strictEqual(selectedEvidenceCount(name, call), 1)
       assert.isFalse(
-        call.contract.typeArguments.some(
+        call.typeArguments.some(
           (argument) => Type.isTypeArgument(argument) && Type.isRepresented(argument),
         ),
       )
     }
     const chained = returnedCall('chained')
-    assert.strictEqual(chained?.contract._tag, 'Compatible')
     const chainedArguments =
-      chained?.contract._tag === 'Compatible'
-        ? chained.contract.typeArguments.map(Type.encodeGenericArgument).slice(0, 6)
-        : []
+      chained?.typeArguments.map(Type.encodeGenericArgument).slice(0, 6) ?? []
     assert.deepEqual(chainedArguments, [
       'generics/known-provider-conformance.Transport',
       'generics/known-provider-conformance.Output',
@@ -1761,13 +1778,10 @@ pub fn main() -> i32 {
       'generics/known-provider-conformance.Positive',
       'generics/known-provider-conformance.Chained',
     ])
-    assert.strictEqual(chained?.selectedConformances?.length, 2)
+    assert.strictEqual(selectedEvidenceCount('chained', chained), 2)
     const chainedReversed = returnedCall('chainedReversed')
-    assert.strictEqual(chainedReversed?.contract._tag, 'Compatible')
     const reversedArguments =
-      chainedReversed?.contract._tag === 'Compatible'
-        ? chainedReversed.contract.typeArguments.map(Type.encodeGenericArgument).slice(0, 6)
-        : []
+      chainedReversed?.typeArguments.map(Type.encodeGenericArgument).slice(0, 6) ?? []
     assert.deepEqual(reversedArguments, [
       'generics/known-provider-conformance.Chained',
       'generics/known-provider-conformance.Transport',
@@ -1789,10 +1803,9 @@ pub fn main() -> i32 {
         : [],
       chainedArguments,
     )
-    assert.strictEqual(chainedReversed?.selectedConformances?.length, 2)
+    assert.strictEqual(selectedEvidenceCount('chainedReversed', chainedReversed), 2)
     const genericAdapter = returnedCall('genericAdapter')
-    assert.strictEqual(genericAdapter?.contract._tag, 'Compatible')
-    assert.strictEqual(genericAdapter?.selectedConformances?.length, 1)
+    assert.strictEqual(selectedEvidenceCount('genericAdapter', genericAdapter), 1)
 
     const diagnostics = Analysis.diagnostics(snapshot).map((diagnostic) => ({
       code: diagnostic.code,

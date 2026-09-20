@@ -1,9 +1,8 @@
-import { records } from './support/records.js'
+import { records, type InspectedBody } from './support/records.js'
 import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
-import type * as Elaboration from '../src/Elaboration.js'
 import * as Tir from '../src/Tir.js'
 import * as Type from '../src/Type.js'
 import * as Projections from './support/projections.js'
@@ -14,21 +13,11 @@ const ascii = (value: string): Uint8Array =>
 const snapshot = (source: string) =>
   AnalysisFixture.retainingMain('fixed-arrays/main', ascii(source))
 
-const nested = (fact: Elaboration.ExpressionFact): ReadonlyArray<Elaboration.ExpressionFact> => {
-  if (fact._tag === 'Move' || fact._tag === 'FieldProjection') return [fact.subject]
-  if (fact._tag === 'IndexProjection') return [fact.subject, fact.index]
-  if (fact._tag === 'ArrayLiteral') return fact.elements.map((element) => element.expression)
-  if (fact._tag === 'StructLiteral')
-    return fact.initializers.map((initializer) => initializer.expression)
-  if (fact._tag === 'Call' || fact._tag === 'Operator' || fact._tag === 'CallableApply')
-    return fact.arguments.map((argument) => argument.expression)
-  return []
-}
-
-const all = (fact: Elaboration.ExpressionFact): ReadonlyArray<Elaboration.ExpressionFact> => [
-  fact,
-  ...nested(fact).flatMap(all),
-]
+const bindingInitializer = (
+  body: InspectedBody | undefined,
+  ordinal: number,
+): Tir.Expression | undefined =>
+  body?.statements.filter((statement) => statement._tag === 'Bind').at(ordinal)?.initializer
 
 it.effect('infers non-empty arrays and contextually types empty and nested literals', () =>
   Effect.gen(function* () {
@@ -40,24 +29,19 @@ pub fn main() -> i32 { return take([]) }`)
 
     assert.deepEqual(Analysis.diagnostics(self), [])
     const functions = records(Analysis.rootAnalysis(self)).functions
-    const inferred = functions.at(0)?.bindings.at(0)?.initializer
-    assert.strictEqual(inferred?._tag, 'ArrayLiteral')
-    if (inferred?._tag === 'ArrayLiteral' && inferred.type._tag === 'Available') {
-      assert.strictEqual(Type.encode(inferred.type.type), 'Array<i32, 3>')
-      assert.deepEqual(
-        inferred.elements.map((element) => element.ordinal),
-        [0, 1, 2],
-      )
+    const inferred = bindingInitializer(functions.at(0), 0)
+    assert.strictEqual(inferred?._tag, 'ArrayConstruct')
+    if (inferred?._tag === 'ArrayConstruct') {
+      assert.strictEqual(Type.encode(inferred.type), 'Array<i32, 3>')
+      assert.strictEqual(inferred.elements.length, 3)
     }
     const empty = functions.at(1)?.returnedExpression
     const nestedArray = functions.at(2)?.returnedExpression
-    assert.strictEqual(empty?._tag, 'ArrayLiteral')
-    assert.strictEqual(nestedArray?._tag, 'ArrayLiteral')
-    if (empty?._tag === 'ArrayLiteral') assert.strictEqual(empty.state._tag, 'Complete')
-    if (nestedArray?._tag === 'ArrayLiteral') {
-      assert.strictEqual(nestedArray.state._tag, 'Complete')
+    assert.strictEqual(empty?._tag, 'ArrayConstruct')
+    assert.strictEqual(nestedArray?._tag, 'ArrayConstruct')
+    if (nestedArray?._tag === 'ArrayConstruct') {
       assert.strictEqual(
-        nestedArray.elements.every((element) => element.expression._tag === 'ArrayLiteral'),
+        nestedArray.elements.every((element) => element._tag === 'ArrayConstruct'),
         true,
       )
     }
@@ -77,16 +61,8 @@ pub fn main() -> i32 { return 0 }`)
       Analysis.diagnostics(self).map((diagnostic) => diagnostic.code),
       ['SEM0029', 'SEM0030', 'SEM0031'],
     )
-    const types = records(Analysis.rootAnalysis(self)).functions.at(1)?.bindings.at(0)?.initializer
-    assert.strictEqual(types?._tag, 'ArrayLiteral')
-    if (types?._tag === 'ArrayLiteral') {
-      assert.strictEqual(types.elements.length, 3)
-      assert.strictEqual(types.state._tag, 'IncompatibleElements')
-      assert.deepEqual(
-        types.elements.map((element) => element.compatibility._tag),
-        ['Compatible', 'TypeMismatch', 'Compatible'],
-      )
-    }
+    const types = bindingInitializer(records(Analysis.rootAnalysis(self)).functions.at(1), 0)
+    assert.strictEqual(types?._tag, 'Unavailable')
   }),
 )
 
@@ -98,9 +74,9 @@ fn constant(values: [i32; 3]) -> i32 { return values[1] }
 pub fn main() -> i32 { return constant([4, 5, 6]) }`)
     assert.deepEqual(Analysis.diagnostics(valid), [])
     const facts = records(Analysis.rootAnalysis(valid)).functions.flatMap((fn) =>
-      all(fn.returnedExpression).filter(
-        (fact): fact is Elaboration.IndexProjectionExpressionFact =>
-          fact._tag === 'IndexProjection',
+      Tir.expressionTree(fn.returnedExpression).filter(
+        (fact): fact is Extract<Tir.Expression, { readonly _tag: 'IndexPlace' }> =>
+          fact._tag === 'IndexPlace',
       ),
     )
     assert.deepEqual(

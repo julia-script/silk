@@ -157,28 +157,20 @@ it.effect(
       const main = records(Analysis.rootAnalysis(self)).functions.at(2)
       const literal = make?.returnedExpression
 
-      assert.strictEqual(literal?._tag, 'StructLiteral')
-      if (literal?._tag !== 'StructLiteral') return
+      assert.strictEqual(literal?._tag, 'Construct')
+      if (literal?._tag !== 'Construct') return
       assert.deepEqual(
-        literal.initializers.map((initializer) => initializer.name),
-        ['right', 'left'],
+        literal.evaluationOrder.map((field) => field.ordinal),
+        [1, 0],
       )
       assert.deepEqual(
-        literal.fields.map(({ field }) =>
-          field.name._tag === 'Present' ? field.name.spelling : 'unavailable',
-        ),
-        ['left', 'right'],
+        literal.fields.map(({ field }) => field.ordinal),
+        [0, 1],
       )
-      assert.strictEqual(main?.returnedExpression._tag, 'Operator')
+      assert.strictEqual(main?.returnedExpression._tag, 'BuiltinCall')
       assert.deepEqual(Analysis.diagnostics(self), [])
 
-      const makeTir = Analysis.rootAnalysis(self).tir.functions.at(0)
-      assert.strictEqual(
-        makeTir === undefined ? undefined : Tir.returned(makeTir)._tag,
-        'Construct',
-      )
-      const mainTir = Analysis.rootAnalysis(self).tir.functions.at(2)
-      const returned = mainTir === undefined ? undefined : Tir.returned(mainTir)
+      const returned = main?.returnedExpression
       assert.strictEqual(returned?._tag, 'BuiltinCall')
       if (returned?._tag === 'BuiltinCall') {
         for (const argument of returned.arguments) {
@@ -213,36 +205,20 @@ fn ready() -> State { return State.Ready }`),
       ['failed', failed],
       ['ready', ready],
     ] as const) {
-      assert.strictEqual(expression?._tag, 'UnionVariant', name)
-      if (expression?._tag === 'UnionVariant') assert.strictEqual(expression.type._tag, 'Available')
+      assert.strictEqual(expression?._tag, 'ConstructUnionVariant', name)
     }
-    assert.strictEqual(
-      some?.type._tag === 'Available' ? Type.encode(some.type.type) : undefined,
-      'union-values/construction.Option<i32>',
+    if (
+      some?._tag !== 'ConstructUnionVariant' ||
+      none?._tag !== 'ConstructUnionVariant' ||
+      failed?._tag !== 'ConstructUnionVariant' ||
+      ready?._tag !== 'ConstructUnionVariant'
     )
-    assert.strictEqual(
-      none?.type._tag === 'Available' ? Type.encode(none.type.type) : undefined,
-      'union-values/construction.Option<i32>',
-    )
-    assert.strictEqual(
-      failed?.type._tag === 'Available' ? Type.encode(failed.type.type) : undefined,
-      'union-values/construction.Result<i32, bool>',
-    )
-    assert.strictEqual(
-      ready?.type._tag === 'Available' ? Type.encode(ready.type.type) : undefined,
-      'union-values/construction.State',
-    )
-    const tir = Analysis.rootAnalysis(self).tir.functions.map(Tir.returned)
-    assert.deepEqual(
-      tir.map((expression) => expression._tag),
-      [
-        'ConstructUnionVariant',
-        'ConstructUnionVariant',
-        'ConstructUnionVariant',
-        'ConstructUnionVariant',
-      ],
-    )
-    const someTir = tir.at(0)
+      return
+    assert.strictEqual(Type.encode(some.type), 'union-values/construction.Option<i32>')
+    assert.strictEqual(Type.encode(none.type), 'union-values/construction.Option<i32>')
+    assert.strictEqual(Type.encode(failed.type), 'union-values/construction.Result<i32, bool>')
+    assert.strictEqual(Type.encode(ready.type), 'union-values/construction.State')
+    const someTir = some
     assert.strictEqual(
       someTir?._tag === 'ConstructUnionVariant' ? someTir.variant.name : undefined,
       'Some',
@@ -276,11 +252,8 @@ fn conflict() -> Result<i32, bool> {
       ['SEM0099', 'SEM0099', 'SEM0099', 'SEM0167', 'SEM0100'],
     )
     const functions = records(Analysis.rootAnalysis(self)).functions
-    assert.strictEqual(functions.at(0)?.returnedExpression._tag, 'UnionVariant')
-    assert.strictEqual(functions.at(1)?.returnedExpression._tag, 'UnionVariant')
-    assert.strictEqual(functions.at(2)?.returnedExpression._tag, 'UnionVariant')
     assert.ok(
-      functions.every((fn) => fn.returnedExpression.type._tag === 'Unavailable'),
+      functions.every((fn) => fn.returnedExpression._tag === 'Unavailable'),
       'expected-type context must not complete a constructor application',
     )
   }),
@@ -325,7 +298,7 @@ fn project(result: Result<i32, bool>) -> i32 { return result.value }`),
       ['SEM0027'],
     )
     assert.strictEqual(
-      records(Analysis.rootAnalysis(self)).functions.at(0)?.returnedExpression.type._tag,
+      records(Analysis.rootAnalysis(self)).functions.at(0)?.returnedExpression._tag,
       'Unavailable',
     )
   }),
@@ -391,7 +364,7 @@ pub fn main() -> i32 { return 0 }`
       )
       const functions = records(Analysis.rootAnalysis(invalid)).functions
       for (const ordinal of [0, 1, 2, 3]) {
-        assert.strictEqual(functions.at(ordinal)?.returnedExpression.type._tag, 'Unavailable')
+        assert.strictEqual(functions.at(ordinal)?.returnedExpression._tag, 'Unavailable')
       }
       const partial = Analysis.rootAnalysis(invalid).tir.functions.find(
         (fn) =>

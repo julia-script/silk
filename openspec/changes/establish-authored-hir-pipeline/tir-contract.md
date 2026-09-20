@@ -647,23 +647,14 @@ are not mistaken for the design:
   revision to this one; a position the body does not account for means the proof is checked again.
   Ownership results that name authored nodes make this a `present` like any other.
 
-**What construction keeps private.** Analysis reasons about the subexpressions it has just checked:
-their resolved references, contracts, written sub-tokens and recovery states. Typed nodes do not carry
-all of that, and should not, because none of it is needed to execute or to reuse a body. So analysis
-keeps working records while it builds a body. The boundary is strict and is what removes the
-duplicate body:
-
-- a working record never leaves construction: `Elaboration.Result` exposes checked bodies and their
-  tables, and no stage after construction imports a record type. `Elaboration.records` is the one
-  seam, for tests of construction and for the inspector, which shows construction itself. It keeps
-  nothing: it builds the records again from the module's inputs when it is asked;
-- nothing caches a record: reuse stores the checked body only;
-- everything a later stage or a tool needs is either on a node or in a table the body publishes
-  (occurrences, inference rows, scopes and their locals, expression types, lifetimes, opaque-result
-  evidence, generated aggregates, static structure, callable flow, diagnostics, provenance). A rule
-  that spans bodies, such as the constrained-callable escape rule, is a join over per-body rows, so
-  a reused body takes part without being read again;
-- the evaluator reads nodes, also while a body is still being built.
+**What construction may keep private.** Analysis may retain ephemeral scalar decisions while it
+checks one authored construct: a resolved reference, a selected contract, a recovery state, or a
+written sub-token needed to produce that construct's node and result rows. It must publish the typed
+node and rows before moving on. It must not assemble a recursive expression, statement, or function
+record for a later lowering pass, cache such a record, or rebuild one for inspection. Inspection uses
+the typed body and its result tables. Cross-body rules, such as constrained-callable escape, join
+per-body rows, so a reused body participates without being checked again. The evaluator reads the
+same completed nodes during construction and after publication.
 
 **Presentation of a checked body.** Stages after construction still read source coordinates (loan
 liveness, MIR provenance, debug locations). A checked body names authored nodes only. Once per

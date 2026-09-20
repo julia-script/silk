@@ -61,9 +61,9 @@ export const lowerCatchEffectValue = (
   }
 
   const site = Tir.effectCatchSite(
-    fn.owner.function.declaration.id,
+    Tir.nodeReference(fn.owner.view.artifact, expression),
     fn.owner.key.declaration,
-    expression.span,
+    fn.owner.function.declaration.id.ordinal,
   )
   const semanticType = fn.semantic(expression.type)
   if (!Type.isEffect(semanticType)) return undefined
@@ -718,13 +718,14 @@ const beginResourceLoan = (
   resource: Mir.LocalId,
   resourceType: Mir.Type,
   callbackType: Extract<Mir.Type, { readonly _tag: 'CallableValue' }>,
+  call: Tir.NodeRef,
   span: SourceSpan.SourceSpan,
 ): { readonly borrow: Tir.BorrowId; readonly reference: Mir.LocalId } | undefined => {
   const parameter = callbackType.type.parameters.at(0)
   const referenceType = parameter === undefined ? undefined : fn.type(parameter)
   if (referenceType?._tag !== 'Reference' || referenceType.type.access !== 'Exclusive')
     return undefined
-  const borrow = fn.freshSyntheticBorrow(span)
+  const borrow = fn.freshSyntheticBorrow(call)
   const reference = fn.alloc(referenceType)
   fn.emit(
     Object.freeze({
@@ -804,7 +805,14 @@ export const lowerUseReleaseNonParking = (
     releaseEffectType === undefined
   )
     return undefined
-  const useLoan = beginResourceLoan(fn, resource.result, resourceType, useType, useExpression.span)
+  const useLoan = beginResourceLoan(
+    fn,
+    resource.result,
+    resourceType,
+    useType,
+    Tir.nodeReference(fn.owner.view.artifact, useExpression),
+    useExpression.span,
+  )
   if (useLoan === undefined) return undefined
   const protectedValue = applyResourceEffectBuilder(
     fn,
@@ -830,6 +838,7 @@ export const lowerUseReleaseNonParking = (
       resource.result,
       resourceType,
       releaseType,
+      Tir.nodeReference(fn.owner.view.artifact, releaseExpression),
       releaseExpression.span,
     )
     if (releaseLoan === undefined) return undefined
@@ -1221,21 +1230,13 @@ export const lowerEffectCatch = (
     return Object.freeze({ result: destination })
   }
 
-  const declaration = fn.owner.function.declaration.id
   const failureMembers =
     failureValueMir._tag === 'Nominal'
       ? Object.freeze([failureValueMir.type])
       : failureValueMir.type.members
-  const innerSpan =
-    SourceSpan.fromOffsets(
-      expression.span.sourceId,
-      expression.span.start,
-      expression.span.start,
-    ) ?? expression.span
   const innerMatch: Match.MatchId = Object.freeze({
     _tag: 'MatchId',
-    function: declaration,
-    span: innerSpan,
+    node: Tir.nodeReference(fn.owner.view.artifact, expression),
   })
   const failureShape = Layout.callingShape(fn.layout, caught.failureValueType)
   if (failureShape === undefined) return undefined
@@ -1261,10 +1262,9 @@ export const lowerEffectCatch = (
       match: innerMatch,
       ordinal,
     })
-    const bindingId: Match.BindingId = Object.freeze({
-      _tag: 'PatternBindingId',
-      arm: armId,
-      ordinal: 0,
+    const bindingId: Tir.LocalId = Object.freeze({
+      _tag: 'TirLocal',
+      ordinal,
     })
     const memberType = fn.type(member)
     if (memberType === undefined || memberType._tag === 'EffectOutcome') return undefined
@@ -1675,13 +1675,9 @@ export const retainedEffectLoans = (
       (child._tag === 'BuiltinCall' || child._tag === 'InterfaceOperationCall') &&
       child.witnessEffectSite !== undefined
     ) {
+      const call = Tir.nodeReference(fn.owner.view.artifact, child)
       for (const loan of fn.ownership?.loans ?? []) {
-        if (
-          loan.origin === 'InterfaceOperand' &&
-          loan.id.callSpan.sourceId === child.span.sourceId &&
-          loan.id.callSpan.start === child.span.start &&
-          loan.id.callSpan.end === child.span.end
-        )
+        if (loan.origin === 'InterfaceOperand' && Tir.nodeRefEquals(loan.id.call, call))
           retained.set(borrowKey(loan.id), loan.id)
       }
     }
@@ -1705,7 +1701,7 @@ export const borrowedWriteRoot = (
 /** Resolves a discriminant-only pattern alias to its original owned storage. */
 export const patternPlace = (
   fn: FunctionLowering,
-  binding: Match.BindingId,
+  binding: Tir.LocalId,
   span: SourceSpan.SourceSpan,
 ):
   | { readonly root: Mir.LocalId; readonly selectors: ReadonlyArray<Mir.PlaceSelector> }
@@ -1790,8 +1786,7 @@ export const lowerServiceEffectValue = (
           fn.layout,
           call.resultEffect,
           Type.isEffect(semanticType) ? semanticType : undefined,
-        )) ??
-    fn.effectResults.get(instanceText(target, typeArguments, call?.target.staticArguments))
+        )) ?? fn.effectResults.get(Instances.keyText(call.target))
   if (effectValue === undefined) return undefined
   const effect = fn.alloc(effectValue)
   fn.emit(
@@ -1820,6 +1815,7 @@ interface LoweredProvidedEffect {
 const prepareProvidedEffect = (
   fn: FunctionLowering,
   providerFact: Extract<Tir.Expression, { readonly _tag: 'EffectBindRequirement' }>['provider'],
+  call: Tir.NodeRef,
 ): LoweredProvidedEffect | undefined => {
   const selected = specializeProvider(fn, providerFact)
   if (selected === undefined) return undefined
@@ -1876,9 +1872,7 @@ const prepareProvidedEffect = (
       candidate.startSpan.start === providerFact.span.start &&
       candidate.startSpan.end === providerFact.span.end,
   )
-  const borrow = fn.beginRecipeBorrow(
-    authoredLoan?.id ?? fn.freshSyntheticBorrow(providerFact.span),
-  )
+  const borrow = fn.beginRecipeBorrow(authoredLoan?.id ?? fn.freshSyntheticBorrow(call))
   if (
     provider === undefined ||
     providerType?._tag !== 'Nominal' ||
@@ -1918,9 +1912,10 @@ const prepareProvidedEffect = (
 export const lowerProvidedEffect = <A>(
   fn: FunctionLowering,
   providerFact: Extract<Tir.Expression, { readonly _tag: 'EffectBindRequirement' }>['provider'],
+  call: Tir.NodeRef,
   use: (requirement: ProvidedRequirement) => A | undefined,
 ): A | 'Transferred' | undefined => {
-  const provided = prepareProvidedEffect(fn, providerFact)
+  const provided = prepareProvidedEffect(fn, providerFact, call)
   if (provided === undefined) return undefined
   const result = use(provided.requirement)
   if (result === 'Transferred') return result
@@ -1968,7 +1963,9 @@ const lowerForwardedProvider = <A>(
       ),
     )
     if (providerType?._tag !== 'Nominal' || referenceType?._tag !== 'Reference') return undefined
-    const borrow = fn.freshSyntheticBorrow(forwarded.provider.span)
+    const borrow = fn.freshSyntheticBorrow(
+      Tir.nodeReference(fn.owner.view.artifact, forwarded.provider),
+    )
     const reference = fn.alloc(referenceType)
     fn.emit(
       Object.freeze({
@@ -2076,24 +2073,29 @@ export const lowerEffectExecution = (
   }
 
   if (subject._tag === 'EffectBindRequirement') {
-    return lowerProvidedEffect(fn, subject.provider, (requirement) => {
-      const result = lowerEffectExecution(
-        fn,
-        subject.protected,
-        success,
-        span,
-        Object.freeze([requirement, ...availableRequirements]),
-      )
-      if (result === 'Transferred') return result
-      if (result === undefined) return undefined
-      endRunLoans(fn, span)
-      if (
-        subject.protected._tag === 'EffectConstruct' ||
-        subject.protected._tag === 'ServiceEffectConstruct'
-      )
-        endLoans(fn, subject.protected.loanEnds, span)
-      return result
-    })
+    return lowerProvidedEffect(
+      fn,
+      subject.provider,
+      Tir.nodeReference(fn.owner.view.artifact, subject),
+      (requirement) => {
+        const result = lowerEffectExecution(
+          fn,
+          subject.protected,
+          success,
+          span,
+          Object.freeze([requirement, ...availableRequirements]),
+        )
+        if (result === 'Transferred') return result
+        if (result === undefined) return undefined
+        endRunLoans(fn, span)
+        if (
+          subject.protected._tag === 'EffectConstruct' ||
+          subject.protected._tag === 'ServiceEffectConstruct'
+        )
+          endLoans(fn, subject.protected.loanEnds, span)
+        return result
+      },
+    )
   }
   if (subject._tag === 'ServiceEffectConstruct') {
     const lowered = lowerServiceEffectValue(fn, subject, availableRequirements)

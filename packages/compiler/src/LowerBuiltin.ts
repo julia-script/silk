@@ -66,9 +66,9 @@ export const lowerBuiltinExpression = (
   const semanticType = fn.semantic(expression.type)
   if (Type.isEffect(semanticType)) {
     const site = Tir.builtinEffectSite(
-      fn.owner.function.declaration.id,
+      Tir.nodeReference(fn.owner.view.artifact, expression),
       fn.owner.key.declaration,
-      expression.span,
+      fn.owner.function.declaration.id.ordinal,
     )
     const type = effectValueAtSite(fn.layout, fn.owner.key, site, semanticType)
     if (type === undefined) return undefined
@@ -546,7 +546,7 @@ const lowerBuiltinOperation = (
     if (payloadType?._tag !== 'Reference') return undefined
     const payload = fn.alloc(payloadType)
     const destination = fn.alloc(type)
-    const loan = fn.freshSyntheticBorrow(expression.span)
+    const loan = fn.freshSyntheticBorrow(Tir.nodeReference(fn.owner.view.artifact, expression))
     const useContract = Type.callable(
       Object.freeze([payloadContract]),
       Mir.semanticType(type),

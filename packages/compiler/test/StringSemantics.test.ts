@@ -59,28 +59,27 @@ it.effect('elaborates text and byte literals with distinct semantic types', () =
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
 
     const literals = Analysis.expressionsOf(snapshot, 'string/literals').filter(
-      (expression) => expression._tag === 'StaticText',
+      (expression) =>
+        expression._tag === 'StaticStringLiteral' || expression._tag === 'StaticByteViewLiteral',
     )
     assert.strictEqual(literals.length, 2)
-    const text = literals.find((literal) => literal.data?.kind === 'Text')
-    const bytes = literals.find((literal) => literal.data?.kind === 'Bytes')
-    assert.strictEqual(text?.type._tag, 'Available')
-    assert.strictEqual(bytes?.type._tag, 'Available')
-    if (text?.type._tag === 'Available') {
-      assert.isTrue(Type.isString(text.type.type))
-      assert.deepEqual(text.data?.bytes, [104, 195, 169])
+    const text = literals.find((literal) => literal._tag === 'StaticStringLiteral')
+    const bytes = literals.find((literal) => literal._tag === 'StaticByteViewLiteral')
+    if (text?._tag === 'StaticStringLiteral') {
+      assert.isTrue(Type.isString(text.type))
+      assert.deepEqual(text.data.bytes, [104, 195, 169])
       // Presentation spans are trivia-free: the literal starts at its own opening quote.
-      const span = SemanticContext.fromModules(snapshot.closure.modules).spanOf(text.anchor)
+      const span = SemanticContext.fromModules(snapshot.closure.modules).spanOf(text.origin.anchor)
       assert.strictEqual(span.sourceId, 'string/literals')
       assert.strictEqual(span.start, source.indexOf('"hé"'))
       assert.strictEqual(span.end, source.indexOf('"hé"') + new TextEncoder().encode('"hé"').length)
     }
-    if (bytes?.type._tag === 'Available') {
+    if (bytes?._tag === 'StaticByteViewLiteral') {
       assert.strictEqual(
-        Type.key(bytes.type.type),
+        Type.key(bytes.type),
         Type.key(Type.slice('Shared', 'u8', Lifetime.staticLifetime)),
       )
-      assert.deepEqual(bytes.data?.bytes, [104, 195, 169])
+      assert.deepEqual(bytes.data.bytes, [104, 195, 169])
     }
 
     const tir = Projections.tirOf(snapshot, 'string/literals')

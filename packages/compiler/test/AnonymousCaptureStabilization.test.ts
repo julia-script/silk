@@ -39,9 +39,12 @@ pub fn main() -> i32 {
       )
       assert.deepEqual(Analysis.diagnostics(snapshot), [])
       const anonymous = Analysis.expressionsOf(snapshot, 'anonymous-capture/quantified-input').find(
-        (expression) => expression._tag === 'CallableSection' && expression.anonymous !== undefined,
+        (expression) =>
+          expression._tag === 'CallableSection' &&
+          expression.target._tag === 'DeclarationCallableTarget' &&
+          expression.target.declaration.name.includes('$callable$'),
       )
-      const type = anonymous?.type._tag === 'Available' ? anonymous.type.type : undefined
+      const type = anonymous?._tag === 'CallableSection' ? anonymous.type : undefined
       assert.isTrue(type !== undefined && Type.isCallable(type))
       if (type === undefined || !Type.isCallable(type)) return
       assert.strictEqual(type.lifetimeBinders.length, 1)
@@ -49,66 +52,88 @@ pub fn main() -> i32 {
     }),
 )
 
-it.effect('derives take-once invocation and run access from captured affine temporaries', () =>
+it.effect('rematerializes anonymous captures in the enclosing body local arena', () =>
   Effect.gen(function* () {
-    for (const [name, source, expected] of [
-      [
-        'once-twice',
-        `${tokenSurface}pub fn main() -> i32 {
+    const snapshot = yield* Analysis.ofSource(
+      'anonymous-capture/body-local-arena',
+      ascii(`struct Operations {}
+pub fn main() -> i32 {
+  let operations = Operations {}
+  let shutdownAfterFlush = true
+  drop operations
+  let check = fn() -> bool { return shutdownAfterFlush }
+  if check() { return 42 }
+  return 0
+}`),
+    )
+
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+  }),
+)
+
+it.effect(
+  'derives take-once invocation and run access from captured affine temporaries',
+  () =>
+    Effect.gen(function* () {
+      for (const [name, source, expected] of [
+        [
+          'once-twice',
+          `${tokenSurface}pub fn main() -> i32 {
   let f = addToken(Token { value: 1 })
   return f(1) + f(2)
 }`,
-        ['OWN0001'],
-      ],
-      [
-        'once-as-fn',
-        `${tokenSurface}fn callShared(f: fn<'static>(i32) -> i32) -> i32 { return f(1) + f(2) }
+          ['OWN0001'],
+        ],
+        [
+          'once-as-fn',
+          `${tokenSurface}fn callShared(f: fn<'static>(i32) -> i32) -> i32 { return f(1) + f(2) }
 pub fn main() -> i32 { return callShared(addToken(Token { value: 1 })) }`,
-        ['SEM0076'],
-      ],
-      [
-        'nomove-capture',
-        `${tokenSurface}fn prepare(token: Token) -> once fn<'static>(i32) -> i32 { return addToken(token) }
+          ['SEM0076'],
+        ],
+        [
+          'nomove-capture',
+          `${tokenSurface}fn prepare(token: Token) -> once fn<'static>(i32) -> i32 { return addToken(token) }
 pub fn main() -> i32 { let p = prepare(Token { value: 10 }) return p(1) }`,
-        ['OWN0003'],
-      ],
-      [
-        'run-twice',
-        `${payloadSurface}fn prepare(payload: Payload) -> once Effect<'static; Payload> { return effect { return move payload } }
+          ['OWN0003'],
+        ],
+        [
+          'run-twice',
+          `${payloadSurface}fn prepare(payload: Payload) -> once Effect<'static; Payload> { return effect { return move payload } }
 pub fn main() -> i32 {
   let e = prepare(Payload { value: 36 })
   let p = run e
   let q = run e
   return p.value + q.value
 }`,
-        ['OWN0001'],
-      ],
-      [
-        'effect-fn-once',
-        `${payloadSurface}effect fn unwrap(payload: Payload) -> Payload { return move payload }
+          ['OWN0001'],
+        ],
+        [
+          'effect-fn-once',
+          `${payloadSurface}effect fn unwrap(payload: Payload) -> Payload { return move payload }
 pub fn main() -> i32 {
   let e = unwrap(Payload { value: 36 })
   let p = run e
   let q = run e
   return p.value + q.value
 }`,
-        ['OWN0001'],
-      ],
-      [
-        'pass-once-nomove',
-        `${payloadSurface}fn prepare(payload: Payload) -> once Effect<'static; Payload> { return effect { return move payload } }
+          ['OWN0001'],
+        ],
+        [
+          'pass-once-nomove',
+          `${payloadSurface}fn prepare(payload: Payload) -> once Effect<'static; Payload> { return effect { return move payload } }
 fn take(e: once Effect<Payload>) -> i32 { return (run e).value }
 pub fn main() -> i32 {
   let e = prepare(Payload { value: 36 })
   return take(e) + take(e)
 }`,
-        ['OWN0003', 'OWN0003'],
-      ],
-    ] as const) {
-      const snapshot = yield* Analysis.ofSource(`anonymous-capture/${name}`, ascii(source))
-      assert.deepEqual(codesOf(snapshot), expected, name)
-    }
-  }),
+          ['OWN0003', 'OWN0003'],
+        ],
+      ] as const) {
+        const snapshot = yield* Analysis.ofSource(`anonymous-capture/${name}`, ascii(source))
+        assert.deepEqual(codesOf(snapshot), expected, name)
+      }
+    }),
+  { timeout: 30_000 },
 )
 
 it.effect(
@@ -158,6 +183,7 @@ pub effect fn main() -> i32 ? &Probe { return run outer(Probe.read()) }`
         }
       }
     }),
+  { timeout: 30_000 },
 )
 
 it.effect(

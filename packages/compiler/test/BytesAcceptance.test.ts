@@ -647,7 +647,7 @@ pub fn main() -> i32 { return 0 }`
         { code: 'OWN0001', text: '&value' },
         { code: 'OWN0001', text: '&value' },
         { code: 'OWN0011', text: 'value' },
-        { code: 'OWN0019', text: 'bytes.length' },
+        { code: 'OWN0019', text: 'bytes' },
         { code: 'OWN0001', text: '&value' },
       ],
     )
@@ -719,7 +719,7 @@ pub fn main() -> i32 { return 0 }`
       [
         { code: 'OWN0001', text: '&value' },
         { code: 'OWN0011', text: 'value' },
-        { code: 'OWN0019', text: 'anchors.length' },
+        { code: 'OWN0019', text: 'anchors' },
         {
           code: 'SEM0021',
           text: 'TrustSnapshot { anchorsValue: Vector.make<TrustAnchor>() }',

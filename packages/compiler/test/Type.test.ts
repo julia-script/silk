@@ -2075,12 +2075,10 @@ fn caller() -> i32 {
             (parentCounts.get(Lifetime.key(edge.shorter)) ?? 0) + 1,
           )
       assert.isTrue([...parentCounts.values()].some((count) => count >= 2))
-      const selected = caller.bindings.find(
-        (binding) => binding.name._tag === 'Present' && binding.name.spelling === 'selected',
-      )
+      const selected = caller.bindings.find((binding) => binding.name === 'selected')
       assert.isDefined(selected)
-      if (selected?.inferredType._tag === 'Available') {
-        const sources = LifetimeFlow.sources(flow, selected.inferredType.type)
+      if (selected !== undefined) {
+        const sources = LifetimeFlow.sources(flow, selected.type)
         assert.strictEqual(
           new Set(
             sources.flatMap((origin) =>
@@ -2089,7 +2087,7 @@ fn caller() -> i32 {
           ).size,
           2,
         )
-        assert.strictEqual(LifetimeFlow.sources(flow, selected.inferredType.type), sources)
+        assert.strictEqual(LifetimeFlow.sources(flow, selected.type), sources)
       }
     }),
 )

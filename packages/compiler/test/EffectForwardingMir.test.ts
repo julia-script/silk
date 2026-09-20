@@ -140,13 +140,16 @@ pub fn main() -> i32 {
     const constructor = constructors.at(0)
     assert.strictEqual(constructor?.result._tag, 'EffectValue')
     if (constructor?.result._tag !== 'EffectValue') return
-    const wrongSite = {
+    const wrongContract = {
       ...constructor,
-      result: { ...constructor.result, site: { ...constructor.result.site, ordinal: 999 } },
+      result: {
+        ...constructor.result,
+        type: { ...constructor.result.type, success: 'i64' as const },
+      },
     }
     const corrupted = {
       ...mir,
-      functions: mir.functions.map((fn) => (fn === constructor ? wrongSite : fn)),
+      functions: mir.functions.map((fn) => (fn === constructor ? wrongContract : fn)),
     }
     assert.isTrue(
       (yield* MirVerification.verify(corrupted)).some(

@@ -59,6 +59,55 @@ const formatMarkdown = Effect.fnUntraced(
   },
 )
 
+const analyzeDocumentationProfile = async (selected, analyzed) => {
+  const [elapsed, analysis] = await Effect.runPromise(
+    ProjectAnalysis.make(
+      analyzed.map((entry) => entry.root).map((source) => source.id),
+      { configuration: { profile: selected.profile } },
+    ).pipe(
+      Effect.provideService(SourceResolver.SourceResolver, {
+        resolve: () => Effect.succeedNone(),
+        resolveStandardLibrary: (module) =>
+          Effect.succeed(
+            Option.fromUndefinedOr(analyzed.find((entry) => entry.root.id === module)).pipe(
+              Option.map((entry) => SourceResolver.resolved(entry.bytes, SourceOrigin.memory())),
+            ),
+          ),
+        toolchainSources: Effect.succeed(
+          new Map(
+            analyzed.map((entry) => [
+              entry.root.id,
+              SourceResolver.resolved(entry.bytes, SourceOrigin.memory()),
+            ]),
+          ),
+        ),
+      }),
+      Effect.timed,
+    ),
+  )
+  log(`Documentation analysis ${selected.name}: ${Duration.toSeconds(elapsed).toFixed(2)}s`)
+  const project = DocumentationProject.fromProjectAnalysis(analysis)
+  const seen = new Set()
+  const violations = []
+  for (const entry of analyzed) {
+    const documented = project.modules.find((module) => module.name === entry.manifest.module)
+    const snapshot = ProjectAnalysis.view(analysis, entry.manifest.module)
+    if (documented === undefined || snapshot === undefined) {
+      logError(`Missing documentation model: ${entry.manifest.module}`)
+      process.exit(1)
+    }
+    if (documented.documentation === undefined && documented.items.length === 0) continue
+    seen.add(entry.manifest.module)
+    for (const violation of DocumentationPolicy.check(documented, snapshot, project))
+      violations.push({
+        violation,
+        path: entry.manifest.path,
+        line: lineAt(entry.bytes, violation.source.start),
+      })
+  }
+  return { project, seen, violations }
+}
+
 const stdlibTree = async () => {
   const analyzed = []
   for (const module of Stdlib.manifest) {
@@ -74,54 +123,12 @@ const stdlibTree = async () => {
   const seen = new Set()
   const violations = new Map()
   for (const selected of documentationProfiles) {
-    const [elapsed, analysis] = await Effect.runPromise(
-      ProjectAnalysis.make(
-        analyzed.map((entry) => entry.root).map((source) => source.id),
-        { configuration: { profile: selected.profile } },
-      ).pipe(
-        Effect.provideService(SourceResolver.SourceResolver, {
-          resolve: () => Effect.succeedNone(),
-          resolveStandardLibrary: (module) =>
-            Effect.succeed(
-              Option.fromUndefinedOr(analyzed.find((entry) => entry.root.id === module)).pipe(
-                Option.map((entry) => SourceResolver.resolved(entry.bytes, SourceOrigin.memory())),
-              ),
-            ),
-          toolchainSources: Effect.succeed(
-            new Map(
-              analyzed.map((entry) => [
-                entry.root.id,
-                SourceResolver.resolved(entry.bytes, SourceOrigin.memory()),
-              ]),
-            ),
-          ),
-        }),
-        Effect.timed,
-      ),
-    )
-    log(`Documentation analysis ${selected.name}: ${Duration.toSeconds(elapsed).toFixed(2)}s`)
-    const project = DocumentationProject.fromProjectAnalysis(analysis)
-    projects.push({
-      name: selected.name,
-      project,
-    })
-    for (const entry of analyzed) {
-      const documented = project.modules.find((module) => module.name === entry.manifest.module)
-      const snapshot = ProjectAnalysis.view(analysis, entry.manifest.module)
-      if (documented === undefined || snapshot === undefined) {
-        logError(`Missing documentation model: ${entry.manifest.module}`)
-        process.exit(1)
-      }
-      if (documented.documentation === undefined && documented.items.length === 0) continue
-      seen.add(entry.manifest.module)
-      for (const violation of DocumentationPolicy.check(documented, snapshot, project)) {
-        const key = `${violation.code}:${violation.identity}:${violation.source.start}`
-        violations.set(key, {
-          violation,
-          path: entry.manifest.path,
-          line: lineAt(entry.bytes, violation.source.start),
-        })
-      }
+    const checked = await analyzeDocumentationProfile(selected, analyzed)
+    projects.push({ name: selected.name, project: checked.project })
+    for (const module of checked.seen) seen.add(module)
+    for (const entry of checked.violations) {
+      const key = `${entry.violation.code}:${entry.violation.identity}:${entry.violation.source.start}`
+      violations.set(key, entry)
     }
   }
   for (const entry of analyzed) {

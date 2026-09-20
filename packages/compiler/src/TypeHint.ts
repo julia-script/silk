@@ -4,6 +4,8 @@ import * as SemanticDisplay from './SemanticDisplay.js'
 import * as SourceSpan from './SourceSpan.js'
 import type * as AuthoredHir from './AuthoredHir.js'
 import type * as SemanticContext from './SemanticContext.js'
+import type * as Tir from './Tir.js'
+import * as BodyBuilder from './BodyBuilder.js'
 import * as Type from './Type.js'
 
 /** One inferred local-binding type anchored to its exact declared name. */
@@ -37,16 +39,23 @@ const compareText = (left: string, right: string): number => {
 const pathAnchor = (path: Elaboration.ReferencePathFact): AuthoredHir.Anchor =>
   path._tag === 'ReferencePath' ? path.memberAnchor : path.anchor
 
-const selectorCallee = (expression: Elaboration.ExpressionFact): AuthoredHir.Anchor | undefined => {
+const selectorCallee = (
+  expression: Elaboration.ExpressionDecision,
+  builder?: BodyBuilder.BodyBuilder,
+): AuthoredHir.Anchor | undefined => {
   if (expression._tag === 'Call') return pathAnchor(expression.path)
   if (expression._tag !== 'CallableApply') return undefined
-  if (expression.provenance._tag === 'DirectCallableApplication') return expression.callee.anchor
+  if (expression.provenance._tag === 'DirectCallableApplication')
+    return Elaboration.constructionExpressionAnchor(expression.callee)
   const callable = expression.provenance.callable
-  return callable._tag === 'CallableSection' ? pathAnchor(callable.path) : undefined
+  if (callable._tag !== 'CallableSection') return undefined
+  const semantic =
+    builder === undefined ? undefined : BodyBuilder.semanticOfExpression(builder, callable)
+  return semantic?._tag === 'CallableSection' ? pathAnchor(semantic.path) : callable.origin.anchor
 }
 
 const selectorFacts = (
-  expression: Elaboration.ExpressionFact,
+  expression: Elaboration.ExpressionDecision,
 ): ReadonlyArray<Elaboration.InferredProviderSelector> => {
   if (expression._tag === 'Call') {
     if (expression.contract._tag === 'Compatible') {
@@ -79,7 +88,8 @@ export type Row =
 /** The inference rows of one body. */
 export const rows = (
   bindings: ReadonlyArray<Elaboration.BindingDeclarationFact>,
-  statements: ReadonlyArray<Elaboration.StatementFact>,
+  statements: ReadonlyArray<Tir.Statement>,
+  builder?: BodyBuilder.BodyBuilder,
 ): ReadonlyArray<Row> => {
   const found: Array<Row> = []
   for (const binding of bindings)
@@ -91,12 +101,18 @@ export const rows = (
           type: binding.inferredType.type,
         }),
       )
-  Elaboration.visitStatementFacts(statements, {
-    expression: (expression) => {
-      const selectors = selectorFacts(expression)
-      const callee = selectors.length === 0 ? undefined : selectorCallee(expression)
-      if (callee !== undefined)
-        found.push(Object.freeze({ _tag: 'ProviderSelectors', callee, selectors }))
+  const addSelectors = (expression: Elaboration.ExpressionDecision): void => {
+    const selectors = selectorFacts(expression)
+    const callee = selectors.length === 0 ? undefined : selectorCallee(expression, builder)
+    if (callee !== undefined)
+      found.push(Object.freeze({ _tag: 'ProviderSelectors', callee, selectors }))
+  }
+  Elaboration.visitStatements(statements, {
+    expression: addSelectors,
+    node: (node) => {
+      const semantic =
+        builder === undefined ? undefined : BodyBuilder.semanticOfExpression(builder, node)
+      if (semantic !== undefined) addSelectors(semantic)
     },
   })
   return Object.freeze(found)

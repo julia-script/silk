@@ -45,8 +45,9 @@ import {
   restoreDelayedEffectState,
 } from './Forwarding.js'
 import type { FunctionLowering } from './FunctionLowering.js'
-import type * as Tir from './Tir.js'
+import * as Tir from './Tir.js'
 import * as Layout from './Layout.js'
+import * as Instances from './Instances.js'
 import type { DelayedEffectState } from './Lower.js'
 import { borrowKey, i32, patternKey, spanKey } from './Lower.js'
 import type {} from './LowerExpression.js'
@@ -60,7 +61,7 @@ import { effectValueForCall, instanceText } from './ValueType.js'
 
 export interface LoweredPatternSelection {
   readonly result: Mir.LocalId
-  readonly bindings: ReadonlyArray<Match.BindingId>
+  readonly bindings: ReadonlyArray<Tir.LocalId>
 }
 
 export const lowerPatternSelection = (
@@ -118,10 +119,8 @@ export const lowerPatternSelection = (
   const subjectShape = Layout.callingShape(fn.layout, semanticSubject)
   const resultShape = Layout.callingShape(fn.layout, resultSemantic)
   if (subjectShape === undefined || resultShape === undefined) return undefined
-  const ownership = fn.ownership?.matches.find(
-    (candidate) =>
-      candidate.id.span.start === selection.id.span.start &&
-      candidate.id.span.end === selection.id.span.end,
+  const ownership = fn.ownership?.matches.find((candidate) =>
+    Tir.nodeRefEquals(candidate.id.node, selection.id.node),
   )
   const selectedBindings: Array<Mir.MatchBinding> = []
   for (const binding of selection.bindings) {
@@ -499,24 +498,28 @@ const lowerStatement = (
       forwardedRequirementNeedsRecipe ||
       statement.initializer._tag === 'ServiceEffectConstruct' ||
       (statement.initializer._tag === 'EffectConstruct' &&
-        fn.call(
-          statement.initializer.span,
-          undefined,
-          statement.initializer.typeArguments.map((argument) => fn.semanticArgument(argument)),
-          statement.initializer.staticArguments,
-        )?.resultEffect === undefined &&
-        fn.effectResults.get(
-          instanceText(
-            statement.initializer.target,
+        (() => {
+          const call = fn.call(
+            statement.initializer.span,
+            undefined,
             statement.initializer.typeArguments.map((argument) => fn.semanticArgument(argument)),
-            fn.call(
-              statement.initializer.span,
-              undefined,
-              statement.initializer.typeArguments.map((argument) => fn.semanticArgument(argument)),
-              statement.initializer.staticArguments,
-            )?.target.staticArguments ?? statement.initializer.staticArguments,
-          ),
-        ) === undefined) ||
+            statement.initializer.staticArguments,
+          )
+          return (
+            call?.resultEffect === undefined &&
+            fn.effectResults.get(
+              call === undefined
+                ? instanceText(
+                    statement.initializer.target,
+                    statement.initializer.typeArguments.map((argument) =>
+                      fn.semanticArgument(argument),
+                    ),
+                    statement.initializer.staticArguments,
+                  )
+                : Instances.keyText(call.target),
+            ) === undefined
+          )
+        })()) ||
       statement.initializer._tag === 'EffectBindRequirement' ||
       (statement.initializer._tag === 'Match' &&
         effectContract(initializerType ?? 'never') !== undefined) ||

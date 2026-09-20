@@ -12,6 +12,7 @@ import * as DeclarationFacts from './DeclarationFacts.js'
 import type * as DeclarationIndex from './DeclarationIndex.js'
 import * as Diagnostic from './Diagnostic.js'
 import * as Elaboration from './Elaboration.js'
+import * as BodyView from './BodyView.js'
 import * as Location from './Location.js'
 import * as Provenance from './Provenance.js'
 import type * as LifetimeFlow from './LifetimeFlow.js'
@@ -60,6 +61,7 @@ export interface Instance {
   readonly _tag: 'Instance'
   readonly key: InstanceKey
   readonly function: Tir.TirFunction
+  readonly view: BodyView.BodyView
   readonly substitution: Type.Substitution
   readonly specialization: ConcreteSpecialization
   readonly ownership: Ownership.FunctionOwnership
@@ -235,6 +237,8 @@ export interface Discovery {
   readonly rootModule: string
   /** Spans of authored positions reachable from any module of the discovered closure. */
   readonly registry: SemanticContext.Registry
+  /** Source and target-specialized anonymous aggregates required by reachable instances. */
+  readonly generatedAggregates: ReadonlyMap<string, DeclarationFacts.StructFact>
   readonly instances: ReadonlyArray<Instance>
   /** Demanded residual specializations rejected before executable reachability. */
   readonly unavailableOwnership: ReadonlyArray<UnavailableResidualOwnership>
@@ -365,6 +369,7 @@ export const invalid = (
     retention: Object.freeze([]),
     rootModule,
     registry,
+    generatedAggregates: new Map(),
     instances: Object.freeze([]),
     unavailableOwnership: Object.freeze([]),
     callables: Object.freeze([]),
@@ -491,6 +496,14 @@ export const keyText = (key: InstanceKey): string => {
   return cached
 }
 
+/** Identifies the machine body shared by proof contexts with one emitted contract. */
+export const runtimeKeyText = (key: InstanceKey): string =>
+  `${Specialization.runtimeKey({
+    declaration: key.declaration,
+    typeArguments: key.typeArguments,
+    staticArguments: key.staticArguments,
+  })}\u0002${key.contractRow.join('\u0000')}`
+
 const concreteConstraintEvidence = (
   wanted: Constraint.Constraint,
   origin: SourceSpan.SourceSpan,
@@ -574,21 +587,24 @@ const specializeEvidence = (
 }
 
 const tirEvidence = (
-  fn: Tir.TirFunction,
+  view: BodyView.BodyView,
 ): ReadonlyArray<{
   readonly evidence: Constraint.ConstraintEvidence
   readonly origin: SourceSpan.SourceSpan
 }> =>
   Object.freeze(
-    fn.statements
+    view.function.statements
       .flatMap(Tir.statementExpressions)
       .flatMap(Tir.expressionTree)
       .flatMap((expression) => {
         let evidence: ReadonlyArray<Constraint.ConstraintEvidence> = Object.freeze([])
         if (expression._tag === 'EffectBindRequirement') {
-          evidence = expression.provider.evidence
+          evidence =
+            BodyView.selectedEvidence(view, expression.provider.evidence)?.constraints ??
+            Object.freeze([])
         } else if (expression._tag === 'EffectCatch') {
-          evidence = expression.evidence
+          evidence =
+            BodyView.selectedEvidence(view, expression.evidence)?.constraints ?? Object.freeze([])
         }
         return evidence.map((proof) => Object.freeze({ evidence: proof, origin: expression.span }))
       }),
@@ -609,12 +625,13 @@ const tirSymbolicConformances = (
   )
 
 export const specialize = (
-  fn: Tir.TirFunction,
+  view: BodyView.BodyView,
   substitution: Type.Substitution,
   index: DeclarationIndex.Index,
   registry: SemanticContext.Registry,
   compatibility?: TypeCompatibility.Context,
 ): ConcreteSpecialization | undefined => {
+  const fn = view.function
   if (fn.contract._tag !== 'Contract') return undefined
   const parameters = fn.contract.parameters.map((parameter) =>
     Type.substitute(parameter, substitution, compatibility),
@@ -658,7 +675,7 @@ export const specialize = (
     if (solved === undefined) return undefined
     concreteEvidence.push(...solved)
   }
-  for (const occurrence of tirEvidence(fn)) {
+  for (const occurrence of tirEvidence(view)) {
     const solved = specializeEvidence(occurrence.evidence, substitution, occurrence.origin, index)
     if (solved === undefined) return undefined
     concreteEvidence.push(...solved)
@@ -706,7 +723,9 @@ export const requirementSelection = (
   provider: Extract<Tir.Expression, { readonly _tag: 'EffectBindRequirement' }>['provider'],
 ): Extract<ConcreteEvidence, { readonly _tag: 'RequirementSelection' }> | undefined => {
   const wantedKeys = new Set(
-    provider.evidence.flatMap((proof) => {
+    (
+      BodyView.selectedEvidence(instance.view, provider.evidence)?.constraints ?? Object.freeze([])
+    ).flatMap((proof) => {
       let wanted: Constraint.Constraint | undefined
       if (proof._tag === 'Assumed') {
         wanted = Constraint.substitute(
@@ -1234,7 +1253,9 @@ export const discover = (
   }
   interface PreparedUnavailableOwnership {
     readonly key: InstanceKey
+    readonly artifact: Tir.ArtifactId
     readonly function: Tir.TirFunction
+    readonly causes: Elaboration.BodyResults['causes']
     /** The region proof the body published, which ownership replays. */
     readonly lifetimes?: LifetimeFlow.LifetimeFlow
     readonly diagnostic: Diagnostic.Diagnostic
@@ -1746,7 +1767,9 @@ export const discover = (
             keyText(key),
             Object.freeze({
               key,
+              artifact: residual.artifact,
               function: residual.function,
+              causes: residual.results.causes,
               ...(residual.results.lifetimes === undefined
                 ? {}
                 : { lifetimes: residual.results.lifetimes }),
@@ -1756,6 +1779,7 @@ export const discover = (
           continue
         }
         const fn = residual.function
+        const view = BodyView.make(residual)
         const parameters = template.declaration.typeParameters.map((parameter) => parameter.type)
         const selected = TypeInference.selectedSubstitution(
           parameters,
@@ -1769,7 +1793,7 @@ export const discover = (
             ? undefined
             : trace(
                 'Instances.specialize',
-                () => specialize(fn, substitution, index, registry, selected?.compatibility),
+                () => specialize(view, substitution, index, registry, selected?.compatibility),
                 {
                   'function.module': key.declaration.module,
                   'function.name': key.declaration.name,
@@ -1799,6 +1823,7 @@ export const discover = (
                 _tag: 'Instance',
                 key,
                 function: fn,
+                view,
                 substitution,
                 specialization,
                 ...(resultCallable === undefined ? {} : { resultCallable }),
@@ -1836,7 +1861,7 @@ export const discover = (
             ]
             const identityOfCall = Specialization.key
             const ordinaryTargets: ReadonlyArray<CallTarget> = [
-              ...bodyCallTargets(fn, index, substitution),
+              ...bodyCallTargets(view, index, substitution),
               ...interfaceWitnessTargets(fn, index, substitution),
               ...requirementBindingCallTargets(fn, substitution, index),
               ...directCalls.map((call) => ({
@@ -2121,10 +2146,12 @@ export const discover = (
               residualOwnership,
               Ownership.input(
                 instance.function,
+                instance.view.artifact,
                 lifetimes,
                 index,
                 accessBoundaryPlan,
                 contextOf(instance.function),
+                instance.view.causes,
               ),
               Residualization.selectionReason(residualization, instance.key) === undefined
                 ? 'UnchangedBody'
@@ -2165,10 +2192,12 @@ export const discover = (
           residualOwnership,
           Ownership.input(
             candidate.function,
+            candidate.artifact,
             candidate.lifetimes,
             index,
             accessBoundaryPlan,
             contextOf(candidate.function),
+            candidate.causes,
           ),
           Residualization.selectionReason(residualization, candidate.key) === undefined
             ? 'UnchangedBody'
@@ -2235,6 +2264,7 @@ export const discover = (
     retention: Object.freeze(retention),
     rootModule,
     registry,
+    generatedAggregates: Residualization.generatedAggregates(residualization),
     instances,
     unavailableOwnership,
     callables: Object.freeze([...recordedCallables.values()]),

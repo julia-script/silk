@@ -35,12 +35,11 @@ fn integerToEnum() -> Status { return 0 }
 fn enumToInteger() -> u8 { return Status.Ready }`
     const self = yield* Analysis.ofSource('operator-contracts/enums', encoder.encode(source))
     const equalities = Analysis.expressionsOf(self, 'operator-contracts/enums').filter(
-      (expression) =>
-        expression._tag === 'Operator' && expression.reference._tag === 'ResolvedEnumEquality',
+      (expression) => expression._tag === 'EnumEquality',
     )
     assert.strictEqual(equalities.length, 2)
     assert.strictEqual(
-      equalities.every((expression) => expression.type._tag === 'Available'),
+      equalities.every((expression) => expression.type === 'bool'),
       true,
     )
 

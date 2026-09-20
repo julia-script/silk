@@ -337,6 +337,51 @@ it('keeps authored owners stable by logical parent and same-key occurrence', () 
   assert.isTrue(Object.isFrozen(identity.path))
 })
 
+it('keeps executable identities structural and free of source-coordinate fields', () => {
+  const owner = AuthoredIdentity.module('identity', 'app/Main')
+  const checked: Tir.ArtifactId = Object.freeze({
+    owner,
+    request: Object.freeze({ _tag: 'Check' }),
+  })
+  const specialized: Tir.ArtifactId = Object.freeze({
+    owner,
+    request: Object.freeze({ _tag: 'Specialize', application: 'i32' }),
+  })
+  const node: Tir.NodeRef = Object.freeze({
+    artifact: checked,
+    node: Object.freeze({ _tag: 'TirNode', ordinal: 7 }),
+  })
+  const identities: ReadonlyArray<
+    Tir.BorrowId | Tir.TemporaryOwnerId | Tir.EffectSiteId | Tir.CallableSiteId
+  > = [
+    Object.freeze({ _tag: 'BorrowId', call: node, ordinal: 0 }),
+    Object.freeze({ _tag: 'TemporaryOwnerId', node }),
+    Tir.effectRootSite(checked, 0),
+    Object.freeze({ _tag: 'EffectSiteId', node, ordinal: 0, functionOrdinal: 0 }),
+    Object.freeze({ _tag: 'CallableSiteId', node, ordinal: 0, functionOrdinal: 0 }),
+  ]
+  const identityTags = new Set(['BorrowId', 'TemporaryOwnerId', 'EffectSiteId', 'CallableSiteId'])
+  const forbiddenFields = ['span', 'callSpan', 'function', 'at', 'occurrence']
+  const pending: unknown[] = [identities]
+  let visited = 0
+
+  while (pending.length > 0) {
+    const value = pending.pop()
+    if (value === null || typeof value !== 'object') continue
+    if ('_tag' in value && typeof value._tag === 'string' && identityTags.has(value._tag)) {
+      visited += 1
+      for (const field of forbiddenFields) assert.isFalse(field in value, `${value._tag}.${field}`)
+    }
+    for (const child of Object.values(value)) pending.push(child)
+  }
+
+  assert.strictEqual(visited, identities.length)
+  assert.strictEqual(
+    Tir.executableSiteKey(Tir.effectRootSite(checked, 0)),
+    Tir.executableSiteKey(Tir.effectRootSite(specialized, 0)),
+  )
+})
+
 it.effect('owns exact text and byte pools and rejects invalid references and payloads', () =>
   Effect.gen(function* () {
     const bytes = [65, 0, 255]
@@ -375,6 +420,17 @@ pub fn main() -> i32 { return missing(2147483648) }`
 
 const elaborate = (id: string, text: string): Elaboration.Result =>
   elaborateSyntax(Parser.parse(Lexer.lex(SourceFile.make(id, ascii(text))))).located
+
+const unavailableCause = (
+  result: Elaboration.Result,
+  fn: Tir.TirFunction,
+  expression: Extract<Tir.Expression, { readonly _tag: 'Unavailable' }>,
+) =>
+  expression.cause === undefined
+    ? undefined
+    : result.bodies
+        .find((body) => body.function === fn)
+        ?.results.causes.at(expression.cause.ordinal)
 
 const elaborateWithStdlib = Effect.fnUntraced(function* (id: string, text: string) {
   const module = id.replace('://', '/').replace(/\.silk$/, '')
@@ -605,8 +661,8 @@ it('keeps unknown facts explicit with causes instead of typed operations', () =>
   assert.strictEqual(Tir.returned(puzzle)._tag, 'Unavailable')
   const mainBody = main === undefined ? undefined : Tir.returned(main)
   assert.strictEqual(mainBody?._tag, 'Unavailable')
-  if (mainBody?._tag !== 'Unavailable') return
-  assert.strictEqual(mainBody.cause?.code, 'SEM0004')
+  if (main === undefined || mainBody?._tag !== 'Unavailable') return
+  assert.strictEqual(unavailableCause(result, main, mainBody)?.code, 'SEM0004')
 })
 
 it('elaborates binding statements into typed locals with moves', () => {
@@ -671,7 +727,12 @@ effect fn main() -> () { run pulse() return () }`,
   if (unavailable?._tag !== 'Evaluate') return
   assert.strictEqual(unavailable.expression._tag, 'Unavailable')
   if (unavailable.expression._tag !== 'Unavailable') return
-  assert.strictEqual(unavailable.expression.cause?.code, 'SEM0004')
+  const unavailableFunction = damaged.tir.functions.at(0)
+  if (unavailableFunction === undefined) return
+  assert.strictEqual(
+    unavailableCause(damaged, unavailableFunction, unavailable.expression)?.code,
+    'SEM0004',
+  )
 })
 
 it('rejects rebinding a name while references keep resolving to the original', () => {
@@ -1092,11 +1153,11 @@ it('retains effect blocks as lazy statement regions with canonical captures', ()
   )
   assert.deepEqual(
     binding.initializer.captures.map((capture) => [capture.binding?.ordinal, capture.access]),
-    [[0, 'Exclusive']],
+    [[1, 'Exclusive']],
   )
   assert.include(
     Tir.encode(result.tir),
-    'effect-block site=effect:declaration:tir/effect-block.silk:main:site:',
+    `effect-block site=${Tir.executableSiteLabel(binding.initializer.site)}`,
   )
   assert.include(Tir.encode(result.tir), 'access=exclusive')
 })
@@ -1157,7 +1218,7 @@ fn inspect(input: Box) -> i32 {
 
   assert.deepEqual(result.diagnostics, [])
   assert.include(Tir.encode(result.tir), 'borrow-value')
-  assert.include(Tir.encode(result.tir), 'a0.b0')
+  assert.include(Tir.encode(result.tir), 'binding #1 buffer')
   assert.include(Tir.encode(result.tir), 'RawBufferRead')
   assert.deepEqual(Tir.verify(result.tir), [])
 })

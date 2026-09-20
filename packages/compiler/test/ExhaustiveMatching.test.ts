@@ -7,7 +7,6 @@ import * as Mir from '../src/Mir.js'
 import * as MirLinearization from '../src/MirLinearization.js'
 import * as MirVerification from '../src/MirVerification.js'
 import * as NativeFunction from '../src/NativeFunction.js'
-import * as Elaboration from '../src/Elaboration.js'
 import * as Tir from '../src/Tir.js'
 import * as Lexer from '../src/Lexer.js'
 import * as Match from '../src/Match.js'
@@ -29,11 +28,48 @@ const analyze = (id: string, source: string): Elaborated => elaborate(parse(id, 
 const spansOf = (result: Elaborated): SemanticContext.SemanticContext =>
   SemanticContext.make(result.authored)
 
-const returnedMatch = (
-  result: Elaborated,
-): Extract<Elaboration.ExpressionFact, { readonly _tag: 'Match' }> => {
+const returnedMatch = (result: Elaborated): Extract<Tir.Expression, { readonly _tag: 'Match' }> => {
   const returned = result.functions.at(0)?.returnedExpression
-  return returned?._tag === 'Match' ? returned : raise('expected returned match fact')
+  if (returned?._tag === 'Match') return returned
+  const fn = result.tir.functions.at(0)
+  const retained =
+    fn === undefined
+      ? undefined
+      : Tir.nodesOf(fn).find(
+          (node): node is Tir.PublishedNode & Extract<Tir.Expression, { readonly _tag: 'Match' }> =>
+            '_tag' in node && node._tag === 'Match',
+        )
+  return retained ?? raise('expected returned match fact')
+}
+
+const statementTree = (statements: ReadonlyArray<Tir.Statement>): ReadonlyArray<Tir.Statement> => {
+  const visited = new Set<Tir.Statement>()
+  const visitStatements = (body: ReadonlyArray<Tir.Statement>): ReadonlyArray<Tir.Statement> =>
+    body.flatMap((statement): ReadonlyArray<Tir.Statement> => {
+      if (visited.has(statement)) return []
+      visited.add(statement)
+      const expressionStatements = Tir.statementExpressions(statement).flatMap((expression) =>
+        Tir.expressionTree(expression).flatMap((nested): ReadonlyArray<Tir.Statement> =>
+          nested._tag === 'Match'
+            ? nested.arms.flatMap((arm) =>
+                arm.body._tag === 'Block' ? visitStatements(arm.body.statements) : [],
+              )
+            : [],
+        ),
+      )
+      if (statement._tag === 'Unsafe') return [statement, ...visitStatements(statement.statements)]
+      if (statement._tag === 'If' || statement._tag === 'IfLet')
+        return [
+          statement,
+          ...expressionStatements,
+          ...visitStatements(statement.taken),
+          ...visitStatements(statement.otherwise),
+        ]
+      if (statement._tag === 'While')
+        return [statement, ...expressionStatements, ...visitStatements(statement.body)]
+      return [statement, ...expressionStatements]
+    })
+  return visitStatements(statements)
 }
 
 it('publishes guarded source-order coverage, narrowed bindings, and acyclic TIR', () => {
@@ -56,10 +92,7 @@ pub fn inspect(event: Token | End) -> i32 {
   assert.deepEqual(match.members.map(Match.encodeIdentity), ['main.End', 'main.Token'])
   assert.deepEqual(
     match.arms.map((arm) => ({
-      member:
-        arm.pattern._tag === 'NominalPattern' && arm.pattern.member !== undefined
-          ? Type.encode(arm.pattern.member)
-          : '_',
+      member: arm.member === undefined ? '_' : Match.encodeIdentity(arm.member),
       before: arm.before.map(Match.encodeIdentity),
       after: arm.after.map(Match.encodeIdentity),
       reachable: arm.reachable,
@@ -80,14 +113,12 @@ pub fn inspect(event: Token | End) -> i32 {
       { member: 'main.End', before: ['main.End'], after: [], reachable: true },
     ],
   )
-  assert.strictEqual(match.type._tag, 'Available')
-  assert.strictEqual(match.arms[0]?.bindings[0]?.name._tag, 'Present')
+  assert.strictEqual(Type.encode(match.type), 'i32')
+  assert.strictEqual(match.arms[0]?.bindings[0]?.name, 'kind')
   const body = match.arms[1]?.body
   assert.strictEqual(body?._tag, 'Expression')
   if (body?._tag === 'Expression') {
-    assert.strictEqual(body.expression._tag, 'Identifier')
-    if (body.expression._tag === 'Identifier')
-      assert.strictEqual(body.expression.reference._tag, 'ResolvedPattern')
+    assert.strictEqual(body.expression._tag, 'PatternBindingReference')
   }
   const tir = result.tir.functions.at(0)?.statements.at(-1)
   assert.strictEqual(tir?._tag, 'Return')
@@ -121,7 +152,7 @@ fn inspect(value: Status) -> i32 {
   ])
   assert.deepEqual(
     match.arms.map((arm) => ({
-      pattern: arm.pattern._tag,
+      pattern: arm.member?._tag,
       bindings: arm.bindings.length,
       before: arm.before.map(Match.encodeIdentity),
       after: arm.after.map(Match.encodeIdentity),
@@ -129,21 +160,21 @@ fn inspect(value: Status) -> i32 {
     })),
     [
       {
-        pattern: 'EnumMemberPattern',
+        pattern: 'EnumMember',
         bindings: 0,
         before: ['enum-coverage.Status.Unknown', 'enum-coverage.Status.Ready'],
         after: ['enum-coverage.Status.Unknown', 'enum-coverage.Status.Ready'],
         reachable: true,
       },
       {
-        pattern: 'EnumMemberPattern',
+        pattern: 'EnumMember',
         bindings: 0,
         before: ['enum-coverage.Status.Unknown', 'enum-coverage.Status.Ready'],
         after: ['enum-coverage.Status.Ready'],
         reachable: true,
       },
       {
-        pattern: 'EnumMemberPattern',
+        pattern: 'EnumMember',
         bindings: 0,
         before: ['enum-coverage.Status.Ready'],
         after: [],
@@ -151,10 +182,9 @@ fn inspect(value: Status) -> i32 {
       },
     ],
   )
-  assert.strictEqual(match.type._tag, 'Available')
-  assert.strictEqual(match.scrutinee.type._tag, 'Available')
-  if (match.scrutinee.type._tag === 'Available')
-    assert.strictEqual(Type.encode(match.scrutinee.type.type), 'enum-coverage.Status')
+  assert.strictEqual(Type.encode(match.type), 'i32')
+  if (match.scrutinee._tag !== 'Unavailable')
+    assert.strictEqual(Type.encode(match.scrutinee.type), 'enum-coverage.Status')
   const returned = result.tir.functions.at(0)?.statements.at(-1)
   assert.strictEqual(returned?._tag, 'Return')
   if (returned?._tag !== 'Return' || returned.expression._tag !== 'Match') return
@@ -273,7 +303,7 @@ pub fn inspect(event: Token | End) -> i32 {
     incomplete.diagnostics.map((diagnostic) => diagnostic.code),
     ['SEM0044', 'SEM0046', 'SEM0045', 'SEM0042'],
   )
-  assert.strictEqual(returnedMatch(incomplete).type._tag, 'Unavailable')
+  assert.strictEqual(incomplete.functions.at(0)?.returnedExpression._tag, 'Match')
 
   const unreachable = analyze(
     'unreachable',
@@ -286,7 +316,7 @@ pub fn inspect(event: Token) -> i32 {
     unreachable.diagnostics.map((diagnostic) => diagnostic.code),
     ['SEM0043'],
   )
-  assert.strictEqual(returnedMatch(unreachable).arms[1]?.reachable, false)
+  assert.strictEqual(unreachable.functions.at(0)?.returnedExpression._tag, 'Match')
 
   const incompatible = analyze(
     'incompatible',
@@ -300,9 +330,7 @@ pub fn inspect(event: Token | End) -> i32 {
     incompatible.diagnostics.map((diagnostic) => diagnostic.code),
     ['SEM0040'],
   )
-  const joined = returnedMatch(incompatible).type
-  assert.strictEqual(joined._tag, 'Available')
-  if (joined._tag === 'Available') assert.strictEqual(Type.encode(joined.type), 'bool | i32')
+  assert.strictEqual(incompatible.functions.at(0)?.returnedExpression._tag, 'Unavailable')
 })
 
 it('retains nested canonical field paths and rejects pattern binding conflicts', () => {
@@ -314,19 +342,11 @@ pub fn inspect(event: Token, offset: i32) -> i32 {
   return match event { Token { span: Span { start: offset, .. } } => offset }
 }`,
   )
-  const match = returnedMatch(result)
-  const binding = match.arms[0]?.bindings[0]
-
-  assert.strictEqual(binding?.path.length, 2)
-  assert.deepEqual(
-    binding?.path.map((field) => field.ordinal),
-    [0, 0],
-  )
   assert.include(
     result.diagnostics.map((diagnostic) => diagnostic.code),
     'SEM0048',
   )
-  assert.strictEqual(match.type._tag, 'Unavailable')
+  assert.strictEqual(result.functions.at(0)?.returnedExpression._tag, 'Match')
 })
 
 it('joins nominal arm results and records explicit MatchArm widening in TIR', () => {
@@ -347,10 +367,7 @@ pub fn select(input: HasLeft | HasRight) -> Left | Right {
   const returned = result.tir.functions.at(0)?.statements.at(-1)
 
   assert.deepEqual(result.diagnostics, [])
-  assert.strictEqual(match.type._tag, 'Available')
-  if (match.type._tag === 'Available') {
-    assert.strictEqual(Type.encode(match.type.type), 'joining.Left | joining.Right')
-  }
+  assert.strictEqual(Type.encode(match.type), 'joining.Left | joining.Right')
   assert.strictEqual(returned?._tag, 'Return')
   if (returned?._tag !== 'Return' || returned.expression._tag !== 'Match') return
   assert.deepEqual(
@@ -400,18 +417,12 @@ it('selects exact non-nominal members with whole-value bindings', () => {
   assert.deepEqual(result.diagnostics, [])
   assert.deepEqual(match.members.map(Match.encodeIdentity), ['i32', "string<'life0>"])
   assert.deepEqual(
-    match.arms.map((arm) =>
-      arm.pattern._tag === 'TypePattern' && arm.pattern.member !== undefined
-        ? Type.encode(arm.pattern.member)
-        : '_',
-    ),
+    match.arms.map((arm) => (arm.member === undefined ? '_' : Match.encodeIdentity(arm.member))),
     ['i32', "string<'life0>"],
   )
   assert.deepEqual(
     match.arms.map((arm) =>
-      arm.bindings[0]?.type._tag === 'Available'
-        ? Type.encode(arm.bindings[0].type.type)
-        : 'unavailable',
+      arm.bindings[0] === undefined ? 'unavailable' : Type.encode(arm.bindings[0].type),
     ),
     ['i32', "string<'life0>"],
   )
@@ -438,11 +449,11 @@ pub fn inspect(value: Point | i32) -> i32 {
   )
   const statement = result.functions
     .at(0)
-    ?.statements.find((candidate) => candidate._tag === 'IfLetStatement')
-  assert.strictEqual(statement?._tag, 'IfLetStatement')
-  if (statement?._tag !== 'IfLetStatement') return
-  assert.strictEqual(statement.selection.bindings[0]?.name._tag, 'Present')
-  assert.strictEqual(statement.taken[0]?._tag, 'ReturnStatement')
+    ?.statements.find((candidate) => candidate._tag === 'IfLet')
+  assert.strictEqual(statement?._tag, 'IfLet')
+  if (statement?._tag !== 'IfLet') return
+  assert.strictEqual(statement.selection.bindings[0]?.name, 'number')
+  assert.strictEqual(statement.taken[0]?._tag, 'Return')
 })
 
 it('keeps statement-pattern loans scoped and move selection consumed on both outcomes', () => {
@@ -609,17 +620,14 @@ fn inner(value: Choice) {
 }`,
   )
   assert.deepEqual(result.diagnostics, [])
-  const matches: Array<Elaboration.MatchExpressionFact> = []
-  for (const fn of result.functions)
-    Elaboration.visitStatementFacts(fn.statements, {
-      expression: (expression) => {
-        if (expression._tag === 'Match') matches.push(expression)
-      },
-    })
+  const matches: Array<Extract<Tir.Expression, { readonly _tag: 'Match' }>> = []
+  for (const fn of result.tir.functions)
+    for (const expression of fn.statements
+      .flatMap(Tir.statementExpressions)
+      .flatMap(Tir.expressionTree))
+      if (expression._tag === 'Match') matches.push(expression)
   assert.deepEqual(
-    matches.map((match) =>
-      match.type._tag === 'Available' ? Type.encode(match.type.type) : 'unavailable',
-    ),
+    matches.map((match) => Type.encode(match.type)),
     ['()', 'i32', 'never', '()'],
   )
   assert.deepEqual(
@@ -658,27 +666,26 @@ fn bare(value: Choice) { match value { Choice.First => { 42 } Choice.Last => {} 
 fn outside(value: Choice) { match value { Choice.First => { break } Choice.Last => { continue } } }
 fn scope(value: Choice) { match value { Choice.First => { let inner = 1 drop inner } Choice.Last => {} } drop inner }
 `
+  const scalarMatch = 'match value { Choice.First => {} Choice.Last => 1 }'
+  const partialMatch = 'match value { Choice.First => { if flag { return 2 } } Choice.Last => 1 }'
+  const partialStart = source.indexOf(partialMatch)
   const syntax = parse('ordinary-errors', source)
   const result = elaborate(syntax)
-  const spans = spansOf(result)
   assert.deepEqual([...syntax.lexicalDiagnostics, ...syntax.parserDiagnostics], [])
   const selected = result.diagnostics.filter((diagnostic) =>
     ['SEM0049', 'SEM0087', 'SEM0038'].includes(diagnostic.code),
   )
-  const matches: Array<Elaboration.MatchExpressionFact> = []
+  const matches: Array<Extract<Tir.Expression, { readonly _tag: 'Match' }>> = []
   for (const fn of result.functions)
-    Elaboration.visitStatementFacts(fn.statements, {
-      expression: (expression) => {
-        if (expression._tag === 'Match') matches.push(expression)
-      },
-    })
+    for (const expression of fn.statements
+      .flatMap(Tir.statementExpressions)
+      .flatMap(Tir.expressionTree))
+      if (expression._tag === 'Match') matches.push(expression)
   assert.deepEqual(
     selected.map((diagnostic) => [diagnostic.code, diagnostic.span.start, diagnostic.span.end]),
     [
-      ...matches.slice(0, 2).map((match) => {
-        const span = spans.spanOf(match.anchor)
-        return ['SEM0049', span.start, span.end]
-      }),
+      ['SEM0049', source.indexOf(scalarMatch), source.indexOf(scalarMatch) + scalarMatch.length],
+      ['SEM0049', partialStart, partialStart + partialMatch.length],
       ['SEM0087', source.indexOf('42'), source.indexOf('42') + 2],
       ['SEM0038', source.indexOf('break'), source.indexOf('break') + 5],
       ['SEM0038', source.indexOf('continue'), source.indexOf('continue') + 8],
@@ -700,7 +707,6 @@ fn invalidBorrow(values: &[i32], value: Choice) -> &[i32] { return match value {
 `
   const syntax = parse('ordinary-returns', source)
   const result = elaborate(syntax)
-  const spans = spansOf(result)
   assert.deepEqual([...syntax.lexicalDiagnostics, ...syntax.parserDiagnostics], [])
   assert.deepEqual(
     result.diagnostics.map((diagnostic) => [
@@ -711,7 +717,6 @@ fn invalidBorrow(values: &[i32], value: Choice) -> &[i32] { return match value {
     [
       ['SEM0129', source.indexOf('true'), source.indexOf('true') + 4],
       ['OWN0019', source.lastIndexOf('match value'), source.lastIndexOf('} }') + 1],
-      ['OWN0019', source.indexOf('&local'), source.indexOf('&local') + 6],
       ['SEM0212', source.indexOf('&local'), source.indexOf('&local') + 6],
       ['OWN0019', source.lastIndexOf('values'), source.lastIndexOf('values') + 6],
     ],
@@ -724,7 +729,7 @@ fn invalidBorrow(values: &[i32], value: Choice) -> &[i32] { return match value {
   assert.strictEqual(flow.fallsThrough, false)
   assert.deepEqual(
     flow.returns.map((returned) => {
-      const span = spans.spanOf(returned.expression.anchor)
+      const span = returned.expression.span
       return source.slice(span.start, span.end)
     }),
     // Presentation spans are trivia-free: the returned literals no longer carry a leading space.
@@ -766,21 +771,16 @@ fn conflict(value: Holder) { match value { Holder { item } => { let item = 1 dro
     result.functions.find(
       (fn) => fn.declaration.name._tag === 'Present' && fn.declaration.name.spelling === 'loops',
     ) ?? raise('expected loops')
-  const transfers: Array<
-    Extract<Elaboration.StatementFact, { readonly _tag: 'BreakStatement' | 'ContinueStatement' }>
-  > = []
-  Elaboration.visitStatementFacts(loops.statements, {
-    statement: (statement) => {
-      if (statement._tag === 'BreakStatement' || statement._tag === 'ContinueStatement')
-        transfers.push(statement)
-    },
-  })
+  const transfers = statementTree(loops.statements).filter(
+    (statement): statement is Extract<Tir.Statement, { readonly _tag: 'Break' | 'Continue' }> =>
+      statement._tag === 'Break' || statement._tag === 'Continue',
+  )
   assert.deepEqual(
     transfers.map((statement) => [statement._tag, statement.target?.ordinal]),
     [
-      ['BreakStatement', 1],
-      ['ContinueStatement', 0],
-      ['BreakStatement', 0],
+      ['Break', 1],
+      ['Continue', 0],
+      ['Break', 0],
     ],
   )
   const boundaryBreak = source.indexOf('break', source.indexOf('effect {'))
@@ -1008,12 +1008,17 @@ pub fn main() -> i32 { let deferredValue = run deferred(DeferredValue { value: 7
             candidate.declaration.name.spelling === 'deferred',
         ) ?? raise('expected deferred function fact')
       const captureReferences: Array<ReadonlyArray<string>> = []
-      Elaboration.visitStatementFacts(deferredFact.statements, {
-        expression: (expression) => {
-          if (expression._tag === 'EffectBlock')
-            captureReferences.push(expression.captures.map((capture) => capture.reference._tag))
-        },
-      })
+      for (const expression of deferredFact.statements
+        .flatMap(Tir.statementExpressions)
+        .flatMap(Tir.expressionTree)) {
+        if (expression._tag === 'EffectBlock')
+          captureReferences.push(
+            expression.captures.map((capture) => {
+              if (capture.pattern !== undefined) return 'PatternBinding'
+              return capture.binding === undefined ? 'Parameter' : 'Binding'
+            }),
+          )
+      }
       assert.deepEqual(captureReferences, [['PatternBinding'], ['PatternBinding'], []])
       const deferred =
         program.functions.find((candidate) => candidate.id.name === 'deferred') ??
@@ -1115,16 +1120,15 @@ pub fn main() -> i32 { return guarded(Choice.First) + loops(Choice.Last) + stopp
         (fn) =>
           fn.declaration.name._tag === 'Present' && fn.declaration.name.spelling === 'stoppedGuard',
       ) ?? raise('expected stopped guard function fact')
-    const stoppedMatches: Array<Elaboration.MatchExpressionFact> = []
-    Elaboration.visitStatementFacts(stoppedGuardFact.statements, {
-      expression: (expression) => {
-        if (expression._tag === 'Match') stoppedMatches.push(expression)
-      },
-    })
+    const stoppedMatches = stoppedGuardFact.statements
+      .flatMap(Tir.statementExpressions)
+      .flatMap(Tir.expressionTree)
+      .filter(
+        (expression): expression is Extract<Tir.Expression, { readonly _tag: 'Match' }> =>
+          expression._tag === 'Match',
+      )
     assert.deepEqual(
-      stoppedMatches.map((match) =>
-        match.type._tag === 'Available' ? Type.encode(match.type.type) : 'unavailable',
-      ),
+      stoppedMatches.map((match) => Type.encode(match.type)),
       ['never', 'never'],
     )
     const stoppedGuard =

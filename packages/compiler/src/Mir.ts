@@ -7,7 +7,7 @@ import type * as DeclarationFacts from './DeclarationFacts.js'
 import type * as ExecutionPackage from './ExecutionPackage.js'
 import type * as ExecutionTransition from './ExecutionTransition.js'
 import * as Tir from './Tir.js'
-import type * as Instances from './Instances.js'
+import * as Instances from './Instances.js'
 import * as EffectExecutionContract from './internal/EffectExecutionContract.js'
 import * as Layout from './Layout.js'
 import * as LayoutVerify from './LayoutVerify.js'
@@ -1369,7 +1369,7 @@ export interface EndLoanOperation {
 }
 
 export interface MatchBinding {
-  readonly id: Match.BindingId
+  readonly id: Tir.LocalId
   readonly destination: LocalId
   readonly path: ReadonlyArray<DeclarationFacts.FieldId>
   readonly type: Type
@@ -1792,6 +1792,22 @@ export const matchesInstance = (
     const expected = staticArguments.at(index)
     return expected !== undefined && StaticValue.key(argument) === StaticValue.key(expected)
   })
+
+/** Tests whether one concrete MIR function realizes a call's exact physical result contract. */
+export const matchesCall = (
+  fn: MirFunction,
+  declaration: DeclarationFacts.CanonicalId,
+  typeArguments: ReadonlyArray<SilkType.GenericArgument>,
+  staticArguments: ReadonlyArray<StaticValue.Value> | undefined,
+  result: Type,
+): boolean =>
+  matchesInstance(fn, declaration, typeArguments, staticArguments) &&
+  (result._tag === 'EffectValue' && fn.result._tag === 'EffectValue'
+    ? EffectExecutionContract.equals(result.type, fn.result.type) &&
+      Tir.sameExecutableSite(result.site, fn.result.site) &&
+      Instances.runtimeKeyText(result.environment.instance) ===
+        Instances.runtimeKeyText(fn.result.environment.instance)
+    : SilkType.runtimeKey(semanticType(result)) === SilkType.runtimeKey(semanticType(fn.result)))
 
 /** Filters the concrete declaration before comparing its exact semantic Effect contract. */
 export const matchesEffectInstance = (

@@ -274,7 +274,7 @@ const controlId = (
     functionOrdinal:
       execution._tag === 'InstanceExecution'
         ? execution.functionOrdinal
-        : execution.site.function.ordinal,
+        : execution.site.functionOrdinal,
     spanStart: span.start,
     spanEnd: span.end,
     ordinal,
@@ -530,9 +530,9 @@ const effectIdentityOf = (
     return Instances.effectIdentity(
       context.instance.key,
       Tir.builtinEffectSite(
-        context.instance.function.declaration.id,
+        Tir.nodeReference(context.instance.view.artifact, expression),
         context.instance.key.declaration,
-        expression.span,
+        context.instance.function.declaration.id.ordinal,
       ),
     )
   if (expression._tag === 'EffectBlock')
@@ -541,9 +541,9 @@ const effectIdentityOf = (
     return Instances.effectIdentity(
       context.instance.key,
       Tir.effectCatchSite(
-        context.instance.function.declaration.id,
+        Tir.nodeReference(context.instance.view.artifact, expression),
         context.instance.key.declaration,
-        expression.span,
+        context.instance.function.declaration.id.ordinal,
       ),
     )
   if (expression._tag === 'ParameterReference')
@@ -660,9 +660,9 @@ const builtinExpressionAt = (
         expression.witnessEffectSite === undefined &&
         Tir.sameExecutableSite(
           Tir.builtinEffectSite(
-            instance.function.declaration.id,
+            Tir.nodeReference(instance.view.artifact, expression),
             instance.key.declaration,
-            expression.span,
+            instance.function.declaration.id.ordinal,
           ),
           site,
         ),
@@ -1572,9 +1572,9 @@ const builtinExecution = (
   )
   if (!Type.isEffect(effect)) return undefined
   const site = Tir.builtinEffectSite(
-    context.instance.function.declaration.id,
+    Tir.nodeReference(context.instance.view.artifact, expression),
     context.instance.key.declaration,
-    expression.span,
+    context.instance.function.declaration.id.ordinal,
   )
   const identity = Instances.effectIdentity(context.instance.key, site)
   const key: ExecutionKey = Object.freeze({
@@ -1902,9 +1902,9 @@ const buildInstance = (context: BuildContext): BuildFragment => {
       expression._tag === 'EffectBlock'
         ? expression.site
         : Tir.effectCatchSite(
-            instance.function.declaration.id,
+            Tir.nodeReference(instance.view.artifact, expression),
             instance.key.declaration,
-            expression.span,
+            instance.function.declaration.id.ordinal,
           )
     const identity = Instances.effectIdentity(instance.key, site)
     const key: ExecutionKey = Object.freeze({
@@ -1988,7 +1988,11 @@ const buildProvidedRunner = (runner: Runner, context: BuildContext): BuildFragme
       if (candidate._tag === 'EffectBlock') return Tir.sameExecutableSite(candidate.site, key.site)
       if (candidate._tag !== 'EffectCatch') return false
       return Tir.sameExecutableSite(
-        Tir.effectCatchSite(owner.function.declaration.id, owner.key.declaration, candidate.span),
+        Tir.effectCatchSite(
+          Tir.nodeReference(owner.view.artifact, candidate),
+          owner.key.declaration,
+          owner.function.declaration.id.ordinal,
+        ),
         key.site,
       )
     })

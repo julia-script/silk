@@ -7,7 +7,7 @@ import * as FloatingPoint from './FloatingPoint.js'
 import * as Location from './Location.js'
 import * as Provenance from './Provenance.js'
 import type * as Match from './Match.js'
-import type * as Tir from './Tir.js'
+import * as Tir from './Tir.js'
 import * as Canonical from './internal/Canonical.js'
 import * as TypeInference from './internal/TypeInference.js'
 import * as Scalar from './Scalar.js'
@@ -1049,7 +1049,10 @@ export const bindingKey = (id: Tir.BindingId): string => `binding:${idKey(id)}`
 
 /** The key of a pattern binding's value in an evaluation environment. */
 export const patternKey = (id: Match.BindingId): string =>
-  `pattern:${id.arm.match.function.sourceId}:${id.arm.match.function.ordinal}:${id.arm.match.span.start}:${id.arm.ordinal}:${id.ordinal}`
+  `pattern:${Tir.nodeRefKey(id.arm.match.node)}:${id.arm.ordinal}:${id.ordinal}`
+
+/** The value key of one published TIR local. */
+export const tirLocalKey = (id: Tir.LocalId): string => `local:${id.ordinal}`
 
 export const localValueKey = (
   value:
@@ -1088,6 +1091,7 @@ export interface NodeContext {
     kind: 'Type' | 'Fields',
     span: Location.Location,
     trace: Trace,
+    lookup: NodeContext['lookup'],
   ) => Outcome<StaticValue.Value>
   readonly call: (
     declaration: DeclarationFacts.DeclarationFact,
@@ -1101,6 +1105,7 @@ export interface NodeContext {
       readonly evidence: ReadonlyArray<string>
       readonly contractRow: ReadonlyArray<string>
     },
+    lookup: NodeContext['lookup'],
   ) => CallResult
   readonly constant?: (
     declaration: DeclarationFacts.ConstantFact,
@@ -1172,9 +1177,9 @@ const transparent = (node: Tir.Expression): Tir.Expression | undefined => {
 }
 
 const localKeyOf = (node: Tir.Expression): string | undefined => {
-  if (node._tag === 'ParameterReference') return parameterKey(node.parameter)
-  if (node._tag === 'BindingReference') return bindingKey(node.binding)
-  if (node._tag === 'PatternBindingReference') return patternKey(node.binding)
+  if (node._tag === 'ParameterReference') return tirLocalKey(node.parameter)
+  if (node._tag === 'BindingReference' || node._tag === 'PatternBindingReference')
+    return tirLocalKey(node.binding)
   return undefined
 }
 
@@ -1216,7 +1221,7 @@ export const staticTextOrigin = (
   if (evaluated !== undefined) return evaluated
   if (node._tag === 'StaticCall' && node.textOrigin !== undefined) return node.textOrigin
   if (node._tag === 'StaticStringLiteral')
-    return sourceTextOrigin(node.origin.anchor, node.data.bytes.length)
+    return node.textOrigin ?? sourceTextOrigin(node.origin.anchor, node.data.bytes.length)
   const inner = transparent(node)
   if (inner !== undefined) return staticTextOrigin(inner, context)
   const local = localKeyOf(node)
@@ -1333,7 +1338,7 @@ const bindPattern = (
           context.trace,
         ),
       )
-    values.set(patternKey(binding.id), value)
+    values.set(tirLocalKey(binding.id), value)
   }
   return complete(Object.freeze({ ...context, values }))
 }
@@ -1410,6 +1415,7 @@ const evaluateIntrinsic = (
       operation === 'reflectType' ? 'Type' : 'Fields',
       at(node),
       context.trace,
+      context.lookup,
     )
   }
   const admit = (value: unknown, name: string) =>
@@ -1590,7 +1596,7 @@ const evaluateExpression = (
       return admit({
         _tag: 'TextValue',
         bytes: node.data.bytes,
-        origin: sourceTextOrigin(node.origin.anchor, node.data.bytes.length),
+        origin: node.textOrigin ?? sourceTextOrigin(node.origin.anchor, node.data.bytes.length),
       })
     case 'ConstantReference': {
       const declaration = context.lookup(node.declaration)
@@ -1817,6 +1823,7 @@ const evaluateExpression = (
           evidence: node.evidence,
           contractRow: Object.freeze([]),
         }),
+        context.lookup,
       )
       if (called.textSpan !== undefined) context.expressionSpans.set(node, called.textSpan)
       if (called.textOrigin !== undefined) context.expressionOrigins.set(node, called.textOrigin)
@@ -1942,8 +1949,9 @@ const sameLoop = (left: Tir.LoopId | undefined, right: Tir.LoopId): boolean =>
   left.function.ordinal === right.function.ordinal
 
 const writeRootKey = (root: Tir.OwnedWriteRoot): string => {
-  if (root._tag === 'BindingWriteRoot') return bindingKey(root.binding)
-  return root._tag === 'PatternWriteRoot' ? patternKey(root.binding) : parameterKey(root.parameter)
+  if (root._tag === 'BindingWriteRoot' || root._tag === 'PatternWriteRoot')
+    return tirLocalKey(root.binding)
+  return tirLocalKey(root.parameter)
 }
 
 const evaluateStatementSequence = (
@@ -1990,7 +1998,7 @@ const evaluateStatementSequence = (
       case 'Bind': {
         const value = evaluateExpression(statement.initializer, contextual)
         if (value._tag !== 'Complete') return value
-        const key = bindingKey(statement.binding)
+        const key = tirLocalKey(statement.binding)
         values.set(key, value.value)
         remember(key, statement.initializer)
         continue

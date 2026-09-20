@@ -1,4 +1,5 @@
-import type * as SourceSpan from './SourceSpan.js'
+import * as AuthoredIdentity from './AuthoredIdentity.js'
+import type * as Tir from './Tir.js'
 import * as Type from './Type.js'
 
 /** The source-visible or occurrence-generated identity of one nominal aggregate. */
@@ -12,7 +13,7 @@ export type AggregateIdentity =
   | {
       readonly _tag: 'AnonymousAggregateIdentity'
       readonly module: string
-      readonly occurrence: SourceSpan.SourceSpan
+      readonly node: Tir.NodeRef
       readonly kind: 'AnonymousNamed' | 'AnonymousPositional'
     }
 
@@ -29,10 +30,9 @@ export const source = (
 
 export const anonymous = (
   module: string,
-  occurrence: SourceSpan.SourceSpan,
+  node: Tir.NodeRef,
   kind: Extract<AggregateIdentity, { readonly _tag: 'AnonymousAggregateIdentity' }>['kind'],
-): AggregateIdentity =>
-  Object.freeze({ _tag: 'AnonymousAggregateIdentity', module, occurrence, kind })
+): AggregateIdentity => Object.freeze({ _tag: 'AnonymousAggregateIdentity', module, node, kind })
 
 export const labeled = (label: string): MemberIdentity =>
   Object.freeze({ _tag: 'LabeledAggregateMember', label })
@@ -44,7 +44,19 @@ export const ordinal = (value: number): MemberIdentity =>
 export const internalName = (self: AggregateIdentity): string =>
   self._tag === 'SourceAggregateIdentity'
     ? self.name
-    : `@${self.kind}:${self.occurrence.start}:${self.occurrence.end}`
+    : `@${self.kind}:${artifactText(self.node.artifact)}:n${self.node.node.ordinal}`
+
+const artifactKey = (self: Tir.ArtifactId): string =>
+  JSON.stringify([
+    AuthoredIdentity.key(self.owner),
+    self.request._tag === 'Check' ? null : self.request.application,
+    self.parent === undefined ? null : artifactKey(self.parent),
+  ])
+
+const artifactText = (self: Tir.ArtifactId): string =>
+  Array.from(new TextEncoder().encode(artifactKey(self)), (byte) =>
+    byte.toString(16).padStart(2, '0'),
+  ).join('')
 
 export const nominal = (self: AggregateIdentity): Type.Nominal =>
   Type.nominal(self.module, internalName(self))

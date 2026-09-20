@@ -3,7 +3,6 @@ import * as OpaqueRealization from '../../src/OpaqueRealization.js'
 import * as Analysis from '../../src/Analysis.js'
 import type * as Backend from '../../src/Backend.js'
 import type * as DeclarationFacts from '../../src/DeclarationFacts.js'
-import type * as Elaboration from '../../src/Elaboration.js'
 import * as Tir from '../../src/Tir.js'
 import * as Layout from '../../src/Layout.js'
 import * as Mir from '../../src/Mir.js'
@@ -15,21 +14,19 @@ import * as Type from '../../src/Type.js'
 export const syntaxOf = (self: Analysis.FrontendSnapshot, module: string) =>
   Analysis.moduleSyntax(self, module)
 
-const nestedStatementFacts = (
-  statement: Elaboration.StatementFact,
-): ReadonlyArray<Elaboration.StatementFact> => {
+const nestedStatements = (statement: Tir.Statement): ReadonlyArray<Tir.Statement> => {
   switch (statement._tag) {
-    case 'UnsafeStatement':
-      return Object.freeze([statement, ...statement.statements.flatMap(nestedStatementFacts)])
-    case 'IfStatement':
-    case 'IfLetStatement':
+    case 'Unsafe':
+      return Object.freeze([statement, ...statement.statements.flatMap(nestedStatements)])
+    case 'If':
+    case 'IfLet':
       return Object.freeze([
         statement,
-        ...statement.taken.flatMap(nestedStatementFacts),
-        ...statement.otherwise.flatMap(nestedStatementFacts),
+        ...statement.taken.flatMap(nestedStatements),
+        ...statement.otherwise.flatMap(nestedStatements),
       ])
-    case 'WhileStatement':
-      return Object.freeze([statement, ...statement.body.flatMap(nestedStatementFacts)])
+    case 'While':
+      return Object.freeze([statement, ...statement.body.flatMap(nestedStatements)])
     default:
       return Object.freeze([statement])
   }
@@ -38,10 +35,10 @@ const nestedStatementFacts = (
 export const statementsOf = (
   self: Analysis.FrontendSnapshot,
   module: string,
-): ReadonlyArray<Elaboration.StatementFact> =>
+): ReadonlyArray<Tir.Statement> =>
   Object.freeze(
     records(self.results.get(module))?.functions.flatMap((fn) =>
-      fn.statements.flatMap(nestedStatementFacts),
+      fn.statements.flatMap(nestedStatements),
     ) ?? [],
   )
 
@@ -51,32 +48,24 @@ export const bindingsOf = (self: Analysis.FrontendSnapshot, module: string) =>
 export const writesOf = (self: Analysis.FrontendSnapshot, module: string) =>
   Object.freeze(
     statementsOf(self, module).filter(
-      (
-        statement,
-      ): statement is Extract<Elaboration.StatementFact, { readonly _tag: 'WriteStatement' }> =>
-        statement._tag === 'WriteStatement',
+      (statement): statement is Extract<Tir.Statement, { readonly _tag: 'Write' }> =>
+        statement._tag === 'Write',
     ),
   )
 
 export const loopsOf = (self: Analysis.FrontendSnapshot, module: string) =>
   Object.freeze(
     statementsOf(self, module).filter(
-      (
-        statement,
-      ): statement is Extract<Elaboration.StatementFact, { readonly _tag: 'WhileStatement' }> =>
-        statement._tag === 'WhileStatement',
+      (statement): statement is Extract<Tir.Statement, { readonly _tag: 'While' }> =>
+        statement._tag === 'While',
     ),
   )
 
 export const transfersOf = (self: Analysis.FrontendSnapshot, module: string) =>
   Object.freeze(
     statementsOf(self, module).filter(
-      (
-        statement,
-      ): statement is Extract<
-        Elaboration.StatementFact,
-        { readonly _tag: 'BreakStatement' | 'ContinueStatement' }
-      > => statement._tag === 'BreakStatement' || statement._tag === 'ContinueStatement',
+      (statement): statement is Extract<Tir.Statement, { readonly _tag: 'Break' | 'Continue' }> =>
+        statement._tag === 'Break' || statement._tag === 'Continue',
     ),
   )
 
@@ -90,7 +79,7 @@ const expressionsOf = (self: Analysis.FrontendSnapshot, module: string) =>
 export const matchesOf = (self: Analysis.FrontendSnapshot, module: string) =>
   Object.freeze(
     expressionsOf(self, module).filter(
-      (expression): expression is Extract<Elaboration.ExpressionFact, { readonly _tag: 'Match' }> =>
+      (expression): expression is Extract<Tir.Expression, { readonly _tag: 'Match' }> =>
         expression._tag === 'Match',
     ),
   )

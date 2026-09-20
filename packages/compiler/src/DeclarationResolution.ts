@@ -19,7 +19,7 @@ import type {
   RequirementRoleFact,
   RequirementRowFact,
   ReturnTypeFact,
-  RowExpressionFact,
+  RowExpressionDecision,
   ServiceFact,
   StructFact,
   TypeParameterFact,
@@ -391,7 +391,13 @@ export const resolveDeclaredType = (
     const requirementExpression =
       fact.requirementExpression === undefined
         ? undefined
-        : resolveRowExpressionFact(spanOf, module, fact.requirementExpression, resolvers, modules)
+        : resolveRowExpressionDecision(
+            spanOf,
+            module,
+            fact.requirementExpression,
+            resolvers,
+            modules,
+          )
     if (requirementExpression !== undefined) diagnostics.push(...requirementExpression.diagnostics)
     if (success.fact._tag === 'Resolved' && failuresAvailable && requirementsAvailable) {
       const base = Type.effect(
@@ -1695,14 +1701,14 @@ const resolveRequirementRole = (
   })
 }
 
-const resolveRowExpressionFact = (
+const resolveRowExpressionDecision = (
   spanOf: SpanOf,
   module: string,
-  fact: RowExpressionFact,
+  fact: RowExpressionDecision,
   resolvers: ResolutionSeams.ResolutionSeams,
   modules: ReadonlyArray<ModuleHeaders>,
 ): {
-  readonly fact: RowExpressionFact
+  readonly fact: RowExpressionDecision
   readonly diagnostics: ReadonlyArray<Diagnostic.Located>
 } => {
   switch (fact._tag) {
@@ -1727,7 +1733,7 @@ const resolveRowExpressionFact = (
     }
     case 'UnionRowExpression': {
       const operands = fact.operands.map((operand) =>
-        resolveRowExpressionFact(spanOf, module, operand, resolvers, modules),
+        resolveRowExpressionDecision(spanOf, module, operand, resolvers, modules),
       )
       return Object.freeze({
         fact: Object.freeze({
@@ -1738,8 +1744,14 @@ const resolveRowExpressionFact = (
       })
     }
     case 'WithoutRowExpression': {
-      const source = resolveRowExpressionFact(spanOf, module, fact.source, resolvers, modules)
-      const selected = resolveRowExpressionFact(spanOf, module, fact.selected, resolvers, modules)
+      const source = resolveRowExpressionDecision(spanOf, module, fact.source, resolvers, modules)
+      const selected = resolveRowExpressionDecision(
+        spanOf,
+        module,
+        fact.selected,
+        resolvers,
+        modules,
+      )
       return Object.freeze({
         fact: Object.freeze({ ...fact, source: source.fact, selected: selected.fact }),
         diagnostics: Object.freeze([...source.diagnostics, ...selected.diagnostics]),
@@ -1760,14 +1772,20 @@ export const resolveConstraintFacts = (
 } => {
   const diagnostics: Array<Diagnostic.Located> = []
   const facts = constraints.map((constraint): ConstraintFact => {
-    const selected = resolveRowExpressionFact(
+    const selected = resolveRowExpressionDecision(
       spanOf,
       module,
       constraint.selected,
       resolvers,
       modules,
     )
-    const source = resolveRowExpressionFact(spanOf, module, constraint.source, resolvers, modules)
+    const source = resolveRowExpressionDecision(
+      spanOf,
+      module,
+      constraint.source,
+      resolvers,
+      modules,
+    )
     diagnostics.push(...selected.diagnostics, ...source.diagnostics)
     if (constraint._tag === 'MembershipConstraint')
       return Object.freeze({ ...constraint, selected: selected.fact, source: source.fact })
@@ -1783,7 +1801,7 @@ export const resolveConstraintFacts = (
   return Object.freeze({ facts: Object.freeze(facts), diagnostics: Object.freeze(diagnostics) })
 }
 
-const semanticFailureRow = (spanOf: SpanOf, fact: RowExpressionFact): Type.FailureRow => {
+const semanticFailureRow = (spanOf: SpanOf, fact: RowExpressionDecision): Type.FailureRow => {
   switch (fact._tag) {
     case 'EmptyRowExpression':
     case 'RequirementMemberExpression':
@@ -1817,7 +1835,10 @@ const semanticFailureRow = (spanOf: SpanOf, fact: RowExpressionFact): Type.Failu
   }
 }
 
-const semanticRequirementRow = (spanOf: SpanOf, fact: RowExpressionFact): Type.RequirementsRow => {
+const semanticRequirementRow = (
+  spanOf: SpanOf,
+  fact: RowExpressionDecision,
+): Type.RequirementsRow => {
   switch (fact._tag) {
     case 'EmptyRowExpression':
     case 'FailureMemberExpression':
@@ -1917,7 +1938,13 @@ export const resolveFailureRow = (
 } => {
   if (row.anchor === undefined) return Object.freeze({ fact: row, diagnostics: Object.freeze([]) })
   const diagnostics: Array<Diagnostic.Located> = []
-  const expression = resolveRowExpressionFact(spanOf, module, row.expression, resolvers, modules)
+  const expression = resolveRowExpressionDecision(
+    spanOf,
+    module,
+    row.expression,
+    resolvers,
+    modules,
+  )
   // Legacy member facts and the symbolic expression share the same source nodes. Resolve the
   // expression for semantic shape, while the member pass below remains the single diagnostic owner.
   const members = row.members.map((member) => {
@@ -1964,7 +1991,13 @@ export const resolveRequirementRow = (
 } => {
   if (row.anchor === undefined) return Object.freeze({ fact: row, diagnostics: Object.freeze([]) })
   const diagnostics: Array<Diagnostic.Located> = []
-  const expression = resolveRowExpressionFact(spanOf, module, row.expression, resolvers, modules)
+  const expression = resolveRowExpressionDecision(
+    spanOf,
+    module,
+    row.expression,
+    resolvers,
+    modules,
+  )
   // The entry pass below owns diagnostics for these same source nodes.
   const entries = row.entries.map((entry) => {
     const capability = resolveDeclaredType(spanOf, module, entry.capability, resolvers, modules)

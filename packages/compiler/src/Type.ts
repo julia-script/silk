@@ -2795,8 +2795,8 @@ export const encode = (self: Type): string => {
 /** Renders a semantic type without exposing compiler-minted anonymous aggregate spellings. */
 export const display = (self: Type): string =>
   encode(self)
-    .replace(/(?:[^\s<>,()&|]+\.)?@AnonymousPositional:\d+:\d+/g, 'anonymous tuple')
-    .replace(/(?:[^\s<>,()&|]+\.)?@AnonymousNamed:\d+:\d+/g, 'anonymous record')
+    .replace(/(?:[^\s<>,()&|]+\.)?@AnonymousPositional:[0-9a-f]+:n\d+/g, 'anonymous tuple')
+    .replace(/(?:[^\s<>,()&|]+\.)?@AnonymousNamed:[0-9a-f]+:n\d+/g, 'anonymous record')
 
 /** Renders one normalized requirement member with its access demand and optional nominal role. */
 export const encodeRequirement = (

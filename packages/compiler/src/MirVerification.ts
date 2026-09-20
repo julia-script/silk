@@ -59,6 +59,7 @@ import {
   conformanceWitnessMatches,
   isCopy,
   matchesEffectInstance,
+  matchesCall,
   matchesInstance,
   matchesInstanceKey,
   runtimeArgumentsEqual,
@@ -1532,8 +1533,7 @@ export const storedExecutableText = (
     ? storedCallableTargetText(stored.realization.target)
     : targetText(stored.realization.runner)
 
-const borrowKey = (borrow: Tir.BorrowId): string =>
-  `${borrow.function.sourceId}:${borrow.function.ordinal}:${borrow.callSpan.start}:${borrow.callSpan.end}:${borrow.ordinal}`
+const borrowKey = (borrow: Tir.BorrowId): string => Tir.borrowKey(borrow)
 
 export const instanceText = Instances.keyText
 
@@ -2503,24 +2503,20 @@ const loanViolations = (
     const active = new Map(inherited)
     const inheritedKeys = new Set(inherited.keys())
     const completed = new Set<string>()
-    const calls = new Set<string>()
     const endLoan = (
       operation: EndLoanOperation,
       currentActive: Map<string, ActiveLoan>,
       currentCompleted: Set<string>,
-      currentCalls: ReadonlySet<string>,
     ): void => {
       const key = borrowKey(operation.borrow)
       const loan = currentActive.get(key)
       const beginning = loan?.operation ?? globalBeginnings.get(key)
-      const call = `${operation.borrow.callSpan.start}:${operation.borrow.callSpan.end}`
       const liveChild = [...currentActive.values()].some((candidate) => candidate.parent === key)
       if (
         beginning === undefined ||
         // Endpoint multiplicity is proved by loanPathsValid over the CFG. Nested execution
         // traversal can visit mutually exclusive endings in the same structural sequence.
         beginning.destination.ordinal !== operation.slice.ordinal ||
-        (loan !== undefined && !currentCalls.has(call)) ||
         liveChild
       ) {
         invalid(`loan ${key} has a missing, duplicate, premature, or mismatched ending`)
@@ -2604,14 +2600,10 @@ const loanViolations = (
             ...(parent === undefined ? {} : { parent: parent[0] }),
           }),
         )
-        calls.add(`${operation.borrow.callSpan.start}:${operation.borrow.callSpan.end}`)
         continue
       }
-      if (operation._tag === 'Call') {
-        calls.add(`${operation.provenance.span.start}:${operation.provenance.span.end}`)
-      }
       if (operation._tag === 'EndLoan') {
-        endLoan(operation, active, completed, calls)
+        endLoan(operation, active, completed)
         continue
       }
 
@@ -2623,7 +2615,7 @@ const loanViolations = (
         const failureActive = new Map(active)
         const failureCompleted = new Set(completed)
         for (const ending of operation.failureLoanEnds ?? [])
-          endLoan(ending, failureActive, failureCompleted, calls)
+          endLoan(ending, failureActive, failureCompleted)
       }
 
       for (const local of accessedOwnerLocals(operation)) {
@@ -5264,9 +5256,6 @@ const computeVerify = Effect.fnUntraced(function* (
             !callableCleanupValid(conflict, operation.conflictCleanup) ||
             expected?._tag !== 'LocalSharedControlBlockPlan' ||
             !LocalSharedControlBlock.equals(expected, operation.block) ||
-            operation.loan.callSpan.sourceId !== operation.provenance.span.sourceId ||
-            operation.loan.callSpan.start !== operation.provenance.span.start ||
-            operation.loan.callSpan.end !== operation.provenance.span.end ||
             operation.retainedLoans.length !== 0
           )
             violations.push(
@@ -6598,11 +6587,12 @@ const computeVerify = Effect.fnUntraced(function* (
         }
         if (operation._tag === 'Call') {
           const target = self.functions.find((candidate) =>
-            matchesInstance(
+            matchesCall(
               candidate,
               operation.target,
               operation.typeArguments,
               operation.staticArguments,
+              operation.type,
             ),
           )
           const valid =
@@ -6617,12 +6607,13 @@ const computeVerify = Effect.fnUntraced(function* (
                 callArgumentCompatible(actual, expected)
               )
             }) &&
-            (operation.type._tag === 'EffectValue' && target.result._tag === 'EffectValue'
-              ? EffectExecutionContract.equals(operation.type.type, target.result.type) &&
-                Tir.sameExecutableSite(operation.type.site, target.result.site) &&
-                instanceText(operation.type.environment.instance) ===
-                  instanceText(target.result.environment.instance)
-              : sameRuntimeType(semanticType(operation.type), semanticType(target.result)))
+            matchesCall(
+              target,
+              operation.target,
+              operation.typeArguments,
+              operation.staticArguments,
+              operation.type,
+            )
           if (!valid) {
             const argumentsDetail = operation.arguments
               .map((argument, ordinal) => {

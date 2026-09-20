@@ -355,11 +355,12 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
     }
     case 'Call': {
       const target = FunctionIndex.nativeCandidates(declared, operation.target).find((candidate) =>
-        Mir.matchesInstance(
+        Mir.matchesCall(
           candidate.fn,
           operation.target,
           operation.typeArguments,
           operation.staticArguments,
+          operation.type,
         ),
       )
       if (target === undefined) {

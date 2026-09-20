@@ -64,7 +64,7 @@ const requirementRole = (fact: DeclarationFacts.RequirementRoleFact): string => 
   }
 }
 
-const rowExpression = (fact: DeclarationFacts.RowExpressionFact): string => {
+const rowExpression = (fact: DeclarationFacts.RowExpressionDecision): string => {
   switch (fact._tag) {
     case 'EmptyRowExpression':
       return ''
@@ -121,8 +121,8 @@ const captureAccess = (access: Elaboration.EffectCaptureFact['access']): string 
 
 /** Renders an anonymous contract and its derived environment without a synthetic declaration. */
 export const anonymousCallable = (
-  self: Elaboration.CallableSectionExpressionFact,
-  anonymous: NonNullable<Elaboration.CallableSectionExpressionFact['anonymous']>,
+  self: Elaboration.CallableSectionExpressionDecision,
+  anonymous: NonNullable<Elaboration.CallableSectionExpressionDecision['anonymous']>,
 ): Presentation => {
   const declaration = self.reference._tag === 'Resolved' ? self.reference.declaration : undefined
   let parameters: ReadonlyArray<string>

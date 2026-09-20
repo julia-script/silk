@@ -52,6 +52,7 @@ import {
 } from './Forwarding.js'
 import type { FunctionLowering } from './FunctionLowering.js'
 import * as Tir from './Tir.js'
+import * as BodyView from './BodyView.js'
 import * as Instances from './Instances.js'
 import * as Layout from './Layout.js'
 import type { DelayedEffectState, ProvidedRequirement } from './Lower.js'
@@ -1094,10 +1095,12 @@ function lowerCallableApplyExpression(
   const definition =
     callable === undefined ? undefined : fn.callableDefinitions.get(callable.ordinal)
   const realizedTarget = target ?? definition?.target
-  const declaredEffectValue =
-    realizedTarget?._tag === 'DeclarationCallableTarget'
-      ? fn.effectResults.get(instanceText(realizedTarget.declaration, typeArguments))
-      : undefined
+  const declaredEffectValue = (() => {
+    if (call !== undefined) return fn.effectResults.get(Instances.keyText(call.target))
+    if (realizedTarget?._tag === 'DeclarationCallableTarget')
+      return fn.effectResults.get(instanceText(realizedTarget.declaration, typeArguments))
+    return undefined
+  })()
   const semanticType = fn.semantic(expression.type)
   const type =
     (call === undefined || !Type.isEffect(semanticType)
@@ -1272,7 +1275,12 @@ function lowerEffectConstructExpression(
           call,
           semanticType,
           provision === undefined ? availableRequirements : provision.requirements,
-        )) ?? fn.effectResults.get(instanceText(expression.target, typeArguments, staticArguments))
+        )) ??
+    fn.effectResults.get(
+      call === undefined
+        ? instanceText(expression.target, typeArguments, staticArguments)
+        : Instances.keyText(call.target),
+    )
   if (resultType === undefined) return undefined
   const arguments_: Array<Mir.LocalId> = []
   for (const argument of expression.arguments) {
@@ -2175,10 +2183,8 @@ function lowerMatchExpression(
   ) {
     return undefined
   }
-  const ownership = fn.ownership?.matches.find(
-    (candidate) =>
-      candidate.id.span.start === expression.id.span.start &&
-      candidate.id.span.end === expression.id.span.end,
+  const ownership = fn.ownership?.matches.find((candidate) =>
+    Tir.nodeRefEquals(candidate.id.node, expression.match.node),
   )
   const specializeMember = (member: Match.CoverageIdentity): Match.CoverageIdentity => {
     if (member._tag === 'StructuralTypeMember')
@@ -2280,8 +2286,7 @@ function lowerMatchExpression(
       exit.matches
         .filter(
           (selected) =>
-            selected.id.span.start === expression.id.span.start &&
-            selected.id.span.end === expression.id.span.end &&
+            Tir.nodeRefEquals(selected.id.node, expression.match.node) &&
             selected.arm.ordinal === arm.id.ordinal,
         )
         .flatMap((selected) => selected.cleanup),
@@ -2481,7 +2486,7 @@ function lowerMatchExpression(
   fn.emit(
     Object.freeze({
       _tag: 'Match',
-      id: expression.id,
+      id: expression.match,
       ...(destination === undefined ? {} : { destination }),
       scrutinee: scrutinee.result,
       ...(selectors === undefined ? {} : { selectors }),
@@ -2707,12 +2712,14 @@ function lowerSliceBorrowExpression(
     }),
   )
   if (expression.root._tag === 'TemporarySliceRoot') {
+    const owner = BodyView.node(fn.owner.view, expression.root.owner.node)
+    if (owner === undefined) return undefined
     fn.temporaryBorrowOwners.set(
       borrowKey(borrow),
       Object.freeze({
         local: root,
         cleanup: CleanupPlan.cleanupPlan(fn.index, fn.semantic(expression.source)),
-        span: expression.root.owner.span,
+        span: owner.span,
       }),
     )
   }
@@ -2774,12 +2781,14 @@ function lowerValueBorrowExpression(
     }),
   )
   if (expression.root._tag === 'TemporarySliceRoot') {
+    const owner = BodyView.node(fn.owner.view, expression.root.owner.node)
+    if (owner === undefined) return undefined
     fn.temporaryBorrowOwners.set(
       borrowKey(borrow),
       Object.freeze({
         local: root,
         cleanup: CleanupPlan.cleanupPlan(fn.index, fn.semantic(expression.source)),
-        span: expression.root.owner.span,
+        span: owner.span,
       }),
     )
   }
@@ -2875,7 +2884,11 @@ function lowerCallExpression(
       (call === undefined || !Type.isEffect(semanticType)
         ? undefined
         : effectValueForCall(fn.layout, call, semanticType, availableRequirements)) ??
-      fn.effectResults.get(instanceText(expression.target, typeArguments, staticArguments)) ??
+      fn.effectResults.get(
+        call === undefined
+          ? instanceText(expression.target, typeArguments, staticArguments)
+          : Instances.keyText(call.target),
+      ) ??
       fn.type(expression.type) ??
       resultCallableValueType(
         fn.layout,

@@ -2288,7 +2288,15 @@ fn bad() -> i32 { let value = 42 return choose(move value, value) }`
         const body =
           result.bodies.find((candidate) => candidate.function === fn) ??
           unreachable('expected checked body')
-        return Ownership.input(fn, body.results.lifetimes, snapshot.index, plan, context)
+        return Ownership.input(
+          fn,
+          body.artifact,
+          body.results.lifetimes,
+          snapshot.index,
+          plan,
+          context,
+          body.results.causes,
+        )
       }
       const good = selected('good')
       const bad = selected('bad')

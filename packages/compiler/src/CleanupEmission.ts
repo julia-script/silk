@@ -1,12 +1,13 @@
 import * as ConcreteCleanup from './ConcreteCleanup.js'
 import * as CleanupPlan from './CleanupPlan.js'
+import * as BodyView from './BodyView.js'
 import * as DeclarationFacts from './DeclarationFacts.js'
 import type * as Match from './Match.js'
 import { endLoans } from './EffectLowering.js'
 import type {} from './EntryAssembly.js'
 import type {} from './Forwarding.js'
 import type { FunctionLowering } from './FunctionLowering.js'
-import type * as Tir from './Tir.js'
+import * as Tir from './Tir.js'
 import * as TypeInference from './internal/TypeInference.js'
 import * as Instances from './Instances.js'
 import * as Layout from './Layout.js'
@@ -472,12 +473,14 @@ export const emitReleases = (fn: FunctionLowering, exit: Ownership.ExitPlan | un
     for (const borrow of exit?.loanEnds ?? []) {
       const slice = fn.loanLocals.get(borrowKey(borrow))
       if (slice === undefined) continue
+      const call = BodyView.node(fn.owner.view, borrow.call)
+      if (call === undefined) throw new RangeError('loan refers to a node outside its body')
       fn.emit(
         Object.freeze({
           _tag: 'EndLoan',
           borrow,
           slice,
-          provenance: generated(exit?.span ?? borrow.callSpan),
+          provenance: generated(exit?.span ?? call.span),
         }),
       )
       fn.loanLocals.delete(borrowKey(borrow))
@@ -536,12 +539,13 @@ const exitDrops = (
   for (const selected of exit?.matches ?? []) {
     for (const release of selected.cleanup) {
       const local = fn.matchCleanupLocals.get(matchCleanupKey(selected.arm, release.path))
-      if (local !== undefined)
+      const match = BodyView.node(fn.owner.view, selected.id.node)
+      if (local !== undefined && match !== undefined)
         releases.push({
           ordinal: selected.ordinal,
           local,
           cleanup: release.cleanup,
-          span: exit?.span ?? selected.id.span,
+          span: exit?.span ?? match.span,
         })
     }
   }
@@ -581,7 +585,7 @@ export const matchCleanupKey = (
   arm: Match.ArmId,
   path: ReadonlyArray<DeclarationFacts.FieldId>,
 ): string =>
-  `${spanKey(arm.match.span)}:${arm.ordinal}:${path.map(DeclarationFacts.fieldIdKey).join('/')}`
+  `${Tir.nodeRefKey(arm.match.node)}:${arm.ordinal}:${path.map(DeclarationFacts.fieldIdKey).join('/')}`
 
 export const effectContract = (type: Type.Type): Type.Effect | undefined => {
   const contract = Type.isRepresented(type) ? type.contract : type

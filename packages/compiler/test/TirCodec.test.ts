@@ -1,5 +1,6 @@
 import { assert, it } from '@effect/vitest'
 import * as Lexer from '../src/Lexer.js'
+import * as BodyView from '../src/BodyView.js'
 import * as Parser from '../src/Parser.js'
 import * as SemanticContext from '../src/SemanticContext.js'
 import * as SourceFile from '../src/SourceFile.js'
@@ -48,6 +49,24 @@ for (const [category, program] of categories)
     for (const body of result.bodies) {
       // Every body publishes nodes, a `static fn` included.
       assert.isAbove(body.function.statements.length, 0)
+      const nodes = Tir.nodesOf(body.function)
+      assert.isAbove(nodes.length, 0)
+      assert.deepEqual(
+        nodes.map((node) => node.id.ordinal),
+        nodes.map((_, ordinal) => ordinal),
+      )
+      for (const node of nodes) assert.strictEqual(Tir.nodeOf(body.function, node.id), node)
+      const locals = body.function.locals ?? raise('published local table')
+      assert.deepEqual(
+        locals.map((local) => local.id.ordinal),
+        locals.map((_, ordinal) => ordinal),
+      )
+      for (const local of locals) assert.strictEqual(Tir.localOf(body.function, local.id), local)
+      assert.isArray(body.results.evidence)
+      assert.isArray(body.results.causes)
+      const view = BodyView.make(body)
+      for (const node of nodes) assert.strictEqual(BodyView.node(view, node.id), node)
+      for (const local of locals) assert.strictEqual(BodyView.local(view, local.id), local)
       const text = TirCodec.encode(body)
       const decoded = TirCodec.decode(
         text,
@@ -66,6 +85,19 @@ it('encodes no position: moved source gives the same bytes', () => {
   const before = analyze(program)
   const after = analyze(`// moved\n\n${program}`)
   assert.deepEqual(after.bodies.map(TirCodec.encode), before.bodies.map(TirCodec.encode))
+  for (const encoded of before.bodies.map(TirCodec.encode)) {
+    const visit = (value: unknown): void => {
+      if (typeof value !== 'object' || value === null) return
+      if (Array.isArray(value)) {
+        for (const item of value) visit(item)
+        return
+      }
+      const record = value as Readonly<Record<string, unknown>>
+      if (record['$'] === 'span') assert.deepEqual(record, { $: 'span' })
+      for (const child of Object.values(record)) visit(child)
+    }
+    visit(JSON.parse(encoded))
+  }
 })
 
 it('identifies each body as an artifact, a compiler-made one under its parent', () => {

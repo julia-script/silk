@@ -413,11 +413,16 @@ export const lowerInstance = (
             RowAlgebra.concrete(Type.requirementRowPolicy(), []),
         )
       : undefined
+  const resultEffectType =
+    effectOutcome ??
+    (contract._tag === 'Contract' && Type.isEffect(instance.specialization.result)
+      ? instance.specialization.result
+      : undefined)
   const returnedBlock = contract._tag === 'Contract' ? returnedEffectBlock(fn) : undefined
   const hiddenEffectValue =
-    returnedBlock === undefined || effectOutcome === undefined
+    returnedBlock === undefined || resultEffectType === undefined
       ? undefined
-      : effectValueType(layout, instance.key, returnedBlock, effectOutcome)
+      : effectValueType(layout, instance.key, returnedBlock, resultEffectType)
   const hiddenCompositeResult = returnedValueType(
     layout,
     opaqueRealizations,
@@ -427,21 +432,21 @@ export const lowerInstance = (
   const specializedEffectValue =
     instance.resultEffect === undefined
       ? undefined
-      : effectValueByIdentity(layout, instance.resultEffect, effectOutcome)
+      : effectValueByIdentity(layout, instance.resultEffect, resultEffectType)
   const resultType =
     specializedEffectValue ??
     hiddenEffectValue ??
     hiddenCompositeResult ??
     (contract._tag === 'Contract'
-      ? (storedCallableValueType(layout, effectOutcome ?? instance.specialization.result) ??
-        storedEffectValueType(layout, effectOutcome ?? instance.specialization.result) ??
+      ? (storedCallableValueType(layout, resultEffectType ?? instance.specialization.result) ??
+        storedEffectValueType(layout, resultEffectType ?? instance.specialization.result) ??
         representedValueType(
           layout,
           opaqueRealizations,
-          effectOutcome ?? instance.specialization.result,
+          resultEffectType ?? instance.specialization.result,
           new Map(),
         ) ??
-        mirType(effectOutcome ?? instance.specialization.result, new Map(), layout) ??
+        mirType(resultEffectType ?? instance.specialization.result, new Map(), layout) ??
         resultCallableValueType(
           layout,
           instances,
@@ -890,8 +895,7 @@ export const lowerBuiltinEffectRunner = (
               Object.freeze({
                 _tag: 'ParameterReference' as const,
                 parameter: Object.freeze({
-                  _tag: 'ParameterId' as const,
-                  function: spec.owner.function.declaration.id,
+                  _tag: 'TirLocal' as const,
                   ordinal,
                 }),
                 type: argument._tag === 'Unavailable' ? ('never' as const) : argument.type,
@@ -1026,6 +1030,7 @@ export const lowerWitnessEffectRunner = (
         lowering,
         spec.target,
         parameterTypes.map((_, ordinal) => local(ordinal)),
+        Tir.nodeReference(lowering.owner.view.artifact, spec.expression),
         spec.expression.span,
       )
       if (arguments_ === undefined) return undefined
@@ -1101,7 +1106,10 @@ export const lowerWitnessEffectRunner = (
             contract.operands.map((operand) =>
               Object.freeze({
                 _tag: 'ParameterReference' as const,
-                parameter: operand.parameter.id,
+                parameter: Object.freeze({
+                  _tag: 'TirLocal' as const,
+                  ordinal: operand.parameter.id.ordinal,
+                }),
                 type: operand.type._tag === 'Resolved' ? operand.type.type : 'never',
                 span: spec.expression.span,
                 origin: spec.expression.origin,

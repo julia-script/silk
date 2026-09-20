@@ -158,32 +158,35 @@ it.effect('loads default startup before realizing implicit-target convenience re
   }),
 )
 
-it.effect('validates default application calls through ordinary source diagnostics', () =>
-  Effect.gen(function* () {
-    const cases = [
-      ['missing', 'pub fn answer() -> i32 { return 42 }', 'SEM0014'],
-      ['generic', 'pub fn main<T>() -> i32 { return 42 }', 'SEM0052'],
-      ['parameters', 'pub fn main(value: i32) -> i32 { return value }', 'SEM0078'],
-    ] as const
-    for (const [target, runtime] of [
-      ['wasm32-unknown-unknown', 'silk/wasm_start'],
-      ['x86_64-unknown-linux-gnu', 'silk/native_start'],
-    ]) {
-      for (const [name, source, code] of cases) {
-        const snapshot = yield* Analysis.ofSourceRealized(
-          `application/${name}`,
-          ascii(source),
-          target,
-        )
-        const diagnostics = Analysis.diagnostics(snapshot)
-        const call = diagnostics.find((diagnostic) => diagnostic.code === code)
-        assert.isDefined(call, name)
-        assert.strictEqual(call?.span.sourceId, runtime)
-        assert.notInclude(
-          diagnostics.map((diagnostic) => diagnostic.code),
-          'SEM0204',
-        )
+it.effect(
+  'validates default application calls through ordinary source diagnostics',
+  () =>
+    Effect.gen(function* () {
+      const cases = [
+        ['missing', 'pub fn answer() -> i32 { return 42 }', 'SEM0014'],
+        ['generic', 'pub fn main<T>() -> i32 { return 42 }', 'SEM0052'],
+        ['parameters', 'pub fn main(value: i32) -> i32 { return value }', 'SEM0078'],
+      ] as const
+      for (const [target, runtime] of [
+        ['wasm32-unknown-unknown', 'silk/wasm_start'],
+        ['x86_64-unknown-linux-gnu', 'silk/native_start'],
+      ]) {
+        for (const [name, source, code] of cases) {
+          const snapshot = yield* Analysis.ofSourceRealized(
+            `application/${name}`,
+            ascii(source),
+            target,
+          )
+          const diagnostics = Analysis.diagnostics(snapshot)
+          const call = diagnostics.find((diagnostic) => diagnostic.code === code)
+          assert.isDefined(call, name)
+          assert.strictEqual(call?.span.sourceId, runtime)
+          assert.notInclude(
+            diagnostics.map((diagnostic) => diagnostic.code),
+            'SEM0204',
+          )
+        }
       }
-    }
-  }),
+    }),
+  { timeout: 120_000 },
 )

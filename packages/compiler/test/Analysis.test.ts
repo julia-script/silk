@@ -250,7 +250,7 @@ it.effect('resolves imported declarations as stored callable values', () =>
     const binding = main?.statements.at(0)
 
     assert.strictEqual(
-      binding?._tag === 'BindStatement' ? binding.binding.initializer._tag : undefined,
+      binding?._tag === 'Bind' ? binding.initializer._tag : undefined,
       'FunctionItem',
     )
     assert.strictEqual(main?.returnedExpression._tag, 'CallableApply')
@@ -292,13 +292,9 @@ it.effect('retains inaccessible imported callable targets without inventing a va
     ])
     const root = self.results.get('root')
     const binding = records(root)?.functions.at(0)?.statements.at(0)
-    const initializer = binding?._tag === 'BindStatement' ? binding.binding.initializer : undefined
+    const initializer = binding?._tag === 'Bind' ? binding.initializer : undefined
 
-    assert.strictEqual(initializer?._tag, 'FunctionItem')
-    assert.strictEqual(
-      initializer?._tag === 'FunctionItem' ? initializer.reference._tag : undefined,
-      'Missing',
-    )
+    assert.strictEqual(initializer?._tag, 'Unavailable')
     assert.include(root?.diagnostics.map((diagnostic) => diagnostic.code) ?? [], 'SEM0015')
   }),
 )

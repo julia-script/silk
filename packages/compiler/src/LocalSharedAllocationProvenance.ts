@@ -224,8 +224,7 @@ interface FunctionContext {
 
 const patternBindingKey = (
   binding: Extract<Tir.Expression, { readonly _tag: 'PatternBindingReference' }>['binding'],
-): string =>
-  `${binding.arm.match.span.sourceId}:${binding.arm.match.span.start}:${binding.arm.match.span.end}:${binding.arm.ordinal}:${binding.ordinal}`
+): string => `${binding.ordinal}`
 
 /** Plans exact source allocation provenance over specialized TIR, including ordinary calls. */
 export const plan = (discovery: Instances.Discovery, index: DeclarationIndex.Index): Plan => {

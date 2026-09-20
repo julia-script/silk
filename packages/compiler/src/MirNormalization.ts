@@ -71,11 +71,12 @@ const directTarget = (
   if (operation._tag === 'Call') {
     return constructorShape(
       FunctionIndex.candidates(functions, operation.target).find((candidate) =>
-        Mir.matchesInstance(
+        Mir.matchesCall(
           candidate,
           operation.target,
           operation.typeArguments,
           operation.staticArguments,
+          operation.type,
         ),
       ),
     )

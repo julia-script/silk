@@ -78,9 +78,14 @@ fn wrong() -> Status { return Mode.Ready }`
     )
     assert.strictEqual(ready?._tag, 'EnumMember')
     if (ready?._tag === 'EnumMember') {
-      assert.strictEqual(ready.enum.canonical._tag, 'Canonical')
-      assert.strictEqual(ready.member?.canonical._tag, 'Canonical')
-      assert.strictEqual(ready.type._tag, 'Available')
+      assert.strictEqual(ready.enum._tag, 'CanonicalDeclarationId')
+      assert.strictEqual(ready.member?._tag, 'CanonicalEnumMemberId')
+      assert.deepEqual(ready.type, {
+        _tag: 'NominalType',
+        module: 'enum/Members',
+        name: 'Status',
+        arguments: [],
+      })
     }
     assert.deepEqual(
       Analysis.diagnostics(self).map((diagnostic) => diagnostic.code),
@@ -129,7 +134,8 @@ it.effect('resolves imported scalar enum types through explicit module scopes', 
       (expression) => expression._tag === 'EnumMember',
     )
     assert.strictEqual(member?._tag, 'EnumMember')
-    if (member?._tag === 'EnumMember') assert.strictEqual(member.enum.canonical._tag, 'Canonical')
+    if (member?._tag === 'EnumMember')
+      assert.strictEqual(member.enum._tag, 'CanonicalDeclarationId')
     assert.deepEqual(Analysis.diagnostics(self), [])
   }),
 )

@@ -41,7 +41,7 @@ import type {
   RequirementRoleFact,
   RequirementRowFact,
   ReturnTypeFact,
-  RowExpressionFact,
+  RowExpressionDecision,
   ServiceFact,
   ServiceOperationFact,
   ServiceOperationId,
@@ -462,7 +462,7 @@ interface AppliedRows {
   readonly requirementParameters: ReadonlyArray<Type.Parameter>
   readonly rowParameterComponents: ReadonlyArray<DeclaredTypeFact>
   /** The row as one expression, present only when the row subtracts (`Without<R, K>`). */
-  readonly requirementExpression: RowExpressionFact | undefined
+  readonly requirementExpression: RowExpressionDecision | undefined
   readonly diagnostics: ReadonlyArray<Diagnostic.Located>
 }
 
@@ -1985,7 +1985,7 @@ const collectRowExpression = (
   bareKeys = false,
   lifetimeContext?: DeclarationLifetime.Context,
 ): {
-  readonly fact: RowExpressionFact
+  readonly fact: RowExpressionDecision
   readonly diagnostics: ReadonlyArray<Diagnostic.Located>
 } => {
   const anchor = operand.anchor
@@ -2105,7 +2105,7 @@ const collectRowExpression = (
   })
 }
 
-const emptyRowExpression: RowExpressionFact = Object.freeze({ _tag: 'EmptyRowExpression' })
+const emptyRowExpression: RowExpressionDecision = Object.freeze({ _tag: 'EmptyRowExpression' })
 
 /** Joins one requirement row's members into a single row expression. */
 const rowExpressionOf = (
@@ -2113,12 +2113,12 @@ const rowExpressionOf = (
   row: AuthoredHir.RequirementRow,
   typeParameters: ReadonlyMap<string, Type.Parameter>,
   lifetimeContext?: DeclarationLifetime.Context,
-): RowExpressionFact =>
+): RowExpressionDecision =>
   row.members
     .map((member) =>
       collectRowExpression(context, member, typeParameters, 'Requirement', false, lifetimeContext),
     )
-    .reduce<RowExpressionFact>(
+    .reduce<RowExpressionDecision>(
       (left, right) =>
         left._tag === 'EmptyRowExpression'
           ? right.fact

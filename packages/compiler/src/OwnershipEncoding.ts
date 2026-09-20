@@ -42,9 +42,9 @@ const siteText = (site: BindingSite): string => {
     return `b${site.binding.ordinal}`
   }
   if (site._tag === 'Pattern') {
-    return `m${site.binding.arm.match.span.start}.a${site.binding.arm.ordinal}.p${site.binding.ordinal}`
+    return `l${site.binding.ordinal}`
   }
-  return `t${site.owner.span.start}.${site.owner.ordinal}`
+  return `t${Tir.nodeRefKey(site.owner.node)}`
 }
 
 const cleanupText = (cleanup: CleanupPlan.CleanupPlan): string => {
@@ -198,7 +198,7 @@ export const encode = (self: ModuleOwnership): string =>
           ...exit.matches.flatMap((match) =>
             match.cleanup.map(
               (field) =>
-                `    match-payload #${match.ordinal} ${spanText(match.id.span)} arm=${match.arm.ordinal} path=${field.path.map((part) => `#${part.ordinal}`).join('.') || 'payload'} cleanup ${cleanupText(field.cleanup)}`,
+                `    match-payload #${match.ordinal} ${Tir.nodeRefKey(match.id.node)} arm=${match.arm.ordinal} path=${field.path.map((part) => `#${part.ordinal}`).join('.') || 'payload'} cleanup ${cleanupText(field.cleanup)}`,
             ),
           ),
         ].join('\n')

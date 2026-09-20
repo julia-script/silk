@@ -52,29 +52,27 @@ it.effect('unions the failure rows and the requirement rows of both zipped Effec
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
 
     const encoded = Analysis.expressionsOf(snapshot, module).flatMap((expression) =>
-      expression._tag === 'Call' &&
-      expression.type._tag === 'Available' &&
-      Type.isEffect(expression.type.type)
+      expression._tag === 'EffectConstruct' && Type.isEffect(expression.type)
         ? [
             {
-              success: Type.encode(expression.type.type.success),
-              failures: Type.failureMembers(expression.type.type).map((type) => Type.encode(type)),
-              requirements: Type.requirementMembers(expression.type.type).map((requirement) =>
+              success: Type.encode(expression.type.success),
+              failures: Type.failureMembers(expression.type).map((type) => Type.encode(type)),
+              requirements: Type.requirementMembers(expression.type).map((requirement) =>
                 Type.encodeRequirement(requirement),
               ),
             },
           ]
         : [],
     )
-    // The zip call itself is encoded first, then its two operands.
+    // Direct TIR publishes the two operand constructors before the enclosing zip constructor.
     assert.deepEqual(encoded, [
+      { success: 'i32', failures: [`${module}.Left`], requirements: [`&${module}.Clock`] },
+      { success: 'i32', failures: [`${module}.Right`], requirements: [`&${module}.Meter`] },
       {
         success: 'silk/effect.Pair<i32, i32>',
         failures: [`${module}.Left`, `${module}.Right`],
         requirements: [`&${module}.Clock`, `&${module}.Meter`],
       },
-      { success: 'i32', failures: [`${module}.Left`], requirements: [`&${module}.Clock`] },
-      { success: 'i32', failures: [`${module}.Right`], requirements: [`&${module}.Meter`] },
     ])
   }),
 )
@@ -86,14 +84,12 @@ it.effect('unions all three failure rows and all three requirement rows through 
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
 
     const encoded = Analysis.expressionsOf(snapshot, module).flatMap((expression) =>
-      expression._tag === 'Call' &&
-      expression.type._tag === 'Available' &&
-      Type.isEffect(expression.type.type)
+      expression._tag === 'EffectConstruct' && Type.isEffect(expression.type)
         ? [
             {
-              success: Type.encode(expression.type.type.success),
-              failures: Type.failureMembers(expression.type.type).map((type) => Type.encode(type)),
-              requirements: Type.requirementMembers(expression.type.type).map((requirement) =>
+              success: Type.encode(expression.type.success),
+              failures: Type.failureMembers(expression.type).map((type) => Type.encode(type)),
+              requirements: Type.requirementMembers(expression.type).map((requirement) =>
                 Type.encodeRequirement(requirement),
               ),
             },
@@ -101,7 +97,7 @@ it.effect('unions all three failure rows and all three requirement rows through 
         : [],
     )
     assert.strictEqual(encoded.length, 4)
-    assert.deepEqual(encoded[0], {
+    assert.deepEqual(encoded.at(-1), {
       success: 'silk/effect.Triple<i32, i32, i32>',
       failures: [`${module}.Left`, `${module}.Middle`, `${module}.Right`],
       requirements: [`&${module}.Clock`, `&${module}.Gauge`, `&${module}.Meter`],

@@ -7,7 +7,6 @@ import * as Tir from '../src/Tir.js'
 import type * as Mir from '../src/Mir.js'
 import * as MirVerification from '../src/MirVerification.js'
 import * as Residualization from '../src/Residualization.js'
-import * as SemanticContext from '../src/SemanticContext.js'
 import * as Type from '../src/Type.js'
 import type * as StaticValue from '../src/StaticValue.js'
 import { referenceProjectionAcceptance } from './support/corpus.js'
@@ -26,9 +25,9 @@ it.effect('retains failed referent facts and rejects affine borrowed reads', () 
       Analysis.diagnostics(invalid).map((diagnostic) => diagnostic.code),
       ['SEM0171'],
     )
+    const invalidFunction = Analysis.rootAnalysis(invalid).tir.functions.at(0)
     assert.strictEqual(
-      Analysis.referentProjectionsOf(invalid, 'reference-projection/non-reference-referent').at(0)
-        ?.state._tag,
+      invalidFunction === undefined ? undefined : Tir.returned(invalidFunction)._tag,
       'Unavailable',
     )
 
@@ -119,7 +118,6 @@ pub fn main() -> i32 { return 0 }`),
     const field = aggregate.fields.at(0)
     assert.isDefined(field)
     if (field === undefined || field.declaredType._tag !== 'Resolved') return
-    const fieldSpan = SemanticContext.fromModules(snapshot.closure.modules).spanOf(field.anchor)
     const descriptor: StaticValue.FieldDescriptorValue = Object.freeze({
       _tag: 'FieldDescriptorValue',
       owner: Object.freeze({
@@ -137,9 +135,7 @@ pub fn main() -> i32 { return 0 }`),
       valueType: field.declaredType.type,
       authorization: function_.canonical.id,
       provenance: Object.freeze({
-        sourceId: fieldSpan.sourceId,
-        start: fieldSpan.start,
-        end: fieldSpan.end,
+        anchor: field.anchor,
       }),
     })
     const residual = Residualization.residualize(

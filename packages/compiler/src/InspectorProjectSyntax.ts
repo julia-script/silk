@@ -190,9 +190,9 @@ const tirExpressionLabel = (expression: Tir.Expression): string => {
     case 'BooleanLiteral':
       return `const ${expression.value}`
     case 'ParameterReference':
-      return `param fn${expression.parameter.function.ordinal}.p${expression.parameter.ordinal}`
+      return `local l${expression.parameter.ordinal}`
     case 'BindingReference':
-      return `binding fn${expression.binding.function.ordinal}.b${expression.binding.ordinal}`
+      return `local l${expression.binding.ordinal}`
     case 'PatternBindingReference':
       return `pattern b${expression.binding.ordinal}`
     case 'Move':

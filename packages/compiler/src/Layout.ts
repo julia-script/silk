@@ -2933,8 +2933,7 @@ const collectEffectPatterns = (
   for (const binding of bindings) patternTypes.set(effectPatternKey(binding.id), binding.type)
 }
 
-const effectPatternKey = (id: Match.BindingId): string =>
-  `${id.arm.match.function.sourceId}:${id.arm.match.function.ordinal}:${id.arm.match.span.start}:${id.arm.ordinal}:${id.ordinal}`
+const effectPatternKey = (id: Tir.LocalId): string => `${id.ordinal}`
 
 const collectEffectSites = (instance: Instances.Instance) => {
   const blocks = instance.function.statements
@@ -2959,9 +2958,9 @@ const collectEffectSites = (instance: Instances.Instance) => {
         : [
             Object.freeze({
               site: Tir.effectCatchSite(
-                instance.function.declaration.id,
+                Tir.nodeReference(instance.view.artifact, expression),
                 instance.key.declaration,
-                expression.span,
+                instance.function.declaration.id.ordinal,
               ),
               type: expression.type,
               captures: Object.freeze([
@@ -2995,9 +2994,9 @@ const collectEffectSites = (instance: Instances.Instance) => {
       return [
         Object.freeze({
           site: Tir.builtinEffectSite(
-            instance.function.declaration.id,
+            Tir.nodeReference(instance.view.artifact, expression),
             instance.key.declaration,
-            expression.span,
+            instance.function.declaration.id.ordinal,
           ),
           type: expression.type,
           captures: Object.freeze(

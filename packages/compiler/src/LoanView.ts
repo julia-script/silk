@@ -2,7 +2,6 @@ import type * as AuthoredHir from './AuthoredHir.js'
 import * as DeclarationFacts from './DeclarationFacts.js'
 import type * as DeclarationIndex from './DeclarationIndex.js'
 import * as Lifetime from './Lifetime.js'
-import type * as Match from './Match.js'
 import type * as SourceSpan from './SourceSpan.js'
 import type * as Tir from './Tir.js'
 import * as TirModule from './Tir.js'
@@ -22,25 +21,26 @@ export type ExpressionType =
 interface Base {
   readonly type: ExpressionType
   readonly anchor: AuthoredHir.Anchor
+  readonly ref: Tir.NodeRef
 }
 
 /** A local as loan analysis names it: its id, its spelling and, for a parameter, its declared type. */
 export type Local =
   | {
       readonly _tag: 'BindingFact'
-      readonly id: Tir.BindingId
+      readonly id: Tir.LocalId
       readonly name: Name
       readonly inferredType: ExpressionType
     }
   | {
       readonly _tag: 'PatternBinding'
-      readonly id: Match.BindingId
+      readonly id: Tir.LocalId
       readonly name: Name
       readonly type: ExpressionType
     }
   | {
       readonly _tag: 'ParameterDeclaration'
-      readonly id: DeclarationFacts.ParameterId
+      readonly id: Tir.LocalId
       readonly name: Name
       readonly declaredType: DeclarationFacts.DeclaredTypeFact
     }
@@ -93,17 +93,17 @@ export type Selector =
 export type BorrowRoot =
   | {
       readonly _tag: 'BindingRoot'
-      readonly binding: { readonly id: Tir.BindingId }
+      readonly binding: { readonly id: Tir.LocalId }
       readonly path: ReadonlyArray<Selector>
     }
   | {
       readonly _tag: 'ParameterRoot'
-      readonly parameter: { readonly id: DeclarationFacts.ParameterId }
+      readonly parameter: { readonly id: Tir.LocalId }
       readonly path: ReadonlyArray<Selector>
     }
   | {
       readonly _tag: 'PatternRoot'
-      readonly binding: { readonly id: Match.BindingId }
+      readonly binding: { readonly id: Tir.LocalId }
       readonly path: ReadonlyArray<Selector>
     }
   | {
@@ -202,6 +202,8 @@ export type Expression =
       readonly _tag: 'Call'
       readonly arguments: ReadonlyArray<Argument>
       readonly reference: { readonly _tag: string; readonly operation?: unknown }
+      /** Direct argument loans the TIR builder proved are retained by this call's result. */
+      readonly heldLoans?: ReadonlyArray<Tir.BorrowId>
     })
   | (Base & {
       readonly _tag: 'ForeignApply'
@@ -260,7 +262,7 @@ export type Expression =
   | (Base & { readonly _tag: 'CompileError'; readonly message: Expression })
 
 export interface Binding {
-  readonly id: Tir.BindingId
+  readonly id: Tir.LocalId
   readonly initializer: Expression
   readonly inferredType: ExpressionType
 }
@@ -448,8 +450,16 @@ export const retainedResultArguments = (
     self.type._tag !== 'Available'
   )
     return []
+  const held =
+    self._tag === 'Call' && self.heldLoans !== undefined
+      ? new Set(self.heldLoans.map((loan) => loan.ordinal))
+      : undefined
   const result = self.type.type
   return self.arguments.filter((argument) => {
+    // `heldLoans` is authoritative only for a direct borrow operand. A nested call or aggregate
+    // can carry its own loans into this result and still needs the ordinary type relation below.
+    if (held !== undefined && argument.expression._tag === 'Borrow')
+      return held.has(argument.id.ordinal)
     if (argument.type._tag !== 'Available') return false
     const source = argument.type.type
     if (Type.isReference(source) || Type.isSlice(source))
@@ -486,14 +496,23 @@ export const retainsLifetimes = (
  * the expression it converts, a borrow's subject is the place the node kept as evidence, and a
  * local is found by the id a node names.
  */
-export const ofTir = (fn: Tir.TirFunction, index: DeclarationIndex.Index): Body => {
-  const parameters = new Map(
-    fn.declaration.parameters.map((parameter) => [parameter.id.ordinal, parameter] as const),
+export const ofTir = (
+  fn: Tir.TirFunction,
+  index: DeclarationIndex.Index,
+  artifact: Tir.ArtifactId,
+): Body => {
+  const parameters = new Map<number, Extract<Local, { readonly _tag: 'ParameterDeclaration' }>>(
+    fn.declaration.parameters.map((parameter) => [
+      parameter.id.ordinal,
+      {
+        ...parameter,
+        id: Object.freeze({ _tag: 'TirLocal' as const, ordinal: parameter.id.ordinal }),
+      },
+    ]),
   )
   const bindings = new Map<number, Extract<Local, { readonly _tag: 'BindingFact' }>>()
   const patterns = new Map<string, Extract<Local, { readonly _tag: 'PatternBinding' }>>()
-  const patternKey = (id: Match.BindingId): string =>
-    `${id.arm.match.span.start}:${id.arm.ordinal}:${id.ordinal}`
+  const patternKey = (id: Tir.LocalId): string => `${id.ordinal}`
   const name = (spelling: string | undefined): Name =>
     spelling === undefined ? { _tag: 'Unavailable' } : { _tag: 'Present', spelling }
   const available = (type: DeclarationFacts.SemanticType): ExpressionType => ({
@@ -591,9 +610,9 @@ export const ofTir = (fn: Tir.TirFunction, index: DeclarationIndex.Index): Body 
     return { _tag: 'TemporaryRoot', owner: root.owner, path }
   }
   const localOf = (capture: {
-    readonly pattern?: Match.BindingId
-    readonly binding?: Tir.BindingId
-    readonly parameter?: DeclarationFacts.ParameterId
+    readonly pattern?: Tir.LocalId
+    readonly binding?: Tir.LocalId
+    readonly parameter?: Tir.LocalId
   }): Local | undefined => {
     if (capture.binding !== undefined) return bindings.get(capture.binding.ordinal)
     if (capture.pattern !== undefined) return patterns.get(patternKey(capture.pattern))
@@ -629,9 +648,11 @@ export const ofTir = (fn: Tir.TirFunction, index: DeclarationIndex.Index): Body 
     return found
   }
   const view = (node: Tir.Expression): Expression => {
+    if (node.id === undefined) throw new RangeError('loan analysis requires published TIR nodes')
     const base = {
       type: node._tag === 'Unavailable' ? ({ _tag: 'Unavailable' } as const) : available(node.type),
       anchor: node.origin.anchor,
+      ref: Object.freeze({ artifact, node: node.id }),
     }
     switch (node._tag) {
       case 'UnionConvert':
@@ -739,7 +760,12 @@ export const ofTir = (fn: Tir.TirFunction, index: DeclarationIndex.Index): Body 
           access: node.access,
           subject:
             node.place === undefined
-              ? { type: { _tag: 'Unavailable' }, anchor: base.anchor, _tag: 'Integer' }
+              ? {
+                  type: { _tag: 'Unavailable' },
+                  anchor: base.anchor,
+                  ref: base.ref,
+                  _tag: 'Integer',
+                }
               : expression(node.place),
           formation,
         }
@@ -810,6 +836,13 @@ export const ofTir = (fn: Tir.TirFunction, index: DeclarationIndex.Index): Body 
               interfaceOperation: { contract: node.interfaceOperation.contract },
             }
       case 'Call':
+        return {
+          ...base,
+          _tag: 'Call',
+          arguments: argumentsOf(node.arguments, node.target),
+          reference: { _tag: 'Resolved' },
+          heldLoans: node.heldLoans,
+        }
       case 'EffectConstruct':
         return {
           ...base,
@@ -914,6 +947,27 @@ export const ofTir = (fn: Tir.TirFunction, index: DeclarationIndex.Index): Body 
         }
       case 'CompileError':
         return { ...base, _tag: 'CompileError', message: expression(node.message) }
+      case 'Unavailable':
+        return node.call?.callee === undefined
+          ? {
+              ...base,
+              _tag: 'Call',
+              arguments: argumentsOf(node.call?.arguments ?? [], node.call?.target),
+              reference: { _tag: node.call?.target === undefined ? 'Unavailable' : 'Resolved' },
+            }
+          : {
+              ...base,
+              _tag: 'CallableApply',
+              callee: expression(node.call.callee),
+              arguments: argumentsOf(node.call.arguments),
+              mode: node.call.access ?? 'Shared',
+              provenance: {
+                _tag:
+                  node.call.evaluation === 'LeftThenCallable'
+                    ? 'PipelineCallableApplication'
+                    : 'DirectCallableApplication',
+              },
+            }
       case 'FunctionItem':
       case 'ForeignFunctionAddress':
         return { ...base, _tag: 'FunctionItem' }
@@ -990,7 +1044,12 @@ export const ofTir = (fn: Tir.TirFunction, index: DeclarationIndex.Index): Body 
               _tag: 'WriteStatement',
               destination:
                 node.destination === undefined
-                  ? { type: { _tag: 'Unavailable' }, anchor: at.anchor, _tag: 'Integer' }
+                  ? {
+                      type: { _tag: 'Unavailable' },
+                      anchor: at.anchor,
+                      ref: TirModule.nodeReference(artifact, node),
+                      _tag: 'Integer',
+                    }
                   : expression(node.destination),
               value: expression(node.value),
             },

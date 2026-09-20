@@ -24,6 +24,7 @@ export const emitWitnessDispatch = (
   argumentLocals: ReadonlyArray<Mir.LocalId>,
   operandTypes: ReadonlyArray<Mir.Type>,
   resultType: Mir.Type,
+  call: Tir.NodeRef,
   span: SourceSpan.SourceSpan,
 ): Mir.LocalId | undefined => {
   const borrows: Array<{ readonly borrow: Tir.BorrowId; readonly local: Mir.LocalId }> = []
@@ -39,8 +40,7 @@ export const emitWitnessDispatch = (
     const borrow = fn.beginRecipeBorrow(
       Object.freeze({
         _tag: 'BorrowId' as const,
-        function: fn.owner.function.declaration.id,
-        callSpan: span,
+        call,
         ordinal,
       }),
     )
@@ -63,7 +63,7 @@ export const emitWitnessDispatch = (
     borrows.push(Object.freeze({ borrow, local: destination }))
     arguments_.push(destination)
   }
-  const witnessArguments = sourceWitnessArguments(fn, target, arguments_, span)
+  const witnessArguments = sourceWitnessArguments(fn, target, arguments_, call, span)
   if (witnessArguments === undefined) return undefined
   const destination = fn.alloc(resultType)
   fn.emit(
@@ -123,7 +123,15 @@ export const lowerInterfaceWitnessCall = (
     operandTypes.length !== bound.contract.operands.length
   )
     return undefined
-  return emitWitnessDispatch(fn, target, argumentLocals, operandTypes, resultType, expression.span)
+  return emitWitnessDispatch(
+    fn,
+    target,
+    argumentLocals,
+    operandTypes,
+    resultType,
+    Tir.nodeReference(fn.owner.view.artifact, expression),
+    expression.span,
+  )
 }
 
 export interface WitnessArguments {
@@ -152,6 +160,7 @@ export const lowerInterfaceOperands = (
   fn: FunctionLowering,
   arguments_: ReadonlyArray<Tir.Expression>,
   operands: ReadonlyArray<DeclarationFacts.InterfaceOperandFact>,
+  call: Tir.NodeRef,
   span: SourceSpan.SourceSpan,
 ): InterfaceOperands | InterfaceOperandLoweringFailure | 'Transferred' => {
   if (arguments_.length !== operands.length)
@@ -204,8 +213,7 @@ export const lowerInterfaceOperands = (
     const borrow = fn.beginRecipeBorrow(
       Object.freeze({
         _tag: 'BorrowId' as const,
-        function: fn.owner.function.declaration.id,
-        callSpan: span,
+        call,
         ordinal,
       }),
     )
@@ -256,6 +264,7 @@ export const sourceWitnessArguments = (
   fn: FunctionLowering,
   target: ConformanceProof.InterfaceWitnessTarget,
   arguments_: ReadonlyArray<Mir.LocalId>,
+  call: Tir.NodeRef,
   span: SourceSpan.SourceSpan,
 ): WitnessArguments | undefined => {
   const parameters = sourceWitnessParameterTypes(fn, target)
@@ -278,8 +287,7 @@ export const sourceWitnessArguments = (
     ) {
       const borrow = fn.beginRecipeBorrow({
         _tag: 'BorrowId',
-        function: fn.owner.function.declaration.id,
-        callSpan: span,
+        call,
         ordinal: arguments_.length + ordinal,
       })
       const destination = fn.alloc(expected)
@@ -325,8 +333,7 @@ export const sourceWitnessArguments = (
     const borrow = fn.beginRecipeBorrow(
       Object.freeze({
         _tag: 'BorrowId' as const,
-        function: fn.owner.function.declaration.id,
-        callSpan: span,
+        call,
         ordinal: arguments_.length + ordinal,
       }),
     )
@@ -472,6 +479,7 @@ export const lowerWitnessEffect = (
     fn,
     expression.arguments,
     contract.operands,
+    Tir.nodeReference(fn.owner.view.artifact, expression),
     expression.span,
   )
   if (operands === 'Transferred') return operands
@@ -547,7 +555,13 @@ export const lowerStaticInterfaceWitnessCall = (
   )
   const resultType = fn.type(expression.type)
   if (target === undefined || resultType === undefined) return undefined
-  const witnessArguments = sourceWitnessArguments(fn, target, argumentLocals, expression.span)
+  const witnessArguments = sourceWitnessArguments(
+    fn,
+    target,
+    argumentLocals,
+    Tir.nodeReference(fn.owner.view.artifact, expression),
+    expression.span,
+  )
   if (witnessArguments === undefined) return undefined
   const selected = fn.call(expression.span, target.implementation, target.typeArguments)
   const destination = fn.alloc(resultType)

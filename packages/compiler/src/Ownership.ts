@@ -37,9 +37,9 @@ export type OwnershipCategory =
 
 /** Where one binding was introduced: a parameter or a `let` statement. */
 export type BindingSite =
-  | { readonly _tag: 'Parameter'; readonly parameter: DeclarationFacts.ParameterId }
-  | { readonly _tag: 'Let'; readonly binding: Tir.BindingId }
-  | { readonly _tag: 'Pattern'; readonly binding: Match.BindingId }
+  | { readonly _tag: 'Parameter'; readonly parameter: Tir.LocalId }
+  | { readonly _tag: 'Let'; readonly binding: Tir.LocalId }
+  | { readonly _tag: 'Pattern'; readonly binding: Tir.LocalId }
   | { readonly _tag: 'Temporary'; readonly owner: Tir.TemporaryOwnerId }
 
 const ownedWriteSite = (root: Tir.OwnedWriteRoot): BindingSite => {
@@ -92,8 +92,17 @@ export type BorrowId = Tir.BorrowId
 /** One concrete validity dependency, retaining its precise known subplace. */
 export interface LoanReferent {
   readonly root: BindingSite
-  readonly path: ReadonlyArray<LoanView.Selector>
+  readonly path: ReadonlyArray<ReferentSelector>
 }
+
+export type ReferentSelector =
+  | Extract<LoanView.Selector, { readonly _tag: 'Field' }>
+  | (Omit<Extract<LoanView.Selector, { readonly _tag: 'Index' }>, 'index'> & {
+      readonly index?: LoanView.Expression
+    })
+  | (Omit<Extract<LoanView.Selector, { readonly _tag: 'SliceIndex' }>, 'index'> & {
+      readonly index?: LoanView.Expression
+    })
 
 /** Canonical subplace identity for inspection and dependency-set normalization. */
 export const referentKey = (self: LoanReferent): string =>
@@ -386,9 +395,9 @@ export const siteKey = (site: BindingSite): string => {
     return `b${site.binding.ordinal}`
   }
   if (site._tag === 'Pattern') {
-    return `m${site.binding.arm.match.span.start}.a${site.binding.arm.ordinal}.p${site.binding.ordinal}`
+    return `l${site.binding.ordinal}`
   }
-  return `t${site.owner.span.sourceId}:${site.owner.span.start}:${site.owner.span.end}:${site.owner.ordinal}`
+  return `t${Tir.nodeRefKey(site.owner.node)}`
 }
 
 interface MutableBinding {
@@ -430,6 +439,7 @@ interface CheckState {
   }
   nextAcquisition: number
   readonly index: DeclarationIndex.Index
+  readonly causes: Elaboration.BodyResults['causes']
   readonly copyAssumptions: ReadonlySet<string>
   readonly bindings: Map<string, MutableBinding>
   readonly order: Array<MutableBinding>
@@ -452,6 +462,12 @@ interface CheckState {
   readonly transitions: Array<PlaceTransition>
   readonly shapes: Map<string, MovePath.ShapeOf>
 }
+
+const unavailableCause = (
+  state: CheckState,
+  expression: Extract<Tir.Expression, { readonly _tag: 'Unavailable' }>,
+): Diagnostic.CauseIdentity | undefined =>
+  expression.cause === undefined ? undefined : state.causes.at(expression.cause.ordinal)
 
 type FlowState = Map<string, MovePath.State>
 type ReadonlyFlowState = ReadonlyMap<string, MovePath.State>
@@ -890,7 +906,8 @@ const callableEnvironment = (
   const slots = Object.freeze(
     expression.captures.map((capture): CallableEnvironmentSlot => {
       const type = capture.value._tag === 'Unavailable' ? undefined : capture.value.type
-      const cause = capture.value._tag === 'Unavailable' ? capture.value.cause : undefined
+      const cause =
+        capture.value._tag === 'Unavailable' ? unavailableCause(state, capture.value) : undefined
       const retained = retainedBinding(state, capture.value)
       const root = borrowRootType(state, capture.value)
       let executionAffinity: ExecutionAffinity.ExecutionAffinity
@@ -2260,7 +2277,7 @@ const analyzeLoans = (
   const viewAliases = new Map<number, ReadonlyArray<number>>()
   const rootsOf = (
     root: BindingSite,
-    path: ReadonlyArray<LoanView.Selector> = [],
+    path: ReadonlyArray<ReferentSelector> = [],
   ): ReadonlyArray<LoanReferent> => {
     const sources = root._tag === 'Let' ? viewRoots.get(root.binding.ordinal) : undefined
     return sources === undefined
@@ -2351,7 +2368,17 @@ const analyzeLoans = (
     }
     if (fn.lifetimeFlow !== undefined && expression.type._tag === 'Available') {
       const origins = LifetimeFlow.sources(fn.lifetimeFlow, expression.type.type).flatMap(
-        (origin) => (origin.root === undefined ? [] : rootsOf(origin.root, origin.path ?? [])),
+        (origin) =>
+          origin.root === undefined
+            ? []
+            : rootsOf(
+                origin.root,
+                (origin.path ?? []).map((selector): ReferentSelector => {
+                  if (selector._tag === 'Field') return selector
+                  const { index: _index, ...portable } = selector
+                  return portable
+                }),
+              ),
       )
       if (origins.length > 0) return origins
     }
@@ -2490,7 +2517,7 @@ const analyzeLoans = (
   const storedByValue = (type: Type.Type | undefined): boolean =>
     type !== undefined &&
     (Type.isReference(type) || Type.isSlice(type) || Type.isEffect(type) || Type.isCallable(type))
-  const ownedParameter = (parameter: DeclarationFacts.ParameterId): boolean => {
+  const ownedParameter = (parameter: Tir.LocalId): boolean => {
     const declared = fn.declaration.parameters.find(
       (candidate) => candidate.id.ordinal === parameter.ordinal,
     )
@@ -2631,17 +2658,24 @@ const analyzeLoans = (
 
   const delayedLoansAt = (span: SourceSpan.SourceSpan, write = false): ReadonlyArray<LoanFact> =>
     loans.filter((loan) => {
-      const live =
-        fn.lifetimeFlow === undefined
-          ? undefined
-          : LifetimeFlow.liveAt(fn.lifetimeFlow, loan.startSpan, span, loan.endSpan, write)
-      if (live !== undefined) return live
-      return (
+      const retainedExecutableCapture =
+        loan.origin === 'CallableCapture' ||
+        loan.origin === 'ReturnedCallableCapture' ||
+        loan.origin === 'EffectCapture'
+      const retainedThroughAuthoredUse =
         loan.startSpan.sourceId === span.sourceId &&
         loan.startSpan.end <= span.start &&
         span.end <= loan.endSpan.end &&
         loan.endSpan.end > loan.startSpan.end
-      )
+      const live =
+        fn.lifetimeFlow === undefined
+          ? undefined
+          : LifetimeFlow.liveAt(fn.lifetimeFlow, loan.startSpan, span, loan.endSpan, write)
+      // Executable environments retain their captured storage until their computed use/drop end.
+      // That ownership fact is stronger than a value-lifetime graph which can stop at an invalid
+      // invocation and would otherwise make the capture disappear before the authored use.
+      if (retainedExecutableCapture && retainedThroughAuthoredUse) return true
+      return live ?? retainedThroughAuthoredUse
     })
 
   const checkDirectAccess = (
@@ -2730,8 +2764,7 @@ const analyzeLoans = (
             _tag: 'Loan',
             id: Object.freeze({
               _tag: 'BorrowId',
-              function: fn.declaration.id,
-              callSpan: context.spanOf(expression.anchor),
+              call: expression.ref,
               ordinal: 0,
             }),
             root,
@@ -2768,7 +2801,8 @@ const analyzeLoans = (
             access,
           )
           for (const selector of place.path)
-            if (selector._tag !== 'Field') inspect(selector.index, region, active, 'Read')
+            if (selector._tag !== 'Field' && selector.index !== undefined)
+              inspect(selector.index, region, active, 'Read')
         }
         if (place === undefined && expression._tag === 'IndexProjection')
           inspect(expression.index, region, active, 'Read')
@@ -2845,8 +2879,7 @@ const analyzeLoans = (
             _tag: 'Loan',
             id: Object.freeze({
               _tag: 'BorrowId',
-              function: fn.declaration.id,
-              callSpan: context.spanOf(expression.anchor),
+              call: expression.ref,
               ordinal,
             }),
             root,
@@ -2910,8 +2943,7 @@ const analyzeLoans = (
             _tag: 'Loan',
             id: Object.freeze({
               _tag: 'BorrowId',
-              function: fn.declaration.id,
-              callSpan: context.spanOf(expression.anchor),
+              call: expression.ref,
               ordinal: capture.ordinal,
             }),
             root,
@@ -2977,8 +3009,7 @@ const analyzeLoans = (
                 _tag: 'Loan',
                 id: Object.freeze({
                   _tag: 'BorrowId',
-                  function: fn.declaration.id,
-                  callSpan: context.spanOf(expression.anchor),
+                  call: expression.ref,
                   ordinal: argumentOrdinal,
                 }),
                 root,
@@ -3069,8 +3100,7 @@ const analyzeLoans = (
             _tag: 'Loan',
             id: Object.freeze({
               _tag: 'BorrowId',
-              function: fn.declaration.id,
-              callSpan: context.spanOf(expression.anchor),
+              call: expression.ref,
               ordinal: argumentOrdinal,
             }),
             root,
@@ -3105,6 +3135,7 @@ const analyzeLoans = (
           ...active,
           ...delayedLoansAt(context.spanOf(expression.anchor)),
         ]
+        const capturedLoans: Array<LoanFact> = []
         for (const [ordinal, capture] of expression.captures.entries()) {
           let root: BindingSite
           if (capture.reference._tag === 'BindingFact')
@@ -3133,8 +3164,7 @@ const analyzeLoans = (
             _tag: 'Loan',
             id: Object.freeze({
               _tag: 'BorrowId',
-              function: fn.declaration.id,
-              callSpan: context.spanOf(expression.anchor),
+              call: expression.ref,
               ordinal,
             }),
             root,
@@ -3148,10 +3178,14 @@ const analyzeLoans = (
             endSpan: delayedEnd?.span ?? context.spanOf(expression.anchor),
             cleanupOnly: delayedEnd?.cleanupOnly ?? false,
           })
-          loans.push(loan)
+          capturedLoans.push(loan)
           captureActive.push(loan)
         }
+        // The deferred body executes through its captured capabilities. Publish those loans only
+        // after inspecting the body so its own reads and writes do not conflict with the views
+        // that authorize them.
         statements(expression.statements)
+        loans.push(...capturedLoans)
         return
       }
       case 'Run':
@@ -3189,8 +3223,7 @@ const analyzeLoans = (
             _tag: 'Loan',
             id: Object.freeze({
               _tag: 'BorrowId',
-              function: fn.declaration.id,
-              callSpan: context.spanOf(expression.anchor),
+              call: expression.ref,
               ordinal: 0,
             }),
             root,
@@ -3362,8 +3395,10 @@ interface ExitDescriptor {
 
 const checkFunction = (
   fn: Tir.TirFunction,
+  artifact: Tir.ArtifactId,
   index: DeclarationIndex.Index,
   context: SemanticContext.SemanticContext,
+  causes: Elaboration.BodyResults['causes'],
   lifetimes?: LifetimeFlow.LifetimeFlow,
   localSharedBoundaries: ReadonlyArray<SourceSpan.SourceSpan> = Object.freeze([]),
   localSharedResultBoundaries: ReadonlyArray<SourceSpan.SourceSpan> = Object.freeze([]),
@@ -3392,6 +3427,7 @@ const checkFunction = (
     },
     nextAcquisition: 0,
     index,
+    causes,
     copyAssumptions,
     bindings: new Map(),
     order: [],
@@ -3532,7 +3568,10 @@ const checkFunction = (
     const cause = 'cause' in parameter.declaredType ? parameter.declaredType.cause : undefined
     const binding: MutableBinding = {
       ordinal: state.nextAcquisition++,
-      site: Object.freeze({ _tag: 'Parameter', parameter: parameter.id }),
+      site: Object.freeze({
+        _tag: 'Parameter',
+        parameter: Object.freeze({ _tag: 'TirLocal' as const, ordinal: parameter.id.ordinal }),
+      }),
       name: parameter.name._tag === 'Present' ? parameter.name.spelling : undefined,
       mutability: parameter.bindingMutability,
       liveFrom: context.spanOf(parameter.anchor),
@@ -3881,7 +3920,9 @@ const checkFunction = (
                 obligations: environment.localSharedObligations,
               })
         const cause =
-          statement.initializer._tag === 'Unavailable' ? statement.initializer.cause : undefined
+          statement.initializer._tag === 'Unavailable'
+            ? unavailableCause(state, statement.initializer)
+            : undefined
         const binding: MutableBinding = {
           ordinal: state.nextAcquisition++,
           site: Object.freeze({ _tag: 'Let', binding: statement.binding }),
@@ -4360,9 +4401,14 @@ const checkFunction = (
     const candidates = new Map(
       expression.members.map((member) => [Match.encodeIdentity(member), candidateFor(member)]),
     )
+    // A `never` match has no result value to consume. This also covers the non-executable
+    // recovery match retained after a rejected result join, whose arms remain available to
+    // tooling but must not produce follow-on move diagnostics.
+    const consumesArmResult = consuming && !Type.isNever(expression.type)
     const continuing: Array<FlowState> = []
     const armFacts: Array<MatchOwnership['arms'][number]> = []
     for (const arm of expression.arms) {
+      if (!arm.reachable) continue
       const selected = expression.members.filter(
         (member) =>
           candidates.has(Match.encodeIdentity(member)) &&
@@ -4440,7 +4486,7 @@ const checkFunction = (
           frame: frames.length - 1,
           release: Object.freeze({
             ordinal: payloadOrdinal,
-            id: expression.id,
+            id: expression.match,
             arm: arm.id,
             cleanup: Object.freeze([
               { path: Object.freeze([]), cleanup: cleanupPlan(state, payloadType) },
@@ -4479,13 +4525,20 @@ const checkFunction = (
           frame: frames.length - 1,
           release: Object.freeze({
             ordinal: payloadOrdinal,
-            id: expression.id,
+            id: expression.match,
             arm: arm.id,
             cleanup,
           }),
         })
         if (arm.body._tag === 'Expression') {
-          completes = checkExpression(state, armLive, arm.body.expression, consuming, guard, true)
+          completes = checkExpression(
+            state,
+            armLive,
+            arm.body.expression,
+            consumesArmResult,
+            guard,
+            true,
+          )
         } else {
           const result = walkStatements(
             arm.body.statements,
@@ -4531,7 +4584,7 @@ const checkFunction = (
     state.matches.push(
       Object.freeze({
         _tag: 'MatchOwnership',
-        id: expression.id,
+        id: expression.match,
         access: expression.access,
         span: expression.span,
         arms: Object.freeze(armFacts),
@@ -4655,7 +4708,7 @@ const checkFunction = (
           diagnostics: Object.freeze([]),
         })
       : analyzeLoans(
-          { ...LoanView.ofTir(fn, index), lifetimeFlow: loanLifetimes },
+          { ...LoanView.ofTir(fn, index, artifact), lifetimeFlow: loanLifetimes },
           index,
           copyAssumptions,
           cleanupExits,
@@ -4697,9 +4750,13 @@ const checkFunction = (
       ...(fn.contract.cause === undefined ? {} : { cause: fn.contract.cause }),
     })
   } else if (firstUnavailable !== undefined) {
+    const cause =
+      firstUnavailable.cause === undefined
+        ? undefined
+        : state.causes.at(firstUnavailable.cause.ordinal)
     verdict = Object.freeze({
       _tag: 'Unavailable',
-      ...(firstUnavailable.cause === undefined ? {} : { cause: firstUnavailable.cause }),
+      ...(cause === undefined ? {} : { cause }),
     })
   } else if (violation !== undefined) {
     verdict = Object.freeze({ _tag: 'Violation', cause: Diagnostic.identity(violation) })
@@ -4777,6 +4834,8 @@ const checkFunction = (
 /** Every input read by the ownership checker, after callback boundaries are selected. */
 export interface CheckInput {
   readonly function: Tir.TirFunction
+  readonly artifact: Tir.ArtifactId
+  readonly causes: Elaboration.BodyResults['causes']
   /** The region proof published with the body; absent for a body construction never analyzed. */
   readonly lifetimes: LifetimeFlow.LifetimeFlow | undefined
   readonly index: DeclarationIndex.Index
@@ -4789,13 +4848,17 @@ export interface CheckInput {
 /** Resolves ownership inputs without running the checker or reconstructing prior diagnostics. */
 export const input = (
   fn: Tir.TirFunction,
+  artifact: Tir.ArtifactId,
   lifetimes: LifetimeFlow.LifetimeFlow | undefined,
   index: DeclarationIndex.Index,
   accessBoundaryPlan: LocalSharedAccessBoundaryPlan,
   context: SemanticContext.SemanticContext,
+  causes: Elaboration.BodyResults['causes'] = Object.freeze([]),
 ): CheckInput =>
   Object.freeze({
     function: fn,
+    artifact,
+    causes,
     lifetimes,
     index,
     context,
@@ -4830,6 +4893,8 @@ const sameBoundarySpans = (
 /** Requires identical semantic authorities and equal ordered access-boundary spans. */
 export const matchesInput = (self: CheckInput, other: CheckInput): boolean =>
   self.function === other.function &&
+  Tir.artifactKey(self.artifact) === Tir.artifactKey(other.artifact) &&
+  self.causes === other.causes &&
   self.lifetimes === other.lifetimes &&
   self.index === other.index &&
   self.context === other.context &&
@@ -4840,8 +4905,10 @@ export const matchesInput = (self: CheckInput, other: CheckInput): boolean =>
 export const check = (self: CheckInput): CheckedFunction =>
   checkFunction(
     self.function,
+    self.artifact,
     self.index,
     self.context,
+    self.causes,
     self.lifetimes,
     self.boundaries,
     self.resultBoundaries,
@@ -5089,7 +5156,15 @@ export const checkModule = (
     // A `static fn` runs in the evaluator: it owns nothing at run time.
     if (body.declaration.phase === 'Static') return []
     const fn = body.function
-    const selected = input(fn, body.results.lifetimes, index, accessBoundaryPlan, context)
+    const selected = input(
+      fn,
+      body.artifact,
+      body.results.lifetimes,
+      index,
+      accessBoundaryPlan,
+      context,
+      body.results.causes,
+    )
     const compute = () => check(selected)
     const checked =
       bodyQuery === undefined ? compute() : BodyQuery.ownership(bodyQuery, selected, compute)

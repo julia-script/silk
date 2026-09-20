@@ -1,7 +1,8 @@
 import type * as AuthoredHir from './AuthoredHir.js'
 import * as AuthoredIdentity from './AuthoredIdentity.js'
 import * as Elaboration from './Elaboration.js'
-import type * as Tir from './Tir.js'
+import * as BodyBuilder from './BodyBuilder.js'
+import * as Tir from './Tir.js'
 import type * as SemanticContext from './SemanticContext.js'
 import type * as SourceSpan from './SourceSpan.js'
 import * as Type from './Type.js'
@@ -34,7 +35,7 @@ const loopKey = (loop: Tir.LoopId): string =>
 /** Builds structured branch exits and loop backedges once for one authored body. */
 export const make = (
   context: SemanticContext.SemanticContext,
-  statements: ReadonlyArray<Elaboration.StatementFact>,
+  statements: ReadonlyArray<Tir.Statement>,
   root: AuthoredHir.Anchor,
 ): BodyControlFlow => {
   const edges: Array<Array<number>> = []
@@ -61,9 +62,13 @@ export const make = (
     return value
   }
   type Loops = ReadonlyMap<string, { readonly exit: number; readonly repeat: number }>
-  const expression = (value: Elaboration.ExpressionFact, next: number, loops: Loops): number => {
-    const own = boundary(value.anchor)
-    if (value.type._tag !== 'Available' || !Type.isNever(value.type.type)) edge(own.after, next)
+  type ConstructionExpression = Elaboration.ExpressionDecision | Tir.Expression
+  type ConstructionStatement = Tir.Statement
+  const expression = (value: ConstructionExpression, next: number, loops: Loops): number => {
+    const own = boundary(Elaboration.constructionExpressionAnchor(value))
+    const expressionType = Elaboration.constructionExpressionType(value)
+    if (expressionType._tag !== 'Available' || !Type.isNever(expressionType.type))
+      edge(own.after, next)
     if (value._tag === 'Match') {
       const dispatch = point()
       let fallback = own.after
@@ -80,15 +85,19 @@ export const make = (
           edge(choice, fallback)
           selected = expression(arm.guard, choice, loops)
         }
-        const entered = boundary(arm.anchor)
+        const entered = boundary(
+          'anchor' in arm
+            ? arm.anchor
+            : (arm.at ?? Elaboration.constructionExpressionAnchor(value)),
+        )
         edge(entered.before, selected)
         edge(dispatch, entered.before)
         fallback = entered.before
       }
       edge(own.before, expression(value.scrutinee, dispatch, loops))
     } else if (value._tag === 'ShortCircuit') {
-      const first = value.arguments.at(0)?.expression
-      const second = value.arguments.at(1)?.expression
+      const first = 'origin' in value ? value.left : value.arguments.at(0)?.expression
+      const second = 'origin' in value ? value.right : value.arguments.at(1)?.expression
       const choice = point()
       edge(choice, own.after)
       if (second !== undefined) edge(choice, expression(second, own.after, loops))
@@ -97,8 +106,9 @@ export const make = (
       // Deferred bodies have their own entry; creation does not execute their statements.
       sequence(value.statements, point(), new Map())
       let start = own.after
-      for (const capture of [...value.captures].reverse())
-        if (capture.expression !== undefined) start = expression(capture.expression, start, loops)
+      if (!('origin' in value))
+        for (const capture of [...value.captures].reverse())
+          if (capture.expression !== undefined) start = expression(capture.expression, start, loops)
       edge(own.before, start)
     } else {
       let start = own.after
@@ -109,26 +119,25 @@ export const make = (
     return own.before
   }
   const sequence = (
-    values: ReadonlyArray<Elaboration.StatementFact>,
+    values: ReadonlyArray<ConstructionStatement>,
     next: number,
     loops: Loops,
   ): number => {
     let start = next
     for (const statement of [...values].reverse()) {
-      const anchor =
-        statement._tag === 'BindStatement' ? statement.binding.anchor : statement.anchor
+      const anchor = statement.origin.anchor
       const own = boundary(anchor)
       const previous = start
       start = own.before
-      if (statement._tag === 'ReturnStatement' || statement._tag === 'FailStatement') {
+      if (statement._tag === 'Return' || statement._tag === 'Fail') {
         edge(own.before, expression(statement.expression, own.after, loops))
-      } else if (statement._tag === 'BreakStatement' || statement._tag === 'ContinueStatement') {
+      } else if (statement._tag === 'Break' || statement._tag === 'Continue') {
         const target =
           statement.target === undefined ? undefined : loops.get(loopKey(statement.target))
         edge(own.before, own.after)
         if (target !== undefined)
-          edge(own.after, statement._tag === 'BreakStatement' ? target.exit : target.repeat)
-      } else if (statement._tag === 'WhileStatement') {
+          edge(own.after, statement._tag === 'Break' ? target.exit : target.repeat)
+      } else if (statement._tag === 'While') {
         const choice = point()
         const condition = expression(statement.condition, choice, loops)
         const nested = new Map(loops).set(loopKey(statement.loop), {
@@ -136,35 +145,35 @@ export const make = (
           repeat: condition,
         })
         const body = sequence(statement.body, condition, nested)
-        if (statement.condition._tag !== 'Boolean' || statement.condition.value) edge(choice, body)
-        if (statement.condition._tag !== 'Boolean' || !statement.condition.value)
-          edge(choice, own.after)
+        const boolean =
+          statement.condition._tag === 'BooleanLiteral' ? statement.condition.value : undefined
+        if (boolean !== false) edge(choice, body)
+        if (boolean !== true) edge(choice, own.after)
         edge(own.before, condition)
         edge(own.after, previous)
-      } else if (statement._tag === 'IfStatement' || statement._tag === 'IfLetStatement') {
+      } else if (statement._tag === 'If' || statement._tag === 'IfLet') {
         const choice = point()
         const test =
-          statement._tag === 'IfStatement' ? statement.condition : statement.selection.source
+          statement._tag === 'If'
+            ? statement.condition
+            : (statement.selection.source ?? statement.selection.subject)
         const taken = sequence(statement.taken, own.after, loops)
         const otherwise = sequence(statement.otherwise, own.after, loops)
-        if (test._tag !== 'Boolean' || test.value) edge(choice, taken)
-        if (test._tag !== 'Boolean' || !test.value) edge(choice, otherwise)
+        const boolean = test._tag === 'BooleanLiteral' ? test.value : undefined
+        if (boolean !== false) edge(choice, taken)
+        if (boolean !== true) edge(choice, otherwise)
         edge(own.before, expression(test, choice, loops))
         edge(own.after, previous)
-      } else if (statement._tag === 'UnsafeStatement') {
+      } else if (statement._tag === 'Unsafe') {
         edge(own.before, sequence(statement.statements, own.after, loops))
         edge(own.after, previous)
       } else {
         let evaluated = own.after
-        let values: ReadonlyArray<Elaboration.ExpressionFact>
-        if (statement._tag === 'BindStatement') values = [statement.binding.initializer]
-        else if (statement._tag === 'WriteStatement')
-          values = [statement.destination, statement.value]
-        else if (statement._tag === 'PatternBindStatement') values = [statement.selection.source]
-        else values = [statement.expression]
+        const values: ReadonlyArray<ConstructionExpression> =
+          BodyBuilder.directStatementExpressions(statement)
         for (const value of [...values].reverse()) evaluated = expression(value, evaluated, loops)
-        if (statement._tag === 'WriteStatement') {
-          const destination = statement.destination.anchor
+        if (statement._tag === 'Write') {
+          const destination = statement.destination?.origin.anchor ?? statement.place.origin.anchor
           anchors.set(AuthoredIdentity.anchorKey(destination), destination)
           writeAnchors.set(AuthoredIdentity.anchorKey(destination), own.after)
           writes.set(spanKey(context.spanOf(destination)), own.after)
