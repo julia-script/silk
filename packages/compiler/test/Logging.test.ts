@@ -10,6 +10,29 @@ const snapshot = (source: string, target = 'aarch64-apple-darwin') =>
   Analysis.ofSourceRealized('logging/main', encoder.encode(source), target)
 
 it.effect(
+  'lowers logger entrypoints with dense runtime parameters after static arguments',
+  () =>
+    Effect.gen(function* () {
+      const frontend = yield* snapshot(
+        `import silk.effect { Effect }
+import silk.logger { LogError }
+import silk.os_logger { StdoutLogger }
+
+pub effect fn main() -> () ! LogError {
+  let mut logger = StdoutLogger.make()
+
+  run Effect.log("Hello, world!", &())
+    |> Effect.provideMut(&mut logger)
+}`,
+        'x86_64-unknown-linux-gnu',
+      )
+      assert.deepEqual(Analysis.diagnostics(frontend), [])
+      yield* Analysis.codegen(frontend, { mode: 'release' })
+    }),
+  { timeout: 30_000 },
+)
+
+it.effect(
   'specializes static logging templates without exposing formatting requirements',
   () =>
     Effect.gen(function* () {

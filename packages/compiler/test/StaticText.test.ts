@@ -1424,11 +1424,11 @@ pub fn main() -> i32 { return choose(true, 41) }`),
     )
     assert.strictEqual(
       sha256(tir),
-      '18f8e2e6289583115c89d808bc3bbdf50e6d810077cb4ae00e45cf933835ed63',
+      'ee710839225f50f0ae65868d962918b1f2e12120d23ea6f5c89ae1bb22effd10',
     )
     assert.strictEqual(
       sha256(ownership),
-      '785e3827b41ff0d0e9e5c4f115a5393445759a387becb85e6a38a60f3ea177d7',
+      '7b219d1f31e63fc6e755aa5fb60d4d3dd986b2300df19bf464d5e618c3bffb31',
     )
 
     const alternateEvidence = Object.freeze({

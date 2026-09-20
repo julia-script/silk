@@ -245,6 +245,12 @@ export const dependencies = (self: EvaluationCoordinator): string =>
 export const counters = (self: EvaluationCoordinator): Counters =>
   Object.freeze({ ...self[stateSymbol].counters })
 
+/** Snapshots source and target-specialized aggregates created during this evaluation session. */
+export const generatedAggregates = (
+  self: EvaluationCoordinator,
+): ReadonlyMap<string, DeclarationFacts.StructFact> =>
+  new Map(self[stateSymbol].generatedAggregates)
+
 /** Snapshots declaration/reason attribution without counting retained proof work as execution. */
 export const observations = (self: EvaluationCoordinator): ReadonlyArray<Observation> =>
   Object.freeze(

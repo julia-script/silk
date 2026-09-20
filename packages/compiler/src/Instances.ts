@@ -237,6 +237,8 @@ export interface Discovery {
   readonly rootModule: string
   /** Spans of authored positions reachable from any module of the discovered closure. */
   readonly registry: SemanticContext.Registry
+  /** Source and target-specialized anonymous aggregates required by reachable instances. */
+  readonly generatedAggregates: ReadonlyMap<string, DeclarationFacts.StructFact>
   readonly instances: ReadonlyArray<Instance>
   /** Demanded residual specializations rejected before executable reachability. */
   readonly unavailableOwnership: ReadonlyArray<UnavailableResidualOwnership>
@@ -367,6 +369,7 @@ export const invalid = (
     retention: Object.freeze([]),
     rootModule,
     registry,
+    generatedAggregates: new Map(),
     instances: Object.freeze([]),
     unavailableOwnership: Object.freeze([]),
     callables: Object.freeze([]),
@@ -2261,6 +2264,7 @@ export const discover = (
     retention: Object.freeze(retention),
     rootModule,
     registry,
+    generatedAggregates: Residualization.generatedAggregates(residualization),
     instances,
     unavailableOwnership,
     callables: Object.freeze([...recordedCallables.values()]),

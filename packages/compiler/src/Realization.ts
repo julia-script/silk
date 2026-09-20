@@ -138,6 +138,7 @@ const collectInstanceDiagnostics = Effect.fn('Realization.collectInstanceDiagnos
 
 const buildTargetLayout = Effect.fn('Realization.buildTargetLayout')(function* (
   self: Frontend,
+  index: DeclarationIndex.Index,
   instances: Instances.Discovery,
   targetSelection: Target.Selection,
   analysisUnavailable: AnalysisUnavailable | undefined,
@@ -163,7 +164,7 @@ const buildTargetLayout = Effect.fn('Realization.buildTargetLayout')(function* (
     })
   const catalog = yield* Layout.catalog(
     selection.target,
-    self.index,
+    index,
     instances.registry,
     instances,
     OpaqueRealization.catalogOf(self),
@@ -173,28 +174,24 @@ const buildTargetLayout = Effect.fn('Realization.buildTargetLayout')(function* (
     selection,
     target: selection.target,
     catalog,
-    layout: yield* Layout.plan(catalog, instances, self.index),
+    layout: yield* Layout.plan(catalog, instances, index),
   })
 })
 
 const lowerMir = Effect.fn('Realization.lowerMir')(function* (
   self: Frontend,
+  index: DeclarationIndex.Index,
   instances: Instances.Discovery,
   layout: Layout.Plan,
   profile: CompilationProfile.CompilationProfile | undefined,
   options: Options,
 ) {
-  const program = yield* lowerProgram(
-    instances,
-    layout,
-    self.index,
-    OpaqueRealization.catalogOf(self),
-  )
-  const provisional = yield* buildProvisionalMir(instances, layout, self.index)
+  const program = yield* lowerProgram(instances, layout, index, OpaqueRealization.catalogOf(self))
+  const provisional = yield* buildProvisionalMir(instances, layout, index)
   return yield* finalizeMir(
     program,
     provisional,
-    self.index,
+    index,
     OpaqueRealization.catalogOf(self),
     profile,
     options,
@@ -294,6 +291,10 @@ const discoverAndLowerEffect = Effect.fn('Realization.discoverAndLower')(functio
     options,
     registry,
   )
+  const realizedIndex: DeclarationIndex.Index = Object.freeze({
+    ...self.index,
+    generatedAggregates: instances.generatedAggregates,
+  })
   const baseDiagnostics = yield* collectInstanceDiagnostics(
     self,
     instances,
@@ -346,7 +347,14 @@ const discoverAndLowerEffect = Effect.fn('Realization.discoverAndLower')(functio
     report,
     'target-layout',
     instances.instances.length,
-    buildTargetLayout(self, instances, targetSelection, analysisUnavailable, prepareForEmission),
+    buildTargetLayout(
+      self,
+      realizedIndex,
+      instances,
+      targetSelection,
+      analysisUnavailable,
+      prepareForEmission,
+    ),
     (value) => (value._tag === 'Available' ? value.layout.entries.length : 0),
     (value) => (value._tag === 'Available' ? value.layout.diagnostics.length : 0),
     options,
@@ -414,7 +422,14 @@ const discoverAndLowerEffect = Effect.fn('Realization.discoverAndLower')(functio
           report,
           'mir-lowering',
           instances.instances.length,
-          lowerMir(self, instances, targetLayout.layout, completion?.profile, options),
+          lowerMir(
+            self,
+            realizedIndex,
+            instances,
+            targetLayout.layout,
+            completion?.profile,
+            options,
+          ),
           (value) => value.program?.functions.length ?? 0,
           (value) => value.diagnostics.length,
           options,

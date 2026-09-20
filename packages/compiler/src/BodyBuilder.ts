@@ -935,16 +935,6 @@ const staticStructure = (
         })
       : unavailable()
   if (fact._tag !== 'Call') return undefined
-  if (fact.staticValue !== undefined && fact.type._tag === 'Available') {
-    const value = staticValueExpression(
-      fact.staticValue,
-      fact.type.type,
-      fact.anchor,
-      options.context,
-      options.builder,
-    )
-    if (value._tag !== 'Unavailable') return value
-  }
   const typeArguments = fact.contract._tag === 'Compatible' ? fact.contract.typeArguments : []
   const arguments_ = Object.freeze(
     fact.arguments.map((argument) => tirExpression(argument.expression, options)),
@@ -1321,7 +1311,6 @@ const residualExpression = (
   if (fact._tag === 'Identifier') {
     const materializeStaticReference =
       options.static === undefined ||
-      (fact.reference._tag === 'Resolved' && fact.reference.parameter.phase === 'Static') ||
       (fact.reference._tag === 'ResolvedBinding' && fact.reference.binding.staticIteration === true)
     if (
       materializeStaticReference &&

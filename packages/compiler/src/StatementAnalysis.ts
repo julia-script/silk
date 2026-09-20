@@ -1252,7 +1252,13 @@ export const analyzeStatements = (
           loopStack,
         )
         facts.push(...selectedStatements)
-        if (!returnFlowOf(selectedStatements).fallsThrough) break
+        const selectedFlow = returnFlowOf(selectedStatements)
+        if (
+          !selectedFlow.fallsThrough &&
+          (selectedFlow.returns.length > 0 ||
+            selectedStatements.some((statement) => statement._tag === 'Fail'))
+        )
+          break
       }
       continue
     }
