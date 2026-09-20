@@ -1275,6 +1275,26 @@ export type AssignmentRootAccess =
   | 'SharedBorrowed'
   | 'ExclusiveBorrowed'
 
+const assignmentPlaceBorrowAccess = (place: ExpressionFact): Type.BorrowAccess | undefined => {
+  if (
+    place._tag !== 'FieldProjection' &&
+    place._tag !== 'ReferentProjection' &&
+    place._tag !== 'IndexProjection'
+  ) {
+    return undefined
+  }
+  const inherited = assignmentPlaceBorrowAccess(place.subject)
+  const current =
+    place._tag === 'ReferentProjection'
+      ? place.borrowAccess
+      : place._tag === 'IndexProjection'
+        ? place.slice?.access
+        : undefined
+  if (inherited === 'Shared' || current === 'Shared') return 'Shared'
+  if (inherited === 'Exclusive' || current === 'Exclusive') return 'Exclusive'
+  return undefined
+}
+
 /** Classifies writable roots without conflating owned binding mutability with pointee access. */
 export const assignmentRootAccess = (
   root: AssignmentRootFact,
@@ -1296,13 +1316,21 @@ export const assignmentRootAccess = (
   } else {
     type = undefined
   }
-  if (
+  const rootBorrowAccess =
     place._tag !== 'Identifier' &&
     type !== undefined &&
     (Type.isSlice(type) || Type.isReference(type))
-  ) {
-    return type.access === 'Exclusive' ? 'ExclusiveBorrowed' : 'SharedBorrowed'
-  }
+      ? type.access
+      : undefined
+  const placeBorrowAccess = assignmentPlaceBorrowAccess(place)
+  const borrowAccess =
+    rootBorrowAccess === 'Shared' || placeBorrowAccess === 'Shared'
+      ? 'Shared'
+      : rootBorrowAccess === 'Exclusive' || placeBorrowAccess === 'Exclusive'
+        ? 'Exclusive'
+        : undefined
+  if (borrowAccess !== undefined)
+    return borrowAccess === 'Exclusive' ? 'ExclusiveBorrowed' : 'SharedBorrowed'
   const mutability = root._tag === 'ParameterDeclaration' ? root.bindingMutability : root.mutability
   return mutability === 'Mutable' ? 'MutableOwned' : 'ImmutableOwned'
 }

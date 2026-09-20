@@ -480,6 +480,51 @@ fn duplicate() -> i32 {
     }),
 )
 
+it.effect(
+  'lowers writes through stored exclusive references for mutable and immutable holders',
+  () =>
+    Effect.gen(function* () {
+      const source = `struct View<'a> { value: &'a mut i32 }
+fn mutableHolder() -> i32 {
+  let mut value = 1
+  let mut holder = View { value: &mut value }
+  holder.value.* = 2
+  return value
+}
+fn immutableHolder() -> i32 {
+  let mut value = 1
+  let holder = View { value: &mut value }
+  holder.value.* = 2
+  return value
+}
+pub fn main() -> i32 { return mutableHolder() + immutableHolder() }`
+      const self = yield* snapshot(source)
+      assert.deepEqual(Analysis.diagnostics(self), [])
+      assert.deepEqual(yield* MirVerification.verify(Analysis.loweredMir(self)), [])
+      for (const name of ['mutableHolder', 'immutableHolder']) {
+        const fn =
+          Analysis.loweredMir(self).functions.find((candidate) => candidate.id.name === name) ??
+          unreachable(`expected ${name}`)
+        assert.lengthOf(
+          MirVerification.operations(fn).filter((operation) => operation._tag === 'WritePlace'),
+          1,
+        )
+      }
+
+      const sharedSource = `struct View<'a> { value: &'a i32 }
+fn invalid() -> i32 {
+  let mut value = 1
+  let mut holder = View { value: &value }
+  holder.value.* = 2
+  return value
+}`
+      const shared = yield* analyze(sharedSource)
+      assert.isTrue(
+        Analysis.diagnostics(shared).some((diagnostic) => diagnostic.code === 'SEM0036'),
+      )
+    }),
+)
+
 it.effect('round-trips semantic borrowed types and executable predicates without erasure', () =>
   Effect.gen(function* () {
     const owner = { module: 'slices/roundtrip', name: 'header' }

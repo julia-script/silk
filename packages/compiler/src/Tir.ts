@@ -433,8 +433,8 @@ export type BorrowedWriteSelector =
 export interface BorrowedWritePlace {
   readonly _tag: 'BorrowedWritePlace'
   readonly root: Extract<SliceRoot, { readonly _tag: 'BindingSliceRoot' | 'ParameterSliceRoot' }>
-  /** The borrowed root: an exclusive slice, or an exclusive reference written through. */
-  readonly slice: Type.Slice | Type.Reference
+  /** Semantic type of the storage root before the path enters borrowed storage. */
+  readonly rootType: DeclarationFacts.SemanticType
   readonly selectors: ReadonlyArray<BorrowedWriteSelector>
   readonly type: DeclarationFacts.SemanticType
   readonly span: SourceSpan.SourceSpan
@@ -1912,16 +1912,25 @@ export const verify = (self: Module): ReadonlyArray<VerificationIssue> => {
             else if (expression._tag === 'EffectBlock') statements(expression.statements)
           }
         if (statement._tag === 'Write' && statement.place._tag === 'BorrowedWritePlace') {
-          const [first, ...rest] = statement.place.selectors
-          const wellFormed = Type.isReference(statement.place.slice)
-            ? statement.place.slice.access === 'Exclusive' &&
-              statement.place.selectors.every(
-                (selector) => selector._tag === 'Field' || selector._tag === 'Index',
-              )
-            : statement.place.slice.access === 'Exclusive' &&
-              first?._tag === 'SliceIndex' &&
-              Type.equals(first.slice, statement.place.slice) &&
-              !rest.some((selector) => selector._tag !== 'Field')
+          const accesses: Array<Type.BorrowAccess> = []
+          if (Type.isReference(statement.place.rootType))
+            accesses.push(statement.place.rootType.access)
+          if (Type.isSlice(statement.place.rootType)) {
+            const first = statement.place.selectors.at(0)
+            if (
+              first?._tag !== 'SliceIndex' ||
+              !Type.equals(first.slice, statement.place.rootType)
+            ) {
+              accesses.push('Shared')
+            } else {
+              accesses.push(statement.place.rootType.access)
+            }
+          }
+          for (const selector of statement.place.selectors) {
+            if (selector._tag === 'SliceIndex') accesses.push(selector.slice.access)
+            else if (Type.isReference(selector.type)) accesses.push(selector.type.access)
+          }
+          const wellFormed = accesses.includes('Exclusive') && !accesses.includes('Shared')
           if (!wellFormed) {
             issues.push(Object.freeze({ _tag: 'InvalidBorrowedWrite', span: statement.place.span }))
           }

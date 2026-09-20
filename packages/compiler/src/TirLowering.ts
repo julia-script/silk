@@ -2394,13 +2394,7 @@ export const tirBorrowedWritePlace = (
 ): Tir.BorrowedWritePlace | undefined => {
   if (root._tag === 'PatternBinding') return undefined
   const rootType = assignmentRootType(root)
-  if (
-    rootType === undefined ||
-    !(Type.isSlice(rootType) || Type.isReference(rootType)) ||
-    rootType.access !== 'Exclusive'
-  ) {
-    return undefined
-  }
+  if (rootType === undefined) return undefined
   const selectors: Array<Tir.BorrowedWriteSelector> = []
   const walk = (current: ExpressionFact): boolean => {
     if (current._tag === 'Identifier') {
@@ -2489,7 +2483,7 @@ export const tirBorrowedWritePlace = (
       root._tag === 'ParameterDeclaration'
         ? Object.freeze({ _tag: 'ParameterSliceRoot' as const, parameter: root.id })
         : Object.freeze({ _tag: 'BindingSliceRoot' as const, binding: root.id }),
-    slice: rootType,
+    rootType,
     selectors: Object.freeze(selectors),
     type: fact.type.type,
     span: options.context.spanOf(fact.anchor),
