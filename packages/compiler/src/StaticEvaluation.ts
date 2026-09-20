@@ -5,6 +5,7 @@ import * as Diagnostic from './Diagnostic.js'
 import type * as Elaboration from './Elaboration.js'
 import * as FloatingPoint from './FloatingPoint.js'
 import * as Location from './Location.js'
+import * as Provenance from './Provenance.js'
 import type * as Match from './Match.js'
 import type * as Tir from './Tir.js'
 import * as Canonical from './internal/Canonical.js'
@@ -121,12 +122,10 @@ export type Trace = ReadonlyArray<TraceFrame>
 
 /** Source-independent provenance for one static text result. */
 export type TextOrigin = StaticValue.TextOrigin
-export type SourceTextOrigin = StaticValue.SourceTextOrigin
-export type ParameterTextOrigin = StaticValue.ParameterTextOrigin
 
 /** Creates provenance for one decoded source text value of `byteLength` bytes. */
 export const sourceTextOrigin = (at: AuthoredHir.Anchor, byteLength: number): TextOrigin =>
-  Object.freeze({ _tag: 'SourceTextOrigin', at, start: 0, end: byteLength })
+  Provenance.literal(at, byteLength)
 
 /** Creates caller-relative provenance for one static text parameter. */
 export const parameterTextOrigin = (
@@ -136,13 +135,7 @@ export const parameterTextOrigin = (
 ): TextOrigin => {
   if (!Number.isSafeInteger(byteLength) || byteLength < 0)
     throw new RangeError('Static text parameter lengths must be non-negative safe integers')
-  return Object.freeze({
-    _tag: 'ParameterTextOrigin',
-    ...(scope === undefined ? {} : { scope }),
-    ordinal,
-    start: 0,
-    end: byteLength,
-  })
+  return Provenance.parameter(ordinal, byteLength, scope)
 }
 
 /** Composes one half-open byte slice into existing text provenance. */
@@ -150,29 +143,35 @@ export const sliceTextOrigin = (
   origin: TextOrigin,
   start: number,
   end: number,
-): TextOrigin | undefined => {
-  if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start < 0 || start > end)
-    return undefined
-  if (end > origin.end - origin.start) return undefined
-  return Object.freeze({ ...origin, start: origin.start + start, end: origin.start + end })
-}
+): TextOrigin | undefined =>
+  !Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start < 0 || start > end
+    ? undefined
+    : Provenance.slice(origin, start, end)
+
+/** Joins the provenance of two texts; a side that was computed contributes no segment. */
+export const concatTextOrigin = (
+  left: TextOrigin | undefined,
+  leftLength: number,
+  right: TextOrigin | undefined,
+): TextOrigin | undefined =>
+  left === undefined && right === undefined
+    ? undefined
+    : Provenance.concat(left ?? [], leftLength, right ?? [])
 
 /**
- * The location of the written bytes behind static text provenance.
+ * The location of the written bytes behind static text provenance: every literal part, in value
+ * order.
  *
- * Parameter-relative provenance has none until a caller substitutes its argument. `fallback` is the
- * node reported when the literal's presentation cannot map the range.
+ * Parameter-relative parts have none until a caller substitutes its argument. `fallback` is the
+ * node reported when a literal's presentation cannot map its range.
  */
 export const textOriginLocation = (
   origin: TextOrigin,
   fallback: AuthoredHir.Anchor,
-): Location.Location | undefined =>
-  origin._tag === 'ParameterTextOrigin'
-    ? undefined
-    : Location.within(
-        [{ _tag: 'Literal', at: origin.at, range: { start: origin.start, end: origin.end } }],
-        fallback,
-      )
+): Location.Location | undefined => {
+  const parts = origin.flatMap((segment) => (segment.from._tag === 'Literal' ? [segment.from] : []))
+  return parts.length === 0 ? undefined : Location.within(parts, fallback)
+}
 
 /** Retains one selected static arm in the logical trace. */
 export const selectedArmFrame = (
@@ -852,7 +851,7 @@ export const staticTextByteAt = (
       )
 }
 
-/** Concatenates two admitted static texts while retaining the left operand as the source anchor. */
+/** Concatenates two admitted static texts; each side keeps the provenance of its own bytes. */
 export const staticTextConcat = (
   environment: TargetEnvironment,
   left: StaticValue.TextValue,
@@ -865,7 +864,9 @@ export const staticTextConcat = (
     {
       _tag: 'TextValue',
       bytes: Object.freeze([...left.bytes, ...right.bytes]),
-      ...(left.origin === undefined ? {} : { origin: left.origin }),
+      ...(left.origin === undefined && right.origin === undefined
+        ? {}
+        : { origin: concatTextOrigin(left.origin, left.bytes.length, right.origin) }),
     },
     'StaticEvaluation.staticTextConcat',
     literal,
@@ -1518,7 +1519,12 @@ const evaluateIntrinsic = (
       return unavailable(node, context, `${operation} requires two static texts`)
     const concatenated = staticTextConcat(context.environment, text, right, literal, context.trace)
     if (concatenated._tag === 'Complete') {
-      const origin = argument === undefined ? undefined : staticTextOrigin(argument, context)
+      const rightArgument = node.arguments.at(1)
+      const origin = concatTextOrigin(
+        argument === undefined ? undefined : staticTextOrigin(argument, context),
+        text.bytes.length,
+        rightArgument === undefined ? undefined : staticTextOrigin(rightArgument, context),
+      )
       if (origin !== undefined) context.expressionOrigins.set(node, origin)
       context.expressionSpans.set(node, literal)
       if (origin !== undefined && concatenated.value._tag === 'TextValue')

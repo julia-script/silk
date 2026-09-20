@@ -22,7 +22,13 @@ export interface Range {
  */
 export type Source =
   | { readonly _tag: 'Literal'; readonly at: AuthoredIdentity.Anchor; readonly range: Range }
-  | { readonly _tag: 'Parameter'; readonly ordinal: number; readonly range: Range }
+  | {
+      readonly _tag: 'Parameter'
+      /** The static application whose parameters `ordinal` counts, when applications nest. */
+      readonly scope?: string
+      readonly ordinal: number
+      readonly range: Range
+    }
 
 /** One run of a value together with the source it was copied from. */
 export interface Segment {
@@ -38,7 +44,7 @@ const range = (start: number, end: number): Range => Object.freeze({ start, end 
 const withRange = (source: Source, next: Range): Source =>
   source._tag === 'Literal'
     ? Object.freeze({ _tag: 'Literal', at: source.at, range: next })
-    : Object.freeze({ _tag: 'Parameter', ordinal: source.ordinal, range: next })
+    : Object.freeze({ ...source, range: next })
 
 /** The provenance of a whole literal of `length` decoded bytes. */
 export const literal = (at: AuthoredIdentity.Anchor, length: number): Provenance =>
@@ -50,11 +56,16 @@ export const literal = (at: AuthoredIdentity.Anchor, length: number): Provenance
   ])
 
 /** The provenance of a whole parameter value of `length` decoded bytes. */
-export const parameter = (ordinal: number, length: number): Provenance =>
+export const parameter = (ordinal: number, length: number, scope?: string): Provenance =>
   Object.freeze([
     Object.freeze({
       value: range(0, length),
-      from: Object.freeze({ _tag: 'Parameter' as const, ordinal, range: range(0, length) }),
+      from: Object.freeze({
+        _tag: 'Parameter' as const,
+        ...(scope === undefined ? {} : { scope }),
+        ordinal,
+        range: range(0, length),
+      }),
     }),
   ])
 
@@ -113,10 +124,14 @@ export const substituteSource = (
 export const substitute = (
   self: Provenance,
   arguments_: ReadonlyArray<Provenance | undefined>,
+  scope?: string,
 ): Provenance =>
   Object.freeze(
     self.flatMap((segment): ReadonlyArray<Segment> => {
       if (segment.from._tag === 'Literal') return [segment]
+      // A parameter of an enclosing application is that application's to resolve.
+      if (scope !== undefined && segment.from.scope !== undefined && segment.from.scope !== scope)
+        return [segment]
       const argument = arguments_.at(segment.from.ordinal)
       if (argument === undefined) return []
       const restricted = slice(argument, segment.from.range.start, segment.from.range.end)

@@ -1,4 +1,5 @@
 import * as Location from './Location.js'
+import * as Provenance from './Provenance.js'
 import * as Effect from 'effect/Effect'
 import * as ToolchainIntegrity from './ToolchainIntegrity.js'
 import type * as CompilationProfile from './CompilationProfile.js'
@@ -478,12 +479,10 @@ const resolveTextOrigin = (
   arguments_: ReadonlyArray<StaticEvaluation.TextOrigin | undefined>,
   scope: string,
 ): StaticEvaluation.TextOrigin | undefined => {
-  if (origin?._tag !== 'ParameterTextOrigin') return origin
-  if (origin.scope !== undefined && origin.scope !== scope) return origin
-  const argument = arguments_.at(origin.ordinal)
-  return argument === undefined
-    ? undefined
-    : StaticEvaluation.sliceTextOrigin(argument, origin.start, origin.end)
+  if (origin === undefined) return undefined
+  // Each parameter part becomes what this caller wrote for it; a computed argument leaves none.
+  const resolved = Provenance.substitute(origin, arguments_, scope)
+  return resolved.length === 0 ? undefined : resolved
 }
 
 const resolveValueOrigins = (
@@ -536,10 +535,12 @@ const bodyLookup =
 const resolveTextSpan = (
   origin: StaticEvaluation.TextOrigin | undefined,
   arguments_: ReadonlyArray<Location.Location | undefined>,
-): Location.Location | undefined =>
-  origin?._tag === 'SourceTextOrigin'
-    ? Location.at(origin.at)
-    : arguments_.at(origin?.ordinal ?? -1)
+): Location.Location | undefined => {
+  // The node a result is reported at is where its text begins: a literal, or this call's argument.
+  const first = origin?.at(0)?.from
+  if (first === undefined) return undefined
+  return first._tag === 'Literal' ? Location.at(first.at) : arguments_.at(first.ordinal)
+}
 
 const evaluateStaticFunction = (
   self: EvaluationCoordinator,

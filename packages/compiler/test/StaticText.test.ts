@@ -301,10 +301,10 @@ it('canonicalizes finite static values without observing construction identity',
 
 it('retains static text provenance without adding it to canonical identity', () => {
   const bytes = Array.from(encoder.encode('template'))
-  const originOrdinal = (value: StaticValue.Value | undefined): number | undefined =>
-    value?._tag === 'TextValue' && value.origin?._tag === 'ParameterTextOrigin'
-      ? value.origin.ordinal
-      : undefined
+  const originOrdinal = (value: StaticValue.Value | undefined): number | undefined => {
+    const from = value?._tag === 'TextValue' ? value.origin?.at(0)?.from : undefined
+    return from?._tag === 'Parameter' ? from.ordinal : undefined
+  }
   const left = admitted(
     StaticValue.admit(
       {
@@ -1644,6 +1644,41 @@ pub fn main() -> i32 { return reject("aéz") }`
   }),
 )
 
+it.effect('reports joined static text at every literal it was copied from', () =>
+  Effect.gen(function* () {
+    const sourceId = 'static/compile-error-concat'
+    const program = `import silk.static_text { StaticText }
+
+static fn label(value: string) -> string { return StaticText.concat("bad: ", value) }
+
+fn reject(static template: string) -> i32 { compileError(label(StaticText.slice(template, 1, 3))) }
+
+pub fn main() -> i32 { return reject("aéz") }`
+    const snapshot = yield* AnalysisFixture.retainingMain(
+      sourceId,
+      encoder.encode(program),
+      Target.x8664UnknownLinuxGnu.id,
+    )
+    const diagnostic = Analysis.diagnostics(snapshot).at(0)
+    assert.strictEqual(diagnostic?.code, 'SEM0177')
+    const bytesBefore = (text: string): number =>
+      encoder.encode(program.slice(0, program.lastIndexOf(text))).length
+    // The callee's literal comes first in the value; the caller's argument is the rest of it.
+    assert.deepEqual(
+      [
+        diagnostic?.span,
+        ...(diagnostic?.relatedSpans ?? [])
+          .filter((related) => related.label === 'continues here')
+          .map((related) => related.span),
+      ].map((span) => [span?.start, span?.end]),
+      [
+        [bytesBefore('"bad: "') + 1, bytesBefore('"bad: "') + 6],
+        [bytesBefore('"aéz"') + 2, bytesBefore('"aéz"') + 4],
+      ],
+    )
+  }),
+)
+
 it.effect(
   'chooses caller provenance deterministically without changing specialization identity',
   () =>
@@ -1813,7 +1848,12 @@ it('composes decoded static-text ranges through source and parameter slices', ()
       3,
       8,
     ),
-    { _tag: 'ParameterTextOrigin', ordinal: 0, start: 3, end: 8 },
+    [
+      {
+        value: { start: 0, end: 5 },
+        from: { _tag: 'Parameter', ordinal: 0, range: { start: 3, end: 8 } },
+      },
+    ],
   )
 })
 
