@@ -525,94 +525,74 @@ export const make = (operations: Operations) => {
     expression: Tir.Expression,
     index: DeclarationIndex.Index,
     substitution: Type.Substitution,
+    evidence: Elaboration.BodyResults['evidence'],
   ): ReadonlyArray<CallTarget> => {
-    if (expression._tag === 'Run') return callTargets(expression.subject, index, substitution)
+    const visit = (child: Tir.Expression): ReadonlyArray<CallTarget> =>
+      callTargets(child, index, substitution, evidence)
+    if (expression._tag === 'Run') return visit(expression.subject)
     if (expression._tag === 'EffectCatch')
-      return [
-        ...callTargets(expression.protected, index, substitution),
-        ...callTargets(expression.handler, index, substitution),
-      ]
+      return [...visit(expression.protected), ...visit(expression.handler)]
     if (expression._tag === 'EffectBindRequirement') {
       // A source-declared witness makes provision dispatch to its qualified operation, so the
       // operation is reachable even though no ordinary call names it.
       const witness = expression.provider.witness
       return [
-        ...callTargets(expression.protected, index, substitution),
+        ...visit(expression.protected),
         ...(witness?._tag === 'SourceConformanceWitness'
           ? witnessDependencyCallTargets(index, witness.provider, witness.capability)
           : []),
       ]
     }
     if (expression._tag === 'Replace')
-      return Tir.expressionChildren(expression).flatMap((child) =>
-        callTargets(child, index, substitution),
-      )
-    if (expression._tag === 'Move') return callTargets(expression.subject, index, substitution)
-    if (expression._tag === 'RuntimeStringView')
-      return callTargets(expression.source, index, substitution)
+      return Tir.expressionChildren(expression).flatMap((child) => visit(child))
+    if (expression._tag === 'Move') return visit(expression.subject)
+    if (expression._tag === 'RuntimeStringView') return visit(expression.source)
     if (
       expression._tag === 'StringEquality' ||
       expression._tag === 'EnumEquality' ||
       expression._tag === 'ShortCircuit'
     ) {
-      return [
-        ...callTargets(expression.left, index, substitution),
-        ...callTargets(expression.right, index, substitution),
-      ]
+      return [...visit(expression.left), ...visit(expression.right)]
     }
-    if (expression._tag === 'UnionConvert')
-      return callTargets(expression.source, index, substitution)
-    if (expression._tag === 'Project') return callTargets(expression.subject, index, substitution)
+    if (expression._tag === 'UnionConvert') return visit(expression.source)
+    if (expression._tag === 'Project') return visit(expression.subject)
     if (expression._tag === 'IndexPlace') {
-      return [
-        ...callTargets(expression.subject, index, substitution),
-        ...callTargets(expression.index, index, substitution),
-      ]
+      return [...visit(expression.subject), ...visit(expression.index)]
     }
-    if (expression._tag === 'SliceLength') return callTargets(expression.slice, index, substitution)
+    if (expression._tag === 'SliceLength') return visit(expression.slice)
     if (expression._tag === 'SliceIndexPlace') {
-      return [
-        ...callTargets(expression.slice, index, substitution),
-        ...callTargets(expression.index, index, substitution),
-      ]
+      return [...visit(expression.slice), ...visit(expression.index)]
     }
     if (expression._tag === 'SliceBorrow' || expression._tag === 'ValueBorrow') {
-      return Tir.expressionChildren(expression).flatMap((child) =>
-        callTargets(child, index, substitution),
-      )
+      return Tir.expressionChildren(expression).flatMap((child) => visit(child))
     }
     if (expression._tag === 'Construct' || expression._tag === 'ConstructUnionVariant') {
-      return expression.fields.flatMap((field) => callTargets(field.value, index, substitution))
+      return expression.fields.flatMap((field) => visit(field.value))
     }
     if (expression._tag === 'ArrayConstruct') {
-      return expression.elements.flatMap((element) => callTargets(element, index, substitution))
+      return expression.elements.flatMap(visit)
     }
     if (expression._tag === 'BuiltinCall' || expression._tag === 'InterfaceOperationCall') {
-      return expression.arguments.flatMap((argument) => callTargets(argument, index, substitution))
+      return expression.arguments.flatMap(visit)
     }
     if (expression._tag === 'FunctionItem') return []
     if (expression._tag === 'CallableSection') {
-      return expression.captures.flatMap((capture) =>
-        callTargets(capture.value, index, substitution),
-      )
+      return expression.captures.flatMap((capture) => visit(capture.value))
     }
     if (expression._tag === 'CallableApply' || expression._tag === 'ForeignApply') {
-      return [
-        ...callTargets(expression.callee, index, substitution),
-        ...expression.arguments.flatMap((argument) => callTargets(argument, index, substitution)),
-      ]
+      return [...visit(expression.callee), ...expression.arguments.flatMap(visit)]
     }
     if (expression._tag === 'Match') {
       return [
-        ...callTargets(expression.scrutinee, index, substitution),
+        ...visit(expression.scrutinee),
         ...expression.arms.flatMap((arm) => {
           if (arm.reachable) {
             return [
-              ...(arm.guard === undefined ? [] : callTargets(arm.guard, index, substitution)),
+              ...(arm.guard === undefined ? [] : visit(arm.guard)),
               ...(arm.body._tag === 'Expression'
                 ? [arm.body.expression]
                 : arm.body.statements.flatMap(Tir.statementExpressions)
-              ).flatMap((child) => callTargets(child, index, substitution)),
+              ).flatMap(visit),
             ]
           }
           return []
@@ -621,9 +601,7 @@ export const make = (operations: Operations) => {
     }
     if (expression._tag === 'EffectBlock') {
       return expression.statements.flatMap((statement) =>
-        Tir.statementExpressions(statement).flatMap((child) =>
-          callTargets(child, index, substitution),
-        ),
+        Tir.statementExpressions(statement).flatMap((child) => visit(child)),
       )
     }
     if (
@@ -632,9 +610,7 @@ export const make = (operations: Operations) => {
       expression._tag !== 'ServiceEffectConstruct'
     )
       return []
-    const nested = expression.arguments.flatMap((argument) =>
-      callTargets(argument, index, substitution),
-    )
+    const nested = expression.arguments.flatMap(visit)
     if (expression._tag === 'ServiceEffectConstruct') return nested
     return carriesHiddenIdentity(expression, substitution)
       ? nested
@@ -642,7 +618,7 @@ export const make = (operations: Operations) => {
           Object.freeze({
             declaration: expression.target,
             typeArguments: expression.typeArguments,
-            evidence: expression.evidence.map(Type.runtimeEvidenceKey),
+            evidence: (evidence.at(expression.evidence.ordinal) ?? []).map(Type.runtimeEvidenceKey),
             ...(expression._tag === 'Call' || expression._tag === 'EffectConstruct'
               ? { staticArguments: expression.staticArguments }
               : {}),
@@ -656,13 +632,16 @@ export const make = (operations: Operations) => {
   }
 
   const bodyCallTargets = (
-    fn: Tir.TirFunction,
+    body: {
+      readonly function: Tir.TirFunction
+      readonly evidence: Elaboration.BodyResults['evidence']
+    },
     index: DeclarationIndex.Index,
     substitution: Type.Substitution,
   ): ReadonlyArray<CallTarget> =>
-    fn.statements.flatMap((statement) =>
+    body.function.statements.flatMap((statement) =>
       Tir.statementExpressions(statement).flatMap((expression) =>
-        callTargets(expression, index, substitution),
+        callTargets(expression, index, substitution, body.evidence),
       ),
     )
 
@@ -1260,6 +1239,7 @@ export const make = (operations: Operations) => {
 
   interface EffectOriginContext {
     readonly fn: Tir.TirFunction
+    readonly evidence: Elaboration.BodyResults['evidence']
     readonly owner: InstanceKey
     readonly substitution: Type.Substitution
     readonly compatibility: TypeCompatibility.Context | undefined
@@ -1298,6 +1278,17 @@ export const make = (operations: Operations) => {
     readonly context: EffectOriginContext
   }
 
+  const evidenceOf = (
+    results: ReadonlyMap<string, Elaboration.Result>,
+    fn: Tir.TirFunction,
+  ): Elaboration.BodyResults['evidence'] => {
+    for (const result of results.values()) {
+      const body = result.bodies.find((candidate) => candidate.function === fn)
+      if (body !== undefined) return body.results.evidence
+    }
+    return Object.freeze([])
+  }
+
   function commonOrigin<A>(
     values: ReadonlyArray<A | undefined>,
     key: (value: A) => string,
@@ -1333,6 +1324,7 @@ export const make = (operations: Operations) => {
       expressions.map((expression) =>
         callableOriginOf(expression, {
           fn,
+          evidence: evidenceOf(results, fn),
           owner,
           substitution,
           compatibility: selectedCompatibility(fn, owner),
@@ -1843,7 +1835,7 @@ export const make = (operations: Operations) => {
       target.declaration.typeParameters.map((parameter) => parameter.type),
       [...typeArguments, ...hiddenArguments],
       expression.staticArguments,
-      expression.evidence.map(Type.runtimeEvidenceKey),
+      (context.evidence.at(expression.evidence.ordinal) ?? []).map(Type.runtimeEvidenceKey),
     )
     context.recordResolvedCall?.(expression, key)
     return key
@@ -2010,6 +2002,7 @@ export const make = (operations: Operations) => {
       expressions.map((expression) =>
         effectOriginOf(expression, {
           fn,
+          evidence: evidenceOf(results, fn),
           owner,
           substitution,
           compatibility: selectedCompatibility(fn, owner),
@@ -2227,6 +2220,7 @@ export const make = (operations: Operations) => {
       returned.map((result) =>
         successEffectOriginOf(result, {
           fn: target,
+          evidence: evidenceOf(context.results, target),
           owner: targetKey,
           substitution,
           compatibility: selectedCompatibility(target, targetKey),
@@ -2267,6 +2261,7 @@ export const make = (operations: Operations) => {
             continue
           return successEffectOriginOf(block, {
             fn: instance.function,
+            evidence: evidenceOf(results, instance.function),
             owner: instance.key,
             substitution: instance.substitution,
             compatibility: selectedCompatibility(instance.function, instance.key),
@@ -2292,6 +2287,7 @@ export const make = (operations: Operations) => {
   ): NonNullable<Instance['effectSuccesses']> => {
     const context: EffectOriginContext = {
       fn,
+      evidence: evidenceOf(results, fn),
       owner,
       substitution,
       compatibility: selectedCompatibility(fn, owner),
@@ -2345,7 +2341,7 @@ export const make = (operations: Operations) => {
       target: witness.implementation,
       symbolicConformances: [],
       typeArguments: witness.typeArguments,
-      evidence: [],
+      evidence: Object.freeze({ _tag: 'TirEvidence' as const, ordinal: -1 }),
       staticArguments: [],
       arguments: expression.arguments,
       loanEnds: expression.loanEnds,
@@ -2401,6 +2397,7 @@ export const make = (operations: Operations) => {
     }
     const context: EffectOriginContext = {
       fn,
+      evidence: evidenceOf(results, fn),
       owner,
       substitution,
       compatibility: selectedCompatibility(fn, owner),
@@ -2564,6 +2561,7 @@ export const make = (operations: Operations) => {
     const targets: Array<CallTarget> = []
     const context: EffectOriginContext = Object.freeze({
       fn,
+      evidence: evidenceOf(results, fn),
       owner,
       substitution: ownerSubstitution,
       compatibility: selectedCompatibility(fn, owner),
@@ -2704,6 +2702,7 @@ export const make = (operations: Operations) => {
     const instances: Array<CallableInstance> = []
     const context: EffectOriginContext = Object.freeze({
       fn,
+      evidence: evidenceOf(results, fn),
       owner,
       substitution: ownerSubstitution,
       compatibility: selectedCompatibility(fn, owner),
@@ -2772,6 +2771,7 @@ export const make = (operations: Operations) => {
                   type_ !== undefined && Type.isCallable(type_)
                     ? callableOriginOf(capture.value, {
                         fn,
+                        evidence: evidenceOf(results, fn),
                         owner,
                         substitution: ownerSubstitution,
                         compatibility: selectedCompatibility(fn, owner),
@@ -2915,6 +2915,7 @@ export const make = (operations: Operations) => {
       const bindings = callableBindings(instance.function)
       const context: EffectOriginContext = Object.freeze({
         fn: instance.function,
+        evidence: instance.view.evidence,
         owner: instance.key,
         substitution: instance.substitution,
         compatibility: selectedCompatibility(instance.function, instance.key),
@@ -3452,6 +3453,7 @@ export const make = (operations: Operations) => {
       if (candidate === undefined || expressions.length === 0) return Object.freeze([])
       const recipeContext: EffectOriginContext = {
         fn: candidate.function,
+        evidence: candidate.view.evidence,
         owner: candidate.key,
         substitution: candidate.substitution,
         compatibility: candidate.specialization.compatibility,
@@ -3502,6 +3504,7 @@ export const make = (operations: Operations) => {
     for (const instance of instances) {
       const context: EffectOriginContext = {
         fn: instance.function,
+        evidence: instance.view.evidence,
         owner: instance.key,
         substitution: instance.substitution,
         compatibility: selectedCompatibility(instance.function, instance.key),

@@ -36,26 +36,28 @@ import * as Type from './Type.js'
 import * as TypeCompatibility from './TypeCompatibility.js'
 import * as BodyBuilder from './BodyBuilder.js'
 
-/**
- * TIR still reports in source coordinates, so a cause gets its span where it enters TIR. The
- * located cause stays beside it: presentation publishes it again for each revision.
- */
 const publishedCause = (
-  context: SemanticContext.SemanticContext,
+  builder: BodyBuilder.BodyBuilder | undefined,
   cause: Diagnostic.Identity<Location.Location>,
-): {
-  readonly cause: Diagnostic.Identity
-  readonly causeAt: Diagnostic.Identity<Location.Location>
-} => ({
-  cause: Diagnostic.publishIdentity(cause, SemanticContext.registryOf(context)),
-  causeAt: cause,
-})
+): { readonly cause: Tir.CauseRef } => {
+  if (builder === undefined) throw new RangeError('TIR cause requires its body builder')
+  return { cause: BodyBuilder.cause(builder, cause) }
+}
+
+const publishedEvidence = (
+  builder: BodyBuilder.BodyBuilder | undefined,
+  evidence: ReadonlyArray<Constraint.ConstraintEvidence>,
+): Tir.EvidenceRef => {
+  if (builder === undefined) throw new RangeError('TIR evidence requires its body builder')
+  return BodyBuilder.selectedEvidence(builder, evidence)
+}
 
 export const tirReference = (
   reference: ParameterReferenceFact,
   type: ExpressionTypeFact,
   anchor: AuthoredHir.Anchor,
   context: SemanticContext.SemanticContext,
+  builder?: BodyBuilder.BodyBuilder,
 ): Tir.Expression => {
   const span = context.spanOf(anchor)
   const origin = Tir.authored(anchor)
@@ -91,7 +93,7 @@ export const tirReference = (
     span,
     origin,
     ...(reference._tag === 'Missing' && reference.cause !== undefined
-      ? publishedCause(context, reference.cause)
+      ? publishedCause(builder, reference.cause)
       : {}),
   })
 }
@@ -689,7 +691,9 @@ export const tirExpression = (
   options: LowerStatementOptions,
   borrow?: Tir.BorrowId,
 ): Tir.Expression => {
-  const published = options.builder?.expressions.get(fact)
+  // A call supplies the argument borrow identity only after the argument itself has been checked.
+  // Replace the provisional context-free node with that call-owned node instead of reusing it.
+  const published = borrow === undefined ? options.builder?.expressions.get(fact) : undefined
   if (published !== undefined) return published
   const known = options.static?.get(fact)
   if (known !== undefined) return known
@@ -933,7 +937,7 @@ const residualExpression = (
         _tag: 'Unavailable',
         span: options.context.spanOf(fact.anchor),
         origin: Tir.authored(fact.anchor),
-        ...(fact.cause === undefined ? {} : publishedCause(options.context, fact.cause)),
+        ...(fact.cause === undefined ? {} : publishedCause(options.builder, fact.cause)),
       })
     return Object.freeze({
       _tag: 'EnumMember',
@@ -982,7 +986,7 @@ const residualExpression = (
         fact.anchor,
         options.context,
       )
-    return tirReference(fact.reference, fact.type, fact.anchor, options.context)
+    return tirReference(fact.reference, fact.type, fact.anchor, options.context, options.builder)
   }
   if (fact._tag === 'Move') {
     const subject = tirExpression(fact.subject, options)
@@ -1121,7 +1125,7 @@ const residualExpression = (
       protectedRow: fact.protectedRow,
       handlerRow: fact.handlerRow,
       residualRow: fact.residualRow,
-      evidence: fact.evidence,
+      evidence: publishedEvidence(options.builder, fact.evidence),
       type: fact.type.type,
       span: options.context.spanOf(fact.anchor),
       origin: Tir.authored(fact.anchor),
@@ -1148,7 +1152,7 @@ const residualExpression = (
           ? { binding: fact.provider.reference.id }
           : { parameter: fact.provider.reference.id }),
         selected: fact.provider.selected,
-        evidence: fact.provider.evidence,
+        evidence: publishedEvidence(options.builder, fact.provider.evidence),
         ...(fact.provider.capability === undefined ? {} : { capability: fact.provider.capability }),
         providerType: fact.provider.providerType,
         ...(fact.provider.witness === undefined ? {} : { witness: fact.provider.witness }),
@@ -1278,7 +1282,7 @@ const residualExpression = (
         span: options.context.spanOf(fact.anchor),
         origin: Tir.authored(fact.anchor),
         ...(fact.target._tag === 'Unavailable' && fact.target.cause !== undefined
-          ? publishedCause(options.context, fact.target.cause)
+          ? publishedCause(options.builder, fact.target.cause)
           : {}),
       })
     }
@@ -1327,7 +1331,7 @@ const residualExpression = (
         span: options.context.spanOf(fact.anchor),
         origin: Tir.authored(fact.anchor),
         ...(fact.target._tag === 'Unavailable' && fact.target.cause !== undefined
-          ? publishedCause(options.context, fact.target.cause)
+          ? publishedCause(options.builder, fact.target.cause)
           : {}),
       })
     }
@@ -1423,7 +1427,7 @@ const residualExpression = (
         span: options.context.spanOf(fact.anchor),
         origin: Tir.authored(fact.anchor),
         ...(fact.state._tag === 'Unavailable' && fact.state.cause !== undefined
-          ? publishedCause(options.context, fact.state.cause)
+          ? publishedCause(options.builder, fact.state.cause)
           : {}),
       })
     }
@@ -1471,7 +1475,7 @@ const residualExpression = (
         span: options.context.spanOf(fact.anchor),
         origin: Tir.authored(fact.anchor),
         ...(fact.bounds._tag === 'Invalid'
-          ? publishedCause(options.context, fact.bounds.cause)
+          ? publishedCause(options.builder, fact.bounds.cause)
           : {}),
       })
     }
@@ -1504,7 +1508,7 @@ const residualExpression = (
         span: options.context.spanOf(fact.anchor),
         origin: Tir.authored(fact.anchor),
         ...(fact.state._tag === 'Unavailable' && fact.state.cause !== undefined
-          ? publishedCause(options.context, fact.state.cause)
+          ? publishedCause(options.builder, fact.state.cause)
           : {}),
       })
     }
@@ -1543,7 +1547,7 @@ const residualExpression = (
         span: options.context.spanOf(fact.anchor),
         origin: Tir.authored(fact.anchor),
         ...(fact.formation._tag === 'Unavailable' && fact.formation.cause !== undefined
-          ? publishedCause(options.context, fact.formation.cause)
+          ? publishedCause(options.builder, fact.formation.cause)
           : {}),
       })
     }
@@ -2120,7 +2124,7 @@ const residualExpression = (
     const call = {
       target: fact.reference.declaration.canonical.id,
       typeArguments: fact.contract.typeArguments,
-      evidence: fact.contract.evidence,
+      evidence: publishedEvidence(options.builder, fact.contract.evidence),
       symbolicConformances: fact.contract.symbolicConformances ?? Object.freeze([]),
       staticArguments: Object.freeze(
         (fact._tag === 'Call' ? (fact.staticArguments ?? []) : []).map(
@@ -2186,7 +2190,7 @@ const residualExpression = (
     _tag: 'Unavailable',
     span: options.context.spanOf(fact.anchor),
     origin: Tir.authored(fact.anchor),
-    ...(cause === undefined ? {} : publishedCause(options.context, cause)),
+    ...(cause === undefined ? {} : publishedCause(options.builder, cause)),
   })
 }
 

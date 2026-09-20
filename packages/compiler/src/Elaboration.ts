@@ -2580,9 +2580,7 @@ export const presentBody = (
     artifact: self.artifact,
     declaration,
     hidden: self.hidden,
-    function: Tir.present(self.function, context.spanOf, declaration, (cause) =>
-      Diagnostic.publishIdentity(cause, SemanticContext.registryOf(context)),
-    ),
+    function: Tir.present(self.function, context.spanOf, declaration),
     results,
   })
 }

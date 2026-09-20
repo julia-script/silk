@@ -430,6 +430,7 @@ interface CheckState {
   }
   nextAcquisition: number
   readonly index: DeclarationIndex.Index
+  readonly causes: Elaboration.BodyResults['causes']
   readonly copyAssumptions: ReadonlySet<string>
   readonly bindings: Map<string, MutableBinding>
   readonly order: Array<MutableBinding>
@@ -452,6 +453,12 @@ interface CheckState {
   readonly transitions: Array<PlaceTransition>
   readonly shapes: Map<string, MovePath.ShapeOf>
 }
+
+const unavailableCause = (
+  state: CheckState,
+  expression: Extract<Tir.Expression, { readonly _tag: 'Unavailable' }>,
+): Diagnostic.CauseIdentity | undefined =>
+  expression.cause === undefined ? undefined : state.causes.at(expression.cause.ordinal)
 
 type FlowState = Map<string, MovePath.State>
 type ReadonlyFlowState = ReadonlyMap<string, MovePath.State>
@@ -890,7 +897,8 @@ const callableEnvironment = (
   const slots = Object.freeze(
     expression.captures.map((capture): CallableEnvironmentSlot => {
       const type = capture.value._tag === 'Unavailable' ? undefined : capture.value.type
-      const cause = capture.value._tag === 'Unavailable' ? capture.value.cause : undefined
+      const cause =
+        capture.value._tag === 'Unavailable' ? unavailableCause(state, capture.value) : undefined
       const retained = retainedBinding(state, capture.value)
       const root = borrowRootType(state, capture.value)
       let executionAffinity: ExecutionAffinity.ExecutionAffinity
@@ -3364,6 +3372,7 @@ const checkFunction = (
   fn: Tir.TirFunction,
   index: DeclarationIndex.Index,
   context: SemanticContext.SemanticContext,
+  causes: Elaboration.BodyResults['causes'],
   lifetimes?: LifetimeFlow.LifetimeFlow,
   localSharedBoundaries: ReadonlyArray<SourceSpan.SourceSpan> = Object.freeze([]),
   localSharedResultBoundaries: ReadonlyArray<SourceSpan.SourceSpan> = Object.freeze([]),
@@ -3392,6 +3401,7 @@ const checkFunction = (
     },
     nextAcquisition: 0,
     index,
+    causes,
     copyAssumptions,
     bindings: new Map(),
     order: [],
@@ -3881,7 +3891,9 @@ const checkFunction = (
                 obligations: environment.localSharedObligations,
               })
         const cause =
-          statement.initializer._tag === 'Unavailable' ? statement.initializer.cause : undefined
+          statement.initializer._tag === 'Unavailable'
+            ? unavailableCause(state, statement.initializer)
+            : undefined
         const binding: MutableBinding = {
           ordinal: state.nextAcquisition++,
           site: Object.freeze({ _tag: 'Let', binding: statement.binding }),
@@ -4697,9 +4709,13 @@ const checkFunction = (
       ...(fn.contract.cause === undefined ? {} : { cause: fn.contract.cause }),
     })
   } else if (firstUnavailable !== undefined) {
+    const cause =
+      firstUnavailable.cause === undefined
+        ? undefined
+        : state.causes.at(firstUnavailable.cause.ordinal)
     verdict = Object.freeze({
       _tag: 'Unavailable',
-      ...(firstUnavailable.cause === undefined ? {} : { cause: firstUnavailable.cause }),
+      ...(cause === undefined ? {} : { cause }),
     })
   } else if (violation !== undefined) {
     verdict = Object.freeze({ _tag: 'Violation', cause: Diagnostic.identity(violation) })
@@ -4777,6 +4793,7 @@ const checkFunction = (
 /** Every input read by the ownership checker, after callback boundaries are selected. */
 export interface CheckInput {
   readonly function: Tir.TirFunction
+  readonly causes: Elaboration.BodyResults['causes']
   /** The region proof published with the body; absent for a body construction never analyzed. */
   readonly lifetimes: LifetimeFlow.LifetimeFlow | undefined
   readonly index: DeclarationIndex.Index
@@ -4793,9 +4810,11 @@ export const input = (
   index: DeclarationIndex.Index,
   accessBoundaryPlan: LocalSharedAccessBoundaryPlan,
   context: SemanticContext.SemanticContext,
+  causes: Elaboration.BodyResults['causes'] = Object.freeze([]),
 ): CheckInput =>
   Object.freeze({
     function: fn,
+    causes,
     lifetimes,
     index,
     context,
@@ -4830,6 +4849,7 @@ const sameBoundarySpans = (
 /** Requires identical semantic authorities and equal ordered access-boundary spans. */
 export const matchesInput = (self: CheckInput, other: CheckInput): boolean =>
   self.function === other.function &&
+  self.causes === other.causes &&
   self.lifetimes === other.lifetimes &&
   self.index === other.index &&
   self.context === other.context &&
@@ -4842,6 +4862,7 @@ export const check = (self: CheckInput): CheckedFunction =>
     self.function,
     self.index,
     self.context,
+    self.causes,
     self.lifetimes,
     self.boundaries,
     self.resultBoundaries,
@@ -5089,7 +5110,14 @@ export const checkModule = (
     // A `static fn` runs in the evaluator: it owns nothing at run time.
     if (body.declaration.phase === 'Static') return []
     const fn = body.function
-    const selected = input(fn, body.results.lifetimes, index, accessBoundaryPlan, context)
+    const selected = input(
+      fn,
+      body.results.lifetimes,
+      index,
+      accessBoundaryPlan,
+      context,
+      body.results.causes,
+    )
     const compute = () => check(selected)
     const checked =
       bodyQuery === undefined ? compute() : BodyQuery.ownership(bodyQuery, selected, compute)

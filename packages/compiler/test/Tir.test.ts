@@ -376,6 +376,17 @@ pub fn main() -> i32 { return missing(2147483648) }`
 const elaborate = (id: string, text: string): Elaboration.Result =>
   elaborateSyntax(Parser.parse(Lexer.lex(SourceFile.make(id, ascii(text))))).located
 
+const unavailableCause = (
+  result: Elaboration.Result,
+  fn: Tir.TirFunction,
+  expression: Extract<Tir.Expression, { readonly _tag: 'Unavailable' }>,
+) =>
+  expression.cause === undefined
+    ? undefined
+    : result.bodies
+        .find((body) => body.function === fn)
+        ?.results.causes.at(expression.cause.ordinal)
+
 const elaborateWithStdlib = Effect.fnUntraced(function* (id: string, text: string) {
   const module = id.replace('://', '/').replace(/\.silk$/, '')
   return Analysis.rootAnalysis(yield* Analysis.ofSource(module, ascii(text)))
@@ -606,7 +617,7 @@ it('keeps unknown facts explicit with causes instead of typed operations', () =>
   const mainBody = main === undefined ? undefined : Tir.returned(main)
   assert.strictEqual(mainBody?._tag, 'Unavailable')
   if (mainBody?._tag !== 'Unavailable') return
-  assert.strictEqual(mainBody.cause?.code, 'SEM0004')
+  assert.strictEqual(unavailableCause(result, main, mainBody)?.code, 'SEM0004')
 })
 
 it('elaborates binding statements into typed locals with moves', () => {
@@ -671,7 +682,12 @@ effect fn main() -> () { run pulse() return () }`,
   if (unavailable?._tag !== 'Evaluate') return
   assert.strictEqual(unavailable.expression._tag, 'Unavailable')
   if (unavailable.expression._tag !== 'Unavailable') return
-  assert.strictEqual(unavailable.expression.cause?.code, 'SEM0004')
+  const unavailableFunction = damaged.tir.functions.at(0)
+  if (unavailableFunction === undefined) return
+  assert.strictEqual(
+    unavailableCause(damaged, unavailableFunction, unavailable.expression)?.code,
+    'SEM0004',
+  )
 })
 
 it('rejects rebinding a name while references keep resolving to the original', () => {

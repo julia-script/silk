@@ -588,9 +588,10 @@ const tirEvidence = (
       .flatMap((expression) => {
         let evidence: ReadonlyArray<Constraint.ConstraintEvidence> = Object.freeze([])
         if (expression._tag === 'EffectBindRequirement') {
-          evidence = expression.provider.evidence
+          evidence =
+            BodyView.selectedEvidence(view, expression.provider.evidence) ?? Object.freeze([])
         } else if (expression._tag === 'EffectCatch') {
-          evidence = expression.evidence
+          evidence = BodyView.selectedEvidence(view, expression.evidence) ?? Object.freeze([])
         }
         return evidence.map((proof) => Object.freeze({ evidence: proof, origin: expression.span }))
       }),
@@ -709,18 +710,20 @@ export const requirementSelection = (
   provider: Extract<Tir.Expression, { readonly _tag: 'EffectBindRequirement' }>['provider'],
 ): Extract<ConcreteEvidence, { readonly _tag: 'RequirementSelection' }> | undefined => {
   const wantedKeys = new Set(
-    provider.evidence.flatMap((proof) => {
-      let wanted: Constraint.Constraint | undefined
-      if (proof._tag === 'Assumed') {
-        wanted = Constraint.substitute(
-          Constraint.substitute(proof.wanted, proof.substitution),
-          instance.substitution,
-        )
-      } else if (proof._tag === 'RequirementSelection') {
-        wanted = Constraint.substitute(proof.wanted, instance.substitution)
-      }
-      return wanted?._tag === 'ProviderSelectionConstraint' ? [Constraint.key(wanted)] : []
-    }),
+    (BodyView.selectedEvidence(instance.view, provider.evidence) ?? Object.freeze([])).flatMap(
+      (proof) => {
+        let wanted: Constraint.Constraint | undefined
+        if (proof._tag === 'Assumed') {
+          wanted = Constraint.substitute(
+            Constraint.substitute(proof.wanted, proof.substitution),
+            instance.substitution,
+          )
+        } else if (proof._tag === 'RequirementSelection') {
+          wanted = Constraint.substitute(proof.wanted, instance.substitution)
+        }
+        return wanted?._tag === 'ProviderSelectionConstraint' ? [Constraint.key(wanted)] : []
+      },
+    ),
   )
   return instance.specialization.evidence.find(
     (proof): proof is Extract<ConcreteEvidence, { readonly _tag: 'RequirementSelection' }> =>
@@ -1238,6 +1241,7 @@ export const discover = (
   interface PreparedUnavailableOwnership {
     readonly key: InstanceKey
     readonly function: Tir.TirFunction
+    readonly causes: Elaboration.BodyResults['causes']
     /** The region proof the body published, which ownership replays. */
     readonly lifetimes?: LifetimeFlow.LifetimeFlow
     readonly diagnostic: Diagnostic.Diagnostic
@@ -1750,6 +1754,7 @@ export const discover = (
             Object.freeze({
               key,
               function: residual.function,
+              causes: residual.results.causes,
               ...(residual.results.lifetimes === undefined
                 ? {}
                 : { lifetimes: residual.results.lifetimes }),
@@ -1841,7 +1846,7 @@ export const discover = (
             ]
             const identityOfCall = Specialization.key
             const ordinaryTargets: ReadonlyArray<CallTarget> = [
-              ...bodyCallTargets(fn, index, substitution),
+              ...bodyCallTargets(view, index, substitution),
               ...interfaceWitnessTargets(fn, index, substitution),
               ...requirementBindingCallTargets(fn, substitution, index),
               ...directCalls.map((call) => ({
@@ -2130,6 +2135,7 @@ export const discover = (
                 index,
                 accessBoundaryPlan,
                 contextOf(instance.function),
+                instance.view.causes,
               ),
               Residualization.selectionReason(residualization, instance.key) === undefined
                 ? 'UnchangedBody'
@@ -2174,6 +2180,7 @@ export const discover = (
             index,
             accessBoundaryPlan,
             contextOf(candidate.function),
+            candidate.causes,
           ),
           Residualization.selectionReason(residualization, candidate.key) === undefined
             ? 'UnchangedBody'

@@ -955,7 +955,7 @@ type ExpressionNode =
       readonly _tag: 'Call'
       readonly target: DeclarationFacts.CanonicalId
       readonly typeArguments: ReadonlyArray<Type.GenericArgument>
-      readonly evidence: ReadonlyArray<Constraint.ConstraintEvidence>
+      readonly evidence: EvidenceRef
       /** Symbolic source identities to be checked against the later concrete proof selection. */
       readonly symbolicConformances: ReadonlyArray<ConformanceProof.SymbolicConformanceSelection>
       readonly staticArguments: ReadonlyArray<StaticValue.Value>
@@ -1046,7 +1046,7 @@ type ExpressionNode =
       readonly _tag: 'EffectConstruct'
       readonly target: DeclarationFacts.CanonicalId
       readonly typeArguments: ReadonlyArray<Type.GenericArgument>
-      readonly evidence: ReadonlyArray<Constraint.ConstraintEvidence>
+      readonly evidence: EvidenceRef
       readonly symbolicConformances: ReadonlyArray<ConformanceProof.SymbolicConformanceSelection>
       readonly staticArguments: ReadonlyArray<StaticValue.Value>
       /** Caller-authored origins aligned with static arguments, excluded from instance identity. */
@@ -1112,7 +1112,7 @@ type ExpressionNode =
       readonly protectedRow: Type.FailureRow
       readonly handlerRow: Type.FailureRow
       readonly residualRow: Type.FailureRow
-      readonly evidence: ReadonlyArray<Constraint.ConstraintEvidence>
+      readonly evidence: EvidenceRef
       readonly type: Type.Effect
       readonly span: SourceSpan.SourceSpan
       readonly origin: Origin
@@ -1124,7 +1124,7 @@ type ExpressionNode =
         readonly binding?: BindingId
         readonly parameter?: DeclarationFacts.ParameterId
         readonly selected: Type.RequirementsRow
-        readonly evidence: ReadonlyArray<Constraint.ConstraintEvidence>
+        readonly evidence: EvidenceRef
         readonly capability?: Type.Nominal | Type.Parameter
         readonly providerType: Type.Nominal | Type.Parameter
         readonly witness?: DeclarationFacts.ConformanceWitness
@@ -1188,9 +1188,7 @@ type ExpressionNode =
       readonly _tag: 'Unavailable'
       readonly span: SourceSpan.SourceSpan
       readonly origin: Origin
-      readonly cause?: Diagnostic.Identity
-      /** The revision-free cause `cause` presents. */
-      readonly causeAt?: Diagnostic.Identity<Location.Location>
+      readonly cause?: CauseRef
     }
 
 /** One elaborated body statement in source order. */
@@ -1588,10 +1586,10 @@ export const returnExpressions = (body: ReadonlyArray<Statement>): ReadonlyArray
 /** The first unavailable expression's cause and span, if the body has one. */
 export const firstUnavailable = (
   self: TirFunction,
-): { readonly span: SourceSpan.SourceSpan; readonly cause?: Diagnostic.Identity } | undefined => {
+): { readonly span: SourceSpan.SourceSpan; readonly cause?: CauseRef } | undefined => {
   const walk = (
     expression: Expression,
-  ): { readonly span: SourceSpan.SourceSpan; readonly cause?: Diagnostic.Identity } | undefined => {
+  ): { readonly span: SourceSpan.SourceSpan; readonly cause?: CauseRef } | undefined => {
     switch (expression._tag) {
       case 'Unavailable':
         return expression
@@ -2425,7 +2423,7 @@ const encodeExpression = (expression: Expression, depth: number): string => {
           expression.typeArguments.length === 0
             ? ''
             : `<${expression.typeArguments.map(Type.encodeGenericArgument).join(', ')}>`
-        }${expression.evidence.length === 0 ? '' : ` evidence=${expression.evidence.map(Constraint.evidenceKey).join(',')}`}${expression.staticArguments.length === 0 ? '' : ` static=${expression.staticArguments.map(StaticValue.presentation).join(',')}`} : ${Type.encode(expression.type)} loan-ends=${expression.loanEnds.map((loan) => `l${loan.ordinal}`).join(',') || 'none'} ${originText(expression.origin)}`,
+        } evidence=e${expression.evidence.ordinal}${expression.staticArguments.length === 0 ? '' : ` static=${expression.staticArguments.map(StaticValue.presentation).join(',')}`} : ${Type.encode(expression.type)} loan-ends=${expression.loanEnds.map((loan) => `l${loan.ordinal}`).join(',') || 'none'} ${originText(expression.origin)}`,
         ...expression.arguments.map((argument) => encodeExpression(argument, depth + 1)),
       ].join('\n')
     case 'ServiceEffectConstruct':
@@ -2604,18 +2602,13 @@ export const present = (
   self: TirFunction,
   spanOf: (anchor: AuthoredIdentity.Anchor) => SourceSpan.SourceSpan,
   declaration: DeclarationFacts.DeclarationFact = self.declaration,
-  publish?: Publish,
 ): TirFunction =>
-  Object.freeze({ ...stamp({ ...self, declaration: undefined }, spanOf, publish), declaration })
-
-/** Publishes a revision-free cause through one revision's presentation. */
-export type Publish = (cause: Diagnostic.Identity<Location.Location>) => Diagnostic.Identity
+  Object.freeze({ ...stamp({ ...self, declaration: undefined }, spanOf), declaration })
 
 /** Stamps every position in a value that has its authored node beside it. */
 export const stamp = <A>(
   self: A,
   spanOf: (anchor: AuthoredIdentity.Anchor) => SourceSpan.SourceSpan,
-  publish?: Publish,
 ): A => {
   const copies = new WeakMap<object, unknown>()
   const visit = (input: unknown): unknown => {
@@ -2639,8 +2632,6 @@ export const stamp = <A>(
       const at = source[anchor] as AuthoredIdentity.Anchor | undefined
       if (at !== undefined && span in source) result[span] = spanOf(at)
     }
-    const causeAt = source['causeAt'] as Diagnostic.Identity<Location.Location> | undefined
-    if (publish !== undefined && causeAt !== undefined) result['cause'] = publish(causeAt)
     // A node's own position comes from its origin, whatever else it names.
     if (origin?.anchor !== undefined && 'span' in source) result['span'] = spanOf(origin.anchor)
     return Object.freeze(result)

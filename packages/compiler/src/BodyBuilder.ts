@@ -148,20 +148,6 @@ export const index = (self: BodyBuilder, fn: Tir.TirFunction): Tir.TirFunction =
     }
     const value = input as Readonly<Record<string, unknown>>
     const tag = value['_tag']
-    if (
-      (tag === 'Call' || tag === 'EffectConstruct' || tag === 'EffectCatch') &&
-      Array.isArray(value['evidence'])
-    )
-      selectedEvidence(self, value['evidence'] as ReadonlyArray<Constraint.ConstraintEvidence>)
-    if (tag === 'EffectBindRequirement') {
-      const provider = value['provider'] as Readonly<Record<string, unknown>> | undefined
-      if (Array.isArray(provider?.['evidence']))
-        selectedEvidence(self, provider['evidence'] as ReadonlyArray<Constraint.ConstraintEvidence>)
-    }
-    if (tag === 'Unavailable') {
-      const unavailable = value['causeAt'] as Diagnostic.Identity<Location.Location> | undefined
-      if (unavailable !== undefined) cause(self, unavailable)
-    }
     if (value['_tag'] === 'Bind') {
       const initializer = value['initializer'] as Readonly<Record<string, unknown>> | undefined
       semanticLocal(self, value['binding'], {
@@ -205,7 +191,8 @@ export const index = (self: BodyBuilder, fn: Tir.TirFunction): Tir.TirFunction =
       self.nodes.push(result as unknown as Tir.PublishedNode)
     }
     for (const key of Object.keys(source)) {
-      if (!isNode || key !== 'id') result[key] = visit(source[key])
+      if (isNode && key === 'id') continue
+      result[key] = visit(source[key])
     }
     return Object.freeze(result)
   }
