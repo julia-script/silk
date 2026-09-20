@@ -33,8 +33,6 @@ export interface ApplicationKey {
   readonly evidence: ReadonlyArray<string>
   readonly contractRow: ReadonlyArray<string>
   readonly staticArguments: ReadonlyArray<StaticValue.Value>
-  /** Caller-authored metadata aligned with static arguments; never part of specialization identity. */
-  readonly staticArgumentOrigins?: ReadonlyArray<StaticEvaluation.TextOrigin | undefined>
 }
 
 export interface ResidualBody {
@@ -1072,12 +1070,9 @@ export const residualize = (self: Coordinator, key: ApplicationKey): Result => {
   const bindings =
     declaration === undefined
       ? undefined
-      : bindStaticParameters(
-          declaration,
-          key.staticArguments,
-          Object.freeze([]),
-          key.staticArgumentOrigins,
-        )
+      : // A residual body is shared by every call that selects it, so its static text names its own
+        // parameters; each selecting call site substitutes what it passed when it reports.
+        bindStaticParameters(declaration, key.staticArguments)
   if (declaration === undefined || input === undefined || bindings === undefined) {
     // A declaration that is gone has no node; its module's root resolves to that module's start.
     const span = Location.at(

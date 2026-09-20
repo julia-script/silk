@@ -12,6 +12,8 @@ import * as DeclarationFacts from './DeclarationFacts.js'
 import type * as DeclarationIndex from './DeclarationIndex.js'
 import * as Diagnostic from './Diagnostic.js'
 import * as Elaboration from './Elaboration.js'
+import * as Location from './Location.js'
+import * as Provenance from './Provenance.js'
 import type * as LifetimeFlow from './LifetimeFlow.js'
 import * as ExecutableOrigin from './ExecutableOrigin.js'
 import * as Tir from './Tir.js'
@@ -1319,6 +1321,8 @@ export const discover = (
   interface WorkItem {
     readonly key: InstanceKey
     readonly staticArgumentOrigins?: ReadonlyArray<StaticEvaluation.TextOrigin | undefined>
+    /** The instance whose body made the call, whose own parameters the origins may name. */
+    readonly selectedBy?: InstanceKey
     readonly ancestors: AncestorHistory.History
     /** Ordinary type arguments retained as the finite structural measure of a cleanup path. */
     readonly cleanupMeasure?: CleanupMeasure
@@ -1586,7 +1590,60 @@ export const discover = (
       item.cleanupMeasure?.roots.map(Type.runtimeKey).sort() ?? null,
     ])
   const pending: Array<string> = []
+  type StaticOrigins = ReadonlyArray<StaticEvaluation.TextOrigin | undefined>
+  /** What each call that selected an application wrote for its static text. */
+  const selections = new Map<
+    string,
+    Map<string, { readonly origins: StaticOrigins; readonly caller?: string }>
+  >()
+  /** Every selection of an application in terms of written literals, through its callers. */
+  const writtenSelections = (
+    key: string,
+    visiting: ReadonlySet<string> = new Set(),
+  ): ReadonlyArray<StaticOrigins> => {
+    if (visiting.has(key)) return []
+    const inner = new Set(visiting).add(key)
+    return [...(selections.get(key)?.values() ?? [])].flatMap(({ origins, caller }) => {
+      const callers =
+        caller !== undefined &&
+        origins.some((origin) => origin?.some((segment) => segment.from._tag === 'Parameter'))
+          ? writtenSelections(caller, inner)
+          : []
+      return callers.length === 0
+        ? [origins]
+        : callers.map((written) =>
+            origins.map((origin) =>
+              origin === undefined ? undefined : Provenance.substitute(origin, written),
+            ),
+          )
+    })
+  }
+  /** Diagnostics about a shared body, published once every selecting call is known. */
+  const sharedDiagnostics: Array<{
+    readonly key: string
+    readonly diagnostic: Diagnostic.Located
+  }> = []
+  const report = (key: InstanceKey, diagnostic: Diagnostic.Located): Diagnostic.Diagnostic => {
+    const published = Diagnostic.publish(diagnostic, registry)
+    if (Location.isShared(diagnostic.span))
+      sharedDiagnostics.push({ key: keyText(key), diagnostic })
+    else
+      residualizationDiagnostics.set(
+        `${published.code}:${published.span.sourceId}:${published.span.start}:${published.span.end}`,
+        published,
+      )
+    return published
+  }
   const schedule = (item: WorkItem): boolean => {
+    if (item.staticArgumentOrigins !== undefined) {
+      const caller = item.selectedBy === undefined ? undefined : keyText(item.selectedBy)
+      const known = selections.get(keyText(item.key)) ?? new Map()
+      known.set(JSON.stringify([caller, item.staticArgumentOrigins]), {
+        origins: item.staticArgumentOrigins,
+        ...(caller === undefined ? {} : { caller }),
+      })
+      selections.set(keyText(item.key), known)
+    }
     const context = contextText(item)
     const prior = scheduledContexts.get(context)
     const ancestors =
@@ -1663,9 +1720,6 @@ export const discover = (
           evidence: key.evidence,
           contractRow: key.contractRow,
           staticArguments: key.staticArguments,
-          ...(item.staticArgumentOrigins === undefined
-            ? {}
-            : { staticArgumentOrigins: item.staticArgumentOrigins }),
         })
         const residual = trace(
           'Instances.residualize',
@@ -1673,30 +1727,17 @@ export const discover = (
           { 'function.module': key.declaration.module, 'function.name': key.declaration.name },
         )
         if (residual._tag === 'StaticFailure') {
-          const diagnostic = Diagnostic.publish(
-            StaticEvaluation.diagnostic(residual.failure, target.id),
-            registry,
-          )
-          residualizationDiagnostics.set(
-            `${diagnostic.code}:${diagnostic.span.sourceId}:${diagnostic.span.start}:${diagnostic.span.end}`,
-            diagnostic,
-          )
+          report(key, StaticEvaluation.diagnostic(residual.failure, target.id))
           continue
         }
         const selectedCompileError = residual.diagnostics.findIndex(
           (diagnostic) => diagnostic.code === Diagnostic.selectedCompileErrorCode,
         )
-        const residualDiagnostics = Diagnostic.publishAll(
+        const residualDiagnostics = (
           selectedCompileError < 0
             ? residual.diagnostics
-            : residual.diagnostics.slice(0, selectedCompileError + 1),
-          registry,
-        )
-        for (const diagnostic of residualDiagnostics)
-          residualizationDiagnostics.set(
-            `${diagnostic.code}:${diagnostic.span.sourceId}:${diagnostic.span.start}:${diagnostic.span.end}`,
-            diagnostic,
-          )
+            : residual.diagnostics.slice(0, selectedCompileError + 1)
+        ).map((diagnostic) => report(key, diagnostic))
         const residualError = residualDiagnostics.find(
           (diagnostic) => diagnostic.severity === 'error',
         )
@@ -1939,7 +1980,7 @@ export const discover = (
                 key: targetKey,
                 ...(call.staticArgumentOrigins === undefined
                   ? {}
-                  : { staticArgumentOrigins: call.staticArgumentOrigins }),
+                  : { staticArgumentOrigins: call.staticArgumentOrigins, selectedBy: key }),
                 ancestors: withAncestor(
                   branchHistory,
                   Object.freeze({
@@ -2048,6 +2089,22 @@ export const discover = (
       }
     }
   })
+  // A failure in a shared body is one fact about the application; each call that selects it is a
+  // distinct authored mistake, reported at what that call wrote.
+  for (const { key, diagnostic } of sharedDiagnostics) {
+    const written = writtenSelections(key)
+    for (const located of written.length === 0
+      ? [diagnostic]
+      : written.map((origins) =>
+          Object.freeze({ ...diagnostic, span: Location.substitute(diagnostic.span, origins) }),
+        )) {
+      const published = Diagnostic.publish(located, registry)
+      residualizationDiagnostics.set(
+        `${published.code}:${published.span.sourceId}:${published.span.start}:${published.span.end}`,
+        published,
+      )
+    }
+  }
   // Success identities may resolve through another instance's block, so they are traced only once
   // every instance is prepared.
   const preparedInstances = [...prepared.values()].map((candidate) => candidate.instance)

@@ -1742,34 +1742,47 @@ pub fn main() -> i32 { return reject("aéz") }`
   }),
 )
 
-it.effect(
-  'chooses caller provenance deterministically without changing specialization identity',
-  () =>
-    Effect.gen(function* () {
-      const sourceId = 'static/compile-error-shared-specialization'
-      const program = `import silk.static_text { StaticText }
+it.effect('reports a shared residual failure at every call that selects it', () =>
+  Effect.gen(function* () {
+    const sourceId = 'static/compile-error-shared-specialization'
+    const program = `import silk.static_text { StaticText }
 
 fn reject(static template: string) -> i32 { compileError(StaticText.slice(template, 1, 3)) }
 
+fn relay(static forwarded: string) -> i32 { return reject(forwarded) }
+
 pub fn main() -> i32 {
   let first = reject("aéz")
+  let second = relay("bèy")
   return reject("aéz")
 }`
-      const snapshot = yield* AnalysisFixture.retainingMain(
-        sourceId,
-        encoder.encode(program),
-        Target.x8664UnknownLinuxGnu.id,
-      )
-      const diagnostics = Analysis.diagnostics(snapshot).filter(
-        (diagnostic) => diagnostic.code === 'SEM0177',
-      )
-      assert.strictEqual(diagnostics.length, 1)
-      const firstLiteralStart = program.indexOf('"aéz"')
-      const prefixBytes = encoder.encode(program.slice(0, firstLiteralStart)).length
-      assert.strictEqual(diagnostics.at(0)?.span.sourceId, sourceId)
-      assert.strictEqual(diagnostics.at(0)?.span.start, prefixBytes + 2)
-      assert.strictEqual(diagnostics.at(0)?.span.end, prefixBytes + 4)
-    }),
+    const snapshot = yield* AnalysisFixture.retainingMain(
+      sourceId,
+      encoder.encode(program),
+      Target.x8664UnknownLinuxGnu.id,
+    )
+    // One specialization per static value, whoever asks for it and wherever they wrote it.
+    assert.deepEqual(
+      Analysis.instancesOf(snapshot)
+        .unavailableOwnership.map((candidate) => candidate.key.declaration.name)
+        .sort(),
+      ['reject', 'reject'],
+    )
+    // The failure is one fact about the application; each selecting call is its own mistake, so
+    // each reports at what it wrote, also through a caller that only forwards it.
+    const bytesBefore = (index: number): number => encoder.encode(program.slice(0, index)).length
+    const literals = [
+      program.indexOf('"aéz"'),
+      program.indexOf('"bèy"'),
+      program.lastIndexOf('"aéz"'),
+    ].map(bytesBefore)
+    assert.deepEqual(
+      Analysis.diagnostics(snapshot)
+        .filter((diagnostic) => diagnostic.code === 'SEM0177')
+        .map((diagnostic) => [diagnostic.span.start, diagnostic.span.end]),
+      literals.map((start) => [start + 2, start + 4]),
+    )
+  }),
 )
 
 it.effect('retains ownership evidence for an unavailable selected residual specialization', () =>

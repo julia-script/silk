@@ -159,19 +159,22 @@ export const concatTextOrigin = (
     : Provenance.concat(left ?? [], leftLength, right ?? [])
 
 /**
- * The location of the written bytes behind static text provenance: every literal part, in value
- * order.
+ * The location of the written bytes behind static text provenance: every part, in value order.
  *
- * Parameter-relative parts have none until a caller substitutes its argument. `fallback` is the
- * node reported when a literal's presentation cannot map its range.
+ * A parameter part has no position until a call site substitutes what it passed, so a location
+ * that keeps one is shared between the calls that select it. `fallback` is the node reported when
+ * no part resolves.
  */
 export const textOriginLocation = (
   origin: TextOrigin,
   fallback: AuthoredHir.Anchor,
-): Location.Location | undefined => {
-  const parts = origin.flatMap((segment) => (segment.from._tag === 'Literal' ? [segment.from] : []))
-  return parts.length === 0 ? undefined : Location.within(parts, fallback)
-}
+): Location.Location | undefined =>
+  origin.length === 0
+    ? undefined
+    : Location.within(
+        origin.map((segment) => segment.from),
+        fallback,
+      )
 
 /** Retains one selected static arm in the logical trace. */
 export const selectedArmFrame = (
