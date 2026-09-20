@@ -1102,7 +1102,7 @@ export const residualize = (self: Coordinator, key: ApplicationKey): Result => {
     const body = input.result.bodies.find(
       (candidate) => candidate.declaration.id.ordinal === declaration.id.ordinal,
     )
-    if (body?.function !== undefined) {
+    if (body !== undefined) {
       record(self, key.declaration, 'UnchangedBody', 'sourceReused', false)
       return Object.freeze({
         _tag: 'ResidualBody',
@@ -1223,7 +1223,7 @@ export const residualize = (self: Coordinator, key: ApplicationKey): Result => {
           ),
         }),
       )
-      if (body.function === undefined)
+      if (declaration.phase === 'Static')
         throw new RangeError('Static functions have no runtime TIR body')
       return StaticEvaluation.complete(
         Object.freeze({

@@ -5086,8 +5086,9 @@ export const checkModule = (
 ): ModuleOwnership => {
   const context = SemanticContext.make(result.authored)
   const checked = result.bodies.flatMap((body) => {
+    // A `static fn` runs in the evaluator: it owns nothing at run time.
+    if (body.declaration.phase === 'Static') return []
     const fn = body.function
-    if (fn === undefined) return []
     const selected = input(fn, body.results.lifetimes, index, accessBoundaryPlan, context)
     const compute = () => check(selected)
     const checked =

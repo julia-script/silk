@@ -494,14 +494,10 @@ const present = (
             artifact: body.artifact,
             declaration: body.hidden ? renumber(body.declaration, moved) : declaration,
             hidden: body.hidden,
-            ...(body.function === undefined
-              ? {}
-              : {
-                  function: {
-                    ...renumber({ ...body.function, declaration: undefined }, moved),
-                    declaration,
-                  },
-                }),
+            function: {
+              ...renumber({ ...body.function, declaration: undefined }, moved),
+              declaration,
+            },
             results: renumber(body.results, moved),
           },
           context,

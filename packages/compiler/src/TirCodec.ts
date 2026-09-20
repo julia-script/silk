@@ -83,8 +83,7 @@ export const encode = (self: Elaboration.CheckedBody): string =>
       artifact: self.artifact,
       declaration: self.hidden ? self.declaration : self.declaration.id,
       hidden: self.hidden,
-      function:
-        self.function === undefined ? undefined : { ...self.function, declaration: undefined },
+      function: { ...self.function, declaration: undefined },
       results:
         self.results.lifetimes === undefined
           ? self.results
@@ -102,7 +101,7 @@ export const decode = (
     readonly artifact: Tir.ArtifactId
     readonly declaration: DeclarationFacts.DeclarationFact | DeclarationFacts.DeclarationId
     readonly hidden: boolean
-    readonly function?: Omit<Tir.TirFunction, 'declaration'>
+    readonly function: Omit<Tir.TirFunction, 'declaration'>
     readonly results: Elaboration.BodyResults
   }
   const declaration =
@@ -114,7 +113,7 @@ export const decode = (
       artifact: decoded.artifact,
       declaration,
       hidden: decoded.hidden,
-      ...(decoded.function === undefined ? {} : { function: { ...decoded.function, declaration } }),
+      function: { ...decoded.function, declaration },
       results: decoded.results,
     },
     context,

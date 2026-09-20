@@ -1545,8 +1545,8 @@ export interface CheckedBody {
   readonly declaration: DeclarationFact
   /** A compiler-made body (an anonymous callable) that source lookup never finds. */
   readonly hidden: boolean
-  /** Absent for a `static fn`, whose nodes exist only while an application is evaluated. */
-  readonly function?: Tir.TirFunction
+  /** A `static fn` keeps its static structure here and is never part of the module's runtime TIR. */
+  readonly function: Tir.TirFunction
   readonly results: BodyResults
 }
 
@@ -1824,6 +1824,7 @@ import {
   directExpressionChildren,
   directStatementExpressions,
   lowerStatements,
+  staticLowering,
 } from './TirLowering.js'
 import { analyzeFunctionBody } from './StatementAnalysis.js'
 export interface FactVisitor {
@@ -2507,6 +2508,22 @@ const expressionTypesOf = (fact: FunctionFact): ReadonlyArray<ExpressionTypeRow>
   return Object.freeze(rows)
 }
 
+/** A `static fn` body keeps its static structure: it runs in the evaluator and never at run time. */
+const staticTirFunction = (
+  context: SemanticContext.SemanticContext,
+  fact: FunctionFact,
+): Tir.TirFunction =>
+  Object.freeze({
+    _tag: 'TirFunction',
+    declaration: fact.declaration,
+    contract: Tir.contractOf(fact.declaration),
+    entryRegion:
+      fact.regionOrder.at(0) ??
+      Object.freeze({ _tag: 'TirRegion' as const, function: fact.declaration.id, ordinal: 0 }),
+    regionOrder: fact.regionOrder,
+    statements: staticLowering(context).statements(fact.statements),
+  })
+
 /**
  * A checked body as one revision reads it. The body itself names authored nodes only; every
  * position it shows is stamped here from the node beside it, and its header is this revision's.
@@ -2531,13 +2548,9 @@ export const presentBody = (
     artifact: self.artifact,
     declaration,
     hidden: self.hidden,
-    ...(self.function === undefined
-      ? {}
-      : {
-          function: Tir.present(self.function, context.spanOf, declaration, (cause) =>
-            Diagnostic.publishIdentity(cause, SemanticContext.registryOf(context)),
-          ),
-        }),
+    function: Tir.present(self.function, context.spanOf, declaration, (cause) =>
+      Diagnostic.publishIdentity(cause, SemanticContext.registryOf(context)),
+    ),
     results,
   })
 }
@@ -2558,7 +2571,9 @@ export const checkedBody = (
     ...(parent === undefined ? {} : { parent }),
   })
   const lowered =
-    fact.declaration.phase === 'Static' ? undefined : runtimeTirFunction(context, fact, index)
+    fact.declaration.phase === 'Static'
+      ? staticTirFunction(context, fact)
+      : runtimeTirFunction(context, fact, index)
   const staticStructure = staticStructureOf(fact)
   const results: BodyResults = Object.freeze({
     occurrences: fact.occurrences,
@@ -2576,7 +2591,7 @@ export const checkedBody = (
     artifact,
     declaration: fact.declaration,
     hidden,
-    ...(lowered === undefined ? {} : { function: lowered }),
+    function: lowered,
     results,
   })
 }
@@ -2650,7 +2665,7 @@ export const elaborateModule = (input: Input): Result => {
     _tag: 'TirModule',
     module: authored.module.owner.module,
     functions: Object.freeze(
-      bodies.flatMap((body) => (body.function === undefined ? [] : [body.function])),
+      bodies.flatMap((body) => (body.declaration.phase === 'Static' ? [] : [body.function])),
     ),
   })
 

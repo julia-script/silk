@@ -46,6 +46,8 @@ for (const [category, program] of categories)
     const context = SemanticContext.make(result.authored)
     assert.isAbove(result.bodies.length, 0)
     for (const body of result.bodies) {
+      // Every body publishes nodes, a `static fn` included.
+      assert.isAbove(body.function.statements.length, 0)
       const text = TirCodec.encode(body)
       const decoded = TirCodec.decode(
         text,
