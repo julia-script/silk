@@ -12,6 +12,7 @@ import type * as Operator from './Operator.js'
 import * as RowAlgebra from './RowAlgebra.js'
 import type * as Scalar from './Scalar.js'
 import type * as SourceSpan from './SourceSpan.js'
+import * as SourceSpanModule from './SourceSpan.js'
 import type * as StaticEvaluation from './StaticEvaluation.js'
 import type * as StaticText from './StaticText.js'
 import * as StaticValue from './StaticValue.js'
@@ -94,6 +95,8 @@ export interface BorrowId {
   readonly _tag: 'BorrowId'
   readonly function: DeclarationFacts.DeclarationId
   readonly callSpan: SourceSpan.SourceSpan
+  /** The authored call `callSpan` presents; presentation stamps the span from it. */
+  readonly call?: AuthoredIdentity.Anchor
   readonly ordinal: number
 }
 
@@ -102,6 +105,8 @@ export interface TemporaryOwnerId {
   readonly _tag: 'TemporaryOwnerId'
   readonly function: DeclarationFacts.DeclarationId
   readonly span: SourceSpan.SourceSpan
+  /** The authored node `span` presents; presentation stamps the span from it. */
+  readonly at?: AuthoredIdentity.Anchor
   readonly ordinal: number
 }
 
@@ -113,6 +118,8 @@ interface ExecutableSiteId {
   readonly owner?: DeclarationFacts.CanonicalId
   readonly ordinal: number
   readonly span: SourceSpan.SourceSpan
+  /** The authored node `span` presents; presentation stamps the span from it. */
+  readonly at?: AuthoredIdentity.Anchor
 }
 
 /** Hidden nominal identity for one source `effect {}` construction site. */
@@ -357,6 +364,7 @@ export type BorrowSelector =
       readonly _tag: 'Field'
       readonly field: DeclarationFacts.FieldId
       readonly span: SourceSpan.SourceSpan
+      readonly at?: AuthoredIdentity.Anchor
     }
   | {
       readonly _tag: 'Index'
@@ -364,12 +372,14 @@ export type BorrowSelector =
       readonly array: Type.FixedArray
       readonly bounds: BoundsMode
       readonly span: SourceSpan.SourceSpan
+      readonly at?: AuthoredIdentity.Anchor
     }
   | {
       readonly _tag: 'SliceIndex'
       readonly index: Expression
       readonly slice: Type.Slice
       readonly span: SourceSpan.SourceSpan
+      readonly at?: AuthoredIdentity.Anchor
     }
 
 /** One selector in a writable place, retained in source evaluation order. */
@@ -379,6 +389,7 @@ export type WriteSelector =
       readonly field: DeclarationFacts.FieldId
       readonly type: DeclarationFacts.SemanticType
       readonly span: SourceSpan.SourceSpan
+      readonly at?: AuthoredIdentity.Anchor
     }
   | {
       readonly _tag: 'Index'
@@ -387,6 +398,7 @@ export type WriteSelector =
       readonly bounds: BoundsMode
       readonly type: DeclarationFacts.SemanticType
       readonly span: SourceSpan.SourceSpan
+      readonly at?: AuthoredIdentity.Anchor
     }
 
 export type OwnedWriteRoot =
@@ -449,12 +461,20 @@ export interface PatternSelection {
   readonly arm: Match.ArmId
   readonly access: Match.Access
   readonly subject: Expression
+  /**
+   * The authored expression matched, borrow included, kept as evidence for loan analysis. `subject`
+   * and `access` are what executes.
+   */
+  readonly source?: Expression
   readonly members: ReadonlyArray<Match.CoverageIdentity>
   readonly member?: Match.CoverageIdentity
   readonly universal: boolean
   readonly bindings: ReadonlyArray<PatternBinding>
   readonly cleanup: ReadonlyArray<ReadonlyArray<DeclarationFacts.FieldId>>
   readonly irrefutable: boolean
+  /** Where a loan taken by matching the subject ends. */
+  readonly loanEnd: SourceSpan.SourceSpan
+  readonly loanEndAt?: AuthoredIdentity.Anchor
   readonly span: SourceSpan.SourceSpan
   readonly origin: Origin
 }
@@ -666,6 +686,8 @@ export type Expression =
         | 'Binding'
         | 'MatchArm'
       readonly expectedAt: SourceSpan.SourceSpan
+      /** The authored node `expectedAt` presents. */
+      readonly expected?: AuthoredIdentity.Anchor
       readonly type: Type.StructuralUnion | Type.Effect | Type.Represented
       readonly span: SourceSpan.SourceSpan
       readonly origin: Origin
@@ -691,6 +713,7 @@ export type Expression =
         readonly after: ReadonlyArray<Match.CoverageIdentity>
         readonly reachable: boolean
         readonly span: SourceSpan.SourceSpan
+        readonly at?: AuthoredIdentity.Anchor
       }>
       readonly type: DeclarationFacts.SemanticType
       readonly span: SourceSpan.SourceSpan
@@ -781,6 +804,11 @@ export type Expression =
     }
   | {
       readonly _tag: 'SliceBorrow'
+      /**
+       * The authored place this borrows, kept as evidence for loan analysis. It is never
+       * evaluated: `root` and `selectors` are what executes.
+       */
+      readonly place?: Expression
       readonly borrow: BorrowId
       readonly root: SliceRoot
       readonly selectors: ReadonlyArray<BorrowSelector>
@@ -794,6 +822,11 @@ export type Expression =
     }
   | {
       readonly _tag: 'ValueBorrow'
+      /**
+       * The authored place this borrows, kept as evidence for loan analysis. It is never
+       * evaluated: `root` and `selectors` are what executes.
+       */
+      readonly place?: Expression
       readonly borrow: BorrowId
       readonly root: SliceRoot
       readonly selectors: ReadonlyArray<BorrowSelector>
@@ -972,6 +1005,9 @@ export type Expression =
         readonly parameter?: DeclarationFacts.ParameterId
         readonly access: 'Copy' | 'Shared' | 'Exclusive' | 'Take'
         readonly span: SourceSpan.SourceSpan
+        readonly at?: AuthoredIdentity.Anchor
+        /** The first authored use that captured the local, when one names it. */
+        readonly use?: AuthoredIdentity.Anchor
       }>
       readonly type: Type.Effect
       readonly span: SourceSpan.SourceSpan
@@ -1018,6 +1054,7 @@ export type Expression =
         readonly selectionAccess: 'Shared' | 'Exclusive' | 'Take'
         readonly captureAccess: 'Copy' | 'Shared' | 'Exclusive' | 'Take'
         readonly span: SourceSpan.SourceSpan
+        readonly at?: AuthoredIdentity.Anchor
       }
       readonly type: Type.Effect
       readonly span: SourceSpan.SourceSpan
@@ -1056,6 +1093,8 @@ export type Expression =
    */
   | {
       readonly _tag: 'InterfaceOperationCall'
+      /** Written as an operator, whose reference operands are borrowed implicitly. */
+      readonly operator?: true
       readonly capability: Type.Nominal
       readonly provider: Type.Type
       readonly operation: string
@@ -1078,6 +1117,8 @@ export type Expression =
 export type Statement =
   | {
       readonly _tag: 'UnavailableStatement'
+      /** Operands of a write whose place has no lowered form; they still evaluate and hold loans. */
+      readonly write?: { readonly destination: Expression; readonly value: Expression }
       readonly region: RegionId
       readonly span: SourceSpan.SourceSpan
       readonly origin: Origin
@@ -1133,6 +1174,8 @@ export type Statement =
     }
   | {
       readonly _tag: 'Write'
+      /** The authored destination, kept as evidence for loan analysis and never evaluated. */
+      readonly destination?: Expression
       readonly place: WritePlace
       readonly value: Expression
       readonly region: RegionId
@@ -1215,7 +1258,9 @@ export const returned = (self: TirFunction): Expression => {
 export const statementExpressions = (statement: Statement): ReadonlyArray<Expression> => {
   switch (statement._tag) {
     case 'UnavailableStatement':
-      return []
+      return statement.write === undefined
+        ? []
+        : [statement.write.destination, statement.write.value]
     case 'Unsafe':
       return statement.statements.flatMap(statementExpressions)
     case 'Bind':
@@ -2402,3 +2447,63 @@ export const encode = (self: Module): string =>
     ]),
     '',
   ].join('\n')
+
+/** Each position a body holds, and the authored node beside it that says where it is. */
+const presented: ReadonlyArray<readonly [span: string, anchor: string]> = [
+  ['span', 'at'],
+  ['callSpan', 'call'],
+  ['loanEnd', 'loanEndAt'],
+  ['expectedAt', 'expected'],
+]
+
+/**
+ * Stamps a body's positions for one revision.
+ *
+ * A checked body names authored nodes. Stages that still work in source coordinates read the spans
+ * beside those nodes, and a span is only ever this function of its node and the current
+ * presentation: a reused body is presented again and nothing in it is matched against the revision
+ * it was built in. The declaration is the current header of the same id.
+ *
+ * ponytail: walks the whole body, types included; present per node kind if this shows in profiles.
+ */
+export const present = (
+  self: TirFunction,
+  spanOf: (anchor: AuthoredIdentity.Anchor) => SourceSpan.SourceSpan,
+  declaration: DeclarationFacts.DeclarationFact = self.declaration,
+): TirFunction =>
+  Object.freeze({ ...stamp({ ...self, declaration: undefined }, spanOf), declaration })
+
+/** Stamps every position in a value that has its authored node beside it. */
+export const stamp = <A>(
+  self: A,
+  spanOf: (anchor: AuthoredIdentity.Anchor) => SourceSpan.SourceSpan,
+): A => {
+  const copies = new WeakMap<object, unknown>()
+  const visit = (input: unknown): unknown => {
+    if (typeof input !== 'object' || input === null) return input
+    if (input instanceof Map || input instanceof Set || SourceSpanModule.isSourceSpan(input))
+      return input
+    const known = copies.get(input)
+    if (known !== undefined) return known
+    if (Array.isArray(input)) {
+      const items: Array<unknown> = []
+      copies.set(input, items)
+      for (const item of input) items.push(visit(item))
+      return Object.freeze(items)
+    }
+    const source = input as Readonly<Record<string, unknown>>
+    const result: Record<string, unknown> = {}
+    copies.set(input, result)
+    for (const key of Object.keys(source)) result[key] = visit(source[key])
+    const origin = source['origin'] as Origin | undefined
+    for (const [span, anchor] of presented) {
+      const at = source[anchor] as AuthoredIdentity.Anchor | undefined
+      if (at !== undefined && span in source) result[span] = spanOf(at)
+    }
+    // A node's own position comes from its origin, whatever else it names.
+    if (origin?.anchor !== undefined && 'span' in source) result['span'] = spanOf(origin.anchor)
+    return Object.freeze(result)
+  }
+  // The walk rebuilds the same shape and changes only spans that have an anchor beside them.
+  return visit(self) as A
+}

@@ -336,6 +336,7 @@ export type BorrowSelectorFact =
       readonly _tag: 'Field'
       readonly field: DeclarationFacts.FieldId
       readonly span: SourceSpan.SourceSpan
+      readonly at?: AuthoredHir.Anchor
     }
   | {
       readonly _tag: 'Index'
@@ -343,12 +344,14 @@ export type BorrowSelectorFact =
       readonly array: Type.FixedArray
       readonly bounds: Extract<BoundsFact, { readonly _tag: 'Proven' | 'Runtime' }>
       readonly span: SourceSpan.SourceSpan
+      readonly at?: AuthoredHir.Anchor
     }
   | {
       readonly _tag: 'SliceIndex'
       readonly index: ExpressionFact
       readonly slice: Type.Slice
       readonly span: SourceSpan.SourceSpan
+      readonly at?: AuthoredHir.Anchor
     }
 
 export type BorrowRootFact =
@@ -577,6 +580,8 @@ export interface PatternSelectionFact {
   readonly bindings: ReadonlyArray<PatternBindingFact>
   readonly irrefutable: boolean
   readonly loanEnd: SourceSpan.SourceSpan
+  /** The authored node `loanEnd` presents. */
+  readonly loanEndAt: AuthoredHir.Anchor
   readonly anchor: AuthoredHir.Anchor
 }
 
@@ -979,6 +984,8 @@ export interface EffectRequirementBindingFact {
   /** Ordinary capture access derived from the provider argument expression. */
   readonly captureAccess: 'Copy' | 'Shared' | 'Exclusive' | 'Take'
   readonly span: SourceSpan.SourceSpan
+  /** The authored node `span` presents. */
+  readonly at: AuthoredHir.Anchor
 }
 
 /** One lazy imperative effect block and its capture-derived execution contract. */
@@ -1183,6 +1190,8 @@ export interface ArgumentId {
   readonly _tag: 'ArgumentId'
   readonly function: DeclarationId
   readonly callSpan: SourceSpan.SourceSpan
+  /** The authored call `callSpan` presents. */
+  readonly call?: AuthoredHir.Anchor
   readonly ordinal: number
 }
 
@@ -1465,6 +1474,33 @@ export interface LexicalScopeFact {
 /** The closed result of looking up one declaration spelling. */
 export type DeclarationLookup = DeclarationFacts.DeclarationLookup
 
+/**
+ * What a checked body publishes beside its nodes.
+ *
+ * Every row names authored nodes and declaration ids, never a position or a header object, so a
+ * reused body keeps its results unchanged and each revision presents them again.
+ */
+export interface BodyResults {
+  /** The authored names the body resolves: navigation reads these and never the body. */
+  readonly occurrences: ReadonlyArray<import('./SemanticOccurrence.js').LocatedOccurrence>
+  /** What the body infers that its author did not write, for editor hints. */
+  readonly hints: ReadonlyArray<import('./TypeHint.js').Row>
+  /** What each returned expression shows about the opaque result this body produces. */
+  readonly opaqueEvidence: ReadonlyArray<import('./OpaqueRealization.js').Evidence>
+  /** The finite region proof of the body, which ownership replays at cleanup. */
+  readonly lifetimes?: import('./LifetimeFlow.js').LifetimeFlow
+}
+
+/** One checked body: the declaration it belongs to, its nodes and its results. */
+export interface CheckedBody {
+  readonly declaration: DeclarationFact
+  /** A compiler-made body (an anonymous callable) that source lookup never finds. */
+  readonly hidden: boolean
+  /** Absent for a `static fn`, whose nodes exist only while an application is evaluated. */
+  readonly function?: Tir.TirFunction
+  readonly results: BodyResults
+}
+
 /** The complete deterministic elaboration result for all direct bootstrap declarations. */
 export interface Result {
   readonly _tag: 'Elaboration'
@@ -1476,6 +1512,8 @@ export interface Result {
   readonly generatedAggregates: ReadonlyArray<DeclarationFacts.StructFact>
   readonly lexicalScopes: ReadonlyArray<LexicalScopeFact>
   readonly tir: Tir.Module
+  /** Every checked body of the module, source declarations first and compiler-made ones after. */
+  readonly bodies: ReadonlyArray<CheckedBody>
   readonly diagnostics: ReadonlyArray<Diagnostic.Located>
 }
 
@@ -1705,7 +1743,8 @@ export interface ArgumentsResult {
 
 export const argumentFact = (
   declaration: DeclarationFact,
-  callSpan: SourceSpan.SourceSpan,
+  context: SemanticContext.SemanticContext,
+  call: AuthoredHir.Anchor,
   expression: ExpressionFact,
   ordinal: number,
 ): ArgumentFact =>
@@ -1714,7 +1753,8 @@ export const argumentFact = (
     id: Object.freeze({
       _tag: 'ArgumentId',
       function: declaration.id,
-      callSpan,
+      callSpan: context.spanOf(call),
+      call,
       ordinal,
     }),
     expression,
@@ -1732,7 +1772,6 @@ import {
   directExpressionChildren,
   directStatementExpressions,
   lowerStatements,
-  statementSpan,
 } from './TirLowering.js'
 import { analyzeFunctionBody } from './StatementAnalysis.js'
 export interface FactVisitor {
@@ -2205,6 +2244,7 @@ const runtimeTirFunction = (
           : {}),
         ordinal: -1,
         span: siteSpan,
+        at: siteAnchor,
       }),
       statements: lowerStatements(fact.statements, {
         context,
@@ -2336,13 +2376,29 @@ export const elaborateModule = (input: Input): Result => {
     ...analyzed.flatMap((result) => result.diagnostics),
     ...constrainedCallableEscapeDiagnostics(context, functions),
   ]
+  const hidden = new Set<FunctionFact>(hiddenFunctions)
+  const bodies = Object.freeze(
+    allRuntimeFunctions.map((fact): CheckedBody => {
+      const lowered =
+        fact.declaration.phase === 'Static' ? undefined : runtimeTirFunction(context, fact, index)
+      return Object.freeze({
+        declaration: fact.declaration,
+        hidden: hidden.has(fact),
+        ...(lowered === undefined ? {} : { function: lowered }),
+        results: Object.freeze({
+          occurrences: fact.occurrences,
+          hints: fact.hints,
+          opaqueEvidence: fact.opaqueEvidence,
+          ...(fact.lifetimeFlow === undefined ? {} : { lifetimes: fact.lifetimeFlow }),
+        }),
+      })
+    }),
+  )
   const tir: Tir.Module = Object.freeze({
     _tag: 'TirModule',
     module: authored.module.owner.module,
     functions: Object.freeze(
-      allRuntimeFunctions.flatMap((fact) =>
-        fact.declaration.phase === 'Static' ? [] : [runtimeTirFunction(context, fact, index)],
-      ),
+      bodies.flatMap((body) => (body.function === undefined ? [] : [body.function])),
     ),
   })
 
@@ -2356,6 +2412,7 @@ export const elaborateModule = (input: Input): Result => {
     ),
     lexicalScopes: lexicalScopesOf(context, allRuntimeFunctions),
     tir,
+    bodies,
     diagnostics: Object.freeze(diagnostics),
   })
 }

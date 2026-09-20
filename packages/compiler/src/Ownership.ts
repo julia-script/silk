@@ -2804,7 +2804,8 @@ const analyzeLoans = (
         return
       case 'Operator': {
         const callActive: Array<LoanFact> = [...active]
-        for (const [ordinal, argument] of expression.arguments.entries()) {
+        for (const argument of expression.arguments) {
+          const ordinal = argument.id.ordinal
           const candidate = argument.expression
           const operand = expression.interfaceOperation?.contract.operands.at(ordinal)
           const operandType = operand?.type._tag === 'Resolved' ? operand.type.type : undefined
@@ -2944,7 +2945,8 @@ const analyzeLoans = (
           inspect(expression.callee, region, active, access, delayedEnd)
         }
         const inspectArguments = (): void => {
-          for (const [argumentOrdinal, argument] of expression.arguments.entries()) {
+          for (const argument of expression.arguments) {
+            const argumentOrdinal = argument.id.ordinal
             const candidate = argument.expression
             if (candidate._tag === 'Borrow' && candidate.formation._tag !== 'Unavailable') {
               const directRoot = borrowSite(candidate.formation.root)
@@ -3031,7 +3033,8 @@ const analyzeLoans = (
             expression.reference.operation === 'SlotTake' ||
             expression.reference.operation === 'SlotCopy' ||
             expression.reference.operation === 'SlotDrop')
-        for (const [argumentOrdinal, argument] of expression.arguments.entries()) {
+        for (const argument of expression.arguments) {
+          const argumentOrdinal = argument.id.ordinal
           const candidate = argument.expression
           const returnedOrdinal = returnedArgumentOrdinals(expression)
           if (candidate._tag !== 'Borrow' || candidate.formation._tag === 'Unavailable') {
@@ -3361,7 +3364,7 @@ const checkFunction = (
   fn: Tir.TirFunction,
   index: DeclarationIndex.Index,
   context: SemanticContext.SemanticContext,
-  semantic?: Elaboration.FunctionFact,
+  lifetimes?: LifetimeFlow.LifetimeFlow,
   localSharedBoundaries: ReadonlyArray<SourceSpan.SourceSpan> = Object.freeze([]),
   localSharedResultBoundaries: ReadonlyArray<SourceSpan.SourceSpan> = Object.freeze([]),
 ): CheckedFunction => {
@@ -4640,21 +4643,24 @@ const checkFunction = (
     ),
   )
 
-  const loanSemantic =
-    semantic?.lifetimeFlow === undefined
-      ? semantic
-      : {
-          ...semantic,
-          lifetimeFlow: LifetimeFlow.withCleanupUses(semantic.lifetimeFlow, cleanupExits),
-        }
+  // Loans are read off the checked body itself; the region proof is the one result construction
+  // publishes beside it, extended by the cleanup this pass just planned.
+  const loanLifetimes =
+    lifetimes === undefined ? undefined : LifetimeFlow.withCleanupUses(lifetimes, cleanupExits)
   const loanAnalysis =
-    loanSemantic === undefined
+    loanLifetimes === undefined
       ? Object.freeze({
           loanAccessChecks: 0,
           loans: Object.freeze([]),
           diagnostics: Object.freeze([]),
         })
-      : analyzeLoans(loanSemantic, index, copyAssumptions, cleanupExits, context)
+      : analyzeLoans(
+          { ...LoanView.ofTir(fn, index), lifetimeFlow: loanLifetimes },
+          index,
+          copyAssumptions,
+          cleanupExits,
+          context,
+        )
   state.work.loanAccessChecks = loanAnalysis.loanAccessChecks
   state.diagnostics.push(...loanAnalysis.diagnostics)
   const exitPlans = Object.freeze(
@@ -4706,9 +4712,8 @@ const checkFunction = (
       _tag: 'FunctionOwnership' as const,
       work: Object.freeze({ ...state.work }),
       cleanupLifetimeWork: Object.freeze(
-        loanSemantic?.lifetimeFlow !== semantic?.lifetimeFlow &&
-          loanSemantic?.lifetimeFlow?.solution._tag === 'Solved'
-          ? { liveness: loanSemantic.lifetimeFlow.solution.work }
+        loanLifetimes !== lifetimes && loanLifetimes?.solution._tag === 'Solved'
+          ? { liveness: loanLifetimes.solution.work }
           : {},
       ),
       declaration,
@@ -4745,9 +4750,8 @@ const checkFunction = (
     }),
     diagnostics: Object.freeze([...state.diagnostics]),
   })
-  if (semantic?.lifetimeFlow === undefined || checked.ownership.verdict._tag !== 'Satisfied')
-    return checked
-  const cleanup = LifetimeFlow.validateCleanup(semantic.lifetimeFlow, checked.ownership, context)
+  if (lifetimes === undefined || checked.ownership.verdict._tag !== 'Satisfied') return checked
+  const cleanup = LifetimeFlow.validateCleanup(lifetimes, checked.ownership, context)
   const firstCleanupViolation = cleanup.diagnostics.at(0)
   return Object.freeze({
     ownership: Object.freeze({
@@ -4773,7 +4777,8 @@ const checkFunction = (
 /** Every input read by the ownership checker, after callback boundaries are selected. */
 export interface CheckInput {
   readonly function: Tir.TirFunction
-  readonly semantic: Elaboration.FunctionFact | undefined
+  /** The region proof published with the body; absent for a body construction never analyzed. */
+  readonly lifetimes: LifetimeFlow.LifetimeFlow | undefined
   readonly index: DeclarationIndex.Index
   /** Spans and evaluation order of this function's authored module. */
   readonly context: SemanticContext.SemanticContext
@@ -4784,14 +4789,14 @@ export interface CheckInput {
 /** Resolves ownership inputs without running the checker or reconstructing prior diagnostics. */
 export const input = (
   fn: Tir.TirFunction,
-  semantic: Elaboration.FunctionFact | undefined,
+  lifetimes: LifetimeFlow.LifetimeFlow | undefined,
   index: DeclarationIndex.Index,
   accessBoundaryPlan: LocalSharedAccessBoundaryPlan,
   context: SemanticContext.SemanticContext,
 ): CheckInput =>
   Object.freeze({
     function: fn,
-    semantic,
+    lifetimes,
     index,
     context,
     boundaries:
@@ -4825,7 +4830,7 @@ const sameBoundarySpans = (
 /** Requires identical semantic authorities and equal ordered access-boundary spans. */
 export const matchesInput = (self: CheckInput, other: CheckInput): boolean =>
   self.function === other.function &&
-  self.semantic === other.semantic &&
+  self.lifetimes === other.lifetimes &&
   self.index === other.index &&
   self.context === other.context &&
   sameBoundarySpans(self.boundaries, other.boundaries) &&
@@ -4837,7 +4842,7 @@ export const check = (self: CheckInput): CheckedFunction =>
     self.function,
     self.index,
     self.context,
-    self.semantic,
+    self.lifetimes,
     self.boundaries,
     self.resultBoundaries,
   )
@@ -5080,19 +5085,15 @@ export const checkModule = (
   bodyQuery?: BodyQuery.BodyQuery,
 ): ModuleOwnership => {
   const context = SemanticContext.make(result.authored)
-  const executableFacts = Elaboration.executableFunctions(result)
-  const checked = result.tir.functions.map((fn) => {
-    const semantic = executableFacts.find(
-      (fact) =>
-        fact.declaration.id.sourceId === fn.declaration.id.sourceId &&
-        fact.declaration.id.ordinal === fn.declaration.id.ordinal,
-    )
-    const selected = input(fn, semantic, index, accessBoundaryPlan, context)
+  const checked = result.bodies.flatMap((body) => {
+    const fn = body.function
+    if (fn === undefined) return []
+    const selected = input(fn, body.results.lifetimes, index, accessBoundaryPlan, context)
     const compute = () => check(selected)
     const checked =
       bodyQuery === undefined ? compute() : BodyQuery.ownership(bodyQuery, selected, compute)
     publishSourceProof(selected, checked)
-    return checked
+    return [checked]
   })
   return Object.freeze({
     _tag: 'OwnershipFacts',

@@ -916,7 +916,7 @@ it.effect('reuses exact unchanged syntax and module semantics inside one coheren
     const retainedFact = retainedResult.functions.at(0) ?? raise('retained semantic function')
     const ownershipInput = Ownership.input(
       retainedFunction,
-      retainedFact,
+      retainedFact.lifetimeFlow,
       currentView.index,
       Ownership.localSharedAccessBoundaryPlan(currentView.results),
       NameResolution.scopeOf(currentView.resolution, 'shared/Core')?.context ??
@@ -1136,7 +1136,7 @@ unsafe fn probe(core: &Intrinsic.SharedCore<i32>) -> i32 { return 1 }`
       const fact = afterResult.functions.at(0) ?? raise('callback fact')
       const previousInput = Ownership.input(
         fn,
-        fact,
+        fact.lifetimeFlow,
         before.index,
         Ownership.localSharedAccessBoundaryPlan(before.results),
         NameResolution.scopeOf(before.resolution, 'shared/Callbacks')?.context ??
@@ -1144,7 +1144,7 @@ unsafe fn probe(core: &Intrinsic.SharedCore<i32>) -> i32 { return 1 }`
       )
       const currentInput = Ownership.input(
         fn,
-        fact,
+        fact.lifetimeFlow,
         after.index,
         Ownership.localSharedAccessBoundaryPlan(after.results),
         NameResolution.scopeOf(after.resolution, 'shared/Callbacks')?.context ??

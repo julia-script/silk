@@ -971,6 +971,7 @@ it('publishes ordered argument identities, expressions, mappings, and compatible
     _tag: 'ArgumentId',
     function: functionAt(one, 1).declaration.id,
     callSpan: oneSpans.spanOf(oneCall.anchor),
+    call: oneCall.anchor,
     ordinal: 0,
   })
   assert.strictEqual(firstArgument.expression._tag, 'Integer')

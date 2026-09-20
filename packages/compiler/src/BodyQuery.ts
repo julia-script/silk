@@ -79,10 +79,10 @@ export interface BodyQuery {
   readonly sharedModules: ReadonlyMap<string, boolean>
   readonly entries: Map<string, Entry>
   readonly reuse: WeakMap<
-    Elaboration.FunctionFact,
+    object,
     { readonly prior: Entry; readonly rebinding?: SemanticRebinding.SemanticRebinding }
   >
-  readonly parents: WeakMap<Elaboration.FunctionFact, string>
+  readonly parents: WeakMap<object, string>
   readonly work: {
     checked: number
     reused: number
@@ -438,7 +438,10 @@ export const check = (
     hiddenFunctions.push(...hidden)
     if (rebinding !== undefined) self.work.rebound += 1
     for (const fact of [analysis.fact, ...hidden])
-      self.reuse.set(fact, { prior, ...(rebinding === undefined ? {} : { rebinding }) })
+      self.reuse.set(fact.lifetimeFlow ?? fact, {
+        prior,
+        ...(rebinding === undefined ? {} : { rebinding }),
+      })
   } else {
     self.work.checked += 1
     const firstHidden = hiddenFunctions.length
@@ -461,7 +464,7 @@ export const check = (
     calls: valid && prior !== undefined ? prior.calls : callsOf(self, analysis, hidden),
     ownership: valid && prior !== undefined ? new Map(prior.ownership) : new Map(),
   })
-  for (const fact of [analysis.fact, ...hidden]) self.parents.set(fact, key)
+  for (const fact of [analysis.fact, ...hidden]) self.parents.set(fact.lifetimeFlow ?? fact, key)
   return analysis
 }
 
@@ -471,11 +474,12 @@ export const ownership = (
   input: Ownership.CheckInput,
   compute: () => Ownership.CheckedFunction,
 ): Ownership.CheckedFunction => {
-  const { semantic: fact, boundaries } = input
-  const key = fact === undefined ? undefined : memberKey(fact.declaration)
-  const parent = fact === undefined ? undefined : self.parents.get(fact)
+  // A body is known here by the region proof it published, which is one object per checked body.
+  const { lifetimes: proof, boundaries } = input
+  const key = proof === undefined ? undefined : memberKey(input.function.declaration)
+  const parent = proof === undefined ? undefined : self.parents.get(proof)
   const current = parent === undefined ? undefined : self.entries.get(parent)
-  const reuse = fact === undefined ? undefined : self.reuse.get(fact)
+  const reuse = proof === undefined ? undefined : self.reuse.get(proof)
   const prior = key === undefined ? undefined : reuse?.prior.ownership.get(key)
   // Rebind only the checked result and spans; the input retains its original index authority.
   const retained =

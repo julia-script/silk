@@ -209,9 +209,10 @@ export const evidenceOfBody = (
 const producers = (results: ReadonlyMap<string, Elaboration.Result>): ReadonlyArray<Producer> =>
   Object.freeze(
     [...results.values()].flatMap((result) => {
-      return result.functions.flatMap((function_): ReadonlyArray<Producer> => {
-        const opaque = function_.declaration.opaqueResult
-        const expected = function_.declaration.returnType
+      return result.bodies.flatMap((body): ReadonlyArray<Producer> => {
+        if (body.hidden) return []
+        const opaque = body.declaration.opaqueResult
+        const expected = body.declaration.returnType
         if (opaque === undefined || expected._tag !== 'Resolved') return []
         const instance = Type.opaqueRepresentationArguments(expected.type).find((argument) =>
           Type.equalsOpaqueFamily(argument.family, opaque.family),
@@ -219,10 +220,10 @@ const producers = (results: ReadonlyMap<string, Elaboration.Result>): ReadonlyAr
         if (instance === undefined) return []
         return [
           Object.freeze({
-            declaration: function_.declaration,
+            declaration: body.declaration,
             instance,
-            evidence: function_.opaqueEvidence,
-            bodyFingerprint: sourceBodyFingerprint(result, function_.declaration),
+            evidence: body.results.opaqueEvidence,
+            bodyFingerprint: sourceBodyFingerprint(result, body.declaration),
           }),
         ]
       })

@@ -85,3 +85,7 @@ export const canonicalize = (spans: Iterable<SourceSpan>): ReadonlyArray<SourceS
       return 0
     }),
   )
+
+/** Whether a value is a span made by this module. */
+export const isSourceSpan = (value: unknown): value is SourceSpan =>
+  typeof value === 'object' && value !== null && SourceSpanTypeId in value

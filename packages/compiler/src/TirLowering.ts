@@ -249,6 +249,7 @@ export const tirPatternSelection = (
     tests: selection.tests,
     arm: selection.arm,
     access: selection.access,
+    source: tirExpression(selection.source, options),
     subject:
       selection.access === 'Move' && (subject._tag === 'Project' || subject._tag === 'IndexPlace')
         ? Object.freeze({ ...subject, access: 'ConsumeRequested' as const })
@@ -276,6 +277,8 @@ export const tirPatternSelection = (
     ),
     cleanup: selection.pattern.omitted,
     irrefutable: selection.irrefutable,
+    loanEnd: selection.loanEnd,
+    loanEndAt: selection.loanEndAt,
     span: options.context.spanOf(selection.anchor),
     origin: Tir.authored(selection.anchor),
   })
@@ -345,7 +348,7 @@ export const lowerStatements = (
                 binding.initializer,
                 binding.declaredType.type,
                 'Binding',
-                options.context.spanOf(binding.anchor),
+                binding.anchor,
                 options,
               )
             return tirExpression(binding.initializer, options)
@@ -405,6 +408,10 @@ export const lowerStatements = (
           if (place === undefined || !statement.compatible)
             return Object.freeze({
               _tag: 'UnavailableStatement',
+              write: Object.freeze({
+                destination: tirExpression(statement.destination, options),
+                value: tirExpression(statement.value, options),
+              }),
               region: statement.region,
               span: options.context.spanOf(statement.anchor),
               origin: Tir.authored(statement.anchor),
@@ -430,12 +437,13 @@ export const lowerStatements = (
           }
           return Object.freeze({
             _tag: 'Write',
+            destination: tirExpression(statement.destination, options),
             place,
             value: tirExpectedExpression(
               statement.value,
               place.type,
               'Assignment',
-              place.span,
+              place.origin.anchor,
               valueOptions,
             ),
             region: statement.region,
@@ -479,11 +487,12 @@ export const lowerStatements = (
                     statement.expression,
                     options.resultType,
                     'Return',
-                    options.context.spanOf(statement.anchor),
+                    statement.anchor,
                     options,
                   ),
               options.resultRepresentation,
-              options.context.spanOf(statement.anchor),
+              statement.anchor,
+              options.context,
             ),
             region: statement.region,
             span: options.context.spanOf(statement.expression.anchor),
@@ -554,6 +563,7 @@ export const argumentBorrowId = (
         _tag: 'BorrowId',
         function: argument.id.function,
         callSpan: argument.id.callSpan,
+        ...(argument.id.call === undefined ? {} : { call: argument.id.call }),
         ordinal,
       })
     : undefined
@@ -992,7 +1002,13 @@ const residualExpression = (
     return Object.freeze({
       _tag: 'Replace',
       place,
-      value: tirExpectedExpression(fact.value, place.type, 'Assignment', place.span, options),
+      value: tirExpectedExpression(
+        fact.value,
+        place.type,
+        'Assignment',
+        place.origin.anchor,
+        options,
+      ),
       type: fact.type.type,
       span: options.context.spanOf(fact.anchor),
       origin: Tir.authored(fact.anchor),
@@ -1035,6 +1051,8 @@ const residualExpression = (
               : {}),
             access: capture.access,
             span: capture.span,
+            at: capture.anchor,
+            ...(capture.expression === undefined ? {} : { use: capture.expression.anchor }),
           }),
         ),
       ),
@@ -1119,6 +1137,7 @@ const residualExpression = (
         selectionAccess: fact.provider.selectionAccess,
         captureAccess: fact.provider.captureAccess,
         span: fact.provider.span,
+        at: fact.provider.at,
       }),
       type: fact.type.type,
       span: options.context.spanOf(fact.anchor),
@@ -1196,7 +1215,7 @@ const residualExpression = (
                           arm.body.expression,
                           target,
                           'MatchArm',
-                          options.context.spanOf(arm.anchor),
+                          arm.anchor,
                           options,
                         )
                       : tirExpression(arm.body.expression, options),
@@ -1219,6 +1238,7 @@ const residualExpression = (
             after: arm.after,
             reachable: arm.reachable,
             span: options.context.spanOf(arm.anchor),
+            at: arm.anchor,
             origin: Tir.authored(arm.anchor),
           })
         }),
@@ -1264,7 +1284,7 @@ const residualExpression = (
                   initializer.expression,
                   Type.substitute(field.declaredType.type, substitution),
                   'StructField',
-                  options.context.spanOf(field.anchor),
+                  field.anchor,
                   options,
                 )
               : tirExpression(initializer.expression, options)
@@ -1315,7 +1335,7 @@ const residualExpression = (
                   initializer.expression,
                   Type.substitute(field.declaredType.type, substitution),
                   'StructField',
-                  options.context.spanOf(field.anchor),
+                  field.anchor,
                   options,
                 )
               : tirExpression(initializer.expression, options)
@@ -1345,7 +1365,7 @@ const residualExpression = (
                 element.expression,
                 element.expected,
                 'ArrayElement',
-                options.context.spanOf(element.anchor),
+                element.anchor,
                 options,
               ),
         ),
@@ -1490,6 +1510,7 @@ const residualExpression = (
             _tag: 'BorrowId',
             function: options.functionId,
             callSpan: options.context.spanOf(fact.anchor),
+            call: fact.anchor,
             ordinal: 0,
           })
     if (
@@ -1537,6 +1558,8 @@ const residualExpression = (
             _tag: 'Field',
             field: selector.field,
             span: selector.span,
+            ...(selector.at === undefined ? {} : { at: selector.at }),
+            ...(selector.at === undefined ? {} : { at: selector.at }),
           }),
         )
         continue
@@ -1556,6 +1579,8 @@ const residualExpression = (
             index,
             slice: selector.slice,
             span: selector.span,
+            ...(selector.at === undefined ? {} : { at: selector.at }),
+            ...(selector.at === undefined ? {} : { at: selector.at }),
           }),
         )
         continue
@@ -1575,6 +1600,7 @@ const residualExpression = (
           array: selector.array,
           bounds: selector.bounds,
           span: selector.span,
+          ...(selector.at === undefined ? {} : { at: selector.at }),
         }),
       )
     }
@@ -1584,6 +1610,7 @@ const residualExpression = (
     ) {
       return Object.freeze({
         _tag: 'ValueBorrow',
+        place: tirExpression(fact.subject, options),
         borrow,
         root,
         selectors: Object.freeze(selectors),
@@ -1611,6 +1638,7 @@ const residualExpression = (
       })
     return Object.freeze({
       _tag: 'SliceBorrow',
+      place: tirExpression(fact.subject, options),
       borrow,
       root,
       selectors: Object.freeze(selectors),
@@ -1681,6 +1709,7 @@ const residualExpression = (
                 _tag: 'BorrowId',
                 function: fact.site.function,
                 callSpan: options.context.spanOf(fact.anchor),
+                call: fact.anchor,
                 ordinal: capture.ordinal,
               }),
             ),
@@ -1749,6 +1778,7 @@ const residualExpression = (
             _tag: 'BorrowId',
             function: retainedSection.site.function,
             callSpan: options.context.spanOf(retainedSection.anchor),
+            call: retainedSection.anchor,
             ordinal: capture.ordinal,
           }))
     return Object.freeze({
@@ -1803,6 +1833,7 @@ const residualExpression = (
     const borrowIds = loanEndsOf(fact.arguments)
     return Object.freeze({
       _tag: 'InterfaceOperationCall',
+      ...(fact._tag === 'Operator' ? { operator: true as const } : {}),
       capability: fact.reference.capability,
       provider: fact.reference.provider,
       operation: fact.reference.operation,
@@ -2030,7 +2061,7 @@ const residualExpression = (
                   argument.expression,
                   Type.substitute(parameter.declaredType.type, substitution),
                   'Argument',
-                  options.context.spanOf(parameter.anchor),
+                  parameter.anchor,
                   options,
                   borrowId,
                 )
@@ -2098,7 +2129,7 @@ const residualExpression = (
                   argument.expression,
                   Type.substitute(parameter.declaredType.type, substitution),
                   'Argument',
-                  options.context.spanOf(parameter.anchor),
+                  parameter.anchor,
                   options,
                   borrowId,
                 )
@@ -2144,7 +2175,8 @@ const residualExpression = (
 const effectJoinConvert = (
   source: Tir.Expression,
   target: SemanticType | undefined,
-  expectedAt: SourceSpan.SourceSpan,
+  expected: AuthoredHir.Anchor,
+  context: SemanticContext.SemanticContext,
 ): Tir.Expression => {
   if (
     target === undefined ||
@@ -2162,7 +2194,8 @@ const effectJoinConvert = (
     mappings: Object.freeze([]),
     access: 'Owned',
     context: 'Return',
-    expectedAt,
+    expectedAt: context.spanOf(expected),
+    expected,
     type: target,
     span: source.span,
     origin: source.origin,
@@ -2173,7 +2206,7 @@ export const tirExpectedExpression = (
   fact: ExpressionFact,
   target: SemanticType,
   context: Extract<Tir.Expression, { readonly _tag: 'UnionConvert' }>['context'],
-  expectedAt: SourceSpan.SourceSpan,
+  expected: AuthoredHir.Anchor,
   options: LowerStatementOptions,
   borrow?: Tir.BorrowId,
 ): Tir.Expression => {
@@ -2255,7 +2288,8 @@ export const tirExpectedExpression = (
     mappings: compatibility.mappings,
     access: 'Owned',
     context,
-    expectedAt,
+    expectedAt: options.context.spanOf(expected),
+    expected,
     type: compatibility.target,
     span: options.context.spanOf(fact.anchor),
     origin: Tir.authored(fact.anchor),
@@ -2294,6 +2328,7 @@ export const tirWritePlace = (
           field: current.state.field.id,
           type: current.type.type,
           span: options.context.spanOf(current.anchor),
+          at: current.anchor,
           origin: Tir.authored(current.anchor),
         }),
       )
@@ -2318,6 +2353,7 @@ export const tirWritePlace = (
           bounds: current.bounds,
           type: current.type.type,
           span: options.context.spanOf(current.anchor),
+          at: current.anchor,
           origin: Tir.authored(current.anchor),
         }),
       )
@@ -2388,6 +2424,7 @@ export const tirBorrowedWritePlace = (
           field: current.state.field.id,
           type: current.type.type,
           span: options.context.spanOf(current.anchor),
+          at: current.anchor,
           origin: Tir.authored(current.anchor),
         }),
       )
@@ -2417,6 +2454,7 @@ export const tirBorrowedWritePlace = (
             slice: current.slice,
             type: current.type.type,
             span: options.context.spanOf(current.anchor),
+            at: current.anchor,
             origin: Tir.authored(current.anchor),
           }),
         )
@@ -2436,6 +2474,7 @@ export const tirBorrowedWritePlace = (
           bounds: current.bounds,
           type: current.type.type,
           span: options.context.spanOf(current.anchor),
+          at: current.anchor,
           origin: Tir.authored(current.anchor),
         }),
       )
@@ -2468,12 +2507,6 @@ export const tirAssignmentWritePlace = (
   if (access === 'MutableOwned') return tirWritePlace(fact, root, options)
   return undefined
 }
-
-export const statementSpan = (
-  context: SemanticContext.SemanticContext,
-  statement: StatementFact,
-): SourceSpan.SourceSpan =>
-  context.spanOf(statement._tag === 'BindStatement' ? statement.binding.anchor : statement.anchor)
 
 export const directStatementExpressions = (
   statement: StatementFact,

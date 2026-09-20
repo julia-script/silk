@@ -2288,7 +2288,7 @@ fn bad() -> i32 { let value = 42 return choose(move value, value) }`
         const fact =
           result.functions.find((candidate) => candidate.declaration === fn.declaration) ??
           unreachable('expected semantic function')
-        return Ownership.input(fn, fact, snapshot.index, plan, context)
+        return Ownership.input(fn, fact.lifetimeFlow, snapshot.index, plan, context)
       }
       const good = selected('good')
       const bad = selected('bad')
@@ -2313,7 +2313,7 @@ fn bad() -> i32 { let value = 42 return choose(move value, value) }`
       assert.isTrue(Object.values(retained.executedWork).every((count) => count === 0))
       const changed: ReadonlyArray<Ownership.CheckInput> = [
         { ...good, function: { ...good.function } },
-        { ...good, semantic: { ...(good.semantic ?? unreachable('expected semantic fact')) } },
+        { ...good, lifetimes: { ...(good.lifetimes ?? unreachable('expected a region proof')) } },
         { ...good, index: { ...good.index } },
         { ...good, boundaries: [context.spanOf(good.function.declaration.anchor)] },
         { ...good, resultBoundaries: [context.spanOf(good.function.declaration.anchor)] },

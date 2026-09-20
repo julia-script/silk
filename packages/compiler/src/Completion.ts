@@ -178,12 +178,12 @@ const enclosingFunction = (
   context: SemanticContext.SemanticContext,
   result: Elaboration.Result,
   offset: number,
-): Elaboration.FunctionFact | undefined => {
-  const width = (fn: Elaboration.FunctionFact): number => {
+): Elaboration.CheckedBody | undefined => {
+  const width = (fn: Elaboration.CheckedBody): number => {
     const span = context.spanOf(fn.declaration.anchor)
     return span.end - span.start
   }
-  return Elaboration.executableFunctions(result)
+  return result.bodies
     .filter((fn) => {
       const span = context.spanOf(fn.declaration.anchor)
       return span.start <= offset && offset <= span.end
@@ -200,7 +200,7 @@ const sameDeclaration = (
 const scopeChain = (
   context: SemanticContext.SemanticContext,
   result: Elaboration.Result,
-  fn: Elaboration.FunctionFact | undefined,
+  fn: Elaboration.CheckedBody | undefined,
   offset: number,
 ): ReadonlyArray<Elaboration.LexicalScopeFact> => {
   if (fn === undefined) return Object.freeze([])
@@ -235,7 +235,7 @@ const scopeChain = (
 const visibleBindings = (
   context: SemanticContext.SemanticContext,
   result: Elaboration.Result,
-  fn: Elaboration.FunctionFact | undefined,
+  fn: Elaboration.CheckedBody | undefined,
   offset: number,
 ): ReadonlyArray<Elaboration.BindingDeclarationFact> => {
   const selected = new Map<string, Elaboration.BindingDeclarationFact>()
@@ -257,7 +257,7 @@ const visibleBindings = (
 const visiblePatternBindings = (
   context: SemanticContext.SemanticContext,
   result: Elaboration.Result,
-  fn: Elaboration.FunctionFact | undefined,
+  fn: Elaboration.CheckedBody | undefined,
   offset: number,
 ): ReadonlyArray<Elaboration.PatternBindingFact> => {
   const selected = new Map<string, Elaboration.PatternBindingFact>()
@@ -434,7 +434,7 @@ const valueLookup = (
   context: SemanticContext.SemanticContext,
   spelling: string,
   result: Elaboration.Result,
-  fn: Elaboration.FunctionFact | undefined,
+  fn: Elaboration.CheckedBody | undefined,
   offset: number,
 ): ValueLookup => {
   const binding = visibleBindings(context, result, fn, offset).find(
@@ -580,7 +580,7 @@ const suppliedOperationCandidates = (
 
 /** The receiver operations a generic value obtains from its parameter's declared bounds. */
 const boundOperationCandidates = (
-  fn: Elaboration.FunctionFact | undefined,
+  fn: Elaboration.CheckedBody | undefined,
   type: Type.Parameter | undefined,
 ): ReadonlyArray<Candidate> => {
   if (fn === undefined || type === undefined) return Object.freeze([])
@@ -652,7 +652,7 @@ const typeCandidates = (
   module: string,
   index: DeclarationIndex.Index,
   scope: NameResolution.ModuleScope | undefined,
-  fn: Elaboration.FunctionFact | undefined,
+  fn: Elaboration.CheckedBody | undefined,
 ): ReadonlyArray<Candidate> => {
   const candidates: Array<Candidate> = [
     candidate({
@@ -756,7 +756,7 @@ const expressionCandidates = (
   index: DeclarationIndex.Index,
   scope: NameResolution.ModuleScope | undefined,
   result: Elaboration.Result,
-  fn: Elaboration.FunctionFact | undefined,
+  fn: Elaboration.CheckedBody | undefined,
   offset: number,
 ): ReadonlyArray<Candidate> => {
   const candidates: Array<Candidate> = []

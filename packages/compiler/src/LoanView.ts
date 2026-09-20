@@ -1,9 +1,11 @@
 import type * as AuthoredHir from './AuthoredHir.js'
-import type * as DeclarationFacts from './DeclarationFacts.js'
+import * as DeclarationFacts from './DeclarationFacts.js'
+import type * as DeclarationIndex from './DeclarationIndex.js'
 import * as Lifetime from './Lifetime.js'
 import type * as Match from './Match.js'
 import type * as SourceSpan from './SourceSpan.js'
 import type * as Tir from './Tir.js'
+import * as TirModule from './Tir.js'
 import * as Type from './Type.js'
 
 /**
@@ -475,3 +477,578 @@ export const retainsLifetimes = (
     )
   )
 }
+
+/**
+ * A checked body's nodes as loan analysis reads them.
+ *
+ * Nodes name locals by id and have conversions as nodes of their own; loan analysis reasons about
+ * authored places and the locals behind them. This presents the one as the other: a conversion is
+ * the expression it converts, a borrow's subject is the place the node kept as evidence, and a
+ * local is found by the id a node names.
+ */
+export const ofTir = (fn: Tir.TirFunction, index: DeclarationIndex.Index): Body => {
+  const parameters = new Map(
+    fn.declaration.parameters.map((parameter) => [parameter.id.ordinal, parameter] as const),
+  )
+  const bindings = new Map<number, Extract<Local, { readonly _tag: 'BindingFact' }>>()
+  const patterns = new Map<string, Extract<Local, { readonly _tag: 'PatternBinding' }>>()
+  const patternKey = (id: Match.BindingId): string =>
+    `${id.arm.match.span.start}:${id.arm.ordinal}:${id.ordinal}`
+  const name = (spelling: string | undefined): Name =>
+    spelling === undefined ? { _tag: 'Unavailable' } : { _tag: 'Present', spelling }
+  const available = (type: DeclarationFacts.SemanticType): ExpressionType => ({
+    _tag: 'Available',
+    type,
+  })
+  const declarePatterns = (found: ReadonlyArray<Tir.PatternBinding>): void => {
+    for (const binding of found)
+      patterns.set(patternKey(binding.id), {
+        _tag: 'PatternBinding',
+        id: binding.id,
+        name: name(binding.name),
+        type: available(binding.type),
+      })
+  }
+  const declare = (statements: ReadonlyArray<Tir.Statement>): void => {
+    for (const statement of statements) {
+      if (statement._tag === 'Bind')
+        bindings.set(statement.binding.ordinal, {
+          _tag: 'BindingFact',
+          id: statement.binding,
+          name: name(statement.name),
+          inferredType:
+            statement.initializer._tag === 'Unavailable'
+              ? { _tag: 'Unavailable' }
+              : available(statement.initializer.type),
+        })
+      if (statement._tag === 'PatternBind' || statement._tag === 'IfLet')
+        declarePatterns(statement.selection.bindings)
+      if (statement._tag === 'Unsafe') declare(statement.statements)
+      if (statement._tag === 'If' || statement._tag === 'IfLet') {
+        declare(statement.taken)
+        declare(statement.otherwise)
+      }
+      if (statement._tag === 'While') declare(statement.body)
+      for (const node of tirStatementNodes(statement)) {
+        if (node._tag === 'Match')
+          for (const arm of node.arms) {
+            declarePatterns(arm.bindings)
+            if (arm.body._tag === 'Block') declare(arm.body.statements)
+          }
+        if (node._tag === 'EffectBlock') declare(node.statements)
+      }
+    }
+  }
+  declare(fn.statements)
+
+  const views = new WeakMap<Tir.Expression, Expression>()
+  const expression = (node: Tir.Expression): Expression => {
+    const known = views.get(node)
+    if (known !== undefined) return known
+    const made = view(node)
+    views.set(node, made)
+    return made
+  }
+  // Nodes drop static arguments, and an argument is known by its declared position: a borrow's
+  // loan is named by it and a retained argument is found by it.
+  const argumentsOf = (
+    nodes: ReadonlyArray<Tir.Expression>,
+    target?: DeclarationFacts.CanonicalId,
+  ): ReadonlyArray<Argument> => {
+    const declaration =
+      target === undefined ? undefined : DeclarationFacts.byCanonical(index, target)
+    const declared =
+      declaration?._tag === 'FunctionDeclaration'
+        ? declaration.parameters
+            .filter((parameter) => parameter.phase !== 'Static')
+            .map((parameter) => parameter.id.ordinal)
+        : []
+    return nodes.map((node, position) => {
+      const made = expression(node)
+      return {
+        id: { ordinal: declared.at(position) ?? position },
+        expression: made,
+        type: made.type,
+      }
+    })
+  }
+  const selector = (self: Tir.BorrowSelector): Selector => {
+    if (self._tag === 'Field') return self
+    if (self._tag === 'Index') return { ...self, index: expression(self.index) }
+    return { ...self, index: expression(self.index) }
+  }
+  const rootOf = (
+    root: Tir.SliceRoot,
+    selectors: ReadonlyArray<Tir.BorrowSelector>,
+  ): BorrowRoot => {
+    const path = selectors.map(selector)
+    if (root._tag === 'BindingSliceRoot')
+      return { _tag: 'BindingRoot', binding: { id: root.binding }, path }
+    if (root._tag === 'ParameterSliceRoot')
+      return { _tag: 'ParameterRoot', parameter: { id: root.parameter }, path }
+    if (root._tag === 'PatternSliceRoot')
+      return { _tag: 'PatternRoot', binding: { id: root.binding }, path }
+    return { _tag: 'TemporaryRoot', owner: root.owner, path }
+  }
+  const localOf = (capture: {
+    readonly pattern?: Match.BindingId
+    readonly binding?: Tir.BindingId
+    readonly parameter?: DeclarationFacts.ParameterId
+  }): Local | undefined => {
+    if (capture.binding !== undefined) return bindings.get(capture.binding.ordinal)
+    if (capture.pattern !== undefined) return patterns.get(patternKey(capture.pattern))
+    return capture.parameter === undefined ? undefined : parameters.get(capture.parameter.ordinal)
+  }
+  // Every `let` of one body context: nested blocks and match arms share it, an effect block has
+  // its own.
+  const bindingsOf = (nodes: ReadonlyArray<Tir.Statement>): ReadonlyArray<Binding> => {
+    const found: Array<Binding> = []
+    const inExpression = (node: Tir.Expression): void => {
+      if (node._tag === 'EffectBlock') return
+      if (node._tag === 'Match')
+        for (const arm of node.arms)
+          if (arm.body._tag === 'Block') inStatements(arm.body.statements)
+      for (const child of TirModule.expressionChildren(node)) inExpression(child)
+    }
+    const inStatements = (inner: ReadonlyArray<Tir.Statement>): void => {
+      for (const statement of inner) {
+        if (statement._tag === 'Bind') {
+          const initializer = expression(statement.initializer)
+          found.push({ id: statement.binding, initializer, inferredType: initializer.type })
+        }
+        if (statement._tag === 'Unsafe') inStatements(statement.statements)
+        if (statement._tag === 'If' || statement._tag === 'IfLet') {
+          inStatements(statement.taken)
+          inStatements(statement.otherwise)
+        }
+        if (statement._tag === 'While') inStatements(statement.body)
+        for (const node of directStatementNodes(statement)) inExpression(node)
+      }
+    }
+    inStatements(nodes)
+    return found
+  }
+  const view = (node: Tir.Expression): Expression => {
+    const base = {
+      type: node._tag === 'Unavailable' ? ({ _tag: 'Unavailable' } as const) : available(node.type),
+      anchor: node.origin.anchor,
+    }
+    switch (node._tag) {
+      case 'UnionConvert':
+        return expression(node.source)
+      case 'RuntimeStringView':
+        // A string view is what a builtin call over its bytes returned, and it retains them.
+        return {
+          ...base,
+          _tag: 'Call',
+          arguments: argumentsOf([node.source]),
+          reference: { _tag: 'ResolvedBuiltin' },
+        }
+      case 'ParameterReference': {
+        const parameter = parameters.get(node.parameter.ordinal)
+        return parameter === undefined
+          ? { ...base, _tag: 'Identifier', reference: { _tag: 'Unavailable' } }
+          : {
+              ...base,
+              _tag: 'Identifier',
+              reference: {
+                _tag: 'Resolved',
+                parameter,
+                spelling: parameter.name._tag === 'Present' ? parameter.name.spelling : '?',
+              },
+            }
+      }
+      case 'BindingReference': {
+        const binding = bindings.get(node.binding.ordinal)
+        return binding === undefined
+          ? { ...base, _tag: 'Identifier', reference: { _tag: 'Unavailable' } }
+          : {
+              ...base,
+              _tag: 'Identifier',
+              reference: {
+                _tag: 'ResolvedBinding',
+                binding,
+                spelling: binding.name._tag === 'Present' ? binding.name.spelling : '?',
+              },
+            }
+      }
+      case 'PatternBindingReference': {
+        const binding = patterns.get(patternKey(node.binding))
+        return binding === undefined
+          ? { ...base, _tag: 'Identifier', reference: { _tag: 'Unavailable' } }
+          : {
+              ...base,
+              _tag: 'Identifier',
+              reference: {
+                _tag: 'ResolvedPattern',
+                binding,
+                spelling: binding.name._tag === 'Present' ? binding.name.spelling : '?',
+              },
+            }
+      }
+      case 'Move':
+        return { ...base, _tag: 'Move', subject: expression(node.subject) }
+      case 'ReferentPlace':
+        return { ...base, _tag: 'ReferentProjection', subject: expression(node.subject) }
+      case 'Project':
+        return {
+          ...base,
+          _tag: 'FieldProjection',
+          subject: expression(node.subject),
+          state: { _tag: 'Resolved', field: { id: node.field } },
+        }
+      case 'SliceLength':
+        return {
+          ...base,
+          _tag: 'FieldProjection',
+          subject: expression(node.slice),
+          state: { _tag: 'SliceLength' },
+        }
+      case 'IndexPlace':
+        return {
+          ...base,
+          _tag: 'IndexProjection',
+          subject: expression(node.subject),
+          index: expression(node.index),
+          array: node.array,
+          bounds: node.bounds,
+        }
+      case 'SliceIndexPlace':
+        return {
+          ...base,
+          _tag: 'IndexProjection',
+          subject: expression(node.slice),
+          index: expression(node.index),
+          bounds: { _tag: 'RuntimeSlice' },
+        }
+      case 'ValueBorrow':
+      case 'SliceBorrow': {
+        const root = rootOf(node.root, node.selectors)
+        let formation: Formation
+        if (node._tag === 'ValueBorrow')
+          formation = node.reborrow
+            ? { _tag: 'ValueReborrow', root, suspendsParent: node.suspendsParent }
+            : { _tag: 'ValueBorrow', root }
+        else
+          formation = node.reborrow
+            ? { _tag: 'SliceReborrow', root, suspendsParent: node.suspendsParent }
+            : { _tag: 'FixedArrayBorrow', root }
+        return {
+          ...base,
+          _tag: 'Borrow',
+          access: node.access,
+          subject:
+            node.place === undefined
+              ? { type: { _tag: 'Unavailable' }, anchor: base.anchor, _tag: 'Integer' }
+              : expression(node.place),
+          formation,
+        }
+      }
+      case 'Construct':
+      case 'ConstructUnionVariant':
+        return {
+          ...base,
+          _tag: node._tag === 'Construct' ? 'StructLiteral' : 'UnionVariant',
+          initializers: node.fields.map((field) => ({ expression: expression(field.value) })),
+        }
+      case 'ArrayConstruct':
+        return {
+          ...base,
+          _tag: 'ArrayLiteral',
+          elements: node.elements.map((element) => ({ expression: expression(element) })),
+        }
+      case 'Match':
+        return {
+          ...base,
+          _tag: 'Match',
+          scrutinee: expression(node.scrutinee),
+          arms: node.arms.map((arm) => ({
+            ...(arm.guard === undefined ? {} : { guard: expression(arm.guard) }),
+            body:
+              arm.body._tag === 'Expression'
+                ? { _tag: 'Expression' as const, expression: expression(arm.body.expression) }
+                : { _tag: 'Block' as const, statements: statements(arm.body.statements) },
+          })),
+        }
+      case 'ShortCircuit':
+        return {
+          ...base,
+          _tag: 'ShortCircuit',
+          arguments: argumentsOf([node.left, node.right]),
+        }
+      case 'EnumEquality':
+      case 'StringEquality':
+        return { ...base, _tag: 'Operator', arguments: argumentsOf([node.left, node.right]) }
+      case 'EnumValue':
+        return { ...base, _tag: 'EnumValue', argument: expression(node.value) }
+      case 'InterfaceOperationCall':
+        return node.operator === true
+          ? {
+              ...base,
+              _tag: 'Operator',
+              arguments: argumentsOf(node.arguments),
+              interfaceOperation: { contract: node.contract },
+            }
+          : {
+              ...base,
+              _tag: 'Call',
+              arguments: argumentsOf(node.arguments),
+              reference: { _tag: 'ResolvedInterfaceOperation' },
+            }
+      case 'BuiltinCall':
+        return node.interfaceOperation === undefined
+          ? {
+              ...base,
+              _tag: 'Call',
+              arguments: argumentsOf(node.arguments),
+              reference: { _tag: 'ResolvedBuiltin', operation: node.operation },
+            }
+          : {
+              ...base,
+              _tag: 'Operator',
+              arguments: argumentsOf(node.arguments),
+              interfaceOperation: { contract: node.interfaceOperation.contract },
+            }
+      case 'Call':
+      case 'EffectConstruct':
+        return {
+          ...base,
+          _tag: 'Call',
+          arguments: argumentsOf(node.arguments, node.target),
+          reference: { _tag: 'Resolved' },
+        }
+      case 'StaticCall':
+      case 'StaticIntrinsic':
+      case 'ServiceEffectConstruct':
+        return {
+          ...base,
+          _tag: 'Call',
+          arguments: argumentsOf(node.arguments),
+          reference: { _tag: 'Resolved' },
+        }
+      case 'ForeignApply':
+        return {
+          ...base,
+          _tag: 'ForeignApply',
+          callee: expression(node.callee),
+          arguments: argumentsOf(node.arguments),
+          evaluation: node.evaluation,
+        }
+      case 'CallableApply':
+        return {
+          ...base,
+          _tag: 'CallableApply',
+          callee: expression(node.callee),
+          arguments: argumentsOf(node.arguments),
+          mode: node.access,
+          ...(node.staged === undefined ? {} : { staged: node.staged }),
+          provenance: {
+            _tag:
+              node.evaluation === 'LeftThenCallable'
+                ? 'PipelineCallableApplication'
+                : 'DirectCallableApplication',
+          },
+        }
+      case 'CallableSection':
+        return {
+          ...base,
+          _tag: 'CallableSection',
+          captures: node.captures.map((capture) => ({
+            ordinal: capture.ordinal,
+            expression: expression(capture.value),
+            access: capture.access,
+          })),
+        }
+      case 'EffectBlock':
+        return {
+          ...base,
+          _tag: 'EffectBlock',
+          captures: node.captures.flatMap((capture) => {
+            const reference = localOf(capture)
+            return reference === undefined
+              ? []
+              : [
+                  {
+                    reference,
+                    access: capture.access,
+                    span: capture.span,
+                    ...(capture.use === undefined ? {} : { expression: { anchor: capture.use } }),
+                  },
+                ]
+          }),
+          bindings: bindingsOf(node.statements),
+          statements: statements(node.statements),
+        }
+      case 'Run':
+        return { ...base, _tag: 'Run', subject: expression(node.subject) }
+      case 'EffectCatch':
+        return {
+          ...base,
+          _tag: 'EffectCatch',
+          protected: expression(node.protected),
+          handler: expression(node.handler),
+        }
+      case 'EffectBindRequirement': {
+        const reference = localOf(node.provider)
+        return {
+          ...base,
+          _tag: 'EffectBindRequirement',
+          protected: expression(node.protected),
+          ...(reference === undefined || reference._tag === 'PatternBinding'
+            ? {}
+            : {
+                provider: {
+                  reference,
+                  captureAccess: node.provider.captureAccess,
+                  span: node.provider.span,
+                },
+              }),
+        }
+      }
+      case 'Replace':
+        return {
+          ...base,
+          _tag: 'PlaceReplace',
+          destination: { ...base, _tag: 'Integer' },
+          value: expression(node.value),
+        }
+      case 'CompileError':
+        return { ...base, _tag: 'CompileError', message: expression(node.message) }
+      case 'FunctionItem':
+      case 'ForeignFunctionAddress':
+        return { ...base, _tag: 'FunctionItem' }
+      default:
+        return { ...base, _tag: 'Integer' }
+    }
+  }
+  const selectionOf = (selection: Tir.PatternSelection) => ({
+    source: expression(selection.source ?? selection.subject),
+    loanEnd: selection.loanEnd,
+    anchor: selection.origin.anchor,
+  })
+  const statements = (nodes: ReadonlyArray<Tir.Statement>): ReadonlyArray<Statement> =>
+    nodes.flatMap((node): ReadonlyArray<Statement> => {
+      const at = { region: node.region, anchor: node.origin.anchor }
+      switch (node._tag) {
+        case 'UnavailableStatement':
+          return node.write === undefined
+            ? []
+            : [
+                {
+                  ...at,
+                  _tag: 'WriteStatement',
+                  destination: expression(node.write.destination),
+                  value: expression(node.write.value),
+                },
+              ]
+        case 'Unsafe':
+          return [{ ...at, _tag: 'UnsafeStatement', statements: statements(node.statements) }]
+        case 'Bind': {
+          const initializer = expression(node.initializer)
+          return [
+            {
+              _tag: 'BindStatement',
+              binding: { id: node.binding, initializer, inferredType: initializer.type },
+              region: node.region,
+            },
+          ]
+        }
+        case 'PatternBind':
+          return [{ ...at, _tag: 'PatternBindStatement', selection: selectionOf(node.selection) }]
+        case 'Evaluate':
+          return [{ ...at, _tag: 'ExpressionStatement', expression: expression(node.expression) }]
+        case 'Return':
+          return [{ ...at, _tag: 'ReturnStatement', expression: expression(node.expression) }]
+        case 'Fail':
+          return [{ ...at, _tag: 'FailStatement', expression: expression(node.expression) }]
+        case 'Drop':
+          return [{ ...at, _tag: 'DropStatement', expression: expression(node.expression) }]
+        case 'If':
+          return [
+            {
+              ...at,
+              _tag: 'IfStatement',
+              condition: expression(node.condition),
+              taken: statements(node.taken),
+              otherwise: statements(node.otherwise),
+            },
+          ]
+        case 'IfLet':
+          return [
+            {
+              ...at,
+              _tag: 'IfLetStatement',
+              selection: selectionOf(node.selection),
+              taken: statements(node.taken),
+              otherwise: statements(node.otherwise),
+            },
+          ]
+        case 'Write':
+          return [
+            {
+              ...at,
+              _tag: 'WriteStatement',
+              destination:
+                node.destination === undefined
+                  ? { type: { _tag: 'Unavailable' }, anchor: at.anchor, _tag: 'Integer' }
+                  : expression(node.destination),
+              value: expression(node.value),
+            },
+          ]
+        case 'While':
+          return [
+            {
+              ...at,
+              _tag: 'WhileStatement',
+              condition: expression(node.condition),
+              body: statements(node.body),
+            },
+          ]
+        case 'Break':
+          return [{ ...at, _tag: 'BreakStatement' }]
+        case 'Continue':
+          return [{ ...at, _tag: 'ContinueStatement' }]
+      }
+    })
+  // An effect function's body is wrapped in the block its callers construct. The wrapper is not
+  // authored, so loan analysis reads the body inside it.
+  const only = fn.statements.length === 1 ? fn.statements.at(0) : undefined
+  const wrapped =
+    only?._tag === 'Return' &&
+    only.expression._tag === 'EffectBlock' &&
+    only.expression.origin._tag === 'Synthetic'
+      ? only.expression.statements
+      : fn.statements
+  return {
+    declaration: fn.declaration,
+    statements: statements(wrapped),
+    bindings: bindingsOf(wrapped),
+  }
+}
+
+/** The expressions one statement evaluates itself, without the statements nested inside it. */
+const directStatementNodes = (statement: Tir.Statement): ReadonlyArray<Tir.Expression> => {
+  switch (statement._tag) {
+    case 'Bind':
+      return [statement.initializer]
+    case 'PatternBind':
+    case 'IfLet':
+      return [statement.selection.subject]
+    case 'Evaluate':
+    case 'Return':
+    case 'Fail':
+    case 'Drop':
+      return [statement.expression]
+    case 'If':
+    case 'While':
+      return [statement.condition]
+    case 'Write':
+      return [statement.value]
+    default:
+      return []
+  }
+}
+
+/** Every node a statement carries directly, nested expressions included. */
+const tirStatementNodes = (statement: Tir.Statement): ReadonlyArray<Tir.Expression> =>
+  TirModule.statementExpressions(statement).flatMap(TirModule.expressionTree)

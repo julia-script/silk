@@ -413,6 +413,7 @@ export const analyzeStatements = (
       _tag: 'MatchId',
       function: context.declaration.id,
       span: context.context.spanOf(element.anchor),
+      at: element.anchor,
     })
     const arm: Match.ArmId = Object.freeze({ _tag: 'MatchArmId', match: id, ordinal: 0 })
     const pattern = analyzePattern(
@@ -495,6 +496,7 @@ export const analyzeStatements = (
         element._tag === 'PatternBindingStatement'
           ? context.context.spanOf(blockNode.anchor)
           : context.context.spanOf(element.anchor),
+      loanEndAt: element._tag === 'PatternBindingStatement' ? blockNode.anchor : element.anchor,
       anchor: element.anchor,
     })
   }

@@ -1061,6 +1061,7 @@ export const borrowRoot = (
               _tag: 'Field' as const,
               field: subject.state.field.id,
               span: context.spanOf(subject.anchor),
+              at: subject.anchor,
             }),
           ]),
         })
@@ -1083,6 +1084,7 @@ export const borrowRoot = (
               array: subject.array,
               bounds: subject.bounds,
               span: context.spanOf(subject.anchor),
+              at: subject.anchor,
             }),
           ]),
         })
@@ -1104,6 +1106,7 @@ export const borrowRoot = (
               index: subject.index,
               slice: subject.slice,
               span: context.spanOf(subject.anchor),
+              at: subject.anchor,
             }),
           ]),
         })
@@ -1240,6 +1243,7 @@ export const borrowSubject = (
             _tag: 'TemporaryOwnerId' as const,
             function: declaration.id,
             span: context.spanOf(subject.anchor),
+            at: subject.anchor,
             ordinal: 0,
           }),
           value: subject,
@@ -2717,6 +2721,7 @@ export const patternTests = (
               member: nested.coverage,
               domain: coverageMembersOf(index, nested.member),
               span: context.spanOf(nested.anchor),
+              at: nested.anchor,
             },
           ]
         : []
@@ -2746,6 +2751,7 @@ export const analyzeMatch = (
     _tag: 'MatchId',
     function: declaration.id,
     span: context.spanOf(node.anchor),
+    at: node.anchor,
   })
   const access = matchAccess(node)
   const scrutineeNode = node.subject
@@ -3329,6 +3335,7 @@ export const exactEffectDeclarationRepresentation = (
     owner: declaration.canonical.id,
     ordinal: -1,
     span: context.spanOf(declaration.anchor),
+    at: declaration.anchor,
   })
   return Type.exactRepresentationArgument(
     Type.effectIdentityArgument(Tir.effectRepresentationIdentity(site), owner),
@@ -4874,6 +4881,7 @@ export const effectBindingProvider = (
   evidence: ReadonlyArray<Constraint.ConstraintEvidence>,
   provider: ExpressionFact,
   span: SourceSpan.SourceSpan,
+  at: AuthoredHir.Anchor,
   index?: DeclarationIndex.Index,
 ): EffectRequirementBindingFact | undefined => {
   if (
@@ -4920,6 +4928,7 @@ export const effectBindingProvider = (
         ? 'Copy'
         : captureAccess(provider, index),
     span,
+    at,
   })
 }
 
@@ -5452,6 +5461,7 @@ export const finishIntrinsicContractCall = (
           evidence,
           provider.expression,
           context.spanOf(provider.anchor),
+          provider.anchor,
           resolution.index,
         )
   const bindingAvailable =
@@ -7640,9 +7650,7 @@ const finishBoundMethod = (
       declaration: candidate.declaration,
     }),
     Object.freeze({
-      facts: Object.freeze([
-        argumentFact(declaration, context.spanOf(node.anchor), receiver.fact, 0),
-      ]),
+      facts: Object.freeze([argumentFact(declaration, context, node.anchor, receiver.fact, 0)]),
       diagnostics: receiver.diagnostics,
     }),
     analyzeCallTypeArguments(context, node, declaration, resolution),
@@ -7727,14 +7735,9 @@ const analyzeMethodCall = (
         reference,
         Object.freeze({
           facts: Object.freeze([
-            argumentFact(declaration, context.spanOf(node.anchor), subjectResult.fact, 0),
+            argumentFact(declaration, context, node.anchor, subjectResult.fact, 0),
             ...written.facts.map((argument, ordinal) =>
-              argumentFact(
-                declaration,
-                context.spanOf(node.anchor),
-                argument.expression,
-                ordinal + 1,
-              ),
+              argumentFact(declaration, context, node.anchor, argument.expression, ordinal + 1),
             ),
           ]),
           diagnostics: written.diagnostics,
@@ -7895,9 +7898,9 @@ const analyzeMethodCall = (
   )
   const argumentsResult: ArgumentsResult = Object.freeze({
     facts: Object.freeze([
-      argumentFact(declaration, context.spanOf(node.anchor), receiver.fact, 0),
+      argumentFact(declaration, context, node.anchor, receiver.fact, 0),
       ...written.facts.map((argument, ordinal) =>
-        argumentFact(declaration, context.spanOf(node.anchor), argument.expression, ordinal + 1),
+        argumentFact(declaration, context, node.anchor, argument.expression, ordinal + 1),
       ),
     ]),
     diagnostics: Object.freeze([...receiver.diagnostics, ...written.diagnostics]),
@@ -8370,9 +8373,7 @@ export const analyzePipelineExpression = (
       node,
       appliedTarget,
       Object.freeze({
-        facts: Object.freeze([
-          argumentFact(declaration, context.spanOf(node.anchor), inputFact, 0),
-        ]),
+        facts: Object.freeze([argumentFact(declaration, context, node.anchor, inputFact, 0)]),
         diagnostics: input?.diagnostics ?? Object.freeze([]),
       }),
       Object.freeze({ explicit: false, facts: Object.freeze([]), diagnostics: Object.freeze([]) }),
@@ -8413,7 +8414,7 @@ export const analyzePipelineExpression = (
     node,
     callableResult,
     Object.freeze({
-      facts: Object.freeze([argumentFact(declaration, context.spanOf(node.anchor), inputFact, 0)]),
+      facts: Object.freeze([argumentFact(declaration, context, node.anchor, inputFact, 0)]),
       diagnostics: input?.diagnostics ?? Object.freeze([]),
     }),
     Object.freeze({

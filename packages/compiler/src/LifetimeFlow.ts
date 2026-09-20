@@ -6,6 +6,7 @@ import * as DeclarationFacts from './DeclarationFacts.js'
 import type * as DeclarationIndex from './DeclarationIndex.js'
 import * as Diagnostic from './Diagnostic.js'
 import * as Elaboration from './Elaboration.js'
+import * as Tir from './Tir.js'
 import * as TirLowering from './TirLowering.js'
 import * as Lifetime from './Lifetime.js'
 import type * as MovePath from './MovePath.js'
@@ -41,6 +42,8 @@ export interface LifetimeFlow {
   readonly solution: Lifetime.Solution
   readonly origins: ReadonlyMap<string, Origin>
   readonly spans: ReadonlyMap<number, SourceSpan.SourceSpan>
+  /** The authored node behind each point of `spans`. */
+  readonly anchors: ReadonlyMap<number, AuthoredHir.Anchor>
   readonly diagnostics: ReadonlyArray<Diagnostic.Located>
 }
 
@@ -125,6 +128,7 @@ const expressionRoot = (
               _tag: 'Field',
               field: expression.state.field.id,
               span: context.spanOf(expression.anchor),
+              at: expression.anchor,
             },
           ],
         }
@@ -147,6 +151,7 @@ const expressionRoot = (
               array: expression.array,
               bounds: expression.bounds,
               span: context.spanOf(expression.anchor),
+              at: expression.anchor,
             },
           ],
         }
@@ -441,6 +446,7 @@ export const analyze = (
               _tag: 'Field',
               field,
               span: context.spanOf(binding.anchor),
+              at: binding.anchor,
             })),
           ],
         })
@@ -1029,7 +1035,32 @@ export const analyze = (
     solution,
     origins,
     spans,
+    anchors: new Map([
+      ...entries.map(([anchor, point]) => [point, anchor] as const),
+      ...terminalAnchors,
+    ]),
     diagnostics,
+  })
+}
+
+/**
+ * The same region proof under another revision's presentation.
+ *
+ * Regions, constraints and the solution are about authored nodes and never change. The spans that
+ * ownership looks points up by are a function of those nodes, so they are stamped again.
+ */
+export const present = (
+  self: LifetimeFlow,
+  context: SemanticContext.SemanticContext,
+): LifetimeFlow => {
+  return Object.freeze({
+    ...self,
+    controlFlow: BodyControlFlow.present(self.controlFlow, context),
+    // An origin's root and path hold ids and selectors that carry positions of their own.
+    origins: new Map(
+      [...self.origins].map(([key, origin]) => [key, Tir.stamp(origin, context.spanOf)]),
+    ),
+    spans: new Map([...self.anchors].map(([point, anchor]) => [point, context.spanOf(anchor)])),
   })
 }
 

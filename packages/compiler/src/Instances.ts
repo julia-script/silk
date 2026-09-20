@@ -2054,7 +2054,7 @@ export const discover = (
               residualOwnership,
               Ownership.input(
                 instance.function,
-                fact,
+                fact.lifetimeFlow,
                 index,
                 accessBoundaryPlan,
                 contextOf(instance.function),
@@ -2098,7 +2098,7 @@ export const discover = (
           residualOwnership,
           Ownership.input(
             candidate.function,
-            candidate.fact,
+            candidate.fact.lifetimeFlow,
             index,
             accessBoundaryPlan,
             contextOf(candidate.function),
