@@ -25,10 +25,27 @@ export interface Counters {
   readonly recursiveComponents: number
 }
 
-interface Dependency {
+/**
+ * One input a body consumed while it was built, with the answer it got. A lookup that found
+ * nothing is an observation too, so adding the member repairs the body that missed it.
+ */
+interface Observation {
   readonly key: string
   readonly signature: string | undefined
   readonly implementation?: string
+}
+
+/**
+ * What must still hold for a cached unit to stand. It is content, never bytes or positions: the
+ * owner's semantic signature, its canonical authored body, the names its body can see, and every
+ * observation asked again. A candidate is found by its owner alone; this decides whether it is used.
+ */
+interface Validity {
+  readonly header: string
+  readonly body: string
+  readonly scope: string
+  readonly resolution: string
+  readonly observed: ReadonlyArray<Observation>
 }
 
 interface Entry {
@@ -41,11 +58,7 @@ interface Entry {
   readonly authoredDeclaration: AuthoredHir.Declaration
   readonly context: SemanticContext.SemanticContext
   readonly index: DeclarationIndex.Index
-  readonly implementation: string
-  readonly signature: string
-  readonly scope: string
-  readonly resolution: string
-  readonly dependencies: ReadonlyArray<Dependency>
+  readonly validity: Validity
   /** The checked unit as this revision presents it. Working records are never stored. */
   readonly unit: Elaboration.CheckedUnit
   readonly calls: ReadonlyArray<string>
@@ -361,7 +374,7 @@ const nominalDependenciesOf = (member: DeclarationFacts.MemberFact): ReadonlyArr
   return result
 }
 
-const dependencies = (self: BodyQuery, built: Built): ReadonlyArray<Dependency> => {
+const dependencies = (self: BodyQuery, built: Built): ReadonlyArray<Observation> => {
   const selected = new Set<string>()
   visit(built.records, (value) => {
     const owner = self.owners.get(value)
@@ -378,7 +391,7 @@ const dependencies = (self: BodyQuery, built: Built): ReadonlyArray<Dependency> 
       selected.add(`${value.module}/${value.name}`)
     return !(records(value) && (value._tag === 'SyntaxNode' || value._tag === 'Token'))
   })
-  const result = new Map<string, Dependency>()
+  const result = new Map<string, Observation>()
   const add = (key: string): void => {
     if (result.has(key)) return
     const member = self.members.get(key)
@@ -431,7 +444,7 @@ const dependencyModule = (self: BodyQuery, key: string): string | undefined =>
 
 const validateDependencies = (
   self: BodyQuery,
-  dependencies: ReadonlyArray<Dependency>,
+  dependencies: ReadonlyArray<Observation>,
   visited = new Set<string>(),
 ): boolean =>
   dependencies.every((dependency) => {
@@ -454,7 +467,7 @@ const validateDependencies = (
     if (visited.has(dependency.key)) return true
     visited.add(dependency.key)
     const body = self.previous.get(dependency.key)
-    return body === undefined || validateDependencies(self, body.dependencies, visited)
+    return body === undefined || validateDependencies(self, body.validity.observed, visited)
   })
 
 /** What construction hands back for one declaration. */
@@ -511,13 +524,13 @@ export const check = (
   const valid =
     prior !== undefined &&
     AuthoredIdentity.equals(prior.context.module.owner, context.module.owner) &&
-    prior.signature === signature &&
-    prior.implementation === bodyKey &&
-    prior.scope === scopeKey &&
-    prior.resolution === self.resolution &&
-    validateDependencies(self, prior.dependencies)
+    prior.validity.header === signature &&
+    prior.validity.body === bodyKey &&
+    prior.validity.scope === scopeKey &&
+    prior.validity.resolution === self.resolution &&
+    validateDependencies(self, prior.validity.observed)
   let unit: Elaboration.CheckedUnit
-  let consumed: ReadonlyArray<Dependency>
+  let consumed: ReadonlyArray<Observation>
   let calls: ReadonlyArray<string>
   let ownership: Entry['ownership']
   if (valid && prior !== undefined) {
@@ -529,7 +542,7 @@ export const check = (
     // the body is the same and only its presentation is stale.
     const unchanged =
       prior.authoredDeclaration === declared &&
-      prior.dependencies.every((dependency) => {
+      prior.validity.observed.every((dependency) => {
         const module = dependencyModule(self, dependency.key)
         return module !== undefined && self.sharedModules.get(module) === true
       })
@@ -539,7 +552,7 @@ export const check = (
     if (!unchanged) self.work.presented += 1
     for (const body of unit.bodies)
       self.reuse.set(body.results.lifetimes ?? body.results, { prior, moved: !unchanged })
-    consumed = prior.dependencies
+    consumed = prior.validity.observed
     calls = prior.calls
     ownership = new Map(prior.ownership)
   } else {
@@ -555,11 +568,13 @@ export const check = (
     authoredDeclaration: declared,
     context,
     index: self.index,
-    implementation: bodyKey,
-    signature,
-    scope: scopeKey,
-    resolution: self.resolution,
-    dependencies: consumed,
+    validity: {
+      header: signature,
+      body: bodyKey,
+      scope: scopeKey,
+      resolution: self.resolution,
+      observed: consumed,
+    },
     unit,
     calls,
     ownership,
