@@ -3,6 +3,8 @@ import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
+import * as Lifetime from '../src/Lifetime.js'
+import * as LoanView from '../src/LoanView.js'
 import * as MirVerification from '../src/MirVerification.js'
 import * as Tir from '../src/Tir.js'
 import * as Projections from './support/projections.js'
@@ -216,5 +218,42 @@ pub fn main() -> i32 {
       { target: 'inspect', loans: [] },
     ])
     assert.deepEqual(yield* MirVerification.verify(Analysis.loweredMir(self)), [])
+  }),
+)
+
+it.effect('retains a runtime borrow after a static call argument', () =>
+  Effect.gen(function* () {
+    const self = yield* snapshot(`fn choose<'a>(static selected: bool, value: &'a i32) -> &'a i32 {
+  static if selected { return value } else { return value }
+}
+pub fn main() -> i32 {
+  let value = 41
+  let view = choose(true, &value)
+  return view.*
+}`)
+
+    assert.deepEqual(Analysis.diagnostics(self), [])
+    const main = Analysis.rootAnalysis(self).tir.functions.find(
+      (fn) => fn.declaration.name._tag === 'Present' && fn.declaration.name.spelling === 'main',
+    )
+    assert.isDefined(main)
+    if (main === undefined) return
+    const body = LoanView.ofTir(main, Analysis.declarationIndex(self), Tir.functionArtifact(main))
+    const retained: Array<{
+      readonly loans: ReadonlyArray<number>
+      readonly arguments: ReadonlyArray<number>
+      readonly selected: ReadonlyArray<number>
+    }> = []
+    LoanView.visitExpressions(body.statements, (expression) => {
+      if (expression._tag !== 'Call' || expression.heldLoans?.length !== 1) return
+      retained.push({
+        loans: expression.heldLoans.map((loan) => loan.ordinal),
+        arguments: expression.arguments.map((argument) => argument.id.ordinal),
+        selected: LoanView.retainedResultArguments(expression, Lifetime.assumptions([])).map(
+          (argument) => argument.id.ordinal,
+        ),
+      })
+    })
+    assert.deepEqual(retained, [{ loans: [1], arguments: [1], selected: [1] }])
   }),
 )

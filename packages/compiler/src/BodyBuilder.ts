@@ -498,7 +498,15 @@ const retainedDirectBorrowOrdinals = (
   return new Set(
     [...retained].filter((ordinal) => {
       const parameter = declaration.parameters.at(ordinal)?.declaredType
-      return parameter?._tag !== 'Resolved' || retainsLifetimes(parameter.type, result, assumptions)
+      if (parameter?._tag !== 'Resolved') return true
+      const source = parameter.type
+      if (Type.isReference(source) || Type.isSlice(source))
+        return Type.storageLifetimes(result).some(
+          (output) =>
+            output._tag !== 'StaticLifetime' &&
+            Lifetime.outlives(assumptions, source.lifetime, output),
+        )
+      return retainsLifetimes(source, result, assumptions)
     }),
   )
 }
