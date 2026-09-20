@@ -60,6 +60,7 @@ for (const [category, program] of categories)
         locals.map((local) => local.id.ordinal),
         locals.map((_, ordinal) => ordinal),
       )
+      for (const local of locals) assert.strictEqual(Tir.localOf(body.function, local.id), local)
       const text = TirCodec.encode(body)
       const decoded = TirCodec.decode(
         text,
@@ -78,6 +79,19 @@ it('encodes no position: moved source gives the same bytes', () => {
   const before = analyze(program)
   const after = analyze(`// moved\n\n${program}`)
   assert.deepEqual(after.bodies.map(TirCodec.encode), before.bodies.map(TirCodec.encode))
+  for (const encoded of before.bodies.map(TirCodec.encode)) {
+    const visit = (value: unknown): void => {
+      if (typeof value !== 'object' || value === null) return
+      if (Array.isArray(value)) {
+        for (const item of value) visit(item)
+        return
+      }
+      const record = value as Readonly<Record<string, unknown>>
+      if (record['$'] === 'span') assert.deepEqual(record, { $: 'span' })
+      for (const child of Object.values(record)) visit(child)
+    }
+    visit(JSON.parse(encoded))
+  }
 })
 
 it('identifies each body as an artifact, a compiler-made one under its parent', () => {

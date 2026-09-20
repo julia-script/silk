@@ -1,4 +1,5 @@
 import type * as Constraint from './Constraint.js'
+import * as AuthoredIdentity from './AuthoredIdentity.js'
 import type * as Diagnostic from './Diagnostic.js'
 import type * as Location from './Location.js'
 import * as SourceSpan from './SourceSpan.js'
@@ -11,6 +12,7 @@ export interface BodyBuilder {
   readonly locals: Array<Tir.Local>
   readonly evidence: Array<ReadonlyArray<Constraint.ConstraintEvidence>>
   readonly causes: Array<Diagnostic.Identity<Location.Location>>
+  readonly localIds: Map<string, Tir.LocalId>
 }
 
 export const make = (artifact: Tir.ArtifactId): BodyBuilder => ({
@@ -19,7 +21,32 @@ export const make = (artifact: Tir.ArtifactId): BodyBuilder => ({
   locals: [],
   evidence: [],
   causes: [],
+  localIds: new Map(),
 })
+
+const semanticLocalKey = (input: unknown): string | undefined => {
+  if (typeof input !== 'object' || input === null) return undefined
+  const id = input as Readonly<Record<string, unknown>>
+  const tag = id['_tag']
+  const ordinal = id['ordinal']
+  if (typeof ordinal !== 'number') return undefined
+  if (tag === 'ParameterId' || tag === 'TirBinding') {
+    const owner = id['function'] as Readonly<Record<string, unknown>> | undefined
+    return owner === undefined
+      ? undefined
+      : `${String(tag)}:${String(owner['sourceId'])}:${String(owner['ordinal'])}:${ordinal}`
+  }
+  if (tag === 'PatternBindingId') {
+    const arm = id['arm'] as Readonly<Record<string, unknown>> | undefined
+    const match = arm?.['match'] as Readonly<Record<string, unknown>> | undefined
+    const owner = match?.['function'] as Readonly<Record<string, unknown>> | undefined
+    const at = match?.['at'] as AuthoredIdentity.Anchor | undefined
+    return owner === undefined || arm === undefined || at === undefined
+      ? undefined
+      : `PatternBindingId:${String(owner['sourceId'])}:${String(owner['ordinal'])}:${AuthoredIdentity.anchorKey(at)}:${String(arm['ordinal'])}:${ordinal}`
+  }
+  return undefined
+}
 
 /** Publishes one node and assigns the next dense artifact-local identity. */
 export const node = <A extends { readonly origin: Tir.Origin }>(
@@ -46,6 +73,29 @@ export const local = (self: BodyBuilder, value: Omit<Tir.Local, 'id'>): Tir.Loca
   })
   self.locals.push(result)
   return result
+}
+
+/** Registers or retrieves one semantic local in the body's unified namespace. */
+export const semanticLocal = (
+  self: BodyBuilder,
+  semantic: unknown,
+  value: Omit<Tir.Local, 'id'>,
+): Tir.LocalId => {
+  const key = semanticLocalKey(semantic)
+  if (key === undefined) throw new RangeError('TIR local has no semantic construction identity')
+  const known = self.localIds.get(key)
+  if (known !== undefined) return known
+  const registered = local(self, value)
+  self.localIds.set(key, registered.id)
+  return registered.id
+}
+
+/** Resolves a semantic construction identity after its local has been registered. */
+export const localId = (self: BodyBuilder, semantic: unknown): Tir.LocalId => {
+  const key = semanticLocalKey(semantic)
+  const known = key === undefined ? undefined : self.localIds.get(key)
+  if (known === undefined) throw new RangeError('TIR referenced an unregistered local')
+  return known
 }
 
 /** Stores selected conformance evidence once and returns its dense table reference. */
@@ -75,45 +125,8 @@ export const cause = (
  * numbering walk once every analysis constructor owns the builder.
  */
 export const index = (self: BodyBuilder, fn: Tir.TirFunction): Tir.TirFunction => {
-  const localKeys = new Set<string>()
-  const localKey = (input: unknown): string | undefined => {
-    if (typeof input !== 'object' || input === null) return undefined
-    const id = input as Readonly<Record<string, unknown>>
-    const tag = id['_tag']
-    const ordinal = id['ordinal']
-    if (typeof ordinal !== 'number') return undefined
-    if (tag === 'ParameterId') {
-      const owner = id['function'] as Readonly<Record<string, unknown>> | undefined
-      return owner === undefined
-        ? undefined
-        : `parameter:${String(owner['sourceId'])}:${String(owner['ordinal'])}:${ordinal}`
-    }
-    if (tag === 'TirBinding') {
-      const owner = id['function'] as Readonly<Record<string, unknown>> | undefined
-      return owner === undefined
-        ? undefined
-        : `binding:${String(owner['sourceId'])}:${String(owner['ordinal'])}:${ordinal}`
-    }
-    if (tag === 'PatternBindingId') {
-      const arm = id['arm'] as Readonly<Record<string, unknown>> | undefined
-      const match = arm?.['match'] as Readonly<Record<string, unknown>> | undefined
-      const owner = match?.['function'] as Readonly<Record<string, unknown>> | undefined
-      const span = match?.['span'] as Readonly<Record<string, unknown>> | undefined
-      return owner === undefined || arm === undefined
-        ? undefined
-        : `pattern:${String(owner['sourceId'])}:${String(owner['ordinal'])}:${String(span?.['start'])}:${String(span?.['end'])}:${String(arm['ordinal'])}:${ordinal}`
-    }
-    return undefined
-  }
-  const addLocal = (key: string, value: Omit<Tir.Local, 'id'>): void => {
-    if (localKeys.has(key)) return
-    localKeys.add(key)
-    local(self, value)
-  }
   for (const parameter of fn.declaration.parameters) {
-    const key = localKey(parameter.id)
-    if (key === undefined) continue
-    addLocal(key, {
+    semanticLocal(self, parameter.id, {
       kind: 'Parameter',
       ...(parameter.name._tag === 'Present' ? { name: parameter.name.spelling } : {}),
       type: parameter.declaredType._tag === 'Resolved' ? parameter.declaredType.type : 'never',
@@ -130,20 +143,18 @@ export const index = (self: BodyBuilder, fn: Tir.TirFunction): Tir.TirFunction =
     }
     const value = input as Readonly<Record<string, unknown>>
     if (value['_tag'] === 'Bind') {
-      const key = localKey(value['binding'])
       const initializer = value['initializer'] as Readonly<Record<string, unknown>> | undefined
-      if (key !== undefined)
-        addLocal(key, {
-          kind: 'Binding',
-          ...(typeof value['name'] === 'string' ? { name: value['name'] } : {}),
-          type: (initializer?.['type'] as import('./Type.js').Type | undefined) ?? 'never',
-          mutability: value['mutability'] === 'Mutable' ? 'Mutable' : 'Immutable',
-        })
+      semanticLocal(self, value['binding'], {
+        kind: 'Binding',
+        ...(typeof value['name'] === 'string' ? { name: value['name'] } : {}),
+        type: (initializer?.['type'] as import('./Type.js').Type | undefined) ?? 'never',
+        mutability: value['mutability'] === 'Mutable' ? 'Mutable' : 'Immutable',
+      })
     }
     const patternId = value['id']
-    const patternKey = localKey(patternId)
-    if (patternKey?.startsWith('pattern:') === true && Array.isArray(value['path']))
-      addLocal(patternKey, {
+    const patternKey = semanticLocalKey(patternId)
+    if (patternKey?.startsWith('PatternBindingId:') === true && Array.isArray(value['path']))
+      semanticLocal(self, patternId, {
         kind: 'Pattern',
         ...(typeof value['name'] === 'string' ? { name: value['name'] } : {}),
         type: (value['type'] as import('./Type.js').Type | undefined) ?? 'never',

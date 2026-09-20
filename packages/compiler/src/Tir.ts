@@ -1349,6 +1349,10 @@ export const nodesOf = (self: TirFunction): ReadonlyArray<PublishedNode> => {
 export const nodeOf = (self: TirFunction, id: NodeId): PublishedNode | undefined =>
   nodesOf(self).at(id.ordinal)
 
+/** Resolves one unified local definition by its dense identity. */
+export const localOf = (self: TirFunction, id: LocalId): Local | undefined =>
+  self.locals?.at(id.ordinal)
+
 /** The terminal return expression; throws when the body ends in another control-flow shape. */
 export const returned = (self: TirFunction): Expression => {
   let statements = self.statements

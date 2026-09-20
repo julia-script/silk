@@ -31,7 +31,7 @@ const encodeValue = (input: unknown): Encoded => {
   }
   if (typeof input === 'bigint') return { [tag]: 'bigint', value: input.toString() }
   if (typeof input !== 'object') throw new RangeError(`A checked body holds a ${typeof input}`)
-  if (SourceSpan.isSourceSpan(input)) return { [tag]: 'span', source: input.sourceId }
+  if (SourceSpan.isSourceSpan(input)) return { [tag]: 'span' }
   if (Array.isArray(input)) return input.map(encodeValue)
   if (input instanceof Map)
     return {
@@ -58,7 +58,7 @@ const decodeValue = (input: Encoded): unknown => {
       return BigInt(record['value'] as string)
     case 'span':
       // A placeholder: the reader stamps every position from the origin beside it.
-      return SourceSpan.fromOffsets(record['source'] as string, 0, 0)
+      return SourceSpan.fromOffsets('', 0, 0)
     case 'map':
       return new Map(
         (record['entries'] as ReadonlyArray<readonly [Encoded, Encoded]>).map(([key, value]) => [
