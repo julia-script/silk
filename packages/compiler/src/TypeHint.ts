@@ -40,9 +40,10 @@ const pathAnchor = (path: Elaboration.ReferencePathFact): AuthoredHir.Anchor =>
 const selectorCallee = (expression: Elaboration.ExpressionFact): AuthoredHir.Anchor | undefined => {
   if (expression._tag === 'Call') return pathAnchor(expression.path)
   if (expression._tag !== 'CallableApply') return undefined
-  if (expression.provenance._tag === 'DirectCallableApplication') return expression.callee.anchor
+  if (expression.provenance._tag === 'DirectCallableApplication')
+    return Elaboration.constructionExpressionAnchor(expression.callee)
   const callable = expression.provenance.callable
-  return callable._tag === 'CallableSection' ? pathAnchor(callable.path) : undefined
+  return callable._tag === 'CallableSection' ? callable.origin.anchor : undefined
 }
 
 const selectorFacts = (

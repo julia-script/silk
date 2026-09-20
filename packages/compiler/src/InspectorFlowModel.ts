@@ -2,6 +2,7 @@ import * as AuthoredIdentity from './AuthoredIdentity.js'
 import * as Elaboration from './Elaboration.js'
 import * as SemanticContext from './SemanticContext.js'
 import type * as SourceSpan from './SourceSpan.js'
+import type * as Tir from './Tir.js'
 import * as Type from './Type.js'
 
 const typeText = (type: Type.Type): string => Type.encode(type)
@@ -105,8 +106,10 @@ const callName = (call: CallFact): string =>
   call.reference._tag === 'Unavailable' ? 'unavailable call' : call.reference.spelling
 
 const directReference = (
-  expression: Elaboration.ExpressionFact,
+  expression: Elaboration.ExpressionFact | Tir.Expression,
 ): Elaboration.IdentifierExpressionFact['reference'] | undefined => {
+  if ('origin' in expression)
+    return expression._tag === 'Move' ? directReference(expression.subject) : undefined
   switch (expression._tag) {
     case 'Identifier':
       return expression.reference
@@ -119,38 +122,29 @@ const directReference = (
   }
 }
 
-const argumentLabel = (argument: Elaboration.ArgumentFact): string => {
-  const expression = argument.expression
-  if (expression._tag === 'Identifier') {
-    return expression.reference._tag === 'Unavailable'
-      ? 'unavailable reference'
-      : expression.reference.spelling
-  }
-  if (expression._tag === 'Call') return `${callName(expression)}(…)`
+const argumentLabel = (expression: Tir.Expression): string => {
+  if (expression._tag === 'ParameterReference') return `parameter #${expression.parameter.ordinal}`
+  if (expression._tag === 'BindingReference') return `binding #${expression.binding.ordinal}`
+  if (expression._tag === 'PatternBindingReference')
+    return `pattern binding #${expression.binding.ordinal}`
+  if (expression._tag === 'Call') return `${expression.target.name}(…)`
   if (expression._tag === 'Move') {
-    return `move ${argumentLabel({ ...argument, expression: expression.subject })}`
+    return `move ${argumentLabel(expression.subject)}`
   }
-  if (expression._tag === 'Boolean') return String(expression.value)
-  if (expression._tag === 'Operator') return `${expression.operator} expression`
+  if (expression._tag === 'BooleanLiteral') return String(expression.value)
+  if (expression._tag === 'BuiltinCall') return `${expression.operation} expression`
   if (expression._tag === 'CallableApply') return 'callable result'
-  if (expression._tag === 'StructLiteral')
-    return expression.target._tag === 'Resolved'
-      ? `${typeText(expression.target.type)} {…}`
-      : 'unavailable struct literal'
-  if (expression._tag === 'FieldProjection')
-    return `${argumentLabel({ ...argument, expression: expression.subject })}.${expression.fieldName ?? '?'}`
-  if (expression._tag === 'ArrayLiteral') return `[${expression.elements.length} elements]`
-  if (expression._tag === 'IndexProjection')
-    return `${argumentLabel({ ...argument, expression: expression.subject })}[index]`
+  if (expression._tag === 'Construct') return `${typeText(expression.type)} {…}`
+  if (expression._tag === 'Project')
+    return `${argumentLabel(expression.subject)}.${expression.field.ordinal}`
+  if (expression._tag === 'ArrayConstruct') return `[${expression.elements.length} elements]`
+  if (expression._tag === 'IndexPlace') return `${argumentLabel(expression.subject)}[index]`
   if (expression._tag === 'Match') return 'match result'
-  if (expression._tag === 'Borrow') {
-    return `${expression.access === 'Exclusive' ? '&mut ' : '&'}${argumentLabel({ ...argument, expression: expression.subject })}`
-  }
+  if (expression._tag === 'ValueBorrow' || expression._tag === 'SliceBorrow')
+    return `${expression.access === 'Exclusive' ? '&mut ' : '&'}borrowed value`
   if (expression._tag === 'Run') return 'run result'
-  if (expression._tag !== 'Integer') return 'unavailable expression'
-  if (expression.integer._tag === 'Available') return String(expression.integer.value)
-  if (expression.integer._tag === 'OutOfRange') return expression.integer.spelling
-  return 'unavailable integer'
+  if (expression._tag === 'IntegerLiteral') return String(expression.value)
+  return 'unavailable expression'
 }
 
 const callId = (call: CallFact): string => `call-${AuthoredIdentity.anchorKey(call.anchor)}`
@@ -262,21 +256,7 @@ const projectCall = (
 
   const nestedResults = new Map<number, string>()
   const nestedCompleteness = new Map<number, boolean>()
-  for (const argument of call.arguments) {
-    if (argument.expression._tag !== 'Call') continue
-    const nested = projectCall(
-      analysis,
-      context,
-      draft,
-      caller,
-      argument.expression,
-      id,
-      depth + 1,
-      argument.id.ordinal,
-    )
-    if (nested.resultId !== undefined) nestedResults.set(argument.id.ordinal, nested.resultId)
-    nestedCompleteness.set(argument.id.ordinal, nested.complete)
-  }
+  // Nested published calls are projected from TIR once this model no longer depends on records.
 
   for (const argument of call.arguments) {
     const argumentId = `${id}-argument-${argument.id.ordinal}`
@@ -288,7 +268,7 @@ const projectCall = (
         group,
         argumentId,
         'Argument',
-        `Argument #${argument.id.ordinal}: ${argumentLabel(argument)}`,
+        `Argument #${argument.id.ordinal}: ${argumentLabel(argument.expression)}`,
         argument.type._tag === 'Available' ? typeText(argument.type.type) : 'Unavailable type',
         call.contract._tag === 'Compatible' && nestedComplete !== false ? 'Connected' : 'Unmatched',
         context.spanOf(argument.anchor),

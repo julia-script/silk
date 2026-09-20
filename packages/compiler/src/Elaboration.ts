@@ -64,7 +64,7 @@ export interface BindingDeclarationFact {
   readonly mutability: 'Immutable' | 'Mutable'
   readonly declaredType?: DeclaredTypeFact
   readonly inferredType: ExpressionTypeFact
-  readonly initializer: ExpressionFact
+  readonly initializer: Tir.Expression
   readonly staticValue?: StaticValue.Value
   /** Exact callable value captured when this binding was initialized, before later source writes. */
   readonly exactCallable?: Extract<
@@ -88,7 +88,7 @@ export interface StaticIterationScopeFact {
 /** The authored static iteration plus its target-selected semantic expansion. */
 export interface StaticIterationFact {
   readonly _tag: 'StaticIteration'
-  readonly iterable: ExpressionFact
+  readonly iterable: Tir.Expression
   readonly state: 'Deferred' | 'Rejected' | 'Expanded'
   readonly scopes: ReadonlyArray<StaticIterationScopeFact>
   readonly anchor: AuthoredHir.Anchor
@@ -195,7 +195,7 @@ export interface CharacterExpressionFact {
 /** One dedicated selected compile-time failure expression. */
 export interface CompileErrorExpressionFact {
   readonly _tag: 'CompileError'
-  readonly message: ExpressionFact
+  readonly message: Tir.Expression
   readonly type: ExpressionTypeFact
   readonly anchor: AuthoredHir.Anchor
 }
@@ -329,7 +329,12 @@ export interface IdentifierExpressionFact {
 /** One `move <place>` expression with its consuming subject fact. */
 export interface MoveExpressionFact {
   readonly _tag: 'Move'
-  readonly subject: ExpressionFact
+  readonly subject: Tir.Expression
+  readonly exactCallable?: Extract<
+    ExpressionFact,
+    { readonly _tag: 'FunctionItem' | 'CallableSection' }
+  >
+  readonly concreteCallableIdentity?: true
   readonly type: ExpressionTypeFact
   readonly anchor: AuthoredHir.Anchor
 }
@@ -343,7 +348,7 @@ export type BorrowSelectorFact =
     }
   | {
       readonly _tag: 'Index'
-      readonly index: ExpressionFact
+      readonly index: Tir.Expression
       readonly array: Type.FixedArray
       readonly bounds: Extract<BoundsFact, { readonly _tag: 'Proven' | 'Runtime' }>
       readonly span: SourceSpan.SourceSpan
@@ -351,7 +356,7 @@ export type BorrowSelectorFact =
     }
   | {
       readonly _tag: 'SliceIndex'
-      readonly index: ExpressionFact
+      readonly index: Tir.Expression
       readonly slice: Type.Slice
       readonly span: SourceSpan.SourceSpan
       readonly at?: AuthoredHir.Anchor
@@ -376,7 +381,7 @@ export type BorrowRootFact =
   | {
       readonly _tag: 'TemporaryRoot'
       readonly owner: Tir.TemporaryOwnerId
-      readonly value: ExpressionFact
+      readonly value: Tir.Expression
       readonly path: ReadonlyArray<BorrowSelectorFact>
     }
 
@@ -409,7 +414,7 @@ export type BorrowFormationFact =
 export interface BorrowExpressionFact {
   readonly _tag: 'Borrow'
   readonly access: Type.BorrowAccess
-  readonly subject: ExpressionFact
+  readonly subject: Tir.Expression
   readonly formation: BorrowFormationFact
   readonly type: ExpressionTypeFact
   readonly anchor: AuthoredHir.Anchor
@@ -530,7 +535,7 @@ export type PatternFact =
 export type MatchArmBodyFact =
   | {
       readonly _tag: 'Expression'
-      readonly expression: ExpressionFact
+      readonly expression: Tir.Expression
       readonly type: ExpressionTypeFact
       readonly anchor: AuthoredHir.Anchor
     }
@@ -548,7 +553,7 @@ export interface MatchArmFact {
   readonly id: Match.ArmId
   readonly pattern: PatternFact
   readonly bindings: ReadonlyArray<PatternBindingFact>
-  readonly guard?: ExpressionFact
+  readonly guard?: Tir.Expression
   readonly body: MatchArmBodyFact
   readonly before: ReadonlyArray<Match.CoverageIdentity>
   readonly after: ReadonlyArray<Match.CoverageIdentity>
@@ -560,7 +565,7 @@ export interface MatchExpressionFact {
   readonly _tag: 'Match'
   readonly id: Match.MatchId
   readonly access: Match.Access
-  readonly scrutinee: ExpressionFact
+  readonly scrutinee: Tir.Expression
   readonly members: ReadonlyArray<Match.CoverageIdentity>
   readonly arms: ReadonlyArray<MatchArmFact>
   readonly exhaustive: boolean
@@ -576,8 +581,8 @@ export interface PatternSelectionFact {
   readonly arm: Match.ArmId
   readonly access: Match.Access
   /** Authored initializer, retaining an outer move/borrow for ownership loan analysis. */
-  readonly source: ExpressionFact
-  readonly subject: ExpressionFact
+  readonly source: Tir.Expression
+  readonly subject: Tir.Expression
   readonly members: ReadonlyArray<Match.CoverageIdentity>
   readonly pattern: PatternFact
   readonly bindings: ReadonlyArray<PatternBindingFact>
@@ -631,7 +636,7 @@ export type StructInitializerState =
 export interface StructInitializerFact {
   readonly _tag: 'StructInitializer'
   readonly name: string | undefined
-  readonly expression: ExpressionFact
+  readonly expression: Tir.Expression
   readonly state: StructInitializerState
   /** The written field label, which is where an editor finds this initializer's field. */
   readonly nameAnchor?: AuthoredHir.Anchor
@@ -680,7 +685,11 @@ export type ProjectionState =
 
 export interface FieldProjectionExpressionFact {
   readonly _tag: 'FieldProjection'
-  readonly subject: ExpressionFact
+  readonly subject: Tir.Expression
+  /** Construction-only summary retained instead of the subject's recursive decision record. */
+  readonly root?: AssignmentRootFact
+  readonly borrowRoot?: BorrowRootFact
+  readonly placeBorrowAccess?: Type.BorrowAccess
   /** Exact compile-time projection retained for residual literal materialization. */
   readonly staticValue?: StaticValue.Value
   readonly nominal?: Type.Nominal
@@ -699,7 +708,10 @@ export type ReferentProjectionState =
 /** One explicit postfix projection from a reference value to its borrowed target place. */
 export interface ReferentProjectionExpressionFact {
   readonly _tag: 'ReferentProjection'
-  readonly subject: ExpressionFact
+  readonly subject: Tir.Expression
+  readonly root?: AssignmentRootFact
+  readonly borrowRoot?: BorrowRootFact
+  readonly placeBorrowAccess?: Type.BorrowAccess
   readonly reference?: Type.Reference
   readonly borrowAccess?: Type.BorrowAccess
   readonly state: ReferentProjectionState
@@ -711,7 +723,7 @@ export interface ReferentProjectionExpressionFact {
 export interface ArrayElementFact {
   readonly _tag: 'ArrayElement'
   readonly ordinal: number
-  readonly expression: ExpressionFact
+  readonly expression: Tir.Expression
   readonly expected?: SemanticType
   readonly compatibility:
     | { readonly _tag: 'Compatible' }
@@ -758,8 +770,11 @@ export type BoundsFact =
 /** One typed checked array-place projection. */
 export interface IndexProjectionExpressionFact {
   readonly _tag: 'IndexProjection'
-  readonly subject: ExpressionFact
-  readonly index: ExpressionFact
+  readonly subject: Tir.Expression
+  readonly index: Tir.Expression
+  readonly root?: AssignmentRootFact
+  readonly borrowRoot?: BorrowRootFact
+  readonly placeBorrowAccess?: Type.BorrowAccess
   readonly array?: Type.FixedArray
   readonly slice?: Type.Slice
   readonly elementType?: SemanticType
@@ -879,7 +894,7 @@ export interface CallableCaptureFact {
   readonly _tag: 'CallableCapture'
   readonly ordinal: number
   readonly parameterOrdinal: number
-  readonly expression: ExpressionFact
+  readonly expression: Tir.Expression
   readonly access: 'Copy' | 'Shared' | 'Exclusive' | 'Take'
 }
 
@@ -889,7 +904,7 @@ export interface AnonymousCaptureFact {
   readonly reference: BindingDeclarationFact | ParameterFact | PatternBindingFact
   readonly access: CallableCaptureFact['access']
   readonly span: SourceSpan.SourceSpan
-  readonly expression: IdentifierExpressionFact
+  readonly expression: Tir.Expression
 }
 
 /** One hidden concrete section construction awaiting an ordered leading parameter prefix. */
@@ -919,7 +934,7 @@ export interface CallableSectionExpressionFact {
 export interface ForeignApplyExpressionFact {
   readonly _tag: 'ForeignApply'
   readonly evaluation: 'CalleeThenArguments' | 'LeftThenCallable'
-  readonly callee: ExpressionFact
+  readonly callee: Tir.Expression
   readonly arguments: ReadonlyArray<ArgumentFact>
   readonly contract: Type.ForeignFunction
   readonly type: ExpressionTypeFact
@@ -932,7 +947,7 @@ export interface CallableApplyExpressionFact {
   /** Exact source identity, when semantic application can discharge its generic obligations. */
   readonly sourceTarget?: Extract<CallReferenceFact, { readonly _tag: 'Resolved' }>
   readonly selectedConformances?: ReadonlyArray<ConformanceGoal.Proof>
-  readonly callee: ExpressionFact
+  readonly callee: Tir.Expression
   readonly arguments: ReadonlyArray<ArgumentFact>
   readonly mode: Type.CallableMode
   readonly contract?: Type.Callable
@@ -952,8 +967,8 @@ export interface CallableApplyExpressionFact {
     | { readonly _tag: 'DirectCallableApplication' }
     | {
         readonly _tag: 'PipelineCallableApplication'
-        readonly left: ExpressionFact
-        readonly callable: ExpressionFact
+        readonly left: Tir.Expression
+        readonly callable: Tir.Expression
         readonly evaluation: 'LeftThenCallable'
       }
   readonly type: ExpressionTypeFact
@@ -969,7 +984,7 @@ export interface EffectCaptureFact {
   /** The authored use that `span` presents. */
   readonly anchor: AuthoredHir.Anchor
   /** First lexical identifier occurrence retained for anonymous environment construction. */
-  readonly expression?: IdentifierExpressionFact
+  readonly expression?: Tir.Expression
 }
 
 /** One existing provider retained by an Effect provision wrapper. */
@@ -1020,7 +1035,7 @@ export interface EnumMemberExpressionFact {
 export interface EnumValueExpressionFact {
   readonly _tag: 'EnumValue'
   readonly operation: DeclarationFacts.EnumAssociatedOperationFact
-  readonly argument: ExpressionFact
+  readonly argument: Tir.Expression
   readonly qualifierAnchor: AuthoredHir.Anchor
   readonly operationAnchor: AuthoredHir.Anchor
   readonly type: ExpressionTypeFact
@@ -1074,7 +1089,7 @@ export type ExpressionFact =
   | EffectExpressionFact
   | {
       readonly _tag: 'Run'
-      readonly subject: ExpressionFact
+      readonly subject: Tir.Expression
       readonly type: ExpressionTypeFact
       readonly anchor: AuthoredHir.Anchor
     }
@@ -1082,9 +1097,9 @@ export type ExpressionFact =
       /** `Place.replace(place, value)`: swap one writable place, yielding its old value. */
       readonly _tag: 'PlaceReplace'
       readonly reference: IntrinsicReferenceFact
-      readonly destination: ExpressionFact
+      readonly destination: Tir.Expression
       readonly root?: AssignmentRootFact
-      readonly value: ExpressionFact
+      readonly value: Tir.Expression
       readonly compatible: boolean
       readonly type: ExpressionTypeFact
       readonly anchor: AuthoredHir.Anchor
@@ -1092,7 +1107,7 @@ export type ExpressionFact =
   | {
       readonly _tag: 'EffectBindRequirement'
       readonly reference: IntrinsicReferenceFact
-      readonly protected: ExpressionFact
+      readonly protected: Tir.Expression
       readonly provider?: EffectRequirementBindingFact
       readonly type: ExpressionTypeFact
       readonly anchor: AuthoredHir.Anchor
@@ -1105,8 +1120,8 @@ export type ExpressionFact =
        */
       readonly _tag: 'EffectCatch'
       readonly reference: IntrinsicReferenceFact
-      readonly protected: ExpressionFact
-      readonly handler: ExpressionFact
+      readonly protected: Tir.Expression
+      readonly handler: Tir.Expression
       readonly selected?: Type.Type
       readonly protectedRow: Type.FailureRow
       readonly handlerRow: Type.FailureRow
@@ -1202,7 +1217,9 @@ export interface ArgumentId {
 export interface ArgumentFact {
   readonly _tag: 'Argument'
   readonly id: ArgumentId
-  readonly expression: ExpressionFact
+  readonly expression: Tir.Expression
+  /** Construction-only loan root needed by intrinsics that project through an argument. */
+  readonly borrowRoot?: BorrowRootFact
   readonly type: ExpressionTypeFact
   readonly anchor: AuthoredHir.Anchor
 }
@@ -1286,13 +1303,7 @@ const assignmentPlaceBorrowAccess = (place: ExpressionFact): Type.BorrowAccess |
   ) {
     return undefined
   }
-  const inherited = assignmentPlaceBorrowAccess(place.subject)
-  let current: Type.BorrowAccess | undefined
-  if (place._tag === 'ReferentProjection') current = place.borrowAccess
-  else if (place._tag === 'IndexProjection') current = place.slice?.access
-  if (inherited === 'Shared' || current === 'Shared') return 'Shared'
-  if (inherited === 'Exclusive' || current === 'Exclusive') return 'Exclusive'
-  return undefined
+  return place.placeBorrowAccess
 }
 
 /** Classifies writable roots without conflating owned binding mutability with pointee access. */
@@ -1347,7 +1358,7 @@ export const assignmentRoot = (fact: ExpressionFact): AssignmentRootFact | undef
     fact._tag === 'ReferentProjection' ||
     fact._tag === 'IndexProjection'
   ) {
-    return assignmentRoot(fact.subject)
+    return fact.root
   }
   return undefined
 }
@@ -1698,15 +1709,23 @@ export const representationJoinDiagnostic = (
 }
 
 export const contextualIntegerCompatible = (
-  expression: ExpressionFact,
+  expression: ExpressionFact | Tir.Expression,
   target: SemanticType,
 ): boolean => {
-  if (expression._tag !== 'Integer' || expression.integer._tag !== 'Available') return false
+  const value =
+    'origin' in expression
+      ? expression._tag === 'IntegerLiteral'
+        ? expression.value
+        : undefined
+      : expression._tag === 'Integer' && expression.integer._tag === 'Available'
+        ? expression.integer.value
+        : undefined
+  if (value === undefined) return false
   if (typeof target !== 'string' || !Scalar.isIntegerSpelling(target)) return false
   const scalar = Scalar.find(target)
   if (scalar?.category !== 'Integer') return false
   const range = Scalar.range(scalar, 64)
-  return expression.integer.value >= range.minimum && expression.integer.value <= range.maximum
+  return value >= range.minimum && value <= range.maximum
 }
 
 export const unionConversionDiagnostic = (
@@ -1798,6 +1817,27 @@ export interface ExpressionResult {
   readonly type: SemanticType | undefined
 }
 
+/** Reads the typed node construction publishes before it proceeds to the parent construct. */
+export const expressionNode = (self: ExpressionResult): Tir.Expression => {
+  if (self.node === undefined) throw new RangeError('Expression analysis did not publish a TIR node')
+  return self.node
+}
+
+/** Construction-time type view shared by a shallow decision and an already published child. */
+export const constructionExpressionType = (
+  self: ExpressionFact | Tir.Expression,
+): ExpressionTypeFact =>
+  'origin' in self
+    ? self._tag === 'Unavailable'
+      ? unavailableExpressionType
+      : availableExpressionType(self.type)
+    : self.type
+
+/** Authored position retained by both construction decisions and typed nodes. */
+export const constructionExpressionAnchor = (
+  self: ExpressionFact | Tir.Expression,
+): AuthoredHir.Anchor => ('origin' in self ? self.origin.anchor : self.anchor)
+
 export interface IdentifierResult {
   readonly fact: IdentifierExpressionFact
   readonly diagnostics: ReadonlyArray<Diagnostic.Located>
@@ -1814,10 +1854,42 @@ export const argumentFact = (
   declaration: DeclarationFact,
   context: SemanticContext.SemanticContext,
   call: AuthoredHir.Anchor,
-  expression: ExpressionFact,
+  input: ExpressionResult | ArgumentFact,
   ordinal: number,
-): ArgumentFact =>
-  Object.freeze({
+): ArgumentFact => {
+  const expression = 'fact' in input ? expressionNode(input) : input.expression
+  const type = 'fact' in input ? input.fact.type : input.type
+  const anchor = 'fact' in input ? input.fact.anchor : input.anchor
+  const borrowRoot =
+    !('fact' in input)
+      ? input.borrowRoot
+      : input.fact._tag === 'Borrow' && input.fact.formation._tag !== 'Unavailable'
+        ? input.fact.formation.root
+        : input.fact._tag === 'FieldProjection' ||
+            input.fact._tag === 'ReferentProjection' ||
+            input.fact._tag === 'IndexProjection'
+          ? input.fact.borrowRoot
+          : input.fact._tag === 'Identifier' && input.fact.reference._tag === 'ResolvedBinding'
+            ? Object.freeze({
+                _tag: 'BindingRoot' as const,
+                binding: input.fact.reference.binding,
+                path: Object.freeze([]),
+              })
+            : input.fact._tag === 'Identifier' && input.fact.reference._tag === 'Resolved'
+              ? Object.freeze({
+                  _tag: 'ParameterRoot' as const,
+                  parameter: input.fact.reference.parameter,
+                  path: Object.freeze([]),
+                })
+              : input.fact._tag === 'Identifier' &&
+                  input.fact.reference._tag === 'ResolvedPattern'
+                ? Object.freeze({
+                    _tag: 'PatternRoot' as const,
+                    binding: input.fact.reference.binding,
+                    path: Object.freeze([]),
+                  })
+          : undefined
+  return Object.freeze({
     _tag: 'Argument',
     id: Object.freeze({
       _tag: 'ArgumentId',
@@ -1827,9 +1899,11 @@ export const argumentFact = (
       ordinal,
     }),
     expression,
-    type: expression.type,
-    anchor: expression.anchor,
+    ...(borrowRoot === undefined ? {} : { borrowRoot }),
+    type,
+    anchor,
   })
+}
 
 import { copyAssumptionsOf } from './CallResolution.js'
 import {
@@ -1847,15 +1921,26 @@ import { analyzeFunctionBody } from './StatementAnalysis.js'
 export interface FactVisitor {
   readonly statement?: (statement: StatementFact) => void
   readonly expression?: (expression: ExpressionFact) => void
+  readonly node?: (expression: Tir.Expression) => void
   readonly descendExpressions?: boolean
   readonly descendEffectBlocks?: boolean
 }
 
 /** Direct semantic children in source evaluation order. */
-export const expressionChildren = (self: ExpressionFact): ReadonlyArray<ExpressionFact> =>
-  directExpressionChildren(self)
+export const expressionChildren = (
+  self: ExpressionFact | Tir.Expression,
+): ReadonlyArray<ExpressionFact | Tir.Expression> =>
+  'origin' in self ? Tir.expressionChildren(self) : directExpressionChildren(self)
 
-const visitExpressionFact = (expression: ExpressionFact, visitor: FactVisitor): void => {
+const visitExpressionFact = (
+  expression: ExpressionFact | Tir.Expression,
+  visitor: FactVisitor,
+): void => {
+  if ('origin' in expression) {
+    visitor.node?.(expression)
+    for (const child of Tir.expressionChildren(expression)) visitExpressionFact(child, visitor)
+    return
+  }
   visitor.expression?.(expression)
   if (expression._tag === 'Match') {
     visitExpressionFact(expression.scrutinee, visitor)
@@ -1874,7 +1959,10 @@ const visitExpressionFact = (expression: ExpressionFact, visitor: FactVisitor): 
 }
 
 /** Visits one expression tree in deterministic source order. */
-export const visitExpressionFacts = (self: ExpressionFact, visitor: FactVisitor): void =>
+export const visitExpressionFacts = (
+  self: ExpressionFact | Tir.Expression,
+  visitor: FactVisitor,
+): void =>
   visitExpressionFact(self, visitor)
 
 /** Visits statement trees and, by default, every nested expression in source order. */
@@ -1896,10 +1984,13 @@ export const visitStatementFacts = (
   }
 }
 
-const constrainedCallableSchema = (expression: ExpressionFact): Type.CallableSchema | undefined => {
-  if (expression.type._tag !== 'Available' || !Type.isCallable(expression.type.type))
+const constrainedCallableSchema = (
+  expression: ExpressionFact | Tir.Expression,
+): Type.CallableSchema | undefined => {
+  const type = constructionExpressionType(expression)
+  if (type._tag !== 'Available' || !Type.isCallable(type.type))
     return undefined
-  const schema = expression.type.type.schema
+  const schema = type.type.schema
   return schema !== undefined &&
     (schema.binders.some(
       (binder) => binder.kind !== 'Lifetime' && !schema.substitution.has(Type.key(binder)),
@@ -1959,10 +2050,49 @@ export interface CallableFlow {
 }
 
 const callableSourceOf = (
-  current: ExpressionFact,
+  current: ExpressionFact | Tir.Expression,
   bindings: ReadonlySet<number> = new Set(),
+  tirBindings: ReadonlyMap<number, Tir.Expression> = new Map(),
+  index?: DeclarationIndex.Index,
 ): CallableSource | undefined => {
-  if (current._tag === 'Move') return callableSourceOf(current.subject, bindings)
+  if ('origin' in current) {
+    if (current._tag === 'Move')
+      return callableSourceOf(current.subject, bindings, tirBindings, index)
+    if (current._tag === 'ParameterReference')
+      return { _tag: 'Parameter', ordinal: current.parameter.ordinal }
+    if (current._tag === 'BindingReference') {
+      const ordinal = current.binding.ordinal
+      if (bindings.has(ordinal)) return undefined
+      const initializer = tirBindings.get(ordinal)
+      if (initializer === undefined) return undefined
+      const source = callableSourceOf(
+        initializer,
+        new Set(bindings).add(ordinal),
+        tirBindings,
+        index,
+      )
+      return source === undefined ? undefined : { _tag: 'Binding', ordinal, source }
+    }
+    if (current._tag !== 'Call') return undefined
+    const declaration =
+      index === undefined ? undefined : DeclarationFacts.byCanonical(index, current.target)
+    const parameters =
+      declaration?._tag === 'FunctionDeclaration'
+        ? declaration.parameters.filter((parameter) => parameter.phase !== 'Static')
+        : []
+    return {
+      _tag: 'Call',
+      target: `${current.target.module}\u0000${current.target.name}`,
+      arguments: current.arguments.flatMap((argument, position) => {
+        const source = callableSourceOf(argument, bindings, tirBindings, index)
+        return source === undefined
+          ? []
+          : [{ parameter: parameters.at(position)?.id.ordinal ?? position, source }]
+      }),
+    }
+  }
+  if (current._tag === 'Move')
+    return callableSourceOf(current.subject, bindings, tirBindings, index)
   if (current._tag === 'Identifier') {
     if (current.reference._tag === 'Resolved')
       return { _tag: 'Parameter', ordinal: current.reference.parameter.id.ordinal }
@@ -1972,6 +2102,8 @@ const callableSourceOf = (
     const source = callableSourceOf(
       current.reference.binding.initializer,
       new Set(bindings).add(ordinal),
+      tirBindings,
+      index,
     )
     return source === undefined ? undefined : { _tag: 'Binding', ordinal, source }
   }
@@ -1982,39 +2114,102 @@ const callableSourceOf = (
     _tag: 'Call',
     target,
     arguments: current.mappings.flatMap((mapping) => {
-      const source = callableSourceOf(mapping.argument.expression, bindings)
+      const source = callableSourceOf(mapping.argument.expression, bindings, tirBindings, index)
       return source === undefined ? [] : [{ parameter: mapping.parameter.id.ordinal, source }]
     }),
   }
 }
 
-const callableFlowOf = (fn: FunctionFact): CallableFlow => {
+const callableFlowOf = (
+  fn: FunctionFact,
+  index: DeclarationIndex.Index,
+  builder: BodyBuilder.BodyBuilder,
+): CallableFlow => {
   const escapes: Array<CallableEscape> = []
-  const value = (expression: ExpressionFact): void => {
+  const tirBindings = new Map<number, Tir.Expression>()
+  visitStatementFacts(fn.statements, {
+    statement: (statement) => {
+      if (statement._tag === 'BindStatement' && 'origin' in statement.binding.initializer)
+        tirBindings.set(statement.binding.id.ordinal, statement.binding.initializer)
+    },
+    descendExpressions: false,
+  })
+  const value = (expression: ExpressionFact | Tir.Expression): void => {
     if (constrainedCallableSchema(expression) !== undefined)
-      escapes.push({ _tag: 'Value', at: expression.anchor })
+      escapes.push({ _tag: 'Value', at: constructionExpressionAnchor(expression) })
+  }
+  const expressionEscape = (expression: ExpressionFact): void => {
+    if (expression._tag === 'StructLiteral' || expression._tag === 'UnionVariant') {
+      for (const initializer of expression.initializers) value(initializer.expression)
+      return
+    }
+    if (expression._tag === 'ArrayLiteral') {
+      for (const element of expression.elements) value(element.expression)
+      return
+    }
+    if (expression._tag === 'CallableSection') {
+      for (const capture of expression.captures) value(capture.expression)
+      return
+    }
+    if (expression._tag === 'EffectBlock') {
+      for (const capture of expression.captures)
+        if (capture.reference._tag === 'BindingFact') value(capture.reference.initializer)
+      return
+    }
+    if (expression._tag === 'Match') {
+      value(expression)
+      return
+    }
+    if (expression._tag === 'CallableApply') {
+      for (const argument of expression.arguments) value(argument.expression)
+      return
+    }
+    if (expression._tag !== 'Call') return
+    const target =
+      expression.reference._tag === 'Resolved'
+        ? canonicalFunctionKey(expression.reference.declaration)
+        : undefined
+    const arguments_ = expression.mappings.flatMap((mapping) =>
+      constrainedCallableSchema(mapping.argument.expression) === undefined
+        ? []
+        : [
+            {
+              parameter: mapping.parameter.id.ordinal,
+              at: constructionExpressionAnchor(mapping.argument.expression),
+            },
+          ],
+    )
+    const constrained = constrainedCallableSchema(expression) !== undefined
+    if (arguments_.length === 0 && !constrained) return
+    escapes.push({
+      _tag: 'Call',
+      ...(target === undefined ? {} : { target }),
+      arguments: arguments_,
+      ...(constrained ? { result: expression.anchor } : {}),
+    })
   }
   visitStatementFacts(fn.statements, {
     statement: (statement) => {
       if (statement._tag === 'ReturnStatement') value(statement.expression)
       else if (statement._tag === 'WriteStatement') value(statement.value)
     },
-    expression: (expression) => {
-      if (expression._tag === 'StructLiteral' || expression._tag === 'UnionVariant') {
-        for (const initializer of expression.initializers) value(initializer.expression)
+    expression: expressionEscape,
+    node: (expression) => {
+      const decision = BodyBuilder.expressionDecision(builder, expression)
+      if (decision !== undefined) {
+        expressionEscape(decision)
         return
       }
-      if (expression._tag === 'ArrayLiteral') {
-        for (const element of expression.elements) value(element.expression)
+      if (expression._tag === 'Construct' || expression._tag === 'ConstructUnionVariant') {
+        for (const field of expression.fields) value(field.value)
+        return
+      }
+      if (expression._tag === 'ArrayConstruct') {
+        for (const element of expression.elements) value(element)
         return
       }
       if (expression._tag === 'CallableSection') {
-        for (const capture of expression.captures) value(capture.expression)
-        return
-      }
-      if (expression._tag === 'EffectBlock') {
-        for (const capture of expression.captures)
-          if (capture.reference._tag === 'BindingFact') value(capture.reference.initializer)
+        for (const capture of expression.captures) value(capture.value)
         return
       }
       if (expression._tag === 'Match') {
@@ -2022,26 +2217,32 @@ const callableFlowOf = (fn: FunctionFact): CallableFlow => {
         return
       }
       if (expression._tag === 'CallableApply') {
-        for (const argument of expression.arguments) value(argument.expression)
+        for (const argument of expression.arguments) value(argument)
         return
       }
       if (expression._tag !== 'Call') return
-      const target =
-        expression.reference._tag === 'Resolved'
-          ? canonicalFunctionKey(expression.reference.declaration)
-          : undefined
-      const arguments_ = expression.mappings.flatMap((mapping) =>
-        constrainedCallableSchema(mapping.argument.expression) === undefined
+      const declaration = DeclarationFacts.byCanonical(index, expression.target)
+      const parameters =
+        declaration?._tag === 'FunctionDeclaration'
+          ? declaration.parameters.filter((parameter) => parameter.phase !== 'Static')
+          : []
+      const arguments_ = expression.arguments.flatMap((argument, position) =>
+        constrainedCallableSchema(argument) === undefined
           ? []
-          : [{ parameter: mapping.parameter.id.ordinal, at: mapping.argument.expression.anchor }],
+          : [
+              {
+                parameter: parameters.at(position)?.id.ordinal ?? position,
+                at: constructionExpressionAnchor(argument),
+              },
+            ],
       )
       const constrained = constrainedCallableSchema(expression) !== undefined
       if (arguments_.length === 0 && !constrained) return
       escapes.push({
         _tag: 'Call',
-        ...(target === undefined ? {} : { target }),
+        target: `${expression.target.module}\u0000${expression.target.name}`,
         arguments: arguments_,
-        ...(constrained ? { result: expression.anchor } : {}),
+        ...(constrained ? { result: constructionExpressionAnchor(expression) } : {}),
       })
     },
   })
@@ -2051,7 +2252,7 @@ const callableFlowOf = (fn: FunctionFact): CallableFlow => {
     fn.declaration.parameters.length === 1 &&
     terminal?._tag === 'ReturnStatement' &&
     leading.every((statement) => statement._tag === 'BindStatement')
-      ? callableSourceOf(terminal.expression)
+      ? callableSourceOf(terminal.expression, new Set(), tirBindings, index)
       : undefined
   return Object.freeze({
     ...(source === undefined
@@ -2184,7 +2385,14 @@ const lexicalScopesOf = (fn: FunctionFact): ReadonlyArray<LexicalScopeFact> => {
       parent: LexicalScopeId | undefined,
       fallback: AuthoredHir.Anchor,
     ) => LexicalScopeId
-    const visitExpression = (expression: ExpressionFact, parent: LexicalScopeId): void => {
+    const visitExpression = (
+      expression: ExpressionFact | Tir.Expression,
+      parent: LexicalScopeId,
+    ): void => {
+      if ('origin' in expression) {
+        for (const child of Tir.expressionChildren(expression)) visitExpression(child, parent)
+        return
+      }
       if (expression._tag === 'Match') {
         visitExpression(expression.scrutinee, parent)
         for (const arm of expression.arms) {
@@ -2295,6 +2503,7 @@ const runtimeTirFunction = (
       0,
       index,
       copyAssumptionsOf(fact.declaration),
+      Object.freeze({ builder }),
     )
     // Every runtime argument enters the deferred environment at construction, even when the body
     // never reads it. Retaining declaration order also retains reverse-argument cleanup order.
@@ -2479,8 +2688,26 @@ export interface CheckedUnit {
   readonly diagnostics: ReadonlyArray<Diagnostic.Located>
 }
 
-const staticStructureOf = (fact: FunctionFact): StaticStructure | undefined => {
+const staticStructureOf = (
+  fact: FunctionFact,
+  index: DeclarationIndex.Index,
+): StaticStructure | undefined => {
   let found: StaticStructure | undefined
+  const recordNode = (expression: Tir.Expression): void => {
+    if (found !== undefined) return
+    if (expression._tag === 'ConstantReference') found = 'UnresolvedConstant'
+    else if (expression._tag === 'CompileError') found = 'CompileError'
+    else if (expression._tag === 'StaticCall') found = 'StaticCall'
+    else if (expression._tag === 'Call' || expression._tag === 'EffectConstruct') {
+      const declaration = DeclarationFacts.byCanonical(index, expression.target)
+      if (
+        declaration?._tag === 'FunctionDeclaration' &&
+        (declaration.phase === 'Static' ||
+          declaration.parameters.some((parameter) => parameter.phase === 'Static'))
+      )
+        found = 'StaticCall'
+    }
+  }
   visitStatementFacts(fact.statements, {
     statement: (statement) => {
       if (
@@ -2505,6 +2732,7 @@ const staticStructureOf = (fact: FunctionFact): StaticStructure | undefined => {
       )
         found = 'StaticCall'
     },
+    node: recordNode,
   })
   return found
 }
@@ -2612,7 +2840,7 @@ export const checkedBody = (
       ? staticTirFunction(context, fact, builder)
       : runtimeTirFunction(context, fact, index, builder),
   )
-  const staticStructure = staticStructureOf(fact)
+  const staticStructure = staticStructureOf(fact, index)
   const results: BodyResults = Object.freeze({
     evidence: Object.freeze(Array.from(builder.evidence)),
     causes: Object.freeze(Array.from(builder.causes)),
@@ -2622,7 +2850,7 @@ export const checkedBody = (
     ...(fact.lifetimeFlow === undefined ? {} : { lifetimes: fact.lifetimeFlow }),
     scopes: lexicalScopesOf(fact),
     aggregates: fact.generatedAggregates,
-    callables: callableFlowOf(fact),
+    callables: callableFlowOf(fact, index, builder),
     ...(staticStructure === undefined ? {} : { staticStructure }),
     expressionTypes: expressionTypesOf(fact),
     staticIterations: staticIterationRows(fact.staticIterations),

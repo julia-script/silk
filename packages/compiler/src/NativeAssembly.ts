@@ -5,17 +5,23 @@ import * as ConfigurationOrigin from './ConfigurationOrigin.js'
 import type * as AuthoredHir from './AuthoredHir.js'
 import * as Diagnostic from './Diagnostic.js'
 import * as Location from './Location.js'
-import type * as Elaboration from './Elaboration.js'
+import * as Elaboration from './Elaboration.js'
+import type * as Tir from './Tir.js'
 import type * as SemanticContext from './SemanticContext.js'
 import type * as Target from './Target.js'
 import * as Type from './Type.js'
 import * as Canonical from './internal/Canonical.js'
 
 /** The exact text one elaborated literal operand denotes, decoded when the fact was built. */
-const literalText = (expression: Elaboration.ExpressionFact): string | undefined =>
-  expression._tag === 'StaticText' && expression.data !== undefined
-    ? new TextDecoder().decode(Uint8Array.from(expression.data.bytes))
-    : undefined
+const literalText = (
+  expression: Elaboration.ExpressionFact | Tir.Expression,
+): string | undefined => {
+  if (expression._tag === 'StaticText' && expression.data !== undefined)
+    return new TextDecoder().decode(Uint8Array.from(expression.data.bytes))
+  if (expression._tag === 'StaticStringLiteral' || expression._tag === 'StaticByteViewLiteral')
+    return new TextDecoder().decode(Uint8Array.from(expression.data.bytes))
+  return undefined
+}
 
 /** Validated function-local machine text and its exact register/effect contract. */
 export interface NativeAssembly {
@@ -209,24 +215,24 @@ export const analyze = (
     constraints === undefined ||
     clobbers === undefined ||
     memory === undefined ||
-    sideEffects?._tag !== 'Boolean' ||
-    noReturn?._tag !== 'Boolean'
+    sideEffects?._tag !== 'BooleanLiteral' ||
+    noReturn?._tag !== 'BooleanLiteral'
   )
     return reject('assembly metadata must be literal')
   const operands: Array<Type.Type> = []
   // A tuple literal is an occurrence-generated struct: it names no source constructor.
   if (
-    tuple?._tag === 'StructLiteral' &&
-    tuple.target._tag === 'Resolved' &&
-    tuple.target.anchor === undefined
+    tuple?._tag === 'Construct'
   ) {
     for (const field of tuple.fields) {
-      const type = field.initializer.expression.type
+      const expression = field.value
+      const type = Elaboration.constructionExpressionType(expression)
       if (type._tag !== 'Available')
-        return reject('assembly operand type', field.initializer.expression.anchor)
+        return reject('assembly operand type', Elaboration.constructionExpressionAnchor(expression))
       operands.push(type.type)
     }
-  } else if (tuple?._tag !== 'Unit') return reject('assembly inputs require a tuple literal')
+  } else if (tuple?._tag !== 'UnitLiteral')
+    return reject('assembly inputs require a tuple literal')
   const checked = inspect(
     {
       template,

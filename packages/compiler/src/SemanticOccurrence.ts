@@ -8,7 +8,7 @@ import * as DeclarationFacts from './DeclarationFacts.js'
 import type * as DeclarationIndex from './DeclarationIndex.js'
 import type * as Diagnostic from './Diagnostic.js'
 import * as Elaboration from './Elaboration.js'
-import type * as Tir from './Tir.js'
+import * as Tir from './Tir.js'
 import * as Intrinsic from './Intrinsic.js'
 import type * as Match from './Match.js'
 import * as NameResolution from './NameResolution.js'
@@ -993,11 +993,16 @@ const collectPattern = (
 }
 
 const collectExpression = (
-  expression: Elaboration.ExpressionFact,
+  expression: Elaboration.ExpressionFact | Tir.Expression,
   index: DeclarationIndex.Index,
   scope: NameResolution.ModuleScope | undefined,
   pending: Array<Pending>,
 ): void => {
+  if ('origin' in expression) {
+    for (const child of Tir.expressionChildren(expression))
+      collectExpression(child, index, scope, pending)
+    return
+  }
   switch (expression._tag) {
     case 'EnumMember':
       push(

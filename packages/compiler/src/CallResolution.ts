@@ -38,7 +38,10 @@ import {
   argumentFact,
   availableExpressionType,
   callCallee,
+  constructionExpressionAnchor,
+  constructionExpressionType,
   contextualIntegerCompatible,
+  expressionNode,
   lookupDeclaration,
   referenceNames,
   referencePath,
@@ -58,7 +61,8 @@ import {
   strongestEffectAccess,
   unavailableExpression,
 } from './ExpressionAnalysis.js'
-import type * as Tir from './Tir.js'
+import * as Tir from './Tir.js'
+import * as BodyBuilder from './BodyBuilder.js'
 import * as Intrinsic from './Intrinsic.js'
 import * as TypeInference from './internal/TypeInference.js'
 import * as NameResolution from './NameResolution.js'
@@ -70,6 +74,19 @@ import type * as SourceSpan from './SourceSpan.js'
 import { unsafeCallDiagnostic } from './StatementAnalysis.js'
 import * as Type from './Type.js'
 import * as TypeCompatibility from './TypeCompatibility.js'
+
+const unavailableNode = (
+  context: SemanticContext.SemanticContext,
+  anchor: AuthoredHir.Anchor,
+  resolution: ResolutionContext | undefined,
+): Tir.Expression => {
+  const node = Object.freeze({
+    _tag: 'Unavailable' as const,
+    span: context.spanOf(anchor),
+    origin: Tir.authored(anchor),
+  })
+  return resolution?.builder === undefined ? node : BodyBuilder.node(resolution.builder, node)
+}
 
 export const analyzeArgumentNodes = (
   context: SemanticContext.SemanticContext,
@@ -109,7 +126,7 @@ export const analyzeArgumentNodes = (
     return result === undefined ? [] : [result]
   })
   const facts = analyzed.map((result, ordinal) =>
-    argumentFact(declaration, context, site.anchor, result.fact, ordinal),
+    argumentFact(declaration, context, site.anchor, result, ordinal),
   )
 
   return Object.freeze({
@@ -740,7 +757,7 @@ export interface SpecializationSite {
   readonly ordinal: number
   readonly pattern: SemanticType
   readonly actual: SemanticType
-  readonly expression: ExpressionFact
+  readonly expression: Tir.Expression
 }
 
 /** One written type argument the value arguments contradict, reported at what was written. */
@@ -1788,7 +1805,11 @@ export const analyzeCallContract = (
           !Type.isRepresented(supplied) &&
           (Type.isCallable(supplied) || Type.isEffect(supplied))
             ? (() => {
-                const representation = representationOfExpression(context, argument.expression)
+                const representation = representationOfExpression(
+                  context,
+                  argument.expression,
+                  resolution?.builder,
+                )
                 return representation === undefined
                   ? undefined
                   : Type.represented(supplied, pattern.representation.requiredBound, representation)
@@ -3243,45 +3264,53 @@ export const analyzeSectionContract = (
 }
 
 export const captureAccess = (
-  expression: ExpressionFact,
+  expression: ExpressionFact | Tir.Expression,
   index: DeclarationIndex.Index | undefined,
   assumptions: ReadonlySet<string> = new Set(),
 ): CallableCaptureFact['access'] => {
-  if (expression._tag === 'Move')
-    return expression.subject.type._tag === 'Available' &&
+  if (expression._tag === 'Move') {
+    const subjectType = constructionExpressionType(expression.subject)
+    return subjectType._tag === 'Available' &&
       index !== undefined &&
-      ConformanceProof.copyType(index, expression.subject.type.type, assumptions)
+      ConformanceProof.copyType(index, subjectType.type, assumptions)
       ? 'Copy'
       : 'Take'
+  }
   if (expression._tag === 'Borrow')
     return expression.access === 'Exclusive' ? 'Exclusive' : 'Shared'
-  if (expression.type._tag === 'Available' && Type.isCallable(expression.type.type))
-    return expression.type.type.mode === 'Shared' ? 'Copy' : expression.type.type.mode
-  if (expression.type._tag === 'Available' && Type.isEffect(expression.type.type))
-    return expression.type.type.access === 'Shared' ? 'Copy' : expression.type.type.access
+  if (expression._tag === 'ValueBorrow' || expression._tag === 'SliceBorrow')
+    return expression.access === 'Exclusive' ? 'Exclusive' : 'Shared'
+  const expressionType = constructionExpressionType(expression)
+  if (expressionType._tag === 'Available' && Type.isCallable(expressionType.type))
+    return expressionType.type.mode === 'Shared' ? 'Copy' : expressionType.type.mode
+  if (expressionType._tag === 'Available' && Type.isEffect(expressionType.type))
+    return expressionType.type.access === 'Shared' ? 'Copy' : expressionType.type.access
   // An owned affine value (a fresh temporary or a call result) is captured by ownership whether
   // or not the source spelled `move`; the environment then cleans it exactly once.
   if (
-    expression.type._tag === 'Available' &&
+    expressionType._tag === 'Available' &&
     index !== undefined &&
-    !Type.isReference(expression.type.type) &&
-    !Type.isSlice(expression.type.type) &&
-    !ConformanceProof.copyType(index, expression.type.type, assumptions)
+    !Type.isReference(expressionType.type) &&
+    !Type.isSlice(expressionType.type) &&
+    !ConformanceProof.copyType(index, expressionType.type, assumptions)
   )
     return 'Take'
   return 'Copy'
 }
 
 export const ownedProviderCaptureAccess = (
-  expression: ExpressionFact,
+  expression: ExpressionFact | Tir.Expression,
   index: DeclarationIndex.Index,
   assumptions: ReadonlySet<string> = new Set(),
-): CallableCaptureFact['access'] =>
-  expression._tag === 'Move' &&
-  expression.subject.type._tag === 'Available' &&
-  ConformanceProof.copyType(index, expression.subject.type.type, assumptions)
+): CallableCaptureFact['access'] => {
+  const subjectType =
+    expression._tag === 'Move' ? constructionExpressionType(expression.subject) : undefined
+  return expression._tag === 'Move' &&
+    subjectType?._tag === 'Available' &&
+    ConformanceProof.copyType(index, subjectType.type, assumptions)
     ? 'Copy'
     : captureAccess(expression, index, assumptions)
+}
 
 type ExactCallableFact = Extract<
   ExpressionFact,
@@ -3293,7 +3322,7 @@ export const exactCallableOf = (
   writtenBindings: ReadonlySet<number> = new Set(),
 ): ExactCallableFact | undefined => {
   if (expression._tag === 'Move') {
-    return exactCallableOf(expression.subject, writtenBindings)
+    return expression.exactCallable
   }
   if (expression._tag === 'FunctionItem' || expression._tag === 'CallableSection') return expression
   if (expression._tag === 'Identifier' && expression.reference._tag === 'ResolvedBinding') {
@@ -3309,7 +3338,7 @@ export const concreteCallableIdentity = (
 ): boolean => {
   if (exactCallableOf(expression, writtenBindings) !== undefined) return true
   if (expression._tag === 'Move') {
-    return concreteCallableIdentity(expression.subject, writtenBindings)
+    return expression.concreteCallableIdentity === true
   }
   if (expression._tag === 'Identifier' && expression.reference._tag === 'ResolvedBinding') {
     if (writtenBindings.has(expression.reference.binding.id.ordinal)) return false
@@ -3322,6 +3351,14 @@ export const callableMode = (captures: ReadonlyArray<CallableCaptureFact>): Type
   strongestEffectAccess(
     ...captures.flatMap((capture) => (capture.access === 'Copy' ? [] : [capture.access])),
   )
+
+const availableConstructionTypes = (
+  expressions: ReadonlyArray<ExpressionFact | Tir.Expression>,
+): ReadonlyArray<Type.Type> =>
+  expressions.flatMap((expression) => {
+    const type = constructionExpressionType(expression)
+    return type._tag === 'Available' ? [type.type] : []
+  })
 
 export const sectionCallableType = (
   context: SemanticContext.SemanticContext,
@@ -3560,12 +3597,10 @@ export const finishCallableSection = (
     BodyLifetime.environment(
       resolution.bodyLifetimes,
       node.anchor,
-      captures.flatMap((capture) =>
-        capture.expression.type._tag === 'Available' ? [capture.expression.type.type] : [],
-      ),
+      availableConstructionTypes(captures.map((capture) => capture.expression)),
       captures
         .filter((capture) => capture.access === 'Shared' || capture.access === 'Exclusive')
-        .map((capture) => capture.expression.anchor),
+        .map((capture) => constructionExpressionAnchor(capture.expression)),
     ),
   )
   const foreign = foreignFirstClassDiagnostic(context, reference, node)
@@ -3695,7 +3730,7 @@ export const finishCallableApplication = (
           provenance?._tag === 'PipelineCallableApplication'
             ? 'LeftThenCallable'
             : 'CalleeThenArguments',
-        callee: callee.fact,
+        callee: expressionNode(callee),
         arguments: argumentsResult.facts,
         contract,
         type: valid ? availableExpressionType(contract.result) : unavailableExpressionType,
@@ -4048,12 +4083,10 @@ export const finishCallableApplication = (
         BodyLifetime.environment(
           resolution?.bodyLifetimes,
           node.anchor,
-          stagedCaptures.flatMap((capture) =>
-            capture.expression.type._tag === 'Available' ? [capture.expression.type.type] : [],
-          ),
+          availableConstructionTypes(stagedCaptures.map((capture) => capture.expression)),
           stagedCaptures
             .filter((capture) => capture.access === 'Shared' || capture.access === 'Exclusive')
-            .map((capture) => capture.expression.anchor),
+            .map((capture) => constructionExpressionAnchor(capture.expression)),
         ),
       )
       return sectionType === undefined
@@ -4067,13 +4100,13 @@ export const finishCallableApplication = (
         node.anchor,
         [
           callable,
-          ...stagedValue.captures.flatMap((capture) =>
-            capture.expression.type._tag === 'Available' ? [capture.expression.type.type] : [],
+          ...availableConstructionTypes(
+            stagedValue.captures.map((capture) => capture.expression),
           ),
         ],
         stagedValue.captures
           .filter((capture) => capture.access === 'Shared' || capture.access === 'Exclusive')
-          .map((capture) => capture.expression.anchor),
+          .map((capture) => constructionExpressionAnchor(capture.expression)),
       )
       if (lifetimes === undefined) return unavailableExpressionType
       return availableExpressionType(
@@ -4171,7 +4204,10 @@ export const finishCallableApplication = (
               RowAlgebra.equals(Type.failureRowPolicy(), candidate.selected, wanted.selected) &&
               RowAlgebra.equals(Type.failureRowPolicy(), candidate.source, wanted.source)),
         )
-      const handlerType = handler?.type._tag === 'Available' ? handler.type.type : undefined
+      const handlerTypeFact =
+        handler === undefined ? undefined : constructionExpressionType(handler)
+      const handlerType =
+        handlerTypeFact?._tag === 'Available' ? handlerTypeFact.type : undefined
       const handlerEffect =
         handlerType !== undefined &&
         Type.isCallable(handlerType) &&
@@ -4188,8 +4224,8 @@ export const finishCallableApplication = (
         fact: Object.freeze({
           _tag: 'EffectCatch',
           reference: sectionIntrinsicReference(section),
-          protected: protected_?.expression ?? unavailableExpression(node.anchor),
-          handler: handler ?? unavailableExpression(node.anchor),
+          protected: protected_?.expression ?? unavailableNode(context, node.anchor, resolution),
+          handler: handler ?? unavailableNode(context, node.anchor, resolution),
           ...(wanted === undefined ? {} : { selected: Type.failureType(wanted.selected) }),
           protectedRow: wanted?.source ?? RowAlgebra.concrete(Type.failureRowPolicy(), []),
           handlerRow: handlerEffect?.failureRow ?? RowAlgebra.concrete(Type.failureRowPolicy(), []),
@@ -4214,15 +4250,16 @@ export const finishCallableApplication = (
             inferred,
             evidence,
             providerCapture.expression,
-            context.spanOf(providerCapture.expression.anchor),
-            providerCapture.expression.anchor,
+            context.spanOf(constructionExpressionAnchor(providerCapture.expression)),
+            constructionExpressionAnchor(providerCapture.expression),
             resolution?.index,
+            resolution?.builder,
           )
     return Object.freeze({
       fact: Object.freeze({
         _tag: 'EffectBindRequirement',
         reference: sectionIntrinsicReference(section),
-        protected: protected_?.expression ?? unavailableExpression(node.anchor),
+        protected: protected_?.expression ?? unavailableNode(context, node.anchor, resolution),
         ...(type._tag === 'Available' && provider !== undefined ? { provider } : {}),
         type,
         anchor: node.anchor,
@@ -4240,7 +4277,7 @@ export const finishCallableApplication = (
       _tag: 'CallableApply',
       ...(sourceTarget === undefined ? {} : { sourceTarget }),
       selectedConformances: selectedConformances.proofs,
-      callee: callee.fact,
+      callee: expressionNode(callee),
       arguments: argumentsResult.facts,
       mode,
       ...(callable === undefined ? {} : { contract: callable }),

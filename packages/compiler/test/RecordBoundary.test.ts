@@ -14,6 +14,7 @@ const record =
  * construction itself. Every other module reads a checked body: nodes and tables.
  */
 const construction = [
+  'BodyBuilder.ts',
   'BodyControlFlow.ts',
   'CallResolution.ts',
   'Elaboration.ts',

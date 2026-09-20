@@ -10,6 +10,7 @@ import * as AuthoredLowering from './AuthoredLowering.js'
 import * as SemanticContext from './SemanticContext.js'
 import * as AuthoredWalk from './AuthoredWalk.js'
 import * as Type from './Type.js'
+import type * as Tir from './Tir.js'
 
 /** One private runtime field retained by a concrete opaque callable or Effect construction. */
 export interface Capture {
@@ -104,8 +105,8 @@ interface Producer {
 const familyKey = (family: Type.OpaqueFamilyKey): string => Type.opaqueFamilyKey(family)
 
 const reachableResults = (
-  expression: Elaboration.ExpressionFact,
-): ReadonlyArray<Elaboration.ExpressionFact> => {
+  expression: Elaboration.ExpressionFact | Tir.Expression,
+): ReadonlyArray<Elaboration.ExpressionFact | Tir.Expression> => {
   if (expression._tag !== 'Match') return Object.freeze([expression])
   return Object.freeze(
     expression.arms.flatMap((arm) =>
@@ -116,8 +117,8 @@ const reachableResults = (
 
 const returnExpressions = (
   statements: ReadonlyArray<Elaboration.StatementFact>,
-): ReadonlyArray<Elaboration.ExpressionFact> => {
-  const found: Array<Elaboration.ExpressionFact> = []
+): ReadonlyArray<Elaboration.ExpressionFact | Tir.Expression> => {
+  const found: Array<Elaboration.ExpressionFact | Tir.Expression> = []
   Elaboration.visitStatementFacts(statements, {
     descendExpressions: false,
     statement: (statement) => {
@@ -130,24 +131,25 @@ const returnExpressions = (
 
 const evidence = (
   argument: Type.RepresentationArgument,
-  expression: Elaboration.ExpressionFact,
+  expression: Elaboration.ExpressionFact | Tir.Expression,
 ): Evidence =>
   Object.freeze({
     argument,
-    at: expression.anchor,
+    at: Elaboration.constructionExpressionAnchor(expression),
     captures: capturesOf(expression),
     suspendable: expressionSuspends(expression),
   })
 
 const evidenceOf = (
   context: SemanticContext.SemanticContext,
-  expression: Elaboration.ExpressionFact,
+  expression: Elaboration.ExpressionFact | Tir.Expression,
   expected: Type.Type,
   family: Type.OpaqueFamilyKey,
 ): ReadonlyArray<Evidence> => {
+  const expressionType = Elaboration.constructionExpressionType(expression)
   const structural =
-    expression.type._tag === 'Available'
-      ? Type.opaqueRepresentationEvidence(expression.type.type, expected, family)
+    expressionType._tag === 'Available'
+      ? Type.opaqueRepresentationEvidence(expressionType.type, expected, family)
       : Object.freeze([])
   if (structural.length > 0)
     return Object.freeze(structural.map((argument) => evidence(argument, expression)))
@@ -231,10 +233,10 @@ const producers = (results: ReadonlyMap<string, Elaboration.Result>): ReadonlyAr
   )
 
 const constructionExpression = (
-  expression: Elaboration.ExpressionFact,
-): Elaboration.ExpressionFact => {
+  expression: Elaboration.ExpressionFact | Tir.Expression,
+): Elaboration.ExpressionFact | Tir.Expression => {
   if (expression._tag === 'Move') return constructionExpression(expression.subject)
-  if (expression._tag === 'Identifier' && expression.reference._tag === 'ResolvedBinding')
+  if (!('origin' in expression) && expression._tag === 'Identifier' && expression.reference._tag === 'ResolvedBinding')
     return constructionExpression(expression.reference.binding.initializer)
   return expression
 }
@@ -249,23 +251,41 @@ const captureType = (
   return reference.declaredType._tag === 'Resolved' ? reference.declaredType.type : undefined
 }
 
-const capturesOf = (expression: Elaboration.ExpressionFact): ReadonlyArray<Capture> => {
+const capturesOf = (
+  expression: Elaboration.ExpressionFact | Tir.Expression,
+): ReadonlyArray<Capture> => {
   const construction = constructionExpression(expression)
-  if (construction._tag === 'CallableSection')
+  if ('origin' in construction && construction._tag === 'CallableSection')
     return Object.freeze(
       construction.captures.flatMap((capture): ReadonlyArray<Capture> => {
-        if (capture.expression.type._tag !== 'Available') return []
+        const type = Elaboration.constructionExpressionType(capture.value)
+        if (type._tag !== 'Available') return []
         return [
           Object.freeze({
             _tag: 'OpaqueCapture',
             ordinal: capture.ordinal,
-            type: capture.expression.type.type,
+            type: type.type,
             access: capture.access,
           }),
         ]
       }),
     )
-  if (construction._tag === 'EffectBlock')
+  if (!('origin' in construction) && construction._tag === 'CallableSection')
+    return Object.freeze(
+      construction.captures.flatMap((capture): ReadonlyArray<Capture> => {
+        const type = Elaboration.constructionExpressionType(capture.expression)
+        if (type._tag !== 'Available') return []
+        return [
+          Object.freeze({
+            _tag: 'OpaqueCapture',
+            ordinal: capture.ordinal,
+            type: type.type,
+            access: capture.access,
+          }),
+        ]
+      }),
+    )
+  if (!('origin' in construction) && construction._tag === 'EffectBlock')
     return Object.freeze(
       construction.captures.flatMap((capture, ordinal): ReadonlyArray<Capture> => {
         const type = captureType(capture.reference)
@@ -284,10 +304,15 @@ const capturesOf = (expression: Elaboration.ExpressionFact): ReadonlyArray<Captu
   return Object.freeze([])
 }
 
-const expressionSuspends = (expression: Elaboration.ExpressionFact): boolean => {
+const expressionSuspends = (
+  expression: Elaboration.ExpressionFact | Tir.Expression,
+): boolean => {
   let suspendable = false
   Elaboration.visitExpressionFacts(expression, {
     expression: (current) => {
+      if (current._tag === 'Run') suspendable = true
+    },
+    node: (current) => {
       if (current._tag === 'Run') suspendable = true
     },
   })

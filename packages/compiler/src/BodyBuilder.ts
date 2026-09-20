@@ -4,16 +4,20 @@ import type * as Diagnostic from './Diagnostic.js'
 import type * as Location from './Location.js'
 import * as SourceSpan from './SourceSpan.js'
 import type * as Tir from './Tir.js'
+import type { ExpressionFact } from './Elaboration.js'
 
 /** Private, single-use construction state for one checked artifact. */
 export interface BodyBuilder {
   readonly artifact: Tir.ArtifactId
-  readonly nodes: Array<Tir.PublishedNode>
+  readonly nodes: Array<Tir.PublishedNode | undefined>
   readonly locals: Array<Tir.Local>
   readonly evidence: Array<ReadonlyArray<Constraint.ConstraintEvidence>>
   readonly causes: Array<Diagnostic.Identity<Location.Location>>
   readonly localIds: Map<string, Tir.LocalId>
+  readonly semanticLocals: Map<number, unknown>
   readonly expressions: WeakMap<object, Tir.Expression>
+  /** Shallow construction decisions keyed by the typed node they immediately published. */
+  readonly expressionDecisions: WeakMap<object, ExpressionFact>
 }
 
 export const make = (artifact: Tir.ArtifactId): BodyBuilder => ({
@@ -23,12 +27,19 @@ export const make = (artifact: Tir.ArtifactId): BodyBuilder => ({
   evidence: [],
   causes: [],
   localIds: new Map(),
+  semanticLocals: new Map(),
   expressions: new WeakMap(),
+  expressionDecisions: new WeakMap(),
 })
 
 const semanticLocalKey = (input: unknown): string | undefined => {
   if (typeof input !== 'object' || input === null) return undefined
   const id = input as Readonly<Record<string, unknown>>
+  const nested = id['id']
+  if (nested !== undefined) {
+    const key = semanticLocalKey(nested)
+    if (key !== undefined) return key
+  }
   const tag = id['_tag']
   const ordinal = id['ordinal']
   if (typeof ordinal !== 'number') return undefined
@@ -50,22 +61,42 @@ const semanticLocalKey = (input: unknown): string | undefined => {
   return undefined
 }
 
-/** Publishes one node and assigns the next dense artifact-local identity. */
-export const node = <A extends { readonly origin: Tir.Origin }>(
+/** Reserves the next dense artifact-local identity before a node constructs its children. */
+export const reserve = (self: BodyBuilder): Tir.NodeId => {
+  const id = Object.freeze({ _tag: 'TirNode' as const, ordinal: self.nodes.length })
+  self.nodes.push(undefined)
+  return id
+}
+
+/** Publishes a node under an identity this builder reserved for it. */
+export const publish = <A extends { readonly origin: Tir.Origin }>(
   self: BodyBuilder,
+  id: Tir.NodeId,
   value: A,
 ): Readonly<A & Tir.Node> => {
   const result = Object.freeze({
     ...value,
-    id: Object.freeze({ _tag: 'TirNode' as const, ordinal: self.nodes.length }),
+    id,
   })
-  self.nodes.push(result)
+  if (self.nodes[id.ordinal] !== undefined)
+    throw new RangeError(`TIR node n${id.ordinal} was published more than once`)
+  self.nodes[id.ordinal] = result
   return result
 }
+
+/** Publishes one leaf node and assigns the next dense artifact-local identity. */
+export const node = <A extends { readonly origin: Tir.Origin }>(
+  self: BodyBuilder,
+  value: A,
+): Readonly<A & Tir.Node> => publish(self, reserve(self), value)
 
 /** Returns an unambiguous reference to a node already published by this builder. */
 export const reference = (self: BodyBuilder, value: Tir.PublishedNode): Tir.NodeRef =>
   Object.freeze({ artifact: self.artifact, node: value.id })
+
+/** Returns an unambiguous reference to a node identity reserved by this builder. */
+export const reservedReference = (self: BodyBuilder, node: Tir.NodeId): Tir.NodeRef =>
+  Object.freeze({ artifact: self.artifact, node })
 
 /** Adds one local to the body's unified dense namespace. */
 export const local = (self: BodyBuilder, value: Omit<Tir.Local, 'id'>): Tir.Local => {
@@ -86,11 +117,25 @@ export const semanticLocal = (
   const key = semanticLocalKey(semantic)
   if (key === undefined) throw new RangeError('TIR local has no semantic construction identity')
   const known = self.localIds.get(key)
-  if (known !== undefined) return known
+  if (known !== undefined) {
+    self.semanticLocals.set(known.ordinal, semantic)
+    return known
+  }
   const registered = local(self, value)
   self.localIds.set(key, registered.id)
+  self.semanticLocals.set(registered.id.ordinal, semantic)
   return registered.id
 }
+
+/** Recovers a construction-only semantic local while the builder is alive. */
+export const semanticOfLocal = (self: BodyBuilder, local: Tir.LocalId): unknown =>
+  self.semanticLocals.get(local.ordinal)
+
+/** Recovers a shallow construction decision while the private builder is still alive. */
+export const expressionDecision = (
+  self: BodyBuilder,
+  expression: Tir.Expression,
+): ExpressionFact | undefined => self.expressionDecisions.get(expression)
 
 /** Resolves a semantic construction identity after its local has been registered. */
 export const localId = (self: BodyBuilder, semantic: unknown): Tir.LocalId => {
@@ -132,7 +177,7 @@ export const index = (self: BodyBuilder, fn: Tir.TirFunction): Tir.TirFunction =
   // the completed tree is renumbered once as a unit so the published namespace has no gaps.
   self.nodes.length = 0
   for (const parameter of fn.declaration.parameters) {
-    semanticLocal(self, parameter.id, {
+    semanticLocal(self, parameter, {
       kind: 'Parameter',
       ...(parameter.name._tag === 'Present' ? { name: parameter.name.spelling } : {}),
       type: parameter.declaredType._tag === 'Resolved' ? parameter.declaredType.type : 'never',

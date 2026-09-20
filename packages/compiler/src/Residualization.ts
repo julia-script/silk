@@ -690,6 +690,16 @@ const evaluateStaticFunction = (
           )
             nestedStaticFailure = expression.staticFailure
         },
+        node: (expression) => {
+          if (nestedStaticFailure !== undefined) return
+          if (expression._tag === 'StaticCall' && expression.failure !== undefined) {
+            nestedStaticFailure = expression.failure
+            return
+          }
+          const decision = BodyBuilder.expressionDecision(builder, expression)
+          if (decision?._tag === 'Call' && decision.staticFailure !== undefined)
+            nestedStaticFailure = decision.staticFailure
+        },
       })
       if (nestedStaticFailure !== undefined) {
         return StaticEvaluation.failed(nestedStaticFailure)

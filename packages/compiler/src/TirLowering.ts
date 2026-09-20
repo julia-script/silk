@@ -18,6 +18,8 @@ import type {
 } from './Elaboration.js'
 import {
   assignmentRootAccess,
+  constructionExpressionAnchor,
+  constructionExpressionType,
   contextualIntegerCompatible,
   retainedResultArguments,
   retainsLifetimes,
@@ -70,7 +72,7 @@ export const tirReference = (
     if (builder === undefined) throw new RangeError('TIR local requires its body builder')
     return Object.freeze({
       _tag: 'ParameterReference',
-      parameter: BodyBuilder.semanticLocal(builder, reference.parameter.id, {
+      parameter: BodyBuilder.semanticLocal(builder, reference.parameter, {
         kind: 'Parameter',
         ...(reference.parameter.name._tag === 'Present'
           ? { name: reference.parameter.name.spelling }
@@ -87,7 +89,7 @@ export const tirReference = (
     if (builder === undefined) throw new RangeError('TIR local requires its body builder')
     return Object.freeze({
       _tag: 'BindingReference',
-      binding: BodyBuilder.semanticLocal(builder, reference.binding.id, {
+      binding: BodyBuilder.semanticLocal(builder, reference.binding, {
         kind: 'Binding',
         ...(reference.binding.name._tag === 'Present'
           ? { name: reference.binding.name.spelling }
@@ -104,7 +106,7 @@ export const tirReference = (
     if (builder === undefined) throw new RangeError('TIR local requires its body builder')
     return Object.freeze({
       _tag: 'PatternBindingReference',
-      binding: BodyBuilder.semanticLocal(builder, reference.binding.id, {
+      binding: BodyBuilder.semanticLocal(builder, reference.binding, {
         kind: 'Pattern',
         ...(reference.binding.name._tag === 'Present'
           ? { name: reference.binding.name.spelling }
@@ -304,7 +306,7 @@ export const tirPatternSelection = (
         binding.type._tag === 'Available'
           ? [
               Object.freeze({
-                id: BodyBuilder.semanticLocal(builder, binding.id, {
+                id: BodyBuilder.semanticLocal(builder, binding, {
                   kind: 'Pattern',
                   ...(binding.name._tag === 'Present' ? { name: binding.name.spelling } : {}),
                   type: binding.type.type,
@@ -369,11 +371,12 @@ export const lowerStatements = (
           (!options.eraseIntrinsicSections ||
             !(
               (statement._tag === 'BindStatement' &&
-                callableSectionOf(statement.binding.initializer)?.reference._tag ===
+                statement.binding.exactCallable?._tag === 'CallableSection' &&
+                statement.binding.exactCallable.reference._tag ===
                   'ResolvedIntrinsicContract') ||
               (statement._tag === 'DropStatement' &&
-                callableSectionOf(statement.expression)?.reference._tag ===
-                  'ResolvedIntrinsicContract')
+                statement.expression._tag === 'CallableSection' &&
+                statement.expression.reference._tag === 'ResolvedIntrinsicContract')
             )),
       )
       .map((statement): Tir.Statement => {
@@ -612,7 +615,7 @@ export const argumentBorrowId = (
   ordinal: number,
 ): Tir.BorrowId | undefined => {
   const expression = argument.expression
-  return expression._tag === 'Borrow' && expression.formation._tag !== 'Unavailable'
+  return expression._tag === 'ValueBorrow' || expression._tag === 'SliceBorrow'
     ? Object.freeze({
         _tag: 'BorrowId',
         function: argument.id.function,
@@ -727,26 +730,41 @@ const staticStructure = (
   return undefined
 }
 
+export type ConstructionExpression = ExpressionFact | Tir.Expression
+
 export const tirExpression = (
-  fact: ExpressionFact,
+  fact: ConstructionExpression,
   options: LowerStatementOptions,
   borrow?: Tir.BorrowId,
+  force = false,
 ): Tir.Expression => {
+  if ('origin' in fact) {
+    const decision =
+      options.builder === undefined ? undefined : options.builder.expressionDecisions.get(fact)
+    if (decision === undefined) return fact
+    return tirExpression(decision, options, borrow, true)
+  }
   // A call supplies the argument borrow identity only after the argument itself has been checked.
   // Replace the provisional context-free node with that call-owned node instead of reusing it.
-  const published = borrow === undefined ? options.builder?.expressions.get(fact) : undefined
+  const published =
+    !force && options.static === undefined && borrow === undefined
+      ? options.builder?.expressions.get(fact)
+      : undefined
   if (published !== undefined) return published
   const known = options.static?.get(fact)
   if (known !== undefined) return known
+  const reserved = options.builder === undefined ? undefined : BodyBuilder.reserve(options.builder)
   const lowered =
     (options.static === undefined ? undefined : staticStructure(fact, options)) ??
     residualExpression(fact, options, borrow)
   const node =
-    options.builder === undefined || lowered.id !== undefined
+    options.builder === undefined || reserved === undefined || lowered.id !== undefined
       ? lowered
-      : BodyBuilder.node(options.builder, lowered)
+      : BodyBuilder.publish(options.builder, reserved, lowered)
   options.static?.set(fact, node)
-  options.builder?.expressions.set(fact, node)
+  if (options.static === undefined) options.builder?.expressions.set(fact, node)
+  if (options.static === undefined && options.builder !== undefined && lowered.id === undefined)
+    options.builder.expressionDecisions.set(node, fact)
   return node
 }
 
@@ -943,6 +961,14 @@ const residualExpression = (
         span: options.context.spanOf(fact.anchor),
         origin: Tir.authored(fact.anchor),
       })
+    if (fact.declaration.canonical._tag === 'Canonical' && fact.type._tag === 'Available')
+      return Object.freeze({
+        _tag: 'ConstantReference',
+        declaration: fact.declaration.canonical.id,
+        type: fact.type.type,
+        span: options.context.spanOf(fact.anchor),
+        origin: Tir.authored(fact.anchor),
+      })
     return Object.freeze({
       _tag: 'Unavailable',
       span: options.context.spanOf(fact.anchor),
@@ -1119,7 +1145,9 @@ const residualExpression = (
             access: capture.access,
             span: capture.span,
             at: capture.anchor,
-            ...(capture.expression === undefined ? {} : { use: capture.expression.anchor }),
+            ...(capture.expression === undefined
+              ? {}
+              : { use: constructionExpressionAnchor(capture.expression) }),
           }),
         ),
       ),
@@ -1263,7 +1291,7 @@ const residualExpression = (
                             ? (() => {
                                 throw new RangeError('TIR local requires its body builder')
                               })()
-                            : BodyBuilder.semanticLocal(options.builder, binding.id, {
+                            : BodyBuilder.semanticLocal(options.builder, binding, {
                                 kind: 'Pattern',
                                 ...(binding.name._tag === 'Present'
                                   ? { name: binding.name.spelling }
@@ -1845,25 +1873,28 @@ const residualExpression = (
         (argument) => argument.id.ordinal,
       ),
     )
-    const retainedSection = callableSectionOf(fact.callee)
+    const retainedSection =
+      fact.callee._tag === 'CallableSection' ? fact.callee : undefined
     const retainedCaptures =
-      retainedSection?.captures.filter(
-        (capture) =>
-          capture.expression.type._tag === 'Available' &&
+      retainedSection?.captures.filter((capture) => {
+        const type = constructionExpressionType(capture.value)
+        return (
+          type._tag === 'Available' &&
           retainsLifetimes(
-            capture.expression.type.type,
+            type.type,
             resultType,
             options.lifetimeAssumptions ?? Lifetime.assumptions([]),
-          ),
-      ) ?? []
+          )
+        )
+      }) ?? []
     const retainedCaptureLoans: ReadonlyArray<Tir.BorrowId> =
       retainedSection === undefined
         ? []
         : retainedCaptures.map((capture) => ({
             _tag: 'BorrowId',
             function: retainedSection.site.function,
-            callSpan: options.context.spanOf(retainedSection.anchor),
-            call: retainedSection.anchor,
+            callSpan: retainedSection.span,
+            call: retainedSection.origin.anchor,
             ordinal: capture.ordinal,
           }))
     return Object.freeze({
@@ -1976,7 +2007,10 @@ const residualExpression = (
         (argument) => argument.id.ordinal,
       ),
     )
-    const directLoanEnds = loanEndsOf(fact.arguments, (ordinal) => !retainedOrdinals.has(ordinal))
+    const directLoanEnds = loanEndsOf(
+      fact.arguments,
+      (ordinal) => !retainedOrdinals.has(ordinal),
+    )
     const nestedSlotLoanEnds =
       fact.reference.operation === 'SlotWrite' ||
       fact.reference.operation === 'SlotTake' ||
@@ -1985,12 +2019,11 @@ const residualExpression = (
         ? fact.arguments.flatMap((argument): ReadonlyArray<Tir.BorrowId> => {
             const nested = argument.expression
             if (
-              nested._tag !== 'Call' ||
-              nested.reference._tag !== 'ResolvedBuiltin' ||
-              nested.reference.operation !== 'RawBufferSlot'
+              nested._tag !== 'BuiltinCall' ||
+              nested.operation !== 'RawBufferSlot'
             )
               return []
-            return loanEndsOf(nested.arguments)
+            return nested.loanEnds
           })
         : []
     const arguments_ = Object.freeze(
@@ -2133,12 +2166,13 @@ const residualExpression = (
           const parameter = target.parameters.at(ordinal)
           if (parameter?.phase === 'Static') return []
           const borrowId = argumentBorrowId(argument, ordinal)
+          const argumentType = constructionExpressionType(argument.expression)
           const genericForwarding =
             parameter?.declaredType._tag === 'Resolved' &&
-            argument.expression.type._tag === 'Available' &&
+            argumentType._tag === 'Available' &&
             isRepresentationIdenticalGenericForwarding(
               parameter.declaredType.type,
-              argument.expression.type.type,
+              argumentType.type,
             )
           return [
             parameter?.declaredType._tag === 'Resolved' && !genericForwarding
@@ -2201,12 +2235,13 @@ const residualExpression = (
           const parameter = target.parameters.at(ordinal)
           if (parameter?.phase === 'Static') return []
           const borrowId = argumentBorrowId(argument, ordinal)
+          const argumentType = constructionExpressionType(argument.expression)
           const genericForwarding =
             parameter?.declaredType._tag === 'Resolved' &&
-            argument.expression.type._tag === 'Available' &&
+            argumentType._tag === 'Available' &&
             isRepresentationIdenticalGenericForwarding(
               parameter.declaredType.type,
-              argument.expression.type.type,
+              argumentType.type,
             )
           return [
             parameter?.declaredType._tag === 'Resolved' && !genericForwarding
@@ -2288,7 +2323,7 @@ const effectJoinConvert = (
 }
 
 export const tirExpectedExpression = (
-  fact: ExpressionFact,
+  fact: ConstructionExpression,
   target: SemanticType,
   context: Extract<Tir.Expression, { readonly _tag: 'UnionConvert' }>['context'],
   expected: AuthoredHir.Anchor,
@@ -2296,6 +2331,7 @@ export const tirExpectedExpression = (
   borrow?: Tir.BorrowId,
 ): Tir.Expression => {
   if (
+    !('origin' in fact) &&
     fact._tag === 'Integer' &&
     fact.integer._tag === 'Available' &&
     contextualIntegerCompatible(fact, target) &&
@@ -2313,7 +2349,13 @@ export const tirExpectedExpression = (
   if (loweredSource._tag === 'Unavailable') return loweredSource
   const unionTarget = Type.isUnion(target) ? target : undefined
   const representation =
-    unionTarget === undefined ? undefined : representationOfExpression(options.context, fact)
+    unionTarget === undefined
+      ? undefined
+      : 'origin' in fact
+        ? Type.isRepresented(loweredSource.type)
+          ? loweredSource.type.representation.argument
+          : undefined
+        : representationOfExpression(options.context, fact, options.builder)
   const sourceContract = Type.isRepresented(loweredSource.type)
     ? loweredSource.type.contract
     : loweredSource.type
@@ -2334,7 +2376,7 @@ export const tirExpectedExpression = (
     Type.isRepresented(target) &&
     Type.isOpaqueRepresentationArgument(target.representation.argument) &&
     Type.equalsOpaqueFamily(target.representation.argument.family, options.opaqueResultFamily) &&
-    representationOfExpression(options.context, fact) !== undefined &&
+    representation !== undefined &&
     TypeCompatibility.isCompatible(
       TypeCompatibility.check(sourceContract, target.contract, options.lifetimeCompatibility),
     )
@@ -2360,8 +2402,8 @@ export const tirExpectedExpression = (
   if (compatibility._tag === 'Incompatible') {
     return Object.freeze({
       _tag: 'Unavailable',
-      span: options.context.spanOf(fact.anchor),
-      origin: Tir.authored(fact.anchor),
+      span: loweredSource.span,
+      origin: loweredSource.origin,
     })
   }
   return Object.freeze({
@@ -2376,18 +2418,60 @@ export const tirExpectedExpression = (
     expectedAt: options.context.spanOf(expected),
     expected,
     type: compatibility.target,
-    span: options.context.spanOf(fact.anchor),
-    origin: Tir.authored(fact.anchor),
+    span: loweredSource.span,
+    origin: loweredSource.origin,
   })
 }
 
 export const tirWritePlace = (
-  fact: ExpressionFact,
+  fact: ConstructionExpression,
   root: AssignmentRootFact,
   options: LowerStatementOptions,
 ): Tir.WritePlace | undefined => {
   const selectors: Array<Tir.WriteSelector> = []
-  const walk = (current: ExpressionFact): boolean => {
+  const walk = (current: ConstructionExpression): boolean => {
+    if ('origin' in current) {
+      if (
+        current._tag === 'BindingReference' ||
+        current._tag === 'ParameterReference' ||
+        current._tag === 'PatternBindingReference'
+      ) {
+        const selected =
+          current._tag === 'ParameterReference' ? current.parameter : current.binding
+        return selected.ordinal === localOf(options, root.id).ordinal
+      }
+      if (current._tag === 'Project') {
+        if (!walk(current.subject)) return false
+        selectors.push(
+          Object.freeze({
+            _tag: 'Field',
+            field: current.field,
+            type: current.type,
+            span: current.span,
+            at: current.origin.anchor,
+            origin: current.origin,
+          }),
+        )
+        return true
+      }
+      if (current._tag === 'IndexPlace') {
+        if (!walk(current.subject)) return false
+        selectors.push(
+          Object.freeze({
+            _tag: 'Index',
+            index: current.index,
+            array: current.array,
+            bounds: current.bounds,
+            type: current.type,
+            span: current.span,
+            at: current.origin.anchor,
+            origin: current.origin,
+          }),
+        )
+        return true
+      }
+      return false
+    }
     if (current._tag === 'Identifier') {
       if (root._tag === 'PatternBinding')
         return (
@@ -2446,7 +2530,8 @@ export const tirWritePlace = (
     }
     return false
   }
-  if (!walk(fact) || fact.type._tag !== 'Available') return undefined
+  const factType = constructionExpressionType(fact)
+  if (!walk(fact) || factType._tag !== 'Available') return undefined
   let ownedRoot: Tir.OwnedWriteRoot
   if (root._tag === 'ParameterDeclaration')
     ownedRoot = { _tag: 'ParameterWriteRoot', parameter: localOf(options, root.id) }
@@ -2457,9 +2542,9 @@ export const tirWritePlace = (
     _tag: 'WritePlace',
     root: ownedRoot,
     selectors: Object.freeze(selectors),
-    type: fact.type.type,
-    span: options.context.spanOf(fact.anchor),
-    origin: Tir.authored(fact.anchor),
+    type: factType.type,
+    span: 'origin' in fact ? fact.span : options.context.spanOf(fact.anchor),
+    origin: 'origin' in fact ? fact.origin : Tir.authored(fact.anchor),
   })
 }
 
@@ -2473,7 +2558,7 @@ export const assignmentRootType = (root: AssignmentRootFact): SemanticType | und
 }
 
 export const tirBorrowedWritePlace = (
-  fact: ExpressionFact,
+  fact: ConstructionExpression,
   root: AssignmentRootFact,
   options: LowerStatementOptions,
 ): Tir.BorrowedWritePlace | undefined => {
@@ -2481,7 +2566,67 @@ export const tirBorrowedWritePlace = (
   const rootType = assignmentRootType(root)
   if (rootType === undefined) return undefined
   const selectors: Array<Tir.BorrowedWriteSelector> = []
-  const walk = (current: ExpressionFact): boolean => {
+  let borrowed = false
+  const walk = (current: ConstructionExpression): boolean => {
+    if ('origin' in current) {
+      if (current._tag === 'BindingReference' || current._tag === 'ParameterReference') {
+        const selected =
+          current._tag === 'ParameterReference' ? current.parameter : current.binding
+        return selected.ordinal === localOf(options, root.id).ordinal
+      }
+      if (current._tag === 'ReferentPlace') {
+        borrowed = current.borrowAccess === 'Exclusive'
+        return borrowed && walk(current.subject)
+      }
+      if (current._tag === 'Project') {
+        if (!walk(current.subject)) return false
+        if (current.borrowAccess === 'Exclusive') borrowed = true
+        selectors.push(
+          Object.freeze({
+            _tag: 'Field',
+            field: current.field,
+            type: current.type,
+            span: current.span,
+            at: current.origin.anchor,
+            origin: current.origin,
+          }),
+        )
+        return true
+      }
+      if (current._tag === 'IndexPlace') {
+        if (!walk(current.subject)) return false
+        selectors.push(
+          Object.freeze({
+            _tag: 'Index',
+            index: current.index,
+            array: current.array,
+            bounds: current.bounds,
+            type: current.type,
+            span: current.span,
+            at: current.origin.anchor,
+            origin: current.origin,
+          }),
+        )
+        return true
+      }
+      if (current._tag === 'SliceIndexPlace') {
+        if (!walk(current.slice) || current.access !== 'Exclusive') return false
+        borrowed = true
+        selectors.push(
+          Object.freeze({
+            _tag: 'SliceIndex',
+            index: current.index,
+            slice: current.sourceType,
+            type: current.type,
+            span: current.span,
+            at: current.origin.anchor,
+            origin: current.origin,
+          }),
+        )
+        return true
+      }
+      return false
+    }
     if (current._tag === 'Identifier') {
       return root._tag === 'ParameterDeclaration'
         ? current.reference._tag === 'Resolved' &&
@@ -2561,7 +2706,8 @@ export const tirBorrowedWritePlace = (
     }
     return false
   }
-  if (!walk(fact) || fact.type._tag !== 'Available') return undefined
+  const factType = constructionExpressionType(fact)
+  if (!walk(fact) || !borrowed || factType._tag !== 'Available') return undefined
   return Object.freeze({
     _tag: 'BorrowedWritePlace',
     root:
@@ -2576,17 +2722,19 @@ export const tirBorrowedWritePlace = (
           }),
     rootType,
     selectors: Object.freeze(selectors),
-    type: fact.type.type,
-    span: options.context.spanOf(fact.anchor),
-    origin: Tir.authored(fact.anchor),
+    type: factType.type,
+    span: 'origin' in fact ? fact.span : options.context.spanOf(fact.anchor),
+    origin: 'origin' in fact ? fact.origin : Tir.authored(fact.anchor),
   })
 }
 
 export const tirAssignmentWritePlace = (
-  fact: ExpressionFact,
+  fact: ConstructionExpression,
   root: AssignmentRootFact,
   options: LowerStatementOptions,
 ): Tir.WritePlace | undefined => {
+  if ('origin' in fact)
+    return tirBorrowedWritePlace(fact, root, options) ?? tirWritePlace(fact, root, options)
   const access = assignmentRootAccess(root, fact)
   if (access === 'ExclusiveBorrowed') return tirBorrowedWritePlace(fact, root, options)
   if (access === 'MutableOwned') return tirWritePlace(fact, root, options)
@@ -2595,7 +2743,7 @@ export const tirAssignmentWritePlace = (
 
 export const directStatementExpressions = (
   statement: StatementFact,
-): ReadonlyArray<ExpressionFact> => {
+): ReadonlyArray<ConstructionExpression> => {
   switch (statement._tag) {
     case 'BindStatement':
       return Object.freeze([statement.binding.initializer])
@@ -2622,8 +2770,9 @@ export const directStatementExpressions = (
 }
 
 export const directExpressionChildren = (
-  expression: ExpressionFact,
-): ReadonlyArray<ExpressionFact> => {
+  expression: ConstructionExpression,
+): ReadonlyArray<ConstructionExpression> => {
+  if ('origin' in expression) return Tir.expressionChildren(expression)
   switch (expression._tag) {
     case 'CompileError':
       return Object.freeze([expression.message])
@@ -2687,7 +2836,7 @@ export const directExpressionChildren = (
  * per node, and a subexpression must be the same node whenever its parent is evaluated again.
  */
 export interface StaticLowering {
-  readonly expression: (fact: ExpressionFact) => Tir.Expression
+  readonly expression: (fact: ConstructionExpression) => Tir.Expression
   readonly statements: (facts: ReadonlyArray<StatementFact>) => ReadonlyArray<Tir.Statement>
 }
 
@@ -2701,7 +2850,7 @@ export const staticLowering = (
     ...(builder === undefined ? {} : { builder }),
   }
   return Object.freeze({
-    expression: (fact: ExpressionFact) => tirExpression(fact, options),
+    expression: (fact: ConstructionExpression) => tirExpression(fact, options),
     statements: (facts: ReadonlyArray<StatementFact>) => lowerStatements(facts, options),
   })
 }
