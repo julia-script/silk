@@ -80,6 +80,7 @@ const decodeValue = (input: Encoded): unknown => {
 export const encode = (self: Elaboration.CheckedBody): string =>
   JSON.stringify(
     encodeValue({
+      artifact: self.artifact,
       declaration: self.hidden ? self.declaration : self.declaration.id,
       hidden: self.hidden,
       function:
@@ -98,6 +99,7 @@ export const decode = (
   context: SemanticContext.SemanticContext,
 ): Elaboration.CheckedBody => {
   const decoded = decodeValue(JSON.parse(text) as Encoded) as {
+    readonly artifact: Tir.ArtifactId
     readonly declaration: DeclarationFacts.DeclarationFact | DeclarationFacts.DeclarationId
     readonly hidden: boolean
     readonly function?: Omit<Tir.TirFunction, 'declaration'>
@@ -109,6 +111,7 @@ export const decode = (
       : Tir.stamp(decoded.declaration, context.spanOf)
   return Elaboration.presentBody(
     {
+      artifact: decoded.artifact,
       declaration,
       hidden: decoded.hidden,
       ...(decoded.function === undefined ? {} : { function: { ...decoded.function, declaration } }),

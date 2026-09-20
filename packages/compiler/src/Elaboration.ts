@@ -1541,6 +1541,7 @@ export type StaticStructure = 'StaticBinding' | 'UnresolvedConstant' | 'CompileE
 
 /** One checked body: the declaration it belongs to, its nodes and its results. */
 export interface CheckedBody {
+  readonly artifact: Tir.ArtifactId
   readonly declaration: DeclarationFact
   /** A compiler-made body (an anonymous callable) that source lookup never finds. */
   readonly hidden: boolean
@@ -2527,6 +2528,7 @@ export const presentBody = (
   const record = recordsOf.get(self.results)
   if (record !== undefined) recordsOf.set(results, record)
   return Object.freeze({
+    artifact: self.artifact,
     declaration,
     hidden: self.hidden,
     ...(self.function === undefined
@@ -2545,8 +2547,16 @@ export const checkedBody = (
   context: SemanticContext.SemanticContext,
   index: DeclarationIndex.Index,
   fact: FunctionFact,
-  hidden: boolean,
+  /** Set for a compiler-made body: the artifact whose construction produced it. */
+  parent?: Tir.ArtifactId,
+  request: Tir.ArtifactId['request'] = Object.freeze({ _tag: 'Check' }),
 ): CheckedBody => {
+  const hidden = parent !== undefined
+  const artifact: Tir.ArtifactId = Object.freeze({
+    owner: fact.declaration.owner,
+    request,
+    ...(parent === undefined ? {} : { parent }),
+  })
   const lowered =
     fact.declaration.phase === 'Static' ? undefined : runtimeTirFunction(context, fact, index)
   const staticStructure = staticStructureOf(fact)
@@ -2563,6 +2573,7 @@ export const checkedBody = (
   })
   recordsOf.set(results, fact)
   return Object.freeze({
+    artifact,
     declaration: fact.declaration,
     hidden,
     ...(lowered === undefined ? {} : { function: lowered }),
@@ -2609,11 +2620,12 @@ export const elaborateModule = (input: Input): Result => {
           declarations,
           Object.freeze({ scope, index, hiddenFunctions }),
         )
+        const own = checkedBody(context, index, analysis.fact)
         return {
           unit: Object.freeze({
             bodies: Object.freeze([
-              checkedBody(context, index, analysis.fact, false),
-              ...hiddenFunctions.map((fact) => checkedBody(context, index, fact, true)),
+              own,
+              ...hiddenFunctions.map((fact) => checkedBody(context, index, fact, own.artifact)),
             ]),
             diagnostics: analysis.diagnostics,
           }),

@@ -1214,7 +1214,14 @@ export const residualize = (self: Coordinator, key: ApplicationKey): Result => {
         SemanticContext.make(input.result.authored),
         self[stateSymbol].index,
         analyzed.fact,
-        false,
+        undefined,
+        Object.freeze({
+          _tag: 'Specialize',
+          application: StaticEvaluation.applicationKey(
+            self[stateSymbol].environment,
+            evaluation.application,
+          ),
+        }),
       )
       if (body.function === undefined)
         throw new RangeError('Static functions have no runtime TIR body')

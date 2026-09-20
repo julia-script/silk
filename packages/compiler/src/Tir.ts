@@ -3,7 +3,7 @@ import * as Lifetime from './Lifetime.js'
 import * as Constraint from './Constraint.js'
 import type * as ConformanceProof from './ConformanceProof.js'
 import type * as DeclarationFacts from './DeclarationFacts.js'
-import type * as AuthoredIdentity from './AuthoredIdentity.js'
+import * as AuthoredIdentity from './AuthoredIdentity.js'
 import type * as Diagnostic from './Diagnostic.js'
 import type * as Location from './Location.js'
 import * as Intrinsic from './Intrinsic.js'
@@ -76,6 +76,30 @@ export type Origin =
       readonly role: string
       readonly occurrence: number
     }
+
+/**
+ * Which typed body this is. "Checking `f`" is not one thing: the generic body is one artifact and
+ * each semantic application that must be specialized is another. Provenance never takes part, so
+ * two applications with equal static values are the same artifact wherever they were written.
+ */
+export interface ArtifactId {
+  /** The authored owner whose body this is; a compiler-made body is its own owner. */
+  readonly owner: AuthoredIdentity.Identity
+  readonly request:
+    | { readonly _tag: 'Check' }
+    /** The canonical key of the application: type and static arguments, evidence, contract row. */
+    | { readonly _tag: 'Specialize'; readonly application: string }
+  /** The artifact that produced a compiler-made body, which tells apart bodies made per parent. */
+  readonly parent?: ArtifactId
+}
+
+/** The canonical text of an artifact identity: the key a body is requested and stored under. */
+export const artifactKey = (self: ArtifactId): string =>
+  JSON.stringify([
+    AuthoredIdentity.key(self.owner),
+    self.request._tag === 'Check' ? null : self.request.application,
+    self.parent === undefined ? null : artifactKey(self.parent),
+  ])
 
 export const authored = (anchor: AuthoredIdentity.Anchor): Origin =>
   Object.freeze({ _tag: 'Authored', anchor })

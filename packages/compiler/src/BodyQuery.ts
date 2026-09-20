@@ -491,6 +491,7 @@ const present = (
         // compiler-made body owns its declaration, which is renumbered with the rest.
         Elaboration.presentBody(
           {
+            artifact: body.artifact,
             declaration: body.hidden ? renumber(body.declaration, moved) : declaration,
             hidden: body.hidden,
             ...(body.function === undefined

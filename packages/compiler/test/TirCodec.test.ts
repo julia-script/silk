@@ -3,6 +3,7 @@ import * as Lexer from '../src/Lexer.js'
 import * as Parser from '../src/Parser.js'
 import * as SemanticContext from '../src/SemanticContext.js'
 import * as SourceFile from '../src/SourceFile.js'
+import * as Tir from '../src/Tir.js'
 import * as TirCodec from '../src/TirCodec.js'
 import { elaborate } from './support/elaborate.js'
 import { raise } from './support/raise.js'
@@ -63,4 +64,21 @@ it('encodes no position: moved source gives the same bytes', () => {
   const before = analyze(program)
   const after = analyze(`// moved\n\n${program}`)
   assert.deepEqual(after.bodies.map(TirCodec.encode), before.bodies.map(TirCodec.encode))
+})
+
+it('identifies each body as an artifact, a compiler-made one under its parent', () => {
+  const [, program] = categories[2] ?? raise('program')
+  const result = analyze(program)
+  const own = result.bodies.find((body) => !body.hidden) ?? raise('source body')
+  const made = result.bodies.find((body) => body.hidden) ?? raise('compiler-made body')
+  assert.deepEqual(own.artifact.request, { _tag: 'Check' })
+  assert.isUndefined(own.artifact.parent)
+  assert.deepEqual(made.artifact.parent, own.artifact)
+  assert.notStrictEqual(Tir.artifactKey(made.artifact), Tir.artifactKey(own.artifact))
+  // Identity is authored, never positional: the same bodies elsewhere in the file are the same.
+  const moved = analyze(`fn before() -> i32 { return 0 }\n${program}`)
+  assert.includeMembers(
+    moved.bodies.map((body) => Tir.artifactKey(body.artifact)),
+    result.bodies.map((body) => Tir.artifactKey(body.artifact)),
+  )
 })
