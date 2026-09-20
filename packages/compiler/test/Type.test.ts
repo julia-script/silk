@@ -1,3 +1,4 @@
+import { records } from './support/records.js'
 import { locationAt } from './support/location.js'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
@@ -1994,7 +1995,7 @@ fn caller() -> i32 { let local = 2 let view = identity(&local) return view.* }`
       assert.isFalse(
         diagnostics.some((diagnostic) => diagnostic.span.start >= source.indexOf('fn caller')),
       )
-      const functions = Analysis.rootAnalysis(snapshot).functions
+      const functions = records(Analysis.rootAnalysis(snapshot)).functions
       const valid = functions.find(
         (fn) => fn.declaration.name._tag === 'Present' && fn.declaration.name.spelling === 'caller',
       )
@@ -2061,7 +2062,8 @@ fn caller() -> i32 {
         })),
         [],
       )
-      const caller = Analysis.rootAnalysis(snapshot).functions.at(-1) ?? unreachable('caller body')
+      const caller =
+        records(Analysis.rootAnalysis(snapshot)).functions.at(-1) ?? unreachable('caller body')
       const flow = caller.lifetimeFlow ?? unreachable('finite lifetime proof')
       assert.strictEqual(flow.solution._tag, 'Solved')
       assert.deepEqual(flow.diagnostics, [])

@@ -1495,9 +1495,12 @@ export interface LexicalScopeFact {
   readonly first: AuthoredHir.Anchor
   readonly last: AuthoredHir.Anchor
   readonly parameters: ReadonlyArray<ParameterFact>
-  readonly bindings: ReadonlyArray<BindingDeclarationFact>
+  readonly bindings: ReadonlyArray<ScopeBinding>
   readonly patternBindings: ReadonlyArray<PatternBindingFact>
 }
+
+/** A local as its scope publishes it: what it is, never how it was initialized. */
+export type ScopeBinding = Omit<BindingDeclarationFact, 'initializer' | 'exactCallable'>
 
 /** The closed result of looking up one declaration spelling. */
 export type DeclarationLookup = DeclarationFacts.DeclarationLookup
@@ -1517,6 +1520,12 @@ export interface BodyResults {
   readonly opaqueEvidence: ReadonlyArray<import('./OpaqueRealization.js').Evidence>
   /** The finite region proof of the body, which ownership replays at cleanup. */
   readonly lifetimes?: import('./LifetimeFlow.js').LifetimeFlow
+  /** The body's lexical scopes and the locals each one introduces, for completion and hover. */
+  readonly scopes: ReadonlyArray<LexicalScopeFact>
+  /** Aggregates the body generated, which layout and later stages declare beside source ones. */
+  readonly aggregates: ReadonlyArray<DeclarationFacts.StructFact>
+  /** The body's half of the module's constrained-callable escape rule. */
+  readonly callables: CallableFlow
 }
 
 /** One checked body: the declaration it belongs to, its nodes and its results. */
@@ -1534,9 +1543,6 @@ export interface Result {
   readonly _tag: 'Elaboration'
   /** The authored module this elaboration consumed; reuse keys derive from it. */
   readonly authored: AuthoredLowering.Lowered
-  readonly functions: ReadonlyArray<FunctionFact>
-  /** Compiler-private executable bodies that never participate in source declaration lookup. */
-  readonly hiddenFunctions: ReadonlyArray<FunctionFact>
   readonly generatedAggregates: ReadonlyArray<DeclarationFacts.StructFact>
   readonly lexicalScopes: ReadonlyArray<LexicalScopeFact>
   readonly tir: Tir.Module
@@ -1545,9 +1551,15 @@ export interface Result {
   readonly diagnostics: ReadonlyArray<Diagnostic.Located>
 }
 
-/** All executable semantic bodies, including compiler-private anonymous targets. */
-export const executableFunctions = (self: Result): ReadonlyArray<FunctionFact> =>
-  Object.freeze([...self.functions, ...self.hiddenFunctions])
+/** How many source bodies a module checked: compiler-made bodies are not counted. */
+export const sourceBodyCount = (self: Result): number =>
+  self.bodies.reduce((sum, body) => sum + (body.hidden ? 0 : 1), 0)
+
+/** All executable working records, including compiler-private anonymous targets. */
+export const executableFunctions = (self: Result): ReadonlyArray<FunctionFact> => {
+  const all = records(self)
+  return Object.freeze([...all.functions, ...all.hiddenFunctions])
+}
 
 export const compatible: ReturnCompatibility = Object.freeze({ _tag: 'Compatible' })
 export const unavailableCompatibility: ReturnCompatibility = Object.freeze({ _tag: 'Unavailable' })
@@ -1873,158 +1885,223 @@ const canonicalFunctionKey = (declaration: DeclarationFact): string | undefined 
     ? `${declaration.canonical.id.module}\u0000${declaration.canonical.id.name}`
     : undefined
 
+/** Where a callable value in a relay body comes from, before the module's other relays are known. */
+export type CallableSource =
+  | { readonly _tag: 'Parameter'; readonly ordinal: number }
+  | { readonly _tag: 'Binding'; readonly ordinal: number; readonly source: CallableSource }
+  | {
+      readonly _tag: 'Call'
+      readonly target: string
+      readonly arguments: ReadonlyArray<{
+        readonly parameter: number
+        readonly source: CallableSource
+      }>
+    }
+
+/** One place a constrained callable value would leave compile time. */
+export type CallableEscape =
+  | { readonly _tag: 'Value'; readonly at: AuthoredHir.Anchor }
+  | {
+      readonly _tag: 'Call'
+      /** The canonical callee, which may turn out to relay one of its arguments. */
+      readonly target?: string
+      readonly arguments: ReadonlyArray<{
+        readonly parameter: number
+        readonly at: AuthoredHir.Anchor
+      }>
+      /** Set when the call's own result is a constrained callable. */
+      readonly result?: AuthoredHir.Anchor
+    }
+
 /**
- * Proves that one ordinary source function is a compile-time-only whole-value relay. Only lexical
- * binds followed by one return qualify: admitting any other statement would erase observable work
- * when lowering replaces the chain by its originating callable recipe.
+ * How constrained callables move through one body. The escape rule is decided per module, because
+ * whether a call relays its argument depends on the callee's body; each body publishes only its
+ * own half, so a reused body takes part without being read again.
  */
-const forwardedCallableParameter = (
-  fn: FunctionFact,
-  functions: ReadonlyMap<string, FunctionFact>,
-  resolvingFunctions: ReadonlySet<string> = new Set(),
-): number | undefined => {
-  const key_ = canonicalFunctionKey(fn.declaration)
-  if (key_ === undefined || resolvingFunctions.has(key_)) return undefined
+export interface CallableFlow {
+  /**
+   * Present when the body is only lexical binds followed by one return. Admitting any other
+   * statement would erase observable work when lowering replaces the chain by its originating
+   * callable recipe.
+   */
+  readonly relay?: { readonly leading: ReadonlyArray<number>; readonly source: CallableSource }
+  readonly escapes: ReadonlyArray<CallableEscape>
+}
+
+const callableSourceOf = (
+  current: ExpressionFact,
+  bindings: ReadonlySet<number> = new Set(),
+): CallableSource | undefined => {
+  if (current._tag === 'Move') return callableSourceOf(current.subject, bindings)
+  if (current._tag === 'Identifier') {
+    if (current.reference._tag === 'Resolved')
+      return { _tag: 'Parameter', ordinal: current.reference.parameter.id.ordinal }
+    if (current.reference._tag !== 'ResolvedBinding') return undefined
+    const ordinal = current.reference.binding.id.ordinal
+    if (bindings.has(ordinal)) return undefined
+    const source = callableSourceOf(
+      current.reference.binding.initializer,
+      new Set(bindings).add(ordinal),
+    )
+    return source === undefined ? undefined : { _tag: 'Binding', ordinal, source }
+  }
+  if (current._tag !== 'Call' || current.reference._tag !== 'Resolved') return undefined
+  const target = canonicalFunctionKey(current.reference.declaration)
+  if (target === undefined) return undefined
+  return {
+    _tag: 'Call',
+    target,
+    arguments: current.mappings.flatMap((mapping) => {
+      const source = callableSourceOf(mapping.argument.expression, bindings)
+      return source === undefined ? [] : [{ parameter: mapping.parameter.id.ordinal, source }]
+    }),
+  }
+}
+
+const callableFlowOf = (fn: FunctionFact): CallableFlow => {
+  const escapes: Array<CallableEscape> = []
+  const value = (expression: ExpressionFact): void => {
+    if (constrainedCallableSchema(expression) !== undefined)
+      escapes.push({ _tag: 'Value', at: expression.anchor })
+  }
+  visitStatementFacts(fn.statements, {
+    statement: (statement) => {
+      if (statement._tag === 'ReturnStatement') value(statement.expression)
+      else if (statement._tag === 'WriteStatement') value(statement.value)
+    },
+    expression: (expression) => {
+      if (expression._tag === 'StructLiteral' || expression._tag === 'UnionVariant') {
+        for (const initializer of expression.initializers) value(initializer.expression)
+        return
+      }
+      if (expression._tag === 'ArrayLiteral') {
+        for (const element of expression.elements) value(element.expression)
+        return
+      }
+      if (expression._tag === 'CallableSection') {
+        for (const capture of expression.captures) value(capture.expression)
+        return
+      }
+      if (expression._tag === 'EffectBlock') {
+        for (const capture of expression.captures)
+          if (capture.reference._tag === 'BindingFact') value(capture.reference.initializer)
+        return
+      }
+      if (expression._tag === 'Match') {
+        value(expression)
+        return
+      }
+      if (expression._tag === 'CallableApply') {
+        for (const argument of expression.arguments) value(argument.expression)
+        return
+      }
+      if (expression._tag !== 'Call') return
+      const target =
+        expression.reference._tag === 'Resolved'
+          ? canonicalFunctionKey(expression.reference.declaration)
+          : undefined
+      const arguments_ = expression.mappings.flatMap((mapping) =>
+        constrainedCallableSchema(mapping.argument.expression) === undefined
+          ? []
+          : [{ parameter: mapping.parameter.id.ordinal, at: mapping.argument.expression.anchor }],
+      )
+      const constrained = constrainedCallableSchema(expression) !== undefined
+      if (arguments_.length === 0 && !constrained) return
+      escapes.push({
+        _tag: 'Call',
+        ...(target === undefined ? {} : { target }),
+        arguments: arguments_,
+        ...(constrained ? { result: expression.anchor } : {}),
+      })
+    },
+  })
   const leading = fn.statements.slice(0, -1)
   const terminal = fn.statements.at(-1)
-  if (
-    fn.declaration.parameters.length !== 1 ||
-    terminal?._tag !== 'ReturnStatement' ||
-    leading.some((statement) => statement._tag !== 'BindStatement')
-  )
-    return undefined
-  const resolving = new Set(resolvingFunctions).add(key_)
-  const forwardedBindings = new Set<number>()
-  const expression = (
-    current: ExpressionFact,
-    bindings: ReadonlySet<number> = new Set(),
-  ): number | undefined => {
-    if (current._tag === 'Move') return expression(current.subject, bindings)
-    if (current._tag === 'Identifier') {
-      if (current.reference._tag === 'Resolved') return current.reference.parameter.id.ordinal
-      if (current.reference._tag !== 'ResolvedBinding') return undefined
-      const ordinal = current.reference.binding.id.ordinal
-      if (bindings.has(ordinal)) return undefined
-      forwardedBindings.add(ordinal)
-      return expression(current.reference.binding.initializer, new Set(bindings).add(ordinal))
+  const source =
+    fn.declaration.parameters.length === 1 &&
+    terminal?._tag === 'ReturnStatement' &&
+    leading.every((statement) => statement._tag === 'BindStatement')
+      ? callableSourceOf(terminal.expression)
+      : undefined
+  return Object.freeze({
+    ...(source === undefined
+      ? {}
+      : {
+          relay: {
+            leading: leading.flatMap((statement) =>
+              statement._tag === 'BindStatement' ? [statement.binding.id.ordinal] : [],
+            ),
+            source,
+          },
+        }),
+    escapes: Object.freeze(escapes),
+  })
+}
+
+/** The parameter a relay body hands back, once the relays it calls are resolved. */
+const relayedParameter = (
+  key_: string,
+  flows: ReadonlyMap<string, CallableFlow>,
+  resolving: ReadonlySet<string> = new Set(),
+): number | undefined => {
+  const relay = flows.get(key_)?.relay
+  if (relay === undefined || resolving.has(key_)) return undefined
+  const inner = new Set(resolving).add(key_)
+  const visited = new Set<number>()
+  const resolve = (source: CallableSource): number | undefined => {
+    if (source._tag === 'Parameter') return source.ordinal
+    if (source._tag === 'Binding') {
+      visited.add(source.ordinal)
+      return resolve(source.source)
     }
-    if (current._tag !== 'Call' || current.reference._tag !== 'Resolved') return undefined
-    const targetKey = canonicalFunctionKey(current.reference.declaration)
-    const target = targetKey === undefined ? undefined : functions.get(targetKey)
-    const forwarded =
-      target === undefined ? undefined : forwardedCallableParameter(target, functions, resolving)
-    const argument =
-      forwarded === undefined
-        ? undefined
-        : current.mappings.find((mapping) => mapping.parameter.id.ordinal === forwarded)?.argument
-    return argument === undefined ? undefined : expression(argument.expression, bindings)
+    const forwarded = relayedParameter(source.target, flows, inner)
+    const argument = source.arguments.find((entry) => entry.parameter === forwarded)
+    return argument === undefined ? undefined : resolve(argument.source)
   }
-  const forwarded = expression(terminal.expression)
-  return forwarded === undefined ||
-    leading.some(
-      (statement) =>
-        statement._tag !== 'BindStatement' || !forwardedBindings.has(statement.binding.id.ordinal),
-    )
+  const forwarded = resolve(relay.source)
+  return forwarded === undefined || relay.leading.some((ordinal) => !visited.has(ordinal))
     ? undefined
     : forwarded
 }
 
 const constrainedCallableEscapeDiagnostics = (
-  context: SemanticContext.SemanticContext,
-  functions: ReadonlyArray<FunctionFact>,
+  bodies: ReadonlyArray<CheckedBody>,
 ): ReadonlyArray<Diagnostic.Located> => {
-  const byCanonical = new Map(
-    functions.flatMap((fn) => {
-      const key_ = canonicalFunctionKey(fn.declaration)
-      return key_ === undefined ? [] : [[key_, fn] as const]
+  const source = bodies.filter((body) => !body.hidden)
+  const flows = new Map(
+    source.flatMap((body) => {
+      const key_ = canonicalFunctionKey(body.declaration)
+      return key_ === undefined ? [] : [[key_, body.results.callables] as const]
     }),
   )
   const diagnostics: Array<Diagnostic.Located> = []
   const seen = new Set<string>()
-  const reject = (expression: ExpressionFact): void => {
-    const key_ = AuthoredIdentity.anchorKey(expression.anchor)
+  const reject = (at: AuthoredHir.Anchor): void => {
+    const key_ = AuthoredIdentity.anchorKey(at)
     if (seen.has(key_)) return
     seen.add(key_)
-    diagnostics.push(
-      Diagnostic.nonConcreteSpecialization('constrained callable', Location.at(expression.anchor)),
-    )
+    diagnostics.push(Diagnostic.nonConcreteSpecialization('constrained callable', Location.at(at)))
   }
-  for (const fn of functions) {
-    visitStatementFacts(fn.statements, {
-      statement: (statement) => {
-        if (
-          (statement._tag === 'ReturnStatement' || statement._tag === 'WriteStatement') &&
-          constrainedCallableSchema(
-            statement._tag === 'ReturnStatement' ? statement.expression : statement.value,
-          ) !== undefined
-        )
-          reject(statement._tag === 'ReturnStatement' ? statement.expression : statement.value)
-      },
-      expression: (expression) => {
-        if (expression._tag === 'StructLiteral' || expression._tag === 'UnionVariant') {
-          for (const initializer of expression.initializers)
-            if (constrainedCallableSchema(initializer.expression) !== undefined)
-              reject(initializer.expression)
-          return
-        }
-        if (expression._tag === 'ArrayLiteral') {
-          for (const element of expression.elements)
-            if (constrainedCallableSchema(element.expression) !== undefined)
-              reject(element.expression)
-          return
-        }
-        if (expression._tag === 'CallableSection') {
-          for (const capture of expression.captures)
-            if (constrainedCallableSchema(capture.expression) !== undefined)
-              reject(capture.expression)
-          return
-        }
-        if (expression._tag === 'EffectBlock') {
-          for (const capture of expression.captures) {
-            const captured =
-              capture.reference._tag === 'BindingFact' ? capture.reference.initializer : undefined
-            if (captured !== undefined && constrainedCallableSchema(captured) !== undefined)
-              reject(captured)
-          }
-          return
-        }
-        if (expression._tag === 'Match' && constrainedCallableSchema(expression) !== undefined) {
-          reject(expression)
-          return
-        }
-        if (expression._tag === 'CallableApply') {
-          for (const argument of expression.arguments)
-            if (constrainedCallableSchema(argument.expression) !== undefined)
-              reject(argument.expression)
-          return
-        }
-        if (expression._tag !== 'Call') return
-        const targetKey =
-          expression.reference._tag === 'Resolved'
-            ? canonicalFunctionKey(expression.reference.declaration)
-            : undefined
-        const target = targetKey === undefined ? undefined : byCanonical.get(targetKey)
-        const forwarded =
-          target === undefined ? undefined : forwardedCallableParameter(target, byCanonical)
-        let relayed = false
-        for (const mapping of expression.mappings) {
-          if (constrainedCallableSchema(mapping.argument.expression) === undefined) continue
-          if (mapping.parameter.id.ordinal === forwarded) relayed = true
-          else reject(mapping.argument.expression)
-        }
-        if (constrainedCallableSchema(expression) !== undefined && !relayed) reject(expression)
-      },
-    })
-  }
+  for (const body of source)
+    for (const escape of body.results.callables.escapes) {
+      if (escape._tag === 'Value') {
+        reject(escape.at)
+        continue
+      }
+      const forwarded =
+        escape.target === undefined ? undefined : relayedParameter(escape.target, flows)
+      let relayed = false
+      for (const argument of escape.arguments)
+        if (argument.parameter === forwarded) relayed = true
+        else reject(argument.at)
+      if (escape.result !== undefined && !relayed) reject(escape.result)
+    }
   return Object.freeze(diagnostics)
 }
 
-const lexicalScopesOf = (
-  context: SemanticContext.SemanticContext,
-  functions: ReadonlyArray<FunctionFact>,
-): ReadonlyArray<LexicalScopeFact> => {
+const lexicalScopesOf = (fn: FunctionFact): ReadonlyArray<LexicalScopeFact> => {
   const scopes: Array<LexicalScopeFact> = []
-  for (const fn of functions) {
+  {
     let ordinal = 0
     const add = (options: {
       readonly parent?: LexicalScopeId
@@ -2048,7 +2125,13 @@ const lexicalScopesOf = (
           first: options.first,
           last: options.last ?? options.first,
           parameters: Object.freeze(Array.from(options.parameters ?? [])),
-          bindings: Object.freeze(Array.from(options.bindings ?? [])),
+          // A scope names its locals; their initializers are working records and stay behind.
+          bindings: Object.freeze(
+            (options.bindings ?? []).map(
+              ({ initializer: _initializer, exactCallable: _exactCallable, ...local }) =>
+                Object.freeze(local),
+            ),
+          ),
           patternBindings: Object.freeze(Array.from(options.patternBindings ?? [])),
         }),
       )
@@ -2363,65 +2446,104 @@ export const residualTirFunction = (
   return runtimeTirFunction(context, fact, index)
 }
 
+/**
+ * Everything construction publishes for one source declaration: its own body first, then the
+ * compiler-made bodies it produced, and what checking them reported. It is the unit of reuse.
+ */
+export interface CheckedUnit {
+  readonly bodies: ReadonlyArray<CheckedBody>
+  readonly diagnostics: ReadonlyArray<Diagnostic.Located>
+}
+
+const recordsOf = new WeakMap<BodyResults, FunctionFact>()
+
+const checkedBody = (
+  context: SemanticContext.SemanticContext,
+  index: DeclarationIndex.Index,
+  fact: FunctionFact,
+  hidden: boolean,
+): CheckedBody => {
+  const lowered =
+    fact.declaration.phase === 'Static' ? undefined : runtimeTirFunction(context, fact, index)
+  const results: BodyResults = Object.freeze({
+    occurrences: fact.occurrences,
+    hints: fact.hints,
+    opaqueEvidence: fact.opaqueEvidence,
+    ...(fact.lifetimeFlow === undefined ? {} : { lifetimes: fact.lifetimeFlow }),
+    scopes: lexicalScopesOf(fact),
+    aggregates: fact.generatedAggregates,
+    callables: callableFlowOf(fact),
+  })
+  recordsOf.set(results, fact)
+  return Object.freeze({
+    declaration: fact.declaration,
+    hidden,
+    ...(lowered === undefined ? {} : { function: lowered }),
+    results,
+  })
+}
+
+/**
+ * The working records construction built a module's bodies from, for tests and the inspector that
+ * examine construction itself. No compiler stage reads them: a stage reads nodes and tables.
+ */
+export const records = (
+  self: Result,
+): {
+  readonly functions: ReadonlyArray<FunctionFact>
+  readonly hiddenFunctions: ReadonlyArray<FunctionFact>
+} => {
+  const of = (hidden: boolean) =>
+    Object.freeze(
+      self.bodies.flatMap((body) => {
+        const fact = body.hidden === hidden ? recordsOf.get(body.results) : undefined
+        return fact === undefined ? [] : [fact]
+      }),
+    )
+  return { functions: of(false), hiddenFunctions: of(true) }
+}
+
 export const elaborateModule = (input: Input): Result => {
   const { authored, headers, scope, index } = input
   const context = SemanticContext.make(authored)
   const declarations = headers.declarations
-  const hiddenFunctions: Array<FunctionFact> = []
   // A foreign header has a native body: it is indexed and callable but never analyzed here.
-  const analyzed = declarations
+  const units = declarations
     .filter((declaration) => declaration.foreign === undefined)
-    .map((declaration) => {
-      const compute = () =>
-        analyzeFunctionBody(
+    .map((declaration): CheckedUnit => {
+      const build = (): BodyQuery.Built => {
+        const hiddenFunctions: Array<FunctionFact> = []
+        const analysis = analyzeFunctionBody(
           context,
           declaration,
           declarations,
           Object.freeze({ scope, index, hiddenFunctions }),
         )
+        return {
+          unit: Object.freeze({
+            bodies: Object.freeze([
+              checkedBody(context, index, analysis.fact, false),
+              ...hiddenFunctions.map((fact) => checkedBody(context, index, fact, true)),
+            ]),
+            diagnostics: analysis.diagnostics,
+          }),
+          records: [analysis, hiddenFunctions],
+        }
+      }
       return input.bodyQuery === undefined
-        ? compute()
-        : BodyQuery.check(
-            input.bodyQuery,
-            context,
-            authored,
-            scope,
-            declaration,
-            hiddenFunctions,
-            compute,
-          )
+        ? build().unit
+        : BodyQuery.check(input.bodyQuery, context, authored, scope, declaration, build)
     })
   const constantDiagnostics = headers.constants.flatMap((constant) =>
     constant.name._tag === 'Present'
       ? analyzeConstant(context, constant, constant.name.anchor, true).diagnostics
       : [],
   )
-  const functions = Object.freeze(analyzed.map((result) => result.fact))
-  const allRuntimeFunctions = Object.freeze([...functions, ...hiddenFunctions])
-  const diagnostics = [
-    ...headers.diagnostics,
-    ...constantDiagnostics,
-    ...analyzed.flatMap((result) => result.diagnostics),
-    ...constrainedCallableEscapeDiagnostics(context, functions),
-  ]
-  const hidden = new Set<FunctionFact>(hiddenFunctions)
-  const bodies = Object.freeze(
-    allRuntimeFunctions.map((fact): CheckedBody => {
-      const lowered =
-        fact.declaration.phase === 'Static' ? undefined : runtimeTirFunction(context, fact, index)
-      return Object.freeze({
-        declaration: fact.declaration,
-        hidden: hidden.has(fact),
-        ...(lowered === undefined ? {} : { function: lowered }),
-        results: Object.freeze({
-          occurrences: fact.occurrences,
-          hints: fact.hints,
-          opaqueEvidence: fact.opaqueEvidence,
-          ...(fact.lifetimeFlow === undefined ? {} : { lifetimes: fact.lifetimeFlow }),
-        }),
-      })
-    }),
-  )
+  const all = units.flatMap((unit) => unit.bodies)
+  const bodies = Object.freeze([
+    ...all.filter((body) => !body.hidden),
+    ...all.filter((body) => body.hidden),
+  ])
   const tir: Tir.Module = Object.freeze({
     _tag: 'TirModule',
     module: authored.module.owner.module,
@@ -2433,15 +2555,16 @@ export const elaborateModule = (input: Input): Result => {
   return Object.freeze({
     _tag: 'Elaboration',
     authored,
-    functions,
-    hiddenFunctions: Object.freeze([...hiddenFunctions]),
-    generatedAggregates: Object.freeze(
-      allRuntimeFunctions.flatMap((fact) => fact.generatedAggregates),
-    ),
-    lexicalScopes: lexicalScopesOf(context, allRuntimeFunctions),
+    generatedAggregates: Object.freeze(bodies.flatMap((body) => body.results.aggregates)),
+    lexicalScopes: Object.freeze(bodies.flatMap((body) => body.results.scopes)),
     tir,
     bodies,
-    diagnostics: Object.freeze(diagnostics),
+    diagnostics: Object.freeze([
+      ...headers.diagnostics,
+      ...constantDiagnostics,
+      ...units.flatMap((unit) => unit.diagnostics),
+      ...constrainedCallableEscapeDiagnostics(bodies),
+    ]),
   })
 }
 
@@ -2451,7 +2574,7 @@ export const declarationByName = dual<
   (self: Result, spelling: string) => DeclarationLookup
 >(2, (self, spelling) =>
   lookupDeclaration(
-    self.functions.map((fact) => fact.declaration),
+    self.bodies.flatMap((body) => (body.hidden ? [] : [body.declaration])),
     spelling,
   ),
 )

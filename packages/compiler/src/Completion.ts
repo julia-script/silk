@@ -237,8 +237,8 @@ const visibleBindings = (
   result: Elaboration.Result,
   fn: Elaboration.CheckedBody | undefined,
   offset: number,
-): ReadonlyArray<Elaboration.BindingDeclarationFact> => {
-  const selected = new Map<string, Elaboration.BindingDeclarationFact>()
+): ReadonlyArray<Elaboration.ScopeBinding> => {
+  const selected = new Map<string, Elaboration.ScopeBinding>()
   for (const scope of scopeChain(context, result, fn, offset))
     for (const binding of scope.bindings.toReversed())
       if (

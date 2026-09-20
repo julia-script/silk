@@ -787,7 +787,7 @@ const lifetimeRequirements = (
 }
 
 export const binding = (
-  self: Elaboration.BindingDeclarationFact,
+  self: Elaboration.ScopeBinding,
   module: string,
   scope?: NameResolution.ModuleScope,
 ): Presentation | undefined => {

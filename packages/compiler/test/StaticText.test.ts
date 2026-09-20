@@ -1,3 +1,4 @@
+import { records } from './support/records.js'
 import { locationAt } from './support/location.js'
 import * as Layer from 'effect/Layer'
 import * as AnalysisFixture from './support/AnalysisFixture.js'
@@ -906,13 +907,11 @@ pub fn main() -> i32 { return invalid([1]) }`
     assert.isFalse(
       Analysis.diagnostics(snapshot).some((diagnostic) => diagnostic.code === 'SEM0177'),
     )
-    const declaration = snapshot.results
-      .get('static/runtime-iteration')
-      ?.functions.find(
-        (candidate) =>
-          candidate.declaration.name._tag === 'Present' &&
-          candidate.declaration.name.spelling === 'invalid',
-      )?.declaration
+    const declaration = records(snapshot.results.get('static/runtime-iteration'))?.functions.find(
+      (candidate) =>
+        candidate.declaration.name._tag === 'Present' &&
+        candidate.declaration.name.spelling === 'invalid',
+    )?.declaration
     assert.notStrictEqual(declaration, undefined)
     assert.strictEqual(snapshot.target._tag, 'Resolved')
     if (
@@ -981,13 +980,11 @@ pub fn main() -> i32 { return rejected() }`),
       assert.isTrue(
         selectedFailure.reason.trace.some((frame) => frame.label === 'static for element 1'),
       )
-    const declaration = snapshot.results
-      .get('static/iteration-rollback')
-      ?.functions.find(
-        (candidate) =>
-          candidate.declaration.name._tag === 'Present' &&
-          candidate.declaration.name.spelling === 'rejected',
-      )?.declaration
+    const declaration = records(snapshot.results.get('static/iteration-rollback'))?.functions.find(
+      (candidate) =>
+        candidate.declaration.name._tag === 'Present' &&
+        candidate.declaration.name.spelling === 'rejected',
+    )?.declaration
     assert.notStrictEqual(declaration, undefined)
     assert.strictEqual(snapshot.target._tag, 'Resolved')
     if (
@@ -1063,13 +1060,11 @@ pub fn main() -> i32 {
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
     assert.strictEqual(snapshot.target._tag, 'Resolved')
     if (snapshot.target._tag !== 'Resolved') return
-    const declaration = snapshot.results
-      .get(sourceId)
-      ?.functions.find(
-        (candidate) =>
-          candidate.declaration.name._tag === 'Present' &&
-          candidate.declaration.name.spelling === 'inspect',
-      )?.declaration
+    const declaration = records(snapshot.results.get(sourceId))?.functions.find(
+      (candidate) =>
+        candidate.declaration.name._tag === 'Present' &&
+        candidate.declaration.name.spelling === 'inspect',
+    )?.declaration
     assert.notStrictEqual(declaration, undefined)
     if (declaration === undefined || declaration.canonical._tag !== 'Canonical') return
     const declarationId = declaration.canonical.id
@@ -1929,7 +1924,8 @@ static fn computed() -> i32 {
       encoder.encode(source),
     )
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
-    const computed = Analysis.rootAnalysis(snapshot).functions.at(0) ?? unreachable('static body')
+    const computed =
+      records(Analysis.rootAnalysis(snapshot)).functions.at(0) ?? unreachable('static body')
     const result = completedValue(
       StaticEvaluation.evaluateStatements(
         TirLowering.staticLowering(

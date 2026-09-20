@@ -1,5 +1,5 @@
 import * as AuthoredIdentity from './AuthoredIdentity.js'
-import type * as Elaboration from './Elaboration.js'
+import * as Elaboration from './Elaboration.js'
 import * as SemanticContext from './SemanticContext.js'
 import type * as SourceSpan from './SourceSpan.js'
 import * as Type from './Type.js'
@@ -229,7 +229,9 @@ const functionFor = (
   analysis: Elaboration.Result,
   declaration: Elaboration.DeclarationFact,
 ): Elaboration.FunctionFact | undefined =>
-  analysis.functions.find((fact) => sameDeclaration(fact.declaration, declaration))
+  Elaboration.records(analysis).functions.find((fact) =>
+    sameDeclaration(fact.declaration, declaration),
+  )
 
 const projectCall = (
   analysis: Elaboration.Result,
@@ -627,7 +629,9 @@ const emptyModel = (): FlowModel =>
 /** Projects semantic relationships for the inspector. */
 export const projectDataFlow = (analysis: Elaboration.Result): FlowModel => {
   const context = SemanticContext.make(analysis.authored)
-  const caller = analysis.functions.find((fact) => fact.returnedExpression._tag === 'Call')
+  const caller = Elaboration.records(analysis).functions.find(
+    (fact) => fact.returnedExpression._tag === 'Call',
+  )
   if (caller === undefined || caller.returnedExpression._tag !== 'Call') {
     return emptyModel()
   }

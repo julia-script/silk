@@ -1,3 +1,4 @@
+import { records } from './support/records.js'
 import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
@@ -184,7 +185,7 @@ effect fn outer() -> i32 ! HandlerProblem {
     )
 
     assert.deepEqual(result.diagnostics, [])
-    const outer = result.functions.at(2)
+    const outer = records(result).functions.at(2)
     const recipe = outer?.bindings.at(0)?.inferredType
     assert.strictEqual(recipe?._tag, 'Available')
     if (recipe?._tag !== 'Available' || !Type.isEffect(recipe.type)) return
@@ -630,7 +631,7 @@ fn main() -> i32 {
   return 0
 }`,
     )
-    const main = result.functions.at(2)
+    const main = records(result).functions.at(2)
     const recipe = main?.bindings.at(0)?.initializer
     const tirRecipe = result.tir.functions.at(2)?.statements.at(0)
 
@@ -666,8 +667,8 @@ fn main() -> i32 {
   return 42
 }`,
     )
-    const allocation = result.functions.at(0)?.declaration.returnType
-    const operation = result.functions.at(0)?.returnedExpression.type
+    const allocation = records(result).functions.at(0)?.declaration.returnType
+    const operation = records(result).functions.at(0)?.returnedExpression.type
 
     assert.deepEqual(result.diagnostics, [])
     assert.strictEqual(allocation?._tag, 'Resolved')
@@ -710,7 +711,7 @@ effect fn use(layout: Layout) -> i32 ! OutOfMemoryError {
 pub fn main() -> i32 { return 0 }`,
     )
     assert.deepEqual(system.diagnostics, [])
-    const providerType = system.functions.at(0)?.bindings.at(0)?.inferredType
+    const providerType = records(system).functions.at(0)?.bindings.at(0)?.inferredType
     assert.strictEqual(providerType?._tag, 'Available')
     if (providerType?._tag === 'Available')
       assert.isTrue(
@@ -761,10 +762,11 @@ fn main() -> i32 {
 )
 
 const functionAt = (
-  result: Pick<Elaborated, 'functions'>,
+  result: Pick<Elaborated, 'functions'> | Elaboration.Result,
   index: number,
 ): Elaboration.FunctionFact =>
-  result.functions.at(index) ?? raise(`expected function fact at index ${index}`)
+  ('functions' in result ? result : Elaboration.records(result)).functions.at(index) ??
+  raise(`expected function fact at index ${index}`)
 
 const integerFact = (fact: Elaboration.FunctionFact): Elaboration.IntegerExpressionFact =>
   fact.returnedExpression._tag === 'Integer'
@@ -2560,7 +2562,7 @@ pub fn main() -> i32 { return 0 }`),
     )
 
     assert.deepEqual(Analysis.diagnostics(self), [])
-    assert.strictEqual(self.results.get('foreign/Idle')?.functions.length, 1)
+    assert.strictEqual(records(self.results.get('foreign/Idle'))?.functions.length, 1)
   }),
 )
 

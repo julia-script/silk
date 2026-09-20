@@ -1,3 +1,4 @@
+import { records } from './support/records.js'
 import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
@@ -1001,7 +1002,7 @@ pub fn main() -> i32 { let deferredValue = run deferred(DeferredValue { value: 7
         ),
       )
       const deferredFact =
-        Analysis.rootAnalysis(snapshot).functions.find(
+        records(Analysis.rootAnalysis(snapshot)).functions.find(
           (candidate) =>
             candidate.declaration.name._tag === 'Present' &&
             candidate.declaration.name.spelling === 'deferred',
@@ -1110,13 +1111,10 @@ pub fn main() -> i32 { return guarded(Choice.First) + loops(Choice.Last) + stopp
     const program = Analysis.loweredMir(snapshot)
     assert.deepEqual(yield* MirVerification.verify(program), [])
     const stoppedGuardFact =
-      snapshot.results
-        .get('ordinary-mir-guard-loop')
-        ?.functions.find(
-          (fn) =>
-            fn.declaration.name._tag === 'Present' &&
-            fn.declaration.name.spelling === 'stoppedGuard',
-        ) ?? raise('expected stopped guard function fact')
+      records(snapshot.results.get('ordinary-mir-guard-loop'))?.functions.find(
+        (fn) =>
+          fn.declaration.name._tag === 'Present' && fn.declaration.name.spelling === 'stoppedGuard',
+      ) ?? raise('expected stopped guard function fact')
     const stoppedMatches: Array<Elaboration.MatchExpressionFact> = []
     Elaboration.visitStatementFacts(stoppedGuardFact.statements, {
       expression: (expression) => {

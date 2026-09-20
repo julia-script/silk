@@ -1,3 +1,4 @@
+import { records } from './support/records.js'
 import * as AnalysisFixture from './support/AnalysisFixture.js'
 import {
   borrowedBox,
@@ -662,7 +663,7 @@ fn bytes<'a>(value: string<'a>) -> &'a [u8] { return Intrinsic.stringUtf8Bytes(v
 fn text<'a>(value: &'a [u8]) -> string<'a> { unsafe { return Intrinsic.stringFromUtf8Unchecked(value) } return "" }`
     const self = yield* Analysis.ofSource('slices/containers', ascii(source))
     assert.deepEqual(Analysis.diagnostics(self), [])
-    const functions = Analysis.rootAnalysis(self).functions
+    const functions = records(Analysis.rootAnalysis(self)).functions
     for (const name of ['store', 'empty', 'bytes', 'text']) {
       const fn =
         functions.find(

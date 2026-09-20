@@ -207,7 +207,8 @@ const analyzeSemantics = Effect.fn('Frontend.analyzeSemantics')(function* (
     elaborateModules(closure, headers, retainedElaborations, precomputed?.results).pipe(
       Effect.map((elaborated) => elaborated.results),
     ),
-    (value) => [...value.values()].reduce((sum, module) => sum + module.functions.length, 0),
+    (value) =>
+      [...value.values()].reduce((sum, module) => sum + Elaboration.sourceBodyCount(module), 0),
     (value) => [...value.values()].reduce((sum, module) => sum + module.diagnostics.length, 0),
     {
       ...options,
@@ -863,7 +864,10 @@ export const frontendProject = Effect.fn('Frontend.frontendProject')(function* (
     headers.index.modules.reduce((sum, module) => sum + module.declarations.length, 0),
     elaborateModules(closure, headers, new Map(), new Map(), bodyQueries),
     (value) =>
-      [...value.results.values()].reduce((sum, result) => sum + result.functions.length, 0),
+      [...value.results.values()].reduce(
+        (sum, result) => sum + Elaboration.sourceBodyCount(result),
+        0,
+      ),
     (value) =>
       [...value.results.values()].reduce((sum, result) => sum + result.diagnostics.length, 0),
     { ...options, counters: () => BodyQuery.counters(bodyQueries) },

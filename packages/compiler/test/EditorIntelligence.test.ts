@@ -1,3 +1,4 @@
+import { records } from './support/records.js'
 import * as Layer from 'effect/Layer'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
@@ -1525,8 +1526,8 @@ it.effect('completes from the innermost lexical scope and excludes later declara
       const values =
         nested?.candidates.filter((candidate) => candidate.label === 'value') ?? Object.freeze([])
       assert.strictEqual(values.length, 1)
-      const innerBinding = analysis.functions
-        .at(0)
+      const innerBinding = records(analysis)
+        .functions.at(0)
         ?.bindings.filter(
           (binding) => binding.name._tag === 'Present' && binding.name.spelling === 'value',
         )

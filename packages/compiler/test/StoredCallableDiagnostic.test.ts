@@ -1,3 +1,4 @@
+import { records } from './support/records.js'
 import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
@@ -278,7 +279,7 @@ it.effect('rejects a nested anonymous body without publishing an inner executabl
       { code: 'SEM0199', start, end: start + rejected.length },
     ])
     assert.strictEqual(
-      snapshot.results.get('stored-callable/nested-anonymous')?.hiddenFunctions.length,
+      records(snapshot.results.get('stored-callable/nested-anonymous'))?.hiddenFunctions.length,
       1,
     )
   }),
@@ -333,8 +334,8 @@ pub fn main() -> i32 {
     const snapshot = yield* Analysis.ofSource('stored-callable/anonymous-inference', ascii(source))
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
     const result = Analysis.rootAnalysis(snapshot)
-    assert.strictEqual(result.hiddenFunctions.length, 1)
-    assert.strictEqual(result.hiddenFunctions.at(0)?.declaration.typeParameters.length, 0)
+    assert.strictEqual(records(result).hiddenFunctions.length, 1)
+    assert.strictEqual(records(result).hiddenFunctions.at(0)?.declaration.typeParameters.length, 0)
     const hidden = result.tir.functions.find(
       (fn) =>
         fn.declaration.canonical._tag === 'Canonical' &&

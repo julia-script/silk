@@ -1097,9 +1097,13 @@ export const expressionsOf = (
   module: string,
 ): ReadonlyArray<Elaboration.ExpressionFact> =>
   Object.freeze(
-    self.results
-      .get(module)
-      ?.functions.flatMap((fn) => fn.statements.flatMap(ModuleTooling.statementExpressions)) ?? [],
+    [self.results.get(module)].flatMap((result) =>
+      result === undefined
+        ? []
+        : Elaboration.records(result).functions.flatMap((fn) =>
+            fn.statements.flatMap(ModuleTooling.statementExpressions),
+          ),
+    ),
   )
 
 /** Returns every canonical or explicitly unavailable field-projection step. */

@@ -1,3 +1,4 @@
+import { records } from './records.js'
 import * as OpaqueRealization from '../../src/OpaqueRealization.js'
 import * as Analysis from '../../src/Analysis.js'
 import type * as Backend from '../../src/Backend.js'
@@ -39,13 +40,13 @@ export const statementsOf = (
   module: string,
 ): ReadonlyArray<Elaboration.StatementFact> =>
   Object.freeze(
-    self.results
-      .get(module)
-      ?.functions.flatMap((fn) => fn.statements.flatMap(nestedStatementFacts)) ?? [],
+    records(self.results.get(module))?.functions.flatMap((fn) =>
+      fn.statements.flatMap(nestedStatementFacts),
+    ) ?? [],
   )
 
 export const bindingsOf = (self: Analysis.FrontendSnapshot, module: string) =>
-  Object.freeze(self.results.get(module)?.functions.flatMap((fn) => fn.bindings) ?? [])
+  Object.freeze(records(self.results.get(module))?.functions.flatMap((fn) => fn.bindings) ?? [])
 
 export const writesOf = (self: Analysis.FrontendSnapshot, module: string) =>
   Object.freeze(
@@ -81,9 +82,9 @@ export const transfersOf = (self: Analysis.FrontendSnapshot, module: string) =>
 
 const expressionsOf = (self: Analysis.FrontendSnapshot, module: string) =>
   Object.freeze(
-    self.results
-      .get(module)
-      ?.functions.flatMap((fn) => fn.statements.flatMap(ModuleTooling.statementExpressions)) ?? [],
+    records(self.results.get(module))?.functions.flatMap((fn) =>
+      fn.statements.flatMap(ModuleTooling.statementExpressions),
+    ) ?? [],
   )
 
 export const matchesOf = (self: Analysis.FrontendSnapshot, module: string) =>

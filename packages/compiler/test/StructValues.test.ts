@@ -1,3 +1,4 @@
+import { records } from './support/records.js'
 import * as Layer from 'effect/Layer'
 import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { assert, it } from '@effect/vitest'
@@ -44,7 +45,7 @@ fn identity(value: i32) -> i32 { return value }
 pub fn main() -> i32 { let Point = identity return Point(42) }`),
     )
     assert.deepEqual(Analysis.diagnostics(self), [])
-    const returned = Analysis.rootAnalysis(self).functions.at(1)?.returnedExpression
+    const returned = records(Analysis.rootAnalysis(self)).functions.at(1)?.returnedExpression
     assert.strictEqual(returned?._tag, 'CallableApply')
   }),
 )
@@ -152,8 +153,8 @@ it.effect(
   () =>
     Effect.gen(function* () {
       const self = yield* snapshot()
-      const make = Analysis.rootAnalysis(self).functions.at(0)
-      const main = Analysis.rootAnalysis(self).functions.at(2)
+      const make = records(Analysis.rootAnalysis(self)).functions.at(0)
+      const main = records(Analysis.rootAnalysis(self)).functions.at(2)
       const literal = make?.returnedExpression
 
       assert.strictEqual(literal?._tag, 'StructLiteral')
@@ -200,7 +201,7 @@ fn none() -> Option<i32> { return Option<i32>.None }
 fn failed() -> Result<i32, bool> { return Result<i32>.Failure { error: true } }
 fn ready() -> State { return State.Ready }`),
     )
-    const functions = Analysis.rootAnalysis(self).functions
+    const functions = records(Analysis.rootAnalysis(self)).functions
     const some = functions.at(0)?.returnedExpression
     const none = functions.at(1)?.returnedExpression
     const failed = functions.at(2)?.returnedExpression
@@ -274,7 +275,7 @@ fn conflict() -> Result<i32, bool> {
       Analysis.diagnostics(self).map((diagnostic) => diagnostic.code),
       ['SEM0099', 'SEM0099', 'SEM0099', 'SEM0167', 'SEM0100'],
     )
-    const functions = Analysis.rootAnalysis(self).functions
+    const functions = records(Analysis.rootAnalysis(self)).functions
     assert.strictEqual(functions.at(0)?.returnedExpression._tag, 'UnionVariant')
     assert.strictEqual(functions.at(1)?.returnedExpression._tag, 'UnionVariant')
     assert.strictEqual(functions.at(2)?.returnedExpression._tag, 'UnionVariant')
@@ -324,7 +325,7 @@ fn project(result: Result<i32, bool>) -> i32 { return result.value }`),
       ['SEM0027'],
     )
     assert.strictEqual(
-      Analysis.rootAnalysis(self).functions.at(0)?.returnedExpression.type._tag,
+      records(Analysis.rootAnalysis(self)).functions.at(0)?.returnedExpression.type._tag,
       'Unavailable',
     )
   }),
@@ -388,7 +389,7 @@ pub fn main() -> i32 { return 0 }`
           .start,
         source.lastIndexOf('move value.pair'),
       )
-      const functions = Analysis.rootAnalysis(invalid).functions
+      const functions = records(Analysis.rootAnalysis(invalid)).functions
       for (const ordinal of [0, 1, 2, 3]) {
         assert.strictEqual(functions.at(ordinal)?.returnedExpression.type._tag, 'Unavailable')
       }

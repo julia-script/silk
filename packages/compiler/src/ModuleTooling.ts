@@ -42,7 +42,7 @@ export const anonymousExpressionIndex = (
 ): ReadonlyArray<AnonymousExpression> => {
   const context = SemanticContext.make(semantics.elaboration.authored)
   const found = new Map<string, AnonymousExpression>()
-  for (const fn of semantics.elaboration.functions)
+  for (const fn of Elaboration.records(semantics.elaboration).functions)
     for (const statement of fn.statements)
       for (const expression of statementExpressions(statement)) {
         if (expression.type._tag !== 'Available') continue

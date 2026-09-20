@@ -1,3 +1,4 @@
+import { records } from './support/records.js'
 import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
@@ -38,7 +39,7 @@ fn take(values: [i32; 0]) -> i32 { return 7 }
 pub fn main() -> i32 { return take([]) }`)
 
     assert.deepEqual(Analysis.diagnostics(self), [])
-    const functions = Analysis.rootAnalysis(self).functions
+    const functions = records(Analysis.rootAnalysis(self)).functions
     const inferred = functions.at(0)?.bindings.at(0)?.initializer
     assert.strictEqual(inferred?._tag, 'ArrayLiteral')
     if (inferred?._tag === 'ArrayLiteral' && inferred.type._tag === 'Available') {
@@ -76,7 +77,7 @@ pub fn main() -> i32 { return 0 }`)
       Analysis.diagnostics(self).map((diagnostic) => diagnostic.code),
       ['SEM0029', 'SEM0030', 'SEM0031'],
     )
-    const types = Analysis.rootAnalysis(self).functions.at(1)?.bindings.at(0)?.initializer
+    const types = records(Analysis.rootAnalysis(self)).functions.at(1)?.bindings.at(0)?.initializer
     assert.strictEqual(types?._tag, 'ArrayLiteral')
     if (types?._tag === 'ArrayLiteral') {
       assert.strictEqual(types.elements.length, 3)
@@ -96,7 +97,7 @@ it.effect('classifies constant and dynamic checked index places', () =>
 fn constant(values: [i32; 3]) -> i32 { return values[1] }
 pub fn main() -> i32 { return constant([4, 5, 6]) }`)
     assert.deepEqual(Analysis.diagnostics(valid), [])
-    const facts = Analysis.rootAnalysis(valid).functions.flatMap((fn) =>
+    const facts = records(Analysis.rootAnalysis(valid)).functions.flatMap((fn) =>
       all(fn.returnedExpression).filter(
         (fact): fact is Elaboration.IndexProjectionExpressionFact =>
           fact._tag === 'IndexProjection',
