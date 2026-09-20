@@ -172,7 +172,10 @@ results other phases need: types and conversions, resolved members and operation
 witnesses, scopes, bindings and occurrences, lifetime, ownership and cleanup evidence, static
 dependencies, diagnostics and unavailable causes. It MUST NOT retain a second executable fact tree
 whose only purpose is conversion into TIR, and body reuse MUST NOT rebind cached facts to predecessor
-syntax: a reused body resolves its anchors through the current presentation. Positive and negative
+syntax: a reused body resolves its anchors through the current presentation. The working records
+analysis builds a body from are private to construction: no stage after construction reads them,
+reuse stores the checked body and its tables only, and the canonical encoding of a checked body
+holds no source position and no header object. Positive and negative
 reuse witnesses (private body edit, alpha rename, new caller, static-helper dependency, exported-bound
 change, missing-member repair, SCC merge and split, origin isolation) SHALL keep their outcomes.
 
@@ -184,7 +187,12 @@ change, missing-member repair, SCC merge and split, origin isolation) SHALL keep
 #### Scenario: Hidden bodies keep structural identity
 
 - **WHEN** a declaration owning an anonymous callable moves below an inserted declaration
-- **THEN** the hidden body identity follows its enclosing declaration ordinal and callable site, and its reused analysis is correct without a rebinding pass
+- **THEN** the hidden body identity follows its enclosing declaration ordinal and callable site, and the reused body names the current declaration ids without consulting predecessor syntax or working records
+
+#### Scenario: A checked body is portable
+
+- **WHEN** a checked body is written through the canonical codec and read back for a revision
+- **THEN** it equals the body that revision builds, and the same authored content at different source positions encodes to the same bytes
 
 ### Requirement: Diagnostics and navigation resolve through current presentation
 
