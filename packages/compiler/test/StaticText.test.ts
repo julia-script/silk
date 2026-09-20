@@ -236,6 +236,69 @@ it.effect('reports compile errors, phase violations, and four distinct determini
   }),
 )
 
+it.effect('accounts budgets so neither caching nor ordering changes what is accepted', () =>
+  Effect.gen(function* () {
+    const profile = yield* CompilationProfile.normalize({ target: Target.x8664UnknownLinuxGnu.id })
+    const evaluation = StaticEvaluation.make<string>(profile, {
+      steps: 10,
+      callDepth: 4,
+      retainedValueBytes: 10_000,
+      residualNodes: 10,
+    })
+    const spend =
+      (steps: number, nested?: string): StaticEvaluation.EvaluationCallback<string> =>
+      (context) => {
+        for (let step = 0; step < steps; step += 1) context.step()
+        if (nested === undefined) return StaticEvaluation.complete('done')
+        const inner = context.evaluate(application(nested), spend(4))
+        return inner._tag === 'Failed'
+          ? StaticEvaluation.failed(inner.failure)
+          : StaticEvaluation.complete('done')
+      }
+    const entry = (name: string) =>
+      StaticEvaluation.cacheEntries(evaluation).find((candidate) => candidate.key.includes(name))
+        ?.state
+
+    // `f` leaves its nested `g` too little: `f` is rejected, and nothing is recorded for `g`.
+    const f = StaticEvaluation.evaluateApplication(
+      evaluation,
+      application('outerFirst'),
+      spend(9, 'nestedWork'),
+    )
+    assert.strictEqual(f._tag === 'Failed' ? f.failure._tag : f._tag, 'StepLimit')
+    assert.strictEqual(entry('outerFirst')?._tag, 'Failed')
+    assert.isUndefined(entry('nestedWork'))
+
+    // Asked again as a root, `g` has the whole allowance and records what it cost.
+    const g = StaticEvaluation.evaluateApplication(evaluation, application('nestedWork'), spend(4))
+    assert.strictEqual(g._tag, 'Complete')
+    const recorded = entry('nestedWork')
+    assert.deepEqual(recorded?._tag === 'Complete' ? recorded.cost : undefined, {
+      steps: 4,
+      callDepth: 1,
+      retainedValueBytes: 0,
+      residualNodes: 0,
+    })
+
+    // A hit is charged like an execution: `h` continues, and `tight` exhausts exactly as it would
+    // have by executing `g` itself.
+    const h = StaticEvaluation.evaluateApplication(
+      evaluation,
+      application('outerSecond'),
+      spend(5, 'nestedWork'),
+    )
+    assert.strictEqual(h._tag, 'Complete')
+    assert.strictEqual(h.budget.steps, 9)
+    const tight = StaticEvaluation.evaluateApplication(
+      evaluation,
+      application('outerThird'),
+      spend(8, 'nestedWork'),
+    )
+    assert.strictEqual(tight._tag === 'Failed' ? tight.failure._tag : tight._tag, 'StepLimit')
+    assert.strictEqual(entry('nestedWork')?._tag, 'Complete')
+  }),
+)
+
 it('canonicalizes finite static values without observing construction identity', () => {
   const left = admitted(
     StaticValue.admit(

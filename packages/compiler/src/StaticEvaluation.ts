@@ -2151,14 +2151,27 @@ export interface Pending {
   readonly trace: Trace
 }
 
+/**
+ * What one completed evaluation consumed. Accounting is additive and depth is counted from the
+ * evaluation's own entry, so a cost is a function of the evaluation's key alone.
+ */
+export interface Cost {
+  readonly steps: number
+  readonly callDepth: number
+  readonly retainedValueBytes: number
+  readonly residualNodes: number
+}
+
 export interface Complete<A> {
   readonly _tag: 'Complete'
   readonly value: A
+  readonly cost?: Cost
 }
 
 export interface Failed {
   readonly _tag: 'Failed'
   readonly failure: StaticFailure
+  readonly cost?: Cost
 }
 
 export interface CacheEntry<A> {
@@ -2386,6 +2399,34 @@ const contextOf = <A>(
       evaluateAt(self, nested, callback, trace),
   })
 
+const isLimit = (failure: StaticFailure): boolean =>
+  failure._tag === 'StepLimit' ||
+  failure._tag === 'CallDepthLimit' ||
+  failure._tag === 'RetainedValueLimit' ||
+  failure._tag === 'ResidualGrowthLimit'
+
+/** Charges a requester what a recorded evaluation consumed, exactly as executing it would have. */
+const chargeCost = <A>(
+  self: Evaluation<A>,
+  cost: Cost,
+  trace: Trace,
+): StaticFailure | undefined => {
+  const state = self[stateSymbol]
+  if (state.budget.failure !== undefined) return state.budget.failure
+  const depth = state.budget.callDepth + cost.callDepth
+  state.budget.maximumCallDepth = Math.max(state.budget.maximumCallDepth, depth)
+  if (depth > self.limits.callDepth) {
+    const failure = limitFailure('CallDepthLimit', self.limits.callDepth, depth, trace)
+    state.budget.failure = failure
+    return failure
+  }
+  return (
+    charge(self, 'steps', cost.steps, 'StepLimit', trace) ??
+    charge(self, 'retainedValueBytes', cost.retainedValueBytes, 'RetainedValueLimit', trace) ??
+    charge(self, 'residualNodes', cost.residualNodes, 'ResidualGrowthLimit', trace)
+  )
+}
+
 const evaluateAt = <A>(
   self: Evaluation<A>,
   application: Application,
@@ -2394,10 +2435,25 @@ const evaluateAt = <A>(
 ): ApplicationResult<A> => {
   const key = applicationKey(self.environment, application)
   const state = self[stateSymbol]
-  const cached = state.cache.get(key)
-  if (cached?._tag === 'Complete' || cached?._tag === 'Failed')
-    return resultOf(self, key, cached, true)
+  // A request made while nothing is being evaluated is a root: it gets the whole allowance.
+  // Everything it asks for draws from what it has left.
+  const root = state.budget.callDepth === 0
+  if (root) {
+    state.budget.steps = 0
+    state.budget.maximumCallDepth = 0
+    state.budget.retainedValueBytes = 0
+    state.budget.residualNodes = 0
+    delete state.budget.failure
+  }
   const trace = appendTrace(parentTrace, applicationFrame(self.environment, application))
+  const cached = state.cache.get(key)
+  if (cached?._tag === 'Complete' || cached?._tag === 'Failed') {
+    // Cache warmth never changes what is accepted: a hit costs what the evaluation cost.
+    const unpaid = cached.cost === undefined ? undefined : chargeCost(self, cached.cost, trace)
+    return unpaid === undefined
+      ? resultOf(self, key, cached, true)
+      : resultOf(self, key, Object.freeze({ _tag: 'Failed', failure: unpaid }), false)
+  }
   if (cached?._tag === 'Pending') {
     const failure: Cycle = Object.freeze({
       _tag: 'Cycle',
@@ -2409,29 +2465,40 @@ const evaluateAt = <A>(
   }
 
   state.cache.set(key, Object.freeze({ _tag: 'Pending', trace }))
+  const before = { ...state.budget }
   const depthFailure = enterCall(self, trace)
-  if (depthFailure !== undefined) {
-    const failedState: Failed = Object.freeze({ _tag: 'Failed', failure: depthFailure })
-    state.cache.set(key, failedState)
-    return resultOf(self, key, failedState, false)
-  }
-
   let outcome: Outcome<A>
-  try {
-    outcome = callback(contextOf(self, application, trace))
-  } catch (defect) {
-    state.cache.delete(key)
-    throw defect
-  } finally {
-    leaveCall(self)
-  }
+  if (depthFailure === undefined) {
+    // Depth is measured from this entry, so the recorded cost does not depend on the caller.
+    state.budget.maximumCallDepth = state.budget.callDepth
+    try {
+      outcome = callback(contextOf(self, application, trace))
+    } catch (defect) {
+      state.cache.delete(key)
+      throw defect
+    } finally {
+      leaveCall(self)
+    }
+  } else outcome = failed<A>(depthFailure)
   const finalOutcome =
     state.budget.failure === undefined ? outcome : failed<A>(state.budget.failure)
+  const cost: Cost = Object.freeze({
+    steps: state.budget.steps - before.steps,
+    callDepth: state.budget.maximumCallDepth - before.callDepth,
+    retainedValueBytes: state.budget.retainedValueBytes - before.retainedValueBytes,
+    residualNodes: state.budget.residualNodes - before.residualNodes,
+  })
+  state.budget.maximumCallDepth = Math.max(before.maximumCallDepth, state.budget.maximumCallDepth)
   const completedState: Complete<A> | Failed =
     finalOutcome._tag === 'Complete'
-      ? Object.freeze({ _tag: 'Complete', value: finalOutcome.value })
-      : Object.freeze({ _tag: 'Failed', failure: finalOutcome.failure })
-  state.cache.set(key, completedState)
+      ? Object.freeze({ _tag: 'Complete', value: finalOutcome.value, cost })
+      : Object.freeze({ _tag: 'Failed', failure: finalOutcome.failure, cost })
+  // Running out of a remainder is a fact about what the callers spent, not about this evaluation:
+  // nothing is recorded under its key, and the exhaustion surfaces as the root's outcome. A root
+  // that exhausts the whole allowance is a fact about its key, which includes the limits.
+  if (!root && completedState._tag === 'Failed' && isLimit(completedState.failure))
+    state.cache.delete(key)
+  else state.cache.set(key, completedState)
   return resultOf(self, key, completedState, false)
 }
 
