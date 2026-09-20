@@ -841,10 +841,11 @@ const presentationOfIdentity = (
     }
     return undefined
   }
+  // A local is found in the scope that introduces it: bodies publish scopes, never their records.
   if (identity._tag === 'BindingIdentity') {
     for (const result of self.results.values())
-      for (const fn of Elaboration.executableFunctions(result)) {
-        const binding = fn.bindings.find(
+      for (const lexical of result.lexicalScopes) {
+        const binding = lexical.bindings.find(
           (candidate) =>
             candidate.id.function.sourceId === identity.id.function.sourceId &&
             candidate.id.function.ordinal === identity.id.function.ordinal &&
@@ -860,58 +861,18 @@ const presentationOfIdentity = (
   }
   if (identity._tag === 'PatternBindingIdentity') {
     const key = SemanticOccurrence.identityKey(identity)
-    const findStatementBinding = (
-      statements: ReadonlyArray<Elaboration.StatementFact>,
-    ): Elaboration.PatternBindingFact | undefined => {
-      for (const statement of statements) {
-        if (statement._tag === 'PatternBindStatement' || statement._tag === 'IfLetStatement')
-          for (const binding of statement.selection.bindings)
-            if (
-              SemanticOccurrence.identityKey(
-                Object.freeze({ _tag: 'PatternBindingIdentity', id: binding.id }),
-              ) === key
-            )
-              return binding
-        let nested: readonly Elaboration.StatementFact[]
-        if (statement._tag === 'UnsafeStatement') {
-          nested = statement.statements
-        } else if (statement._tag === 'IfStatement' || statement._tag === 'IfLetStatement') {
-          nested = [...statement.taken, ...statement.otherwise]
-        } else if (statement._tag === 'WhileStatement') {
-          nested = statement.body
-        } else {
-          nested = []
-        }
-        const found = findStatementBinding(nested)
-        if (found !== undefined) return found
-      }
-      return undefined
-    }
     for (const result of self.results.values())
-      for (const fn of Elaboration.executableFunctions(result)) {
-        const statementBinding = findStatementBinding(fn.statements)
-        if (statementBinding !== undefined)
-          return hoverPresentation(
-            SemanticDisplay.patternBinding(statementBinding, module, scope),
-            statementBinding.type._tag === 'Available' ? statementBinding.type.type : undefined,
+      for (const lexical of result.lexicalScopes)
+        for (const binding of lexical.patternBindings)
+          if (
+            SemanticOccurrence.identityKey(
+              Object.freeze({ _tag: 'PatternBindingIdentity', id: binding.id }),
+            ) === key
           )
-      }
-    for (const result of self.results.values())
-      for (const fn of Elaboration.executableFunctions(result))
-        for (const statement of fn.statements)
-          for (const expression of ModuleTooling.statementExpressions(statement))
-            if (expression._tag === 'Match')
-              for (const arm of expression.arms)
-                for (const binding of arm.bindings)
-                  if (
-                    SemanticOccurrence.identityKey(
-                      Object.freeze({ _tag: 'PatternBindingIdentity', id: binding.id }),
-                    ) === key
-                  )
-                    return hoverPresentation(
-                      SemanticDisplay.patternBinding(binding, module, scope),
-                      binding.type._tag === 'Available' ? binding.type.type : undefined,
-                    )
+            return hoverPresentation(
+              SemanticDisplay.patternBinding(binding, module, scope),
+              binding.type._tag === 'Available' ? binding.type.type : undefined,
+            )
     return undefined
   }
   if (identity._tag === 'ImportNamespaceIdentity')

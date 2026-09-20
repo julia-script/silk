@@ -39,7 +39,8 @@ export interface ApplicationKey {
 export interface ResidualBody {
   readonly _tag: 'ResidualBody'
   readonly function: Tir.TirFunction
-  readonly fact: Elaboration.FunctionFact
+  /** The tables the body published, which later stages read beside its nodes. */
+  readonly results: Elaboration.BodyResults
   readonly diagnostics: ReadonlyArray<Diagnostic.Located>
 }
 
@@ -1053,40 +1054,10 @@ export const selectionReason = (
     if (scope !== undefined && hasStaticControlFlow(scope.context.module, declaration))
       return 'StaticControlFlow'
     const input = moduleInput(self, declaration)
-    const fact =
-      input === undefined
-        ? undefined
-        : Elaboration.executableFunctions(input.result).find(
-            (candidate) => candidate.declaration.id.ordinal === declaration.id.ordinal,
-          )
-    if (fact === undefined) return 'UnavailableBody'
-    let found: SelectionReason | undefined
-    Elaboration.visitStatementFacts(fact.statements, {
-      statement: (statement) => {
-        if (
-          found === undefined &&
-          statement._tag === 'BindStatement' &&
-          statement.binding.phase === 'Static'
-        )
-          found = 'StaticBinding'
-      },
-      expression: (expression) => {
-        if (found !== undefined) return
-        if (expression._tag === 'Constant' && expression.value === undefined)
-          found = 'UnresolvedConstant'
-        else if (expression._tag === 'CompileError') found = 'CompileError'
-        else if (
-          expression._tag === 'Call' &&
-          expression.reference._tag === 'Resolved' &&
-          (expression.reference.declaration.phase === 'Static' ||
-            expression.reference.declaration.parameters.some(
-              (parameter) => parameter.phase === 'Static',
-            ))
-        )
-          found = 'StaticCall'
-      },
-    })
-    return found
+    const body = input?.result.bodies.find(
+      (candidate) => candidate.declaration.id.ordinal === declaration.id.ordinal,
+    )
+    return body === undefined ? 'UnavailableBody' : body.results.staticStructure
   }
   const selected = reason()
   cache.set(declaration, selected)
@@ -1132,16 +1103,15 @@ export const residualize = (self: Coordinator, key: ApplicationKey): Result => {
   }
   const reason = selectionReason(self, key)
   if (reason === undefined) {
-    const fact = Elaboration.executableFunctions(input.result).find(
+    const body = input.result.bodies.find(
       (candidate) => candidate.declaration.id.ordinal === declaration.id.ordinal,
     )
-    const fn = FunctionIndex.tirByCanonical(input.result.tir, key.declaration)
-    if (fact !== undefined && fn !== undefined) {
+    if (body?.function !== undefined) {
       record(self, key.declaration, 'UnchangedBody', 'sourceReused', false)
       return Object.freeze({
         _tag: 'ResidualBody',
-        function: fn,
-        fact,
+        function: body.function,
+        results: body.results,
         diagnostics: Object.freeze([]),
       })
     }
@@ -1244,15 +1214,19 @@ export const residualize = (self: Coordinator, key: ApplicationKey): Result => {
         chargedStaticIterationNodes.value === 0 ? Math.max(1, remainingNodes) : remainingNodes,
       )
       if (growthFailure !== undefined) return StaticEvaluation.failed(growthFailure)
+      const body = Elaboration.checkedBody(
+        SemanticContext.make(input.result.authored),
+        self[stateSymbol].index,
+        analyzed.fact,
+        false,
+      )
+      if (body.function === undefined)
+        throw new RangeError('Static functions have no runtime TIR body')
       return StaticEvaluation.complete(
         Object.freeze({
           _tag: 'ResidualBody' as const,
-          function: Elaboration.residualTirFunction(
-            SemanticContext.make(input.result.authored),
-            analyzed.fact,
-            self[stateSymbol].index,
-          ),
-          fact: analyzed.fact,
+          function: body.function,
+          results: body.results,
           diagnostics: analyzed.diagnostics,
         }),
       )

@@ -12,6 +12,7 @@ import * as DeclarationFacts from './DeclarationFacts.js'
 import type * as DeclarationIndex from './DeclarationIndex.js'
 import * as Diagnostic from './Diagnostic.js'
 import * as Elaboration from './Elaboration.js'
+import type * as LifetimeFlow from './LifetimeFlow.js'
 import * as ExecutableOrigin from './ExecutableOrigin.js'
 import * as Tir from './Tir.js'
 import * as FunctionIndex from './internal/FunctionIndex.js'
@@ -1226,12 +1227,14 @@ export const discover = (
   )
   interface PreparedInstance {
     readonly instance: Omit<Instance, 'ownership'>
-    readonly fact: Elaboration.FunctionFact
+    /** The region proof the body published, which ownership replays. */
+    readonly lifetimes?: LifetimeFlow.LifetimeFlow
   }
   interface PreparedUnavailableOwnership {
     readonly key: InstanceKey
     readonly function: Tir.TirFunction
-    readonly fact: Elaboration.FunctionFact
+    /** The region proof the body published, which ownership replays. */
+    readonly lifetimes?: LifetimeFlow.LifetimeFlow
     readonly diagnostic: Diagnostic.Diagnostic
   }
   const prepared = new Map<string, PreparedInstance>()
@@ -1703,7 +1706,9 @@ export const discover = (
             Object.freeze({
               key,
               function: residual.function,
-              fact: residual.fact,
+              ...(residual.results.lifetimes === undefined
+                ? {}
+                : { lifetimes: residual.results.lifetimes }),
               diagnostic: residualError,
             }),
           )
@@ -1746,7 +1751,9 @@ export const discover = (
           prepared.set(
             keyText(key),
             Object.freeze({
-              fact: residual.fact,
+              ...(residual.results.lifetimes === undefined
+                ? {}
+                : { lifetimes: residual.results.lifetimes }),
               instance: Object.freeze({
                 _tag: 'Instance',
                 key,
@@ -2046,7 +2053,7 @@ export const discover = (
   const preparedInstances = [...prepared.values()].map((candidate) => candidate.instance)
   const instances = trace('Instances.finalizeInstances', () => {
     const instances = Object.freeze(
-      [...prepared.values()].map(({ instance, fact }) => {
+      [...prepared.values()].map(({ instance, lifetimes }) => {
         const checked = trace(
           'Instances.checkOwnership',
           () =>
@@ -2054,7 +2061,7 @@ export const discover = (
               residualOwnership,
               Ownership.input(
                 instance.function,
-                fact.lifetimeFlow,
+                lifetimes,
                 index,
                 accessBoundaryPlan,
                 contextOf(instance.function),
@@ -2098,7 +2105,7 @@ export const discover = (
           residualOwnership,
           Ownership.input(
             candidate.function,
-            candidate.fact.lifetimeFlow,
+            candidate.lifetimes,
             index,
             accessBoundaryPlan,
             contextOf(candidate.function),

@@ -25,6 +25,7 @@ import type * as StaticEvaluation from './StaticEvaluation.js'
 import type * as StaticText from './StaticText.js'
 import type * as StaticValue from './StaticValue.js'
 import * as Lifetime from './Lifetime.js'
+import * as SemanticDisplay from './SemanticDisplay.js'
 import * as Type from './Type.js'
 import * as TypeCompatibility from './TypeCompatibility.js'
 
@@ -1521,7 +1522,21 @@ export interface BodyResults {
   readonly aggregates: ReadonlyArray<DeclarationFacts.StructFact>
   /** The body's half of the module's constrained-callable escape rule. */
   readonly callables: CallableFlow
+  /** Why an application of this body must be specialized, when its own statements say so. */
+  readonly staticStructure?: StaticStructure
+  /** The type each authored expression was given, in source order, for hover. */
+  readonly expressionTypes: ReadonlyArray<ExpressionTypeRow>
 }
+
+/** One typed expression as hover shows it. */
+export interface ExpressionTypeRow {
+  readonly at: AuthoredHir.Anchor
+  readonly type: Type.Type
+  readonly presentation?: SemanticDisplay.Presentation
+}
+
+/** Static work a body still holds after checking, which only a concrete application resolves. */
+export type StaticStructure = 'StaticBinding' | 'UnresolvedConstant' | 'CompileError' | 'StaticCall'
 
 /** One checked body: the declaration it belongs to, its nodes and its results. */
 export interface CheckedBody {
@@ -2430,17 +2445,6 @@ const runtimeTirFunction = (
   })
 }
 
-/** Lowers one already-residual runtime function fact into backend-facing TIR. */
-export const residualTirFunction = (
-  context: SemanticContext.SemanticContext,
-  fact: FunctionFact,
-  index: DeclarationIndex.Index,
-): Tir.TirFunction => {
-  if (fact.declaration.phase === 'Static')
-    throw new RangeError('Static functions have no runtime TIR body')
-  return runtimeTirFunction(context, fact, index)
-}
-
 /**
  * Everything construction publishes for one source declaration: its own body first, then the
  * compiler-made bodies it produced, and what checking them reported. It is the unit of reuse.
@@ -2452,7 +2456,57 @@ export interface CheckedUnit {
 
 const recordsOf = new WeakMap<BodyResults, FunctionFact>()
 
-const checkedBody = (
+const staticStructureOf = (fact: FunctionFact): StaticStructure | undefined => {
+  let found: StaticStructure | undefined
+  visitStatementFacts(fact.statements, {
+    statement: (statement) => {
+      if (
+        found === undefined &&
+        statement._tag === 'BindStatement' &&
+        statement.binding.phase === 'Static'
+      )
+        found = 'StaticBinding'
+    },
+    expression: (expression) => {
+      if (found !== undefined) return
+      if (expression._tag === 'Constant' && expression.value === undefined)
+        found = 'UnresolvedConstant'
+      else if (expression._tag === 'CompileError') found = 'CompileError'
+      else if (
+        expression._tag === 'Call' &&
+        expression.reference._tag === 'Resolved' &&
+        (expression.reference.declaration.phase === 'Static' ||
+          expression.reference.declaration.parameters.some(
+            (parameter) => parameter.phase === 'Static',
+          ))
+      )
+        found = 'StaticCall'
+    },
+  })
+  return found
+}
+
+const expressionTypesOf = (fact: FunctionFact): ReadonlyArray<ExpressionTypeRow> => {
+  const rows: Array<ExpressionTypeRow> = []
+  visitStatementFacts(fact.statements, {
+    expression: (expression) => {
+      if (expression.type._tag !== 'Available') return
+      rows.push(
+        Object.freeze({
+          at: expression.anchor,
+          type: expression.type.type,
+          ...(expression._tag === 'CallableSection' && expression.anonymous !== undefined
+            ? { presentation: SemanticDisplay.anonymousCallable(expression, expression.anonymous) }
+            : {}),
+        }),
+      )
+    },
+  })
+  return Object.freeze(rows)
+}
+
+/** Publishes one analyzed body: its nodes, when it runs, and the tables later stages read. */
+export const checkedBody = (
   context: SemanticContext.SemanticContext,
   index: DeclarationIndex.Index,
   fact: FunctionFact,
@@ -2460,6 +2514,7 @@ const checkedBody = (
 ): CheckedBody => {
   const lowered =
     fact.declaration.phase === 'Static' ? undefined : runtimeTirFunction(context, fact, index)
+  const staticStructure = staticStructureOf(fact)
   const results: BodyResults = Object.freeze({
     occurrences: fact.occurrences,
     hints: fact.hints,
@@ -2468,6 +2523,8 @@ const checkedBody = (
     scopes: lexicalScopesOf(fact),
     aggregates: fact.generatedAggregates,
     callables: callableFlowOf(fact),
+    ...(staticStructure === undefined ? {} : { staticStructure }),
+    expressionTypes: expressionTypesOf(fact),
   })
   recordsOf.set(results, fact)
   return Object.freeze({
@@ -2482,6 +2539,9 @@ const checkedBody = (
  * The working records construction built a module's bodies from, for tests and the inspector that
  * examine construction itself. No compiler stage reads them: a stage reads nodes and tables.
  */
+export const recordOf = (self: BodyResults): FunctionFact | undefined => recordsOf.get(self)
+
+/** Every working record of a module, source bodies apart from compiler-made ones. */
 export const records = (
   self: Result,
 ): {

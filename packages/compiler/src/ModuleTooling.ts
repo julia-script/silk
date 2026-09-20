@@ -42,24 +42,20 @@ export const anonymousExpressionIndex = (
 ): ReadonlyArray<AnonymousExpression> => {
   const context = SemanticContext.make(semantics.elaboration.authored)
   const found = new Map<string, AnonymousExpression>()
-  for (const fn of Elaboration.records(semantics.elaboration).functions)
-    for (const statement of fn.statements)
-      for (const expression of statementExpressions(statement)) {
-        if (expression.type._tag !== 'Available') continue
-        const span = context.spanOf(expression.anchor)
-        found.set(
-          `${span.start}:${span.end}`,
-          Object.freeze({
-            span,
-            type: expression.type.type,
-            ...(expression._tag === 'CallableSection' && expression.anonymous !== undefined
-              ? {
-                  presentation: SemanticDisplay.anonymousCallable(expression, expression.anonymous),
-                }
-              : {}),
-          }),
-        )
-      }
+  for (const body of semantics.elaboration.bodies) {
+    if (body.hidden) continue
+    for (const row of body.results.expressionTypes) {
+      const span = context.spanOf(row.at)
+      found.set(
+        `${span.start}:${span.end}`,
+        Object.freeze({
+          span,
+          type: row.type,
+          ...(row.presentation === undefined ? {} : { presentation: row.presentation }),
+        }),
+      )
+    }
+  }
   return Object.freeze(
     [...found.values()].sort(
       (left, right) =>

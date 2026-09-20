@@ -1,3 +1,4 @@
+import * as Elaboration from '../src/Elaboration.js'
 import { records } from './support/records.js'
 import { locationAt } from './support/location.js'
 import * as Layer from 'effect/Layer'
@@ -938,7 +939,7 @@ pub fn main() -> i32 { return invalid([1]) }`
     assert.strictEqual(residual._tag, 'ResidualBody')
     if (residual._tag !== 'ResidualBody') return
     assert.deepEqual(
-      residual.fact.staticIterations.map((iteration) => ({
+      (Elaboration.recordOf(residual.results)?.staticIterations ?? []).map((iteration) => ({
         state: iteration.state,
         scopes: iteration.scopes.length,
       })),
@@ -1011,7 +1012,7 @@ pub fn main() -> i32 { return rejected() }`),
     assert.strictEqual(residual._tag, 'ResidualBody')
     if (residual._tag !== 'ResidualBody') return
     assert.deepEqual(
-      residual.fact.staticIterations.map((iteration) => ({
+      (Elaboration.recordOf(residual.results)?.staticIterations ?? []).map((iteration) => ({
         state: iteration.state,
         scopes: iteration.scopes.length,
       })),
@@ -1087,7 +1088,7 @@ pub fn main() -> i32 {
       )
       assert.strictEqual(residual._tag, 'ResidualBody')
       if (residual._tag !== 'ResidualBody') return Object.freeze([])
-      const iteration = residual.fact.staticIterations.at(0)
+      const iteration = (Elaboration.recordOf(residual.results)?.staticIterations ?? []).at(0)
       assert.strictEqual(iteration?.state, 'Expanded')
       return Object.freeze(
         (iteration?.scopes ?? []).flatMap((scope) =>
