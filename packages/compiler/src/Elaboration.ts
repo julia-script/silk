@@ -1792,6 +1792,8 @@ export interface IntegerResult {
 
 export interface ExpressionResult {
   readonly fact: ExpressionFact
+  /** The typed node already published while checking this construct. */
+  readonly node?: Tir.Expression
   readonly diagnostics: ReadonlyArray<Diagnostic.Located>
   readonly type: SemanticType | undefined
 }

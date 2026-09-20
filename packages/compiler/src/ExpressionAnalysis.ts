@@ -92,6 +92,7 @@ import {
 } from './Elaboration.js'
 import * as FloatingPoint from './FloatingPoint.js'
 import * as Tir from './Tir.js'
+import * as TirLowering from './TirLowering.js'
 import * as Intrinsic from './Intrinsic.js'
 import * as DurationLiteral from './internal/DurationLiteral.js'
 import * as TypeInference from './internal/TypeInference.js'
@@ -9334,7 +9335,7 @@ export const containsOrdinaryArm = (node: AuthoredHir.Expression): boolean => {
   return AuthoredWalk.expressionChildren(node).some(containsOrdinaryArm)
 }
 
-export function analyzeExpression(
+function analyzeExpressionFact(
   context: SemanticContext.SemanticContext,
   node: AuthoredHir.Expression,
   declarations: ReadonlyArray<DeclarationFact>,
@@ -10546,6 +10547,38 @@ export function analyzeExpression(
     declaration,
     resolution,
   )
+}
+
+/** Checks one authored expression and immediately publishes its typed node to the body builder. */
+export function analyzeExpression(
+  context: SemanticContext.SemanticContext,
+  node: AuthoredHir.Expression,
+  declarations: ReadonlyArray<DeclarationFact>,
+  declaration: DeclarationFact,
+  scope: Scope,
+  resolution: ResolutionContext,
+  expected?: SemanticType,
+): ExpressionResult | undefined {
+  const result = analyzeExpressionFact(
+    context,
+    node,
+    declarations,
+    declaration,
+    scope,
+    resolution,
+    expected,
+  )
+  if (result === undefined || resolution.builder === undefined) return result
+  const lowered = TirLowering.tirExpression(result.fact, {
+    context,
+    builder: resolution.builder,
+    ...(declaration.phase === 'Static' ? { static: resolution.builder.expressions } : {}),
+    ...(resolution.lifetimeCompatibility === undefined
+      ? {}
+      : { lifetimeCompatibility: resolution.lifetimeCompatibility }),
+    functionId: declaration.id,
+  })
+  return Object.freeze({ ...result, node: lowered })
 }
 
 export const finishDeclarationCall = (
