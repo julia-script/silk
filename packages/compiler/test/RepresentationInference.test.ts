@@ -98,8 +98,8 @@ pub fn main() -> i32 {
   })
 
   assert.deepEqual(identities, [
-    'declaration:representation-inference/sites.main:site:2:owner=representation-inference/sites.main<>',
-    'effect:effect\u0000["memory:representation-inference/sites/function=main#0",null,null]:n7',
+    'declaration:representation-inference/sites.main:site:0:owner=representation-inference/sites.main<>',
+    'effect:effect\u0000declaration:representation-inference/sites:main:site:1',
   ])
   assert.deepEqual(result.diagnostics, [])
 })

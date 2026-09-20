@@ -8870,6 +8870,12 @@ export const effectCaptureFacts = (
   const patternKey = (id: Match.BindingId): string =>
     `${Tir.nodeRefKey(id.arm.match.node)}:${id.arm.ordinal}:${id.ordinal}`
   const localPatterns = new Set<string>()
+  const recordLocalPattern = (local: Tir.LocalId): void => {
+    if (options.builder === undefined) return
+    const semantic = BodyBuilder.semanticOfLocal(options.builder, local)
+    if (isCaptureReferenceFact(semantic) && semantic._tag === 'PatternBinding')
+      localPatterns.add(patternKey(semantic.id))
+  }
   visitStatements(statements, {
     descendEffectBlocks: false,
     expression: (fact) => {
@@ -9088,6 +9094,16 @@ export const effectCaptureFacts = (
         }
         return
       }
+      if (fact._tag === 'Match') {
+        expression(fact.scrutinee, requested)
+        for (const arm of fact.arms) {
+          for (const binding of arm.bindings) recordLocalPattern(binding.id)
+          if (arm.guard !== undefined) expression(arm.guard)
+          if (arm.body._tag === 'Expression') expression(arm.body.expression)
+          else visit(arm.body.statements)
+        }
+        return
+      }
       for (const child of Tir.expressionChildren(fact)) expression(child)
       return
     }
@@ -9118,6 +9134,7 @@ export const effectCaptureFacts = (
       case 'Match':
         expression(fact.scrutinee, requested)
         for (const arm of fact.arms) {
+          for (const binding of arm.bindings) localPatterns.add(patternKey(binding.id))
           if (arm.guard !== undefined) expression(arm.guard)
           if (arm.body._tag === 'Expression') expression(arm.body.expression)
           else visit(arm.body.statements)
@@ -9207,6 +9224,7 @@ export const effectCaptureFacts = (
           expression(statement.initializer)
           break
         case 'PatternBind':
+          for (const binding of statement.selection.bindings) recordLocalPattern(binding.id)
           expression(statement.selection.subject)
           break
         case 'Evaluate':
@@ -9218,6 +9236,7 @@ export const effectCaptureFacts = (
           visit(statement.otherwise)
           break
         case 'IfLet':
+          for (const binding of statement.selection.bindings) recordLocalPattern(binding.id)
           expression(statement.selection.subject)
           visit(statement.taken)
           visit(statement.otherwise)

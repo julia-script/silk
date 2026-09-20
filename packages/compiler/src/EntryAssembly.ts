@@ -287,6 +287,8 @@ export const lowerInstance = (
   let parameterTypes: Mir.Type[]
   if (contract._tag === 'Contract') {
     parameterTypes = instance.specialization.parameters.flatMap((specialized, ordinal) => {
+      const parameter = fn.declaration.parameters.at(ordinal)
+      if (parameter?.phase !== 'Runtime') return []
       const borrowedCapture = callableEnvironment?.fields.find(
         (field) => field.parameterOrdinal === ordinal && field.representation === 'Borrow',
       )

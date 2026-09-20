@@ -478,10 +478,39 @@ const provesOutlives = (
 const retainedArguments = (
   fact: ExpressionDecision,
   options: LowerStatementOptions,
-): ReadonlyArray<ArgumentFact> =>
-  retainedResultArguments(fact, lifetimeAssumptionsOf(options), (longer, shorter) =>
+): ReadonlyArray<ArgumentFact> => {
+  const proven = retainedResultArguments(fact, lifetimeAssumptionsOf(options), (longer, shorter) =>
     provesOutlives(options, longer, shorter),
   )
+  if (
+    fact._tag !== 'Call' ||
+    fact.reference._tag !== 'Resolved' ||
+    fact.contract._tag !== 'Compatible' ||
+    fact.type._tag !== 'Available'
+  )
+    return proven
+  // Direct TIR construction precedes the body's solved lifetime graph. The substituted callable
+  // contract still identifies arguments whose storage is carried by the result, even when the
+  // actual-to-parameter outlives edge has only just been installed.
+  const retained = new Map(proven.map((argument) => [argument.id.ordinal, argument]))
+  for (const [ordinal, argument] of fact.arguments.entries()) {
+    const parameter = fact.reference.declaration.parameters.at(ordinal)
+    if (parameter?.declaredType._tag !== 'Resolved') continue
+    const source = Type.substitute(parameter.declaredType.type, fact.contract.substitution)
+    const result = fact.type.type
+    const carries =
+      Type.isReference(source) || Type.isSlice(source)
+        ? Type.storageLifetimes(result).some(
+            (output) =>
+              output._tag !== 'StaticLifetime' && provesOutlives(options, source.lifetime, output),
+          )
+        : retainsLifetimes(source, result, lifetimeAssumptionsOf(options), (longer, shorter) =>
+            provesOutlives(options, longer, shorter),
+          )
+    if (carries) retained.set(argument.id.ordinal, argument)
+  }
+  return Object.freeze([...retained.values()])
+}
 
 const retainedDirectBorrowOrdinals = (
   fact: ExpressionDecision,
@@ -518,6 +547,19 @@ const publishExpression = (
   expression.id !== undefined || options.builder === undefined
     ? expression
     : BodyArena.node(options.builder, expression)
+
+const publishExpectedExpression = (
+  options: LowerStatementOptions,
+  expression: Tir.Expression,
+  fact: ConstructionExpression,
+): Tir.Expression => {
+  const published = publishExpression(options, expression)
+  if (options.builder === undefined) return published
+  const semantic = 'origin' in fact ? BodyArena.semanticOfExpression(options.builder, fact) : fact
+  if (typeof semantic === 'object' && semantic !== null)
+    options.builder.semanticExpressions.set(published, semantic)
+  return published
+}
 
 export const publishStatements = (
   facts: ReadonlyArray<StatementDraft>,
@@ -893,6 +935,16 @@ const staticStructure = (
         })
       : unavailable()
   if (fact._tag !== 'Call') return undefined
+  if (fact.staticValue !== undefined && fact.type._tag === 'Available') {
+    const value = staticValueExpression(
+      fact.staticValue,
+      fact.type.type,
+      fact.anchor,
+      options.context,
+      options.builder,
+    )
+    if (value._tag !== 'Unavailable') return value
+  }
   const typeArguments = fact.contract._tag === 'Compatible' ? fact.contract.typeArguments : []
   const arguments_ = Object.freeze(
     fact.arguments.map((argument) => tirExpression(argument.expression, options)),
@@ -1040,11 +1092,11 @@ const residualExpression = (
         })
   }
   if (fact._tag === 'Integer') {
-    return fact.integer._tag === 'Available'
+    return fact.integer._tag === 'Available' && fact.type._tag === 'Available'
       ? Object.freeze({
           _tag: 'IntegerLiteral',
           value: fact.integer.value,
-          type: fact.integer.type,
+          type: fact.type.type,
           span: options.context.spanOf(fact.anchor),
           origin: Tir.authored(fact.anchor),
         })
@@ -1070,7 +1122,7 @@ const residualExpression = (
         })
   }
   if (fact._tag === 'Floating') {
-    return fact.floating._tag === 'Available'
+    return fact.floating._tag === 'Available' && fact.type._tag === 'Available'
       ? Object.freeze({
           _tag: 'FloatingLiteral',
           bits: fact.floating.bits,
@@ -1269,6 +1321,7 @@ const residualExpression = (
   if (fact._tag === 'Identifier') {
     const materializeStaticReference =
       options.static === undefined ||
+      (fact.reference._tag === 'Resolved' && fact.reference.parameter.phase === 'Static') ||
       (fact.reference._tag === 'ResolvedBinding' && fact.reference.binding.staticIteration === true)
     if (
       materializeStaticReference &&
@@ -1474,14 +1527,9 @@ const residualExpression = (
       (loweredScrutinee._tag === 'Project' || loweredScrutinee._tag === 'IndexPlace')
         ? Object.freeze({ ...loweredScrutinee, access: 'ConsumeRequested' as const })
         : loweredScrutinee
-    if (scrutinee._tag === 'Unavailable' || fact.type._tag !== 'Available') {
-      return Object.freeze({
-        _tag: 'Unavailable',
-        span: options.context.spanOf(fact.anchor),
-        origin: Tir.authored(fact.anchor),
-      })
-    }
-    const target = fact.type.type
+    // Preserve the match row for rejected bodies so tooling can still inspect coverage, arms, and
+    // healthy children. `never` is the non-executable recovery type when the join itself failed.
+    const target: SemanticType = fact.type._tag === 'Available' ? fact.type.type : 'never'
     return Object.freeze({
       _tag: 'Match',
       match: fact.id,
@@ -2639,7 +2687,7 @@ export const tirExpectedExpression = (
     typeof target === 'string' &&
     Scalar.isIntegerSpelling(target)
   )
-    return publishExpression(
+    return publishExpectedExpression(
       options,
       Object.freeze({
         _tag: 'IntegerLiteral',
@@ -2648,17 +2696,12 @@ export const tirExpectedExpression = (
         span: options.context.spanOf(fact.anchor),
         origin: Tir.authored(fact.anchor),
       }),
+      fact,
     )
   const loweredSource = tirExpression(fact, options, borrow)
   if (loweredSource._tag === 'Unavailable') return loweredSource
   const unionTarget = Type.isUnion(target) ? target : undefined
-  let representation: Type.RepresentationArgument | undefined
-  if (unionTarget !== undefined) {
-    if ('origin' in fact) {
-      if (Type.isRepresented(loweredSource.type))
-        representation = loweredSource.type.representation.argument
-    } else representation = representationOfExpression(options.context, fact, options.builder)
-  }
+  const representation = representationOfExpression(options.context, fact, options.builder)
   const sourceContract = Type.isRepresented(loweredSource.type)
     ? loweredSource.type.contract
     : loweredSource.type
@@ -2703,16 +2746,17 @@ export const tirExpectedExpression = (
     return source
   if (compatibility._tag === 'Bottom') return source
   if (compatibility._tag === 'Incompatible') {
-    return publishExpression(
+    return publishExpectedExpression(
       options,
       Object.freeze({
         _tag: 'Unavailable',
         span: loweredSource.span,
         origin: loweredSource.origin,
       }),
+      fact,
     )
   }
-  return publishExpression(
+  return publishExpectedExpression(
     options,
     Object.freeze({
       _tag: 'UnionConvert',
@@ -2729,6 +2773,7 @@ export const tirExpectedExpression = (
       span: loweredSource.span,
       origin: loweredSource.origin,
     }),
+    fact,
   )
 }
 

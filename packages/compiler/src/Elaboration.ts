@@ -1550,14 +1550,19 @@ export const declaredReturnTypesCompatible = (
   declaration: DeclarationFact,
   expression: ExpressionDecision | Tir.Expression,
   compatibility?: TypeCompatibility.Context,
+  builder?: BodyBuilder.BodyBuilder,
 ): boolean => {
-  const expressionType = constructionExpressionType(expression)
+  const selected =
+    'origin' in expression && expression._tag === 'Unavailable' && builder !== undefined
+      ? (BodyBuilder.semanticOfExpression(builder, expression) ?? expression)
+      : expression
+  const expressionType = constructionExpressionType(selected)
   if (declaration.returnType._tag !== 'Resolved' || expressionType._tag !== 'Available')
     return false
   const source = expressionType.type
   const target = declaration.returnType.type
   if (typesCompatible(source, target, compatibility)) return true
-  const representation = representationOfExpression(context, expression)
+  const representation = representationOfExpression(context, selected, builder)
   const contract = Type.isRepresented(source) ? source.contract : source
   if (
     declaration.opaqueResult !== undefined &&
@@ -2048,8 +2053,16 @@ const callableFlowOf = (
     },
     descendExpressions: false,
   })
+  const constrainedSchemaOf = (
+    expression: ExpressionDecision | Tir.Expression,
+  ): Type.CallableSchema | undefined => {
+    const direct = constrainedCallableSchema(expression)
+    if (direct !== undefined || !('origin' in expression)) return direct
+    const semantic = BodyBuilder.semanticOfExpression(builder, expression)
+    return semantic === undefined ? undefined : constrainedCallableSchema(semantic)
+  }
   const value = (expression: ExpressionDecision | Tir.Expression): void => {
-    if (constrainedCallableSchema(expression) !== undefined)
+    if (constrainedSchemaOf(expression) !== undefined)
       escapes.push({ _tag: 'Value', at: constructionExpressionAnchor(expression) })
   }
   const expressionEscape = (expression: ExpressionDecision): void => {
@@ -2084,7 +2097,7 @@ const callableFlowOf = (
         ? canonicalFunctionKey(expression.reference.declaration)
         : undefined
     const arguments_ = expression.mappings.flatMap((mapping) =>
-      constrainedCallableSchema(mapping.argument.expression) === undefined
+      constrainedSchemaOf(mapping.argument.expression) === undefined
         ? []
         : [
             {
@@ -2093,7 +2106,7 @@ const callableFlowOf = (
             },
           ],
     )
-    const constrained = constrainedCallableSchema(expression) !== undefined
+    const constrained = constrainedSchemaOf(expression) !== undefined
     if (arguments_.length === 0 && !constrained) return
     escapes.push({
       _tag: 'Call',
@@ -2102,6 +2115,14 @@ const callableFlowOf = (
       ...(constrained ? { result: expression.anchor } : {}),
     })
   }
+  const semanticFlowVisitor: FactVisitor = {
+    expression: expressionEscape,
+    node: (expression) => {
+      if (expression._tag !== 'Unavailable') return
+      const semantic = BodyBuilder.semanticOfExpression(builder, expression)
+      if (semantic !== undefined) visitExpressionDecision(semantic, semanticFlowVisitor)
+    },
+  }
   visitStatements(fn.statements, {
     statement: (statement) => {
       if (statement._tag === 'Return') value(statement.expression)
@@ -2109,6 +2130,11 @@ const callableFlowOf = (
     },
     expression: expressionEscape,
     node: (expression) => {
+      if (expression._tag === 'Unavailable') {
+        const semantic = BodyBuilder.semanticOfExpression(builder, expression)
+        if (semantic !== undefined) visitExpressionDecision(semantic, semanticFlowVisitor)
+        return
+      }
       if (expression._tag === 'Construct' || expression._tag === 'ConstructUnionVariant') {
         for (const field of expression.fields) value(field.value)
         return
@@ -2136,7 +2162,7 @@ const callableFlowOf = (
           ? declaration.parameters.filter((parameter) => parameter.phase !== 'Static')
           : []
       const arguments_ = expression.arguments.flatMap((argument, position) =>
-        constrainedCallableSchema(argument) === undefined
+        constrainedSchemaOf(argument) === undefined
           ? []
           : [
               {
@@ -2145,7 +2171,7 @@ const callableFlowOf = (
               },
             ],
       )
-      const constrained = constrainedCallableSchema(expression) !== undefined
+      const constrained = constrainedSchemaOf(expression) !== undefined
       if (arguments_.length === 0 && !constrained) return
       escapes.push({
         _tag: 'Call',

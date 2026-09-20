@@ -937,6 +937,7 @@ it.effect('reuses exact unchanged syntax and module semantics inside one coheren
       Ownership.localSharedAccessBoundaryPlan(currentView.results),
       NameResolution.scopeOf(currentView.resolution, 'shared/Core')?.context ??
         raise('retained library context'),
+      retainedBody.results.causes,
     )
     const sourceProof = Ownership.sourceProof(ownershipInput) ?? raise('current-index source proof')
     const residual = ResidualOwnership.make()
@@ -1158,6 +1159,7 @@ unsafe fn probe(core: &Intrinsic.SharedCore<i32>) -> i32 { return 1 }`
         Ownership.localSharedAccessBoundaryPlan(before.results),
         NameResolution.scopeOf(before.resolution, 'shared/Callbacks')?.context ??
           raise('previous callbacks context'),
+        body.results.causes,
       )
       const currentInput = Ownership.input(
         fn,
@@ -1167,6 +1169,7 @@ unsafe fn probe(core: &Intrinsic.SharedCore<i32>) -> i32 { return 1 }`
         Ownership.localSharedAccessBoundaryPlan(after.results),
         NameResolution.scopeOf(after.resolution, 'shared/Callbacks')?.context ??
           raise('current callbacks context'),
+        body.results.causes,
       )
       assert.lengthOf(previousInput.boundaries, 0)
       assert.lengthOf(currentInput.boundaries, 1)

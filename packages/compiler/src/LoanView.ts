@@ -450,12 +450,16 @@ export const retainedResultArguments = (
     self.type._tag !== 'Available'
   )
     return []
-  if (self._tag === 'Call' && self.heldLoans !== undefined) {
-    const retained = new Set(self.heldLoans.map((loan) => loan.ordinal))
-    return self.arguments.filter((argument) => retained.has(argument.id.ordinal))
-  }
+  const held =
+    self._tag === 'Call' && self.heldLoans !== undefined
+      ? new Set(self.heldLoans.map((loan) => loan.ordinal))
+      : undefined
   const result = self.type.type
   return self.arguments.filter((argument) => {
+    // `heldLoans` is authoritative only for a direct borrow operand. A nested call or aggregate
+    // can carry its own loans into this result and still needs the ordinary type relation below.
+    if (held !== undefined && argument.expression._tag === 'Borrow')
+      return held.has(argument.id.ordinal)
     if (argument.type._tag !== 'Available') return false
     const source = argument.type.type
     if (Type.isReference(source) || Type.isSlice(source))

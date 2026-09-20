@@ -599,6 +599,13 @@ export const analyze = (
     statement: AuthoredHir.Anchor,
     place = false,
   ): void => {
+    if ('origin' in expression && expression._tag === 'Unavailable') {
+      const semantic = BodyBuilder.semanticOfExpression(builder, expression)
+      if (semantic !== undefined) {
+        visitExpression(semantic, statement, place)
+        return
+      }
+    }
     const expressionAnchor = Elaboration.constructionExpressionAnchor(expression)
     const expressionType = Elaboration.constructionExpressionType(expression)
     // Synthetic TIR nodes are conversions and other compiler-inserted structure around one
@@ -920,7 +927,13 @@ export const analyze = (
       }
       if (statement._tag === 'Return' || statement._tag === 'Fail') {
         const boundary = boundaries.get(AuthoredIdentity.anchorKey(statement.origin.anchor))
-        const expressionType = Elaboration.constructionExpressionType(statement.expression)
+        const directType = Elaboration.constructionExpressionType(statement.expression)
+        const semantic =
+          directType._tag === 'Unavailable' && statement.expression._tag === 'Unavailable'
+            ? BodyBuilder.semanticOfExpression(builder, statement.expression)
+            : undefined
+        const expressionType =
+          semantic === undefined ? directType : Elaboration.constructionExpressionType(semantic)
         if (expressionType._tag === 'Available' && boundary !== undefined)
           requireType(expressionType.type, boundary)
       } else if (statement._tag === 'Drop') {

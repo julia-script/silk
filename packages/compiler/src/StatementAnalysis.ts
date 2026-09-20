@@ -1241,18 +1241,18 @@ export const analyzeStatements = (
             ),
           ),
         })
-        facts.push(
-          ...analyzeStatements(
-            Object.freeze({
-              ...context,
-              staticContext,
-              resolution: Object.freeze({ ...context.resolution, staticContext }),
-            }),
-            selected,
-            scope,
-            loopStack,
-          ),
+        const selectedStatements = analyzeStatements(
+          Object.freeze({
+            ...context,
+            staticContext,
+            resolution: Object.freeze({ ...context.resolution, staticContext }),
+          }),
+          selected,
+          scope,
+          loopStack,
         )
+        facts.push(...selectedStatements)
+        if (!returnFlowOf(selectedStatements).fallsThrough) break
       }
       continue
     }
@@ -1312,6 +1312,19 @@ export const analyzeStatements = (
         throw new RangeError(`Semantic analysis cannot analyze ${valueNode._tag}`)
       }
       context.diagnostics.push(...value.diagnostics)
+      const rootAccess =
+        root === undefined ? undefined : assignmentRootAccess(root, destination.fact)
+      const writableRoot =
+        destination.fact._tag !== 'ForeignStatic' &&
+        root !== undefined &&
+        rootAccess !== 'ImmutableOwned' &&
+        rootAccess !== 'SharedBorrowed' &&
+        !(
+          rootAccess === 'ExclusiveBorrowed' &&
+          destination.fact._tag !== 'IndexProjection' &&
+          destination.fact._tag !== 'ReferentProjection' &&
+          destination.fact._tag !== 'FieldProjection'
+        )
       if (destination.fact._tag === 'ForeignStatic') {
         context.diagnostics.push(
           Diagnostic.immutableAssignment(
@@ -1327,7 +1340,7 @@ export const analyzeStatements = (
             Diagnostic.invalidAssignmentPlace(Location.at(destinationNode.anchor)),
           )
         }
-      } else if (assignmentRootAccess(root, destination.fact) === 'ImmutableOwned') {
+      } else if (rootAccess === 'ImmutableOwned') {
         context.diagnostics.push(
           Diagnostic.immutableAssignment(
             root.name._tag === 'Present' ? root.name.spelling : '?',
@@ -1335,8 +1348,8 @@ export const analyzeStatements = (
           ),
         )
       } else if (
-        assignmentRootAccess(root, destination.fact) === 'SharedBorrowed' ||
-        (assignmentRootAccess(root, destination.fact) === 'ExclusiveBorrowed' &&
+        rootAccess === 'SharedBorrowed' ||
+        (rootAccess === 'ExclusiveBorrowed' &&
           destination.fact._tag !== 'IndexProjection' &&
           destination.fact._tag !== 'ReferentProjection' &&
           destination.fact._tag !== 'FieldProjection')
@@ -1416,7 +1429,7 @@ export const analyzeStatements = (
         Object.freeze({
           _tag: 'WriteStatement',
           destination: expressionNode(destination),
-          ...(root === undefined ? {} : { root }),
+          ...(writableRoot ? { root } : {}),
           value: expressionNode(value),
           compatible,
           lifetimeProof: Lifetime.assumptions(
@@ -2225,7 +2238,11 @@ export const analyzeFunctionBody = (
   let validReturnContract = declaration.returnType._tag === 'Resolved'
   if (declaration.returnType._tag === 'Resolved') {
     for (const returned of returnFlow.returns) {
-      const returnedType = constructionExpressionType(returned.expression)
+      const returnedExpression =
+        'origin' in returned.expression && returned.expression._tag === 'Unavailable'
+          ? (BodyBuilder.semanticOfExpression(builder, returned.expression) ?? returned.expression)
+          : returned.expression
+      const returnedType = constructionExpressionType(returnedExpression)
       if (returnedType._tag !== 'Available') {
         validReturnContract = false
         continue
@@ -2236,8 +2253,9 @@ export const analyzeFunctionBody = (
           ? declaredReturnTypesCompatible(
               semantic,
               declaration,
-              returned.expression,
+              returnedExpression,
               bodyResolution?.lifetimeCompatibility,
+              builder,
             )
           : typesCompatible(
               actual,
@@ -2336,7 +2354,7 @@ export const analyzeFunctionBody = (
       staticIterations: Object.freeze([...context.staticIterations]),
       occurrences: Object.freeze([...occurrences.values()]),
       hints: TypeHint.rows(context.bindings, statements, builder),
-      opaqueEvidence: OpaqueRealization.evidenceOfBody(semantic, declaration, statements),
+      opaqueEvidence: OpaqueRealization.evidenceOfBody(semantic, declaration, statements, builder),
     }),
     diagnostics: Object.freeze([...context.diagnostics]),
     builder,

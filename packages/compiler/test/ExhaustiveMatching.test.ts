@@ -303,7 +303,7 @@ pub fn inspect(event: Token | End) -> i32 {
     incomplete.diagnostics.map((diagnostic) => diagnostic.code),
     ['SEM0044', 'SEM0046', 'SEM0045', 'SEM0042'],
   )
-  assert.strictEqual(incomplete.functions.at(0)?.returnedExpression._tag, 'Unavailable')
+  assert.strictEqual(incomplete.functions.at(0)?.returnedExpression._tag, 'Match')
 
   const unreachable = analyze(
     'unreachable',
@@ -316,7 +316,7 @@ pub fn inspect(event: Token) -> i32 {
     unreachable.diagnostics.map((diagnostic) => diagnostic.code),
     ['SEM0043'],
   )
-  assert.strictEqual(unreachable.functions.at(0)?.returnedExpression._tag, 'Unavailable')
+  assert.strictEqual(unreachable.functions.at(0)?.returnedExpression._tag, 'Match')
 
   const incompatible = analyze(
     'incompatible',
@@ -346,7 +346,7 @@ pub fn inspect(event: Token, offset: i32) -> i32 {
     result.diagnostics.map((diagnostic) => diagnostic.code),
     'SEM0048',
   )
-  assert.strictEqual(result.functions.at(0)?.returnedExpression._tag, 'Unavailable')
+  assert.strictEqual(result.functions.at(0)?.returnedExpression._tag, 'Match')
 })
 
 it('joins nominal arm results and records explicit MatchArm widening in TIR', () => {

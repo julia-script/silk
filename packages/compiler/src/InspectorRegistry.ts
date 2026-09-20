@@ -275,12 +275,7 @@ export const views: ReadonlyArray<ViewDefinition> = [
       const layout = Analysis.layoutOf(snapshot)
       const shapes = layout._tag === 'Available' ? layout.value.callingShapes : []
       return {
-        rows: structValueRows(
-          SemanticContext.fromModules(snapshot.closure.modules),
-          literals,
-          projections,
-          shapes,
-        ),
+        rows: structValueRows(snapshot.index, literals, projections, shapes),
         meta: `${literals.length} lit · ${projections.length} proj`,
       }
     },

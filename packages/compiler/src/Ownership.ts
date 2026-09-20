@@ -3135,6 +3135,7 @@ const analyzeLoans = (
           ...active,
           ...delayedLoansAt(context.spanOf(expression.anchor)),
         ]
+        const capturedLoans: Array<LoanFact> = []
         for (const [ordinal, capture] of expression.captures.entries()) {
           let root: BindingSite
           if (capture.reference._tag === 'BindingFact')
@@ -3177,10 +3178,14 @@ const analyzeLoans = (
             endSpan: delayedEnd?.span ?? context.spanOf(expression.anchor),
             cleanupOnly: delayedEnd?.cleanupOnly ?? false,
           })
-          loans.push(loan)
+          capturedLoans.push(loan)
           captureActive.push(loan)
         }
+        // The deferred body executes through its captured capabilities. Publish those loans only
+        // after inspecting the body so its own reads and writes do not conflict with the views
+        // that authorize them.
         statements(expression.statements)
+        loans.push(...capturedLoans)
         return
       }
       case 'Run':
@@ -4396,9 +4401,14 @@ const checkFunction = (
     const candidates = new Map(
       expression.members.map((member) => [Match.encodeIdentity(member), candidateFor(member)]),
     )
+    // A `never` match has no result value to consume. This also covers the non-executable
+    // recovery match retained after a rejected result join, whose arms remain available to
+    // tooling but must not produce follow-on move diagnostics.
+    const consumesArmResult = consuming && !Type.isNever(expression.type)
     const continuing: Array<FlowState> = []
     const armFacts: Array<MatchOwnership['arms'][number]> = []
     for (const arm of expression.arms) {
+      if (!arm.reachable) continue
       const selected = expression.members.filter(
         (member) =>
           candidates.has(Match.encodeIdentity(member)) &&
@@ -4521,7 +4531,14 @@ const checkFunction = (
           }),
         })
         if (arm.body._tag === 'Expression') {
-          completes = checkExpression(state, armLive, arm.body.expression, consuming, guard, true)
+          completes = checkExpression(
+            state,
+            armLive,
+            arm.body.expression,
+            consumesArmResult,
+            guard,
+            true,
+          )
         } else {
           const result = walkStatements(
             arm.body.statements,

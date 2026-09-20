@@ -1191,12 +1191,22 @@ export const symbolRows = (
  * on one row pair is what makes the reordering inspectable rather than folklore.
  */
 export const structValueRows = (
-  _spans: SemanticContext.Registry,
+  index: DeclarationIndex.Index,
   literals: ReadonlyArray<Extract<Tir.Expression, { readonly _tag: 'Construct' }>>,
   projections: ReadonlyArray<Extract<Tir.Expression, { readonly _tag: 'Project' }>>,
   shapes: ReadonlyArray<Layout.CallingShape>,
 ): ReadonlyArray<RowModel> => {
   const rows: Array<RowModel> = []
+  const fieldName = (nominal: Type.Nominal, field: DeclarationFacts.FieldId): string => {
+    const declaration = DeclarationFacts.byCanonical(index, {
+      _tag: 'CanonicalDeclarationId',
+      module: nominal.module,
+      name: nominal.name,
+    })
+    if (declaration?._tag !== 'StructDeclaration') return `#${field.ordinal}`
+    const fact = declaration.fields.at(field.ordinal)
+    return fact === undefined ? `#${field.ordinal}` : declaredName(fact.name)
+  }
 
   rows.push({
     key: 'literals',
@@ -1219,13 +1229,16 @@ export const structValueRows = (
       key: `${key}-source`,
       depth: 2,
       label: 'source order',
-      detail: literal.evaluationOrder.map((field) => `#${field.ordinal}`).join(', ') || 'empty',
+      detail:
+        literal.evaluationOrder.map((field) => fieldName(literal.nominal, field)).join(', ') ||
+        'empty',
     })
     rows.push({
       key: `${key}-canonical`,
       depth: 2,
       label: 'canonical order',
-      detail: literal.fields.map(({ field }) => `#${field.ordinal}`).join(', ') || 'empty',
+      detail:
+        literal.fields.map(({ field }) => fieldName(literal.nominal, field)).join(', ') || 'empty',
     })
   }
 
@@ -1240,7 +1253,7 @@ export const structValueRows = (
     rows.push({
       key: `proj-${span.start}-${span.end}`,
       depth: 1,
-      label: `${typeText(projection.nominal)}.#${projection.field.ordinal}`,
+      label: `${typeText(projection.nominal)}.${fieldName(projection.nominal, projection.field)}`,
       detail: projection.access.toLowerCase(),
       span,
     })
