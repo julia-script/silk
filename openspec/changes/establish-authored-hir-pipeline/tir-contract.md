@@ -625,17 +625,27 @@ except where stated.
    `structuredClone` equality as a secondary check; spec sync; an inventory check that nothing
    imports a deleted schema.
 
-**Order as implemented.** Step 2 cannot delete `SemanticRebinding` while the cached product is
-still the fact tree: facts embed the declaration objects of their revision, so a cached fact can only
-be reused by rebinding it. Converting facts to ids would be work that step 6 deletes. The same holds
-for span-derived identities: `BorrowId`, `TemporaryOwnerId` and the site ids become node references,
-which need the node ids of step 3, and rebuilding them on anchors first would be redone there. So
-step 2 is split. Its identity types and the node-based identities land with the schema in step 3;
-the `Request`/`Validity` split, returning the cached object on a hit, and the deletion of
-`SemanticRebinding` land directly after step 6, when the cached product is the checked body. The
-milestone still closes only with rebinding and the duplicate body both gone.
+**Order as implemented.** A cached fact tree embeds the declaration objects of its revision and can
+only be reused by rebinding it, so `SemanticRebinding` could not go while facts were the cached
+product. It went as soon as they were not: every stage after construction was moved to nodes and
+body tables, `BodyQuery` then stored the checked unit of each declaration (its bodies, their tables
+and located diagnostics), and `SemanticRebinding` was deleted in that same change. The
+`Request`/`Validity` types, node ids and the span-derived identities (`BorrowId`,
+`TemporaryOwnerId`, the site ids) still land with the schema in step 3; until then those identities
+carry an authored anchor beside the span, which is what lets a cached body be presented again.
 
-Step 6 removes the duplicate body and, with the rest of step 2, rebinding.
+**What reuse still does to a cached body.** Two things, both temporary and both named here so they
+are not mistaken for the design:
+
+- _Renumbering._ A declaration id is a position in its module, so inserting a declaration renumbers
+  the ones after it. A reused body is copied once with each declaration id replaced by its current
+  one; a compiler-made body follows its enclosing declaration. Declaration ids keyed by authored
+  identity make the copy unnecessary, and the cached object itself is then returned on every hit,
+  as the `Validity` section requires.
+- _Ownership positions._ Ownership proofs are reported in source coordinates. When a reused body
+  only moved, each position of its proof follows the body's own presentation from the previous
+  revision to this one; a position the body does not account for means the proof is checked again.
+  Ownership results that name authored nodes make this a `present` like any other.
 
 **What construction keeps private.** Analysis reasons about the subexpressions it has just checked:
 their resolved references, contracts, written sub-tokens and recovery states. Typed nodes do not carry
@@ -644,10 +654,14 @@ keeps working records while it builds a body. The boundary is strict and is what
 duplicate body:
 
 - a working record never leaves construction: `Elaboration.Result` exposes checked bodies and their
-  tables, and nothing outside construction imports a record type;
+  tables, and no stage after construction imports a record type. `Elaboration.records` is the one
+  seam, for tests of construction and for the inspector, which shows construction itself;
 - nothing caches a record: reuse stores the checked body only;
 - everything a later stage or a tool needs is either on a node or in a table the body publishes
-  (occurrences, inference rows, scopes, lifetimes, diagnostics, provenance);
+  (occurrences, inference rows, scopes and their locals, expression types, lifetimes, opaque-result
+  evidence, generated aggregates, static structure, callable flow, diagnostics, provenance). A rule
+  that spans bodies, such as the constrained-callable escape rule, is a join over per-body rows, so
+  a reused body takes part without being read again;
 - the evaluator reads nodes, also while a body is still being built.
 
 **Presentation of a checked body.** Stages after construction still read source coordinates (loan
