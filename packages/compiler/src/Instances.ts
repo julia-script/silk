@@ -2074,7 +2074,10 @@ export const discover = (
               key: provided.target,
               ...(provided.staticArgumentOrigins === undefined
                 ? {}
-                : { staticArgumentOrigins: provided.staticArgumentOrigins }),
+                : {
+                    staticArgumentOrigins: provided.staticArgumentOrigins,
+                    selectedBy: provided.owner,
+                  }),
               ancestors: withAncestor(branchHistory, Object.freeze({ key: provided.target })),
               ...(cleanupSpecialization && cleanup !== undefined
                 ? { cleanupMeasure: cleanup }
