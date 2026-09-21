@@ -100,6 +100,11 @@ fn helper() -> () { let value = 2 drop value }`)
 test fn beta() -> () { helper() }
 fn helper() -> () { let value = 4 drop value }`,
       )
+      const headerEdit = yield* fingerprintSnapshot(
+        `pub test fn alpha() -> () { let value = 1 drop value }
+test fn beta() -> () { helper() }
+fn helper() -> () { let value = 2 drop value }`,
+      )
       const movedAndTriviaEdit = yield* fingerprintSnapshot(`
 
 fn unrelated() {}
@@ -121,6 +126,14 @@ fn helper() -> () { let value = 2 drop value }`)
       assert.strictEqual(
         fingerprints(before).get('Cases:beta'),
         fingerprints(bodyAndHelperEdit).get('Cases:beta'),
+      )
+      assert.notStrictEqual(
+        fingerprints(before).get('Cases:alpha'),
+        fingerprints(headerEdit).get('Cases:alpha'),
+      )
+      assert.strictEqual(
+        fingerprints(before).get('Cases:beta'),
+        fingerprints(headerEdit).get('Cases:beta'),
       )
       assert.strictEqual(
         fingerprints(before).get('Cases:alpha'),
@@ -181,6 +194,51 @@ it.effect('requires ownership and logical-path facts for reachable in-memory sou
       assert.deepEqual(attempted.failure.reason, {
         _tag: 'MissingDiscoverySource',
         module: 'MemoryTests',
+      })
+    }
+  }),
+)
+
+it.effect('requires ownership facts for in-memory sources reached by selected imports', () =>
+  Effect.gen(function* () {
+    const attempted = yield* Effect.result(
+      Analysis.make({
+        root: 'Runner',
+        target: 'x86_64-unknown-linux-gnu',
+        discovery: {
+          root: 'MemoryTests',
+          sources: new Map([
+            [
+              'MemoryTests',
+              { ownership: 'Project' as const, logicalPath: 'tests/MemoryTests.silk' },
+            ],
+          ]),
+        },
+      }).pipe(
+        Effect.provide(
+          SourceResolver.overlay([
+            source('Runner', 'pub fn main() -> () {}'),
+            SourceFile.make(
+              'MemoryTests',
+              encoder.encode('static if true { import SelectedTests }'),
+              SourceOrigin.memory('memory://tests'),
+            ),
+            SourceFile.make(
+              'SelectedTests',
+              encoder.encode('test fn omitted() {}'),
+              SourceOrigin.memory('memory://selected-tests'),
+            ),
+          ]).pipe(Layer.provideMerge(SourceResolver.empty)),
+        ),
+      ),
+    )
+
+    assert.isTrue(Result.isFailure(attempted))
+    if (Result.isFailure(attempted)) {
+      assert.strictEqual(attempted.failure._tag, 'ModuleClosureError')
+      assert.deepEqual(attempted.failure.reason, {
+        _tag: 'MissingDiscoverySource',
+        module: 'SelectedTests',
       })
     }
   }),

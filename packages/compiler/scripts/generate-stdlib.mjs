@@ -63,7 +63,11 @@ for (const [index, entry] of manifest.entries()) {
     ...new Set(
       [...source.matchAll(/\bIntrinsic\.([A-Za-z_][A-Za-z0-9_]*)/g)].map((match) => match[1]),
     ),
-  ].sort()
+  ].sort((left, right) => {
+    if (left < right) return -1
+    if (left > right) return 1
+    return 0
+  })
   const staticInventory = intrinsicInventory.filter((operation) => staticIntrinsics.has(operation))
   const runtimeInventory = intrinsicInventory.filter(
     (operation) => !staticIntrinsics.has(operation),
@@ -87,8 +91,8 @@ const entries = modules
     sourceIdentity: '${entry.sourceIdentity}',
     digest: '${entry.digest}',
     documentation: '${entry.documentation}',
-    staticInventory: ${aliasesLiteral(entry.staticInventory)},
-    runtimeInventory: ${aliasesLiteral(entry.runtimeInventory)},
+    staticInventory: ${aliasesLiteral(entry.staticInventory, 78)},
+    runtimeInventory: ${aliasesLiteral(entry.runtimeInventory, 77)},
     ${entry.namespace === undefined ? '' : `namespace: '${entry.namespace}',\n    `}${entry.aliases === undefined ? '' : `aliases: ${aliasesLiteral(entry.aliases, 86)},\n    `}source:
       ${sourceLiteral(entry.source)},
   },`,

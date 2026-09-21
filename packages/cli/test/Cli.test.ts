@@ -115,7 +115,10 @@ effect fn readWithFixedClock() -> () {
 }
 test fn succeeds() {}
 test effect fn fails() ! bool { fail false }
-test fn locallyProvided() -> () { return run readWithFixedClock() }`,
+test effect fn locallyProvided() -> () ! bool {
+  run readWithFixedClock()
+  fail false
+}`,
       )
 
       const executed = yield* Effect.result(
@@ -132,7 +135,11 @@ test fn locallyProvided() -> () { return run readWithFixedClock() }`,
         ]),
       )
 
-      assert.strictEqual(Result.isSuccess(executed), true)
+      assert.strictEqual(Result.isFailure(executed), true)
+      if (Result.isFailure(executed)) {
+        assert.strictEqual(executed.failure._tag, 'CommandExit')
+        if (executed.failure._tag === 'CommandExit') assert.strictEqual(executed.failure.status, 1)
+      }
     }).pipe(Effect.scoped, Effect.provide(CompilerHost.layer)),
   Timeouts.nativeBuild,
 )

@@ -590,6 +590,7 @@ const selectModules = Effect.fn('Frontend.selectModules')(function* (
   )
   const selectedClosure = ModuleClosure.view(selected.closure, closure.rootModule)
   if (selectedClosure === undefined) throw new RangeError('Module selection lost its root')
+  yield* ModuleClosure.validateDiscoverySources(request, selectedClosure)
   return { closure: selectedClosure, selection: selected.selection }
 })
 

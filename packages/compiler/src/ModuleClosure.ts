@@ -504,35 +504,38 @@ export const view = (self: ProjectClosure, rootModule: string): Closure | undefi
       })
     : undefined
 
-const validateDiscoverySources = Effect.fnUntraced(function* (
-  request: CompilationRequest,
-  closure: Closure,
-): Effect.fn.Return<void, ModuleClosureError> {
-  if (request.discovery === undefined) return
-  const modules = new Map(closure.modules.map((module) => [module.name, module]))
-  const reached = new Set<string>()
-  const pending = [request.discovery.root]
-  while (pending.length > 0) {
-    pending.sort(compareText)
-    const name = pending.shift()
-    if (name === undefined || reached.has(name)) continue
-    const module = modules.get(name)
-    if (module === undefined) continue
-    reached.add(name)
-    if (
-      !Stdlib.isReserved(name) &&
-      module.syntax.source.origin._tag === 'Memory' &&
-      request.discovery.sources?.has(name) !== true
-    )
-      return yield* new ModuleClosureError({
-        operation: 'ModuleClosure.loadProject',
-        message: `In-memory discovery source ${name} requires ownership and a logical path`,
-        reason: { _tag: 'MissingDiscoverySource', module: name },
-      })
-    for (const imported of module.imports)
-      if (imported.target._tag === 'Resolved') pending.push(imported.target.module)
-  }
-})
+/** Requires explicit ownership and logical paths for every in-memory source reached from discovery. */
+export const validateDiscoverySources = Effect.fn('ModuleClosure.validateDiscoverySources')(
+  function* (
+    request: CompilationRequest,
+    closure: Closure,
+  ): Effect.fn.Return<void, ModuleClosureError> {
+    if (request.discovery === undefined) return
+    const modules = new Map(closure.modules.map((module) => [module.name, module]))
+    const reached = new Set<string>()
+    const pending = [request.discovery.root]
+    while (pending.length > 0) {
+      pending.sort(compareText)
+      const name = pending.shift()
+      if (name === undefined || reached.has(name)) continue
+      const module = modules.get(name)
+      if (module === undefined) continue
+      reached.add(name)
+      if (
+        !Stdlib.isReserved(name) &&
+        module.syntax.source.origin._tag === 'Memory' &&
+        request.discovery.sources?.has(name) !== true
+      )
+        return yield* new ModuleClosureError({
+          operation: 'ModuleClosure.loadProject',
+          message: `In-memory discovery source ${name} requires ownership and a logical path`,
+          reason: { _tag: 'MissingDiscoverySource', module: name },
+        })
+      for (const imported of module.imports)
+        if (imported.target._tag === 'Resolved') pending.push(imported.target.module)
+    }
+  },
+)
 
 /** Discovers the unconditional bootstrap closure of one compilation request. Use Analysis.make for profile-selected frontend facts. */
 export const load = Effect.fn('ModuleClosure.load')(function* (

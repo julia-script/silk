@@ -566,6 +566,11 @@ test fn runsAfterFailure() -> () {
         assert.strictEqual(empty.status, 0, empty.stderr)
         assert.include(empty.stdout, 'summary: 4 discovered, 0 selected, 0 passed, 0 failed')
 
+        const malformed = yield* runCompiled(outcome.path, {
+          arguments: ['--unknown', 'value'],
+        })
+        assert.strictEqual(malformed.status, 2, malformed.stderr)
+
         const trapped = yield* runCompiled(outcome.path, {
           arguments: ['--file', 'tests/Trap.silk'],
         })
@@ -574,6 +579,7 @@ test fn runsAfterFailure() -> () {
           true,
           `expected fatal test trap, native exited ${trapped.status}`,
         )
+        assert.include(trapped.stdout, 'test tests/Trap::fatalTrap')
         assert.notInclude(trapped.stdout, 'summary:')
       }),
     ),
