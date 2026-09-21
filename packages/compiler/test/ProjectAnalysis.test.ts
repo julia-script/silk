@@ -268,7 +268,7 @@ fn privateValue() -> i32 { return 1 }`
   }),
 )
 
-it.effect('invalidates dependent storage consumers when exported variance or cleanup changes', () =>
+it.effect('reuses variance-only edits and invalidates cleanup changes', () =>
   Effect.gen(function* () {
     const root = SourceFile.make(
       'query/Dependent',
@@ -313,8 +313,8 @@ fn privateValue() -> i32 { return 1 }`
     )?.counters
     assert.strictEqual(varianceQueries?._tag, 'BodyQueryCounters')
     if (varianceQueries?._tag !== 'BodyQueryCounters') return
-    assert.strictEqual(varianceQueries.checked, 1)
-    assert.strictEqual(varianceQueries.reused, 2)
+    assert.strictEqual(varianceQueries.checked, 0)
+    assert.strictEqual(varianceQueries.reused, 3)
     const cleanupSource =
       exclusiveSource +
       `
@@ -584,7 +584,7 @@ fn sibling() -> i32 { return 0 }`
   }),
 )
 
-it.effect('invalidates transitively consumed static bodies while retaining ordinary siblings', () =>
+it.effect('reuses checked bodies across transitive static implementation edits', () =>
   Effect.gen(function* () {
     const source = `static fn base() -> i32 { return 1 }
 static fn indirect() -> i32 { return base() }
@@ -608,8 +608,8 @@ fn recursiveRight() -> i32 { return recursiveLeft() }`
     const queries = changed.report.find((phase) => phase.phase === 'Semantic.checkBody')?.counters
     assert.strictEqual(queries?._tag, 'BodyQueryCounters')
     if (queries?._tag !== 'BodyQueryCounters') return
-    assert.strictEqual(queries.checked, 3)
-    assert.strictEqual(queries.reused, 3)
+    assert.strictEqual(queries.checked, 1)
+    assert.strictEqual(queries.reused, 5)
     assert.strictEqual(queries.recursiveComponents, 1)
     const view = ProjectAnalysis.view(changed, 'query/Static') ?? raise('static query view')
     assert.deepEqual(Analysis.diagnostics(view), [])

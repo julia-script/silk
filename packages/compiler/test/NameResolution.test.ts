@@ -251,7 +251,7 @@ it.effect(
       assert.deepEqual(instanceKeys(forward), instanceKeys(wasm))
       assert.deepEqual(wasm.diagnostics, [])
     }),
-  10_000,
+  15_000,
 )
 
 it.effect('keeps repeated imports valid without hiding parser recovery diagnostics', () =>

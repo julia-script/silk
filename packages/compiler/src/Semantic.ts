@@ -58,6 +58,7 @@ interface Runtime {
     }
   >
   readonly presentations: Map<string, unknown>
+  conformanceCandidatesFingerprint?: string
   queries?: SemanticQuery.Session
 }
 
@@ -117,17 +118,6 @@ const stableJson = (value: unknown): string =>
 // Boundary spans are presentation data; semantic identity depends only on the row shape.
 const boundaryFingerprint = (boundaries: ReadonlyArray<SourceSpan.SourceSpan>): string =>
   String(boundaries.length)
-
-const conformanceCandidateFingerprints = new WeakMap<DeclarationIndex.Index, string>()
-
-const conformanceCandidatesFingerprint = (index: DeclarationIndex.Index): string => {
-  let fingerprint = conformanceCandidateFingerprints.get(index)
-  if (fingerprint === undefined) {
-    fingerprint = ToolchainIntegrity.contentDigest(ModuleSurface.resolutionSignature(index))
-    conformanceCandidateFingerprints.set(index, fingerprint)
-  }
-  return fingerprint
-}
 
 const declarationKey = (id: DeclarationFacts.CanonicalId): string => id.module + '.' + id.name
 
@@ -283,8 +273,12 @@ const readInput = (
       return headerFingerprint(index, parts[0] ?? '', parts[1] ?? '')
     case 'AssociatedCandidates':
       return associatedCandidatesFingerprint(index, parts[0] ?? '', parts[1] ?? '', parts[2] ?? '')
-    case 'ConformanceCandidates':
-      return conformanceCandidatesFingerprint(index)
+    case 'ConformanceCandidates': {
+      runtime.conformanceCandidatesFingerprint ??= ToolchainIntegrity.contentDigest(
+        ModuleSurface.resolutionSignature(index),
+      )
+      return runtime.conformanceCandidatesFingerprint
+    }
     case 'BodyHeader':
       return runtime.bodies.get(parts[0] ?? '')?.header
     case 'BodyImplementation':
