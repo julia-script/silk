@@ -2,6 +2,7 @@ import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Option from 'effect/Option'
 import * as Result from 'effect/Result'
+import * as Source from '../src/Source.js'
 import * as SourceResolver from '../src/SourceResolver.js'
 
 const ascii = (value: string): Uint8Array =>
@@ -12,29 +13,28 @@ it.effect('resolves exact immutable bytes from replaceable memory storage', () =
     const original = ascii('source')
     const layer = SourceResolver.memory(new Map([['compiler/Syntax', original]]))
     original[0] = 0
-    const found = yield* SourceResolver.resolve('compiler/Syntax').pipe(Effect.provide(layer))
+    const found = yield* Source.load('compiler/Syntax').pipe(Effect.provide(layer))
     assert.strictEqual(Option.isSome(found), true)
     if (Option.isSome(found)) {
       assert.deepEqual(found.value.bytes, ascii('source'))
       assert.strictEqual(found.value.origin._tag, 'Memory')
     }
-    const absent = yield* SourceResolver.resolve('compiler/syntax').pipe(Effect.provide(layer))
+    const absent = yield* Source.load('compiler/syntax').pipe(Effect.provide(layer))
     assert.strictEqual(Option.isNone(absent), true)
   }),
 )
 
 it.effect('empty storage reports absence and invalid identities fail precisely', () =>
   Effect.gen(function* () {
-    const absent = yield* SourceResolver.resolve('missing/Module').pipe(
-      Effect.provide(SourceResolver.empty),
-    )
+    const absent = yield* Source.load('missing/Module').pipe(Effect.provide(SourceResolver.empty))
     assert.strictEqual(Option.isNone(absent), true)
     const invalid = yield* Effect.result(
-      SourceResolver.resolve('../escape').pipe(Effect.provide(SourceResolver.empty)),
+      Source.load('../escape').pipe(Effect.provide(SourceResolver.empty)),
     )
     assert.strictEqual(Result.isFailure(invalid), true)
     if (Result.isFailure(invalid)) {
       assert.strictEqual(invalid.failure.reason._tag, 'InvalidModuleIdentity')
+      assert.strictEqual(invalid.failure.operation, 'Source.load')
     }
   }),
 )

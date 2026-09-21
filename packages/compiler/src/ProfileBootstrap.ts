@@ -11,7 +11,8 @@ import * as PackageConfiguration from './PackageConfiguration.js'
 import * as PackageParameter from './PackageParameter.js'
 import * as Residualization from './Residualization.js'
 import type * as SemanticContext from './SemanticContext.js'
-import type * as StaticEvaluation from './StaticEvaluation.js'
+import type * as StaticEvaluation from './Evaluation.js'
+import * as CompilerTrace from './CompilerTrace.js'
 import type * as StaticValue from './StaticValue.js'
 
 /** The unconditional source graph needed to resolve package defaults before specialization. */
@@ -53,6 +54,7 @@ export const complete = Effect.fn('ProfileBootstrap.complete')(function* (
   source: Source,
   bindings: ReadonlyArray<PackageConfiguration.Binding> = [],
 ): Effect.fn.Return<Completion, ConfigurationError.ConfigurationError> {
+  const trace = yield* CompilerTrace.capture()
   yield* Target.validateDescription(initial.target).pipe(
     Effect.mapError(() =>
       ConfigurationError.make('ProfileBootstrap.complete', 'InvalidInput', 'target description'),
@@ -82,6 +84,7 @@ export const complete = Effect.fn('ProfileBootstrap.complete')(function* (
     source.resolution,
     source.index,
     explicit,
+    trace,
   )
   const completed: Array<CompilationProfile.Parameter> = []
   const values = new Map<string, StaticValue.Value>()

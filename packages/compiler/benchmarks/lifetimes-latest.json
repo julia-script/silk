@@ -97,7 +97,7 @@
           "elapsedMs": 0.5751250000000141
         },
         {
-          "phase": "body-queries",
+          "phase": "Semantic.checkBody",
           "elapsedMs": 7.779333
         },
         {
@@ -258,7 +258,7 @@
           "elapsedMs": 0.12312499999995907
         },
         {
-          "phase": "body-queries",
+          "phase": "Semantic.checkBody",
           "elapsedMs": 0.93325
         },
         {
@@ -407,7 +407,7 @@
           "elapsedMs": 0.03516700000000128
         },
         {
-          "phase": "body-queries",
+          "phase": "Semantic.checkBody",
           "elapsedMs": 3.968458
         },
         {
@@ -574,7 +574,7 @@
           "elapsedMs": 0.06091699999996081
         },
         {
-          "phase": "body-queries",
+          "phase": "Semantic.checkBody",
           "elapsedMs": 9.743417
         },
         {
@@ -737,7 +737,7 @@
           "elapsedMs": 0.043083000000024185
         },
         {
-          "phase": "body-queries",
+          "phase": "Semantic.checkBody",
           "elapsedMs": 2.356167
         },
         {
@@ -885,7 +885,7 @@
           "elapsedMs": 0.02924999999999045
         },
         {
-          "phase": "body-queries",
+          "phase": "Semantic.checkBody",
           "elapsedMs": 0.901833
         },
         {
@@ -1046,7 +1046,7 @@
           "elapsedMs": 0.11120899999997391
         },
         {
-          "phase": "body-queries",
+          "phase": "Semantic.checkBody",
           "elapsedMs": 2.333541
         },
         {
@@ -1213,7 +1213,7 @@
           "elapsedMs": 0.1732499999999959
         },
         {
-          "phase": "body-queries",
+          "phase": "Semantic.checkBody",
           "elapsedMs": 1.272542
         },
         {
@@ -1380,7 +1380,7 @@
           "elapsedMs": 0.041083000000014636
         },
         {
-          "phase": "body-queries",
+          "phase": "Semantic.checkBody",
           "elapsedMs": 0.750958
         },
         {
@@ -1541,7 +1541,7 @@
           "elapsedMs": 0.0464579999999728
         },
         {
-          "phase": "body-queries",
+          "phase": "Semantic.checkBody",
           "elapsedMs": 0.565416
         },
         {
@@ -1708,7 +1708,7 @@
           "elapsedMs": 0.04750000000001364
         },
         {
-          "phase": "body-queries",
+          "phase": "Semantic.checkBody",
           "elapsedMs": 0.576375
         },
         {
@@ -1875,7 +1875,7 @@
           "elapsedMs": 0.05058299999996052
         },
         {
-          "phase": "body-queries",
+          "phase": "Semantic.checkBody",
           "elapsedMs": 1.193958
         },
         {
@@ -2029,7 +2029,7 @@
           "elapsedMs": 0.039249999999981355
         },
         {
-          "phase": "body-queries",
+          "phase": "Semantic.checkBody",
           "elapsedMs": 3.750792
         },
         {
@@ -2177,7 +2177,7 @@
           "elapsedMs": 0.0262079999999969
         },
         {
-          "phase": "body-queries",
+          "phase": "Semantic.checkBody",
           "elapsedMs": 1.652709
         },
         {
@@ -2339,7 +2339,7 @@
           "elapsedMs": 0.020458999999959815
         },
         {
-          "phase": "body-queries",
+          "phase": "Semantic.checkBody",
           "elapsedMs": 0.969125
         },
         {
@@ -2513,7 +2513,7 @@
           "elapsedMs": 0.05858299999999872
         },
         {
-          "phase": "body-queries",
+          "phase": "Semantic.checkBody",
           "elapsedMs": 0.899792
         },
         {
@@ -2686,7 +2686,7 @@
           "elapsedMs": 0.10104200000000674
         },
         {
-          "phase": "body-queries",
+          "phase": "Semantic.checkBody",
           "elapsedMs": 2.753791
         },
         {
@@ -2821,7 +2821,7 @@
           "elapsedMs": 0.10524999999995543
         },
         {
-          "phase": "body-queries",
+          "phase": "Semantic.checkBody",
           "elapsedMs": 0.660834
         },
         {
@@ -2977,7 +2977,7 @@
           "elapsedMs": 0.08762500000000273
         },
         {
-          "phase": "body-queries",
+          "phase": "Semantic.checkBody",
           "elapsedMs": 3.148875
         },
         {
@@ -3133,7 +3133,7 @@
           "elapsedMs": 0.12383399999998801
         },
         {
-          "phase": "body-queries",
+          "phase": "Semantic.checkBody",
           "elapsedMs": 1.738959
         },
         {
@@ -3320,7 +3320,7 @@
           "elapsedMs": 0.18191699999999855
         },
         {
-          "phase": "body-queries",
+          "phase": "Semantic.checkBody",
           "elapsedMs": 3.121125
         },
         {
@@ -3482,7 +3482,7 @@
           "elapsedMs": 0.10545799999999872
         },
         {
-          "phase": "body-queries",
+          "phase": "Semantic.checkBody",
           "elapsedMs": 1.89675
         },
         {
@@ -3652,7 +3652,7 @@
           "elapsedMs": 0.08866599999998925
         },
         {
-          "phase": "body-queries",
+          "phase": "Semantic.checkBody",
           "elapsedMs": 1.27725
         },
         {
@@ -3813,7 +3813,7 @@
           "elapsedMs": 0.06200000000001182
         },
         {
-          "phase": "body-queries",
+          "phase": "Semantic.checkBody",
           "elapsedMs": 0.397916
         },
         {
@@ -3962,7 +3962,7 @@
           "elapsedMs": 0.03766699999994216
         },
         {
-          "phase": "body-queries",
+          "phase": "Semantic.checkBody",
           "elapsedMs": 1.585708
         },
         {
@@ -4129,7 +4129,7 @@
           "elapsedMs": 0.04316700000003948
         },
         {
-          "phase": "body-queries",
+          "phase": "Semantic.checkBody",
           "elapsedMs": 7.854541
         },
         {
@@ -4292,7 +4292,7 @@
           "elapsedMs": 0.03558399999997164
         },
         {
-          "phase": "body-queries",
+          "phase": "Semantic.checkBody",
           "elapsedMs": 1.948708
         },
         {
@@ -4440,7 +4440,7 @@
           "elapsedMs": 0.034667000000013104
         },
         {
-          "phase": "body-queries",
+          "phase": "Semantic.checkBody",
           "elapsedMs": 1.192416
         },
         {
@@ -4601,7 +4601,7 @@
           "elapsedMs": 0.15612499999997453
         },
         {
-          "phase": "body-queries",
+          "phase": "Semantic.checkBody",
           "elapsedMs": 3.012375
         },
         {
@@ -4768,7 +4768,7 @@
           "elapsedMs": 0.1330000000000382
         },
         {
-          "phase": "body-queries",
+          "phase": "Semantic.checkBody",
           "elapsedMs": 0.976042
         },
         {
@@ -4935,7 +4935,7 @@
           "elapsedMs": 0.04658400000005258
         },
         {
-          "phase": "body-queries",
+          "phase": "Semantic.checkBody",
           "elapsedMs": 0.90875
         },
         {
@@ -5096,7 +5096,7 @@
           "elapsedMs": 0.029125000000021828
         },
         {
-          "phase": "body-queries",
+          "phase": "Semantic.checkBody",
           "elapsedMs": 0.49175
         },
         {
@@ -5263,7 +5263,7 @@
           "elapsedMs": 0.0674579999999878
         },
         {
-          "phase": "body-queries",
+          "phase": "Semantic.checkBody",
           "elapsedMs": 0.927875
         },
         {
@@ -5430,7 +5430,7 @@
           "elapsedMs": 0.04720800000006875
         },
         {
-          "phase": "body-queries",
+          "phase": "Semantic.checkBody",
           "elapsedMs": 1.707166
         },
         {
@@ -5584,7 +5584,7 @@
           "elapsedMs": 0.03341699999998582
         },
         {
-          "phase": "body-queries",
+          "phase": "Semantic.checkBody",
           "elapsedMs": 3.645916
         },
         {
@@ -5732,7 +5732,7 @@
           "elapsedMs": 0.027000000000043656
         },
         {
-          "phase": "body-queries",
+          "phase": "Semantic.checkBody",
           "elapsedMs": 1.535125
         },
         {
@@ -5894,7 +5894,7 @@
           "elapsedMs": 0.018916999999987638
         },
         {
-          "phase": "body-queries",
+          "phase": "Semantic.checkBody",
           "elapsedMs": 1.46125
         },
         {
@@ -6068,7 +6068,7 @@
           "elapsedMs": 0.08083299999998417
         },
         {
-          "phase": "body-queries",
+          "phase": "Semantic.checkBody",
           "elapsedMs": 1.255042
         },
         {
@@ -6241,7 +6241,7 @@
           "elapsedMs": 0.14470800000003692
         },
         {
-          "phase": "body-queries",
+          "phase": "Semantic.checkBody",
           "elapsedMs": 3.703708
         },
         {
@@ -6376,7 +6376,7 @@
           "elapsedMs": 0.12191699999993943
         },
         {
-          "phase": "body-queries",
+          "phase": "Semantic.checkBody",
           "elapsedMs": 0.8995
         },
         {
@@ -6532,7 +6532,7 @@
           "elapsedMs": 0.10908300000005511
         },
         {
-          "phase": "body-queries",
+          "phase": "Semantic.checkBody",
           "elapsedMs": 3.140792
         },
         {
@@ -6688,7 +6688,7 @@
           "elapsedMs": 0.11891700000001038
         },
         {
-          "phase": "body-queries",
+          "phase": "Semantic.checkBody",
           "elapsedMs": 3.078042
         },
         {
@@ -6899,7 +6899,7 @@
           "elapsedMs": 0.138417000000004
         },
         {
-          "phase": "body-queries",
+          "phase": "Semantic.checkBody",
           "elapsedMs": 6.288542
         },
         {
@@ -7061,7 +7061,7 @@
           "elapsedMs": 0.11770899999999074
         },
         {
-          "phase": "body-queries",
+          "phase": "Semantic.checkBody",
           "elapsedMs": 2.470875
         },
         {
@@ -7231,7 +7231,7 @@
           "elapsedMs": 0.09204099999999471
         },
         {
-          "phase": "body-queries",
+          "phase": "Semantic.checkBody",
           "elapsedMs": 2.063125
         },
         {
@@ -7392,7 +7392,7 @@
           "elapsedMs": 0.10587499999996908
         },
         {
-          "phase": "body-queries",
+          "phase": "Semantic.checkBody",
           "elapsedMs": 0.373958
         },
         {
@@ -7541,7 +7541,7 @@
           "elapsedMs": 0.029291000000057466
         },
         {
-          "phase": "body-queries",
+          "phase": "Semantic.checkBody",
           "elapsedMs": 2.451375
         },
         {
@@ -7708,7 +7708,7 @@
           "elapsedMs": 0.04766699999993307
         },
         {
-          "phase": "body-queries",
+          "phase": "Semantic.checkBody",
           "elapsedMs": 22.950875
         },
         {
@@ -7871,7 +7871,7 @@
           "elapsedMs": 0.030375000000049113
         },
         {
-          "phase": "body-queries",
+          "phase": "Semantic.checkBody",
           "elapsedMs": 2.755
         },
         {
@@ -8019,7 +8019,7 @@
           "elapsedMs": 0.03233399999999165
         },
         {
-          "phase": "body-queries",
+          "phase": "Semantic.checkBody",
           "elapsedMs": 1.383541
         },
         {
@@ -8180,7 +8180,7 @@
           "elapsedMs": 0.24883299999999053
         },
         {
-          "phase": "body-queries",
+          "phase": "Semantic.checkBody",
           "elapsedMs": 5.712834
         },
         {
@@ -8347,7 +8347,7 @@
           "elapsedMs": 0.1153749999999718
         },
         {
-          "phase": "body-queries",
+          "phase": "Semantic.checkBody",
           "elapsedMs": 0.809583
         },
         {
@@ -8514,7 +8514,7 @@
           "elapsedMs": 0.05408399999998892
         },
         {
-          "phase": "body-queries",
+          "phase": "Semantic.checkBody",
           "elapsedMs": 1.48725
         },
         {
@@ -8675,7 +8675,7 @@
           "elapsedMs": 0.03674999999998363
         },
         {
-          "phase": "body-queries",
+          "phase": "Semantic.checkBody",
           "elapsedMs": 0.505209
         },
         {
@@ -8842,7 +8842,7 @@
           "elapsedMs": 0.08024999999997817
         },
         {
-          "phase": "body-queries",
+          "phase": "Semantic.checkBody",
           "elapsedMs": 1.532583
         },
         {
@@ -9009,7 +9009,7 @@
           "elapsedMs": 0.07062499999994998
         },
         {
-          "phase": "body-queries",
+          "phase": "Semantic.checkBody",
           "elapsedMs": 1.80275
         },
         {
@@ -9163,7 +9163,7 @@
           "elapsedMs": 0.029957999999965068
         },
         {
-          "phase": "body-queries",
+          "phase": "Semantic.checkBody",
           "elapsedMs": 4.33025
         },
         {
@@ -9311,7 +9311,7 @@
           "elapsedMs": 0.023416999999994914
         },
         {
-          "phase": "body-queries",
+          "phase": "Semantic.checkBody",
           "elapsedMs": 2.008083
         },
         {
@@ -9473,7 +9473,7 @@
           "elapsedMs": 0.028999999999996362
         },
         {
-          "phase": "body-queries",
+          "phase": "Semantic.checkBody",
           "elapsedMs": 2.497959
         },
         {
@@ -9647,7 +9647,7 @@
           "elapsedMs": 0.06987499999991087
         },
         {
-          "phase": "body-queries",
+          "phase": "Semantic.checkBody",
           "elapsedMs": 1.747542
         },
         {
@@ -9820,7 +9820,7 @@
           "elapsedMs": 0.17566699999997581
         },
         {
-          "phase": "body-queries",
+          "phase": "Semantic.checkBody",
           "elapsedMs": 6.735375
         },
         {
@@ -9955,7 +9955,7 @@
           "elapsedMs": 0.2307500000000573
         },
         {
-          "phase": "body-queries",
+          "phase": "Semantic.checkBody",
           "elapsedMs": 2.475625
         },
         {
@@ -10111,7 +10111,7 @@
           "elapsedMs": 0.25845800000001873
         },
         {
-          "phase": "body-queries",
+          "phase": "Semantic.checkBody",
           "elapsedMs": 5.512542
         },
         {
@@ -10267,7 +10267,7 @@
           "elapsedMs": 0.18516599999998107
         },
         {
-          "phase": "body-queries",
+          "phase": "Semantic.checkBody",
           "elapsedMs": 6.82725
         },
         {
@@ -10526,7 +10526,7 @@
           "elapsedMs": 0.21387499999991633
         },
         {
-          "phase": "body-queries",
+          "phase": "Semantic.checkBody",
           "elapsedMs": 8.245833
         },
         {
@@ -10688,7 +10688,7 @@
           "elapsedMs": 0.22062500000004093
         },
         {
-          "phase": "body-queries",
+          "phase": "Semantic.checkBody",
           "elapsedMs": 3.483417
         },
         {

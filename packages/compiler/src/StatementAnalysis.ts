@@ -76,7 +76,7 @@ import * as Match from './Match.js'
 import * as NameResolution from './NameResolution.js'
 import * as SemanticDisplay from './SemanticDisplay.js'
 import * as SourceSpan from './SourceSpan.js'
-import * as StaticEvaluation from './StaticEvaluation.js'
+import * as StaticEvaluation from './Evaluation.js'
 import * as StaticValue from './StaticValue.js'
 import * as Type from './Type.js'
 export const unsafeCallDiagnostic = (

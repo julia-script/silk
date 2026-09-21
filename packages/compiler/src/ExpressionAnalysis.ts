@@ -111,7 +111,7 @@ import {
   expressionNever,
   unsafeCallDiagnostic,
 } from './StatementAnalysis.js'
-import * as StaticEvaluation from './StaticEvaluation.js'
+import * as StaticEvaluation from './Evaluation.js'
 import * as LiteralForm from './LiteralForm.js'
 import * as StaticText from './StaticText.js'
 import * as StaticValue from './StaticValue.js'
@@ -11423,7 +11423,7 @@ export const evaluateStatic = (
   staticContext: StaticAnalysisContext,
   resolution: Pick<ResolutionContext, 'generatedAggregates'> | undefined,
 ): StaticEvaluation.Outcome<StaticValue.Value> =>
-  StaticEvaluation.evaluate(staticContext.nodes.expression(fact), {
+  StaticEvaluation.evaluateNode(staticContext.nodes.expression(fact), {
     ...staticContext,
     lookup: (id) =>
       resolution?.generatedAggregates?.get(`${id.module}:${id.name}`) ?? staticContext.lookup(id),

@@ -1,4 +1,5 @@
 import type * as CompilationProfile from './CompilationProfile.js'
+import * as CompilerTrace from './CompilerTrace.js'
 import type * as AuthoredHir from './AuthoredHir.js'
 import type * as DeclarationFacts from './DeclarationFacts.js'
 import * as Diagnostic from './Diagnostic.js'
@@ -1344,7 +1345,7 @@ const bindPattern = (
 }
 
 /** Evaluates a node at a static application boundary, where no lexical transfer may escape. */
-export const evaluate = (
+export const evaluateNode = (
   node: Tir.Expression,
   context: NodeContext,
 ): Outcome<StaticValue.Value> => {
@@ -2193,6 +2194,7 @@ export interface CacheEntry<A> {
 interface MutableState<A> {
   readonly cache: Map<string, CacheState<A>>
   readonly budget: MutableBudget
+  readonly trace: CompilerTrace.CompilerTrace
 }
 
 const stateSymbol: unique symbol = Symbol('StaticEvaluation.state')
@@ -2210,6 +2212,7 @@ export const make = <A>(
   compilation: CompilationProfile.Initial | CompilationProfile.CompilationProfile,
   policy: Limits = defaultLimits,
   sourceIdentity = '',
+  trace: CompilerTrace.CompilerTrace = CompilerTrace.none,
 ): Evaluation<A> =>
   Object.freeze({
     _tag: 'StaticEvaluation',
@@ -2217,6 +2220,7 @@ export const make = <A>(
     limits: limits(policy),
     [stateSymbol]: {
       cache: new Map(),
+      trace,
       budget: {
         steps: 0,
         callDepth: 0,
@@ -2446,82 +2450,101 @@ const evaluateAt = <A>(
 ): ApplicationResult<A> => {
   const key = applicationKey(self.environment, application)
   const state = self[stateSymbol]
-  // A request made while nothing is being evaluated is a root: it gets the whole allowance.
-  // Everything it asks for draws from what it has left.
-  const root = state.budget.callDepth === 0
-  if (root) {
-    state.budget.steps = 0
-    state.budget.maximumCallDepth = 0
-    state.budget.retainedValueBytes = 0
-    state.budget.residualNodes = 0
-    delete state.budget.failure
-  }
-  const trace = appendTrace(parentTrace, applicationFrame(self.environment, application))
-  const cached = state.cache.get(key)
-  if (cached?._tag === 'Complete' || cached?._tag === 'Failed') {
-    // Cache warmth never changes what is accepted: a hit costs what the evaluation cost.
-    const unpaid = cached.cost === undefined ? undefined : chargeCost(self, cached.cost, trace)
-    return unpaid === undefined
-      ? resultOf(self, key, cached, true)
-      : resultOf(self, key, Object.freeze({ _tag: 'Failed', failure: unpaid }), false)
-  }
-  if (cached?._tag === 'Pending') {
-    const failure: Cycle = Object.freeze({
-      _tag: 'Cycle',
-      declaration: Object.freeze({ ...application.declaration }),
-      span: application.span,
-      trace: frozenTrace(trace),
-    })
-    return resultOf(self, key, Object.freeze({ _tag: 'Failed', failure }), false)
-  }
+  const existing = state.cache.get(key)
+  let branch: 'reuse' | 'cycle' | 'execute'
+  if (existing?._tag === 'Complete' || existing?._tag === 'Failed') branch = 'reuse'
+  else if (existing?._tag === 'Pending') branch = 'cycle'
+  else branch = 'execute'
+  return state.trace(
+    'Evaluation.evaluate',
+    () => {
+      // A request made while nothing is being evaluated is a root: it gets the whole allowance.
+      // Everything it asks for draws from what it has left.
+      const root = state.budget.callDepth === 0
+      if (root) {
+        state.budget.steps = 0
+        state.budget.maximumCallDepth = 0
+        state.budget.retainedValueBytes = 0
+        state.budget.residualNodes = 0
+        delete state.budget.failure
+      }
+      const trace = appendTrace(parentTrace, applicationFrame(self.environment, application))
+      const cached = state.cache.get(key)
+      if (cached?._tag === 'Complete' || cached?._tag === 'Failed') {
+        // Cache warmth never changes what is accepted: a hit costs what the evaluation cost.
+        const unpaid = cached.cost === undefined ? undefined : chargeCost(self, cached.cost, trace)
+        return unpaid === undefined
+          ? resultOf(self, key, cached, true)
+          : resultOf(self, key, Object.freeze({ _tag: 'Failed', failure: unpaid }), false)
+      }
+      if (cached?._tag === 'Pending') {
+        const failure: Cycle = Object.freeze({
+          _tag: 'Cycle',
+          declaration: Object.freeze({ ...application.declaration }),
+          span: application.span,
+          trace: frozenTrace(trace),
+        })
+        return resultOf(self, key, Object.freeze({ _tag: 'Failed', failure }), false)
+      }
 
-  state.cache.set(key, Object.freeze({ _tag: 'Pending', trace }))
-  const before = { ...state.budget }
-  const depthFailure = enterCall(self, trace)
-  let outcome: Outcome<A>
-  if (depthFailure === undefined) {
-    // Depth is measured from this entry, so the recorded cost does not depend on the caller.
-    state.budget.maximumCallDepth = state.budget.callDepth
-    try {
-      outcome = callback(contextOf(self, application, trace))
-    } catch (defect) {
-      state.cache.delete(key)
-      throw defect
-    } finally {
-      leaveCall(self)
-    }
-  } else outcome = failed<A>(depthFailure)
-  const finalOutcome =
-    state.budget.failure === undefined ? outcome : failed<A>(state.budget.failure)
-  const cost: Cost = Object.freeze({
-    steps: state.budget.steps - before.steps,
-    callDepth: state.budget.maximumCallDepth - before.callDepth,
-    retainedValueBytes: state.budget.retainedValueBytes - before.retainedValueBytes,
-    residualNodes: state.budget.residualNodes - before.residualNodes,
-  })
-  state.budget.maximumCallDepth = Math.max(before.maximumCallDepth, state.budget.maximumCallDepth)
-  const completedState: Complete<A> | Failed =
-    finalOutcome._tag === 'Complete'
-      ? Object.freeze({ _tag: 'Complete', value: finalOutcome.value, cost })
-      : Object.freeze({ _tag: 'Failed', failure: finalOutcome.failure, cost })
-  // Running out of a remainder is a fact about what the callers spent, not about this evaluation:
-  // nothing is recorded under its key, and the exhaustion surfaces as the root's outcome. A root
-  // that exhausts the whole allowance is a fact about its key, which includes the limits.
-  if (!root && completedState._tag === 'Failed' && isLimit(completedState.failure))
-    state.cache.delete(key)
-  else state.cache.set(key, completedState)
-  return resultOf(self, key, completedState, false)
+      state.cache.set(key, Object.freeze({ _tag: 'Pending', trace }))
+      const before = { ...state.budget }
+      const depthFailure = enterCall(self, trace)
+      let outcome: Outcome<A>
+      if (depthFailure === undefined) {
+        // Depth is measured from this entry, so the recorded cost does not depend on the caller.
+        state.budget.maximumCallDepth = state.budget.callDepth
+        try {
+          outcome = callback(contextOf(self, application, trace))
+        } catch (defect) {
+          state.cache.delete(key)
+          throw defect
+        } finally {
+          leaveCall(self)
+        }
+      } else outcome = failed<A>(depthFailure)
+      const finalOutcome =
+        state.budget.failure === undefined ? outcome : failed<A>(state.budget.failure)
+      const cost: Cost = Object.freeze({
+        steps: state.budget.steps - before.steps,
+        callDepth: state.budget.maximumCallDepth - before.callDepth,
+        retainedValueBytes: state.budget.retainedValueBytes - before.retainedValueBytes,
+        residualNodes: state.budget.residualNodes - before.residualNodes,
+      })
+      state.budget.maximumCallDepth = Math.max(
+        before.maximumCallDepth,
+        state.budget.maximumCallDepth,
+      )
+      const completedState: Complete<A> | Failed =
+        finalOutcome._tag === 'Complete'
+          ? Object.freeze({ _tag: 'Complete', value: finalOutcome.value, cost })
+          : Object.freeze({ _tag: 'Failed', failure: finalOutcome.failure, cost })
+      // Running out of a remainder is a fact about what the callers spent, not about this evaluation:
+      // nothing is recorded under its key, and the exhaustion surfaces as the root's outcome. A root
+      // that exhausts the whole allowance is a fact about its key, which includes the limits.
+      if (!root && completedState._tag === 'Failed' && isLimit(completedState.failure))
+        state.cache.delete(key)
+      else state.cache.set(key, completedState)
+      return resultOf(self, key, completedState, false)
+    },
+    {
+      'evaluation.branch': branch,
+      'evaluation.reuse': branch === 'reuse',
+      module: application.declaration.module,
+      declaration: application.declaration.name,
+    },
+  )
 }
 
 /** Evaluates or reuses one canonical target application through the supplied deterministic policy. */
-export const evaluateApplication = <A>(
+export const evaluate = <A>(
   self: Evaluation<A>,
   application: Application,
   callback: EvaluationCallback<A>,
 ): ApplicationResult<A> => evaluateAt(self, application, callback, Object.freeze([]))
 
 /** Evaluates a nested canonical application while retaining its source-level parent trace. */
-export const evaluateApplicationFrom = <A>(
+export const evaluateFrom = <A>(
   self: Evaluation<A>,
   application: Application,
   parentTrace: Trace,

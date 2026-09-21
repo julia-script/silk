@@ -4,6 +4,7 @@ import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Exit from 'effect/Exit'
 import * as Fiber from 'effect/Fiber'
+import * as Tracer from 'effect/Tracer'
 import * as Analysis from '../src/Analysis.js'
 import * as FrontendTooling from '../src/FrontendTooling.js'
 import * as Tir from '../src/Tir.js'
@@ -36,6 +37,34 @@ const make = (requestedRoots = roots) =>
       ),
     ),
   )
+
+it.effect('traces fresh and reused declarations through Semantic.checkBody', () =>
+  Effect.gen(function* () {
+    const spans: Array<Tracer.Span> = []
+    const tracer = Tracer.make({
+      span(options) {
+        const span = new Tracer.NativeSpan(options)
+        spans.push(span)
+        return span
+      },
+    })
+    yield* Effect.gen(function* () {
+      const initial = yield* make()
+      yield* ProjectAnalysis.revise(
+        initial,
+        roots.map((source) => source.id),
+      ).pipe(
+        Effect.provide(
+          SourceResolver.overlay(roots).pipe(Layer.provideMerge(SourceResolver.memory(sources))),
+        ),
+      )
+    }).pipe(Effect.withTracer(tracer))
+    assert.isTrue(spans.some((span) => span.name === 'Semantic.checkBody'))
+    assert.isTrue(spans.some((span) => span.name === 'Semantic.checkBody.execute'))
+    assert.isTrue(spans.some((span) => span.name === 'Semantic.checkBody.reuse'))
+    assert.isFalse(spans.some((span) => span.name.startsWith('PhaseReport.measure')))
+  }),
+)
 
 it.effect(
   'isolates selected surfaces by profile while reusing parsed syntax and ignoring unloaded edits',
@@ -237,7 +266,9 @@ fn privateValue() -> i32 { return 1 }`
       assert.deepEqual(Analysis.diagnostics(view), [])
     }
     const counts = (project: ProjectAnalysis.ProjectAnalysis) => {
-      const counters = project.report.find((phase) => phase.phase === 'body-queries')?.counters
+      const counters = project.report.find(
+        (phase) => phase.phase === 'Semantic.checkBody',
+      )?.counters
       if (counters?._tag !== 'BodyQueryCounters') return raise('body counters')
       return counters
     }
@@ -288,7 +319,9 @@ fn privateValue() -> i32 { return 1 }`
         SourceResolver.overlay([root]).pipe(Layer.provideMerge(resolve(editedSource))),
       ),
     )
-    const privateQueries = edited.report.find((phase) => phase.phase === 'body-queries')?.counters
+    const privateQueries = edited.report.find(
+      (phase) => phase.phase === 'Semantic.checkBody',
+    )?.counters
     assert.strictEqual(privateQueries?._tag, 'BodyQueryCounters')
     if (privateQueries?._tag !== 'BodyQueryCounters') return
     assert.strictEqual(privateQueries.checked, 1)
@@ -303,7 +336,7 @@ fn privateValue() -> i32 { return 1 }`
       ),
     )
     const varianceQueries = exclusive.report.find(
-      (phase) => phase.phase === 'body-queries',
+      (phase) => phase.phase === 'Semantic.checkBody',
     )?.counters
     assert.strictEqual(varianceQueries?._tag, 'BodyQueryCounters')
     if (varianceQueries?._tag !== 'BodyQueryCounters') return
@@ -321,7 +354,9 @@ impl<'a> Drop for Guard<'a> { fn drop(self: &mut Guard<'a>) -> () { return () } 
         SourceResolver.overlay([root]).pipe(Layer.provideMerge(resolve(cleanupSource))),
       ),
     )
-    const cleanupQueries = cleanup.report.find((phase) => phase.phase === 'body-queries')?.counters
+    const cleanupQueries = cleanup.report.find(
+      (phase) => phase.phase === 'Semantic.checkBody',
+    )?.counters
     assert.strictEqual(cleanupQueries?._tag, 'BodyQueryCounters')
     if (cleanupQueries?._tag !== 'BodyQueryCounters') return
     // Adding a conformance changes the resolution catalog; implementation-only hook edits do not.
@@ -339,7 +374,9 @@ impl<'a> Drop for Guard<'a> { fn drop(self: &mut Guard<'a>) -> () { return () } 
         ),
       ),
     )
-    const hookQueries = hookEdited.report.find((phase) => phase.phase === 'body-queries')?.counters
+    const hookQueries = hookEdited.report.find(
+      (phase) => phase.phase === 'Semantic.checkBody',
+    )?.counters
     assert.strictEqual(hookQueries?._tag, 'BodyQueryCounters')
     if (hookQueries?._tag !== 'BodyQueryCounters') return
     assert.strictEqual(hookQueries.checked, 1)
@@ -382,7 +419,7 @@ pub fn value() -> i32 { return privateValue() }`
           ),
         ),
       )
-      const queries = revised.report.find((phase) => phase.phase === 'body-queries')?.counters
+      const queries = revised.report.find((phase) => phase.phase === 'Semantic.checkBody')?.counters
       assert.strictEqual(queries?._tag, 'BodyQueryCounters')
       if (queries?._tag !== 'BodyQueryCounters') return
       assert.strictEqual(queries.checked, 1)
@@ -401,7 +438,7 @@ pub fn value() -> i32 { return privateValue() }`
         ),
       )
       const renamedQueries = renamed.report.find(
-        (phase) => phase.phase === 'body-queries',
+        (phase) => phase.phase === 'Semantic.checkBody',
       )?.counters
       assert.strictEqual(renamedQueries?._tag, 'BodyQueryCounters')
       if (renamedQueries?._tag !== 'BodyQueryCounters') return
@@ -457,7 +494,7 @@ fn additional() -> i32 { let value = 6 return Core.identity(&value).* }`),
         ),
       )
       const additionalQueries = additional.report.find(
-        (phase) => phase.phase === 'body-queries',
+        (phase) => phase.phase === 'Semantic.checkBody',
       )?.counters
       assert.strictEqual(additionalQueries?._tag, 'BodyQueryCounters')
       if (additionalQueries?._tag !== 'BodyQueryCounters') return
@@ -477,7 +514,7 @@ fn additional() -> i32 { let value = 6 return Core.identity(&value).* }`),
         ),
       )
       const boundQueries = changedBound.report.find(
-        (phase) => phase.phase === 'body-queries',
+        (phase) => phase.phase === 'Semantic.checkBody',
       )?.counters
       assert.strictEqual(boundQueries?._tag, 'BodyQueryCounters')
       if (boundQueries?._tag !== 'BodyQueryCounters') return
@@ -536,7 +573,9 @@ fn sibling() -> i32 { return 0 }`
         ),
       ),
     )
-    const unrelatedWork = unrelated.report.find((phase) => phase.phase === 'body-queries')?.counters
+    const unrelatedWork = unrelated.report.find(
+      (phase) => phase.phase === 'Semantic.checkBody',
+    )?.counters
     assert.strictEqual(unrelatedWork?._tag, 'BodyQueryCounters')
     if (unrelatedWork?._tag !== 'BodyQueryCounters') return
     assert.strictEqual(unrelatedWork.checked, 1)
@@ -560,7 +599,9 @@ fn sibling() -> i32 { return 0 }`
         ),
       ),
     )
-    const repairedWork = repaired.report.find((phase) => phase.phase === 'body-queries')?.counters
+    const repairedWork = repaired.report.find(
+      (phase) => phase.phase === 'Semantic.checkBody',
+    )?.counters
     assert.strictEqual(repairedWork?._tag, 'BodyQueryCounters')
     if (repairedWork?._tag !== 'BodyQueryCounters') return
     assert.strictEqual(repairedWork.checked, 2)
@@ -591,7 +632,7 @@ fn recursiveRight() -> i32 { return recursiveLeft() }`
         ]).pipe(Layer.provideMerge(SourceResolver.memory(sources))),
       ),
     )
-    const queries = changed.report.find((phase) => phase.phase === 'body-queries')?.counters
+    const queries = changed.report.find((phase) => phase.phase === 'Semantic.checkBody')?.counters
     assert.strictEqual(queries?._tag, 'BodyQueryCounters')
     if (queries?._tag !== 'BodyQueryCounters') return
     assert.strictEqual(queries.checked, 3)
@@ -625,7 +666,7 @@ fn broken() -> i32 { return missing() }`
           ),
         ),
       )
-      const queries = current.report.find((phase) => phase.phase === 'body-queries')?.counters
+      const queries = current.report.find((phase) => phase.phase === 'Semantic.checkBody')?.counters
       assert.strictEqual(queries?._tag, 'BodyQueryCounters')
       if (queries?._tag !== 'BodyQueryCounters') return
       assert.strictEqual(queries.checked, 1)
@@ -730,7 +771,7 @@ it.effect('analyzes a shared dependency once and derives structurally shared roo
         'declaration-index',
         'name-resolution',
         'module-surface',
-        'body-queries',
+        'Semantic.checkBody',
         'semantic-invalidation',
         'elaboration',
         'ownership',
@@ -1184,7 +1225,9 @@ unsafe fn probe(core: &Intrinsic.SharedCore<i32>) -> i32 { return 1 }`
         after.semantics.get('shared/Callbacks')?.ownership,
         after.ownership.get('shared/Callbacks'),
       )
-      const counters = revised.report.find((phase) => phase.phase === 'body-queries')?.counters
+      const counters = revised.report.find(
+        (phase) => phase.phase === 'Semantic.checkBody',
+      )?.counters
       assert.strictEqual(counters?._tag, 'BodyQueryCounters')
       if (counters?._tag !== 'BodyQueryCounters') return
       assert.strictEqual(counters.checked, 1)

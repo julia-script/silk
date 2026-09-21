@@ -2,6 +2,7 @@ import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Layer from 'effect/Layer'
 import * as Option from 'effect/Option'
+import * as Tracer from 'effect/Tracer'
 import * as ArtifactComposition from '../src/ArtifactComposition.js'
 import * as CompilationProfile from '../src/CompilationProfile.js'
 import * as Preparation from '../src/Preparation.js'
@@ -129,9 +130,20 @@ it.effect('keeps analysis intent frontend-only and promotes into a new bundle', 
       ['component/application', ascii('pub fn main() -> i32 { return 42 }')],
       ['custom/storage', provider],
     ])
+    const spans: Array<Tracer.Span> = []
+    const tracer = Tracer.make({
+      span(options) {
+        const span = new Tracer.NativeSpan(options)
+        spans.push(span)
+        return span
+      },
+    })
     const analysis = yield* Preparation.prepare(request, 'analysis').pipe(
       Effect.provide(counting(sources).layer),
+      Effect.withTracer(tracer),
     )
+    assert.isTrue(spans.some((span) => span.name === 'Preparation.prepare'))
+    assert.isFalse(spans.some((span) => span.name.startsWith('PhaseReport.measure')))
     const phases = analysis.frontend.report.map((phase) => phase.phase)
     assert.include(phases, 'elaboration')
     for (const phase of ['instance-discovery', 'target-layout', 'mir-lowering'])

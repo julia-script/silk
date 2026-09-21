@@ -21,7 +21,7 @@ snapshots. Repeated analysis of identical input SHALL produce identical answers.
 
 Normal analysis, hover, diagnostics, indexing, and inspection SHALL perform no runtime execution and
 SHALL expose no runtime value, outcome, trace, blocked reason, terminal, host adapter, or execution
-request. Compile-time `StaticEvaluation` MAY run only where language analysis requires it.
+request. Compile-time `Evaluation` MAY run only where language analysis requires it.
 
 #### Scenario: Inspect a valid program
 

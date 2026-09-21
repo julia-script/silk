@@ -1,6 +1,6 @@
 import * as Data from 'effect/Data'
 import * as ConfigurationOrigin from './ConfigurationOrigin.js'
-import type * as StaticEvaluation from './StaticEvaluation.js'
+import type * as StaticEvaluation from './Evaluation.js'
 
 export type Code =
   | 'InvalidInput'

@@ -29,6 +29,7 @@ import * as PhaseReport from './PhaseReport.js'
 import * as SemanticInvalidation from './SemanticInvalidation.js'
 import * as SourceResolver from './SourceResolver.js'
 import * as ArtifactComposition from './ArtifactComposition.js'
+import * as CompilerTrace from './CompilerTrace.js'
 
 /** Optional environment-specific observations attached to compiler phase reports. */
 export interface Options {
@@ -138,6 +139,7 @@ const elaborateModules = Effect.fn('Frontend.elaborateModules')(function* (
   precomputed: ReadonlyMap<string, Elaboration.Result> = new Map(),
   bodyQuery?: BodyQuery.BodyQuery,
 ): Effect.fn.Return<ElaboratedModules> {
+  const trace = yield* CompilerTrace.capture()
   const results = new Map<string, Elaboration.Result>()
   const computed = new Map<string, Elaboration.Result>()
   for (const [ordinal, module] of closure.modules.entries()) {
@@ -162,6 +164,7 @@ const elaborateModules = Effect.fn('Frontend.elaborateModules')(function* (
         headers: moduleHeaders,
         scope,
         index: headers.index,
+        trace,
         ...(bodyQuery === undefined ? {} : { bodyQuery }),
       })
       const published = bodyQuery === undefined ? result : BodyQuery.publish(bodyQuery, result)
@@ -860,7 +863,7 @@ export const frontendProject = Effect.fn('Frontend.frontendProject')(function* (
   )
   const currentElaboration = yield* PhaseReport.measureEffectInto(
     report,
-    'body-queries',
+    'Semantic.checkBody',
     headers.index.modules.reduce((sum, module) => sum + module.declarations.length, 0),
     elaborateModules(closure, headers, new Map(), new Map(), bodyQueries),
     (value) =>
@@ -923,7 +926,7 @@ export const frontendProject = Effect.fn('Frontend.frontendProject')(function* (
       ...(previous === undefined ? { opaqueRealizations: currentOpaqueRealizations } : {}),
     }),
   )
-  const queryReport = report.findIndex((phase) => phase.phase === 'body-queries')
+  const queryReport = report.findIndex((phase) => phase.phase === 'Semantic.checkBody')
   const measuredQuery = report[queryReport]
   if (measuredQuery !== undefined)
     report[queryReport] = PhaseReport.make({

@@ -31,7 +31,7 @@ import * as ResidualOwnership from './ResidualOwnership.js'
 import * as RowAlgebra from './RowAlgebra.js'
 import * as SourceSpan from './SourceSpan.js'
 import * as Specialization from './Specialization.js'
-import * as StaticEvaluation from './StaticEvaluation.js'
+import * as StaticEvaluation from './Evaluation.js'
 import * as StaticValue from './StaticValue.js'
 import * as SuspensionMode from './SuspensionMode.js'
 import type * as Target from './Target.js'
@@ -1232,6 +1232,7 @@ export const discover = (
     index,
     undefined,
     completion.values,
+    trace,
   )
   const residualOwnership = ResidualOwnership.make()
   // Ownership reads spans and evaluation order from the module that authored the body it checks.

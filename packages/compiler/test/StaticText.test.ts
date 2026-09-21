@@ -7,8 +7,10 @@ import * as SourceResolver from '../src/SourceResolver.js'
 import { createHash } from 'node:crypto'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
+import * as Tracer from 'effect/Tracer'
 import * as Analysis from '../src/Analysis.js'
 import * as CompilationProfile from '../src/CompilationProfile.js'
+import * as CompilerTrace from '../src/CompilerTrace.js'
 import * as PackageConfiguration from '../src/PackageConfiguration.js'
 import * as ProfileBootstrap from '../src/ProfileBootstrap.js'
 import * as ConfigurationOrigin from '../src/ConfigurationOrigin.js'
@@ -31,7 +33,7 @@ import * as AuthoredLowering from '../src/AuthoredLowering.js'
 import * as SemanticContext from '../src/SemanticContext.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as Location from '../src/Location.js'
-import * as StaticEvaluation from '../src/StaticEvaluation.js'
+import * as StaticEvaluation from '../src/Evaluation.js'
 import * as StaticText from '../src/StaticText.js'
 import * as StaticValue from '../src/StaticValue.js'
 import * as SyntaxTree from '../src/SyntaxTree.js'
@@ -42,6 +44,41 @@ import { unreachable } from './support/raise.js'
 
 const encoder = new TextEncoder()
 const sha256 = (value: string): string => createHash('sha256').update(value).digest('hex')
+
+it.effect('traces application execution and cache reuse under one operation identity', () =>
+  Effect.gen(function* () {
+    const profile = yield* CompilationProfile.normalize({ target: Target.x8664UnknownLinuxGnu.id })
+    const spans: Array<Tracer.Span> = []
+    const tracer = Tracer.make({
+      span(options) {
+        const span = new Tracer.NativeSpan(options)
+        spans.push(span)
+        return span
+      },
+    })
+    yield* Effect.gen(function* () {
+      const trace = yield* CompilerTrace.capture()
+      const evaluation = StaticEvaluation.make<string>(
+        profile,
+        StaticEvaluation.defaultLimits,
+        '',
+        trace,
+      )
+      const request = application('trace')
+      StaticEvaluation.evaluate(evaluation, request, () => StaticEvaluation.complete('fresh'))
+      StaticEvaluation.evaluate(evaluation, request, () => StaticEvaluation.complete('unused'))
+    }).pipe(Effect.withTracer(tracer))
+    const evaluations = spans.filter((span) => span.name === 'Evaluation.evaluate')
+    assert.deepEqual(
+      evaluations.map((span) => span.attributes.get('evaluation.branch')),
+      ['execute', 'reuse'],
+    )
+    assert.deepEqual(
+      evaluations.map((span) => span.attributes.get('evaluation.reuse')),
+      [false, true],
+    )
+  }),
+)
 
 const syntaxNodes = (node: SyntaxTree.Node): ReadonlyArray<SyntaxTree.Node> =>
   Object.freeze([
@@ -108,8 +145,8 @@ it.effect('keys and caches complete static applications by target and canonical 
       assert.strictEqual(context.retain(staticArgument), undefined)
       return StaticEvaluation.complete('residual body')
     }
-    const first = StaticEvaluation.evaluateApplication(evaluation, application('render'), callback)
-    const second = StaticEvaluation.evaluateApplication(evaluation, application('render'), callback)
+    const first = StaticEvaluation.evaluate(evaluation, application('render'), callback)
+    const second = StaticEvaluation.evaluate(evaluation, application('render'), callback)
 
     assert.strictEqual(first._tag, 'Complete')
     assert.strictEqual(first.cached, false)
@@ -128,7 +165,7 @@ it.effect('keys and caches complete static applications by target and canonical 
     assert.strictEqual(StaticEvaluation.cacheEntries(evaluation).at(0)?.state._tag, 'Complete')
 
     const wasm = StaticEvaluation.make<string>(profilewasm32UnknownUnknown)
-    const wasmResult = StaticEvaluation.evaluateApplication(wasm, application('render'), callback)
+    const wasmResult = StaticEvaluation.evaluate(wasm, application('render'), callback)
     assert.notStrictEqual(first.key, wasmResult.key)
     assert.strictEqual(wasm.environment.compilation.target.architecture, 'wasm32')
     assert.strictEqual(Object.isFrozen(wasm.environment), true)
@@ -144,7 +181,7 @@ it.effect('detects pending cycles with logical application and selected-arm fram
 
     const evaluation = StaticEvaluation.make<string>(profilex8664UnknownLinuxGnu)
     const render = application('render')
-    const result = StaticEvaluation.evaluateApplication(evaluation, render, (context) => {
+    const result = StaticEvaluation.evaluate(evaluation, render, (context) => {
       const selected = context.withTrace(StaticEvaluation.selectedArmFrame('Taken', staticSpan))
       const nested = selected.evaluate(render, () => StaticEvaluation.complete('unreachable'))
       return nested._tag === 'Failed'
@@ -188,7 +225,7 @@ it.effect('reports compile errors, phase violations, and four distinct determini
       callback: StaticEvaluation.EvaluationCallback<string>,
     ) => {
       const evaluation = StaticEvaluation.make<string>(profilex8664UnknownLinuxGnu, policy)
-      return StaticEvaluation.evaluateApplication(evaluation, application('limited'), callback)
+      return StaticEvaluation.evaluate(evaluation, application('limited'), callback)
     }
     const base = { steps: 10, callDepth: 10, retainedValueBytes: 10_000, residualNodes: 10 }
     const step = limited({ ...base, steps: 0 }, (context) => {
@@ -259,7 +296,7 @@ it.effect('accounts budgets so neither caching nor ordering changes what is acce
         ?.state
 
     // `f` leaves its nested `g` too little: `f` is rejected, and nothing is recorded for `g`.
-    const f = StaticEvaluation.evaluateApplication(
+    const f = StaticEvaluation.evaluate(
       evaluation,
       application('outerFirst'),
       spend(9, 'nestedWork'),
@@ -269,7 +306,7 @@ it.effect('accounts budgets so neither caching nor ordering changes what is acce
     assert.isUndefined(entry('nestedWork'))
 
     // Asked again as a root, `g` has the whole allowance and records what it cost.
-    const g = StaticEvaluation.evaluateApplication(evaluation, application('nestedWork'), spend(4))
+    const g = StaticEvaluation.evaluate(evaluation, application('nestedWork'), spend(4))
     assert.strictEqual(g._tag, 'Complete')
     const recorded = entry('nestedWork')
     assert.deepEqual(recorded?._tag === 'Complete' ? recorded.cost : undefined, {
@@ -281,14 +318,14 @@ it.effect('accounts budgets so neither caching nor ordering changes what is acce
 
     // A hit is charged like an execution: `h` continues, and `tight` exhausts exactly as it would
     // have by executing `g` itself.
-    const h = StaticEvaluation.evaluateApplication(
+    const h = StaticEvaluation.evaluate(
       evaluation,
       application('outerSecond'),
       spend(5, 'nestedWork'),
     )
     assert.strictEqual(h._tag, 'Complete')
     assert.strictEqual(h.budget.steps, 9)
-    const tight = StaticEvaluation.evaluateApplication(
+    const tight = StaticEvaluation.evaluate(
       evaluation,
       application('outerThird'),
       spend(8, 'nestedWork'),

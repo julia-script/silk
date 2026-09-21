@@ -437,7 +437,7 @@ const observe = (project, root, duration) => {
       start: diagnostic.span.start,
       end: diagnostic.span.end,
     })),
-    queries: project.report.find((phase) => phase.phase === 'body-queries')?.counters,
+    queries: project.report.find((phase) => phase.phase === 'Semantic.checkBody')?.counters,
     resolution: { totals: sumWork(resolution), byInitiator: resolution },
     phases: project.report.map(({ phase, elapsedMs }) => ({ phase, elapsedMs })),
     retainedProofs: retainedProofs(view),
@@ -838,7 +838,7 @@ const residualWorkload = Effect.fnUntraced(
       frontend: {
         elapsedMs: Duration.toMillis(frontendDuration),
         diagnostics,
-        queries: snapshot.report.find((phase) => phase.phase === 'body-queries')?.counters,
+        queries: snapshot.report.find((phase) => phase.phase === 'Semantic.checkBody')?.counters,
       },
       residual: { elapsedMs: Duration.toMillis(residualDuration), ...residual },
     }

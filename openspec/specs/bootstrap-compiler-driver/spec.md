@@ -41,6 +41,18 @@ The driver SHALL report canonical frontend, realization, LLVM emission, and arti
 phases. Identical compiler, source, target, profile, and toolchain inputs SHALL preserve committed
 structural and artifact determinism gates.
 
+The existing Milestone A operation boundaries SHALL be named `Source.load`, `Hir.lower`,
+`Preparation.prepare`, `Semantic.checkBody`, and `Evaluation.evaluate`. Corresponding trace and
+phase-report identities SHALL name the work being performed rather than a generic measurement
+wrapper. Fresh and reused body checks SHALL both pass through `Semantic.checkBody`; application
+evaluation traces SHALL distinguish execution from cache reuse while preserving recorded-cost
+budget admission. Module-level coordinators SHALL remain distinguishable from declaration checks.
+
+#### Scenario: Observe source through compile-time evaluation
+
+- **WHEN** a traced compilation loads and lowers source, prepares it, checks declarations and evaluates a selected static application
+- **THEN** its spans expose the five Milestone A operation identities, measurement helpers add no wrapper spans, and reports retain their existing counters
+
 #### Scenario: Reject invalid source
 
 - **WHEN** frontend analysis produces an error diagnostic

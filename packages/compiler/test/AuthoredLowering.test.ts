@@ -7,6 +7,7 @@ import * as AuthoredIdentity from '../src/AuthoredIdentity.js'
 import * as AuthoredLowering from '../src/AuthoredLowering.js'
 import * as AuthoredModule from '../src/AuthoredModule.js'
 import * as AuthoredPresentation from '../src/AuthoredPresentation.js'
+import * as Hir from '../src/Hir.js'
 import * as Lexer from '../src/Lexer.js'
 import * as Parser from '../src/Parser.js'
 import * as SourceFile from '../src/SourceFile.js'
@@ -22,6 +23,18 @@ const parse = (id: string, source: string): SyntaxFile.SyntaxFile =>
 const owner = AuthoredIdentity.module('fixture', 'app/Main')
 
 const lower = (id: string, source: string) => AuthoredLowering.lower(parse(id, source), owner)
+
+it.effect('lowers an identified revision with recovered syntax and presentation diagnostics', () =>
+  Effect.gen(function* () {
+    const lowered = yield* Hir.lower(
+      SourceFile.make('app/Broken', encoder.encode('pub fn broken( -> i32 { return 1 }')),
+    )
+    assert.strictEqual(lowered.syntax.source.id, 'app/Broken')
+    assert.isAbove(lowered.syntax.parserDiagnostics.length, 0)
+    assert.strictEqual(lowered.authored.module.owner.module, 'app/Broken')
+    assert.isAbove(lowered.authored.presentation.diagnostics.length, 0)
+  }),
+)
 
 const golden = (name: string): string =>
   readFileSync(new URL(`./goldens/${name}`, import.meta.url), 'utf8')

@@ -14,7 +14,7 @@ artifact before any lowering exists to need them.
 Generic ownership and lifetime facts SHALL first be checked once under the declaration's abstract assumptions. After private residual and cleanup-call candidate closure is complete, separately attributable residual ownership validation SHALL consume those checked facts and resolved representation/static inputs once for each residual runtime HIR specialization and SHALL publish
 one immutable ownership fact for that specialization: its runtime bindings with their ownership
 category and live range over source spans, and a closed verdict. Static parameters, static local
-bindings, static-function locals, inactive static arms, and `StaticEvaluation` storage MUST NOT appear
+bindings, static-function locals, inactive static arms, and `Evaluation` storage MUST NOT appear
 as owned bindings or cleanup obligations. Runtime parameters and residual `let` statements SHALL
 retain their ordinary liveness and move behavior.
 
@@ -63,7 +63,7 @@ executable reachability before the residual graph is closed.
 The phase SHALL produce one cleanup plan per successful residual runtime specialization: every
 structured residual exit path with its ordered releases in last-acquired, first-released order. A
 release SHALL record the end of one runtime binding's ownership at that exit; bindings already
-consumed by a move before the exit MUST NOT be released again. Static values and `StaticEvaluation` storage
+consumed by a move before the exit MUST NOT be released again. Static values and `Evaluation` storage
 MUST NOT produce releases. The plan SHALL remain target-neutral, SHALL record runtime releases
 uniformly whether or not the released type carries cleanup behavior, and SHALL expose a
 deterministic textual encoding gated by committed golden files.

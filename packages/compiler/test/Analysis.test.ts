@@ -147,6 +147,9 @@ static if Intrinsic.targetOperatingSystem() == "darwin" {
         assert.strictEqual(Option.getOrUndefined(span.parent)?.spanId, root.spanId)
       }
       for (const span of spans) assert.strictEqual(span.status._tag, 'Ended', span.name)
+      assert.isTrue(spans.some((span) => span.name === 'Source.load'))
+      assert.isTrue(spans.some((span) => span.name === 'Hir.lower'))
+      assert.isFalse(spans.some((span) => span.name.startsWith('PhaseReport.measure')))
       if (request.root === 'incomplete') {
         assert.isTrue(spans.some((span) => span.name === 'Frontend.diagnoseIncompleteProfile'))
         assert.isFalse(spans.some((span) => span.name === 'Frontend.analyzeFrontend'))
@@ -154,7 +157,10 @@ static if Intrinsic.targetOperatingSystem() == "darwin" {
       } else {
         assert.deepEqual(frontend.diagnostics, [])
         assert.isTrue(spans.some((span) => span.name === 'Frontend.analyzeSemantics'))
+        assert.isTrue(spans.some((span) => span.name === 'Semantic.checkBody'))
         assert.strictEqual(frontend.selection !== undefined, request.root === 'selected')
+        if (request.root === 'selected')
+          assert.isTrue(spans.some((span) => span.name === 'Evaluation.evaluate'))
       }
     }
   }),

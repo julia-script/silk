@@ -4,6 +4,8 @@ import type * as AuthoredHir from './AuthoredHir.js'
 import * as AuthoredIdentity from './AuthoredIdentity.js'
 import * as AuthoredLowering from './AuthoredLowering.js'
 import * as SemanticContext from './SemanticContext.js'
+import type * as CompilerTrace from './CompilerTrace.js'
+import * as Semantic from './Semantic.js'
 import * as BodyQuery from './BodyQuery.js'
 import * as BodyBuilder from './BodyBuilder.js'
 import * as LifetimeFlow from './LifetimeFlow.js'
@@ -22,7 +24,7 @@ import type * as NameResolution from './NameResolution.js'
 import type * as Operator from './Operator.js'
 import * as Scalar from './Scalar.js'
 import * as SourceSpan from './SourceSpan.js'
-import type * as StaticEvaluation from './StaticEvaluation.js'
+import type * as StaticEvaluation from './Evaluation.js'
 import type * as StaticText from './StaticText.js'
 import type * as StaticValue from './StaticValue.js'
 import * as Lifetime from './Lifetime.js'
@@ -2448,6 +2450,7 @@ const lexicalScopesOf = (
 /** Elaborates every declaration body into immutable facts and the module's TIR. */
 export interface Input {
   readonly bodyQuery?: BodyQuery.BodyQuery
+  readonly trace?: CompilerTrace.CompilerTrace
   readonly authored: AuthoredLowering.Lowered
   readonly headers: DeclarationFacts.ModuleHeaders
   readonly scope: NameResolution.ModuleScope
@@ -2855,9 +2858,15 @@ export const elaborateModule = (input: Input): Result => {
         })
         return { unit }
       }
-      return input.bodyQuery === undefined
-        ? build().unit
-        : BodyQuery.check(input.bodyQuery, context, authored, scope, declaration, build)
+      return Semantic.checkBody({
+        context,
+        authored,
+        scope,
+        declaration,
+        build,
+        ...(input.bodyQuery === undefined ? {} : { query: input.bodyQuery }),
+        ...(input.trace === undefined ? {} : { trace: input.trace }),
+      })
     })
   const constantDiagnostics = headers.constants.flatMap((constant) =>
     constant.name._tag === 'Present'

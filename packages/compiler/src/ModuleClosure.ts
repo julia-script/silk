@@ -8,14 +8,14 @@ import * as Option from 'effect/Option'
 import * as Result from 'effect/Result'
 import type * as AuthoredHir from './AuthoredHir.js'
 import * as AuthoredIdentity from './AuthoredIdentity.js'
-import * as AuthoredLowering from './AuthoredLowering.js'
+import type * as AuthoredLowering from './AuthoredLowering.js'
 import * as Diagnostic from './Diagnostic.js'
 import * as ImportPath from './ImportPath.js'
 import * as Graph from './internal/Graph.js'
-import * as Lexer from './Lexer.js'
-import * as Parser from './Parser.js'
+import * as Hir from './Hir.js'
 import * as SemanticContext from './SemanticContext.js'
 import * as SourceFile from './SourceFile.js'
+import * as Source from './Source.js'
 import * as SourceResolver from './SourceResolver.js'
 import * as Stdlib from './Stdlib.js'
 import type * as SyntaxFile from './SyntaxFile.js'
@@ -195,13 +195,11 @@ const parseModule = Effect.fnUntraced(function* (
 ): Effect.fn.Return<ParsedModule> {
   const currentSource = SourceFile.make(name, source.bytes, source.origin)
   const reused = previous !== undefined && SourceFile.equals(previous.syntax.source, currentSource)
-  const syntax = reused ? previous.syntax : Parser.parse(Lexer.lex(currentSource))
-  // Lowering a parser artifact cannot fail for source mistakes; a rejection is a compiler defect.
-  const authored = reused
-    ? previous.authored
-    : yield* Effect.orDie(
-        AuthoredLowering.lower(syntax, AuthoredLowering.moduleOwner(name, currentSource.origin)),
-      )
+  const lowered = reused ? undefined : yield* Effect.orDie(Hir.lower(currentSource))
+  const syntax = reused ? previous?.syntax : lowered?.syntax
+  const authored = reused ? previous?.authored : lowered?.authored
+  if (syntax === undefined || authored === undefined)
+    throw new RangeError(`HIR lowering lost products for ${name}`)
   const context = SemanticContext.make(authored)
   const declarations = selectedDeclarations(authored.module, selection)
   const imports = declarations.flatMap((declaration): ParsedModule['imports'] => {
@@ -404,7 +402,7 @@ export const loadProject = Effect.fn('ModuleClosure.loadProject')(function* (
     const attempted = yield* Effect.result(
       Stdlib.isReserved(module)
         ? SourceResolver.resolveStandardLibrary(module)
-        : SourceResolver.resolve(module),
+        : Source.load(module),
     )
     const resolution: Resolution = Result.isFailure(attempted)
       ? Object.freeze({ _tag: 'Failed', error: attempted.failure })

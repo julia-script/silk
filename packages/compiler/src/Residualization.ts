@@ -1,6 +1,7 @@
 import * as Location from './Location.js'
 import * as Provenance from './Provenance.js'
 import * as Effect from 'effect/Effect'
+import * as CompilerTrace from './CompilerTrace.js'
 import * as ToolchainIntegrity from './ToolchainIntegrity.js'
 import type * as CompilationProfile from './CompilationProfile.js'
 import * as Lifetime from './Lifetime.js'
@@ -17,7 +18,7 @@ import * as Canonical from './internal/Canonical.js'
 import * as NameResolution from './NameResolution.js'
 import * as RowAlgebra from './RowAlgebra.js'
 import { analyzeFunctionBody } from './StatementAnalysis.js'
-import * as StaticEvaluation from './StaticEvaluation.js'
+import * as StaticEvaluation from './Evaluation.js'
 import * as StaticValue from './StaticValue.js'
 import type * as AuthoredHir from './AuthoredHir.js'
 import * as AuthoredIdentity from './AuthoredIdentity.js'
@@ -165,6 +166,7 @@ const makeState = (
   index: DeclarationIndex.Index,
   limits: StaticEvaluation.Limits = StaticEvaluation.defaultLimits,
   parameters: ReadonlyMap<string, StaticValue.Value> = new Map(),
+  trace: CompilerTrace.CompilerTrace = CompilerTrace.none,
 ): State => {
   const sourceIdentity = ToolchainIntegrity.contentDigest(
     Canonical.array(
@@ -190,8 +192,13 @@ const makeState = (
     resolution,
     index: Object.freeze({ ...index, generatedAggregates }),
     generatedAggregates,
-    evaluation: StaticEvaluation.make<StaticValue.Value>(compilation, limits, sourceIdentity),
-    residuals: StaticEvaluation.make<ResidualBody>(compilation, limits, sourceIdentity),
+    evaluation: StaticEvaluation.make<StaticValue.Value>(
+      compilation,
+      limits,
+      sourceIdentity,
+      trace,
+    ),
+    residuals: StaticEvaluation.make<ResidualBody>(compilation, limits, sourceIdentity, trace),
     staticResultOrigins: new Map<string, StaticEvaluation.TextOrigin>(),
     counters: emptyCounters(),
     observations: new Map(),
@@ -207,10 +214,11 @@ export const make = (
   index: DeclarationIndex.Index,
   limits: StaticEvaluation.Limits = StaticEvaluation.defaultLimits,
   parameters: ReadonlyMap<string, StaticValue.Value> = new Map(),
+  trace: CompilerTrace.CompilerTrace = CompilerTrace.none,
 ): Coordinator =>
   Object.freeze({
     _tag: 'ResidualizationCoordinator',
-    [stateSymbol]: makeState(compilation, results, resolution, index, limits, parameters),
+    [stateSymbol]: makeState(compilation, results, resolution, index, limits, parameters, trace),
   })
 
 /** Starts default/predicate evaluation without granting runtime-specialization admission. */
@@ -220,6 +228,7 @@ export const makeBootstrap = (
   resolution: NameResolution.Resolution,
   index: DeclarationIndex.Index,
   parameters: ReadonlyMap<string, StaticValue.Value>,
+  trace: CompilerTrace.CompilerTrace = CompilerTrace.none,
 ): BootstrapCoordinator =>
   Object.freeze({
     _tag: 'ProfileBootstrapCoordinator',
@@ -230,6 +239,7 @@ export const makeBootstrap = (
       index,
       StaticEvaluation.defaultLimits,
       parameters,
+      trace,
     ),
   })
 
@@ -638,7 +648,7 @@ const evaluateStaticFunction = (
     span,
   })
   const originScope = StaticEvaluation.applicationKey(self[stateSymbol].environment, application)
-  const result = StaticEvaluation.evaluateApplicationFrom(
+  const result = StaticEvaluation.evaluateFrom(
     self[stateSymbol].evaluation,
     application,
     parentTrace,
@@ -870,7 +880,7 @@ function evaluateConstantValue(
     staticArguments: Object.freeze([]),
     span,
   })
-  const result = StaticEvaluation.evaluateApplicationFrom(
+  const result = StaticEvaluation.evaluateFrom(
     self[stateSymbol].evaluation,
     application,
     parentTrace,
@@ -984,7 +994,7 @@ function evaluateConstantValue(
             evaluation.trace,
           ),
         )
-      const value = StaticEvaluation.evaluate(staticContext.nodes.expression(analyzed.fact), {
+      const value = StaticEvaluation.evaluateNode(staticContext.nodes.expression(analyzed.fact), {
         ...staticContext,
         step: () => evaluation.step(),
       })
@@ -1217,7 +1227,7 @@ export const residualize = (self: Coordinator, key: ApplicationKey): Result => {
     span: Location.at(declaration.anchor),
   })
   let executed = false
-  const evaluated = StaticEvaluation.evaluateApplication(
+  const evaluated = StaticEvaluation.evaluate(
     self[stateSymbol].residuals,
     application,
     (evaluation) => {

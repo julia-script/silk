@@ -7,7 +7,7 @@ Project frontend analysis, root-view derivation and every analysis-intent prepar
 #### Scenario: Observe a completed project revision
 
 - **WHEN** a multi-root project frontend analysis completes
-- **THEN** its observations contain one frontend phase sequence for the union closure and no runtime realization phase
+- **THEN** its observations contain one frontend phase sequence for the union closure, report declaration work as `Semantic.checkBody`, and contain no runtime realization phase
 
 #### Scenario: Prepare for analysis only
 

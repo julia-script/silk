@@ -18,7 +18,7 @@ service requirement, borrow, unsafe operation, or observable allocation. A `stri
 accept an escaped or raw text literal in either delimiter width and SHALL reject a byte-string
 literal. Type inference and aggregate constants SHALL remain unavailable.
 
-Constant initialization SHALL use `StaticEvaluation`. Target-dependent constant values
+Constant initialization SHALL use `Evaluation`. Target-dependent constant values
 SHALL resolve through an imported ordinary standard-library target declaration over the sealed
 static target-profile intrinsic; the compiler MUST NOT recognize `Target` or any member spelling as
 a special initializer form. A failed static evaluation, wrong result type, or selected-target range
@@ -48,7 +48,7 @@ semantic inspection. No runtime backend SHALL select or replace the value again.
 #### Scenario: Derive a target-width constant through ordinary source
 
 - **WHEN** the standard library initializes a `usize` constant from its ordinary imported target fact on a 32-bit and a 64-bit compilation
-- **THEN** each compilation records its selected value through `StaticEvaluation` and no syntax-only target selector or backend-specific selection remains
+- **THEN** each compilation records its selected value through `Evaluation` and no syntax-only target selector or backend-specific selection remains
 
 #### Scenario: Keep declaration surfaces target neutral
 
