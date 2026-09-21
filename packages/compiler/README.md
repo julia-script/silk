@@ -48,13 +48,13 @@ pub fn main() -> i32 { return identity(42) }`),
 
 The current low-level operation map is:
 
-| Operation             | Input                                                                            | Current result                                                                        |
-| --------------------- | -------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
-| `Source.load`         | canonical module identity plus the active `SourceResolver` provider              | `Option<ResolvedSource>` with immutable bytes and origin, or a typed resolver failure |
-| `Hir.lower`           | one identified `SourceFile` revision                                             | recovered `SyntaxFile` plus authored untyped HIR and its presentation                 |
-| `Preparation.prepare` | compilation request and `analysis` or `executable` intent                        | the existing intent-specific sealed preparation bundle                                |
-| `Semantic.checkBody`  | authored declaration context, optional body query, and the existing body builder | `CheckedUnit { bodies, diagnostics }`, including hidden bodies                        |
-| `Evaluation.evaluate` | evaluation session, canonical application, and deterministic callback            | `ApplicationResult` (`Complete` or `Failed`) with key, cache status, and budget       |
+| Operation             | Input                                                                                                   | Current result                                                                        |
+| --------------------- | ------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| `Source.load`         | canonical module identity plus the active `SourceResolver` provider                                     | `Option<ResolvedSource>` with immutable bytes and origin, or a typed resolver failure |
+| `Hir.lower`           | one identified `SourceFile` revision                                                                    | recovered `SyntaxFile` plus authored untyped HIR and its presentation                 |
+| `Preparation.prepare` | compilation request and `analysis` or `executable` intent                                               | the existing intent-specific sealed preparation bundle                                |
+| `Semantic.checkBody`  | authored HIR, module headers, resolution scope, declaration index and fact, plus an optional body query | `CheckedUnit { bodies, diagnostics }`, including hidden bodies                        |
+| `Evaluation.evaluate` | evaluation session, canonical application, and deterministic callback                                   | `ApplicationResult` (`Complete` or `Failed`) with key, cache status, and budget       |
 
 `Hir.lower` does not load a module, discover imports, run semantic analysis, or realize a target.
 Its returned syntax keeps lexer/parser recovery diagnostics for syntax-only tooling, while

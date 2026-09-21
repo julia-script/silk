@@ -39,42 +39,6 @@ const make = (requestedRoots = roots) =>
     ),
   )
 
-it.effect('traces fresh and reused declarations through Semantic.checkBody', () =>
-  Effect.gen(function* () {
-    const spans: Array<Tracer.Span> = []
-    const tracer = Tracer.make({
-      span(options) {
-        const span = new Tracer.NativeSpan(options)
-        spans.push(span)
-        return span
-      },
-    })
-    yield* Effect.gen(function* () {
-      const initial = yield* make()
-      yield* ProjectAnalysis.revise(
-        initial,
-        roots.map((source) => source.id),
-      ).pipe(
-        Effect.provide(
-          SourceResolver.overlay(roots).pipe(Layer.provideMerge(SourceResolver.memory(sources))),
-        ),
-      )
-    }).pipe(Effect.withTracer(tracer))
-    const moduleSpans = new Set(
-      spans
-        .filter((span) => span.name === 'Frontend.elaborateModules:module')
-        .map((span) => span.spanId),
-    )
-    const bodySpans = spans.filter((span) => span.name === 'Semantic.checkBody')
-    assert.isAbove(bodySpans.length, 0)
-    for (const span of bodySpans)
-      assert.isTrue(moduleSpans.has(Option.getOrUndefined(span.parent)?.spanId ?? ''))
-    assert.isTrue(spans.some((span) => span.name === 'Semantic.checkBody.execute'))
-    assert.isTrue(spans.some((span) => span.name === 'Semantic.checkBody.reuse'))
-    assert.isFalse(spans.some((span) => span.name.startsWith('PhaseReport.measure')))
-  }),
-)
-
 it.effect(
   'isolates selected surfaces by profile while reusing parsed syntax and ignoring unloaded edits',
   () =>
@@ -890,7 +854,15 @@ it.effect('deduplicates repeated root identities through one resolver supply', (
 
 it.effect('reuses exact unchanged syntax and module semantics inside one coherent frontend', () =>
   Effect.gen(function* () {
-    const previous = yield* make()
+    const spans: Array<Tracer.Span> = []
+    const tracer = Tracer.make({
+      span(options) {
+        const span = new Tracer.NativeSpan(options)
+        spans.push(span)
+        return span
+      },
+    })
+    const previous = yield* make().pipe(Effect.withTracer(tracer))
     const revisedRoots = Object.freeze([
       SourceFile.make(
         'app/A',
@@ -909,6 +881,7 @@ it.effect('reuses exact unchanged syntax and module semantics inside one coheren
           Layer.provideMerge(SourceResolver.memory(sources)),
         ),
       ),
+      Effect.withTracer(tracer),
     )
     const previousModules = new Map(
       previous.closure.modules.map((module) => [module.name, module.syntax]),
@@ -1031,6 +1004,18 @@ it.effect('reuses exact unchanged syntax and module semantics inside one coheren
       { _tag: 'ModuleReuseCounters', reused: 2, recomputed: 1 },
     )
     assert.deepEqual(Analysis.diagnostics(currentView), [])
+    const moduleSpans = new Set(
+      spans
+        .filter((span) => span.name === 'Frontend.elaborateModules:module')
+        .map((span) => span.spanId),
+    )
+    const bodySpans = spans.filter((span) => span.name === 'Semantic.checkBody')
+    assert.isAbove(bodySpans.length, 0)
+    for (const span of bodySpans)
+      assert.isTrue(moduleSpans.has(Option.getOrUndefined(span.parent)?.spanId ?? ''))
+    assert.isTrue(spans.some((span) => span.name === 'Semantic.checkBody.execute'))
+    assert.isTrue(spans.some((span) => span.name === 'Semantic.checkBody.reuse'))
+    assert.isFalse(spans.some((span) => span.name.startsWith('PhaseReport.measure')))
   }),
 )
 
