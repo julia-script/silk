@@ -24,12 +24,12 @@ Scope: implement JUL-217, JUL-218, JUL-219, and JUL-221 as four stacked compiler
       EXPECT: JUL219_OK
       EVIDENCE: 2026-09-21 strict OpenSpec validation passed; 49 Storage/NativeToolchain tests and 3 selected Driver migration tests passed; JUL219_OK.
 
-- [ ] G4: JUL-221 persists and strictly admits complete checked units plus ordered dependency manifests through Storage and the shared validator
+- [x] G4: JUL-221 persists and strictly admits complete checked units plus ordered dependency manifests through Storage and the shared validator
       CHECK: openspec validate jul-221-persisted-checked-units --strict && pnpm --filter @silklang/compiler exec vitest run test/TirCodec.test.ts test/SemanticPersistence.test.ts test/SemanticInvalidation.test.ts && echo JUL221_OK
       EXPECT: JUL221_OK
-      EVIDENCE: pending
+      EVIDENCE: 2026-09-21 strict OpenSpec validation passed; 24 focused codec, persistence, and invalidation tests passed; JUL221_OK.
 
-- [ ] G5: the final composed head keeps every new OpenSpec implementation task complete and the compiler type-safe
+- [x] G5: the final composed head keeps every new OpenSpec implementation task complete and the compiler type-safe
       CHECK: pnpm --filter @silklang/llvm build && pnpm --filter @silklang/compiler typecheck && node -e "const fs=require('fs');for(const p of fs.readdirSync('openspec/changes').filter(x=>/^jul-(217|218|219|221)-/.test(x))){const t=fs.readFileSync('openspec/changes/'+p+'/tasks.md','utf8');if(/- \[ \]/.test(t))throw new Error('incomplete '+p)}console.log('FINAL_LOCAL_OK')"
       EXPECT: FINAL_LOCAL_OK
-      EVIDENCE: pending
+      EVIDENCE: 2026-09-21 LLVM build and compiler typecheck passed; all JUL-217/218/219/221 implementation tasks are complete; FINAL_LOCAL_OK.

@@ -77,6 +77,11 @@ const descriptor = (
     reuse,
   })
 
+/** Stable semantic-query address for one declaration's complete checked unit. */
+export const checkBodyDescriptor = (
+  declaration: DeclarationFacts.DeclarationFact,
+): SemanticQuery.Descriptor => descriptor('CheckBody', [BodyQuery.identity(declaration)])
+
 const input = (family: string, address: ReadonlyArray<string>): SemanticQuery.InputAddress =>
   Object.freeze({
     _tag: 'SemanticInputAddress',
@@ -722,7 +727,7 @@ export const checkBody = (bodyInput: BodyInput): Elaboration.CheckedUnit => {
       }),
     }
   }
-  const request = descriptor('CheckBody', [BodyQuery.identity(bodyInput.declaration)])
+  const request = checkBodyDescriptor(bodyInput.declaration)
   const runtime = runtimeOf(bodyInput.session)
   runtime.bodies.set(request.address, {
     header: BodyQuery.headerFingerprint(bodyInput.index, bodyInput.declaration),

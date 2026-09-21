@@ -48,25 +48,26 @@ pub fn main() -> i32 { return identity(42) }`),
 
 The current low-level operation map is:
 
-| Operation                    | Input                                                                                                        | Current result                                                                        |
-| ---------------------------- | ------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------- |
-| `Source.load`                | canonical module identity plus the active `SourceResolver` provider                                          | `Option<ResolvedSource>` with immutable bytes and origin, or a typed resolver failure |
-| `Storage.read` / `.publish`  | logical namespace/key, caller-supplied complete-record bound, and opaque bytes                               | caller-owned optional bytes or atomic publication with typed storage failures         |
-| `Hir.lower`                  | one identified `SourceFile` revision                                                                         | recovered `SyntaxFile` plus authored untyped HIR and its presentation                 |
-| `Preparation.prepare`        | compilation request and `analysis` or `executable` intent                                                    | the existing intent-specific sealed preparation bundle                                |
-| `Semantic.resolveName`       | semantic session, immutable module scope, and spelling                                                       | one memoized resolved, missing, conflicting, inaccessible, or unavailable answer      |
-| `Semantic.typeOf`            | semantic session and canonical declaration identity                                                          | the declaration's completed public header, or an unavailable answer                   |
-| `Semantic.checkBody`         | semantic session, authored HIR, module headers, scope, declaration fact, and current presentation context    | revision-validated `CheckedUnit { bodies, diagnostics }`, including hidden bodies     |
-| `Semantic.evaluate`          | semantic session, target-scoped evaluation store, canonical application, policy, and deterministic callback  | revision-validated static result with recorded cost charged once on every demand      |
-| `Semantic.constructResidual` | semantic session, target-scoped evaluation store, canonical runtime application, policy, and constructor     | independently validated residual program and diagnostics                              |
-| `Semantic.ownership`         | semantic session, complete checked unit, access-boundary plan, and current presentation                      | revision-validated ownership facts and current diagnostics                            |
-| `Realization.instantiate`    | checked artifacts, declaration facts, completed profile, roots, resolution, and runtime composition          | portable reachable `Instances.Discovery` graph without live presentation state        |
-| `Layout.computeTypes`        | target, declaration index, literal presentation, and opaque realization facts                                | pre-reachability target type-layout catalog                                           |
-| `Layout.computeRuntime`      | type catalog, concrete instance graph, declaration index, and opaque realization facts                       | reached layouts plus storage, environment, calling, execution, and literal plans      |
-| `Mir.lower`                  | admitted instances/runtime layout, declaration/opaque facts, presentation, profile, normalization, and audit | finalized MIR or explicit diagnostics with no program                                 |
-| `Backend.emit`               | finalized MIR and backend code-generation request                                                            | target backend artifact such as LLVM bitcode/IR plus symbol metadata                  |
-| `ObjectEmission.materialize` | backend artifact, resolved toolchain, profile, and caller-owned build scope                                  | scope-bound native object with inventory, helper, and command metadata                |
-| `Linker.link`                | complete physical link plan, build scope, native kind, destination, and cache policy                         | durable final artifact plus plan identity, cache key, and reuse metadata              |
+| Operation                               | Input                                                                                                             | Current result                                                                        |
+| --------------------------------------- | ----------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| `Source.load`                           | canonical module identity plus the active `SourceResolver` provider                                               | `Option<ResolvedSource>` with immutable bytes and origin, or a typed resolver failure |
+| `Storage.read` / `.publish`             | logical namespace/key, caller-supplied complete-record bound, and opaque bytes                                    | caller-owned optional bytes or atomic publication with typed storage failures         |
+| `Hir.lower`                             | one identified `SourceFile` revision                                                                              | recovered `SyntaxFile` plus authored untyped HIR and its presentation                 |
+| `Preparation.prepare`                   | compilation request and `analysis` or `executable` intent                                                         | the existing intent-specific sealed preparation bundle                                |
+| `Semantic.resolveName`                  | semantic session, immutable module scope, and spelling                                                            | one memoized resolved, missing, conflicting, inaccessible, or unavailable answer      |
+| `Semantic.typeOf`                       | semantic session and canonical declaration identity                                                               | the declaration's completed public header, or an unavailable answer                   |
+| `Semantic.checkBody`                    | semantic session, authored HIR, module headers, scope, declaration fact, and current presentation context         | revision-validated `CheckedUnit { bodies, diagnostics }`, including hidden bodies     |
+| `Semantic.evaluate`                     | semantic session, target-scoped evaluation store, canonical application, policy, and deterministic callback       | revision-validated static result with recorded cost charged once on every demand      |
+| `Semantic.constructResidual`            | semantic session, target-scoped evaluation store, canonical runtime application, policy, and constructor          | independently validated residual program and diagnostics                              |
+| `Semantic.ownership`                    | semantic session, complete checked unit, access-boundary plan, and current presentation                           | revision-validated ownership facts and current diagnostics                            |
+| `SemanticPersistence.load` / `.publish` | explicit Storage service, compiler identity, complete-record/codec bounds, current headers, and CheckBody records | optional complete-unit candidates or atomic versioned envelopes                       |
+| `Realization.instantiate`               | checked artifacts, declaration facts, completed profile, roots, resolution, and runtime composition               | portable reachable `Instances.Discovery` graph without live presentation state        |
+| `Layout.computeTypes`                   | target, declaration index, literal presentation, and opaque realization facts                                     | pre-reachability target type-layout catalog                                           |
+| `Layout.computeRuntime`                 | type catalog, concrete instance graph, declaration index, and opaque realization facts                            | reached layouts plus storage, environment, calling, execution, and literal plans      |
+| `Mir.lower`                             | admitted instances/runtime layout, declaration/opaque facts, presentation, profile, normalization, and audit      | finalized MIR or explicit diagnostics with no program                                 |
+| `Backend.emit`                          | finalized MIR and backend code-generation request                                                                 | target backend artifact such as LLVM bitcode/IR plus symbol metadata                  |
+| `ObjectEmission.materialize`            | backend artifact, resolved toolchain, profile, and caller-owned build scope                                       | scope-bound native object with inventory, helper, and command metadata                |
+| `Linker.link`                           | complete physical link plan, build scope, native kind, destination, and cache policy                              | durable final artifact plus plan identity, cache key, and reuse metadata              |
 
 `Hir.lower` does not load a module, discover imports, run semantic analysis, or realize a target.
 Its returned syntax keeps lexer/parser recovery diagnostics for syntax-only tooling, while
@@ -95,6 +96,21 @@ charges its recorded deterministic cost exactly once. Ownership records the chec
 the access-boundary/conformance inputs it actually consumes, then projects source locations through
 the current body presentation. Aborted or cyclic executions publish no partial answer, and forced
 fresh mode bypasses nested reuse across every family.
+
+`SemanticPersistence` selectively carries only complete `CheckBody` records across process
+restarts. One integrity-bound envelope contains the exact reconstructible descriptor, result
+fingerprint, ordered query/input observations, compiler identity, and the full checked unit. The
+strict codec omits source spans, resolves declaration references through stable identities, bounds
+bytes and every decoded structure, and rejects the whole candidate before it becomes visible when
+any reference or shape is invalid. Loaded records are ordinary prior-snapshot candidates: the same
+recursive validator admits or rejects both memory and Storage records, and current presentation is
+applied only after admission. Missing, stale, incompatible, corrupt, oversized, or externally
+unreadable optional records recompute; publication failure preserves the computed result.
+
+This is the D2 checked-unit persistence gate, not C1/C2 HIR persistence. A restart may rebuild
+current authored HIR, declaration headers, name resolution, selection, and presentation before it
+looks up a checked-unit candidate. Persisting those earlier products remains an independent
+optimization and is not a correctness prerequisite for checked-unit reuse.
 
 The instance graph is a published artifact, not a live realization session. It retains concrete
 instances, substitutions, residual bodies, reachability, calls, effects, constants, and diagnostic
@@ -128,8 +144,9 @@ external read, and external publication failures. It does not interpret envelope
 targets, or query validity. Native artifact and runtime-object cache actors retain those policies,
 translate `StorageError` at their boundary, and keep runtime hit/miss accounting.
 
-Phase reports and trace spans use these operation identities where they measure the corresponding
-work. `Semantic.checkBody.execute` and `.reuse`, and the `evaluation.branch` attribute on
+Phase reports, structural counters, and trace spans use these operation identities where they
+measure the corresponding work. Persistence counters distinguish lookup, load, missing/rejected
+records, typed read failure, publication, and publication failure. `Semantic.checkBody.execute` and `.reuse`, and the `evaluation.branch` attribute on
 `Evaluation.evaluate`, distinguish fresh work from reuse. Module coordinators such as
 `Frontend.elaborateModules` remain separately visible; measurement helpers add reports without
 introducing wrapper spans.

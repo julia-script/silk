@@ -14,6 +14,7 @@ import * as DeclarationIndex from './DeclarationIndex.js'
 import * as Diagnostic from './Diagnostic.js'
 import * as SemanticContext from './SemanticContext.js'
 import * as Semantic from './Semantic.js'
+import * as SemanticPersistence from './SemanticPersistence.js'
 import type * as SemanticQuery from './SemanticQuery.js'
 import * as Elaboration from './Elaboration.js'
 import * as IncrementalReuse from './IncrementalReuse.js'
@@ -37,6 +38,8 @@ import * as TestDiscovery from './TestDiscovery.js'
 /** Optional environment-specific observations attached to compiler phase reports. */
 export interface Options {
   readonly heapBytes?: () => number
+  /** Optional checked-unit persistence. Its Storage provider and bounds are explicit. */
+  readonly semanticPersistence?: SemanticPersistence.Persistence
   /** Internal differential-test escape hatch; production paths normalize shared MIR. */
   readonly normalizeMir?: boolean
 }
@@ -71,6 +74,7 @@ export interface ProjectFrontend extends FrontendFacts {
   readonly semanticEnvironment: string
   readonly semanticQueries: SemanticQuery.Snapshot
   readonly semanticQueryCounters: SemanticQuery.Counters
+  readonly semanticPersistenceCounters?: SemanticPersistence.Counters
   readonly closure: ModuleClosure.ProjectClosure
   readonly semanticInvalidation: SemanticInvalidation.SemanticInvalidation
 }
@@ -148,7 +152,16 @@ const analyzeHeaders = Effect.fn('Frontend.analyzeHeaders')(function* (
     ])
     .map((part) => `${part.length}:${part}`)
     .join('')
-  const session = Semantic.makeSession(epoch, index, resolution, 'default', previous)
+  const availablePrevious =
+    options.semanticPersistence === undefined
+      ? previous
+      : yield* SemanticPersistence.load(
+          options.semanticPersistence,
+          index,
+          resolution,
+          previous,
+        ).pipe(Effect.orDie)
+  const session = Semantic.makeSession(epoch, index, resolution, 'default', availablePrevious)
   return Object.freeze({ index, resolution, session, surfaces })
 })
 
@@ -365,10 +378,17 @@ const analyzeFrontend = Effect.fn('Frontend.analyzeFrontend')(function* (
 ): Effect.fn.Return<FrontendFacts> {
   const headers = yield* analyzeHeaders(closure, report, options)
   const semantics = yield* analyzeSemantics(closure, headers, report, options)
-  return OpaqueRealization.withCatalog(
+  const frontend = OpaqueRealization.withCatalog(
     Object.freeze({ ...headers, ...semantics, report: Object.freeze([...report]) }),
     OpaqueRealization.catalogOf(semantics),
   )
+  if (options.semanticPersistence !== undefined)
+    yield* SemanticPersistence.publish(
+      options.semanticPersistence,
+      Semantic.snapshot(headers.session),
+      headers.index,
+    ).pipe(Effect.orDie)
+  return frontend
 })
 
 /** Supplies lazy static helpers with headers and source, without checking executable bodies. */
@@ -998,6 +1018,13 @@ export const frontendProject = Effect.fn('Frontend.frontendProject')(function* (
       ...measuredQuery,
       counters: BodyQuery.counters(bodyQueries),
     })
+  const semanticQueries = Semantic.snapshot(headers.session)
+  if (options.semanticPersistence !== undefined)
+    yield* SemanticPersistence.publish(
+      options.semanticPersistence,
+      semanticQueries,
+      headers.index,
+    ).pipe(Effect.orDie)
   return OpaqueRealization.withCatalog(
     Object.freeze({
       closure,
@@ -1005,8 +1032,13 @@ export const frontendProject = Effect.fn('Frontend.frontendProject')(function* (
       ...semantics,
       semanticInvalidation: invalidation.value,
       semanticEnvironment,
-      semanticQueries: Semantic.snapshot(headers.session),
+      semanticQueries,
       semanticQueryCounters: Semantic.queryCounters(headers.session),
+      ...(options.semanticPersistence === undefined
+        ? {}
+        : {
+            semanticPersistenceCounters: SemanticPersistence.counters(options.semanticPersistence),
+          }),
       ...(selection === undefined ? {} : { selection }),
       ...(profile === undefined ? {} : { profile }),
       report: Object.freeze([...report]),

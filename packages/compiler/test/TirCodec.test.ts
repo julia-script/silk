@@ -6,7 +6,7 @@ import * as SemanticContext from '../src/SemanticContext.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as Tir from '../src/Tir.js'
 import * as TirCodec from '../src/TirCodec.js'
-import { elaborate } from './support/elaborate.js'
+import { elaborate, indexOf } from './support/elaborate.js'
 import { raise } from './support/raise.js'
 
 const analyze = (text: string) =>
@@ -67,25 +67,26 @@ for (const [category, program] of categories)
       const view = BodyView.make(body)
       for (const node of nodes) assert.strictEqual(BodyView.node(view, node.id), node)
       for (const local of locals) assert.strictEqual(BodyView.local(view, local.id), local)
-      const text = TirCodec.encode(body)
-      const decoded = TirCodec.decode(
-        text,
-        (id) =>
-          result.bodies.find((candidate) => candidate.declaration.id.ordinal === id.ordinal)
-            ?.declaration ?? raise('declaration of a decoded body'),
-        context,
-      )
-      assert.deepEqual(decoded, body)
-      assert.strictEqual(TirCodec.encode(decoded), text)
     }
+    const unit = Object.freeze({ bodies: result.bodies, diagnostics: result.located.diagnostics })
+    const primary = result.bodies.find((body) => !body.hidden) ?? raise('source body')
+    const encoded = TirCodec.encode(unit, indexOf(result))
+    const decoded = TirCodec.decode(encoded, indexOf(result), primary.declaration, context)
+    assert.deepEqual(decoded, unit)
+    assert.deepEqual(TirCodec.encode(decoded, indexOf(result)), encoded)
   })
 
 it('encodes no position: moved source gives the same bytes', () => {
   const [, program] = categories[1] ?? raise('program')
   const before = analyze(program)
   const after = analyze(`// moved\n\n${program}`)
-  assert.deepEqual(after.bodies.map(TirCodec.encode), before.bodies.map(TirCodec.encode))
-  for (const encoded of before.bodies.map(TirCodec.encode)) {
+  const encode = (result: ReturnType<typeof analyze>) =>
+    TirCodec.encode(
+      Object.freeze({ bodies: result.bodies, diagnostics: result.located.diagnostics }),
+      indexOf(result),
+    )
+  assert.deepEqual(encode(after), encode(before))
+  for (const encoded of [encode(before)]) {
     const visit = (value: unknown): void => {
       if (typeof value !== 'object' || value === null) return
       if (Array.isArray(value)) {
@@ -96,8 +97,36 @@ it('encodes no position: moved source gives the same bytes', () => {
       if (record['$'] === 'span') assert.deepEqual(record, { $: 'span' })
       for (const child of Object.values(record)) visit(child)
     }
-    visit(JSON.parse(encoded))
+    visit(JSON.parse(new TextDecoder().decode(encoded)))
   }
+})
+
+it('rejects unknown tags and structural limits before publishing a partial unit', () => {
+  const result = analyze(categories[0]?.[1] ?? raise('program'))
+  const unit = Object.freeze({ bodies: result.bodies, diagnostics: result.located.diagnostics })
+  const encoded = TirCodec.encode(unit, indexOf(result))
+  const text = new TextDecoder().decode(encoded)
+  assert.throws(
+    () =>
+      TirCodec.decode(
+        new TextEncoder().encode(text.replace('{"$":"span"}', '{"$":"future"}')),
+        indexOf(result),
+        result.bodies[0]?.declaration ?? raise('primary declaration'),
+        SemanticContext.make(result.authored),
+      ),
+    TirCodec.CodecError,
+  )
+  assert.throws(
+    () =>
+      TirCodec.decode(
+        encoded,
+        indexOf(result),
+        result.bodies[0]?.declaration ?? raise('primary declaration'),
+        SemanticContext.make(result.authored),
+        { ...TirCodec.defaultLimits, maximumDepth: 1 },
+      ),
+    TirCodec.CodecError,
+  )
 })
 
 it('identifies each body as an artifact, a compiler-made one under its parent', () => {

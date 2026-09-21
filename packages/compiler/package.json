@@ -442,6 +442,10 @@
       "types": "./dist/Semantic.d.ts",
       "import": "./dist/Semantic.js"
     },
+    "./SemanticPersistence": {
+      "types": "./dist/SemanticPersistence.d.ts",
+      "import": "./dist/SemanticPersistence.js"
+    },
     "./SemanticQuery": {
       "types": "./dist/SemanticQuery.d.ts",
       "import": "./dist/SemanticQuery.js"

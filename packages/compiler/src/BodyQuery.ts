@@ -455,50 +455,8 @@ export const referencedNames = (
   )
 
 /** Position-independent result identity used for dependent-query cutoffs. */
-export const fingerprint = (
-  index: DeclarationIndex.Index,
-  unit: Elaboration.CheckedUnit,
-): string => {
-  const declarations = new Map(
-    index.modules.flatMap((module) =>
-      module.declarations.map(
-        (declaration) =>
-          [
-            declarationKey(declaration.id.sourceId, declaration.id.ordinal),
-            memberKey(declaration),
-          ] as const,
-      ),
-    ),
-  )
-  return JSON.stringify(
-    [
-      unit.bodies.map((body) => JSON.parse(TirCodec.encode(body)) as unknown),
-      unit.diagnostics.map((diagnostic) => [
-        diagnostic.code,
-        diagnostic.severity,
-        diagnostic.reason,
-      ]),
-    ],
-    (_key, value: unknown) => {
-      if (SourceSpan.isSourceSpan(value)) return undefined
-      if (typeof value === 'bigint') return value.toString() + 'n'
-      if (
-        records(value) &&
-        value._tag === 'DeclarationId' &&
-        typeof value.sourceId === 'string' &&
-        typeof value.ordinal === 'number'
-      )
-        return (
-          declarations.get(declarationKey(value.sourceId, value.ordinal)) ?? [
-            'unresolved-declaration',
-            value.sourceId,
-            value.ordinal,
-          ]
-        )
-      return value
-    },
-  )
-}
+export const fingerprint = (index: DeclarationIndex.Index, unit: Elaboration.CheckedUnit): string =>
+  TirCodec.fingerprint(unit, index)
 
 const callsOf = (self: BodyQuery, built: Built): ReadonlyArray<string> => {
   const calls = new Set<string>()
