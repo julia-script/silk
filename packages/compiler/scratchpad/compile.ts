@@ -12,9 +12,15 @@ import * as OtlpTracer from 'effect/unstable/observability/OtlpTracer'
 import * as Driver from '../src/Driver.js'
 import * as FileSourceResolver from '../src/FileSourceResolver.js'
 import * as NodeHeapObservation from '../src/NodeHeapObservation.js'
+import * as SemanticPersistence from '../src/SemanticPersistence.js'
+import * as Storage from '../src/Storage.js'
+import * as ToolchainIntegrity from '../src/ToolchainIntegrity.js'
 import * as ChromeTrace from './ChromeTrace.js'
 
 const program = Effect.gen(function* () {
+  // Set the default to true here, or use SILK_SCRATCHPAD_CACHE=true for a cached run.
+  // False bypasses semantic persistence and backend artifact caches without deleting them.
+  const cache = yield* Config.boolean('SILK_SCRATCHPAD_CACHE').pipe(Config.withDefault(false))
   const fs = yield* FileSystem.FileSystem
   const path = yield* Path.Path
   const directory = yield* path.fromFileUrl(new URL('.', import.meta.url))
@@ -30,16 +36,33 @@ const program = Effect.gen(function* () {
   const defaultArchiver = (yield* fs.exists(siblingArchiver)) ? siblingArchiver : 'llvm-ar'
   const llvmAr = yield* Config.string('SILK_LLVM_AR').pipe(Config.withDefault(defaultArchiver))
   yield* fs.makeDirectory(path.dirname(destination), { recursive: true })
+  const cacheDirectory = path.join(directory, 'dist', 'cache')
+  const storage = cache ? yield* Storage.fileSystemService(cacheDirectory) : undefined
+  const semanticPersistence =
+    storage === undefined
+      ? undefined
+      : SemanticPersistence.make({
+          storage,
+          compilerIdentity: ToolchainIntegrity.installed().digest,
+          maximumRecordBytes: 64 * 1024 * 1024,
+        })
+  yield* Console.log(cache ? `Cache: on (${cacheDirectory})` : 'Cache: off')
 
   // Set a breakpoint here, then step into Driver.compile or any compiler phase in src/.
   const outcome = yield* Driver.compile({
     compilation: { root: 'main' },
     packageName: 'scratchpad-hello-world',
     artifactKind: 'NativeExecutable',
-    toolchain: { _tag: 'Toolchain', clang, llvmAr },
+    toolchain: {
+      _tag: 'Toolchain',
+      clang,
+      llvmAr,
+      ...(storage === undefined ? {} : { artifactStorage: storage }),
+    },
     optimization: 'debug',
     destination,
-    cache: false,
+    cache,
+    ...(semanticPersistence === undefined ? {} : { semanticPersistence }),
     saveTemps: true,
   }).pipe(Effect.provide(FileSourceResolver.layer(FileSourceResolver.make(sourceRoot))))
 

@@ -24,6 +24,7 @@ import * as Analysis from '../src/Analysis.js'
 import * as NativeLinkInput from '../src/NativeLinkInput.js'
 import * as NativeToolchain from '../src/NativeToolchain.js'
 import * as Storage from '../src/Storage.js'
+import * as SemanticPersistence from '../src/SemanticPersistence.js'
 import * as PhaseReport from '../src/PhaseReport.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
@@ -113,6 +114,52 @@ const expectedPhases = [
   'runtime',
   'link',
 ]
+
+it.effect(
+  'forwards semantic persistence and bypasses it when compilation caching is disabled',
+  () =>
+    Effect.gen(function* () {
+      const storage = Storage.memoryService()
+      const persistence = () =>
+        SemanticPersistence.make({
+          storage,
+          compilerIdentity: ToolchainIntegrity.installed().digest,
+          maximumRecordBytes: 16 * 1024 * 1024,
+        })
+      // Reject before emission: this tests Driver's preparation wiring without invoking LLVM.
+      const source = 'pub fn main() -> i32 { return missing }'
+      const cold = persistence()
+      const first = yield* compileSource('semantic-cache-cold', source, {
+        cache: true,
+        semanticPersistence: cold,
+      })
+      assert.strictEqual(first._tag, 'Rejected')
+      assert.isAbove(SemanticPersistence.counters(cold).published, 0)
+
+      const warm = persistence()
+      const second = yield* compileSource('semantic-cache-warm', source, {
+        cache: true,
+        semanticPersistence: warm,
+      })
+      assert.strictEqual(second._tag, 'Rejected')
+      assert.isAbove(SemanticPersistence.counters(warm).loaded, 0)
+
+      const disabled = persistence()
+      const before = SemanticPersistence.counters(disabled)
+      const fresh = yield* compileSource('semantic-cache-disabled', source, {
+        cache: false,
+        semanticPersistence: disabled,
+      })
+      assert.strictEqual(fresh._tag, 'Rejected')
+      assert.deepEqual(SemanticPersistence.counters(disabled), before)
+      if (first._tag === 'Rejected' && second._tag === 'Rejected' && fresh._tag === 'Rejected') {
+        const diagnostics = (outcome: Driver.Rejected) =>
+          outcome.diagnostics.map((diagnostic) => [diagnostic.code, diagnostic.span])
+        assert.deepEqual(diagnostics(second), diagnostics(first))
+        assert.deepEqual(diagnostics(fresh), diagnostics(first))
+      }
+    }),
+)
 
 it.effect('measures Effect phases with the fiber clock', () =>
   Effect.gen(function* () {

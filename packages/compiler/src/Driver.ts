@@ -23,6 +23,7 @@ import * as Linker from './Linker.js'
 import type * as NativeLinkPlan from './NativeLinkPlan.js'
 import * as PhaseReport from './PhaseReport.js'
 import * as Preparation from './Preparation.js'
+import type * as SemanticPersistence from './SemanticPersistence.js'
 import * as SourceFile from './SourceFile.js'
 import * as SourceResolver from './SourceResolver.js'
 import * as Target from './Target.js'
@@ -189,8 +190,10 @@ export interface CompileRequest {
   readonly nativeLinkInputs?: ReadonlyArray<NativeLinkInput.NativeLinkInput>
   readonly scopeName?: string
   readonly saveTemps?: boolean
-  /** Set false to bypass the content-addressed artifact cache for this request. */
+  /** Set false to bypass artifact caches and configured semantic persistence for this request. */
   readonly cache?: boolean
+  /** Optional checked-unit persistence; ignored when cache is false. */
+  readonly semanticPersistence?: SemanticPersistence.Persistence
   /** Explicit distribution metadata for embeddings and integrity tests; defaults to this build. */
   readonly distribution?: ToolchainIntegrity.Graph
 }
@@ -407,6 +410,9 @@ export const compile = Effect.fn('Driver.compile')(function* (
   // bodies, and analyze semantics and ownership. Retain its diagnostics and per-phase observations.
   const bundle = yield* Preparation.prepare(compilation, 'executable', {
     heapBytes,
+    ...(request.cache === false || request.semanticPersistence === undefined
+      ? {}
+      : { semanticPersistence: request.semanticPersistence }),
     artifactKind: request.artifactKind,
     ...(request.compilation.configuration === undefined || request.optimization === undefined
       ? {}
