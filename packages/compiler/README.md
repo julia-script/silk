@@ -71,7 +71,15 @@ Its returned syntax keeps lexer/parser recovery diagnostics for syntax-only tool
 tooling remains on `Analysis`, `ProjectAnalysis`, `ModuleTooling`, and the inspector actors. Each
 prepared frontend seals one `Semantic.Session`; declaration/header providers memoize within that
 epoch and publish immutable dependency observations without retaining syntax or source-resolver
-capabilities. Layout/MIR/emission/link requests remain separate later-stage operations.
+capabilities. A project revision transfers one bounded semantic-query snapshot to its successor.
+Each reusable header/name request has a provider-owned descriptor and immutable result fingerprint;
+validation replays ordered query and leaf reads against the current completed headers, namespace
+membership, import selection, candidate sets, and configuration. It stops at the first changed or
+unavailable read, replaces obsolete dependency branches on execution, and lets an equal result stop
+downstream execution. Current declaration objects, anchors, and diagnostic spans are presented only
+after validation, so moving one rejected use cannot copy another use's location. Forced-fresh mode
+bypasses both current and previous records through the same providers. Layout/MIR/emission/link
+requests remain separate later-stage operations.
 
 `CheckBody` memoization is session-local; the existing `BodyQuery` remains the cross-revision store
 that validates semantic dependencies and re-presents retained editor artifacts at current spans.

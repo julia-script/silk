@@ -445,25 +445,108 @@ pub fn inspect(event: Token, offset: i32) -> i32 {
 )
 
 it('memoizes semantic query answers and clears failed reservations before retry', () => {
-  const session = SemanticQuery.make('query-runtime')
   let attempts = 0
-  const request: SemanticQuery.Request<number> = Object.freeze({
-    _tag: 'SemanticQueryRequest',
-    key: 'answer',
-    execute: (observe: SemanticQuery.Observe) => {
+  const request: SemanticQuery.Descriptor = Object.freeze({
+    _tag: 'SemanticQueryDescriptor',
+    family: 'Fixture',
+    schema: 1,
+    address: 'answer',
+    reuse: 'Revision',
+  })
+  const session = SemanticQuery.make('query-runtime', {
+    execute: (_request, observe) => {
       attempts += 1
-      observe(Object.freeze({ _tag: 'Query', key: `attempt:${attempts}` }))
+      observe(
+        Object.freeze({
+          _tag: 'SemanticInputAddress',
+          family: 'FixtureInput',
+          schema: 1,
+          address: 'stable',
+        }),
+      )
       if (attempts === 1) throw new Error('fixture failure')
       return 42
     },
+    fingerprint: (_request, answer) => String(answer),
+    read: () => 'stable',
   })
 
   assert.throws(() => SemanticQuery.query(session, request), 'fixture failure')
-  assert.isFalse(SemanticQuery.isActive(session, request.key))
+  assert.isFalse(SemanticQuery.isActive(session, request))
   assert.strictEqual(SemanticQuery.query(session, request)._tag, 'Completed')
   assert.strictEqual(SemanticQuery.query(session, request)._tag, 'Completed')
-  assert.strictEqual(SemanticQuery.executionCount(session, request.key), 2)
+  assert.strictEqual(SemanticQuery.executionCount(session, request), 2)
   assert.strictEqual(attempts, 2)
+})
+
+it('validates prior query records and stops at an equal child result', () => {
+  let inputValue = 'before'
+  let session: SemanticQuery.Session | undefined
+  let childExecutions = 0
+  let parentExecutions = 0
+  const child: SemanticQuery.Descriptor = Object.freeze({
+    _tag: 'SemanticQueryDescriptor',
+    family: 'Child',
+    schema: 1,
+    address: 'child',
+    reuse: 'Revision',
+  })
+  const parent: SemanticQuery.Descriptor = Object.freeze({
+    _tag: 'SemanticQueryDescriptor',
+    family: 'Parent',
+    schema: 1,
+    address: 'parent',
+    reuse: 'Revision',
+  })
+  const leaf: SemanticQuery.InputAddress = Object.freeze({
+    _tag: 'SemanticInputAddress',
+    family: 'Leaf',
+    schema: 1,
+    address: 'input',
+  })
+  const provider: SemanticQuery.Provider = {
+    execute: (request, observe) => {
+      if (request.family === 'Child') {
+        childExecutions += 1
+        observe(leaf)
+        return 'stable-child'
+      }
+      parentExecutions += 1
+      const current = session
+      if (current === undefined) throw new RangeError('Missing query session')
+      const result = SemanticQuery.query<string>(current, child)
+      return result._tag === 'Completed' ? 'parent:' + result.completed.answer : 'cycle'
+    },
+    fingerprint: (_request, answer) => String(answer),
+    read: () => inputValue,
+  }
+
+  session = SemanticQuery.make('one', provider)
+  assert.strictEqual(SemanticQuery.query(session, parent)._tag, 'Completed')
+  const previous = SemanticQuery.snapshot(session)
+  assert.strictEqual(childExecutions, 1)
+  assert.strictEqual(parentExecutions, 1)
+
+  session = SemanticQuery.make('two', provider, previous)
+  assert.strictEqual(SemanticQuery.query(session, parent)._tag, 'Completed')
+  assert.deepEqual(SemanticQuery.counters(session), {
+    _tag: 'SemanticQueryCounters',
+    validations: 2,
+    executions: 0,
+    reuses: 2,
+  })
+
+  inputValue = 'after'
+  session = SemanticQuery.make('three', provider, previous)
+  assert.strictEqual(SemanticQuery.query(session, parent)._tag, 'Completed')
+  assert.strictEqual(childExecutions, 2)
+  assert.strictEqual(parentExecutions, 1)
+  assert.deepEqual(SemanticQuery.counters(session), {
+    _tag: 'SemanticQueryCounters',
+    validations: 2,
+    executions: 1,
+    reuses: 1,
+  })
 })
 
 it.effect('routes editor name reads through one memoized semantic session', () =>

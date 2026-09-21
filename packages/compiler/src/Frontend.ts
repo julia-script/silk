@@ -14,6 +14,7 @@ import * as DeclarationIndex from './DeclarationIndex.js'
 import * as Diagnostic from './Diagnostic.js'
 import * as SemanticContext from './SemanticContext.js'
 import * as Semantic from './Semantic.js'
+import type * as SemanticQuery from './SemanticQuery.js'
 import * as Elaboration from './Elaboration.js'
 import * as IncrementalReuse from './IncrementalReuse.js'
 import * as ModuleClosure from './ModuleClosure.js'
@@ -68,6 +69,8 @@ export interface Frontend extends FrontendFacts {
 /** Immutable multi-root frontend facts computed once for one project revision. */
 export interface ProjectFrontend extends FrontendFacts {
   readonly semanticEnvironment: string
+  readonly semanticQueries: SemanticQuery.Snapshot
+  readonly semanticQueryCounters: SemanticQuery.Counters
   readonly closure: ModuleClosure.ProjectClosure
   readonly semanticInvalidation: SemanticInvalidation.SemanticInvalidation
 }
@@ -83,6 +86,7 @@ const analyzeHeaders = Effect.fn('Frontend.analyzeHeaders')(function* (
   closure: ModuleClosure.Facts,
   report: Array<PhaseReport.PhaseReport>,
   options: Options,
+  previous?: SemanticQuery.Snapshot,
 ): Effect.fn.Return<HeaderFacts> {
   const collected = PhaseReport.measureInto(
     report,
@@ -144,7 +148,7 @@ const analyzeHeaders = Effect.fn('Frontend.analyzeHeaders')(function* (
     ])
     .map((part) => `${part.length}:${part}`)
     .join('')
-  const session = Semantic.makeSession(epoch, index, resolution)
+  const session = Semantic.makeSession(epoch, index, resolution, 'default', previous)
   return Object.freeze({ index, resolution, session, surfaces })
 })
 
@@ -853,6 +857,7 @@ export const selectProject = Effect.fn('Frontend.selectProject')(function* (
   request: ModuleClosure.ProjectRequest,
   report: Array<PhaseReport.PhaseReport> = [],
   options: Options = {},
+  previous?: SemanticQuery.Snapshot,
 ): Effect.fn.Return<
   SelectedProject,
   ModuleClosure.ModuleClosureError,
@@ -876,7 +881,8 @@ export const selectProject = Effect.fn('Frontend.selectProject')(function* (
   yield* Effect.yieldNow
   const selected = yield* configureProjectSelection(expanded, loaded, report, options)
   const headers =
-    selected.bootstrapHeaders ?? (yield* analyzeHeaders(selected.closure, report, options))
+    selected.bootstrapHeaders ??
+    (yield* analyzeHeaders(selected.closure, report, options, previous))
   const closure = yield* diagnoseMissingProjectRoots(
     expanded,
     selected.closure,
@@ -901,7 +907,12 @@ export const frontendProject = Effect.fn('Frontend.frontendProject')(function* (
   SourceResolver.SourceResolver
 > {
   const report: Array<PhaseReport.PhaseReport> = []
-  const { closure, profile, selection, headers } = yield* selectProject(request, report, options)
+  const { closure, profile, selection, headers } = yield* selectProject(
+    request,
+    report,
+    options,
+    previous?.semanticQueries,
+  )
   const semanticEnvironment = Canonical.record('SelectedFrontend', [
     SemanticInvalidation.environment,
     profile?.identity ?? '',
@@ -992,6 +1003,8 @@ export const frontendProject = Effect.fn('Frontend.frontendProject')(function* (
       ...semantics,
       semanticInvalidation: invalidation.value,
       semanticEnvironment,
+      semanticQueries: Semantic.snapshot(headers.session),
+      semanticQueryCounters: Semantic.queryCounters(headers.session),
       ...(selection === undefined ? {} : { selection }),
       ...(profile === undefined ? {} : { profile }),
       report: Object.freeze([...report]),

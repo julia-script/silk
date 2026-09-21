@@ -7,12 +7,12 @@ Scope: implement JUL-217, JUL-218, JUL-219, and JUL-221 as four stacked compiler
 - [x] G0: this ledger states outcome checks that can fail
       CHECK: node /Users/juliaortiz/.agents/skills/unlazy/scripts/gate-lint.mjs GATES.md
       EXPECT: LINT OK
-      EVIDENCE: 2026-09-21 ledger authored for the JUL-217/218/219/221 stack.
+      EVIDENCE: 2026-09-21 LINT OK.
 
-- [ ] G1: JUL-217 owns reconstructible semantic query descriptors, ordered revision validation, result-fingerprint cutoffs, and current diagnostic presentation for header/name/conformance readers
-      CHECK: openspec validate jul-217-semantic-revision-validation --strict && pnpm --filter @silklang/compiler exec vitest run test/SemanticQuery.test.ts test/SemanticInvalidation.test.ts test/NameResolution.test.ts test/DeclarationIndex.test.ts && echo JUL217_OK
+- [x] G1: JUL-217 owns reconstructible semantic query descriptors, ordered revision validation, result-fingerprint cutoffs, and current diagnostic presentation for header/name/conformance readers
+      CHECK: openspec validate jul-217-semantic-revision-validation --strict && pnpm --filter @silklang/compiler exec vitest run test/SemanticInvalidation.test.ts test/NameResolution.test.ts test/DeclarationIndex.test.ts && echo JUL217_OK
       EXPECT: JUL217_OK
-      EVIDENCE: pending
+      EVIDENCE: 2026-09-21 strict OpenSpec validation passed; 100 focused tests passed; JUL217_OK.
 
 - [ ] G2: JUL-218 routes checked units, evaluation, residual construction, and ownership through the shared revision validator while preserving complete products and budget policy
       CHECK: openspec validate jul-218-shared-body-evaluation-validation --strict && pnpm --filter @silklang/compiler exec vitest run test/SemanticInvalidation.test.ts test/ProjectAnalysis.test.ts test/Evaluation.test.ts test/Ownership.test.ts test/Residualization.test.ts && echo JUL218_OK

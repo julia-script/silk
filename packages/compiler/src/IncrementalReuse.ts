@@ -5,6 +5,7 @@ import type * as ModuleSemantics from './ModuleSemantics.js'
 import type * as ModuleSurface from './ModuleSurface.js'
 import type * as OpaqueRealization from './OpaqueRealization.js'
 import * as SemanticInvalidation from './SemanticInvalidation.js'
+import type * as SemanticQuery from './SemanticQuery.js'
 
 /** Prior immutable project facts permitted to seed module semantic structural sharing. */
 export interface ProjectReuseBasis {
@@ -13,6 +14,7 @@ export interface ProjectReuseBasis {
   readonly semantics: ReadonlyMap<string, ModuleSemantics.ModuleSemantics>
   readonly opaqueRealizations: OpaqueRealization.Catalog
   readonly environment: string
+  readonly semanticQueries: SemanticQuery.Snapshot
 }
 
 const moduleBatchSize = 8
