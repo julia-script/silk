@@ -10,8 +10,10 @@ import * as Evaluation from './Evaluation.js'
 import type * as ExpressionAnalysis from './ExpressionAnalysis.js'
 import * as ModuleSurface from './ModuleSurface.js'
 import * as NameResolution from './NameResolution.js'
+import type * as Ownership from './Ownership.js'
 import * as SemanticContext from './SemanticContext.js'
 import * as SemanticQuery from './SemanticQuery.js'
+import * as SourceSpan from './SourceSpan.js'
 import * as StatementAnalysis from './StatementAnalysis.js'
 
 /** The sealed semantic reader for one immutable current closure and selection. */
@@ -24,8 +26,37 @@ export interface Session {
   readonly queries: SemanticQuery.Session
 }
 
+interface RecordedEvaluation<A> {
+  readonly entry: Evaluation.CacheEntry<A>
+  readonly result: Evaluation.ApplicationResult<A>
+  readonly reusable: boolean
+}
+
 interface Runtime {
-  readonly bodies: Map<string, () => Elaboration.CheckedUnit>
+  readonly bodies: Map<
+    string,
+    {
+      readonly header: string
+      readonly implementation: string
+      readonly scope: string
+      readonly names: ReadonlyArray<string>
+      readonly build: () => Elaboration.CheckedUnit
+    }
+  >
+  readonly ownership: Map<
+    string,
+    {
+      readonly boundary: string
+      readonly build: () => Ownership.CheckedFunction
+    }
+  >
+  readonly evaluations: Map<
+    string,
+    {
+      readonly policy: string
+      readonly execute: () => RecordedEvaluation<unknown>
+    }
+  >
   readonly presentations: Map<string, unknown>
   queries?: SemanticQuery.Session
 }
@@ -66,6 +97,17 @@ const runtimeOf = (self: Session): Runtime => {
   if (runtime === undefined) throw new RangeError('Unknown semantic session')
   return runtime
 }
+
+const stableJson = (value: unknown): string =>
+  JSON.stringify(value, (_key, child: unknown) => {
+    if (SourceSpan.isSourceSpan(child)) return undefined
+    if (typeof child === 'bigint') return child.toString() + 'n'
+    if (child instanceof Map)
+      return [...child].sort(([left], [right]) => String(left).localeCompare(String(right)))
+    if (child instanceof Set)
+      return [...child].sort((left, right) => String(left).localeCompare(String(right)))
+    return child
+  })
 
 const declarationKey = (id: DeclarationFacts.CanonicalId): string => id.module + '.' + id.name
 
@@ -204,6 +246,7 @@ const readInput = (
   index: DeclarationIndex.Index,
   resolution: NameResolution.Resolution,
   configuration: string,
+  runtime: Runtime,
   address: SemanticQuery.InputAddress,
 ): string | undefined => {
   const parts = partsOf(address.address)
@@ -222,8 +265,16 @@ const readInput = (
       return associatedCandidatesFingerprint(index, parts[0] ?? '', parts[1] ?? '', parts[2] ?? '')
     case 'ConformanceCandidates':
       return ModuleSurface.resolutionSignature(index)
-    case 'Evaluation':
-      return parts[0]
+    case 'BodyHeader':
+      return runtime.bodies.get(parts[0] ?? '')?.header
+    case 'BodyImplementation':
+      return runtime.bodies.get(parts[0] ?? '')?.implementation
+    case 'BodyScope':
+      return runtime.bodies.get(parts[0] ?? '')?.scope
+    case 'OwnershipBoundary':
+      return runtime.ownership.get(parts[0] ?? '')?.boundary
+    case 'EvaluationPolicy':
+      return runtime.evaluations.get(parts[0] ?? '')?.policy
   }
 }
 
@@ -325,6 +376,23 @@ const makeProvider = (
   configuration: string,
   runtime: Runtime,
 ): SemanticQuery.Provider => ({
+  cacheable: (request, answer) =>
+    request.family !== 'Evaluate' && request.family !== 'ConstructResidual'
+      ? true
+      : (answer as RecordedEvaluation<unknown>).reusable,
+  available: (request) => {
+    switch (request.family) {
+      case 'CheckBody':
+        return runtime.bodies.has(request.address)
+      case 'Ownership':
+        return runtime.ownership.has(request.address)
+      case 'Evaluate':
+      case 'ConstructResidual':
+        return runtime.evaluations.has(request.address)
+      default:
+        return true
+    }
+  },
   execute: (request, observe) => {
     const parts = partsOf(request.address)
     switch (request.family) {
@@ -408,17 +476,59 @@ const makeProvider = (
           : memberProjection(fact)
       }
       case 'CheckBody': {
-        const build = runtime.bodies.get(request.address)
-        if (build === undefined) throw new RangeError('Body provider is unavailable')
-        return build()
+        const body = runtime.bodies.get(request.address)
+        if (body === undefined) throw new RangeError('Body provider is unavailable')
+        observeConfiguration(observe)
+        observe(input('BodyHeader', [request.address]))
+        observe(input('BodyImplementation', [request.address]))
+        observe(input('BodyScope', [request.address]))
+        const queries = runtime.queries
+        if (queries === undefined)
+          throw new RangeError('Semantic query provider is not initialized')
+        for (const spelling of body.names) {
+          const parts = partsOf(request.address)
+          const identity = parts[0] ?? ''
+          const slash = identity.lastIndexOf('/')
+          const module = slash < 0 ? identity : identity.slice(0, slash)
+          SemanticQuery.query<string>(queries, nameDescriptor(module, spelling))
+        }
+        return body.build()
+      }
+      case 'Ownership': {
+        const ownership = runtime.ownership.get(request.address)
+        if (ownership === undefined) throw new RangeError('Ownership provider is unavailable')
+        const identity = parts[0] ?? ''
+        const queries = runtime.queries
+        if (queries === undefined)
+          throw new RangeError('Semantic query provider is not initialized')
+        SemanticQuery.query<Elaboration.CheckedUnit>(queries, descriptor('CheckBody', [identity]))
+        observeConfiguration(observe)
+        observe(input('ConformanceCandidates', [identity]))
+        observe(input('OwnershipBoundary', [request.address]))
+        return ownership.build()
+      }
+      case 'Evaluate':
+      case 'ConstructResidual': {
+        const evaluation = runtime.evaluations.get(request.address)
+        if (evaluation === undefined) throw new RangeError('Evaluation provider is unavailable')
+        observeConfiguration(observe)
+        observe(input('EvaluationPolicy', [request.address]))
+        return evaluation.execute()
       }
       default:
         throw new RangeError('Unknown semantic query family ' + request.family)
     }
   },
-  fingerprint: (request, answer) =>
-    typeof answer === 'string' ? answer : request.family + ':' + request.address,
-  read: (address) => readInput(index, resolution, configuration, address),
+  fingerprint: (request, answer) => {
+    if (typeof answer === 'string') return answer
+    if (request.family === 'CheckBody')
+      return BodyQuery.fingerprint(index, answer as Elaboration.CheckedUnit)
+    if (request.family === 'Ownership') return stableJson(answer)
+    if (request.family === 'Evaluate' || request.family === 'ConstructResidual')
+      return stableJson((answer as RecordedEvaluation<unknown>).entry.state)
+    return request.family + ':' + request.address
+  },
+  read: (address) => readInput(index, resolution, configuration, runtime, address),
 })
 
 /** Builds one current session and optionally admits records from one prior snapshot. */
@@ -431,6 +541,8 @@ export const makeSession = (
 ): Session => {
   const runtime: Runtime = {
     bodies: new Map(),
+    ownership: new Map(),
+    evaluations: new Map(),
     presentations: new Map(),
   }
   const queries = SemanticQuery.make(
@@ -610,34 +722,31 @@ export const checkBody = (bodyInput: BodyInput): Elaboration.CheckedUnit => {
       }),
     }
   }
-  const request = descriptor(
-    'CheckBody',
-    [bodyInput.declaration.owner.module, String(bodyInput.declaration.id.ordinal)],
-    'Session',
-  )
+  const request = descriptor('CheckBody', [BodyQuery.identity(bodyInput.declaration)])
   const runtime = runtimeOf(bodyInput.session)
-  runtime.bodies.set(request.address, () => {
-    observeConfiguration((leaf) => SemanticQuery.observe(bodyInput.session.queries, leaf))
-    SemanticQuery.observe(
-      bodyInput.session.queries,
-      input('Header', [
-        bodyInput.declaration.owner.module,
-        bodyInput.declaration.name._tag === 'Present'
-          ? bodyInput.declaration.name.spelling
-          : String(bodyInput.declaration.id.ordinal),
-      ]),
-    )
-    return bodyInput.query === undefined
-      ? trace('Semantic.checkBody.execute', () => build().unit)
-      : BodyQuery.check(
-          bodyInput.query,
-          context,
-          bodyInput.authored,
-          bodyInput.scope,
-          bodyInput.declaration,
-          build,
-          trace,
-        )
+  runtime.bodies.set(request.address, {
+    header: BodyQuery.headerFingerprint(bodyInput.index, bodyInput.declaration),
+    implementation: BodyQuery.implementationFingerprint(bodyInput.authored, bodyInput.declaration),
+    scope: BodyQuery.scopeFingerprint(
+      bodyInput.query,
+      bodyInput.index,
+      bodyInput.authored,
+      bodyInput.declaration,
+      bodyInput.scope,
+    ),
+    names: BodyQuery.referencedNames(bodyInput.authored, bodyInput.declaration),
+    build: () =>
+      bodyInput.query === undefined
+        ? trace('Semantic.checkBody.execute', () => build().unit)
+        : BodyQuery.check(
+            bodyInput.query,
+            context,
+            bodyInput.authored,
+            bodyInput.scope,
+            bodyInput.declaration,
+            build,
+            trace,
+          ),
   })
   return trace(
     'Semantic.checkBody',
@@ -648,7 +757,16 @@ export const checkBody = (bodyInput: BodyInput): Elaboration.CheckedUnit => {
       )
       if (result._tag === 'Cycle')
         throw new RangeError('Recursive body query: ' + result.cycle.path.join(' -> '))
-      return result.completed.answer
+      return result.reused && bodyInput.query !== undefined
+        ? BodyQuery.reuse(
+            bodyInput.query,
+            context,
+            bodyInput.authored,
+            bodyInput.declaration,
+            result.completed.answer,
+            trace,
+          )
+        : result.completed.answer
     },
     {
       module: bodyInput.declaration.owner.module,
@@ -668,17 +786,94 @@ export const checkBodyFresh = (bodyInput: BodyInput): Elaboration.CheckedUnit =>
   return checkBody({ ...fresh, session: isolated })
 }
 
-/** Records a typed evaluation leaf until JUL-218 makes evaluation a full provider family. */
+/** Derives ownership through the same revision validator as its checked-unit dependency. */
+export const ownership = (
+  self: Session,
+  bodyQuery: BodyQuery.BodyQuery | undefined,
+  ownershipInput: Ownership.CheckInput,
+  compute: () => Ownership.CheckedFunction,
+): Ownership.CheckedFunction => {
+  const identity =
+    bodyQuery === undefined
+      ? BodyQuery.identity(ownershipInput.function.declaration)
+      : BodyQuery.ownershipRootIdentity(bodyQuery, ownershipInput)
+  const request = descriptor('Ownership', [
+    identity,
+    BodyQuery.identity(ownershipInput.function.declaration),
+  ])
+  const runtime = runtimeOf(self)
+  runtime.ownership.set(request.address, {
+    boundary: stableJson(ownershipInput.boundaries),
+    build: compute,
+  })
+  const result = SemanticQuery.query<Ownership.CheckedFunction>(self.queries, request)
+  if (result._tag === 'Cycle')
+    throw new RangeError('Recursive ownership query: ' + result.cycle.path.join(' -> '))
+  if (bodyQuery === undefined) return result.completed.answer
+  const presented = BodyQuery.acceptOwnership(
+    bodyQuery,
+    ownershipInput,
+    result.completed.answer,
+    result.reused,
+  )
+  if (presented !== undefined) return presented
+  const rebuilt = compute()
+  return BodyQuery.acceptOwnership(bodyQuery, ownershipInput, rebuilt, false) ?? rebuilt
+}
+
+const evaluateQuery = <A>(
+  family: 'Evaluate' | 'ConstructResidual',
+  self: Session,
+  evaluation: Evaluation.Evaluation<A>,
+  application: Evaluation.Application,
+  parentTrace: Evaluation.Trace,
+  callback: Evaluation.EvaluationCallback<A>,
+): Evaluation.ApplicationResult<A> => {
+  const key = Evaluation.applicationKey(evaluation.environment, application)
+  const request = descriptor(family, [key, Evaluation.policyKey(evaluation)])
+  const runtime = runtimeOf(self)
+  runtime.evaluations.set(request.address, {
+    policy: Evaluation.policyKey(evaluation),
+    execute: () => {
+      const evaluated =
+        parentTrace.length === 0
+          ? Evaluation.evaluate(evaluation, application, callback)
+          : Evaluation.evaluateFrom(evaluation, application, parentTrace, callback)
+      const entry = Evaluation.cacheEntry(evaluation, evaluated.key)
+      if (entry !== undefined) return Object.freeze({ entry, result: evaluated, reusable: true })
+      if (evaluated._tag === 'Complete')
+        throw new RangeError('Completed evaluation did not publish its cache entry')
+      return Object.freeze({
+        entry: Object.freeze({
+          key: evaluated.key,
+          state: Object.freeze({ _tag: 'Failed' as const, failure: evaluated.failure }),
+        }),
+        result: evaluated,
+        reusable: false,
+      })
+    },
+  })
+  const result = SemanticQuery.query<RecordedEvaluation<A>>(self.queries, request)
+  if (result._tag === 'Cycle') {
+    const direct =
+      parentTrace.length === 0
+        ? Evaluation.evaluate(evaluation, application, callback)
+        : Evaluation.evaluateFrom(evaluation, application, parentTrace, callback)
+    return direct
+  }
+  return result.reused
+    ? Evaluation.admit(evaluation, application, result.completed.answer.entry, parentTrace)
+    : result.completed.answer.result
+}
+
+/** Evaluates one static application through the shared revision validator. */
 export const evaluate = <A>(
   self: Session,
   evaluation: Evaluation.Evaluation<A>,
   application: Evaluation.Application,
   callback: Evaluation.EvaluationCallback<A>,
-): Evaluation.ApplicationResult<A> => {
-  const key = Evaluation.applicationKey(evaluation.environment, application)
-  SemanticQuery.observe(self.queries, input('Evaluation', [key]))
-  return Evaluation.evaluate(evaluation, application, callback)
-}
+): Evaluation.ApplicationResult<A> =>
+  evaluateQuery('Evaluate', self, evaluation, application, Object.freeze([]), callback)
 
 export const evaluateFrom = <A>(
   self: Session,
@@ -687,7 +882,14 @@ export const evaluateFrom = <A>(
   parentTrace: Evaluation.Trace,
   callback: Evaluation.EvaluationCallback<A>,
 ): Evaluation.ApplicationResult<A> => {
-  const key = Evaluation.applicationKey(evaluation.environment, application)
-  SemanticQuery.observe(self.queries, input('Evaluation', [key]))
-  return Evaluation.evaluateFrom(evaluation, application, parentTrace, callback)
+  return evaluateQuery('Evaluate', self, evaluation, application, parentTrace, callback)
 }
+
+/** Constructs one residual application independently from pure static evaluation. */
+export const constructResidual = <A>(
+  self: Session,
+  evaluation: Evaluation.Evaluation<A>,
+  application: Evaluation.Application,
+  callback: Evaluation.EvaluationCallback<A>,
+): Evaluation.ApplicationResult<A> =>
+  evaluateQuery('ConstructResidual', self, evaluation, application, Object.freeze([]), callback)

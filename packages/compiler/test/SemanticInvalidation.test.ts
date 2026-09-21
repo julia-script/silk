@@ -91,7 +91,9 @@ it.effect('validates editor name reads across revisions', () =>
     assert.strictEqual(Analysis.lookupName(currentView, 'query/Main', 'answer')._tag, 'Resolved')
     const after = Semantic.queryCounters(current.semanticSession)
 
-    assert.strictEqual(after.validations, before.validations + 1)
+    // Body checking already demanded this descriptor in the current session. The editor read
+    // reuses that validated answer without validating it a second time.
+    assert.strictEqual(after.validations, before.validations)
     assert.strictEqual(after.executions, before.executions)
     assert.strictEqual(after.reuses, before.reuses + 1)
   }),
@@ -169,7 +171,7 @@ it.effect('keeps importers reusable when an alias target is only re-spelled', ()
     expectReusable(current, 'app/A')
     expectReasons(current, 'app/B', ['LocalChange'])
     expectBodyChecks(current, 0, 1)
-    assert.notStrictEqual(current.semantics.get('app/A'), previous.semantics.get('app/A'))
+    assert.strictEqual(current.semantics.get('app/A'), previous.semantics.get('app/A'))
   }),
 )
 

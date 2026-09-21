@@ -10,6 +10,7 @@ import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
 import * as Projections from './support/projections.js'
 import * as SemanticQuery from '../src/SemanticQuery.js'
+import { raise } from './support/raise.js'
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
@@ -546,6 +547,69 @@ it('validates prior query records and stops at an equal child result', () => {
     validations: 2,
     executions: 1,
     reuses: 1,
+  })
+})
+
+it('defers an invalid callback-backed child until its parent registers the current demand', () => {
+  let inputValue = 'before'
+  let childRegistered = true
+  let session: SemanticQuery.Session | undefined
+  let childExecutions = 0
+  let parentExecutions = 0
+  const child: SemanticQuery.Descriptor = Object.freeze({
+    _tag: 'SemanticQueryDescriptor',
+    family: 'CallbackChild',
+    schema: 1,
+    address: 'child',
+    reuse: 'Revision',
+  })
+  const parent: SemanticQuery.Descriptor = Object.freeze({
+    _tag: 'SemanticQueryDescriptor',
+    family: 'CallbackParent',
+    schema: 1,
+    address: 'parent',
+    reuse: 'Revision',
+  })
+  const leaf: SemanticQuery.InputAddress = Object.freeze({
+    _tag: 'SemanticInputAddress',
+    family: 'CallbackInput',
+    schema: 1,
+    address: 'input',
+  })
+  const provider: SemanticQuery.Provider = {
+    available: (request) => request.family !== 'CallbackChild' || childRegistered,
+    execute: (request, observe) => {
+      if (request.family === 'CallbackChild') {
+        if (!childRegistered) throw new RangeError('child demand was not registered')
+        childExecutions += 1
+        observe(leaf)
+        return inputValue
+      }
+      parentExecutions += 1
+      childRegistered = true
+      const current = session ?? raise('callback query session')
+      const result = SemanticQuery.query<string>(current, child)
+      return result._tag === 'Completed' ? result.completed.answer : 'cycle'
+    },
+    fingerprint: (_request, answer) => String(answer),
+    read: () => inputValue,
+  }
+
+  session = SemanticQuery.make('callback-one', provider)
+  assert.strictEqual(SemanticQuery.query(session, parent)._tag, 'Completed')
+  const previous = SemanticQuery.snapshot(session)
+
+  inputValue = 'after'
+  childRegistered = false
+  session = SemanticQuery.make('callback-two', provider, previous)
+  assert.strictEqual(SemanticQuery.query(session, parent)._tag, 'Completed')
+  assert.strictEqual(childExecutions, 2)
+  assert.strictEqual(parentExecutions, 2)
+  assert.deepEqual(SemanticQuery.counters(session), {
+    _tag: 'SemanticQueryCounters',
+    validations: 3,
+    executions: 2,
+    reuses: 0,
   })
 })
 

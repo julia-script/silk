@@ -16,6 +16,7 @@ import * as TypeInference from './internal/TypeInference.js'
 import * as LocalSharedOwnership from './LocalSharedOwnership.js'
 import * as Match from './Match.js'
 import * as SemanticContext from './SemanticContext.js'
+import * as Semantic from './Semantic.js'
 import * as MovePath from './MovePath.js'
 import * as LifetimeFlow from './LifetimeFlow.js'
 import * as Lifetime from './Lifetime.js'
@@ -5150,6 +5151,7 @@ export const checkModule = (
   index: DeclarationIndex.Index,
   accessBoundaryPlan: LocalSharedAccessBoundaryPlan,
   bodyQuery?: BodyQuery.BodyQuery,
+  semantic?: Semantic.Session,
 ): ModuleOwnership => {
   const context = SemanticContext.make(result.authored)
   const checked = result.bodies.flatMap((body) => {
@@ -5167,7 +5169,9 @@ export const checkModule = (
     )
     const compute = () => check(selected)
     const checked =
-      bodyQuery === undefined ? compute() : BodyQuery.ownership(bodyQuery, selected, compute)
+      semantic === undefined
+        ? compute()
+        : Semantic.ownership(semantic, bodyQuery, selected, compute)
     publishSourceProof(selected, checked)
     return [checked]
   })

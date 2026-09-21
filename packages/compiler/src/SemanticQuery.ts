@@ -37,6 +37,10 @@ export interface Provider {
   readonly execute: (descriptor: Descriptor, observe: Observe) => unknown
   readonly fingerprint: (descriptor: Descriptor, answer: unknown) => string
   readonly read: (input: InputAddress) => string | undefined
+  /** Whether a successfully returned answer may enter current or revision snapshots. */
+  readonly cacheable?: (descriptor: Descriptor, answer: unknown) => boolean
+  /** Whether a callback-backed descriptor can execute before its current demand is registered. */
+  readonly available?: (descriptor: Descriptor) => boolean
 }
 
 export interface Completed<A> {
@@ -168,6 +172,28 @@ const validateObservation = (self: Session, observation: Observation): boolean =
   const state = stateOf(self)
   if (observation._tag === 'InputRead')
     return readFingerprint(state, observation.input) === observation.fingerprint
+  if (state.provider.available?.(observation.descriptor) === false) {
+    const key = keyOf(observation.descriptor)
+    const current = state.current.get(key)
+    if (current !== undefined) return current.fingerprint === observation.fingerprint
+    const previous = state.previous.get(key)
+    if (previous === undefined || state.active.some((active) => active.key === key)) return false
+    const reservation: Active = { key, observations: [] }
+    state.active.push(reservation)
+    let valid = false
+    let removed: Active | undefined
+    try {
+      valid = validate(self, previous)
+    } finally {
+      removed = state.active.pop()
+    }
+    if (removed !== reservation)
+      throw new RangeError('Semantic query validation stack is corrupted')
+    if (!valid) return false
+    state.current.set(key, previous)
+    state.counters.reuses += 1
+    return previous.fingerprint === observation.fingerprint
+  }
   const result = execute<unknown>(self, observation.descriptor, true)
   return result._tag === 'Completed' && result.completed.fingerprint === observation.fingerprint
 }
@@ -205,7 +231,8 @@ const executeProvider = <A>(self: Session, descriptor: Descriptor, publish: bool
       fingerprint: state.provider.fingerprint(descriptor, answer),
       observations: Object.freeze([...active.observations]),
     })
-    if (publish) state.current.set(key, completed)
+    if (publish && state.provider.cacheable?.(descriptor, answer) !== false)
+      state.current.set(key, completed)
     const removed = state.active.pop()
     if (removed !== active) throw new RangeError('Semantic query reservation stack is corrupted')
     observeParent(state, descriptor, completed.fingerprint)
@@ -233,13 +260,14 @@ const execute = <A>(self: Session, descriptor: Descriptor, allowReuse: boolean):
       const reservation: Active = { key, observations: [] }
       state.active.push(reservation)
       let valid = false
+      let removed: Active | undefined
       try {
         valid = validate(self, previous)
       } finally {
-        const removed = state.active.pop()
-        if (removed !== reservation)
-          throw new RangeError('Semantic query validation stack is corrupted')
+        removed = state.active.pop()
       }
+      if (removed !== reservation)
+        throw new RangeError('Semantic query validation stack is corrupted')
       if (valid) {
         state.current.set(key, previous)
         state.counters.reuses += 1

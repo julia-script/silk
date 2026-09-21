@@ -280,6 +280,7 @@ const analyzeSemantics = Effect.fn('Frontend.analyzeSemantics')(function* (
           index,
           localSharedAccessBoundaries,
           precomputed?.bodyQueries,
+          precomputed?.bodyQueries === undefined ? undefined : headers.session,
         )
         const previous = retained.get(name)?.ownership
         const unchanged =
@@ -921,6 +922,7 @@ export const frontendProject = Effect.fn('Frontend.frontendProject')(function* (
   const compatiblePrevious = previous?.environment === semanticEnvironment ? previous : undefined
   const bodyQueries = BodyQuery.make(
     headers.index,
+    headers.resolution,
     [...(compatiblePrevious?.semantics.values() ?? [])].map((module) => module.elaboration),
     closure.modules.map((module) => module.authored),
   )

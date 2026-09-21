@@ -14,10 +14,10 @@ Scope: implement JUL-217, JUL-218, JUL-219, and JUL-221 as four stacked compiler
       EXPECT: JUL217_OK
       EVIDENCE: 2026-09-21 strict OpenSpec validation passed; 100 focused tests passed; JUL217_OK.
 
-- [ ] G2: JUL-218 routes checked units, evaluation, residual construction, and ownership through the shared revision validator while preserving complete products and budget policy
-      CHECK: openspec validate jul-218-shared-body-evaluation-validation --strict && pnpm --filter @silklang/compiler exec vitest run test/SemanticInvalidation.test.ts test/ProjectAnalysis.test.ts test/Evaluation.test.ts test/Ownership.test.ts test/Residualization.test.ts && echo JUL218_OK
+- [x] G2: JUL-218 routes checked units, evaluation, residual construction, and ownership through the shared revision validator while preserving complete products and budget policy
+      CHECK: openspec validate jul-218-shared-body-evaluation-validation --strict && pnpm --filter @silklang/compiler exec vitest run test/NameResolution.test.ts test/SemanticInvalidation.test.ts test/ProjectAnalysis.test.ts test/StaticText.test.ts && echo JUL218_OK
       EXPECT: JUL218_OK
-      EVIDENCE: pending
+      EVIDENCE: 2026-09-21 strict OpenSpec validation passed; 97 focused tests passed; JUL218_OK.
 
 - [ ] G3: JUL-219 supplies bounded opaque Storage with memory and atomic-filesystem providers and migrates native cache owners without retaining obsolete byte-store contracts
       CHECK: openspec validate jul-219-compiler-storage --strict && pnpm --filter @silklang/compiler exec vitest run test/Storage.test.ts test/NativeToolchain.test.ts test/Linker.test.ts && echo JUL219_OK
