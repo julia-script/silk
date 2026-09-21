@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto'
 import * as Effect from 'effect/Effect'
 import * as Option from 'effect/Option'
 import type * as DeclarationFacts from './DeclarationFacts.js'
@@ -9,6 +8,7 @@ import * as Semantic from './Semantic.js'
 import * as SemanticQuery from './SemanticQuery.js'
 import * as Storage from './Storage.js'
 import * as TirCodec from './TirCodec.js'
+import * as ToolchainIntegrity from './ToolchainIntegrity.js'
 
 export const schema = 1
 export const addressSchema = 1
@@ -74,7 +74,7 @@ const exact = (
   )
 }
 
-const digest = (value: string): string => createHash('sha256').update(value).digest('hex')
+const digest = ToolchainIntegrity.contentDigest
 const storageAddress = (descriptor: SemanticQuery.Descriptor): Storage.Address =>
   Object.freeze({
     _tag: 'StorageAddress',
