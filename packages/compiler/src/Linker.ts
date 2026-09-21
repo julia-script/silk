@@ -1,12 +1,13 @@
 import * as Effect from 'effect/Effect'
 import type * as NativeLinkPlan from './NativeLinkPlan.js'
 import * as NativeToolchain from './NativeToolchain.js'
+import type * as Storage from './Storage.js'
 
 export type CachePolicy =
   | { readonly _tag: 'Disabled' }
   | {
       readonly _tag: 'ReadWrite'
-      readonly store: NativeToolchain.ArtifactCache
+      readonly store: Storage.Service
       readonly key: string
     }
 

@@ -14,6 +14,12 @@ import { records, type InspectedBody } from './records.js'
 
 const indices = new WeakMap<Elaboration.Result, DeclarationIndex.Index>()
 
+export const indexOf = (elaborated: Elaborated): DeclarationIndex.Index => {
+  const index = indices.get(elaborated.located)
+  if (index === undefined) throw new RangeError('Elaboration fixture lost its declaration index')
+  return index
+}
+
 /** `fixture://semantic-accepted.silk` becomes `fixture/semantic-accepted.silk`. */
 export const canonicalName = (sourceId: string): string => sourceId.replace(/:\/*/g, '/')
 

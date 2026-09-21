@@ -27,6 +27,7 @@ import * as LiteralForm from '../src/LiteralForm.js'
 import * as OwnershipEncoding from '../src/OwnershipEncoding.js'
 import * as Parser from '../src/Parser.js'
 import * as Residualization from '../src/Residualization.js'
+import * as Semantic from '../src/Semantic.js'
 import type * as AuthoredHir from '../src/AuthoredHir.js'
 import * as AuthoredIdentity from '../src/AuthoredIdentity.js'
 import * as AuthoredLowering from '../src/AuthoredLowering.js'
@@ -164,6 +165,108 @@ it.effect('keys and caches complete static applications by target and canonical 
     assert.strictEqual(Object.isFrozen(wasm.environment), true)
     assert.strictEqual(Object.isFrozen(wasm.limits), true)
   }),
+)
+
+it.effect(
+  'admits shared evaluation hits at their recorded cost and isolates residual queries',
+  () =>
+    Effect.gen(function* () {
+      const analyzed = yield* AnalysisFixture.retainingMain(
+        'static/shared-evaluation-query',
+        encoder.encode('pub fn main() -> i32 { return 42 }'),
+      )
+      const profile = analyzed.profile ?? unreachable('realized compilation profile')
+      const first = Semantic.makeSession(
+        'shared-evaluation-one',
+        analyzed.index,
+        analyzed.resolution,
+      )
+      const policy = {
+        steps: 10,
+        callDepth: 4,
+        retainedValueBytes: 10_000,
+        residualNodes: 10,
+      }
+      let evaluationCalls = 0
+      let residualCalls = 0
+      const execute: Evaluation.EvaluationCallback<string> = (context) => {
+        evaluationCalls += 1
+        context.step(3)
+        return Evaluation.complete('evaluated')
+      }
+      const construct: Evaluation.EvaluationCallback<string> = (context) => {
+        residualCalls += 1
+        context.growResidual(2)
+        return Evaluation.complete('residual')
+      }
+      const request = application('shared')
+      const evaluated = Semantic.evaluate(
+        first,
+        Evaluation.make<string>(profile, policy),
+        request,
+        execute,
+      )
+      const residual = Semantic.constructResidual(
+        first,
+        Evaluation.make<string>(profile, policy),
+        request,
+        construct,
+      )
+      assert.strictEqual(evaluated._tag, 'Complete')
+      assert.strictEqual(residual._tag, 'Complete')
+      assert.strictEqual(evaluationCalls, 1)
+      assert.strictEqual(residualCalls, 1)
+
+      const second = Semantic.makeSession(
+        'shared-evaluation-two',
+        analyzed.index,
+        analyzed.resolution,
+        'default',
+        Semantic.snapshot(first),
+      )
+      const admitted = Semantic.evaluate(
+        second,
+        Evaluation.make<string>(profile, policy),
+        request,
+        execute,
+      )
+      assert.strictEqual(admitted._tag, 'Complete')
+      assert.strictEqual(admitted.cached, true)
+      assert.strictEqual(admitted.budget.steps, 3)
+      assert.strictEqual(evaluationCalls, 1)
+      assert.deepEqual(Semantic.queryCounters(second), {
+        _tag: 'SemanticQueryCounters',
+        validations: 1,
+        executions: 0,
+        reuses: 1,
+      })
+      const reconstructed = Semantic.constructResidual(
+        second,
+        Evaluation.make<string>(profile, { ...policy, residualNodes: 11 }),
+        request,
+        construct,
+      )
+      assert.strictEqual(reconstructed._tag, 'Complete')
+      assert.strictEqual(reconstructed.cached, false)
+      assert.strictEqual(residualCalls, 2)
+
+      const changedPolicy = Semantic.makeSession(
+        'shared-evaluation-policy',
+        analyzed.index,
+        analyzed.resolution,
+        'default',
+        Semantic.snapshot(first),
+      )
+      const recomputed = Semantic.evaluate(
+        changedPolicy,
+        Evaluation.make<string>(profile, { ...policy, steps: 11 }),
+        request,
+        execute,
+      )
+      assert.strictEqual(recomputed._tag, 'Complete')
+      assert.strictEqual(recomputed.cached, false)
+      assert.strictEqual(evaluationCalls, 2)
+    }),
 )
 
 it.effect('detects pending cycles with logical application and selected-arm frames', () =>

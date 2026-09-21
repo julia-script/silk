@@ -11,6 +11,8 @@ import type * as ModuleSurface from './ModuleSurface.js'
 import type * as ModuleTooling from './ModuleTooling.js'
 import * as OpaqueRealization from './OpaqueRealization.js'
 import type * as PhaseReport from './PhaseReport.js'
+import * as Semantic from './Semantic.js'
+import type * as SemanticQuery from './SemanticQuery.js'
 import * as SemanticInvalidation from './SemanticInvalidation.js'
 import type * as SourceResolver from './SourceResolver.js'
 import type * as SyntaxFile from './SyntaxFile.js'
@@ -59,6 +61,9 @@ export interface ProjectAnalysis {
   readonly semantics: ReadonlyMap<string, ModuleSemantics.ModuleSemantics>
   readonly toolingModules: ReadonlyMap<string, ModuleTooling.ModuleTooling>
   readonly semanticEnvironment: string
+  readonly semanticQueries: SemanticQuery.Snapshot
+  readonly semanticQueryCounters: SemanticQuery.Counters
+  readonly semanticSession: Semantic.Session
   readonly semanticInvalidation: SemanticInvalidation.SemanticInvalidation
   readonly report: ReadonlyArray<PhaseReport.PhaseReport>
 }
@@ -94,6 +99,7 @@ const analyze = Effect.fnUntraced(function* (
           semantics: previous.semantics,
           opaqueRealizations: opaqueRealizationsOf(previous),
           environment: previous.semanticEnvironment,
+          semanticQueries: Semantic.snapshot(previous.semanticSession),
         },
   )
   const root = unconfigured.closure.rootModules[0]
@@ -183,6 +189,9 @@ const analyze = Effect.fnUntraced(function* (
       semantics: frontend.semantics,
       toolingModules: tooling.toolingModules,
       semanticEnvironment: frontend.semanticEnvironment,
+      semanticQueries: frontend.semanticQueries,
+      semanticQueryCounters: frontend.semanticQueryCounters,
+      semanticSession: frontend.session,
       semanticInvalidation: frontend.semanticInvalidation,
       report,
     }),

@@ -2,14 +2,16 @@ import type * as AuthoredHir from './AuthoredHir.js'
 import * as AuthoredIdentity from './AuthoredIdentity.js'
 import * as AuthoredLowering from './AuthoredLowering.js'
 import * as CompilerTrace from './CompilerTrace.js'
-import type * as DeclarationFacts from './DeclarationFacts.js'
+import * as DeclarationFacts from './DeclarationFacts.js'
 import type * as DeclarationIndex from './DeclarationIndex.js'
 import * as Elaboration from './Elaboration.js'
 import * as ModuleSurface from './ModuleSurface.js'
-import type * as NameResolution from './NameResolution.js'
+import * as NameResolution from './NameResolution.js'
 import type * as Ownership from './Ownership.js'
 import * as SourceSpan from './SourceSpan.js'
 import * as Tir from './Tir.js'
+import * as TirCodec from './TirCodec.js'
+import * as ToolchainIntegrity from './ToolchainIntegrity.js'
 import type * as SemanticContext from './SemanticContext.js'
 
 /** Actual source-body query work, independent of module invalidation observations. */
@@ -19,34 +21,9 @@ export interface Counters {
   readonly reused: number
   /** Reused bodies whose source moved, so their positions were presented again. */
   readonly presented: number
-  readonly validatedDependencies: number
-  readonly dependencyCacheHits: number
   readonly ownershipChecked: number
   readonly ownershipReused: number
   readonly recursiveComponents: number
-}
-
-/**
- * One input a body consumed while it was built, with the answer it got. A lookup that found
- * nothing is an observation too, so adding the member repairs the body that missed it.
- */
-interface Observation {
-  readonly key: string
-  readonly signature: string | undefined
-  readonly implementation?: string
-}
-
-/**
- * What must still hold for a cached unit to stand. It is content, never bytes or positions: the
- * owner's semantic signature, its canonical authored body, the names its body can see, and every
- * observation asked again. A candidate is found by its owner alone; this decides whether it is used.
- */
-interface Validity {
-  readonly header: string
-  readonly body: string
-  readonly scope: string
-  readonly resolution: string
-  readonly observed: ReadonlyArray<Observation>
 }
 
 interface Entry {
@@ -59,27 +36,18 @@ interface Entry {
   readonly authoredDeclaration: AuthoredHir.Declaration
   readonly context: SemanticContext.SemanticContext
   readonly index: DeclarationIndex.Index
-  readonly validity: Validity
   /** The checked unit as this revision presents it. Working records are never stored. */
   readonly unit: Elaboration.CheckedUnit
+  readonly presentationModules: ReadonlyArray<string>
   readonly calls: ReadonlyArray<string>
-  readonly ownership: Map<
-    string,
-    {
-      readonly input: Ownership.CheckInput
-      readonly checked: Ownership.CheckedFunction
-    }
-  >
 }
 
 /** One revision's declaration cache, shared by module elaboration coordinators. */
 export interface BodyQuery {
   readonly index: DeclarationIndex.Index
-  readonly resolution: string
+  readonly resolution: NameResolution.Resolution
+  readonly currentModules: ReadonlyMap<string, AuthoredLowering.Lowered>
   readonly members: ReadonlyMap<string, DeclarationFacts.MemberFact>
-  readonly signatures: ReadonlyMap<string, string>
-  readonly implementations: ReadonlyMap<string, string>
-  readonly comparisons: Map<string, boolean>
   readonly owners: WeakMap<object, string>
   readonly previous: ReadonlyMap<string, Entry>
   readonly previousModules: ReadonlyMap<string, Elaboration.Result>
@@ -97,8 +65,6 @@ export interface BodyQuery {
     checked: number
     reused: number
     presented: number
-    validatedDependencies: number
-    dependencyCacheHits: number
     ownershipChecked: number
     ownershipReused: number
   }
@@ -107,6 +73,16 @@ export interface BodyQuery {
 const artifacts = new WeakMap<Elaboration.Result, ReadonlyArray<Entry>>()
 const records = (value: unknown): value is Readonly<Record<string, unknown>> =>
   typeof value === 'object' && value !== null && !Array.isArray(value)
+
+const isAuthoredAnchor = (value: unknown): value is AuthoredHir.Anchor =>
+  records(value) &&
+  value._tag === 'AuthoredAnchor' &&
+  records(value.owner) &&
+  value.owner._tag === 'AuthoredIdentity' &&
+  typeof value.owner.namespace === 'string' &&
+  typeof value.owner.module === 'string' &&
+  Array.isArray(value.owner.path) &&
+  Array.isArray(value.path)
 
 /** Visits each object of an immutable graph once, stopping below objects the inspector declines. */
 const visit = (value: unknown, inspect: (value: object) => boolean): void => {
@@ -222,6 +198,46 @@ const memberKey = (value: DeclarationFacts.MemberFact): string =>
     ? `${value.canonical.id.module}/${value.canonical.id.name}`
     : `${value._tag}:${AuthoredIdentity.anchorKey(value.anchor)}`
 
+/** Canonical query identity for one source body, independent of declaration ordinal. */
+export const identity = (declaration: DeclarationFacts.DeclarationFact): string =>
+  memberKey(declaration)
+
+const semanticMemberFingerprint = (member: DeclarationFacts.MemberFact): ReadonlyArray<unknown> => {
+  const key = memberKey(member)
+  const nominal = new Set<string>()
+  visit(member, (value) => {
+    if (
+      records(value) &&
+      value._tag === 'NominalType' &&
+      typeof value.module === 'string' &&
+      typeof value.name === 'string'
+    )
+      nominal.add(`${value.module}/${value.name}`)
+    return !(records(value) && (value._tag === 'SyntaxNode' || value._tag === 'Token'))
+  })
+  return Object.freeze([
+    key,
+    ModuleSurface.memberSignature(member),
+    Object.freeze([...nominal].sort()),
+  ])
+}
+
+/** The declaration's direct semantic header input consumed by one checked-unit query. */
+const headerFingerprints = new WeakMap<DeclarationFacts.MemberFact, string>()
+
+export const headerFingerprint = (
+  _index: DeclarationIndex.Index,
+  declaration: DeclarationFacts.MemberFact,
+): string => {
+  const cached = headerFingerprints.get(declaration)
+  if (cached !== undefined) return cached
+  const fingerprint = ToolchainIntegrity.contentDigest(
+    JSON.stringify(semanticMemberFingerprint(declaration)),
+  )
+  headerFingerprints.set(declaration, fingerprint)
+  return fingerprint
+}
+
 const memberCatalogs = new WeakMap<
   DeclarationIndex.Index,
   ReadonlyMap<string, DeclarationFacts.MemberFact>
@@ -245,14 +261,19 @@ const membersOf = (
 /** Creates a query context from the prior revision's completed module artifacts. */
 export const make = (
   index: DeclarationIndex.Index,
+  resolution: NameResolution.Resolution,
   previous: Iterable<Elaboration.Result> = [],
   current: Iterable<AuthoredLowering.Lowered> = [],
 ): BodyQuery => {
   const previousResults = [...previous]
+  const currentLowerings = [...current]
   const previousLowerings = new Map(
     previousResults.map((result) => [result.authored.module.owner.module, result.authored]),
   )
   const members = membersOf(index)
+  const currentModules = new Map(
+    currentLowerings.map((lowered) => [lowered.module.owner.module, lowered] as const),
+  )
   const owners = new WeakMap<object, string>()
   for (const [key, member] of members)
     visit(member, (value) => {
@@ -271,15 +292,9 @@ export const make = (
     })
   return {
     index,
-    resolution: ModuleSurface.resolutionSignature(index),
+    resolution,
+    currentModules,
     members,
-    signatures: new Map(
-      [...members].map(([key, member]) => [key, ModuleSurface.memberSignature(member)]),
-    ),
-    implementations: new Map(
-      [...members].map(([key, member]) => [key, ModuleSurface.memberImplementation(member)]),
-    ),
-    comparisons: new Map(),
     owners,
     previous: new Map(
       previousResults.flatMap((result) =>
@@ -292,7 +307,7 @@ export const make = (
       previousResults.map((result) => [result.authored.module.owner.module, result]),
     ),
     sharedModules: new Map(
-      [...current].map((lowered) => {
+      currentLowerings.map((lowered) => {
         const module = lowered.module.owner.module
         return [module, previousLowerings.get(module) === lowered] as const
       }),
@@ -304,8 +319,6 @@ export const make = (
       checked: 0,
       reused: 0,
       presented: 0,
-      validatedDependencies: 0,
-      dependencyCacheHits: 0,
       ownershipChecked: 0,
       ownershipReused: 0,
     },
@@ -313,7 +326,7 @@ export const make = (
 }
 
 /** The authored declaration behind one indexed declaration; the pipeline lowers every module. */
-const authoredDeclaration = (
+export const authoredDeclaration = (
   authored: AuthoredLowering.Lowered,
   declaration: DeclarationFacts.DeclarationFact,
 ) =>
@@ -323,101 +336,87 @@ const authoredDeclaration = (
   })()
 
 /** The canonical authored body up to lifetime alpha-renaming: the syntax-free implementation key. */
-const implementation = (
+export const implementationFingerprint = (
   authored: AuthoredLowering.Lowered,
   declaration: DeclarationFacts.DeclarationFact,
-): string => AuthoredLowering.canonicalBody(authored, authoredDeclaration(authored, declaration))
+): string =>
+  ToolchainIntegrity.contentDigest(
+    AuthoredLowering.canonicalBody(authored, authoredDeclaration(authored, declaration)),
+  )
 
-const scopeSignature = (
+export const scopeFingerprint = (
+  index: DeclarationIndex.Index,
   authored: AuthoredLowering.Lowered,
   declaration: DeclarationFacts.DeclarationFact,
   scope: NameResolution.ModuleScope,
 ): string => {
   const names = AuthoredLowering.bodyNames(authored, authoredDeclaration(authored, declaration))
-  return JSON.stringify(
-    scope.bindings
-      .filter((binding) => names.has(binding.spelling))
-      .map((binding) => {
-        if (binding._tag === 'LocalDeclaration' || binding._tag === 'ImportedMember')
+  return ToolchainIntegrity.contentDigest(
+    JSON.stringify(
+      scope.bindings
+        .filter((binding) => names.has(binding.spelling))
+        .map((binding) => {
+          if (binding._tag === 'ModuleNamespace')
+            return [binding._tag, binding.spelling, binding.module]
+          if (binding._tag !== 'LocalDeclaration' && binding._tag !== 'ImportedMember')
+            return [binding._tag, binding.spelling]
+          const member = DeclarationFacts.byCanonical(index, binding.declaration)
           return [
             binding._tag,
             binding.spelling,
             binding.declaration.module,
             binding.declaration.name,
+            member === undefined ? 'missing' : headerFingerprint(index, member),
           ]
-        if (binding._tag === 'ModuleNamespace')
-          return [binding._tag, binding.spelling, binding.module]
-        return [binding._tag, binding.spelling]
-      }),
+        }),
+    ),
   )
 }
 
-const nominalDependencies = new WeakMap<DeclarationFacts.MemberFact, ReadonlyArray<string>>()
-
-const nominalDependenciesOf = (member: DeclarationFacts.MemberFact): ReadonlyArray<string> => {
-  const cached = nominalDependencies.get(member)
-  if (cached !== undefined) return cached
-  const selected = new Set<string>()
-  // Documentation checks thousands of bodies against the same immutable declarations. Walk each
-  // declaration shape once; callers still close over these edges in their own dependency set.
-  visit(member, (value) => {
+const collectPresentationModules = (
+  self: BodyQuery,
+  authored: AuthoredLowering.Lowered,
+  declaration: DeclarationFacts.DeclarationFact,
+  scope: NameResolution.ModuleScope,
+  visited: Set<string>,
+  modules: Set<string>,
+): void => {
+  const body = memberKey(declaration)
+  modules.add(declaration.owner.module)
+  if (visited.has(body)) return
+  visited.add(body)
+  const names = AuthoredLowering.bodyNames(authored, authoredDeclaration(authored, declaration))
+  for (const binding of scope.bindings) {
     if (
-      records(value) &&
-      value._tag === 'NominalType' &&
-      typeof value.module === 'string' &&
-      typeof value.name === 'string'
+      !names.has(binding.spelling) ||
+      (binding._tag !== 'LocalDeclaration' && binding._tag !== 'ImportedMember')
     )
-      selected.add(`${value.module}/${value.name}`)
-    return !(records(value) && (value._tag === 'SyntaxNode' || value._tag === 'Token'))
-  })
-  const result = Object.freeze([...selected])
-  nominalDependencies.set(member, result)
-  return result
+      continue
+    modules.add(binding.declaration.module)
+    const member = DeclarationFacts.byCanonical(self.index, binding.declaration)
+    if (member?._tag !== 'FunctionDeclaration' || member.bodyTemplate === undefined) continue
+    const lowered = self.currentModules.get(member.owner.module)
+    const nestedScope = NameResolution.scopeOf(self.resolution, member.owner.module)
+    if (lowered !== undefined && nestedScope !== undefined)
+      collectPresentationModules(self, lowered, member, nestedScope, visited, modules)
+  }
 }
 
-const dependencies = (self: BodyQuery, built: Built): ReadonlyArray<Observation> => {
-  const selected = new Set<string>()
-  visit(built.unit, (value) => {
-    const owner = self.owners.get(value)
-    if (owner !== undefined) {
-      selected.add(owner)
-      return false
-    }
-    if (
-      records(value) &&
-      value._tag === 'NominalType' &&
-      typeof value.module === 'string' &&
-      typeof value.name === 'string'
-    )
-      selected.add(`${value.module}/${value.name}`)
-    return !(records(value) && (value._tag === 'SyntaxNode' || value._tag === 'Token'))
-  })
-  const result = new Map<string, Observation>()
-  const add = (key: string): void => {
-    if (result.has(key)) return
-    const member = self.members.get(key)
-    if (member === undefined) return
-    result.set(key, {
-      key,
-      signature: self.signatures.get(key) ?? '',
-      ...(member._tag === 'FunctionDeclaration' && member.bodyTemplate !== undefined
-        ? { implementation: self.implementations.get(key) ?? '' }
-        : {}),
-    })
-    // Resolved nominal shapes carry variance, cleanup and nested lifetime requirements. Traverse
-    // only those selected shapes; a visited declaration bounds recursive components finitely.
-    for (const dependency of nominalDependenciesOf(member)) add(dependency)
-  }
-  for (const key of [...selected].sort()) add(key)
-  // A failed lookup consumed the absence of this exact member. Retain that input so adding
-  // the member repairs cached diagnostics without invalidating users of unrelated names.
-  for (const diagnostic of built.unit.diagnostics) {
-    if (diagnostic.reason._tag !== 'UnknownImportedMember') continue
-    const key = `${diagnostic.reason.module}/${diagnostic.reason.spelling}`
-    if (!result.has(key)) result.set(key, { key, signature: self.signatures.get(key) })
-  }
-  return [...result.values()].sort((left, right) => left.key.localeCompare(right.key))
+/** Modules whose current source presentation can appear in this body's projected facts. */
+export const presentationModules = (
+  self: BodyQuery,
+  authored: AuthoredLowering.Lowered,
+  declaration: DeclarationFacts.DeclarationFact,
+  scope: NameResolution.ModuleScope,
+): ReadonlyArray<string> => {
+  const modules = new Set<string>()
+  collectPresentationModules(self, authored, declaration, scope, new Set(), modules)
+  return Object.freeze([...modules].sort())
 }
+
+/** Position-independent result identity used for dependent-query cutoffs. */
+export const fingerprint = (index: DeclarationIndex.Index, unit: Elaboration.CheckedUnit): string =>
+  TirCodec.fingerprint(unit, index, (declaration) => headerFingerprint(index, declaration))
 
 const callsOf = (self: BodyQuery, built: Built): ReadonlyArray<string> => {
   const calls = new Set<string>()
@@ -446,38 +445,6 @@ const callsOf = (self: BodyQuery, built: Built): ReadonlyArray<string> => {
   })
   return [...calls].sort()
 }
-
-/** The authored module owning one dependency key's member fact, absent when the key is unresolved. */
-const dependencyModule = (self: BodyQuery, key: string): string | undefined =>
-  self.members.get(key)?.anchor.owner.module
-
-const validateDependencies = (
-  self: BodyQuery,
-  dependencies: ReadonlyArray<Observation>,
-  visited = new Set<string>(),
-): boolean =>
-  dependencies.every((dependency) => {
-    const comparison = JSON.stringify([
-      dependency.key,
-      dependency.signature,
-      dependency.implementation,
-    ])
-    let matches = self.comparisons.get(comparison)
-    if (matches === undefined) {
-      self.work.validatedDependencies += 1
-      matches =
-        self.signatures.get(dependency.key) === dependency.signature &&
-        (dependency.implementation === undefined ||
-          self.implementations.get(dependency.key) === dependency.implementation)
-      self.comparisons.set(comparison, matches)
-    } else self.work.dependencyCacheHits += 1
-    if (!matches) return false
-    if (dependency.implementation === undefined) return true
-    if (visited.has(dependency.key)) return true
-    visited.add(dependency.key)
-    const body = self.previous.get(dependency.key)
-    return body === undefined || validateDependencies(self, body.validity.observed, visited)
-  })
 
 /** What construction hands back for one declaration. */
 export interface Built {
@@ -513,84 +480,109 @@ const present = (
     ),
   })
 
-/** Runs the body checker only when its own implementation or a consumed input changed. */
+const record = (
+  self: BodyQuery,
+  context: SemanticContext.SemanticContext,
+  authored: AuthoredLowering.Lowered,
+  declaration: DeclarationFacts.DeclarationFact,
+  unit: Elaboration.CheckedUnit,
+  presentationModules: ReadonlyArray<string>,
+  calls: ReadonlyArray<string>,
+): Elaboration.CheckedUnit => {
+  const key = memberKey(declaration)
+  self.entries.set(key, {
+    declaration,
+    authoredDeclaration: authoredDeclaration(authored, declaration),
+    context,
+    index: self.index,
+    unit,
+    presentationModules,
+    calls,
+  })
+  for (const body of unit.bodies) self.parents.set(body.results.lifetimes ?? body.results, key)
+  return unit
+}
+
+/** Executes one body after the shared semantic query runtime selected the miss branch. */
 export const check = (
   self: BodyQuery,
   context: SemanticContext.SemanticContext,
   authored: AuthoredLowering.Lowered,
-  scope: NameResolution.ModuleScope,
+  _scope: NameResolution.ModuleScope,
   declaration: DeclarationFacts.DeclarationFact,
   compute: () => Built,
   trace: CompilerTrace.CompilerTrace = CompilerTrace.none,
 ): Elaboration.CheckedUnit => {
   const key = memberKey(declaration)
+  return trace(
+    'Semantic.checkBody.execute',
+    () => {
+      self.work.checked += 1
+      const built = compute()
+      return record(
+        self,
+        context,
+        authored,
+        declaration,
+        built.unit,
+        presentationModules(self, authored, declaration, _scope),
+        callsOf(self, built),
+      )
+    },
+    { body: key },
+  )
+}
+
+/** Presents a result admitted by the shared validator against this revision's declarations. */
+export const reuse = (
+  self: BodyQuery,
+  context: SemanticContext.SemanticContext,
+  authored: AuthoredLowering.Lowered,
+  declaration: DeclarationFacts.DeclarationFact,
+  admitted: Elaboration.CheckedUnit,
+  trace: CompilerTrace.CompilerTrace = CompilerTrace.none,
+): Elaboration.CheckedUnit => {
+  const key = memberKey(declaration)
+  const current = self.entries.get(key)
+  if (current !== undefined) return current.unit
   const prior = self.previous.get(key)
-  const signature = self.signatures.get(key) ?? ModuleSurface.memberSignature(declaration)
-  const declared = authoredDeclaration(authored, declaration)
-  const bodyKey = implementation(authored, declaration)
-  const scopeKey = scopeSignature(authored, declaration, scope)
-  const valid =
-    prior !== undefined &&
-    AuthoredIdentity.equals(prior.context.module.owner, context.module.owner) &&
-    prior.validity.header === signature &&
-    prior.validity.body === bodyKey &&
-    prior.validity.scope === scopeKey &&
-    prior.validity.resolution === self.resolution &&
-    validateDependencies(self, prior.validity.observed)
-  return trace(`Semantic.checkBody.${valid && prior !== undefined ? 'reuse' : 'execute'}`, () => {
-    let unit: Elaboration.CheckedUnit
-    let consumed: ReadonlyArray<Observation>
-    let calls: ReadonlyArray<string>
-    let ownership: Entry['ownership']
-    if (valid && prior !== undefined) {
+  return trace(
+    'Semantic.checkBody.reuse',
+    () => {
       self.work.reused += 1
-      // Declaration and member facts are rebuilt every revision, so their object identity never
-      // survives one; only the authored lowering is shared, and only for a byte-identical source.
-      // A shared authored declaration therefore witnesses that this body kept its own positions, and
-      // a shared lowering behind every consumed member witnesses the same for its inputs. Otherwise
-      // the body is the same and only its presentation is stale.
+      if (prior === undefined) {
+        return record(
+          self,
+          context,
+          authored,
+          declaration,
+          admitted,
+          Object.freeze([declaration.owner.module]),
+          [],
+        )
+      }
+      const declared = authoredDeclaration(authored, declaration)
       const unchanged =
         prior.authoredDeclaration === declared &&
-        prior.validity.observed.every((dependency) => {
-          const module = dependencyModule(self, dependency.key)
-          return module !== undefined && self.sharedModules.get(module) === true
-        })
-      unit = unchanged
-        ? prior.unit
-        : present(prior.unit, renumberingOf(prior.index, self), context, declaration)
+        prior.presentationModules.every((module) => self.sharedModules.get(module) === true)
+      const unit = unchanged
+        ? admitted
+        : present(admitted, renumberingOf(prior.index, self), context, declaration)
       if (!unchanged) self.work.presented += 1
       for (const body of unit.bodies)
         self.reuse.set(body.results.lifetimes ?? body.results, { prior, moved: !unchanged })
-      consumed = prior.validity.observed
-      calls = prior.calls
-      ownership = new Map(prior.ownership)
-    } else {
-      self.work.checked += 1
-      const built = compute()
-      unit = built.unit
-      consumed = dependencies(self, built)
-      calls = callsOf(self, built)
-      ownership = new Map()
-    }
-    self.entries.set(key, {
-      declaration,
-      authoredDeclaration: declared,
-      context,
-      index: self.index,
-      validity: {
-        header: signature,
-        body: bodyKey,
-        scope: scopeKey,
-        resolution: self.resolution,
-        observed: consumed,
-      },
-      unit,
-      calls,
-      ownership,
-    })
-    for (const body of unit.bodies) self.parents.set(body.results.lifetimes ?? body.results, key)
-    return unit
-  })
+      return record(
+        self,
+        context,
+        authored,
+        declaration,
+        unit,
+        prior.presentationModules,
+        prior.calls,
+      )
+    },
+    { body: key },
+  )
 }
 
 const spanKey = (span: SourceSpan.SourceSpan): string => `${span.start}:${span.end}`
@@ -607,6 +599,12 @@ const movesOf = (previous: Entry, current: Entry): ReadonlyMap<string, SourceSpa
       if (SourceSpan.isSourceSpan(after)) moves.set(spanKey(before), after)
       return
     }
+    if (isAuthoredAnchor(before) && isAuthoredAnchor(after)) {
+      const beforeSpan = previous.context.spanOf(before)
+      const afterSpan = current.context.spanOf(after)
+      moves.set(spanKey(beforeSpan), afterSpan)
+      return
+    }
     if (before instanceof Map || before instanceof Set) return
     if (Array.isArray(before)) {
       if (Array.isArray(after)) for (const [at, item] of before.entries()) walk(item, after[at])
@@ -616,6 +614,7 @@ const movesOf = (previous: Entry, current: Entry): ReadonlyMap<string, SourceSpa
     for (const key of Object.keys(before)) walk(before[key], after[key])
   }
   for (const [at, body] of previous.unit.bodies.entries()) {
+    walk(body.declaration, current.unit.bodies[at]?.declaration)
     walk(body.function, current.unit.bodies[at]?.function)
     // Ownership also reports at the header: the declaration and each parameter it binds.
     for (const anchor of [
@@ -634,8 +633,23 @@ const moved = <A>(value: A, moves: ReadonlyMap<string, SourceSpan.SourceSpan>): 
   const copy = (input: unknown): unknown => {
     if (typeof input !== 'object' || input === null) return input
     if (SourceSpan.isSourceSpan(input)) {
-      const next = moves.get(spanKey(input))
-      if (next === undefined) complete = false
+      let next = moves.get(spanKey(input))
+      if (next === undefined) {
+        let distance = Number.POSITIVE_INFINITY
+        for (const [key, candidate] of moves) {
+          if (candidate.sourceId !== input.sourceId) continue
+          const separator = key.indexOf(':')
+          const beforeStart = Number(key.slice(0, separator))
+          const candidateDistance = Math.abs(input.start - beforeStart)
+          if (candidateDistance >= distance) continue
+          distance = candidateDistance
+          const delta = candidate.start - beforeStart
+          next = SourceSpan.fromOffsets(input.sourceId, input.start + delta, input.end + delta)
+        }
+      }
+      if (next === undefined) {
+        complete = false
+      }
       return next ?? input
     }
     const known = copies.get(input)
@@ -668,37 +682,32 @@ const moved = <A>(value: A, moves: ReadonlyMap<string, SourceSpan.SourceSpan>): 
   return complete ? result : undefined
 }
 
-/** Reuses source ownership only beside a reused semantic body and unchanged access boundaries. */
-export const ownership = (
+/** Records or presents an ownership result admitted by the shared semantic query runtime. */
+export const acceptOwnership = (
   self: BodyQuery,
   input: Ownership.CheckInput,
-  compute: () => Ownership.CheckedFunction,
-): Ownership.CheckedFunction => {
-  // A body is known here by the region proof it published, which is one object per checked body.
-  const { lifetimes: proof, boundaries } = input
-  const key = proof === undefined ? undefined : memberKey(input.function.declaration)
+  admitted: Ownership.CheckedFunction,
+  reused: boolean,
+): Ownership.CheckedFunction | undefined => {
+  const { lifetimes: proof } = input
+  const key = memberKey(input.function.declaration)
   const parent = proof === undefined ? undefined : self.parents.get(proof)
-  const current = parent === undefined ? undefined : self.entries.get(parent)
+  const current = self.entries.get(parent ?? key)
   const reuse = proof === undefined ? undefined : self.reuse.get(proof)
-  const prior = key === undefined ? undefined : reuse?.prior.ownership.get(key)
-  const retained =
-    prior === undefined ? undefined : { boundaries: prior.input.boundaries, checked: prior.checked }
-  // Ownership reports in source coordinates. Its proof holds for a body that only moved, so each
-  // position follows the body; a position the body does not account for means checking again.
-  const carried =
-    retained === undefined || reuse?.moved !== true || current === undefined
-      ? retained
-      : moved(retained, movesOf(reuse.prior, current))
-  let checked: Ownership.CheckedFunction
-  if (carried !== undefined && JSON.stringify(carried.boundaries) === JSON.stringify(boundaries)) {
-    checked = carried.checked
-    self.work.ownershipReused += 1
-  } else {
-    checked = compute()
-    self.work.ownershipChecked += 1
-  }
-  if (current !== undefined && key !== undefined) current.ownership.set(key, { input, checked })
+  const checked =
+    !reused || reuse?.moved !== true || current === undefined
+      ? admitted
+      : moved(admitted, movesOf(reuse.prior, current))
+  if (checked === undefined) return undefined
+  if (reused) self.work.ownershipReused += 1
+  else self.work.ownershipChecked += 1
   return checked
+}
+
+/** Complete checked-unit identity that owns a source or compiler-made ownership input. */
+export const ownershipRootIdentity = (self: BodyQuery, input: Ownership.CheckInput): string => {
+  const proof = input.lifetimes ?? input.function
+  return self.parents.get(proof) ?? memberKey(input.function.declaration)
 }
 
 /** Attaches current query artifacts to their immutable elaboration boundary for the next revision. */

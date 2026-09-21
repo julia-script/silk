@@ -18,10 +18,12 @@ import * as Config from 'effect/Config'
 import * as ConfigProvider from 'effect/ConfigProvider'
 import * as Effect from 'effect/Effect'
 import * as Layer from 'effect/Layer'
+import * as Option from 'effect/Option'
 import * as TestClock from 'effect/testing/TestClock'
 import * as Analysis from '../src/Analysis.js'
 import * as NativeLinkInput from '../src/NativeLinkInput.js'
 import * as NativeToolchain from '../src/NativeToolchain.js'
+import * as Storage from '../src/Storage.js'
 import * as PhaseReport from '../src/PhaseReport.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
@@ -440,20 +442,20 @@ it.effect(
       const entries = new Map<string, Uint8Array>()
       const reads: Array<string> = [],
         writes: Array<string> = []
-      const artifactCache: NativeToolchain.ArtifactCache = Object.freeze({
-        _tag: 'ArtifactCache',
-        get: (key: string) =>
+      const artifactStorage: Storage.Service = Storage.Storage.of({
+        read: (address) =>
           Effect.sync(() => {
-            reads.push(key)
-            return entries.get(key)
+            reads.push(address.key)
+            const found = entries.get(address.key)
+            return found === undefined ? Option.none() : Option.some(found)
           }),
-        set: (key: string, bytes: Uint8Array) =>
+        publish: (address, bytes) =>
           Effect.sync(() => {
-            writes.push(key)
-            entries.set(key, bytes)
+            writes.push(address.key)
+            entries.set(address.key, Uint8Array.from(bytes))
           }),
       })
-      const cachingToolchain = Object.freeze({ ...toolchain, artifactCache })
+      const cachingToolchain = Object.freeze({ ...toolchain, artifactStorage })
       const source = 'pub fn main() -> i32 { return 42 }'
       for (const name of ['admission-first', 'admission-second']) {
         const outcome = yield* compileSource(name, source, {
@@ -516,19 +518,23 @@ it.effect('reports a missing request-supplied object as linker input even when c
   }),
 )
 
-it.effect('translates a synchronously throwing artifact-cache read at the Driver boundary', () =>
+it.effect('translates an artifact Storage read failure at the Driver boundary', () =>
   Effect.gen(function* () {
     const cause = Object.freeze({ injected: 'artifact-cache-read' })
-    const artifactCache: NativeToolchain.ArtifactCache = Object.freeze({
-      _tag: 'ArtifactCache',
-      get: () => {
-        throw cause
-      },
-      set: () => Effect.void,
+    const error = new Storage.StorageError({
+      operation: 'Storage.read',
+      namespace: 'native-artifacts',
+      key: 'injected',
+      message: 'injected read failure',
+      reason: { _tag: 'ReadFailure', cause },
+    })
+    const artifactStorage: Storage.Service = Storage.Storage.of({
+      read: () => Effect.fail(error),
+      publish: () => Effect.void,
     })
     const result = yield* Effect.result(
       compileSource('throwing-artifact-cache-read', 'pub fn main() -> i32 { return 42 }', {
-        toolchain: Object.freeze({ ...toolchain, artifactCache }),
+        toolchain: Object.freeze({ ...toolchain, artifactStorage }),
         cache: true,
       }),
     )
@@ -540,23 +546,27 @@ it.effect('translates a synchronously throwing artifact-cache read at the Driver
     assert.strictEqual(result.failure.stage, 'cache-read')
     assert.strictEqual(result.failure.reason._tag, 'StorageFailed')
     if (result.failure.reason._tag !== 'StorageFailed') return
-    assert.strictEqual(result.failure.reason.cause, cause)
+    assert.strictEqual(result.failure.reason.cause, error)
   }),
 )
 
-it.effect('translates a synchronously throwing artifact-cache write at the Driver boundary', () =>
+it.effect('translates an artifact Storage publication failure at the Driver boundary', () =>
   Effect.gen(function* () {
     const cause = Object.freeze({ injected: 'artifact-cache-write' })
-    const artifactCache: NativeToolchain.ArtifactCache = Object.freeze({
-      _tag: 'ArtifactCache',
-      get: () => Effect.as(Effect.void, undefined),
-      set: () => {
-        throw cause
-      },
+    const error = new Storage.StorageError({
+      operation: 'Storage.publish',
+      namespace: 'native-artifacts',
+      key: 'injected',
+      message: 'injected publication failure',
+      reason: { _tag: 'PublishFailure', cause },
+    })
+    const artifactStorage: Storage.Service = Storage.Storage.of({
+      read: () => Effect.succeedNone,
+      publish: () => Effect.fail(error),
     })
     const result = yield* Effect.result(
       compileSource('throwing-artifact-cache-write', 'pub fn main() -> i32 { return 42 }', {
-        toolchain: Object.freeze({ ...toolchain, artifactCache }),
+        toolchain: Object.freeze({ ...toolchain, artifactStorage }),
         cache: true,
       }),
     )
@@ -568,7 +578,7 @@ it.effect('translates a synchronously throwing artifact-cache write at the Drive
     assert.strictEqual(result.failure.stage, 'cache-write')
     assert.strictEqual(result.failure.reason._tag, 'StorageFailed')
     if (result.failure.reason._tag !== 'StorageFailed') return
-    assert.strictEqual(result.failure.reason.cause, cause)
+    assert.strictEqual(result.failure.reason.cause, error)
   }),
 )
 
@@ -579,7 +589,7 @@ it.effect(
       Effect.sync(() => mkdtempSync(join(tmpdir(), 'silk-default-cache-'))),
       (cacheDirectory) =>
         Effect.gen(function* () {
-          // No artifactCache is pinned on either toolchain: the durable reuse below can only come
+          // No artifact Storage is pinned on either toolchain: the durable reuse below can only come
           // from the environment-selected default, and each compile builds its own toolchain value
           // so nothing is shared between them but the directory.
           const source = 'pub fn main() -> i32 { return 40 + 2 }'
@@ -660,15 +670,14 @@ it.effect('rejects a supplied foreign contract before backend-cache or native-to
       toolchain: {
         ...toolchain,
         clang: 'must-not-invoke-clang',
-        artifactCache: {
-          _tag: 'ArtifactCache',
-          get: () =>
+        artifactStorage: Storage.Storage.of({
+          read: () =>
             Effect.sync(() => {
               cacheReads += 1
-              return undefined
+              return Option.none()
             }),
-          set: () => Effect.void,
-        },
+          publish: () => Effect.void,
+        }),
       },
     })
     assert.strictEqual(outcome._tag, 'Rejected')

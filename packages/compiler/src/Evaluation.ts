@@ -2339,6 +2339,21 @@ export const cacheEntries = <A>(self: Evaluation<A>): ReadonlyArray<CacheEntry<A
       .map(([key, state]) => Object.freeze({ key, state })),
   )
 
+/** Normalized policy identity required for cross-revision evaluation admission. */
+export const policyKey = <A>(self: Evaluation<A>): string =>
+  JSON.stringify([
+    self.limits.steps,
+    self.limits.callDepth,
+    self.limits.retainedValueBytes,
+    self.limits.residualNodes,
+  ])
+
+/** Returns one completed cache entry without exposing the mutable cache. */
+export const cacheEntry = <A>(self: Evaluation<A>, key: string): CacheEntry<A> | undefined => {
+  const state = self[stateSymbol].cache.get(key)
+  return state === undefined || state._tag === 'Pending' ? undefined : Object.freeze({ key, state })
+}
+
 /** Canonical target-and-application identity used only inside static-evaluation coordination. */
 export const applicationKey = (environment: TargetEnvironment, application: Application): string =>
   Canonical.record('StaticApplication', [
@@ -2647,3 +2662,24 @@ export const evaluateFrom = <A>(
   parentTrace: Trace,
   callback: EvaluationCallback<A>,
 ): ApplicationResult<A> => evaluateAt(self, application, callback, parentTrace)
+
+/** Installs one validated completed application and charges its recorded cost exactly once. */
+export const admit = <A>(
+  self: Evaluation<A>,
+  application: Application,
+  entry: CacheEntry<A>,
+  parentTrace: Trace = Object.freeze([]),
+): ApplicationResult<A> => {
+  const key = applicationKey(self.environment, application)
+  if (entry.key !== key || entry.state._tag === 'Pending')
+    throw new RangeError('Validated evaluation entry does not match its application')
+  self[stateSymbol].cache.set(key, entry.state)
+  return evaluateAt(
+    self,
+    application,
+    () => {
+      throw new RangeError('Validated evaluation unexpectedly executed')
+    },
+    parentTrace,
+  )
+}

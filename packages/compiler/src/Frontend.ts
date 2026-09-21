@@ -14,6 +14,8 @@ import * as DeclarationIndex from './DeclarationIndex.js'
 import * as Diagnostic from './Diagnostic.js'
 import * as SemanticContext from './SemanticContext.js'
 import * as Semantic from './Semantic.js'
+import * as SemanticPersistence from './SemanticPersistence.js'
+import type * as SemanticQuery from './SemanticQuery.js'
 import * as Elaboration from './Elaboration.js'
 import * as IncrementalReuse from './IncrementalReuse.js'
 import * as ModuleClosure from './ModuleClosure.js'
@@ -36,6 +38,8 @@ import * as TestDiscovery from './TestDiscovery.js'
 /** Optional environment-specific observations attached to compiler phase reports. */
 export interface Options {
   readonly heapBytes?: () => number
+  /** Optional checked-unit persistence. Its Storage provider and bounds are explicit. */
+  readonly semanticPersistence?: SemanticPersistence.Persistence
   /** Internal differential-test escape hatch; production paths normalize shared MIR. */
   readonly normalizeMir?: boolean
 }
@@ -68,6 +72,9 @@ export interface Frontend extends FrontendFacts {
 /** Immutable multi-root frontend facts computed once for one project revision. */
 export interface ProjectFrontend extends FrontendFacts {
   readonly semanticEnvironment: string
+  readonly semanticQueries: SemanticQuery.Snapshot
+  readonly semanticQueryCounters: SemanticQuery.Counters
+  readonly semanticPersistenceCounters?: SemanticPersistence.Counters
   readonly closure: ModuleClosure.ProjectClosure
   readonly semanticInvalidation: SemanticInvalidation.SemanticInvalidation
 }
@@ -83,6 +90,7 @@ const analyzeHeaders = Effect.fn('Frontend.analyzeHeaders')(function* (
   closure: ModuleClosure.Facts,
   report: Array<PhaseReport.PhaseReport>,
   options: Options,
+  previous?: SemanticQuery.Snapshot,
 ): Effect.fn.Return<HeaderFacts> {
   const collected = PhaseReport.measureInto(
     report,
@@ -144,7 +152,16 @@ const analyzeHeaders = Effect.fn('Frontend.analyzeHeaders')(function* (
     ])
     .map((part) => `${part.length}:${part}`)
     .join('')
-  const session = Semantic.makeSession(epoch, index, resolution)
+  const availablePrevious =
+    options.semanticPersistence === undefined
+      ? previous
+      : yield* SemanticPersistence.load(
+          options.semanticPersistence,
+          index,
+          resolution,
+          previous,
+        ).pipe(Effect.orDie)
+  const session = Semantic.makeSession(epoch, index, resolution, 'default', availablePrevious)
   return Object.freeze({ index, resolution, session, surfaces })
 })
 
@@ -276,6 +293,7 @@ const analyzeSemantics = Effect.fn('Frontend.analyzeSemantics')(function* (
           index,
           localSharedAccessBoundaries,
           precomputed?.bodyQueries,
+          precomputed?.bodyQueries === undefined ? undefined : headers.session,
         )
         const previous = retained.get(name)?.ownership
         const unchanged =
@@ -360,10 +378,17 @@ const analyzeFrontend = Effect.fn('Frontend.analyzeFrontend')(function* (
 ): Effect.fn.Return<FrontendFacts> {
   const headers = yield* analyzeHeaders(closure, report, options)
   const semantics = yield* analyzeSemantics(closure, headers, report, options)
-  return OpaqueRealization.withCatalog(
+  const frontend = OpaqueRealization.withCatalog(
     Object.freeze({ ...headers, ...semantics, report: Object.freeze([...report]) }),
     OpaqueRealization.catalogOf(semantics),
   )
+  if (options.semanticPersistence !== undefined)
+    yield* SemanticPersistence.publish(
+      options.semanticPersistence,
+      Semantic.snapshot(headers.session),
+      headers.index,
+    ).pipe(Effect.orDie)
+  return frontend
 })
 
 /** Supplies lazy static helpers with headers and source, without checking executable bodies. */
@@ -853,6 +878,7 @@ export const selectProject = Effect.fn('Frontend.selectProject')(function* (
   request: ModuleClosure.ProjectRequest,
   report: Array<PhaseReport.PhaseReport> = [],
   options: Options = {},
+  previous?: SemanticQuery.Snapshot,
 ): Effect.fn.Return<
   SelectedProject,
   ModuleClosure.ModuleClosureError,
@@ -876,7 +902,8 @@ export const selectProject = Effect.fn('Frontend.selectProject')(function* (
   yield* Effect.yieldNow
   const selected = yield* configureProjectSelection(expanded, loaded, report, options)
   const headers =
-    selected.bootstrapHeaders ?? (yield* analyzeHeaders(selected.closure, report, options))
+    selected.bootstrapHeaders ??
+    (yield* analyzeHeaders(selected.closure, report, options, previous))
   const closure = yield* diagnoseMissingProjectRoots(
     expanded,
     selected.closure,
@@ -901,7 +928,12 @@ export const frontendProject = Effect.fn('Frontend.frontendProject')(function* (
   SourceResolver.SourceResolver
 > {
   const report: Array<PhaseReport.PhaseReport> = []
-  const { closure, profile, selection, headers } = yield* selectProject(request, report, options)
+  const { closure, profile, selection, headers } = yield* selectProject(
+    request,
+    report,
+    options,
+    previous?.semanticQueries,
+  )
   const semanticEnvironment = Canonical.record('SelectedFrontend', [
     SemanticInvalidation.environment,
     profile?.identity ?? '',
@@ -910,6 +942,7 @@ export const frontendProject = Effect.fn('Frontend.frontendProject')(function* (
   const compatiblePrevious = previous?.environment === semanticEnvironment ? previous : undefined
   const bodyQueries = BodyQuery.make(
     headers.index,
+    headers.resolution,
     [...(compatiblePrevious?.semantics.values() ?? [])].map((module) => module.elaboration),
     closure.modules.map((module) => module.authored),
   )
@@ -985,6 +1018,13 @@ export const frontendProject = Effect.fn('Frontend.frontendProject')(function* (
       ...measuredQuery,
       counters: BodyQuery.counters(bodyQueries),
     })
+  const semanticQueries = Semantic.snapshot(headers.session)
+  if (options.semanticPersistence !== undefined)
+    yield* SemanticPersistence.publish(
+      options.semanticPersistence,
+      semanticQueries,
+      headers.index,
+    ).pipe(Effect.orDie)
   return OpaqueRealization.withCatalog(
     Object.freeze({
       closure,
@@ -992,6 +1032,13 @@ export const frontendProject = Effect.fn('Frontend.frontendProject')(function* (
       ...semantics,
       semanticInvalidation: invalidation.value,
       semanticEnvironment,
+      semanticQueries,
+      semanticQueryCounters: Semantic.queryCounters(headers.session),
+      ...(options.semanticPersistence === undefined
+        ? {}
+        : {
+            semanticPersistenceCounters: SemanticPersistence.counters(options.semanticPersistence),
+          }),
       ...(selection === undefined ? {} : { selection }),
       ...(profile === undefined ? {} : { profile }),
       report: Object.freeze([...report]),

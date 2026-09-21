@@ -1,39 +1,66 @@
 import * as Effect from 'effect/Effect'
 
-/** One immutable dependency observed while a semantic query executes. */
-export type Observation =
-  | { readonly _tag: 'Query'; readonly key: string }
-  | {
-      readonly _tag: 'Namespace'
-      readonly module: string
-      readonly spelling: string
-      readonly candidates: ReadonlyArray<string>
-    }
-  | { readonly _tag: 'Header'; readonly declaration: string }
-  | { readonly _tag: 'ImportSelection'; readonly module: string; readonly binding: string }
-  | { readonly _tag: 'Alias'; readonly declaration: string }
-  | { readonly _tag: 'Bound'; readonly declaration: string }
-  | { readonly _tag: 'Conformance'; readonly key: string }
-  | { readonly _tag: 'Configuration'; readonly key: string; readonly value: string }
-
-/** Records a dependency at the exact semantic read which determined an answer. */
-export type Observe = (observation: Observation) => void
-
-/** One typed request executed by the session's authoritative provider for that request family. */
-export interface Request<A> {
-  readonly _tag: 'SemanticQueryRequest'
-  readonly key: string
-  readonly execute: (observe: Observe) => A
+/** A provider-owned semantic operation with a reconstructible canonical address. */
+export interface Descriptor {
+  readonly _tag: 'SemanticQueryDescriptor'
+  readonly family: string
+  readonly schema: number
+  readonly address: string
+  readonly reuse: 'Revision' | 'Session'
 }
 
-/** A completed immutable answer and the dependencies observed while producing it. */
+/** One typed current input that can be read again while validating a prior record. */
+export interface InputAddress {
+  readonly _tag: 'SemanticInputAddress'
+  readonly family: string
+  readonly schema: number
+  readonly address: string
+}
+
+export interface QueryRead {
+  readonly _tag: 'QueryRead'
+  readonly descriptor: Descriptor
+  readonly fingerprint: string
+}
+
+export interface InputRead {
+  readonly _tag: 'InputRead'
+  readonly input: InputAddress
+  readonly fingerprint: string
+}
+
+export type Observation = QueryRead | InputRead
+export type Observe = (input: InputAddress) => void
+
+/** The single dispatcher for one semantic environment. */
+export interface Provider {
+  readonly execute: (descriptor: Descriptor, observe: Observe) => unknown
+  readonly fingerprint: (
+    descriptor: Descriptor,
+    answer: unknown,
+    observations: ReadonlyArray<Observation>,
+  ) => string
+  readonly read: (input: InputAddress) => string | undefined
+  /** Whether a successfully returned answer may enter current or revision snapshots. */
+  readonly cacheable?: (descriptor: Descriptor, answer: unknown) => boolean
+  /** Whether a callback-backed descriptor can execute before its current demand is registered. */
+  readonly available?: (descriptor: Descriptor) => boolean
+}
+
 export interface Completed<A> {
+  readonly descriptor: Descriptor
   readonly key: string
   readonly answer: A
+  readonly fingerprint: string
   readonly observations: ReadonlyArray<Observation>
 }
 
-/** Explicit active-query recursion; providers decide whether it is semantically available. */
+/** A bounded transfer object that does not retain its producing session. */
+export interface Snapshot {
+  readonly _tag: 'SemanticQuerySnapshot'
+  readonly records: ReadonlyMap<string, Completed<unknown>>
+}
+
 export interface Cycle {
   readonly _tag: 'SemanticQueryCycle'
   readonly key: string
@@ -44,7 +71,13 @@ export type Result<A> =
   | { readonly _tag: 'Completed'; readonly completed: Completed<A>; readonly reused: boolean }
   | { readonly _tag: 'Cycle'; readonly cycle: Cycle }
 
-/** The public immutable identity of one fresh semantic environment. */
+export interface Counters {
+  readonly _tag: 'SemanticQueryCounters'
+  readonly validations: number
+  readonly executions: number
+  readonly reuses: number
+}
+
 export interface Session {
   readonly _tag: 'SemanticQuerySession'
   readonly epoch: string
@@ -56,12 +89,17 @@ interface Active {
 }
 
 interface State {
-  readonly completed: Map<string, Completed<unknown>>
+  readonly provider: Provider
+  readonly previous: ReadonlyMap<string, Completed<unknown>>
+  readonly current: Map<string, Completed<unknown>>
   readonly active: Array<Active>
   readonly executions: Map<string, number>
+  readonly counters: { validations: number; executions: number; reuses: number }
+  freshDepth: number
 }
 
 const states = new WeakMap<Session, State>()
+const missingFingerprint = '\u0000missing'
 
 const stateOf = (self: Session): State => {
   const state = states.get(self)
@@ -69,22 +107,50 @@ const stateOf = (self: Session): State => {
   return state
 }
 
-/** Creates an empty answer store for exactly one immutable semantic environment. */
-export const make = (epoch: string): Session => {
+export const keyOf = (descriptor: Descriptor): string =>
+  descriptor.family +
+  ':' +
+  descriptor.schema +
+  ':' +
+  descriptor.address.length +
+  ':' +
+  descriptor.address
+
+const inputKey = (input: InputAddress): string =>
+  input.family + ':' + input.schema + ':' + input.address.length + ':' + input.address
+
+const readFingerprint = (state: State, input: InputAddress): string =>
+  state.provider.read(input) ?? missingFingerprint
+
+export const make = (epoch: string, provider: Provider, previous?: Snapshot): Session => {
   const session = Object.freeze({ _tag: 'SemanticQuerySession' as const, epoch })
-  states.set(session, { completed: new Map(), active: [], executions: new Map() })
+  states.set(session, {
+    provider,
+    previous: previous?.records ?? new Map(),
+    current: new Map(),
+    active: [],
+    executions: new Map(),
+    counters: { validations: 0, executions: 0, reuses: 0 },
+    freshDepth: 0,
+  })
   return session
 }
 
+const observationKey = (observation: Observation): string =>
+  observation._tag === 'QueryRead'
+    ? observation._tag + ':' + keyOf(observation.descriptor) + ':' + observation.fingerprint
+    : observation._tag + ':' + inputKey(observation.input) + ':' + observation.fingerprint
+
 const observeInto = (active: Active, observation: Observation): void => {
-  const encoded = JSON.stringify(observation)
-  if (active.observations.some((candidate) => JSON.stringify(candidate) === encoded)) return
+  const encoded = observationKey(observation)
+  if (active.observations.some((candidate) => observationKey(candidate) === encoded)) return
   active.observations.push(Object.freeze(observation))
 }
 
-const observeParent = (state: State, key: string): void => {
+const observeParent = (state: State, descriptor: Descriptor, fingerprint: string): void => {
   const parent = state.active.at(-1)
-  if (parent !== undefined) observeInto(parent, Object.freeze({ _tag: 'Query', key }))
+  if (parent !== undefined)
+    observeInto(parent, Object.freeze({ _tag: 'QueryRead', descriptor, fingerprint }))
 }
 
 const cycle = (state: State, key: string): Result<never> => {
@@ -102,34 +168,78 @@ const cycle = (state: State, key: string): Result<never> => {
   })
 }
 
-const execute = <A>(self: Session, request: Request<A>, publish: boolean): Result<A> => {
+const storedAs = <A>(stored: Completed<unknown>): Completed<A> =>
+  // Family and schema are part of the key and determine the provider answer type.
+  stored as Completed<A>
+
+const validateObservation = (self: Session, observation: Observation): boolean => {
   const state = stateOf(self)
-  observeParent(state, request.key)
-  if (publish) {
-    const stored = state.completed.get(request.key)
-    if (stored !== undefined)
-      // The store is populated only by the same keyed request family. This cast is the local
-      // variance bridge which keeps unknown out of every public answer channel.
-      return Object.freeze({
-        _tag: 'Completed',
-        completed: stored as Completed<A>,
-        reused: true,
-      })
+  if (observation._tag === 'InputRead')
+    return readFingerprint(state, observation.input) === observation.fingerprint
+  if (state.provider.available?.(observation.descriptor) === false) {
+    const key = keyOf(observation.descriptor)
+    const current = state.current.get(key)
+    if (current !== undefined) return current.fingerprint === observation.fingerprint
+    const previous = state.previous.get(key)
+    if (previous === undefined || state.active.some((active) => active.key === key)) return false
+    const reservation: Active = { key, observations: [] }
+    state.active.push(reservation)
+    let valid = false
+    let removed: Active | undefined
+    try {
+      valid = validate(self, previous)
+    } finally {
+      removed = state.active.pop()
+    }
+    if (removed !== reservation)
+      throw new RangeError('Semantic query validation stack is corrupted')
+    if (!valid) return false
+    state.current.set(key, previous)
+    state.counters.reuses += 1
+    return previous.fingerprint === observation.fingerprint
   }
-  if (state.active.some((active) => active.key === request.key)) return cycle(state, request.key)
-  const active: Active = { key: request.key, observations: [] }
+  const result = execute<unknown>(self, observation.descriptor, true)
+  return result._tag === 'Completed' && result.completed.fingerprint === observation.fingerprint
+}
+
+const validate = (self: Session, completed: Completed<unknown>): boolean => {
+  const state = stateOf(self)
+  state.counters.validations += 1
+  for (const observation of completed.observations)
+    if (!validateObservation(self, observation)) return false
+  return true
+}
+
+const executeProvider = <A>(self: Session, descriptor: Descriptor, publish: boolean): Result<A> => {
+  const state = stateOf(self)
+  const key = keyOf(descriptor)
+  const active: Active = { key, observations: [] }
   state.active.push(active)
   try {
-    state.executions.set(request.key, (state.executions.get(request.key) ?? 0) + 1)
-    const answer = request.execute((observation) => observeInto(active, observation))
+    state.counters.executions += 1
+    state.executions.set(key, (state.executions.get(key) ?? 0) + 1)
+    const answer = state.provider.execute(descriptor, (input) =>
+      observeInto(
+        active,
+        Object.freeze({
+          _tag: 'InputRead',
+          input,
+          fingerprint: readFingerprint(state, input),
+        }),
+      ),
+    ) as A
     const completed = Object.freeze({
-      key: request.key,
+      descriptor,
+      key,
       answer,
+      fingerprint: state.provider.fingerprint(descriptor, answer, active.observations),
       observations: Object.freeze([...active.observations]),
     })
-    if (publish) state.completed.set(request.key, completed)
+    if (publish && state.provider.cacheable?.(descriptor, answer) !== false)
+      state.current.set(key, completed)
     const removed = state.active.pop()
     if (removed !== active) throw new RangeError('Semantic query reservation stack is corrupted')
+    observeParent(state, descriptor, completed.fingerprint)
     return Object.freeze({ _tag: 'Completed', completed, reused: false })
   } catch (cause) {
     if (state.active.at(-1) === active) state.active.pop()
@@ -137,42 +247,105 @@ const execute = <A>(self: Session, request: Request<A>, publish: boolean): Resul
   }
 }
 
-/** Executes or reuses a request in this session. Defects never publish partial answers. */
-export const query = <A>(self: Session, request: Request<A>): Result<A> =>
-  execute(self, request, true)
+const execute = <A>(self: Session, descriptor: Descriptor, allowReuse: boolean): Result<A> => {
+  const state = stateOf(self)
+  const key = keyOf(descriptor)
+  const publish = state.freshDepth === 0
+  if (state.active.some((active) => active.key === key)) return cycle(state, key)
+  if (allowReuse && publish) {
+    const current = state.current.get(key)
+    if (current !== undefined) {
+      state.counters.reuses += 1
+      observeParent(state, descriptor, current.fingerprint)
+      return Object.freeze({ _tag: 'Completed', completed: storedAs<A>(current), reused: true })
+    }
+    const previous = descriptor.reuse === 'Revision' ? state.previous.get(key) : undefined
+    if (previous !== undefined) {
+      const reservation: Active = { key, observations: [] }
+      state.active.push(reservation)
+      let valid = false
+      let removed: Active | undefined
+      try {
+        valid = validate(self, previous)
+      } finally {
+        removed = state.active.pop()
+      }
+      if (removed !== reservation)
+        throw new RangeError('Semantic query validation stack is corrupted')
+      if (valid) {
+        state.current.set(key, previous)
+        state.counters.reuses += 1
+        observeParent(state, descriptor, previous.fingerprint)
+        return Object.freeze({
+          _tag: 'Completed',
+          completed: storedAs<A>(previous),
+          reused: true,
+        })
+      }
+    }
+  }
+  return executeProvider(self, descriptor, publish)
+}
 
-/** Executes the same provider without reading or publishing the completed-answer store. */
-export const fresh = <A>(self: Session, request: Request<A>): Result<A> =>
-  execute(self, request, false)
+export const query = <A>(self: Session, descriptor: Descriptor): Result<A> =>
+  execute(self, descriptor, true)
 
-/**
- * Effect boundary for cancellable callers. The yield is the supported cancellation boundary;
- * synchronous providers remain deliberately non-preemptive.
- */
+/** Bypasses both current and previous reuse for this root and every nested provider. */
+export const fresh = <A>(self: Session, descriptor: Descriptor): Result<A> => {
+  const state = stateOf(self)
+  state.freshDepth += 1
+  try {
+    return execute(self, descriptor, false)
+  } finally {
+    state.freshDepth -= 1
+  }
+}
+
 export const queryEffect = Effect.fn('SemanticQuery.query')(function* <A>(
   self: Session,
-  request: Request<A>,
+  descriptor: Descriptor,
 ): Effect.fn.Return<Completed<A>, Cycle> {
   yield* Effect.yieldNow
-  const result = query(self, request)
+  const result = query<A>(self, descriptor)
   return result._tag === 'Cycle' ? yield* Effect.fail(result.cycle) : result.completed
 })
 
-/** Reads a completed result for inspection without executing its provider. */
-export const completed = <A>(self: Session, key: string): Completed<A> | undefined =>
-  // See execute(): request keys uniquely determine their answer family.
-  stateOf(self).completed.get(key) as Completed<A> | undefined
+export const completed = <A>(self: Session, descriptor: Descriptor): Completed<A> | undefined => {
+  const stored = stateOf(self).current.get(keyOf(descriptor))
+  return stored === undefined ? undefined : storedAs<A>(stored)
+}
 
-/** Structural counter used by focused query-boundary fixtures. */
-export const executionCount = (self: Session, key: string): number =>
-  stateOf(self).executions.get(key) ?? 0
+export const snapshot = (self: Session): Snapshot =>
+  Object.freeze({
+    _tag: 'SemanticQuerySnapshot',
+    records: new Map(
+      [...stateOf(self).current].filter(
+        ([, completed]) => completed.descriptor.reuse === 'Revision',
+      ),
+    ),
+  })
 
-/** True only while a provider currently owns the request reservation. */
-export const isActive = (self: Session, key: string): boolean =>
-  stateOf(self).active.some((active) => active.key === key)
+export const executionCount = (self: Session, descriptor: Descriptor): number =>
+  stateOf(self).executions.get(keyOf(descriptor)) ?? 0
 
-/** Records a provider-owned dependency in the currently executing query, when one exists. */
-export const observe = (self: Session, observation: Observation): void => {
-  const active = stateOf(self).active.at(-1)
-  if (active !== undefined) observeInto(active, observation)
+export const counters = (self: Session): Counters => {
+  const counters = stateOf(self).counters
+  return Object.freeze({ _tag: 'SemanticQueryCounters', ...counters })
+}
+
+export const isActive = (self: Session, descriptor: Descriptor): boolean =>
+  stateOf(self).active.some((active) => active.key === keyOf(descriptor))
+
+export const observe = (self: Session, input: InputAddress): void => {
+  const state = stateOf(self)
+  const active = state.active.at(-1)
+  if (active !== undefined)
+    observeInto(
+      active,
+      Object.freeze({
+        _tag: 'InputRead',
+        input,
+        fingerprint: readFingerprint(state, input),
+      }),
+    )
 }

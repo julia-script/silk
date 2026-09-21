@@ -33,9 +33,11 @@ import { afterAll, assert, it } from '@effect/vitest'
 import * as Config from 'effect/Config'
 import * as Effect from 'effect/Effect'
 import * as Fiber from 'effect/Fiber'
+import * as Option from 'effect/Option'
 import * as Analysis from '../src/Analysis.js'
 import * as NativeLinkInput from '../src/NativeLinkInput.js'
 import * as NativeToolchain from '../src/NativeToolchain.js'
+import * as Storage from '../src/Storage.js'
 import * as ObjectEmission from '../src/ObjectEmission.js'
 import * as Linker from '../src/Linker.js'
 import * as LlvmWasmRuntime from '../src/LlvmWasmRuntime.js'
@@ -450,30 +452,29 @@ it.effect(
 it.effect('authenticates artifact-cache payloads and rejects body or trailing corruption', () =>
   Effect.gen(function* () {
     let stored: Uint8Array | undefined
-    const cache: NativeToolchain.ArtifactCache = Object.freeze({
-      _tag: 'ArtifactCache',
-      get: () => Effect.succeed(stored),
-      set: (_key: string, bytes: Uint8Array) =>
+    const storage: Storage.Service = Storage.Storage.of({
+      read: () => Effect.succeed(stored === undefined ? Option.none() : Option.some(stored)),
+      publish: (_address, bytes) =>
         Effect.sync(() => {
           stored = Uint8Array.from(bytes)
         }),
     })
     const payload = Uint8Array.from([1, 2, 3, 4])
-    yield* NativeToolchain.writeArtifactCache(cache, 'entry', payload)
-    assert.deepStrictEqual(yield* NativeToolchain.readArtifactCache(cache, 'entry'), payload)
-    assert.strictEqual(yield* NativeToolchain.readArtifactCache(cache, 'other-entry'), undefined)
+    yield* NativeToolchain.writeArtifactCache(storage, 'entry', payload)
+    assert.deepStrictEqual(yield* NativeToolchain.readArtifactCache(storage, 'entry'), payload)
+    assert.strictEqual(yield* NativeToolchain.readArtifactCache(storage, 'other-entry'), undefined)
     if (stored === undefined) return assert.fail('expected encoded cache entry')
     const encoded = stored
 
     const corrupted = Uint8Array.from(encoded)
     corrupted[corrupted.length - 1] = (corrupted[corrupted.length - 1] ?? 0) ^ 0xff
     stored = corrupted
-    assert.strictEqual(yield* NativeToolchain.readArtifactCache(cache, 'entry'), undefined)
+    assert.strictEqual(yield* NativeToolchain.readArtifactCache(storage, 'entry'), undefined)
 
     const appended = new Uint8Array(encoded.length + 1)
     appended.set(encoded)
     stored = appended
-    assert.strictEqual(yield* NativeToolchain.readArtifactCache(cache, 'entry'), undefined)
+    assert.strictEqual(yield* NativeToolchain.readArtifactCache(storage, 'entry'), undefined)
   }),
 )
 
@@ -783,18 +784,22 @@ it.effect('falls back to Node cleanup when injected atomic cleanup keeps failing
   }),
 )
 
-it.effect('translates synchronously throwing runtime-cache reads with cache-stage provenance', () =>
+it.effect('translates runtime Storage read failures with cache-stage provenance', () =>
   Effect.gen(function* () {
     const target = yield* NativeToolchain.hostTarget()
     const cause = Object.freeze({ injected: 'cache-read' })
-    const cache: NativeToolchain.RuntimeObjectCache = Object.freeze({
-      _tag: 'RuntimeObjectCache',
-      get: () => {
-        throw cause
-      },
-      set: () => Effect.void,
-      stats: () => Object.freeze({ entries: 0, hits: 0, misses: 0 }),
+    const error = new Storage.StorageError({
+      operation: 'Storage.read',
+      namespace: 'runtime-objects',
+      key: 'injected',
+      message: 'injected read failure',
+      reason: { _tag: 'ReadFailure', cause },
     })
+    const storage = Storage.Storage.of({
+      read: () => Effect.fail(error),
+      publish: () => Effect.void,
+    })
+    const cache = NativeToolchain.makeRuntimeObjectCache(storage)
     const result = yield* Effect.result(
       NativeToolchain.withBuildScope('cache-read-failure', (scope) =>
         NativeToolchain.compileRuntime(
@@ -810,41 +815,43 @@ it.effect('translates synchronously throwing runtime-cache reads with cache-stag
     assert.strictEqual(result.failure.operation, 'NativeToolchain.RuntimeObjectCache.get')
     assert.strictEqual(result.failure.reason._tag, 'StorageFailed')
     if (result.failure.reason._tag !== 'StorageFailed') return
-    assert.strictEqual(result.failure.reason.cause, cause)
+    assert.strictEqual(result.failure.reason.cause, error)
   }),
 )
 
-it.effect(
-  'translates synchronously throwing runtime-cache writes with cache-stage provenance',
-  () =>
-    Effect.gen(function* () {
-      const target = yield* NativeToolchain.hostTarget()
-      const cause = Object.freeze({ injected: 'cache-write' })
-      const cache: NativeToolchain.RuntimeObjectCache = Object.freeze({
-        _tag: 'RuntimeObjectCache',
-        get: () => Effect.as(Effect.void, undefined),
-        set: () => {
-          throw cause
-        },
-        stats: () => Object.freeze({ entries: 0, hits: 0, misses: 0 }),
-      })
-      const result = yield* Effect.result(
-        NativeToolchain.withBuildScope('cache-write-failure', (scope) =>
-          NativeToolchain.compileRuntime(
-            Object.freeze({ ...toolchain, runtimeObjectCache: cache }),
-            scope,
-            target,
-          ),
+it.effect('translates runtime Storage publication failures with cache-stage provenance', () =>
+  Effect.gen(function* () {
+    const target = yield* NativeToolchain.hostTarget()
+    const cause = Object.freeze({ injected: 'cache-write' })
+    const error = new Storage.StorageError({
+      operation: 'Storage.publish',
+      namespace: 'runtime-objects',
+      key: 'injected',
+      message: 'injected publication failure',
+      reason: { _tag: 'PublishFailure', cause },
+    })
+    const storage = Storage.Storage.of({
+      read: () => Effect.succeedNone,
+      publish: () => Effect.fail(error),
+    })
+    const cache = NativeToolchain.makeRuntimeObjectCache(storage)
+    const result = yield* Effect.result(
+      NativeToolchain.withBuildScope('cache-write-failure', (scope) =>
+        NativeToolchain.compileRuntime(
+          Object.freeze({ ...toolchain, runtimeObjectCache: cache }),
+          scope,
+          target,
         ),
-      )
-      assert.strictEqual(result._tag, 'Failure')
-      if (result._tag !== 'Failure') return
-      assert.strictEqual(result.failure.stage, 'cache-write')
-      assert.strictEqual(result.failure.operation, 'NativeToolchain.RuntimeObjectCache.set')
-      assert.strictEqual(result.failure.reason._tag, 'StorageFailed')
-      if (result.failure.reason._tag !== 'StorageFailed') return
-      assert.strictEqual(result.failure.reason.cause, cause)
-    }),
+      ),
+    )
+    assert.strictEqual(result._tag, 'Failure')
+    if (result._tag !== 'Failure') return
+    assert.strictEqual(result.failure.stage, 'cache-write')
+    assert.strictEqual(result.failure.operation, 'NativeToolchain.RuntimeObjectCache.set')
+    assert.strictEqual(result.failure.reason._tag, 'StorageFailed')
+    if (result.failure.reason._tag !== 'StorageFailed') return
+    assert.strictEqual(result.failure.reason.cause, error)
+  }),
 )
 
 it('classifies cached artifacts by container, kind, and every canonical target', () => {

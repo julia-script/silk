@@ -218,7 +218,13 @@ export const present = (
     const anchor = self.anchors.get(key)
     if (anchor !== undefined) writes.set(spanKey(context.spanOf(anchor)), value)
   }
-  return { ...self, spans, writes, queries: new Map(self.queries) }
+  return {
+    ...self,
+    spans,
+    writes,
+    queries: new Map(self.queries),
+    work: { queries: 0, cacheHits: 0, visitedEdges: 0 },
+  }
 }
 
 /** The graph without what one revision derived from it: positions and answered queries. */

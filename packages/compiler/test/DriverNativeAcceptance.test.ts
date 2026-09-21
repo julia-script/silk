@@ -1,4 +1,5 @@
 import * as Layer from 'effect/Layer'
+import { NodeServices } from '@effect/platform-node'
 import type * as RuntimeComponent from '../src/RuntimeComponent.js'
 import * as ArtifactComposition from '../src/ArtifactComposition.js'
 import * as CompilationProfile from '../src/CompilationProfile.js'
@@ -13,6 +14,7 @@ import * as Json from './support/Json.js'
 import * as ArtifactKind from '../src/ArtifactKind.js'
 import * as NativeLinkInput from '../src/NativeLinkInput.js'
 import * as NativeToolchain from '../src/NativeToolchain.js'
+import type * as Storage from '../src/Storage.js'
 import type * as ModuleClosure from '../src/ModuleClosure.js'
 import * as Linker from '../src/Linker.js'
 import * as SourceFile from '../src/SourceFile.js'
@@ -81,7 +83,7 @@ const compileSource = Effect.fnUntraced(function* (
     readonly packageName?: string
     readonly nativeLinkInputs?: ReadonlyArray<NativeLinkInput.NativeLinkInput>
     readonly cache?: boolean
-    readonly artifactCache?: NativeToolchain.ArtifactCache
+    readonly artifactStorage?: Storage.Service
     readonly optimization?: CompilationProfile.Optimization
     readonly debug?: boolean
     readonly sourceModule?: string
@@ -109,9 +111,9 @@ const compileSource = Effect.fnUntraced(function* (
       },
     },
     toolchain:
-      options.artifactCache === undefined
+      options.artifactStorage === undefined
         ? toolchain
-        : { ...toolchain, artifactCache: options.artifactCache },
+        : { ...toolchain, artifactStorage: options.artifactStorage },
     artifactKind: options.artifactKind ?? 'NativeExecutable',
     packageName: options.packageName ?? 'compiler-test',
     destination: join(destinationRoot, name),
@@ -287,7 +289,9 @@ it.effect.skipIf(!runFixedTests)(
 pub fn main() -> i32 { return unsafe silk_cache_selected() }`
         const options = {
           cache: true,
-          artifactCache: NativeToolchain.defaultArtifactCache(join(scope.root, 'cache')),
+          artifactStorage: yield* NativeToolchain.defaultArtifactStorage(
+            join(scope.root, 'cache'),
+          ).pipe(Effect.provide(NodeServices.layer)),
           nativeLinkInputs: [
             NativeLinkInput.searchPath(earlier),
             NativeLinkInput.searchPath(later),

@@ -3,6 +3,7 @@ import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as OpaqueRealization from '../src/OpaqueRealization.js'
 import * as ProjectAnalysis from '../src/ProjectAnalysis.js'
+import * as Semantic from '../src/Semantic.js'
 import * as SemanticInvalidation from '../src/SemanticInvalidation.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
@@ -61,6 +62,42 @@ const expectReasons = (
   assert.strictEqual(found._tag, 'Recomputed', `${module} should recompute`)
   if (found._tag === 'Recomputed') assert.deepEqual(found.reasons, reasons)
 }
+
+it.effect('validates editor name reads across revisions', () =>
+  Effect.gen(function* () {
+    const importer = 'import query.Dependency { answer } pub fn use() -> i32 { return answer() }'
+    const previous = yield* analyze(
+      sources({
+        'query/Main': importer,
+        'query/Dependency': 'pub fn answer() -> i32 { return 1 }',
+      }),
+      ['query/Main'],
+    )
+    const previousView =
+      ProjectAnalysis.view(previous, 'query/Main') ?? raise('missing previous query view')
+    assert.strictEqual(Analysis.lookupName(previousView, 'query/Main', 'answer')._tag, 'Resolved')
+
+    const current = yield* analyze(
+      sources({
+        'query/Main': importer,
+        'query/Dependency': 'pub fn answer() -> i32 { return 2 }',
+      }),
+      ['query/Main'],
+      previous,
+    )
+    const before = Semantic.queryCounters(current.semanticSession)
+    const currentView =
+      ProjectAnalysis.view(current, 'query/Main') ?? raise('missing current query view')
+    assert.strictEqual(Analysis.lookupName(currentView, 'query/Main', 'answer')._tag, 'Resolved')
+    const after = Semantic.queryCounters(current.semanticSession)
+
+    // Body checking already demanded this descriptor in the current session. The editor read
+    // reuses that validated answer without validating it a second time.
+    assert.strictEqual(after.validations, before.validations)
+    assert.strictEqual(after.executions, before.executions)
+    assert.strictEqual(after.reuses, before.reuses + 1)
+  }),
+)
 
 it.effect('keeps unrelated modules and body-only importers reusable', () =>
   Effect.gen(function* () {
@@ -134,7 +171,7 @@ it.effect('keeps importers reusable when an alias target is only re-spelled', ()
     expectReusable(current, 'app/A')
     expectReasons(current, 'app/B', ['LocalChange'])
     expectBodyChecks(current, 0, 1)
-    assert.notStrictEqual(current.semantics.get('app/A'), previous.semantics.get('app/A'))
+    assert.strictEqual(current.semantics.get('app/A'), previous.semantics.get('app/A'))
   }),
 )
 

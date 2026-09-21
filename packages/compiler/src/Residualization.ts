@@ -1259,7 +1259,7 @@ export const residualize = (self: Coordinator, key: ApplicationKey): Result => {
     span: Location.at(declaration.anchor),
   })
   let executed = false
-  const evaluated = Semantic.evaluate(
+  const evaluated = Semantic.constructResidual(
     self[stateSymbol].semantic,
     self[stateSymbol].residuals,
     application,

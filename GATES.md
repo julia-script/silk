@@ -1,50 +1,35 @@
-# Gates: compiler architecture Milestone B stack
+# Gates: compiler revision validation and persistence stack
 
-OWNS: openspec/changes/**, openspec/specs/**, packages/compiler/**, apps/docs/**, GATES.md
+OWNS: openspec/changes/jul-217-_/\**, openspec/changes/jul-218-_/**, openspec/changes/jul-219-\*/**, openspec/changes/jul-221-*/**, openspec/specs/**, packages/compiler/**, apps/docs/**, GATES.md
 
-Scope: implement JUL-210 through JUL-215 as six stacked, coherent compiler architecture changes and prove the final head.
+Scope: implement JUL-217, JUL-218, JUL-219, and JUL-221 as four stacked compiler changes. Full-repository CI is a workflow gate checked on the exact final PR head after all repository mutations; it is intentionally not a self-modifying ledger gate.
 
 - [x] G0: this ledger states outcome checks that can fail
       CHECK: node /Users/juliaortiz/.agents/skills/unlazy/scripts/gate-lint.mjs GATES.md
       EXPECT: LINT OK
-      EVIDENCE: 2026-09-21 `LINT OK`.
+      EVIDENCE: 2026-09-21 LINT OK.
 
-- [x] G1: JUL-210 provides the authoritative declaration/header semantic-query boundary and its OpenSpec contract
-      CHECK: openspec validate jul-210-semantic-declaration-queries --strict && pnpm --filter @silklang/compiler exec vitest run test/NameResolution.test.ts test/DeclarationIndex.test.ts && echo JUL210_OK
-      EXPECT: JUL210_OK
-      EVIDENCE: 2026-09-21 strict validation passed; 86 focused tests passed; `JUL210_OK`.
+- [x] G1: JUL-217 owns reconstructible semantic query descriptors, ordered revision validation, result-fingerprint cutoffs, and current diagnostic presentation for header/name/conformance readers
+      CHECK: openspec validate jul-217-semantic-revision-validation --strict && pnpm --filter @silklang/compiler exec vitest run test/SemanticInvalidation.test.ts test/NameResolution.test.ts test/DeclarationIndex.test.ts && echo JUL217_OK
+      EXPECT: JUL217_OK
+      EVIDENCE: 2026-09-21 strict OpenSpec validation passed; 100 focused tests passed; JUL217_OK.
 
-- [x] G2: JUL-211 routes checked bodies and static evaluation through observed semantic queries without losing editor reuse
-      CHECK: openspec validate jul-211-semantic-body-evaluation-queries --strict && pnpm --filter @silklang/compiler exec vitest run test/ProjectAnalysis.test.ts test/StaticText.test.ts && echo JUL211_OK
-      EXPECT: JUL211_OK
-      EVIDENCE: 2026-09-21 strict validation passed; 65 focused tests passed; `JUL211_OK`.
+- [x] G2: JUL-218 routes checked units, evaluation, residual construction, and ownership through the shared revision validator while preserving complete products and budget policy
+      CHECK: openspec validate jul-218-shared-body-evaluation-validation --strict && pnpm --filter @silklang/compiler exec vitest run test/NameResolution.test.ts test/SemanticInvalidation.test.ts test/ProjectAnalysis.test.ts test/StaticText.test.ts && echo JUL218_OK
+      EXPECT: JUL218_OK
+      EVIDENCE: 2026-09-21 strict OpenSpec validation passed; 97 focused tests passed; JUL218_OK.
 
-- [x] G3: JUL-212 publishes a detached concrete instance graph through Realization.instantiate
-      CHECK: openspec validate jul-212-instance-artifacts --strict && pnpm --filter @silklang/compiler exec vitest run test/Instances.test.ts && echo JUL212_OK
-      EXPECT: JUL212_OK
-      EVIDENCE: 2026-09-21 strict validation passed; 58 focused tests passed; `JUL212_OK`.
+- [x] G3: JUL-219 supplies bounded opaque Storage with memory and atomic-filesystem providers and migrates native cache owners without retaining obsolete byte-store contracts
+      CHECK: openspec validate jul-219-compiler-storage --strict && pnpm --filter @silklang/compiler exec vitest run test/Storage.test.ts test/NativeToolchain.test.ts && pnpm --filter @silklang/compiler exec vitest run test/Driver.test.ts -t "admits native final caching|artifact Storage|rejects interface before cache reads" && echo JUL219_OK
+      EXPECT: JUL219_OK
+      EVIDENCE: 2026-09-21 strict OpenSpec validation passed; 49 Storage/NativeToolchain tests and 3 selected Driver migration tests passed; JUL219_OK.
 
-- [x] G4: JUL-213 publishes pre-reachability type layouts and instance-dependent runtime plans through explicit layout APIs
-      CHECK: openspec validate jul-213-layout-runtime-plans --strict && pnpm --filter @silklang/compiler exec vitest run test/Layout.test.ts && echo JUL213_OK
-      EXPECT: JUL213_OK
-      EVIDENCE: 2026-09-21 strict validation passed; 33 focused tests passed after preserving catalog entry identity; `JUL213_OK`.
+- [x] G4: JUL-221 persists and strictly admits complete checked units plus ordered dependency manifests through Storage and the shared validator
+      CHECK: openspec validate jul-221-persisted-checked-units --strict && pnpm --filter @silklang/compiler exec vitest run test/TirCodec.test.ts test/SemanticPersistence.test.ts test/SemanticInvalidation.test.ts && echo JUL221_OK
+      EXPECT: JUL221_OK
+      EVIDENCE: 2026-09-21 strict OpenSpec validation passed; 24 focused codec, persistence, and invalidation tests passed; JUL221_OK.
 
-- [x] G5: JUL-214 lowers explicit instance/layout/runtime inputs to truthfully staged and audited MIR
-      CHECK: openspec validate jul-214-explicit-mir-lowering --strict && pnpm --filter @silklang/compiler exec vitest run test/Mir.test.ts test/MirNormalization.test.ts && echo JUL214_OK
-      EXPECT: JUL214_OK
-      EVIDENCE: 2026-09-21 strict validation passed; 37 focused tests passed; `JUL214_OK`.
-
-- [x] G6: JUL-215 separates backend emission, materialization, support preparation and final linking without semantic re-entry
-      CHECK: openspec validate jul-215-emission-linking --strict && pnpm --filter @silklang/compiler exec vitest run test/Backend.test.ts test/NativeToolchain.test.ts && echo JUL215_OK
-      EXPECT: JUL215_OK
-      EVIDENCE: 2026-09-21 strict validation passed; 69 focused tests passed; `JUL215_OK`.
-
-- [x] G7: the composed final compiler head typechecks with every OpenSpec implementation task complete
-      CHECK: pnpm --filter @silklang/llvm build && pnpm --filter @silklang/compiler typecheck && node -e "const fs=require('fs');for(const p of fs.readdirSync('openspec/changes').filter(x=>/^jul-21[0-5]-/.test(x))){const t=fs.readFileSync('openspec/changes/'+p+'/tasks.md','utf8');if(/- \[ \]/.test(t))throw new Error('incomplete '+p)}console.log('FINAL_LOCAL_OK')"
+- [x] G5: the final composed head keeps every new OpenSpec implementation task complete and the compiler type-safe
+      CHECK: pnpm --filter @silklang/llvm build && pnpm --filter @silklang/compiler typecheck && node -e "const fs=require('fs');for(const p of fs.readdirSync('openspec/changes').filter(x=>/^jul-(217|218|219|221)-/.test(x))){const t=fs.readFileSync('openspec/changes/'+p+'/tasks.md','utf8');if(/- \[ \]/.test(t))throw new Error('incomplete '+p)}console.log('FINAL_LOCAL_OK')"
       EXPECT: FINAL_LOCAL_OK
-      EVIDENCE: 2026-09-21 LLVM build and compiler typecheck passed; every JUL-210..215 task is checked; `FINAL_LOCAL_OK`.
-
-- [ ] G8: required pull-request CI passes on the exact final stack head
-      CHECK: gh pr checks --required && echo FINAL_CI_OK
-      EXPECT: FINAL_CI_OK
-      EVIDENCE: pending
+      EVIDENCE: 2026-09-21 LLVM build and compiler typecheck passed; all JUL-217/218/219/221 implementation tasks are complete; FINAL_LOCAL_OK.

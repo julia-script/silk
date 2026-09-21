@@ -2,6 +2,7 @@ import * as MirVerification from './MirVerification.js'
 import * as HelperCapability from './HelperCapability.js'
 import * as NativeRequirementBinding from './NativeRequirementBinding.js'
 import * as ArtifactPlan from './ArtifactPlan.js'
+import { NodeServices } from '@effect/platform-node'
 import * as Config from 'effect/Config'
 import * as Result from 'effect/Result'
 import * as ForeignContract from './ForeignContract.js'
@@ -319,6 +320,13 @@ export const compile = Effect.fn('Driver.compile')(function* (
     Config.withDefault(''),
     Effect.orDie,
   )
+  const artifactStorage =
+    request.cache === false
+      ? undefined
+      : (request.toolchain.artifactStorage ??
+        (yield* NativeToolchain.defaultArtifactStorage(nativeCacheDirectory).pipe(
+          Effect.provide(NodeServices.layer),
+        )))
 
   // 2. Check the compiler distribution against the toolchain sources supplied by the resolver.
   // Unreadable toolchain sources become integrity failures, so a broken installation stops here.
@@ -564,11 +572,7 @@ export const compile = Effect.fn('Driver.compile')(function* (
   // 9. Look up LLVM emission independently of the final-artifact cache. The key covers the
   // distribution, backend, profile, artifact plan/kind, mode, source closure, and ABI manifests.
   const mode = preparation.profile.debug ? 'debug' : 'release'
-  const emissionCache =
-    request.cache !== false
-      ? (request.toolchain.artifactCache ??
-        NativeToolchain.defaultArtifactCache(nativeCacheDirectory))
-      : undefined
+  const emissionCache = artifactStorage
   const emissionCacheKey =
     emissionCache === undefined
       ? undefined
@@ -726,19 +730,18 @@ export const compile = Effect.fn('Driver.compile')(function* (
   // 12. Try final WebAssembly artifact reuse using bitcode, profile, toolchain, and runtime source.
   // Native artifacts need a complete physical link plan, so their final-cache lookup happens later.
   const cacheAdmission = NativeToolchain.finalArtifactCacheAdmission(cacheKind)
-  const artifactCache =
+  const finalArtifactStorage =
     cacheAdmission._tag !== 'Ineligible' &&
     request.cache !== false &&
     artifact._tag === 'LlvmBitcodeArtifact'
-      ? (request.toolchain.artifactCache ??
-        NativeToolchain.defaultArtifactCache(nativeCacheDirectory))
+      ? artifactStorage
       : undefined
   const runtimeSource = NativeToolchain.artifactRuntimeSource(
     cacheKind,
     artifact.nativeRuntimeSymbols,
   )
   const cacheKey =
-    artifactCache !== undefined && artifact._tag === 'LlvmBitcodeArtifact'
+    finalArtifactStorage !== undefined && artifact._tag === 'LlvmBitcodeArtifact'
       ? yield* NativeToolchain.wasmArtifactCacheKey(
           request.toolchain,
           preparation.profile,
@@ -747,13 +750,13 @@ export const compile = Effect.fn('Driver.compile')(function* (
         )
       : undefined
   if (
-    artifactCache !== undefined &&
+    finalArtifactStorage !== undefined &&
     cacheKey !== undefined &&
     artifact._tag === 'LlvmBitcodeArtifact'
   ) {
     // Validate cached bytes for the requested artifact kind and target before committing them
     // to the durable destination. A miss continues to the build scope below.
-    const bytes = yield* NativeToolchain.readArtifactCache(artifactCache, cacheKey)
+    const bytes = yield* NativeToolchain.readArtifactCache(finalArtifactStorage, cacheKey)
     if (bytes !== undefined && NativeToolchain.isCachedArtifact(bytes, cacheKind, target)) {
       const committed = yield* PhaseReport.measureEffectInto(
         report,
@@ -824,8 +827,12 @@ export const compile = Effect.fn('Driver.compile')(function* (
             () => 0,
             { heapBytes },
           )
-          if (artifactCache !== undefined && cacheKey !== undefined) {
-            yield* NativeToolchain.writeArtifactCache(artifactCache, cacheKey, finalized.bytes)
+          if (finalArtifactStorage !== undefined && cacheKey !== undefined) {
+            yield* NativeToolchain.writeArtifactCache(
+              finalArtifactStorage,
+              cacheKey,
+              finalized.bytes,
+            )
           }
           return Object.freeze({
             _tag: 'Compiled',
@@ -956,11 +963,10 @@ export const compile = Effect.fn('Driver.compile')(function* (
           helpers,
         )
         const nativeAdmission = NativeToolchain.finalArtifactCacheAdmission(cacheKind, linkPlan)
-        const nativeCache =
+        const nativeStorage =
           request.cache === false || nativeAdmission._tag !== 'CompleteNativePlan'
             ? undefined
-            : (toolchain.artifactCache ??
-              NativeToolchain.defaultArtifactCache(nativeCacheDirectory))
+            : artifactStorage
         const nativeKey = `native-${linkPlan.identity}.blob`
         // Linking owns physical-plan validation and optional final-artifact reuse. Helper/runtime
         // preparation stays outside it and remains scoped by this caller-owned build lifetime.
@@ -973,9 +979,9 @@ export const compile = Effect.fn('Driver.compile')(function* (
             artifactKind: cacheKind,
             destination: request.destination,
             cache:
-              nativeCache === undefined
+              nativeStorage === undefined
                 ? Object.freeze({ _tag: 'Disabled' })
-                : Object.freeze({ _tag: 'ReadWrite', store: nativeCache, key: nativeKey }),
+                : Object.freeze({ _tag: 'ReadWrite', store: nativeStorage, key: nativeKey }),
           }),
           () => 1,
           () => 0,

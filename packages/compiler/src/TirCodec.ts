@@ -1,18 +1,58 @@
+import * as Data from 'effect/Data'
 import type * as DeclarationFacts from './DeclarationFacts.js'
+import type * as DeclarationIndex from './DeclarationIndex.js'
 import * as Elaboration from './Elaboration.js'
-import type * as SemanticContext from './SemanticContext.js'
 import * as LifetimeFlow from './LifetimeFlow.js'
+import type * as SemanticContext from './SemanticContext.js'
 import * as SourceSpan from './SourceSpan.js'
 import * as Tir from './Tir.js'
 
-/**
- * The portable form of a checked body.
- *
- * A body is revision-free content: nodes, tables and authored origins. Two things in memory are
- * not content and never reach the encoding. A position is presentation, stamped again from the
- * origin beside it when the body is decoded for a revision. The owning declaration is this
- * revision's header object, named by id and resolved again by the reader.
- */
+export const schema = 1
+
+export interface Limits {
+  readonly maximumBytes: number
+  readonly maximumDepth: number
+  readonly maximumCollectionEntries: number
+  readonly maximumStringBytes: number
+  readonly maximumByteArrayBytes: number
+  readonly maximumObjectFields: number
+  readonly maximumIdentifier: number
+}
+
+export const defaultLimits: Limits = Object.freeze({
+  maximumBytes: 64 * 1024 * 1024,
+  maximumDepth: 192,
+  maximumCollectionEntries: 2_000_000,
+  maximumStringBytes: 8 * 1024 * 1024,
+  maximumByteArrayBytes: 32 * 1024 * 1024,
+  maximumObjectFields: 4096,
+  maximumIdentifier: Number.MAX_SAFE_INTEGER,
+})
+
+export type RejectionReason =
+  | 'MalformedJson'
+  | 'IncompatibleSchema'
+  | 'Oversize'
+  | 'Depth'
+  | 'Collection'
+  | 'String'
+  | 'Bytes'
+  | 'Number'
+  | 'Tag'
+  | 'Fields'
+  | 'Identifier'
+  | 'Declaration'
+  | 'Unit'
+
+export class CodecError extends Data.TaggedError('TirCodecError')<{
+  readonly reason: RejectionReason
+  readonly message: string
+}> {
+  constructor(reason: RejectionReason, message: string) {
+    super({ reason, message })
+  }
+}
+
 type Encoded =
   | null
   | boolean
@@ -21,101 +61,616 @@ type Encoded =
   | ReadonlyArray<Encoded>
   | { readonly [key: string]: Encoded }
 
-const tag = '$'
+type StableDeclaration =
+  | { readonly kind: 'unit'; readonly site: number }
+  | { readonly kind: 'named'; readonly module: string; readonly name: string }
 
-const encodeValue = (input: unknown): Encoded => {
-  if (input === null || typeof input === 'boolean' || typeof input === 'string') return input
-  if (typeof input === 'number') {
-    if (!Number.isFinite(input)) throw new RangeError('A checked body holds a non-finite number')
-    return input
-  }
-  if (typeof input === 'bigint') return { [tag]: 'bigint', value: input.toString() }
-  if (typeof input !== 'object') throw new RangeError(`A checked body holds a ${typeof input}`)
-  if (SourceSpan.isSourceSpan(input)) return { [tag]: 'span' }
-  if (Array.isArray(input)) return input.map(encodeValue)
-  if (input instanceof Map)
+interface Root {
+  readonly schema: number
+  readonly unit: Encoded
+}
+
+const utf8 = new TextEncoder()
+const tag = '$'
+const hiddenBase = Tir.hiddenDeclarationOrdinal(0, 0)
+const records = (value: unknown): value is Readonly<Record<string, unknown>> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value)
+
+const assertLimit = (value: number, name: keyof Limits): void => {
+  if (!Number.isSafeInteger(value) || value <= 0)
+    throw new CodecError('Identifier', `${name} must be a positive safe integer`)
+}
+
+const validateLimits = (limits: Limits): void => {
+  for (const [name, value] of Object.entries(limits)) assertLimit(value, name as keyof Limits)
+}
+
+const declarationKey = (id: DeclarationFacts.DeclarationId): string =>
+  `${id.sourceId.length}:${id.sourceId}:${id.ordinal}`
+
+const stableIdentityOf = (
+  value: unknown,
+):
+  | { readonly id: DeclarationFacts.DeclarationId; readonly module: string; readonly name: string }
+  | undefined => {
+  if (!records(value) || !records(value['id']) || value['id']['_tag'] !== 'DeclarationId')
+    return undefined
+  const id = value['id'] as unknown as DeclarationFacts.DeclarationId
+  const canonical = value['canonical']
+  if (
+    records(canonical) &&
+    canonical['_tag'] === 'Canonical' &&
+    records(canonical['id']) &&
+    typeof canonical['id']['module'] === 'string' &&
+    typeof canonical['id']['name'] === 'string'
+  )
+    return { id, module: canonical['id']['module'], name: canonical['id']['name'] }
+  const associated = value['associatedMember']
+  if (
+    records(associated) &&
+    records(associated['owner']) &&
+    typeof associated['owner']['module'] === 'string' &&
+    typeof associated['owner']['name'] === 'string' &&
+    typeof associated['name'] === 'string'
+  )
     return {
-      [tag]: 'map',
-      entries: [...input].map(([key, value]) => [encodeValue(key), encodeValue(value)]),
+      id,
+      module: associated['owner']['module'],
+      name: `${associated['owner']['name']}::${associated['name']}`,
     }
-  if (input instanceof Set) return { [tag]: 'set', values: [...input].map(encodeValue) }
-  if (input instanceof Uint8Array) return { [tag]: 'bytes', values: [...input] }
-  const result: Record<string, Encoded> = {}
-  // Keys are written in one order so equal bodies encode to equal text.
-  for (const key of Object.keys(input).sort()) {
-    const value = (input as Readonly<Record<string, unknown>>)[key]
-    if (value !== undefined) result[key] = encodeValue(value)
+  return undefined
+}
+
+const declarationIndexes = new WeakMap<
+  DeclarationIndex.Index,
+  ReadonlyMap<string, StableDeclaration>
+>()
+
+const stableDeclarations = (
+  index: DeclarationIndex.Index,
+): ReadonlyMap<string, StableDeclaration> => {
+  const cached = declarationIndexes.get(index)
+  if (cached !== undefined) return cached
+  const result = new Map<string, StableDeclaration>()
+  for (const module of index.modules) {
+    for (const declaration of [...module.members, ...module.declarations]) {
+      const stable = stableIdentityOf(declaration)
+      if (stable === undefined) continue
+      result.set(declarationKey(stable.id), {
+        kind: 'named',
+        module: stable.module,
+        name: stable.name,
+      })
+    }
+  }
+  for (const declaration of index.generatedAggregates.values()) {
+    if (declaration.canonical._tag !== 'Canonical') continue
+    result.set(declarationKey(declaration.id), {
+      kind: 'named',
+      module: declaration.canonical.id.module,
+      name: declaration.canonical.id.name,
+    })
+  }
+  declarationIndexes.set(index, result)
+  return result
+}
+
+const relativeDeclaration = (
+  root: DeclarationFacts.DeclarationId,
+  id: DeclarationFacts.DeclarationId,
+): StableDeclaration | undefined => {
+  if (id.sourceId !== root.sourceId) return undefined
+  if (id.ordinal === root.ordinal) return { kind: 'unit', site: 0 }
+  if (id.ordinal < hiddenBase) return undefined
+  const site = (id.ordinal - hiddenBase) % 65536
+  const enclosing = (id.ordinal - hiddenBase - site) / 65536
+  return enclosing === root.ordinal ? { kind: 'unit', site: site + 1 } : undefined
+}
+
+const encodeDeclaration = (declaration: StableDeclaration): Encoded =>
+  declaration.kind === 'unit'
+    ? { [tag]: 'declaration', kind: 'unit', site: declaration.site }
+    : {
+        [tag]: 'declaration',
+        kind: 'named',
+        module: declaration.module,
+        name: declaration.name,
+      }
+
+const encoder = (
+  root: DeclarationFacts.DeclarationId,
+  declarations: ReadonlyMap<string, StableDeclaration>,
+  strict = true,
+) => {
+  const encodeValue = (input: unknown): Encoded => {
+    if (input === null || typeof input === 'boolean' || typeof input === 'string') return input
+    if (typeof input === 'number') {
+      if (!Number.isFinite(input))
+        throw new CodecError('Number', 'checked unit has non-finite number')
+      return input
+    }
+    if (typeof input === 'bigint') return { [tag]: 'bigint', value: input.toString() }
+    if (typeof input !== 'object')
+      throw new CodecError('Unit', `checked unit has unsupported ${typeof input}`)
+    if (SourceSpan.isSourceSpan(input)) return { [tag]: 'span' }
+    if (Array.isArray(input)) return input.map(encodeValue)
+    if (input instanceof Map)
+      return {
+        [tag]: 'map',
+        entries: [...input].map(([key, value]) => [encodeValue(key), encodeValue(value)]),
+      }
+    if (input instanceof Set) return { [tag]: 'set', values: [...input].map(encodeValue) }
+    if (input instanceof Uint8Array) return { [tag]: 'bytes', values: [...input] }
+    const record = input as Readonly<Record<string, unknown>>
+    if (
+      record['_tag'] === 'DeclarationId' &&
+      typeof record['sourceId'] === 'string' &&
+      typeof record['ordinal'] === 'number'
+    ) {
+      const id = input as DeclarationFacts.DeclarationId
+      const stable = relativeDeclaration(root, id) ?? declarations.get(declarationKey(id))
+      if (stable === undefined && strict)
+        throw new CodecError(
+          'Declaration',
+          `declaration ${id.sourceId}:${id.ordinal} is not stable`,
+        )
+      return stable === undefined
+        ? { [tag]: 'unstable-declaration', sourceId: id.sourceId, ordinal: id.ordinal }
+        : encodeDeclaration(stable)
+    }
+    const result: Record<string, Encoded> = {}
+    for (const key of Object.keys(record).sort()) {
+      const value = record[key]
+      if (value !== undefined) result[key] = encodeValue(value)
+    }
+    return result
+  }
+  return encodeValue
+}
+
+const namedDeclarations = (
+  index: DeclarationIndex.Index,
+): ReadonlyMap<string, DeclarationFacts.DeclarationId> => {
+  const result = new Map<string, DeclarationFacts.DeclarationId>()
+  for (const module of index.modules) {
+    for (const declaration of [...module.members, ...module.declarations]) {
+      const stable = stableIdentityOf(declaration)
+      if (stable === undefined) continue
+      result.set(`${stable.module.length}:${stable.module}:${stable.name}`, stable.id)
+    }
+  }
+  for (const declaration of index.generatedAggregates.values()) {
+    if (declaration.canonical._tag !== 'Canonical') continue
+    result.set(
+      `${declaration.canonical.id.module.length}:${declaration.canonical.id.module}:${declaration.canonical.id.name}`,
+      declaration.id,
+    )
   }
   return result
 }
 
-const decodeValue = (input: Encoded): unknown => {
-  if (input === null || typeof input !== 'object') return input
-  if (Array.isArray(input)) return Object.freeze(input.map(decodeValue))
-  const record = input as { readonly [key: string]: Encoded }
-  switch (record[tag]) {
-    case 'bigint':
-      return BigInt(record['value'] as string)
-    case 'span':
-      // A placeholder: the reader stamps every position from the origin beside it.
-      return SourceSpan.fromOffsets('', 0, 0)
-    case 'map':
-      return new Map(
-        (record['entries'] as ReadonlyArray<readonly [Encoded, Encoded]>).map(([key, value]) => [
-          decodeValue(key),
-          decodeValue(value),
-        ]),
-      )
-    case 'set':
-      return new Set((record['values'] as ReadonlyArray<Encoded>).map(decodeValue))
-    case 'bytes':
-      return Uint8Array.from(record['values'] as ReadonlyArray<number>)
-  }
-  const result: Record<string, unknown> = {}
-  for (const key of Object.keys(record)) result[key] = decodeValue(record[key] ?? null)
-  return Object.freeze(result)
+interface DecodeState {
+  entries: number
 }
 
-/** Writes one checked body as canonical text. Its declaration is written as its id alone. */
-export const encode = (self: Elaboration.CheckedBody): string =>
-  JSON.stringify(
-    encodeValue({
-      artifact: self.artifact,
-      declaration: self.hidden ? self.declaration : self.declaration.id,
-      hidden: self.hidden,
-      function: { ...self.function, declaration: undefined },
-      results:
-        self.results.lifetimes === undefined
-          ? self.results
-          : { ...self.results, lifetimes: LifetimeFlow.content(self.results.lifetimes) },
-    }),
-  )
+const exactFields = (
+  record: Readonly<Record<string, unknown>>,
+  fields: ReadonlyArray<string>,
+): void => {
+  const actual = Object.keys(record).sort()
+  const expected = [...fields].sort()
+  if (actual.length !== expected.length || actual.some((field, index) => field !== expected[index]))
+    throw new CodecError(
+      'Fields',
+      `invalid fields for ${typeof record[tag] === 'string' ? record[tag] : 'object'}`,
+    )
+}
 
-/** Reads a checked body back for one revision: its header is resolved and its positions stamped. */
-export const decode = (
-  text: string,
-  declarationOf: (id: DeclarationFacts.DeclarationId) => DeclarationFacts.DeclarationFact,
-  context: SemanticContext.SemanticContext,
-): Elaboration.CheckedBody => {
-  const decoded = decodeValue(JSON.parse(text) as Encoded) as {
-    readonly artifact: Tir.ArtifactId
-    readonly declaration: DeclarationFacts.DeclarationFact | DeclarationFacts.DeclarationId
-    readonly hidden: boolean
-    readonly function: Omit<Tir.TirFunction, 'declaration'>
-    readonly results: Elaboration.BodyResults
+const decoder = (
+  limits: Limits,
+  root: DeclarationFacts.DeclarationFact,
+  declarations: ReadonlyMap<string, DeclarationFacts.DeclarationId>,
+) => {
+  const state: DecodeState = { entries: 0 }
+  const count = (amount: number): void => {
+    state.entries += amount
+    if (state.entries > limits.maximumCollectionEntries)
+      throw new CodecError('Collection', 'checked unit exceeds collection bound')
   }
-  const declaration =
-    decoded.declaration._tag === 'DeclarationId'
-      ? declarationOf(decoded.declaration)
-      : Tir.stamp(decoded.declaration, context.spanOf)
-  return Elaboration.presentBody(
-    {
-      artifact: decoded.artifact,
-      declaration,
-      hidden: decoded.hidden,
-      function: { ...decoded.function, declaration },
-      results: decoded.results,
-    },
-    context,
-  )
+  const decodeDeclaration = (
+    record: Readonly<Record<string, unknown>>,
+  ): DeclarationFacts.DeclarationId => {
+    if (record['kind'] === 'unit') {
+      exactFields(record, [tag, 'kind', 'site'])
+      const site = record['site']
+      if (!Number.isSafeInteger(site) || (site as number) < 0 || (site as number) > 65535)
+        throw new CodecError('Identifier', 'invalid unit declaration site')
+      return Object.freeze({
+        _tag: 'DeclarationId',
+        sourceId: root.id.sourceId,
+        ordinal:
+          site === 0
+            ? root.id.ordinal
+            : Tir.hiddenDeclarationOrdinal(root.id.ordinal, (site as number) - 1),
+      })
+    }
+    if (record['kind'] !== 'named') throw new CodecError('Declaration', 'unknown declaration kind')
+    exactFields(record, [tag, 'kind', 'module', 'name'])
+    const module = record['module']
+    const name = record['name']
+    if (typeof module !== 'string' || typeof name !== 'string')
+      throw new CodecError('Declaration', 'malformed named declaration')
+    const declaration = declarations.get(`${module.length}:${module}:${name}`)
+    if (declaration === undefined)
+      throw new CodecError('Declaration', `current declaration ${module}.${name} is unavailable`)
+    return declaration
+  }
+  const decodeValue = (input: unknown, depth = 0): unknown => {
+    if (depth > limits.maximumDepth)
+      throw new CodecError('Depth', 'checked unit exceeds depth bound')
+    if (input === null || typeof input === 'boolean') return input
+    if (typeof input === 'string') {
+      if (utf8.encode(input).byteLength > limits.maximumStringBytes)
+        throw new CodecError('String', 'checked unit string exceeds bound')
+      return input
+    }
+    if (typeof input === 'number') {
+      if (!Number.isFinite(input) || Math.abs(input) > limits.maximumIdentifier)
+        throw new CodecError('Number', 'checked unit number is outside the supported range')
+      return input
+    }
+    if (Array.isArray(input)) {
+      count(input.length)
+      return Object.freeze(input.map((value) => decodeValue(value, depth + 1)))
+    }
+    if (!records(input)) throw new CodecError('Unit', 'checked unit contains unsupported value')
+    const keys = Object.keys(input)
+    if (keys.length > limits.maximumObjectFields)
+      throw new CodecError('Fields', 'checked unit object exceeds field bound')
+    count(keys.length)
+    const special = input[tag]
+    if (special !== undefined) {
+      if (typeof special !== 'string') throw new CodecError('Tag', 'non-string codec tag')
+      switch (special) {
+        case 'bigint': {
+          exactFields(input, [tag, 'value'])
+          const value = input['value']
+          if (typeof value !== 'string' || !/^-?(0|[1-9][0-9]*)$/.test(value))
+            throw new CodecError('Number', 'malformed bigint')
+          return BigInt(value)
+        }
+        case 'span':
+          exactFields(input, [tag])
+          return SourceSpan.fromOffsets('', 0, 0)
+        case 'map': {
+          exactFields(input, [tag, 'entries'])
+          const entries = input['entries']
+          if (!Array.isArray(entries)) throw new CodecError('Collection', 'malformed map')
+          count(entries.length)
+          return new Map(
+            entries.map((entry) => {
+              if (!Array.isArray(entry) || entry.length !== 2)
+                throw new CodecError('Collection', 'malformed map entry')
+              return [decodeValue(entry[0], depth + 1), decodeValue(entry[1], depth + 1)]
+            }),
+          )
+        }
+        case 'set': {
+          exactFields(input, [tag, 'values'])
+          const values = input['values']
+          if (!Array.isArray(values)) throw new CodecError('Collection', 'malformed set')
+          count(values.length)
+          return new Set(values.map((value) => decodeValue(value, depth + 1)))
+        }
+        case 'bytes': {
+          exactFields(input, [tag, 'values'])
+          const values = input['values']
+          if (!Array.isArray(values) || values.length > limits.maximumByteArrayBytes)
+            throw new CodecError('Bytes', 'malformed or oversized byte array')
+          return Uint8Array.from(
+            values.map((value) => {
+              if (!Number.isInteger(value) || (value as number) < 0 || (value as number) > 255)
+                throw new CodecError('Bytes', 'invalid byte')
+              return value as number
+            }),
+          )
+        }
+        case 'declaration':
+          return decodeDeclaration(input)
+        default:
+          throw new CodecError('Tag', `unknown codec tag ${special}`)
+      }
+    }
+    const result: Record<string, unknown> = {}
+    for (const key of keys) result[key] = decodeValue(input[key], depth + 1)
+    // Several validated TIR analysis tables own lazy, non-semantic memo fields. The container is
+    // frozen only after those actors rebuild their caches; decoding must not freeze the cache host.
+    return result
+  }
+  return decodeValue
+}
+
+const checkedUnit = (value: unknown): Elaboration.CheckedUnit => {
+  if (!records(value)) throw new CodecError('Unit', 'checked unit root must be an object')
+  exactFields(value, ['bodies', 'diagnostics'])
+  if (!Array.isArray(value['bodies']) || !Array.isArray(value['diagnostics']))
+    throw new CodecError('Unit', 'checked unit has malformed collections')
+  if (value['bodies'].length === 0) throw new CodecError('Unit', 'checked unit has no primary body')
+  for (const [index, body] of value['bodies'].entries()) {
+    if (
+      !records(body) ||
+      !records(body['declaration']) ||
+      !records(body['function']) ||
+      !records(body['results'])
+    )
+      throw new CodecError('Unit', `body ${index} is malformed`)
+    if (typeof body['hidden'] !== 'boolean')
+      throw new CodecError('Unit', `body ${index} has invalid ownership`)
+    const id = body['declaration']['id']
+    if (!records(id) || id['_tag'] !== 'DeclarationId')
+      throw new CodecError('Declaration', `body ${index} has invalid declaration`)
+  }
+  return value as unknown as Elaboration.CheckedUnit
+}
+
+const validateUnit = (unit: Elaboration.CheckedUnit, limits: Limits): void => {
+  const artifacts = new Set<string>()
+  for (const [bodyIndex, body] of unit.bodies.entries()) {
+    if (
+      !Number.isSafeInteger(body.declaration.id.ordinal) ||
+      body.declaration.id.ordinal < 0 ||
+      body.declaration.id.ordinal > limits.maximumIdentifier
+    )
+      throw new CodecError('Identifier', `body ${bodyIndex} declaration id is out of range`)
+    const artifact = Tir.artifactKey(body.artifact)
+    if (artifacts.has(artifact)) throw new CodecError('Unit', `duplicate artifact ${artifact}`)
+    if (body.hidden) {
+      const parent = body.artifact.parent
+      if (parent === undefined || !artifacts.has(Tir.artifactKey(parent)))
+        throw new CodecError('Unit', `hidden body ${bodyIndex} has no admitted parent artifact`)
+    } else if (body.artifact.parent !== undefined) {
+      throw new CodecError('Unit', `source body ${bodyIndex} unexpectedly has a parent artifact`)
+    }
+    artifacts.add(artifact)
+    const nodes = Tir.nodesOf(body.function)
+    if (nodes.some((node, ordinal) => node.id.ordinal !== ordinal))
+      throw new CodecError('Identifier', `body ${bodyIndex} node table is not contiguous`)
+    const locals = body.function.locals
+    if (locals === undefined || locals.some((local, ordinal) => local.id.ordinal !== ordinal))
+      throw new CodecError('Identifier', `body ${bodyIndex} local table is not contiguous`)
+    if (!Array.isArray(body.results.evidence) || !Array.isArray(body.results.causes))
+      throw new CodecError('Unit', `body ${bodyIndex} has malformed evidence tables`)
+  }
+}
+
+/** Encodes one complete checked unit. Positions are omitted and declaration ids use stable names. */
+export const encode = (
+  unit: Elaboration.CheckedUnit,
+  index: DeclarationIndex.Index,
+  limits: Limits = defaultLimits,
+): Uint8Array => {
+  validateLimits(limits)
+  const primary = unit.bodies[0]
+  if (primary === undefined) throw new CodecError('Unit', 'checked unit has no primary body')
+  const encodeValue = encoder(primary.declaration.id, stableDeclarations(index))
+  const root: Root = {
+    schema,
+    unit: encodeValue({
+      bodies: unit.bodies.map((body) => ({
+        artifact: body.artifact,
+        declaration: body.declaration,
+        hidden: body.hidden,
+        function: { ...body.function, declaration: undefined },
+        results:
+          body.results.lifetimes === undefined
+            ? body.results
+            : { ...body.results, lifetimes: LifetimeFlow.content(body.results.lifetimes) },
+      })),
+      diagnostics: unit.diagnostics,
+    }),
+  }
+  const bytes = utf8.encode(JSON.stringify(root))
+  if (bytes.byteLength > limits.maximumBytes)
+    throw new CodecError('Oversize', 'checked unit exceeds byte bound')
+  return bytes
+}
+
+/** Canonical, position-free in-process result identity; unavailable external ids remain explicit. */
+export const fingerprint = (
+  unit: Elaboration.CheckedUnit,
+  index: DeclarationIndex.Index,
+  declarationFingerprint: (declaration: DeclarationFacts.DeclarationFact) => string,
+): string => {
+  const primary = unit.bodies[0]
+  if (primary === undefined) throw new CodecError('Unit', 'checked unit has no primary body')
+  const declarations = stableDeclarations(index)
+  const visited = new WeakSet<object>()
+  const state: [number, number, number, number, number, number, number, number] = [
+    0x811c9dc5, 0x9e3779b9, 0x243f6a88, 0xb7e15162, 0x85ebca6b, 0xc2b2ae35, 0x27d4eb2f, 0x165667b1,
+  ]
+  const write = (value: number): void => {
+    state[0] = Math.imul(state[0] ^ value, 0x01000193) >>> 0
+    state[1] = Math.imul(state[1] + value, 0x85ebca6b) >>> 0
+    state[2] = Math.imul(state[2] ^ ((value << 16) | (value >>> 16)), 0xc2b2ae35) >>> 0
+    state[3] = Math.imul(state[3] + (value ^ 0x9e3779b9), 0x27d4eb2f) >>> 0
+    state[4] = Math.imul(state[4] ^ (value + 0x7f4a7c15), 0x165667b1) >>> 0
+    state[5] = Math.imul(state[5] + ((value << 13) | (value >>> 19)), 0xd3a2646c) >>> 0
+    state[6] = Math.imul(state[6] ^ (value + state[0]), 0xfd7046c5) >>> 0
+    state[7] = Math.imul(state[7] + (value ^ state[3]), 0xb55a4f09) >>> 0
+  }
+  const writeText = (value: string): void => {
+    let first = 0x811c9dc5
+    let second = 0x9e3779b9
+    let third = 0x243f6a88
+    let fourth = 0xb7e15162
+    for (let offset = 0; offset < value.length; offset += 1) {
+      const code = value.charCodeAt(offset)
+      first = Math.imul(first ^ code, 0x01000193) >>> 0
+      second = Math.imul(second + code, 0x85ebca6b) >>> 0
+      third = Math.imul(third ^ ((code << 16) | (code >>> 16)), 0xc2b2ae35) >>> 0
+      fourth = Math.imul(fourth + (code ^ 0x9e3779b9), 0x27d4eb2f) >>> 0
+    }
+    write(value.length)
+    write(first)
+    write(second)
+    write(third)
+    write(fourth)
+  }
+  const writeValue = (input: unknown): void => {
+    if (input === null) {
+      writeText('null')
+      return
+    }
+    if (typeof input === 'boolean') {
+      writeText('boolean')
+      write(input ? 1 : 0)
+      return
+    }
+    if (typeof input === 'string') {
+      writeText('string')
+      writeText(input)
+      return
+    }
+    if (typeof input === 'number') {
+      if (!Number.isFinite(input))
+        throw new CodecError('Number', 'checked unit has non-finite number')
+      writeText('number')
+      writeText(String(input))
+      return
+    }
+    if (typeof input === 'bigint') {
+      writeText('bigint')
+      writeText(String(input))
+      return
+    }
+    if (typeof input !== 'object')
+      throw new CodecError('Unit', `checked unit has unsupported ${typeof input}`)
+    if (SourceSpan.isSourceSpan(input)) {
+      writeText('span')
+      return
+    }
+    if (visited.has(input)) {
+      writeText('reference')
+      return
+    }
+    visited.add(input)
+    if (Array.isArray(input)) {
+      writeText('array')
+      write(input.length)
+      for (const value of input) writeValue(value)
+    } else if (input instanceof Map) {
+      writeText('map')
+      write(input.size)
+      for (const [key, value] of input) {
+        writeValue(key)
+        writeValue(value)
+      }
+    } else if (input instanceof Set) {
+      writeText('set')
+      write(input.size)
+      for (const value of input) writeValue(value)
+    } else if (input instanceof Uint8Array) {
+      writeText('bytes')
+      write(input.byteLength)
+      for (const value of input) write(value)
+    } else {
+      const record = input as Readonly<Record<string, unknown>>
+      if (
+        record['_tag'] === 'DeclarationId' &&
+        typeof record['sourceId'] === 'string' &&
+        typeof record['ordinal'] === 'number'
+      ) {
+        const id = input as DeclarationFacts.DeclarationId
+        const declaration =
+          relativeDeclaration(primary.declaration.id, id) ?? declarations.get(declarationKey(id))
+        writeText('declaration')
+        if (declaration === undefined) {
+          writeText('unstable')
+          writeText(id.sourceId)
+          write(id.ordinal)
+        } else {
+          writeText(declaration.kind)
+          if (declaration.kind === 'named') {
+            writeText(declaration.module)
+            writeText(declaration.name)
+          } else {
+            write(declaration.site)
+          }
+        }
+      } else {
+        writeText('object')
+        const keys = Object.keys(record)
+          .filter((key) => record[key] !== undefined)
+          .sort()
+        write(keys.length)
+        for (const key of keys) {
+          const value = record[key]
+          writeText(key)
+          writeValue(value)
+        }
+      }
+    }
+  }
+  const semanticUnit = {
+    bodies: unit.bodies.map((body) => ({
+      artifact: body.artifact,
+      declaration: declarationFingerprint(body.declaration),
+      hidden: body.hidden,
+      function: { ...body.function, artifact: undefined, declaration: undefined },
+      results:
+        body.results.lifetimes === undefined
+          ? body.results
+          : { ...body.results, lifetimes: LifetimeFlow.content(body.results.lifetimes) },
+    })),
+    diagnostics: unit.diagnostics,
+  }
+  writeValue(semanticUnit)
+  return state.map((value) => value.toString(16).padStart(8, '0')).join('')
+}
+
+/** Strictly decodes and presents one complete unit against the current header and authored spans. */
+export const decode = (
+  bytes: Uint8Array,
+  index: DeclarationIndex.Index,
+  declaration: DeclarationFacts.DeclarationFact,
+  context: SemanticContext.SemanticContext,
+  limits: Limits = defaultLimits,
+): Elaboration.CheckedUnit => {
+  validateLimits(limits)
+  if (bytes.byteLength > limits.maximumBytes)
+    throw new CodecError('Oversize', 'checked unit exceeds byte bound')
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes)) as unknown
+  } catch {
+    throw new CodecError('MalformedJson', 'checked unit is not canonical UTF-8 JSON')
+  }
+  if (!records(parsed)) throw new CodecError('Unit', 'codec root must be an object')
+  exactFields(parsed, ['schema', 'unit'])
+  if (parsed['schema'] !== schema)
+    throw new CodecError('IncompatibleSchema', 'codec schema mismatch')
+  const decodeValue = decoder(limits, declaration, namedDeclarations(index))
+  const unit = checkedUnit(decodeValue(parsed['unit']))
+  const bodies = unit.bodies.map((body, bodyIndex) => {
+    const owner =
+      bodyIndex === 0 ||
+      (body.declaration.id.sourceId === declaration.id.sourceId &&
+        body.declaration.id.ordinal === declaration.id.ordinal)
+        ? declaration
+        : body.declaration
+    return Elaboration.presentBody(
+      {
+        artifact: body.artifact,
+        declaration: owner,
+        hidden: body.hidden,
+        function: { ...body.function, declaration: owner },
+        results: body.results,
+      },
+      context,
+      owner,
+    )
+  })
+  const presented = Object.freeze({ bodies: Object.freeze(bodies), diagnostics: unit.diagnostics })
+  validateUnit(presented, limits)
+  return presented
 }

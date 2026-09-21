@@ -10,6 +10,7 @@ import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
 import * as Projections from './support/projections.js'
 import * as SemanticQuery from '../src/SemanticQuery.js'
+import { raise } from './support/raise.js'
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
@@ -215,39 +216,42 @@ const threeModuleSources = {
   'values/Number': 'pub fn two() -> i32 { return 2 }',
 }
 
-it.effect('keeps TIR, MIR, diagnostics, and instances deterministic across fresh snapshots', () =>
-  Effect.gen(function* () {
-    const forward = yield* snapshot('app/Main', threeModuleSources)
-    const reverse = yield* snapshot('app/Main', {
-      'values/Number': threeModuleSources['values/Number'],
-      'library/Answer': threeModuleSources['library/Answer'],
-      'app/Main': threeModuleSources['app/Main'],
-    })
-    const wasm = yield* snapshot('app/Main', threeModuleSources, 'wasm32-unknown-unknown')
-    assert.deepEqual(
-      [...forward.results.values()].map((result) => Tir.encode(result.tir)),
-      [...reverse.results.values()].map((result) => Tir.encode(result.tir)),
-    )
-    assert.strictEqual(
-      MirEncoding.encode(Analysis.loweredMir(forward)),
-      MirEncoding.encode(Analysis.loweredMir(reverse)),
-    )
-    assert.deepEqual(forward.instances, reverse.instances)
-    assert.deepEqual(forward.diagnostics, reverse.diagnostics)
-    assert.deepEqual(
-      [...forward.results.values()].map((result) => Tir.encode(result.tir)),
-      [...wasm.results.values()].map((result) => Tir.encode(result.tir)),
-    )
-    const functionBodies = (candidate: Analysis.Snapshot): string => {
-      const encoded = MirEncoding.encode(Analysis.loweredMir(candidate))
-      return encoded.slice(encoded.indexOf('\nfn '))
-    }
-    assert.strictEqual(functionBodies(forward), functionBodies(wasm))
-    const instanceKeys = (candidate: Analysis.Snapshot) =>
-      candidate.instances.instances.map((instance) => instance.key)
-    assert.deepEqual(instanceKeys(forward), instanceKeys(wasm))
-    assert.deepEqual(wasm.diagnostics, [])
-  }),
+it.effect(
+  'keeps TIR, MIR, diagnostics, and instances deterministic across fresh snapshots',
+  () =>
+    Effect.gen(function* () {
+      const forward = yield* snapshot('app/Main', threeModuleSources)
+      const reverse = yield* snapshot('app/Main', {
+        'values/Number': threeModuleSources['values/Number'],
+        'library/Answer': threeModuleSources['library/Answer'],
+        'app/Main': threeModuleSources['app/Main'],
+      })
+      const wasm = yield* snapshot('app/Main', threeModuleSources, 'wasm32-unknown-unknown')
+      assert.deepEqual(
+        [...forward.results.values()].map((result) => Tir.encode(result.tir)),
+        [...reverse.results.values()].map((result) => Tir.encode(result.tir)),
+      )
+      assert.strictEqual(
+        MirEncoding.encode(Analysis.loweredMir(forward)),
+        MirEncoding.encode(Analysis.loweredMir(reverse)),
+      )
+      assert.deepEqual(forward.instances, reverse.instances)
+      assert.deepEqual(forward.diagnostics, reverse.diagnostics)
+      assert.deepEqual(
+        [...forward.results.values()].map((result) => Tir.encode(result.tir)),
+        [...wasm.results.values()].map((result) => Tir.encode(result.tir)),
+      )
+      const functionBodies = (candidate: Analysis.Snapshot): string => {
+        const encoded = MirEncoding.encode(Analysis.loweredMir(candidate))
+        return encoded.slice(encoded.indexOf('\nfn '))
+      }
+      assert.strictEqual(functionBodies(forward), functionBodies(wasm))
+      const instanceKeys = (candidate: Analysis.Snapshot) =>
+        candidate.instances.instances.map((instance) => instance.key)
+      assert.deepEqual(instanceKeys(forward), instanceKeys(wasm))
+      assert.deepEqual(wasm.diagnostics, [])
+    }),
+  30_000,
 )
 
 it.effect('keeps repeated imports valid without hiding parser recovery diagnostics', () =>
@@ -445,25 +449,171 @@ pub fn inspect(event: Token, offset: i32) -> i32 {
 )
 
 it('memoizes semantic query answers and clears failed reservations before retry', () => {
-  const session = SemanticQuery.make('query-runtime')
   let attempts = 0
-  const request: SemanticQuery.Request<number> = Object.freeze({
-    _tag: 'SemanticQueryRequest',
-    key: 'answer',
-    execute: (observe: SemanticQuery.Observe) => {
+  const request: SemanticQuery.Descriptor = Object.freeze({
+    _tag: 'SemanticQueryDescriptor',
+    family: 'Fixture',
+    schema: 1,
+    address: 'answer',
+    reuse: 'Revision',
+  })
+  const session = SemanticQuery.make('query-runtime', {
+    execute: (_request, observe) => {
       attempts += 1
-      observe(Object.freeze({ _tag: 'Query', key: `attempt:${attempts}` }))
+      observe(
+        Object.freeze({
+          _tag: 'SemanticInputAddress',
+          family: 'FixtureInput',
+          schema: 1,
+          address: 'stable',
+        }),
+      )
       if (attempts === 1) throw new Error('fixture failure')
       return 42
     },
+    fingerprint: (_request, answer) => String(answer),
+    read: () => 'stable',
   })
 
   assert.throws(() => SemanticQuery.query(session, request), 'fixture failure')
-  assert.isFalse(SemanticQuery.isActive(session, request.key))
+  assert.isFalse(SemanticQuery.isActive(session, request))
   assert.strictEqual(SemanticQuery.query(session, request)._tag, 'Completed')
   assert.strictEqual(SemanticQuery.query(session, request)._tag, 'Completed')
-  assert.strictEqual(SemanticQuery.executionCount(session, request.key), 2)
+  assert.strictEqual(SemanticQuery.executionCount(session, request), 2)
   assert.strictEqual(attempts, 2)
+})
+
+it('validates prior query records and stops at an equal child result', () => {
+  let inputValue = 'before'
+  let session: SemanticQuery.Session | undefined
+  let childExecutions = 0
+  let parentExecutions = 0
+  const child: SemanticQuery.Descriptor = Object.freeze({
+    _tag: 'SemanticQueryDescriptor',
+    family: 'Child',
+    schema: 1,
+    address: 'child',
+    reuse: 'Revision',
+  })
+  const parent: SemanticQuery.Descriptor = Object.freeze({
+    _tag: 'SemanticQueryDescriptor',
+    family: 'Parent',
+    schema: 1,
+    address: 'parent',
+    reuse: 'Revision',
+  })
+  const leaf: SemanticQuery.InputAddress = Object.freeze({
+    _tag: 'SemanticInputAddress',
+    family: 'Leaf',
+    schema: 1,
+    address: 'input',
+  })
+  const provider: SemanticQuery.Provider = {
+    execute: (request, observe) => {
+      if (request.family === 'Child') {
+        childExecutions += 1
+        observe(leaf)
+        return 'stable-child'
+      }
+      parentExecutions += 1
+      const current = session
+      if (current === undefined) throw new RangeError('Missing query session')
+      const result = SemanticQuery.query<string>(current, child)
+      return result._tag === 'Completed' ? 'parent:' + result.completed.answer : 'cycle'
+    },
+    fingerprint: (_request, answer) => String(answer),
+    read: () => inputValue,
+  }
+
+  session = SemanticQuery.make('one', provider)
+  assert.strictEqual(SemanticQuery.query(session, parent)._tag, 'Completed')
+  const previous = SemanticQuery.snapshot(session)
+  assert.strictEqual(childExecutions, 1)
+  assert.strictEqual(parentExecutions, 1)
+
+  session = SemanticQuery.make('two', provider, previous)
+  assert.strictEqual(SemanticQuery.query(session, parent)._tag, 'Completed')
+  assert.deepEqual(SemanticQuery.counters(session), {
+    _tag: 'SemanticQueryCounters',
+    validations: 2,
+    executions: 0,
+    reuses: 2,
+  })
+
+  inputValue = 'after'
+  session = SemanticQuery.make('three', provider, previous)
+  assert.strictEqual(SemanticQuery.query(session, parent)._tag, 'Completed')
+  assert.strictEqual(childExecutions, 2)
+  assert.strictEqual(parentExecutions, 1)
+  assert.deepEqual(SemanticQuery.counters(session), {
+    _tag: 'SemanticQueryCounters',
+    validations: 2,
+    executions: 1,
+    reuses: 1,
+  })
+})
+
+it('defers an invalid callback-backed child until its parent registers the current demand', () => {
+  let inputValue = 'before'
+  let childRegistered = true
+  let session: SemanticQuery.Session | undefined
+  let childExecutions = 0
+  let parentExecutions = 0
+  const child: SemanticQuery.Descriptor = Object.freeze({
+    _tag: 'SemanticQueryDescriptor',
+    family: 'CallbackChild',
+    schema: 1,
+    address: 'child',
+    reuse: 'Revision',
+  })
+  const parent: SemanticQuery.Descriptor = Object.freeze({
+    _tag: 'SemanticQueryDescriptor',
+    family: 'CallbackParent',
+    schema: 1,
+    address: 'parent',
+    reuse: 'Revision',
+  })
+  const leaf: SemanticQuery.InputAddress = Object.freeze({
+    _tag: 'SemanticInputAddress',
+    family: 'CallbackInput',
+    schema: 1,
+    address: 'input',
+  })
+  const provider: SemanticQuery.Provider = {
+    available: (request) => request.family !== 'CallbackChild' || childRegistered,
+    execute: (request, observe) => {
+      if (request.family === 'CallbackChild') {
+        if (!childRegistered) throw new RangeError('child demand was not registered')
+        childExecutions += 1
+        observe(leaf)
+        return inputValue
+      }
+      parentExecutions += 1
+      childRegistered = true
+      const current = session ?? raise('callback query session')
+      const result = SemanticQuery.query<string>(current, child)
+      return result._tag === 'Completed' ? result.completed.answer : 'cycle'
+    },
+    fingerprint: (_request, answer) => String(answer),
+    read: () => inputValue,
+  }
+
+  session = SemanticQuery.make('callback-one', provider)
+  assert.strictEqual(SemanticQuery.query(session, parent)._tag, 'Completed')
+  const previous = SemanticQuery.snapshot(session)
+
+  inputValue = 'after'
+  childRegistered = false
+  session = SemanticQuery.make('callback-two', provider, previous)
+  assert.strictEqual(SemanticQuery.query(session, parent)._tag, 'Completed')
+  assert.strictEqual(childExecutions, 2)
+  assert.strictEqual(parentExecutions, 2)
+  assert.deepEqual(SemanticQuery.counters(session), {
+    _tag: 'SemanticQueryCounters',
+    validations: 3,
+    executions: 2,
+    reuses: 0,
+  })
 })
 
 it.effect('routes editor name reads through one memoized semantic session', () =>

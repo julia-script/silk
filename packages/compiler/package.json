@@ -442,6 +442,10 @@
       "types": "./dist/Semantic.d.ts",
       "import": "./dist/Semantic.js"
     },
+    "./SemanticPersistence": {
+      "types": "./dist/SemanticPersistence.d.ts",
+      "import": "./dist/SemanticPersistence.js"
+    },
     "./SemanticQuery": {
       "types": "./dist/SemanticQuery.d.ts",
       "import": "./dist/SemanticQuery.js"
@@ -533,6 +537,10 @@
     "./StaticValue": {
       "types": "./dist/StaticValue.d.ts",
       "import": "./dist/StaticValue.js"
+    },
+    "./Storage": {
+      "types": "./dist/Storage.d.ts",
+      "import": "./dist/Storage.js"
     },
     "./Stdlib": {
       "types": "./dist/Stdlib.d.ts",
