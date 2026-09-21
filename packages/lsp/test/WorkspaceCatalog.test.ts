@@ -49,7 +49,7 @@ it.effect(
       assert.deepEqual([...inventory.project.keys()], ['Main', 'nested/Util'])
       assert.deepEqual(
         WorkspaceInventory.candidates(inventory, 'main').map((candidate) => candidate.module),
-        ['Main'],
+        ['Main', 'silk/test_runner'],
       )
       assert.deepEqual(
         WorkspaceInventory.candidates(inventory, 'bufferedValue').map(
