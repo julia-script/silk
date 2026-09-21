@@ -110,7 +110,6 @@ const discoverInstances = Effect.fn('Realization.discoverInstances')(function* (
   prepareForEmission: boolean,
   report: Array<PhaseReport.PhaseReport>,
   options: Options,
-  registry: SemanticContext.Registry,
 ) {
   const trace = yield* CompilerTrace.capture()
   const instances = PhaseReport.measureInto(
@@ -358,7 +357,6 @@ const discoverAndLowerEffect = Effect.fn('Realization.discoverAndLower')(functio
     prepareForEmission,
     report,
     options,
-    registry,
   )
   const realizedIndex: DeclarationIndex.Index = Object.freeze({
     ...self.index,

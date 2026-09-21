@@ -14,6 +14,7 @@ import * as CompilationProfile from '../../dist/CompilationProfile.js'
 import * as NodeHeapObservation from '../../dist/NodeHeapObservation.js'
 import * as Driver from '../../dist/Driver.js'
 import * as NativeToolchain from '../../dist/NativeToolchain.js'
+import * as Linker from '../../dist/Linker.js'
 import * as NativeLinkInput from '../../dist/NativeLinkInput.js'
 import * as SourceFile from '../../dist/SourceFile.js'
 import * as SourceResolver from '../../dist/SourceResolver.js'
@@ -143,11 +144,13 @@ const program = Effect.gen(function* () {
           archivePath,
           entry,
         )
-        yield* NativeToolchain.NativeFinalizer.finalize(
-          archivePlan,
-          'NativeStaticLibrary',
-          archivePath,
-        )
+        yield* Linker.link({
+          scope,
+          plan: archivePlan,
+          artifactKind: 'NativeStaticLibrary',
+          destination: archivePath,
+          cache: { _tag: 'Disabled' },
+        })
         const source = `unsafe extern "C" fn supply_archive_root() -> i32
 unsafe extern "C" fn supply_add(a: i32, b: i32) -> i32
 pub fn main() -> i32 { let rooted = unsafe supply_archive_root()
@@ -246,7 +249,13 @@ pub fn main() -> i32 { let rooted = unsafe supply_archive_root()
           cDestination,
           entry,
         )
-        yield* NativeToolchain.NativeFinalizer.finalize(cPlan, 'NativeExecutable', cDestination)
+        yield* Linker.link({
+          scope,
+          plan: cPlan,
+          artifactKind: 'NativeExecutable',
+          destination: cDestination,
+          cache: { _tag: 'Disabled' },
+        })
         const cExecution = target.includes('apple')
           ? yield* run(cDestination, [], 42)
           : yield* run(
@@ -343,11 +352,13 @@ pub fn main() -> i32 { let rooted = unsafe supply_archive_root()
               entry,
             )
             const rejected = yield* Effect.result(
-              NativeToolchain.NativeFinalizer.finalize(
-                rejectedPlan,
-                'NativeExecutable',
-                path.join(output, `${target}-${name}`),
-              ),
+              Linker.link({
+                scope,
+                plan: rejectedPlan,
+                artifactKind: 'NativeExecutable',
+                destination: path.join(output, `${target}-${name}`),
+                cache: { _tag: 'Disabled' },
+              }),
             )
             if (
               !Result.isFailure(rejected) ||

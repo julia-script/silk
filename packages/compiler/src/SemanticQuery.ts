@@ -128,10 +128,12 @@ const execute = <A>(self: Session, request: Request<A>, publish: boolean): Resul
       observations: Object.freeze([...active.observations]),
     })
     if (publish) state.completed.set(request.key, completed)
-    return Object.freeze({ _tag: 'Completed', completed, reused: false })
-  } finally {
     const removed = state.active.pop()
     if (removed !== active) throw new RangeError('Semantic query reservation stack is corrupted')
+    return Object.freeze({ _tag: 'Completed', completed, reused: false })
+  } catch (cause) {
+    if (state.active.at(-1) === active) state.active.pop()
+    throw cause
   }
 }
 

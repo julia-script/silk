@@ -19,6 +19,8 @@ import * as HelperCapability from '../../dist/HelperCapability.js'
 import { fileURLToPath } from 'node:url'
 import * as PlatformSupplyResolver from '../../dist/PlatformSupplyResolver.js'
 import * as NativeToolchain from '../../dist/NativeToolchain.js'
+import * as ObjectEmission from '../../dist/ObjectEmission.js'
+import * as Linker from '../../dist/Linker.js'
 
 class ConformanceError extends Data.TaggedError('ConformanceError') {}
 const program = Effect.gen(function* () {
@@ -176,7 +178,12 @@ const program = Effect.gen(function* () {
             return yield* new ConformanceError({
               message: `Source input provider acquired a generated runtime dependency: ${artifact.nativeRuntimeSymbols.join(', ')}`,
             })
-          const object = yield* NativeToolchain.emitObject(tools, scope, artifact, profile)
+          const object = yield* ObjectEmission.materialize({
+            toolchain: tools,
+            scope,
+            artifact,
+            profile,
+          })
           const support = yield* NativeToolchain.compileHelpers(
             tools,
             scope,
@@ -241,7 +248,13 @@ const program = Effect.gen(function* () {
             },
             [object.helpers, ...support.map((entry) => entry.helpers)],
           )
-          yield* NativeToolchain.NativeFinalizer.finalize(plan, 'NativeExecutable', destination)
+          yield* Linker.link({
+            scope,
+            plan,
+            artifactKind: 'NativeExecutable',
+            destination,
+            cache: { _tag: 'Disabled' },
+          })
           yield* fs.writeFile(`${destination}.silk`, fixture.source)
           yield* fs.copyFile(object.artifact.path, `${destination}.o`)
           const inspection = yield* run(inspect, [

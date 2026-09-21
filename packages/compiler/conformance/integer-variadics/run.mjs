@@ -17,6 +17,8 @@ import { fileURLToPath } from 'node:url'
 import { createHash } from 'node:crypto'
 import * as PlatformSupplyResolver from '../../dist/PlatformSupplyResolver.js'
 import * as NativeToolchain from '../../dist/NativeToolchain.js'
+import * as ObjectEmission from '../../dist/ObjectEmission.js'
+import * as Linker from '../../dist/Linker.js'
 import * as SourceFile from '../../dist/SourceFile.js'
 import * as SourceResolver from '../../dist/SourceResolver.js'
 
@@ -177,7 +179,12 @@ const program = Effect.gen(function* () {
               message: `Inconsistent declaration inventory for ${symbol}`,
             })
         }
-        const object = yield* NativeToolchain.emitObject(tools, scope, artifact, profile)
+        const object = yield* ObjectEmission.materialize({
+          toolchain: tools,
+          scope,
+          artifact,
+          profile,
+        })
         const runtime = yield* NativeToolchain.compileRuntime(tools, scope, profile.target)
         const c = yield* NativeToolchain.compileCObject(
           tools,
@@ -220,7 +227,13 @@ const program = Effect.gen(function* () {
             resolved: { kind: 'default' },
           },
         )
-        yield* NativeToolchain.NativeFinalizer.finalize(plan, 'NativeExecutable', destination)
+        yield* Linker.link({
+          scope,
+          plan,
+          artifactKind: 'NativeExecutable',
+          destination,
+          cache: { _tag: 'Disabled' },
+        })
         yield* fs.writeFileString(`${destination}.ll`, artifact.ir)
         yield* fs.copyFile(object.artifact.path, `${destination}.o`)
         const inspection = yield* run(inspect, [
