@@ -114,6 +114,10 @@ const stableJson = (value: unknown): string =>
     return child
   })
 
+// Boundary spans are presentation data; semantic identity depends only on the row shape.
+const boundaryFingerprint = (boundaries: ReadonlyArray<SourceSpan.SourceSpan>): string =>
+  String(boundaries.length)
+
 const declarationKey = (id: DeclarationFacts.CanonicalId): string => id.module + '.' + id.name
 
 const bindingKey = (binding: NameResolution.Binding): string => {
@@ -516,11 +520,12 @@ const makeProvider = (
         throw new RangeError('Unknown semantic query family ' + request.family)
     }
   },
-  fingerprint: (request, answer) => {
+  fingerprint: (request, answer, observations) => {
     if (typeof answer === 'string') return answer
     if (request.family === 'CheckBody')
       return BodyQuery.fingerprint(index, answer as Elaboration.CheckedUnit)
-    if (request.family === 'Ownership') return ToolchainIntegrity.contentDigest(stableJson(answer))
+    if (request.family === 'Ownership')
+      return ToolchainIntegrity.contentDigest(stableJson([request, observations]))
     if (request.family === 'Evaluate' || request.family === 'ConstructResidual')
       return ToolchainIntegrity.contentDigest(
         stableJson((answer as RecordedEvaluation<unknown>).entry.state),
@@ -810,7 +815,9 @@ export const ownership = (
   ])
   const runtime = runtimeOf(self)
   const provider = {
-    boundary: ToolchainIntegrity.contentDigest(stableJson(ownershipInput.boundaries)),
+    boundary: `${boundaryFingerprint(ownershipInput.boundaries)}:${boundaryFingerprint(
+      ownershipInput.resultBoundaries,
+    )}`,
     build: compute,
   }
   runtime.ownership.set(request.address, provider)

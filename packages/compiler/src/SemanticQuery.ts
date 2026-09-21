@@ -35,7 +35,11 @@ export type Observe = (input: InputAddress) => void
 /** The single dispatcher for one semantic environment. */
 export interface Provider {
   readonly execute: (descriptor: Descriptor, observe: Observe) => unknown
-  readonly fingerprint: (descriptor: Descriptor, answer: unknown) => string
+  readonly fingerprint: (
+    descriptor: Descriptor,
+    answer: unknown,
+    observations: ReadonlyArray<Observation>,
+  ) => string
   readonly read: (input: InputAddress) => string | undefined
   /** Whether a successfully returned answer may enter current or revision snapshots. */
   readonly cacheable?: (descriptor: Descriptor, answer: unknown) => boolean
@@ -228,7 +232,7 @@ const executeProvider = <A>(self: Session, descriptor: Descriptor, publish: bool
       descriptor,
       key,
       answer,
-      fingerprint: state.provider.fingerprint(descriptor, answer),
+      fingerprint: state.provider.fingerprint(descriptor, answer, active.observations),
       observations: Object.freeze([...active.observations]),
     })
     if (publish && state.provider.cacheable?.(descriptor, answer) !== false)
