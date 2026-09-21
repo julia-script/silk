@@ -58,6 +58,8 @@ The current low-level operation map is:
 | `Semantic.checkBody`      | semantic session, authored HIR, module headers, scope, declaration fact, and optional cross-revision body store | memoized `CheckedUnit { bodies, diagnostics }`, including hidden bodies               |
 | `Semantic.evaluate`       | semantic session, target-scoped evaluation store, canonical application, and deterministic callback             | value-sensitive `ApplicationResult` with key, cache status, and budget                |
 | `Realization.instantiate` | checked artifacts, declaration facts, completed profile, roots, resolution, and runtime composition             | portable reachable `Instances.Discovery` graph without live presentation state        |
+| `Layout.computeTypes`     | target, declaration index, literal presentation, and opaque realization facts                                   | pre-reachability target type-layout catalog                                           |
+| `Layout.computeRuntime`   | type catalog, concrete instance graph, declaration index, and opaque realization facts                          | reached layouts plus storage, environment, calling, execution, and literal plans      |
 
 `Hir.lower` does not load a module, discover imports, run semantic analysis, or realize a target.
 Its returned syntax keeps lexer/parser recovery diagnostics for syntax-only tooling, while
@@ -77,6 +79,11 @@ The instance graph is a published artifact, not a live realization session. It r
 instances, substitutions, residual bodies, reachability, calls, effects, constants, and diagnostic
 evidence, but not the frontend, semantic session, source resolver, or presentation registry.
 Consumers that publish source-located diagnostics or MIR receive current presentation separately.
+
+Type layout and runtime planning are separate operations. `Layout.computeTypes` cannot observe
+reachability and may include declared non-generic types that never execute. `Layout.computeRuntime`
+uses the instance graph to complete concrete generic layouts and retains only reached entries while
+planning storage, callable/effect environments, calling shapes, execution packages, and literals.
 
 Phase reports and trace spans use these operation identities where they measure the corresponding
 work. `Semantic.checkBody.execute` and `.reuse`, and the `evaluation.branch` attribute on

@@ -18,13 +18,8 @@ const storedLayout = Effect.fnUntraced(function* (
   target: Target.Target,
 ) {
   const snapshot = yield* AnalysisFixture.retainingMain(name, ascii(source), target.id)
-  const catalog = yield* Layout.catalog(
-    target,
-    snapshot.index,
-    snapshot.resolution.contexts,
-    snapshot.instances,
-  )
-  const plan = yield* Layout.plan(catalog, snapshot.instances, snapshot.index)
+  const catalog = yield* Layout.computeTypes(target, snapshot.index, snapshot.resolution.contexts)
+  const plan = yield* Layout.computeRuntime(catalog, snapshot.instances, snapshot.index)
   return Object.freeze({ snapshot, catalog, plan })
 })
 

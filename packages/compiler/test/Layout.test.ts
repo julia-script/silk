@@ -881,12 +881,16 @@ it.effect('plans only concrete types reached through discovered instances', () =
       ascii(`pub fn unused(value: bool) -> bool { return value }
 pub fn main() -> i32 { return 42 }`),
     )
-    const catalog = yield* Layout.catalog(
+    const catalog = yield* Layout.computeTypes(
       Target.aarch64AppleDarwin,
       Analysis.declarationIndex(snapshot),
       snapshot.resolution.contexts,
     )
-    const plan = yield* Layout.plan(catalog, Analysis.instancesOf(snapshot), snapshot.index)
+    const plan = yield* Layout.computeRuntime(
+      catalog,
+      Analysis.instancesOf(snapshot),
+      snapshot.index,
+    )
 
     assert.deepEqual(
       plan.entries.map((candidate) => candidate.type),
@@ -1654,7 +1658,7 @@ pub fn main() -> i32 { return 42 }`),
       [Target.aarch64AppleDarwin, 8, 64],
       [Target.wasm32UnknownUnknown, 4, 32],
     ] as const) {
-      const catalog = yield* Layout.catalog(
+      const catalog = yield* Layout.computeTypes(
         target,
         Analysis.declarationIndex(snapshot),
         snapshot.resolution.contexts,

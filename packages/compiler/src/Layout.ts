@@ -428,14 +428,13 @@ export interface Violation {
 // Planning entry points
 
 /** Computes every canonical nominal layout before runtime reachability or backend work. */
-export const catalog = Effect.fn('Layout.catalog')(function* (
+export const computeTypes = Effect.fn('Layout.computeTypes')(function* (
   target: Target.Target,
   index: DeclarationIndex.Index,
   registry: SemanticContext.Registry,
-  discovery?: Instances.Discovery,
   opaqueRealizations?: OpaqueRealization.Catalog,
 ): Effect.fn.Return<Catalog> {
-  const state = makeCatalogState(target, index, discovery, opaqueRealizations)
+  const state = makeCatalogState(target, index, undefined, opaqueRealizations)
   const { declarations, unionDeclarations, completed } = state
   const referenced = new Map<string, DeclarationFacts.SemanticType>()
   yield* collectDeclaredTypes(index, referenced)
@@ -446,7 +445,6 @@ export const catalog = Effect.fn('Layout.catalog')(function* (
   for (const declaration of unionDeclarations) {
     if (declaration.union.typeParameters.length === 0) yield* layoutNominal(state, declaration.type)
   }
-  yield* collectInstanceTypes(discovery, referenced)
   yield* completeCatalog(state, referenced)
   return Object.freeze({
     _tag: 'LayoutCatalog',
@@ -474,27 +472,50 @@ export const catalog = Effect.fn('Layout.catalog')(function* (
   })
 })
 
-/** Selects runtime-reachable entries while reusing nominal decisions from the catalog. */
-export const plan = Effect.fn('Layout.plan')(function* (
+const completeForInstances = Effect.fnUntraced(function* (
   self: Catalog,
   discovery: Instances.Discovery,
   index: DeclarationIndex.Index,
+  opaqueRealizations?: OpaqueRealization.Catalog,
+): Effect.fn.Return<Catalog> {
+  const state = makeCatalogState(self.target, index, discovery, opaqueRealizations)
+  const referenced = new Map<string, DeclarationFacts.SemanticType>()
+  yield* collectDeclaredTypes(index, referenced)
+  yield* collectInstanceTypes(discovery, referenced)
+  yield* completeCatalog(state, referenced)
+  return Object.freeze({
+    ...self,
+    entries: Object.freeze(
+      [...state.completed.values()].sort((left, right) =>
+        compareRuntimeTypes(left.type, right.type),
+      ),
+    ),
+  })
+})
+
+/** Selects runtime-reachable entries while reusing nominal decisions from the catalog. */
+export const computeRuntime = Effect.fn('Layout.computeRuntime')(function* (
+  self: Catalog,
+  discovery: Instances.Discovery,
+  index: DeclarationIndex.Index,
+  opaqueRealizations?: OpaqueRealization.Catalog,
 ): Effect.fn.Return<Plan> {
+  const completed = yield* completeForInstances(self, discovery, index, opaqueRealizations)
   const reached = yield* collectReachableTypes(discovery)
   const entries = new Map<string, Entry>()
-  const state: PlanState = { catalog: self, entries }
+  const state: PlanState = { catalog: completed, entries }
   yield* resolveEntries(state, reached)
   const orderedEntries = Object.freeze(
     [...entries.values()].sort((left, right) => compareRuntimeTypes(left.type, right.type)),
   )
-  const literals = yield* planLiteralVerdicts(self.target, discovery, self.wordConstants)
+  const literals = yield* planLiteralVerdicts(completed.target, discovery, completed.wordConstants)
   const localSharedAllocationProvenance = yield* planLocalSharedAllocation(discovery, index)
   const localSharedDiagnostics = yield* checkLocalSharedLayouts(state, discovery)
   const shapeTypes = yield* collectShapeTypes(orderedEntries, reached)
-  const staticData = yield* planStaticData(self.target, discovery)
-  const callablePlans = yield* planCallableEnvironments(self.target, orderedEntries, discovery)
+  const staticData = yield* planStaticData(completed.target, discovery)
+  const callablePlans = yield* planCallableEnvironments(completed.target, orderedEntries, discovery)
   const effectPlans = yield* planEffectEnvironments(
-    self.target,
+    completed.target,
     orderedEntries,
     discovery,
     callablePlans,
@@ -512,7 +533,7 @@ export const plan = Effect.fn('Layout.plan')(function* (
   for (const environment of effectPlans)
     specializedShapeTypes.set(Type.runtimeKey(environment.effect), environment.effect)
   const plannedShapes = yield* planCallingShapes(
-    self.target,
+    completed.target,
     orderedEntries,
     [...specializedShapeTypes.values()].sort(compareRuntimeTypes),
     effectPlans,
@@ -520,7 +541,7 @@ export const plan = Effect.fn('Layout.plan')(function* (
   )
   const base: Plan = Object.freeze({
     _tag: 'LayoutPlan',
-    target: self.target,
+    target: completed.target,
     entries: orderedEntries,
     effectEnvironments: effectPlans,
     callableEnvironments: callablePlans,

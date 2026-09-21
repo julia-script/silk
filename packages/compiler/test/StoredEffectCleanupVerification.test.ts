@@ -25,13 +25,12 @@ const lowerStored = Effect.fnUntraced(function* (name: string, source: string) {
     Target.wasm32UnknownUnknown.id,
   )
   assert.deepEqual(Analysis.diagnostics(snapshot), [])
-  const catalog = yield* Layout.catalog(
+  const catalog = yield* Layout.computeTypes(
     Target.wasm32UnknownUnknown,
     snapshot.index,
     snapshot.resolution.contexts,
-    snapshot.instances,
   )
-  const layout = yield* Layout.plan(catalog, snapshot.instances, snapshot.index)
+  const layout = yield* Layout.computeRuntime(catalog, snapshot.instances, snapshot.index)
   const module = Lower.lowerProgram(
     snapshot.instances,
     layout,

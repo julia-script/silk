@@ -203,19 +203,14 @@ const buildTargetLayout = Effect.fn('Realization.buildTargetLayout')(function* (
       selection,
       error: analysisUnavailable,
     })
-  const catalog = yield* Layout.catalog(
-    selection.target,
-    index,
-    registry,
-    instances,
-    OpaqueRealization.catalogOf(self),
-  )
+  const opaqueRealizations = OpaqueRealization.catalogOf(self)
+  const catalog = yield* Layout.computeTypes(selection.target, index, registry, opaqueRealizations)
   return Object.freeze({
     _tag: 'Available' as const,
     selection,
     target: selection.target,
     catalog,
-    layout: yield* Layout.plan(catalog, instances, index),
+    layout: yield* Layout.computeRuntime(catalog, instances, index, opaqueRealizations),
   })
 })
 
