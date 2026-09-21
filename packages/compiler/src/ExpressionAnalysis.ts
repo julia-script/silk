@@ -3,6 +3,7 @@ import type * as AuthoredHir from './AuthoredHir.js'
 import * as AuthoredIdentity from './AuthoredIdentity.js'
 import * as AuthoredWalk from './AuthoredWalk.js'
 import * as SemanticContext from './SemanticContext.js'
+import * as Semantic from './Semantic.js'
 import * as NativeAssembly from './NativeAssembly.js'
 import * as AggregateIdentity from './AggregateIdentity.js'
 import * as BodyLifetime from './BodyLifetime.js'
@@ -677,7 +678,7 @@ export const analyzeEnumMember = (
   if (qualifierToken === undefined || memberToken === undefined || identifiers.length !== 2)
     return undefined
   const qualifier = SemanticContext.nameText(context, qualifierToken) ?? ''
-  const enumLookup = NameResolution.lookup(resolution.scope, resolution.index, qualifier)
+  const enumLookup = Semantic.resolveName(resolution.semantic, resolution.scope, qualifier)
   if (enumLookup._tag !== 'Resolved' || enumLookup.declaration._tag !== 'EnumDeclaration')
     return undefined
   const enum_ = enumLookup.declaration
@@ -688,7 +689,7 @@ export const analyzeEnumMember = (
   // misspelled member, when an impl declares it.
   if (
     member === undefined &&
-    NameResolution.lookupAssociated(resolution.index, enum_, memberName, resolution.scope.module)
+    Semantic.resolveAssociatedName(resolution.semantic, enum_, memberName, resolution.scope.module)
       ._tag !== 'Missing'
   )
     return undefined
@@ -767,7 +768,7 @@ const analyzeEnumValueCall = (
     return undefined
   const qualifier = SemanticContext.nameText(context, qualifierToken) ?? ''
   const operationName = SemanticContext.nameText(context, operationToken) ?? ''
-  const qualifierLookup = NameResolution.lookup(resolution.scope, resolution.index, qualifier)
+  const qualifierLookup = Semantic.resolveName(resolution.semantic, resolution.scope, qualifier)
   if (qualifierLookup._tag !== 'Resolved' || qualifierLookup.declaration._tag !== 'EnumDeclaration')
     return undefined
   const operation = qualifierLookup.declaration.associatedOperations.find(
@@ -885,14 +886,14 @@ export const analyzeConstantReference = (
   if (first === undefined || identifiers.length > 2) return undefined
   const lookup =
     second === undefined
-      ? NameResolution.lookup(
+      ? Semantic.resolveName(
+          resolution.semantic,
           resolution.scope,
-          resolution.index,
           SemanticContext.nameText(context, first) ?? '',
         )
-      : NameResolution.lookupQualified(
+      : Semantic.resolveQualifiedName(
+          resolution.semantic,
           resolution.scope,
-          resolution.index,
           SemanticContext.nameText(context, first) ?? '',
           SemanticContext.nameText(context, second) ?? '',
           second.anchor,
@@ -968,14 +969,14 @@ export const analyzeForeignStaticReference = (
   if (first === undefined || identifiers.length > 2) return undefined
   const lookup =
     second === undefined
-      ? NameResolution.lookup(
+      ? Semantic.resolveName(
+          resolution.semantic,
           resolution.scope,
-          resolution.index,
           SemanticContext.nameText(context, first) ?? '',
         )
-      : NameResolution.lookupQualified(
+      : Semantic.resolveQualifiedName(
+          resolution.semantic,
           resolution.scope,
-          resolution.index,
           SemanticContext.nameText(context, first) ?? '',
           SemanticContext.nameText(context, second) ?? '',
           second.anchor,
@@ -1993,9 +1994,9 @@ const resolveBareUnionVariantTarget = (
   const variantToken = identifiers.at(1)
   if (identifiers.length !== 2 || parentToken === undefined || variantToken === undefined)
     return undefined
-  const lookup = NameResolution.lookup(
+  const lookup = Semantic.resolveName(
+    resolution.semantic,
     resolution.scope,
-    resolution.index,
     SemanticContext.nameText(context, parentToken) ?? '',
   )
   if (lookup._tag !== 'Resolved' || lookup.declaration._tag !== 'UnionDeclaration') return undefined
@@ -2006,7 +2007,7 @@ const resolveBareUnionVariantTarget = (
     !union.variants.some(
       (variant) => variant.name._tag === 'Present' && variant.name.spelling === variantName,
     ) &&
-    NameResolution.lookupAssociated(resolution.index, union, variantName, resolution.scope.module)
+    Semantic.resolveAssociatedName(resolution.semantic, union, variantName, resolution.scope.module)
       ._tag !== 'Missing'
   )
     return undefined
@@ -2255,7 +2256,7 @@ export const analyzePattern = (
     const enumLookup =
       qualifier === undefined
         ? undefined
-        : NameResolution.lookup(resolution.scope, resolution.index, qualifier)
+        : Semantic.resolveName(resolution.semantic, resolution.scope, qualifier)
     const enum_ =
       enumLookup?._tag === 'Resolved' && enumLookup.declaration._tag === 'EnumDeclaration'
         ? enumLookup.declaration
@@ -6792,18 +6793,18 @@ const tupleConstructor = (
   if (first !== undefined && second === undefined) {
     if (scopeSpanFor(context, scope, SemanticContext.nameText(context, first) ?? '') !== undefined)
       return undefined
-    const lookup = NameResolution.lookup(
+    const lookup = Semantic.resolveName(
+      resolution.semantic,
       resolution.scope,
-      resolution.index,
       SemanticContext.nameText(context, first) ?? '',
     )
     if (lookup._tag === 'Resolved') candidate = lookup.declaration
   } else if (first !== undefined && second !== undefined) {
     if (scopeSpanFor(context, scope, SemanticContext.nameText(context, first) ?? '') !== undefined)
       return undefined
-    const qualifier = NameResolution.lookup(
+    const qualifier = Semantic.resolveName(
+      resolution.semantic,
       resolution.scope,
-      resolution.index,
       SemanticContext.nameText(context, first) ?? '',
     )
     if (qualifier._tag === 'Namespace') {
@@ -7777,8 +7778,8 @@ export const resolveMethodCandidate = (
       name: subjectType.name,
     })
     if (owner === undefined) return Object.freeze({ _tag: 'Missing' })
-    const associated = NameResolution.lookupAssociated(
-      resolution.index,
+    const associated = Semantic.resolveAssociatedName(
+      resolution.semantic,
       owner,
       member,
       resolution.scope.module,
@@ -8404,15 +8405,15 @@ const appliedInherentMember = (
   const tokens = nameSegments(parts.owner)
   const token = tokens.at(0)
   if (token === undefined || tokens.length !== 1) return false
-  const owner = NameResolution.lookup(
+  const owner = Semantic.resolveName(
+    resolution.semantic,
     resolution.scope,
-    resolution.index,
     SemanticContext.nameText(context, token) ?? '',
   )
   return (
     owner._tag === 'Resolved' &&
-    NameResolution.lookupAssociated(
-      resolution.index,
+    Semantic.resolveAssociatedName(
+      resolution.semantic,
       owner.declaration,
       SemanticContext.nameText(context, parts.member) ?? '',
       resolution.scope.module,
@@ -8427,9 +8428,9 @@ const appliedInterfaceOwnerDeclaration = (
 ): DeclarationFacts.ContractFact | undefined => {
   const token = nameSegments(owner).at(-1)
   if (token === undefined) return undefined
-  const lookup = NameResolution.lookup(
+  const lookup = Semantic.resolveName(
+    resolution.semantic,
     resolution.scope,
-    resolution.index,
     SemanticContext.nameText(context, token) ?? '',
   )
   return lookup._tag === 'Resolved' &&
@@ -10792,7 +10793,7 @@ function analyzeExpressionDecision(
     if (intrinsicOperationTarget(context, node)?.rule._tag === 'PlaceRule') {
       return analyzePlaceReplace(context, node, declarations, declaration, scope, resolution)
     }
-    const qualifierLookup = NameResolution.lookup(resolution.scope, resolution.index, qualifier)
+    const qualifierLookup = Semantic.resolveName(resolution.semantic, resolution.scope, qualifier)
     if (qualifierLookup._tag === 'Intrinsic') {
       return analyzeBuiltinCall(
         context,
@@ -10807,8 +10808,8 @@ function analyzeExpressionDecision(
     // spelling: contract operations, the legacy module projection, and enum members are consulted
     // only when the owner declares no such member.
     if (qualifierLookup._tag === 'Resolved') {
-      const associated = NameResolution.lookupAssociated(
-        resolution.index,
+      const associated = Semantic.resolveAssociatedName(
+        resolution.semantic,
         qualifierLookup.declaration,
         member,
         resolution.scope.module,
@@ -11108,7 +11109,7 @@ function analyzeExpressionDecision(
   }
 
   const tokenSpelling = SemanticContext.nameText(context, token) ?? ''
-  const resolvedLookup = NameResolution.lookup(resolution.scope, resolution.index, tokenSpelling)
+  const resolvedLookup = Semantic.resolveName(resolution.semantic, resolution.scope, tokenSpelling)
   const localLookup = lookupDeclaration(declarations, tokenSpelling)
   let lookup: DeclarationFacts.DeclarationLookup
   if (resolvedLookup._tag === 'Conflict') {
@@ -11647,6 +11648,7 @@ export interface ResolutionContext {
   }
   readonly scope: NameResolution.ModuleScope
   readonly index: DeclarationIndex.Index
+  readonly semantic: Semantic.Session
   /** Occurrence-generated aggregates are semantic facts, deliberately outside lexical lookup. */
   readonly generatedAggregates?: Map<string, DeclarationFacts.StructFact>
   readonly unsafeSpans?: ReadonlyArray<SourceSpan.SourceSpan>

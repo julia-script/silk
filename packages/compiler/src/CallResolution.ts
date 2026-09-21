@@ -4,6 +4,7 @@ import * as AuthoredIdentity from './AuthoredIdentity.js'
 import type * as AuthoredHir from './AuthoredHir.js'
 import * as AuthoredWalk from './AuthoredWalk.js'
 import * as SemanticContext from './SemanticContext.js'
+import * as Semantic from './Semantic.js'
 import * as BodyLifetime from './BodyLifetime.js'
 import * as Lifetime from './Lifetime.js'
 import * as ForeignContract from './ForeignContract.js'
@@ -154,7 +155,7 @@ export function analyzeArguments(
   let boundParameters: ReadonlyArray<SemanticType> = Object.freeze([])
   if (first !== undefined && second === undefined) {
     const name = SemanticContext.nameText(context, first) ?? ''
-    const resolved = NameResolution.lookup(resolution.scope, resolution.index, name)
+    const resolved = Semantic.resolveName(resolution.semantic, resolution.scope, name)
     const local = lookupDeclaration(declarations, name)
     if (resolved._tag === 'Resolved' && resolved.declaration._tag === 'FunctionDeclaration') {
       target = resolved.declaration
@@ -164,11 +165,11 @@ export function analyzeArguments(
   } else if (first !== undefined && second !== undefined) {
     const qualifierSpelling = SemanticContext.nameText(context, first) ?? ''
     const memberSpelling = SemanticContext.nameText(context, second) ?? ''
-    const qualifier = NameResolution.lookup(resolution.scope, resolution.index, qualifierSpelling)
+    const qualifier = Semantic.resolveName(resolution.semantic, resolution.scope, qualifierSpelling)
     const associated =
       qualifier._tag === 'Resolved'
-        ? NameResolution.lookupAssociated(
-            resolution.index,
+        ? Semantic.resolveAssociatedName(
+            resolution.semantic,
             qualifier.declaration,
             memberSpelling,
             resolution.scope.module,
@@ -358,17 +359,17 @@ const explicitSourceCallTypeParameters = (
   const second = identifiers.at(1)
   let target: SourceCallable | undefined
   if (first !== undefined && second === undefined) {
-    const resolved = NameResolution.lookup(
+    const resolved = Semantic.resolveName(
+      resolution.semantic,
       resolution.scope,
-      resolution.index,
       SemanticContext.nameText(context, first) ?? '',
     )
     if (resolved._tag === 'Resolved' && resolved.declaration._tag === 'FunctionDeclaration')
       target = resolved.declaration
   } else if (first !== undefined && second !== undefined) {
-    const qualifier = NameResolution.lookup(
+    const qualifier = Semantic.resolveName(
+      resolution.semantic,
       resolution.scope,
-      resolution.index,
       SemanticContext.nameText(context, first) ?? '',
     )
     const member = SemanticContext.nameText(context, second) ?? ''
@@ -377,8 +378,8 @@ const explicitSourceCallTypeParameters = (
       if (selected._tag === 'Resolved' && selected.declaration._tag === 'FunctionDeclaration')
         target = selected.declaration
     } else if (qualifier._tag === 'Resolved') {
-      const associated = NameResolution.lookupAssociated(
-        resolution.index,
+      const associated = Semantic.resolveAssociatedName(
+        resolution.semantic,
         qualifier.declaration,
         member,
         resolution.scope.module,
@@ -2574,7 +2575,7 @@ export const resolvedFunctionReference = (
   if (first === undefined) return undefined
   if (second === undefined) {
     const name = SemanticContext.nameText(context, first) ?? ''
-    const resolved = NameResolution.lookup(resolution.scope, resolution.index, name)
+    const resolved = Semantic.resolveName(resolution.semantic, resolution.scope, name)
     const local = lookupDeclaration(declarations, name)
     let declaration: DeclarationFacts.DeclarationFact | undefined
     if (resolved._tag === 'Resolved' && resolved.declaration._tag === 'FunctionDeclaration') {
@@ -2595,7 +2596,7 @@ export const resolvedFunctionReference = (
   }
   const qualifier = SemanticContext.nameText(context, first) ?? ''
   const member = SemanticContext.nameText(context, second) ?? ''
-  const qualifierLookup = NameResolution.lookup(resolution.scope, resolution.index, qualifier)
+  const qualifierLookup = Semantic.resolveName(resolution.semantic, resolution.scope, qualifier)
   if (qualifierLookup._tag === 'Intrinsic') {
     const signature = builtinSignature(qualifier, member)
     if (signature === undefined) {
@@ -2614,8 +2615,8 @@ export const resolvedFunctionReference = (
     })
   }
   if (qualifierLookup._tag === 'Resolved') {
-    const associated = NameResolution.lookupAssociated(
-      resolution.index,
+    const associated = Semantic.resolveAssociatedName(
+      resolution.semantic,
       qualifierLookup.declaration,
       member,
       resolution.scope.module,
@@ -2661,7 +2662,7 @@ export const analyzeFunctionItem = (
     if (qualifierToken === undefined || memberToken === undefined) return undefined
     const qualifier = SemanticContext.nameText(context, qualifierToken) ?? ''
     const member = SemanticContext.nameText(context, memberToken) ?? ''
-    const qualifierLookup = NameResolution.lookup(resolution.scope, resolution.index, qualifier)
+    const qualifierLookup = Semantic.resolveName(resolution.semantic, resolution.scope, qualifier)
     if (qualifierLookup._tag !== 'Namespace') return undefined
     const memberLookup = DeclarationFacts.lookup(resolution.index, qualifierLookup.module, member)
     let diagnostic: Diagnostic.Located | undefined

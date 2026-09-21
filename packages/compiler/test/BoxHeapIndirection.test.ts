@@ -4,6 +4,7 @@ import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import type * as CleanupPlan from '../src/CleanupPlan.js'
+import * as Layout from '../src/Layout.js'
 import * as ModuleClosure from '../src/ModuleClosure.js'
 import * as MirVerification from '../src/MirVerification.js'
 import * as NameResolution from '../src/NameResolution.js'
@@ -382,8 +383,12 @@ it.effect('gives Box no compiler privilege', () =>
     )
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
 
-    // The layout is an ordinary aggregate computed from its declared fields.
-    const layout = Analysis.nominalLayout(snapshot, Type.nominal('silk/box', 'Box', ['i32']))
+    // The concrete specialization is an ordinary reached runtime aggregate computed from its
+    // declared fields; it does not pollute the pre-reachability type catalog.
+    const plan = Analysis.layoutOf(snapshot)
+    assert.strictEqual(plan._tag, 'Available')
+    if (plan._tag !== 'Available') return
+    const layout = Layout.entry(plan.value, Type.nominal('silk/box', 'Box', ['i32']))
     assert.strictEqual(layout?._tag, 'LayoutEntry')
     if (layout?._tag !== 'LayoutEntry') return
     assert.strictEqual(layout.representation._tag, 'Aggregate')

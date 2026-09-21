@@ -136,7 +136,7 @@ const execute = Effect.fnUntraced(function* (
     case 'OutgoingCalls':
       return Document.outgoingCalls(session.document, session.snapshot, query.parameters, uriOf)
     case 'Inspection':
-      return Inspection.project(session, query.parameters)
+      return yield* Inspection.project(session, query.parameters)
   }
 })
 

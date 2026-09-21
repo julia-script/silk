@@ -15,6 +15,7 @@ import * as Analysis from '@silklang/compiler/Analysis'
 import type { Fact } from '@silklang/compiler/InspectorRegistry'
 import { viewById, views } from '@silklang/compiler/InspectorRegistry'
 import type { RowModel } from '@silklang/compiler/InspectorRow'
+import type * as ModuleClosure from '@silklang/compiler/ModuleClosure'
 import type * as ProjectAnalysis from '@silklang/compiler/ProjectAnalysis'
 import * as SourceFile from '@silklang/compiler/SourceFile'
 import * as SourceResolver from '@silklang/compiler/SourceResolver'
@@ -98,7 +99,9 @@ const decoder = new TextDecoder()
  */
 const realizations = new WeakMap<ProjectAnalysis.View, Map<string, Analysis.Snapshot>>()
 
-const realizedFor = (session: ProjectSnapshot.DocumentSnapshot): Analysis.Snapshot => {
+const realizedFor = Effect.fn('Inspection.realizedFor')(function* (
+  session: ProjectSnapshot.DocumentSnapshot,
+): Effect.fn.Return<Analysis.Snapshot, ModuleClosure.ModuleClosureError> {
   const byRoot = realizations.get(session.snapshot) ?? new Map<string, Analysis.Snapshot>()
   realizations.set(session.snapshot, byRoot)
   const root = session.document.module
@@ -110,33 +113,31 @@ const realizedFor = (session: ProjectSnapshot.DocumentSnapshot): Analysis.Snapsh
     [...sources].map(([name, file]) => [name, Uint8Array.from(file.bytes)] as const),
   )
   const rootFile = sources.get(root) ?? SourceFile.make(root, session.document.bytes)
-  const realized = Effect.runSync(
-    Analysis.makeRealized({
-      root: rootFile.id,
-      ...(session.snapshot.configuration === undefined
-        ? {}
-        : { configuration: session.snapshot.configuration }),
-    }).pipe(
-      Effect.provide(
-        SourceResolver.overlay([rootFile]).pipe(Layer.provideMerge(SourceResolver.memory(bytes))),
-      ),
+  const realized = yield* Analysis.makeRealized({
+    root: rootFile.id,
+    ...(session.snapshot.configuration === undefined
+      ? {}
+      : { configuration: session.snapshot.configuration }),
+  }).pipe(
+    Effect.provide(
+      SourceResolver.overlay([rootFile]).pipe(Layer.provideMerge(SourceResolver.memory(bytes))),
     ),
   )
   byRoot.set(root, realized)
   return realized
-}
+})
 
 /** Projects one inspector view for a committed document analysis. */
-export const project = (
+export const project = Effect.fn('Inspection.project')(function* (
   session: ProjectSnapshot.DocumentSnapshot,
   parameters: ViewParameters,
-): ViewResponse | UnknownView => {
+): Effect.fn.Return<ViewResponse | UnknownView, ModuleClosure.ModuleClosureError> {
   const definition = viewById(parameters.view)
   if (definition === undefined) {
     return { _tag: 'UnknownView', message: `Unknown inspector view '${parameters.view}'` }
   }
 
-  const snapshot = realizedFor(session)
+  const snapshot = yield* realizedFor(session)
   const modules = Object.fromEntries(
     [...Analysis.sources(session.snapshot)].map(
       ([name, file]) => [name, decoder.decode(Uint8Array.from(file.bytes))] as const,
@@ -162,4 +163,4 @@ export const project = (
     version: session.document.version,
     moduleUris: Object.fromEntries(session.moduleUris),
   }
-}
+})

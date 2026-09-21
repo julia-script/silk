@@ -238,8 +238,6 @@ export interface Discovery {
   readonly retention: ReadonlyArray<InstanceKey>
   readonly _tag: 'InstanceDiscovery'
   readonly rootModule: string
-  /** Spans of authored positions reachable from any module of the discovered closure. */
-  readonly registry: SemanticContext.Registry
   /** Source and target-specialized anonymous aggregates required by reachable instances. */
   readonly generatedAggregates: ReadonlyMap<string, DeclarationFacts.StructFact>
   readonly instances: ReadonlyArray<Instance>
@@ -363,15 +361,11 @@ const forwardedRequirementBinding = (
 }
 
 /** Produces empty discovery when frontend errors prevent reachability analysis. */
-export const invalid = (
-  rootModule: string,
-  registry: SemanticContext.Registry = SemanticContext.registry([]),
-): Discovery =>
+export const invalid = (rootModule: string): Discovery =>
   Object.freeze({
     _tag: 'InstanceDiscovery',
     retention: Object.freeze([]),
     rootModule,
-    registry,
     generatedAggregates: new Map(),
     instances: Object.freeze([]),
     unavailableOwnership: Object.freeze([]),
@@ -1225,7 +1219,7 @@ export const discover = (
   }
   if (rootDiagnostics.length > 0)
     return Object.freeze({
-      ...invalid(rootModule, registry),
+      ...invalid(rootModule),
       foreignExports,
       residualizationDiagnostics: Object.freeze(rootDiagnostics),
     })
@@ -2269,7 +2263,6 @@ export const discover = (
     _tag: 'InstanceDiscovery',
     retention: Object.freeze(retention),
     rootModule,
-    registry,
     generatedAggregates: Residualization.generatedAggregates(residualization),
     instances,
     unavailableOwnership,

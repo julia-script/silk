@@ -20,6 +20,8 @@ import * as HelperCapability from '../../dist/HelperCapability.js'
 import { fileURLToPath } from 'node:url'
 import * as PlatformSupplyResolver from '../../dist/PlatformSupplyResolver.js'
 import * as NativeToolchain from '../../dist/NativeToolchain.js'
+import * as ObjectEmission from '../../dist/ObjectEmission.js'
+import * as Linker from '../../dist/Linker.js'
 
 class ConformanceError extends Data.TaggedError('ConformanceError') {}
 
@@ -217,7 +219,12 @@ const runLane = Effect.fnUntraced(
           /silk_os_process_(execute|capture)/.test(artifact.ir)
         )
           return yield* new ConformanceError({ message: 'Superseded process bridge retained' })
-        const object = yield* NativeToolchain.emitObject(tools, scope, artifact, profile)
+        const object = yield* ObjectEmission.materialize({
+          toolchain: tools,
+          scope,
+          artifact,
+          profile,
+        })
         const support = yield* NativeToolchain.compileHelpers(tools, scope, profile, object.helpers)
         const helperInspections = []
         for (const [index, helper] of support.entries()) {
@@ -277,7 +284,13 @@ const runLane = Effect.fnUntraced(
           },
           [object.helpers, ...support.map((entry) => entry.helpers)],
         )
-        yield* NativeToolchain.NativeFinalizer.finalize(plan, 'NativeExecutable', destination)
+        yield* Linker.link({
+          scope,
+          plan,
+          artifactKind: 'NativeExecutable',
+          destination,
+          cache: { _tag: 'Disabled' },
+        })
         yield* fs.writeFile(`${destination}.silk`, source)
         yield* fs.copyFile(object.artifact.path, `${destination}.o`)
         const inspection = yield* run(inspect, [

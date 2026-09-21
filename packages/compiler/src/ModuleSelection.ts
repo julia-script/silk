@@ -12,6 +12,7 @@ import * as ModuleClosure from './ModuleClosure.js'
 import * as NameResolution from './NameResolution.js'
 import type * as ProfileBootstrap from './ProfileBootstrap.js'
 import * as Residualization from './Residualization.js'
+import * as Semantic from './Semantic.js'
 import * as SemanticContext from './SemanticContext.js'
 import type * as SourceResolver from './SourceResolver.js'
 import type * as SourceSpan from './SourceSpan.js'
@@ -280,6 +281,12 @@ const coordinator = (
   trace: CompilerTrace.CompilerTrace,
 ): Residualization.Coordinator => {
   const { index, resolution } = NameResolution.analyze(closure)
+  const session = Semantic.makeSession(
+    `module-selection:${completion.profile.identity}`,
+    index,
+    resolution,
+    completion.profile.identity,
+  )
   const results = new Map<string, Elaboration.Result>()
   for (const module of closure.modules) {
     const headers = index.modules.find((candidate) => candidate.module === module.name)
@@ -293,6 +300,7 @@ const coordinator = (
         headers: { ...headers, declarations: [], constants: [] },
         scope,
         index,
+        session,
       }),
     )
   }

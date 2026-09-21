@@ -3,6 +3,7 @@ import * as ImportPlan from './ImportPlan.js'
 import type * as ModuleSummary from './ModuleSummary.js'
 import * as NameResolution from './NameResolution.js'
 import * as SemanticOccurrence from './SemanticOccurrence.js'
+import * as Semantic from './Semantic.js'
 import * as SourceAction from './SourceAction.js'
 import * as SourceFile from './SourceFile.js'
 import type * as SyntaxFile from './SyntaxFile.js'
@@ -12,6 +13,7 @@ import * as WorkspaceInventory from './WorkspaceInventory.js'
 export interface Snapshot {
   readonly index: Parameters<typeof NameResolution.lookup>[1]
   readonly resolution: NameResolution.Resolution
+  readonly session: Semantic.Session
   readonly semanticOccurrences: SemanticOccurrence.Index
   /** Import edits rewrite source, so the plan needs the closure's parsed syntax. */
   readonly closure: {
@@ -97,7 +99,7 @@ export const discover = (request: Request): ReadonlyArray<Action> => {
   const scope = NameResolution.scopeOf(request.snapshot.resolution, request.module)
   if (
     scope === undefined ||
-    NameResolution.lookup(scope, request.snapshot.index, spelling)._tag !== 'Missing'
+    Semantic.resolveName(request.snapshot.session, scope, spelling)._tag !== 'Missing'
   )
     return Object.freeze([])
   const candidates = WorkspaceInventory.candidates(request.inventory, spelling)

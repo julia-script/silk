@@ -270,6 +270,10 @@
       "types": "./dist/Layout.d.ts",
       "import": "./dist/Layout.js"
     },
+    "./Linker": {
+      "types": "./dist/Linker.d.ts",
+      "import": "./dist/Linker.js"
+    },
     "./LayoutEncode": {
       "types": "./dist/LayoutEncode.d.ts",
       "import": "./dist/LayoutEncode.js"
@@ -362,6 +366,10 @@
       "types": "./dist/NativeLinkPlan.d.ts",
       "import": "./dist/NativeLinkPlan.js"
     },
+    "./ObjectEmission": {
+      "types": "./dist/ObjectEmission.d.ts",
+      "import": "./dist/ObjectEmission.js"
+    },
     "./NativeLinkResolver": {
       "types": "./dist/NativeLinkResolver.d.ts",
       "import": "./dist/NativeLinkResolver.js"
@@ -433,6 +441,10 @@
     "./Semantic": {
       "types": "./dist/Semantic.d.ts",
       "import": "./dist/Semantic.js"
+    },
+    "./SemanticQuery": {
+      "types": "./dist/SemanticQuery.d.ts",
+      "import": "./dist/SemanticQuery.js"
     },
     "./ProfileBootstrap": {
       "types": "./dist/ProfileBootstrap.d.ts",

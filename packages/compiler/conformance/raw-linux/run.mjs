@@ -15,6 +15,8 @@ import * as SourceFile from '../../dist/SourceFile.js'
 import * as SourceResolver from '../../dist/SourceResolver.js'
 import * as CompilationProfile from '../../dist/CompilationProfile.js'
 import * as NativeToolchain from '../../dist/NativeToolchain.js'
+import * as ObjectEmission from '../../dist/ObjectEmission.js'
+import * as Linker from '../../dist/Linker.js'
 import * as HelperCapability from '../../dist/HelperCapability.js'
 
 class ConformanceError extends Data.TaggedError('ConformanceError') {}
@@ -201,7 +203,12 @@ const program = Effect.gen(function* () {
       const lane = yield* NativeToolchain.withBuildScope(
         name,
         Effect.fnUntraced(function* (scope) {
-          const object = yield* NativeToolchain.emitObject(tools, scope, artifact, profile)
+          const object = yield* ObjectEmission.materialize({
+            toolchain: tools,
+            scope,
+            artifact,
+            profile,
+          })
           const support = yield* NativeToolchain.compileHelpers(
             tools,
             scope,
@@ -220,7 +227,13 @@ const program = Effect.gen(function* () {
             analysis.artifactPlan.composition.loader,
             [object.helpers, ...support.map((entry) => entry.helpers)],
           )
-          yield* NativeToolchain.NativeFinalizer.finalize(plan, 'NativeExecutable', destination)
+          yield* Linker.link({
+            scope,
+            plan,
+            artifactKind: 'NativeExecutable',
+            destination,
+            cache: { _tag: 'Disabled' },
+          })
           yield* fs.copyFile(object.artifact.path, `${destination}.o`)
           yield* fs.writeFileString(`${destination}.ll`, artifact.ir)
           const elf = yield* run(readelf, ['-h', '-l', '-d', '-s', destination])

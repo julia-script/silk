@@ -18,6 +18,7 @@ import * as LocalSharedLifecycle from '../src/LocalSharedLifecycle.js'
 import * as Mir from '../src/Mir.js'
 import * as MirLinearization from '../src/MirLinearization.js'
 import * as NativeToolchain from '../src/NativeToolchain.js'
+import * as Linker from '../src/Linker.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
 import * as Target from '../src/Target.js'
@@ -881,12 +882,16 @@ it.effect('plans only concrete types reached through discovered instances', () =
       ascii(`pub fn unused(value: bool) -> bool { return value }
 pub fn main() -> i32 { return 42 }`),
     )
-    const catalog = yield* Layout.catalog(
+    const catalog = yield* Layout.computeTypes(
       Target.aarch64AppleDarwin,
       Analysis.declarationIndex(snapshot),
       snapshot.resolution.contexts,
     )
-    const plan = yield* Layout.plan(catalog, Analysis.instancesOf(snapshot), snapshot.index)
+    const plan = yield* Layout.computeRuntime(
+      catalog,
+      Analysis.instancesOf(snapshot),
+      snapshot.index,
+    )
 
     assert.deepEqual(
       plan.entries.map((candidate) => candidate.type),
@@ -1654,7 +1659,7 @@ pub fn main() -> i32 { return 42 }`),
       [Target.aarch64AppleDarwin, 8, 64],
       [Target.wasm32UnknownUnknown, 4, 32],
     ] as const) {
-      const catalog = yield* Layout.catalog(
+      const catalog = yield* Layout.computeTypes(
         target,
         Analysis.declarationIndex(snapshot),
         snapshot.resolution.contexts,
@@ -1800,24 +1805,28 @@ int main(void) {
 }
 `,
         )
-        const executable = yield* NativeToolchain.NativeFinalizer.finalize(
-          yield* NativeToolchain.planNativeLink(
-            cLayoutOracleToolchain,
-            scope,
-            'NativeExecutable',
-            yield* CompilationProfile.normalize({ target: host.id }),
-            [object.artifact],
-            [],
-            join(scope.root, 'record-layout-oracle'),
-            {
-              request: { kind: 'default' },
-              composition: { kind: 'default' },
-              resolved: { kind: 'default' },
-            },
-          ),
+        const destination = join(scope.root, 'record-layout-oracle')
+        const plan = yield* NativeToolchain.planNativeLink(
+          cLayoutOracleToolchain,
+          scope,
           'NativeExecutable',
-          join(scope.root, 'record-layout-oracle'),
+          yield* CompilationProfile.normalize({ target: host.id }),
+          [object.artifact],
+          [],
+          destination,
+          {
+            request: { kind: 'default' },
+            composition: { kind: 'default' },
+            resolved: { kind: 'default' },
+          },
         )
+        const executable = (yield* Linker.link({
+          scope,
+          plan,
+          artifactKind: 'NativeExecutable',
+          destination,
+          cache: Object.freeze({ _tag: 'Disabled' }),
+        })).artifact
         const ran = yield* Effect.try({
           try: () => spawnSync(executable.path, [], { encoding: 'utf8' }),
           catch: (cause) =>

@@ -428,14 +428,13 @@ export interface Violation {
 // Planning entry points
 
 /** Computes every canonical nominal layout before runtime reachability or backend work. */
-export const catalog = Effect.fn('Layout.catalog')(function* (
+export const computeTypes = Effect.fn('Layout.computeTypes')(function* (
   target: Target.Target,
   index: DeclarationIndex.Index,
   registry: SemanticContext.Registry,
-  discovery?: Instances.Discovery,
   opaqueRealizations?: OpaqueRealization.Catalog,
 ): Effect.fn.Return<Catalog> {
-  const state = makeCatalogState(target, index, discovery, opaqueRealizations)
+  const state = makeCatalogState(target, index, undefined, opaqueRealizations)
   const { declarations, unionDeclarations, completed } = state
   const referenced = new Map<string, DeclarationFacts.SemanticType>()
   yield* collectDeclaredTypes(index, referenced)
@@ -446,7 +445,6 @@ export const catalog = Effect.fn('Layout.catalog')(function* (
   for (const declaration of unionDeclarations) {
     if (declaration.union.typeParameters.length === 0) yield* layoutNominal(state, declaration.type)
   }
-  yield* collectInstanceTypes(discovery, referenced)
   yield* completeCatalog(state, referenced)
   return Object.freeze({
     _tag: 'LayoutCatalog',
@@ -474,27 +472,64 @@ export const catalog = Effect.fn('Layout.catalog')(function* (
   })
 })
 
-/** Selects runtime-reachable entries while reusing nominal decisions from the catalog. */
-export const plan = Effect.fn('Layout.plan')(function* (
+const completeForInstances = Effect.fnUntraced(function* (
   self: Catalog,
   discovery: Instances.Discovery,
   index: DeclarationIndex.Index,
+  reached: ReadonlyMap<string, DeclarationFacts.SemanticType>,
+  opaqueRealizations?: OpaqueRealization.Catalog,
+): Effect.fn.Return<Catalog> {
+  const state = makeCatalogState(self.target, index, discovery, opaqueRealizations)
+  const referenced = new Map<string, DeclarationFacts.SemanticType>()
+  yield* collectDeclaredTypes(index, referenced)
+  yield* collectInstanceTypes(discovery, referenced)
+  yield* completeCatalog(state, referenced)
+  const runtimeReferenced = new Map<string, DeclarationFacts.SemanticType>()
+  const visiting = new Set<string>()
+  for (const type of reached.values()) yield* addReached(runtimeReferenced, type, visiting)
+  for (const key of runtimeReferenced.keys()) {
+    if (state.completed.get(key)?._tag === 'UnavailableLayoutEntry') state.completed.delete(key)
+  }
+  yield* completeCatalog(state, runtimeReferenced)
+  // Complete the instance-dependent dependency walk before restoring the pre-reachability
+  // decisions. Pre-seeding `completed` would suppress that walk for declaration types that are
+  // also roots of concrete executable specializations.
+  for (const entry of self.entries) {
+    if (entry._tag === 'LayoutEntry') state.completed.set(Type.runtimeKey(entry.type), entry)
+  }
+  return Object.freeze({
+    ...self,
+    entries: Object.freeze(
+      [...state.completed.values()].sort((left, right) =>
+        compareRuntimeTypes(left.type, right.type),
+      ),
+    ),
+  })
+})
+
+/** Selects runtime-reachable entries while reusing nominal decisions from the catalog. */
+export const computeRuntime = Effect.fn('Layout.computeRuntime')(function* (
+  self: Catalog,
+  discovery: Instances.Discovery,
+  index: DeclarationIndex.Index,
+  opaqueRealizations?: OpaqueRealization.Catalog,
 ): Effect.fn.Return<Plan> {
   const reached = yield* collectReachableTypes(discovery)
+  const completed = yield* completeForInstances(self, discovery, index, reached, opaqueRealizations)
   const entries = new Map<string, Entry>()
-  const state: PlanState = { catalog: self, entries }
+  const state: PlanState = { catalog: completed, entries }
   yield* resolveEntries(state, reached)
   const orderedEntries = Object.freeze(
     [...entries.values()].sort((left, right) => compareRuntimeTypes(left.type, right.type)),
   )
-  const literals = yield* planLiteralVerdicts(self.target, discovery, self.wordConstants)
+  const literals = yield* planLiteralVerdicts(completed.target, discovery, completed.wordConstants)
   const localSharedAllocationProvenance = yield* planLocalSharedAllocation(discovery, index)
   const localSharedDiagnostics = yield* checkLocalSharedLayouts(state, discovery)
   const shapeTypes = yield* collectShapeTypes(orderedEntries, reached)
-  const staticData = yield* planStaticData(self.target, discovery)
-  const callablePlans = yield* planCallableEnvironments(self.target, orderedEntries, discovery)
+  const staticData = yield* planStaticData(completed.target, discovery)
+  const callablePlans = yield* planCallableEnvironments(completed.target, orderedEntries, discovery)
   const effectPlans = yield* planEffectEnvironments(
-    self.target,
+    completed.target,
     orderedEntries,
     discovery,
     callablePlans,
@@ -512,7 +547,7 @@ export const plan = Effect.fn('Layout.plan')(function* (
   for (const environment of effectPlans)
     specializedShapeTypes.set(Type.runtimeKey(environment.effect), environment.effect)
   const plannedShapes = yield* planCallingShapes(
-    self.target,
+    completed.target,
     orderedEntries,
     [...specializedShapeTypes.values()].sort(compareRuntimeTypes),
     effectPlans,
@@ -520,7 +555,7 @@ export const plan = Effect.fn('Layout.plan')(function* (
   )
   const base: Plan = Object.freeze({
     _tag: 'LayoutPlan',
-    target: self.target,
+    target: completed.target,
     entries: orderedEntries,
     effectEnvironments: effectPlans,
     callableEnvironments: callablePlans,
@@ -1893,6 +1928,39 @@ const addReferenced = Effect.fnUntraced(function* (
     for (const failure of Type.failureMembers(type.contract))
       yield* addReferenced(referenced, failure)
   }
+})
+
+/** Adds runtime-reached types in dependency order, including exact executable representations. */
+const addReached = Effect.fnUntraced(function* (
+  referenced: Map<string, Type.Type>,
+  type: DeclarationFacts.SemanticType,
+  visiting: Set<string>,
+): Effect.fn.Return<void> {
+  const key = Type.runtimeKey(type)
+  if (referenced.has(key) || visiting.has(key)) return
+  visiting.add(key)
+  if (Type.isNominal(type)) {
+    for (const argument of type.arguments)
+      if (Type.isTypeArgument(argument)) yield* addReached(referenced, argument, visiting)
+  }
+  if (Type.isFixedArray(type) || Type.isSlice(type))
+    yield* addReached(referenced, type.element, visiting)
+  else if (Type.isReference(type)) yield* addReached(referenced, type.target, visiting)
+  else if (Type.isPointer(type)) yield* addReached(referenced, type.pointee, visiting)
+  if (Type.isUnion(type))
+    for (const member of type.members) yield* addReached(referenced, member, visiting)
+  if (Type.isEffect(type)) {
+    yield* addReached(referenced, type.success, visiting)
+    for (const failure of Type.failureMembers(type))
+      yield* addReached(referenced, failure, visiting)
+  }
+  if (Type.isRepresented(type) && Type.isEffect(type.contract)) {
+    yield* addReached(referenced, type.contract.success, visiting)
+    for (const failure of Type.failureMembers(type.contract))
+      yield* addReached(referenced, failure, visiting)
+  }
+  visiting.delete(key)
+  referenced.set(key, type)
 })
 
 const addSpecializedExpression = Effect.fnUntraced(function* (

@@ -12,6 +12,9 @@ import * as CompilationProfile from './CompilationProfile.js'
 import * as ConfigurationError from './ConfigurationError.js'
 import * as ProfileBootstrap from './ProfileBootstrap.js'
 import type * as DeclarationIndex from './DeclarationIndex.js'
+import type * as Elaboration from './Elaboration.js'
+import type * as NameResolution from './NameResolution.js'
+import type * as TestDiscovery from './TestDiscovery.js'
 
 /**
  * Every diagnostic family judged against reachable concrete instances, collected once so that
@@ -20,18 +23,56 @@ import type * as DeclarationIndex from './DeclarationIndex.js'
 const instanceViolationDiagnostics = (
   self: Frontend,
   discovery: Instances.Discovery,
+  registry: SemanticContext.Registry,
 ): ReadonlyArray<Diagnostic.Diagnostic> => {
   return Diagnostic.merge(
-    InstanceDiagnostics.violationDiagnostics(discovery),
-    InstanceDiagnostics.copyDropViolations(discovery, self.index),
+    InstanceDiagnostics.violationDiagnostics(discovery, registry),
+    InstanceDiagnostics.copyDropViolations(discovery, self.index, registry),
     InstanceDiagnostics.requirementBindingViolations(discovery, self.index),
     InstanceDiagnostics.unlowerableWitnessViolations(discovery, self.index),
     InstanceDiagnostics.storedCallableViolations(discovery, self.index),
     InstanceDiagnostics.storedEffectViolations(discovery, self.index),
-    ExecutableProperty.violationDiagnostics(discovery, self.index),
+    ExecutableProperty.violationDiagnostics(discovery, self.index, registry),
     DiagnosticObservation.violationDiagnostics(discovery),
   )
 }
+
+/** Explicit immutable inputs for constructing the reachable concrete instance graph. */
+export interface InstantiationInput {
+  readonly rootModule: string
+  readonly results: ReadonlyMap<string, Elaboration.Result>
+  readonly index: DeclarationIndex.Index
+  readonly completion: ProfileBootstrap.Completion
+  readonly resolution: NameResolution.Resolution
+  readonly composition: ArtifactComposition.Resolved
+  readonly testCatalog?: TestDiscovery.Catalog
+}
+
+const instantiateWithTrace = (
+  input: InstantiationInput,
+  trace: CompilerTrace.CompilerTrace,
+): Instances.Discovery => {
+  const registry = SemanticContext.fromModules(input.results.values())
+  return Instances.discover(
+    input.rootModule,
+    input.results,
+    input.index,
+    registry,
+    input.completion,
+    input.resolution,
+    input.composition,
+    trace,
+    input.testCatalog,
+  )
+}
+
+/** Constructs the portable reachable instance graph without retaining a frontend or presentation registry. */
+export const instantiate = Effect.fn('Realization.instantiate')(function* (
+  input: InstantiationInput,
+): Effect.fn.Return<Instances.Discovery> {
+  const trace = yield* CompilerTrace.capture()
+  return instantiateWithTrace(input, trace)
+})
 
 /** Rejects a pointer-sized exported static that cannot be represented on the selected target. */
 const foreignStaticTargetDiagnostics = (
@@ -72,7 +113,6 @@ const discoverInstances = Effect.fn('Realization.discoverInstances')(function* (
   prepareForEmission: boolean,
   report: Array<PhaseReport.PhaseReport>,
   options: Options,
-  registry: SemanticContext.Registry,
 ) {
   const trace = yield* CompilerTrace.capture()
   const instances = PhaseReport.measureInto(
@@ -84,17 +124,18 @@ const discoverInstances = Effect.fn('Realization.discoverInstances')(function* (
       completion === undefined ||
       self.composition === undefined ||
       (!prepareForEmission && specializationInvalid)
-        ? Instances.invalid(self.closure.rootModule, registry)
-        : Instances.discover(
-            self.closure.rootModule,
-            self.results,
-            self.index,
-            registry,
-            completion,
-            self.resolution,
-            self.composition,
+        ? Instances.invalid(self.closure.rootModule)
+        : instantiateWithTrace(
+            {
+              rootModule: self.closure.rootModule,
+              results: self.results,
+              index: self.index,
+              completion,
+              resolution: self.resolution,
+              composition: self.composition,
+              ...(self.testCatalog === undefined ? {} : { testCatalog: self.testCatalog }),
+            },
             trace,
-            self.testCatalog,
           ),
     (value) => value.instances.length,
     (value) => value.violations.length,
@@ -114,6 +155,7 @@ const collectInstanceDiagnostics = Effect.fn('Realization.collectInstanceDiagnos
     self: Frontend,
     instances: Instances.Discovery,
     foreignStaticDiagnostics: ReadonlyArray<Diagnostic.Diagnostic>,
+    registry: SemanticContext.Registry,
   ) =>
     Effect.sync(() => {
       const declarationDiagnosticKeys = new Set(
@@ -131,7 +173,7 @@ const collectInstanceDiagnostics = Effect.fn('Realization.collectInstanceDiagnos
       return Diagnostic.merge(
         self.diagnostics,
         residualizationDiagnostics,
-        instanceViolationDiagnostics(self, instances),
+        instanceViolationDiagnostics(self, instances, registry),
         foreignStaticDiagnostics,
       )
     }),
@@ -144,6 +186,7 @@ const buildTargetLayout = Effect.fn('Realization.buildTargetLayout')(function* (
   targetSelection: Target.Selection,
   analysisUnavailable: AnalysisUnavailable | undefined,
   prepareForEmission: boolean,
+  registry: SemanticContext.Registry,
 ) {
   const selection = targetSelection
   if (selection._tag === 'Unavailable')
@@ -163,40 +206,67 @@ const buildTargetLayout = Effect.fn('Realization.buildTargetLayout')(function* (
       selection,
       error: analysisUnavailable,
     })
-  const catalog = yield* Layout.catalog(
-    selection.target,
-    index,
-    instances.registry,
-    instances,
-    OpaqueRealization.catalogOf(self),
-  )
+  const opaqueRealizations = OpaqueRealization.catalogOf(self)
+  const catalog = yield* Layout.computeTypes(selection.target, index, registry, opaqueRealizations)
   return Object.freeze({
     _tag: 'Available' as const,
     selection,
     target: selection.target,
     catalog,
-    layout: yield* Layout.plan(catalog, instances, index),
+    layout: yield* Layout.computeRuntime(catalog, instances, index, opaqueRealizations),
   })
 })
 
-const lowerMir = Effect.fn('Realization.lowerMir')(function* (
-  self: Frontend,
-  index: DeclarationIndex.Index,
-  instances: Instances.Discovery,
-  layout: Layout.Plan,
-  profile: CompilationProfile.CompilationProfile | undefined,
-  options: Options,
-) {
-  const program = yield* lowerProgram(instances, layout, index, OpaqueRealization.catalogOf(self))
-  const provisional = yield* buildProvisionalMir(instances, layout, index)
-  return yield* finalizeMir(
+export type MirAdmission =
+  | { readonly _tag: 'Admitted' }
+  | { readonly _tag: 'Rejected'; readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic> }
+
+/** Explicit artifact inputs and policy for one MIR lowering request. */
+export interface MirLoweringInput {
+  readonly instances: Instances.Discovery
+  readonly layout: Layout.Plan
+  readonly index: DeclarationIndex.Index
+  readonly opaqueRealizations: OpaqueRealization.Catalog
+  readonly profile?: CompilationProfile.CompilationProfile
+  readonly presentation: SemanticContext.Registry
+  readonly admission: MirAdmission
+  readonly normalization: 'Normalize' | 'Preserve'
+  readonly audit: 'None' | 'ForeignPlanning'
+}
+
+export interface MirLoweringResult {
+  readonly program: Mir.Module | undefined
+  readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
+}
+
+/** Lowers admitted instance/layout artifacts to MIR with optional target planning audit. */
+export const lowerMir = Effect.fn('Mir.lower')(function* (
+  input: MirLoweringInput,
+): Effect.fn.Return<MirLoweringResult> {
+  if (input.admission._tag === 'Rejected')
+    return Object.freeze({ program: undefined, diagnostics: input.admission.diagnostics })
+  const program = yield* lowerProgram(
+    input.instances,
+    input.layout,
+    input.index,
+    input.opaqueRealizations,
+    input.presentation,
+  )
+  const provisional = yield* buildProvisionalMir(input.instances, input.layout, input.index)
+  const finalized = yield* finalizeMir(
     program,
     provisional,
-    index,
-    OpaqueRealization.catalogOf(self),
-    profile,
-    options,
+    input.index,
+    input.opaqueRealizations,
+    input.profile,
+    input.normalization,
   )
+  if (finalized.program === undefined || input.audit === 'None') return finalized
+  const audit = yield* checkForeignPlanning(finalized.program, input.layout.target)
+  return Object.freeze({
+    program: audit.length === 0 ? finalized.program : undefined,
+    diagnostics: Diagnostic.merge(finalized.diagnostics, audit),
+  })
 })
 
 const lowerProgram = Effect.fn('Realization.lowerProgram')(function* (
@@ -204,9 +274,10 @@ const lowerProgram = Effect.fn('Realization.lowerProgram')(function* (
   layout: Layout.Plan,
   index: DeclarationIndex.Index,
   opaqueRealizations: OpaqueRealization.Catalog,
+  registry: SemanticContext.Registry,
 ) {
   const trace = yield* CompilerTrace.capture()
-  return Lower.lowerProgram(instances, layout, index, opaqueRealizations, trace)
+  return Lower.lowerProgram(instances, layout, index, opaqueRealizations, registry, trace)
 })
 
 const buildProvisionalMir = Effect.fn('Realization.buildProvisionalMir')(
@@ -290,7 +361,6 @@ const discoverAndLowerEffect = Effect.fn('Realization.discoverAndLower')(functio
     prepareForEmission,
     report,
     options,
-    registry,
   )
   const realizedIndex: DeclarationIndex.Index = Object.freeze({
     ...self.index,
@@ -300,6 +370,7 @@ const discoverAndLowerEffect = Effect.fn('Realization.discoverAndLower')(functio
     self,
     instances,
     foreignStaticDiagnostics,
+    registry,
   )
   if (prepareForEmission && Diagnostic.hasErrors(baseDiagnostics))
     return Object.freeze({
@@ -355,6 +426,7 @@ const discoverAndLowerEffect = Effect.fn('Realization.discoverAndLower')(functio
       targetSelection,
       analysisUnavailable,
       prepareForEmission,
+      registry,
     ),
     (value) => (value._tag === 'Available' ? value.layout.entries.length : 0),
     (value) => (value._tag === 'Available' ? value.layout.diagnostics.length : 0),
@@ -423,14 +495,17 @@ const discoverAndLowerEffect = Effect.fn('Realization.discoverAndLower')(functio
           report,
           'mir-lowering',
           instances.instances.length,
-          lowerMir(
-            self,
-            realizedIndex,
+          Mir.lower({
             instances,
-            targetLayout.layout,
-            completion?.profile,
-            options,
-          ),
+            layout: targetLayout.layout,
+            index: realizedIndex,
+            opaqueRealizations: OpaqueRealization.catalogOf(self),
+            ...(completion === undefined ? {} : { profile: completion.profile }),
+            presentation: registry,
+            admission: Object.freeze({ _tag: 'Admitted' }),
+            normalization: options.normalizeMir === false ? 'Preserve' : 'Normalize',
+            audit: prepareForEmission ? 'ForeignPlanning' : 'None',
+          }),
           (value) => value.program?.functions.length ?? 0,
           (value) => value.diagnostics.length,
           options,
@@ -453,13 +528,6 @@ const discoverAndLowerEffect = Effect.fn('Realization.discoverAndLower')(functio
       self.composition === undefined
     )
       throw new RangeError('Driver lowering reached an unavailable target after its gates')
-    const planning = yield* checkForeignPlanning(program, targetLayout.target)
-    if (planning.length > 0)
-      return Object.freeze({
-        _tag: 'Rejected',
-        diagnostics: Diagnostic.merge(finalizedDiagnostics, planning),
-        report: Object.freeze(report),
-      })
     return Object.freeze({
       _tag: 'Prepared',
       frontend: self,
@@ -718,7 +786,7 @@ import * as Instances from './Instances.js'
 import * as IntrinsicAvailability from './IntrinsicAvailability.js'
 import * as Layout from './Layout.js'
 import * as Lower from './Lower.js'
-import type * as Mir from './Mir.js'
+import * as Mir from './Mir.js'
 import * as MirNormalization from './MirNormalization.js'
 import * as OpaqueRealization from './OpaqueRealization.js'
 import * as PhaseReport from './PhaseReport.js'
@@ -729,9 +797,13 @@ import * as SuspensionOwnership from './SuspensionOwnership.js'
 import * as Target from './Target.js'
 
 const normalizeMir = Effect.fn('Realization.normalizeMir')(
-  (program: Mir.Module, provisional: ProvisionalMir.Module, options: Options) =>
+  (
+    program: Mir.Module,
+    provisional: ProvisionalMir.Module,
+    normalization: MirLoweringInput['normalization'],
+  ) =>
     Effect.sync(() =>
-      options.normalizeMir === false ? program : MirNormalization.normalize(program, provisional),
+      normalization === 'Preserve' ? program : MirNormalization.normalize(program, provisional),
     ),
 )
 
@@ -741,12 +813,12 @@ const finalizeMir = Effect.fn('Realization.finalizeMir')(function* (
   index: DeclarationIndex.Index,
   opaqueRealizations: OpaqueRealization.Catalog,
   profile: CompilationProfile.CompilationProfile | undefined,
-  options: Options,
+  normalization: MirLoweringInput['normalization'],
 ): Effect.fn.Return<{
   readonly program: Mir.Module | undefined
   readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
 }> {
-  const normalized = yield* normalizeMir(program, provisional, options)
+  const normalized = yield* normalizeMir(program, provisional, normalization)
   const ownership = yield* planSuspensionOwnership(
     normalized,
     provisional,
@@ -760,7 +832,7 @@ const finalizeMir = Effect.fn('Realization.finalizeMir')(function* (
     ...(yield* checkNativeAssembly(normalized, profile)),
   ]
   if (diagnostics.length > 0) return { program: undefined, diagnostics }
-  if (options.normalizeMir === false) return { program: normalized, diagnostics }
+  if (normalization === 'Preserve') return { program: normalized, diagnostics }
   const suspended = yield* finalizeSuspensionMir(normalized, provisional, ownership, index)
   return { program: yield* applyCoroutineFrames(suspended), diagnostics }
 })

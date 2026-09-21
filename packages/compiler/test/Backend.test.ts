@@ -110,9 +110,9 @@ it.effect('traces discovery, lowering, and optional verification separately from
         : spans.find((item) => item.name === name)) ?? unreachable(name)
     for (const [child, parent] of [
       ['Instances.residualize', 'Instances.expandWorklist'],
-      ['Layout.planValueStorage', 'Layout.plan'],
+      ['Layout.planValueStorage', 'Layout.computeRuntime'],
       ['Lower.lowerInstance', 'Lower.lowerInstances'],
-      ['Layout.planCallingShapes', 'Layout.plan'],
+      ['Layout.planCallingShapes', 'Layout.computeRuntime'],
       ['Layout.planCallingShape', 'Layout.planCallingShapes'],
       ['MirVerification.check', 'Analysis.codegen'],
       ['MirVerification.verify', 'MirVerification.check'],

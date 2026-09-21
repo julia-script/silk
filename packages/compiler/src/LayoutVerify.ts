@@ -1424,8 +1424,11 @@ export const verifyAgainstCatalog = (self: Plan, catalog: Catalog): ReadonlyArra
       )
         return []
       const expected = catalogEntry(catalog, candidate.type)
-      return expected?._tag === 'LayoutEntry' &&
-        candidate.copy === expected.copy &&
+      // Concrete generic specializations and executable representations are completed only in
+      // the runtime plan. The pre-reachability catalog is an oracle only for entries it already
+      // resolved.
+      if (expected?._tag !== 'LayoutEntry') return []
+      return candidate.copy === expected.copy &&
         candidate.size === expected.size &&
         candidate.alignment === expected.alignment &&
         representationEquals(candidate.representation, expected.representation) &&

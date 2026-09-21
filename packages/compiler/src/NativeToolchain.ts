@@ -268,9 +268,9 @@ const linkError = (
   inputs?: ReadonlyArray<PlatformSupply.File>,
 ): ToolchainError =>
   new ToolchainError({
-    operation: 'NativeToolchain.NativeFinalizer.finalize',
+    operation: 'Linker.link',
     stage: 'link',
-    message: `NativeToolchain.NativeFinalizer.finalize failed: ${output}`,
+    message: `Linker.link failed: ${output}`,
     reason: {
       _tag: 'LinkFailed',
       ...(inputs === undefined ? {} : { inputs }),
@@ -283,9 +283,9 @@ const linkError = (
 
 const unsupportedPlanError = (plan: ToolchainPlan.UnsupportedNativePlan): ToolchainError =>
   new ToolchainError({
-    operation: 'NativeToolchain.NativeFinalizer.finalize',
+    operation: 'Linker.link',
     stage: 'link',
-    message: `NativeToolchain.NativeFinalizer.finalize cannot preserve ${plan.reason} for ${plan.artifactKind} on ${plan.target.id}`,
+    message: `Linker.link cannot preserve ${plan.reason} for ${plan.artifactKind} on ${plan.target.id}`,
     reason: { _tag: 'UnsupportedPlan', plan },
   })
 
@@ -828,7 +828,8 @@ const requirePath = Effect.fnUntraced(function* (
     return yield* storageError(operation, stage, path, new Error('expected output is missing'))
 })
 
-export const emitObject = Effect.fn('NativeToolchain.emitObject')(function* (
+/** @internal ObjectEmission owns the public materialization operation. */
+export const materializeObject = Effect.fnUntraced(function* (
   toolchain: Toolchain,
   scope: BuildScope,
   artifact: Backend.LlvmBitcodeArtifact,
@@ -842,7 +843,7 @@ export const emitObject = Effect.fn('NativeToolchain.emitObject')(function* (
   )
     return yield* helperError(
       new HelperCapability.HelperError({
-        operation: 'NativeToolchain.emitObject',
+        operation: 'ObjectEmission.materialize',
         code: 'MissingProvider',
         subject: 'No-libc artifact requires explicitly supplied language runtime capabilities',
         origins: artifact.nativeRuntimeSymbols,
@@ -859,7 +860,7 @@ export const emitObject = Effect.fn('NativeToolchain.emitObject')(function* (
   )
     return yield* helperError(
       new HelperCapability.HelperError({
-        operation: 'NativeToolchain.emitObject',
+        operation: 'ObjectEmission.materialize',
         code: 'InvalidSupportProfile',
         subject: 'Support artifact requires the restricted object profile',
         origins: [baseName],
@@ -888,7 +889,7 @@ export const emitObject = Effect.fn('NativeToolchain.emitObject')(function* (
   })
   if (artifact.target.id !== target.id) {
     return yield* processError(
-      'NativeToolchain.emitObject',
+      'ObjectEmission.materialize',
       'object',
       planned,
       null,
@@ -896,17 +897,17 @@ export const emitObject = Effect.fn('NativeToolchain.emitObject')(function* (
     )
   }
   yield* writeArtifact(scope, target, `${baseName}.bc`, artifact.bitcode)
-  yield* runPlanned('NativeToolchain.emitObject', 'object', planned)
-  yield* requirePath('NativeToolchain.emitObject', 'object', objectPath)
+  yield* runPlanned('ObjectEmission.materialize', 'object', planned)
+  yield* requirePath('ObjectEmission.materialize', 'object', objectPath)
   const bytes = yield* Effect.try({
     try: () => readFileSync(objectPath),
-    catch: (cause) => storageError('NativeToolchain.emitObject', 'object', objectPath, cause),
+    catch: (cause) => storageError('ObjectEmission.materialize', 'object', objectPath, cause),
   })
   const inventory = ObjectSymbols.inspect(bytes, target)
   if (Result.isFailure(inventory))
     return yield* helperError(
       new HelperCapability.HelperError({
-        operation: 'NativeToolchain.emitObject',
+        operation: 'ObjectEmission.materialize',
         code: 'InvalidObject',
         subject: inventory.failure.detail,
         origins: [objectPath, target.id],
@@ -953,7 +954,7 @@ export const compileHelpers = Effect.fn('NativeToolchain.compileHelpers')(functi
   for (const provider of selected) {
     if (provider.kind !== 'source') continue
     const source = yield* HelperSource.compile(provider, profile).pipe(Effect.mapError(helperError))
-    const object = yield* emitObject(
+    const object = yield* materializeObject(
       toolchain,
       scope,
       source.artifact,
@@ -1199,77 +1200,71 @@ export const validateLinkPlan = Effect.fn('NativeToolchain.validateLinkPlan')(fu
   ]).pipe(Effect.mapError(supplyError), Effect.provide(NodeServices.layer))
 })
 
-export const NativeFinalizer = Object.freeze({
-  finalize: Effect.fn('NativeToolchain.NativeFinalizer.finalize')(function* (
-    plan: NativeLinkPlan.NativeLinkPlan,
-    artifactKind: ToolchainPlan.NativeArtifactKind,
-    destination: string,
-  ): Effect.fn.Return<FinalArtifact, ToolchainError> {
-    if (plan.kind !== artifactKind)
-      return yield* supplyError(
-        PlatformSupply.failure(
-          'InvalidConfiguration',
-          artifactKind,
-          'native link plan',
-          'Use the artifact kind for which this link plan was resolved.',
-        ),
-      )
-    yield* validateLinkPlan(plan)
-    for (const script of plan.scripts)
-      yield* Effect.gen(function* () {
-        const fs = yield* FileSystem.FileSystem
-        yield* fs
-          .writeFileString(script.path, script.source)
-          .pipe(
-            Effect.mapError((cause) =>
-              storageError('NativeToolchain.NativeFinalizer.finalize', 'link', script.path, cause),
-            ),
-          )
-      }).pipe(Effect.provide(NodeServices.layer))
-    const planned = Object.freeze({ ...plan.command, environment: plan.supply.environment })
-    const result = yield* PlatformSupplyResolver.query(
-      planned.environment,
-      planned.command,
-      planned.arguments,
-      'final linking',
-    ).pipe(
-      Effect.mapError((failure) =>
-        linkError(
-          planned,
-          failure.query?.status ?? null,
-          `${failure.query?.stdout ?? ''}${failure.query?.stderr ?? failure.message}`,
-          failure.cause,
-          plan.inputs,
-        ),
+/** @internal Linker owns validation, cache policy, and the public link operation. */
+export const finalizeLink = Effect.fnUntraced(function* (
+  plan: NativeLinkPlan.NativeLinkPlan,
+  artifactKind: ToolchainPlan.NativeArtifactKind,
+  destination: string,
+): Effect.fn.Return<FinalArtifact, ToolchainError> {
+  if (plan.kind !== artifactKind)
+    return yield* supplyError(
+      PlatformSupply.failure(
+        'InvalidConfiguration',
+        artifactKind,
+        'native link plan',
+        'Use the artifact kind for which this link plan was resolved.',
       ),
-      Effect.provide(NodeServices.layer),
     )
-    yield* requirePath('NativeToolchain.NativeFinalizer.finalize', 'link', plan.output)
-    const bytes = yield* Effect.try({
-      try: () => readFileSync(plan.output),
-      catch: (cause) =>
-        storageError('NativeToolchain.NativeFinalizer.finalize', 'link', plan.output, cause),
-    })
-    if (!isCachedArtifact(bytes, artifactKind, plan.supply.target))
-      return yield* linkError(
+  yield* validateLinkPlan(plan)
+  for (const script of plan.scripts)
+    yield* Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem
+      yield* fs
+        .writeFileString(script.path, script.source)
+        .pipe(Effect.mapError((cause) => storageError('Linker.link', 'link', script.path, cause)))
+    }).pipe(Effect.provide(NodeServices.layer))
+  const planned = Object.freeze({ ...plan.command, environment: plan.supply.environment })
+  const result = yield* PlatformSupplyResolver.query(
+    planned.environment,
+    planned.command,
+    planned.arguments,
+    'final linking',
+  ).pipe(
+    Effect.mapError((failure) =>
+      linkError(
         planned,
-        result.status,
-        'Linked output does not match its requested artifact kind and target.',
-      )
-    const path = yield* atomicCommit(destination, bytes, {
-      ...(artifactKind === 'NativeExecutable' ? { mode: 0o755 } : {}),
-      stage: 'artifact-commit',
-    })
-    return Object.freeze({
-      _tag: 'FinalArtifact',
-      kind: artifactKind,
-      path,
-      bytes,
-      target: plan.supply.target,
+        failure.query?.status ?? null,
+        `${failure.query?.stdout ?? ''}${failure.query?.stderr ?? failure.message}`,
+        failure.cause,
+        plan.inputs,
+      ),
+    ),
+    Effect.provide(NodeServices.layer),
+  )
+  yield* requirePath('Linker.link', 'link', plan.output)
+  const bytes = yield* Effect.try({
+    try: () => readFileSync(plan.output),
+    catch: (cause) => storageError('Linker.link', 'link', plan.output, cause),
+  })
+  if (!isCachedArtifact(bytes, artifactKind, plan.supply.target))
+    return yield* linkError(
       planned,
-      linkPlan: plan,
-    })
-  }),
+      result.status,
+      'Linked output does not match its requested artifact kind and target.',
+    )
+  const path = yield* atomicCommit(destination, bytes, {
+    ...(artifactKind === 'NativeExecutable' ? { mode: 0o755 } : {}),
+    stage: 'artifact-commit',
+  })
+  return Object.freeze({
+    _tag: 'FinalArtifact',
+    kind: artifactKind,
+    path,
+    bytes,
+    target: plan.supply.target,
+    planned,
+    linkPlan: plan,
+  })
 })
 
 const hasWasmHeader = (bytes: Uint8Array): boolean =>
@@ -1425,7 +1420,7 @@ export const finalizeWasm = Effect.fn('NativeToolchain.finalizeWasm')(function* 
   destination: string,
 ): Effect.fn.Return<FinalArtifact, ToolchainError> {
   const target = profile.target
-  const object = yield* emitObject(toolchain, scope, artifact, profile)
+  const object = yield* materializeObject(toolchain, scope, artifact, profile)
   const runtime = yield* compileCObject(
     toolchain,
     scope,
@@ -1575,7 +1570,7 @@ export const emitRepresentation = Effect.fn('NativeToolchain.emitRepresentation'
   if (stage === 'llvm-ir')
     return yield* commitRepresentation(new TextEncoder().encode(artifact.ir), destination)
   if (stage === 'object') {
-    const object = yield* emitObject(toolchain, scope, artifact, profile)
+    const object = yield* materializeObject(toolchain, scope, artifact, profile)
     return yield* commitPathRepresentation(object.artifact, destination)
   }
   const bitcode = yield* writeArtifact(scope, profile.target, 'program.bc', artifact.bitcode)

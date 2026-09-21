@@ -1,42 +1,50 @@
-# Gates: JUL-207 TIR completion
+# Gates: compiler architecture Milestone B stack
 
-OWNS: packages/compiler/src/**, packages/compiler/test/**, packages/compiler/scripts/generate-documentation.mjs, openspec/changes/establish-authored-hir-pipeline/**, GATES.md
+OWNS: openspec/changes/**, openspec/specs/**, packages/compiler/**, apps/docs/**, GATES.md
 
-Scope: finish OpenSpec tasks 3.3.2 and 3.3.5 so JUL-207 publishes one portable, directly constructed typed TIR body with dense local identities and no fact-tree conversion path
+Scope: implement JUL-210 through JUL-215 as six stacked, coherent compiler architecture changes and prove the final head.
 
-- [x] G0: this ledger states completion outcomes that can fail
+- [x] G0: this ledger states outcome checks that can fail
       CHECK: node /Users/juliaortiz/.agents/skills/unlazy/scripts/gate-lint.mjs GATES.md
       EXPECT: LINT OK
-      EVIDENCE: LINT OK
+      EVIDENCE: 2026-09-21 `LINT OK`.
 
-- [x] G1: the TIR schema, references, presentation, and canonical codec satisfy their focused tests
-      CHECK: CI=true ../../node_modules/.bin/vitest run test/Tir.test.ts test/TirCodec.test.ts test/TirPresentation.test.ts
-      EXPECT: Test Files 3 passed
-      CWD: packages/compiler
-      EVIDENCE: 3 files passed, 49 tests passed
+- [x] G1: JUL-210 provides the authoritative declaration/header semantic-query boundary and its OpenSpec contract
+      CHECK: openspec validate jul-210-semantic-declaration-queries --strict && pnpm --filter @silklang/compiler exec vitest run test/NameResolution.test.ts test/DeclarationIndex.test.ts && echo JUL210_OK
+      EXPECT: JUL210_OK
+      EVIDENCE: 2026-09-21 strict validation passed; 86 focused tests passed; `JUL210_OK`.
 
-- [x] G2: elaboration constructs checked bodies without the legacy fact-tree boundary
-      CHECK: CI=true ../../node_modules/.bin/vitest run test/RecordBoundary.test.ts test/Elaboration.test.ts
-      EXPECT: Test Files 2 passed
-      CWD: packages/compiler
-      EVIDENCE: 2 files passed, 8 tests passed
+- [x] G2: JUL-211 routes checked bodies and static evaluation through observed semantic queries without losing editor reuse
+      CHECK: openspec validate jul-211-semantic-body-evaluation-queries --strict && pnpm --filter @silklang/compiler exec vitest run test/ProjectAnalysis.test.ts test/StaticText.test.ts && echo JUL211_OK
+      EXPECT: JUL211_OK
+      EVIDENCE: 2026-09-21 strict validation passed; 65 focused tests passed; `JUL211_OK`.
 
-- [x] G3: the compiler package typechecks after the schema and construction rewrite
-      CHECK: pnpm --filter @silklang/compiler typecheck && echo JUL207_COMPILER_TYPES_OK
-      EXPECT: JUL207_COMPILER_TYPES_OK
-      EVIDENCE: JUL207_COMPILER_TYPES_OK
+- [x] G3: JUL-212 publishes a detached concrete instance graph through Realization.instantiate
+      CHECK: openspec validate jul-212-instance-artifacts --strict && pnpm --filter @silklang/compiler exec vitest run test/Instances.test.ts && echo JUL212_OK
+      EXPECT: JUL212_OK
+      EVIDENCE: 2026-09-21 strict validation passed; 58 focused tests passed; `JUL212_OK`.
 
-- [x] G4: compiler and OpenSpec edits are formatted and lint-free
-      CHECK: node_modules/.bin/oxfmt --check packages/compiler openspec/changes/establish-authored-hir-pipeline && node_modules/.bin/oxlint packages/compiler && echo JUL207_STYLE_OK
-      EXPECT: JUL207_STYLE_OK
-      EVIDENCE: JUL207_STYLE_OK
+- [x] G4: JUL-213 publishes pre-reachability type layouts and instance-dependent runtime plans through explicit layout APIs
+      CHECK: openspec validate jul-213-layout-runtime-plans --strict && pnpm --filter @silklang/compiler exec vitest run test/Layout.test.ts && echo JUL213_OK
+      EXPECT: JUL213_OK
+      EVIDENCE: 2026-09-21 strict validation passed; 33 focused tests passed after preserving catalog entry identity; `JUL213_OK`.
 
-- [x] G5: every task in the OpenSpec change is complete
-      CHECK: test "$(openspec instructions apply --change establish-authored-hir-pipeline --json | jq -r '.state + ":" + (.progress.remaining | tostring)')" = "all_done:0" && echo JUL207_OPENSPEC_COMPLETE
-      EXPECT: JUL207_OPENSPEC_COMPLETE
-      EVIDENCE: JUL207_OPENSPEC_COMPLETE
+- [x] G5: JUL-214 lowers explicit instance/layout/runtime inputs to truthfully staged and audited MIR
+      CHECK: openspec validate jul-214-explicit-mir-lowering --strict && pnpm --filter @silklang/compiler exec vitest run test/Mir.test.ts test/MirNormalization.test.ts && echo JUL214_OK
+      EXPECT: JUL214_OK
+      EVIDENCE: 2026-09-21 strict validation passed; 37 focused tests passed; `JUL214_OK`.
 
-- [x] G6: required pull-request checks pass on the branch head
-      CHECK: gh pr checks --required && echo JUL207_PR_CI_OK
-      EXPECT: JUL207_PR_CI_OK
-      EVIDENCE: JUL207_PR_CI_OK — CI run 35544689539 completed successfully on exact head c31054838f50504309ee343a11e44232bbbafbf2 (https://github.com/julia-script/silk/actions/runs/35544689539)
+- [x] G6: JUL-215 separates backend emission, materialization, support preparation and final linking without semantic re-entry
+      CHECK: openspec validate jul-215-emission-linking --strict && pnpm --filter @silklang/compiler exec vitest run test/Backend.test.ts test/NativeToolchain.test.ts && echo JUL215_OK
+      EXPECT: JUL215_OK
+      EVIDENCE: 2026-09-21 strict validation passed; 69 focused tests passed; `JUL215_OK`.
+
+- [x] G7: the composed final compiler head typechecks with every OpenSpec implementation task complete
+      CHECK: pnpm --filter @silklang/llvm build && pnpm --filter @silklang/compiler typecheck && node -e "const fs=require('fs');for(const p of fs.readdirSync('openspec/changes').filter(x=>/^jul-21[0-5]-/.test(x))){const t=fs.readFileSync('openspec/changes/'+p+'/tasks.md','utf8');if(/- \[ \]/.test(t))throw new Error('incomplete '+p)}console.log('FINAL_LOCAL_OK')"
+      EXPECT: FINAL_LOCAL_OK
+      EVIDENCE: 2026-09-21 LLVM build and compiler typecheck passed; every JUL-210..215 task is checked; `FINAL_LOCAL_OK`.
+
+- [ ] G8: required pull-request CI passes on the exact final stack head
+      CHECK: gh pr checks --required && echo FINAL_CI_OK
+      EXPECT: FINAL_CI_OK
+      EVIDENCE: pending

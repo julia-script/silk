@@ -42,10 +42,10 @@ export interface Options {
   readonly root?: Document | ShadowRoot
 }
 
-/** One language-server view of the snippet: document and snapshot built from the same bytes. */
+/** One language-server view of the snippet: document and frontend built from the same bytes. */
 export interface Session {
   readonly document: LspDocument.Document
-  readonly snapshot: Analysis.Snapshot
+  readonly snapshot: Analysis.FrontendSnapshot
   readonly source: string
 }
 
@@ -75,7 +75,7 @@ export interface Handle {
 export const session = (
   module: string,
   bytes: Uint8Array,
-  snapshot: Analysis.Snapshot,
+  snapshot: Analysis.FrontendSnapshot,
 ): Session => ({
   document: LspDocument.make({
     uri: module,

@@ -1,6 +1,7 @@
 import * as Effect from 'effect/Effect'
 import * as Diagnostic from '../../src/Diagnostic.js'
 import * as SemanticContext from '../../src/SemanticContext.js'
+import * as Semantic from '../../src/Semantic.js'
 import * as AuthoredIdentity from '../../src/AuthoredIdentity.js'
 import * as AuthoredLowering from '../../src/AuthoredLowering.js'
 import * as Elaboration from '../../src/Elaboration.js'
@@ -60,7 +61,8 @@ export const elaborate = (syntax: SyntaxFile.SyntaxFile): Elaborated => {
   const scope = NameResolution.scopeOf(analyzed.resolution, name)
   if (headers === undefined || scope === undefined)
     throw new RangeError('Single-module elaboration fixture lost its module')
-  const result = Elaboration.elaborateModule({ authored, headers, scope, index })
+  const session = Semantic.makeSession(name, index, analyzed.resolution)
+  const result = Elaboration.elaborateModule({ authored, headers, scope, index, session })
   const inspected = records(result)
   indices.set(result, index)
   return Object.freeze({
