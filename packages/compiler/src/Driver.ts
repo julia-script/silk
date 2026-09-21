@@ -17,6 +17,8 @@ import * as LlvmBackend from './LlvmBackend.js'
 import type * as ModuleClosure from './ModuleClosure.js'
 import * as NativeLinkInput from './NativeLinkInput.js'
 import * as NativeToolchain from './NativeToolchain.js'
+import * as ObjectEmission from './ObjectEmission.js'
+import * as Linker from './Linker.js'
 import type * as NativeLinkPlan from './NativeLinkPlan.js'
 import * as PhaseReport from './PhaseReport.js'
 import * as Preparation from './Preparation.js'
@@ -864,7 +866,12 @@ export const compile = Effect.fn('Driver.compile')(function* (
           report,
           'object',
           1,
-          NativeToolchain.emitObject(toolchain, scope, artifact, preparation.profile),
+          ObjectEmission.materialize({
+            toolchain,
+            scope,
+            artifact,
+            profile: preparation.profile,
+          }),
           () => 1,
           () => 0,
           { heapBytes },
@@ -955,29 +962,28 @@ export const compile = Effect.fn('Driver.compile')(function* (
             : (toolchain.artifactCache ??
               NativeToolchain.defaultArtifactCache(nativeCacheDirectory))
         const nativeKey = `native-${linkPlan.identity}.blob`
-        // Validate the physical plan even on cache hits, then accept cached bytes only when their
-        // artifact kind and target match. Otherwise execute the finalizer and record the link phase.
-        yield* NativeToolchain.validateLinkPlan(linkPlan)
-        const cached =
-          nativeCache === undefined
-            ? undefined
-            : yield* NativeToolchain.readArtifactCache(nativeCache, nativeKey)
-        const reusable =
-          cached !== undefined && NativeToolchain.isCachedArtifact(cached, cacheKind, target)
-        const linked = yield* PhaseReport.measureEffectInto(
+        // Linking owns physical-plan validation and optional final-artifact reuse. Helper/runtime
+        // preparation stays outside it and remains scoped by this caller-owned build lifetime.
+        const linkedResult = yield* PhaseReport.measureEffectInto(
           report,
-          reusable ? 'artifact-cache' : 'link',
+          'link',
           2,
-          reusable
-            ? NativeToolchain.commitCachedArtifact(cached, cacheKind, target, request.destination)
-            : NativeToolchain.NativeFinalizer.finalize(linkPlan, cacheKind, request.destination),
+          Linker.link({
+            scope,
+            plan: linkPlan,
+            artifactKind: cacheKind,
+            destination: request.destination,
+            cache:
+              nativeCache === undefined
+                ? Object.freeze({ _tag: 'Disabled' })
+                : Object.freeze({ _tag: 'ReadWrite', store: nativeCache, key: nativeKey }),
+          }),
           () => 1,
           () => 0,
           { heapBytes },
         )
-        // Cache freshly finalized bytes and publish the inspectable link plan beside the artifact.
-        if (!reusable && nativeCache !== undefined)
-          yield* NativeToolchain.writeArtifactCache(nativeCache, nativeKey, linked.bytes)
+        const linked = linkedResult.artifact
+        // Publish the inspectable link plan beside the artifact.
         const linkPlanPath = yield* NativeToolchain.commitLinkPlan(
           linkPlan,
           `${request.destination}.link.json`,

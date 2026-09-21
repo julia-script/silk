@@ -48,19 +48,22 @@ pub fn main() -> i32 { return identity(42) }`),
 
 The current low-level operation map is:
 
-| Operation                 | Input                                                                                                           | Current result                                                                        |
-| ------------------------- | --------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
-| `Source.load`             | canonical module identity plus the active `SourceResolver` provider                                             | `Option<ResolvedSource>` with immutable bytes and origin, or a typed resolver failure |
-| `Hir.lower`               | one identified `SourceFile` revision                                                                            | recovered `SyntaxFile` plus authored untyped HIR and its presentation                 |
-| `Preparation.prepare`     | compilation request and `analysis` or `executable` intent                                                       | the existing intent-specific sealed preparation bundle                                |
-| `Semantic.resolveName`    | semantic session, immutable module scope, and spelling                                                          | one memoized resolved, missing, conflicting, inaccessible, or unavailable answer      |
-| `Semantic.typeOf`         | semantic session and canonical declaration identity                                                             | the declaration's completed public header, or an unavailable answer                   |
-| `Semantic.checkBody`      | semantic session, authored HIR, module headers, scope, declaration fact, and optional cross-revision body store | memoized `CheckedUnit { bodies, diagnostics }`, including hidden bodies               |
-| `Semantic.evaluate`       | semantic session, target-scoped evaluation store, canonical application, and deterministic callback             | value-sensitive `ApplicationResult` with key, cache status, and budget                |
-| `Realization.instantiate` | checked artifacts, declaration facts, completed profile, roots, resolution, and runtime composition             | portable reachable `Instances.Discovery` graph without live presentation state        |
-| `Layout.computeTypes`     | target, declaration index, literal presentation, and opaque realization facts                                   | pre-reachability target type-layout catalog                                           |
-| `Layout.computeRuntime`   | type catalog, concrete instance graph, declaration index, and opaque realization facts                          | reached layouts plus storage, environment, calling, execution, and literal plans      |
-| `Mir.lower`               | admitted instances/runtime layout, declaration/opaque facts, presentation, profile, normalization, and audit    | finalized MIR or explicit diagnostics with no program                                 |
+| Operation                    | Input                                                                                                           | Current result                                                                        |
+| ---------------------------- | --------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| `Source.load`                | canonical module identity plus the active `SourceResolver` provider                                             | `Option<ResolvedSource>` with immutable bytes and origin, or a typed resolver failure |
+| `Hir.lower`                  | one identified `SourceFile` revision                                                                            | recovered `SyntaxFile` plus authored untyped HIR and its presentation                 |
+| `Preparation.prepare`        | compilation request and `analysis` or `executable` intent                                                       | the existing intent-specific sealed preparation bundle                                |
+| `Semantic.resolveName`       | semantic session, immutable module scope, and spelling                                                          | one memoized resolved, missing, conflicting, inaccessible, or unavailable answer      |
+| `Semantic.typeOf`            | semantic session and canonical declaration identity                                                             | the declaration's completed public header, or an unavailable answer                   |
+| `Semantic.checkBody`         | semantic session, authored HIR, module headers, scope, declaration fact, and optional cross-revision body store | memoized `CheckedUnit { bodies, diagnostics }`, including hidden bodies               |
+| `Semantic.evaluate`          | semantic session, target-scoped evaluation store, canonical application, and deterministic callback             | value-sensitive `ApplicationResult` with key, cache status, and budget                |
+| `Realization.instantiate`    | checked artifacts, declaration facts, completed profile, roots, resolution, and runtime composition             | portable reachable `Instances.Discovery` graph without live presentation state        |
+| `Layout.computeTypes`        | target, declaration index, literal presentation, and opaque realization facts                                   | pre-reachability target type-layout catalog                                           |
+| `Layout.computeRuntime`      | type catalog, concrete instance graph, declaration index, and opaque realization facts                          | reached layouts plus storage, environment, calling, execution, and literal plans      |
+| `Mir.lower`                  | admitted instances/runtime layout, declaration/opaque facts, presentation, profile, normalization, and audit    | finalized MIR or explicit diagnostics with no program                                 |
+| `Backend.emit`               | finalized MIR and backend code-generation request                                                               | target backend artifact such as LLVM bitcode/IR plus symbol metadata                  |
+| `ObjectEmission.materialize` | backend artifact, resolved toolchain, profile, and caller-owned build scope                                     | scope-bound native object with inventory, helper, and command metadata                |
+| `Linker.link`                | complete physical link plan, build scope, native kind, destination, and cache policy                            | durable final artifact plus plan identity, cache key, and reuse metadata              |
 
 `Hir.lower` does not load a module, discover imports, run semantic analysis, or realize a target.
 Its returned syntax keeps lexer/parser recovery diagnostics for syntax-only tooling, while
@@ -91,6 +94,12 @@ admission value decides whether lowering may start; normalization and optional f
 audit are explicit policy inputs. Rejected admission and failed audits return diagnostics without a
 program, while valid requests run the ownership, native-assembly, suspension, and coroutine-frame
 finalization sequence.
+
+Backend emission deliberately stops at the backend artifact. `ObjectEmission.materialize` owns
+bitcode-to-object execution inside a caller-owned build scope. Helper, runtime, translation-unit,
+and native-input preparation remains outside `Linker.link`; the linker consumes the already complete
+physical plan and owns validation, optional final-cache reuse/write, execution, and durable commit.
+Its result records plan identity, scope, cache key, and whether bytes were reused.
 
 Phase reports and trace spans use these operation identities where they measure the corresponding
 work. `Semantic.checkBody.execute` and `.reuse`, and the `evaluation.branch` attribute on

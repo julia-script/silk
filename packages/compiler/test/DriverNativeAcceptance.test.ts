@@ -13,6 +13,7 @@ import * as Json from './support/Json.js'
 import * as ArtifactKind from '../src/ArtifactKind.js'
 import * as NativeLinkInput from '../src/NativeLinkInput.js'
 import * as NativeToolchain from '../src/NativeToolchain.js'
+import * as Linker from '../src/Linker.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
 import { httpRedirectCorpusProgram, nativeCorpus, type NativeRun } from './support/corpus.js'
@@ -252,24 +253,28 @@ it.effect.skipIf(!runFixedTests)(
             'selected',
             `int silk_cache_selected(void) { return ${value}; }`,
           )
-          yield* NativeToolchain.NativeFinalizer.finalize(
-            yield* NativeToolchain.planNativeLink(
-              toolchain,
-              scope,
-              'NativeStaticLibrary',
-              yield* CompilationProfile.normalize({ target: target.id }),
-              [object.artifact],
-              [],
-              join(directory, 'libsilk_cache_selected.a'),
-              {
-                request: { kind: 'default' },
-                composition: { kind: 'default' },
-                resolved: { kind: 'default' },
-              },
-            ),
+          const destination = join(directory, 'libsilk_cache_selected.a')
+          const plan = yield* NativeToolchain.planNativeLink(
+            toolchain,
+            scope,
             'NativeStaticLibrary',
-            join(directory, 'libsilk_cache_selected.a'),
+            yield* CompilationProfile.normalize({ target: target.id }),
+            [object.artifact],
+            [],
+            destination,
+            {
+              request: { kind: 'default' },
+              composition: { kind: 'default' },
+              resolved: { kind: 'default' },
+            },
           )
+          yield* Linker.link({
+            scope,
+            plan,
+            artifactKind: 'NativeStaticLibrary',
+            destination,
+            cache: Object.freeze({ _tag: 'Disabled' }),
+          })
         })
         const source = `unsafe extern "C" fn silk_cache_selected() -> i32
 pub fn main() -> i32 { return unsafe silk_cache_selected() }`
