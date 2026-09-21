@@ -48,15 +48,15 @@ pub fn main() -> i32 { return identity(42) }`),
 
 The current low-level operation map is:
 
-| Operation             | Input                                                                                                   | Current result                                                                        |
-| --------------------- | ------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
-| `Source.load`         | canonical module identity plus the active `SourceResolver` provider                                     | `Option<ResolvedSource>` with immutable bytes and origin, or a typed resolver failure |
-| `Hir.lower`           | one identified `SourceFile` revision                                                                    | recovered `SyntaxFile` plus authored untyped HIR and its presentation                 |
-| `Preparation.prepare` | compilation request and `analysis` or `executable` intent                                               | the existing intent-specific sealed preparation bundle                                |
-| `Semantic.resolveName` | semantic session, immutable module scope, and spelling                                                  | one memoized resolved, missing, conflicting, inaccessible, or unavailable answer       |
-| `Semantic.typeOf`      | semantic session and canonical declaration identity                                                     | the declaration's completed public header, or an unavailable answer                    |
-| `Semantic.checkBody`  | authored HIR, module headers, resolution scope, declaration index and fact, plus an optional body query | `CheckedUnit { bodies, diagnostics }`, including hidden bodies                        |
-| `Evaluation.evaluate` | evaluation session, canonical application, and deterministic callback                                   | `ApplicationResult` (`Complete` or `Failed`) with key, cache status, and budget       |
+| Operation              | Input                                                                                                           | Current result                                                                        |
+| ---------------------- | --------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| `Source.load`          | canonical module identity plus the active `SourceResolver` provider                                             | `Option<ResolvedSource>` with immutable bytes and origin, or a typed resolver failure |
+| `Hir.lower`            | one identified `SourceFile` revision                                                                            | recovered `SyntaxFile` plus authored untyped HIR and its presentation                 |
+| `Preparation.prepare`  | compilation request and `analysis` or `executable` intent                                                       | the existing intent-specific sealed preparation bundle                                |
+| `Semantic.resolveName` | semantic session, immutable module scope, and spelling                                                          | one memoized resolved, missing, conflicting, inaccessible, or unavailable answer      |
+| `Semantic.typeOf`      | semantic session and canonical declaration identity                                                             | the declaration's completed public header, or an unavailable answer                   |
+| `Semantic.checkBody`   | semantic session, authored HIR, module headers, scope, declaration fact, and optional cross-revision body store | memoized `CheckedUnit { bodies, diagnostics }`, including hidden bodies               |
+| `Semantic.evaluate`    | semantic session, target-scoped evaluation store, canonical application, and deterministic callback             | value-sensitive `ApplicationResult` with key, cache status, and budget                |
 
 `Hir.lower` does not load a module, discover imports, run semantic analysis, or realize a target.
 Its returned syntax keeps lexer/parser recovery diagnostics for syntax-only tooling, while
@@ -65,6 +65,12 @@ tooling remains on `Analysis`, `ProjectAnalysis`, `ModuleTooling`, and the inspe
 prepared frontend seals one `Semantic.Session`; declaration/header providers memoize within that
 epoch and publish immutable dependency observations without retaining syntax or source-resolver
 capabilities. Layout/MIR/emission/link requests remain separate later-stage operations.
+
+`CheckBody` memoization is session-local; the existing `BodyQuery` remains the cross-revision store
+that validates semantic dependencies and re-presents retained editor artifacts at current spans.
+Static evaluation similarly keeps `Evaluation` as the owner of target/application caches and budget
+accounting. `Semantic.evaluate` observes and delegates that value-sensitive request, so two static
+argument values cannot share an answer and a cache hit still pays its recorded deterministic cost.
 
 Phase reports and trace spans use these operation identities where they measure the corresponding
 work. `Semantic.checkBody.execute` and `.reuse`, and the `evaluation.branch` attribute on

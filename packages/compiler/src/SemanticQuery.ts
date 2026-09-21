@@ -168,3 +168,9 @@ export const executionCount = (self: Session, key: string): number =>
 /** True only while a provider currently owns the request reservation. */
 export const isActive = (self: Session, key: string): boolean =>
   stateOf(self).active.some((active) => active.key === key)
+
+/** Records a provider-owned dependency in the currently executing query, when one exists. */
+export const observe = (self: Session, observation: Observation): void => {
+  const active = stateOf(self).active.at(-1)
+  if (active !== undefined) observeInto(active, observation)
+}

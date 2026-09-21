@@ -4,6 +4,7 @@ import * as CompilerTrace from './CompilerTrace.js'
 import * as DeclarationFacts from './DeclarationFacts.js'
 import type * as DeclarationIndex from './DeclarationIndex.js'
 import * as Elaboration from './Elaboration.js'
+import * as Evaluation from './Evaluation.js'
 import type * as ExpressionAnalysis from './ExpressionAnalysis.js'
 import * as NameResolution from './NameResolution.js'
 import * as SemanticQuery from './SemanticQuery.js'
@@ -314,10 +315,18 @@ export const checkBody = (input: BodyInput): Elaboration.CheckedUnit => {
       }),
     }
   }
-  return trace(
-    'Semantic.checkBody',
-    () =>
-      input.query === undefined
+  const request: SemanticQuery.Request<Elaboration.CheckedUnit> = Object.freeze({
+    _tag: 'SemanticQueryRequest',
+    key: `CheckBody:${input.declaration.owner.module}:${input.declaration.id.ordinal}`,
+    execute: (observe: SemanticQuery.Observe) => {
+      observeConfiguration(input.session, observe)
+      observe(
+        Object.freeze({
+          _tag: 'Header',
+          declaration: `${input.declaration.owner.module}:${input.declaration.id.ordinal}`,
+        }),
+      )
+      return input.query === undefined
         ? trace('Semantic.checkBody.execute', () => build().unit)
         : BodyQuery.check(
             input.query,
@@ -327,10 +336,57 @@ export const checkBody = (input: BodyInput): Elaboration.CheckedUnit => {
             input.declaration,
             build,
             trace,
-          ),
+          )
+    },
+  })
+  return trace(
+    'Semantic.checkBody',
+    () => {
+      const result = SemanticQuery.query(input.session.queries, request)
+      if (result._tag === 'Cycle')
+        throw new RangeError(`Recursive body query: ${result.cycle.path.join(' -> ')}`)
+      return result.completed.answer
+    },
     {
       module: input.declaration.owner.module,
       declaration: input.declaration.id.ordinal,
     },
   )
+}
+
+/** Runs the body provider without consulting or publishing this session's completed answer. */
+export const checkBodyFresh = (input: BodyInput): Elaboration.CheckedUnit => {
+  const isolated = makeSession(
+    `${input.session.epoch}:fresh`,
+    input.session.index,
+    input.session.resolution,
+    input.session.configuration,
+  )
+  const { query: _query, ...fresh } = input
+  return checkBody({ ...fresh, session: isolated })
+}
+
+/** Evaluates one value-sensitive static application through its existing target-scoped store. */
+export const evaluate = <A>(
+  self: Session,
+  evaluation: Evaluation.Evaluation<A>,
+  application: Evaluation.Application,
+  callback: Evaluation.EvaluationCallback<A>,
+): Evaluation.ApplicationResult<A> => {
+  const key = Evaluation.applicationKey(evaluation.environment, application)
+  SemanticQuery.observe(self.queries, Object.freeze({ _tag: 'Query', key: `Evaluate:${key}` }))
+  return Evaluation.evaluate(evaluation, application, callback)
+}
+
+/** Evaluates a nested static application while preserving its source-level parent trace. */
+export const evaluateFrom = <A>(
+  self: Session,
+  evaluation: Evaluation.Evaluation<A>,
+  application: Evaluation.Application,
+  parentTrace: Evaluation.Trace,
+  callback: Evaluation.EvaluationCallback<A>,
+): Evaluation.ApplicationResult<A> => {
+  const key = Evaluation.applicationKey(evaluation.environment, application)
+  SemanticQuery.observe(self.queries, Object.freeze({ _tag: 'Query', key: `Evaluate:${key}` }))
+  return Evaluation.evaluateFrom(evaluation, application, parentTrace, callback)
 }
