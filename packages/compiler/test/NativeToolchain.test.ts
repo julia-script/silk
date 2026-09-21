@@ -36,6 +36,8 @@ import * as Fiber from 'effect/Fiber'
 import * as Analysis from '../src/Analysis.js'
 import * as NativeLinkInput from '../src/NativeLinkInput.js'
 import * as NativeToolchain from '../src/NativeToolchain.js'
+import * as ObjectEmission from '../src/ObjectEmission.js'
+import * as Linker from '../src/Linker.js'
 import * as LlvmWasmRuntime from '../src/LlvmWasmRuntime.js'
 import * as Target from '../src/Target.js'
 import * as ToolchainPlan from '../src/ToolchainPlan.js'
@@ -87,7 +89,13 @@ const finalize = Effect.fnUntraced(function* (
     destination,
     { request: selection, composition: selection, resolved: selection },
   )
-  return yield* NativeToolchain.NativeFinalizer.finalize(plan, kind, destination)
+  return (yield* Linker.link({
+    scope,
+    plan,
+    artifactKind: kind,
+    destination,
+    cache: Object.freeze({ _tag: 'Disabled' }),
+  })).artifact
 })
 
 it('denies native final-cache admission without complete tool and implicit-input identities', () => {
@@ -478,12 +486,12 @@ it.effect('yields a typed spawn failure with command, stage, and arbitrary cause
     const result = yield* Effect.result(
       NativeToolchain.withBuildScope('spawn-failure', (scope) => {
         scopeRoot = scope.root
-        return NativeToolchain.emitObject(
-          { _tag: 'Toolchain', clang: '/nonexistent/clang', llvmAr: 'llvm-ar' },
+        return ObjectEmission.materialize({
+          toolchain: { _tag: 'Toolchain', clang: '/nonexistent/clang', llvmAr: 'llvm-ar' },
           scope,
           artifact,
-          compilation,
-        )
+          profile: compilation,
+        })
       }),
     )
     assert.strictEqual(result._tag, 'Failure')
@@ -511,12 +519,12 @@ it.effect('rejects hosted language runtime dependencies before spawning a no-lib
       NativeToolchain.withBuildScope(
         'raw-capability',
         Effect.fnUntraced(function* (scope) {
-          return yield* NativeToolchain.emitObject(
-            { _tag: 'Toolchain', clang: '/nonexistent/clang', llvmAr: 'llvm-ar' },
+          return yield* ObjectEmission.materialize({
+            toolchain: { _tag: 'Toolchain', clang: '/nonexistent/clang', llvmAr: 'llvm-ar' },
             scope,
-            { ...artifact, nativeRuntimeSymbols: ['silk_test_unsupported_runtime'] },
-            compilation,
-          )
+            artifact: { ...artifact, nativeRuntimeSymbols: ['silk_test_unsupported_runtime'] },
+            profile: compilation,
+          })
         }),
       ),
     )
@@ -1108,7 +1116,12 @@ it.effect(
       const destination = join(testRoot, 'linked-program')
       const linked = yield* NativeToolchain.withBuildScope('link-run', (scope) =>
         Effect.gen(function* () {
-          const object = yield* NativeToolchain.emitObject(toolchain, scope, artifact, compilation)
+          const object = yield* ObjectEmission.materialize({
+            toolchain,
+            scope,
+            artifact,
+            profile: compilation,
+          })
           const runtime = yield* NativeToolchain.compileRuntime(toolchain, scope, target)
           assert.include(runtime.planned.arguments, 'cpp-output')
           assert.include(runtime.planned.arguments, join(scope.root, 'silk_runtime.i'))
@@ -1155,7 +1168,12 @@ it.effect(
       const destination = join(testRoot, 'linked-dollar-symbols')
       const linked = yield* NativeToolchain.withBuildScope('dollar-symbol-link', (scope) =>
         Effect.gen(function* () {
-          const program = yield* NativeToolchain.emitObject(toolchain, scope, artifact, compilation)
+          const program = yield* ObjectEmission.materialize({
+            toolchain,
+            scope,
+            artifact,
+            profile: compilation,
+          })
           const definitions = yield* NativeToolchain.compileCObject(
             toolchain,
             scope,

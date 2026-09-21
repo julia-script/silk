@@ -29,7 +29,9 @@ pub effect fn main() -> () ! LogError {
       assert.deepEqual(Analysis.diagnostics(frontend), [])
       yield* Analysis.codegen(frontend, { mode: 'release' })
     }),
-  { timeout: 30_000 },
+  // The two realization passes take about 8s in isolation and can approach 30s when the four
+  // compiler shards saturate the CI host; this is contention headroom, not a performance gate.
+  { timeout: 90_000 },
 )
 
 it.effect(

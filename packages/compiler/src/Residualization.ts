@@ -24,6 +24,7 @@ import type * as AuthoredHir from './AuthoredHir.js'
 import * as AuthoredIdentity from './AuthoredIdentity.js'
 import * as AuthoredWalk from './AuthoredWalk.js'
 import * as SemanticContext from './SemanticContext.js'
+import * as Semantic from './Semantic.js'
 import type * as Target from './Target.js'
 import * as Type from './Type.js'
 
@@ -109,6 +110,7 @@ interface State {
   readonly spans: SemanticContext.Registry
   readonly resolution: NameResolution.Resolution
   readonly index: DeclarationIndex.Index
+  readonly semantic: Semantic.Session
   /** Generated declarations published by source and residual bodies in this session. */
   readonly generatedAggregates: Map<string, DeclarationFacts.StructFact>
   readonly evaluation: Evaluation.Evaluation<StaticValue.Value>
@@ -182,6 +184,12 @@ const makeState = (
     ),
   )
   const generatedAggregates = new Map(index.generatedAggregates)
+  const semantic = Semantic.makeSession(
+    `residualization:${sourceIdentity}:${compilation.target.id}`,
+    index,
+    resolution,
+    compilation.target.id,
+  )
   return {
     target: compilation.target,
     parameters: new Map(parameters),
@@ -191,6 +199,7 @@ const makeState = (
     spans: SemanticContext.fromModules([...results.values()]),
     resolution,
     index: Object.freeze({ ...index, generatedAggregates }),
+    semantic,
     generatedAggregates,
     evaluation: Evaluation.make<StaticValue.Value>(compilation, limits, sourceIdentity, trace),
     residuals: Evaluation.make<ResidualBody>(compilation, limits, sourceIdentity, trace),
@@ -643,7 +652,8 @@ const evaluateStaticFunction = (
     span,
   })
   const originScope = Evaluation.applicationKey(self[stateSymbol].environment, application)
-  const result = Evaluation.evaluateFrom(
+  const result = Semantic.evaluateFrom(
+    self[stateSymbol].semantic,
     self[stateSymbol].evaluation,
     application,
     parentTrace,
@@ -726,7 +736,12 @@ const evaluateStaticFunction = (
         semantic,
         declaration,
         input.declarations,
-        Object.freeze({ scope: input.scope, index: self[stateSymbol].index, builder }),
+        Object.freeze({
+          scope: input.scope,
+          index: self[stateSymbol].index,
+          semantic: self[stateSymbol].semantic,
+          builder,
+        }),
         staticContext,
       )
       publishGeneratedAggregates(self, analyzed.fact.generatedAggregates)
@@ -873,7 +888,8 @@ function evaluateConstantValue(
     staticArguments: Object.freeze([]),
     span,
   })
-  const result = Evaluation.evaluateFrom(
+  const result = Semantic.evaluateFrom(
+    self[stateSymbol].semantic,
     self[stateSymbol].evaluation,
     application,
     parentTrace,
@@ -953,6 +969,7 @@ function evaluateConstantValue(
         Object.freeze({
           scope: input.scope,
           index: self[stateSymbol].index,
+          semantic: self[stateSymbol].semantic,
           staticContext,
           builder,
           generatedAggregates,
@@ -1220,33 +1237,26 @@ export const residualize = (self: Coordinator, key: ApplicationKey): Result => {
     span: Location.at(declaration.anchor),
   })
   let executed = false
-  const evaluated = Evaluation.evaluate(self[stateSymbol].residuals, application, (evaluation) => {
-    executed = true
-    const typeSubstitution = TypeInference.substitution(
-      declaration.typeParameters.map((parameter) => parameter.type),
-      key.typeArguments,
-    )
-    if (typeSubstitution === undefined)
-      return Evaluation.failed(
-        Evaluation.phaseViolation(
-          'Residualization.residualize',
-          'runtime application does not completely specialize its declaration',
-          Location.at(declaration.anchor),
-          evaluation.trace,
-        ),
+  const evaluated = Semantic.evaluate(
+    self[stateSymbol].semantic,
+    self[stateSymbol].residuals,
+    application,
+    (evaluation) => {
+      executed = true
+      const typeSubstitution = TypeInference.substitution(
+        declaration.typeParameters.map((parameter) => parameter.type),
+        key.typeArguments,
       )
-    const call: Evaluation.NodeContext['call'] = (
-      callee,
-      arguments_,
-      argumentSpans,
-      argumentOrigins,
-      span,
-      trace,
-      identity,
-      lookup,
-    ) =>
-      evaluateStaticFunction(
-        self,
+      if (typeSubstitution === undefined)
+        return Evaluation.failed(
+          Evaluation.phaseViolation(
+            'Residualization.residualize',
+            'runtime application does not completely specialize its declaration',
+            Location.at(declaration.anchor),
+            evaluation.trace,
+          ),
+        )
+      const call: Evaluation.NodeContext['call'] = (
         callee,
         arguments_,
         argumentSpans,
@@ -1255,83 +1265,106 @@ export const residualize = (self: Coordinator, key: ApplicationKey): Result => {
         trace,
         identity,
         lookup,
+      ) =>
+        evaluateStaticFunction(
+          self,
+          callee,
+          arguments_,
+          argumentSpans,
+          argumentOrigins,
+          span,
+          trace,
+          identity,
+          lookup,
+        )
+      const constant: NonNullable<Evaluation.NodeContext['constant']> = (
+        declaration,
+        span,
+        trace,
+      ) => evaluateConstantValue(self, declaration, span, trace)
+      const chargedStaticIterationNodes = { value: 0 }
+      const semantic = SemanticContext.make(input.result.authored)
+      const request: Tir.ArtifactId['request'] = Object.freeze({
+        _tag: 'Specialize',
+        application: Evaluation.applicationKey(
+          self[stateSymbol].environment,
+          evaluation.application,
+        ),
+      })
+      const builder = BodyBuilder.make(Object.freeze({ owner: declaration.owner, request }))
+      const analyzed = analyzeFunctionBody(
+        semantic,
+        declaration,
+        input.declarations,
+        Object.freeze({
+          scope: input.scope,
+          index: self[stateSymbol].index,
+          semantic: self[stateSymbol].semantic,
+          builder,
+        }),
+        Object.freeze({
+          environment: self[stateSymbol].environment,
+          typeSubstitution,
+          values: bindings.values,
+          valueSpans: bindings.valueSpans,
+          valueOrigins: bindings.valueOrigins,
+          expressionSpans: new Map<Tir.Expression, Location.Location>(),
+          expressionOrigins: new Map<Tir.Expression, Evaluation.TextOrigin>(),
+          nodes: BodyBuilder.staticLowering(semantic, builder),
+          lookup: (id: DeclarationFacts.CanonicalId) => lookupDeclaration(self, id),
+          trace: evaluation.trace,
+          call,
+          chargeStaticIteration: (trace: Evaluation.Trace, residualNodes: number) => {
+            const stepFailure = evaluation.stepAt(trace)
+            return stepFailure ?? evaluation.growResidualAt(trace, residualNodes)
+          },
+          chargedStaticIterationNodes,
+          reflect: (
+            owner: Type.Type,
+            kind: 'Type' | 'Fields',
+            reflectSpan: Location.Location,
+            trace: Evaluation.Trace,
+            lookup: Evaluation.NodeContext['lookup'],
+          ) => reflectAggregate(self, declaration, owner, kind, reflectSpan, trace, lookup),
+          constant,
+        }),
       )
-    const constant: NonNullable<Evaluation.NodeContext['constant']> = (declaration, span, trace) =>
-      evaluateConstantValue(self, declaration, span, trace)
-    const chargedStaticIterationNodes = { value: 0 }
-    const semantic = SemanticContext.make(input.result.authored)
-    const request: Tir.ArtifactId['request'] = Object.freeze({
-      _tag: 'Specialize',
-      application: Evaluation.applicationKey(self[stateSymbol].environment, evaluation.application),
-    })
-    const builder = BodyBuilder.make(Object.freeze({ owner: declaration.owner, request }))
-    const analyzed = analyzeFunctionBody(
-      semantic,
-      declaration,
-      input.declarations,
-      Object.freeze({ scope: input.scope, index: self[stateSymbol].index, builder }),
-      Object.freeze({
-        environment: self[stateSymbol].environment,
-        typeSubstitution,
-        values: bindings.values,
-        valueSpans: bindings.valueSpans,
-        valueOrigins: bindings.valueOrigins,
-        expressionSpans: new Map<Tir.Expression, Location.Location>(),
-        expressionOrigins: new Map<Tir.Expression, Evaluation.TextOrigin>(),
-        nodes: BodyBuilder.staticLowering(semantic, builder),
-        lookup: (id: DeclarationFacts.CanonicalId) => lookupDeclaration(self, id),
-        trace: evaluation.trace,
-        call,
-        chargeStaticIteration: (trace: Evaluation.Trace, residualNodes: number) => {
-          const stepFailure = evaluation.stepAt(trace)
-          return stepFailure ?? evaluation.growResidualAt(trace, residualNodes)
+      publishGeneratedAggregates(self, analyzed.fact.generatedAggregates)
+      let nodes = 0
+      Elaboration.visitStatements(analyzed.fact.statements, {
+        statement: () => {
+          nodes += 1
         },
-        chargedStaticIterationNodes,
-        reflect: (
-          owner: Type.Type,
-          kind: 'Type' | 'Fields',
-          reflectSpan: Location.Location,
-          trace: Evaluation.Trace,
-          lookup: Evaluation.NodeContext['lookup'],
-        ) => reflectAggregate(self, declaration, owner, kind, reflectSpan, trace, lookup),
-        constant,
-      }),
-    )
-    publishGeneratedAggregates(self, analyzed.fact.generatedAggregates)
-    let nodes = 0
-    Elaboration.visitStatements(analyzed.fact.statements, {
-      statement: () => {
-        nodes += 1
-      },
-      expression: () => {
-        nodes += 1
-      },
-    })
-    const remainingNodes = Math.max(0, nodes - chargedStaticIterationNodes.value)
-    const growthFailure = evaluation.growResidual(
-      chargedStaticIterationNodes.value === 0 ? Math.max(1, remainingNodes) : remainingNodes,
-    )
-    if (growthFailure !== undefined) return Evaluation.failed(growthFailure)
-    const body = Elaboration.checkedBody(
-      SemanticContext.make(input.result.authored),
-      self[stateSymbol].index,
-      analyzed.fact,
-      undefined,
-      request,
-      builder,
-    )
-    if (declaration.phase === 'Static')
-      throw new RangeError('Static functions have no runtime TIR body')
-    return Evaluation.complete(
-      Object.freeze({
-        _tag: 'ResidualBody' as const,
-        artifact: body.artifact,
-        function: body.function,
-        results: body.results,
-        diagnostics: analyzed.diagnostics,
-      }),
-    )
-  })
+        expression: () => {
+          nodes += 1
+        },
+      })
+      const remainingNodes = Math.max(0, nodes - chargedStaticIterationNodes.value)
+      const growthFailure = evaluation.growResidual(
+        chargedStaticIterationNodes.value === 0 ? Math.max(1, remainingNodes) : remainingNodes,
+      )
+      if (growthFailure !== undefined) return Evaluation.failed(growthFailure)
+      const body = Elaboration.checkedBody(
+        SemanticContext.make(input.result.authored),
+        self[stateSymbol].index,
+        analyzed.fact,
+        undefined,
+        request,
+        builder,
+      )
+      if (declaration.phase === 'Static')
+        throw new RangeError('Static functions have no runtime TIR body')
+      return Evaluation.complete(
+        Object.freeze({
+          _tag: 'ResidualBody' as const,
+          artifact: body.artifact,
+          function: body.function,
+          results: body.results,
+          diagnostics: analyzed.diagnostics,
+        }),
+      )
+    },
+  )
   let branch: 'cacheReused' | 'checked' | 'rejected' = 'rejected'
   if (evaluated.cached) branch = 'cacheReused'
   else if (executed) branch = 'checked'

@@ -352,6 +352,7 @@ const storedExecutableViolations = (
 export const copyDropViolations = (
   self: Instances.Discovery,
   index: DeclarationIndex.Index,
+  registry: SemanticContext.Registry,
 ): ReadonlyArray<Diagnostic.Diagnostic> =>
   Object.freeze(
     self.instances.flatMap((instance) => {
@@ -369,7 +370,7 @@ export const copyDropViolations = (
         ? [
             Diagnostic.invalidDropHook(
               `Copy type ${Type.encode(selfType.target)} cannot implement Drop`,
-              self.registry.spanOf(instance.function.declaration.anchor),
+              registry.spanOf(instance.function.declaration.anchor),
             ),
           ]
         : []
@@ -471,6 +472,7 @@ export const storedEffectViolations = (
 /** Produces semantic diagnostics for every finite-discovery violation. */
 export const violationDiagnostics = (
   self: Instances.Discovery,
+  registry: SemanticContext.Registry,
 ): ReadonlyArray<Diagnostic.Diagnostic> =>
   Object.freeze([
     ...self.specializationFailures.map((failure) =>
@@ -494,8 +496,9 @@ export const violationDiagnostics = (
         Diagnostic.polymorphicRecursion(
           callerText,
           targetText,
-          self.registry.spanOf(caller.function.declaration.anchor),
+          registry.spanOf(caller.function.declaration.anchor),
         ),
       ]
     }),
   ])
+import type * as SemanticContext from './SemanticContext.js'

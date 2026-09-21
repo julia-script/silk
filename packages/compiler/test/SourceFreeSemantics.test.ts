@@ -11,6 +11,7 @@ import * as NameResolution from '../src/NameResolution.js'
 import * as Ownership from '../src/Ownership.js'
 import * as Parser from '../src/Parser.js'
 import * as SemanticContext from '../src/SemanticContext.js'
+import * as Semantic from '../src/Semantic.js'
 import * as SourceFile from '../src/SourceFile.js'
 import type * as SyntaxFile from '../src/SyntaxFile.js'
 import * as Tir from '../src/Tir.js'
@@ -57,7 +58,14 @@ const analyze = (text: string) =>
     const scope = NameResolution.scopeOf(analyzed.resolution, name)
     if (headers === undefined || scope === undefined)
       throw new RangeError('fixture lost its module')
-    const result = Elaboration.elaborateModule({ authored, headers, scope, index: analyzed.index })
+    const session = Semantic.makeSession(name, analyzed.index, analyzed.resolution)
+    const result = Elaboration.elaborateModule({
+      authored,
+      headers,
+      scope,
+      index: analyzed.index,
+      session,
+    })
     const ownership = Ownership.checkModule(
       result,
       analyzed.index,

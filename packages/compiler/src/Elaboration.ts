@@ -2454,6 +2454,7 @@ export interface Input {
   readonly headers: DeclarationFacts.ModuleHeaders
   readonly scope: NameResolution.ModuleScope
   readonly index: DeclarationIndex.Index
+  readonly session: Semantic.Session
 }
 
 /** The authored block of a callable declaration body, when it has one. */
@@ -2823,7 +2824,7 @@ export const checkedBody = (
 }
 
 export const elaborateModule = (input: Input): Result => {
-  const { authored, headers, scope, index } = input
+  const { authored, headers, scope, index, session } = input
   const context = SemanticContext.make(authored)
   const declarations = headers.declarations
   // A foreign header has a native body: it is indexed and callable but never analyzed here.
@@ -2835,6 +2836,7 @@ export const elaborateModule = (input: Input): Result => {
         headers,
         scope,
         index,
+        session,
         declaration,
         ...(input.bodyQuery === undefined ? {} : { query: input.bodyQuery }),
         ...(input.trace === undefined ? {} : { trace: input.trace }),

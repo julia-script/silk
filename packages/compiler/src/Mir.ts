@@ -31,6 +31,20 @@ import type {
 } from './Suspension.js'
 import * as SilkType from './Type.js'
 import * as TypeCompatibility from './TypeCompatibility.js'
+import * as Effect from 'effect/Effect'
+import type * as Realization from './Realization.js'
+
+export type LoweringInput = Realization.MirLoweringInput
+export type LoweringResult = Realization.MirLoweringResult
+
+/** Lowers explicit admitted instance/layout artifacts without reopening semantic or source state. */
+export const lower = Effect.fn('Mir.lower')(function* (
+  input: LoweringInput,
+): Effect.fn.Return<LoweringResult> {
+  // The implementation is loaded lazily because the MIR data actor is imported by the lowerers.
+  const implementation = yield* Effect.promise(() => import('./Realization.js'))
+  return yield* implementation.lowerMir(input)
+})
 
 /**
  * MIR is the monomorphic, target-aware, backend-neutral structured control DAG. Structural child

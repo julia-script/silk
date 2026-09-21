@@ -598,6 +598,7 @@ const nominalApplications = (type: Type.Type): ReadonlyArray<Type.Nominal> => {
 export const violationDiagnostics = (
   self: Instances.Discovery,
   index: DeclarationIndex.Index,
+  registry: SemanticContext.Registry,
 ): ReadonlyArray<Diagnostic.Diagnostic> => {
   const facts = derive(self, index, Instances.callableIdentity)
   const incoming = new Map<string, Instances.CallInstance>()
@@ -669,8 +670,7 @@ export const violationDiagnostics = (
       const argument = visibleArguments.at(ordinal)
       if (argument === undefined) return []
       const span =
-        incoming.get(Instances.keyText(instance.key))?.span ??
-        self.registry.spanOf(parameter.anchor)
+        incoming.get(Instances.keyText(instance.key))?.span ?? registry.spanOf(parameter.anchor)
       return diagnosticsFor(parameter, argument, span)
     })
   })
@@ -734,3 +734,4 @@ export const encodeVerdict = (self: Verdict): string =>
 
 export const encode = (self: Fact): string =>
   `${encodeSubject(self)} affinity=${ExecutionAffinity.encode(self.affinity)} Detached=${encodeVerdict(self.detached)} NonParking=${encodeVerdict(self.nonParking)}`
+import type * as SemanticContext from './SemanticContext.js'

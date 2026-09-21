@@ -13,6 +13,7 @@ import type * as DeclarationFacts from './DeclarationFacts.js'
 import * as DeclarationIndex from './DeclarationIndex.js'
 import * as Diagnostic from './Diagnostic.js'
 import * as SemanticContext from './SemanticContext.js'
+import * as Semantic from './Semantic.js'
 import * as Elaboration from './Elaboration.js'
 import * as IncrementalReuse from './IncrementalReuse.js'
 import * as ModuleClosure from './ModuleClosure.js'
@@ -43,6 +44,7 @@ interface FrontendFacts {
   readonly selection?: ModuleSelection.ModuleSelection
   readonly index: DeclarationIndex.Index
   readonly resolution: NameResolution.Resolution
+  readonly session: Semantic.Session
   readonly surfaces: ReadonlyMap<string, ModuleSurface.ModuleSurface>
   readonly semantics: ReadonlyMap<string, ModuleSemantics.ModuleSemantics>
   readonly results: ReadonlyMap<string, Elaboration.Result>
@@ -71,6 +73,7 @@ export interface ProjectFrontend extends FrontendFacts {
 interface HeaderFacts {
   readonly index: DeclarationIndex.Index
   readonly resolution: NameResolution.Resolution
+  readonly session: Semantic.Session
   readonly surfaces: ReadonlyMap<string, ModuleSurface.ModuleSurface>
 }
 
@@ -124,7 +127,23 @@ const analyzeHeaders = Effect.fn('Frontend.analyzeHeaders')(function* (
     () => 0,
     options,
   )
-  return Object.freeze({ index, resolution, surfaces })
+  const epoch = index.modules
+    .flatMap((module) => [
+      `module:${module.module}`,
+      ...module.members.map((member) =>
+        member.canonical._tag === 'Canonical'
+          ? `member:${member.canonical.id.module}.${member.canonical.id.name}`
+          : `member:${member.canonical._tag}`,
+      ),
+      ...module.publications.map(
+        (publication) =>
+          `publication:${publication.module}.${publication.original}->${publication.spelling}`,
+      ),
+    ])
+    .map((part) => `${part.length}:${part}`)
+    .join('')
+  const session = Semantic.makeSession(epoch, index, resolution)
+  return Object.freeze({ index, resolution, session, surfaces })
 })
 
 interface ElaboratedModules {
@@ -164,6 +183,7 @@ const elaborateModules = Effect.fn('Frontend.elaborateModules')(function* (
         headers: moduleHeaders,
         scope,
         index: headers.index,
+        session: headers.session,
         trace,
         ...(bodyQuery === undefined ? {} : { bodyQuery }),
       })
@@ -189,7 +209,7 @@ const analyzeSemantics = Effect.fn('Frontend.analyzeSemantics')(function* (
     readonly opaqueRealizations?: OpaqueRealization.Catalog
     readonly bodyQueries?: BodyQuery.BodyQuery
   },
-): Effect.fn.Return<Omit<FrontendFacts, 'resolution' | 'surfaces' | 'report'>> {
+): Effect.fn.Return<Omit<FrontendFacts, 'resolution' | 'session' | 'surfaces' | 'report'>> {
   const candidates =
     reuse === undefined
       ? new Map<string, ModuleSemantics.ModuleSemantics>()
@@ -366,6 +386,7 @@ const bootstrapFacts = Effect.fn('Frontend.bootstrapFacts')(function* (
         headers: { ...moduleHeaders, declarations: [], constants: [] },
         scope,
         index: headers.index,
+        session: headers.session,
       }),
     )
   }

@@ -19,13 +19,8 @@ const storedLayout = Effect.fnUntraced(function* (
 ) {
   const snapshot = yield* AnalysisFixture.retainingMain(name, ascii(source), target.id)
   assert.deepEqual(Analysis.diagnostics(snapshot), [])
-  const catalog = yield* Layout.catalog(
-    target,
-    snapshot.index,
-    snapshot.resolution.contexts,
-    snapshot.instances,
-  )
-  return yield* Layout.plan(catalog, snapshot.instances, snapshot.index)
+  const catalog = yield* Layout.computeTypes(target, snapshot.index, snapshot.resolution.contexts)
+  return yield* Layout.computeRuntime(catalog, snapshot.instances, snapshot.index)
 })
 
 const representedEntry = (plan: Layout.Plan): Layout.Entry =>
