@@ -9,6 +9,7 @@ import { assert, it } from '@effect/vitest'
 import * as Analysis from '@silklang/compiler/Analysis'
 import * as SourceFile from '@silklang/compiler/SourceFile'
 import * as SourceOrigin from '@silklang/compiler/SourceOrigin'
+import * as Source from '@silklang/compiler/Source'
 import * as SourceResolver from '@silklang/compiler/SourceResolver'
 import * as Stdlib from '@silklang/compiler/Stdlib'
 import * as WorkspaceInventory from '@silklang/compiler/WorkspaceInventory'
@@ -113,7 +114,7 @@ it.effect('resolves open-document overlays before rooted files', () =>
         ),
       ],
     ])
-    const overlaid = yield* SourceResolver.resolve('Util').pipe(
+    const overlaid = yield* Source.load('Util').pipe(
       Effect.provide(Workspace.resolver(join(root, 'src'), overlays)),
     )
     assert.isTrue(Option.isSome(overlaid))
@@ -125,7 +126,7 @@ it.effect('resolves open-document overlays before rooted files', () =>
       })
     }
 
-    const fromDisk = yield* SourceResolver.resolve('Main').pipe(
+    const fromDisk = yield* Source.load('Main').pipe(
       Effect.provide(Workspace.resolver(join(root, 'src'), overlays)),
     )
     assert.isTrue(Option.isSome(fromDisk))
@@ -182,7 +183,7 @@ it.effect('keeps editor analysis on frontend phases only', () =>
         'declaration-index',
         'name-resolution',
         'module-surface',
-        'body-queries',
+        'Semantic.checkBody',
         'semantic-invalidation',
         'elaboration',
         'ownership',

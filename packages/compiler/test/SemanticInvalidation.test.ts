@@ -45,7 +45,7 @@ const expectBodyChecks = (
   checked: number,
   reused: number,
 ): void => {
-  const counters = project.report.find((phase) => phase.phase === 'body-queries')?.counters
+  const counters = project.report.find((phase) => phase.phase === 'Semantic.checkBody')?.counters
   assert.strictEqual(counters?._tag, 'BodyQueryCounters')
   if (counters?._tag !== 'BodyQueryCounters') return
   assert.strictEqual(counters.checked, checked)

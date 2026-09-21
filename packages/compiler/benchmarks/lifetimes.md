@@ -27,7 +27,7 @@ are retained alongside every sample.
 
 ## Work attribution
 
-`body-queries` counts actual semantic body executions, semantic reuse/rebinding, ownership
+`Semantic.checkBody` counts actual semantic body executions, semantic reuse/rebinding, ownership
 executions/reuse, dependency comparisons/cache hits, and resolved recursive call components.
 These are current-revision counters, rather than module invalidation labels. Source syntax and
 header rebinding still do work when body check counts are zero.

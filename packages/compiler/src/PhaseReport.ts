@@ -109,7 +109,7 @@ export const measureInto = <A>(
 }
 
 /** Measures one Effect phase using the fiber clock. */
-export const measureEffect = Effect.fn('PhaseReport.measureEffect')(function* <A, E, R>(
+export const measureEffect = Effect.fnUntraced(function* <A, E, R>(
   phase: string,
   inputs: number,
   effect: Effect.Effect<A, E, R>,
@@ -137,7 +137,7 @@ export const measureEffect = Effect.fn('PhaseReport.measureEffect')(function* <A
 })
 
 /** Measures one Effect phase and appends its observation without duplicating timing policy. */
-export const measureEffectInto = Effect.fn('PhaseReport.measureEffectInto')(function* <A, E, R>(
+export const measureEffectInto = Effect.fnUntraced(function* <A, E, R>(
   report: Array<PhaseReport>,
   phase: string,
   inputs: number,

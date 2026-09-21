@@ -5,11 +5,11 @@ bytes, preserves lossless syntax and recovery facts, resolves a complete module 
 realizes valid programs through TIR, ownership, specialization, target layout, MIR, and LLVM
 backend emission.
 
-The package deliberately exposes one supported compilation surface: `Analysis`. Individual phase
-actors remain importable where their immutable data types are part of an answer, but tools should
-not assemble a second compiler by invoking phases directly. Reusable project discovery, file-backed
-source resolution, source-entry identity, target selection, and inspector projections also live
-here because the CLI, language server, and editor applications share them.
+`Analysis` is the supported end-to-end compilation surface. Phase-specific tools may also call the
+five Milestone A operations below; these are the same operations used by the compiler pipeline, not
+a second implementation. Reusable project discovery, file-backed source providers, source-entry
+identity, target selection, and inspector projections also live here because the CLI, language
+server, and editor applications share them.
 
 Every supported actor namespace at the package root has the same explicit subpath. Prefer the
 subpath when one actor is the dependency of a module; the root remains available for compact
@@ -44,6 +44,31 @@ pub fn main() -> i32 { return identity(42) }`),
 })
 ```
 
+## Milestone A operations
+
+The current low-level operation map is:
+
+| Operation             | Input                                                                                                   | Current result                                                                        |
+| --------------------- | ------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| `Source.load`         | canonical module identity plus the active `SourceResolver` provider                                     | `Option<ResolvedSource>` with immutable bytes and origin, or a typed resolver failure |
+| `Hir.lower`           | one identified `SourceFile` revision                                                                    | recovered `SyntaxFile` plus authored untyped HIR and its presentation                 |
+| `Preparation.prepare` | compilation request and `analysis` or `executable` intent                                               | the existing intent-specific sealed preparation bundle                                |
+| `Semantic.checkBody`  | authored HIR, module headers, resolution scope, declaration index and fact, plus an optional body query | `CheckedUnit { bodies, diagnostics }`, including hidden bodies                        |
+| `Evaluation.evaluate` | evaluation session, canonical application, and deterministic callback                                   | `ApplicationResult` (`Complete` or `Failed`) with key, cache status, and budget       |
+
+`Hir.lower` does not load a module, discover imports, run semantic analysis, or realize a target.
+Its returned syntax keeps lexer/parser recovery diagnostics for syntax-only tooling, while
+`authored.module` and `authored.presentation` are the source-independent HIR products. Semantic
+tooling available today remains on `Analysis`, `ProjectAnalysis`, `ModuleTooling`, and the inspector
+actors. A typed `Semantic.query` dispatcher and independently callable layout/MIR/emission/link
+requests are future Milestone B APIs, not aliases for the operations above.
+
+Phase reports and trace spans use these operation identities where they measure the corresponding
+work. `Semantic.checkBody.execute` and `.reuse`, and the `evaluation.branch` attribute on
+`Evaluation.evaluate`, distinguish fresh work from reuse. Module coordinators such as
+`Frontend.elaborateModules` remain separately visible; measurement helpers add reports without
+introducing wrapper spans.
+
 ## Compiler pipeline
 
 A realized analysis snapshot makes these deterministic artifacts available:
@@ -63,7 +88,7 @@ invoking the LLVM backend or toolchain.
 
 Native acceptance tests compare real process outcomes with independently pinned expectations.
 Native builds and WebAssembly builds both use deterministic LLVM bitcode and the pinned LLVM
-toolchain; compile-time execution remains isolated in `StaticEvaluation`.
+toolchain; compile-time execution remains isolated in `Evaluation`.
 
 `Driver.compile` owns artifact-producing builds. Before it resolves project imports, it validates
 the compiler, generated catalog, every packaged standard-library source, and the sealed intrinsic
@@ -122,9 +147,10 @@ general FFI, a package registry, or self-hosting.
 ## Source resolution and project analysis
 
 Compilation requests carry one explicit root `SourceFile`. Imports use canonical, extensionless,
-case-sensitive module identities relative to a compiler-provided source root. `SourceResolver` is
-an Effect service: browser and editor tools may provide `SourceResolver.memory`, while filesystem
-access belongs to the host boundary rather than the compiler core.
+case-sensitive module identities relative to a compiler-provided source root. `Source.load` is the
+typed operation and `SourceResolver` is its Effect service: browser and editor tools may provide
+`SourceResolver.memory`, while filesystem access belongs to the host boundary rather than the
+compiler core.
 
 `ProjectAnalysis` analyzes the union closure of synchronized roots once and returns immutable root
 views that share syntax, declaration, semantic, tooling, and diagnostic facts. Revising a project

@@ -94,7 +94,7 @@ SHA-256 SHALL be the initial digest. Content equality MUST NOT alone prove seman
 
 ### Requirement: Integration preserves one semantic pipeline and existing reuse
 
-The coordinated milestone SHALL lower all loaded arms locally, analyze authored HIR into one typed TIR
+The coordinated milestone SHALL lower all loaded arms locally through `Hir.lower`, analyze authored HIR into one typed TIR
 plus indexed semantic results, and delete superseded syntax-backed semantic and duplicate body paths.
 Formatting SHALL remain syntax-only. Existing dependency-sensitive editor reuse, including canonical
 signature equality under alpha-renaming, SHALL remain. Prepared bundles SHALL distinguish analysis
@@ -113,13 +113,17 @@ access. A1's foundation MUST NOT independently land as an unused competing pipel
 
 ### Requirement: Semantic reuse keys derive from authored content
 
-Every loaded module SHALL be lowered to its authored module and presentation once per parse and
-carried beside its syntax through the closure and elaboration inputs. Body-query reuse SHALL key
+Every loaded module SHALL pass its identified source revision through `Hir.lower` to obtain recovered
+syntax plus its authored module and presentation once per parse. Those products SHALL be carried
+through the closure and elaboration inputs. Body-query reuse SHALL key
 implementations by the canonical authored body, alpha-normalizing header lifetime binders to their
 declaration ordinal, and SHALL key scope sensitivity by the authored names spelled in the body; it
 MUST NOT tokenize or slice source to build a key. Hidden anonymous bodies SHALL take their
 snapshot-local declaration identity from their enclosing declaration and callable site, never from a
 byte offset. The typed executable representation is named TIR; authored HIR is the untyped input.
+Fresh construction and body-query reuse SHALL both pass through `Semantic.checkBody` and return the
+existing checked unit, including hidden bodies and diagnostics. Reuse MAY present current positions
+or ordinals without executing the checker.
 
 #### Scenario: Alpha-rename a lifetime
 

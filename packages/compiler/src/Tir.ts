@@ -14,7 +14,7 @@ import * as RowAlgebra from './RowAlgebra.js'
 import type * as Scalar from './Scalar.js'
 import type * as SourceSpan from './SourceSpan.js'
 import * as SourceSpanModule from './SourceSpan.js'
-import type * as StaticEvaluation from './StaticEvaluation.js'
+import type * as Evaluation from './Evaluation.js'
 import type * as StaticText from './StaticText.js'
 import * as StaticValue from './StaticValue.js'
 import * as Type from './Type.js'
@@ -644,7 +644,7 @@ type ExpressionNode =
       readonly _tag: 'StaticStringLiteral'
       readonly data: StaticText.Data
       /** Static-text provenance retained when a residual value is materialized as a literal. */
-      readonly textOrigin?: StaticEvaluation.TextOrigin
+      readonly textOrigin?: Evaluation.TextOrigin
       readonly type: Type.String
       readonly span: SourceSpan.SourceSpan
       readonly origin: Origin
@@ -724,10 +724,10 @@ type ExpressionNode =
       readonly evidence: ReadonlyArray<string>
       readonly arguments: ReadonlyArray<Expression>
       /** A rejection already reached while construction selected this call's application. */
-      readonly failure?: StaticEvaluation.StaticFailure
+      readonly failure?: Evaluation.StaticFailure
       /** Where the text this call returns was written, when construction already knows. */
       readonly text?: Location.Location
-      readonly textOrigin?: StaticEvaluation.TextOrigin
+      readonly textOrigin?: Evaluation.TextOrigin
       readonly type: DeclarationFacts.SemanticType
       readonly span: SourceSpan.SourceSpan
       readonly origin: Origin
@@ -1009,7 +1009,7 @@ type ExpressionNode =
       readonly symbolicConformances: ReadonlyArray<ConformanceProof.SymbolicConformanceSelection>
       readonly staticArguments: ReadonlyArray<StaticValue.Value>
       /** Caller-authored origins aligned with static arguments, excluded from instance identity. */
-      readonly staticArgumentOrigins?: ReadonlyArray<StaticEvaluation.TextOrigin | undefined>
+      readonly staticArgumentOrigins?: ReadonlyArray<Evaluation.TextOrigin | undefined>
       readonly arguments: ReadonlyArray<Expression>
       readonly loanEnds: ReadonlyArray<BorrowId>
       /** Direct argument loans deliberately retained by a returned lexical view. */
@@ -1099,7 +1099,7 @@ type ExpressionNode =
       readonly symbolicConformances: ReadonlyArray<ConformanceProof.SymbolicConformanceSelection>
       readonly staticArguments: ReadonlyArray<StaticValue.Value>
       /** Caller-authored origins aligned with static arguments, excluded from instance identity. */
-      readonly staticArgumentOrigins?: ReadonlyArray<StaticEvaluation.TextOrigin | undefined>
+      readonly staticArgumentOrigins?: ReadonlyArray<Evaluation.TextOrigin | undefined>
       readonly arguments: ReadonlyArray<Expression>
       readonly loanEnds: ReadonlyArray<BorrowId>
       readonly type: Type.Effect
@@ -1115,7 +1115,7 @@ type ExpressionNode =
       readonly typeArguments: ReadonlyArray<Type.GenericArgument>
       readonly staticArguments: ReadonlyArray<StaticValue.Value>
       /** Caller-authored origins aligned with static arguments, excluded from instance identity. */
-      readonly staticArgumentOrigins?: ReadonlyArray<StaticEvaluation.TextOrigin | undefined>
+      readonly staticArgumentOrigins?: ReadonlyArray<Evaluation.TextOrigin | undefined>
       readonly arguments: ReadonlyArray<Expression>
       readonly loanEnds: ReadonlyArray<BorrowId>
       readonly type: Type.Effect

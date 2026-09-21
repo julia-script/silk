@@ -1,6 +1,7 @@
 import type * as AuthoredHir from './AuthoredHir.js'
 import * as AuthoredIdentity from './AuthoredIdentity.js'
 import * as AuthoredLowering from './AuthoredLowering.js'
+import * as CompilerTrace from './CompilerTrace.js'
 import type * as DeclarationFacts from './DeclarationFacts.js'
 import type * as DeclarationIndex from './DeclarationIndex.js'
 import * as Elaboration from './Elaboration.js'
@@ -520,6 +521,7 @@ export const check = (
   scope: NameResolution.ModuleScope,
   declaration: DeclarationFacts.DeclarationFact,
   compute: () => Built,
+  trace: CompilerTrace.CompilerTrace = CompilerTrace.none,
 ): Elaboration.CheckedUnit => {
   const key = memberKey(declaration)
   const prior = self.previous.get(key)
@@ -535,58 +537,60 @@ export const check = (
     prior.validity.scope === scopeKey &&
     prior.validity.resolution === self.resolution &&
     validateDependencies(self, prior.validity.observed)
-  let unit: Elaboration.CheckedUnit
-  let consumed: ReadonlyArray<Observation>
-  let calls: ReadonlyArray<string>
-  let ownership: Entry['ownership']
-  if (valid && prior !== undefined) {
-    self.work.reused += 1
-    // Declaration and member facts are rebuilt every revision, so their object identity never
-    // survives one; only the authored lowering is shared, and only for a byte-identical source.
-    // A shared authored declaration therefore witnesses that this body kept its own positions, and
-    // a shared lowering behind every consumed member witnesses the same for its inputs. Otherwise
-    // the body is the same and only its presentation is stale.
-    const unchanged =
-      prior.authoredDeclaration === declared &&
-      prior.validity.observed.every((dependency) => {
-        const module = dependencyModule(self, dependency.key)
-        return module !== undefined && self.sharedModules.get(module) === true
-      })
-    unit = unchanged
-      ? prior.unit
-      : present(prior.unit, renumberingOf(prior.index, self), context, declaration)
-    if (!unchanged) self.work.presented += 1
-    for (const body of unit.bodies)
-      self.reuse.set(body.results.lifetimes ?? body.results, { prior, moved: !unchanged })
-    consumed = prior.validity.observed
-    calls = prior.calls
-    ownership = new Map(prior.ownership)
-  } else {
-    self.work.checked += 1
-    const built = compute()
-    unit = built.unit
-    consumed = dependencies(self, built)
-    calls = callsOf(self, built)
-    ownership = new Map()
-  }
-  self.entries.set(key, {
-    declaration,
-    authoredDeclaration: declared,
-    context,
-    index: self.index,
-    validity: {
-      header: signature,
-      body: bodyKey,
-      scope: scopeKey,
-      resolution: self.resolution,
-      observed: consumed,
-    },
-    unit,
-    calls,
-    ownership,
+  return trace(`Semantic.checkBody.${valid && prior !== undefined ? 'reuse' : 'execute'}`, () => {
+    let unit: Elaboration.CheckedUnit
+    let consumed: ReadonlyArray<Observation>
+    let calls: ReadonlyArray<string>
+    let ownership: Entry['ownership']
+    if (valid && prior !== undefined) {
+      self.work.reused += 1
+      // Declaration and member facts are rebuilt every revision, so their object identity never
+      // survives one; only the authored lowering is shared, and only for a byte-identical source.
+      // A shared authored declaration therefore witnesses that this body kept its own positions, and
+      // a shared lowering behind every consumed member witnesses the same for its inputs. Otherwise
+      // the body is the same and only its presentation is stale.
+      const unchanged =
+        prior.authoredDeclaration === declared &&
+        prior.validity.observed.every((dependency) => {
+          const module = dependencyModule(self, dependency.key)
+          return module !== undefined && self.sharedModules.get(module) === true
+        })
+      unit = unchanged
+        ? prior.unit
+        : present(prior.unit, renumberingOf(prior.index, self), context, declaration)
+      if (!unchanged) self.work.presented += 1
+      for (const body of unit.bodies)
+        self.reuse.set(body.results.lifetimes ?? body.results, { prior, moved: !unchanged })
+      consumed = prior.validity.observed
+      calls = prior.calls
+      ownership = new Map(prior.ownership)
+    } else {
+      self.work.checked += 1
+      const built = compute()
+      unit = built.unit
+      consumed = dependencies(self, built)
+      calls = callsOf(self, built)
+      ownership = new Map()
+    }
+    self.entries.set(key, {
+      declaration,
+      authoredDeclaration: declared,
+      context,
+      index: self.index,
+      validity: {
+        header: signature,
+        body: bodyKey,
+        scope: scopeKey,
+        resolution: self.resolution,
+        observed: consumed,
+      },
+      unit,
+      calls,
+      ownership,
+    })
+    for (const body of unit.bodies) self.parents.set(body.results.lifetimes ?? body.results, key)
+    return unit
   })
-  for (const body of unit.bodies) self.parents.set(body.results.lifetimes ?? body.results, key)
-  return unit
 }
 
 const spanKey = (span: SourceSpan.SourceSpan): string => `${span.start}:${span.end}`

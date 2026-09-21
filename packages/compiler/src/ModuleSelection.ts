@@ -15,7 +15,8 @@ import * as Residualization from './Residualization.js'
 import * as SemanticContext from './SemanticContext.js'
 import type * as SourceResolver from './SourceResolver.js'
 import type * as SourceSpan from './SourceSpan.js'
-import * as StaticEvaluation from './StaticEvaluation.js'
+import * as Evaluation from './Evaluation.js'
+import * as CompilerTrace from './CompilerTrace.js'
 
 /** One completed profile's declaration choices and their full authored provenance. */
 export interface ModuleSelection {
@@ -276,6 +277,7 @@ const availabilityCycles = (
 const coordinator = (
   closure: ModuleClosure.Facts,
   completion: ProfileBootstrap.Completion,
+  trace: CompilerTrace.CompilerTrace,
 ): Residualization.Coordinator => {
   const { index, resolution } = NameResolution.analyze(closure)
   const results = new Map<string, Elaboration.Result>()
@@ -301,6 +303,7 @@ const coordinator = (
     index,
     undefined,
     completion.values,
+    trace,
   )
 }
 
@@ -317,6 +320,7 @@ export const select = Effect.fn('ModuleSelection.select')(function* (
   ModuleClosure.ModuleClosureError,
   SourceResolver.SourceResolver
 > {
+  const trace = yield* CompilerTrace.capture()
   const decisions = new Map<string, Map<string, boolean>>()
   const bootstrapModules = new Set(initial.modules.map((module) => module.name))
   const dependencies: Array<string> = []
@@ -328,7 +332,7 @@ export const select = Effect.fn('ModuleSelection.select')(function* (
       pending(module, decisions.get(module.name) ?? new Map()),
     )
     if (conditions.length === 0) break
-    const evaluation = coordinator(closure, completion)
+    const evaluation = coordinator(closure, completion, trace)
     const failures: Array<Diagnostic.Diagnostic> = []
     const failedConditions: Array<{
       readonly condition: Condition
@@ -366,7 +370,7 @@ export const select = Effect.fn('ModuleSelection.select')(function* (
         if (result.outcome._tag === 'Failed')
           failures.push(
             Diagnostic.publish(
-              StaticEvaluation.diagnostic(result.outcome.failure, completion.profile.target.id),
+              Evaluation.diagnostic(result.outcome.failure, completion.profile.target.id),
               registry,
             ),
           )

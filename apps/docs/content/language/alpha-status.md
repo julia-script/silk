@@ -55,7 +55,7 @@ every target. Reachable target-specific intrinsics are checked before artifact e
 
 LLVM is the current runtime implementation family: it emits native executables and WebAssembly.
 The shared native acceptance corpus pins target-neutral runtime behavior, and focused
-LLVM-to-Wasm tests cover WebAssembly contracts. Compile-time `StaticEvaluation` is a separate
+LLVM-to-Wasm tests cover WebAssembly contracts. Compile-time `Evaluation` is a separate
 analysis phase and never serves as a runtime execution path.
 
 ## Important alpha boundaries

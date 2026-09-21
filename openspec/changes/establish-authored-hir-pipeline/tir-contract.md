@@ -194,7 +194,7 @@ authored vocabulary: `Authored(anchor)` or `Synthetic(anchor, role, occurrence)`
 | Consumer                                                               | Complete input                                                                                       |
 | ---------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
 | Analysis (`ExpressionAnalysis`, `StatementAnalysis`, `CallResolution`) | authored declaration, `SemanticContext`, declaration index, scope, `BodyBuilder`, evaluation session |
-| `StaticEvaluation`                                                     | typed nodes, a read-only `BodyView` (locals, evidence, causes), an `Environment`, the session        |
+| `Evaluation`                                                           | typed nodes, a read-only `BodyView` (locals, evidence, causes), an `Environment`, the session        |
 | `Residualization`, `ModuleSelection`                                   | a `Request` for `Specialize(application)`; they hold the returned artifact and nothing else          |
 | `LifetimeFlow`, `BodyControlFlow`, `TypeOutlives`                      | `function`, `results.lifetimes`                                                                      |
 | `Ownership`, `CleanupPlan`, `ResidualOwnership`, `SuspensionOwnership` | `function`, `results.evidence`, declaration index (headers by id)                                    |
@@ -611,7 +611,7 @@ except where stated.
    `BodyControlFlow`, `TypeOutlives`, `Ownership`, `OpaqueRealization`, `Instances`, then
    occurrences, completion, type hints, inspector, LSP and docgen callers. After this step only
    analysis and the evaluator read facts.
-5. **The evaluator onto nodes.** `StaticEvaluation` interprets typed nodes through a read-only view,
+5. **The evaluator onto nodes.** `Evaluation` interprets typed nodes through a read-only view,
    with an environment and a session; outcomes keyed by `EvaluationKey`, separate in-progress sets for
    construction and evaluation; `Residualization` and `ModuleSelection` request
    `Specialize` artifacts. This works before step 6 because `TirLowering` is already compositional

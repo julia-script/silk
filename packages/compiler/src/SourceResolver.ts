@@ -79,24 +79,6 @@ export class SourceResolver extends Context.Service<
   }
 >()('@silklang/compiler/SourceResolver') {}
 
-/** Resolves one validated canonical module through the active source resolver. */
-export const resolve = Effect.fn('SourceResolver.resolve')(function* (
-  module: string,
-): Effect.fn.Return<Option.Option<ResolvedSource>, SourceResolverError, SourceResolver> {
-  if (!isCanonicalModule(module)) {
-    return yield* new SourceResolverError({
-      operation: 'SourceResolver.resolve',
-      module,
-      message: `Source module identity ${module} is not canonical`,
-      reason: { _tag: 'InvalidModuleIdentity' },
-    })
-  }
-  const resolver = yield* SourceResolver
-  return Option.map(yield* resolver.resolve(module), (source) =>
-    resolved(source.bytes, source.origin),
-  )
-})
-
 /** Resolves one reserved module through the active toolchain source policy. */
 export const resolveStandardLibrary = Effect.fn('SourceResolver.resolveStandardLibrary')(function* (
   module: string,

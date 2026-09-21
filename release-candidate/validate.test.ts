@@ -518,7 +518,6 @@ test('the compiler release candidate exposes only its LLVM compiler actors', () 
       './AuthoredEncoding',
       './AuthoredHir',
       './AuthoredIdentity',
-      './AuthoredLowering',
       './AuthoredModule',
       './AuthoredPool',
       './AuthoredPresentation',
@@ -542,6 +541,7 @@ test('the compiler release candidate exposes only its LLVM compiler actors', () 
       './DocBlock',
       './Driver',
       './Elaboration',
+      './Evaluation',
       './ExecutableProperty',
       './ExecutionAffinity',
       './ExecutionBoundary',
@@ -556,6 +556,7 @@ test('the compiler release candidate exposes only its LLVM compiler actors', () 
       './HeapObservation',
       './HelperCapability',
       './HelperSource',
+      './Hir',
       './ImportPath',
       './ImportPlan',
       './ImportUsage',
@@ -619,10 +620,12 @@ test('the compiler release candidate exposes only its LLVM compiler actors', () 
       './RowAlgebra',
       './RuntimeComponent',
       './Scalar',
+      './Semantic',
       './SemanticContext',
       './SemanticDisplay',
       './SemanticInvalidation',
       './SemanticOccurrence',
+      './Source',
       './SourceAction',
       './SourceCatalog',
       './SourceEntry',
@@ -630,7 +633,6 @@ test('the compiler release candidate exposes only its LLVM compiler actors', () 
       './SourceOrigin',
       './SourceResolver',
       './SourceSpan',
-      './StaticEvaluation',
       './StaticValue',
       './Stdlib',
       './SuspensionMode',
@@ -650,6 +652,7 @@ test('the compiler release candidate exposes only its LLVM compiler actors', () 
       './WorkspaceInventory',
     ])
     for (const removed of [
+      './AuthoredLowering',
       './BackendRegistry',
       './BootstrapEvaluation',
       './ChildProcess',
@@ -659,10 +662,11 @@ test('the compiler release candidate exposes only its LLVM compiler actors', () 
       './RandomHost',
       './StandardInput',
       './StandardStreams',
+      './StaticEvaluation',
       './WasmBackend',
     ])
       expect(deepPaths).not.toContain(removed)
-    expect(deepPaths).toContain('./StaticEvaluation')
+    expect(deepPaths).toContain('./Evaluation')
     expect(deepPaths).toContain('./LlvmBackend')
     expect(existsSync(resolve(packedRoot, 'dist/index.js'))).toBe(true)
     expect(existsSync(resolve(packedRoot, 'dist/index.d.ts'))).toBe(true)
@@ -763,7 +767,9 @@ test('the compiler release candidate exposes only its LLVM compiler actors', () 
     const api = JSON.parse(inspected)
     expect(api.root).not.toContain('BootstrapEvaluation')
     expect(api.root).not.toContain('WasmBackend')
-    expect(api.root).toContain('StaticEvaluation')
+    expect(api.root).toContain('Evaluation')
+    expect(api.root).not.toContain('AuthoredLowering')
+    expect(api.root).not.toContain('StaticEvaluation')
     expect(api.deep).toHaveLength(deepPaths.length)
     for (const [index, exports] of api.deep.entries()) {
       const path = deepPaths[index]

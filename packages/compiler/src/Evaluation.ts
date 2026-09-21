@@ -1,4 +1,5 @@
 import type * as CompilationProfile from './CompilationProfile.js'
+import * as CompilerTrace from './CompilerTrace.js'
 import type * as AuthoredHir from './AuthoredHir.js'
 import type * as DeclarationFacts from './DeclarationFacts.js'
 import * as Diagnostic from './Diagnostic.js'
@@ -416,7 +417,7 @@ const expectedLiteral = (
   expected === undefined || expected === actual
     ? undefined
     : primitiveFailure(
-        'StaticEvaluation.evaluateLiteral',
+        'Evaluation.evaluateLiteral',
         `expected ${expected}, received ${actual} literal`,
         span,
         trace,
@@ -445,7 +446,7 @@ export const evaluateLiteral = (
     const selected = expected === undefined ? Scalar.defaultInteger.spelling : expected
     if (!Scalar.isIntegerSpelling(selected))
       return primitiveFailure(
-        'StaticEvaluation.evaluateLiteral',
+        'Evaluation.evaluateLiteral',
         `expected ${selected}, received integer literal`,
         span,
         trace,
@@ -453,7 +454,7 @@ export const evaluateLiteral = (
     return admittedValue(
       environment,
       { _tag: 'IntegerValue', type: selected, value: node.value },
-      'StaticEvaluation.evaluateLiteral',
+      'Evaluation.evaluateLiteral',
       span,
       trace,
     )
@@ -462,7 +463,7 @@ export const evaluateLiteral = (
     const selected = expected === undefined ? Scalar.defaultFloat.spelling : expected
     if (!Scalar.isFloatSpelling(selected))
       return primitiveFailure(
-        'StaticEvaluation.evaluateLiteral',
+        'Evaluation.evaluateLiteral',
         `expected ${selected}, received floating literal`,
         span,
         trace,
@@ -474,7 +475,7 @@ export const evaluateLiteral = (
     )
     return encoded === undefined
       ? primitiveFailure(
-          'StaticEvaluation.evaluateLiteral',
+          'Evaluation.evaluateLiteral',
           'floating literal cannot be encoded',
           span,
           trace,
@@ -482,7 +483,7 @@ export const evaluateLiteral = (
       : admittedValue(
           environment,
           { _tag: 'FloatValue', type: selected, bits: encoded.bits },
-          'StaticEvaluation.evaluateLiteral',
+          'Evaluation.evaluateLiteral',
           span,
           trace,
         )
@@ -496,7 +497,7 @@ export const evaluateLiteral = (
       Scalar.isIntegerSpelling(selected)
         ? { _tag: 'IntegerValue', type: selected, value: BigInt(node.scalar) }
         : { _tag: 'CharacterValue', value: node.scalar },
-      'StaticEvaluation.evaluateLiteral',
+      'Evaluation.evaluateLiteral',
       span,
       trace,
     )
@@ -510,13 +511,13 @@ export const evaluateLiteral = (
         _tag: 'TextValue',
         bytes: Object.freeze([...new TextEncoder().encode(context.textOf(node.value))]),
       },
-      'StaticEvaluation.evaluateLiteral',
+      'Evaluation.evaluateLiteral',
       span,
       trace,
     )
   }
   return primitiveFailure(
-    'StaticEvaluation.evaluateLiteral',
+    'Evaluation.evaluateLiteral',
     `${node._tag} is not a static literal`,
     span,
     trace,
@@ -543,7 +544,7 @@ export const evaluatePrimitive = (
   const arity = operation === 'Negate' || operation === 'Not' ? 1 : 2
   if (operands.length !== arity || left === undefined)
     return primitiveFailure(
-      'StaticEvaluation.evaluatePrimitive',
+      'Evaluation.evaluatePrimitive',
       `${operation} expects ${arity} operand${arity === 1 ? '' : 's'}`,
       span,
       trace,
@@ -551,7 +552,7 @@ export const evaluatePrimitive = (
   if ((operation === 'Equals' || operation === 'NotEquals') && right !== undefined) {
     if (!samePrimitiveType(left, right))
       return primitiveFailure(
-        'StaticEvaluation.evaluatePrimitive',
+        'Evaluation.evaluatePrimitive',
         'equality operands must have the same primitive type',
         span,
         trace,
@@ -579,7 +580,7 @@ export const evaluatePrimitive = (
       return complete(StaticValue.boolean(operation === 'Equals' ? equal : !equal))
     }
     return primitiveFailure(
-      'StaticEvaluation.evaluatePrimitive',
+      'Evaluation.evaluatePrimitive',
       `${left._tag} does not expose primitive equality`,
       span,
       trace,
@@ -593,7 +594,7 @@ export const evaluatePrimitive = (
   if (comparison && right !== undefined) {
     if (!samePrimitiveType(left, right))
       return primitiveFailure(
-        'StaticEvaluation.evaluatePrimitive',
+        'Evaluation.evaluatePrimitive',
         'comparison operands must have the same primitive type',
         span,
         trace,
@@ -627,7 +628,7 @@ export const evaluatePrimitive = (
       const scalar = Scalar.find(left.type)
       if (scalar?.category !== 'Integer' || scalar.signedness !== 'Signed')
         return primitiveFailure(
-          'StaticEvaluation.evaluatePrimitive',
+          'Evaluation.evaluatePrimitive',
           `Negate is unavailable for ${left.type}`,
           span,
           trace,
@@ -635,24 +636,24 @@ export const evaluatePrimitive = (
       return admittedValue(
         environment,
         { _tag: 'IntegerValue', type: left.type, value: -left.value },
-        'StaticEvaluation.evaluatePrimitive',
+        'Evaluation.evaluatePrimitive',
         span,
         trace,
       )
     }
     if (right?._tag !== 'IntegerValue' || right.type !== left.type)
       return primitiveFailure(
-        'StaticEvaluation.evaluatePrimitive',
+        'Evaluation.evaluatePrimitive',
         'integer arithmetic operands must have the same type',
         span,
         trace,
       )
     if ((operation === 'Divide' || operation === 'Remainder') && right.value === 0n)
-      return primitiveFailure('StaticEvaluation.evaluatePrimitive', 'division by zero', span, trace)
+      return primitiveFailure('Evaluation.evaluatePrimitive', 'division by zero', span, trace)
     const scalar = Scalar.find(left.type)
     if (scalar?.category !== 'Integer')
       return primitiveFailure(
-        'StaticEvaluation.evaluatePrimitive',
+        'Evaluation.evaluatePrimitive',
         `unknown integer scalar ${left.type}`,
         span,
         trace,
@@ -664,12 +665,7 @@ export const evaluatePrimitive = (
       left.value === range.minimum &&
       right.value === -1n
     )
-      return primitiveFailure(
-        'StaticEvaluation.evaluatePrimitive',
-        'arithmetic overflow',
-        span,
-        trace,
-      )
+      return primitiveFailure('Evaluation.evaluatePrimitive', 'arithmetic overflow', span, trace)
     let value: bigint
     switch (operation) {
       case 'Add':
@@ -689,7 +685,7 @@ export const evaluatePrimitive = (
         break
       default:
         return primitiveFailure(
-          'StaticEvaluation.evaluatePrimitive',
+          'Evaluation.evaluatePrimitive',
           `${operation} is unavailable for ${left.type}`,
           span,
           trace,
@@ -698,7 +694,7 @@ export const evaluatePrimitive = (
     return admittedValue(
       environment,
       { _tag: 'IntegerValue', type: left.type, value },
-      'StaticEvaluation.evaluatePrimitive',
+      'Evaluation.evaluatePrimitive',
       span,
       trace,
     )
@@ -711,7 +707,7 @@ export const evaluatePrimitive = (
     else {
       if (right?._tag !== 'FloatValue' || right.type !== left.type)
         return primitiveFailure(
-          'StaticEvaluation.evaluatePrimitive',
+          'Evaluation.evaluatePrimitive',
           'floating arithmetic operands must have the same type',
           span,
           trace,
@@ -735,7 +731,7 @@ export const evaluatePrimitive = (
           break
         default:
           return primitiveFailure(
-            'StaticEvaluation.evaluatePrimitive',
+            'Evaluation.evaluatePrimitive',
             `${operation} is unavailable for ${left.type}`,
             span,
             trace,
@@ -746,13 +742,13 @@ export const evaluatePrimitive = (
     return admittedValue(
       environment,
       { _tag: 'FloatValue', type: left.type, bits: encoded.bits },
-      'StaticEvaluation.evaluatePrimitive',
+      'Evaluation.evaluatePrimitive',
       span,
       trace,
     )
   }
   return primitiveFailure(
-    'StaticEvaluation.evaluatePrimitive',
+    'Evaluation.evaluatePrimitive',
     `${operation} is unavailable for ${left._tag}`,
     span,
     trace,
@@ -772,7 +768,7 @@ export const constructEnum = (
   admittedValue(
     environment,
     { _tag: 'EnumValue', type, member, representation, discriminant },
-    'StaticEvaluation.constructEnum',
+    'Evaluation.constructEnum',
     span,
     trace,
   )
@@ -787,7 +783,7 @@ export const evaluateEnumEquality = (
 ): Outcome<StaticValue.Value> => {
   if (left.type.module !== right.type.module || left.type.name !== right.type.name)
     return primitiveFailure(
-      'StaticEvaluation.evaluateEnumEquality',
+      'Evaluation.evaluateEnumEquality',
       'enum equality operands must have the same nominal type',
       span,
       trace,
@@ -805,7 +801,7 @@ const staticTextFailure = (
   const offset =
     byteOffset >= 0n && byteOffset <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(byteOffset) : 0
   return primitiveFailure(
-    'StaticEvaluation.inspectStaticText',
+    'Evaluation.inspectStaticText',
     detail,
     literal,
     appendTrace(trace, staticTextFrame(literal, offset)),
@@ -822,7 +818,7 @@ export const staticTextByteLength = (
   admittedValue(
     environment,
     { _tag: 'IntegerValue', type: 'usize', value: BigInt(text.bytes.length) },
-    'StaticEvaluation.inspectStaticText',
+    'Evaluation.inspectStaticText',
     literal,
     trace,
   )
@@ -848,7 +844,7 @@ export const staticTextByteAt = (
     : admittedValue(
         environment,
         { _tag: 'IntegerValue', type: 'u8', value: BigInt(byte) },
-        'StaticEvaluation.inspectStaticText',
+        'Evaluation.inspectStaticText',
         literal,
         trace,
       )
@@ -871,7 +867,7 @@ export const staticTextConcat = (
         ? {}
         : { origin: concatTextOrigin(left.origin, left.bytes.length, right.origin) }),
     },
-    'StaticEvaluation.staticTextConcat',
+    'Evaluation.staticTextConcat',
     literal,
     trace,
   )
@@ -901,7 +897,7 @@ export const staticTextSlice = (
         ? {}
         : { origin: sliceTextOrigin(text.origin, Number(start), Number(end)) }),
     },
-    'StaticEvaluation.inspectStaticText',
+    'Evaluation.inspectStaticText',
     literal,
     appendTrace(trace, staticTextFrame(literal, Number(start))),
   )
@@ -922,7 +918,7 @@ export const constructAggregate = (
   const outcome = admittedValue(
     environment,
     { _tag: 'AggregateValue', identity, fields },
-    'StaticEvaluation.constructAggregate',
+    'Evaluation.constructAggregate',
     span,
     trace,
   )
@@ -1031,7 +1027,7 @@ export const profileFact = (
     }
   }
   return failed(
-    phaseViolation('StaticEvaluation.profileFact', 'unknown profile fact selector', span, trace),
+    phaseViolation('Evaluation.profileFact', 'unknown profile fact selector', span, trace),
   )
 }
 
@@ -1130,7 +1126,7 @@ const unavailable = (
   context: NodeContext,
   detail: string,
 ): Outcome<StaticValue.Value> =>
-  primitiveFailure('StaticEvaluation.evaluate', detail, at(node), context.trace)
+  primitiveFailure('Evaluation.evaluate', detail, at(node), context.trace)
 
 const evaluateAll = (
   nodes: ReadonlyArray<Tir.Expression>,
@@ -1332,7 +1328,7 @@ const bindPattern = (
     if (value === undefined)
       return failed(
         phaseViolation(
-          'StaticEvaluation.bindPattern',
+          'Evaluation.bindPattern',
           'selected pattern binding has no static payload',
           at(binding),
           context.trace,
@@ -1344,7 +1340,7 @@ const bindPattern = (
 }
 
 /** Evaluates a node at a static application boundary, where no lexical transfer may escape. */
-export const evaluate = (
+export const evaluateNode = (
   node: Tir.Expression,
   context: NodeContext,
 ): Outcome<StaticValue.Value> => {
@@ -1419,7 +1415,7 @@ const evaluateIntrinsic = (
     )
   }
   const admit = (value: unknown, name: string) =>
-    admittedValue(context.environment, value, `StaticEvaluation.${name}`, at(node), context.trace)
+    admittedValue(context.environment, value, `Evaluation.${name}`, at(node), context.trace)
   if (operation === 'reflectTypeKind') {
     const descriptor = arguments_.at(0)
     if (descriptor?._tag !== 'TypeDescriptorValue')
@@ -1578,7 +1574,7 @@ const evaluateExpression = (
   context: NodeContext,
 ): ExecutionOutcome<StaticValue.Value> => {
   const admit = (value: unknown) =>
-    admittedValue(context.environment, value, 'StaticEvaluation.evaluate', at(node), context.trace)
+    admittedValue(context.environment, value, 'Evaluation.evaluate', at(node), context.trace)
   switch (node._tag) {
     case 'UnitLiteral':
       return complete(StaticValue.unit())
@@ -1879,7 +1875,7 @@ const evaluateStaticIndex = (
   )
     return failed(
       phaseViolation(
-        'StaticEvaluation.evaluate',
+        'Evaluation.evaluate',
         'array projection requires an in-bounds static index',
         at(node),
         context.trace,
@@ -1922,7 +1918,7 @@ const replaceStaticPlace = (
   if (current?._tag !== 'AggregateValue' || field === undefined)
     return failed(
       phaseViolation(
-        'StaticEvaluation.evaluateStatements',
+        'Evaluation.evaluateStatements',
         'assignment projection has no admitted static storage',
         span,
         context.trace,
@@ -1980,7 +1976,7 @@ const evaluateStatementSequence = (
   const notBool = (condition: Tir.Expression, what: string) =>
     failed(
       phaseViolation(
-        'StaticEvaluation.evaluateStatements',
+        'Evaluation.evaluateStatements',
         `${what} condition is not bool`,
         at(condition),
         context.trace,
@@ -2055,7 +2051,7 @@ const evaluateStatementSequence = (
         if (statement.place._tag !== 'WritePlace' || key === undefined || !values.has(key))
           return failed(
             phaseViolation(
-              'StaticEvaluation.evaluateStatements',
+              'Evaluation.evaluateStatements',
               'assignment does not replace one static local',
               at(statement),
               context.trace,
@@ -2087,7 +2083,7 @@ const evaluateStatementSequence = (
       default:
         return failed(
           phaseViolation(
-            'StaticEvaluation.evaluateStatements',
+            'Evaluation.evaluateStatements',
             `${statement._tag} is not admitted in a static function`,
             at(statement),
             context.trace,
@@ -2108,7 +2104,7 @@ export const evaluateStatements = (
   if (result.control._tag === 'Return') return complete(result.control.value)
   return failed(
     phaseViolation(
-      'StaticEvaluation.evaluateStatements',
+      'Evaluation.evaluateStatements',
       'loop transfer escaped its lexical loop',
       result.span,
       context.trace,
@@ -2193,13 +2189,14 @@ export interface CacheEntry<A> {
 interface MutableState<A> {
   readonly cache: Map<string, CacheState<A>>
   readonly budget: MutableBudget
+  readonly trace: CompilerTrace.CompilerTrace
 }
 
-const stateSymbol: unique symbol = Symbol('StaticEvaluation.state')
+const stateSymbol: unique symbol = Symbol('Evaluation.state')
 
 /** One target-scoped static-evaluation session with hidden cache and accounting state. */
 export interface Evaluation<A> {
-  readonly _tag: 'StaticEvaluation'
+  readonly _tag: 'Evaluation'
   readonly environment: TargetEnvironment
   readonly limits: Limits
   readonly [stateSymbol]: MutableState<A>
@@ -2210,13 +2207,15 @@ export const make = <A>(
   compilation: CompilationProfile.Initial | CompilationProfile.CompilationProfile,
   policy: Limits = defaultLimits,
   sourceIdentity = '',
+  trace: CompilerTrace.CompilerTrace = CompilerTrace.none,
 ): Evaluation<A> =>
   Object.freeze({
-    _tag: 'StaticEvaluation',
+    _tag: 'Evaluation',
     environment: targetEnvironment(compilation, sourceIdentity),
     limits: limits(policy),
     [stateSymbol]: {
       cache: new Map(),
+      trace,
       budget: {
         steps: 0,
         callDepth: 0,
@@ -2446,82 +2445,101 @@ const evaluateAt = <A>(
 ): ApplicationResult<A> => {
   const key = applicationKey(self.environment, application)
   const state = self[stateSymbol]
-  // A request made while nothing is being evaluated is a root: it gets the whole allowance.
-  // Everything it asks for draws from what it has left.
-  const root = state.budget.callDepth === 0
-  if (root) {
-    state.budget.steps = 0
-    state.budget.maximumCallDepth = 0
-    state.budget.retainedValueBytes = 0
-    state.budget.residualNodes = 0
-    delete state.budget.failure
-  }
-  const trace = appendTrace(parentTrace, applicationFrame(self.environment, application))
-  const cached = state.cache.get(key)
-  if (cached?._tag === 'Complete' || cached?._tag === 'Failed') {
-    // Cache warmth never changes what is accepted: a hit costs what the evaluation cost.
-    const unpaid = cached.cost === undefined ? undefined : chargeCost(self, cached.cost, trace)
-    return unpaid === undefined
-      ? resultOf(self, key, cached, true)
-      : resultOf(self, key, Object.freeze({ _tag: 'Failed', failure: unpaid }), false)
-  }
-  if (cached?._tag === 'Pending') {
-    const failure: Cycle = Object.freeze({
-      _tag: 'Cycle',
-      declaration: Object.freeze({ ...application.declaration }),
-      span: application.span,
-      trace: frozenTrace(trace),
-    })
-    return resultOf(self, key, Object.freeze({ _tag: 'Failed', failure }), false)
-  }
+  const existing = state.cache.get(key)
+  let branch: 'reuse' | 'cycle' | 'execute'
+  if (existing?._tag === 'Complete' || existing?._tag === 'Failed') branch = 'reuse'
+  else if (existing?._tag === 'Pending') branch = 'cycle'
+  else branch = 'execute'
+  return state.trace(
+    'Evaluation.evaluate',
+    () => {
+      // A request made while nothing is being evaluated is a root: it gets the whole allowance.
+      // Everything it asks for draws from what it has left.
+      const root = state.budget.callDepth === 0
+      if (root) {
+        state.budget.steps = 0
+        state.budget.maximumCallDepth = 0
+        state.budget.retainedValueBytes = 0
+        state.budget.residualNodes = 0
+        delete state.budget.failure
+      }
+      const trace = appendTrace(parentTrace, applicationFrame(self.environment, application))
+      const cached = state.cache.get(key)
+      if (cached?._tag === 'Complete' || cached?._tag === 'Failed') {
+        // Cache warmth never changes what is accepted: a hit costs what the evaluation cost.
+        const unpaid = cached.cost === undefined ? undefined : chargeCost(self, cached.cost, trace)
+        return unpaid === undefined
+          ? resultOf(self, key, cached, true)
+          : resultOf(self, key, Object.freeze({ _tag: 'Failed', failure: unpaid }), false)
+      }
+      if (cached?._tag === 'Pending') {
+        const failure: Cycle = Object.freeze({
+          _tag: 'Cycle',
+          declaration: Object.freeze({ ...application.declaration }),
+          span: application.span,
+          trace: frozenTrace(trace),
+        })
+        return resultOf(self, key, Object.freeze({ _tag: 'Failed', failure }), false)
+      }
 
-  state.cache.set(key, Object.freeze({ _tag: 'Pending', trace }))
-  const before = { ...state.budget }
-  const depthFailure = enterCall(self, trace)
-  let outcome: Outcome<A>
-  if (depthFailure === undefined) {
-    // Depth is measured from this entry, so the recorded cost does not depend on the caller.
-    state.budget.maximumCallDepth = state.budget.callDepth
-    try {
-      outcome = callback(contextOf(self, application, trace))
-    } catch (defect) {
-      state.cache.delete(key)
-      throw defect
-    } finally {
-      leaveCall(self)
-    }
-  } else outcome = failed<A>(depthFailure)
-  const finalOutcome =
-    state.budget.failure === undefined ? outcome : failed<A>(state.budget.failure)
-  const cost: Cost = Object.freeze({
-    steps: state.budget.steps - before.steps,
-    callDepth: state.budget.maximumCallDepth - before.callDepth,
-    retainedValueBytes: state.budget.retainedValueBytes - before.retainedValueBytes,
-    residualNodes: state.budget.residualNodes - before.residualNodes,
-  })
-  state.budget.maximumCallDepth = Math.max(before.maximumCallDepth, state.budget.maximumCallDepth)
-  const completedState: Complete<A> | Failed =
-    finalOutcome._tag === 'Complete'
-      ? Object.freeze({ _tag: 'Complete', value: finalOutcome.value, cost })
-      : Object.freeze({ _tag: 'Failed', failure: finalOutcome.failure, cost })
-  // Running out of a remainder is a fact about what the callers spent, not about this evaluation:
-  // nothing is recorded under its key, and the exhaustion surfaces as the root's outcome. A root
-  // that exhausts the whole allowance is a fact about its key, which includes the limits.
-  if (!root && completedState._tag === 'Failed' && isLimit(completedState.failure))
-    state.cache.delete(key)
-  else state.cache.set(key, completedState)
-  return resultOf(self, key, completedState, false)
+      state.cache.set(key, Object.freeze({ _tag: 'Pending', trace }))
+      const before = { ...state.budget }
+      const depthFailure = enterCall(self, trace)
+      let outcome: Outcome<A>
+      if (depthFailure === undefined) {
+        // Depth is measured from this entry, so the recorded cost does not depend on the caller.
+        state.budget.maximumCallDepth = state.budget.callDepth
+        try {
+          outcome = callback(contextOf(self, application, trace))
+        } catch (defect) {
+          state.cache.delete(key)
+          throw defect
+        } finally {
+          leaveCall(self)
+        }
+      } else outcome = failed<A>(depthFailure)
+      const finalOutcome =
+        state.budget.failure === undefined ? outcome : failed<A>(state.budget.failure)
+      const cost: Cost = Object.freeze({
+        steps: state.budget.steps - before.steps,
+        callDepth: state.budget.maximumCallDepth - before.callDepth,
+        retainedValueBytes: state.budget.retainedValueBytes - before.retainedValueBytes,
+        residualNodes: state.budget.residualNodes - before.residualNodes,
+      })
+      state.budget.maximumCallDepth = Math.max(
+        before.maximumCallDepth,
+        state.budget.maximumCallDepth,
+      )
+      const completedState: Complete<A> | Failed =
+        finalOutcome._tag === 'Complete'
+          ? Object.freeze({ _tag: 'Complete', value: finalOutcome.value, cost })
+          : Object.freeze({ _tag: 'Failed', failure: finalOutcome.failure, cost })
+      // Running out of a remainder is a fact about what the callers spent, not about this evaluation:
+      // nothing is recorded under its key, and the exhaustion surfaces as the root's outcome. A root
+      // that exhausts the whole allowance is a fact about its key, which includes the limits.
+      if (!root && completedState._tag === 'Failed' && isLimit(completedState.failure))
+        state.cache.delete(key)
+      else state.cache.set(key, completedState)
+      return resultOf(self, key, completedState, false)
+    },
+    {
+      'evaluation.branch': branch,
+      'evaluation.reuse': branch === 'reuse',
+      module: application.declaration.module,
+      declaration: application.declaration.name,
+    },
+  )
 }
 
 /** Evaluates or reuses one canonical target application through the supplied deterministic policy. */
-export const evaluateApplication = <A>(
+export const evaluate = <A>(
   self: Evaluation<A>,
   application: Application,
   callback: EvaluationCallback<A>,
 ): ApplicationResult<A> => evaluateAt(self, application, callback, Object.freeze([]))
 
 /** Evaluates a nested canonical application while retaining its source-level parent trace. */
-export const evaluateApplicationFrom = <A>(
+export const evaluateFrom = <A>(
   self: Evaluation<A>,
   application: Application,
   parentTrace: Trace,

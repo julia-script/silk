@@ -62,10 +62,6 @@
       "types": "./dist/AuthoredIdentity.d.ts",
       "import": "./dist/AuthoredIdentity.js"
     },
-    "./AuthoredLowering": {
-      "types": "./dist/AuthoredLowering.d.ts",
-      "import": "./dist/AuthoredLowering.js"
-    },
     "./AuthoredModule": {
       "types": "./dist/AuthoredModule.d.ts",
       "import": "./dist/AuthoredModule.js"
@@ -157,6 +153,10 @@
     "./Elaboration": {
       "types": "./dist/Elaboration.d.ts",
       "import": "./dist/Elaboration.js"
+    },
+    "./Evaluation": {
+      "types": "./dist/Evaluation.d.ts",
+      "import": "./dist/Evaluation.js"
     },
     "./ExecutableProperty": {
       "types": "./dist/ExecutableProperty.d.ts",
@@ -406,6 +406,10 @@
       "types": "./dist/PhaseReport.d.ts",
       "import": "./dist/PhaseReport.js"
     },
+    "./Hir": {
+      "types": "./dist/Hir.d.ts",
+      "import": "./dist/Hir.js"
+    },
     "./PlatformCatalog": {
       "types": "./dist/PlatformCatalog.d.ts",
       "import": "./dist/PlatformCatalog.js"
@@ -425,6 +429,10 @@
     "./SemanticContext": {
       "types": "./dist/SemanticContext.d.ts",
       "import": "./dist/SemanticContext.js"
+    },
+    "./Semantic": {
+      "types": "./dist/Semantic.d.ts",
+      "import": "./dist/Semantic.js"
     },
     "./ProfileBootstrap": {
       "types": "./dist/ProfileBootstrap.d.ts",
@@ -482,6 +490,10 @@
       "types": "./dist/SourceAction.d.ts",
       "import": "./dist/SourceAction.js"
     },
+    "./Source": {
+      "types": "./dist/Source.d.ts",
+      "import": "./dist/Source.js"
+    },
     "./SourceCatalog": {
       "types": "./dist/SourceCatalog.d.ts",
       "import": "./dist/SourceCatalog.js"
@@ -505,10 +517,6 @@
     "./SourceSpan": {
       "types": "./dist/SourceSpan.d.ts",
       "import": "./dist/SourceSpan.js"
-    },
-    "./StaticEvaluation": {
-      "types": "./dist/StaticEvaluation.d.ts",
-      "import": "./dist/StaticEvaluation.js"
     },
     "./StaticValue": {
       "types": "./dist/StaticValue.d.ts",

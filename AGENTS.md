@@ -232,7 +232,7 @@ The compiler suite is the critical path of `pnpm check`; every test pays for the
 pipelines it runs. Prove each claim at the cheapest tier that can falsify it.
 
 - Prove parser, resolution, typing, ownership, Effect, target-selection, and diagnostic claims with
-  structured analysis assertions. Prove compile-time execution only through `StaticEvaluation`.
+  structured analysis assertions. Prove compile-time execution only through `Evaluation`.
 - Put target-neutral runtime behavior in the shared native acceptance corpus. Use LLVM IR, object,
   symbol, relocation, disassembly, or separately compiled C fixtures for lowering and ABI claims,
   and add an LLVM-to-Wasm leg only for intended WebAssembly behavior.

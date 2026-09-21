@@ -30,3 +30,9 @@ Format: date · symptom · fix · project. Check here first when tooling is slow
   `node_modules` tried to replace the modules directory and aborted without a TTY · Invoke the
   primary worktree's `node_modules/.bin/vitest` directly from the comparison package directory ·
   compiler
+- 2026-09-21 · The `silk-work` workflow's `superset mcp` transport was unavailable on PATH while
+  claiming JUL-209 · Use the connected Linear MCP tools directly and preserve the same admission,
+  evidence and reread gates · silk
+- 2026-09-21 · Compiler typecheck produced hundreds of misleading missing `@silklang/llvm/*`
+  errors in a fresh worktree · Build `@silklang/llvm` once before the focused compiler typecheck ·
+  compiler
