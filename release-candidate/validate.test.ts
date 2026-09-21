@@ -641,6 +641,7 @@ test('the compiler release candidate exposes only its LLVM compiler actors', () 
       './SyntaxTree',
       './Target',
       './TargetSelector',
+      './TestDiscovery',
       './Tir',
       './Token',
       './ToolchainIntegrity',
@@ -1055,6 +1056,7 @@ test('the CLI release candidate installs with its project-first command surface'
       './ProjectOptions',
       './Report',
       './RunCommand',
+      './TestCommand',
       './Workflow',
     ])
     expect(manifest.exports).not.toHaveProperty('./CompileCommand')
