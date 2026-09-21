@@ -331,9 +331,9 @@ export const lowerProgram = (
   layout: Layout.Plan,
   index: DeclarationIndex.Index,
   opaqueRealizations: OpaqueRealization.Catalog,
+  registry: SemanticContext.Registry,
   trace: CompilerTrace.CompilerTrace = CompilerTrace.none,
 ): Mir.Module => {
-  const registry = discovery.registry
   const declaredForeignStatics = trace('Lower.collectForeignStatics', () => {
     const declaredForeignStatics = Object.freeze(
       index.modules.flatMap((module) =>
@@ -780,3 +780,4 @@ export const lowerProgram = (
     functions: withLocalSharedDropPlans(layout, functions),
   })
 }
+import type * as SemanticContext from './SemanticContext.js'

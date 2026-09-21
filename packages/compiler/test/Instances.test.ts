@@ -19,6 +19,7 @@ import * as Lifetime from '../src/Lifetime.js'
 import * as Tir from '../src/Tir.js'
 import * as FunctionIndex from '../src/internal/FunctionIndex.js'
 import * as Instances from '../src/Instances.js'
+import * as SemanticContext from '../src/SemanticContext.js'
 import * as LlvmBackend from '../src/LlvmBackend.js'
 import * as Match from '../src/Match.js'
 import * as Mir from '../src/Mir.js'
@@ -391,13 +392,14 @@ pub fn main() -> i32 { return run forward(relay()) }`)
         { owner: 'relay', target: 'make' },
       ],
     )
+    const registry = SemanticContext.fromModules(result.results.values())
     for (const call of discovery.calls) {
       const owner = discovery.instances.find(
         (instance) => Instances.keyText(instance.key) === Instances.keyText(call.owner),
       )
       assert.notStrictEqual(owner, undefined)
       if (owner === undefined) continue
-      const ownerSpan = discovery.registry.spanOf(owner.function.declaration.anchor)
+      const ownerSpan = registry.spanOf(owner.function.declaration.anchor)
       assert.strictEqual(call.span.sourceId, ownerSpan.sourceId)
       assert.isAtLeast(call.span.start, ownerSpan.start)
       assert.isAtMost(call.span.end, ownerSpan.end)

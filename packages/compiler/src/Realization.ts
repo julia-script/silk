@@ -12,6 +12,8 @@ import * as CompilationProfile from './CompilationProfile.js'
 import * as ConfigurationError from './ConfigurationError.js'
 import * as ProfileBootstrap from './ProfileBootstrap.js'
 import type * as DeclarationIndex from './DeclarationIndex.js'
+import type * as Elaboration from './Elaboration.js'
+import type * as NameResolution from './NameResolution.js'
 
 /**
  * Every diagnostic family judged against reachable concrete instances, collected once so that
@@ -20,18 +22,54 @@ import type * as DeclarationIndex from './DeclarationIndex.js'
 const instanceViolationDiagnostics = (
   self: Frontend,
   discovery: Instances.Discovery,
+  registry: SemanticContext.Registry,
 ): ReadonlyArray<Diagnostic.Diagnostic> => {
   return Diagnostic.merge(
-    InstanceDiagnostics.violationDiagnostics(discovery),
-    InstanceDiagnostics.copyDropViolations(discovery, self.index),
+    InstanceDiagnostics.violationDiagnostics(discovery, registry),
+    InstanceDiagnostics.copyDropViolations(discovery, self.index, registry),
     InstanceDiagnostics.requirementBindingViolations(discovery, self.index),
     InstanceDiagnostics.unlowerableWitnessViolations(discovery, self.index),
     InstanceDiagnostics.storedCallableViolations(discovery, self.index),
     InstanceDiagnostics.storedEffectViolations(discovery, self.index),
-    ExecutableProperty.violationDiagnostics(discovery, self.index),
+    ExecutableProperty.violationDiagnostics(discovery, self.index, registry),
     DiagnosticObservation.violationDiagnostics(discovery),
   )
 }
+
+/** Explicit immutable inputs for constructing the reachable concrete instance graph. */
+export interface InstantiationInput {
+  readonly rootModule: string
+  readonly results: ReadonlyMap<string, Elaboration.Result>
+  readonly index: DeclarationIndex.Index
+  readonly completion: ProfileBootstrap.Completion
+  readonly resolution: NameResolution.Resolution
+  readonly composition: ArtifactComposition.Resolved
+}
+
+const instantiateWithTrace = (
+  input: InstantiationInput,
+  trace: CompilerTrace.CompilerTrace,
+): Instances.Discovery => {
+  const registry = SemanticContext.fromModules(input.results.values())
+  return Instances.discover(
+    input.rootModule,
+    input.results,
+    input.index,
+    registry,
+    input.completion,
+    input.resolution,
+    input.composition,
+    trace,
+  )
+}
+
+/** Constructs the portable reachable instance graph without retaining a frontend or presentation registry. */
+export const instantiate = Effect.fn('Realization.instantiate')(function* (
+  input: InstantiationInput,
+): Effect.fn.Return<Instances.Discovery> {
+  const trace = yield* CompilerTrace.capture()
+  return instantiateWithTrace(input, trace)
+})
 
 /** Rejects a pointer-sized exported static that cannot be represented on the selected target. */
 const foreignStaticTargetDiagnostics = (
@@ -84,15 +122,16 @@ const discoverInstances = Effect.fn('Realization.discoverInstances')(function* (
       completion === undefined ||
       self.composition === undefined ||
       (!prepareForEmission && specializationInvalid)
-        ? Instances.invalid(self.closure.rootModule, registry)
-        : Instances.discover(
-            self.closure.rootModule,
-            self.results,
-            self.index,
-            registry,
-            completion,
-            self.resolution,
-            self.composition,
+        ? Instances.invalid(self.closure.rootModule)
+        : instantiateWithTrace(
+            {
+              rootModule: self.closure.rootModule,
+              results: self.results,
+              index: self.index,
+              completion,
+              resolution: self.resolution,
+              composition: self.composition,
+            },
             trace,
           ),
     (value) => value.instances.length,
@@ -113,6 +152,7 @@ const collectInstanceDiagnostics = Effect.fn('Realization.collectInstanceDiagnos
     self: Frontend,
     instances: Instances.Discovery,
     foreignStaticDiagnostics: ReadonlyArray<Diagnostic.Diagnostic>,
+    registry: SemanticContext.Registry,
   ) =>
     Effect.sync(() => {
       const declarationDiagnosticKeys = new Set(
@@ -130,7 +170,7 @@ const collectInstanceDiagnostics = Effect.fn('Realization.collectInstanceDiagnos
       return Diagnostic.merge(
         self.diagnostics,
         residualizationDiagnostics,
-        instanceViolationDiagnostics(self, instances),
+        instanceViolationDiagnostics(self, instances, registry),
         foreignStaticDiagnostics,
       )
     }),
@@ -143,6 +183,7 @@ const buildTargetLayout = Effect.fn('Realization.buildTargetLayout')(function* (
   targetSelection: Target.Selection,
   analysisUnavailable: AnalysisUnavailable | undefined,
   prepareForEmission: boolean,
+  registry: SemanticContext.Registry,
 ) {
   const selection = targetSelection
   if (selection._tag === 'Unavailable')
@@ -165,7 +206,7 @@ const buildTargetLayout = Effect.fn('Realization.buildTargetLayout')(function* (
   const catalog = yield* Layout.catalog(
     selection.target,
     index,
-    instances.registry,
+    registry,
     instances,
     OpaqueRealization.catalogOf(self),
   )
@@ -185,8 +226,15 @@ const lowerMir = Effect.fn('Realization.lowerMir')(function* (
   layout: Layout.Plan,
   profile: CompilationProfile.CompilationProfile | undefined,
   options: Options,
+  registry: SemanticContext.Registry,
 ) {
-  const program = yield* lowerProgram(instances, layout, index, OpaqueRealization.catalogOf(self))
+  const program = yield* lowerProgram(
+    instances,
+    layout,
+    index,
+    OpaqueRealization.catalogOf(self),
+    registry,
+  )
   const provisional = yield* buildProvisionalMir(instances, layout, index)
   return yield* finalizeMir(
     program,
@@ -203,9 +251,10 @@ const lowerProgram = Effect.fn('Realization.lowerProgram')(function* (
   layout: Layout.Plan,
   index: DeclarationIndex.Index,
   opaqueRealizations: OpaqueRealization.Catalog,
+  registry: SemanticContext.Registry,
 ) {
   const trace = yield* CompilerTrace.capture()
-  return Lower.lowerProgram(instances, layout, index, opaqueRealizations, trace)
+  return Lower.lowerProgram(instances, layout, index, opaqueRealizations, registry, trace)
 })
 
 const buildProvisionalMir = Effect.fn('Realization.buildProvisionalMir')(
@@ -299,6 +348,7 @@ const discoverAndLowerEffect = Effect.fn('Realization.discoverAndLower')(functio
     self,
     instances,
     foreignStaticDiagnostics,
+    registry,
   )
   if (prepareForEmission && Diagnostic.hasErrors(baseDiagnostics))
     return Object.freeze({
@@ -354,6 +404,7 @@ const discoverAndLowerEffect = Effect.fn('Realization.discoverAndLower')(functio
       targetSelection,
       analysisUnavailable,
       prepareForEmission,
+      registry,
     ),
     (value) => (value._tag === 'Available' ? value.layout.entries.length : 0),
     (value) => (value._tag === 'Available' ? value.layout.diagnostics.length : 0),
@@ -429,6 +480,7 @@ const discoverAndLowerEffect = Effect.fn('Realization.discoverAndLower')(functio
             targetLayout.layout,
             completion?.profile,
             options,
+            registry,
           ),
           (value) => value.program?.functions.length ?? 0,
           (value) => value.diagnostics.length,

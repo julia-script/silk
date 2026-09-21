@@ -12,6 +12,7 @@ import * as MirVerification from '../src/MirVerification.js'
 import * as OpaqueRealization from '../src/OpaqueRealization.js'
 import * as Target from '../src/Target.js'
 import * as Type from '../src/Type.js'
+import * as SemanticContext from '../src/SemanticContext.js'
 import { unreachable } from './support/raise.js'
 
 const ascii = (value: string): Uint8Array =>
@@ -36,6 +37,7 @@ const lowerStored = Effect.fnUntraced(function* (name: string, source: string) {
     layout,
     snapshot.index,
     OpaqueRealization.catalogOf(snapshot),
+    SemanticContext.fromModules(snapshot.results.values()),
   )
   return Object.freeze({ catalog, module })
 })

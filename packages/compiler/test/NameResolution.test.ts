@@ -232,9 +232,7 @@ it.effect('keeps TIR, MIR, diagnostics, and instances deterministic across fresh
       MirEncoding.encode(Analysis.loweredMir(forward)),
       MirEncoding.encode(Analysis.loweredMir(reverse)),
     )
-    // The span registry is a lookup over each snapshot's own presentation, not discovered data.
-    const discovered = ({ registry: _registry, ...rest }: typeof forward.instances) => rest
-    assert.deepEqual(discovered(forward.instances), discovered(reverse.instances))
+    assert.deepEqual(forward.instances, reverse.instances)
     assert.deepEqual(forward.diagnostics, reverse.diagnostics)
     assert.deepEqual(
       [...forward.results.values()].map((result) => Tir.encode(result.tir)),
