@@ -1,9 +1,14 @@
 import * as Effect from 'effect/Effect'
+import * as Schema from 'effect/Schema'
 import { it } from '@effect/vitest'
 import { expect } from 'vitest'
 import * as Analysis from '../src/Analysis.js'
 import type { ViewContext } from '../src/InspectorRegistry.js'
 import { views } from '../src/InspectorRegistry.js'
+
+const UnknownFromJsonString = Schema.fromJsonString(Schema.Unknown)
+const encodeJson = Schema.encodeSync(UnknownFromJsonString)
+const decodeJson = Schema.decodeUnknownSync(UnknownFromJsonString)
 
 /**
  * Every view's result must survive structured serialization unchanged: the language server
@@ -33,7 +38,7 @@ pub fn main() -> i32 { let pair = make() return pair.right }`
 
     for (const view of views) {
       const result = view.project(context)
-      expect(JSON.parse(JSON.stringify(result)), view.id).toEqual(result)
+      expect(decodeJson(encodeJson(result)), view.id).toEqual(result)
       for (const row of result.rows) {
         if (row.span !== undefined) {
           // Closure/index/resolution rows may point into stdlib modules, so the assertion is

@@ -390,9 +390,9 @@ it.effect(
       )
       assert.deepEqual([...observed].sort(), [...catalog].sort())
     }),
-  // Measured near the 60s floor while the full parallel gate saturates the host; the timeout
-  // is headroom for contention, not a performance assertion.
-  180_000,
+  // This sweep takes about 45s in isolation but can exceed 180s while all four compiler shards
+  // saturate the CI host; the timeout is contention headroom, not a performance assertion.
+  300_000,
 )
 
 it.effect('keeps every intrinsic identifiable and presentable in rejected calls', () =>
