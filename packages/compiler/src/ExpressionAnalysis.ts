@@ -1516,6 +1516,16 @@ export const intrinsicStruct = (
     ])
   } else if (Type.equals(type, Type.invalidAlignment)) {
     fieldTypes = Object.freeze([Object.freeze(['alignment', 'usize'] as const)])
+  } else if (Type.equals(type, Type.testInfo)) {
+    fieldTypes = Object.freeze([
+      Object.freeze(['identity', Type.string(Lifetime.staticLifetime)] as const),
+      Object.freeze(['name', Type.string(Lifetime.staticLifetime)] as const),
+      Object.freeze(['module', Type.string(Lifetime.staticLifetime)] as const),
+      Object.freeze(['path', Type.string(Lifetime.staticLifetime)] as const),
+      Object.freeze(['line', 'usize'] as const),
+      Object.freeze(['column', 'usize'] as const),
+      Object.freeze(['fingerprint', Type.string(Lifetime.staticLifetime)] as const),
+    ])
   } else {
     fieldTypes = Object.freeze([])
   }
@@ -1531,7 +1541,9 @@ export const intrinsicStruct = (
       }),
     }),
     visibility:
-      Type.equals(type, Type.layout) || Type.equals(type, Type.invalidAlignment)
+      Type.equals(type, Type.layout) ||
+      Type.equals(type, Type.invalidAlignment) ||
+      Type.equals(type, Type.testInfo)
         ? 'Public'
         : 'Private',
     layout: Object.freeze({ _tag: 'Silk' }),
@@ -5065,7 +5077,8 @@ export const intrinsicContractReference = (
   if (
     operation.rule._tag !== 'ContractRule' &&
     operation.rule._tag !== 'StaticOnlyRule' &&
-    operation.rule._tag !== 'MixedFieldProjectionRule'
+    operation.rule._tag !== 'MixedFieldProjectionRule' &&
+    operation.rule._tag !== 'MixedTestFunctionRule'
   )
     throw new RangeError('intrinsic contract reference requires a contract operation')
   const declared = operation.rule.contract
@@ -5534,6 +5547,122 @@ const mixedFieldProjection = (
   })
 }
 
+const mixedTestFunction = (
+  context: SemanticContext.SemanticContext,
+  call: AuthoredHir.Expression,
+  operation: Intrinsic.Operation,
+  reference: Extract<CallReferenceFact, { readonly _tag: 'ResolvedIntrinsicContract' }>,
+  argumentsResult: ArgumentsResult,
+  typeArguments: CallTypeArgumentsResult,
+  analyzed: ReturnType<typeof analyzeCallContract>,
+  resolution: ResolutionContext,
+): ExpressionResult => {
+  if (operation.rule._tag !== 'MixedTestFunctionRule')
+    throw new RangeError('test callable projection requires its sealed intrinsic rule')
+  const commonDiagnostics = [
+    ...argumentsResult.diagnostics,
+    ...typeArguments.diagnostics,
+    ...analyzed.diagnostics,
+  ]
+  const descriptorArgument = argumentsResult.facts.at(operation.rule.staticDescriptorParameter)
+  const unavailableFact = (): ExpressionDecision =>
+    Object.freeze({
+      _tag: 'Call',
+      reference,
+      path: referencePath(context, call),
+      typeArguments: typeArguments.facts,
+      arguments: argumentsResult.facts,
+      mappings: analyzed.mappings,
+      contract: analyzed.fact,
+      type: unavailableExpressionType,
+      anchor: call.anchor,
+    })
+  if (descriptorArgument === undefined || analyzed.fact._tag !== 'Compatible')
+    return Object.freeze({
+      fact: unavailableFact(),
+      diagnostics: Object.freeze(commonDiagnostics),
+      type: undefined,
+    })
+  if (resolution.staticContext === undefined) {
+    const deferred = isDeferredStaticExpression(descriptorArgument.expression, resolution.builder)
+    const diagnostic = deferred
+      ? undefined
+      : Diagnostic.staticPhaseViolation(
+          'Intrinsic.testFunction descriptor',
+          'unselected-target',
+          Object.freeze([]),
+          Location.at(descriptorArgument.anchor),
+        )
+    return Object.freeze({
+      fact: unavailableFact(),
+      diagnostics: Object.freeze([
+        ...commonDiagnostics,
+        ...(diagnostic === undefined ? [] : [diagnostic]),
+      ]),
+      type: undefined,
+    })
+  }
+  const evaluated = evaluateStatic(
+    descriptorArgument.expression,
+    resolution.staticContext,
+    resolution,
+  )
+  const descriptor =
+    evaluated._tag === 'Complete' && evaluated.value._tag === 'TestDescriptorValue'
+      ? evaluated.value
+      : undefined
+  const target =
+    descriptor === undefined
+      ? undefined
+      : DeclarationFacts.byCanonical(resolution.index, descriptor.declaration)
+  const catalog = resolution.staticContext.testCatalog
+  const issued =
+    descriptor !== undefined &&
+    catalog?.identity === descriptor.authorization &&
+    catalog.entries.some(
+      (entry) => entry.declaration === target && Type.equals(entry.callable, descriptor.callable),
+    )
+  if (
+    descriptor === undefined ||
+    target?._tag !== 'FunctionDeclaration' ||
+    !target.test ||
+    !issued
+  ) {
+    const diagnostic =
+      evaluated._tag === 'Failed'
+        ? Evaluation.diagnostic(evaluated.failure, resolution.staticContext.environment.target)
+        : Diagnostic.staticPhaseViolation(
+            'Intrinsic.testFunction descriptor',
+            resolution.staticContext.environment.target,
+            Object.freeze([]),
+            Location.at(descriptorArgument.anchor),
+          )
+    return Object.freeze({
+      fact: unavailableFact(),
+      diagnostics: Object.freeze([...commonDiagnostics, diagnostic]),
+      type: undefined,
+    })
+  }
+  const fact: ExpressionDecision = Object.freeze({
+    _tag: 'FunctionItem',
+    reference: Object.freeze({
+      _tag: 'Resolved',
+      spelling: `${descriptor.declaration.module}.${descriptor.declaration.name}`,
+      anchor: call.anchor,
+      declaration: target,
+    }),
+    path: referencePath(context, call),
+    typeArguments: Object.freeze([]),
+    type: availableExpressionType(descriptor.callable),
+    anchor: call.anchor,
+  })
+  return Object.freeze({
+    fact,
+    diagnostics: Object.freeze(commonDiagnostics),
+    type: descriptor.callable,
+  })
+}
+
 export const finishIntrinsicContractCall = (
   context: SemanticContext.SemanticContext,
   call: AuthoredHir.Expression,
@@ -5547,7 +5676,8 @@ export const finishIntrinsicContractCall = (
   if (
     operation.rule._tag !== 'ContractRule' &&
     operation.rule._tag !== 'StaticOnlyRule' &&
-    operation.rule._tag !== 'MixedFieldProjectionRule'
+    operation.rule._tag !== 'MixedFieldProjectionRule' &&
+    operation.rule._tag !== 'MixedTestFunctionRule'
   )
     throw new RangeError('intrinsic contract finisher received a non-contract operation')
   const reference = intrinsicContractReference(operation, operationToken)
@@ -5584,9 +5714,30 @@ export const finishIntrinsicContractCall = (
       resolution,
       caller,
     )
+  if (operation.rule._tag === 'MixedTestFunctionRule')
+    return mixedTestFunction(
+      context,
+      call,
+      operation,
+      reference,
+      argumentsResult,
+      typeArguments,
+      analyzed,
+      resolution,
+    )
   if (operation.rule._tag === 'StaticOnlyRule') {
+    if (operation.spelling === 'testInfo')
+      resolution.generatedAggregates?.set(
+        aggregateKey(Type.testInfo),
+        intrinsicStruct(Type.testInfo, call, call.anchor),
+      )
+    // The phase-only catalog value may seed a deferred `static for` before target selection. The
+    // statement analyzer preserves that loop without lowering the value; its expanded analysis
+    // evaluates this call again with the sealed discovery catalog.
     const phaseDiagnostic =
-      caller.phase === 'Static' || resolution.staticContext !== undefined
+      caller.phase === 'Static' ||
+      resolution.staticContext !== undefined ||
+      (operation.spelling === 'tests' && Type.isStaticPhaseOnly(operation.rule.contract.result))
         ? undefined
         : Diagnostic.staticPhaseViolation(
             `Intrinsic.${operation.spelling}`,
@@ -5599,23 +5750,40 @@ export const finishIntrinsicContractCall = (
       analyzed.fact._tag === 'Compatible' && phaseDiagnostic === undefined
         ? availableExpressionType(result)
         : unavailableExpressionType
+    const fact: Extract<ExpressionDecision, { readonly _tag: 'Call' }> = Object.freeze({
+      _tag: 'Call',
+      reference,
+      path: referencePath(context, call),
+      typeArguments: typeArguments.facts,
+      arguments: argumentsResult.facts,
+      mappings: analyzed.mappings,
+      contract: analyzed.fact,
+      type,
+      anchor: call.anchor,
+    })
+    const staticResult =
+      resolution.staticContext !== undefined &&
+      resolution.deferStaticCalls !== true &&
+      type._tag === 'Available'
+        ? evaluateStatic(fact, resolution.staticContext, resolution)
+        : undefined
+    const staticDiagnostics =
+      staticResult?._tag === 'Failed' && resolution.staticContext !== undefined
+        ? [Evaluation.diagnostic(staticResult.failure, resolution.staticContext.environment.target)]
+        : []
+    let resolvedFact: ExpressionDecision = fact
+    if (staticResult?._tag === 'Complete')
+      resolvedFact = Object.freeze({ ...fact, staticValue: staticResult.value })
+    else if (staticResult?._tag === 'Failed')
+      resolvedFact = Object.freeze({ ...fact, staticFailure: staticResult.failure })
     return Object.freeze({
-      fact: Object.freeze({
-        _tag: 'Call',
-        reference,
-        path: referencePath(context, call),
-        typeArguments: typeArguments.facts,
-        arguments: argumentsResult.facts,
-        mappings: analyzed.mappings,
-        contract: analyzed.fact,
-        type,
-        anchor: call.anchor,
-      }),
+      fact: resolvedFact,
       diagnostics: Object.freeze([
         ...argumentsResult.diagnostics,
         ...typeArguments.diagnostics,
         ...analyzed.diagnostics,
         ...(phaseDiagnostic === undefined ? [] : [phaseDiagnostic]),
+        ...staticDiagnostics,
       ]),
       type: type._tag === 'Available' ? type.type : undefined,
     })
@@ -5783,7 +5951,8 @@ export function analyzeBuiltinCall(
   if (
     (operation?.rule._tag === 'ContractRule' ||
       operation?.rule._tag === 'StaticOnlyRule' ||
-      operation?.rule._tag === 'MixedFieldProjectionRule') &&
+      operation?.rule._tag === 'MixedFieldProjectionRule' ||
+      operation?.rule._tag === 'MixedTestFunctionRule') &&
     isSectionArity(operation.rule.contract.parameters.length, argumentsResult.facts.length)
   )
     return finishCallableSection(
@@ -5798,7 +5967,8 @@ export function analyzeBuiltinCall(
   if (
     operation?.rule._tag === 'ContractRule' ||
     operation?.rule._tag === 'StaticOnlyRule' ||
-    operation?.rule._tag === 'MixedFieldProjectionRule'
+    operation?.rule._tag === 'MixedFieldProjectionRule' ||
+    operation?.rule._tag === 'MixedTestFunctionRule'
   )
     return finishIntrinsicContractCall(
       context,
@@ -11436,6 +11606,7 @@ export interface StaticAnalysisContext {
   readonly lookup: Evaluation.NodeContext['lookup']
   readonly call: Evaluation.NodeContext['call']
   readonly reflect: Evaluation.NodeContext['reflect']
+  readonly testCatalog?: import('./TestDiscovery.js').Catalog
   readonly constant?: NonNullable<Evaluation.NodeContext['constant']>
   /** Charges one fully analyzed iteration before any of its residual facts are published. */
   readonly chargeStaticIteration?: (

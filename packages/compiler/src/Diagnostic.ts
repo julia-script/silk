@@ -437,6 +437,8 @@ export const ambiguousLifetimeElisionCode = 'SEM0210' as const
 export const invalidLifetimeBinderCode = 'SEM0211' as const
 export const unsatisfiedLifetimeBoundCode = 'SEM0212' as const
 export const unsatisfiedTypeOutlivesCode = 'SEM0213' as const
+/** A `test` qualifier marks a function outside the finite executable test contract. */
+export const invalidTestDeclarationCode = 'SEM0218' as const
 /** A borrowed value is used beyond the validity of its referent. */
 export const expiredLifetimeCode = 'OWN0019' as const
 /** An owner cannot be preserved by the suspension frame at this run boundary. */
@@ -478,6 +480,7 @@ export type Code =
   | typeof invalidLifetimeBinderCode
   | typeof unsatisfiedLifetimeBoundCode
   | typeof unsatisfiedTypeOutlivesCode
+  | typeof invalidTestDeclarationCode
   | typeof expiredLifetimeCode
   | typeof invalidSuspensionOwnershipCode
   | typeof unsupportedBytesCode
@@ -912,6 +915,7 @@ export type Reason<L = SourceSpan.SourceSpan> =
       readonly provider: string
     }
   | { readonly _tag: 'InvalidServiceDeclaration'; readonly detail: string }
+  | { readonly _tag: 'InvalidTestDeclaration'; readonly detail: string }
   | {
       readonly _tag: 'InvalidMutableParameter'
       readonly context: 'BorrowedView' | 'Contract'
@@ -5142,6 +5146,17 @@ export const invalidServiceDeclaration = <L>(detail: string, span: L): Diagnosti
     severity: 'error',
     message: `Invalid service declaration: ${detail}`,
     reason: Object.freeze({ _tag: 'InvalidServiceDeclaration' as const, detail }),
+    span,
+  })
+
+export const invalidTestDeclaration = <L>(detail: string, span: L): Diagnostic<L> =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: invalidTestDeclarationCode,
+    severity: 'error',
+    message: `Invalid test declaration: ${detail}`,
+    reason: Object.freeze({ _tag: 'InvalidTestDeclaration' as const, detail }),
     span,
   })
 

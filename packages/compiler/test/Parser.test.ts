@@ -4493,3 +4493,50 @@ static fn choose() -> bool { return true }`
     [false, true, true],
   )
 })
+
+it('parses contextual test function qualifiers losslessly through selected branches', () => {
+  const source = `test fn plain() {}
+pub test effect fn effectful() -> () ! i32 { fail 1 }
+static if true { test fn selected() {} } else { test fn inactive() {} }
+fn test() {}
+fn use(test: i32) -> i32 { return test }`
+  const result = parseText('memory://test-qualifier.silk', source)
+  assert.deepEqual(result.parserDiagnostics, [])
+  const declarations = descendants(result.root).filter(
+    (element): element is SyntaxTree.Node =>
+      SyntaxTree.isNode(element) && element.kind === 'FunctionDeclaration',
+  )
+  const names = declarations.map((declaration) => {
+    const tokens = declaration.children.filter(SyntaxTree.isToken)
+    const fn = tokens.findIndex((token) => token.kind === 'FnKeyword')
+    const name = tokens
+      .slice(fn + 1)
+      .find((token) => token.kind === 'Identifier' || token.kind === 'DropKeyword')
+    return name === undefined
+      ? undefined
+      : Option.getOrUndefined(SourceFile.spelling(result.source, name.span))
+  })
+  assert.deepEqual(names, ['plain', 'effectful', 'selected', 'inactive', 'test', 'use'])
+  assert.deepEqual(
+    declarations.map((declaration) =>
+      declaration.children.some(
+        (element) =>
+          SyntaxTree.isToken(element) &&
+          element.kind === 'Identifier' &&
+          Option.contains(SourceFile.spelling(result.source, element.span), 'test') &&
+          element.span.start <
+            (SyntaxTree.directToken(declaration, 'FnKeyword')?.span.start ?? element.span.start),
+      ),
+    ),
+    [true, true, true, true, false, false],
+  )
+  assert.deepEqual(reconstructedBytes(result), ascii(source))
+})
+
+it('recovers a damaged test declaration without consuming the next function', () => {
+  const source = 'test fn broken( -> () {}\nfn next() {}'
+  const result = parseText('memory://damaged-test-qualifier.silk', source)
+  assert.isNotEmpty(result.parserDiagnostics)
+  assert.strictEqual(directFunctionDeclarations(result.root).length, 2)
+  assert.deepEqual(reconstructedBytes(result), ascii(source))
+})

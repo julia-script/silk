@@ -98,6 +98,32 @@ it('keeps run host-only', () => {
   assert.strictEqual(Result.isSuccess(accepted), true)
 })
 
+it('plans tests as final host executables in a dedicated destination', () => {
+  const host = TargetSelector.resolve('host', NativeToolchain.hostSelection())
+  assert.strictEqual(Result.isSuccess(host), true)
+  if (Result.isFailure(host)) return
+  const planned = BuildPlan.make(project('answer', '/workspace/build', 'NativeStaticLibrary'), {
+    target: host.success,
+    optimization: 'debug',
+    purpose: 'test',
+    configuration: {
+      input: {
+        target: host.success.id,
+        artifact: 'static-archive',
+        optimization: 'none',
+        debug: true,
+      },
+      bindings: [],
+    },
+  })
+  assert.strictEqual(Result.isSuccess(planned), true)
+  if (Result.isFailure(planned)) return
+  assert.strictEqual(planned.success.artifactKind, 'NativeExecutable')
+  assert.strictEqual(planned.success.stage, 'final')
+  assert.strictEqual(planned.success.configuration?.input.artifact, 'executable')
+  assert.match(planned.success.destination, /\/build\/test\/llvm\/.*\/debug\/answer$/)
+})
+
 it('guards the plan against a non-portable project value', () => {
   const planned = BuildPlan.make(project('Not Portable'), {
     target: Target.aarch64AppleDarwin,

@@ -1176,6 +1176,30 @@ export const hasContextualSpelling = (state: State, spelling: string): boolean =
   )
 }
 
+/** True for one contextual identifier at a significant-token offset from the current state. */
+export const hasContextualSpellingAt = (
+  state: State,
+  spelling: string,
+  offset: number,
+): boolean => {
+  let index = state.index
+  let remaining = offset
+  let token = state.lexical.tokens.at(index)
+  while (token !== undefined) {
+    if (!isTrivia(token.kind)) {
+      if (remaining === 0)
+        return (
+          token.kind === 'Identifier' &&
+          Option.contains(SourceFile.spelling(state.lexical.source, token.span), spelling)
+        )
+      remaining -= 1
+    }
+    index += 1
+    token = state.lexical.tokens.at(index)
+  }
+  return false
+}
+
 /** True only for `typeof(`; an ordinary type path is never followed by a parenthesis. */
 export const isExactRepresentationStart = (state: State): boolean =>
   hasContextualSpelling(state, 'typeof') && peek(state, 1) === 'LeftParenthesis'

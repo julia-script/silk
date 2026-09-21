@@ -12,7 +12,7 @@ import * as ToolchainPlan from '@silklang/compiler/ToolchainPlan'
 import * as Data from 'effect/Data'
 import * as Result from 'effect/Result'
 
-export type Purpose = 'build' | 'run'
+export type Purpose = 'build' | 'run' | 'test'
 
 export interface BuildPlan {
   readonly _tag: 'BuildPlan'
@@ -75,10 +75,19 @@ export const make = (
       }),
     )
   }
+  const testPurpose = options.purpose === 'test'
+  const configuration =
+    testPurpose && options.configuration !== undefined
+      ? Object.freeze({
+          ...options.configuration,
+          input: Object.freeze({ ...options.configuration.input, artifact: 'executable' as const }),
+        })
+      : options.configuration
   let artifactKind = Target.isNative(options.target)
     ? project.build.artifact
     : ArtifactKind.webAssemblyModule
-  const logicalArtifact = options.configuration?.input.artifact
+  if (testPurpose) artifactKind = ArtifactKind.nativeExecutable
+  const logicalArtifact = configuration?.input.artifact
   if (logicalArtifact !== undefined) {
     if (Target.isNative(options.target)) {
       if (logicalArtifact === 'executable') artifactKind = 'NativeExecutable'
@@ -87,8 +96,8 @@ export const make = (
       else artifactKind = 'NativeSharedLibrary'
     }
   }
-  const stage = project.build.stage ?? 'final'
-  if (options.purpose === 'run') {
+  const stage = testPurpose ? 'final' : (project.build.stage ?? 'final')
+  if (options.purpose === 'run' || testPurpose) {
     if (artifactKind !== 'NativeExecutable' || stage !== 'final') {
       return Result.fail(
         new BuildPlanError({
@@ -154,6 +163,7 @@ export const make = (
   }
   const destination = join(
     project.build.outputDirectory,
+    ...(testPurpose ? ['test'] : []),
     'llvm',
     options.target.id,
     options.optimization,
@@ -201,7 +211,7 @@ export const make = (
       artifactKind,
       stage,
       optimization: options.optimization,
-      ...(options.configuration === undefined ? {} : { configuration: options.configuration }),
+      ...(configuration === undefined ? {} : { configuration }),
       destination,
       toolchain,
       nativeLinkInputs: Target.isNative(options.target)

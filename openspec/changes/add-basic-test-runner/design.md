@@ -42,11 +42,11 @@ Catalog order is canonical module identity, then declared test name, then canoni
 
 Use the following source-facing shape; `F` denotes the exact callable type, not an erased runtime interface:
 
-| Operation | Contract |
-| --- | --- |
-| `Intrinsic.tests()` | Static-only finite heterogeneous iterable of sealed `Intrinsic.Test<F>` descriptors for the request's catalog. |
-| `Intrinsic.testInfo(descriptor)` | Static-only projection to ordinary immutable metadata values: opaque declaration identity, name, canonical module, project-relative source path, current declaration line/column, and authored fingerprint. |
-| `Intrinsic.testFunction(descriptor)` | Consume a required static descriptor during specialization and produce the corresponding ordinary runtime callable of exact type `F`. |
+| Operation                            | Contract                                                                                                                                                                                                    |
+| ------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Intrinsic.tests()`                  | Static-only finite heterogeneous iterable of sealed `Intrinsic.Test<F>` descriptors for the request's catalog.                                                                                              |
+| `Intrinsic.testInfo(descriptor)`     | Static-only projection to ordinary immutable metadata values: opaque declaration identity, name, canonical module, project-relative source path, current declaration line/column, and authored fingerprint. |
+| `Intrinsic.testFunction(descriptor)` | Consume a required static descriptor during specialization and produce the corresponding ordinary runtime callable of exact type `F`.                                                                       |
 
 The catalog iterable and descriptors are phase-only compiler values. They cannot be forged, serialized as runtime descriptors, addressed, or passed through a residual parameter. The callable projection is the same kind of staging bridge as static field projection: no descriptor or discovery intrinsic survives into runtime TIR/MIR/backend operations. Metadata strings and integer coordinates may become ordinary constants when used by the runner. Locations refer to current presentation; they are excluded from the fingerprint. For in-memory sources, the request supplies the logical project-relative source path; no ambient filesystem probe is needed.
 

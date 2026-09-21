@@ -328,6 +328,10 @@
       }
     },
     {
+      "name": "storage.modifier.test.silk",
+      "match": "\\btest(?=\\s+(?:effect\\s+)?fn\\b)"
+    },
+    {
       "name": "keyword.control.silk",
       "match": "\\b(?:if|else|while|break|continue|return|match)\\b"
     },

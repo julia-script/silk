@@ -85,6 +85,12 @@ export type Rule =
       readonly staticDescriptorParameter: 1
     }
   | {
+      /** One compiler-issued test descriptor is consumed while publishing its exact callable. */
+      readonly _tag: 'MixedTestFunctionRule'
+      readonly contract: CallableContract.CallableContract
+      readonly staticDescriptorParameter: 0
+    }
+  | {
       /** Result and parameter types are derived from the owning canonical enum declaration. */
       readonly _tag: 'EnumValueRule'
     }
@@ -1178,6 +1184,7 @@ const sequenceElement = Type.parameter(
   0,
   'Element',
 )
+const testCallable = Type.parameter({ module: 'Intrinsic', name: 'test' }, 0, 'F')
 
 const reflectionOperations = Object.freeze([
   staticGenericOperation({
@@ -1275,6 +1282,68 @@ const borrowFieldOperation: Operation = Object.freeze({
     staticDescriptorParameter: 1,
   }),
 })
+
+const testOperations: ReadonlyArray<Operation> = Object.freeze([
+  Object.freeze({
+    _tag: 'IntrinsicOperation',
+    id: operationId('Intrinsic', 'tests'),
+    spelling: 'tests',
+    typeParameters: Object.freeze([]),
+    parameters: Object.freeze([]),
+    result: 'Tests',
+    unsafe: false,
+    phase: 'StaticOnly',
+    admission: 'Language',
+    consumer: 'language:test-discovery',
+    targets: Object.freeze([]),
+    rule: Object.freeze({
+      _tag: 'StaticOnlyRule',
+      contract: CallableContract.make({
+        environment: Lifetime.staticLifetime,
+        lifetimeBinders: [],
+        functionKind: 'Function',
+        parameters: Object.freeze([]),
+        result: Type.testCatalog,
+      }),
+    }),
+  }),
+  staticGenericOperation({
+    name: 'testInfo',
+    typeParameters: Object.freeze([testCallable]),
+    parameters: Object.freeze([valueParameter('descriptor', 'Test<F>')]),
+    semanticParameters: Object.freeze([Type.testDescriptor(testCallable)]),
+    result: 'TestInfo',
+    semanticResult: Type.testInfo,
+    consumer: 'language:test-discovery',
+  }),
+  Object.freeze({
+    _tag: 'IntrinsicOperation',
+    id: operationId('Intrinsic', 'testFunction'),
+    spelling: 'testFunction',
+    typeParameters: Object.freeze([typeParameter('F')]),
+    parameters: Object.freeze([staticValueParameter('descriptor', 'Test<F>')]),
+    result: 'F',
+    unsafe: false,
+    phase: 'Mixed',
+    admission: 'Language',
+    consumer: 'language:test-discovery',
+    targets: Object.freeze([]),
+    rule: Object.freeze({
+      _tag: 'MixedTestFunctionRule',
+      contract: CallableContract.make({
+        environment: Lifetime.staticLifetime,
+        lifetimeBinders: [],
+        functionKind: 'Function',
+        binders: Object.freeze([testCallable]),
+        parameters: Object.freeze([
+          Object.freeze({ type: Type.testDescriptor(testCallable), mode: 'Value' as const }),
+        ]),
+        result: testCallable,
+      }),
+      staticDescriptorParameter: 0,
+    }),
+  }),
+])
 
 const staticSequenceOperations = Object.freeze([
   staticGenericOperation({
@@ -2429,6 +2498,7 @@ const intrinsicOperations = Object.freeze([
   ...staticTextOperations,
   ...reflectionOperations,
   borrowFieldOperation,
+  ...testOperations,
   ...staticSequenceOperations,
   assemblyOperation,
   enumValueOperation,
@@ -2525,12 +2595,22 @@ export const inventory = (): ReadonlyArray<InventoryEntry> =>
           operation.parameters.length !== 7
         )
           throw new RangeError('Assembly metadata lanes are invalid')
-      } else if (operation.phase === 'Mixed') {
+      } else if (
+        operation.phase === 'Mixed' &&
+        operation.rule._tag === 'MixedFieldProjectionRule'
+      ) {
         if (
           operation.rule._tag !== 'MixedFieldProjectionRule' ||
           staticParameters.length !== 1 ||
           staticParameters.at(0) !== operation.rule.staticDescriptorParameter ||
           operation.parameters.at(operation.rule.runtimeOwnerParameter)?.phase === 'Static'
+        )
+          throw new RangeError(`Mixed intrinsic ${operation.spelling} has an invalid calling shape`)
+      } else if (operation.phase === 'Mixed') {
+        if (
+          operation.rule._tag !== 'MixedTestFunctionRule' ||
+          staticParameters.length !== 1 ||
+          staticParameters.at(0) !== operation.rule.staticDescriptorParameter
         )
           throw new RangeError(`Mixed intrinsic ${operation.spelling} has an invalid calling shape`)
       } else if (staticParameters.length !== 0) {
@@ -2555,6 +2635,7 @@ export const inventory = (): ReadonlyArray<InventoryEntry> =>
           break
         case 'StaticOnlyRule':
         case 'MixedFieldProjectionRule':
+        case 'MixedTestFunctionRule':
           identity = undefined
           break
         default:

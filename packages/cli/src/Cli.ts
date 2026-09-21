@@ -9,6 +9,7 @@ import * as DocumentationSiteCommand from './DocumentationSiteCommand.js'
 import * as FormatCommand from './FormatCommand.js'
 import * as InitCommand from './InitCommand.js'
 import * as RunCommand from './RunCommand.js'
+import * as TestCommand from './TestCommand.js'
 
 /**
  * The `silk` root command. It owns only composition — every subcommand keeps its own module — so
@@ -26,6 +27,7 @@ export const command = Command.make('silk').pipe(
     DocumentationSiteCommand.command,
     FormatCommand.command,
     RunCommand.command,
+    TestCommand.command,
     BuildExeCommand.command,
   ]),
 )

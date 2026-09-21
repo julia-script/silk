@@ -243,6 +243,11 @@ export const grammar: Grammar = {
       },
     },
     {
+      // `test` is contextual: only the declaration marker is keyword-colored.
+      name: 'storage.modifier.test.silk',
+      match: '\\btest(?=\\s+(?:effect\\s+)?fn\\b)',
+    },
+    {
       name: 'keyword.control.silk',
       match: `\\b(?:${controlSpellings.join('|')})\\b`,
     },

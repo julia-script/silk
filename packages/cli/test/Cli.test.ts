@@ -22,6 +22,7 @@ it('exposes the project-first command surface without a compile alias', () => {
     'docs-site',
     'format',
     'run',
+    'test',
     'build-exe',
   ])
   assert.strictEqual(names.includes('compile'), false)
@@ -86,6 +87,92 @@ it.effect(
   Timeouts.nativeBuild,
 )
 
+it.effect(
+  'runs tests from an import-only root with combined runtime filters',
+  () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem
+      const root = yield* fileSystem.makeTempDirectoryScoped()
+      yield* fileSystem.writeFileString(
+        `${root}/silk.toml`,
+        '[package]\nname = "test-integration"\nversion = "0.1.0"\nroot = "Main.silk"\n',
+      )
+      yield* fileSystem.writeFileString(`${root}/Main.silk`, 'pub fn main() -> i32 { return 9 }')
+      yield* fileSystem.writeFileString(`${root}/Tests.silk`, 'import Cases')
+      yield* fileSystem.writeFileString(
+        `${root}/Cases.silk`,
+        `import silk.effect { Effect }
+service Clock { effect fn value() -> i32 ? &Clock }
+struct Fixed { value: i32 }
+effect fn fixedValue(self: &Fixed) -> i32 { return self.value }
+impl Clock for Fixed { value: Fixed.fixedValue }
+effect fn read() -> i32 ? &Clock { return run Clock.value() }
+effect fn readWithFixedClock() -> () {
+  let fixed = Fixed { value: 42 }
+  let value = run read() |> Effect.provide<Clock>(&fixed)
+  drop value
+  return ()
+}
+test fn succeeds() {}
+test effect fn fails() ! bool { fail false }
+test fn locallyProvided() -> () { return run readWithFixedClock() }`,
+      )
+
+      const executed = yield* Effect.result(
+        Command.runWith(Cli.command, { version: 'test' })([
+          'test',
+          '--manifest-path',
+          `${root}/silk.toml`,
+          '--root',
+          'Tests.silk',
+          '--file',
+          'Cases.silk',
+          '--filter',
+          'PROVIDED',
+        ]),
+      )
+
+      assert.strictEqual(Result.isSuccess(executed), true)
+    }).pipe(Effect.scoped, Effect.provide(CompilerHost.layer)),
+  Timeouts.nativeBuild,
+)
+
+it.effect(
+  'rejects a discovered broken test before applying its nonmatching runtime filter',
+  () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem
+      const root = yield* fileSystem.makeTempDirectoryScoped()
+      yield* fileSystem.writeFileString(
+        `${root}/silk.toml`,
+        '[package]\nname = "test-filter-boundary"\nversion = "0.1.0"\nroot = "Main.silk"\n',
+      )
+      yield* fileSystem.writeFileString(
+        `${root}/Main.silk`,
+        `service Clock { fn now() -> i32 }
+test fn selected() {}
+test effect fn broken() -> () ? &Clock { return () }`,
+      )
+
+      const executed = yield* Effect.result(
+        Command.runWith(Cli.command, { version: 'test' })([
+          'test',
+          '--manifest-path',
+          `${root}/silk.toml`,
+          '--filter',
+          'selected',
+        ]),
+      )
+
+      assert.strictEqual(Result.isFailure(executed), true)
+      if (Result.isFailure(executed)) {
+        assert.strictEqual(executed.failure._tag, 'CommandExit')
+        if (executed.failure._tag === 'CommandExit') assert.strictEqual(executed.failure.status, 1)
+      }
+    }).pipe(Effect.scoped, Effect.provide(CompilerHost.layer)),
+  Timeouts.nativeBuild,
+)
+
 it('lists clean with its purpose in root help', () => {
   const clean = Cli.command.subcommands
     .flatMap((group) => group.commands)
@@ -93,6 +180,18 @@ it('lists clean with its purpose in root help', () => {
 
   assert.notStrictEqual(clean, undefined)
   assert.strictEqual(clean?.description, 'Remove the build artifacts of the nearest Silk project.')
+})
+
+it('lists test with its discovery purpose in root help', () => {
+  const test = Cli.command.subcommands
+    .flatMap((group) => group.commands)
+    .find((command) => command.name === 'test')
+
+  assert.notStrictEqual(test, undefined)
+  assert.strictEqual(
+    test?.description,
+    'Build and run tests reachable from one project source root.',
+  )
 })
 
 it.effect('rejects the removed compile subcommand', () =>

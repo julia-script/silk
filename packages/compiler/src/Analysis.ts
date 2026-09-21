@@ -58,6 +58,7 @@ import type * as SemanticContext from './SemanticContext.js'
 import type * as SyntaxFile from './SyntaxFile.js'
 import * as SyntaxTree from './SyntaxTree.js'
 import * as Target from './Target.js'
+import type * as TestDiscovery from './TestDiscovery.js'
 import * as Type from './Type.js'
 import * as Tir from './Tir.js'
 import * as TypeHint from './TypeHint.js'
@@ -102,6 +103,7 @@ export interface FrontendSnapshot {
   readonly initialProfile?: CompilationProfile.Initial
   readonly configurationError?: ConfigurationError.ConfigurationError
   readonly requestedTarget?: string
+  readonly testCatalog?: TestDiscovery.Catalog
 }
 
 /** One true single-root frontend accepted by explicit runtime realization. */

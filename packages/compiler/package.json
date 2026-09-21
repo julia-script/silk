@@ -550,6 +550,10 @@
       "types": "./dist/TargetSelector.d.ts",
       "import": "./dist/TargetSelector.js"
     },
+    "./TestDiscovery": {
+      "types": "./dist/TestDiscovery.d.ts",
+      "import": "./dist/TestDiscovery.js"
+    },
     "./Tir": {
       "types": "./dist/Tir.d.ts",
       "import": "./dist/Tir.js"

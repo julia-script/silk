@@ -94,6 +94,7 @@ const discoverInstances = Effect.fn('Realization.discoverInstances')(function* (
             self.resolution,
             self.composition,
             trace,
+            self.testCatalog,
           ),
     (value) => value.instances.length,
     (value) => value.violations.length,

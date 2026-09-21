@@ -19,6 +19,7 @@ import * as LocalSharedOwnership from '../src/LocalSharedOwnership.js'
 import * as ExpressionNesting from '../src/Parser/ExpressionNesting.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
+import * as SemanticDisplay from '../src/SemanticDisplay.js'
 import * as SyntaxTree from '../src/SyntaxTree.js'
 import * as Type from '../src/Type.js'
 import { invalidMatchCorpus } from './support/corpus.js'
@@ -1150,5 +1151,82 @@ unsafe extern "C" fn hidden(value: i32) -> i32`),
       ]),
       [['SEM0015', 'hidden']],
     )
+  }),
+)
+
+it.effect('retains valid plain and Effect test contracts without changing their channels', () =>
+  Effect.gen(function* () {
+    const source = `service Clock { fn now() -> i32 }
+test fn plain() {}
+pub test effect fn effectful() -> () ! i32 ? &Clock { fail 1 }
+fn test() {}`
+    const snapshot = yield* Analysis.ofSource('test-contracts', ascii(source))
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    const declarations = Analysis.declarationIndex(snapshot).modules.flatMap(
+      (module) => module.declarations,
+    )
+    const tests = declarations.filter((declaration) => declaration.test)
+    assert.deepEqual(
+      tests.map((declaration) => [
+        declaration.name._tag === 'Present' ? declaration.name.spelling : undefined,
+        declaration.functionKind,
+        declaration.parameterCount,
+        declaration.returnType._tag === 'Resolved'
+          ? Type.equals(declaration.returnType.type, Type.unit)
+          : false,
+      ]),
+      [
+        ['plain', 'Ordinary', 0, true],
+        ['effectful', 'Effect', 0, true],
+      ],
+    )
+    assert.deepEqual(tests[1]?.failureRow.failures.map(Type.encode), ['i32'])
+    assert.isAbove(tests[1]?.requirementRow.requirements.length ?? 0, 0)
+    assert.strictEqual(
+      tests[0] === undefined ? undefined : SemanticDisplay.functionDeclaration(tests[0]).text,
+      'test fn plain() -> ()',
+    )
+    assert.match(
+      tests[1] === undefined ? '' : SemanticDisplay.functionDeclaration(tests[1]).text,
+      /^pub test effect<[^>]+> fn effectful\(\) -> \(\) ! i32 \? &Clock$/,
+    )
+    assert.isFalse(
+      declarations.some(
+        (declaration) =>
+          declaration.name._tag === 'Present' &&
+          declaration.name.spelling === 'test' &&
+          declaration.test,
+      ),
+    )
+  }),
+)
+
+it.effect('rejects test declarations outside the finite module-level unit contract', () =>
+  Effect.gen(function* () {
+    const cases = [
+      'test static fn selected() {}',
+      'test unsafe fn selected() {}',
+      'test unsafe extern "C" fn selected()',
+      'test export "C" fn selected() as "selected" {}',
+      'test fn selected(value: i32) {}',
+      'test fn selected<T>() {}',
+      'test fn selected() -> i32 { return 1 }',
+      'struct Box {}\nimpl Box { test fn selected() {} }',
+    ]
+    for (const [ordinal, source] of cases.entries()) {
+      const snapshot = yield* Analysis.ofSource(`invalid-test-${ordinal}`, ascii(source))
+      const diagnostics = Analysis.diagnostics(snapshot).filter(
+        (diagnostic) => diagnostic.code === 'SEM0218',
+      )
+      assert.strictEqual(diagnostics.length, 1, source)
+      const diagnostic = diagnostics[0]
+      assert.strictEqual(
+        diagnostic === undefined
+          ? undefined
+          : source.slice(diagnostic.span.start, diagnostic.span.end),
+        'test',
+        source,
+      )
+    }
   }),
 )

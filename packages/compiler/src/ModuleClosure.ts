@@ -19,10 +19,13 @@ import * as Source from './Source.js'
 import * as SourceResolver from './SourceResolver.js'
 import * as Stdlib from './Stdlib.js'
 import type * as SyntaxFile from './SyntaxFile.js'
+import type * as TestDiscovery from './TestDiscovery.js'
 
 /** One compilation request: a canonical root identity plus optional target selection. */
 export interface CompilationRequest {
   readonly root: string
+  /** Independent, root-scoped test catalog input; absent for ordinary compilation. */
+  readonly discovery?: TestDiscovery.Request
   readonly target?: string
   readonly configuration?: {
     readonly composition?: ArtifactComposition.Input
@@ -506,8 +509,12 @@ export const load = Effect.fn('ModuleClosure.load')(function* (
   additionalRoots: ReadonlyArray<string> = [],
   previous?: Facts,
 ): Effect.fn.Return<Closure, ModuleClosureError, SourceResolver.SourceResolver> {
+  const requiredRoots = [
+    request.root,
+    ...(request.discovery === undefined ? [] : [request.discovery.root]),
+  ]
   const project = yield* loadProject({
-    roots: [request.root],
+    roots: requiredRoots,
     additionalRoots,
     application: request.root,
     ...(previous === undefined ? {} : { previous }),

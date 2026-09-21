@@ -2971,6 +2971,19 @@ effect fn value() -> i32 { return 1 }
   }),
 )
 
+it.effect('colors only the contextual test qualifier as a keyword', () =>
+  Effect.gen(function* () {
+    const source = `test fn checked() {}
+fn use(test: i32) -> i32 { return test }
+`
+    const { document, snapshot } = yield* open(source)
+    const decoded = decodeSemanticTokens(Document.semanticTokens(document, snapshot))
+    assert.strictEqual(semanticTokenAt(decoded, source, 'test')?.type, 'keyword')
+    assert.strictEqual(semanticTokenAt(decoded, source, 'test', 1)?.type, 'parameter')
+    assert.strictEqual(semanticTokenAt(decoded, source, 'test', 2)?.type, 'parameter')
+  }),
+)
+
 it.effect('folds a function body from its open brace to its close brace', () =>
   Effect.gen(function* () {
     const source = `pub fn main() -> i32 {

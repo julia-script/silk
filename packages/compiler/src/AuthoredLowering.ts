@@ -415,6 +415,25 @@ const modifierAnchor = (
   return marker === undefined ? undefined : node(draft, child(cursor, role), marker.span).anchor
 }
 
+/** A contextual modifier must precede `fn`; an ordinary function named `test` is not a marker. */
+const contextualModifier = (
+  draft: Draft,
+  cursor: Cursor,
+  parent: SyntaxTree.Node,
+  spelling: string,
+  role: string,
+): AuthoredHir.Anchor | undefined => {
+  const tokens = parent.children.filter(isToken)
+  const fnIndex = tokens.findIndex((candidate) => candidate.kind === 'FnKeyword')
+  const marker = tokens
+    .slice(0, fnIndex < 0 ? 0 : fnIndex)
+    .find(
+      (candidate) =>
+        candidate.kind === 'Identifier' && spellingOf(draft, spanOf(candidate)) === spelling,
+    )
+  return marker === undefined ? undefined : node(draft, child(cursor, role), marker.span).anchor
+}
+
 const spelled = (
   draft: Draft,
   parent: SyntaxTree.Node,
@@ -487,6 +506,31 @@ const nameIn = (
   for (const element of parent.children) {
     if (isToken(element) && kinds.includes(element.kind)) return nameFromToken(draft, own, element)
     if (isMissing(element) && kinds.includes(element.expected))
+      return missingName(draft, own, spanOf(element))
+  }
+  return missingName(draft, own, spanOf(parent))
+}
+
+/** The name immediately after `fn`, excluding contextual modifiers retained as identifiers. */
+const callableNameIn = (
+  draft: Draft,
+  cursor: Cursor,
+  parent: SyntaxTree.Node,
+): AuthoredHir.Name => {
+  const own = child(cursor, 'name')
+  let afterFn = false
+  for (const element of parent.children) {
+    if (isToken(element) && element.kind === 'FnKeyword') {
+      afterFn = true
+      continue
+    }
+    if (!afterFn) continue
+    if (isToken(element) && (element.kind === 'Identifier' || element.kind === 'DropKeyword'))
+      return nameFromToken(draft, own, element)
+    if (
+      isMissing(element) &&
+      (element.expected === 'Identifier' || element.expected === 'DropKeyword')
+    )
       return missingName(draft, own, spanOf(element))
   }
   return missingName(draft, own, spanOf(parent))
@@ -1201,6 +1245,7 @@ const callableContract = (
   const requirements = parts.find((n) => n.kind === 'RequirementRow')
   const environment = parts.find((n) => n.kind === 'EffectEnvironment')
   const where = parts.find((n) => n.kind === 'WhereClause')
+  const testAnchor = contextualModifier(draft, own, header, 'test', 'testMarker')
   return {
     ...base,
     _tag: 'CallableContract',
@@ -1216,6 +1261,7 @@ const callableContract = (
     requirements: requirements === undefined ? undefined : requirementRow(draft, own, requirements),
     constraints: where === undefined ? [] : constraints(draft, own, where),
     effect: hasToken(header, 'EffectKeyword'),
+    test: testAnchor !== undefined,
     environment:
       environment === undefined
         ? undefined
@@ -1223,6 +1269,7 @@ const callableContract = (
     unsafe: hasToken(header, 'UnsafeKeyword'),
     static: hasToken(header, 'StaticKeyword'),
     effectAnchor: modifierAnchor(draft, own, header, 'EffectKeyword', 'effectMarker'),
+    testAnchor,
     unsafeAnchor: modifierAnchor(draft, own, header, 'UnsafeKeyword', 'unsafeMarker'),
     staticAnchor: modifierAnchor(draft, own, header, 'StaticKeyword', 'staticMarker'),
     genericsAnchor:
@@ -2573,6 +2620,20 @@ const identifierSpellings = (draft: Draft, syntax: SyntaxTree.Node | undefined):
         .join('.')
 
 const declarationName = (draft: Draft, syntax: SyntaxTree.Node): string | undefined => {
+  if (syntax.kind === 'FunctionDeclaration' || syntax.kind === 'ForeignFunctionDeclaration') {
+    let afterFn = false
+    for (const element of syntax.children) {
+      if (isToken(element) && element.kind === 'FnKeyword') {
+        afterFn = true
+        continue
+      }
+      if (!afterFn) continue
+      if (isToken(element) && (element.kind === 'Identifier' || element.kind === 'DropKeyword'))
+        return spellingOf(draft, spanOf(element))
+      if (isMissing(element) && element.expected === 'Identifier') return undefined
+    }
+    return undefined
+  }
   for (const element of syntax.children) {
     if (isToken(element) && (element.kind === 'Identifier' || element.kind === 'DropKeyword'))
       return spellingOf(draft, spanOf(element))
@@ -2728,7 +2789,7 @@ const callableParts = (
   const base = node(draft, header, spanOf(syntax), {
     documentation: documentationOf(draft, syntax),
   })
-  const name = nameIn(draft, header, syntax, ['Identifier', 'DropKeyword'])
+  const name = callableNameIn(draft, header, syntax)
   const contract = callableContract(draft, header, syntax, scope)
   const properties = propertyClauses(draft, header, syntax)
   const bodySyntax = nodes(syntax).find((n) => n.kind === 'Block')

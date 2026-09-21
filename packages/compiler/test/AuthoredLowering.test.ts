@@ -469,6 +469,35 @@ fn identity(value: i32)   ->  i32 { return value }`,
   }),
 )
 
+it.effect(
+  'retains test qualification and its presentation span in source-free authored headers',
+  () =>
+    Effect.gen(function* () {
+      const source = 'pub test effect fn checked() -> () ! i32 { fail 1 }\nfn test() {}'
+      const lowered = yield* lower('test-header', source)
+      const checked = declarationNamed(lowered.module, 'checked')
+      const header = checked.header
+      assert.strictEqual(header._tag, 'FunctionHeader')
+      if (header._tag !== 'FunctionHeader') return
+      assert.isTrue(header.contract.test)
+      assert.isDefined(header.contract.testAnchor)
+      const marker = lowered.presentation.entries.find(
+        (entry) => entry.anchor === header.contract.testAnchor,
+      )
+      assert.strictEqual(
+        marker === undefined ? undefined : source.slice(marker.span.start, marker.span.end),
+        'test',
+      )
+      const ordinary = declarationNamed(lowered.module, 'test')
+      assert.strictEqual(ordinary.header._tag, 'FunctionHeader')
+      if (ordinary.header._tag === 'FunctionHeader') {
+        assert.isFalse(ordinary.header.contract.test)
+        assert.isUndefined(ordinary.header.contract.testAnchor)
+      }
+      yield* AuthoredEncoding.header(lowered.module.pool, checked)
+    }),
+)
+
 const structural = `import platform.clock as clock
 static if false { import inactive.alternative fn unused() -> i32 { return missing() } }
 static fn size() -> u64 { return 18446744073709551616 }

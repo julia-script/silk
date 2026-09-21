@@ -26,6 +26,7 @@ import * as Ownership from './Ownership.js'
 import * as ProviderSelection from './ProviderSelection.js'
 import * as AuthoredIdentity from './AuthoredIdentity.js'
 import * as Residualization from './Residualization.js'
+import type * as TestDiscovery from './TestDiscovery.js'
 import * as SemanticContext from './SemanticContext.js'
 import * as ResidualOwnership from './ResidualOwnership.js'
 import * as RowAlgebra from './RowAlgebra.js'
@@ -1160,6 +1161,7 @@ export const discover = (
   resolution: NameResolution.Resolution,
   composition: ArtifactComposition.Resolved,
   trace: CompilerTrace.CompilerTrace = CompilerTrace.none,
+  testCatalog?: TestDiscovery.Catalog,
 ): Discovery => {
   const target = completion.profile.target
   const root = results.get(rootModule)
@@ -1233,6 +1235,7 @@ export const discover = (
     undefined,
     completion.values,
     trace,
+    testCatalog,
   )
   const residualOwnership = ResidualOwnership.make()
   // Ownership reads spans and evaluation order from the module that authored the body it checks.

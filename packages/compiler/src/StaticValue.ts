@@ -20,6 +20,8 @@ export type Value =
   | FieldDescriptorValue
   | FieldCollectionValue
   | StaticSequenceValue
+  | TestDescriptorValue
+  | TestCollectionValue
 
 export interface UnitValue {
   readonly _tag: 'UnitValue'
@@ -154,6 +156,20 @@ export interface StaticSequenceValue {
   readonly elements: ReadonlyArray<Value>
 }
 
+/** Compiler-issued phase-only reference to one exact test declaration and callable type. */
+export interface TestDescriptorValue {
+  readonly _tag: 'TestDescriptorValue'
+  readonly declaration: DeclarationFacts.CanonicalId
+  readonly callable: Type.Callable
+  readonly authorization: string
+}
+
+/** Canonical-order heterogeneous collection consumed only by `static for`. */
+export interface TestCollectionValue {
+  readonly _tag: 'TestCollectionValue'
+  readonly tests: ReadonlyArray<TestDescriptorValue>
+}
+
 export type RejectionReason =
   | 'UnsupportedValue'
   | 'InvalidCharacter'
@@ -166,6 +182,8 @@ export type RejectionReason =
   | 'InvalidFieldDescriptor'
   | 'InvalidFieldCollection'
   | 'InvalidStaticSequence'
+  | 'InvalidTestDescriptor'
+  | 'InvalidTestCollection'
   | 'CyclicValue'
 
 /** A closed admission result; rejected candidates never become static values. */
@@ -478,6 +496,26 @@ const fieldDescriptorValue = (value: unknown): FieldDescriptorValue | undefined 
   })
 }
 
+const testDescriptorValue = (value: unknown): TestDescriptorValue | undefined => {
+  if (!isRecord(value) || value._tag !== 'TestDescriptorValue') return undefined
+  const declaration = canonicalId(value.declaration)
+  const callable = Type.fromUnknown(value.callable)
+  if (
+    declaration === undefined ||
+    callable === undefined ||
+    !Type.isCallable(callable) ||
+    typeof value.authorization !== 'string' ||
+    value.authorization.length === 0
+  )
+    return undefined
+  return Object.freeze({
+    _tag: 'TestDescriptorValue',
+    declaration,
+    callable,
+    authorization: value.authorization,
+  })
+}
+
 const sameTypeDescriptor = (left: TypeDescriptorValue, right: TypeDescriptorValue): boolean =>
   left.kind === right.kind && Type.equals(left.owner, right.owner)
 
@@ -677,6 +715,34 @@ const admissionAt = (
           }),
         )
       }
+      case 'TestDescriptorValue': {
+        const descriptor = testDescriptorValue(input)
+        return descriptor === undefined
+          ? rejected('InvalidTestDescriptor', 'test descriptor is unavailable', path)
+          : admitted(descriptor)
+      }
+      case 'TestCollectionValue': {
+        if (!Array.isArray(input.tests))
+          return rejected('InvalidTestCollection', 'test collection is unavailable', path)
+        const tests: Array<TestDescriptorValue> = []
+        const declarations = new Set<string>()
+        for (let index = 0; index < input.tests.length; index += 1) {
+          const descriptor = testDescriptorValue(input.tests.at(index))
+          const key =
+            descriptor === undefined
+              ? undefined
+              : `${descriptor.declaration.module}:${descriptor.declaration.name}`
+          if (descriptor === undefined || key === undefined || declarations.has(key))
+            return rejected(
+              'InvalidTestCollection',
+              'tests must be compiler-issued unique descriptors',
+              [...path, index],
+            )
+          declarations.add(key)
+          tests.push(descriptor)
+        }
+        return admitted(Object.freeze({ _tag: 'TestCollectionValue', tests: Object.freeze(tests) }))
+      }
       default:
         return rejected(
           'UnsupportedValue',
@@ -743,6 +809,10 @@ export const sequenceElement = (self: StaticSequenceValue, index: number): Value
 /** Returns the exact phase-only nominal type bound by one reflected-field iteration. */
 export const fieldDescriptorType = (self: FieldDescriptorValue): Type.Nominal =>
   Type.fieldDescriptor(self.owner.owner, self.valueType)
+
+/** Returns the exact phase-only nominal type bound by one test-catalog iteration. */
+export const testDescriptorType = (self: TestDescriptorValue): Type.Nominal =>
+  Type.testDescriptor(self.callable)
 
 const identityEncoding = (identity: AggregateIdentity): string =>
   identity._tag === 'ArrayAggregateIdentity'
@@ -823,6 +893,15 @@ export const encode = (self: Value): string => {
         Type.key(self.elementType),
         Canonical.array(self.elements.map(encode)),
       ])
+    case 'TestDescriptorValue':
+      return Canonical.record('TestDescriptorValue', [
+        self.declaration.module,
+        self.declaration.name,
+        Type.key(self.callable),
+        self.authorization,
+      ])
+    case 'TestCollectionValue':
+      return Canonical.record('TestCollectionValue', [self.tests.map(encode).join('')])
   }
 }
 
@@ -886,6 +965,10 @@ export const presentation = (self: Value): string => {
         .join(', ')}]`
     case 'StaticSequenceValue':
       return `sequence<${Type.encode(self.elementType)}>[${self.elements.map(presentation).join(', ')}]`
+    case 'TestDescriptorValue':
+      return `test<${Type.encode(self.callable)}>(${self.declaration.module}.${self.declaration.name})`
+    case 'TestCollectionValue':
+      return `tests[${self.tests.map(presentation).join(', ')}]`
   }
 }
 

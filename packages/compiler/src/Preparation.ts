@@ -99,6 +99,7 @@ const identityOf = (
     frontend.closure.rootModule,
     frontend.profile?.identity ?? frontend.initialProfile?.target.id ?? '',
     frontend.selection?.dependencies ?? '',
+    frontend.testCatalog?.identity ?? '',
     Canonical.array(components.map((component) => `${component.reason}:${component.module}`)),
     Canonical.array(
       frontend.closure.modules.map(
@@ -482,6 +483,7 @@ export const promote = Effect.fn('Preparation.promote')(function* (
     root: frontend.closure.rootModule,
     ...(frontend.configuration === undefined ? {} : { configuration: frontend.configuration }),
     ...(frontend.requestedTarget === undefined ? {} : { target: frontend.requestedTarget }),
+    ...(frontend.testCatalog === undefined ? {} : { discovery: frontend.testCatalog.request }),
   }
   const load = (components: ReadonlyArray<string>, previous: Frontend.Frontend | undefined) =>
     Frontend.frontend(

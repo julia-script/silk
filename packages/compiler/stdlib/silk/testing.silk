@@ -1,0 +1,95 @@
+//! Minimal source-defined test assertions and runtime selection predicates.
+//!
+//! # When to use
+//! Mark a parameterless unit function with `test`, then use [`expect`] for a boolean condition.
+//! Custom runners may reuse [`matches`] to apply the builtin runner's file and name policy.
+//!
+//! # Details
+//! Assertions are ordinary typed failures. They require no service and carry the caller's borrowed
+//! diagnostic message. Runtime filters are literal: file paths compare exactly, while names use
+//! ASCII-only case folding and bytewise substring matching.
+
+import silk.string { String }
+import silk.u8
+import silk.u32
+import silk.usize
+
+/// A failed boolean expectation with the caller-provided diagnostic message.
+pub struct AssertionError<'message> {
+  message: string<'message>
+}
+
+/// Source-defined test helpers with no compiler-known behavior.
+pub struct Testing {}
+
+impl Testing {
+  /// Fails with `message` when `condition` is false.
+  pub effect fn expect<'message>(
+    condition: bool,
+    message: string<'message>
+  ) -> () ! AssertionError<'message> {
+    if condition == false {
+      fail AssertionError<'message> { message: message }
+    }
+    return ()
+  }
+
+  /// Returns the diagnostic message retained by one assertion failure.
+  pub fn assertionMessage<'message>(error: &'message AssertionError<'message>) -> string<'message> {
+    return error.message
+  }
+
+  /// Applies exact logical-file matching and literal ASCII case-insensitive name matching.
+  /// Empty file or name filters match every test.
+  pub fn matches(
+    path: string,
+    name: string,
+    fileFilter: string,
+    nameFilter: string,
+  ) -> bool {
+    if String.byteLength(fileFilter) != usize.ZERO && !equal(path, fileFilter) {
+      return false
+    }
+    return containsAsciiFolded(name, nameFilter)
+  }
+}
+
+fn equal(left: string, right: string) -> bool {
+  let leftBytes = String.utf8Bytes(left)
+  let rightBytes = String.utf8Bytes(right)
+  if leftBytes.length != rightBytes.length { return false }
+  let mut index = usize.ZERO
+  while index < leftBytes.length {
+    if leftBytes[index] != rightBytes[index] { return false }
+    index = index + usize.ONE
+  }
+  return true
+}
+
+fn asciiFold(value: u8) -> u8 {
+  if u8.toU32(value) < 65 || u8.toU32(value) > 90 { return value }
+  return u32.toU8(u8.toU32(value) + 32)
+}
+
+fn containsAsciiFolded(value: string, pattern: string) -> bool {
+  let source = String.utf8Bytes(value)
+  let search = String.utf8Bytes(pattern)
+  if search.length == usize.ZERO { return true }
+  if source.length < search.length { return false }
+  let mut start = usize.ZERO
+  while start <= source.length - search.length {
+    let mut offset = usize.ZERO
+    let mut matched = true
+    while offset < search.length {
+      if asciiFold(source[start + offset]) != asciiFold(search[offset]) {
+        matched = false
+        offset = search.length
+      } else {
+        offset = offset + usize.ONE
+      }
+    }
+    if matched { return true }
+    start = start + usize.ONE
+  }
+  return false
+}

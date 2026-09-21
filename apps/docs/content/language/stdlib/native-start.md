@@ -13,7 +13,7 @@ It supplies the platform C main entry and calls the explicitly selected applicat
 
 ## Details
 
-The application returns i32, unit, or an Effect producing unit. The Effect may require mutable
+The application returns i32, unit, or an Effect producing unit or i32. The Effect may require mutable
 HostInput; startup provides an owned argument/environment snapshot. Other requirements must
 be supplied by application source. Returned and directly authored Effects use the same policy.
 

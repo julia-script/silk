@@ -144,6 +144,8 @@ it('assigns keyword, numeric, and comment scopes via a TextMate tokenizer', asyn
   assert.include(scopesAt(program, 'main'), 'entity.name.function.silk')
   assert.include(scopesAt(program, 'return'), 'keyword.control.silk')
   assert.include(scopesAt(program, 'i32'), 'support.type.builtin.silk')
+  assert.include(scopesAt('test effect fn checked() {}', 'test'), 'storage.modifier.test.silk')
+  assert.notInclude(scopesAt('fn use(test: i32) {}', 'test'), 'storage.modifier.test.silk')
   assert.include(scopesAt('impl Allocator for Mine { unsafe {} }', 'impl'), 'storage.type.silk')
   assert.include(scopesAt('impl Allocator for Mine { unsafe {} }', 'for'), 'storage.type.silk')
   assert.include(scopesAt('impl Allocator for Mine { unsafe {} }', 'unsafe'), 'storage.type.silk')

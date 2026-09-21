@@ -802,11 +802,12 @@ const printFunctionDeclaration = (
 ): FormatDocument.Document => {
   const tokens = directTokens(node)
   const nodes = directNodes(node)
-  // Every modifier through `fn`: `[pub] [static] [unsafe] [extern | export "C"] [effect] fn`.
+  // Every modifier through `fn`: `[pub] [test] [static] [unsafe] [extern | export "C"] [effect] fn`.
   const head = tokens.slice(0, tokens.findIndex((token) => token.kind === 'FnKeyword') + 1)
-  const name =
-    tokens.find((token) => token.kind === 'Identifier') ??
-    tokens.find((token) => token.kind === 'DropKeyword')
+  const fnIndex = tokens.findIndex((token) => token.kind === 'FnKeyword')
+  const name = tokens
+    .slice(fnIndex + 1)
+    .find((token) => token.kind === 'Identifier' || token.kind === 'DropKeyword')
   if (name === undefined)
     throw new SyntaxFormatterImplementationError('FunctionDeclaration has no function name')
   const asIndex = tokens.findIndex((token) => token.kind === 'AsKeyword')

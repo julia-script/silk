@@ -95,4 +95,4 @@ Before execution, `silk test` SHALL use existing source-rejection status 1 and c
 #### Scenario: Preserve a runner operational failure
 
 - **WHEN** the source runner exits 2 due to an operational failure
-- **THEN** `silk test` also exits 2 rather than reporting all tests passed 
+- **THEN** `silk test` also exits 2 rather than reporting all tests passed

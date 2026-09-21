@@ -26,6 +26,7 @@ import * as AuthoredWalk from './AuthoredWalk.js'
 import * as SemanticContext from './SemanticContext.js'
 import type * as Target from './Target.js'
 import * as Type from './Type.js'
+import type * as TestDiscovery from './TestDiscovery.js'
 
 /** The specialization fields needed before an executable instance is admitted. */
 export interface ApplicationKey {
@@ -117,6 +118,7 @@ interface State {
   readonly counters: MutableCounters
   readonly observations: Map<string, Observation & { readonly counters: MutableCounters }>
   readonly selectionReasons: Map<DeclarationFacts.DeclarationFact, SelectionReason | undefined>
+  readonly testCatalog?: TestDiscovery.Catalog
 }
 
 const stateSymbol: unique symbol = Symbol('Residualization.state')
@@ -167,10 +169,11 @@ const makeState = (
   limits: Evaluation.Limits = Evaluation.defaultLimits,
   parameters: ReadonlyMap<string, StaticValue.Value> = new Map(),
   trace: CompilerTrace.CompilerTrace = CompilerTrace.none,
+  testCatalog?: TestDiscovery.Catalog,
 ): State => {
   const sourceIdentity = ToolchainIntegrity.contentDigest(
-    Canonical.array(
-      [...results]
+    Canonical.array([
+      ...[...results]
         .toSorted(([a], [b]) => Canonical.compare(a, b))
         .map(([module, result]) =>
           Canonical.record(module, [
@@ -179,7 +182,8 @@ const makeState = (
             ),
           ]),
         ),
-    ),
+      Canonical.record('TestCatalog', [testCatalog?.identity ?? '']),
+    ]),
   )
   const generatedAggregates = new Map(index.generatedAggregates)
   return {
@@ -198,6 +202,7 @@ const makeState = (
     counters: emptyCounters(),
     observations: new Map(),
     selectionReasons: new Map(),
+    ...(testCatalog === undefined ? {} : { testCatalog }),
   }
 }
 
@@ -210,10 +215,20 @@ export const make = (
   limits: Evaluation.Limits = Evaluation.defaultLimits,
   parameters: ReadonlyMap<string, StaticValue.Value> = new Map(),
   trace: CompilerTrace.CompilerTrace = CompilerTrace.none,
+  testCatalog?: TestDiscovery.Catalog,
 ): Coordinator =>
   Object.freeze({
     _tag: 'ResidualizationCoordinator',
-    [stateSymbol]: makeState(compilation, results, resolution, index, limits, parameters, trace),
+    [stateSymbol]: makeState(
+      compilation,
+      results,
+      resolution,
+      index,
+      limits,
+      parameters,
+      trace,
+      testCatalog,
+    ),
   })
 
 /** Starts default/predicate evaluation without granting runtime-specialization admission. */
@@ -460,6 +475,7 @@ const constantHost = (
     visibility: 'Private',
     phase: 'Static',
     functionKind: 'Ordinary',
+    test: false,
     unsafe: false,
     typeParameters: Object.freeze([]),
     parameterCount: 0,
@@ -696,6 +712,9 @@ const evaluateStaticFunction = (
       )
       const staticContext = {
         environment: self[stateSymbol].environment,
+        ...(self[stateSymbol].testCatalog === undefined
+          ? {}
+          : { testCatalog: self[stateSymbol].testCatalog }),
         typeSubstitution,
         values: bindings.values,
         valueSpans: bindings.valueSpans,
@@ -922,6 +941,9 @@ function evaluateConstantValue(
       const generatedAggregates = new Map<string, DeclarationFacts.StructFact>()
       const staticContext = Object.freeze({
         environment: self[stateSymbol].environment,
+        ...(self[stateSymbol].testCatalog === undefined
+          ? {}
+          : { testCatalog: self[stateSymbol].testCatalog }),
         values: new Map<string, StaticValue.Value>(),
         valueSpans: new Map<string, Location.Location>(),
         valueOrigins: new Map<string, Evaluation.TextOrigin>(),
@@ -1272,6 +1294,9 @@ export const residualize = (self: Coordinator, key: ApplicationKey): Result => {
       Object.freeze({ scope: input.scope, index: self[stateSymbol].index, builder }),
       Object.freeze({
         environment: self[stateSymbol].environment,
+        ...(self[stateSymbol].testCatalog === undefined
+          ? {}
+          : { testCatalog: self[stateSymbol].testCatalog }),
         typeSubstitution,
         values: bindings.values,
         valueSpans: bindings.valueSpans,

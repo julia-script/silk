@@ -518,6 +518,23 @@ export const complete = (
                 result.fact._tag === 'Resolved' ? result.fact.type : undefined,
                 Location.at(result.fact.anchor),
               )
+        if (member.test) {
+          const marker = Location.at(member.testAnchor ?? member.anchor)
+          let invalid: string | undefined
+          if (member.associatedMember !== undefined)
+            invalid = 'tests must be declared at module scope'
+          else if (member.phase === 'Static') invalid = 'tests must be runtime functions'
+          else if (member.unsafe) invalid = 'tests must be safe functions'
+          else if (member.foreign !== undefined || member.foreignExport !== undefined)
+            invalid = 'tests cannot have native linkage'
+          else if (resolvedTypeParameters.length > 0)
+            invalid = 'tests cannot declare generic or lifetime binders'
+          else if (parameters.length > 0) invalid = 'tests cannot declare parameters'
+          else if (result.fact._tag !== 'Resolved' || !Type.equals(result.fact.type, Type.unit))
+            invalid = 'tests must produce unit success'
+          if (invalid !== undefined)
+            diagnostics.push(Diagnostic.invalidTestDeclaration(invalid, marker))
+        }
         diagnostics.push(...admission, ...behaviorDiagnostics, ...pointerAdmission)
         const { foreignExport, ...retained } = member
         return Object.freeze({

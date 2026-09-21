@@ -32,6 +32,10 @@ export interface DeclarationFact {
   readonly visibility: 'Public' | 'Private'
   readonly phase: 'Runtime' | 'Static'
   readonly functionKind: 'Ordinary' | 'Effect'
+  /** A module-level function admitted for explicit test discovery. */
+  readonly test: boolean
+  /** The authored `test` marker, retained so contract diagnostics name the qualifier. */
+  readonly testAnchor?: AuthoredHir.Anchor
   readonly unsafe: boolean
   /** Present when native code supplies the body: the ABI and the logical native symbol. */
   readonly foreign?: {
