@@ -6,8 +6,8 @@ import { projectDataFlow } from '../src/InspectorFlowModel.js'
 
 const encoder = new TextEncoder()
 
-const snap = (id: string, text: string): Analysis.Snapshot =>
-  Effect.runSync(Analysis.ofSourceRealized(id, encoder.encode(text)))
+const snap = (id: string, text: string): Analysis.FrontendSnapshot =>
+  Effect.runSync(Analysis.ofSource(id, encoder.encode(text)))
 
 const analyze = (id: string, text: string): Elaboration.Result =>
   Analysis.rootAnalysis(snap(id, text))
