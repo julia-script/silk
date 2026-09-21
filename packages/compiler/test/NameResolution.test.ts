@@ -216,39 +216,42 @@ const threeModuleSources = {
   'values/Number': 'pub fn two() -> i32 { return 2 }',
 }
 
-it.effect('keeps TIR, MIR, diagnostics, and instances deterministic across fresh snapshots', () =>
-  Effect.gen(function* () {
-    const forward = yield* snapshot('app/Main', threeModuleSources)
-    const reverse = yield* snapshot('app/Main', {
-      'values/Number': threeModuleSources['values/Number'],
-      'library/Answer': threeModuleSources['library/Answer'],
-      'app/Main': threeModuleSources['app/Main'],
-    })
-    const wasm = yield* snapshot('app/Main', threeModuleSources, 'wasm32-unknown-unknown')
-    assert.deepEqual(
-      [...forward.results.values()].map((result) => Tir.encode(result.tir)),
-      [...reverse.results.values()].map((result) => Tir.encode(result.tir)),
-    )
-    assert.strictEqual(
-      MirEncoding.encode(Analysis.loweredMir(forward)),
-      MirEncoding.encode(Analysis.loweredMir(reverse)),
-    )
-    assert.deepEqual(forward.instances, reverse.instances)
-    assert.deepEqual(forward.diagnostics, reverse.diagnostics)
-    assert.deepEqual(
-      [...forward.results.values()].map((result) => Tir.encode(result.tir)),
-      [...wasm.results.values()].map((result) => Tir.encode(result.tir)),
-    )
-    const functionBodies = (candidate: Analysis.Snapshot): string => {
-      const encoded = MirEncoding.encode(Analysis.loweredMir(candidate))
-      return encoded.slice(encoded.indexOf('\nfn '))
-    }
-    assert.strictEqual(functionBodies(forward), functionBodies(wasm))
-    const instanceKeys = (candidate: Analysis.Snapshot) =>
-      candidate.instances.instances.map((instance) => instance.key)
-    assert.deepEqual(instanceKeys(forward), instanceKeys(wasm))
-    assert.deepEqual(wasm.diagnostics, [])
-  }),
+it.effect(
+  'keeps TIR, MIR, diagnostics, and instances deterministic across fresh snapshots',
+  () =>
+    Effect.gen(function* () {
+      const forward = yield* snapshot('app/Main', threeModuleSources)
+      const reverse = yield* snapshot('app/Main', {
+        'values/Number': threeModuleSources['values/Number'],
+        'library/Answer': threeModuleSources['library/Answer'],
+        'app/Main': threeModuleSources['app/Main'],
+      })
+      const wasm = yield* snapshot('app/Main', threeModuleSources, 'wasm32-unknown-unknown')
+      assert.deepEqual(
+        [...forward.results.values()].map((result) => Tir.encode(result.tir)),
+        [...reverse.results.values()].map((result) => Tir.encode(result.tir)),
+      )
+      assert.strictEqual(
+        MirEncoding.encode(Analysis.loweredMir(forward)),
+        MirEncoding.encode(Analysis.loweredMir(reverse)),
+      )
+      assert.deepEqual(forward.instances, reverse.instances)
+      assert.deepEqual(forward.diagnostics, reverse.diagnostics)
+      assert.deepEqual(
+        [...forward.results.values()].map((result) => Tir.encode(result.tir)),
+        [...wasm.results.values()].map((result) => Tir.encode(result.tir)),
+      )
+      const functionBodies = (candidate: Analysis.Snapshot): string => {
+        const encoded = MirEncoding.encode(Analysis.loweredMir(candidate))
+        return encoded.slice(encoded.indexOf('\nfn '))
+      }
+      assert.strictEqual(functionBodies(forward), functionBodies(wasm))
+      const instanceKeys = (candidate: Analysis.Snapshot) =>
+        candidate.instances.instances.map((instance) => instance.key)
+      assert.deepEqual(instanceKeys(forward), instanceKeys(wasm))
+      assert.deepEqual(wasm.diagnostics, [])
+    }),
+  10_000,
 )
 
 it.effect('keeps repeated imports valid without hiding parser recovery diagnostics', () =>

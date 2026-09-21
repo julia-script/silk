@@ -15,6 +15,7 @@ import * as SemanticContext from './SemanticContext.js'
 import * as SemanticQuery from './SemanticQuery.js'
 import * as SourceSpan from './SourceSpan.js'
 import * as StatementAnalysis from './StatementAnalysis.js'
+import * as ToolchainIntegrity from './ToolchainIntegrity.js'
 
 /** The sealed semantic reader for one immutable current closure and selection. */
 export interface Session {
@@ -39,22 +40,21 @@ interface Runtime {
       readonly header: string
       readonly implementation: string
       readonly scope: string
-      readonly names: ReadonlyArray<string>
-      readonly build: () => Elaboration.CheckedUnit
+      readonly build?: () => Elaboration.CheckedUnit
     }
   >
   readonly ownership: Map<
     string,
     {
       readonly boundary: string
-      readonly build: () => Ownership.CheckedFunction
+      readonly build?: () => Ownership.CheckedFunction
     }
   >
   readonly evaluations: Map<
     string,
     {
       readonly policy: string
-      readonly execute: () => RecordedEvaluation<unknown>
+      readonly execute?: () => RecordedEvaluation<unknown>
     }
   >
   readonly presentations: Map<string, unknown>
@@ -482,26 +482,17 @@ const makeProvider = (
       }
       case 'CheckBody': {
         const body = runtime.bodies.get(request.address)
-        if (body === undefined) throw new RangeError('Body provider is unavailable')
+        if (body?.build === undefined) throw new RangeError('Body provider is unavailable')
         observeConfiguration(observe)
         observe(input('BodyHeader', [request.address]))
         observe(input('BodyImplementation', [request.address]))
         observe(input('BodyScope', [request.address]))
-        const queries = runtime.queries
-        if (queries === undefined)
-          throw new RangeError('Semantic query provider is not initialized')
-        for (const spelling of body.names) {
-          const parts = partsOf(request.address)
-          const identity = parts[0] ?? ''
-          const slash = identity.lastIndexOf('/')
-          const module = slash < 0 ? identity : identity.slice(0, slash)
-          SemanticQuery.query<string>(queries, nameDescriptor(module, spelling))
-        }
         return body.build()
       }
       case 'Ownership': {
         const ownership = runtime.ownership.get(request.address)
-        if (ownership === undefined) throw new RangeError('Ownership provider is unavailable')
+        if (ownership?.build === undefined)
+          throw new RangeError('Ownership provider is unavailable')
         const identity = parts[0] ?? ''
         const queries = runtime.queries
         if (queries === undefined)
@@ -515,7 +506,8 @@ const makeProvider = (
       case 'Evaluate':
       case 'ConstructResidual': {
         const evaluation = runtime.evaluations.get(request.address)
-        if (evaluation === undefined) throw new RangeError('Evaluation provider is unavailable')
+        if (evaluation?.execute === undefined)
+          throw new RangeError('Evaluation provider is unavailable')
         observeConfiguration(observe)
         observe(input('EvaluationPolicy', [request.address]))
         return evaluation.execute()
@@ -528,9 +520,11 @@ const makeProvider = (
     if (typeof answer === 'string') return answer
     if (request.family === 'CheckBody')
       return BodyQuery.fingerprint(index, answer as Elaboration.CheckedUnit)
-    if (request.family === 'Ownership') return stableJson(answer)
+    if (request.family === 'Ownership') return ToolchainIntegrity.contentDigest(stableJson(answer))
     if (request.family === 'Evaluate' || request.family === 'ConstructResidual')
-      return stableJson((answer as RecordedEvaluation<unknown>).entry.state)
+      return ToolchainIntegrity.contentDigest(
+        stableJson((answer as RecordedEvaluation<unknown>).entry.state),
+      )
     return request.family + ':' + request.address
   },
   read: (address) => readInput(index, resolution, configuration, runtime, address),
@@ -729,17 +723,15 @@ export const checkBody = (bodyInput: BodyInput): Elaboration.CheckedUnit => {
   }
   const request = checkBodyDescriptor(bodyInput.declaration)
   const runtime = runtimeOf(bodyInput.session)
-  runtime.bodies.set(request.address, {
+  const provider = {
     header: BodyQuery.headerFingerprint(bodyInput.index, bodyInput.declaration),
     implementation: BodyQuery.implementationFingerprint(bodyInput.authored, bodyInput.declaration),
     scope: BodyQuery.scopeFingerprint(
-      bodyInput.query,
       bodyInput.index,
       bodyInput.authored,
       bodyInput.declaration,
       bodyInput.scope,
     ),
-    names: BodyQuery.referencedNames(bodyInput.authored, bodyInput.declaration),
     build: () =>
       bodyInput.query === undefined
         ? trace('Semantic.checkBody.execute', () => build().unit)
@@ -752,32 +744,42 @@ export const checkBody = (bodyInput: BodyInput): Elaboration.CheckedUnit => {
             build,
             trace,
           ),
-  })
-  return trace(
-    'Semantic.checkBody',
-    () => {
-      const result = SemanticQuery.query<Elaboration.CheckedUnit>(
-        bodyInput.session.queries,
-        request,
-      )
-      if (result._tag === 'Cycle')
-        throw new RangeError('Recursive body query: ' + result.cycle.path.join(' -> '))
-      return result.reused && bodyInput.query !== undefined
-        ? BodyQuery.reuse(
-            bodyInput.query,
-            context,
-            bodyInput.authored,
-            bodyInput.declaration,
-            result.completed.answer,
-            trace,
-          )
-        : result.completed.answer
-    },
-    {
-      module: bodyInput.declaration.owner.module,
-      declaration: bodyInput.declaration.id.ordinal,
-    },
-  )
+  }
+  runtime.bodies.set(request.address, provider)
+  try {
+    return trace(
+      'Semantic.checkBody',
+      () => {
+        const result = SemanticQuery.query<Elaboration.CheckedUnit>(
+          bodyInput.session.queries,
+          request,
+        )
+        if (result._tag === 'Cycle')
+          throw new RangeError('Recursive body query: ' + result.cycle.path.join(' -> '))
+        return result.reused && bodyInput.query !== undefined
+          ? BodyQuery.reuse(
+              bodyInput.query,
+              context,
+              bodyInput.authored,
+              bodyInput.declaration,
+              result.completed.answer,
+              trace,
+            )
+          : result.completed.answer
+      },
+      {
+        module: bodyInput.declaration.owner.module,
+        declaration: bodyInput.declaration.id.ordinal,
+      },
+    )
+  } finally {
+    if (runtime.bodies.get(request.address) === provider)
+      runtime.bodies.set(request.address, {
+        header: provider.header,
+        implementation: provider.implementation,
+        scope: provider.scope,
+      })
+  }
 }
 
 export const checkBodyFresh = (bodyInput: BodyInput): Elaboration.CheckedUnit => {
@@ -807,23 +809,29 @@ export const ownership = (
     BodyQuery.identity(ownershipInput.function.declaration),
   ])
   const runtime = runtimeOf(self)
-  runtime.ownership.set(request.address, {
+  const provider = {
     boundary: stableJson(ownershipInput.boundaries),
     build: compute,
-  })
-  const result = SemanticQuery.query<Ownership.CheckedFunction>(self.queries, request)
-  if (result._tag === 'Cycle')
-    throw new RangeError('Recursive ownership query: ' + result.cycle.path.join(' -> '))
-  if (bodyQuery === undefined) return result.completed.answer
-  const presented = BodyQuery.acceptOwnership(
-    bodyQuery,
-    ownershipInput,
-    result.completed.answer,
-    result.reused,
-  )
-  if (presented !== undefined) return presented
-  const rebuilt = compute()
-  return BodyQuery.acceptOwnership(bodyQuery, ownershipInput, rebuilt, false) ?? rebuilt
+  }
+  runtime.ownership.set(request.address, provider)
+  try {
+    const result = SemanticQuery.query<Ownership.CheckedFunction>(self.queries, request)
+    if (result._tag === 'Cycle')
+      throw new RangeError('Recursive ownership query: ' + result.cycle.path.join(' -> '))
+    if (bodyQuery === undefined) return result.completed.answer
+    const presented = BodyQuery.acceptOwnership(
+      bodyQuery,
+      ownershipInput,
+      result.completed.answer,
+      result.reused,
+    )
+    if (presented !== undefined) return presented
+    const rebuilt = compute()
+    return BodyQuery.acceptOwnership(bodyQuery, ownershipInput, rebuilt, false) ?? rebuilt
+  } finally {
+    if (runtime.ownership.get(request.address) === provider)
+      runtime.ownership.set(request.address, { boundary: provider.boundary })
+  }
 }
 
 const evaluateQuery = <A>(
@@ -837,7 +845,7 @@ const evaluateQuery = <A>(
   const key = Evaluation.applicationKey(evaluation.environment, application)
   const request = descriptor(family, [key, Evaluation.policyKey(evaluation)])
   const runtime = runtimeOf(self)
-  runtime.evaluations.set(request.address, {
+  const provider = {
     policy: Evaluation.policyKey(evaluation),
     execute: () => {
       const evaluated =
@@ -857,18 +865,24 @@ const evaluateQuery = <A>(
         reusable: false,
       })
     },
-  })
-  const result = SemanticQuery.query<RecordedEvaluation<A>>(self.queries, request)
-  if (result._tag === 'Cycle') {
-    const direct =
-      parentTrace.length === 0
-        ? Evaluation.evaluate(evaluation, application, callback)
-        : Evaluation.evaluateFrom(evaluation, application, parentTrace, callback)
-    return direct
   }
-  return result.reused
-    ? Evaluation.admit(evaluation, application, result.completed.answer.entry, parentTrace)
-    : result.completed.answer.result
+  runtime.evaluations.set(request.address, provider)
+  try {
+    const result = SemanticQuery.query<RecordedEvaluation<A>>(self.queries, request)
+    if (result._tag === 'Cycle') {
+      const direct =
+        parentTrace.length === 0
+          ? Evaluation.evaluate(evaluation, application, callback)
+          : Evaluation.evaluateFrom(evaluation, application, parentTrace, callback)
+      return direct
+    }
+    return result.reused
+      ? Evaluation.admit(evaluation, application, result.completed.answer.entry, parentTrace)
+      : result.completed.answer.result
+  } finally {
+    if (runtime.evaluations.get(request.address) === provider)
+      runtime.evaluations.set(request.address, { policy: provider.policy })
+  }
 }
 
 /** Evaluates one static application through the shared revision validator. */

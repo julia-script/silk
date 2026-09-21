@@ -121,9 +121,16 @@ const stableIdentityOf = (
   return undefined
 }
 
+const declarationIndexes = new WeakMap<
+  DeclarationIndex.Index,
+  ReadonlyMap<string, StableDeclaration>
+>()
+
 const stableDeclarations = (
   index: DeclarationIndex.Index,
 ): ReadonlyMap<string, StableDeclaration> => {
+  const cached = declarationIndexes.get(index)
+  if (cached !== undefined) return cached
   const result = new Map<string, StableDeclaration>()
   for (const module of index.modules) {
     for (const declaration of [...module.members, ...module.declarations]) {
@@ -144,6 +151,7 @@ const stableDeclarations = (
       name: declaration.canonical.id.name,
     })
   }
+  declarationIndexes.set(index, result)
   return result
 }
 
@@ -471,10 +479,153 @@ export const encode = (
 export const fingerprint = (
   unit: Elaboration.CheckedUnit,
   index: DeclarationIndex.Index,
+  declarationFingerprint: (declaration: DeclarationFacts.DeclarationFact) => string,
 ): string => {
   const primary = unit.bodies[0]
   if (primary === undefined) throw new CodecError('Unit', 'checked unit has no primary body')
-  return JSON.stringify(encoder(primary.declaration.id, stableDeclarations(index), false)(unit))
+  const declarations = stableDeclarations(index)
+  const visited = new WeakSet<object>()
+  const state: [number, number, number, number, number, number, number, number] = [
+    0x811c9dc5, 0x9e3779b9, 0x243f6a88, 0xb7e15162, 0x85ebca6b, 0xc2b2ae35, 0x27d4eb2f, 0x165667b1,
+  ]
+  const write = (value: number): void => {
+    state[0] = Math.imul(state[0] ^ value, 0x01000193) >>> 0
+    state[1] = Math.imul(state[1] + value, 0x85ebca6b) >>> 0
+    state[2] = Math.imul(state[2] ^ ((value << 16) | (value >>> 16)), 0xc2b2ae35) >>> 0
+    state[3] = Math.imul(state[3] + (value ^ 0x9e3779b9), 0x27d4eb2f) >>> 0
+    state[4] = Math.imul(state[4] ^ (value + 0x7f4a7c15), 0x165667b1) >>> 0
+    state[5] = Math.imul(state[5] + ((value << 13) | (value >>> 19)), 0xd3a2646c) >>> 0
+    state[6] = Math.imul(state[6] ^ (value + state[0]), 0xfd7046c5) >>> 0
+    state[7] = Math.imul(state[7] + (value ^ state[3]), 0xb55a4f09) >>> 0
+  }
+  const writeText = (value: string): void => {
+    let first = 0x811c9dc5
+    let second = 0x9e3779b9
+    let third = 0x243f6a88
+    let fourth = 0xb7e15162
+    for (let offset = 0; offset < value.length; offset += 1) {
+      const code = value.charCodeAt(offset)
+      first = Math.imul(first ^ code, 0x01000193) >>> 0
+      second = Math.imul(second + code, 0x85ebca6b) >>> 0
+      third = Math.imul(third ^ ((code << 16) | (code >>> 16)), 0xc2b2ae35) >>> 0
+      fourth = Math.imul(fourth + (code ^ 0x9e3779b9), 0x27d4eb2f) >>> 0
+    }
+    write(value.length)
+    write(first)
+    write(second)
+    write(third)
+    write(fourth)
+  }
+  const writeValue = (input: unknown): void => {
+    if (input === null) {
+      writeText('null')
+      return
+    }
+    if (typeof input === 'boolean') {
+      writeText('boolean')
+      write(input ? 1 : 0)
+      return
+    }
+    if (typeof input === 'string') {
+      writeText('string')
+      writeText(input)
+      return
+    }
+    if (typeof input === 'number') {
+      if (!Number.isFinite(input))
+        throw new CodecError('Number', 'checked unit has non-finite number')
+      writeText('number')
+      writeText(String(input))
+      return
+    }
+    if (typeof input === 'bigint') {
+      writeText('bigint')
+      writeText(String(input))
+      return
+    }
+    if (typeof input !== 'object')
+      throw new CodecError('Unit', `checked unit has unsupported ${typeof input}`)
+    if (SourceSpan.isSourceSpan(input)) {
+      writeText('span')
+      return
+    }
+    if (visited.has(input)) {
+      writeText('reference')
+      return
+    }
+    visited.add(input)
+    if (Array.isArray(input)) {
+      writeText('array')
+      write(input.length)
+      for (const value of input) writeValue(value)
+    } else if (input instanceof Map) {
+      writeText('map')
+      write(input.size)
+      for (const [key, value] of input) {
+        writeValue(key)
+        writeValue(value)
+      }
+    } else if (input instanceof Set) {
+      writeText('set')
+      write(input.size)
+      for (const value of input) writeValue(value)
+    } else if (input instanceof Uint8Array) {
+      writeText('bytes')
+      write(input.byteLength)
+      for (const value of input) write(value)
+    } else {
+      const record = input as Readonly<Record<string, unknown>>
+      if (
+        record['_tag'] === 'DeclarationId' &&
+        typeof record['sourceId'] === 'string' &&
+        typeof record['ordinal'] === 'number'
+      ) {
+        const id = input as DeclarationFacts.DeclarationId
+        const declaration =
+          relativeDeclaration(primary.declaration.id, id) ?? declarations.get(declarationKey(id))
+        writeText('declaration')
+        if (declaration === undefined) {
+          writeText('unstable')
+          writeText(id.sourceId)
+          write(id.ordinal)
+        } else {
+          writeText(declaration.kind)
+          if (declaration.kind === 'named') {
+            writeText(declaration.module)
+            writeText(declaration.name)
+          } else {
+            write(declaration.site)
+          }
+        }
+      } else {
+        writeText('object')
+        const keys = Object.keys(record)
+          .filter((key) => record[key] !== undefined)
+          .sort()
+        write(keys.length)
+        for (const key of keys) {
+          const value = record[key]
+          writeText(key)
+          writeValue(value)
+        }
+      }
+    }
+  }
+  const semanticUnit = {
+    bodies: unit.bodies.map((body) => ({
+      artifact: body.artifact,
+      declaration: declarationFingerprint(body.declaration),
+      hidden: body.hidden,
+      function: { ...body.function, artifact: undefined, declaration: undefined },
+      results:
+        body.results.lifetimes === undefined
+          ? body.results
+          : { ...body.results, lifetimes: LifetimeFlow.content(body.results.lifetimes) },
+    })),
+    diagnostics: unit.diagnostics,
+  }
+  writeValue(semanticUnit)
+  return state.map((value) => value.toString(16).padStart(8, '0')).join('')
 }
 
 /** Strictly decodes and presents one complete unit against the current header and authored spans. */

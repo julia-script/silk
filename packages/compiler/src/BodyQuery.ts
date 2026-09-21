@@ -11,6 +11,7 @@ import type * as Ownership from './Ownership.js'
 import * as SourceSpan from './SourceSpan.js'
 import * as Tir from './Tir.js'
 import * as TirCodec from './TirCodec.js'
+import * as ToolchainIntegrity from './ToolchainIntegrity.js'
 import type * as SemanticContext from './SemanticContext.js'
 
 /** Actual source-body query work, independent of module invalidation observations. */
@@ -201,14 +202,8 @@ const memberKey = (value: DeclarationFacts.MemberFact): string =>
 export const identity = (declaration: DeclarationFacts.DeclarationFact): string =>
   memberKey(declaration)
 
-const semanticMemberFingerprint = (
-  index: DeclarationIndex.Index,
-  member: DeclarationFacts.MemberFact,
-  visited: Set<string>,
-): ReadonlyArray<unknown> => {
+const semanticMemberFingerprint = (member: DeclarationFacts.MemberFact): ReadonlyArray<unknown> => {
   const key = memberKey(member)
-  if (visited.has(key)) return Object.freeze([key])
-  visited.add(key)
   const nominal = new Set<string>()
   visit(member, (value) => {
     if (
@@ -223,27 +218,25 @@ const semanticMemberFingerprint = (
   return Object.freeze([
     key,
     ModuleSurface.memberSignature(member),
-    Object.freeze(
-      [...nominal].sort().map((identity) => {
-        const slash = identity.lastIndexOf('/')
-        const dependency = DeclarationFacts.byCanonical(index, {
-          _tag: 'CanonicalDeclarationId',
-          module: identity.slice(0, slash),
-          name: identity.slice(slash + 1),
-        })
-        return dependency === undefined
-          ? Object.freeze([identity, 'missing'])
-          : semanticMemberFingerprint(index, dependency, visited)
-      }),
-    ),
+    Object.freeze([...nominal].sort()),
   ])
 }
 
-/** The current transitive header input consumed by one checked-unit query. */
+/** The declaration's direct semantic header input consumed by one checked-unit query. */
+const headerFingerprints = new WeakMap<DeclarationFacts.MemberFact, string>()
+
 export const headerFingerprint = (
-  index: DeclarationIndex.Index,
-  declaration: DeclarationFacts.DeclarationFact,
-): string => JSON.stringify(semanticMemberFingerprint(index, declaration, new Set()))
+  _index: DeclarationIndex.Index,
+  declaration: DeclarationFacts.MemberFact,
+): string => {
+  const cached = headerFingerprints.get(declaration)
+  if (cached !== undefined) return cached
+  const fingerprint = ToolchainIntegrity.contentDigest(
+    JSON.stringify(semanticMemberFingerprint(declaration)),
+  )
+  headerFingerprints.set(declaration, fingerprint)
+  return fingerprint
+}
 
 const memberCatalogs = new WeakMap<
   DeclarationIndex.Index,
@@ -346,91 +339,67 @@ export const authoredDeclaration = (
 export const implementationFingerprint = (
   authored: AuthoredLowering.Lowered,
   declaration: DeclarationFacts.DeclarationFact,
-): string => AuthoredLowering.canonicalBody(authored, authoredDeclaration(authored, declaration))
-
-const bodyDependencyFingerprint = (
-  self: BodyQuery,
-  authored: AuthoredLowering.Lowered,
-  declaration: DeclarationFacts.DeclarationFact,
-  scope: NameResolution.ModuleScope,
-  visited: Set<string>,
-  modules: Set<string> = new Set(),
-): ReadonlyArray<unknown> => {
-  const body = memberKey(declaration)
-  modules.add(declaration.owner.module)
-  if (visited.has(body)) return Object.freeze([body, 'recursive'])
-  visited.add(body)
-  const names = AuthoredLowering.bodyNames(authored, authoredDeclaration(authored, declaration))
-  return Object.freeze([
-    body,
-    implementationFingerprint(authored, declaration),
-    Object.freeze(
-      scope.bindings
-        .filter((binding) => names.has(binding.spelling))
-        .map((binding) => {
-          if (binding._tag === 'LocalDeclaration' || binding._tag === 'ImportedMember') {
-            modules.add(binding.declaration.module)
-            const member = DeclarationFacts.byCanonical(self.index, binding.declaration)
-            const dependency =
-              member?._tag === 'FunctionDeclaration' && member.bodyTemplate !== undefined
-                ? (() => {
-                    const lowered = self.currentModules.get(member.owner.module)
-                    const nestedScope = NameResolution.scopeOf(self.resolution, member.owner.module)
-                    return lowered === undefined || nestedScope === undefined
-                      ? ModuleSurface.memberImplementation(member)
-                      : bodyDependencyFingerprint(
-                          self,
-                          lowered,
-                          member,
-                          nestedScope,
-                          visited,
-                          modules,
-                        )
-                  })()
-                : undefined
-            return [
-              binding._tag,
-              binding.spelling,
-              binding.declaration.module,
-              binding.declaration.name,
-              member === undefined
-                ? 'missing'
-                : semanticMemberFingerprint(self.index, member, new Set()),
-              dependency,
-            ]
-          }
-          if (binding._tag === 'ModuleNamespace')
-            return [binding._tag, binding.spelling, binding.module]
-          return [binding._tag, binding.spelling]
-        }),
-    ),
-  ])
-}
+): string =>
+  ToolchainIntegrity.contentDigest(
+    AuthoredLowering.canonicalBody(authored, authoredDeclaration(authored, declaration)),
+  )
 
 export const scopeFingerprint = (
-  self: BodyQuery | undefined,
   index: DeclarationIndex.Index,
   authored: AuthoredLowering.Lowered,
   declaration: DeclarationFacts.DeclarationFact,
   scope: NameResolution.ModuleScope,
 ): string => {
-  if (self !== undefined)
-    return JSON.stringify(bodyDependencyFingerprint(self, authored, declaration, scope, new Set()))
   const names = AuthoredLowering.bodyNames(authored, authoredDeclaration(authored, declaration))
-  return JSON.stringify(
-    scope.bindings
-      .filter((binding) => names.has(binding.spelling))
-      .map((binding) => {
-        if (binding._tag !== 'LocalDeclaration' && binding._tag !== 'ImportedMember')
-          return [binding._tag, binding.spelling]
-        const member = DeclarationFacts.byCanonical(index, binding.declaration)
-        return [
-          binding._tag,
-          binding.spelling,
-          member === undefined ? 'missing' : semanticMemberFingerprint(index, member, new Set()),
-        ]
-      }),
+  return ToolchainIntegrity.contentDigest(
+    JSON.stringify(
+      scope.bindings
+        .filter((binding) => names.has(binding.spelling))
+        .map((binding) => {
+          if (binding._tag === 'ModuleNamespace')
+            return [binding._tag, binding.spelling, binding.module]
+          if (binding._tag !== 'LocalDeclaration' && binding._tag !== 'ImportedMember')
+            return [binding._tag, binding.spelling]
+          const member = DeclarationFacts.byCanonical(index, binding.declaration)
+          return [
+            binding._tag,
+            binding.spelling,
+            binding.declaration.module,
+            binding.declaration.name,
+            member === undefined ? 'missing' : headerFingerprint(index, member),
+          ]
+        }),
+    ),
   )
+}
+
+const collectPresentationModules = (
+  self: BodyQuery,
+  authored: AuthoredLowering.Lowered,
+  declaration: DeclarationFacts.DeclarationFact,
+  scope: NameResolution.ModuleScope,
+  visited: Set<string>,
+  modules: Set<string>,
+): void => {
+  const body = memberKey(declaration)
+  modules.add(declaration.owner.module)
+  if (visited.has(body)) return
+  visited.add(body)
+  const names = AuthoredLowering.bodyNames(authored, authoredDeclaration(authored, declaration))
+  for (const binding of scope.bindings) {
+    if (
+      !names.has(binding.spelling) ||
+      (binding._tag !== 'LocalDeclaration' && binding._tag !== 'ImportedMember')
+    )
+      continue
+    modules.add(binding.declaration.module)
+    const member = DeclarationFacts.byCanonical(self.index, binding.declaration)
+    if (member?._tag !== 'FunctionDeclaration' || member.bodyTemplate === undefined) continue
+    const lowered = self.currentModules.get(member.owner.module)
+    const nestedScope = NameResolution.scopeOf(self.resolution, member.owner.module)
+    if (lowered !== undefined && nestedScope !== undefined)
+      collectPresentationModules(self, lowered, member, nestedScope, visited, modules)
+  }
 }
 
 /** Modules whose current source presentation can appear in this body's projected facts. */
@@ -441,22 +410,13 @@ export const presentationModules = (
   scope: NameResolution.ModuleScope,
 ): ReadonlyArray<string> => {
   const modules = new Set<string>()
-  bodyDependencyFingerprint(self, authored, declaration, scope, new Set(), modules)
+  collectPresentationModules(self, authored, declaration, scope, new Set(), modules)
   return Object.freeze([...modules].sort())
 }
 
-/** Source spellings whose current resolution can affect this body. */
-export const referencedNames = (
-  authored: AuthoredLowering.Lowered,
-  declaration: DeclarationFacts.DeclarationFact,
-): ReadonlyArray<string> =>
-  Object.freeze(
-    [...AuthoredLowering.bodyNames(authored, authoredDeclaration(authored, declaration))].sort(),
-  )
-
 /** Position-independent result identity used for dependent-query cutoffs. */
 export const fingerprint = (index: DeclarationIndex.Index, unit: Elaboration.CheckedUnit): string =>
-  TirCodec.fingerprint(unit, index)
+  TirCodec.fingerprint(unit, index, (declaration) => headerFingerprint(index, declaration))
 
 const callsOf = (self: BodyQuery, built: Built): ReadonlyArray<string> => {
   const calls = new Set<string>()
