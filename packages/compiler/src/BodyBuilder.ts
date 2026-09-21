@@ -1771,7 +1771,10 @@ const residualExpression = (
   }
   if (fact._tag === 'FieldProjection') {
     if (
-      (options.static === undefined || options.builder?.artifact.request._tag === 'Specialize') &&
+      (options.static === undefined ||
+        (options.builder?.artifact.request._tag === 'Specialize' &&
+          fact.nominal !== undefined &&
+          Type.equals(fact.nominal, Type.testInfo))) &&
       fact.staticValue !== undefined &&
       fact.type._tag === 'Available'
     ) {

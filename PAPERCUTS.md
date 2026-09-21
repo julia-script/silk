@@ -47,3 +47,8 @@ Format: date · symptom · fix · project. Check here first when tooling is slow
 - 2026-09-21 · Local `pnpm release:candidate` could not install offline consumers because the pnpm
   metadata mirror lacked unrelated package records · Use exact CI for the full release-candidate
   gate; locally verify that changed export assertions advance past manifest validation · repository
+- 2026-09-21 · A zsh test wrapper assigned to the readonly `status` parameter after the test had
+  already run · Use a task-specific exit variable or avoid capturing the status when inspecting a
+  redirected log · repository
+- 2026-09-21 · A temporary comparison-worktree command was rejected because it began with
+  `rm -rf` cleanup · Use a unique temporary path and add the worktree directly · repository

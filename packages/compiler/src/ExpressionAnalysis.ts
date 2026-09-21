@@ -5762,6 +5762,7 @@ export const finishIntrinsicContractCall = (
       anchor: call.anchor,
     })
     const staticResult =
+      (operation.spelling === 'tests' || operation.spelling === 'testInfo') &&
       resolution.staticContext !== undefined &&
       resolution.deferStaticCalls !== true &&
       type._tag === 'Available'
