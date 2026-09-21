@@ -479,6 +479,7 @@ const completeForInstances = Effect.fnUntraced(function* (
   opaqueRealizations?: OpaqueRealization.Catalog,
 ): Effect.fn.Return<Catalog> {
   const state = makeCatalogState(self.target, index, discovery, opaqueRealizations)
+  for (const entry of self.entries) state.completed.set(Type.runtimeKey(entry.type), entry)
   const referenced = new Map<string, DeclarationFacts.SemanticType>()
   yield* collectDeclaredTypes(index, referenced)
   yield* collectInstanceTypes(discovery, referenced)
