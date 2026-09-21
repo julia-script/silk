@@ -214,31 +214,56 @@ const buildTargetLayout = Effect.fn('Realization.buildTargetLayout')(function* (
   })
 })
 
-const lowerMir = Effect.fn('Realization.lowerMir')(function* (
-  self: Frontend,
-  index: DeclarationIndex.Index,
-  instances: Instances.Discovery,
-  layout: Layout.Plan,
-  profile: CompilationProfile.CompilationProfile | undefined,
-  options: Options,
-  registry: SemanticContext.Registry,
-) {
+export type MirAdmission =
+  | { readonly _tag: 'Admitted' }
+  | { readonly _tag: 'Rejected'; readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic> }
+
+/** Explicit artifact inputs and policy for one MIR lowering request. */
+export interface MirLoweringInput {
+  readonly instances: Instances.Discovery
+  readonly layout: Layout.Plan
+  readonly index: DeclarationIndex.Index
+  readonly opaqueRealizations: OpaqueRealization.Catalog
+  readonly profile?: CompilationProfile.CompilationProfile
+  readonly presentation: SemanticContext.Registry
+  readonly admission: MirAdmission
+  readonly normalization: 'Normalize' | 'Preserve'
+  readonly audit: 'None' | 'ForeignPlanning'
+}
+
+export interface MirLoweringResult {
+  readonly program: Mir.Module | undefined
+  readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
+}
+
+/** Lowers admitted instance/layout artifacts to MIR with optional target planning audit. */
+export const lowerMir = Effect.fn('Mir.lower')(function* (
+  input: MirLoweringInput,
+): Effect.fn.Return<MirLoweringResult> {
+  if (input.admission._tag === 'Rejected')
+    return Object.freeze({ program: undefined, diagnostics: input.admission.diagnostics })
   const program = yield* lowerProgram(
-    instances,
-    layout,
-    index,
-    OpaqueRealization.catalogOf(self),
-    registry,
+    input.instances,
+    input.layout,
+    input.index,
+    input.opaqueRealizations,
+    input.presentation,
   )
-  const provisional = yield* buildProvisionalMir(instances, layout, index)
-  return yield* finalizeMir(
+  const provisional = yield* buildProvisionalMir(input.instances, input.layout, input.index)
+  const finalized = yield* finalizeMir(
     program,
     provisional,
-    index,
-    OpaqueRealization.catalogOf(self),
-    profile,
-    options,
+    input.index,
+    input.opaqueRealizations,
+    input.profile,
+    input.normalization,
   )
+  if (finalized.program === undefined || input.audit === 'None') return finalized
+  const audit = yield* checkForeignPlanning(finalized.program, input.layout.target)
+  return Object.freeze({
+    program: audit.length === 0 ? finalized.program : undefined,
+    diagnostics: Diagnostic.merge(finalized.diagnostics, audit),
+  })
 })
 
 const lowerProgram = Effect.fn('Realization.lowerProgram')(function* (
@@ -468,15 +493,17 @@ const discoverAndLowerEffect = Effect.fn('Realization.discoverAndLower')(functio
           report,
           'mir-lowering',
           instances.instances.length,
-          lowerMir(
-            self,
-            realizedIndex,
+          Mir.lower({
             instances,
-            targetLayout.layout,
-            completion?.profile,
-            options,
-            registry,
-          ),
+            layout: targetLayout.layout,
+            index: realizedIndex,
+            opaqueRealizations: OpaqueRealization.catalogOf(self),
+            ...(completion === undefined ? {} : { profile: completion.profile }),
+            presentation: registry,
+            admission: Object.freeze({ _tag: 'Admitted' }),
+            normalization: options.normalizeMir === false ? 'Preserve' : 'Normalize',
+            audit: prepareForEmission ? 'ForeignPlanning' : 'None',
+          }),
           (value) => value.program?.functions.length ?? 0,
           (value) => value.diagnostics.length,
           options,
@@ -499,13 +526,6 @@ const discoverAndLowerEffect = Effect.fn('Realization.discoverAndLower')(functio
       self.composition === undefined
     )
       throw new RangeError('Driver lowering reached an unavailable target after its gates')
-    const planning = yield* checkForeignPlanning(program, targetLayout.target)
-    if (planning.length > 0)
-      return Object.freeze({
-        _tag: 'Rejected',
-        diagnostics: Diagnostic.merge(finalizedDiagnostics, planning),
-        report: Object.freeze(report),
-      })
     return Object.freeze({
       _tag: 'Prepared',
       frontend: self,
@@ -764,7 +784,7 @@ import * as Instances from './Instances.js'
 import * as IntrinsicAvailability from './IntrinsicAvailability.js'
 import * as Layout from './Layout.js'
 import * as Lower from './Lower.js'
-import type * as Mir from './Mir.js'
+import * as Mir from './Mir.js'
 import * as MirNormalization from './MirNormalization.js'
 import * as OpaqueRealization from './OpaqueRealization.js'
 import * as PhaseReport from './PhaseReport.js'
@@ -775,9 +795,13 @@ import * as SuspensionOwnership from './SuspensionOwnership.js'
 import * as Target from './Target.js'
 
 const normalizeMir = Effect.fn('Realization.normalizeMir')(
-  (program: Mir.Module, provisional: ProvisionalMir.Module, options: Options) =>
+  (
+    program: Mir.Module,
+    provisional: ProvisionalMir.Module,
+    normalization: MirLoweringInput['normalization'],
+  ) =>
     Effect.sync(() =>
-      options.normalizeMir === false ? program : MirNormalization.normalize(program, provisional),
+      normalization === 'Preserve' ? program : MirNormalization.normalize(program, provisional),
     ),
 )
 
@@ -787,12 +811,12 @@ const finalizeMir = Effect.fn('Realization.finalizeMir')(function* (
   index: DeclarationIndex.Index,
   opaqueRealizations: OpaqueRealization.Catalog,
   profile: CompilationProfile.CompilationProfile | undefined,
-  options: Options,
+  normalization: MirLoweringInput['normalization'],
 ): Effect.fn.Return<{
   readonly program: Mir.Module | undefined
   readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
 }> {
-  const normalized = yield* normalizeMir(program, provisional, options)
+  const normalized = yield* normalizeMir(program, provisional, normalization)
   const ownership = yield* planSuspensionOwnership(
     normalized,
     provisional,
@@ -806,7 +830,7 @@ const finalizeMir = Effect.fn('Realization.finalizeMir')(function* (
     ...(yield* checkNativeAssembly(normalized, profile)),
   ]
   if (diagnostics.length > 0) return { program: undefined, diagnostics }
-  if (options.normalizeMir === false) return { program: normalized, diagnostics }
+  if (normalization === 'Preserve') return { program: normalized, diagnostics }
   const suspended = yield* finalizeSuspensionMir(normalized, provisional, ownership, index)
   return { program: yield* applyCoroutineFrames(suspended), diagnostics }
 })

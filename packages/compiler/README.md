@@ -60,6 +60,7 @@ The current low-level operation map is:
 | `Realization.instantiate` | checked artifacts, declaration facts, completed profile, roots, resolution, and runtime composition             | portable reachable `Instances.Discovery` graph without live presentation state        |
 | `Layout.computeTypes`     | target, declaration index, literal presentation, and opaque realization facts                                   | pre-reachability target type-layout catalog                                           |
 | `Layout.computeRuntime`   | type catalog, concrete instance graph, declaration index, and opaque realization facts                          | reached layouts plus storage, environment, calling, execution, and literal plans      |
+| `Mir.lower`               | admitted instances/runtime layout, declaration/opaque facts, presentation, profile, normalization, and audit    | finalized MIR or explicit diagnostics with no program                                 |
 
 `Hir.lower` does not load a module, discover imports, run semantic analysis, or realize a target.
 Its returned syntax keeps lexer/parser recovery diagnostics for syntax-only tooling, while
@@ -84,6 +85,12 @@ Type layout and runtime planning are separate operations. `Layout.computeTypes` 
 reachability and may include declared non-generic types that never execute. `Layout.computeRuntime`
 uses the instance graph to complete concrete generic layouts and retains only reached entries while
 planning storage, callable/effect environments, calling shapes, execution packages, and literals.
+
+`Mir.lower` is independently callable and does not infer stage truth from the caller. A closed
+admission value decides whether lowering may start; normalization and optional foreign-planning
+audit are explicit policy inputs. Rejected admission and failed audits return diagnostics without a
+program, while valid requests run the ownership, native-assembly, suspension, and coroutine-frame
+finalization sequence.
 
 Phase reports and trace spans use these operation identities where they measure the corresponding
 work. `Semantic.checkBody.execute` and `.reuse`, and the `evaluation.branch` attribute on
