@@ -75,7 +75,7 @@ export type TargetValidation =
     }
   | { readonly _tag: 'Invalid'; readonly failures: ReadonlyArray<IntegrityFailure> }
 
-const sha256Constants = Object.freeze([
+const sha256Constants = Int32Array.from([
   0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
   0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
   0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
@@ -85,9 +85,6 @@ const sha256Constants = Object.freeze([
   0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
   0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
 ])
-
-const rotateRight = (value: number, count: number): number =>
-  (value >>> count) | (value << (32 - count))
 
 /** Computes the path- and timestamp-independent SHA-256 identity of exact bytes. */
 const contentDigestCache = new WeakMap<Uint8Array, string>()
@@ -104,64 +101,75 @@ export const contentDigest = (value: Uint8Array | string): string => {
   return computeContentDigest(value)
 }
 
+const sha256Words = new Int32Array(64)
+const sha256State = new Int32Array(8)
+
+// Typed module state and a closure-free block function: persisted semantic records hash
+// hundreds of megabytes per compile.
+const sha256Compress = (bytes: Uint8Array, offset: number): void => {
+  const words = sha256Words
+  const constants = sha256Constants
+  const state = sha256State
+  for (let index = 0; index < 16; index += 1) {
+    const at = offset + index * 4
+    words[index] =
+      (bytes[at]! << 24) | (bytes[at + 1]! << 16) | (bytes[at + 2]! << 8) | bytes[at + 3]!
+  }
+  for (let index = 16; index < 64; index += 1) {
+    const p15 = words[index - 15]!
+    const p2 = words[index - 2]!
+    const sigma0 = ((p15 >>> 7) | (p15 << 25)) ^ ((p15 >>> 18) | (p15 << 14)) ^ (p15 >>> 3)
+    const sigma1 = ((p2 >>> 17) | (p2 << 15)) ^ ((p2 >>> 19) | (p2 << 13)) ^ (p2 >>> 10)
+    words[index] = (words[index - 16]! + sigma0 + words[index - 7]! + sigma1) | 0
+  }
+  let a = state[0]!
+  let b = state[1]!
+  let c = state[2]!
+  let d = state[3]!
+  let e = state[4]!
+  let f = state[5]!
+  let g = state[6]!
+  let h = state[7]!
+  for (let index = 0; index < 64; index += 1) {
+    const upper1 = ((e >>> 6) | (e << 26)) ^ ((e >>> 11) | (e << 21)) ^ ((e >>> 25) | (e << 7))
+    const temporary1 = (h + upper1 + ((e & f) ^ (~e & g)) + constants[index]! + words[index]!) | 0
+    const upper0 = ((a >>> 2) | (a << 30)) ^ ((a >>> 13) | (a << 19)) ^ ((a >>> 22) | (a << 10))
+    const temporary2 = (upper0 + ((a & b) ^ (a & c) ^ (b & c))) | 0
+    h = g
+    g = f
+    f = e
+    e = (d + temporary1) | 0
+    d = c
+    c = b
+    b = a
+    a = (temporary1 + temporary2) | 0
+  }
+  state[0] = state[0]! + a
+  state[1] = state[1]! + b
+  state[2] = state[2]! + c
+  state[3] = state[3]! + d
+  state[4] = state[4]! + e
+  state[5] = state[5]! + f
+  state[6] = state[6]! + g
+  state[7] = state[7]! + h
+}
+
 const computeContentDigest = (value: Uint8Array | string): string => {
   const source = typeof value === 'string' ? new TextEncoder().encode(value) : value
-  const bitLength = BigInt(source.length) * 8n
-  const paddedLength = Math.ceil((source.length + 9) / 64) * 64
-  const bytes = new Uint8Array(paddedLength)
-  bytes.set(source)
-  bytes[source.length] = 0x80
-  for (let index = 0; index < 8; index += 1)
-    bytes[paddedLength - 1 - index] = Number((bitLength >> BigInt(index * 8)) & 0xffn)
-
-  const state = [
+  sha256State.set([
     0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19,
-  ]
-  const words = new Uint32Array(64)
-  for (let offset = 0; offset < bytes.length; offset += 64) {
-    for (let index = 0; index < 16; index += 1) {
-      const at = offset + index * 4
-      words[index] =
-        ((bytes[at] ?? 0) << 24) |
-        ((bytes[at + 1] ?? 0) << 16) |
-        ((bytes[at + 2] ?? 0) << 8) |
-        (bytes[at + 3] ?? 0)
-    }
-    for (let index = 16; index < 64; index += 1) {
-      const prior15 = words[index - 15] ?? 0
-      const prior2 = words[index - 2] ?? 0
-      const sigma0 = rotateRight(prior15, 7) ^ rotateRight(prior15, 18) ^ (prior15 >>> 3)
-      const sigma1 = rotateRight(prior2, 17) ^ rotateRight(prior2, 19) ^ (prior2 >>> 10)
-      words[index] = ((words[index - 16] ?? 0) + sigma0 + (words[index - 7] ?? 0) + sigma1) >>> 0
-    }
-    let [a, b, c, d, e, f, g, h] = state
-    for (let index = 0; index < 64; index += 1) {
-      const upper1 = rotateRight(e ?? 0, 6) ^ rotateRight(e ?? 0, 11) ^ rotateRight(e ?? 0, 25)
-      const choice = ((e ?? 0) & (f ?? 0)) ^ (~(e ?? 0) & (g ?? 0))
-      const temporary1 =
-        ((h ?? 0) + upper1 + choice + (sha256Constants[index] ?? 0) + (words[index] ?? 0)) >>> 0
-      const upper0 = rotateRight(a ?? 0, 2) ^ rotateRight(a ?? 0, 13) ^ rotateRight(a ?? 0, 22)
-      const majority = ((a ?? 0) & (b ?? 0)) ^ ((a ?? 0) & (c ?? 0)) ^ ((b ?? 0) & (c ?? 0))
-      const temporary2 = (upper0 + majority) >>> 0
-      h = g
-      g = f
-      f = e
-      e = ((d ?? 0) + temporary1) >>> 0
-      d = c
-      c = b
-      b = a
-      a = (temporary1 + temporary2) >>> 0
-    }
-    state[0] = ((state[0] ?? 0) + (a ?? 0)) >>> 0
-    state[1] = ((state[1] ?? 0) + (b ?? 0)) >>> 0
-    state[2] = ((state[2] ?? 0) + (c ?? 0)) >>> 0
-    state[3] = ((state[3] ?? 0) + (d ?? 0)) >>> 0
-    state[4] = ((state[4] ?? 0) + (e ?? 0)) >>> 0
-    state[5] = ((state[5] ?? 0) + (f ?? 0)) >>> 0
-    state[6] = ((state[6] ?? 0) + (g ?? 0)) >>> 0
-    state[7] = ((state[7] ?? 0) + (h ?? 0)) >>> 0
-  }
-  return state.map((word) => word.toString(16).padStart(8, '0')).join('')
+  ])
+  const whole = source.length - (source.length % 64)
+  for (let offset = 0; offset < whole; offset += 64) sha256Compress(source, offset)
+  const remaining = source.length - whole
+  const tail = new Uint8Array(remaining + 9 > 64 ? 128 : 64)
+  tail.set(source.subarray(whole))
+  tail[remaining] = 0x80
+  const view = new DataView(tail.buffer)
+  view.setUint32(tail.length - 8, Math.floor(source.length / 0x20000000))
+  view.setUint32(tail.length - 4, (source.length << 3) >>> 0)
+  for (let offset = 0; offset < tail.length; offset += 64) sha256Compress(tail, offset)
+  return Array.from(sha256State, (word) => (word >>> 0).toString(16).padStart(8, '0')).join('')
 }
 
 const field = (value: string): string => `${new TextEncoder().encode(value).length}:${value}`
@@ -177,22 +185,18 @@ const graphDigest = (components: ReadonlyArray<Component>): string =>
 
 /** Builds a normalized graph, primarily for distribution generation and embedding tests. */
 export const make = (components: Iterable<Component>): Graph => {
-  const normalized = Object.freeze(
-    [...components]
-      .map((component) =>
-        Object.freeze({
-          ...component,
-          dependencies: Object.freeze([...component.dependencies].sort()),
-        }),
-      )
-      .sort(compareComponent),
-  )
-  return Object.freeze({
+  const normalized = [...components]
+    .map((component) => ({
+      ...component,
+      dependencies: [...component.dependencies].sort(),
+    }))
+    .sort(compareComponent)
+  return {
     _tag: 'ToolchainIdentityGraph',
     schema,
     digest: graphDigest(normalized),
     components: normalized,
-  })
+  }
 }
 
 const catalogDigest = (): string =>
@@ -219,53 +223,49 @@ const sourceId = (module: string): string => `source/${module}`
 const runtimeId = (target: Target.Id, operation: string): string => `runtime/${target}/${operation}`
 
 const installedComponents = (): ReadonlyArray<Component> => {
-  const compiler: Component = Object.freeze({
+  const compiler: Component = {
     kind: 'Compiler',
     id: '@silklang/compiler',
     digest: compilerDigest,
-    dependencies: Object.freeze([]),
-  })
-  const catalog: Component = Object.freeze({
+    dependencies: [],
+  }
+  const catalog: Component = {
     kind: 'Catalog',
     id: 'silk/stdlib/catalog',
     digest: catalogDigest(),
-    dependencies: Object.freeze([compiler.id]),
-  })
-  const intrinsic: Component = Object.freeze({
+    dependencies: [compiler.id],
+  }
+  const intrinsic: Component = {
     kind: 'IntrinsicInventory',
     id: 'silk/intrinsic/inventory',
     digest: inventoryDigest(),
-    dependencies: Object.freeze([compiler.id]),
-  })
-  const sources = Stdlib.manifest.map<Component>((entry) =>
-    Object.freeze({
-      kind: 'Source',
-      id: sourceId(entry.module),
-      digest: entry.digest,
-      dependencies: Object.freeze([catalog.id]),
-    }),
-  )
+    dependencies: [compiler.id],
+  }
+  const sources = Stdlib.manifest.map<Component>((entry) => ({
+    kind: 'Source',
+    id: sourceId(entry.module),
+    digest: entry.digest,
+    dependencies: [catalog.id],
+  }))
   const runtime = Intrinsic.inventory().flatMap<Component>((entry) =>
     entry.phase === 'StaticOnly' || entry.targets.length === 0
       ? []
-      : entry.targets.map((target) =>
-          Object.freeze({
-            kind: 'RuntimeSupport',
-            id: runtimeId(target, entry.operation),
-            digest: contentDigest(
-              JSON.stringify({
-                compiler: compilerDigest,
-                target,
-                operation: entry.operation,
-                tir: entry.tir,
-                mir: entry.mir,
-              }),
-            ),
-            dependencies: Object.freeze([compiler.id, intrinsic.id]),
-          }),
-        ),
+      : entry.targets.map((target) => ({
+          kind: 'RuntimeSupport',
+          id: runtimeId(target, entry.operation),
+          digest: contentDigest(
+            JSON.stringify({
+              compiler: compilerDigest,
+              target,
+              operation: entry.operation,
+              tir: entry.tir,
+              mir: entry.mir,
+            }),
+          ),
+          dependencies: [compiler.id, intrinsic.id],
+        })),
   )
-  return Object.freeze([compiler, catalog, intrinsic, ...sources, ...runtime])
+  return [compiler, catalog, intrinsic, ...sources, ...runtime]
 }
 
 const installedGraph = make(installedComponents())
@@ -276,7 +276,7 @@ export const installed = (): Graph => installedGraph
 const failure = (
   boundary: IntegrityFailure['boundary'],
   reason: IntegrityFailure['reason'],
-): IntegrityFailure => Object.freeze({ _tag: 'ToolchainIntegrityFailure', boundary, reason })
+): IntegrityFailure => ({ _tag: 'ToolchainIntegrityFailure', boundary, reason })
 
 /** Classifies failure to read one promised packaged source at the distribution boundary. */
 export const unreadableSource = (module: string, detail: string): IntegrityFailure =>
@@ -434,8 +434,8 @@ export const validateFrontend = (
         failure('Frontend', { _tag: 'UnexpectedComponent', kind: 'Source', id: sourceId(module) }),
       )
   return failures.length === 0
-    ? Object.freeze({ _tag: 'Matched', graph: candidate })
-    : Object.freeze({ _tag: 'Invalid', failures: Object.freeze(failures) })
+    ? { _tag: 'Matched', graph: candidate }
+    : { _tag: 'Invalid', failures: failures }
 }
 
 /** Validates runtime implementations reached by one prepared program. */
@@ -456,11 +456,11 @@ export const validateTarget = (
     ),
   ].sort()
   if (unsupported.length > 0)
-    return Object.freeze({
+    return {
       _tag: 'UnsupportedTarget',
       target: target.id,
-      operations: Object.freeze([...new Set(unsupported)].sort()),
-    })
+      operations: [...new Set(unsupported)].sort(),
+    }
 
   const selectedIds = new Set(
     calls.map((call) => runtimeId(target.id, Intrinsic.operationText(call.operation))),
@@ -503,14 +503,11 @@ export const validateTarget = (
         }),
       )
   }
-  if (failures.length > 0)
-    return Object.freeze({ _tag: 'Invalid', failures: Object.freeze(failures) })
-  return Object.freeze({
+  if (failures.length > 0) return { _tag: 'Invalid', failures: failures }
+  return {
     _tag: 'Matched',
-    runtimeSupport: Object.freeze(
-      [...expected.values()].filter((entry) => entry.kind === 'RuntimeSupport'),
-    ),
-  })
+    runtimeSupport: [...expected.values()].filter((entry) => entry.kind === 'RuntimeSupport'),
+  }
 }
 
 /** Stable human-readable detail for CLI and embedding diagnostics. */

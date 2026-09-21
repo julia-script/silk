@@ -6,6 +6,7 @@ import * as CompilationProfile from './CompilationProfile.js'
 import * as Result from 'effect/Result'
 import * as ConfigurationError from './ConfigurationError.js'
 import * as Effect from 'effect/Effect'
+import * as Option from 'effect/Option'
 import * as BodyQuery from './BodyQuery.js'
 import * as DeclarationCollection from './DeclarationCollection.js'
 import * as DeclarationCompletion from './DeclarationCompletion.js'
@@ -38,8 +39,6 @@ import * as TestDiscovery from './TestDiscovery.js'
 /** Optional environment-specific observations attached to compiler phase reports. */
 export interface Options {
   readonly heapBytes?: () => number
-  /** Optional checked-unit persistence. Its Storage provider and bounds are explicit. */
-  readonly semanticPersistence?: SemanticPersistence.Persistence
   /** Internal differential-test escape hatch; production paths normalize shared MIR. */
   readonly normalizeMir?: boolean
 }
@@ -86,11 +85,19 @@ interface HeaderFacts {
   readonly surfaces: ReadonlyMap<string, ModuleSurface.ModuleSurface>
 }
 
+/** Checked-unit persistence when the environment provides it. */
+const semanticPersistence = Effect.map(
+  Effect.serviceOption(SemanticPersistence.SemanticPersistence),
+  Option.getOrUndefined,
+)
+
 const analyzeHeaders = Effect.fn('Frontend.analyzeHeaders')(function* (
   closure: ModuleClosure.Facts,
   report: Array<PhaseReport.PhaseReport>,
   options: Options,
   previous?: SemanticQuery.Snapshot,
+  /** Persisted-record variant: the selected profile's identity, or null to skip persistence. */
+  variant: string | null = '',
 ): Effect.fn.Return<HeaderFacts> {
   const collected = PhaseReport.measureInto(
     report,
@@ -152,17 +159,19 @@ const analyzeHeaders = Effect.fn('Frontend.analyzeHeaders')(function* (
     ])
     .map((part) => `${part.length}:${part}`)
     .join('')
+  const persistence = variant === null ? undefined : yield* semanticPersistence
   const availablePrevious =
-    options.semanticPersistence === undefined
+    persistence === undefined
       ? previous
       : yield* SemanticPersistence.load(
-          options.semanticPersistence,
+          persistence,
+          variant ?? '',
           index,
           resolution,
           previous,
         ).pipe(Effect.orDie)
   const session = Semantic.makeSession(epoch, index, resolution, 'default', availablePrevious)
-  return Object.freeze({ index, resolution, session, surfaces })
+  return { index, resolution, session, surfaces }
 })
 
 interface ElaboratedModules {
@@ -211,7 +220,7 @@ const elaborateModules = Effect.fn('Frontend.elaborateModules')(function* (
       computed.set(module.name, published)
     }).pipe(Effect.withSpan('Frontend.elaborateModules:module'))
   }
-  return Object.freeze({ results, computed })
+  return { results, computed }
 })
 
 const analyzeSemantics = Effect.fn('Frontend.analyzeSemantics')(function* (
@@ -254,12 +263,11 @@ const analyzeSemantics = Effect.fn('Frontend.analyzeSemantics')(function* (
     (value) => [...value.values()].reduce((sum, module) => sum + module.diagnostics.length, 0),
     {
       ...options,
-      counters: () =>
-        Object.freeze({
-          _tag: 'ModuleReuseCounters' as const,
-          reused: retained.size,
-          recomputed: closure.modules.length - retained.size,
-        }),
+      counters: () => ({
+        _tag: 'ModuleReuseCounters' as const,
+        reused: retained.size,
+        recomputed: closure.modules.length - retained.size,
+      }),
     },
   )
   const generatedAggregates = new Map<string, DeclarationFacts.StructFact>()
@@ -314,12 +322,11 @@ const analyzeSemantics = Effect.fn('Frontend.analyzeSemantics')(function* (
     (value) => [...value.values()].reduce((sum, module) => sum + module.diagnostics.length, 0),
     {
       ...options,
-      counters: () =>
-        Object.freeze({
-          _tag: 'ModuleReuseCounters' as const,
-          reused: retainedOwnership.size,
-          recomputed: results.size - retainedOwnership.size,
-        }),
+      counters: () => ({
+        _tag: 'ModuleReuseCounters' as const,
+        reused: retainedOwnership.size,
+        recomputed: results.size - retainedOwnership.size,
+      }),
     },
   )
   const opaqueRealizations =
@@ -360,13 +367,13 @@ const analyzeSemantics = Effect.fn('Frontend.analyzeSemantics')(function* (
     ...[...ownership.values()].map((facts) => facts.diagnostics),
   )
   return OpaqueRealization.withCatalog(
-    Object.freeze({
+    {
       index,
       semantics,
       results,
       ownership,
       diagnostics,
-    }),
+    },
     opaqueRealizations,
   )
 })
@@ -375,16 +382,19 @@ const analyzeFrontend = Effect.fn('Frontend.analyzeFrontend')(function* (
   closure: ModuleClosure.Facts,
   report: Array<PhaseReport.PhaseReport>,
   options: Options,
+  variant = '',
 ): Effect.fn.Return<FrontendFacts> {
-  const headers = yield* analyzeHeaders(closure, report, options)
+  const headers = yield* analyzeHeaders(closure, report, options, undefined, variant)
   const semantics = yield* analyzeSemantics(closure, headers, report, options)
   const frontend = OpaqueRealization.withCatalog(
-    Object.freeze({ ...headers, ...semantics, report: Object.freeze([...report]) }),
+    { ...headers, ...semantics, report: [...report] },
     OpaqueRealization.catalogOf(semantics),
   )
-  if (options.semanticPersistence !== undefined)
+  const persistence = yield* semanticPersistence
+  if (persistence !== undefined)
     yield* SemanticPersistence.publish(
-      options.semanticPersistence,
+      persistence,
+      variant,
       Semantic.snapshot(headers.session),
       headers.index,
     ).pipe(Effect.orDie)
@@ -397,7 +407,15 @@ const bootstrapFacts = Effect.fn('Frontend.bootstrapFacts')(function* (
   report: Array<PhaseReport.PhaseReport>,
   options: Options,
 ): Effect.fn.Return<FrontendFacts> {
-  const headers = yield* analyzeHeaders(closure, report, options)
+  // Before selection there is no profile to key records by, and bootstrap checks no declared
+  // bodies. Without conditions these headers are the final ones, and records have no variant.
+  const headers = yield* analyzeHeaders(
+    closure,
+    report,
+    options,
+    undefined,
+    ModuleSelection.required(closure) ? null : '',
+  )
   const results = new Map<string, Elaboration.Result>()
   for (const module of closure.modules) {
     const moduleHeaders = headers.index.modules.find(
@@ -418,7 +436,7 @@ const bootstrapFacts = Effect.fn('Frontend.bootstrapFacts')(function* (
     )
   }
   return OpaqueRealization.withCatalog(
-    Object.freeze({
+    {
       ...headers,
       results,
       semantics: new Map<string, ModuleSemantics.ModuleSemantics>(),
@@ -428,8 +446,8 @@ const bootstrapFacts = Effect.fn('Frontend.bootstrapFacts')(function* (
         ...closure.modules.map((module) => module.syntax.lexicalDiagnostics),
         ...closure.modules.map((module) => module.syntax.parserDiagnostics),
       ),
-      report: Object.freeze([...report]),
-    }),
+      report: [...report],
+    },
     OpaqueRealization.analyze(results),
   )
 })
@@ -461,9 +479,9 @@ const decodeBindings = Effect.fn('Frontend.decodeBindings')(function* (
   for (const binding of configuration?.bindings ?? []) {
     const origin = ConfigurationOrigin.snapshot(binding.origin)
     const value = yield* ConfigurationValue.decode(binding.value, origin)
-    bindings.push(Object.freeze({ ...binding, origin, value }))
+    bindings.push({ ...binding, origin, value })
   }
-  return Object.freeze(bindings)
+  return bindings
 })
 
 const snapshotConfiguration = Effect.fn('Frontend.snapshotConfiguration')(
@@ -478,18 +496,16 @@ const snapshotConfiguration = Effect.fn('Frontend.snapshotConfiguration')(
         initial !== undefined && Result.isSuccess(initial)
           ? CompilationProfile.input(initial.success)
           : configuration.profile
-      return Object.freeze({
+      return {
         ...configuration,
         profile,
-        bindings: Result.isSuccess(bindings) ? bindings.success : Object.freeze([]),
+        bindings: Result.isSuccess(bindings) ? bindings.success : [],
         ...(configuration.modules === undefined
           ? {}
           : {
-              modules: Object.freeze(
-                configuration.modules.map((module) => Object.freeze({ ...module })),
-              ),
+              modules: configuration.modules.map((module) => ({ ...module })),
             }),
-      })
+      }
     }),
 )
 
@@ -572,7 +588,7 @@ const assembleSnapshot = Effect.fn('Frontend.assembleSnapshot')(
           ? { composition: composition.success }
           : { configurationError: composition.failure }
       return OpaqueRealization.withCatalog(
-        Object.freeze({
+        {
           closure,
           ...facts,
           ...initialFacts,
@@ -581,7 +597,7 @@ const assembleSnapshot = Effect.fn('Frontend.assembleSnapshot')(
           ...(configuration === undefined ? {} : { configuration }),
           ...(Result.isFailure(bindings) ? { configurationError: bindings.failure } : {}),
           ...(request.target === undefined ? {} : { requestedTarget: request.target }),
-        }),
+        },
         OpaqueRealization.catalogOf(facts),
       )
     }),
@@ -652,7 +668,7 @@ const attachTestCatalog = Effect.fn('Frontend.attachTestCatalog')(function* (
     frontend.results,
   ).pipe(Effect.orDie)
   return OpaqueRealization.withCatalog(
-    Object.freeze({ ...frontend, testCatalog }),
+    { ...frontend, testCatalog },
     OpaqueRealization.catalogOf(frontend),
   )
 })
@@ -666,7 +682,7 @@ const finalizeSelection = Effect.fn('Frontend.finalizeSelection')(
   ) =>
     Effect.sync((): Frontend =>
       OpaqueRealization.withCatalog(
-        Object.freeze({ ...self, ...facts, closure, selection, profile: selection.profile }),
+        { ...self, ...facts, closure, selection, profile: selection.profile },
         OpaqueRealization.catalogOf(facts),
       ),
     ),
@@ -722,7 +738,12 @@ export const frontend = Effect.fn('Frontend.frontend')(function* (
   if (configured.completion === undefined)
     return yield* diagnoseIncompleteProfile(configured.frontend, closure, request.target)
   const selected = yield* selectModules(request, closure, roots, configured.completion)
-  const selectedFacts = yield* analyzeFrontend(selected.closure, report, options)
+  const selectedFacts = yield* analyzeFrontend(
+    selected.closure,
+    report,
+    options,
+    selected.selection.profile.identity,
+  )
   return yield* attachTestCatalog(
     yield* finalizeSelection(unselected, selectedFacts, selected.closure, selected.selection),
     request,
@@ -774,7 +795,7 @@ const diagnoseProjectProfile = Effect.fn('Frontend.diagnoseProjectProfile')(
   (closure: ModuleClosure.ProjectClosure, frontend: Frontend, first: string | undefined) =>
     Effect.sync(() => {
       const span = closure.modules.find((module) => module.name === first)?.syntax.root.span
-      return Object.freeze({
+      return {
         ...closure,
         diagnostics: Diagnostic.merge(
           closure.diagnostics,
@@ -792,7 +813,7 @@ const diagnoseProjectProfile = Effect.fn('Frontend.diagnoseProjectProfile')(
                 ),
               ],
         ),
-      })
+      }
     }),
 )
 
@@ -901,20 +922,21 @@ export const selectProject = Effect.fn('Frontend.selectProject')(function* (
   )
   yield* Effect.yieldNow
   const selected = yield* configureProjectSelection(expanded, loaded, report, options)
+  const variant = selected.selection?.profile.identity ?? ''
   const headers =
     selected.bootstrapHeaders ??
-    (yield* analyzeHeaders(selected.closure, report, options, previous))
+    (yield* analyzeHeaders(selected.closure, report, options, previous, variant))
   const closure = yield* diagnoseMissingProjectRoots(
     expanded,
     selected.closure,
     selected.closure.missingRoots,
   )
-  return Object.freeze({
+  return {
     closure,
     headers,
     ...(selected.profile === undefined ? {} : { profile: selected.profile }),
     ...(selected.selection === undefined ? {} : { selection: selected.selection }),
-  })
+  }
 }, SourceResolver.withSnapshot)
 
 /** Constructs one complete compiler frontend for the union closure of project roots. */
@@ -980,7 +1002,7 @@ export const frontendProject = Effect.fn('Frontend.frontendProject')(function* (
       ...options,
       counters: (value) => {
         const totals = value.totals
-        return Object.freeze({
+        return {
           _tag: 'SemanticInvalidationCounters' as const,
           reusable: totals.reusable,
           recomputed: totals.recomputed,
@@ -993,7 +1015,7 @@ export const frontendProject = Effect.fn('Frontend.frontendProject')(function* (
           cyclicPeerChange: totals.reasons.CyclicPeerChange,
           environmentChange: totals.reasons.EnvironmentChange,
           surfaceChange: totals.reasons.SurfaceChange,
-        })
+        }
       },
     },
   )
@@ -1005,11 +1027,11 @@ export const frontendProject = Effect.fn('Frontend.frontendProject')(function* (
     report,
     options,
     previous === undefined ? undefined : { previous, invalidation: invalidation.value },
-    Object.freeze({
+    {
       results: currentElaboration.computed,
       bodyQueries,
       ...(previous === undefined ? { opaqueRealizations: currentOpaqueRealizations } : {}),
-    }),
+    },
   )
   const queryReport = report.findIndex((phase) => phase.phase === 'Semantic.checkBody')
   const measuredQuery = report[queryReport]
@@ -1019,14 +1041,16 @@ export const frontendProject = Effect.fn('Frontend.frontendProject')(function* (
       counters: BodyQuery.counters(bodyQueries),
     })
   const semanticQueries = Semantic.snapshot(headers.session)
-  if (options.semanticPersistence !== undefined)
+  const persistence = yield* semanticPersistence
+  if (persistence !== undefined)
     yield* SemanticPersistence.publish(
-      options.semanticPersistence,
+      persistence,
+      selection?.profile.identity ?? '',
       semanticQueries,
       headers.index,
     ).pipe(Effect.orDie)
   return OpaqueRealization.withCatalog(
-    Object.freeze({
+    {
       closure,
       ...headers,
       ...semantics,
@@ -1034,15 +1058,13 @@ export const frontendProject = Effect.fn('Frontend.frontendProject')(function* (
       semanticEnvironment,
       semanticQueries,
       semanticQueryCounters: Semantic.queryCounters(headers.session),
-      ...(options.semanticPersistence === undefined
+      ...(persistence === undefined
         ? {}
-        : {
-            semanticPersistenceCounters: SemanticPersistence.counters(options.semanticPersistence),
-          }),
+        : { semanticPersistenceCounters: SemanticPersistence.counters(persistence) }),
       ...(selection === undefined ? {} : { selection }),
       ...(profile === undefined ? {} : { profile }),
-      report: Object.freeze([...report]),
-    }),
+      report: [...report],
+    },
     OpaqueRealization.catalogOf(semantics),
   )
 })

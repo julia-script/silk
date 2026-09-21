@@ -10,6 +10,7 @@ import { dirname, join } from 'node:path'
 import { afterAll, assert, it } from '@effect/vitest'
 import * as Config from 'effect/Config'
 import * as Effect from 'effect/Effect'
+import { identity } from 'effect/Function'
 import * as Json from './support/Json.js'
 import * as ArtifactKind from '../src/ArtifactKind.js'
 import * as NativeLinkInput from '../src/NativeLinkInput.js'
@@ -110,10 +111,7 @@ const compileSource = Effect.fnUntraced(function* (
         },
       },
     },
-    toolchain:
-      options.artifactStorage === undefined
-        ? toolchain
-        : { ...toolchain, artifactStorage: options.artifactStorage },
+    toolchain,
     artifactKind: options.artifactKind ?? 'NativeExecutable',
     packageName: options.packageName ?? 'compiler-test',
     destination: join(destinationRoot, name),
@@ -139,6 +137,9 @@ const compileSource = Effect.fnUntraced(function* (
         ),
       ),
     ),
+    options.artifactStorage === undefined
+      ? identity
+      : Effect.provideService(NativeToolchain.ArtifactStorage, options.artifactStorage),
   )
 })
 

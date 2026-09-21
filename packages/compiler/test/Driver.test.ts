@@ -131,16 +131,14 @@ it.effect(
       const cold = persistence()
       const first = yield* compileSource('semantic-cache-cold', source, {
         cache: true,
-        semanticPersistence: cold,
-      })
+      }).pipe(Effect.provideService(SemanticPersistence.SemanticPersistence, cold))
       assert.strictEqual(first._tag, 'Rejected')
       assert.isAbove(SemanticPersistence.counters(cold).published, 0)
 
       const warm = persistence()
       const second = yield* compileSource('semantic-cache-warm', source, {
         cache: true,
-        semanticPersistence: warm,
-      })
+      }).pipe(Effect.provideService(SemanticPersistence.SemanticPersistence, warm))
       assert.strictEqual(second._tag, 'Rejected')
       assert.isAbove(SemanticPersistence.counters(warm).loaded, 0)
 
@@ -148,8 +146,7 @@ it.effect(
       const before = SemanticPersistence.counters(disabled)
       const fresh = yield* compileSource('semantic-cache-disabled', source, {
         cache: false,
-        semanticPersistence: disabled,
-      })
+      }).pipe(Effect.provideService(SemanticPersistence.SemanticPersistence, disabled))
       assert.strictEqual(fresh._tag, 'Rejected')
       assert.deepEqual(SemanticPersistence.counters(disabled), before)
       if (first._tag === 'Rejected' && second._tag === 'Rejected' && fresh._tag === 'Rejected') {
@@ -502,13 +499,11 @@ it.effect(
             entries.set(address.key, Uint8Array.from(bytes))
           }),
       })
-      const cachingToolchain = Object.freeze({ ...toolchain, artifactStorage })
       const source = 'pub fn main() -> i32 { return 42 }'
       for (const name of ['admission-first', 'admission-second']) {
-        const outcome = yield* compileSource(name, source, {
-          toolchain: cachingToolchain,
-          cache: true,
-        })
+        const outcome = yield* compileSource(name, source, { cache: true }).pipe(
+          Effect.provideService(NativeToolchain.ArtifactStorage, artifactStorage),
+        )
         assert.strictEqual(outcome._tag, 'Compiled')
         if (outcome._tag !== 'Compiled') return
         const phases = outcome.report.map((entry) => entry.phase)
@@ -520,10 +515,9 @@ it.effect(
       const nativeReads = reads.filter((key) => key.startsWith('native-')).length
       const failed = yield* Effect.result(
         compileSource('admission-missing-library', source, {
-          toolchain: cachingToolchain,
           cache: true,
           nativeLinkInputs: [NativeLinkInput.library('silk_missing_admission_fixture', 'Dynamic')],
-        }),
+        }).pipe(Effect.provideService(NativeToolchain.ArtifactStorage, artifactStorage)),
       )
       assert.strictEqual(failed._tag, 'Failure')
       if (failed._tag !== 'Failure' || failed.failure._tag !== 'ToolchainError')
@@ -581,9 +575,8 @@ it.effect('translates an artifact Storage read failure at the Driver boundary', 
     })
     const result = yield* Effect.result(
       compileSource('throwing-artifact-cache-read', 'pub fn main() -> i32 { return 42 }', {
-        toolchain: Object.freeze({ ...toolchain, artifactStorage }),
         cache: true,
-      }),
+      }).pipe(Effect.provideService(NativeToolchain.ArtifactStorage, artifactStorage)),
     )
     assert.strictEqual(result._tag, 'Failure')
     if (result._tag !== 'Failure') return
@@ -613,9 +606,8 @@ it.effect('translates an artifact Storage publication failure at the Driver boun
     })
     const result = yield* Effect.result(
       compileSource('throwing-artifact-cache-write', 'pub fn main() -> i32 { return 42 }', {
-        toolchain: Object.freeze({ ...toolchain, artifactStorage }),
         cache: true,
-      }),
+      }).pipe(Effect.provideService(NativeToolchain.ArtifactStorage, artifactStorage)),
     )
     assert.strictEqual(result._tag, 'Failure')
     if (result._tag !== 'Failure') return
@@ -714,10 +706,11 @@ it.effect('rejects a supplied foreign contract before backend-cache or native-to
       compilation: { root: root.id, target: 'aarch64-apple-darwin' },
       foreignInterfaces: [supplied],
       cache: true,
-      toolchain: {
-        ...toolchain,
-        clang: 'must-not-invoke-clang',
-        artifactStorage: Storage.Storage.of({
+      toolchain: { ...toolchain, clang: 'must-not-invoke-clang' },
+    }).pipe(
+      Effect.provideService(
+        NativeToolchain.ArtifactStorage,
+        Storage.Storage.of({
           read: () =>
             Effect.sync(() => {
               cacheReads += 1
@@ -725,8 +718,8 @@ it.effect('rejects a supplied foreign contract before backend-cache or native-to
             }),
           publish: () => Effect.void,
         }),
-      },
-    })
+      ),
+    )
     assert.strictEqual(outcome._tag, 'Rejected')
     if (outcome._tag !== 'Rejected') return
     const mismatch = outcome.diagnostics.find((diagnostic) => diagnostic.code === 'SEM0192')
