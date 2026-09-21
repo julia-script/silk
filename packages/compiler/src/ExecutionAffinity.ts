@@ -21,10 +21,12 @@ export interface Component {
   readonly cause?: Diagnostic.CauseIdentity
 }
 
-export const unrestricted: Extract<ExecutionAffinity, { readonly _tag: 'Unrestricted' }> =
-  Object.freeze({ _tag: 'Unrestricted' })
-export const localExecution: Extract<ExecutionAffinity, { readonly _tag: 'LocalExecution' }> =
-  Object.freeze({ _tag: 'LocalExecution' })
+export const unrestricted: Extract<ExecutionAffinity, { readonly _tag: 'Unrestricted' }> = {
+  _tag: 'Unrestricted',
+}
+export const localExecution: Extract<ExecutionAffinity, { readonly _tag: 'LocalExecution' }> = {
+  _tag: 'LocalExecution',
+}
 
 const diagnosticKey = (identity: Diagnostic.CauseIdentity): string =>
   `${identity.phase}\0${identity.code}\0${Diagnostic.causeLabel(identity)}\0${identity.ordinal}`
@@ -36,23 +38,19 @@ const distinctCauses = (
   causes: ReadonlyArray<Diagnostic.CauseIdentity>,
 ): ReadonlyArray<Diagnostic.CauseIdentity> => {
   const seen = new Set<string>()
-  return Object.freeze(
-    causes.filter((cause) => {
-      const key = diagnosticKey(cause)
-      if (seen.has(key)) return false
-      seen.add(key)
-      return true
-    }),
-  )
+  return causes.filter((cause) => {
+    const key = diagnosticKey(cause)
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
 }
 
 const parameters = (inputs: ReadonlyArray<Type.Parameter>): ReadonlyArray<Type.Parameter> => {
   const byIdentity = new Map(inputs.map((parameter) => [Type.key(parameter), parameter]))
-  return Object.freeze(
-    [...byIdentity.entries()]
-      .sort(([left], [right]) => left.localeCompare(right))
-      .map(([, parameter]) => parameter),
-  )
+  return [...byIdentity.entries()]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([, parameter]) => parameter)
 }
 
 /** Joins recursively derived affinities with unavailable and local outcomes taking precedence. */
@@ -61,18 +59,20 @@ export const join = (inputs: ReadonlyArray<ExecutionAffinity>): ExecutionAffinit
   const causes = distinctCauses(
     inputs.flatMap((input) => (input._tag === 'Unavailable' ? input.causes : [])),
   )
-  if (hasUnavailable) return Object.freeze({ _tag: 'Unavailable', causes })
+  if (hasUnavailable) return { _tag: 'Unavailable', causes }
   if (inputs.some((input) => input._tag === 'LocalExecution')) return localExecution
   const dependent = parameters(
     inputs.flatMap((input) => (input._tag === 'ParameterDependent' ? input.parameters : [])),
   )
   return dependent.length === 0
     ? unrestricted
-    : Object.freeze({ _tag: 'ParameterDependent', parameters: dependent })
+    : { _tag: 'ParameterDependent', parameters: dependent }
 }
 
-const unavailable = (causes: ReadonlyArray<Diagnostic.CauseIdentity>): ExecutionAffinity =>
-  Object.freeze({ _tag: 'Unavailable', causes: distinctCauses(causes) })
+const unavailable = (causes: ReadonlyArray<Diagnostic.CauseIdentity>): ExecutionAffinity => ({
+  _tag: 'Unavailable',
+  causes: distinctCauses(causes),
+})
 
 const declaredCauses = (
   fact: DeclarationFacts.DeclaredTypeFact,
@@ -112,8 +112,7 @@ const ofTypeInner = (
   active: ReadonlySet<string>,
 ): ExecutionAffinity => {
   if (Type.isSharedCore(type) || Type.isExecution(type) || Type.isWake(type)) return localExecution
-  if (Type.isParameter(type))
-    return Object.freeze({ _tag: 'ParameterDependent', parameters: Object.freeze([type]) })
+  if (Type.isParameter(type)) return { _tag: 'ParameterDependent', parameters: [type] }
   if (Type.isFixedArray(type)) return ofTypeInner(index, type.element, active)
   if (Type.isSlice(type)) return ofTypeInner(index, type.element, active)
   if (Type.isReference(type)) return ofTypeInner(index, type.target, active)

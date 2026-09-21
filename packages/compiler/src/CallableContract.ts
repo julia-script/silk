@@ -40,24 +40,19 @@ export const make = (
     readonly constraints?: ReadonlyArray<Constraint.Constraint>
     readonly captures?: ReadonlyArray<CaptureRelationship>
   },
-): CallableContract =>
-  Object.freeze({
-    functionKind: options.functionKind,
-    environment: options.environment,
-    lifetimeBinders: Object.freeze([...options.lifetimeBinders]),
-    lifetimeBounds: Lifetime.assumptions(options.lifetimeBounds ?? []).bounds,
-    typeOutlives: Type.normalizeTypeOutlives(options.typeOutlives ?? []),
-    unsafe: options.unsafe ?? false,
-    binders: Object.freeze(Array.from(options.binders ?? [])),
-    parameters: Object.freeze(
-      Array.from(options.parameters ?? [], (parameter) => Object.freeze({ ...parameter })),
-    ),
-    result: options.result,
-    constraints: Object.freeze(Array.from(options.constraints ?? [])),
-    captures: Object.freeze(
-      Array.from(options.captures ?? [], (relationship) => Object.freeze({ ...relationship })),
-    ),
-  })
+): CallableContract => ({
+  functionKind: options.functionKind,
+  environment: options.environment,
+  lifetimeBinders: [...options.lifetimeBinders],
+  lifetimeBounds: Lifetime.assumptions(options.lifetimeBounds ?? []).bounds,
+  typeOutlives: Type.normalizeTypeOutlives(options.typeOutlives ?? []),
+  unsafe: options.unsafe ?? false,
+  binders: Array.from(options.binders ?? []),
+  parameters: Array.from(options.parameters ?? [], (parameter) => ({ ...parameter })),
+  result: options.result,
+  constraints: Array.from(options.constraints ?? []),
+  captures: Array.from(options.captures ?? [], (relationship) => ({ ...relationship })),
+})
 
 export const key = (self: CallableContract): string =>
   Canonical.record('CallableContract', [

@@ -87,16 +87,16 @@ export const defaults = (
     : undefined
   const runtime =
     selected === undefined ? undefined : { name: selected.name, module: selected.module }
-  return Object.freeze({
-    runtimes: runtime === undefined ? Object.freeze([]) : Object.freeze([runtime]),
-    defaults: runtime === undefined ? Object.freeze([]) : Object.freeze([runtime.name]),
-    retention: Object.freeze([]),
-    requirements: Object.freeze([]),
+  return {
+    runtimes: runtime === undefined ? [] : [runtime],
+    defaults: runtime === undefined ? [] : [runtime.name],
+    retention: [],
+    requirements: [],
     components:
       runtime !== undefined && profile.runtime.kind !== 'none'
         ? Stdlib.compositions.components
-        : Object.freeze([]),
-  })
+        : [],
+  }
 }
 
 /** Strictly decodes the build catalog; absent fields are empty sets, not hidden runtime defaults. */
@@ -164,13 +164,11 @@ export const decode = Effect.fn('ArtifactComposition.decode')(function* (
       !SourceResolver.isCanonicalModule(candidate.module)
     )
       return yield* invalid('runtime descriptor', [at])
-    runtimes.push(
-      Object.freeze({
-        name: candidate.name,
-        module: candidate.module,
-        origin: at,
-      }),
-    )
+    runtimes.push({
+      name: candidate.name,
+      module: candidate.module,
+      origin: at,
+    })
   }
   const duplicateNames = new Set(
     runtimes
@@ -209,9 +207,7 @@ export const decode = Effect.fn('ArtifactComposition.decode')(function* (
       !name(candidate.declaration)
     )
       return yield* invalid('retention selector', [at])
-    retention.push(
-      Object.freeze({ module: candidate.module, declaration: candidate.declaration, origin: at }),
-    )
+    retention.push({ module: candidate.module, declaration: candidate.declaration, origin: at })
   }
   const requirements: Array<NativeRequirement.NativeRequirement> = []
   for (const [ordinal, candidate] of requirementInputs.entries())
@@ -225,34 +221,32 @@ export const decode = Effect.fn('ArtifactComposition.decode')(function* (
         },
       ),
     )
-  let entry: CompilationProfile.Selection = Object.freeze({ kind: 'default' })
+  let entry: CompilationProfile.Selection = { kind: 'default' }
   if (input.entry !== undefined) {
     if (!record(input.entry)) return yield* invalid('composition loader entry')
     if (
       (input.entry.kind === 'default' || input.entry.kind === 'none') &&
       exact(input.entry, ['kind'])
     )
-      entry = Object.freeze({ kind: input.entry.kind })
+      entry = { kind: input.entry.kind }
     else if (
       input.entry.kind === 'named' &&
       exact(input.entry, ['kind', 'name']) &&
       typeof input.entry.name === 'string' &&
       NativeRequirement.isIdentity(input.entry.name)
     )
-      entry = Object.freeze({ kind: 'named', name: input.entry.name })
+      entry = { kind: 'named', name: input.entry.name }
     else return yield* invalid('composition loader entry')
   }
-  return Object.freeze({
-    components: Object.freeze(
-      components.sort((a, b) => Canonical.compare(a.capability, b.capability)),
-    ),
-    runtimes: Object.freeze(runtimes.sort((a, b) => Canonical.compare(a.name, b.name))),
-    defaults: Object.freeze([...new Set(defaults)].sort(Canonical.compare)),
-    retention: Object.freeze(retention.sort((a, b) => Canonical.compare(rootKey(a), rootKey(b)))),
-    requirements: Object.freeze(requirements),
+  return {
+    components: components.sort((a, b) => Canonical.compare(a.capability, b.capability)),
+    runtimes: runtimes.sort((a, b) => Canonical.compare(a.name, b.name)),
+    defaults: [...new Set(defaults)].sort(Canonical.compare),
+    retention: retention.sort((a, b) => Canonical.compare(rootKey(a), rootKey(b))),
+    requirements: requirements,
     entry,
     origin: ConfigurationOrigin.snapshot(origin),
-  })
+  }
 })
 
 /** Canonical declaration selector encoding, excluding current configuration location. */
@@ -294,7 +288,7 @@ export const resolve = Effect.fn('ArtifactComposition.resolve')(function* (
     )
   const runtime = selected[0]
   const retained = new Map(self.retention.map((root) => [rootKey(root), root]))
-  const retention = Object.freeze([...retained.values()])
+  const retention = [...retained.values()]
   if (
     profile.entry.kind !== 'default' &&
     self.entry.kind !== 'default' &&
@@ -307,20 +301,18 @@ export const resolve = Effect.fn('ArtifactComposition.resolve')(function* (
       'loader entry',
       [ConfigurationOrigin.literal('profile.entry'), self.origin],
     )
-  const loader = Object.freeze({
+  const loader = {
     request: profile.entry,
     composition: self.entry,
     resolved: profile.entry.kind === 'default' ? self.entry : profile.entry,
-  })
-  const modules = Object.freeze(
-    [
-      ...new Set([
-        application,
-        ...(runtime === undefined ? [] : [runtime.module]),
-        ...retention.map((root) => root.module),
-      ]),
-    ].sort(Canonical.compare),
-  )
+  }
+  const modules = [
+    ...new Set([
+      application,
+      ...(runtime === undefined ? [] : [runtime.module]),
+      ...retention.map((root) => root.module),
+    ]),
+  ].sort(Canonical.compare)
   const identity = Canonical.record('ArtifactComposition.v2', [
     Canonical.array(self.components.map(RuntimeComponent.encode)),
     application,
@@ -333,7 +325,7 @@ export const resolve = Effect.fn('ArtifactComposition.resolve')(function* (
     CompilationProfile.encodeSelection(loader.composition),
     CompilationProfile.encodeSelection(loader.resolved),
   ])
-  return Object.freeze({
+  return {
     application,
     components: self.components,
     request,
@@ -343,24 +335,17 @@ export const resolve = Effect.fn('ArtifactComposition.resolve')(function* (
     loader,
     modules,
     identity,
-  })
+  }
 })
 
 /** Projects a validated catalog into portable build fields without diagnostic metadata. */
-export const input = (self: ArtifactComposition): Input =>
-  Object.freeze({
-    components: Object.freeze(self.components.map(RuntimeComponent.input)),
-    runtimes: Object.freeze(
-      self.runtimes.map(({ origin: _origin, ...runtime }) => Object.freeze(runtime)),
-    ),
-    defaults: self.defaults,
-    retention: Object.freeze(
-      self.retention.map(({ origin: _origin, ...root }) => Object.freeze(root)),
-    ),
-    requirements: Object.freeze(
-      self.requirements.map(({ origin: _origin, scope: _scope, ...requirement }) =>
-        Object.freeze(requirement),
-      ),
-    ),
-    entry: self.entry,
-  })
+export const input = (self: ArtifactComposition): Input => ({
+  components: self.components.map(RuntimeComponent.input),
+  runtimes: self.runtimes.map(({ origin: _origin, ...runtime }) => runtime),
+  defaults: self.defaults,
+  retention: self.retention.map(({ origin: _origin, ...root }) => root),
+  requirements: self.requirements.map(
+    ({ origin: _origin, scope: _scope, ...requirement }) => requirement,
+  ),
+  entry: self.entry,
+})

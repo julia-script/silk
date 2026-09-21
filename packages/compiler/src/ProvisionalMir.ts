@@ -130,20 +130,20 @@ const executionInstance = (key: ExecutionKey): Instances.InstanceKey => {
     let siteKind = 'effect-site'
     if (kind === 'WitnessEffectRunnerExecution') siteKind = 'witness-effect-site'
     else if (kind === 'BuiltinEffectRunnerExecution') siteKind = 'builtin-effect-site'
-    cached = Object.freeze({
+    cached = {
       _tag: 'InstanceKey',
       declaration: key.runner,
       typeArguments: key.owner.typeArguments,
       evidence: key.owner.evidence,
       staticArguments: key.owner.staticArguments,
-      contractRow: Object.freeze([
+      contractRow: [
         ...key.owner.contractRow,
         `${siteKind}:${Tir.executableSiteKey(key.site)}`,
         ...(key._tag === 'ProvidedEffectRunnerExecution'
           ? key.providers.map(providedContractEntry)
           : []),
-      ]),
-    })
+      ],
+    }
     executionInstanceCache.set(key, cached)
   }
   return cached
@@ -192,24 +192,22 @@ const executionForInstance = (
   const specialized = candidates.find((execution) => {
     const executionKey = executionInstance(execution.key)
     return (
-      Instances.keyText(Object.freeze({ ...executionKey, declaration: instance.declaration })) ===
+      Instances.keyText({ ...executionKey, declaration: instance.declaration }) ===
       Instances.keyText(instance)
     )
   })
   if (specialized !== undefined) return specialized
-  const openInstance: Instances.InstanceKey = Object.freeze({
+  const openInstance: Instances.InstanceKey = {
     ...instance,
-    contractRow: Object.freeze(
-      instance.contractRow.filter((entry) => !entry.startsWith('provided:')),
-    ),
-  })
+    contractRow: instance.contractRow.filter((entry) => !entry.startsWith('provided:')),
+  }
   return candidates.find((execution) => {
     const executionKey = executionInstance(execution.key)
     return (
       (execution.key._tag === 'EffectRunnerExecution' ||
         execution.key._tag === 'WitnessEffectRunnerExecution' ||
         execution.key._tag === 'BuiltinEffectRunnerExecution') &&
-      Instances.keyText(Object.freeze({ ...executionKey, declaration: instance.declaration })) ===
+      Instances.keyText({ ...executionKey, declaration: instance.declaration }) ===
         Instances.keyText(openInstance)
     )
   })
@@ -250,7 +248,7 @@ const providedClassification = (
       const key = executionInstance(outcome.runner.execution)
       return key.declaration.module === instance.declaration.module &&
         key.declaration.name === baseName &&
-        Instances.keyText(Object.freeze({ ...key, declaration: instance.declaration })) ===
+        Instances.keyText({ ...key, declaration: instance.declaration }) ===
           Instances.keyText(instance)
         ? [outcome.runner.classification]
         : []
@@ -266,20 +264,19 @@ const controlId = (
   span: SourceSpan.SourceSpan,
   ordinal: number,
   port: ControlId['port'],
-): ControlId =>
-  Object.freeze({
-    _tag: 'ProvisionalControlId',
-    execution: executionIdentity(execution),
-    sourceId: span.sourceId,
-    functionOrdinal:
-      execution._tag === 'InstanceExecution'
-        ? execution.functionOrdinal
-        : execution.site.functionOrdinal,
-    spanStart: span.start,
-    spanEnd: span.end,
-    ordinal,
-    port,
-  })
+): ControlId => ({
+  _tag: 'ProvisionalControlId',
+  execution: executionIdentity(execution),
+  sourceId: span.sourceId,
+  functionOrdinal:
+    execution._tag === 'InstanceExecution'
+      ? execution.functionOrdinal
+      : execution.site.functionOrdinal,
+  spanStart: span.start,
+  spanEnd: span.end,
+  ordinal,
+  port,
+})
 
 const classificationOfEffect = (
   discovery: Instances.Discovery,
@@ -325,7 +322,7 @@ const expressionTree = (expression: Tir.Expression): ReadonlyArray<Tir.Expressio
 const statementExpressions = (statement: Tir.Statement): ReadonlyArray<Tir.Expression> => {
   const cached = statementExpressionLists.get(statement)
   if (cached !== undefined) return cached
-  const expressions = Object.freeze(Tir.statementExpressions(statement))
+  const expressions = Tir.statementExpressions(statement)
   statementExpressionLists.set(statement, expressions)
   return expressions
 }
@@ -613,17 +610,17 @@ const providersOf = (
     return providersOf(expression.protected, context)
   const witness =
     expression.provider.witness ?? ConformanceProof.witness(context.index, providerType, capability)
-  return Object.freeze([
+  return [
     ...providersOf(expression.protected, context),
-    Object.freeze({
+    {
       capability,
       providerType,
       role: selected.role,
       requirementAccess: selected.access,
       access: expression.provider.selectionAccess,
       ...(witness === undefined ? {} : { witness }),
-    }),
-  ])
+    },
+  ]
 }
 
 const witnessExpressionAt = (
@@ -766,35 +763,31 @@ const computeRunner = (
     (environment?._tag === 'EffectEnvironment' ? environment.effect : requested)
   if (effect === undefined)
     throw new RangeError('Provisional runner requires a resolved Effect contract')
-  const providers = Object.freeze(
-    Type.requirementMembers(
-      environment?._tag === 'EffectEnvironment' ? environment.effect : effect,
-    ).flatMap((requirement) => {
-      const selected = availableProviders.find(
-        (provider) =>
-          provider.role === requirement.role &&
-          Type.equals(provider.capability, requirement.capability) &&
-          (requirement.access === 'Shared' ||
-            provider.access === 'Exclusive' ||
-            provider.access === 'Take'),
-      )
-      return selected === undefined
-        ? []
-        : [Object.freeze({ ...selected, requirementAccess: requirement.access })]
-    }),
-  )
+  const providers = Type.requirementMembers(
+    environment?._tag === 'EffectEnvironment' ? environment.effect : effect,
+  ).flatMap((requirement) => {
+    const selected = availableProviders.find(
+      (provider) =>
+        provider.role === requirement.role &&
+        Type.equals(provider.capability, requirement.capability) &&
+        (requirement.access === 'Shared' ||
+          provider.access === 'Exclusive' ||
+          provider.access === 'Take'),
+    )
+    return selected === undefined ? [] : [{ ...selected, requirementAccess: requirement.access }]
+  })
   if (environment?._tag !== 'EffectEnvironment' || identity === undefined) {
-    return Object.freeze({
-      execution: Object.freeze({
+    return {
+      execution: {
         _tag: 'UnknownExecution',
         identity: `${context.instance.key.declaration.module}:${expression.span.start}`,
-      }),
+      },
       classification: 'Unknown',
-      typeArguments: Object.freeze([]),
+      typeArguments: [],
       outcome: effect,
-      captures: Object.freeze([]),
+      captures: [],
       providers,
-    })
+    }
   }
   const environmentOwner = context.lookup.instances.get(Instances.keyText(environment.instance))
   const witness =
@@ -811,14 +804,14 @@ const computeRunner = (
     builtinExpressionAt(environmentOwner, environment.site) !== undefined
   )
     executionKind = 'BuiltinEffectRunnerExecution'
-  const baseExecution: ExecutionKey = Object.freeze({
+  const baseExecution: ExecutionKey = {
     _tag: executionKind,
     owner: stored?.runnerInstance ?? environment.instance,
     site: stored?.site ?? environment.site,
     identity,
     runner:
       stored?.runner ?? Tir.effectRunnerId(environment.instance.declaration, environment.site),
-  })
+  }
   const providedIdentity =
     providers.length === 0
       ? undefined
@@ -826,7 +819,7 @@ const computeRunner = (
   const execution: ExecutionKey =
     providedIdentity === undefined
       ? baseExecution
-      : Object.freeze({
+      : {
           _tag: 'ProvidedEffectRunnerExecution',
           baseKind: executionKind,
           owner: environment.instance,
@@ -835,7 +828,7 @@ const computeRunner = (
           effectIdentity: identity,
           runner: baseExecution.runner,
           providers,
-        })
+        }
   let baseClassification: Classification
   if (stored === undefined) {
     baseClassification =
@@ -931,7 +924,7 @@ const computeRunner = (
     }
     return 'Synchronous'
   }
-  return Object.freeze({
+  return {
     execution,
     classification: providedClassification(),
     declaration: execution.runner,
@@ -940,19 +933,15 @@ const computeRunner = (
     ...(providedIdentity === undefined ? {} : { providedIdentity }),
     typeArguments: stored?.runnerArguments ?? environment.instance.typeArguments,
     outcome: stored?.contract ?? environment.effect,
-    captures: Object.freeze(
-      environment.fields.map((field, ordinal) =>
-        Object.freeze({
-          ordinal,
-          source: field.source,
-          sourceOrdinal: field.ordinal,
-          access: field.access,
-          type: field.type,
-        }),
-      ),
-    ),
+    captures: environment.fields.map((field, ordinal) => ({
+      ordinal,
+      source: field.source,
+      sourceOrdinal: field.ordinal,
+      access: field.access,
+      type: field.type,
+    })),
     providers,
-  })
+  }
 }
 
 const reifyPolicy = (
@@ -966,7 +955,7 @@ const reifyPolicy = (
   const failureValueShape = Layout.callingShape(context.layout, failureValueType)
   if (outcomeShape === undefined || successShape === undefined || failureValueShape === undefined)
     return undefined
-  return Object.freeze({
+  return {
     _tag: 'Reify',
     outcome,
     successType,
@@ -974,7 +963,7 @@ const reifyPolicy = (
     successShape,
     outcomeShape,
     failureValueShape,
-  })
+  }
 }
 
 const isSuspendOrigin = (expression: Tir.Expression, context: BuildContext): boolean => {
@@ -1061,11 +1050,11 @@ const catchHandlerRunner = (
     !Type.isEffect(handlerType.result)
   )
     return undefined
-  const declaration: DeclarationFacts.CanonicalId = Object.freeze({
+  const declaration: DeclarationFacts.CanonicalId = {
     _tag: 'CanonicalDeclarationId',
     module: callableIdentity.target.module,
     name: callableIdentity.target.name,
-  })
+  }
   const identities = [
     ...new Set(
       Instances.matchingSpecialization(context.discovery, {
@@ -1167,11 +1156,11 @@ const builtinEffectCallbackRunner = (
     !Type.isEffect(callableType.result)
   )
     return undefined
-  const declaration: DeclarationFacts.CanonicalId = Object.freeze({
+  const declaration: DeclarationFacts.CanonicalId = {
     _tag: 'CanonicalDeclarationId',
     module: callableIdentity.target.module,
     name: callableIdentity.target.name,
-  })
+  }
   const environment =
     callableIdentity.environment === undefined
       ? undefined
@@ -1210,7 +1199,7 @@ const controlsOfCatch = (
   runSpan = expression.span,
 ): ReadonlyArray<Region> => {
   const regions: Array<Region> = []
-  if (expression.protected._tag === 'Unavailable') return Object.freeze(regions)
+  if (expression.protected._tag === 'Unavailable') return regions
   const protectedEffect = Type.substitute(
     expression.protected.type,
     context.instance.substitution,
@@ -1221,7 +1210,7 @@ const controlsOfCatch = (
     context.instance.substitution,
     context.instance.specialization.compatibility,
   )
-  if (!Type.isEffect(protectedEffect) || !Type.isEffect(resultEffect)) return Object.freeze([])
+  if (!Type.isEffect(protectedEffect) || !Type.isEffect(resultEffect)) return []
 
   const protectedRunner = runnerOf(expression.protected, context)
   const selected = Type.substitute(
@@ -1230,66 +1219,65 @@ const controlsOfCatch = (
     context.instance.specialization.compatibility,
   )
   if (Type.isNever(selected)) {
-    if (protectedRunner.classification === 'Synchronous') return Object.freeze(regions)
-    const policy: Extract<CompletionPolicy, { readonly _tag: 'Propagate' }> = Object.freeze({
+    if (protectedRunner.classification === 'Synchronous') return regions
+    const policy: Extract<CompletionPolicy, { readonly _tag: 'Propagate' }> = {
       _tag: 'Propagate',
       outcome: protectedRunner.outcome,
-      failureMappings: Object.freeze(
-        Type.failureMembers(protectedRunner.outcome).map((_failure, source) =>
-          Object.freeze({ source: source + 1, target: source + 1 }),
-        ),
-      ),
-    })
+      failureMappings: Type.failureMembers(protectedRunner.outcome).map((_failure, source) => ({
+        source: source + 1,
+        target: source + 1,
+      })),
+    }
     const id = controlId(execution, runSpan, ordinalOffset, 'Invoke')
     const complete = controlId(execution, runSpan, ordinalOffset, 'Complete')
-    return Object.freeze([
-      Object.freeze({
+    return [
+      {
         _tag: 'ProvisionalRegion',
         id,
-        outcome: Object.freeze({
+        outcome: {
           _tag: 'RunSuspendableEffect',
           runner: protectedRunner,
           completion: policy,
           complete,
-          relay: Object.freeze({
+          relay: {
             _tag: 'RelayExistingTransfer',
             preserves: ['Child', 'Origin', 'TypedOutcome'] as const,
-          }),
+          },
           span: runSpan,
-        }),
-      }),
-      Object.freeze({
+        },
+      },
+      {
         _tag: 'ProvisionalRegion',
         id: complete,
-        outcome: Object.freeze({ _tag: 'Complete', policy }),
-      }),
-    ])
+        outcome: { _tag: 'Complete', policy },
+      },
+    ]
   }
   const protectedPolicy = reifyPolicy(protectedRunner.outcome, context)
   if (protectedRunner.classification !== 'Synchronous' && protectedPolicy !== undefined) {
     const id = controlId(execution, expression.span, ordinalOffset, 'Invoke')
     const complete = controlId(execution, expression.span, ordinalOffset, 'Complete')
     regions.push(
-      Object.freeze({
+      {
         _tag: 'ProvisionalRegion',
         id,
-        outcome: Object.freeze({
+        outcome: {
           _tag: 'RunSuspendableEffect',
           runner: protectedRunner,
           completion: protectedPolicy,
           complete,
-          relay: Object.freeze({
+          relay: {
             _tag: 'RelayExistingTransfer',
             preserves: ['Child', 'Origin', 'TypedOutcome'] as const,
-          }),
+          },
           span: expression.span,
-        }),
-      }),
-      Object.freeze({
+        },
+      },
+      {
         _tag: 'ProvisionalRegion',
         id: complete,
-        outcome: Object.freeze({ _tag: 'Complete', policy: protectedPolicy }),
-      }),
+        outcome: { _tag: 'Complete', policy: protectedPolicy },
+      },
     )
   }
 
@@ -1298,47 +1286,46 @@ const controlsOfCatch = (
     handlerRunner?.classification !== 'Suspendable' &&
     handlerRunner?.classification !== 'Unknown'
   )
-    return Object.freeze(regions)
+    return regions
   const mappings = Type.failureMembers(handlerRunner.outcome).flatMap((failure, source) => {
     const target = Type.failureMembers(resultEffect).findIndex((candidate) =>
       Type.equals(candidate, failure),
     )
-    return target < 0 ? [] : [Object.freeze({ source: source + 1, target: target + 1 })]
+    return target < 0 ? [] : [{ source: source + 1, target: target + 1 }]
   })
-  if (mappings.length !== Type.failureMembers(handlerRunner.outcome).length)
-    return Object.freeze(regions)
-  const policy: Extract<CompletionPolicy, { readonly _tag: 'Propagate' }> = Object.freeze({
+  if (mappings.length !== Type.failureMembers(handlerRunner.outcome).length) return regions
+  const policy: Extract<CompletionPolicy, { readonly _tag: 'Propagate' }> = {
     _tag: 'Propagate',
     outcome: handlerRunner.outcome,
-    failureMappings: Object.freeze(mappings),
-  })
+    failureMappings: mappings,
+  }
   // The selected handler executes at the enclosing Run span. CatchEffect itself uses the
   // protected expression span; conflating them loses the handler's exact ownership control.
   const id = controlId(execution, runSpan, ordinalOffset + 1, 'Invoke')
   const complete = controlId(execution, runSpan, ordinalOffset + 1, 'Complete')
   regions.push(
-    Object.freeze({
+    {
       _tag: 'ProvisionalRegion',
       id,
-      outcome: Object.freeze({
+      outcome: {
         _tag: 'RunSuspendableEffect',
         runner: handlerRunner,
         completion: policy,
         complete,
-        relay: Object.freeze({
+        relay: {
           _tag: 'RelayExistingTransfer',
           preserves: ['Child', 'Origin', 'TypedOutcome'] as const,
-        }),
+        },
         span: runSpan,
-      }),
-    }),
-    Object.freeze({
+      },
+    },
+    {
       _tag: 'ProvisionalRegion',
       id: complete,
-      outcome: Object.freeze({ _tag: 'Complete', policy }),
-    }),
+      outcome: { _tag: 'Complete', policy },
+    },
   )
-  return Object.freeze(regions)
+  return regions
 }
 
 const controlsOfExpressions = (
@@ -1370,35 +1357,35 @@ const controlsOfExpressions = (
           const policy =
             inputOrdinal === 0 && Type.failureMembers(runner.outcome).length > 0
               ? reifyPolicy(runner.outcome, context)
-              : Object.freeze({
+              : {
                   _tag: 'Propagate' as const,
                   outcome: runner.outcome,
-                  failureMappings: Object.freeze([]),
-                })
+                  failureMappings: [],
+                }
           if (policy === undefined) continue
           const id = controlId(execution, argument.span, idOrdinal + inputOrdinal, 'Invoke')
           const complete = controlId(execution, argument.span, idOrdinal + inputOrdinal, 'Complete')
           regions.push(
-            Object.freeze({
+            {
               _tag: 'ProvisionalRegion',
               id,
-              outcome: Object.freeze({
+              outcome: {
                 _tag: 'RunSuspendableEffect',
                 runner,
                 completion: policy,
                 complete,
-                relay: Object.freeze({
+                relay: {
                   _tag: 'RelayExistingTransfer',
                   preserves: ['Child', 'Origin', 'TypedOutcome'] as const,
-                }),
+                },
                 span: argument.span,
-              }),
-            }),
-            Object.freeze({
+              },
+            },
+            {
               _tag: 'ProvisionalRegion',
               id: complete,
-              outcome: Object.freeze({ _tag: 'Complete', policy }),
-            }),
+              outcome: { _tag: 'Complete', policy },
+            },
           )
         }
         ordinal += 1
@@ -1421,35 +1408,35 @@ const controlsOfExpressions = (
           const policy =
             offset === 0 && Type.failureMembers(runner.outcome).length > 0
               ? reifyPolicy(runner.outcome, context)
-              : Object.freeze({
+              : {
                   _tag: 'Propagate' as const,
                   outcome: runner.outcome,
-                  failureMappings: Object.freeze([]),
-                })
+                  failureMappings: [],
+                }
           if (policy === undefined) continue
           const id = controlId(execution, argument.span, idOrdinal + offset, 'Invoke')
           const complete = controlId(execution, argument.span, idOrdinal + offset, 'Complete')
           regions.push(
-            Object.freeze({
+            {
               _tag: 'ProvisionalRegion',
               id,
-              outcome: Object.freeze({
+              outcome: {
                 _tag: 'RunSuspendableEffect',
                 runner,
                 completion: policy,
                 complete,
-                relay: Object.freeze({
+                relay: {
                   _tag: 'RelayExistingTransfer',
                   preserves: ['Child', 'Origin', 'TypedOutcome'] as const,
-                }),
+                },
                 span: argument.span,
-              }),
-            }),
-            Object.freeze({
+              },
+            },
+            {
               _tag: 'ProvisionalRegion',
               id: complete,
-              outcome: Object.freeze({ _tag: 'Complete', policy }),
-            }),
+              outcome: { _tag: 'Complete', policy },
+            },
           )
         }
         ordinal += 1
@@ -1469,18 +1456,16 @@ const controlsOfExpressions = (
         const deferred = deferredOf(expression.subject, context)
         if (deferred !== undefined) {
           const id = controlId(execution, expression.span, idOrdinal, 'Origin')
-          regions.push(
-            Object.freeze({
-              _tag: 'ProvisionalRegion',
-              id,
-              outcome: Object.freeze({
-                _tag: 'SuspendEffect',
-                deferred: runnerOf(deferred, context),
-                transfer: Object.freeze({ _tag: 'OriginateTransfer' }),
-                span: expression.span,
-              }),
-            }),
-          )
+          regions.push({
+            _tag: 'ProvisionalRegion',
+            id,
+            outcome: {
+              _tag: 'SuspendEffect',
+              deferred: runnerOf(deferred, context),
+              transfer: { _tag: 'OriginateTransfer' },
+              span: expression.span,
+            },
+          })
         }
       } else {
         const protected_ = expression.subject
@@ -1504,39 +1489,38 @@ const controlsOfExpressions = (
           return
         }
         if (runner.classification !== 'Synchronous') {
-          const policy = Object.freeze({
+          const policy = {
             _tag: 'Propagate' as const,
             outcome: runner.outcome,
-            failureMappings: Object.freeze(
-              Type.failureMembers(runner.outcome).map((_failure, source) =>
-                Object.freeze({ source: source + 1, target: source + 1 }),
-              ),
-            ),
-          })
+            failureMappings: Type.failureMembers(runner.outcome).map((_failure, source) => ({
+              source: source + 1,
+              target: source + 1,
+            })),
+          }
           if (policy !== undefined) {
             const id = controlId(execution, expression.span, idOrdinal, 'Invoke')
             const complete = controlId(execution, expression.span, idOrdinal, 'Complete')
             regions.push(
-              Object.freeze({
+              {
                 _tag: 'ProvisionalRegion',
                 id,
-                outcome: Object.freeze({
+                outcome: {
                   _tag: 'RunSuspendableEffect',
                   runner,
                   completion: policy,
                   complete,
-                  relay: Object.freeze({
+                  relay: {
                     _tag: 'RelayExistingTransfer',
                     preserves: ['Child', 'Origin', 'TypedOutcome'] as const,
-                  }),
+                  },
                   span: expression.span,
-                }),
-              }),
-              Object.freeze({
+                },
+              },
+              {
                 _tag: 'ProvisionalRegion',
                 id: complete,
-                outcome: Object.freeze({ _tag: 'Complete', policy }),
-              }),
+                outcome: { _tag: 'Complete', policy },
+              },
             )
           }
         }
@@ -1545,7 +1529,7 @@ const controlsOfExpressions = (
     for (const child of Tir.expressionChildren(expression)) visit(child)
   }
   for (const expression of expressions) visit(expression)
-  return Object.freeze(regions)
+  return regions
 }
 
 const controlsOf = (
@@ -1577,34 +1561,34 @@ const builtinExecution = (
     context.instance.function.declaration.id.ordinal,
   )
   const identity = Instances.effectIdentity(context.instance.key, site)
-  const key: ExecutionKey = Object.freeze({
+  const key: ExecutionKey = {
     _tag: 'BuiltinEffectRunnerExecution',
     owner: context.instance.key,
     site,
     identity,
     runner: Tir.effectRunnerId(context.instance.key.declaration, site),
-  })
+  }
   const classification = classificationOfEffect(context.discovery, identity)
   const regions = controlsOfExpressions(
     [
-      Object.freeze({
+      {
         _tag: 'Run',
         subject: expression,
         type: effect.success,
         span: expression.span,
         origin: expression.origin,
-      }),
+      },
     ],
     key,
     classification,
     context,
   )
-  return Object.freeze({
+  return {
     _tag: 'ProvisionalExecution',
     key,
     classification: classificationWithRegions(classification, regions),
     regions,
-  })
+  }
 }
 
 const providedRunnersOf = (
@@ -1640,7 +1624,7 @@ const providedRunnersOf = (
     for (const child of Tir.expressionChildren(expression)) visit(child)
   }
   for (const expression of expressions) visit(expression)
-  return Object.freeze(runners)
+  return runners
 }
 
 /** The adapter itself runs the selected implementation's returned Effect. */
@@ -1672,15 +1656,13 @@ const witnessExecution = (
     bound.contract,
     context.instance.substitution,
   )
-  const key: ExecutionKey =
-    providedKey ??
-    Object.freeze({
-      _tag: 'WitnessEffectRunnerExecution',
-      owner: context.instance.key,
-      site,
-      identity: Instances.effectIdentity(context.instance.key, site),
-      runner: Tir.effectRunnerId(context.instance.key.declaration, site),
-    })
+  const key: ExecutionKey = providedKey ?? {
+    _tag: 'WitnessEffectRunnerExecution',
+    owner: context.instance.key,
+    site,
+    identity: Instances.effectIdentity(context.instance.key, site),
+    runner: Tir.effectRunnerId(context.instance.key.declaration, site),
+  }
   const regions: Array<Region> = []
   let classification: Classification = 'Unknown'
   let selectedRunner: Runner | undefined
@@ -1719,50 +1701,49 @@ const witnessExecution = (
       selectedRunner = runner
       classification = runner.classification
       if (classification !== 'Synchronous') {
-        const policy: CompletionPolicy = Object.freeze({
+        const policy: CompletionPolicy = {
           _tag: 'Propagate',
           outcome: runner.outcome,
-          failureMappings: Object.freeze(
-            Type.failureMembers(runner.outcome).map((_failure, ordinal) =>
-              Object.freeze({ source: ordinal + 1, target: ordinal + 1 }),
-            ),
-          ),
-        })
+          failureMappings: Type.failureMembers(runner.outcome).map((_failure, ordinal) => ({
+            source: ordinal + 1,
+            target: ordinal + 1,
+          })),
+        }
         const complete = controlId(key, expression.span, 0, 'Complete')
         regions.push(
-          Object.freeze({
+          {
             _tag: 'ProvisionalRegion',
             id: controlId(key, expression.span, 0, 'Invoke'),
-            outcome: Object.freeze({
+            outcome: {
               _tag: 'RunSuspendableEffect',
               runner,
               completion: policy,
               complete,
-              relay: Object.freeze({
+              relay: {
                 _tag: 'RelayExistingTransfer',
                 preserves: ['Child', 'Origin', 'TypedOutcome'] as const,
-              }),
+              },
               span: expression.span,
-            }),
-          }),
-          Object.freeze({
+            },
+          },
+          {
             _tag: 'ProvisionalRegion',
             id: complete,
-            outcome: Object.freeze({ _tag: 'Complete', policy }),
-          }),
+            outcome: { _tag: 'Complete', policy },
+          },
         )
       }
     }
   }
-  return Object.freeze({
-    execution: Object.freeze({
+  return {
+    execution: {
       _tag: 'ProvisionalExecution',
       key,
       classification,
-      regions: Object.freeze(regions),
-    }),
+      regions: regions,
+    },
     ...(selectedRunner === undefined ? {} : { selectedRunner }),
-  })
+  }
 }
 
 const classificationWithRegions = (
@@ -1816,8 +1797,8 @@ const buildFragment = (
   executions: Array<Execution>,
   providedRunners: Array<Runner>,
 ): BuildFragment => ({
-  executions: Object.freeze(executions),
-  providedRunners: Object.freeze(providedRunners),
+  executions: executions,
+  providedRunners: providedRunners,
   dependencies: context.effectClassifications.observed,
 })
 
@@ -1838,12 +1819,12 @@ const buildInstance = (context: BuildContext): BuildFragment => {
   const { discovery, instance } = context
   const executions: Array<Execution> = []
   const providedRunners: Array<Runner> = []
-  const instanceKey: ExecutionKey = Object.freeze({
+  const instanceKey: ExecutionKey = {
     _tag: 'InstanceExecution',
     instance: instance.key,
     functionOrdinal: instance.function.declaration.id.ordinal,
     identity: Instances.keyText(instance.key),
-  })
+  }
   const instanceClassification: Classification = suspendableSummary(
     Instances.executionSuspensionOf(discovery, instance.key),
   )
@@ -1858,14 +1839,12 @@ const buildInstance = (context: BuildContext): BuildFragment => {
   providedRunners.push(
     ...providedRunnersOf(instance.function.statements.flatMap(statementExpressions), context),
   )
-  executions.push(
-    Object.freeze({
-      _tag: 'ProvisionalExecution',
-      key: instanceKey,
-      classification: classificationWithRegions(instanceClassification, instanceRegions),
-      regions: instanceRegions,
-    }),
-  )
+  executions.push({
+    _tag: 'ProvisionalExecution',
+    key: instanceKey,
+    classification: classificationWithRegions(instanceClassification, instanceRegions),
+    regions: instanceRegions,
+  })
   const expressions = instance.function.statements
     .flatMap(statementExpressions)
     .flatMap(expressionTree)
@@ -1907,13 +1886,13 @@ const buildInstance = (context: BuildContext): BuildFragment => {
             instance.function.declaration.id.ordinal,
           )
     const identity = Instances.effectIdentity(instance.key, site)
-    const key: ExecutionKey = Object.freeze({
+    const key: ExecutionKey = {
       _tag: 'EffectRunnerExecution',
       owner: instance.key,
       site,
       identity,
       runner: Tir.effectRunnerId(instance.key.declaration, site),
-    })
+    }
     const runnerClassification =
       readClassification(context.effectClassifications, identity) ??
       classificationOfEffect(discovery, identity)
@@ -1948,14 +1927,12 @@ const buildInstance = (context: BuildContext): BuildFragment => {
         ),
       )
     const specializedClassification = classificationWithRegions(runnerClassification, regions)
-    executions.push(
-      Object.freeze({
-        _tag: 'ProvisionalExecution',
-        key,
-        classification: specializedClassification,
-        regions,
-      }),
-    )
+    executions.push({
+      _tag: 'ProvisionalExecution',
+      key,
+      classification: specializedClassification,
+      regions,
+    })
   }
   return buildFragment(context, executions, providedRunners)
 }
@@ -2043,12 +2020,12 @@ const buildProvidedRunner = (runner: Runner, context: BuildContext): BuildFragme
   // consumed only by the suspension primitive itself.
   if (!specializesProviderDispatch && !relaysProvidedRunner)
     return buildFragment(context, executions, providedRunners)
-  const execution: Execution = Object.freeze({
+  const execution: Execution = {
     _tag: 'ProvisionalExecution',
     key,
     classification: classificationWithRegions(runner.classification, regions),
     regions,
-  })
+  }
   executions.push(execution)
   for (const region of regions) {
     const outcome = region.outcome
@@ -2111,11 +2088,11 @@ const buildPass = (
     executions.push(...fragment.executions)
     pendingProvided.push(...fragment.providedRunners)
   }
-  return Object.freeze({
+  return {
     _tag: 'ProvisionalMirModule',
     module: state.discovery.rootModule,
-    executions: Object.freeze(executions),
-  })
+    executions: executions,
+  }
 }
 
 const classificationsOf = (self: Module): ReadonlyMap<string, Classification> => {
@@ -2266,7 +2243,7 @@ export const controlOfRun = (
       candidate.outcome._tag === 'RunSuspendableEffect' && sameSpan(candidate.outcome.span, span),
   )
   return region?.outcome._tag === 'RunSuspendableEffect'
-    ? Object.freeze({ id: region.id, outcome: region.outcome })
+    ? { id: region.id, outcome: region.outcome }
     : undefined
 }
 
@@ -2333,13 +2310,11 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
     for (const region of execution.regions) {
       const key = controlIdText(region.id)
       if (regions.has(key)) {
-        violations.push(
-          Object.freeze({
-            _tag: 'ProvisionalMirViolation',
-            execution: identity,
-            detail: `duplicate provisional region ${key}`,
-          }),
-        )
+        violations.push({
+          _tag: 'ProvisionalMirViolation',
+          execution: identity,
+          detail: `duplicate provisional region ${key}`,
+        })
       }
       regions.set(key, region)
     }
@@ -2348,32 +2323,26 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
       if (outcome._tag !== 'RunSuspendableEffect') continue
       const target = regions.get(controlIdText(outcome.complete))
       if (target?.outcome._tag !== 'Complete') {
-        violations.push(
-          Object.freeze({
-            _tag: 'ProvisionalMirViolation',
-            execution: identity,
-            detail: `suspendable run ${controlIdText(region.id)} has a dangling Complete target`,
-          }),
-        )
+        violations.push({
+          _tag: 'ProvisionalMirViolation',
+          execution: identity,
+          detail: `suspendable run ${controlIdText(region.id)} has a dangling Complete target`,
+        })
       } else if (target.outcome.policy._tag !== outcome.completion._tag) {
-        violations.push(
-          Object.freeze({
-            _tag: 'ProvisionalMirViolation',
-            execution: identity,
-            detail: `suspendable run ${controlIdText(region.id)} changes its Complete policy`,
-          }),
-        )
+        violations.push({
+          _tag: 'ProvisionalMirViolation',
+          execution: identity,
+          detail: `suspendable run ${controlIdText(region.id)} changes its Complete policy`,
+        })
       }
       if (outcome.runner.classification === 'Synchronous') {
-        violations.push(
-          Object.freeze({
-            _tag: 'ProvisionalMirViolation',
-            execution: identity,
-            detail: `synchronous runner appears in suspendable control ${controlIdText(region.id)}`,
-          }),
-        )
+        violations.push({
+          _tag: 'ProvisionalMirViolation',
+          execution: identity,
+          detail: `synchronous runner appears in suspendable control ${controlIdText(region.id)}`,
+        })
       }
     }
   }
-  return Object.freeze(violations)
+  return violations
 }

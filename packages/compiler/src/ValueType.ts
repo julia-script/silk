@@ -80,7 +80,7 @@ export type GeneratedEffectRunner =
 export const instanceText = (
   declaration: { readonly module: string; readonly name: string },
   typeArguments: ReadonlyArray<Type.GenericArgument>,
-  staticArguments: ReadonlyArray<StaticValue.Value> = Object.freeze([]),
+  staticArguments: ReadonlyArray<StaticValue.Value> = [],
 ): string => Specialization.runtimeKey({ declaration, typeArguments, staticArguments })
 
 const runnerSiteKey = (owner: Instances.InstanceKey, site: Tir.EffectSiteId): string =>
@@ -163,12 +163,12 @@ export const effectValueType = (
       EffectExecutionContract.equals(candidate.effect, requested),
   )
   if (environment?._tag !== 'EffectEnvironment') return undefined
-  return Object.freeze({
+  return {
     _tag: 'EffectValue',
     type: requested,
     site: block.site,
     environment,
-  })
+  }
 }
 
 export const effectValueAtSite = (
@@ -186,7 +186,7 @@ export const effectValueAtSite = (
   )
   return environment?._tag !== 'EffectEnvironment'
     ? undefined
-    : Object.freeze({ _tag: 'EffectValue', type: environment.effect, site, environment })
+    : { _tag: 'EffectValue', type: environment.effect, site, environment }
 }
 
 const effectEnvironmentsByIdentity = (
@@ -236,12 +236,12 @@ export const effectValueByIdentity = (
   const exact = matching.length === 1 ? matching.at(0) : undefined
   return exact === undefined
     ? undefined
-    : Object.freeze({
+    : {
         _tag: 'EffectValue',
         type: requested ?? exact.effect,
         site: exact.site,
         environment: exact,
-      })
+      }
 }
 
 /** Resolves a contextual Effect result only through its already-selected concrete call edge. */
@@ -249,7 +249,7 @@ export const effectValueForCall = (
   layout: Layout.Plan,
   call: Instances.CallInstance,
   requested: Type.Effect,
-  provided: ReadonlyArray<ProvidedRequirement> = Object.freeze([]),
+  provided: ReadonlyArray<ProvidedRequirement> = [],
 ): Extract<Mir.Type, { readonly _tag: 'EffectValue' }> | undefined => {
   if (call.resultEffect === undefined) return undefined
   const candidates = effectEnvironmentsByIdentity(layout, call.resultEffect)
@@ -263,12 +263,12 @@ export const effectValueForCall = (
   const environment = selected.length === 1 ? selected.at(0) : undefined
   return environment === undefined
     ? undefined
-    : Object.freeze({
+    : {
         _tag: 'EffectValue',
         type: requested,
         site: environment.site,
         environment,
-      })
+      }
 }
 
 export const effectCompositeShape = (
@@ -303,15 +303,15 @@ export const callableValueByIdentity = (
   if (identity.environment !== undefined && environment === undefined) return undefined
   const specializedType =
     environment === undefined
-      ? Object.freeze({ ...type, mode: 'Shared' as const })
-      : Object.freeze({ ...environment.callable.type, mode: environment.callable.mode })
-  return Object.freeze({
+      ? { ...type, mode: 'Shared' as const }
+      : { ...environment.callable.type, mode: environment.callable.mode }
+  return {
     _tag: 'CallableValue',
     type: specializedType,
     target,
     typeArguments: identity.typeArguments,
     ...(environment === undefined ? {} : { site: environment.callable.site, environment }),
-  })
+  }
 }
 
 /** The exact callable a specialized target returns through a structural callable result type. */
@@ -380,12 +380,12 @@ export const representedValueType = (
     )
     return alternatives.length !== representation.alternatives.length
       ? undefined
-      : Object.freeze({
+      : {
           _tag: 'EffectComposite',
           type: specialized,
           contract: specialized.contract,
-          alternatives: Object.freeze(alternatives),
-        })
+          alternatives: alternatives,
+        }
   }
   if (Type.isExactRepresentationArgument(representation)) {
     if (
@@ -469,12 +469,12 @@ export const representedValueType = (
     )
     return environment === undefined
       ? undefined
-      : Object.freeze({
+      : {
           _tag: 'EffectValue',
           type: specialized.contract,
           site: environment.site,
           environment,
-        })
+        }
   }
   return undefined
 }
@@ -501,18 +501,18 @@ export const storedCallableValueType = (
             FieldRealization.matchesCallable(realization, candidate.callable),
         )
   if (realization.site !== undefined && environment === undefined) return undefined
-  return Object.freeze({
+  return {
     _tag: 'CallableValue',
     type: realization.contract,
     target: Tir.callableTargetFromIdentity(realization.target),
     ...(realization.site === undefined ? {} : { site: realization.site }),
     ...(environment === undefined ? {} : { environment }),
-    storage: Object.freeze({
+    storage: {
       _tag: 'StoredCallableField',
       type,
       realization,
-    }),
-  })
+    },
+  }
 }
 
 export const storedEffectValueType = (
@@ -525,28 +525,27 @@ export const storedEffectValueType = (
   const representation = entry?.representation
   if (entry === undefined || representation?._tag !== 'StoredEffectEnvironment') return undefined
   const realization = representation.realization
-  const environment: Extract<Layout.EffectEnvironment, { readonly _tag: 'EffectEnvironment' }> =
-    Object.freeze({
-      _tag: 'EffectEnvironment',
-      instance: realization.runnerInstance,
-      site: realization.site,
-      effect: realization.contract,
-      fields: representation.fields,
-      size: entry.size,
-      alignment: entry.alignment,
-      tailPadding: representation.tailPadding,
-    })
-  return Object.freeze({
+  const environment: Extract<Layout.EffectEnvironment, { readonly _tag: 'EffectEnvironment' }> = {
+    _tag: 'EffectEnvironment',
+    instance: realization.runnerInstance,
+    site: realization.site,
+    effect: realization.contract,
+    fields: representation.fields,
+    size: entry.size,
+    alignment: entry.alignment,
+    tailPadding: representation.tailPadding,
+  }
+  return {
     _tag: 'EffectValue',
     type: realization.contract,
     site: realization.site,
     environment,
-    storage: Object.freeze({
+    storage: {
       _tag: 'StoredEffectField',
       type,
       realization,
-    }),
-  })
+    },
+  }
 }
 
 export const requirementsFor = (
@@ -575,14 +574,14 @@ export const requirementsFor = (
     const candidate = exact ?? (physical.length === 1 ? physical.at(0) : undefined)
     return candidate === undefined
       ? undefined
-      : Object.freeze({
+      : {
           ...candidate,
           capability: requirement.capability,
           requirementAccess: requirement.access,
-        })
+        }
   })
   return selected.every((candidate) => candidate !== undefined)
-    ? Object.freeze(selected.flatMap((candidate) => (candidate === undefined ? [] : [candidate])))
+    ? selected.flatMap((candidate) => (candidate === undefined ? [] : [candidate]))
     : undefined
 }
 
@@ -619,55 +618,44 @@ export const ensureEffectRunner = (
   const base = physical.length === 1 ? physical.at(0) : undefined
   if (base === undefined) return undefined
   if (requirements.length === 0) return base.id
-  const id: DeclarationFacts.CanonicalId = Object.freeze({
+  const id: DeclarationFacts.CanonicalId = {
     _tag: 'CanonicalDeclarationId',
     module: base.id.module,
     name: `${base.id.name}$provided$${fn.generatedRunners.length}`,
+  }
+  fn.generatedRunners.push({
+    ...base,
+    id,
+    type: base.type,
+    specializationKey: key,
+    providedRequirements: requirements.map(({ local: _local, ...requirement }) => requirement),
   })
-  fn.generatedRunners.push(
-    Object.freeze({
-      ...base,
-      id,
-      type: base.type,
-      specializationKey: key,
-      providedRequirements: Object.freeze(
-        requirements.map(({ local: _local, ...requirement }) => Object.freeze(requirement)),
-      ),
-    }),
-  )
   return id
 }
 
 export const runtimeRequirementArguments = (
   requirements: ReadonlyArray<ProvidedRequirement> | undefined,
 ): ReadonlyArray<Mir.LocalId> =>
-  Object.freeze(
-    requirements?.flatMap((requirement) =>
-      requirement.witness._tag !== 'SourceConformanceWitness' || requirement.local === undefined
-        ? []
-        : [requirement.local],
-    ) ?? [],
-  )
+  requirements?.flatMap((requirement) =>
+    requirement.witness._tag !== 'SourceConformanceWitness' || requirement.local === undefined
+      ? []
+      : [requirement.local],
+  ) ?? []
 
 export const providerBindings = (
   requirements: ReadonlyArray<ProvidedRequirement> | undefined,
 ): Extract<Mir.Operation, { readonly _tag: 'RunEffectValue' }>['providers'] =>
-  Object.freeze(
-    requirements?.map((requirement) =>
-      Object.freeze({
-        capability: requirement.capability,
-        providerType: requirement.providerType,
-        witness: requirement.witness,
-        role: requirement.role,
-        requirementAccess: requirement.requirementAccess,
-        access: requirement.access,
-        ...(requirement.witness._tag === 'SourceConformanceWitness' &&
-        requirement.local !== undefined
-          ? { argument: requirement.local }
-          : {}),
-      }),
-    ) ?? [],
-  )
+  requirements?.map((requirement) => ({
+    capability: requirement.capability,
+    providerType: requirement.providerType,
+    witness: requirement.witness,
+    role: requirement.role,
+    requirementAccess: requirement.requirementAccess,
+    access: requirement.access,
+    ...(requirement.witness._tag === 'SourceConformanceWitness' && requirement.local !== undefined
+      ? { argument: requirement.local }
+      : {}),
+  })) ?? []
 
 export const sameSite = (left: Tir.CallableSiteId, right: Tir.CallableSiteId): boolean =>
   Tir.sameExecutableSite(left, right)
@@ -697,25 +685,26 @@ const recontextualizedCallableEnvironment = (
     })
   )
     return undefined
-  const captures = environment.callable.captures.map((capture, ordinal) =>
-    Object.freeze({ ...capture, type: captureTypes.at(ordinal) ?? capture.type }),
-  )
+  const captures = environment.callable.captures.map((capture, ordinal) => ({
+    ...capture,
+    type: captureTypes.at(ordinal) ?? capture.type,
+  }))
   const fields = environment.fields.map((field) => {
     const capture = captures.find((candidate) => candidate.ordinal === field.ordinal)
-    return capture === undefined ? field : Object.freeze({ ...field, type: capture.type })
+    return capture === undefined ? field : { ...field, type: capture.type }
   })
-  return Object.freeze({
+  return {
     ...environment,
-    callable: Object.freeze({
+    callable: {
       ...environment.callable,
       owner: fn.owner.key,
-      captureTypes: Object.freeze(captureTypes),
-      captures: Object.freeze(captures),
+      captureTypes: captureTypes,
+      captures: captures,
       type,
       mode: type.mode,
-    }),
-    fields: Object.freeze(fields),
-  })
+    },
+    fields: fields,
+  }
 }
 
 export const callableValueType = (
@@ -729,7 +718,7 @@ export const callableValueType = (
   const identity = Tir.callableEnvironmentIdentity(section.site, {
     declaration: fn.owner.key.declaration,
     typeArguments: fn.owner.key.typeArguments,
-    staticArgumentKeys: Object.freeze(fn.owner.key.staticArguments.map(StaticValue.key)),
+    staticArgumentKeys: fn.owner.key.staticArguments.map(StaticValue.key),
   })
   const identityKey = Type.runtimeCallableEnvironmentIdentityKey(identity)
   const candidates = fn.layout.callableEnvironments.filter(
@@ -758,24 +747,22 @@ export const callableValueType = (
     return section.captures.length === 0 &&
       Type.isCallable(expected) &&
       Type.isRuntimeConcrete(expected)
-      ? Object.freeze({
+      ? {
           _tag: 'CallableValue',
           type: expected,
           target: section.target,
           site: section.site,
-          typeArguments: Object.freeze(
-            section.typeArguments.map((argument) => fn.semanticArgument(argument)),
-          ),
-        })
+          typeArguments: section.typeArguments.map((argument) => fn.semanticArgument(argument)),
+        }
       : undefined
   }
-  return Object.freeze({
+  return {
     _tag: 'CallableValue',
     type: environment.callable.type,
     target: environment.callable.target,
     site: section.site,
     environment,
-  })
+  }
 }
 
 /** The environment-bearing value type a staged application builds at its own site. */
@@ -797,13 +784,13 @@ export const stagedCallableValueType = (
   const environment = candidates.length === 1 ? candidates.at(0) : undefined
   return environment === undefined
     ? undefined
-    : Object.freeze({
+    : {
         _tag: 'CallableValue',
         type: environment.callable.type,
         target: environment.callable.target,
         site,
         environment,
-      })
+      }
 }
 
 export const directCallableSectionValueType = (
@@ -817,7 +804,7 @@ export const directCallableSectionValueType = (
     Type.substitute(section.type, new Map([...section.substitution, ...applicationSubstitution])),
   )
   return Type.isCallable(type) && Type.isRuntimeConcrete(type)
-    ? Object.freeze({ _tag: 'CallableValue', type, target: section.target })
+    ? { _tag: 'CallableValue', type, target: section.target }
     : undefined
 }
 
@@ -832,13 +819,11 @@ export const functionItemValueType = (
     fn.owner.specialization.compatibility,
   )
   return Type.isCallable(type) && Type.isRuntimeConcrete(type)
-    ? Object.freeze({
+    ? {
         _tag: 'CallableValue',
         type,
         target: item.target,
-        typeArguments: Object.freeze(
-          item.typeArguments.map((argument) => fn.semanticArgument(argument)),
-        ),
-      })
+        typeArguments: item.typeArguments.map((argument) => fn.semanticArgument(argument)),
+      }
     : undefined
 }

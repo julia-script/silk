@@ -193,5 +193,5 @@ export const resolve = Effect.fnUntraced(function* (
       `${tag}_element`,
     )
   }
-  return Object.freeze({ address: projected, type: selected })
+  return { address: projected, type: selected }
 })

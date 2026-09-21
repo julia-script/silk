@@ -14,8 +14,10 @@ export interface ResolvedSource {
 }
 
 /** Copies resolved bytes into one immutable resolution fact. */
-export const resolved = (bytes: Uint8Array, origin: SourceOrigin.SourceOrigin): ResolvedSource =>
-  Object.freeze({ bytes: Uint8Array.from(bytes), origin })
+export const resolved = (bytes: Uint8Array, origin: SourceOrigin.SourceOrigin): ResolvedSource => ({
+  bytes: Uint8Array.from(bytes),
+  origin,
+})
 
 /** Why a source resolver could not determine the bytes for one canonical module identity. */
 export type SourceResolverErrorReason =

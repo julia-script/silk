@@ -31,10 +31,8 @@ export const parse = (source: string): Result.Result<NativeStub, string> => {
     }
   }
   if (names.length === 0) return Result.fail('stub does not supply arm64-macos')
-  return Result.succeed(
-    Object.freeze({
-      names: Object.freeze(names),
-      imports: Object.freeze(imports.filter((name) => !names.includes(name))),
-    }),
-  )
+  return Result.succeed({
+    names: names,
+    imports: imports.filter((name) => !names.includes(name)),
+  })
 }

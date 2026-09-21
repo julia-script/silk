@@ -64,7 +64,7 @@ export const make = (options: {
   readonly diagnostics: number
   readonly heapBytes?: number
   readonly counters?: Counters
-}): PhaseReport => Object.freeze({ ...options })
+}): PhaseReport => ({ ...options })
 
 /** Measures one synchronous compiler phase without making its deterministic result time-dependent. */
 export const measure = <A>(
@@ -79,7 +79,7 @@ export const measure = <A>(
   const value = run()
   const observedHeap = options.heapBytes?.()
   const counters = options.counters?.(value)
-  return Object.freeze({
+  return {
     value,
     report: make({
       phase,
@@ -90,7 +90,7 @@ export const measure = <A>(
       ...(observedHeap === undefined ? {} : { heapBytes: observedHeap }),
       ...(counters === undefined ? {} : { counters }),
     }),
-  })
+  }
 }
 
 /** Measures a synchronous phase and appends its observation to an accumulating report. */
@@ -122,7 +122,7 @@ export const measureEffect = Effect.fnUntraced(function* <A, E, R>(
   const finishedAt = yield* Clock.currentTimeNanos
   const observedHeap = options.heapBytes?.()
   const counters = options.counters?.(value)
-  return Object.freeze({
+  return {
     value,
     report: make({
       phase,
@@ -133,7 +133,7 @@ export const measureEffect = Effect.fnUntraced(function* <A, E, R>(
       ...(observedHeap === undefined ? {} : { heapBytes: observedHeap }),
       ...(counters === undefined ? {} : { counters }),
     }),
-  })
+  }
 })
 
 /** Measures one Effect phase and appends its observation without duplicating timing policy. */

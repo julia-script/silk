@@ -24,8 +24,8 @@ const callableArguments = (
         ? undefined
         : Layout.callableTargetArguments(type.environment)) ??
         type.storage?.realization.targetArguments ??
-        Object.freeze([]))
-    : Object.freeze([])
+        [])
+    : []
 }
 
 /** Emits one closed local-shared access transition without exposing its state word. */
@@ -89,23 +89,20 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
     callableType: SilkType.Callable,
     arguments_: ReadonlyArray<Operation['payload']>,
   ) {
-    yield* NativeCallOperation.emit(
-      context,
-      Object.freeze({
-        _tag: 'ApplyCallable' as const,
-        destination: operation.destination,
-        callable,
-        typeArguments: callableArguments(context, callable),
-        captures: Object.freeze([]),
-        arguments: Object.freeze(arguments_),
-        callableType,
-        access: 'Take' as const,
-        evaluation: 'CalleeThenArguments' as const,
-        realization: 'Environment' as const,
-        type: operation.type,
-        provenance: operation.provenance,
-      }),
-    )
+    yield* NativeCallOperation.emit(context, {
+      _tag: 'ApplyCallable' as const,
+      destination: operation.destination,
+      callable,
+      typeArguments: callableArguments(context, callable),
+      captures: [],
+      arguments: arguments_,
+      callableType,
+      access: 'Take' as const,
+      evaluation: 'CalleeThenArguments' as const,
+      realization: 'Environment' as const,
+      type: operation.type,
+      provenance: operation.provenance,
+    })
     const realizedCallable = context.entry.fn.localTypes.at(callable.ordinal)
     const diverges =
       realizedCallable?._tag === 'CallableValue' && SilkType.isNever(realizedCallable.type.result)
@@ -121,24 +118,16 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
     yield* Constant.integerUnsigned(builder, usizeType, 1n),
     accessPointer,
   )
-  yield* NativeStorage.writeLocal(
-    nativeStorage,
-    operation.payload.ordinal,
-    Object.freeze([
-      yield* NativeLanePointer.lanePointer(
-        lanePointers,
-        body,
-        base,
-        operation.block.valueOffset,
-        `shared${operation.destination.ordinal}_payload`,
-      ),
-    ]),
-  )
-  const useDiverges = yield* apply(
-    operation.use,
-    operation.useType,
-    Object.freeze([operation.payload]),
-  )
+  yield* NativeStorage.writeLocal(nativeStorage, operation.payload.ordinal, [
+    yield* NativeLanePointer.lanePointer(
+      lanePointers,
+      body,
+      base,
+      operation.block.valueOffset,
+      `shared${operation.destination.ordinal}_payload`,
+    ),
+  ])
+  const useDiverges = yield* apply(operation.use, operation.useType, [operation.payload])
   if (useDiverges) {
     yield* FunctionBody.unreachable(body)
   } else {
@@ -159,11 +148,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
   yield* LlvmBlock.setInsertionPoint(body, conflictBlock)
   nativeStorage.locals.clear()
   for (const [ordinal, values] of initialLocals) nativeStorage.locals.set(ordinal, values)
-  const conflictDiverges = yield* apply(
-    operation.onConflict,
-    operation.conflictType,
-    Object.freeze([]),
-  )
+  const conflictDiverges = yield* apply(operation.onConflict, operation.conflictType, [])
   if (conflictDiverges) {
     yield* FunctionBody.unreachable(body)
   } else {

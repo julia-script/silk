@@ -257,7 +257,7 @@ export const emit = Effect.fnUntraced(function* (
 ): Effect.fn.Return<void, LlvmError.LlvmError> {
   const { builder, body, i32 } = context
   const readLocal = (local: Mir.LocalId) => read(context, local)
-  const block = Object.freeze({ id: blockId })
+  const block = { id: blockId }
   switch (terminator._tag) {
     case 'PropagateEffectFailure': {
       yield* NativeTermination.storePropagated(
@@ -318,7 +318,7 @@ export const emit = Effect.fnUntraced(function* (
       ]
       yield* NativeReturn.complete(
         context.suspension,
-        Object.freeze(returned.slice(0, terminator.propagationLaneCount)),
+        returned.slice(0, terminator.propagationLaneCount),
         'propagated_selective_failure',
         terminator.outcome,
       )

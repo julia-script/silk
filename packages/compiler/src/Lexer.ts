@@ -57,7 +57,7 @@ const isSupportedTokenStart = (bytes: ReadonlyArray<number>, index: number): boo
   )
 }
 
-const keywordSpellings: ReadonlyArray<readonly [string, Token.TokenKind]> = Object.freeze([
+const keywordSpellings: ReadonlyArray<readonly [string, Token.TokenKind]> = [
   ['as', 'AsKeyword'],
   ['static', 'StaticKeyword'],
   ['compileError', 'CompileErrorKeyword'],
@@ -96,7 +96,7 @@ const keywordSpellings: ReadonlyArray<readonly [string, Token.TokenKind]> = Obje
   ['role', 'RoleKeyword'],
   ['true', 'TrueKeyword'],
   ['false', 'FalseKeyword'],
-])
+]
 
 const matchesSpelling = (
   bytes: ReadonlyArray<number>,
@@ -216,7 +216,7 @@ const scanDigitRun = (
     afterSeparator = true
     at += 1
   }
-  return Object.freeze({ end: at, digits, separated: separated && !afterSeparator })
+  return { end: at, digits, separated: separated && !afterSeparator }
 }
 
 const spanAt = (source: SourceFile.SourceFile, start: number, end: number): SourceSpan.SourceSpan =>
@@ -429,9 +429,9 @@ export const lex = (source: SourceFile.SourceFile): LexicalResult => {
   }
 
   pushToken('EndOfFile', bytes.length, bytes.length)
-  return Object.freeze({
+  return {
     source,
-    tokens: Object.freeze(tokens),
-    diagnostics: Object.freeze(diagnostics),
-  })
+    tokens: tokens,
+    diagnostics: diagnostics,
+  }
 }

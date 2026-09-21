@@ -20,7 +20,7 @@ import type * as Value from './Value.js'
  * @category intrinsics
  * @since 0.0.0
  */
-export const inventory = Object.freeze([
+export const inventory = [
   'va_start',
   'va_end',
   'va_copy',
@@ -179,7 +179,7 @@ export const inventory = Object.freeze([
   'nvvm.read.ptx.sreg.ctaid.z',
   'wasm.memory.size',
   'wasm.memory.grow',
-] as const)
+] as const
 
 /**
  * A compile-time-safe intrinsic identifier drawn from {@link inventory}.
@@ -251,17 +251,13 @@ const catalogOverloads = (id: Id): CatalogEntry['overloads'] => {
   return 'caller'
 }
 
-export const catalog: ReadonlyArray<CatalogEntry> = Object.freeze(
-  inventory.map((id) =>
-    Object.freeze({
-      id,
-      llvmName: `llvm.${id}`,
-      signature: builtInIds.has(id) ? 'built-in' : 'explicit',
-      overloads: catalogOverloads(id),
-      attributes: builtInAttributeIds.has(id) ? 'built-in' : 'explicit',
-    }),
-  ),
-)
+export const catalog: ReadonlyArray<CatalogEntry> = inventory.map((id) => ({
+  id,
+  llvmName: `llvm.${id}`,
+  signature: builtInIds.has(id) ? 'built-in' : 'explicit',
+  overloads: catalogOverloads(id),
+  attributes: builtInAttributeIds.has(id) ? 'built-in' : 'explicit',
+}))
 
 /**
  * Caller-supplied signature for an intrinsic without a built-in recipe.
@@ -369,7 +365,7 @@ const memorySetSignature = Effect.fnUntraced(function* (
   }
 })
 
-const overloadedRecipes: Readonly<Partial<Record<Id, OverloadedRecipe>>> = Object.freeze({
+const overloadedRecipes: Readonly<Partial<Record<Id, OverloadedRecipe>>> = {
   va_start: Effect.fnUntraced(function* (builder, overloads) {
     const parameter = overloads[0]
     if (parameter === undefined) {
@@ -408,9 +404,9 @@ const overloadedRecipes: Readonly<Partial<Record<Id, OverloadedRecipe>>> = Objec
   memmove: memoryCopySignature,
   memset: memorySetSignature,
   'memset.inline': memorySetSignature,
-})
+}
 
-const simpleRecipes: Readonly<Partial<Record<Id, SimpleRecipe>>> = Object.freeze({
+const simpleRecipes: Readonly<Partial<Record<Id, SimpleRecipe>>> = {
   assume: Effect.fnUntraced(function* (builder: Builder.Builder) {
     return {
       returnType: yield* Type.voidType(builder),
@@ -429,7 +425,7 @@ const simpleRecipes: Readonly<Partial<Record<Id, SimpleRecipe>>> = Object.freeze
   sideeffect: Effect.fnUntraced(function* (builder: Builder.Builder) {
     return { returnType: yield* Type.voidType(builder), parameters: [] }
   }),
-})
+}
 
 /** @internal */
 const mangleDescription = (

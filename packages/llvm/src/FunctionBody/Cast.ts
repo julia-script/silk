@@ -169,8 +169,11 @@ export const cast = Effect.fnUntraced(function* (
           }),
         )
       }
-      return (yield* FunctionBodyState.appendResult(draft, destination, name, (result, finalName) =>
-        Object.freeze({
+      return (yield* FunctionBodyState.appendResult(
+        draft,
+        destination,
+        name,
+        (result, finalName) => ({
           _tag: 'Cast',
           kind,
           operand: source.operand,

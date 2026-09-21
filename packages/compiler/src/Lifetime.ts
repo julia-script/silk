@@ -46,32 +46,33 @@ export interface Intersection {
 
 export type Lifetime = Atom | Intersection
 
-export const staticLifetime: Static = Object.freeze({ _tag: 'StaticLifetime' })
+export const staticLifetime: Static = { _tag: 'StaticLifetime' }
 
 export const bound = (
   owner: Owner,
   ordinal: number,
   name: string,
   binder: ReadonlyArray<number> = [],
-): Bound =>
-  Object.freeze({
-    _tag: 'BoundLifetime',
-    owner: Object.freeze({ ...owner }),
-    binder: Object.freeze([...binder]),
-    ordinal,
-    name: name.startsWith("'") ? name.slice(1) : name,
-  })
+): Bound => ({
+  _tag: 'BoundLifetime',
+  owner: { ...owner },
+  binder: [...binder],
+  ordinal,
+  name: name.startsWith("'") ? name.slice(1) : name,
+})
 
-export const local = (owner: Owner, context: string, ordinal: number): Local =>
-  Object.freeze({
-    _tag: 'LocalLifetime',
-    owner: Object.freeze({ ...owner }),
-    context,
-    ordinal,
-  })
+export const local = (owner: Owner, context: string, ordinal: number): Local => ({
+  _tag: 'LocalLifetime',
+  owner: { ...owner },
+  context,
+  ordinal,
+})
 
-export const placeholder = (parameter: Bound, universe: string): Placeholder =>
-  Object.freeze({ _tag: 'PlaceholderLifetime', parameter, universe })
+export const placeholder = (parameter: Bound, universe: string): Placeholder => ({
+  _tag: 'PlaceholderLifetime',
+  parameter,
+  universe,
+})
 
 /** Recognizes a region in an already typed discriminated semantic-argument union. */
 export const isLifetime = (self: string | { readonly _tag: string }): self is Lifetime =>
@@ -104,7 +105,7 @@ export const intersection = (members: ReadonlyArray<Lifetime>): Lifetime => {
   if (ordered.length === 0) return staticLifetime
   const sole = ordered.at(0)
   if (ordered.length === 1 && sole !== undefined) return sole
-  return Object.freeze({ _tag: 'IntersectionLifetime', members: Object.freeze(ordered) })
+  return { _tag: 'IntersectionLifetime', members: ordered }
 }
 
 const ownerKey = (self: Owner): string => Canonical.record('Declaration', [self.module, self.name])
@@ -187,10 +188,10 @@ const assumptionEntries = new WeakMap<Assumptions, ReadonlyArray<readonly [strin
 const fromAssumptionEntries = (
   entries: ReadonlyArray<readonly [string, Outlives]>,
 ): Assumptions => {
-  const result = Object.freeze({
-    bounds: Object.freeze(entries.map(([, entry]) => entry)),
+  const result = {
+    bounds: entries.map(([, entry]) => entry),
     key: Canonical.array(entries.map(([identity]) => identity)),
-  })
+  }
   canonicalBounds.set(result.bounds, result)
   assumptionEntries.set(result, entries)
   return result
@@ -203,7 +204,7 @@ export const assumptions = (bounds: ReadonlyArray<Outlives>): Assumptions => {
   if (bounds.length === 0) return emptyAssumptions
   const cached = canonicalBounds.get(bounds)
   if (cached !== undefined) return cached
-  const entries = new Map(bounds.map((entry) => [outlivesKey(entry), Object.freeze({ ...entry })]))
+  const entries = new Map(bounds.map((entry) => [outlivesKey(entry), { ...entry }]))
   const ordered = [...entries].sort(([left], [right]) => {
     if (left < right) return -1
     if (left > right) return 1
@@ -398,7 +399,7 @@ export type Solution =
  */
 export const solve = (input: Input): Solution => {
   if (!Number.isSafeInteger(input.pointCount) || input.pointCount < 0)
-    return Object.freeze({ _tag: 'InvalidDomain', dimension: 'PointCount' })
+    return { _tag: 'InvalidDomain', dimension: 'PointCount' }
   const regions = new Map<string, Region>()
   const required = new Map<string, Set<number>>()
   const edges = new Map<
@@ -409,18 +410,18 @@ export const solve = (input: Input): Solution => {
   for (const region of input.regions) {
     const identity = key(region.lifetime)
     if (regions.has(identity))
-      return Object.freeze({
+      return {
         _tag: 'InvalidDomain',
         dimension: 'DuplicateRegion',
         lifetime: region.lifetime,
-      })
+      }
     for (const point of [...region.available, ...region.required]) {
       if (!Number.isSafeInteger(point) || point < 0 || point >= input.pointCount)
-        return Object.freeze({
+        return {
           _tag: 'InvalidDomain',
           dimension: 'Point',
           lifetime: region.lifetime,
-        })
+        }
     }
     regions.set(identity, region)
     required.set(identity, new Set(region.required))
@@ -443,20 +444,20 @@ export const solve = (input: Input): Solution => {
     if (!regions.has(longer)) absent = constraint.longer
     else if (!regions.has(shorter)) absent = constraint.shorter
     if (absent !== undefined)
-      return Object.freeze({
+      return {
         _tag: 'InvalidDomain',
         dimension: 'MissingRegion',
         lifetime: absent,
-      })
+      }
     const points = constraint.points
     if (points !== undefined)
       for (const point of points)
         if (!Number.isSafeInteger(point) || point < 0 || point >= input.pointCount)
-          return Object.freeze({
+          return {
             _tag: 'InvalidDomain',
             dimension: 'Point',
             lifetime: constraint.longer,
-          })
+          }
     const parents = edges.get(shorter) ?? new Map()
     parents.set(
       `${longer}:${points === undefined ? '*' : [...points].sort((a, b) => a - b).join(',')}`,
@@ -483,20 +484,19 @@ export const solve = (input: Input): Solution => {
   for (const [identity, region] of regions) {
     if (region.lifetime._tag === 'StaticLifetime') continue
     for (const point of [...(required.get(identity) ?? [])].sort((left, right) => left - right)) {
-      if (!region.available.has(point))
-        violations.push(Object.freeze({ lifetime: region.lifetime, point }))
+      if (!region.available.has(point)) violations.push({ lifetime: region.lifetime, point })
     }
   }
-  return Object.freeze({
+  return {
     _tag: 'Solved',
     required,
-    violations: Object.freeze(violations),
-    work: Object.freeze({
+    violations: violations,
+    work: {
       regions: regions.size,
       constraints: [...edges.values()].reduce((count, values) => count + values.size, 0),
       requiredPoints,
       propagatedPoints: pending.length - requiredPoints,
       edgeVisits,
-    }),
-  })
+    },
+  }
 }

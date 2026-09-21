@@ -54,7 +54,7 @@ export const lowerBuiltinExpression = (
       _tag: 'NativeAssembly',
       assembly,
       destination,
-      arguments: Object.freeze(arguments_),
+      arguments: arguments_,
       type,
       provenance: authored(expression.span),
     })
@@ -78,38 +78,30 @@ export const lowerBuiltinExpression = (
       return undefined
     const destination = fn.alloc(type)
     const runner = Tir.effectRunnerId(fn.owner.key.declaration, site)
-    fn.emit(
-      Object.freeze({
-        _tag: 'MakeEffect',
-        destination,
-        runner,
-        runnerTypeArguments: fn.owner.key.typeArguments,
-        captures: Object.freeze(
-          captures.map((source, ordinal) =>
-            Object.freeze({
-              source,
-              access: type.environment.fields.at(ordinal)?.access ?? ('Take' as const),
-            }),
-          ),
-        ),
-        type,
-        provenance: generated(expression.span),
-      }),
-    )
+    fn.emit({
+      _tag: 'MakeEffect',
+      destination,
+      runner,
+      runnerTypeArguments: fn.owner.key.typeArguments,
+      captures: captures.map((source, ordinal) => ({
+        source,
+        access: type.environment.fields.at(ordinal)?.access ?? ('Take' as const),
+      })),
+      type,
+      provenance: generated(expression.span),
+    })
     const key = baseRunnerKey(fn.owner.key, site, type.type)
     if (!fn.generatedRunners.some((candidate) => candidate.specializationKey === key))
-      fn.generatedRunners.push(
-        Object.freeze({
-          _tag: 'BuiltinEffectRunner',
-          id: runner,
-          owner: fn.owner,
-          expression,
-          type,
-          specializationKey: key,
-          providedRequirements: Object.freeze([]),
-        }),
-      )
-    return Object.freeze({ result: destination })
+      fn.generatedRunners.push({
+        _tag: 'BuiltinEffectRunner',
+        id: runner,
+        owner: fn.owner,
+        expression,
+        type,
+        specializationKey: key,
+        providedRequirements: [],
+      })
+    return { result: destination }
   }
   const argumentLocals = lowerBuiltinArguments(fn, expression, intrinsic)
   if (argumentLocals === 'Transferred') return argumentLocals
@@ -147,18 +139,16 @@ const lowerBuiltinOperation = (
     for (const borrow of endings.values()) {
       const loan = fn.loanLocals.get(borrowKey(borrow))
       if (loan === undefined) continue
-      fn.emit(
-        Object.freeze({
-          _tag: 'EndLoan' as const,
-          borrow,
-          slice: loan,
-          provenance: generated(expression.span),
-        }),
-      )
+      fn.emit({
+        _tag: 'EndLoan' as const,
+        borrow,
+        slice: loan,
+        provenance: generated(expression.span),
+      })
       fn.loanLocals.delete(borrowKey(borrow))
     }
     if (slot !== undefined && inherited.length > 0) fn.slotLoans.delete(slot.ordinal)
-    return Object.freeze({ result })
+    return { result }
   }
   const witnessCall = lowerInterfaceWitnessCall(fn, expression, argumentLocals)
   if (witnessCall !== undefined) return finishBuiltin(witnessCall)
@@ -224,33 +214,29 @@ const lowerBuiltinOperation = (
     }> = []
     for (const field of layoutEntry.representation.fields) {
       const value = fn.alloc(usize)
-      fn.emit(
-        Object.freeze({
-          _tag: 'Literal' as const,
-          destination: value,
-          type: usize,
-          value: BigInt(
-            field.name === 'bytes'
-              ? (executionSpecialization?.size ?? sharedBlock?.size ?? elementLayout.size)
-              : (executionSpecialization?.alignment ??
-                  sharedBlock?.alignment ??
-                  elementLayout.alignment),
-          ),
-          provenance: generated(expression.span),
-        }),
-      )
-      fields.push(Object.freeze({ field: field.id, value }))
+      fn.emit({
+        _tag: 'Literal' as const,
+        destination: value,
+        type: usize,
+        value: BigInt(
+          field.name === 'bytes'
+            ? (executionSpecialization?.size ?? sharedBlock?.size ?? elementLayout.size)
+            : (executionSpecialization?.alignment ??
+                sharedBlock?.alignment ??
+                elementLayout.alignment),
+        ),
+        provenance: generated(expression.span),
+      })
+      fields.push({ field: field.id, value })
     }
     const destination = fn.alloc(type)
-    fn.emit(
-      Object.freeze({
-        _tag: 'Construct' as const,
-        destination,
-        type,
-        fields: Object.freeze(fields),
-        provenance: generated(expression.span),
-      }),
-    )
+    fn.emit({
+      _tag: 'Construct' as const,
+      destination,
+      type,
+      fields: fields,
+      provenance: generated(expression.span),
+    })
     return finishBuiltin(destination)
   }
   if (
@@ -290,19 +276,17 @@ const lowerBuiltinOperation = (
     )
       return undefined
     const destination = fn.alloc(type)
-    fn.emit(
-      Object.freeze({
-        _tag: 'RawBufferFrom' as const,
-        destination,
-        allocation,
-        count,
-        element,
-        stride: Math.ceil(elementLayout.size / elementLayout.alignment) * elementLayout.alignment,
-        elementAlignment: elementLayout.alignment,
-        type,
-        provenance: authored(expression.span),
-      }),
-    )
+    fn.emit({
+      _tag: 'RawBufferFrom' as const,
+      destination,
+      allocation,
+      count,
+      element,
+      stride: Math.ceil(elementLayout.size / elementLayout.alignment) * elementLayout.alignment,
+      elementAlignment: elementLayout.alignment,
+      type,
+      provenance: authored(expression.span),
+    })
     return finishBuiltin(destination)
   }
   if (expression.operation === 'SharedFromAllocation') {
@@ -351,23 +335,21 @@ const lowerBuiltinOperation = (
     )
       return undefined
     const destination = fn.alloc(type)
-    fn.emit(
-      Object.freeze({
-        _tag: 'SharedFromAllocation' as const,
-        destination,
-        allocation,
-        value,
-        element,
-        block,
-        allocationBlock,
-        allocationFact,
-        allocationProvenance: allocationProvenance.span,
-        allocationAccess: 'Take',
-        valueAccess: 'Take',
-        type,
-        provenance: authored(expression.span),
-      }),
-    )
+    fn.emit({
+      _tag: 'SharedFromAllocation' as const,
+      destination,
+      allocation,
+      value,
+      element,
+      block,
+      allocationBlock,
+      allocationFact,
+      allocationProvenance: allocationProvenance.span,
+      allocationAccess: 'Take',
+      valueAccess: 'Take',
+      type,
+      provenance: authored(expression.span),
+    })
     return finishBuiltin(destination)
   }
   if (expression.operation === 'ExecutionFromAllocation') {
@@ -454,28 +436,26 @@ const lowerBuiltinOperation = (
       plan.cleanup?.callback ?? ConcreteCleanup.forType(fn, plan.specialization.callback),
       callbackLocalType,
     )
-    fn.emit(
-      Object.freeze({
-        _tag: 'ExecutionFromAllocation' as const,
-        destination,
-        allocation,
-        body,
-        endpoint,
-        callback,
-        plan,
-        bodyCleanup,
-        endpointCleanup,
-        callbackCleanup,
-        allocationFact,
-        allocationProvenance: allocationProvenance.span,
-        allocationAccess: 'Take' as const,
-        bodyAccess: 'Take' as const,
-        endpointAccess: 'Take' as const,
-        callbackAccess: 'Take' as const,
-        type,
-        provenance: authored(expression.span),
-      }),
-    )
+    fn.emit({
+      _tag: 'ExecutionFromAllocation' as const,
+      destination,
+      allocation,
+      body,
+      endpoint,
+      callback,
+      plan,
+      bodyCleanup,
+      endpointCleanup,
+      callbackCleanup,
+      allocationFact,
+      allocationProvenance: allocationProvenance.span,
+      allocationAccess: 'Take' as const,
+      bodyAccess: 'Take' as const,
+      endpointAccess: 'Take' as const,
+      callbackAccess: 'Take' as const,
+      type,
+      provenance: authored(expression.span),
+    })
     return finishBuiltin(destination)
   }
   if (expression.operation === 'SharedClone') {
@@ -499,17 +479,15 @@ const lowerBuiltinOperation = (
     )
       return undefined
     const destination = fn.alloc(type)
-    fn.emit(
-      Object.freeze({
-        _tag: 'SharedClone' as const,
-        destination,
-        self,
-        element,
-        block,
-        type,
-        provenance: authored(expression.span),
-      }),
-    )
+    fn.emit({
+      _tag: 'SharedClone' as const,
+      destination,
+      self,
+      element,
+      block,
+      type,
+      provenance: authored(expression.span),
+    })
     return finishBuiltin(destination)
   }
   if (expression.operation === 'SharedWithMut') {
@@ -548,56 +526,47 @@ const lowerBuiltinOperation = (
     const destination = fn.alloc(type)
     const loan = fn.freshSyntheticBorrow(Tir.nodeReference(fn.owner.view.artifact, expression))
     const useContract = Type.callable(
-      Object.freeze([payloadContract]),
+      [payloadContract],
       Mir.semanticType(type),
       useType.type,
       'Take',
     )
-    const conflictContract = Type.callable(
-      Object.freeze([]),
-      Mir.semanticType(type),
-      conflictType.type,
-      'Take',
-    )
-    fn.emit(
-      Object.freeze({
-        _tag: 'SharedWithMut' as const,
-        destination,
-        payload,
-        self,
-        use,
-        onConflict,
-        element,
-        block,
-        useType: useContract,
-        conflictType: conflictContract,
-        useCleanup: cleanupForLocal(fn, ConcreteCleanup.forType(fn, useType.type), useType),
-        conflictCleanup: cleanupForLocal(
-          fn,
-          ConcreteCleanup.forType(fn, conflictType.type),
-          conflictType,
-        ),
-        loan,
-        retainedLoans: Object.freeze([]),
-        type,
-        provenance: authored(expression.span),
-      }),
-    )
+    const conflictContract = Type.callable([], Mir.semanticType(type), conflictType.type, 'Take')
+    fn.emit({
+      _tag: 'SharedWithMut' as const,
+      destination,
+      payload,
+      self,
+      use,
+      onConflict,
+      element,
+      block,
+      useType: useContract,
+      conflictType: conflictContract,
+      useCleanup: cleanupForLocal(fn, ConcreteCleanup.forType(fn, useType.type), useType),
+      conflictCleanup: cleanupForLocal(
+        fn,
+        ConcreteCleanup.forType(fn, conflictType.type),
+        conflictType,
+      ),
+      loan,
+      retainedLoans: [],
+      type,
+      provenance: authored(expression.span),
+    })
     return finishBuiltin(destination)
   }
   if (expression.operation === 'RawBufferCount') {
     const [buffer] = argumentLocals
     if (buffer === undefined) return undefined
     const destination = fn.alloc(usize)
-    fn.emit(
-      Object.freeze({
-        _tag: 'RawBufferCount' as const,
-        destination,
-        buffer,
-        type: usize,
-        provenance: authored(expression.span),
-      }),
-    )
+    fn.emit({
+      _tag: 'RawBufferCount' as const,
+      destination,
+      buffer,
+      type: usize,
+      provenance: authored(expression.span),
+    })
     return finishBuiltin(destination)
   }
   if (expression.operation === 'RawBufferRead') {
@@ -605,17 +574,15 @@ const lowerBuiltinOperation = (
     const type = fn.type(expression.type)
     if (buffer === undefined || index === undefined || type === undefined) return undefined
     const destination = fn.alloc(type)
-    fn.emit(
-      Object.freeze({
-        _tag: 'RawBufferRead' as const,
-        destination,
-        buffer,
-        index,
-        element: fn.semantic(expression.type),
-        type,
-        provenance: authored(expression.span),
-      }),
-    )
+    fn.emit({
+      _tag: 'RawBufferRead' as const,
+      destination,
+      buffer,
+      index,
+      element: fn.semantic(expression.type),
+      type,
+      provenance: authored(expression.span),
+    })
     return finishBuiltin(destination)
   }
   if (expression.operation === 'SliceView') {
@@ -636,20 +603,18 @@ const lowerBuiltinOperation = (
       return undefined
     }
     const destination = fn.alloc(type)
-    fn.emit(
-      Object.freeze({
-        _tag: 'SliceView' as const,
-        destination,
-        slice,
-        offset,
-        length,
-        element: semanticElement,
-        stride: Math.ceil(elementLayout.size / elementLayout.alignment) * elementLayout.alignment,
-        heldLoans: expression.heldLoans,
-        type,
-        provenance: authored(expression.span),
-      }),
-    )
+    fn.emit({
+      _tag: 'SliceView' as const,
+      destination,
+      slice,
+      offset,
+      length,
+      element: semanticElement,
+      stride: Math.ceil(elementLayout.size / elementLayout.alignment) * elementLayout.alignment,
+      heldLoans: expression.heldLoans,
+      type,
+      provenance: authored(expression.span),
+    })
     return finishBuiltin(destination)
   }
   if (expression.operation === 'RawBufferView' || expression.operation === 'RawBufferViewMut') {
@@ -670,20 +635,18 @@ const lowerBuiltinOperation = (
       return undefined
     }
     const destination = fn.alloc(type)
-    fn.emit(
-      Object.freeze({
-        _tag: 'RawBufferView' as const,
-        destination,
-        buffer,
-        offset,
-        length,
-        element: semanticElement,
-        stride: Math.ceil(elementLayout.size / elementLayout.alignment) * elementLayout.alignment,
-        access: expression.operation === 'RawBufferView' ? 'Shared' : 'Exclusive',
-        type,
-        provenance: authored(expression.span),
-      }),
-    )
+    fn.emit({
+      _tag: 'RawBufferView' as const,
+      destination,
+      buffer,
+      offset,
+      length,
+      element: semanticElement,
+      stride: Math.ceil(elementLayout.size / elementLayout.alignment) * elementLayout.alignment,
+      access: expression.operation === 'RawBufferView' ? 'Shared' : 'Exclusive',
+      type,
+      provenance: authored(expression.span),
+    })
     return finishBuiltin(destination)
   }
   if (expression.operation === 'RawBufferSlot') {
@@ -701,17 +664,15 @@ const lowerBuiltinOperation = (
     )
       return undefined
     const destination = fn.alloc(type)
-    fn.emit(
-      Object.freeze({
-        _tag: 'RawBufferSlot' as const,
-        destination,
-        buffer,
-        index,
-        element: fn.semantic(element),
-        type,
-        provenance: authored(expression.span),
-      }),
-    )
+    fn.emit({
+      _tag: 'RawBufferSlot' as const,
+      destination,
+      buffer,
+      index,
+      element: fn.semantic(element),
+      type,
+      provenance: authored(expression.span),
+    })
     fn.slotLoans.set(destination.ordinal, expression.heldLoans)
     return finishBuiltin(destination)
   }
@@ -737,21 +698,19 @@ const lowerBuiltinOperation = (
     )
       return undefined
     const destination = fn.alloc(type)
-    fn.emit(
-      Object.freeze({
-        _tag: 'RawBufferCopy' as const,
-        destination,
-        buffer,
-        offset,
-        source,
-        length,
-        element: semanticElement,
-        stride: Math.ceil(elementLayout.size / elementLayout.alignment) * elementLayout.alignment,
-        retainsSource: Mir.isCopy(fn.layout, semanticElement),
-        type,
-        provenance: authored(expression.span),
-      }),
-    )
+    fn.emit({
+      _tag: 'RawBufferCopy' as const,
+      destination,
+      buffer,
+      offset,
+      source,
+      length,
+      element: semanticElement,
+      stride: Math.ceil(elementLayout.size / elementLayout.alignment) * elementLayout.alignment,
+      retainsSource: Mir.isCopy(fn.layout, semanticElement),
+      type,
+      provenance: authored(expression.span),
+    })
     return finishBuiltin(destination)
   }
   if (expression.operation === 'RawBufferFill') {
@@ -767,60 +726,52 @@ const lowerBuiltinOperation = (
     )
       return undefined
     const destination = fn.alloc(type)
-    fn.emit(
-      Object.freeze({
-        _tag: 'RawBufferFill' as const,
-        destination,
-        buffer,
-        offset,
-        length,
-        value,
-        type,
-        provenance: authored(expression.span),
-      }),
-    )
+    fn.emit({
+      _tag: 'RawBufferFill' as const,
+      destination,
+      buffer,
+      offset,
+      length,
+      value,
+      type,
+      provenance: authored(expression.span),
+    })
     return finishBuiltin(destination)
   }
   if (expression.operation === 'PointerNull') {
     const type = fn.type(expression.type)
     if (type?._tag !== 'Pointer') return undefined
     const destination = fn.alloc(type)
-    fn.emit(
-      Object.freeze({
-        _tag: 'PointerNull' as const,
-        destination,
-        type,
-        provenance: authored(expression.span),
-      }),
-    )
+    fn.emit({
+      _tag: 'PointerNull' as const,
+      destination,
+      type,
+      provenance: authored(expression.span),
+    })
     return finishBuiltin(destination)
   }
   if (expression.operation === 'PointerIsNull') {
     const [pointer] = argumentLocals
     if (pointer === undefined) return undefined
-    const destination = fn.alloc(Object.freeze({ _tag: 'bool' as const }))
-    fn.emit(
-      Object.freeze({
-        _tag: 'PointerIsNull' as const,
-        destination,
-        pointer,
-        provenance: authored(expression.span),
-      }),
-    )
+    const destination = fn.alloc({ _tag: 'bool' as const })
+    fn.emit({
+      _tag: 'PointerIsNull' as const,
+      destination,
+      pointer,
+      provenance: authored(expression.span),
+    })
     return finishBuiltin(destination)
   }
   if (expression.operation === 'PointerAddress') {
     const [pointer] = argumentLocals
     if (pointer === undefined) return undefined
-    const destination = fn.alloc(Object.freeze({ _tag: 'usize' as const }))
-    fn.emit(
-      Object.freeze({
-        _tag: 'PointerAddress' as const,
-        destination,
-        pointer,
-        provenance: authored(expression.span),
-      }),
-    )
+    const destination = fn.alloc({ _tag: 'usize' as const })
+    fn.emit({
+      _tag: 'PointerAddress' as const,
+      destination,
+      pointer,
+      provenance: authored(expression.span),
+    })
     return finishBuiltin(destination)
   }
   if (
@@ -843,15 +794,13 @@ const lowerBuiltinOperation = (
       expression.operation === 'PointerBytes'
         ? expression.operation
         : 'PointerFromStorage'
-    fn.emit(
-      Object.freeze({
-        _tag: tag,
-        destination,
-        source,
-        type,
-        provenance: authored(expression.span),
-      }),
-    )
+    fn.emit({
+      _tag: tag,
+      destination,
+      source,
+      type,
+      provenance: authored(expression.span),
+    })
     return finishBuiltin(destination)
   }
   if (expression.operation === 'PointerAt' || expression.operation === 'PointerAtMut') {
@@ -859,16 +808,14 @@ const lowerBuiltinOperation = (
     const type = fn.type(expression.type)
     if (pointer === undefined || count === undefined || type?._tag !== 'Pointer') return undefined
     const destination = fn.alloc(type)
-    fn.emit(
-      Object.freeze({
-        _tag: 'PointerAt' as const,
-        destination,
-        pointer,
-        count,
-        type,
-        provenance: authored(expression.span),
-      }),
-    )
+    fn.emit({
+      _tag: 'PointerAt' as const,
+      destination,
+      pointer,
+      count,
+      type,
+      provenance: authored(expression.span),
+    })
     return finishBuiltin(destination)
   }
   if (expression.operation === 'PointerRead' || expression.operation === 'PointerReadUnaligned') {
@@ -876,15 +823,13 @@ const lowerBuiltinOperation = (
     const type = fn.type(expression.type)
     if (pointer === undefined || type === undefined) return undefined
     const destination = fn.alloc(type)
-    fn.emit(
-      Object.freeze({
-        _tag: 'PointerRead' as const,
-        destination,
-        pointer,
-        type,
-        provenance: authored(expression.span),
-      }),
-    )
+    fn.emit({
+      _tag: 'PointerRead' as const,
+      destination,
+      pointer,
+      type,
+      provenance: authored(expression.span),
+    })
     return finishBuiltin(destination)
   }
   if (expression.operation === 'PointerWrite' || expression.operation === 'PointerWriteUnaligned') {
@@ -898,15 +843,13 @@ const lowerBuiltinOperation = (
     )
       return undefined
     const destination = fn.alloc(type)
-    fn.emit(
-      Object.freeze({
-        _tag: 'PointerWrite' as const,
-        destination,
-        pointer,
-        value,
-        provenance: authored(expression.span),
-      }),
-    )
+    fn.emit({
+      _tag: 'PointerWrite' as const,
+      destination,
+      pointer,
+      value,
+      provenance: authored(expression.span),
+    })
     return finishBuiltin(destination)
   }
   if (expression.operation === 'SlotWrite') {
@@ -925,17 +868,15 @@ const lowerBuiltinOperation = (
     )
       return undefined
     const destination = fn.alloc(type)
-    fn.emit(
-      Object.freeze({
-        _tag: 'SlotWrite' as const,
-        destination,
-        slot,
-        value,
-        element: fn.semantic(slotElement),
-        type,
-        provenance: authored(expression.span),
-      }),
-    )
+    fn.emit({
+      _tag: 'SlotWrite' as const,
+      destination,
+      slot,
+      value,
+      element: fn.semantic(slotElement),
+      type,
+      provenance: authored(expression.span),
+    })
     return finishBuiltin(destination)
   }
   if (expression.operation === 'SlotTake') {
@@ -943,16 +884,14 @@ const lowerBuiltinOperation = (
     const type = fn.type(expression.type)
     if (slot === undefined || type === undefined) return undefined
     const destination = fn.alloc(type)
-    fn.emit(
-      Object.freeze({
-        _tag: 'SlotTake' as const,
-        destination,
-        slot,
-        element: fn.semantic(expression.type),
-        type,
-        provenance: authored(expression.span),
-      }),
-    )
+    fn.emit({
+      _tag: 'SlotTake' as const,
+      destination,
+      slot,
+      element: fn.semantic(expression.type),
+      type,
+      provenance: authored(expression.span),
+    })
     return finishBuiltin(destination)
   }
   if (expression.operation === 'SlotCopy') {
@@ -960,16 +899,14 @@ const lowerBuiltinOperation = (
     const type = fn.type(expression.type)
     if (slot === undefined || type === undefined) return undefined
     const destination = fn.alloc(type)
-    fn.emit(
-      Object.freeze({
-        _tag: 'SlotCopy' as const,
-        destination,
-        slot,
-        element: fn.semantic(expression.type),
-        type,
-        provenance: authored(expression.span),
-      }),
-    )
+    fn.emit({
+      _tag: 'SlotCopy' as const,
+      destination,
+      slot,
+      element: fn.semantic(expression.type),
+      type,
+      provenance: authored(expression.span),
+    })
     return finishBuiltin(destination)
   }
   if (expression.operation === 'SlotDrop') {
@@ -987,17 +924,15 @@ const lowerBuiltinOperation = (
     )
       return undefined
     const destination = fn.alloc(type)
-    fn.emit(
-      Object.freeze({
-        _tag: 'SlotDrop' as const,
-        destination,
-        slot,
-        element: fn.semantic(element),
-        cleanup: ConcreteCleanup.forType(fn, fn.semantic(element)),
-        type,
-        provenance: authored(expression.span),
-      }),
-    )
+    fn.emit({
+      _tag: 'SlotDrop' as const,
+      destination,
+      slot,
+      element: fn.semantic(element),
+      cleanup: ConcreteCleanup.forType(fn, fn.semantic(element)),
+      type,
+      provenance: authored(expression.span),
+    })
     return finishBuiltin(destination)
   }
   if (expression.operation === 'StringFromUtf8Unchecked') return undefined
@@ -1008,16 +943,14 @@ const lowerBuiltinOperation = (
     if (string === undefined || stringType?._tag !== 'String' || type?._tag !== 'Slice')
       return undefined
     const destination = fn.alloc(type)
-    fn.emit(
-      Object.freeze({
-        _tag: 'StringUtf8Bytes',
-        destination,
-        string,
-        heldLoans: expression.heldLoans,
-        type,
-        provenance: authored(expression.span),
-      }),
-    )
+    fn.emit({
+      _tag: 'StringUtf8Bytes',
+      destination,
+      string,
+      heldLoans: expression.heldLoans,
+      type,
+      provenance: authored(expression.span),
+    })
     return finishBuiltin(destination)
   }
   if (expression.operation === 'StringByteLength') {
@@ -1025,15 +958,13 @@ const lowerBuiltinOperation = (
     const stringType = string === undefined ? undefined : fn.localTypes.at(string.ordinal)
     if (string === undefined || stringType?._tag !== 'String') return undefined
     const destination = fn.alloc(usize)
-    fn.emit(
-      Object.freeze({
-        _tag: 'StringByteLength',
-        destination,
-        string,
-        type: usize,
-        provenance: authored(expression.span),
-      }),
-    )
+    fn.emit({
+      _tag: 'StringByteLength',
+      destination,
+      string,
+      type: usize,
+      provenance: authored(expression.span),
+    })
     return finishBuiltin(destination)
   }
   if (expression.operation === 'ExecutionWake') {
@@ -1049,16 +980,14 @@ const lowerBuiltinOperation = (
     )
       return undefined
     const destination = fn.alloc(type)
-    fn.emit(
-      Object.freeze({
-        _tag: 'ExecutionWake' as const,
-        destination,
-        wake,
-        wakeAccess: 'Take' as const,
-        type,
-        provenance: authored(expression.span),
-      }),
-    )
+    fn.emit({
+      _tag: 'ExecutionWake' as const,
+      destination,
+      wake,
+      wakeAccess: 'Take' as const,
+      type,
+      provenance: authored(expression.span),
+    })
     return finishBuiltin(destination)
   }
   if (expression.operation === 'ExecutionNotifyInitial') {
@@ -1075,16 +1004,14 @@ const lowerBuiltinOperation = (
     )
       return undefined
     const destination = fn.alloc(type)
-    fn.emit(
-      Object.freeze({
-        _tag: 'ExecutionNotifyInitial' as const,
-        destination,
-        execution,
-        executionAccess: 'Exclusive' as const,
-        type,
-        provenance: authored(expression.span),
-      }),
-    )
+    fn.emit({
+      _tag: 'ExecutionNotifyInitial' as const,
+      destination,
+      execution,
+      executionAccess: 'Exclusive' as const,
+      type,
+      provenance: authored(expression.span),
+    })
     return finishBuiltin(destination)
   }
   if (expression.operation === 'ExecutionDrive' || expression.operation === 'ExecutionPark')
@@ -1094,7 +1021,7 @@ const lowerBuiltinOperation = (
   const conversionTarget = Scalar.conversionTarget(expression.operation)
   if (Scalar.isCheckedOperation(expression.operation)) {
     const arity = expression.operation.startsWith('CheckedConvertTo') ? 1 : 2
-    const operands = Object.freeze(argumentLocals.slice(0, arity))
+    const operands = argumentLocals.slice(0, arity)
     const present = argumentLocals.at(arity)
     const absent = argumentLocals.at(arity + 1)
     const presentType = present === undefined ? undefined : fn.localTypes.at(present.ordinal)
@@ -1122,27 +1049,25 @@ const lowerBuiltinOperation = (
       operands.some((local) => fn.localTypes.at(local.ordinal)?._tag !== sourceType._tag)
     )
       return undefined
-    const valid = fn.alloc(Object.freeze({ _tag: 'bool' as const }))
-    const value = fn.alloc(Object.freeze({ _tag: valueScalar.spelling }))
+    const valid = fn.alloc({ _tag: 'bool' as const })
+    const value = fn.alloc({ _tag: valueScalar.spelling })
     const destination = fn.alloc(targetType)
-    fn.emit(
-      Object.freeze({
-        _tag: 'CheckedScalar' as const,
-        operation: expression.operation,
-        destination,
-        valid,
-        value,
-        operands,
-        present,
-        absent,
-        presentCleanup: ConcreteCleanup.forCallable(fn, presentType),
-        absentCleanup: ConcreteCleanup.forCallable(fn, absentType),
-        sourceType,
-        valueType: Object.freeze({ _tag: valueScalar.spelling }),
-        type: targetType,
-        provenance: authored(expression.span),
-      }),
-    )
+    fn.emit({
+      _tag: 'CheckedScalar' as const,
+      operation: expression.operation,
+      destination,
+      valid,
+      value,
+      operands,
+      present,
+      absent,
+      presentCleanup: ConcreteCleanup.forCallable(fn, presentType),
+      absentCleanup: ConcreteCleanup.forCallable(fn, absentType),
+      sourceType,
+      valueType: { _tag: valueScalar.spelling },
+      type: targetType,
+      provenance: authored(expression.span),
+    })
     return finishBuiltin(destination)
   }
   if (conversionTarget !== undefined) {
@@ -1161,19 +1086,17 @@ const lowerBuiltinOperation = (
     )
       return undefined
     const destination = fn.alloc(targetType)
-    fn.emit(
-      Object.freeze({
-        _tag:
-          sourceScalar.category === 'Integer'
-            ? ('ConvertInteger' as const)
-            : ('ConvertScalar' as const),
-        destination,
-        source,
-        sourceType,
-        type: targetType,
-        provenance: authored(expression.span),
-      }),
-    )
+    fn.emit({
+      _tag:
+        sourceScalar.category === 'Integer'
+          ? ('ConvertInteger' as const)
+          : ('ConvertScalar' as const),
+      destination,
+      source,
+      sourceType,
+      type: targetType,
+      provenance: authored(expression.span),
+    })
     return finishBuiltin(destination)
   }
   const floatConversionTarget = Scalar.floatConversionTarget(expression.operation)
@@ -1193,16 +1116,14 @@ const lowerBuiltinOperation = (
     )
       return undefined
     const destination = fn.alloc(targetType)
-    fn.emit(
-      Object.freeze({
-        _tag: 'ConvertScalar' as const,
-        destination,
-        source,
-        sourceType,
-        type: targetType,
-        provenance: authored(expression.span),
-      }),
-    )
+    fn.emit({
+      _tag: 'ConvertScalar' as const,
+      destination,
+      source,
+      sourceType,
+      type: targetType,
+      provenance: authored(expression.span),
+    })
     return finishBuiltin(destination)
   }
   if (expression.operation === 'ToBits' || expression.operation === 'FromBits') {
@@ -1212,16 +1133,14 @@ const lowerBuiltinOperation = (
     if (source === undefined || sourceType === undefined || targetType === undefined)
       return undefined
     const destination = fn.alloc(targetType)
-    fn.emit(
-      Object.freeze({
-        _tag: 'ReinterpretScalar' as const,
-        destination,
-        source,
-        sourceType: sourceType as Mir.ScalarType,
-        type: targetType as Mir.ScalarType,
-        provenance: authored(expression.span),
-      }),
-    )
+    fn.emit({
+      _tag: 'ReinterpretScalar' as const,
+      destination,
+      source,
+      sourceType: sourceType as Mir.ScalarType,
+      type: targetType as Mir.ScalarType,
+      provenance: authored(expression.span),
+    })
     return finishBuiltin(destination)
   }
   if (expression.operation === 'Sin' || expression.operation === 'Cos') {
@@ -1231,17 +1150,15 @@ const lowerBuiltinOperation = (
     if (source === undefined || sourceType === undefined || targetType === undefined)
       return undefined
     const destination = fn.alloc(targetType)
-    fn.emit(
-      Object.freeze({
-        _tag: 'FloatTranscendental' as const,
-        operation: expression.operation,
-        destination,
-        source,
-        sourceType: sourceType as Mir.ScalarType,
-        type: targetType as Mir.ScalarType,
-        provenance: authored(expression.span),
-      }),
-    )
+    fn.emit({
+      _tag: 'FloatTranscendental' as const,
+      operation: expression.operation,
+      destination,
+      source,
+      sourceType: sourceType as Mir.ScalarType,
+      type: targetType as Mir.ScalarType,
+      provenance: authored(expression.span),
+    })
     return finishBuiltin(destination)
   }
   if (
@@ -1265,17 +1182,15 @@ const lowerBuiltinOperation = (
     if (source === undefined || sourceType === undefined || targetType === undefined)
       return undefined
     const destination = fn.alloc(targetType)
-    fn.emit(
-      Object.freeze({
-        _tag: 'FloatUnary' as const,
-        operation: expression.operation,
-        destination,
-        source,
-        sourceType: sourceType as Mir.ScalarType,
-        type: targetType as Mir.ScalarType,
-        provenance: authored(expression.span),
-      }),
-    )
+    fn.emit({
+      _tag: 'FloatUnary' as const,
+      operation: expression.operation,
+      destination,
+      source,
+      sourceType: sourceType as Mir.ScalarType,
+      type: targetType as Mir.ScalarType,
+      provenance: authored(expression.span),
+    })
     return finishBuiltin(destination)
   }
   if (
@@ -1298,32 +1213,28 @@ const lowerBuiltinOperation = (
       constant = scalar.signedness === 'Signed' ? -1n : Scalar.range(scalar, pointerBits).maximum
     }
     const zero = fn.alloc(operandType)
-    fn.emit(
-      Object.freeze({
-        _tag: 'Literal',
-        destination: zero,
-        type: operandType,
-        value: constant,
-        provenance: Object.freeze({ span: expression.span, generated: true }),
-      }),
-    )
+    fn.emit({
+      _tag: 'Literal',
+      destination: zero,
+      type: operandType,
+      value: constant,
+      provenance: { span: expression.span, generated: true },
+    })
     const destination = fn.alloc(operandType)
     let operator: Mir.BinaryOperator = 'Subtract'
     if (expression.operation === 'Not') operator = 'Equals'
     else if (expression.operation === 'BitNot') operator = 'BitXor'
     else if (expression.operation === 'WrappingNegate') operator = 'WrappingSubtract'
     else if (expression.operation === 'SaturatingNegate') operator = 'SaturatingSubtract'
-    fn.emit(
-      Object.freeze({
-        _tag: 'Binary',
-        operator,
-        destination,
-        left: expression.operation === 'Not' ? subject : zero,
-        right: expression.operation === 'Not' ? zero : subject,
-        type: operandType,
-        provenance: Object.freeze({ span: expression.span, generated: false }),
-      }),
-    )
+    fn.emit({
+      _tag: 'Binary',
+      operator,
+      destination,
+      left: expression.operation === 'Not' ? subject : zero,
+      right: expression.operation === 'Not' ? zero : subject,
+      type: operandType,
+      provenance: { span: expression.span, generated: false },
+    })
     return finishBuiltin(destination)
   }
   if (!Mir.isBinaryOperator(expression.operation)) return undefined
@@ -1332,16 +1243,14 @@ const lowerBuiltinOperation = (
   const type = fn.type(expression.type)
   if (type === undefined) return undefined
   const destination = fn.alloc(type)
-  fn.emit(
-    Object.freeze({
-      _tag: 'Binary',
-      operator: expression.operation,
-      destination,
-      left,
-      right,
-      type,
-      provenance: Object.freeze({ span: expression.span, generated: false }),
-    }),
-  )
+  fn.emit({
+    _tag: 'Binary',
+    operator: expression.operation,
+    destination,
+    left,
+    right,
+    type,
+    provenance: { span: expression.span, generated: false },
+  })
   return finishBuiltin(destination)
 }

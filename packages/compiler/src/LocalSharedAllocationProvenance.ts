@@ -95,7 +95,7 @@ export interface Plan {
   readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
 }
 
-const unreached: UnreachedOrigin = Object.freeze({ _tag: 'UnreachedOrigin' })
+const unreached: UnreachedOrigin = { _tag: 'UnreachedOrigin' }
 
 const sameSpan = (left: SourceSpan.SourceSpan, right: SourceSpan.SourceSpan): boolean =>
   left.sourceId === right.sourceId && left.start === right.start && left.end === right.end
@@ -157,7 +157,7 @@ const mergeOrigin = (left: Origin, right: Origin): Origin => {
   if (left._tag === 'UnreachedOrigin') return right
   if (right._tag === 'UnreachedOrigin' || sameOrigin(left, right)) return left
   const span = originSpan(left) ?? originSpan(right)
-  return span === undefined ? unreached : Object.freeze({ _tag: 'ConflictOrigin', span })
+  return span === undefined ? unreached : { _tag: 'ConflictOrigin', span }
 }
 
 const ownerKey = (instance: Instances.Instance): string => Instances.keyText(instance.key)
@@ -206,7 +206,7 @@ const nestedStatements = (
     }
   }
   visit(statements)
-  return Object.freeze(found)
+  return found
 }
 
 interface ArgumentSource {
@@ -236,57 +236,54 @@ export const plan = (discovery: Instances.Discovery, index: DeclarationIndex.Ind
       .flatMap(Tir.statementExpressions)
       .flatMap(Tir.expressionTree)
       .flatMap((expression) => (expression._tag === 'Replace' ? [expression.place.root] : []))
-    contexts.set(
-      ownerKey(instance),
-      Object.freeze({
-        instance,
-        bindings: new Map(
-          statements.flatMap((statement) =>
-            statement._tag === 'Bind'
-              ? [[statement.binding.ordinal, statement.initializer] as const]
-              : [],
-          ),
+    contexts.set(ownerKey(instance), {
+      instance,
+      bindings: new Map(
+        statements.flatMap((statement) =>
+          statement._tag === 'Bind'
+            ? [[statement.binding.ordinal, statement.initializer] as const]
+            : [],
         ),
-        patternBindings: new Map(
-          statements
-            .flatMap(Tir.statementExpressions)
-            .flatMap(Tir.expressionTree)
-            .flatMap((expression) =>
-              expression._tag === 'Match'
-                ? expression.arms.flatMap((arm) =>
-                    arm.bindings.map(
-                      (binding) => [patternBindingKey(binding.id), expression.scrutinee] as const,
-                    ),
-                  )
-                : [],
-            ),
+      ),
+      patternBindings: new Map(
+        statements
+          .flatMap(Tir.statementExpressions)
+          .flatMap(Tir.expressionTree)
+          .flatMap((expression) =>
+            expression._tag === 'Match'
+              ? expression.arms.flatMap((arm) =>
+                  arm.bindings.map(
+                    (binding) => [patternBindingKey(binding.id), expression.scrutinee] as const,
+                  ),
+                )
+              : [],
+          ),
+      ),
+      writtenBindings: new Set([
+        ...statements.flatMap((statement) =>
+          statement._tag === 'Write' &&
+          statement.place._tag === 'WritePlace' &&
+          statement.place.root._tag === 'BindingWriteRoot'
+            ? [statement.place.root.binding.ordinal]
+            : [],
         ),
-        writtenBindings: new Set([
-          ...statements.flatMap((statement) =>
-            statement._tag === 'Write' &&
-            statement.place._tag === 'WritePlace' &&
-            statement.place.root._tag === 'BindingWriteRoot'
-              ? [statement.place.root.binding.ordinal]
-              : [],
-          ),
-          ...replacedRoots.flatMap((root) =>
-            root._tag === 'BindingWriteRoot' ? [root.binding.ordinal] : [],
-          ),
-        ]),
-        writtenParameters: new Set([
-          ...statements.flatMap((statement) =>
-            statement._tag === 'Write' &&
-            statement.place._tag === 'WritePlace' &&
-            statement.place.root._tag === 'ParameterWriteRoot'
-              ? [statement.place.root.parameter.ordinal]
-              : [],
-          ),
-          ...replacedRoots.flatMap((root) =>
-            root._tag === 'ParameterWriteRoot' ? [root.parameter.ordinal] : [],
-          ),
-        ]),
-      }),
-    )
+        ...replacedRoots.flatMap((root) =>
+          root._tag === 'BindingWriteRoot' ? [root.binding.ordinal] : [],
+        ),
+      ]),
+      writtenParameters: new Set([
+        ...statements.flatMap((statement) =>
+          statement._tag === 'Write' &&
+          statement.place._tag === 'WritePlace' &&
+          statement.place.root._tag === 'ParameterWriteRoot'
+            ? [statement.place.root.parameter.ordinal]
+            : [],
+        ),
+        ...replacedRoots.flatMap((root) =>
+          root._tag === 'ParameterWriteRoot' ? [root.parameter.ordinal] : [],
+        ),
+      ]),
+    })
   }
 
   const callAt = (
@@ -414,16 +411,15 @@ export const plan = (discovery: Instances.Discovery, index: DeclarationIndex.Ind
     const firstReturn = returns.at(0)
     if (firstReturn === undefined) return unreached
     if (resolving.has(identity))
-      return Object.freeze({
+      return {
         _tag: 'InvalidOrigin',
         description: 'recursive or unresolved allocation provenance',
         span: firstReturn.span,
-      })
-    const parameters = Object.freeze(
-      instance.function.declaration.parameters.map((_, ordinal): Origin =>
-        Object.freeze({ _tag: 'ParameterOrigin', ordinal }),
-      ),
-    )
+      }
+    const parameters = instance.function.declaration.parameters.map((_, ordinal): Origin => ({
+      _tag: 'ParameterOrigin',
+      ordinal,
+    }))
     const result = returns
       .map((expression) =>
         originOf(expression, instance, parameters, new Set([...resolving, identity])),
@@ -436,9 +432,9 @@ export const plan = (discovery: Instances.Discovery, index: DeclarationIndex.Ind
   const substitute = (origin: Origin, arguments_: ReadonlyArray<Origin>): Origin => {
     if (origin._tag === 'ParameterOrigin') return arguments_.at(origin.ordinal) ?? unreached
     if (origin._tag === 'ServiceOrigin')
-      return Object.freeze({ ...origin, layout: substitute(origin.layout, arguments_) })
+      return { ...origin, layout: substitute(origin.layout, arguments_) }
     if (origin._tag === 'ProviderBoundOrigin')
-      return Object.freeze({ ...origin, protected: substitute(origin.protected, arguments_) })
+      return { ...origin, protected: substitute(origin.protected, arguments_) }
     return origin
   }
 
@@ -454,33 +450,33 @@ export const plan = (discovery: Instances.Discovery, index: DeclarationIndex.Ind
       expression._tag === 'ParameterReference' &&
       context?.writtenParameters.has(expression.parameter.ordinal)
     )
-      return Object.freeze({
+      return {
         _tag: 'InvalidOrigin',
         description: 'mutable parameter allocation provenance',
         span: expression.span,
-      })
+      }
     if (expression._tag === 'ParameterReference')
       return parameterOrigins.at(expression.parameter.ordinal) ?? unreached
     if (expression._tag === 'BindingReference') {
       if (context?.writtenBindings.has(expression.binding.ordinal))
-        return Object.freeze({
+        return {
           _tag: 'InvalidOrigin',
           description: 'mutable allocation provenance',
           span: expression.span,
-        })
+        }
       if (activeBindings.has(expression.binding.ordinal))
-        return Object.freeze({
+        return {
           _tag: 'InvalidOrigin',
           description: 'recursive allocation provenance',
           span: expression.span,
-        })
+        }
       const initializer = context?.bindings.get(expression.binding.ordinal)
       return initializer === undefined
-        ? Object.freeze({
+        ? {
             _tag: 'InvalidOrigin',
             description: 'unknown allocation provenance',
             span: expression.span,
-          })
+          }
         : originOf(
             initializer,
             instance,
@@ -492,11 +488,11 @@ export const plan = (discovery: Instances.Discovery, index: DeclarationIndex.Ind
     if (expression._tag === 'PatternBindingReference') {
       const scrutinee = context?.patternBindings.get(patternBindingKey(expression.binding))
       return scrutinee === undefined
-        ? Object.freeze({
+        ? {
             _tag: 'InvalidOrigin',
             description: 'unknown pattern allocation provenance',
             span: expression.span,
-          })
+          }
         : originOf(scrutinee, instance, parameterOrigins, resolving, activeBindings)
     }
     if (expression._tag === 'Move' || expression._tag === 'Run')
@@ -504,7 +500,7 @@ export const plan = (discovery: Instances.Discovery, index: DeclarationIndex.Ind
     if (expression._tag === 'UnionConvert')
       return originOf(expression.source, instance, parameterOrigins, resolving, activeBindings)
     if (expression._tag === 'EffectBindRequirement')
-      return Object.freeze({
+      return {
         _tag: 'ProviderBoundOrigin',
         protected: originOf(
           expression.protected,
@@ -516,7 +512,7 @@ export const plan = (discovery: Instances.Discovery, index: DeclarationIndex.Ind
         owner: instance,
         provider: expression.provider,
         span: expression.span,
-      })
+      }
     if (expression._tag === 'EffectCatch')
       return originOf(expression.protected, instance, parameterOrigins, resolving, activeBindings)
     if (expression._tag === 'EffectBlock') {
@@ -541,7 +537,7 @@ export const plan = (discovery: Instances.Discovery, index: DeclarationIndex.Ind
     if (expression._tag === 'BuiltinCall' && expression.operation === 'SharedLayout') {
       const raw = expression.typeArguments.at(0)
       return raw !== undefined && Type.isTypeArgument(raw)
-        ? Object.freeze({
+        ? {
             _tag: 'ConcreteOrigin',
             element: Type.substitute(
               raw,
@@ -549,44 +545,42 @@ export const plan = (discovery: Instances.Discovery, index: DeclarationIndex.Ind
               instance.specialization.compatibility,
             ),
             span: expression.span,
-          })
-        : Object.freeze({
+          }
+        : {
             _tag: 'InvalidOrigin',
             description: 'unknown layout provenance',
             span: expression.span,
-          })
+          }
     }
     if (expression._tag === 'BuiltinCall' && expression.operation === 'ExecutionLayout')
-      return Object.freeze({
+      return {
         _tag: 'ExecutionOrigin',
-        arguments: Object.freeze(
-          expression.typeArguments.map((argument) =>
-            Type.substituteGenericArgument(
-              argument,
-              instance.substitution,
-              instance.specialization.compatibility,
-            ),
+        arguments: expression.typeArguments.map((argument) =>
+          Type.substituteGenericArgument(
+            argument,
+            instance.substitution,
+            instance.specialization.compatibility,
           ),
         ),
         span: expression.span,
-      })
+      }
     if (expression._tag === 'BuiltinCall' && expression.operation === 'StorageAcquire') {
       const argument = expression.arguments.at(0)
       return argument === undefined
-        ? Object.freeze({
+        ? {
             _tag: 'InvalidOrigin',
             description: 'unknown layout provenance',
             span: expression.span,
-          })
+          }
         : originOf(argument, instance, parameterOrigins, resolving, activeBindings)
     }
     if (expression._tag === 'ServiceEffectConstruct') {
       if (!Type.equals(expression.type.success, Type.allocation))
-        return Object.freeze({
+        return {
           _tag: 'InvalidOrigin',
           description: 'non-allocation effect provenance',
           span: expression.span,
-        })
+        }
       const layouts = expression.arguments.filter(
         (argument) =>
           'type' in argument &&
@@ -606,12 +600,12 @@ export const plan = (discovery: Instances.Discovery, index: DeclarationIndex.Ind
         instance.specialization.compatibility,
       )
       return layout === undefined || !Type.isNominal(service)
-        ? Object.freeze({
+        ? {
             _tag: 'InvalidOrigin',
             description: 'unknown allocator layout provenance',
             span: expression.span,
-          })
-        : Object.freeze({
+          }
+        : {
             _tag: 'ServiceOrigin',
             owner: instance,
             service,
@@ -619,16 +613,16 @@ export const plan = (discovery: Instances.Discovery, index: DeclarationIndex.Ind
             role: expression.role,
             layout: originOf(layout, instance, parameterOrigins, resolving, activeBindings),
             span: expression.span,
-          })
+          }
     }
     if (expression._tag === 'Call' || expression._tag === 'EffectConstruct') {
       const target = targetAt(instance, expression)
       if (target === undefined)
-        return Object.freeze({
+        return {
           _tag: 'InvalidOrigin',
           description: 'unknown helper allocation provenance',
           span: expression.span,
-        })
+        }
       const arguments_ = expression.arguments.map((argument) =>
         originOf(argument, instance, parameterOrigins, resolving, activeBindings),
       )
@@ -637,11 +631,11 @@ export const plan = (discovery: Instances.Discovery, index: DeclarationIndex.Ind
     if (expression._tag === 'CallableApply') {
       const target = targetAt(instance, expression)
       if (target === undefined)
-        return Object.freeze({
+        return {
           _tag: 'InvalidOrigin',
           description: 'unknown callable allocation provenance',
           span: expression.span,
-        })
+        }
       const arguments_: Array<Origin> = Array.from(
         { length: target.function.declaration.parameterCount },
         () => unreached,
@@ -682,11 +676,11 @@ export const plan = (discovery: Instances.Discovery, index: DeclarationIndex.Ind
       }
       return substitute(summarize(target, resolving), arguments_)
     }
-    return Object.freeze({
+    return {
       _tag: 'InvalidOrigin',
       description: 'non-shared layout provenance',
       span: expression.span,
-    })
+    }
   }
 
   interface Provider {
@@ -709,12 +703,12 @@ export const plan = (discovery: Instances.Discovery, index: DeclarationIndex.Ind
     const witness = provider.witness ?? ConformanceProof.witness(index, providerType, capability)
     return witness === undefined
       ? undefined
-      : Object.freeze({
+      : {
           capability,
           providerType,
           role: proof.selected.role,
           witness,
-        })
+        }
   }
 
   const resolve = (origin: Origin, providers: ReadonlyArray<Provider> = []): Origin => {
@@ -722,7 +716,7 @@ export const plan = (discovery: Instances.Discovery, index: DeclarationIndex.Ind
       const selected = selectedProvider(origin.owner, origin.provider)
       return resolve(
         origin.protected,
-        selected === undefined ? providers : Object.freeze([...providers, selected]),
+        selected === undefined ? providers : [...providers, selected],
       )
     }
     if (origin._tag !== 'ServiceOrigin') return origin
@@ -832,22 +826,22 @@ export const plan = (discovery: Instances.Discovery, index: DeclarationIndex.Ind
           )
         : [explicitlyBound]
     if (candidates.length === 0)
-      return Object.freeze({
+      return {
         _tag: 'InvalidOrigin',
         description: 'unproved service allocation provenance',
         span: origin.span,
-      })
+      }
     // One generic ordinary helper may be reached through several lexical provider bindings. Its
     // initializer is safe only when every reaching implementation preserves the requested layout;
     // selecting the first provider would let a valid caller authorize a forged sibling call.
     return candidates
       .map((provider): Origin => {
         if (provider.witness._tag !== 'SourceConformanceWitness')
-          return Object.freeze({
+          return {
             _tag: 'InvalidOrigin',
             description: 'unproved service allocation provenance',
             span: origin.span,
-          })
+          }
         const implementation = ConformanceProof.witnessOperation(provider.witness, origin.operation)
         const targets =
           implementation === undefined
@@ -858,28 +852,26 @@ export const plan = (discovery: Instances.Discovery, index: DeclarationIndex.Ind
               })
         const target = targets.length === 1 ? targets.at(0) : undefined
         if (target === undefined)
-          return Object.freeze({
+          return {
             _tag: 'InvalidOrigin',
             description: 'unresolved service implementation provenance',
             span: origin.span,
-          })
-        const arguments_: Array<Origin> = target.specialization.parameters.map(() =>
-          Object.freeze({
-            _tag: 'InvalidOrigin' as const,
-            description: 'non-layout service parameter provenance',
-            span: origin.span,
-          }),
-        )
+          }
+        const arguments_: Array<Origin> = target.specialization.parameters.map(() => ({
+          _tag: 'InvalidOrigin' as const,
+          description: 'non-layout service parameter provenance',
+          span: origin.span,
+        }))
         const layoutParameters = target.specialization.parameters.flatMap((parameter, ordinal) =>
           Type.equals(parameter, Type.layout) ? [ordinal] : [],
         )
         const layoutParameter = layoutParameters.length === 1 ? layoutParameters.at(0) : undefined
         if (layoutParameter === undefined)
-          return Object.freeze({
+          return {
             _tag: 'InvalidOrigin',
             description: 'unresolved service layout parameter provenance',
             span: origin.span,
-          })
+          }
         arguments_[layoutParameter] = origin.layout
         const implementationOrigin = resolve(substitute(summarize(target, new Set()), arguments_))
         return implementationOrigin._tag === 'UnreachedOrigin'
@@ -945,11 +937,11 @@ export const plan = (discovery: Instances.Discovery, index: DeclarationIndex.Ind
           : undefined
       const unresolved =
         allocation === undefined
-          ? Object.freeze({
+          ? {
               _tag: 'InvalidOrigin' as const,
               description: 'missing allocation provenance',
               span: expression.span,
-            })
+            }
           : originOf(allocation, instance, parameters, new Set([ownerKey(instance)]))
       const actual = resolve(unresolved)
       if (
@@ -957,15 +949,13 @@ export const plan = (discovery: Instances.Discovery, index: DeclarationIndex.Ind
         actual._tag === 'ConcreteOrigin' &&
         Type.equals(expected, actual.element)
       ) {
-        facts.push(
-          Object.freeze({
-            _tag: 'LocalSharedAllocationProvenanceFact',
-            owner: ownerKey(instance),
-            expression,
-            element: actual.element,
-            span: actual.span,
-          }),
-        )
+        facts.push({
+          _tag: 'LocalSharedAllocationProvenanceFact',
+          owner: ownerKey(instance),
+          expression,
+          element: actual.element,
+          span: actual.span,
+        })
         continue
       }
       if (expected === undefined) continue
@@ -1010,27 +1000,25 @@ export const plan = (discovery: Instances.Discovery, index: DeclarationIndex.Ind
       seen.add(expression)
       if (expression._tag !== 'BuiltinCall' || expression.operation !== 'ExecutionFromAllocation')
         continue
-      const expected = Object.freeze(
-        expression.typeArguments.map((argument) =>
-          Instances.concreteEffectRepresentationArgument(
-            instance.function,
-            instance.key,
-            Type.substituteGenericArgument(
-              argument,
-              instance.substitution,
-              instance.specialization.compatibility,
-            ),
+      const expected = expression.typeArguments.map((argument) =>
+        Instances.concreteEffectRepresentationArgument(
+          instance.function,
+          instance.key,
+          Type.substituteGenericArgument(
+            argument,
+            instance.substitution,
+            instance.specialization.compatibility,
           ),
         ),
       )
       const allocation = expression.arguments.at(0)
       const unresolved =
         allocation === undefined
-          ? Object.freeze({
+          ? {
               _tag: 'InvalidOrigin' as const,
               description: 'missing allocation provenance',
               span: expression.span,
-            })
+            }
           : originOf(allocation, instance, parameters, new Set([ownerKey(instance)]))
       const actual = resolve(unresolved)
       const actualArguments =
@@ -1042,7 +1030,7 @@ export const plan = (discovery: Instances.Discovery, index: DeclarationIndex.Ind
                 argument,
               ),
             )
-          : Object.freeze([])
+          : []
       if (
         actual._tag === 'ExecutionOrigin' &&
         expected.length === actualArguments.length &&
@@ -1054,15 +1042,13 @@ export const plan = (discovery: Instances.Discovery, index: DeclarationIndex.Ind
           )
         })
       ) {
-        executionFacts.push(
-          Object.freeze({
-            _tag: 'ExecutionAllocationProvenanceFact',
-            owner: ownerKey(instance),
-            expression,
-            arguments: expected,
-            span: actual.span,
-          }),
-        )
+        executionFacts.push({
+          _tag: 'ExecutionAllocationProvenanceFact',
+          owner: ownerKey(instance),
+          expression,
+          arguments: expected,
+          span: actual.span,
+        })
         continue
       }
       const span = originSpan(actual) ?? allocation?.span ?? expression.span
@@ -1091,12 +1077,12 @@ export const plan = (discovery: Instances.Discovery, index: DeclarationIndex.Ind
       )
     }
   }
-  return Object.freeze({
+  return {
     _tag: 'LocalSharedAllocationProvenancePlan',
-    facts: Object.freeze(facts),
-    executionFacts: Object.freeze(executionFacts),
+    facts: facts,
+    executionFacts: executionFacts,
     diagnostics: Diagnostic.merge(diagnostics),
-  })
+  }
 }
 
 /** Finds the exact source allocation fact for one specialized TIR initializer. */
@@ -1122,10 +1108,9 @@ export const findExecution = (
 }
 
 /** Empty provenance surface for hand-built layout plans. */
-export const empty = (): Plan =>
-  Object.freeze({
-    _tag: 'LocalSharedAllocationProvenancePlan',
-    facts: Object.freeze([]),
-    executionFacts: Object.freeze([]),
-    diagnostics: Object.freeze([]),
-  })
+export const empty = (): Plan => ({
+  _tag: 'LocalSharedAllocationProvenancePlan',
+  facts: [],
+  executionFacts: [],
+  diagnostics: [],
+})

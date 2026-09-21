@@ -12,7 +12,7 @@ export interface ByteString {
 /** @internal */
 const fromNumbers = (bytes: Iterable<number>): ByteString => ({
   _tag: 'ByteString',
-  bytes: Object.freeze(Array.from(bytes)),
+  bytes: Array.from(bytes),
 })
 
 /**

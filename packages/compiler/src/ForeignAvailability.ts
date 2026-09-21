@@ -21,25 +21,21 @@ export interface StaticLoad {
 
 /** Collects callback-address operations in deterministic MIR function/operation order. */
 export const callbackAddresses = (program: Mir.Module): ReadonlyArray<CallbackAddress> =>
-  Object.freeze(
-    program.functions.flatMap((fn) =>
-      MirVerification.operations(fn).flatMap((operation) =>
-        operation._tag === 'ForeignFunctionAddress'
-          ? [Object.freeze({ symbol: operation.symbol, span: operation.provenance.span })]
-          : [],
-      ),
+  program.functions.flatMap((fn) =>
+    MirVerification.operations(fn).flatMap((operation) =>
+      operation._tag === 'ForeignFunctionAddress'
+        ? [{ symbol: operation.symbol, span: operation.provenance.span }]
+        : [],
     ),
   )
 
 /** Collects reachable data-symbol loads in deterministic MIR function/operation order. */
 export const staticLoads = (program: Mir.Module): ReadonlyArray<StaticLoad> =>
-  Object.freeze(
-    program.functions.flatMap((fn) =>
-      MirVerification.operations(fn).flatMap((operation) =>
-        operation._tag === 'ForeignStaticLoad'
-          ? [Object.freeze({ symbol: operation.symbol, span: operation.provenance.span })]
-          : [],
-      ),
+  program.functions.flatMap((fn) =>
+    MirVerification.operations(fn).flatMap((operation) =>
+      operation._tag === 'ForeignStaticLoad'
+        ? [{ symbol: operation.symbol, span: operation.provenance.span }]
+        : [],
     ),
   )
 
@@ -50,12 +46,12 @@ export const staticLoads = (program: Mir.Module): ReadonlyArray<StaticLoad> =>
 export const select = (
   calls: ReadonlyArray<Instances.ForeignCall>,
   target: Target.Target,
-  statics: Mir.Module['foreignStatics'] = Object.freeze([]),
-  callbacks: ReadonlyArray<CallbackAddress> = Object.freeze([]),
-  loads: ReadonlyArray<StaticLoad> = Object.freeze([]),
+  statics: Mir.Module['foreignStatics'] = [],
+  callbacks: ReadonlyArray<CallbackAddress> = [],
+  loads: ReadonlyArray<StaticLoad> = [],
 ): ReadonlyArray<Diagnostic.Diagnostic> => {
   if (calls.length === 0 && statics.length === 0 && callbacks.length === 0 && loads.length === 0)
-    return Object.freeze([])
+    return []
   const native = target.kind === 'Native'
   const surface = target.id
   const unavailable = new Map<string, Diagnostic.Diagnostic>()

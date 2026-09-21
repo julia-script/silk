@@ -174,7 +174,7 @@ export const context = (modules: ReadonlyArray<DeclarationFacts.ModuleHeaders>):
       const identity = Type.key(parameter)
       const existing = parameterBounds.get(identity) ?? []
       if (existing.some((bound) => Lifetime.equals(bound, shorter))) continue
-      parameterBounds.set(identity, Object.freeze([...existing, shorter]))
+      parameterBounds.set(identity, [...existing, shorter])
       work.typeObligations += 1
       changed = true
     }
@@ -223,14 +223,14 @@ export const context = (modules: ReadonlyArray<DeclarationFacts.ModuleHeaders>):
         }
       }
   }
-  const result = Object.freeze({
+  const result = {
     assumptions: Lifetime.assumptions(bounds),
     parameters,
     parameterBounds,
     nominals,
     contractNominals,
-    work: Object.freeze(work),
-  })
+    work: work,
+  }
   contexts.set(modules, result)
   return result
 }
@@ -351,17 +351,15 @@ export const application = (
   scope: Context,
   prove: Prove = (longer, shorter) => Lifetime.outlives(scope.assumptions, longer, shorter),
 ): ReadonlyArray<Failure> =>
-  Object.freeze(
-    obligations(self, scope).filter(({ argument, required }) => {
-      if (Lifetime.isLifetime(argument)) return !prove(argument, required)
-      if (Type.isTypeArgument(argument)) return !check(argument, required, scope, prove)
-      if (Type.isRepresentationArgument(argument)) {
-        const represented = Type.representedType(argument)
-        return represented === undefined || !check(represented, required, scope, prove)
-      }
-      return true
-    }),
-  )
+  obligations(self, scope).filter(({ argument, required }) => {
+    if (Lifetime.isLifetime(argument)) return !prove(argument, required)
+    if (Type.isTypeArgument(argument)) return !check(argument, required, scope, prove)
+    if (Type.isRepresentationArgument(argument)) {
+      const represented = Type.representedType(argument)
+      return represented === undefined || !check(represented, required, scope, prove)
+    }
+    return true
+  })
 
 /** Validates resolved headers after all parameter-implied assumptions are available. */
 export const moduleDiagnostics = (
@@ -416,5 +414,5 @@ export const moduleDiagnostics = (
     }
   }
   for (const declaration of self.inherentImpls) inspect(declaration.owner)
-  return Object.freeze([...diagnostics.values()])
+  return [...diagnostics.values()]
 }

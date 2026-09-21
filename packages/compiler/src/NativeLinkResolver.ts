@@ -48,7 +48,7 @@ export const argumentsOf = (line: string): Result.Result<ReadonlyArray<string>, 
   }
   if (quoted || escaped) return Result.fail('unterminated driver argument')
   if (active) values.push(value)
-  return Result.succeed(Object.freeze(values))
+  return Result.succeed(values)
 }
 
 interface Closure {
@@ -253,9 +253,7 @@ const addFile = Effect.fnUntraced(function* (
           )
       }
       const rewritten = join(closure.scope, `link-script-${closure.scripts.length}.ld`)
-      closure.scripts.push(
-        Object.freeze({ path: rewritten, source: LinkerScript.render(parsed.success, paths) }),
-      )
+      closure.scripts.push({ path: rewritten, source: LinkerScript.render(parsed.success, paths) })
       closure.paths.set(input.path, rewritten)
     }
   }
@@ -629,10 +627,10 @@ export const resolvePlan = Effect.fn('NativeLinkResolver.resolvePlan')(function*
       supply.root,
       'Provide the GNU glibc link contract.',
     )
-  const resolvedSupply = Object.freeze({
+  const resolvedSupply = {
     ...supply,
     version: closure.glibcVersion ?? supply.version,
-  })
+  }
   if (supply.target.operatingSystem === 'linux') {
     const dependencyRoots = [
       ...new Set(
@@ -658,25 +656,25 @@ export const resolvePlan = Effect.fn('NativeLinkResolver.resolvePlan')(function*
       supply.files.map((input) => input.digest),
     ]).pipe(Effect.orDie),
   )
-  return Object.freeze({
+  return {
     _tag: 'NativeLinkPlan',
-    helpers: Object.freeze([...(options.helpers ?? [])]),
-    translations: Object.freeze([...(options.translations ?? [])]),
+    helpers: [...(options.helpers ?? [])],
+    translations: [...(options.translations ?? [])],
     kind: options.kind,
     supply: resolvedSupply,
-    command: Object.freeze({
+    command: {
       _tag: 'PlannedCommand',
       target: supply.target,
       command:
         options.kind === 'NativeStaticLibrary' ? supply.archiver.command : supply.linker.command,
-      arguments: Object.freeze(args),
-    }),
+      arguments: args,
+    },
     query,
-    inputs: Object.freeze(closure.inputs),
-    scripts: Object.freeze(closure.scripts),
+    inputs: closure.inputs,
+    scripts: closure.scripts,
     identity,
     entry: options.entry,
     interpreter,
     output: options.output,
-  })
+  }
 })

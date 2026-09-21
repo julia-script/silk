@@ -91,14 +91,14 @@ export const emit = Effect.fn('NativeProgram.emit')(function* (
   const types = yield* initializeTypes(builder, program, frameRuntimeEnabled)
   const { i8, i32, f32, f64, pointer, usizeType, integerTypes, lanePointers } = types
   const staticPointers = yield* emitStaticData(builder, program, i8)
-  const typeContext: NativeType.LoweringContext = Object.freeze({
+  const typeContext: NativeType.LoweringContext = {
     program,
     i32,
     f32,
     f64,
     pointer,
     integerTypes,
-  })
+  }
   const lanesFor = (type: Mir.Type): ReadonlyArray<Layout.CallingLane> =>
     NativeType.lanesFor(typeContext, type)
   const valueLanesFor = (type: Mir.Type): ReadonlyArray<Layout.CallingLane> =>
@@ -134,19 +134,17 @@ export const emit = Effect.fn('NativeProgram.emit')(function* (
     frameRuntimeEnabled,
   )
 
-  const functionDeclarations = yield* NativeDeclare.functions(
-    Object.freeze({
-      types: typeContext,
-      lanePointers,
-      builder,
-      program,
-      i32,
-      pointer,
-      lanesFor,
-      laneType,
-      support: request.support === true,
-    }),
-  )
+  const functionDeclarations = yield* NativeDeclare.functions({
+    types: typeContext,
+    lanePointers,
+    builder,
+    program,
+    i32,
+    pointer,
+    lanesFor,
+    laneType,
+    support: request.support === true,
+  })
   const declared = functionDeclarations.declared
   const executionStorage = NativeExecutionStorage.make(program, declared)
   if (frameRuntimeEnabled && executionStorage === undefined)
@@ -176,92 +174,86 @@ export const emit = Effect.fn('NativeProgram.emit')(function* (
     request,
   )
   const termination = NativeTermination.make(request)
-  yield* NativeFunction.emitBodies(
-    Object.freeze({
-      termination,
-      runtimeFeatures,
-      builder,
-      program,
-      request,
-      i8,
-      i32,
-      f32,
-      f64,
-      pointer,
-      ...(usizeType === undefined ? {} : { usizeType }),
-      integerTypes,
-      lanePointers,
-      staticPointers,
-      lanesFor,
-      valueLanesFor,
-      laneType,
-      transferHeaderSize,
-      transferResultOffset,
-      transferStorageSize,
-      ...(childThunkType === undefined ? {} : { childThunkType }),
-      ...(resumeThunkType === undefined ? {} : { resumeThunkType }),
-      signedOverflowSignatures,
-      unsignedOverflowSignatures,
-      ...(malloc === undefined ? {} : { malloc }),
-      ...(free === undefined ? {} : { free }),
-      ...(executionStorage === undefined ? {} : { executionStorage }),
-      ...(executionRelease === undefined ? {} : { executionRelease: executionRelease.handle }),
-      ...(memcmp === undefined ? {} : { memcmp }),
-      foreignFunctions,
-      foreignStatics,
-      foreignCallbacks,
-      foreignIndirects,
-      declared,
-      originThunks,
-      resumeThunks,
-      debug,
-      compileUnit,
-      file,
-      table,
-      debugContext,
-    }),
-  )
+  yield* NativeFunction.emitBodies({
+    termination,
+    runtimeFeatures,
+    builder,
+    program,
+    request,
+    i8,
+    i32,
+    f32,
+    f64,
+    pointer,
+    ...(usizeType === undefined ? {} : { usizeType }),
+    integerTypes,
+    lanePointers,
+    staticPointers,
+    lanesFor,
+    valueLanesFor,
+    laneType,
+    transferHeaderSize,
+    transferResultOffset,
+    transferStorageSize,
+    ...(childThunkType === undefined ? {} : { childThunkType }),
+    ...(resumeThunkType === undefined ? {} : { resumeThunkType }),
+    signedOverflowSignatures,
+    unsignedOverflowSignatures,
+    ...(malloc === undefined ? {} : { malloc }),
+    ...(free === undefined ? {} : { free }),
+    ...(executionStorage === undefined ? {} : { executionStorage }),
+    ...(executionRelease === undefined ? {} : { executionRelease: executionRelease.handle }),
+    ...(memcmp === undefined ? {} : { memcmp }),
+    foreignFunctions,
+    foreignStatics,
+    foreignCallbacks,
+    foreignIndirects,
+    declared,
+    originThunks,
+    resumeThunks,
+    debug,
+    compileUnit,
+    file,
+    table,
+    debugContext,
+  })
 
   if (executionRelease !== undefined)
-    yield* NativeExecutionOperation.emitReleaseHelper(
-      Object.freeze({
-        builder,
-        program,
-        i8,
-        i32,
-        pointer,
-        ...(usizeType === undefined ? {} : { usizeType }),
-        ...(free === undefined ? {} : { free }),
-        ...(executionStorage === undefined ? {} : { executionStorage }),
-        resumeThunks,
-        declared,
-        types: typeContext,
-        lanePointers,
-        helper: executionRelease,
-      }),
-    )
-
-  yield* NativeSuspension.emitThunks(
-    Object.freeze({
+    yield* NativeExecutionOperation.emitReleaseHelper({
       builder,
       program,
       i8,
       i32,
       pointer,
       ...(usizeType === undefined ? {} : { usizeType }),
-      lanePointers,
-      declared,
-      originThunks,
-      resumeThunks,
-      types: typeContext,
+      ...(free === undefined ? {} : { free }),
       ...(executionStorage === undefined ? {} : { executionStorage }),
-      transferHeaderSize,
-      transferResultOffset,
-      transferStorageSize,
-      ...(childThunkType === undefined ? {} : { childThunkType }),
-      ...(resumeThunkType === undefined ? {} : { resumeThunkType }),
-    }),
-  )
+      resumeThunks,
+      declared,
+      types: typeContext,
+      lanePointers,
+      helper: executionRelease,
+    })
+
+  yield* NativeSuspension.emitThunks({
+    builder,
+    program,
+    i8,
+    i32,
+    pointer,
+    ...(usizeType === undefined ? {} : { usizeType }),
+    lanePointers,
+    declared,
+    originThunks,
+    resumeThunks,
+    types: typeContext,
+    ...(executionStorage === undefined ? {} : { executionStorage }),
+    transferHeaderSize,
+    transferResultOffset,
+    transferStorageSize,
+    ...(childThunkType === undefined ? {} : { childThunkType }),
+    ...(resumeThunkType === undefined ? {} : { resumeThunkType }),
+  })
   if (needsFrameCleanup || originThunks.size > 0 || resumeThunks.size > 0)
     runtimeFeatures.add('NestedSuspensionRuntime')
 
@@ -313,11 +305,11 @@ const initializeTypes = Effect.fn('NativeProgram.initializeTypes')(function* (
   }
   const i8 = yield* LlvmType.integer(builder, 8)
   const pointer = yield* LlvmType.pointer(builder)
-  const lanePointers: NativeLanePointer.Context = Object.freeze({
+  const lanePointers: NativeLanePointer.Context = {
     builder,
     byteType: i8,
     offsetType: i32,
-  })
+  }
   return { i8, i32, f32, f64, pointer, usizeType, integerTypes, lanePointers }
 })
 
@@ -512,7 +504,7 @@ const declareForeignFunctions = Effect.fn('NativeProgram.declareForeignFunctions
         arguments_.flatMap((type) => (type === undefined ? [] : [type])),
         cType(call.signature.result) ?? (yield* LlvmType.voidType(builder)),
       )
-      foreignFunctions.set(key, Object.freeze({ handle: guarded, signature: call.signature }))
+      foreignFunctions.set(key, { handle: guarded, signature: call.signature })
     }
   }
   return { foreignFunctions, declaredForeign }
@@ -566,13 +558,10 @@ const declareForeignStatics = Effect.fn('NativeProgram.declareForeignStatics')(f
           }),
       ),
     )
-    foreignStatics.set(
-      record.symbol,
-      Object.freeze({
-        address: yield* Constant.fromGlobal(builder, yield* Variable.global(builder, variable)),
-        valueType,
-      }),
-    )
+    foreignStatics.set(record.symbol, {
+      address: yield* Constant.fromGlobal(builder, yield* Variable.global(builder, variable)),
+      valueType,
+    })
   }
   return { foreignStatics, staticDeclarations }
 })
@@ -702,16 +691,14 @@ const declareExports = Effect.fn('NativeProgram.declareExports')(function* (
   cType: CType,
   foreignGuard: NativeForeignGuard.NativeForeignGuard | undefined,
 ) {
-  const exportThunks = yield* NativeDeclare.exportThunks(
-    Object.freeze({
-      builder,
-      program,
-      declared,
-      cType,
-      foreignGuard,
-      support: request.support === true,
-    }),
-  )
+  const exportThunks = yield* NativeDeclare.exportThunks({
+    builder,
+    program,
+    declared,
+    cType,
+    foreignGuard,
+    support: request.support === true,
+  })
   const foreignCallbacks = new Map<string, Constant.Constant>()
   for (const [symbol, thunk] of exportThunks)
     foreignCallbacks.set(
@@ -759,19 +746,16 @@ const declareSuspensionThunks = Effect.fn('NativeProgram.declareSuspensionThunks
       const suffix = `${sanitize(Instances.keyText(region.point.owner))}_${sanitize(region.point.sourceId)}_${region.point.spanStart}_${region.point.ordinal}`
       if (region._tag === 'SuspendEffectRegion') {
         if (childThunkType === undefined) throw new RangeError('LLVM origin lost thunk type')
-        originThunks.set(
-          key,
-          Object.freeze({
-            owner,
-            region,
-            handle: yield* FunctionActor.declare(
-              builder,
-              `silk_suspend_child_${suffix}`,
-              childThunkType,
-              { visibility: 'hidden' },
-            ),
-          }),
-        )
+        originThunks.set(key, {
+          owner,
+          region,
+          handle: yield* FunctionActor.declare(
+            builder,
+            `silk_suspend_child_${suffix}`,
+            childThunkType,
+            { visibility: 'hidden' },
+          ),
+        })
         continue
       }
       const descriptor = region.relay.state
@@ -783,21 +767,18 @@ const declareSuspensionThunks = Effect.fn('NativeProgram.declareSuspensionThunks
       const layout = CoroutineFrame.stateLayout(program, region.point)
       if (frame === undefined || layout === undefined || resumeThunkType === undefined)
         throw new RangeError('LLVM coroutine frame lost its physical layout or thunk type')
-      resumeThunks.set(
-        key,
-        Object.freeze({
-          owner,
-          region,
-          frame,
-          layout,
-          handle: yield* FunctionActor.declare(
-            builder,
-            `silk_suspend_resume_${suffix}`,
-            resumeThunkType,
-            { visibility: 'hidden' },
-          ),
-        }),
-      )
+      resumeThunks.set(key, {
+        owner,
+        region,
+        frame,
+        layout,
+        handle: yield* FunctionActor.declare(
+          builder,
+          `silk_suspend_resume_${suffix}`,
+          resumeThunkType,
+          { visibility: 'hidden' },
+        ),
+      })
     }
   }
   return { childThunkType, resumeThunkType, originThunks, resumeThunks }
@@ -823,13 +804,13 @@ const initializeDebugInfo = Effect.fn('NativeProgram.initializeDebugInfo')(funct
   }
 
   const debugTypes = new Map<string, LlvmMetadata.Optional>()
-  const debugContext: NativeDebug.LoweringContext = Object.freeze({
+  const debugContext: NativeDebug.LoweringContext = {
     builder,
     program,
     enabled: debug,
     file,
     types: debugTypes,
-  })
+  }
   return { debug, compileUnit, file, table, debugContext }
 })
 
@@ -872,60 +853,46 @@ const encodeArtifact = Effect.fn('NativeProgram.encodeArtifact')(function* ({
   const context = yield* Effect.context<never>()
 
   return {
-    symbols: declared.map((entry) =>
-      Object.freeze({
-        declaration: entry.fn.id,
-        instance: entry.fn.instance,
-        symbol: entry.publicSymbol,
-      }),
-    ),
-    nativeRuntimeSymbols: Object.freeze([
+    symbols: declared.map((entry) => ({
+      declaration: entry.fn.id,
+      instance: entry.fn.instance,
+      symbol: entry.publicSymbol,
+    })),
+    nativeRuntimeSymbols: [
       // LLVM may fold allocation followed by zero initialization into calloc.
       ...(malloc === undefined ? [] : ['malloc', 'calloc']),
       ...(free === undefined ? [] : ['free']),
-    ]),
-    runtimeFeatures: Object.freeze([...runtimeFeatures].sort()),
-    foreignImports: Object.freeze(
-      [...declaredForeign]
-        .sort(([left], [right]) => left.localeCompare(right, 'en'))
-        .map(([symbol, foreign]) =>
-          Object.freeze({
-            symbol,
-            variadic: foreign.variadic,
-            parameters: Object.freeze(foreign.parameters.map(CAbi.typeText)),
-            result: CAbi.typeText(foreign.result),
-            contract: foreign.contract,
-          }),
-        ),
-    ),
-    foreignExports: Object.freeze(
-      [...program.foreignExports]
-        .sort((left, right) => left.symbol.localeCompare(right.symbol, 'en'))
-        .map((record) =>
-          Object.freeze({
-            symbol: record.symbol,
-            variadic: record.signature.variadic,
-            parameters: Object.freeze(record.signature.parameters.map(CAbi.typeText)),
-            result: CAbi.typeText(record.signature.result),
-            contract: record.signature.contract,
-          }),
-        ),
-    ),
-    foreignStatics: Object.freeze(
-      staticDeclarations
-        .sort(
-          (left, right) =>
-            left.symbol.localeCompare(right.symbol, 'en') ||
-            left.direction.localeCompare(right.direction, 'en'),
-        )
-        .map((record) =>
-          Object.freeze({
-            symbol: record.symbol,
-            type: CAbi.typeText(CAbi.classify(record.type, program.layout.target, 'Parameter')),
-            direction: record.direction,
-          }),
-        ),
-    ),
+    ],
+    runtimeFeatures: [...runtimeFeatures].sort(),
+    foreignImports: [...declaredForeign]
+      .sort(([left], [right]) => left.localeCompare(right, 'en'))
+      .map(([symbol, foreign]) => ({
+        symbol,
+        variadic: foreign.variadic,
+        parameters: foreign.parameters.map(CAbi.typeText),
+        result: CAbi.typeText(foreign.result),
+        contract: foreign.contract,
+      })),
+    foreignExports: [...program.foreignExports]
+      .sort((left, right) => left.symbol.localeCompare(right.symbol, 'en'))
+      .map((record) => ({
+        symbol: record.symbol,
+        variadic: record.signature.variadic,
+        parameters: record.signature.parameters.map(CAbi.typeText),
+        result: CAbi.typeText(record.signature.result),
+        contract: record.signature.contract,
+      })),
+    foreignStatics: staticDeclarations
+      .sort(
+        (left, right) =>
+          left.symbol.localeCompare(right.symbol, 'en') ||
+          left.direction.localeCompare(right.direction, 'en'),
+      )
+      .map((record) => ({
+        symbol: record.symbol,
+        type: CAbi.typeText(CAbi.classify(record.type, program.layout.target, 'Parameter')),
+        direction: record.direction,
+      })),
     renderIr: () => Effect.runSyncWith(context)(IrText.render(builder)),
     bitcode: yield* encodeBitcode(builder),
   }

@@ -30,7 +30,7 @@ export type Input = boolean | Partial<FastMath>
  * @category fast math
  * @since 0.0.0
  */
-export const none: FastMath = Object.freeze({
+export const none: FastMath = {
   allowReassociation: false,
   noNaNs: false,
   noInfinities: false,
@@ -38,7 +38,7 @@ export const none: FastMath = Object.freeze({
   allowReciprocal: false,
   allowContract: false,
   approximateFunctions: false,
-})
+}
 
 /**
  * LLVM's aggregate `fast` setting with every fast-math promise enabled.
@@ -46,7 +46,7 @@ export const none: FastMath = Object.freeze({
  * @category fast math
  * @since 0.0.0
  */
-export const fast: FastMath = Object.freeze({
+export const fast: FastMath = {
   allowReassociation: true,
   noNaNs: true,
   noInfinities: true,
@@ -54,7 +54,7 @@ export const fast: FastMath = Object.freeze({
   allowReciprocal: true,
   allowContract: true,
   approximateFunctions: true,
-})
+}
 
 /**
  * Normalizes a boolean shorthand or partial setting into immutable fast-math flags.
@@ -83,7 +83,7 @@ export const fast: FastMath = Object.freeze({
 export const make = (input: Input = false): FastMath => {
   if (input === true) return fast
   if (input === false) return none
-  return Object.freeze({ ...none, ...input })
+  return { ...none, ...input }
 }
 
 /**
@@ -104,7 +104,7 @@ export const make = (input: Input = false): FastMath => {
 export const combine: {
   (other: Input): (self: FastMath) => FastMath
   (self: FastMath, other: Input): FastMath
-} = dual(2, (self: FastMath, other: Input): FastMath => Object.freeze({ ...self, ...make(other) }))
+} = dual(2, (self: FastMath, other: Input): FastMath => ({ ...self, ...make(other) }))
 
 /**
  * Encodes the setting as LLVM's instruction fast-math bit mask.
@@ -128,16 +128,14 @@ export const toBitcode = (self: FastMath): number =>
  * @since 0.0.0
  */
 export const toText = (self: FastMath): ReadonlyArray<string> => {
-  if (self === fast || toBitcode(self) === toBitcode(fast)) return Object.freeze(['fast'])
-  return Object.freeze(
-    [
-      self.allowReassociation ? 'reassoc' : '',
-      self.noNaNs ? 'nnan' : '',
-      self.noInfinities ? 'ninf' : '',
-      self.noSignedZeros ? 'nsz' : '',
-      self.allowReciprocal ? 'arcp' : '',
-      self.allowContract ? 'contract' : '',
-      self.approximateFunctions ? 'afn' : '',
-    ].filter((flag) => flag !== ''),
-  )
+  if (self === fast || toBitcode(self) === toBitcode(fast)) return ['fast']
+  return [
+    self.allowReassociation ? 'reassoc' : '',
+    self.noNaNs ? 'nnan' : '',
+    self.noInfinities ? 'ninf' : '',
+    self.noSignedZeros ? 'nsz' : '',
+    self.allowReciprocal ? 'arcp' : '',
+    self.allowContract ? 'contract' : '',
+    self.approximateFunctions ? 'afn' : '',
+  ].filter((flag) => flag !== '')
 }

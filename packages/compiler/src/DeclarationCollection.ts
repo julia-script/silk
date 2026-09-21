@@ -81,7 +81,7 @@ import * as Type from './Type.js'
 
 type Context = SemanticContext.SemanticContext
 
-const noDiagnostics: ReadonlyArray<Diagnostic.Located> = Object.freeze([])
+const noDiagnostics: ReadonlyArray<Diagnostic.Located> = []
 
 /** The spelling of an authored name, or `undefined` when recovery left none. */
 const nameText = (context: Context, name: AuthoredHir.Name): string | undefined =>
@@ -91,36 +91,40 @@ const nameText = (context: Context, name: AuthoredHir.Name): string | undefined 
 export const declaredName = (context: Context, name: AuthoredHir.Name): DeclaredName => {
   const spelling = nameText(context, name)
   return spelling === undefined
-    ? Object.freeze({ _tag: 'Unavailable', anchor: name.anchor })
-    : Object.freeze({ _tag: 'Present', spelling, anchor: name.anchor })
+    ? { _tag: 'Unavailable', anchor: name.anchor }
+    : { _tag: 'Present', spelling, anchor: name.anchor }
 }
 
 /** A header's declared name; headers that declare none are unavailable at their own anchor. */
 const headerName = (context: Context, header: AuthoredHir.DeclarationHeader): DeclaredName =>
   'name' in header
     ? declaredName(context, header.name)
-    : Object.freeze({ _tag: 'Unavailable', anchor: header.anchor })
+    : { _tag: 'Unavailable', anchor: header.anchor }
 
-const unavailable = (anchor: AuthoredHir.Anchor): DeclaredTypeFact =>
-  Object.freeze({ _tag: 'Unavailable', anchor })
+const unavailable = (anchor: AuthoredHir.Anchor): DeclaredTypeFact => ({
+  _tag: 'Unavailable',
+  anchor,
+})
 
-const unavailableResolution = (anchor: AuthoredHir.Anchor): TypeResolution =>
-  Object.freeze({ fact: unavailable(anchor), diagnostics: noDiagnostics })
+const unavailableResolution = (anchor: AuthoredHir.Anchor): TypeResolution => ({
+  fact: unavailable(anchor),
+  diagnostics: noDiagnostics,
+})
 
 /** The type path an authored path denotes, or `undefined` when no segment kept a spelling. */
 const typePathOf = (context: Context, path: AuthoredHir.Path): TypePathFact | undefined => {
   const segments = path.segments.flatMap((segment) => {
     const spelling = nameText(context, segment)
-    return spelling === undefined ? [] : [Object.freeze({ spelling, anchor: segment.anchor })]
+    return spelling === undefined ? [] : [{ spelling, anchor: segment.anchor }]
   })
   return segments.length === 0
     ? undefined
-    : Object.freeze({
+    : {
         _tag: 'TypePath',
         spelling: segments.map((segment) => segment.spelling).join('.'),
-        segments: Object.freeze(segments),
+        segments: segments,
         anchor: path.anchor,
-      })
+      }
 }
 
 /** The role an authored requirement selects; a requirement without a role keeps the default. */
@@ -129,9 +133,7 @@ export const collectedRequirementRole = (
   requirement: AuthoredHir.Requirement,
 ): RequirementRoleFact => {
   const path = requirement.role === undefined ? undefined : typePathOf(context, requirement.role)
-  return path === undefined
-    ? Object.freeze({ _tag: 'DefaultRole' })
-    : Object.freeze({ _tag: 'UnresolvedRole', path })
+  return path === undefined ? { _tag: 'DefaultRole' } : { _tag: 'UnresolvedRole', path }
 }
 
 /** The single type path a named type names directly, used to recognize a binder occurrence. */
@@ -162,7 +164,7 @@ const firstSegment = (
   if (type._tag !== 'NamedType') return undefined
   for (const segment of type.path.segments) {
     const spelling = nameText(context, segment)
-    if (spelling !== undefined) return Object.freeze({ spelling, anchor: segment.anchor })
+    if (spelling !== undefined) return { spelling, anchor: segment.anchor }
   }
   return undefined
 }
@@ -296,11 +298,11 @@ const bodyTemplate = (
   if (declaration.body._tag !== 'CallableBody') return undefined
   const block = declaration.body.block
   if (block === undefined || !(staticPhase || requiresStaticEvaluation(block))) return undefined
-  return Object.freeze({
+  return {
     _tag: 'FunctionBodyTemplate',
     anchor: block.anchor,
     canonical: AuthoredLowering.canonicalBody(lowered, declaration),
-  })
+  }
 }
 
 /** A static initializer's deterministic encoding, taken from the declaration that owns it. */
@@ -308,15 +310,14 @@ const staticExpressionTemplate = (
   lowered: AuthoredLowering.Lowered,
   declaration: AuthoredHir.Declaration,
   expression: AuthoredHir.Expression,
-): StaticExpressionTemplate =>
-  Object.freeze({
-    _tag: 'StaticExpressionTemplate',
-    anchor: expression.anchor,
-    canonical: `${AuthoredIdentity.anchorKey(expression.anchor)}=${AuthoredLowering.canonicalBody(
-      lowered,
-      declaration,
-    )}`,
-  })
+): StaticExpressionTemplate => ({
+  _tag: 'StaticExpressionTemplate',
+  anchor: expression.anchor,
+  canonical: `${AuthoredIdentity.anchorKey(expression.anchor)}=${AuthoredLowering.canonicalBody(
+    lowered,
+    declaration,
+  )}`,
+})
 
 /** The constant value an authored initializer denotes without any evaluation. */
 export const constantLiteral = (
@@ -325,36 +326,36 @@ export const constantLiteral = (
 ): ConstantLiteralFact => {
   const anchor = initializer.anchor
   if (initializer._tag === 'BooleanLiteral')
-    return Object.freeze({ _tag: 'BooleanLiteral', value: initializer.value, anchor })
+    return { _tag: 'BooleanLiteral', value: initializer.value, anchor }
   if (initializer._tag === 'CharacterLiteral')
-    return Object.freeze({ _tag: 'CharacterLiteral', value: initializer.scalar, anchor })
+    return { _tag: 'CharacterLiteral', value: initializer.scalar, anchor }
   if (initializer._tag === 'IntegerLiteral')
-    return Object.freeze({
+    return {
       _tag: 'IntegerLiteral',
       value: initializer.value,
       spelling: integerSpelling(initializer),
       anchor,
-    })
+    }
   if (initializer._tag === 'DurationLiteral') {
     const value = initializer.components.reduce(
       (total, component) => total + component.magnitude * durationScale[component.unit],
       0n,
     )
-    return Object.freeze({
+    return {
       _tag: 'DurationLiteral',
       value,
       spelling: initializer.components
         .map((component) => `${component.magnitude}${component.unit}`)
         .join(''),
       anchor,
-    })
+    }
   }
   if (initializer._tag === 'FloatingLiteral')
-    return Object.freeze({
+    return {
       _tag: 'FloatingLiteral',
       spelling: floatingSpelling(initializer),
       anchor,
-    })
+    }
   if (initializer._tag === 'InvalidExpression') {
     // A literal that lexes but does not decode keeps the decoder's reason in its presentation.
     const key = AuthoredIdentity.anchorKey(anchor)
@@ -363,39 +364,38 @@ export const constantLiteral = (
         entry.code === Diagnostic.invalidStaticLiteralCode &&
         AuthoredIdentity.anchorKey(entry.anchor) === key,
     )
-    if (undecodable !== undefined)
-      return Object.freeze({ _tag: 'Malformed', detail: undecodable.message, anchor })
+    if (undecodable !== undefined) return { _tag: 'Malformed', detail: undecodable.message, anchor }
   }
   if (initializer._tag === 'TextLiteral')
-    return Object.freeze({
+    return {
       _tag: 'StringLiteral',
       data: staticData('Text', Array.from(utf8.encode(context.textOf(initializer.value)))),
       anchor,
-    })
+    }
   if (initializer._tag === 'BytesLiteral')
-    return Object.freeze({
+    return {
       _tag: 'StringLiteral',
       data: staticData('Bytes', Array.from(context.bytesOf(initializer.value))),
       anchor,
-    })
+    }
   // A prefix negation over an integer or float is part of the literal a constant header admits.
   if (initializer._tag === 'PrefixExpression' && initializer.operator === 'Negate') {
     const operand = constantLiteral(context, initializer.operand)
     if (operand._tag === 'IntegerLiteral')
-      return Object.freeze({
+      return {
         _tag: 'IntegerLiteral',
         value: -operand.value,
         spelling: `-${operand.spelling}`,
         anchor,
-      })
+      }
     if (operand._tag === 'FloatingLiteral')
-      return Object.freeze({
+      return {
         _tag: 'FloatingLiteral',
         spelling: `-${operand.spelling}`,
         anchor,
-      })
+      }
   }
-  return Object.freeze({ _tag: 'Unavailable', anchor })
+  return { _tag: 'Unavailable', anchor }
 }
 
 const utf8 = new TextEncoder()
@@ -406,35 +406,36 @@ const utf8 = new TextEncoder()
  * Authored HIR already carries the decoded bytes, so the header no longer re-lexes the literal;
  * the identity stays the byte digest every later phase compares.
  */
-const staticData = (kind: StaticText.Data['kind'], bytes: ReadonlyArray<number>): StaticText.Data =>
-  Object.freeze({
-    _tag: 'StaticData',
-    id: `${kind === 'Text' ? 'text' : 'bytes'}:${bytes
-      .map((byte) => byte.toString(16).padStart(2, '0'))
-      .join('')}`,
-    kind,
-    bytes: Object.freeze([...bytes]),
-    utf8: kind === 'Text',
-  })
+const staticData = (
+  kind: StaticText.Data['kind'],
+  bytes: ReadonlyArray<number>,
+): StaticText.Data => ({
+  _tag: 'StaticData',
+  id: `${kind === 'Text' ? 'text' : 'bytes'}:${bytes
+    .map((byte) => byte.toString(16).padStart(2, '0'))
+    .join('')}`,
+  kind,
+  bytes: [...bytes],
+  utf8: kind === 'Text',
+})
 
-const durationScale: Readonly<Record<AuthoredHir.DurationComponent['unit'], bigint>> =
-  Object.freeze({
-    w: 604800000000000n,
-    d: 86400000000000n,
-    h: 3600000000000n,
-    m: 60000000000n,
-    s: 1000000000n,
-    ms: 1000000n,
-    us: 1000n,
-    ns: 1n,
-  })
+const durationScale: Readonly<Record<AuthoredHir.DurationComponent['unit'], bigint>> = {
+  w: 604800000000000n,
+  d: 86400000000000n,
+  h: 3600000000000n,
+  m: 60000000000n,
+  s: 1000000000n,
+  ms: 1000000n,
+  us: 1000n,
+  ns: 1n,
+}
 
-const radixPrefix: Readonly<Record<AuthoredHir.IntegerLiteral['radix'], string>> = Object.freeze({
+const radixPrefix: Readonly<Record<AuthoredHir.IntegerLiteral['radix'], string>> = {
   2: '0b',
   8: '0o',
   10: '',
   16: '0x',
-})
+}
 
 /** The decimal spelling a consumer compares and re-renders; the radix prefix is preserved. */
 const integerSpelling = (literal: AuthoredHir.IntegerLiteral): string =>
@@ -503,7 +504,7 @@ const analyzeAppliedRows = (
     member._tag !== 'Requirement'
       ? []
       : [
-          Object.freeze({
+          {
             capability: analyzeDeclaredType(
               context,
               member.capability,
@@ -514,7 +515,7 @@ const analyzeAppliedRows = (
             role: collectedRequirementRole(context, member),
             access: member.access === 'Mutable' ? ('Exclusive' as const) : ('Shared' as const),
             anchor: member.anchor,
-          }),
+          },
         ],
   )
   // A bare path inside a requirement row names a row parameter, never a capability.
@@ -544,12 +545,12 @@ const analyzeAppliedRows = (
     return segment === undefined || parameter?.kind !== 'RequirementRow'
       ? []
       : [
-          Object.freeze({
+          {
             _tag: 'Resolved' as const,
             type: parameter,
             spelling: segment.spelling,
             anchor: path.anchor,
-          }),
+          },
         ]
   })
   const subtracts = (row?.members ?? []).some(
@@ -559,16 +560,16 @@ const analyzeAppliedRows = (
     row !== undefined && subtracts
       ? rowExpressionOf(context, row, typeParameters, lifetimeContext)
       : undefined
-  return Object.freeze({
+  return {
     failureAnchor: argumentList.failures?.anchor,
-    failures: Object.freeze(failures),
+    failures: failures,
     requirementAnchor: row?.anchor,
-    requirements: Object.freeze(requirements),
-    requirementParameters: Object.freeze(requirementParameters),
-    rowParameterComponents: Object.freeze(rowParameterComponents),
+    requirements: requirements,
+    requirementParameters: requirementParameters,
+    rowParameterComponents: rowParameterComponents,
     requirementExpression,
-    diagnostics: Object.freeze(diagnostics),
-  })
+    diagnostics: diagnostics,
+  }
 }
 
 const unreportedLifetimeDiagnostic = (
@@ -580,7 +581,7 @@ const unreportedLifetimeDiagnostic = (
       reported.code === diagnostic.code && Location.equals(reported.span, diagnostic.span),
   )
     ? noDiagnostics
-    : Object.freeze([diagnostic])
+    : [diagnostic]
 
 /**
  * Resolves one authored type annotation into a declared-type fact.
@@ -604,18 +605,18 @@ export const analyzeDeclaredType = (
         : DeclarationLifetime.regionOf(lifetimeContext, anchor)) ??
       (ticked === undefined ? undefined : DeclarationLifetime.named(ticked, typeParameters))
     if (ticked !== undefined && lifetime !== undefined && genericArgumentPosition)
-      return Object.freeze({
-        fact: Object.freeze({ _tag: 'Lifetime', lifetime, spelling: ticked, anchor }),
+      return {
+        fact: { _tag: 'Lifetime', lifetime, spelling: ticked, anchor },
         diagnostics: noDiagnostics,
-      })
+      }
     const diagnostic =
       ticked === undefined
         ? Diagnostic.invalidLifetimeBinder('Expected a lifetime argument', Location.at(anchor))
         : Diagnostic.unknownLifetime(ticked, Location.at(type.name.anchor))
-    return Object.freeze({
-      fact: Object.freeze({ _tag: 'Unavailable', anchor, cause: Diagnostic.identity(diagnostic) }),
+    return {
+      fact: { _tag: 'Unavailable', anchor, cause: Diagnostic.identity(diagnostic) },
       diagnostics: unreportedLifetimeDiagnostic(diagnostic, lifetimeContext),
-    })
+    }
   }
   /** The region elaboration assigned to one annotation, or the one its own lifetime names. */
   const regionOf = (
@@ -644,16 +645,16 @@ export const analyzeDeclaredType = (
             spelling.startsWith("'") ? spelling : `'${spelling}`,
             Location.at(written?.anchor ?? anchor),
           )
-    return Object.freeze({
-      fact: Object.freeze({ _tag: 'Unavailable', anchor, cause: Diagnostic.identity(diagnostic) }),
+    return {
+      fact: { _tag: 'Unavailable', anchor, cause: Diagnostic.identity(diagnostic) },
       diagnostics: unreportedLifetimeDiagnostic(diagnostic, lifetimeContext),
-    })
+    }
   }
   if (type._tag === 'UnitType')
-    return Object.freeze({
-      fact: Object.freeze({ _tag: 'Resolved', type: Type.unit, spelling: '()', anchor }),
+    return {
+      fact: { _tag: 'Resolved', type: Type.unit, spelling: '()', anchor },
       diagnostics: noDiagnostics,
-    })
+    }
   if (type._tag === 'MissingType' || type._tag === 'InvalidType')
     return unavailableResolution(anchor)
   // Recovery keeps an absent type as a named type over a missing name: the parser owns that damage.
@@ -670,9 +671,7 @@ export const analyzeDeclaredType = (
       analyzeDeclaredType(context, parameter, typeParameters, false, lifetimeContext),
     )
     const result = analyzeDeclaredType(context, type.result, typeParameters, false, lifetimeContext)
-    const diagnostics = Object.freeze(
-      [...parameters, result].flatMap((entry) => Array.from(entry.diagnostics)),
-    )
+    const diagnostics = [...parameters, result].flatMap((entry) => Array.from(entry.diagnostics))
     if (
       result.fact._tag === 'Resolved' &&
       parameters.every((entry) => entry.fact._tag === 'Resolved')
@@ -685,43 +684,44 @@ export const analyzeDeclaredType = (
         undefined,
         type.unsafe,
       )
-      return Object.freeze({
-        fact: Object.freeze({
+      return {
+        fact: {
           _tag: 'Resolved',
           type: contract,
           spelling: Type.encode(contract),
           anchor,
-          components: Object.freeze([...parameters.map((entry) => entry.fact), result.fact]),
-        }),
+          components: [...parameters.map((entry) => entry.fact), result.fact],
+        },
         diagnostics,
-      })
+      }
     }
     const cause = [...parameters.map((entry) => entry.fact), result.fact]
       .flatMap((fact) => ('cause' in fact && fact.cause !== undefined ? [fact.cause] : []))
       .at(-1)
-    return Object.freeze({
-      fact: Object.freeze({
+    return {
+      fact: {
         _tag: 'Callable',
         lifetimes,
         unsafe: type.unsafe,
         mode,
-        parameters: Object.freeze(parameters.map((entry) => entry.fact)),
+        parameters: parameters.map((entry) => entry.fact),
         result: result.fact,
         spelling: `${type.unsafe ? 'unsafe ' : ''}${mode === 'Exclusive' ? 'mut ' : ''}${
           mode === 'Take' ? 'once ' : ''
         }fn(...)`,
         anchor,
         ...(cause === undefined ? {} : { cause }),
-      }),
+      },
       diagnostics,
-    })
+    }
   }
   if (type._tag === 'ForeignFunctionType') {
-    const lifetimes =
-      (lifetimeContext === undefined
-        ? undefined
-        : DeclarationLifetime.callableOf(lifetimeContext, anchor)) ??
-      Object.freeze({ environment: Lifetime.staticLifetime, lifetimeBinders: Object.freeze([]) })
+    const lifetimes = (lifetimeContext === undefined
+      ? undefined
+      : DeclarationLifetime.callableOf(lifetimeContext, anchor)) ?? {
+      environment: Lifetime.staticLifetime,
+      lifetimeBinders: [],
+    }
     const parameters = type.parameters.map((parameter) =>
       analyzeDeclaredType(context, parameter, typeParameters, false, lifetimeContext),
     )
@@ -761,31 +761,31 @@ export const analyzeDeclaredType = (
         behavior.contract,
         lifetimes,
       )
-      return Object.freeze({
-        fact: Object.freeze({
+      return {
+        fact: {
           _tag: 'Resolved',
           type: contract,
           spelling: Type.encode(contract),
           anchor,
-          components: Object.freeze([...parameters.map((entry) => entry.fact), result.fact]),
-        }),
-        diagnostics: Object.freeze(diagnostics),
-      })
+          components: [...parameters.map((entry) => entry.fact), result.fact],
+        },
+        diagnostics: diagnostics,
+      }
     }
     const cause = diagnostics.at(-1)
-    return Object.freeze({
-      fact: Object.freeze({
+    return {
+      fact: {
         _tag: 'ForeignFunction',
         lifetimes,
         contract: behavior.contract,
-        parameters: Object.freeze(parameters.map((entry) => entry.fact)),
+        parameters: parameters.map((entry) => entry.fact),
         result: result.fact,
         spelling: 'extern "C" fn(...)',
         anchor,
         ...(cause === undefined ? {} : { cause: Diagnostic.identity(cause) }),
-      }),
-      diagnostics: Object.freeze(diagnostics),
-    })
+      },
+      diagnostics: diagnostics,
+    }
   }
   if (type._tag === 'UnionType') {
     const members = type.members.flatMap((member) =>
@@ -804,7 +804,7 @@ export const analyzeDeclaredType = (
     const diagnostics: Array<Diagnostic.Located> = members.flatMap((member) =>
       Array.from(member.diagnostics),
     )
-    const facts = Object.freeze(members.map((member) => member.fact))
+    const facts = members.map((member) => member.fact)
     if (facts.every((fact) => fact._tag === 'Resolved')) {
       const resolved = facts.filter(
         (fact): fact is Extract<DeclaredTypeFact, { readonly _tag: 'Resolved' }> =>
@@ -812,16 +812,16 @@ export const analyzeDeclaredType = (
       )
       const normalized = Type.union(resolved.map((fact) => fact.type))
       if (normalized._tag === 'Normalized')
-        return Object.freeze({
-          fact: Object.freeze({
+        return {
+          fact: {
             _tag: 'Resolved',
             type: normalized.type,
             spelling: Type.encode(normalized.type),
             anchor,
-            unionSource: Object.freeze({ _tag: 'UnionSource', members: facts, anchor }),
-          }),
-          diagnostics: Object.freeze(diagnostics),
-        })
+            unionSource: { _tag: 'UnionSource', members: facts, anchor },
+          },
+          diagnostics: diagnostics,
+        }
       if (normalized._tag === 'InvalidMembers')
         for (const invalid of normalized.members) {
           const sourceFact = resolved.find((fact) => Type.equals(fact.type, invalid))
@@ -834,8 +834,8 @@ export const analyzeDeclaredType = (
         }
     }
     const cause = diagnostics.at(-1)
-    return Object.freeze({
-      fact: Object.freeze({
+    return {
+      fact: {
         _tag: 'Union',
         members: facts,
         spelling: facts
@@ -843,9 +843,9 @@ export const analyzeDeclaredType = (
           .join(' | '),
         anchor,
         ...(cause === undefined ? {} : { cause: Diagnostic.identity(cause) }),
-      }),
-      diagnostics: Object.freeze(diagnostics),
-    })
+      },
+      diagnostics: diagnostics,
+    }
   }
   if (type._tag === 'SliceType') {
     const lifetime = regionOf(type, type.lifetime)
@@ -860,19 +860,19 @@ export const analyzeDeclaredType = (
     )
     if (element.fact._tag === 'Resolved') {
       const sliced = Type.slice(access, element.fact.type, lifetime)
-      return Object.freeze({
-        fact: Object.freeze({
+      return {
+        fact: {
           _tag: 'Resolved',
           type: sliced,
           spelling: Type.encode(sliced),
           anchor,
-          components: Object.freeze([element.fact]),
-        }),
+          components: [element.fact],
+        },
         diagnostics: element.diagnostics,
-      })
+      }
     }
-    return Object.freeze({
-      fact: Object.freeze({
+    return {
+      fact: {
         _tag: 'Slice',
         lifetime,
         access,
@@ -882,9 +882,9 @@ export const analyzeDeclaredType = (
         ...('cause' in element.fact && element.fact.cause !== undefined
           ? { cause: element.fact.cause }
           : {}),
-      }),
+      },
       diagnostics: element.diagnostics,
-    })
+    }
   }
   if (type._tag === 'ReferenceType') {
     const lifetime = regionOf(type, type.lifetime)
@@ -897,8 +897,8 @@ export const analyzeDeclaredType = (
       false,
       lifetimeContext,
     )
-    return Object.freeze({
-      fact: Object.freeze({
+    return {
+      fact: {
         _tag: 'Reference',
         lifetime,
         access,
@@ -908,9 +908,9 @@ export const analyzeDeclaredType = (
         ...('cause' in target.fact && target.fact.cause !== undefined
           ? { cause: target.fact.cause }
           : {}),
-      }),
+      },
       diagnostics: target.diagnostics,
-    })
+    }
   }
   if (type._tag === 'PointerType') {
     const extent: Type.Pointer['extent'] = type.multiplicity === 'Many' ? 'Many' : 'Single'
@@ -943,10 +943,10 @@ export const analyzeDeclaredType = (
     }
     const invalid = qualifierDiagnostics[0]
     if (invalid !== undefined)
-      return Object.freeze({
-        fact: Object.freeze({ _tag: 'Unavailable', anchor, cause: Diagnostic.identity(invalid) }),
-        diagnostics: Object.freeze(qualifierDiagnostics),
-      })
+      return {
+        fact: { _tag: 'Unavailable', anchor, cause: Diagnostic.identity(invalid) },
+        diagnostics: qualifierDiagnostics,
+      }
     const pointee = analyzeDeclaredType(
       context,
       type.pointee,
@@ -956,19 +956,19 @@ export const analyzeDeclaredType = (
     )
     if (pointee.fact._tag === 'Resolved') {
       const pointer = Type.pointer({ ...qualifiers, pointee: pointee.fact.type })
-      return Object.freeze({
-        fact: Object.freeze({
+      return {
+        fact: {
           _tag: 'Resolved',
           type: pointer,
           spelling: Type.encode(pointer),
           anchor,
-          components: Object.freeze([pointee.fact]),
-        }),
+          components: [pointee.fact],
+        },
         diagnostics: pointee.diagnostics,
-      })
+      }
     }
-    return Object.freeze({
-      fact: Object.freeze({
+    return {
+      fact: {
         _tag: 'Pointer',
         ...qualifiers,
         pointee: pointee.fact,
@@ -977,9 +977,9 @@ export const analyzeDeclaredType = (
         ...('cause' in pointee.fact && pointee.fact.cause !== undefined
           ? { cause: pointee.fact.cause }
           : {}),
-      }),
+      },
       diagnostics: pointee.diagnostics,
-    })
+    }
   }
   if (type._tag === 'FixedArrayType') {
     const element = analyzeDeclaredType(
@@ -992,7 +992,7 @@ export const analyzeDeclaredType = (
     const diagnostics: Array<Diagnostic.Located> = [...element.diagnostics]
     let length: ArrayLengthFact
     if (type.length._tag !== 'IntegerLiteral') {
-      length = Object.freeze({ _tag: 'Unavailable', anchor: type.length.anchor })
+      length = { _tag: 'Unavailable', anchor: type.length.anchor }
     } else {
       const spelling = integerSpelling(type.length)
       const value = Number(type.length.value)
@@ -1004,36 +1004,36 @@ export const analyzeDeclaredType = (
           Location.at(type.length.anchor),
         )
         diagnostics.push(diagnostic)
-        length = Object.freeze({
+        length = {
           _tag: 'OutOfRange',
           spelling,
           anchor: type.length.anchor,
           cause: Diagnostic.identity(diagnostic),
-        })
+        }
       } else {
-        length = Object.freeze({
+        length = {
           _tag: 'Available',
           value,
           spelling,
           anchor: type.length.anchor,
-        })
+        }
       }
     }
     if (element.fact._tag === 'Resolved' && length._tag === 'Available') {
       const array = Type.fixedArray(element.fact.type, length.value)
-      return Object.freeze({
-        fact: Object.freeze({
+      return {
+        fact: {
           _tag: 'Resolved',
           type: array,
           spelling: Type.encode(array),
           anchor,
-          components: Object.freeze([element.fact]),
-        }),
-        diagnostics: Object.freeze(diagnostics),
-      })
+          components: [element.fact],
+        },
+        diagnostics: diagnostics,
+      }
     }
-    return Object.freeze({
-      fact: Object.freeze({
+    return {
+      fact: {
         _tag: 'FixedArray',
         element: element.fact,
         length,
@@ -1041,9 +1041,9 @@ export const analyzeDeclaredType = (
           element.fact._tag === 'Resolved' ? Type.encode(element.fact.type) : 'unavailable'
         }, ${length._tag === 'Available' ? length.value : 'unavailable'}>`,
         anchor,
-      }),
-      diagnostics: Object.freeze(diagnostics),
-    })
+      },
+      diagnostics: diagnostics,
+    }
   }
   if (type._tag === 'OpaqueResultType')
     // The binder belongs to the declaration that carries it, so its representation parameters and
@@ -1060,16 +1060,16 @@ export const analyzeDeclaredType = (
           ? []
           : [analyzeDeclaredType(context, argument, typeParameters, true, lifetimeContext)],
     )
-    return Object.freeze({
-      fact: Object.freeze({
+    return {
+      fact: {
         _tag: 'ExactRepresentation',
         item: path,
-        arguments: Object.freeze(arguments_.map((argument) => argument.fact)),
+        arguments: arguments_.map((argument) => argument.fact),
         spelling: `typeof(${path.spelling})`,
         anchor,
-      }),
-      diagnostics: Object.freeze(arguments_.flatMap((argument) => argument.diagnostics)),
-    })
+      },
+      diagnostics: arguments_.flatMap((argument) => argument.diagnostics),
+    }
   }
   if (type._tag === 'RowWithout') return unavailableResolution(anchor)
   if (type._tag === 'AppliedType') {
@@ -1090,36 +1090,33 @@ export const analyzeDeclaredType = (
           'string requires exactly one lifetime argument',
           Location.at(anchor),
         )
-        return Object.freeze({
-          fact: Object.freeze({
+        return {
+          fact: {
             _tag: 'Unavailable',
             anchor,
             cause: Diagnostic.identity(diagnostic),
-          }),
-          diagnostics: Object.freeze([
-            ...arguments_.flatMap((entry) => entry.diagnostics),
-            diagnostic,
-          ]),
-        })
+          },
+          diagnostics: [...arguments_.flatMap((entry) => entry.diagnostics), diagnostic],
+        }
       }
-      return Object.freeze({
-        fact: Object.freeze({
+      return {
+        fact: {
           _tag: 'Resolved',
           type: Type.string(argument.lifetime),
           spelling: `string<${Lifetime.display(argument.lifetime)}>`,
           anchor,
-          components: Object.freeze([argument]),
-        }),
+          components: [argument],
+        },
         diagnostics: noDiagnostics,
-      })
+      }
     }
     if (bare === 'Effect') {
       const environment = regionOf(type, undefined)
       if (environment === undefined) return missingLifetime(undefined)
-      const lifetimes: Type.ExecutableLifetimes = Object.freeze({
+      const lifetimes: Type.ExecutableLifetimes = {
         environment,
-        lifetimeBinders: Object.freeze([]),
-      })
+        lifetimeBinders: [],
+      }
       const access: Type.Effect['access'] = callableMode(
         type.target._tag === 'NamedType' ? type.target.mode : undefined,
       )
@@ -1152,11 +1149,11 @@ export const analyzeDeclaredType = (
           (Type.isParameter(requirement.capability.fact.type) &&
             requirement.capability.fact.type.kind === 'Value'))
           ? [
-              Object.freeze({
+              {
                 capability: requirement.capability.fact.type,
                 role: requirementRoleIdentity(requirement.role) ?? RequirementRow.defaultRole,
                 access: requirement.access,
-              }),
+              },
             ]
           : [],
       )
@@ -1179,81 +1176,73 @@ export const analyzeDeclaredType = (
           resolvedRequirements,
           rows.requirementParameters,
         )
-        return Object.freeze({
-          fact: Object.freeze({
+        return {
+          fact: {
             _tag: 'Resolved',
             type: effect,
             spelling: Type.encode(effect),
             anchor,
-            components: Object.freeze([
+            components: [
               target.fact,
               ...arguments_.map((argument) => argument.fact),
               ...rows.requirements.map((requirement) => requirement.capability.fact),
               ...rows.rowParameterComponents,
-            ]),
-          }),
-          diagnostics: Object.freeze(diagnostics),
-        })
+            ],
+          },
+          diagnostics: diagnostics,
+        }
       }
-      return Object.freeze({
-        fact: Object.freeze({
+      return {
+        fact: {
           _tag: 'Effect',
           lifetimes,
           access,
           success: success ?? unavailable(type.arguments.anchor),
-          failures: Object.freeze(rows.failures.map((failure) => failure.fact)),
-          requirements: Object.freeze(
-            rows.requirements.map((requirement) =>
-              Object.freeze({
-                capability: requirement.capability.fact,
-                role: requirement.role,
-                access: requirement.access,
-                anchor: requirement.anchor,
-              }),
-            ),
-          ),
-          requirementParameters: Object.freeze(rows.requirementParameters),
+          failures: rows.failures.map((failure) => failure.fact),
+          requirements: rows.requirements.map((requirement) => ({
+            capability: requirement.capability.fact,
+            role: requirement.role,
+            access: requirement.access,
+            anchor: requirement.anchor,
+          })),
+          requirementParameters: rows.requirementParameters,
           ...(rows.requirementExpression === undefined
             ? {}
             : { requirementExpression: rows.requirementExpression }),
           spelling: 'Effect',
           anchor,
-        }),
-        diagnostics: Object.freeze(diagnostics),
-      })
+        },
+        diagnostics: diagnostics,
+      }
     }
     const rows = analyzeAppliedRows(context, type.arguments, typeParameters, lifetimeContext)
     const implicit =
       lifetimeContext === undefined
         ? undefined
         : DeclarationLifetime.nominalArgumentsOf(lifetimeContext, anchor)
-    return Object.freeze({
-      fact: Object.freeze({
+    return {
+      fact: {
         _tag: 'Applied',
         ...(implicit === undefined ? {} : { implicitLifetimeArguments: implicit }),
         target: target.fact,
-        arguments: Object.freeze(arguments_.map((argument) => argument.fact)),
+        arguments: arguments_.map((argument) => argument.fact),
         ...(rows.requirementAnchor === undefined
           ? {}
           : {
-              requirementRow: Object.freeze({
-                requirements: Object.freeze(
-                  rows.requirements.map((requirement) =>
-                    Object.freeze({
-                      capability: requirement.capability.fact,
-                      role: requirement.role,
-                      access: requirement.access,
-                      anchor: requirement.anchor,
-                    }),
-                  ),
-                ),
-                parameters: Object.freeze(rows.requirementParameters),
+              requirementRow: {
+                requirements: rows.requirements.map((requirement) => ({
+                  capability: requirement.capability.fact,
+                  role: requirement.role,
+                  access: requirement.access,
+                  anchor: requirement.anchor,
+                })),
+                parameters: rows.requirementParameters,
                 anchor: rows.requirementAnchor,
-              }),
+              },
             }),
         spelling: appliedSpelling(context, type),
         anchor,
-      }),
+      },
       diagnostics: Diagnostic.collect(
         target.diagnostics,
         ...arguments_.map((argument) => argument.diagnostics),
@@ -1261,7 +1250,7 @@ export const analyzeDeclaredType = (
         ...rows.requirements.map((requirement) => requirement.capability.diagnostics),
         rows.diagnostics,
       ),
-    })
+    }
   }
   const path = typePathOf(context, type.path)
   if (path === undefined) return unavailableResolution(anchor)
@@ -1271,34 +1260,34 @@ export const analyzeDeclaredType = (
   if (bare === 'string') {
     const lifetime = regionOf(type, undefined)
     if (lifetime === undefined) return missingLifetime(undefined)
-    return Object.freeze({
-      fact: Object.freeze({
+    return {
+      fact: {
         _tag: 'Resolved',
         type: Type.string(lifetime),
         spelling: `string<${Lifetime.display(lifetime)}>`,
         anchor,
         path,
-      }),
+      },
       diagnostics: noDiagnostics,
-    })
+    }
   }
   if (bare !== undefined && (Type.isBuiltin(bare) || bare === 'never'))
-    return Object.freeze({
-      fact: Object.freeze({ _tag: 'Resolved', type: bare, spelling: bare, anchor, path }),
+    return {
+      fact: { _tag: 'Resolved', type: bare, spelling: bare, anchor, path },
       diagnostics: noDiagnostics,
-    })
+    }
   const intrinsicNominal = bare === undefined ? undefined : Type.intrinsicNominals.get(bare)
   if (intrinsicNominal !== undefined && bare !== undefined)
-    return Object.freeze({
-      fact: Object.freeze({
+    return {
+      fact: {
         _tag: 'Resolved',
         type: intrinsicNominal,
         spelling: bare,
         anchor,
         path,
-      }),
+      },
       diagnostics: noDiagnostics,
-    })
+    }
   const parameterType = bare === undefined ? undefined : typeParameters.get(bare)
   if (parameterType !== undefined && bare !== undefined) {
     if (
@@ -1307,31 +1296,31 @@ export const analyzeDeclaredType = (
     ) {
       const bound = parameterType.representationBound
       if (bound === undefined)
-        return Object.freeze({
-          fact: Object.freeze({
+        return {
+          fact: {
             _tag: 'RepresentationParameter',
             parameter: parameterType,
             spelling: bare,
             anchor,
             path,
-          }),
+          },
           diagnostics: noDiagnostics,
-        })
+        }
       const represented = Type.represented(
         bound,
         bound,
         Type.representationParameterArgument(parameterType),
       )
-      return Object.freeze({
-        fact: Object.freeze({
+      return {
+        fact: {
           _tag: 'Resolved',
           type: represented,
           spelling: bare,
           anchor,
           path,
-        }),
+        },
         diagnostics: noDiagnostics,
-      })
+      }
     }
     if (parameterType.kind !== 'Value' && !genericArgumentPosition) {
       const diagnostic = Diagnostic.genericParameterKindMismatch(
@@ -1340,40 +1329,40 @@ export const analyzeDeclaredType = (
         parameterType.kind,
         Location.at(first.anchor),
       )
-      return Object.freeze({
-        fact: Object.freeze({
+      return {
+        fact: {
           _tag: 'Unavailable',
           anchor,
           cause: Diagnostic.identity(diagnostic),
-        }),
-        diagnostics: Object.freeze([diagnostic]),
-      })
+        },
+        diagnostics: [diagnostic],
+      }
     }
-    return Object.freeze({
-      fact: Object.freeze({
+    return {
+      fact: {
         _tag: 'Resolved',
         type: parameterType,
         spelling: bare,
         anchor,
         path,
-      }),
+      },
       diagnostics: noDiagnostics,
-    })
+    }
   }
   const implicit =
     lifetimeContext === undefined
       ? undefined
       : DeclarationLifetime.nominalArgumentsOf(lifetimeContext, anchor)
-  return Object.freeze({
-    fact: Object.freeze({
+  return {
+    fact: {
       _tag: 'Unresolved',
       ...(implicit === undefined ? {} : { implicitLifetimeArguments: implicit }),
       spelling: path.spelling,
       anchor,
       path,
-    }),
+    },
     diagnostics: noDiagnostics,
-  })
+  }
 }
 
 /** The written spelling of an applied type, rebuilt from authored names rather than source. */
@@ -1446,18 +1435,18 @@ const analyzeParameter = (
   readonly diagnostics: ReadonlyArray<Diagnostic.Located>
 } => {
   const type = analyzeDeclaredType(context, parameter.type, typeParameters, false, lifetimeContext)
-  return Object.freeze({
-    fact: Object.freeze({
+  return {
+    fact: {
       _tag: 'ParameterDeclaration',
-      id: Object.freeze({ _tag: 'ParameterId', function: functionId, ordinal }),
+      id: { _tag: 'ParameterId', function: functionId, ordinal },
       name: declaredName(context, parameter.name),
       phase: parameter.mode === 'Static' ? 'Static' : 'Runtime',
       bindingMutability: parameter.mode === 'Mutable' ? 'Mutable' : 'Immutable',
       declaredType: type.fact,
       anchor: parameter.anchor,
-    }),
+    },
     diagnostics: type.diagnostics,
-  })
+  }
 }
 
 const duplicateParameterDiagnostics = (
@@ -1478,7 +1467,7 @@ const duplicateParameterDiagnostics = (
         ),
       )
   }
-  return Object.freeze(diagnostics)
+  return diagnostics
 }
 
 const collectFields = (
@@ -1491,17 +1480,17 @@ const collectFields = (
   const first = new Map<string, { readonly id: FieldId; readonly anchor: AuthoredHir.Anchor }>()
   const diagnostics: Array<Diagnostic.Located> = []
   const fields = fieldNodes.map((field, ordinal): FieldFact => {
-    const id: FieldId = Object.freeze({ _tag: 'FieldId', owner, ordinal })
+    const id: FieldId = { _tag: 'FieldId', owner, ordinal }
     const name = declaredName(context, field.name)
     const type = analyzeDeclaredType(context, field.type, typeParameters, false, lifetimeContext)
     diagnostics.push(...type.diagnostics)
     let state: FieldState
-    if (name._tag !== 'Present') state = Object.freeze({ _tag: 'Unidentified' })
+    if (name._tag !== 'Present') state = { _tag: 'Unidentified' }
     else {
       const original = first.get(name.spelling)
       if (original === undefined) {
-        first.set(name.spelling, Object.freeze({ id, anchor: name.anchor }))
-        state = Object.freeze({ _tag: 'Unique', id })
+        first.set(name.spelling, { id, anchor: name.anchor })
+        state = { _tag: 'Unique', id }
       } else {
         const diagnostic = Diagnostic.duplicateFieldName(
           name.spelling,
@@ -1509,14 +1498,14 @@ const collectFields = (
           Location.at(name.anchor),
         )
         diagnostics.push(diagnostic)
-        state = Object.freeze({
+        state = {
           _tag: 'Duplicate',
           original: original.id,
           cause: Diagnostic.identity(diagnostic),
-        })
+        }
       }
     }
-    return Object.freeze({
+    return {
       _tag: 'AggregateField',
       id,
       member: AggregateIdentity.labeled(name._tag === 'Present' ? name.spelling : ''),
@@ -1525,9 +1514,9 @@ const collectFields = (
       name,
       declaredType: type.fact,
       anchor: field.anchor,
-    })
+    }
   })
-  return Object.freeze({ fields: Object.freeze(fields), diagnostics: Object.freeze(diagnostics) })
+  return { fields: fields, diagnostics: diagnostics }
 }
 
 /** Collects declaration-ordered tuple positions without inventing source field spellings. */
@@ -1540,7 +1529,7 @@ const collectPositionalFields = (
 ) => {
   const diagnostics: Array<Diagnostic.Located> = []
   const fields = elements.map((element, ordinal): FieldFact => {
-    const id: FieldId = Object.freeze({ _tag: 'FieldId', owner, ordinal })
+    const id: FieldId = { _tag: 'FieldId', owner, ordinal }
     const declaredType = analyzeDeclaredType(
       context,
       element,
@@ -1549,18 +1538,18 @@ const collectPositionalFields = (
       lifetimeContext,
     )
     diagnostics.push(...declaredType.diagnostics)
-    return Object.freeze({
+    return {
       _tag: 'AggregateField',
       id,
       member: AggregateIdentity.ordinal(ordinal),
-      state: Object.freeze({ _tag: 'Unique', id }),
+      state: { _tag: 'Unique', id },
       visibility: 'Public',
-      name: Object.freeze({ _tag: 'Unavailable', anchor: element.anchor }),
+      name: { _tag: 'Unavailable', anchor: element.anchor },
       declaredType: declaredType.fact,
       anchor: element.anchor,
-    })
+    }
   })
-  return Object.freeze({ fields: Object.freeze(fields), diagnostics: Object.freeze(diagnostics) })
+  return { fields: fields, diagnostics: diagnostics }
 }
 
 /** A generic binder's written name, normalized so a lifetime binder keeps its leading tick. */
@@ -1569,7 +1558,7 @@ const binderName = (context: Context, generic: AuthoredHir.GenericParameter): De
   if (generic._tag !== 'LifetimeParameter' || name._tag !== 'Present') return name
   return name.spelling.startsWith("'")
     ? name
-    : Object.freeze({ _tag: 'Present', spelling: `'${name.spelling}`, anchor: name.anchor })
+    : { _tag: 'Present', spelling: `'${name.spelling}`, anchor: name.anchor }
 }
 
 /** The sealed static property a bound names, when the bound is `Intrinsic.<Property>`. */
@@ -1701,11 +1690,9 @@ const collectTypeParameters = (
         (property): property is Type.SealedStaticProperty => property !== undefined,
       ),
     )
-    const staticProperties: ReadonlyArray<Type.SealedStaticProperty> = Object.freeze(
-      (['Intrinsic.Detached', 'Intrinsic.NonParking'] as const).filter((property) =>
-        staticPropertySet.has(property),
-      ),
-    )
+    const staticProperties: ReadonlyArray<Type.SealedStaticProperty> = (
+      ['Intrinsic.Detached', 'Intrinsic.NonParking'] as const
+    ).filter((property) => staticPropertySet.has(property))
     const representationContract =
       boundResolution?.fact._tag === 'Resolved' &&
       (Type.isCallable(boundResolution.fact.type) || Type.isEffect(boundResolution.fact.type))
@@ -1741,56 +1728,52 @@ const collectTypeParameters = (
     }
     const bounds: ReadonlyArray<BoundFact> =
       representationKind !== undefined || declaredBounds.length === 0
-        ? Object.freeze([])
-        : Object.freeze(
-            typeBounds.flatMap((candidate): ReadonlyArray<BoundFact> => {
-              if (staticPropertyOf(context, candidate) !== undefined) return []
-              const segment = firstSegment(context, candidate)
-              const path = nominalPath(context, candidate)
-              // A bound recovery left without a name is still a written obligation: it stays an
-              // unavailable requirement, so nothing downstream proves the binder unconstrained.
-              if (
-                (segment === undefined || path === undefined) &&
-                !AuthoredWalk.isAvailable(candidate)
-              )
-                return [
-                  Object.freeze({
-                    _tag: 'UnresolvedBound' as const,
-                    spelling: '',
-                    path: Object.freeze({
-                      _tag: 'TypePath' as const,
-                      spelling: '',
-                      segments: Object.freeze([]),
-                      anchor: candidate.anchor,
-                    }),
-                    application: unavailable(candidate.anchor),
-                  }),
-                ]
-              if (segment === undefined || path === undefined) return []
-              const resolution = analyzeDeclaredType(
-                context,
-                candidate,
-                environment,
-                false,
-                lifetimeContext,
-              )
+        ? []
+        : typeBounds.flatMap((candidate): ReadonlyArray<BoundFact> => {
+            if (staticPropertyOf(context, candidate) !== undefined) return []
+            const segment = firstSegment(context, candidate)
+            const path = nominalPath(context, candidate)
+            // A bound recovery left without a name is still a written obligation: it stays an
+            // unavailable requirement, so nothing downstream proves the binder unconstrained.
+            if (
+              (segment === undefined || path === undefined) &&
+              !AuthoredWalk.isAvailable(candidate)
+            )
               return [
-                Object.freeze({
+                {
                   _tag: 'UnresolvedBound' as const,
-                  spelling: segment.spelling,
-                  path: Object.freeze({
+                  spelling: '',
+                  path: {
                     _tag: 'TypePath' as const,
-                    spelling: segment.spelling,
-                    segments: Object.freeze([
-                      Object.freeze({ spelling: segment.spelling, anchor: segment.anchor }),
-                    ]),
+                    spelling: '',
+                    segments: [],
                     anchor: candidate.anchor,
-                  }),
-                  application: resolution.fact,
-                }),
+                  },
+                  application: unavailable(candidate.anchor),
+                },
               ]
-            }),
-          )
+            if (segment === undefined || path === undefined) return []
+            const resolution = analyzeDeclaredType(
+              context,
+              candidate,
+              environment,
+              false,
+              lifetimeContext,
+            )
+            return [
+              {
+                _tag: 'UnresolvedBound' as const,
+                spelling: segment.spelling,
+                path: {
+                  _tag: 'TypePath' as const,
+                  spelling: segment.spelling,
+                  segments: [{ spelling: segment.spelling, anchor: segment.anchor }],
+                  anchor: candidate.anchor,
+                },
+                application: resolution.fact,
+              },
+            ]
+          })
     const duplicateOf =
       name._tag === 'Present' && originals.has(name.spelling)
         ? environment.get(name.spelling)
@@ -1807,7 +1790,7 @@ const collectTypeParameters = (
         parameterKind,
         representationContract,
         representationKind === undefined
-          ? Object.freeze(staticProperties.filter((property) => property === 'Intrinsic.Detached'))
+          ? staticProperties.filter((property) => property === 'Intrinsic.Detached')
           : staticProperties,
       )
     if (name._tag === 'Present' && duplicateOf === undefined) {
@@ -1824,16 +1807,16 @@ const collectTypeParameters = (
           ),
         )
     }
-    return Object.freeze({
+    return {
       _tag: 'TypeParameterDeclaration' as const,
       type: parameterType,
       name,
       anchor: generic.anchor,
       bounds,
-      lifetimeBounds: Object.freeze(lifetimeBounds),
+      lifetimeBounds: lifetimeBounds,
       staticProperties:
         representationKind === undefined
-          ? Object.freeze(staticProperties.filter((property) => property === 'Intrinsic.Detached'))
+          ? staticProperties.filter((property) => property === 'Intrinsic.Detached')
           : staticProperties,
       ...(duplicateOf === undefined ? {} : { duplicateOf }),
       ...(representationKind === undefined ||
@@ -1841,7 +1824,7 @@ const collectTypeParameters = (
       boundResolution === undefined
         ? {}
         : {
-            representationBound: Object.freeze({
+            representationBound: {
               _tag: 'RepresentationBound' as const,
               kind:
                 representationKind === 'CallableRepresentation'
@@ -1849,24 +1832,24 @@ const collectTypeParameters = (
                   : ('Effect' as const),
               contract: boundResolution.fact,
               anchor: boundNode.anchor,
-            }),
+            },
           }),
-    })
+    }
   })
   const implicitFacts = implicitLifetimeParameters(lifetimeContext, environment)
-  return Object.freeze({
-    facts: Object.freeze([...facts, ...implicitFacts]),
-    lifetimeContext: Object.freeze({
+  return {
+    facts: [...facts, ...implicitFacts],
+    lifetimeContext: {
       ...lifetimeContext,
       parameters: new Map(
         [...environment].filter(
           ([name]) => !lifetimeContext.implicit.some((binder) => binder.parameter.name === name),
         ),
       ),
-    }),
+    },
     environment,
-    diagnostics: Object.freeze(diagnostics),
-  })
+    diagnostics: diagnostics,
+  }
 }
 
 const implicitLifetimeParameters = (
@@ -1875,20 +1858,20 @@ const implicitLifetimeParameters = (
 ): ReadonlyArray<TypeParameterFact> =>
   lifetimeContext.implicit.map((binder) => {
     environment.set(binder.parameter.name, binder.parameter)
-    return Object.freeze({
+    return {
       _tag: 'TypeParameterDeclaration',
       type: binder.parameter,
-      name: Object.freeze({
+      name: {
         _tag: 'Present',
         spelling: binder.parameter.name,
         anchor: binder.anchor,
-      }),
+      },
       anchor: binder.anchor,
-      bounds: Object.freeze([]),
-      staticProperties: Object.freeze([]),
-      lifetimeBounds: Object.freeze([]),
+      bounds: [],
+      staticProperties: [],
+      lifetimeBounds: [],
       implicitLifetime: true,
-    })
+    }
   })
 
 /**
@@ -1925,7 +1908,7 @@ const collectReturnType = (
       false,
       lifetimeContext,
     )
-    return Object.freeze({ fact: analyzed.fact, diagnostics: analyzed.diagnostics })
+    return { fact: analyzed.fact, diagnostics: analyzed.diagnostics }
   }
   const collected = collectTypeParameters(
     context,
@@ -1937,10 +1920,10 @@ const collectReturnType = (
   )
   const binder = collected.facts.at(0)
   if (binder === undefined)
-    return Object.freeze({
+    return {
       fact: unavailable(result.anchor),
       diagnostics: collected.diagnostics,
-    })
+    }
   const analyzed = analyzeDeclaredType(
     context,
     result.result,
@@ -1948,29 +1931,29 @@ const collectReturnType = (
     false,
     lifetimeContext,
   )
-  return Object.freeze({
+  return {
     fact: analyzed.fact,
-    opaqueResult: Object.freeze({
+    opaqueResult: {
       _tag: 'OpaqueResult',
       binder,
-      family: Object.freeze({
+      family: {
         _tag: 'OpaqueFamilyKey',
-        producer: Object.freeze({ module: context.module.owner.module, name: ownerName }),
+        producer: { module: context.module.owner.module, name: ownerName },
         binderOrdinal: 0,
-      }),
-      publicSignature: Object.freeze({
+      },
+      publicSignature: {
         bound:
           binder.type.representationBound === undefined
             ? 'unavailable'
             : Type.key(binder.type.representationBound),
         result:
           analyzed.fact._tag === 'Resolved' ? Type.key(analyzed.fact.type) : analyzed.fact._tag,
-        enclosingKinds: Object.freeze(typeParameters.map((parameter) => parameter.type.kind)),
-      }),
+        enclosingKinds: typeParameters.map((parameter) => parameter.type.kind),
+      },
       anchor: result.anchor,
-    }),
-    diagnostics: Object.freeze([...collected.diagnostics, ...analyzed.diagnostics]),
-  })
+    },
+    diagnostics: [...collected.diagnostics, ...analyzed.diagnostics],
+  }
 }
 
 /**
@@ -2006,60 +1989,60 @@ const collectRowExpression = (
       true,
       lifetimeContext,
     )
-    return Object.freeze({
-      fact: Object.freeze({
+    return {
+      fact: {
         _tag: 'WithoutRowExpression',
         source: sourceRow.fact,
         selected: selected.fact,
         anchor,
-      }),
-      diagnostics: Object.freeze([...sourceRow.diagnostics, ...selected.diagnostics]),
-    })
+      },
+      diagnostics: [...sourceRow.diagnostics, ...selected.diagnostics],
+    }
   }
   if (operand._tag === 'UnionType') {
     const collected = operand.members.map((member) =>
       collectRowExpression(context, member, typeParameters, leaf, bareKeys, lifetimeContext),
     )
-    return Object.freeze({
-      fact: Object.freeze({
+    return {
+      fact: {
         _tag: 'UnionRowExpression',
-        operands: Object.freeze(collected.map((member) => member.fact)),
+        operands: collected.map((member) => member.fact),
         anchor,
-      }),
-      diagnostics: Object.freeze(collected.flatMap((member) => member.diagnostics)),
-    })
+      },
+      diagnostics: collected.flatMap((member) => member.diagnostics),
+    }
   }
   if (leaf === 'Failure') {
     if (operand._tag === 'Requirement')
-      return Object.freeze({
-        fact: Object.freeze({ _tag: 'UnavailableRowExpression', anchor }),
+      return {
+        fact: { _tag: 'UnavailableRowExpression', anchor },
         diagnostics: noDiagnostics,
-      })
+      }
     const analyzed = analyzeDeclaredType(context, operand, typeParameters, false, lifetimeContext)
-    return Object.freeze({
-      fact: Object.freeze({ _tag: 'FailureMemberExpression', member: analyzed.fact, anchor }),
+    return {
+      fact: { _tag: 'FailureMemberExpression', member: analyzed.fact, anchor },
       diagnostics: analyzed.diagnostics,
-    })
+    }
   }
   if (operand._tag !== 'Requirement') {
     const parameter = parameterAtType(context, operand, typeParameters)
     if (parameter?.kind === 'RequirementRow')
-      return Object.freeze({
-        fact: Object.freeze({ _tag: 'RowParameterExpression', parameter, anchor }),
+      return {
+        fact: { _tag: 'RowParameterExpression', parameter, anchor },
         diagnostics: noDiagnostics,
-      })
+      }
     if (bareKeys && operand._tag === 'NamedType') {
       const analyzed = analyzeDeclaredType(context, operand, typeParameters, false, lifetimeContext)
-      return Object.freeze({
-        fact: Object.freeze({
+      return {
+        fact: {
           _tag: 'RequirementMemberExpression',
           capability: analyzed.fact,
           access: 'Shared',
-          role: Object.freeze({ _tag: 'DefaultRole' }),
+          role: { _tag: 'DefaultRole' },
           anchor,
-        }),
+        },
         diagnostics: analyzed.diagnostics,
-      })
+      }
     }
     // A row position that parses as a type spells a borrowed requirement as a reference type.
     if (operand._tag === 'ReferenceType') {
@@ -2070,21 +2053,21 @@ const collectRowExpression = (
         false,
         lifetimeContext,
       )
-      return Object.freeze({
-        fact: Object.freeze({
+      return {
+        fact: {
           _tag: 'RequirementMemberExpression',
           capability: analyzed.fact,
           access: operand.access === 'Mutable' ? 'Exclusive' : 'Shared',
-          role: Object.freeze({ _tag: 'DefaultRole' }),
+          role: { _tag: 'DefaultRole' },
           anchor,
-        }),
+        },
         diagnostics: analyzed.diagnostics,
-      })
+      }
     }
-    return Object.freeze({
-      fact: Object.freeze({ _tag: 'UnavailableRowExpression', anchor }),
+    return {
+      fact: { _tag: 'UnavailableRowExpression', anchor },
       diagnostics: noDiagnostics,
-    })
+    }
   }
   const analyzed = analyzeDeclaredType(
     context,
@@ -2093,19 +2076,19 @@ const collectRowExpression = (
     false,
     lifetimeContext,
   )
-  return Object.freeze({
-    fact: Object.freeze({
+  return {
+    fact: {
       _tag: 'RequirementMemberExpression',
       capability: analyzed.fact,
       access: operand.access === 'Mutable' ? 'Exclusive' : 'Shared',
       role: collectedRequirementRole(context, operand),
       anchor,
-    }),
+    },
     diagnostics: analyzed.diagnostics,
-  })
+  }
 }
 
-const emptyRowExpression: RowExpressionDecision = Object.freeze({ _tag: 'EmptyRowExpression' })
+const emptyRowExpression: RowExpressionDecision = { _tag: 'EmptyRowExpression' }
 
 /** Joins one requirement row's members into a single row expression. */
 const rowExpressionOf = (
@@ -2122,36 +2105,36 @@ const rowExpressionOf = (
       (left, right) =>
         left._tag === 'EmptyRowExpression'
           ? right.fact
-          : Object.freeze({
+          : {
               _tag: 'UnionRowExpression',
-              operands: Object.freeze([left, right.fact]),
+              operands: [left, right.fact],
               anchor: row.anchor,
-            }),
+            },
       emptyRowExpression,
     )
 
 const emptyFailureRow = RowAlgebra.concrete(Type.failureRowPolicy(), [])
 const emptyRequirementRow = RowAlgebra.concrete(Type.requirementRowPolicy(), [])
 
-const absentFailureRow: FailureRowFact = Object.freeze({
+const absentFailureRow: FailureRowFact = {
   _tag: 'FailureRow',
-  members: Object.freeze([]),
-  parameters: Object.freeze([]),
-  failures: Object.freeze([]),
+  members: [],
+  parameters: [],
+  failures: [],
   available: true,
   expression: emptyRowExpression,
   row: emptyFailureRow,
-})
+}
 
-const absentRequirementRow: RequirementRowFact = Object.freeze({
+const absentRequirementRow: RequirementRowFact = {
   _tag: 'RequirementRow',
-  entries: Object.freeze([]),
-  parameters: Object.freeze([]),
-  requirements: Object.freeze([]),
+  entries: [],
+  parameters: [],
+  requirements: [],
   available: true,
   expression: emptyRowExpression,
   row: emptyRequirementRow,
-})
+}
 
 const collectFailureRow = (
   context: Context,
@@ -2162,8 +2145,7 @@ const collectFailureRow = (
   readonly fact: FailureRowFact
   readonly diagnostics: ReadonlyArray<Diagnostic.Located>
 } => {
-  if (failures === undefined)
-    return Object.freeze({ fact: absentFailureRow, diagnostics: noDiagnostics })
+  if (failures === undefined) return { fact: absentFailureRow, diagnostics: noDiagnostics }
   const expression = collectRowExpression(
     context,
     failures,
@@ -2194,19 +2176,19 @@ const collectFailureRow = (
     diagnostics.push(...analyzed.diagnostics)
     return [analyzed.fact]
   })
-  return Object.freeze({
-    fact: Object.freeze({
+  return {
+    fact: {
       _tag: 'FailureRow',
-      members: Object.freeze(members),
-      parameters: Object.freeze([]),
-      failures: Object.freeze([]),
+      members: members,
+      parameters: [],
+      failures: [],
       anchor: failures.anchor,
       available: false,
       expression: expression.fact,
       row: emptyFailureRow,
-    }),
-    diagnostics: Object.freeze(diagnostics),
-  })
+    },
+    diagnostics: diagnostics,
+  }
 }
 
 const collectRequirementRow = (
@@ -2218,8 +2200,7 @@ const collectRequirementRow = (
   readonly fact: RequirementRowFact
   readonly diagnostics: ReadonlyArray<Diagnostic.Located>
 } => {
-  if (row === undefined)
-    return Object.freeze({ fact: absentRequirementRow, diagnostics: noDiagnostics })
+  if (row === undefined) return { fact: absentRequirementRow, diagnostics: noDiagnostics }
   const diagnostics: Array<Diagnostic.Located> = []
   // Entry collection owns the source diagnostics; the expression facts are structural and must
   // not duplicate the same diagnostic occurrence.
@@ -2235,12 +2216,12 @@ const collectRequirementRow = (
     )
     diagnostics.push(...analyzed.diagnostics)
     return [
-      Object.freeze({
+      {
         capability: analyzed.fact,
         role: collectedRequirementRole(context, member),
         access: member.access === 'Mutable' ? ('Exclusive' as const) : ('Shared' as const),
         anchor: member.anchor,
-      }),
+      },
     ]
   })
   const parameters = row.members.flatMap((member): ReadonlyArray<Type.Parameter> => {
@@ -2261,19 +2242,19 @@ const collectRequirementRow = (
       )
     return []
   })
-  return Object.freeze({
-    fact: Object.freeze({
+  return {
+    fact: {
       _tag: 'RequirementRow',
-      entries: Object.freeze(entries),
-      parameters: Object.freeze(parameters),
-      requirements: Object.freeze([]),
+      entries: entries,
+      parameters: parameters,
+      requirements: [],
       anchor: row.anchor,
       available: false,
       expression,
       row: emptyRequirementRow,
-    }),
-    diagnostics: Object.freeze(diagnostics),
-  })
+    },
+    diagnostics: diagnostics,
+  }
 }
 
 /** Whether any operand below one row expression names a requirement-row binder. */
@@ -2308,8 +2289,7 @@ const collectConstraints = (
   readonly facts: ReadonlyArray<ConstraintFact>
   readonly diagnostics: ReadonlyArray<Diagnostic.Located>
 } => {
-  if (constraints.length === 0)
-    return Object.freeze({ facts: Object.freeze([]), diagnostics: noDiagnostics })
+  if (constraints.length === 0) return { facts: [], diagnostics: noDiagnostics }
   const diagnostics: Array<Diagnostic.Located> = []
   const facts = constraints.map((constraint): ConstraintFact => {
     if (constraint._tag === 'MembershipConstraint') {
@@ -2317,13 +2297,13 @@ const collectConstraints = (
       const selected = collectRowExpression(context, constraint.subject, typeParameters, domain)
       const sourceRow = collectRowExpression(context, constraint.source, typeParameters, domain)
       diagnostics.push(...selected.diagnostics, ...sourceRow.diagnostics)
-      return Object.freeze({
+      return {
         _tag: 'MembershipConstraint',
         domain,
         selected: selected.fact,
         source: sourceRow.fact,
         anchor: constraint.anchor,
-      })
+      }
     }
     // A provider written as a borrow selects a shared or exclusive mode; a bare type takes it.
     const provider = constraint.provider
@@ -2346,16 +2326,16 @@ const collectConstraints = (
     if (provider._tag !== 'ReferenceType') mode = 'Take'
     else if (provider.access === 'Mutable') mode = 'Exclusive'
     else mode = 'Shared'
-    return Object.freeze({
+    return {
       _tag: 'ProviderConstraint',
       mode,
       provider: analyzed.fact,
       selected: selected.fact,
       source: sourceRow.fact,
       anchor: constraint.anchor,
-    })
+    }
   })
-  return Object.freeze({ facts: Object.freeze(facts), diagnostics: Object.freeze(diagnostics) })
+  return { facts: facts, diagnostics: diagnostics }
 }
 
 /**
@@ -2373,24 +2353,23 @@ const missingName = (anchor: AuthoredHir.Anchor, origin: AuthoredHir.Origin): Au
 
 export const anonymousDeclaration = (
   node: Extract<AuthoredHir.Expression, { readonly _tag: 'CallableExpression' }>,
-): AuthoredHir.Declaration =>
-  Object.freeze({
-    _tag: 'Declaration',
-    owner: node.anchor.owner,
-    header: Object.freeze({
-      _tag: 'FunctionHeader',
-      anchor: node.anchor,
-      origin: node.origin,
-      causes: node.causes,
-      // A hidden callable has no authored name; the canonical identity supplies its spelling.
-      name: missingName(node.anchor, node.origin),
-      public: false,
-      contract: node.contract,
-      linkage: undefined,
-      properties: Object.freeze([]),
-    }),
-    body: Object.freeze({ _tag: 'CallableBody', block: node.body }),
-  })
+): AuthoredHir.Declaration => ({
+  _tag: 'Declaration',
+  owner: node.anchor.owner,
+  header: {
+    _tag: 'FunctionHeader',
+    anchor: node.anchor,
+    origin: node.origin,
+    causes: node.causes,
+    // A hidden callable has no authored name; the canonical identity supplies its spelling.
+    name: missingName(node.anchor, node.origin),
+    public: false,
+    contract: node.contract,
+    linkage: undefined,
+    properties: [],
+  },
+  body: { _tag: 'CallableBody', block: node.body },
+})
 
 /**
  * Collects the declaration-shaped contract owned by one anonymous callable occurrence.
@@ -2415,33 +2394,33 @@ export const collectAnonymousCallableDeclaration = (
   )
   const name: DeclaredName =
     node._tag === 'CallableExpression'
-      ? Object.freeze({ _tag: 'Present', spelling: canonical.name, anchor: node.anchor })
-      : Object.freeze({ _tag: 'Unavailable', anchor: node.anchor })
+      ? { _tag: 'Present', spelling: canonical.name, anchor: node.anchor }
+      : { _tag: 'Unavailable', anchor: node.anchor }
   if (node._tag !== 'CallableExpression')
-    return Object.freeze({
-      fact: Object.freeze({
+    return {
+      fact: {
         _tag: 'FunctionDeclaration',
         id,
-        canonical: Object.freeze({ _tag: 'Canonical', id: canonical }),
+        canonical: { _tag: 'Canonical', id: canonical },
         visibility: 'Private',
         phase: 'Runtime',
         functionKind: 'Ordinary',
         test: false,
         unsafe: false,
-        typeParameters: Object.freeze([...inheritedTypeParameters]),
+        typeParameters: [...inheritedTypeParameters],
         parameterCount: 0,
-        parameters: Object.freeze([]),
+        parameters: [],
         name,
         returnType: unavailable(node.anchor),
         failureRow: absentFailureRow,
         requirementRow: absentRequirementRow,
-        constraints: Object.freeze([]),
-        constraintContracts: Object.freeze([]),
+        constraints: [],
+        constraintContracts: [],
         owner: node.anchor.owner,
         anchor: node.anchor,
-      }),
+      },
       diagnostics: noDiagnostics,
-    })
+    }
   const declaration = anonymousDeclaration(node)
   const contract = node.contract
   const lifetimeContext = DeclarationLifetime.forHeader(
@@ -2459,10 +2438,10 @@ export const collectAnonymousCallableDeclaration = (
     readonly diagnostics: ReadonlyArray<Diagnostic.Located>
   } =
     contract.result === undefined
-      ? Object.freeze({
+      ? {
           fact: unavailable(node.anchor),
           diagnostics: noDiagnostics,
-        })
+        }
       : collectReturnType(
           context,
           declaration,
@@ -2479,8 +2458,8 @@ export const collectAnonymousCallableDeclaration = (
     environment,
     lifetimeContext,
   )
-  const parameterFacts = Object.freeze(parameters.map((parameter) => parameter.fact))
-  const diagnostics = Object.freeze([
+  const parameterFacts = parameters.map((parameter) => parameter.fact)
+  const diagnostics = [
     ...lifetimeContext.diagnostics,
     ...parameters.flatMap((parameter) => parameter.diagnostics),
     ...duplicateParameterDiagnostics(context, parameterFacts),
@@ -2490,22 +2469,22 @@ export const collectAnonymousCallableDeclaration = (
     ...(!contract.effect && failureRow.fact.anchor !== undefined
       ? [Diagnostic.failureChannelOnOrdinary(Location.at(failureRow.fact.anchor))]
       : []),
-  ])
-  return Object.freeze({
-    fact: Object.freeze({
+  ]
+  return {
+    fact: {
       _tag: 'FunctionDeclaration',
       lifetimeElaboration: lifetimeContext,
       id,
-      canonical: Object.freeze({ _tag: 'Canonical', id: canonical }),
+      canonical: { _tag: 'Canonical', id: canonical },
       visibility: 'Private',
       phase: 'Runtime',
       functionKind: contract.effect ? 'Effect' : 'Ordinary',
       test: false,
       unsafe: false,
-      typeParameters: Object.freeze([
+      typeParameters: [
         ...inheritedTypeParameters,
         ...implicitLifetimeParameters(lifetimeContext, environment),
-      ]),
+      ],
       parameterCount: parameterFacts.length,
       parameters: parameterFacts,
       name,
@@ -2513,13 +2492,13 @@ export const collectAnonymousCallableDeclaration = (
       ...(returnType.opaqueResult === undefined ? {} : { opaqueResult: returnType.opaqueResult }),
       failureRow: failureRow.fact,
       requirementRow: requirementRow.fact,
-      constraints: Object.freeze([]),
-      constraintContracts: Object.freeze([]),
+      constraints: [],
+      constraintContracts: [],
       owner: node.anchor.owner,
       anchor: node.anchor,
-    }),
+    },
     diagnostics,
-  })
+  }
 }
 
 const enumRepresentation = (
@@ -2529,37 +2508,37 @@ const enumRepresentation = (
 ): EnumRepresentationFact => {
   const representation = header.representation
   if (representation === undefined)
-    return Object.freeze({
+    return {
       _tag: 'Available',
       scalar: Scalar.defaultEnumRepresentation,
       explicit: false,
       anchor: header.anchor,
-    })
+    }
   if (representation._tag === 'MissingType' || representation._tag === 'InvalidType')
-    return Object.freeze({ _tag: 'Unavailable', explicit: true, anchor: representation.anchor })
+    return { _tag: 'Unavailable', explicit: true, anchor: representation.anchor }
   const segment = firstSegment(context, representation)
   const spelling = segment?.spelling ?? '<unavailable>'
   const scalar = Scalar.enumRepresentation(spelling)
   if (scalar !== undefined)
-    return Object.freeze({
+    return {
       _tag: 'Available',
       scalar,
       explicit: true,
       anchor: representation.anchor,
-    })
+    }
   const diagnostic = Diagnostic.unsupportedEnumRepresentation(
     spelling,
     Scalar.enumRepresentations().map((candidate) => candidate.spelling),
     Location.at(representation.anchor),
   )
   diagnostics.push(diagnostic)
-  return Object.freeze({
+  return {
     _tag: 'Unavailable',
     explicit: true,
     anchor: representation.anchor,
     spelling,
     cause: Diagnostic.identity(diagnostic),
-  })
+  }
 }
 
 const collectEnum = (
@@ -2596,30 +2575,27 @@ const collectEnum = (
     representationScalar === undefined ? undefined : Scalar.range(representationScalar, 64)
   let previous: bigint | undefined
   const members = header.members.map((member, ordinal): EnumMemberFact => {
-    const memberId: EnumMemberId = Object.freeze({ _tag: 'EnumMemberId', enum: id, ordinal })
+    const memberId: EnumMemberId = { _tag: 'EnumMemberId', enum: id, ordinal }
     const memberName = declaredName(context, member.name)
-    let memberCanonical: EnumMemberFact['canonical'] = Object.freeze({ _tag: 'Unidentified' })
+    let memberCanonical: EnumMemberFact['canonical'] = { _tag: 'Unidentified' }
     if (memberName._tag === 'Present') {
       const original = firstNames.get(memberName.spelling)
       if (original === undefined) {
         const canonicalMember =
           canonical._tag === 'Canonical'
-            ? Object.freeze({
+            ? {
                 _tag: 'CanonicalEnumMemberId' as const,
                 enum: canonical.id,
                 name: memberName.spelling,
-              })
+              }
             : undefined
-        firstNames.set(
-          memberName.spelling,
-          Object.freeze({
-            id: memberId,
-            anchor: memberName.anchor,
-            ...(canonicalMember === undefined ? {} : { canonical: canonicalMember }),
-          }),
-        )
+        firstNames.set(memberName.spelling, {
+          id: memberId,
+          anchor: memberName.anchor,
+          ...(canonicalMember === undefined ? {} : { canonical: canonicalMember }),
+        })
         if (canonicalMember !== undefined)
-          memberCanonical = Object.freeze({ _tag: 'Canonical', id: canonicalMember })
+          memberCanonical = { _tag: 'Canonical', id: canonicalMember }
       } else {
         const diagnostic = Diagnostic.duplicateEnumMemberName(
           memberName.spelling,
@@ -2628,11 +2604,11 @@ const collectEnum = (
         )
         enumDiagnostics.push(diagnostic)
         if (original.canonical !== undefined)
-          memberCanonical = Object.freeze({
+          memberCanonical = {
             _tag: 'Duplicate',
             original: original.canonical,
             cause: Diagnostic.identity(diagnostic),
-          })
+          }
       }
     }
     const explicit = member.value
@@ -2648,7 +2624,7 @@ const collectEnum = (
     let discriminant: EnumDiscriminantFact
     const discriminantAnchor = explicit?.anchor ?? member.anchor
     if (attempted === undefined || range === undefined || representationScalar === undefined) {
-      discriminant = Object.freeze({
+      discriminant = {
         _tag: 'Unavailable',
         source: sourceKind,
         anchor: discriminantAnchor,
@@ -2656,7 +2632,7 @@ const collectEnum = (
         ...(representation._tag === 'Unavailable' && representation.cause !== undefined
           ? { cause: representation.cause }
           : {}),
-      })
+      }
     } else if (
       sourceKind === 'Explicit' &&
       representationScalar.signedness === 'Unsigned' &&
@@ -2668,13 +2644,13 @@ const collectEnum = (
         Location.at(discriminantAnchor),
       )
       enumDiagnostics.push(diagnostic)
-      discriminant = Object.freeze({
+      discriminant = {
         _tag: 'Unavailable',
         source: sourceKind,
         anchor: discriminantAnchor,
         attempted,
         cause: Diagnostic.identity(diagnostic),
-      })
+      }
     } else if (attempted < range.minimum || attempted > range.maximum) {
       const diagnostic =
         sourceKind === 'Explicit'
@@ -2692,23 +2668,23 @@ const collectEnum = (
               Location.at(member.anchor),
             )
       enumDiagnostics.push(diagnostic)
-      discriminant = Object.freeze({
+      discriminant = {
         _tag: 'Unavailable',
         source: sourceKind,
         anchor: discriminantAnchor,
         attempted,
         cause: Diagnostic.identity(diagnostic),
-      })
+      }
     } else {
       const original = firstDiscriminants.get(attempted)
       if (original === undefined) {
         firstDiscriminants.set(attempted, member.anchor)
-        discriminant = Object.freeze({
+        discriminant = {
           _tag: 'Available',
           value: attempted,
           source: sourceKind,
           anchor: discriminantAnchor,
-        })
+        }
       } else {
         const diagnostic = Diagnostic.duplicateEnumDiscriminant(
           attempted,
@@ -2716,13 +2692,13 @@ const collectEnum = (
           Location.at(member.anchor),
         )
         enumDiagnostics.push(diagnostic)
-        discriminant = Object.freeze({
+        discriminant = {
           _tag: 'Unavailable',
           source: sourceKind,
           anchor: discriminantAnchor,
           attempted,
           cause: Diagnostic.identity(diagnostic),
-        })
+        }
       }
     }
     previous =
@@ -2732,14 +2708,14 @@ const collectEnum = (
       attempted <= range.maximum
         ? attempted
         : undefined
-    return Object.freeze({
+    return {
       _tag: 'EnumMember',
       id: memberId,
       canonical: memberCanonical,
       name: memberName,
       discriminant,
       anchor: member.anchor,
-    })
+    }
   })
   diagnostics.push(...enumDiagnostics)
   const associatedOperation = enumValueOperation({ canonical, representation })
@@ -2752,28 +2728,24 @@ const collectEnum = (
         member.canonical._tag === 'Canonical' &&
         member.discriminant._tag === 'Available',
     )
-  return Object.freeze({
+  return {
     _tag: 'EnumDeclaration',
     id,
     canonical,
     visibility,
-    typeParameters: Object.freeze([]),
+    typeParameters: [],
     name,
     representation,
-    members: Object.freeze(members),
-    associatedOperations: Object.freeze(
-      associatedOperation === undefined ? [] : [associatedOperation],
-    ),
+    members: members,
+    associatedOperations: associatedOperation === undefined ? [] : [associatedOperation],
     validity: valid
-      ? Object.freeze({ _tag: 'Valid' })
-      : Object.freeze({
+      ? { _tag: 'Valid' }
+      : {
           _tag: 'Invalid',
-          causes: Object.freeze(
-            enumDiagnostics.map((diagnostic) => Diagnostic.identity(diagnostic)),
-          ),
-        }),
+          causes: enumDiagnostics.map((diagnostic) => Diagnostic.identity(diagnostic)),
+        },
     anchor: declaration.header.anchor,
-  })
+  }
 }
 
 const collectUnion = (
@@ -2804,30 +2776,27 @@ const collectUnion = (
     }
   >()
   const variants = header.variants.map((variant, ordinal): UnionVariantFact => {
-    const variantId: UnionVariantId = Object.freeze({ _tag: 'UnionVariantId', union: id, ordinal })
+    const variantId: UnionVariantId = { _tag: 'UnionVariantId', union: id, ordinal }
     const variantName = declaredName(context, variant.name)
-    let variantCanonical: UnionVariantFact['canonical'] = Object.freeze({ _tag: 'Unidentified' })
+    let variantCanonical: UnionVariantFact['canonical'] = { _tag: 'Unidentified' }
     if (variantName._tag === 'Present') {
       const original = first.get(variantName.spelling)
       if (original === undefined) {
         const canonicalVariant =
           canonical._tag === 'Canonical'
-            ? Object.freeze({
+            ? {
                 _tag: 'CanonicalUnionVariantId' as const,
                 union: canonical.id,
                 name: variantName.spelling,
-              })
+              }
             : undefined
-        first.set(
-          variantName.spelling,
-          Object.freeze({
-            id: variantId,
-            anchor: variantName.anchor,
-            ...(canonicalVariant === undefined ? {} : { canonical: canonicalVariant }),
-          }),
-        )
+        first.set(variantName.spelling, {
+          id: variantId,
+          anchor: variantName.anchor,
+          ...(canonicalVariant === undefined ? {} : { canonical: canonicalVariant }),
+        })
         if (canonicalVariant !== undefined)
-          variantCanonical = Object.freeze({ _tag: 'Canonical', id: canonicalVariant })
+          variantCanonical = { _tag: 'Canonical', id: canonicalVariant }
       } else {
         const diagnostic = Diagnostic.duplicateUnionVariant(
           variantName.spelling,
@@ -2836,17 +2805,17 @@ const collectUnion = (
         )
         unionDiagnostics.push(diagnostic)
         if (original.canonical !== undefined)
-          variantCanonical = Object.freeze({
+          variantCanonical = {
             _tag: 'Duplicate',
             original: original.canonical,
             cause: Diagnostic.identity(diagnostic),
-          })
+          }
       }
     }
     const collected = collectFields(
       context,
       variant.fields,
-      Object.freeze({ _tag: 'UnionVariantFieldOwnerId', variant: variantId }),
+      { _tag: 'UnionVariantFieldOwnerId', variant: variantId },
       typeParameters.environment,
       typeParameters.lifetimeContext,
     )
@@ -2863,7 +2832,7 @@ const collectUnion = (
       unionDiagnostics.push(
         Diagnostic.emptyUnionVariant(variantName.spelling, Location.at(variant.anchor)),
       )
-    return Object.freeze({
+    return {
       _tag: 'UnionVariant',
       id: variantId,
       canonical: variantCanonical,
@@ -2871,7 +2840,7 @@ const collectUnion = (
       kind: variant.fields.length === 0 ? 'Unit' : 'Fields',
       fields: collected.fields,
       anchor: variant.anchor,
-    })
+    }
   })
   diagnostics.push(...unionDiagnostics)
   const valid =
@@ -2883,7 +2852,7 @@ const collectUnion = (
         variant.canonical._tag === 'Canonical' &&
         variant.fields.every((field) => field.state._tag === 'Unique'),
     )
-  return Object.freeze({
+  return {
     _tag: 'UnionDeclaration',
     lifetimeElaboration: typeParameters.lifetimeContext,
     id,
@@ -2891,18 +2860,16 @@ const collectUnion = (
     visibility,
     typeParameters: typeParameters.facts,
     name,
-    variants: Object.freeze(variants),
-    dependency: Object.freeze({ _tag: 'Available', types: Object.freeze([]) }),
+    variants: variants,
+    dependency: { _tag: 'Available', types: [] },
     validity: valid
-      ? Object.freeze({ _tag: 'Valid' })
-      : Object.freeze({
+      ? { _tag: 'Valid' }
+      : {
           _tag: 'Invalid',
-          causes: Object.freeze(
-            unionDiagnostics.map((diagnostic) => Diagnostic.identity(diagnostic)),
-          ),
-        }),
+          causes: unionDiagnostics.map((diagnostic) => Diagnostic.identity(diagnostic)),
+        },
     anchor: declaration.header.anchor,
-  })
+  }
 }
 
 /** The text an authored ABI or symbol operand carries; a computed expression has none. */
@@ -2920,24 +2887,23 @@ const collectStructLayout = (
   readonly diagnostics: ReadonlyArray<Diagnostic.Located>
 } => {
   const marker = header.abi
-  if (marker === undefined)
-    return Object.freeze({ fact: Object.freeze({ _tag: 'Silk' }), diagnostics: noDiagnostics })
+  if (marker === undefined) return { fact: { _tag: 'Silk' }, diagnostics: noDiagnostics }
   const abiSpan = context.spanOf(marker.anchor)
   const abi = literalText(context, marker)
   if (abi === undefined)
-    return Object.freeze({
-      fact: Object.freeze({ _tag: 'InvalidForeign', abi: undefined, abiSpan }),
+    return {
+      fact: { _tag: 'InvalidForeign', abi: undefined, abiSpan },
       diagnostics: noDiagnostics,
-    })
+    }
   if (abi === 'C')
-    return Object.freeze({
-      fact: Object.freeze({ _tag: 'Foreign', abi, abiSpan }),
+    return {
+      fact: { _tag: 'Foreign', abi, abiSpan },
       diagnostics: noDiagnostics,
-    })
-  return Object.freeze({
-    fact: Object.freeze({ _tag: 'InvalidForeign', abi, abiSpan }),
-    diagnostics: Object.freeze([Diagnostic.unsupportedForeignAbi(abi, Location.at(marker.anchor))]),
-  })
+    }
+  return {
+    fact: { _tag: 'InvalidForeign', abi, abiSpan },
+    diagnostics: [Diagnostic.unsupportedForeignAbi(abi, Location.at(marker.anchor))],
+  }
 }
 
 /** The header shapes a foreign or exported function may not carry, with the written wording. */
@@ -2979,7 +2945,7 @@ const foreignRestrictions = (
     found.push(['body', body.block.anchor])
   if (direction === 'Export' && contract.unsafe)
     found.push(['unsafe', contract.unsafeAnchor ?? contract.anchor])
-  return Object.freeze(found)
+  return found
 }
 
 /**
@@ -3073,15 +3039,15 @@ const collectForeign = (
       ),
     )
   diagnostics.push(...behavior.diagnostics)
-  return Object.freeze({
-    fact: Object.freeze({
+  return {
+    fact: {
       abi: 'C' as const,
       symbol,
       contract: behavior.contract,
       variadic: contract.variadic,
-    }),
-    diagnostics: Object.freeze(diagnostics),
-  })
+    },
+    diagnostics: diagnostics,
+  }
 }
 
 /** Collects the ABI and symbol spelling shared by imported and exported data declarations. */
@@ -3110,10 +3076,10 @@ const collectForeignStatic = (
     diagnostics.push(Diagnostic.invalidForeignSymbol(symbol, symbolSpan))
   else if (ForeignSymbol.isReserved(symbol))
     diagnostics.push(Diagnostic.reservedForeignSymbol(symbol, symbolSpan))
-  return Object.freeze({
-    fact: Object.freeze({ abi: 'C' as const, symbol }),
-    diagnostics: Object.freeze(diagnostics),
-  })
+  return {
+    fact: { abi: 'C' as const, symbol },
+    diagnostics: diagnostics,
+  }
 }
 
 /** The declaration kinds that occupy an ordinal in the module's own declaration sequence. */
@@ -3135,7 +3101,7 @@ const isOwnDeclaration = (header: AuthoredHir.DeclarationHeader): boolean =>
 const implMembers = (
   declaration: AuthoredHir.Declaration,
 ): ReadonlyArray<AuthoredHir.Declaration> =>
-  declaration.body._tag === 'MembersBody' ? declaration.body.members : Object.freeze([])
+  declaration.body._tag === 'MembersBody' ? declaration.body.members : []
 
 /** A function header's linkage direction, which distinguishes `extern` from `export`. */
 const linkageDirection = (
@@ -3185,13 +3151,13 @@ const collectModule = (module: ModuleClosure.Module): ModuleHeaders => {
           return parameter.bounds.flatMap((bound) => {
             const application = bound._tag === 'UnresolvedBound' ? bound.application : undefined
             if (application === undefined) return []
-            return Object.freeze({
+            return {
               _tag: 'ConformanceRequirement' as const,
               parameter: parameter.type,
               spelling: bound.spelling,
               capability: application,
               anchor: bound.path.anchor,
-            })
+            }
           })
         },
       )
@@ -3200,13 +3166,12 @@ const collectModule = (module: ModuleClosure.Module): ModuleHeaders => {
         if (member.header._tag !== 'ImplAliasHeader') return []
         const path = typePathOf(context, member.header.target)
         return [
-          Object.freeze({
+          {
             name: declaredName(context, member.header.name),
-            target:
-              path ?? Object.freeze({ _tag: 'Unavailable' as const, anchor: member.header.anchor }),
+            target: path ?? { _tag: 'Unavailable' as const, anchor: member.header.anchor },
             form: 'Mapped' as const,
             anchor: member.header.anchor,
-          }),
+          },
         ]
       })
       const providerSegment =
@@ -3218,35 +3183,35 @@ const collectModule = (module: ModuleClosure.Module): ModuleHeaders => {
           const name = declaredName(context, member.header.name)
           if (name._tag !== 'Present' || providerSegment === undefined)
             return [
-              Object.freeze({
+              {
                 name,
-                target: Object.freeze({
+                target: {
                   _tag: 'Unavailable' as const,
                   anchor: member.header.anchor,
-                }),
+                },
                 form: 'Inline' as const,
                 anchor: member.header.anchor,
-              }),
+              },
             ]
           const targetName = `impl@${ordinal}.${name.spelling}`
           return [
-            Object.freeze({
+            {
               name,
-              target: Object.freeze({
+              target: {
                 _tag: 'TypePath' as const,
                 spelling: `${providerSegment.spelling}.${targetName}`,
-                segments: Object.freeze([
-                  Object.freeze({
+                segments: [
+                  {
                     spelling: providerSegment.spelling,
                     anchor: providerSegment.anchor,
-                  }),
-                  Object.freeze({ spelling: targetName, anchor: name.anchor }),
-                ]),
+                  },
+                  { spelling: targetName, anchor: name.anchor },
+                ],
                 anchor: member.header.anchor,
-              }),
+              },
               form: 'Inline' as const,
               anchor: member.header.anchor,
-            }),
+            },
           ]
         },
       )
@@ -3278,13 +3243,13 @@ const collectModule = (module: ModuleClosure.Module): ModuleHeaders => {
                 hookLifetimes,
               )
               diagnostics.push(...failure.diagnostics, ...requirementRow.diagnostics)
-              return Object.freeze({
+              return {
                 _tag: 'DropHookDeclaration' as const,
-                name: Object.freeze({
+                name: {
                   _tag: 'Present' as const,
                   spelling: 'drop',
                   anchor: hookHeader.name.anchor,
-                }),
+                },
                 functionKind: hookHeader.contract.effect
                   ? ('Effect' as const)
                   : ('Ordinary' as const),
@@ -3292,7 +3257,7 @@ const collectModule = (module: ModuleClosure.Module): ModuleHeaders => {
                 parameterCount: hookHeader.contract.parameters.length,
                 parameterName:
                   parameter === undefined
-                    ? Object.freeze({ _tag: 'Unavailable' as const, anchor: hookHeader.anchor })
+                    ? { _tag: 'Unavailable' as const, anchor: hookHeader.anchor }
                     : declaredName(context, parameter.name),
                 parameterType:
                   parameter === undefined
@@ -3317,50 +3282,50 @@ const collectModule = (module: ModuleClosure.Module): ModuleHeaders => {
                 failureRow: failure.fact,
                 requirementRow: requirementRow.fact,
                 anchor: hookHeader.anchor,
-              })
+              }
             })()
-      return Object.freeze({
+      return {
         _tag: 'ConformanceDeclaration',
         lifetimeElaboration: collected.lifetimeContext,
         module: moduleName,
         ordinal,
         self: selfType,
         typeParameters: collected.facts,
-        requirements: Object.freeze(requirements),
+        requirements: requirements,
         capability,
         provider,
         visibility: 'Public',
-        operations: Object.freeze([...mappedOperations, ...inlineOperations]),
+        operations: [...mappedOperations, ...inlineOperations],
         ...(hook === undefined ? {} : { hook }),
         // Coherence and termination are program-wide questions, so both stay unanswered until
         // every module's headers have resolved.
-        coherence: Object.freeze({ _tag: 'Coherent' as const }),
-        termination: Object.freeze({ _tag: 'UnavailableTermination' as const }),
-        validity: Object.freeze({ _tag: 'UncheckedConformance' as const }),
+        coherence: { _tag: 'Coherent' as const },
+        termination: { _tag: 'UnavailableTermination' as const },
+        validity: { _tag: 'UncheckedConformance' as const },
         anchor: header.anchor,
-      })
+      }
     })
   let nestedDeclarationOrdinal = own.length
   const ownMembers = own.map((declaration, ordinal): MemberFact => {
     const header = declaration.header
-    const id: DeclarationId = Object.freeze({
+    const id: DeclarationId = {
       _tag: 'DeclarationId',
       sourceId: moduleName,
       ordinal,
-    })
+    }
     const name = headerName(context, header)
     let canonical: CanonicalState
-    if (name._tag !== 'Present') canonical = Object.freeze({ _tag: 'Unidentified' })
+    if (name._tag !== 'Present') canonical = { _tag: 'Unidentified' }
     else {
       const original = first.get(name.spelling)
       if (original === undefined) {
-        const canonicalId: CanonicalId = Object.freeze({
+        const canonicalId: CanonicalId = {
           _tag: 'CanonicalDeclarationId',
           module: moduleName,
           name: name.spelling,
-        })
-        first.set(name.spelling, Object.freeze({ id: canonicalId, anchor: name.anchor }))
-        canonical = Object.freeze({ _tag: 'Canonical', id: canonicalId })
+        }
+        first.set(name.spelling, { id: canonicalId, anchor: name.anchor })
+        canonical = { _tag: 'Canonical', id: canonicalId }
       } else {
         const diagnostic = Diagnostic.duplicateDeclarationName(
           name.spelling,
@@ -3368,11 +3333,11 @@ const collectModule = (module: ModuleClosure.Module): ModuleHeaders => {
           Location.at(name.anchor),
         )
         diagnostics.push(diagnostic)
-        canonical = Object.freeze({
+        canonical = {
           _tag: 'Duplicate',
           original: original.id,
           cause: Diagnostic.identity(diagnostic),
-        })
+        }
       }
     }
     const visibility: 'Private' | 'Public' =
@@ -3393,17 +3358,17 @@ const collectModule = (module: ModuleClosure.Module): ModuleHeaders => {
         ? unavailableResolution(header.anchor)
         : analyzeDeclaredType(context, header.target)
       diagnostics.push(...target.diagnostics)
-      return Object.freeze({
+      return {
         _tag: 'AliasDeclaration',
         id,
         canonical,
         visibility,
-        typeParameters: Object.freeze([]),
+        typeParameters: [],
         name,
         target: target.fact,
         ...(parameterized ? { parameterList: header.generics[0]?.anchor ?? header.anchor } : {}),
         anchor: header.anchor,
-      })
+      }
     }
     if (header._tag === 'ConstantHeader' || header._tag === 'PackageParameterHeader') {
       const declaredType =
@@ -3419,19 +3384,19 @@ const collectModule = (module: ModuleClosure.Module): ModuleHeaders => {
         id,
         canonical,
         visibility,
-        typeParameters: Object.freeze([]),
+        typeParameters: [],
         name,
         declaredType: declaredType.fact,
         initializerTemplate: staticExpressionTemplate(lowered, declaration, initializerExpression),
         literal:
           header._tag === 'PackageParameterHeader'
-            ? Object.freeze({ _tag: 'Unavailable' as const, anchor: initializerExpression.anchor })
+            ? { _tag: 'Unavailable' as const, anchor: initializerExpression.anchor }
             : constantLiteral(context, initializerExpression),
         initializer: initializerExpression,
         anchor: header.anchor,
       }
       return header._tag === 'PackageParameterHeader'
-        ? Object.freeze({
+        ? {
             ...base,
             _tag: 'PackageParameterDeclaration',
             hasDefault: initializer !== undefined,
@@ -3441,8 +3406,8 @@ const collectModule = (module: ModuleClosure.Module): ModuleHeaders => {
                   predicate,
                   predicateTemplate: staticExpressionTemplate(lowered, declaration, predicate),
                 }),
-          })
-        : Object.freeze({ ...base, _tag: 'ConstantDeclaration' })
+          }
+        : { ...base, _tag: 'ConstantDeclaration' }
     }
     if (header._tag === 'StaticHeader') {
       const declaredType = analyzeDeclaredType(context, header.type)
@@ -3450,12 +3415,12 @@ const collectModule = (module: ModuleClosure.Module): ModuleHeaders => {
       diagnostics.push(...declaredType.diagnostics, ...foreign.diagnostics)
       const initializer =
         declaration.body._tag === 'InitializerBody' ? declaration.body.value : undefined
-      return Object.freeze({
+      return {
         _tag: 'ForeignStaticDeclaration',
         id,
         canonical,
         visibility: 'Private',
-        typeParameters: Object.freeze([]),
+        typeParameters: [],
         name,
         direction: header.linkage.direction,
         foreign: foreign.fact,
@@ -3468,18 +3433,18 @@ const collectModule = (module: ModuleClosure.Module): ModuleHeaders => {
               initializer,
             }),
         anchor: header.anchor,
-      })
+      }
     }
     if (header._tag === 'RoleHeader')
-      return Object.freeze({
+      return {
         _tag: 'RoleDeclaration',
         id,
         canonical,
         visibility,
-        typeParameters: Object.freeze([]),
+        typeParameters: [],
         name,
         anchor: header.anchor,
-      })
+      }
     if (header._tag === 'EnumHeader')
       return collectEnum(context, declaration, header, id, canonical, visibility, name, diagnostics)
     if (header._tag === 'UnionHeader')
@@ -3499,12 +3464,12 @@ const collectModule = (module: ModuleClosure.Module): ModuleHeaders => {
       const collected = collectFields(
         context,
         header.fields,
-        Object.freeze({ _tag: 'StructFieldOwnerId', declaration: id }),
+        { _tag: 'StructFieldOwnerId', declaration: id },
         typeParameters.environment,
         typeParameters.lifetimeContext,
       )
       diagnostics.push(...layout.diagnostics, ...collected.diagnostics)
-      return Object.freeze({
+      return {
         _tag: 'StructDeclaration',
         lifetimeElaboration: typeParameters.lifetimeContext,
         id,
@@ -3521,26 +3486,26 @@ const collectModule = (module: ModuleClosure.Module): ModuleHeaders => {
           : {}),
         aggregateKind: 'Named',
         fields: collected.fields,
-        dependency: Object.freeze({ _tag: 'Available', types: Object.freeze([]) }),
+        dependency: { _tag: 'Available', types: [] },
         anchor: header.anchor,
-      })
+      }
     }
     if (header._tag === 'TupleHeader') {
       const collected = collectPositionalFields(
         context,
         header.elements,
-        Object.freeze({ _tag: 'StructFieldOwnerId', declaration: id }),
+        { _tag: 'StructFieldOwnerId', declaration: id },
         typeParameters.environment,
         typeParameters.lifetimeContext,
       )
       diagnostics.push(...collected.diagnostics)
-      return Object.freeze({
+      return {
         _tag: 'StructDeclaration',
         lifetimeElaboration: typeParameters.lifetimeContext,
         id,
         canonical,
         visibility,
-        layout: Object.freeze({ _tag: 'Silk' }),
+        layout: { _tag: 'Silk' },
         typeParameters: typeParameters.facts,
         name,
         ...(name._tag === 'Present'
@@ -3548,9 +3513,9 @@ const collectModule = (module: ModuleClosure.Module): ModuleHeaders => {
           : {}),
         aggregateKind: 'Positional',
         fields: collected.fields,
-        dependency: Object.freeze({ _tag: 'Available', types: Object.freeze([]) }),
+        dependency: { _tag: 'Available', types: [] },
         anchor: header.anchor,
-      })
+      }
     }
     if (header._tag === 'ServiceHeader' || header._tag === 'InterfaceHeader') {
       const ownerName = name._tag === 'Present' ? name.spelling : `#${ordinal}`
@@ -3569,29 +3534,29 @@ const collectModule = (module: ModuleClosure.Module): ModuleHeaders => {
           const operationHeader = operation.header
           if (operationHeader._tag !== 'OperationHeader')
             throw new RangeError('Service operation lost its operation header')
-          const operationId: DeclarationId = Object.freeze({
+          const operationId: DeclarationId = {
             _tag: 'DeclarationId',
             sourceId: moduleName,
             ordinal: nestedDeclarationOrdinal,
-          })
+          }
           nestedDeclarationOrdinal += 1
           const operationName = declaredName(context, operationHeader.name)
           let operationState: ServiceOperationState
           if (operationName._tag !== 'Present') {
-            operationState = Object.freeze({ _tag: 'Unidentified' })
+            operationState = { _tag: 'Unidentified' }
           } else {
             const original = operationFirst.get(operationName.spelling)
             if (original === undefined) {
-              const serviceOperationId: ServiceOperationId = Object.freeze({
+              const serviceOperationId: ServiceOperationId = {
                 _tag: 'ServiceOperationId',
                 service: id,
                 name: operationName.spelling,
+              }
+              operationFirst.set(operationName.spelling, {
+                id: serviceOperationId,
+                anchor: operationName.anchor,
               })
-              operationFirst.set(
-                operationName.spelling,
-                Object.freeze({ id: serviceOperationId, anchor: operationName.anchor }),
-              )
-              operationState = Object.freeze({ _tag: 'Unique', id: serviceOperationId })
+              operationState = { _tag: 'Unique', id: serviceOperationId }
             } else {
               const diagnostic = Diagnostic.duplicateDeclarationName(
                 operationName.spelling,
@@ -3599,11 +3564,11 @@ const collectModule = (module: ModuleClosure.Module): ModuleHeaders => {
                 Location.at(operationName.anchor),
               )
               diagnostics.push(diagnostic)
-              operationState = Object.freeze({
+              operationState = {
                 _tag: 'Duplicate',
                 original: original.id,
                 cause: Diagnostic.identity(diagnostic),
-              })
+              }
             }
           }
           const operationTypeParameters = collectTypeParameters(
@@ -3637,15 +3602,15 @@ const collectModule = (module: ModuleClosure.Module): ModuleHeaders => {
             readonly diagnostics: ReadonlyArray<Diagnostic.Located>
           } =
             result === undefined
-              ? Object.freeze({
-                  fact: Object.freeze({
+              ? {
+                  fact: {
                     _tag: 'Resolved' as const,
                     type: Type.unit,
                     spelling: '()',
                     anchor: operationHeader.contract.anchor,
-                  }),
+                  },
                   diagnostics: noDiagnostics,
-                })
+                }
               : collectReturnType(
                   context,
                   operation,
@@ -3672,7 +3637,7 @@ const collectModule = (module: ModuleClosure.Module): ModuleHeaders => {
             operationHeader.contract.constraints,
             environment,
           )
-          const parameterFacts = Object.freeze(parameters.map((parameter) => parameter.fact))
+          const parameterFacts = parameters.map((parameter) => parameter.fact)
           const functionKind = operationHeader.contract.effect
             ? ('Effect' as const)
             : ('Ordinary' as const)
@@ -3715,9 +3680,7 @@ const collectModule = (module: ModuleClosure.Module): ModuleHeaders => {
               ),
             )
           const staticProperties: ReadonlyArray<Type.SealedStaticProperty> =
-            validNonParking.length === 0
-              ? Object.freeze([])
-              : Object.freeze(['Intrinsic.NonParking'])
+            validNonParking.length === 0 ? [] : ['Intrinsic.NonParking']
           const operatorName = operationHeader.operator
           const operatorSpelling =
             operatorName === undefined ? undefined : nameText(context, operatorName)
@@ -3762,7 +3725,7 @@ const collectModule = (module: ModuleClosure.Module): ModuleHeaders => {
             diagnostics.push(
               Diagnostic.failureChannelOnOrdinary(Location.at(failureRow.fact.anchor)),
             )
-          return Object.freeze({
+          return {
             _tag: 'ServiceOperation',
             id: operationId,
             state: operationState,
@@ -3770,13 +3733,13 @@ const collectModule = (module: ModuleClosure.Module): ModuleHeaders => {
             unsafe: operationHeader.contract.unsafe,
             staticProperties,
             typeParameters: operationTypeParameters.facts,
-            lifetimeElaboration: Object.freeze({
+            lifetimeElaboration: {
               ...operationTypeParameters.lifetimeContext,
               parameters: new Map([
                 ...operationTypeParameters.lifetimeContext.parameters,
                 ...contractEnvironment,
               ]),
-            }),
+            },
             parameterCount: parameterFacts.length,
             parameters: parameterFacts,
             ...(operatorName !== undefined &&
@@ -3784,10 +3747,10 @@ const collectModule = (module: ModuleClosure.Module): ModuleHeaders => {
             header._tag === 'InterfaceHeader' &&
             operationTypeParameters.facts.every((parameter) => parameter.type.kind === 'Lifetime')
               ? {
-                  operator: Object.freeze({
+                  operator: {
                     operator: selectedOperator,
                     anchor: operatorName.anchor,
-                  }),
+                  },
                 }
               : {}),
             name: operationName,
@@ -3798,9 +3761,9 @@ const collectModule = (module: ModuleClosure.Module): ModuleHeaders => {
             failureRow: failureRow.fact,
             requirementRow: requirementRow.fact,
             constraints: constraints.facts,
-            constraintContracts: Object.freeze([]),
+            constraintContracts: [],
             anchor: operationHeader.anchor,
-          })
+          }
         },
       )
       const shared = {
@@ -3810,25 +3773,25 @@ const collectModule = (module: ModuleClosure.Module): ModuleHeaders => {
         self: selfType,
         typeParameters: typeParameters.facts,
         name,
-        operations: Object.freeze(operations),
+        operations: operations,
         anchor: header.anchor,
       }
       const contract =
         header._tag === 'InterfaceHeader'
-          ? Object.freeze({
+          ? {
               _tag: 'InterfaceDeclaration' as const,
               dependencyEligible: false as const,
               ...shared,
-            })
-          : Object.freeze({
+            }
+          : {
               _tag: 'ServiceDeclaration' as const,
               dependencyEligible: true as const,
               ...shared,
-            })
-      return Object.freeze({
+            }
+      return {
         ...contract,
         operationContracts: interfaceOperationContracts(contract, operations),
-      })
+      }
     }
     if (header._tag !== 'FunctionHeader')
       throw new RangeError(`Declaration collection reached an unexpected header ${header._tag}`)
@@ -3849,15 +3812,15 @@ const collectModule = (module: ModuleClosure.Module): ModuleHeaders => {
       readonly diagnostics: ReadonlyArray<Diagnostic.Located>
     } =
       contract.result === undefined
-        ? Object.freeze({
-            fact: Object.freeze({
+        ? {
+            fact: {
               _tag: 'Resolved' as const,
               type: Type.unit,
               spelling: '()',
               anchor: contract.anchor,
-            }),
+            },
             diagnostics: noDiagnostics,
-          })
+          }
         : collectReturnType(
             context,
             declaration,
@@ -3886,12 +3849,10 @@ const collectModule = (module: ModuleClosure.Module): ModuleHeaders => {
       typeParameters.environment,
     )
     const staticFunction = contract.static
-    const facts = Object.freeze(
-      parameters.map((parameter) =>
-        staticFunction && parameter.fact.phase !== 'Static'
-          ? Object.freeze({ ...parameter.fact, phase: 'Static' as const })
-          : parameter.fact,
-      ),
+    const facts = parameters.map((parameter) =>
+      staticFunction && parameter.fact.phase !== 'Static'
+        ? { ...parameter.fact, phase: 'Static' as const }
+        : parameter.fact,
     )
     diagnostics.push(
       ...parameters.flatMap((parameter) => parameter.diagnostics),
@@ -3956,7 +3917,7 @@ const collectModule = (module: ModuleClosure.Module): ModuleHeaders => {
     if (native !== undefined) diagnostics.push(...native.diagnostics)
     const retainedBody =
       foreign === undefined ? bodyTemplate(lowered, declaration, staticFunction) : undefined
-    return Object.freeze({
+    return {
       _tag: 'FunctionDeclaration',
       lifetimeElaboration: typeParameters.lifetimeContext,
       id,
@@ -3988,11 +3949,11 @@ const collectModule = (module: ModuleClosure.Module): ModuleHeaders => {
       failureRow: failureRow.fact,
       requirementRow: requirementRow.fact,
       constraints: constraints.facts,
-      constraintContracts: Object.freeze([]),
+      constraintContracts: [],
       ...(retainedBody === undefined ? {} : { bodyTemplate: retainedBody }),
       owner: declaration.owner,
       anchor: header.anchor,
-    })
+    }
   })
   // Owner binders precede the member's own, so `Option.map<i32, i64>` reads T then U; a binder
   // the member refined carries the member's bounds under the head's identity.
@@ -4008,7 +3969,7 @@ const collectModule = (module: ModuleClosure.Module): ModuleHeaders => {
   ): ReadonlyArray<TypeParameterFact> => {
     const mentioned = mentionedNames(context, member)
     const namesSelf = mentioned.has('Self')
-    return Object.freeze([
+    return [
       ...headBinders
         .filter(
           (parameter) =>
@@ -4023,13 +3984,13 @@ const collectModule = (module: ModuleClosure.Module): ModuleHeaders => {
               : undefined
           return refined === undefined
             ? parameter
-            : Object.freeze({
+            : {
                 ...parameter,
-                bounds: Object.freeze([...parameter.bounds, ...refined.bounds]),
-              })
+                bounds: [...parameter.bounds, ...refined.bounds],
+              }
         }),
       ...built.typeParameters,
-    ])
+    ]
   }
   // A function declared inside an impl block, conformance or inherent, elaborates and lowers as an
   // ordinary declaration carrying the impl's binders ahead of its own and `Self` bound to the
@@ -4047,18 +4008,18 @@ const collectModule = (module: ModuleClosure.Module): ModuleHeaders => {
     // `Self` is in scope for the member's own binder bounds (`U: Like<Self>`) exactly as the
     // head binders are, so it rides along as a synthetic enclosing binder.
     const selfBinder: ReadonlyArray<TypeParameterFact> = [
-      Object.freeze({
+      {
         _tag: 'TypeParameterDeclaration' as const,
         type: self,
-        name: Object.freeze({
+        name: {
           _tag: 'Present' as const,
           spelling: 'Self',
           anchor: header.anchor,
-        }),
+        },
         anchor: header.anchor,
-        bounds: Object.freeze([]),
-        staticProperties: Object.freeze([]),
-      }),
+        bounds: [],
+        staticProperties: [],
+      },
     ]
     const collected = collectTypeParameters(
       context,
@@ -4109,15 +4070,15 @@ const collectModule = (module: ModuleClosure.Module): ModuleHeaders => {
     )
     const returnType =
       contract.result === undefined
-        ? Object.freeze({
-            fact: Object.freeze({
+        ? {
+            fact: {
               _tag: 'Resolved' as const,
               type: Type.unit,
               spelling: '()',
               anchor: contract.anchor,
-            }),
+            },
             diagnostics: noDiagnostics,
-          })
+          }
         : collectReturnType(
             context,
             member,
@@ -4140,12 +4101,10 @@ const collectModule = (module: ModuleClosure.Module): ModuleHeaders => {
       collected.lifetimeContext,
     )
     const constraints = collectConstraints(context, contract.constraints, environment)
-    const parameterFacts = Object.freeze(
-      parameters.map((parameter) =>
-        contract.static && parameter.fact.phase !== 'Static'
-          ? Object.freeze({ ...parameter.fact, phase: 'Static' as const })
-          : parameter.fact,
-      ),
+    const parameterFacts = parameters.map((parameter) =>
+      contract.static && parameter.fact.phase !== 'Static'
+        ? { ...parameter.fact, phase: 'Static' as const }
+        : parameter.fact,
     )
     diagnostics.push(
       ...parameters.flatMap((parameter) => parameter.diagnostics),
@@ -4156,7 +4115,7 @@ const collectModule = (module: ModuleClosure.Module): ModuleHeaders => {
       ...constraints.diagnostics,
     )
     const retainedBody = bodyTemplate(lowered, member, contract.static)
-    return Object.freeze({
+    return {
       _tag: 'FunctionDeclaration' as const,
       phase: contract.static ? ('Static' as const) : ('Runtime' as const),
       functionKind: contract.effect ? ('Effect' as const) : ('Ordinary' as const),
@@ -4175,11 +4134,11 @@ const collectModule = (module: ModuleClosure.Module): ModuleHeaders => {
       failureRow: failureRow.fact,
       requirementRow: requirementRow.fact,
       constraints: constraints.facts,
-      constraintContracts: Object.freeze([]),
+      constraintContracts: [],
       ...(retainedBody === undefined ? {} : { bodyTemplate: retainedBody }),
       owner: member.owner,
       anchor: header.anchor,
-    })
+    }
   }
   // Inline conformance operations elaborate and lower as private ordinary declarations. Their
   // canonical names are implementation identities, not source-visible actor members.
@@ -4204,11 +4163,11 @@ const collectModule = (module: ModuleClosure.Module): ModuleHeaders => {
               AuthoredIdentity.anchorKey(operation.anchor),
           )
           if (member === undefined || member.header._tag !== 'FunctionHeader') return []
-          const id: DeclarationId = Object.freeze({
+          const id: DeclarationId = {
             _tag: 'DeclarationId',
             sourceId: moduleName,
             ordinal: nestedDeclarationOrdinal + conformanceIndex * 1024 + operationIndex,
-          })
+          }
           const {
             bodyTemplate: _retained,
             refinedBinders,
@@ -4222,7 +4181,7 @@ const collectModule = (module: ModuleClosure.Module): ModuleHeaders => {
             conformance.self,
           )
           return [
-            Object.freeze({
+            {
               ...built,
               // A generic conformance's inline body is generic in the header's binders exactly as a
               // mapped witness is; the proof that selects the witness supplies their arguments.
@@ -4233,30 +4192,30 @@ const collectModule = (module: ModuleClosure.Module): ModuleHeaders => {
                 refinedBinders,
               ),
               id,
-              canonical: Object.freeze({
+              canonical: {
                 _tag: 'Canonical' as const,
-                id: Object.freeze({
+                id: {
                   _tag: 'CanonicalDeclarationId' as const,
                   module: moduleName,
                   name: targetSegment.spelling,
-                }),
-              }),
+                },
+              },
               visibility: 'Private' as const,
-              name: Object.freeze({
+              name: {
                 _tag: 'Present' as const,
                 spelling: targetSegment.spelling,
                 anchor:
                   operation.name._tag === 'Present' ? operation.name.anchor : targetSegment.anchor,
-              }),
-              conformanceImplementation: Object.freeze({
+              },
+              conformanceImplementation: {
                 ordinal: conformance.ordinal,
                 operation:
                   operation.name._tag === 'Present'
                     ? operation.name.spelling
                     : targetSegment.spelling,
                 self: conformance.self,
-              }),
-            }),
+              },
+            },
           ]
         },
       )
@@ -4323,26 +4282,24 @@ const collectModule = (module: ModuleClosure.Module): ModuleHeaders => {
       headDiagnostic = undefined
     }
     if (headDiagnostic !== undefined) diagnostics.push(headDiagnostic)
-    inherentImpls.push(
-      Object.freeze({
-        _tag: 'InherentImplDeclaration' as const,
-        lifetimeElaboration: collected.lifetimeContext,
-        module: moduleName,
-        ordinal,
-        self: selfType,
-        typeParameters: collected.facts,
-        ownerSpelling,
-        owner,
-        validity:
-          headDiagnostic === undefined
-            ? Object.freeze({ _tag: 'Valid' as const })
-            : Object.freeze({
-                _tag: 'Invalid' as const,
-                cause: Diagnostic.identity(headDiagnostic),
-              }),
-        anchor: header.anchor,
-      }),
-    )
+    inherentImpls.push({
+      _tag: 'InherentImplDeclaration' as const,
+      lifetimeElaboration: collected.lifetimeContext,
+      module: moduleName,
+      ordinal,
+      self: selfType,
+      typeParameters: collected.facts,
+      ownerSpelling,
+      owner,
+      validity:
+        headDiagnostic === undefined
+          ? { _tag: 'Valid' as const }
+          : {
+              _tag: 'Invalid' as const,
+              cause: Diagnostic.identity(headDiagnostic),
+            },
+      anchor: header.anchor,
+    })
     const members = implMembers(declaration)
     for (const mapped of members) {
       if (mapped.header._tag !== 'ImplAliasHeader') continue
@@ -4373,11 +4330,11 @@ const collectModule = (module: ModuleClosure.Module): ModuleHeaders => {
           )
           return
         }
-        const id: DeclarationId = Object.freeze({
+        const id: DeclarationId = {
           _tag: 'DeclarationId',
           sourceId: moduleName,
           ordinal: nestedDeclarationOrdinal + (conformances.length + ordinal) * 1024 + memberIndex,
-        })
+        }
         const memberName = name._tag === 'Present' ? name.spelling : `member#${memberIndex}`
         // The member's own binders are minted under the member's identity, not the owner's, so two
         // members' `?R` binders never share one key and one member can call another with inference.
@@ -4389,10 +4346,10 @@ const collectModule = (module: ModuleClosure.Module): ModuleHeaders => {
           collected.facts,
           selfType,
         )
-        const shared = Object.freeze({
+        const shared = {
           ...built,
           typeParameters: joinedTypeParameters(member, collected.facts, built, refinedBinders),
-        })
+        }
         const receiverParameter = shared.parameters.at(0)
         const receiver =
           receiverParameter !== undefined &&
@@ -4400,32 +4357,30 @@ const collectModule = (module: ModuleClosure.Module): ModuleHeaders => {
           receiverParameter.name.spelling === 'self' &&
           declaredTypeNamesOwner(receiverParameter.declaredType, selfType, ownerSpelling)
         const canonicalName = `${ownerSpelling}.${memberName}`
-        inherentMembers.push(
-          Object.freeze({
-            ...shared,
-            id,
-            canonical:
-              headDiagnostic === undefined && name._tag === 'Present'
-                ? Object.freeze({
-                    _tag: 'Canonical' as const,
-                    id: Object.freeze({
-                      _tag: 'CanonicalDeclarationId' as const,
-                      module: moduleName,
-                      name: canonicalName,
-                    }),
-                  })
-                : Object.freeze({ _tag: 'Unidentified' as const }),
-            visibility: memberHeader.public ? ('Public' as const) : ('Private' as const),
-            name,
-            associatedMember: Object.freeze({
-              ordinal,
-              ownerSpelling,
-              name: memberName,
-              self: selfType,
-              receiver,
-            }),
-          }),
-        )
+        inherentMembers.push({
+          ...shared,
+          id,
+          canonical:
+            headDiagnostic === undefined && name._tag === 'Present'
+              ? {
+                  _tag: 'Canonical' as const,
+                  id: {
+                    _tag: 'CanonicalDeclarationId' as const,
+                    module: moduleName,
+                    name: canonicalName,
+                  },
+                }
+              : { _tag: 'Unidentified' as const },
+          visibility: memberHeader.public ? ('Public' as const) : ('Private' as const),
+          name,
+          associatedMember: {
+            ordinal,
+            ownerSpelling,
+            name: memberName,
+            self: selfType,
+            receiver,
+          },
+        })
       })
   })
   // A name declared twice for one owner has no winner: both facts become duplicates of the shared
@@ -4456,14 +4411,14 @@ const collectModule = (module: ModuleClosure.Module): ModuleHeaders => {
       Location.at(other.name._tag === 'Present' ? other.name.anchor : other.anchor),
     )
     diagnostics.push(diagnostic)
-    return Object.freeze({
+    return {
       ...member,
-      canonical: Object.freeze({
+      canonical: {
         _tag: 'Duplicate' as const,
         original: member.canonical.id,
         cause: Diagnostic.identity(diagnostic),
-      }),
-    })
+      },
+    }
   })
   // Drop hook bodies elaborate as hidden generic functions: each accepted hook joins the member
   // list under a non-identifier canonical name, carrying the impl's type parameters, so ordinary
@@ -4478,11 +4433,11 @@ const collectModule = (module: ModuleClosure.Module): ModuleHeaders => {
     )
     if (member === undefined || member.header._tag !== 'FunctionHeader') return []
     const memberHeader = member.header
-    const id: DeclarationId = Object.freeze({
+    const id: DeclarationId = {
       _tag: 'DeclarationId',
       sourceId: moduleName,
       ordinal: nestedDeclarationOrdinal + inlineMembers.length + hookIndex,
-    })
+    }
     const environment = new Map<string, Type.Parameter>(
       conformance.typeParameters.flatMap((parameter) =>
         parameter.duplicateOf === undefined && parameter.name._tag === 'Present'
@@ -4510,19 +4465,19 @@ const collectModule = (module: ModuleClosure.Module): ModuleHeaders => {
             false,
             lifetimeContext,
           )
-    const facts = Object.freeze(parameters.map((parameter) => parameter.fact))
+    const facts = parameters.map((parameter) => parameter.fact)
     return [
-      Object.freeze({
+      {
         _tag: 'FunctionDeclaration' as const,
         id,
-        canonical: Object.freeze({
+        canonical: {
           _tag: 'Canonical' as const,
-          id: Object.freeze({
+          id: {
             _tag: 'CanonicalDeclarationId' as const,
             module: moduleName,
             name: `drop@impl#${conformance.ordinal}`,
-          }),
-        }),
+          },
+        },
         visibility: 'Private' as const,
         phase: 'Runtime' as const,
         functionKind: 'Ordinary' as const,
@@ -4535,11 +4490,11 @@ const collectModule = (module: ModuleClosure.Module): ModuleHeaders => {
         returnType: returnType.fact,
         failureRow: hook.failureRow,
         requirementRow: hook.requirementRow,
-        constraints: Object.freeze([]),
-        constraintContracts: Object.freeze([]),
+        constraints: [],
+        constraintContracts: [],
         owner: member.owner,
         anchor: memberHeader.anchor,
-      }),
+      },
     ]
   })
   const nativeRequirements: Array<NativeRequirement.NativeRequirement> = []
@@ -4579,69 +4534,58 @@ const collectModule = (module: ModuleClosure.Module): ModuleHeaders => {
     ...dedupedInherentMembers,
     ...hookMembers,
   ]
-  return Object.freeze({
+  return {
     _tag: 'ModuleHeaders',
     module: moduleName,
-    nativeRequirements: Object.freeze(nativeRequirements),
-    publications: Object.freeze(
-      declarations.flatMap((declaration): ModuleHeaders['publications'] => {
-        const header = declaration.header
-        if (header._tag !== 'ImportHeader' || !header.public) return []
-        const target = module.imports.find((imported) =>
-          AuthoredIdentity.equals(imported.declaration.owner, declaration.owner),
-        )?.canonicalTarget
-        if (target === undefined || header.members === undefined) return []
-        return header.members.flatMap((imported) => {
-          const original = nameText(context, imported.name)
-          if (original === undefined) return []
-          const alias = imported.alias === undefined ? undefined : nameText(context, imported.alias)
-          return [
-            Object.freeze({
-              module: target,
-              original,
-              spelling: alias ?? original,
-              anchor: (imported.alias ?? imported.name).anchor,
-            }),
-          ]
-        })
-      }),
+    nativeRequirements: nativeRequirements,
+    publications: declarations.flatMap((declaration): ModuleHeaders['publications'] => {
+      const header = declaration.header
+      if (header._tag !== 'ImportHeader' || !header.public) return []
+      const target = module.imports.find((imported) =>
+        AuthoredIdentity.equals(imported.declaration.owner, declaration.owner),
+      )?.canonicalTarget
+      if (target === undefined || header.members === undefined) return []
+      return header.members.flatMap((imported) => {
+        const original = nameText(context, imported.name)
+        if (original === undefined) return []
+        const alias = imported.alias === undefined ? undefined : nameText(context, imported.alias)
+        return [
+          {
+            module: target,
+            original,
+            spelling: alias ?? original,
+            anchor: (imported.alias ?? imported.name).anchor,
+          },
+        ]
+      })
+    }),
+    members: members,
+    declarations: members.filter(
+      (member): member is DeclarationFact => member._tag === 'FunctionDeclaration',
     ),
-    members: Object.freeze(members),
-    declarations: Object.freeze(
-      members.filter((member): member is DeclarationFact => member._tag === 'FunctionDeclaration'),
+    structs: members.filter((member): member is StructFact => member._tag === 'StructDeclaration'),
+    enums: members.filter((member): member is EnumFact => member._tag === 'EnumDeclaration'),
+    unions: members.filter((member): member is UnionFact => member._tag === 'UnionDeclaration'),
+    services: members.filter(
+      (member): member is ServiceFact => member._tag === 'ServiceDeclaration',
     ),
-    structs: Object.freeze(
-      members.filter((member): member is StructFact => member._tag === 'StructDeclaration'),
+    interfaces: members.filter(
+      (member): member is InterfaceFact => member._tag === 'InterfaceDeclaration',
     ),
-    enums: Object.freeze(
-      members.filter((member): member is EnumFact => member._tag === 'EnumDeclaration'),
+    constants: members.filter(
+      (member): member is ConstantFact =>
+        member._tag === 'ConstantDeclaration' || member._tag === 'PackageParameterDeclaration',
     ),
-    unions: Object.freeze(
-      members.filter((member): member is UnionFact => member._tag === 'UnionDeclaration'),
-    ),
-    services: Object.freeze(
-      members.filter((member): member is ServiceFact => member._tag === 'ServiceDeclaration'),
-    ),
-    interfaces: Object.freeze(
-      members.filter((member): member is InterfaceFact => member._tag === 'InterfaceDeclaration'),
-    ),
-    constants: Object.freeze(
-      members.filter(
-        (member): member is ConstantFact =>
-          member._tag === 'ConstantDeclaration' || member._tag === 'PackageParameterDeclaration',
-      ),
-    ),
-    conformances: Object.freeze(conformances),
-    inherentImpls: Object.freeze(inherentImpls),
-    diagnostics: Object.freeze(diagnostics),
-  })
+    conformances: conformances,
+    inherentImpls: inherentImpls,
+    diagnostics: diagnostics,
+  }
 }
 
 /** The property clauses one header carries, across the header shapes that admit them. */
 const headerProperties = (
   header: AuthoredHir.DeclarationHeader,
-): ReadonlyArray<AuthoredHir.PropertyClause> =>
-  'properties' in header ? header.properties : Object.freeze([])
+): ReadonlyArray<AuthoredHir.PropertyClause> => ('properties' in header ? header.properties : [])
 
 /** The generic binders one header declares, across contract-carrying and nominal headers. */
 const headerGenerics = (
@@ -4649,7 +4593,7 @@ const headerGenerics = (
 ): ReadonlyArray<AuthoredHir.GenericParameter> => {
   if ('contract' in header) return header.contract.generics
   if ('generics' in header) return header.generics
-  return Object.freeze([])
+  return []
 }
 
 /**
@@ -4738,15 +4682,14 @@ const declaredInitializer = (
 }
 
 /** An absent authored initializer, so a header without one still publishes a stable template. */
-const missingExpression = (anchor: AuthoredHir.Anchor): AuthoredHir.Expression =>
-  Object.freeze({
-    _tag: 'MissingExpression',
-    anchor,
-    origin: Object.freeze({ _tag: 'Authored' }),
-    causes: Object.freeze([
-      Object.freeze({ _tag: 'Cause' as const, anchor, code: 'MissingInitializer' }),
-    ]) as AuthoredHir.RecoveryCauses,
-  })
+const missingExpression = (anchor: AuthoredHir.Anchor): AuthoredHir.Expression => ({
+  _tag: 'MissingExpression',
+  anchor,
+  origin: { _tag: 'Authored' },
+  causes: [
+    { _tag: 'Cause' as const, anchor, code: 'MissingInitializer' },
+  ] as AuthoredHir.RecoveryCauses,
+})
 
 /** Every name an impl member mentions, which decides the owner binders it inherits. */
 const mentionedNames = (context: Context, member: AuthoredHir.Declaration): ReadonlySet<string> => {
@@ -4883,7 +4826,7 @@ const declaredTypeNamesOwner = (
 
 /** Collects identities and raw type paths for the complete closure before scope resolution. */
 export const collect = (closure: ModuleClosure.Facts): DeclarationIndex.Index => {
-  const modules = Object.freeze(closure.modules.map((module) => collectModule(module)))
+  const modules = closure.modules.map((module) => collectModule(module))
   return DeclarationIndex.make(
     'Collected',
     modules,
@@ -4954,22 +4897,22 @@ export const finalizeLifetimeHeader = (
   const parameters = new Map(environment)
   const implicit: ReadonlyArray<TypeParameterFact> = elaborated.implicit.map((binder) => {
     parameters.set(binder.parameter.name, binder.parameter)
-    return Object.freeze({
+    return {
       _tag: 'TypeParameterDeclaration',
       type: binder.parameter,
-      name: Object.freeze({
+      name: {
         _tag: 'Present',
         spelling: binder.parameter.name,
         anchor: binder.anchor,
-      }),
+      },
       anchor: binder.anchor,
-      bounds: Object.freeze([]),
-      staticProperties: Object.freeze([]),
-      lifetimeBounds: Object.freeze([]),
+      bounds: [],
+      staticProperties: [],
+      lifetimeBounds: [],
       implicitLifetime: true,
-    })
+    }
   })
-  const typeParameters = Object.freeze([
+  const typeParameters = [
     ...member.typeParameters.filter(
       (parameter) =>
         !parameter.implicitLifetime ||
@@ -4981,7 +4924,7 @@ export const finalizeLifetimeHeader = (
     ),
     ...(retainsOwner ? ambient : []),
     ...implicit,
-  ])
+  ]
   // Only an annotation whose failure was a lifetime question is worth re-analyzing; the authored
   // node behind it is found through the anchor the first analysis recorded.
   const declared = (fact: DeclaredTypeFact): DeclaredTypeFact => {
@@ -4997,49 +4940,40 @@ export const finalizeLifetimeHeader = (
       : analyzeDeclaredType(context, type, parameters, false, elaborated).fact
   }
   const fields = (values: ReadonlyArray<FieldFact>): ReadonlyArray<FieldFact> =>
-    Object.freeze(
-      values.map((field) =>
-        Object.freeze({ ...field, declaredType: declared(field.declaredType) }),
-      ),
-    )
+    values.map((field) => ({ ...field, declaredType: declared(field.declaredType) }))
   if (member._tag === 'ConformanceDeclaration')
-    return Object.freeze({
+    return {
       ...member,
       typeParameters,
       lifetimeElaboration: elaborated,
       capability: declared(member.capability),
       provider: declared(member.provider),
-      requirements: Object.freeze(
-        member.requirements.map((requirement) =>
-          Object.freeze({ ...requirement, capability: declared(requirement.capability) }),
-        ),
-      ),
-    })
+      requirements: member.requirements.map((requirement) => ({
+        ...requirement,
+        capability: declared(requirement.capability),
+      })),
+    }
   if (member._tag === 'InherentImplDeclaration')
-    return Object.freeze({
+    return {
       ...member,
       typeParameters,
       lifetimeElaboration: elaborated,
       owner: declared(member.owner),
-    })
+    }
   if (member._tag === 'StructDeclaration')
-    return Object.freeze({
+    return {
       ...member,
       typeParameters,
       lifetimeElaboration: elaborated,
       fields: fields(member.fields),
-    })
+    }
   if (member._tag === 'UnionDeclaration')
-    return Object.freeze({
+    return {
       ...member,
       typeParameters,
       lifetimeElaboration: elaborated,
-      variants: Object.freeze(
-        member.variants.map((variant) =>
-          Object.freeze({ ...variant, fields: fields(variant.fields) }),
-        ),
-      ),
-    })
+      variants: member.variants.map((variant) => ({ ...variant, fields: fields(variant.fields) })),
+    }
   const contract = 'contract' in declaration.header ? declaration.header.contract : undefined
   const opaqueReturn =
     member.opaqueResult === undefined || contract?.result === undefined
@@ -5053,15 +4987,14 @@ export const finalizeLifetimeHeader = (
           parameters,
           elaborated,
         )
-  return Object.freeze({
+  return {
     ...member,
     typeParameters,
     lifetimeElaboration: elaborated,
-    parameters: Object.freeze(
-      member.parameters.map((parameter) =>
-        Object.freeze({ ...parameter, declaredType: declared(parameter.declaredType) }),
-      ),
-    ),
+    parameters: member.parameters.map((parameter) => ({
+      ...parameter,
+      declaredType: declared(parameter.declaredType),
+    })),
     returnType: opaqueReturn?.fact ?? declared(member.returnType),
     ...(opaqueReturn?.opaqueResult === undefined
       ? {}
@@ -5069,7 +5002,7 @@ export const finalizeLifetimeHeader = (
     failureRow: collectFailureRow(context, contract?.failures, parameters, elaborated).fact,
     requirementRow: collectRequirementRow(context, contract?.requirements, parameters, elaborated)
       .fact,
-  })
+  }
 }
 
 /** The authored type annotation one anchor names below a declaration header. */
@@ -5124,7 +5057,7 @@ const headerTypes = (header: AuthoredHir.DeclarationHeader): ReadonlyArray<Autho
     for (const generic of header.generics)
       if (generic._tag !== 'RowParameter')
         for (const bound of generic.bounds) if (bound._tag !== 'Lifetime') found.push(bound)
-  return Object.freeze(found)
+  return found
 }
 
 /** The annotations nested directly below one type, for an anchor search. */

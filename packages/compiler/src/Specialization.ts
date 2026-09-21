@@ -56,10 +56,10 @@ export const specializeType = (
       (specialized, substitution) => Type.substitute(specialized, substitution),
       type,
     ),
-    Object.freeze({
+    {
       declaration: self.declaration,
       typeArguments: self.typeArguments,
-      staticArgumentKeys: Object.freeze((self.staticArguments ?? []).map(StaticValue.key)),
-    }),
+      staticArgumentKeys: (self.staticArguments ?? []).map(StaticValue.key),
+    },
     Constraint.specializeCallableSchemaExecutableOwner,
   )

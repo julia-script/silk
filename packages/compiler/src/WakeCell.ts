@@ -59,22 +59,24 @@ export type DriveAdmission =
       readonly state: State
     }
 
-const state = (value: Omit<State, '_tag'>): State =>
-  Object.freeze({ _tag: 'WakeCellState', ...value })
+const state = (value: Omit<State, '_tag'>): State => ({ _tag: 'WakeCellState', ...value })
 
 const transitioned = (
   self: State,
   action: Extract<Transition, { readonly _tag: 'Transition' }>['action'],
-): Transition => Object.freeze({ _tag: 'Transition', state: self, action })
+): Transition => ({ _tag: 'Transition', state: self, action })
 
-const violated = (self: State, reason: Violation): Transition =>
-  Object.freeze({ _tag: 'WakeCellViolation', reason, state: self })
+const violated = (self: State, reason: Violation): Transition => ({
+  _tag: 'WakeCellViolation',
+  reason,
+  state: self,
+})
 
 /** Rejects owner drive without mutating readiness state while park or notification owns progress. */
 export const admitDrive = (self: State): DriveAdmission =>
   self.phase === 'Dormant' || self.phase === 'Notifying' || self.phase === 'DestroyPending'
-    ? Object.freeze({ _tag: 'FatalDriveTrap', reason: 'DormantOrNotifying', state: self })
-    : Object.freeze({ _tag: 'DriveAllowed', state: self })
+    ? { _tag: 'FatalDriveTrap', reason: 'DormantOrNotifying', state: self }
+    : { _tag: 'DriveAllowed', state: self }
 
 /** Initializes one reusable cell before the Execution's first park generation. */
 export const initial = (): State =>
@@ -294,7 +296,7 @@ export const verify = (self: State): ReadonlyArray<Violation> => {
     violations.push('AuthorityInvariant')
   if (self.phase === 'DestroyPending' && self.values !== 'Live')
     violations.push('AuthorityInvariant')
-  return Object.freeze([...new Set(violations)])
+  return [...new Set(violations)]
 }
 
 /** Stable representation-free inspection used by MIR and deterministic generation tests. */

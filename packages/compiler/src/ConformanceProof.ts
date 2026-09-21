@@ -110,34 +110,32 @@ export const conformanceCandidates = (
     },
     'ConformanceDiscovery',
   )
-  return Object.freeze(
-    candidatesByCapability(self, goal.capability).flatMap(
-      ({ module, conformance }): ReadonlyArray<ConformanceCandidate> => {
-        ResolutionWork.visit(work)
-        if (
-          conformance.capability._tag !== 'Resolved' ||
-          !Type.isNominal(conformance.capability.type) ||
-          conformance.provider._tag !== 'Resolved' ||
-          (admission !== 'Declared' && conformance.validity._tag !== 'ValidConformance') ||
-          conformance.coherence._tag !== 'Coherent' ||
-          conformance.termination._tag !== 'Terminating'
-        )
-          return []
-        const inferred = new Map<string, Type.GenericArgument>()
-        const inferHead = (pattern: Type.Type, actual: Type.Type): boolean =>
-          admission === 'AssumedOpen'
-            ? TypeInference.inferOpenGenericArguments(pattern, actual, inferred).matches
-            : TypeInference.infer(pattern, actual, inferred)
-        if (!inferHead(conformance.provider.type, goal.provider)) return []
-        // The provider may fix a parameter nested in a normalized capability argument (such as
-        // E | FixedError). Apply those bindings before matching the second head; comparing the
-        // unsubstituted union would reject the same witness when its goal becomes concrete.
-        const capabilityPattern = Type.substitute(conformance.capability.type, inferred)
-        if (!inferHead(capabilityPattern, goal.capability)) return []
-        ResolutionWork.accept(work)
-        return Object.freeze([Object.freeze({ module, conformance, substitution: inferred })])
-      },
-    ),
+  return candidatesByCapability(self, goal.capability).flatMap(
+    ({ module, conformance }): ReadonlyArray<ConformanceCandidate> => {
+      ResolutionWork.visit(work)
+      if (
+        conformance.capability._tag !== 'Resolved' ||
+        !Type.isNominal(conformance.capability.type) ||
+        conformance.provider._tag !== 'Resolved' ||
+        (admission !== 'Declared' && conformance.validity._tag !== 'ValidConformance') ||
+        conformance.coherence._tag !== 'Coherent' ||
+        conformance.termination._tag !== 'Terminating'
+      )
+        return []
+      const inferred = new Map<string, Type.GenericArgument>()
+      const inferHead = (pattern: Type.Type, actual: Type.Type): boolean =>
+        admission === 'AssumedOpen'
+          ? TypeInference.inferOpenGenericArguments(pattern, actual, inferred).matches
+          : TypeInference.infer(pattern, actual, inferred)
+      if (!inferHead(conformance.provider.type, goal.provider)) return []
+      // The provider may fix a parameter nested in a normalized capability argument (such as
+      // E | FixedError). Apply those bindings before matching the second head; comparing the
+      // unsubstituted union would reject the same witness when its goal becomes concrete.
+      const capabilityPattern = Type.substitute(conformance.capability.type, inferred)
+      if (!inferHead(capabilityPattern, goal.capability)) return []
+      ResolutionWork.accept(work)
+      return [{ module, conformance, substitution: inferred }]
+    },
   )
 }
 
@@ -239,65 +237,61 @@ export const conditionalContractCandidates = (
   requestingModule: string,
   provider: Type.Type,
 ): ReadonlyArray<ConditionalContractCandidate> => {
-  if (!Type.isNominal(provider)) return Object.freeze([])
+  if (!Type.isNominal(provider)) return []
   const providerDeclaration = memberByNominal(self.modules, provider)
   if (providerDeclaration === undefined || !endpointVisible(providerDeclaration, requestingModule))
-    return Object.freeze([])
-  return Object.freeze(
-    self.modules.flatMap((module) =>
-      module.conformances.flatMap((conformance): ReadonlyArray<ConditionalContractCandidate> => {
-        if (
-          conformance.validity._tag !== 'ValidConformance' ||
-          conformance.coherence._tag !== 'Coherent' ||
-          conformance.termination._tag !== 'Terminating' ||
-          conformance.capability._tag !== 'Resolved' ||
-          !Type.isNominal(conformance.capability.type) ||
-          conformance.provider._tag !== 'Resolved'
-        )
-          return []
-        const substitution = new Map<string, Type.GenericArgument>()
-        if (!TypeInference.infer(conformance.provider.type, provider, substitution)) return []
-        const capability = Type.substitute(conformance.capability.type, substitution)
-        if (
-          !Type.isNominal(capability) ||
-          Type.equals(capability, Type.copyCapability) ||
-          Type.equals(capability, Type.dropCapability)
-        )
-          return []
-        const contract = contractByCapability(self, capability)
-        if (contract === undefined || !endpointVisible(contract, requestingModule)) return []
-        const declared = declaredRequirements(self.modules, conformance)
-        const requirements = declared.flatMap((requirement) => {
-          const requiredCapability = Type.substitute(requirement.capability, substitution)
-          return Type.isNominal(requiredCapability)
-            ? [
-                Object.freeze({
-                  capability: requiredCapability,
-                  provider: Type.substitute(requirement.provider, substitution),
-                }),
-              ]
-            : []
-        })
-        if (requirements.length === 0 || requirements.length !== declared.length) return []
-        return [
-          Object.freeze({
-            capability,
-            provider,
-            selection: Object.freeze({
-              _tag: 'SourceSelection' as const,
-              module: module.module,
-              ordinal: conformance.ordinal,
-            }),
-            typeArguments: Object.freeze(
-              conformance.typeParameters
-                .filter((parameter) => parameter.duplicateOf === undefined)
-                .map((parameter) => substitution.get(Type.key(parameter.type)) ?? parameter.type),
-            ),
-            requirements: Object.freeze(requirements),
-          }),
-        ]
-      }),
-    ),
+    return []
+  return self.modules.flatMap((module) =>
+    module.conformances.flatMap((conformance): ReadonlyArray<ConditionalContractCandidate> => {
+      if (
+        conformance.validity._tag !== 'ValidConformance' ||
+        conformance.coherence._tag !== 'Coherent' ||
+        conformance.termination._tag !== 'Terminating' ||
+        conformance.capability._tag !== 'Resolved' ||
+        !Type.isNominal(conformance.capability.type) ||
+        conformance.provider._tag !== 'Resolved'
+      )
+        return []
+      const substitution = new Map<string, Type.GenericArgument>()
+      if (!TypeInference.infer(conformance.provider.type, provider, substitution)) return []
+      const capability = Type.substitute(conformance.capability.type, substitution)
+      if (
+        !Type.isNominal(capability) ||
+        Type.equals(capability, Type.copyCapability) ||
+        Type.equals(capability, Type.dropCapability)
+      )
+        return []
+      const contract = contractByCapability(self, capability)
+      if (contract === undefined || !endpointVisible(contract, requestingModule)) return []
+      const declared = declaredRequirements(self.modules, conformance)
+      const requirements = declared.flatMap((requirement) => {
+        const requiredCapability = Type.substitute(requirement.capability, substitution)
+        return Type.isNominal(requiredCapability)
+          ? [
+              {
+                capability: requiredCapability,
+                provider: Type.substitute(requirement.provider, substitution),
+              },
+            ]
+          : []
+      })
+      if (requirements.length === 0 || requirements.length !== declared.length) return []
+      return [
+        {
+          capability,
+          provider,
+          selection: {
+            _tag: 'SourceSelection' as const,
+            module: module.module,
+            ordinal: conformance.ordinal,
+          },
+          typeArguments: conformance.typeParameters
+            .filter((parameter) => parameter.duplicateOf === undefined)
+            .map((parameter) => substitution.get(Type.key(parameter.type)) ?? parameter.type),
+          requirements: requirements,
+        },
+      ]
+    }),
   )
 }
 
@@ -309,10 +303,10 @@ const provedContracts = (
   assumptions?: DeclarationFact,
 ): ReadonlyArray<Type.Nominal> => {
   if (!Type.isNominal(provider) || (requireRuntimeConcrete && !Type.isRuntimeConcrete(provider)))
-    return Object.freeze([])
+    return []
   const providerDeclaration = memberByNominal(self.modules, provider)
   if (providerDeclaration === undefined || !endpointVisible(providerDeclaration, requestingModule))
-    return Object.freeze([])
+    return []
 
   const implemented = new Map<string, Type.Nominal>()
   for (const headers of self.modules)
@@ -359,19 +353,17 @@ const provedContracts = (
       if (!concretelySelected && !symbolicallySelected) continue
       implemented.set(Type.key(specialized), specialized)
     }
-  return Object.freeze(
-    [...implemented.entries()]
-      .sort(([left], [right]) => {
-        if (left < right) {
-          return -1
-        }
-        if (left > right) {
-          return 1
-        }
-        return 0
-      })
-      .map(([, capability]) => capability),
-  )
+  return [...implemented.entries()]
+    .sort(([left], [right]) => {
+      if (left < right) {
+        return -1
+      }
+      if (left > right) {
+        return 1
+      }
+      return 0
+    })
+    .map(([, capability]) => capability)
 }
 
 /**
@@ -410,7 +402,7 @@ export const knownProviderContracts = (
 
 const proofMemos = new WeakMap<Index, Map<string, ConformanceGoal.Proof>>()
 
-const provedCopy: CopyProof = Object.freeze({ _tag: 'Copy' })
+const provedCopy: CopyProof = { _tag: 'Copy' }
 
 export const copyAssumptions = (conformance: ConformanceFact): ReadonlySet<string> =>
   new Set(
@@ -455,11 +447,11 @@ export const copyProof = (
   if (Type.isReference(type) || Type.isSlice(type))
     return type.access === 'Shared'
       ? provedCopy
-      : Object.freeze({ _tag: 'NotCopy', reason: 'exclusive borrows are affine' })
+      : { _tag: 'NotCopy', reason: 'exclusive borrows are affine' }
   if (Type.isParameter(type))
     return assumptions.has(Type.key(type))
       ? provedCopy
-      : Object.freeze({ _tag: 'NotCopy', reason: `${type.name} has no Copy bound` })
+      : { _tag: 'NotCopy', reason: `${type.name} has no Copy bound` }
   if (Type.isFixedArray(type)) return copyProof(self, type.element, assumptions, active)
   if (Type.isUnion(type)) {
     for (const member of type.members) {
@@ -474,44 +466,44 @@ export const copyProof = (
       if (Type.isCallable(argument.contract))
         return argument.contract.mode === 'Shared'
           ? provedCopy
-          : Object.freeze({
+          : {
               _tag: 'NotCopy',
               reason: `${argument.contract.mode.toLowerCase()} callable captures are affine`,
-            })
+            }
       if (Type.isEffect(argument.contract))
         return argument.contract.access === 'Shared'
           ? provedCopy
-          : Object.freeze({
+          : {
               _tag: 'NotCopy',
               reason: `${argument.contract.access.toLowerCase()} Effect captures are affine`,
-            })
-      return Object.freeze({
+            }
+      return {
         _tag: 'UnavailableCopy',
         reason: 'the executable representation contract is damaged',
-      })
+      }
     }
     if (Type.isCompositeEffectRepresentationArgument(argument)) {
       for (const alternative of argument.alternatives) {
         if (!Type.isEffect(alternative.contract) || alternative.contract.access !== 'Shared')
-          return Object.freeze({
+          return {
             _tag: 'NotCopy',
             reason: 'a selected Effect alternative has affine captures',
-          })
+          }
       }
       return provedCopy
     }
-    return Object.freeze({
+    return {
       _tag: 'UnavailableCopy',
       reason: 'executable Copy depends on its concrete realized captures',
-    })
+    }
   }
   if (Type.isCallable(type) || Type.isEffect(type))
-    return Object.freeze({
+    return {
       _tag: 'UnavailableCopy',
       reason: 'an open executable contract does not identify its captures',
-    })
+    }
   if (!Type.isNominal(type) || Type.isIntrinsicNominal(type))
-    return Object.freeze({ _tag: 'NotCopy', reason: `${Type.encode(type)} is compiler-affine` })
+    return { _tag: 'NotCopy', reason: `${Type.encode(type)} is compiler-affine` }
 
   const declaration = byCanonical(self, {
     _tag: 'CanonicalDeclarationId',
@@ -521,39 +513,39 @@ export const copyProof = (
   if (declaration?._tag === 'EnumDeclaration')
     return declaration.validity._tag === 'Valid'
       ? provedCopy
-      : Object.freeze({
+      : {
           _tag: 'UnavailableCopy',
           reason: `scalar enum ${Type.encode(type)} is invalid`,
-        })
+        }
 
   const key = Type.key(type)
   if (active.has(key))
-    return Object.freeze({
+    return {
       _tag: 'UnavailableCopy',
       reason: `recursive Copy proof for ${Type.encode(type)}`,
-    })
+    }
   const candidates = conformanceCandidates(self, ConformanceGoal.make(Type.copyCapability, type))
   const selected = candidates.at(0)
   if (candidates.length !== 1 || selected === undefined)
-    return Object.freeze({
+    return {
       _tag: candidates.length === 0 ? 'NotCopy' : 'UnavailableCopy',
       reason:
         candidates.length === 0
           ? `${Type.encode(type)} has no valid Copy impl`
           : `${Type.encode(type)} has conflicting Copy evidence`,
-    })
+    }
   if (hasDropConformance(self, type))
-    return Object.freeze({
+    return {
       _tag: 'NotCopy',
       reason: `${Type.encode(type)} also implements Drop`,
-    })
+    }
   if (declaration?._tag !== 'StructDeclaration' && declaration?._tag !== 'UnionDeclaration')
-    return Object.freeze({ _tag: 'NotCopy', reason: `${Type.encode(type)} is not an aggregate` })
+    return { _tag: 'NotCopy', reason: `${Type.encode(type)} is not an aggregate` }
   if (declaration.dependency._tag === 'Unavailable')
-    return Object.freeze({
+    return {
       _tag: 'UnavailableCopy',
       reason: `stored fields of ${Type.encode(type)} are unavailable`,
-    })
+    }
   const substitution =
     TypeInference.substitution(
       declaration.typeParameters.map((parameter) => parameter.type),
@@ -566,23 +558,23 @@ export const copyProof = (
     readonly variant?: UnionVariantFact
   }> =
     declaration._tag === 'StructDeclaration'
-      ? declaration.fields.map((field) => Object.freeze({ field }))
+      ? declaration.fields.map((field) => ({ field }))
       : declaration.variants.flatMap((variant) =>
-          variant.fields.map((field) => Object.freeze({ field, variant })),
+          variant.fields.map((field) => ({ field, variant })),
         )
   for (const { field, variant } of fields) {
     if (field.declaredType._tag !== 'Resolved')
-      return Object.freeze({
+      return {
         _tag: 'UnavailableCopy',
         reason: `a stored field of ${Type.encode(type)} is unresolved`,
-      })
+      }
     const fieldType = Type.substitute(field.declaredType.type, substitution)
     const proof = copyProof(self, fieldType, nestedAssumptions, nestedActive)
     if (proof._tag !== 'Copy')
-      return Object.freeze({
+      return {
         ...proof,
         reason: `${variant === undefined ? '' : `variant ${variant.name._tag === 'Present' ? variant.name.spelling : `#${variant.id.ordinal}`} `}field ${field.name._tag === 'Present' ? field.name.spelling : `#${field.id.ordinal}`} (${Type.encode(fieldType)}): ${proof.reason}`,
-      })
+      }
   }
   return provedCopy
 }
@@ -592,26 +584,24 @@ const provedGoal = (
   selection: ConformanceGoal.Selection,
   typeArguments: ReadonlyArray<Type.GenericArgument>,
   requirements: ReadonlyArray<ConformanceGoal.Proof>,
-): ConformanceGoal.Proof =>
-  Object.freeze({
-    _tag: 'Proved' as const,
-    goal,
-    selection,
-    typeArguments: Object.freeze([...typeArguments]),
-    requirements: Object.freeze([...requirements]),
-  })
+): ConformanceGoal.Proof => ({
+  _tag: 'Proved' as const,
+  goal,
+  selection,
+  typeArguments: [...typeArguments],
+  requirements: [...requirements],
+})
 
 const unprovedGoal = (
   goal: ConformanceGoal.ConformanceGoal,
   failure: ConformanceGoal.Failure,
   trace: ReadonlyArray<ConformanceGoal.ConformanceGoal>,
-): ConformanceGoal.Proof =>
-  Object.freeze({
-    _tag: 'Unproved' as const,
-    goal,
-    failure,
-    trace: Object.freeze([...trace]),
-  })
+): ConformanceGoal.Proof => ({
+  _tag: 'Unproved' as const,
+  goal,
+  failure,
+  trace: [...trace],
+})
 
 const proveGoal = (
   self: Index,
@@ -626,26 +616,26 @@ const proveGoal = (
   // finite, so reaching this means a fact was damaged; the answer recovers the path rather than
   // admitting a coinductive proof, and is deliberately not remembered.
   if (active.some((entry) => ConformanceGoal.key(entry) === goalKey))
-    return unprovedGoal(goal, Object.freeze({ _tag: 'ActiveCycle' as const }), active)
+    return unprovedGoal(goal, { _tag: 'ActiveCycle' as const }, active)
   const proof = ((): ConformanceGoal.Proof => {
     if (Type.equals(goal.capability, Type.copyCapability)) {
       const copy = copyProof(self, goal.provider)
       if (copy._tag !== 'Copy')
         return unprovedGoal(
           goal,
-          Object.freeze({ _tag: 'UnavailableWitness' as const, reason: copy.reason }),
+          { _tag: 'UnavailableWitness' as const, reason: copy.reason },
           active,
         )
       const candidate = conformanceCandidates(self, goal).at(0)
       return candidate === undefined
-        ? provedGoal(goal, Object.freeze({ _tag: 'IntrinsicSelection' as const }), [], [])
+        ? provedGoal(goal, { _tag: 'IntrinsicSelection' as const }, [], [])
         : provedGoal(
             goal,
-            Object.freeze({
+            {
               _tag: 'SourceSelection' as const,
               module: candidate.module,
               ordinal: candidate.conformance.ordinal,
-            }),
+            },
             candidate.conformance.typeParameters
               .filter((parameter) => parameter.duplicateOf === undefined)
               .map(
@@ -657,19 +647,19 @@ const proveGoal = (
     }
     if (Type.isNominal(goal.provider)) {
       if (Type.equals(goal.provider, goal.capability))
-        return provedGoal(goal, Object.freeze({ _tag: 'IdentitySelection' as const }), [], [])
+        return provedGoal(goal, { _tag: 'IdentitySelection' as const }, [], [])
     }
     const matching = conformanceCandidates(self, goal)
     const selected = matching.at(0)
     if (matching.length === 0 || selected === undefined)
-      return unprovedGoal(goal, Object.freeze({ _tag: 'MissingWitness' as const }), active)
+      return unprovedGoal(goal, { _tag: 'MissingWitness' as const }, active)
     if (matching.length > 1)
       return unprovedGoal(
         goal,
-        Object.freeze({ _tag: 'AmbiguousWitness' as const, candidates: matching.length }),
+        { _tag: 'AmbiguousWitness' as const, candidates: matching.length },
         active,
       )
-    const nested = Object.freeze([...active, goal])
+    const nested = [...active, goal]
     const requirements: Array<ConformanceGoal.Proof> = []
     for (const requirement of declaredRequirements(self.modules, selected.conformance)) {
       const capability = Type.substitute(requirement.capability, selected.substitution)
@@ -677,10 +667,10 @@ const proveGoal = (
       if (!Type.isNominal(capability))
         return unprovedGoal(
           goal,
-          Object.freeze({
+          {
             _tag: 'UnavailableWitness' as const,
             reason: 'a declared requirement did not resolve to an interface',
-          }),
+          },
           active,
         )
       const proved = proveGoal(self, ConformanceGoal.make(capability, provider), memo, nested)
@@ -691,11 +681,11 @@ const proveGoal = (
     }
     return provedGoal(
       goal,
-      Object.freeze({
+      {
         _tag: 'SourceSelection' as const,
         module: selected.module,
         ordinal: selected.conformance.ordinal,
-      }),
+      },
       selected.conformance.typeParameters
         .filter((parameter) => parameter.duplicateOf === undefined)
         .map((parameter) => selected.substitution.get(Type.key(parameter.type)) ?? parameter.type),
@@ -721,7 +711,7 @@ export const prove = (
   const remembered = proofMemos.get(self)
   const memo = remembered ?? new Map<string, ConformanceGoal.Proof>()
   if (remembered === undefined) proofMemos.set(self, memo)
-  return proveGoal(self, ConformanceGoal.make(capability, provider), memo, Object.freeze([]))
+  return proveGoal(self, ConformanceGoal.make(capability, provider), memo, [])
 }
 
 const interfaceConformance = (
@@ -772,18 +762,16 @@ export const unmappedInterfaceOperations = (
     'Declared',
   )
   const conformance = declared.length === 1 ? declared.at(0)?.conformance : undefined
-  if (interface_ === undefined || conformance === undefined) return Object.freeze([])
+  if (interface_ === undefined || conformance === undefined) return []
   const mapped = new Set(
     conformance.operations.flatMap((mapping) =>
       mapping.name._tag === 'Present' ? [mapping.name.spelling] : [],
     ),
   )
-  return Object.freeze(
-    interface_.operations.flatMap((operation) =>
-      operation.name._tag === 'Present' && !mapped.has(operation.name.spelling)
-        ? [operation.name.spelling]
-        : [],
-    ),
+  return interface_.operations.flatMap((operation) =>
+    operation.name._tag === 'Present' && !mapped.has(operation.name.spelling)
+      ? [operation.name.spelling]
+      : [],
   )
 }
 
@@ -895,11 +883,11 @@ const invocationLifetimeSubstitution = (
   if (binders.length === 0) return new Map()
   if (contract.operands.length !== application.operands.length) return undefined
   const inferred = new Map(headerSubstitution)
-  const lifetimes: TypeInference.LifetimeInference = Object.freeze({
+  const lifetimes: TypeInference.LifetimeInference = {
     inferable: new Set(binders.map(Lifetime.key)),
     accepts: (source: Lifetime.Lifetime, target: Lifetime.Lifetime, invariant: boolean) =>
       Lifetime.equals(source, target) && (!invariant || Lifetime.equals(target, source)),
-  })
+  }
   // This reconstructs invocation binders for an already-proved witness, not a new compatibility
   // check. Admitted application lifetimes can differ from the header's retained proof context.
   // Preserve inferred binders only when every non-lifetime part still has the same runtime shape.
@@ -964,12 +952,10 @@ const inferredTargetArguments = (
     applicationSubstitution,
   )
   if (invocationSubstitution === undefined) return undefined
-  const arguments_ = Object.freeze(
-    mapping.targetArguments.map((argument) =>
-      Type.substituteGenericArgument(
-        Type.substituteGenericArgument(argument, headerSubstitution),
-        invocationSubstitution,
-      ),
+  const arguments_ = mapping.targetArguments.map((argument) =>
+    Type.substituteGenericArgument(
+      Type.substituteGenericArgument(argument, headerSubstitution),
+      invocationSubstitution,
     ),
   )
   return arguments_.every(Type.isRuntimeConcreteGenericArgument) ? arguments_ : undefined
@@ -1025,13 +1011,13 @@ export const selectedInterfaceTarget = (
     applicationSubstitution,
   )
   if (implementation === undefined || typeArguments === undefined) return undefined
-  return Object.freeze({
+  return {
     implementation,
     typeArguments,
     selection: proof.selection,
     conformanceTypeArguments: proof.typeArguments,
     ...(proof.requirements.length > 0 ? { structuralProvider: provider } : {}),
-  })
+  }
 }
 
 /**
@@ -1048,7 +1034,7 @@ export const witnessDependencyTargets = (
   capability: Type.Nominal,
 ): ReadonlyArray<InterfaceWitnessTarget> => {
   const proof = prove(self, provider, capability)
-  if (proof._tag !== 'Proved') return Object.freeze([])
+  if (proof._tag !== 'Proved') return []
   const found = new Map<string, InterfaceWitnessTarget>()
   const visit = (dependency: ConformanceGoal.Proof): void => {
     if (dependency._tag !== 'Proved') return
@@ -1077,20 +1063,17 @@ export const witnessDependencyTargets = (
         typeArguments,
       })
       if (!found.has(identity))
-        found.set(
-          identity,
-          Object.freeze({
-            implementation,
-            typeArguments,
-            selection: dependency.selection,
-            conformanceTypeArguments: dependency.typeArguments,
-            structuralProvider: dependency.goal.provider,
-          }),
-        )
+        found.set(identity, {
+          implementation,
+          typeArguments,
+          selection: dependency.selection,
+          conformanceTypeArguments: dependency.typeArguments,
+          structuralProvider: dependency.goal.provider,
+        })
     }
   }
   for (const requirement of proof.requirements) visit(requirement)
-  return Object.freeze([...found.values()])
+  return [...found.values()]
 }
 
 /** Selects the unique compiler-shipped or source-declared witness for one provider. */
@@ -1101,7 +1084,7 @@ export const witness = (
 ): ConformanceWitness | undefined => {
   if (!Type.isNominal(provider)) return undefined
   if (Type.equals(provider, capability)) {
-    return Object.freeze({ _tag: 'IdentityConformanceWitness', capability, provider })
+    return { _tag: 'IdentityConformanceWitness', capability, provider }
   }
   // Proof selection is the single authority for matching both the provider and capability heads.
   // Repeating only provider inference here would lose capability binders and could select a header
@@ -1130,28 +1113,26 @@ export const witness = (
     conformance.operations.length === contract.operations.length
   let operations: readonly Readonly<{ name: string; implementation: CanonicalId }>[]
   if (contract === undefined) {
-    operations = Object.freeze([])
+    operations = []
   } else {
-    operations = Object.freeze(
-      contract.operations.flatMap((operation) => {
-        const name = operation.name._tag === 'Present' ? operation.name.spelling : undefined
-        const implementation =
-          name === undefined ? undefined : witnessImplementation(self, provider, conformance, name)
-        return name === undefined || implementation === undefined
-          ? []
-          : [
-              Object.freeze({
-                name,
-                implementation,
-              }),
-            ]
-      }),
-    )
+    operations = contract.operations.flatMap((operation) => {
+      const name = operation.name._tag === 'Present' ? operation.name.spelling : undefined
+      const implementation =
+        name === undefined ? undefined : witnessImplementation(self, provider, conformance, name)
+      return name === undefined || implementation === undefined
+        ? []
+        : [
+            {
+              name,
+              implementation,
+            },
+          ]
+    })
   }
   const completeOperationSet =
     contract === undefined || operations.length === contract.operations.length
   return Type.equals(capability, Type.dropCapability) || (completeContract && completeOperationSet)
-    ? Object.freeze({
+    ? {
         _tag: 'SourceConformanceWitness',
         module: conformance.module,
         ordinal: conformance.ordinal,
@@ -1159,7 +1140,7 @@ export const witness = (
         provider,
         operations,
         typeArguments: proof.typeArguments,
-      })
+      }
     : undefined
 }
 
@@ -1175,109 +1156,100 @@ export const providerMatch = (
       ? undefined
       : assumedConditionalSelection(self, provider, capability, assumptions)
   if (assumed !== undefined)
-    return Object.freeze({
+    return {
       _tag: 'Unique',
-      match: Object.freeze({
+      match: {
         _tag: 'Conformance',
-        witness: Object.freeze({
-          origin: Object.freeze({
+        witness: {
+          origin: {
             _tag: 'SourceWitness',
-            declaration: Object.freeze({
+            declaration: {
               module: assumed.module,
               name: `conformance#${assumed.conformance.ordinal}`,
-            }),
-          }),
-          typeArguments: Object.freeze(
-            assumed.conformance.typeParameters
-              .filter((parameter) => parameter.duplicateOf === undefined)
-              .map(
-                (parameter) =>
-                  assumed.substitution.get(Type.key(parameter.type)) ??
-                  Type.parameterArgument(parameter.type),
-              ),
-          ),
-        }),
-      }),
-    })
+            },
+          },
+          typeArguments: assumed.conformance.typeParameters
+            .filter((parameter) => parameter.duplicateOf === undefined)
+            .map(
+              (parameter) =>
+                assumed.substitution.get(Type.key(parameter.type)) ??
+                Type.parameterArgument(parameter.type),
+            ),
+        },
+      },
+    }
   const proof = prove(self, provider, capability)
   if (proof._tag === 'Unproved') {
-    if (proof.failure._tag === 'MissingWitness') return Object.freeze({ _tag: 'NoMatch' })
+    if (proof.failure._tag === 'MissingWitness') return { _tag: 'NoMatch' }
     if (proof.failure._tag === 'AmbiguousWitness') {
       const goal = ConformanceGoal.make(capability, provider)
-      return Object.freeze({
+      return {
         _tag: 'Ambiguous',
-        witnesses: Object.freeze(
-          conformanceCandidates(self, goal).map((candidate) =>
-            Object.freeze({
-              origin: Object.freeze({
-                _tag: 'SourceWitness' as const,
-                declaration: Object.freeze({
-                  module: candidate.module,
-                  name: `conformance#${candidate.conformance.ordinal}`,
-                }),
-              }),
-              typeArguments: Object.freeze(
-                candidate.conformance.typeParameters
-                  .filter((parameter) => parameter.duplicateOf === undefined)
-                  .map(
-                    (parameter) =>
-                      candidate.substitution.get(Type.key(parameter.type)) ?? parameter.type,
-                  ),
-              ),
-            }),
-          ),
-        ),
-      })
+        witnesses: conformanceCandidates(self, goal).map((candidate) => ({
+          origin: {
+            _tag: 'SourceWitness' as const,
+            declaration: {
+              module: candidate.module,
+              name: `conformance#${candidate.conformance.ordinal}`,
+            },
+          },
+          typeArguments: candidate.conformance.typeParameters
+            .filter((parameter) => parameter.duplicateOf === undefined)
+            .map(
+              (parameter) => candidate.substitution.get(Type.key(parameter.type)) ?? parameter.type,
+            ),
+        })),
+      }
     }
-    return Object.freeze({
+    return {
       _tag: 'Invalid',
       reason:
         proof.failure._tag === 'UnavailableWitness'
           ? proof.failure.reason
           : 'conformance selection reached an active cycle',
-    })
+    }
   }
   const selected = witness(self, provider, capability)
   if (selected === undefined)
-    return Object.freeze({
+    return {
       _tag: 'Invalid',
       reason: 'the selected conformance does not provide a complete service implementation',
-    })
+    }
   if (selected._tag === 'IdentityConformanceWitness')
-    return Object.freeze({
+    return {
       _tag: 'Unique',
-      match: Object.freeze({ _tag: 'Identity' }),
-    })
+      match: { _tag: 'Identity' },
+    }
   if (selected._tag === 'IntrinsicConformanceWitness')
-    return Object.freeze({
+    return {
       _tag: 'Unique',
-      match: Object.freeze({
+      match: {
         _tag: 'Conformance',
-        witness: Object.freeze({
-          origin: Object.freeze({
+        witness: {
+          origin: {
             _tag: 'IntrinsicWitness',
             operation: `${Type.key(selected.provider)}=>${Type.key(selected.capability)}`,
-          }),
-          typeArguments: Object.freeze([]),
-        }),
-      }),
-    })
-  return Object.freeze({
+          },
+          typeArguments: [],
+        },
+      },
+    }
+  return {
     _tag: 'Unique',
-    match: Object.freeze({
+    match: {
       _tag: 'Conformance',
-      witness: Object.freeze({
-        origin: Object.freeze({
+      witness: {
+        origin: {
           _tag: 'SourceWitness',
-          declaration: Object.freeze({
+          declaration: {
             module: selected.module,
             name: `conformance#${selected.ordinal}`,
-          }),
-        }),
+          },
+        },
         typeArguments: selected.typeArguments,
-      }),
-    }),
-  })
+      },
+    },
+  }
 }
 
 /** Selects one mapped source implementation from a declaration-shaped witness. */

@@ -41,7 +41,7 @@ export const make = (
     code,
     subject,
     message: `${code}: ${subject}`,
-    origins: Object.freeze(origins.map(ConfigurationOrigin.snapshot)),
-    dependencies: Object.freeze([...dependencies]),
+    origins: origins.map(ConfigurationOrigin.snapshot),
+    dependencies: [...dependencies],
     ...(staticFailure === undefined ? {} : { staticFailure }),
   })

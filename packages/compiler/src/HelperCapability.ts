@@ -132,19 +132,19 @@ const contractOf = (symbol: string, target: Target.Target): Contract | undefined
     family === 'memory' ? 'LLVM-22.1-memory/C11-7.24' : 'LLVM-22.1-frem/selected-libc-fmod'
   if (symbol === 'bcmp' || symbol === 'bzero')
     authority = 'LLVM-22.1-target-library/selected-strings.h'
-  return Object.freeze({
+  return {
     symbol,
     family,
     callingConvention: 'C',
     pointerBits: target.pointerSize === 4 ? 32 : 64,
-    parameters: Object.freeze(parameters),
+    parameters: parameters,
     result,
     linkage: 'external',
     visibility: 'default',
     retention: family === 'memory' ? 'explicit-object' : 'platform-symbol',
     lto: 'unsupported',
     authority,
-  })
+  }
 }
 
 /** Selects the initial permanent source/platform and explicit Wasm bootstrap providers. */
@@ -184,17 +184,17 @@ export const provider = Effect.fn('HelperCapability.provider')(function* (
   } else if (kind === 'bootstrap')
     content = ToolchainIntegrity.contentDigest(LlvmWasmRuntime.source)
   const id = `${kind}:${root}:${symbol}:v1`
-  return Object.freeze({
+  return {
     id,
     kind,
     root,
-    provides: Object.freeze([symbol]),
-    requires: Object.freeze([]),
-    targets: kind === 'bootstrap' ? Object.freeze([profile.target.id]) : Object.freeze(targets),
+    provides: [symbol],
+    requires: [],
+    targets: kind === 'bootstrap' ? [profile.target.id] : targets,
     identity: ToolchainIntegrity.contentDigest(
       Canonical.record(id, [profile.target.id, profile.libc, content]),
     ),
-  })
+  }
 })
 
 /** Validates a selected provider graph, reporting the full path for missing edges and cycles. */
@@ -240,7 +240,7 @@ export const closure = Effect.fn('HelperCapability.closure')(function* (
     for (const symbol of [...candidate.requires].sort().reverse())
       pending.push({ symbol, path: [...next.path, candidate.id], exiting: false })
   }
-  return Object.freeze(selected)
+  return selected
 })
 
 /** Accounts actual object references against explicit source/runtime contracts and helper ABIs. */
@@ -304,15 +304,13 @@ export const reconcile = Effect.fn('HelperCapability.reconcile')(function* (
     )
     const contract = contractOf(symbol, profile.target)
     if (contract === undefined) return yield* error('UnsupportedFamily', symbol, [object])
-    requirements.push(
-      Object.freeze({
-        contract,
-        provider: selected,
-        object,
-        objectDigest,
-        emittedSymbol: entry.name,
-      }),
-    )
+    requirements.push({
+      contract,
+      provider: selected,
+      object,
+      objectDigest,
+      emittedSymbol: entry.name,
+    })
   }
   const identity = ToolchainIntegrity.contentDigest(
     Canonical.record('HelperReport.v1', [
@@ -333,17 +331,17 @@ export const reconcile = Effect.fn('HelperCapability.reconcile')(function* (
       Canonical.array(platform),
     ]),
   )
-  return Object.freeze({
+  return {
     schema: 1,
     target: profile.target.id,
     object,
     objectDigest,
-    requirements: Object.freeze(requirements),
-    foreign: Object.freeze(foreign),
-    runtime: Object.freeze(runtime),
-    platform: Object.freeze(platform),
+    requirements: requirements,
+    foreign: foreign,
+    runtime: runtime,
+    platform: platform,
     identity,
-  })
+  }
 })
 
 /** Verifies the classified C signatures before an ordinary source provider can supply a helper. */
@@ -404,14 +402,12 @@ export const verifyProvider = Effect.fn('HelperCapability.verifyProvider')(funct
 export const linkInputs = (
   reports: ReadonlyArray<Report>,
 ): ReadonlyArray<NativeLinkInput.NativeLinkInput> =>
-  Object.freeze(
-    [
-      ...new Set(
-        reports.flatMap((report) =>
-          report.requirements
-            .filter((entry) => entry.provider.kind === 'platform' && entry.provider.root === 'm')
-            .map(() => 'm'),
-        ),
+  [
+    ...new Set(
+      reports.flatMap((report) =>
+        report.requirements
+          .filter((entry) => entry.provider.kind === 'platform' && entry.provider.root === 'm')
+          .map(() => 'm'),
       ),
-    ].map((name) => NativeLinkInput.library(name, 'Dynamic')),
-  )
+    ),
+  ].map((name) => NativeLinkInput.library(name, 'Dynamic'))

@@ -24,8 +24,5 @@ it.effect('closes one module semantic input and its editor indexes into one arti
       artifact.anonymousExpressions,
       snapshot.anonymousExpressions.get('tooling/Main'),
     )
-    assert.isTrue(Object.isFrozen(artifact))
-    assert.isTrue(Object.isFrozen(artifact.semanticOccurrences))
-    assert.isTrue(Object.isFrozen(artifact.anonymousExpressions))
   }),
 )

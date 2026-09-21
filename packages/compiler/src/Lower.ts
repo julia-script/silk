@@ -24,12 +24,12 @@ import * as Type from './Type.js'
  * loop region plus lexical repeat/exit outcomes; backend-private CFGs are derived later.
  */
 
-export const i32: Extract<Mir.Type, { readonly _tag: 'i32' }> = Object.freeze({ _tag: 'i32' })
-export const usize: Extract<Mir.Type, { readonly _tag: 'usize' }> = Object.freeze({ _tag: 'usize' })
-export const bool: Extract<Mir.Type, { readonly _tag: 'bool' }> = Object.freeze({ _tag: 'bool' })
-export const character: Extract<Mir.Type, { readonly _tag: 'char' }> = Object.freeze({
+export const i32: Extract<Mir.Type, { readonly _tag: 'i32' }> = { _tag: 'i32' }
+export const usize: Extract<Mir.Type, { readonly _tag: 'usize' }> = { _tag: 'usize' }
+export const bool: Extract<Mir.Type, { readonly _tag: 'bool' }> = { _tag: 'bool' }
+export const character: Extract<Mir.Type, { readonly _tag: 'char' }> = {
   _tag: 'char',
-})
+}
 
 export const mirType = (
   type: Type.Type,
@@ -41,27 +41,25 @@ export const mirType = (
   const representation =
     layout === undefined ? undefined : Layout.entry(layout, specialized)?.representation
   if (Type.isNominal(specialized) && representation?._tag === 'ScalarEnum')
-    return Object.freeze({ _tag: 'Enum', type: specialized, representation })
+    return { _tag: 'Enum', type: specialized, representation }
   if (typeof specialized === 'string') {
-    if (Type.isBuiltin(specialized)) return Object.freeze({ _tag: specialized })
-    if (Type.isNever(specialized)) return Object.freeze({ _tag: 'Bottom', type: specialized })
+    if (Type.isBuiltin(specialized)) return { _tag: specialized }
+    if (Type.isNever(specialized)) return { _tag: 'Bottom', type: specialized }
     return undefined
   }
-  if (Type.isString(specialized)) return Object.freeze({ _tag: 'String', type: specialized })
-  if (Type.isNominal(specialized)) return Object.freeze({ _tag: 'Nominal', type: specialized })
-  if (Type.isFixedArray(specialized))
-    return Object.freeze({ _tag: 'FixedArray', type: specialized })
-  if (Type.isSlice(specialized)) return Object.freeze({ _tag: 'Slice', type: specialized })
-  if (Type.isReference(specialized)) return Object.freeze({ _tag: 'Reference', type: specialized })
-  if (Type.isPointer(specialized)) return Object.freeze({ _tag: 'Pointer', type: specialized })
-  if (Type.isForeignFunction(specialized))
-    return Object.freeze({ _tag: 'ForeignFunction', type: specialized })
-  if (Type.isUnion(specialized)) return Object.freeze({ _tag: 'Union', type: specialized })
-  if (Type.isEffect(specialized)) return Object.freeze({ _tag: 'EffectOutcome', type: specialized })
+  if (Type.isString(specialized)) return { _tag: 'String', type: specialized }
+  if (Type.isNominal(specialized)) return { _tag: 'Nominal', type: specialized }
+  if (Type.isFixedArray(specialized)) return { _tag: 'FixedArray', type: specialized }
+  if (Type.isSlice(specialized)) return { _tag: 'Slice', type: specialized }
+  if (Type.isReference(specialized)) return { _tag: 'Reference', type: specialized }
+  if (Type.isPointer(specialized)) return { _tag: 'Pointer', type: specialized }
+  if (Type.isForeignFunction(specialized)) return { _tag: 'ForeignFunction', type: specialized }
+  if (Type.isUnion(specialized)) return { _tag: 'Union', type: specialized }
+  if (Type.isEffect(specialized)) return { _tag: 'EffectOutcome', type: specialized }
   return undefined
 }
 
-export const local = (ordinal: number): Mir.LocalId => Object.freeze({ _tag: 'Local', ordinal })
+export const local = (ordinal: number): Mir.LocalId => ({ _tag: 'Local', ordinal })
 
 export const spanKey = (span: SourceSpan.SourceSpan): string => `${span.start}:${span.end}`
 export const patternKey = (binding: Match.BindingId | Tir.LocalId): string =>
@@ -98,14 +96,14 @@ export const specializeProvider = (
     return undefined
   const witness = provider.witness ?? ConformanceProof.witness(fn.index, providerType, capability)
   if (witness === undefined) return undefined
-  return Object.freeze({
+  return {
     capability,
     providerType,
     witness,
     role: selected.role,
     requirementAccess: selected.access,
     access: provider.selectionAccess,
-  })
+  }
 }
 
 import type { FunctionLowering } from './FunctionLowering.js'
@@ -124,20 +122,20 @@ const withLocalSharedDropPlan = (layout: Layout.Plan, operation: Mir.Operation):
         : LocalSharedControlBlock.plan(layout.target, operation.cleanup.element, elementLayout)
     return block?._tag !== 'LocalSharedControlBlockPlan'
       ? operation
-      : Object.freeze({
+      : {
           ...operation,
-          localShared: Object.freeze({ element: operation.cleanup.element, block }),
-        })
+          localShared: { element: operation.cleanup.element, block },
+        }
   }
   if (operation._tag === 'DiagnosticScope')
-    return Object.freeze({
+    return {
       ...operation,
       body: Mir.mapExecutionOperations(operation.body, (operations) =>
         operations.map((child) => withLocalSharedDropPlan(layout, child)),
       ),
-    })
+    }
   if (operation._tag === 'Conditional')
-    return Object.freeze({
+    return {
       ...operation,
       taken: Mir.mapExecutionOperations(operation.taken, (operations) =>
         operations.map((child) => withLocalSharedDropPlan(layout, child)),
@@ -145,51 +143,45 @@ const withLocalSharedDropPlan = (layout: Layout.Plan, operation: Mir.Operation):
       otherwise: Mir.mapExecutionOperations(operation.otherwise, (operations) =>
         operations.map((child) => withLocalSharedDropPlan(layout, child)),
       ),
-    })
+    }
   if (operation._tag === 'ShortCircuit')
-    return Object.freeze({
+    return {
       ...operation,
       right: Mir.mapExecutionOperations(operation.right, (operations) =>
         operations.map((child) => withLocalSharedDropPlan(layout, child)),
       ),
-    })
+    }
   if (operation._tag === 'Match')
-    return Object.freeze({
+    return {
       ...operation,
-      arms: Object.freeze(
-        operation.arms.map((arm) =>
-          Object.freeze({
-            ...arm,
-            ...(arm.guard === undefined
-              ? {}
-              : {
-                  guard: Object.freeze({
-                    ...arm.guard,
-                    execution: Mir.mapExecutionOperations(arm.guard.execution, (operations) =>
-                      operations.map((child) => withLocalSharedDropPlan(layout, child)),
-                    ),
-                  }),
-                }),
-            selected: Object.freeze({
-              ...arm.selected,
-              execution: Mir.mapExecutionOperations(arm.selected.execution, (operations) =>
-                operations.map((child) => withLocalSharedDropPlan(layout, child)),
-              ),
+      arms: operation.arms.map((arm) => ({
+        ...arm,
+        ...(arm.guard === undefined
+          ? {}
+          : {
+              guard: {
+                ...arm.guard,
+                execution: Mir.mapExecutionOperations(arm.guard.execution, (operations) =>
+                  operations.map((child) => withLocalSharedDropPlan(layout, child)),
+                ),
+              },
             }),
-          }),
-        ),
-      ),
-    })
+        selected: {
+          ...arm.selected,
+          execution: Mir.mapExecutionOperations(arm.selected.execution, (operations) =>
+            operations.map((child) => withLocalSharedDropPlan(layout, child)),
+          ),
+        },
+      })),
+    }
   if ('releases' in operation && operation.releases !== undefined)
-    return Object.freeze({
+    return {
       ...operation,
-      releases: Object.freeze(
-        operation.releases.map((release) => {
-          const planned = withLocalSharedDropPlan(layout, release)
-          return planned._tag === 'Drop' ? planned : release
-        }),
-      ),
-    })
+      releases: operation.releases.map((release) => {
+        const planned = withLocalSharedDropPlan(layout, release)
+        return planned._tag === 'Drop' ? planned : release
+      }),
+    }
   return operation
 }
 
@@ -197,37 +189,29 @@ const withLocalSharedDropPlans = (
   layout: Layout.Plan,
   functions: ReadonlyArray<Mir.MirFunction>,
 ): ReadonlyArray<Mir.MirFunction> =>
-  Object.freeze(
-    functions.map((fn) =>
-      Object.freeze({
-        ...fn,
-        regions: Object.freeze(
-          fn.regions.map((region) => {
-            if (region._tag === 'OperationRegion') {
-              return Object.freeze({
-                ...region,
-                operations: Object.freeze(
-                  region.operations.map((operation) => withLocalSharedDropPlan(layout, operation)),
-                ),
-              })
-            }
-            if (region._tag === 'CleanupRegion') {
-              return Object.freeze({
-                ...region,
-                releases: Object.freeze(
-                  region.releases.map((release) => {
-                    const planned = withLocalSharedDropPlan(layout, release)
-                    return planned._tag === 'Drop' || planned._tag === 'EndLoan' ? planned : release
-                  }),
-                ),
-              })
-            }
-            return region
+  functions.map((fn) => ({
+    ...fn,
+    regions: fn.regions.map((region) => {
+      if (region._tag === 'OperationRegion') {
+        return {
+          ...region,
+          operations: region.operations.map((operation) =>
+            withLocalSharedDropPlan(layout, operation),
+          ),
+        }
+      }
+      if (region._tag === 'CleanupRegion') {
+        return {
+          ...region,
+          releases: region.releases.map((release) => {
+            const planned = withLocalSharedDropPlan(layout, release)
+            return planned._tag === 'Drop' || planned._tag === 'EndLoan' ? planned : release
           }),
-        ),
-      }),
-    ),
-  )
+        }
+      }
+      return region
+    }),
+  }))
 
 /**
  * Resolves the hidden package cleanup at the last point where exact MIR executable identities are
@@ -244,31 +228,26 @@ const withExecutionPackageCleanups = (
     for (const operation of MirVerification.operations(fn)) {
       if (operation._tag !== 'ExecutionFromAllocation') continue
       const key = ExecutionPackage.specializationKey(operation.plan.specialization)
-      cleanupBySpecialization.set(
-        key,
-        Object.freeze({
-          body: operation.bodyCleanup,
-          endpoint: operation.endpointCleanup,
-          callback: operation.callbackCleanup,
-        }),
-      )
+      cleanupBySpecialization.set(key, {
+        body: operation.bodyCleanup,
+        endpoint: operation.endpointCleanup,
+        callback: operation.callbackCleanup,
+      })
     }
   }
   if (cleanupBySpecialization.size === 0) return layout
-  return Object.freeze({
+  return {
     ...layout,
-    executionPackages: Object.freeze({
+    executionPackages: {
       ...layout.executionPackages,
-      plans: Object.freeze(
-        layout.executionPackages.plans.map((plan) => {
-          const cleanup = cleanupBySpecialization.get(
-            ExecutionPackage.specializationKey(plan.specialization),
-          )
-          return cleanup === undefined ? plan : Object.freeze({ ...plan, cleanup })
-        }),
-      ),
-    }),
-  })
+      plans: layout.executionPackages.plans.map((plan) => {
+        const cleanup = cleanupBySpecialization.get(
+          ExecutionPackage.specializationKey(plan.specialization),
+        )
+        return cleanup === undefined ? plan : { ...plan, cleanup }
+      }),
+    },
+  }
 }
 
 import { generated } from './CleanupEmission.js'
@@ -300,31 +279,27 @@ export const specializedWitnessEffectTargets = (
   owner: Instances.Instance,
   block: Extract<Tir.Expression, { readonly _tag: 'EffectBlock' }>,
 ): ReadonlyArray<SpecializedWitnessEffectTarget> =>
-  Object.freeze(
-    Tir.runtimeExpressionTree(block).flatMap((expression) => {
-      if (
-        (expression._tag !== 'BuiltinCall' && expression._tag !== 'InterfaceOperationCall') ||
-        expression.witnessEffectSite === undefined
-      )
-        return []
-      const bound =
-        expression._tag === 'InterfaceOperationCall' ? expression : expression.interfaceOperation
-      if (bound === undefined) return []
-      const capability = Type.substitute(bound.capability, owner.substitution)
-      if (!Type.isNominal(capability)) return []
-      const target = ConformanceProof.interfaceWitnessTarget(
-        index,
-        Type.substitute(bound.provider, owner.substitution),
-        capability,
-        bound.operation,
-        bound.contract,
-        owner.substitution,
-      )
-      return target === undefined
-        ? []
-        : [Object.freeze({ site: expression.witnessEffectSite, target })]
-    }),
-  )
+  Tir.runtimeExpressionTree(block).flatMap((expression) => {
+    if (
+      (expression._tag !== 'BuiltinCall' && expression._tag !== 'InterfaceOperationCall') ||
+      expression.witnessEffectSite === undefined
+    )
+      return []
+    const bound =
+      expression._tag === 'InterfaceOperationCall' ? expression : expression.interfaceOperation
+    if (bound === undefined) return []
+    const capability = Type.substitute(bound.capability, owner.substitution)
+    if (!Type.isNominal(capability)) return []
+    const target = ConformanceProof.interfaceWitnessTarget(
+      index,
+      Type.substitute(bound.provider, owner.substitution),
+      capability,
+      bound.operation,
+      bound.contract,
+      owner.substitution,
+    )
+    return target === undefined ? [] : [{ site: expression.witnessEffectSite, target }]
+  })
 
 export const lowerProgram = (
   discovery: Instances.Discovery,
@@ -335,35 +310,32 @@ export const lowerProgram = (
   trace: CompilerTrace.CompilerTrace = CompilerTrace.none,
 ): Mir.Module => {
   const declaredForeignStatics = trace('Lower.collectForeignStatics', () => {
-    const declaredForeignStatics = Object.freeze(
-      index.modules.flatMap((module) =>
-        module.members.flatMap((member) =>
-          member._tag === 'ForeignStaticDeclaration' &&
-          member.canonical._tag === 'Canonical' &&
-          member.declaredType._tag === 'Resolved'
-            ? [
-                Object.freeze({
-                  declaration: member.canonical.id,
-                  declarationSpan: registry.spanOf(member.anchor),
-                  direction: member.direction,
-                  symbol: member.foreign.symbol,
-                  type: member.declaredType.type,
-                  ...(member.literal === undefined ? {} : { literal: member.literal }),
-                }),
-              ]
-            : [],
-        ),
+    const declaredForeignStatics = index.modules.flatMap((module) =>
+      module.members.flatMap((member) =>
+        member._tag === 'ForeignStaticDeclaration' &&
+        member.canonical._tag === 'Canonical' &&
+        member.declaredType._tag === 'Resolved'
+          ? [
+              {
+                declaration: member.canonical.id,
+                declarationSpan: registry.spanOf(member.anchor),
+                direction: member.direction,
+                symbol: member.foreign.symbol,
+                type: member.declaredType.type,
+                ...(member.literal === undefined ? {} : { literal: member.literal }),
+              },
+            ]
+          : [],
       ),
     )
     return declaredForeignStatics
   })
-  const ownershipOf = (instance: Instances.Instance): Ownership.ModuleOwnership =>
-    Object.freeze({
-      _tag: 'OwnershipFacts',
-      module: instance.key.declaration.module,
-      functions: Object.freeze([instance.ownership]),
-      diagnostics: Object.freeze([]),
-    })
+  const ownershipOf = (instance: Instances.Instance): Ownership.ModuleOwnership => ({
+    _tag: 'OwnershipFacts',
+    module: instance.key.declaration.module,
+    functions: [instance.ownership],
+    diagnostics: [],
+  })
   const staticData = trace('Lower.collectStaticData', () => {
     const staticDataById = new Map<
       string,
@@ -383,8 +355,8 @@ export const lowerProgram = (
           staticDataById.set(expression.data.id, expression.data)
       }
     }
-    const staticData = Object.freeze(
-      [...staticDataById.values()].sort((left, right) => left.id.localeCompare(right.id)),
+    const staticData = [...staticDataById.values()].sort((left, right) =>
+      left.id.localeCompare(right.id),
     )
     return staticData
   })
@@ -432,18 +404,16 @@ export const lowerProgram = (
           : effectValueType(layout, instance.key, block, blockType)
       if (type !== undefined && block !== undefined) {
         publishEffectResult(instance, type)
-        generatedRunners.push(
-          Object.freeze({
-            _tag: 'BlockEffectRunner',
-            id: Tir.effectRunnerId(instance.key.declaration, block.site),
-            owner: instance,
-            block,
-            type,
-            specializationKey: baseRunnerKey(instance.key, block.site, type.type),
-            providedRequirements: Object.freeze([]),
-            witnessTargets: specializedWitnessEffectTargets(index, instance, block),
-          }),
-        )
+        generatedRunners.push({
+          _tag: 'BlockEffectRunner',
+          id: Tir.effectRunnerId(instance.key.declaration, block.site),
+          owner: instance,
+          block,
+          type,
+          specializationKey: baseRunnerKey(instance.key, block.site, type.type),
+          providedRequirements: [],
+          witnessTargets: specializedWitnessEffectTargets(index, instance, block),
+        })
         continue
       }
       const returned = returnedValueType(
@@ -501,47 +471,45 @@ export const lowerProgram = (
       const parameter = local(0)
       const result = local(1)
       const cleanup = CleanupPlan.cleanupPlan(index, element)
-      functions.push(
-        Object.freeze({
-          _tag: 'MirFunction' as const,
-          id: LocalSharedPayloadCleanup.declaration,
-          instance: LocalSharedPayloadCleanup.instance(element),
-          parameterCount: 1,
-          localTypes: Object.freeze([parameterType, i32]),
-          result: i32,
-          entry: Object.freeze({ _tag: 'Region' as const, ordinal: 0 }),
-          regions: Object.freeze([
-            Object.freeze({
-              _tag: 'OperationRegion' as const,
-              id: Object.freeze({ _tag: 'Region' as const, ordinal: 0 }),
-              operations: Object.freeze([
-                ...(cleanup._tag === 'NoCleanup'
-                  ? []
-                  : [
-                      Object.freeze({
-                        _tag: 'Drop' as const,
-                        local: parameter,
-                        cleanup,
-                        provenance: generated(helperSpan),
-                      }),
-                    ]),
-                Object.freeze({
-                  _tag: 'Literal' as const,
-                  destination: result,
-                  type: i32,
-                  value: 0n,
-                  provenance: generated(helperSpan),
-                }),
-              ]),
-              outcome: Object.freeze({
-                _tag: 'Return' as const,
-                value: result,
+      functions.push({
+        _tag: 'MirFunction' as const,
+        id: LocalSharedPayloadCleanup.declaration,
+        instance: LocalSharedPayloadCleanup.instance(element),
+        parameterCount: 1,
+        localTypes: [parameterType, i32],
+        result: i32,
+        entry: { _tag: 'Region' as const, ordinal: 0 },
+        regions: [
+          {
+            _tag: 'OperationRegion' as const,
+            id: { _tag: 'Region' as const, ordinal: 0 },
+            operations: [
+              ...(cleanup._tag === 'NoCleanup'
+                ? []
+                : [
+                    {
+                      _tag: 'Drop' as const,
+                      local: parameter,
+                      cleanup,
+                      provenance: generated(helperSpan),
+                    },
+                  ]),
+              {
+                _tag: 'Literal' as const,
+                destination: result,
+                type: i32,
+                value: 0n,
                 provenance: generated(helperSpan),
-              }),
-            }),
-          ]),
-        }),
-      )
+              },
+            ],
+            outcome: {
+              _tag: 'Return' as const,
+              value: result,
+              provenance: generated(helperSpan),
+            },
+          },
+        ],
+      })
     }
   })
   const loweredRunners: Array<{
@@ -654,7 +622,7 @@ export const lowerProgram = (
         },
       )
     }
-    if (runner !== undefined) loweredRunners.push(Object.freeze({ spec: generated, runner }))
+    if (runner !== undefined) loweredRunners.push({ spec: generated, runner })
   }
   // Lowering a provided parent can discover provided children after their open bases were already
   // visited. Filter only after the worklist reaches its fixed point so backends never compile an
@@ -679,7 +647,7 @@ export const lowerProgram = (
           const key = runnerKey(
             alternative.runner,
             alternative.runnerTypeArguments,
-            alternative.runnerStaticArguments ?? Object.freeze([]),
+            alternative.runnerStaticArguments ?? [],
           )
           if (retainedRunners.has(key)) continue
           retainedRunners.add(key)
@@ -696,7 +664,7 @@ export const lowerProgram = (
       const key = runnerKey(
         operation.runner,
         operation.runnerTypeArguments,
-        operation.runnerStaticArguments ?? Object.freeze([]),
+        operation.runnerStaticArguments ?? [],
       )
       if (!retainedRunners.has(key)) {
         retainedRunners.add(key)
@@ -748,21 +716,19 @@ export const lowerProgram = (
       ),
     ),
   )
-  const foreignStatics = Object.freeze(
-    declaredForeignStatics
-      .filter(
-        (record) =>
-          record.direction === 'Export' ||
-          foreignStaticUses.has(`${record.declaration.module}\u0000${record.declaration.name}`),
-      )
-      .sort(
-        (left, right) =>
-          left.declarationSpan.sourceId.localeCompare(right.declarationSpan.sourceId) ||
-          left.declarationSpan.start - right.declarationSpan.start ||
-          left.declarationSpan.end - right.declarationSpan.end,
-      ),
-  )
-  return Object.freeze({
+  const foreignStatics = declaredForeignStatics
+    .filter(
+      (record) =>
+        record.direction === 'Export' ||
+        foreignStaticUses.has(`${record.declaration.module}\u0000${record.declaration.name}`),
+    )
+    .sort(
+      (left, right) =>
+        left.declarationSpan.sourceId.localeCompare(right.declarationSpan.sourceId) ||
+        left.declarationSpan.start - right.declarationSpan.start ||
+        left.declarationSpan.end - right.declarationSpan.end,
+    )
+  return {
     _tag: 'MirModule',
     module: discovery.rootModule,
     intrinsics: discovery.intrinsics,
@@ -772,12 +738,10 @@ export const lowerProgram = (
     foreignStatics,
     layout: finalizedLayout,
     staticData,
-    executionTransitions: Object.freeze(
-      finalizedLayout.executionPackages.plans.map((plan, ordinal) =>
-        ExecutionTransition.authority(ordinal, ordinal + 1, plan.readinessStorage),
-      ),
+    executionTransitions: finalizedLayout.executionPackages.plans.map((plan, ordinal) =>
+      ExecutionTransition.authority(ordinal, ordinal + 1, plan.readinessStorage),
     ),
     functions: withLocalSharedDropPlans(layout, functions),
-  })
+  }
 }
 import type * as SemanticContext from './SemanticContext.js'

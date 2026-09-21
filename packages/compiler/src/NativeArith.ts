@@ -338,10 +338,10 @@ export const emitCallableBinary = Effect.fnUntraced(function* (
     return result
   }
   if (operator === 'RotateLeft' || operator === 'RotateRight') {
-    const signature = Object.freeze({
+    const signature = {
       returnType: operandType,
-      parameters: Object.freeze([operandType, operandType, operandType]),
-    })
+      parameters: [operandType, operandType, operandType],
+    }
     const result = yield* Intrinsic.call(
       body,
       operator === 'RotateLeft' ? 'fshl' : 'fshr',
@@ -355,10 +355,10 @@ export const emitCallableBinary = Effect.fnUntraced(function* (
     return result
   }
   if (operator === 'SaturatingAdd' || operator === 'SaturatingSubtract') {
-    const signature = Object.freeze({
+    const signature = {
       returnType: operandType,
-      parameters: Object.freeze([operandType, operandType]),
-    })
+      parameters: [operandType, operandType],
+    }
     let intrinsic: Intrinsic.Id
     switch (operator) {
       case 'SaturatingAdd':
@@ -392,10 +392,10 @@ export const emitCallableBinary = Effect.fnUntraced(function* (
     let signature = signatures.get(bits)
     if (signature === undefined) {
       const i1 = yield* LlvmType.integer(builder, 1)
-      signature = Object.freeze({
+      signature = {
         returnType: yield* LlvmType.structure(builder, [operandType, i1]),
-        parameters: Object.freeze([operandType, operandType]),
-      })
+        parameters: [operandType, operandType],
+      }
       signatures.set(bits, signature)
     }
     const pair = yield* Intrinsic.call(
@@ -489,10 +489,10 @@ export const emitCallableBinary = Effect.fnUntraced(function* (
     let overflowSignature = signatures.get(bits)
     if (overflowSignature === undefined) {
       const i1 = yield* LlvmType.integer(builder, 1)
-      overflowSignature = Object.freeze({
+      overflowSignature = {
         returnType: yield* LlvmType.structure(builder, [operandType, i1]),
-        parameters: Object.freeze([operandType, operandType]),
-      })
+        parameters: [operandType, operandType],
+      }
       signatures.set(bits, overflowSignature)
     }
     const pair = yield* Intrinsic.call(

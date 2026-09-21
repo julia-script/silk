@@ -280,7 +280,6 @@ it.effect('unifies unequal payloads by target width with stable equal-width ties
       ]
       const result = yield* Layout.unifyPayloadTypes(variants, target)
       assert.deepEqual(result, expected)
-      assert.isTrue(Object.isFrozen(result))
       assert.deepEqual(yield* Layout.unifyPayloadTypes(variants.toReversed(), target), expected)
       assert.deepEqual(
         yield* Layout.unifyPayloadTypes([scalarShape('i32'), scalarShape('f32')], target),

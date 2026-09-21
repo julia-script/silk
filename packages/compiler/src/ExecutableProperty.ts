@@ -34,10 +34,13 @@ export interface Fact {
   readonly nonParking: Verdict
 }
 
-export const satisfied: Verdict = Object.freeze({ _tag: 'Satisfied' })
+export const satisfied: Verdict = { _tag: 'Satisfied' }
 
-const cause = (reason: Cause['reason'], path: ReadonlyArray<string>): Cause =>
-  Object.freeze({ _tag: 'ExecutablePropertyCause', reason, path: Object.freeze(Array.from(path)) })
+const cause = (reason: Cause['reason'], path: ReadonlyArray<string>): Cause => ({
+  _tag: 'ExecutablePropertyCause',
+  reason,
+  path: Array.from(path),
+})
 
 const causeKey = (self: Cause): string => `${self.reason}\0${self.path.join('\0')}`
 
@@ -55,9 +58,7 @@ const verdict = (causes: ReadonlyArray<Cause>): Verdict => {
   const distinct = [...new Map(causes.map((entry) => [causeKey(entry), entry])).values()].sort(
     (left, right) => compareText(causeKey(left), causeKey(right)),
   )
-  return distinct.length === 0
-    ? satisfied
-    : Object.freeze({ _tag: 'Unsatisfied', causes: Object.freeze(distinct) })
+  return distinct.length === 0 ? satisfied : { _tag: 'Unsatisfied', causes: distinct }
 }
 
 const nestedLoanCauses = (
@@ -75,8 +76,8 @@ const nestedLoanCauses = (
       (longer, shorter) => Lifetime.outlives(assumptions, longer, shorter),
     )
       ? []
-      : Object.freeze([cause('NestedLoan', [...path, Type.encode(type)])])
-  if (Type.isSlot(type)) return Object.freeze([cause('NestedLoan', [...path, Type.encode(type)])])
+      : [cause('NestedLoan', [...path, Type.encode(type)])]
+  if (Type.isSlot(type)) return [cause('NestedLoan', [...path, Type.encode(type)])]
   if (Type.isFixedArray(type))
     return nestedLoanCauses(index, type.element, [...path, 'element'], active, assumptions)
   if (Type.isUnion(type))
@@ -145,7 +146,7 @@ const detachedCapture = (
     capture.providedRequirement?.providerAccess !== undefined &&
     capture.providedRequirement.providerAccess !== 'Take'
   )
-    return Object.freeze([cause('ProviderLoan', path)])
+    return [cause('ProviderLoan', path)]
   if (
     capture.access === 'Shared' ||
     capture.access === 'Exclusive' ||
@@ -160,7 +161,7 @@ const detachedCapture = (
       )) ||
     Type.isSlot(capture.type)
   )
-    return Object.freeze([cause('LexicalLoan', path)])
+    return [cause('LexicalLoan', path)]
   return nestedLoanCauses(index, capture.type, path, new Set(), assumptions)
 }
 
@@ -229,21 +230,19 @@ const representedSubjectsOfType = (
     } else {
       alternatives = []
     }
-    return Object.freeze(
-      alternatives.flatMap((alternative) => {
-        const identity = alternative.identity
-        if (identity._tag === 'CallableIdentityArgument') {
-          const subject = callableSubjectOf(discovery, identity)
-          return subject === undefined ? [] : [subject]
-        }
-        const candidate = discovery.effects.find(
-          (effect) =>
-            effect.identity === identity.identity ||
-            effect.representationIdentity === identity.identity,
-        )
-        return candidate === undefined ? [] : [`Effect:${candidate.identity}`]
-      }),
-    )
+    return alternatives.flatMap((alternative) => {
+      const identity = alternative.identity
+      if (identity._tag === 'CallableIdentityArgument') {
+        const subject = callableSubjectOf(discovery, identity)
+        return subject === undefined ? [] : [subject]
+      }
+      const candidate = discovery.effects.find(
+        (effect) =>
+          effect.identity === identity.identity ||
+          effect.representationIdentity === identity.identity,
+      )
+      return candidate === undefined ? [] : [`Effect:${candidate.identity}`]
+    })
   }
   if (Type.isFixedArray(type))
     return representedSubjectsOfType(discovery, index, type.element, active)
@@ -321,23 +320,21 @@ export const derive = (
     ownerAssumptions.set(key, assumptions)
     return assumptions
   }
-  const effects = discovery.effects.map((effect): Fact =>
-    Object.freeze({
-      _tag: 'ExecutablePropertyFact',
-      subject: Object.freeze({ _tag: 'Effect', identity: effect.identity }),
-      affinity: ExecutionAffinity.ofEnvironment(
-        index,
-        effect.captures.map((capture) => ({ type: capture.type })),
-      ),
-      detached: detachedOfEnvironment(index, effect.captures, assumptionsForOwner(effect.owner)),
-      nonParking: nonParkingOfSummary(effect.suspension),
-    }),
-  )
+  const effects = discovery.effects.map((effect): Fact => ({
+    _tag: 'ExecutablePropertyFact',
+    subject: { _tag: 'Effect', identity: effect.identity },
+    affinity: ExecutionAffinity.ofEnvironment(
+      index,
+      effect.captures.map((capture) => ({ type: capture.type })),
+    ),
+    detached: detachedOfEnvironment(index, effect.captures, assumptionsForOwner(effect.owner)),
+    nonParking: nonParkingOfSummary(effect.suspension),
+  }))
   const callables = discovery.callables.map((callable): Fact => {
     const identity = callableIdentity(callable)
-    return Object.freeze({
+    return {
       _tag: 'ExecutablePropertyFact',
-      subject: Object.freeze({ _tag: 'Callable', identity }),
+      subject: { _tag: 'Callable', identity },
       affinity: ExecutionAffinity.ofEnvironment(
         index,
         callable.captures.map((capture) => ({ type: capture.type })),
@@ -364,7 +361,7 @@ export const derive = (
               )?.summary ?? SuspensionMode.direct,
             )
       })(),
-    })
+    }
   })
   const nodes = new Map<
     string,
@@ -376,56 +373,48 @@ export const derive = (
   for (const [ordinal, effect] of discovery.effects.entries()) {
     const fact = effects.at(ordinal)
     if (fact === undefined) continue
-    nodes.set(
-      `Effect:${effect.identity}`,
-      Object.freeze({
-        direct: fact.detached,
-        dependencies: Object.freeze(
-          effect.captures.flatMap((capture) => {
-            let directTarget: string | undefined
-            if (capture.effectIdentity !== undefined) {
-              directTarget = `Effect:${capture.effectIdentity}`
-            } else if (capture.callableIdentity === undefined) {
-              directTarget = undefined
-            } else {
-              directTarget = callableSubjectOf(discovery, capture.callableIdentity)
-            }
-            const targets = [
-              ...(directTarget === undefined ? [] : [directTarget]),
-              ...representedSubjectsOfType(discovery, index, capture.type),
-            ]
-            return [...new Set(targets)].map((target) =>
-              Object.freeze({ label: `capture#${capture.ordinal}`, target }),
-            )
-          }),
-        ),
+    nodes.set(`Effect:${effect.identity}`, {
+      direct: fact.detached,
+      dependencies: effect.captures.flatMap((capture) => {
+        let directTarget: string | undefined
+        if (capture.effectIdentity !== undefined) {
+          directTarget = `Effect:${capture.effectIdentity}`
+        } else if (capture.callableIdentity === undefined) {
+          directTarget = undefined
+        } else {
+          directTarget = callableSubjectOf(discovery, capture.callableIdentity)
+        }
+        const targets = [
+          ...(directTarget === undefined ? [] : [directTarget]),
+          ...representedSubjectsOfType(discovery, index, capture.type),
+        ]
+        return [...new Set(targets)].map((target) => ({
+          label: `capture#${capture.ordinal}`,
+          target,
+        }))
       }),
-    )
+    })
   }
   for (const [ordinal, callable] of discovery.callables.entries()) {
     const fact = callables.at(ordinal)
     if (fact === undefined) continue
-    nodes.set(
-      `Callable:${Instances.callableIdentity(callable)}`,
-      Object.freeze({
-        direct: fact.detached,
-        dependencies: Object.freeze(
-          callable.captures.flatMap((capture) => {
-            const directTarget =
-              capture.callableIdentity === undefined
-                ? undefined
-                : callableSubjectOf(discovery, capture.callableIdentity)
-            const targets = [
-              ...(directTarget === undefined ? [] : [directTarget]),
-              ...representedSubjectsOfType(discovery, index, capture.type),
-            ]
-            return [...new Set(targets)].map((target) =>
-              Object.freeze({ label: `capture#${capture.ordinal}`, target }),
-            )
-          }),
-        ),
+    nodes.set(`Callable:${Instances.callableIdentity(callable)}`, {
+      direct: fact.detached,
+      dependencies: callable.captures.flatMap((capture) => {
+        const directTarget =
+          capture.callableIdentity === undefined
+            ? undefined
+            : callableSubjectOf(discovery, capture.callableIdentity)
+        const targets = [
+          ...(directTarget === undefined ? [] : [directTarget]),
+          ...representedSubjectsOfType(discovery, index, capture.type),
+        ]
+        return [...new Set(targets)].map((target) => ({
+          label: `capture#${capture.ordinal}`,
+          target,
+        }))
       }),
-    )
+    })
   }
   const detachedThrough = (subject: string): Verdict => {
     const visit = (nodeKey: string, active: ReadonlySet<string>): ReadonlyArray<Cause> => {
@@ -449,16 +438,12 @@ export const derive = (
     }
     return verdict(visit(subject, new Set()))
   }
-  return Object.freeze(
-    [...effects, ...callables]
-      .map((fact): Fact =>
-        Object.freeze({
-          ...fact,
-          detached: detachedThrough(`${fact.subject._tag}:${fact.subject.identity}`),
-        }),
-      )
-      .sort((left, right) => compareText(encodeSubject(left), encodeSubject(right))),
-  )
+  return [...effects, ...callables]
+    .map((fact): Fact => ({
+      ...fact,
+      detached: detachedThrough(`${fact.subject._tag}:${fact.subject.identity}`),
+    }))
+    .sort((left, right) => compareText(encodeSubject(left), encodeSubject(right)))
 }
 
 const encodeSubject = (self: Fact): string => `${self.subject._tag}:${self.subject.identity}`
@@ -546,35 +531,35 @@ const factOfExact = (
       : undefined
   if (target === undefined) return undefined
   const summary = Instances.suspensionOf(self, target.key)
-  return Object.freeze({
+  return {
     _tag: 'ExecutablePropertyFact',
-    subject: Object.freeze({ _tag: 'Callable', identity: identity.identity }),
+    subject: { _tag: 'Callable', identity: identity.identity },
     affinity: ExecutionAffinity.unrestricted,
     detached: satisfied,
     nonParking: nonParkingOfSummary(summary),
-  })
+  }
 }
 
 const exactAlternatives = (
   argument: Type.GenericArgument,
 ): ReadonlyArray<Type.ExactRepresentationArgument> => {
   if (Type.isExactRepresentationArgument(argument)) {
-    return Object.freeze([argument])
+    return [argument]
   }
   if (Type.isCompositeEffectRepresentationArgument(argument)) {
     return argument.alternatives
   }
-  return Object.freeze([])
+  return []
 }
 
 const nominalApplications = (type: Type.Type): ReadonlyArray<Type.Nominal> => {
   if (Type.isNominal(type))
-    return Object.freeze([
+    return [
       type,
       ...type.arguments.flatMap((argument) =>
         Type.isTypeArgument(argument) ? nominalApplications(argument) : [],
       ),
-    ])
+    ]
   if (Type.isFixedArray(type)) return nominalApplications(type.element)
   if (Type.isSlice(type)) return nominalApplications(type.element)
   if (Type.isReference(type)) return nominalApplications(type.target)
@@ -591,7 +576,7 @@ const nominalApplications = (type: Type.Type): ReadonlyArray<Type.Nominal> => {
     ].flatMap(nominalApplications)
   if (Type.isRepresented(type))
     return [type.contract, type.representation.requiredBound].flatMap(nominalApplications)
-  return Object.freeze([])
+  return []
 }
 
 /** Diagnoses reachable concrete substitutions that fail one sealed static-property obligation. */
@@ -724,7 +709,7 @@ export const violationDiagnostics = (
     )
       distinct.set(key, diagnostic)
   }
-  return Object.freeze([...distinct.values()])
+  return [...distinct.values()]
 }
 
 export const encodeVerdict = (self: Verdict): string =>

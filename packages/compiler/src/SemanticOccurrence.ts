@@ -117,18 +117,16 @@ export interface Index {
   readonly declarationLocations: ReadonlyMap<string, DeclarationLocation>
 }
 
-const identityOfDeclaration = (declaration: DeclarationFacts.MemberFact): Identity =>
-  Object.freeze({
-    _tag: 'DeclarationIdentity',
-    id: declaration.canonical._tag === 'Canonical' ? declaration.canonical.id : declaration.id,
-  })
+const identityOfDeclaration = (declaration: DeclarationFacts.MemberFact): Identity => ({
+  _tag: 'DeclarationIdentity',
+  id: declaration.canonical._tag === 'Canonical' ? declaration.canonical.id : declaration.id,
+})
 
 const location = (
   module: string | undefined,
   at: AuthoredIdentity.Anchor,
   selection: AuthoredIdentity.Anchor,
-): LocatedDeclaration =>
-  Object.freeze({ ...(module === undefined ? {} : { module }), at, selection })
+): LocatedDeclaration => ({ ...(module === undefined ? {} : { module }), at, selection })
 
 /**
  * The alias a retained type path names, if any. An alias is erased from the resolved type, so
@@ -237,7 +235,7 @@ const locationOfField = (
     : undefined
 }
 
-const available = (identity: Identity): Resolution => Object.freeze({ _tag: 'Available', identity })
+const available = (identity: Identity): Resolution => ({ _tag: 'Available', identity })
 
 type Pending = LocatedOccurrence
 
@@ -249,14 +247,12 @@ const push = (
   declaration?: LocatedDeclaration,
 ): void => {
   if (at === undefined) return
-  pending.push(
-    Object.freeze({
-      at,
-      role,
-      resolution,
-      ...(declaration === undefined ? {} : { declaration }),
-    }),
-  )
+  pending.push({
+    at,
+    role,
+    resolution,
+    ...(declaration === undefined ? {} : { declaration }),
+  })
 }
 
 const publishDeclaration = (
@@ -264,11 +260,11 @@ const publishDeclaration = (
   spans: SemanticContext.Registry,
 ): DeclarationLocation => {
   const span = spans.spanOf(self.at)
-  return Object.freeze({
+  return {
     module: self.module ?? span.sourceId,
     span,
     selectionSpan: spans.spanOf(self.selection),
-  })
+  }
 }
 
 interface Published {
@@ -285,8 +281,8 @@ const publish = (
     const span = spans.spanOf(entry.at)
     if (span.start === span.end) return []
     return [
-      Object.freeze({
-        occurrence: Object.freeze({
+      {
+        occurrence: {
           _tag: 'SemanticOccurrence' as const,
           span,
           role: entry.role,
@@ -294,9 +290,9 @@ const publish = (
           ...(entry.declaration === undefined
             ? {}
             : { declaration: publishDeclaration(entry.declaration, spans) }),
-        }),
+        },
         ordinal,
-      }),
+      },
     ]
   })
 
@@ -378,7 +374,7 @@ const collectQualifier = (
   pending: Array<Pending>,
 ): void => {
   if (scope === undefined) {
-    push(pending, anchor, 'Actor', Object.freeze({ _tag: 'Unavailable' }))
+    push(pending, anchor, 'Actor', { _tag: 'Unavailable' })
     return
   }
   const lookup = NameResolution.lookup(scope, index, spelling, {
@@ -402,8 +398,8 @@ const collectQualifier = (
       anchor,
       'Actor',
       actor === undefined
-        ? Object.freeze({ _tag: 'Unavailable' })
-        : available(Object.freeze({ _tag: 'IntrinsicActorIdentity', id: actor.id })),
+        ? { _tag: 'Unavailable' }
+        : available({ _tag: 'IntrinsicActorIdentity', id: actor.id }),
     )
     return
   }
@@ -419,27 +415,20 @@ const collectQualifier = (
       pending,
       anchor,
       'Actor',
-      available(
-        Object.freeze({
-          _tag: 'ImportNamespaceIdentity',
-          module: lookup.module,
-          spelling: lookup.spelling,
-        }),
-      ),
+      available({
+        _tag: 'ImportNamespaceIdentity',
+        module: lookup.module,
+        spelling: lookup.spelling,
+      }),
       declaration,
     )
     return
   }
   if (lookup._tag === 'Conflict') {
-    push(
-      pending,
-      anchor,
-      'Actor',
-      Object.freeze({ _tag: 'Conflicting', cause: lookup.conflict.cause }),
-    )
+    push(pending, anchor, 'Actor', { _tag: 'Conflicting', cause: lookup.conflict.cause })
     return
   }
-  push(pending, anchor, 'Actor', Object.freeze({ _tag: 'Unavailable' }))
+  push(pending, anchor, 'Actor', { _tag: 'Unavailable' })
 }
 
 const collectResolvedType = (
@@ -460,7 +449,7 @@ const collectResolvedType = (
       selected === undefined ? undefined : selected.anchor,
       'Value',
       declaration === undefined
-        ? Object.freeze({ _tag: 'Unavailable' })
+        ? { _tag: 'Unavailable' }
         : available(identityOfDeclaration(declaration)),
       declaration === undefined ? undefined : locationOfDeclaration(index, declaration),
     )
@@ -475,8 +464,7 @@ const collectResolvedType = (
       collectDeclaredType(member, index, scope, pending)
     return
   }
-  const anchors =
-    fact.path?.segments.map((segment) => segment.anchor) ?? Object.freeze([fact.anchor])
+  const anchors = fact.path?.segments.map((segment) => segment.anchor) ?? [fact.anchor]
   const token = anchors.at(-1) ?? fact.anchor
   const qualifier = anchors.length > 1 ? anchors.at(0) : undefined
   if (qualifier !== undefined) {
@@ -498,7 +486,7 @@ const collectResolvedType = (
       pending,
       token,
       'Type',
-      available(Object.freeze({ _tag: 'TypeParameterIdentity', id: parameter })),
+      available({ _tag: 'TypeParameterIdentity', id: parameter }),
       declaration === undefined ? undefined : locationOfTypeParameter(declaration),
     )
     return
@@ -509,7 +497,7 @@ const collectResolvedType = (
       pending,
       token,
       'Type',
-      available(Object.freeze({ _tag: 'TypeParameterIdentity', id: fact.type })),
+      available({ _tag: 'TypeParameterIdentity', id: fact.type }),
       declaration === undefined ? undefined : locationOfTypeParameter(declaration),
     )
     return
@@ -543,8 +531,8 @@ const collectResolvedType = (
       token,
       'Type',
       actor === undefined
-        ? Object.freeze({ _tag: 'Unavailable' })
-        : available(Object.freeze({ _tag: 'IntrinsicActorIdentity', id: actor.id })),
+        ? { _tag: 'Unavailable' }
+        : available({ _tag: 'IntrinsicActorIdentity', id: actor.id }),
     )
     return
   }
@@ -555,8 +543,8 @@ const collectResolvedType = (
       token,
       'Type',
       actor === undefined
-        ? Object.freeze({ _tag: 'Unavailable' })
-        : available(Object.freeze({ _tag: 'IntrinsicActorIdentity', id: actor.id })),
+        ? { _tag: 'Unavailable' }
+        : available({ _tag: 'IntrinsicActorIdentity', id: actor.id }),
     )
   }
 }
@@ -585,10 +573,10 @@ const collectDeclaredType = (
       pending,
       selected === undefined ? undefined : selected.anchor,
       'Type',
-      Object.freeze({
+      {
         _tag: fact.candidate === undefined ? 'Missing' : 'Inaccessible',
         ...(fact.cause === undefined ? {} : { cause: fact.cause }),
-      }),
+      },
       declarationLocation,
     )
     return
@@ -635,10 +623,10 @@ const collectDeclaredType = (
       pending,
       selected === undefined ? undefined : selected.anchor,
       'Value',
-      Object.freeze({
+      {
         _tag: 'Unavailable',
         ...(fact.cause === undefined ? {} : { cause: fact.cause }),
-      }),
+      },
       declaration === undefined ? undefined : locationOfDeclaration(index, declaration),
     )
     for (const argument of fact.arguments) collectDeclaredType(argument, index, scope, pending)
@@ -650,7 +638,7 @@ const collectDeclaredType = (
       pending,
       fact.anchor,
       'Type',
-      available(Object.freeze({ _tag: 'TypeParameterIdentity', id: fact.parameter })),
+      available({ _tag: 'TypeParameterIdentity', id: fact.parameter }),
       declaration === undefined ? undefined : locationOfTypeParameter(declaration),
     )
     return
@@ -675,7 +663,7 @@ const collectRowExpression = (
         pending,
         fact.anchor,
         'Type',
-        available(Object.freeze({ _tag: 'TypeParameterIdentity', id: fact.parameter })),
+        available({ _tag: 'TypeParameterIdentity', id: fact.parameter }),
         declaration === undefined ? undefined : locationOfTypeParameter(declaration),
       )
       return
@@ -712,41 +700,37 @@ const parameterResolution = (
 ): { readonly resolution: Resolution; readonly declaration?: LocatedDeclaration } => {
   if (reference._tag === 'Resolved') {
     const declaration = locationOfParameter(reference.parameter)
-    return Object.freeze({
-      resolution: available(
-        Object.freeze({ _tag: 'ParameterIdentity', id: reference.parameter.id }),
-      ),
+    return {
+      resolution: available({ _tag: 'ParameterIdentity', id: reference.parameter.id }),
       ...(declaration === undefined ? {} : { declaration }),
-    })
+    }
   }
   if (reference._tag === 'ResolvedBinding') {
     const declaration = locationOfBinding(reference.binding)
-    return Object.freeze({
-      resolution: available(Object.freeze({ _tag: 'BindingIdentity', id: reference.binding.id })),
+    return {
+      resolution: available({ _tag: 'BindingIdentity', id: reference.binding.id }),
       ...(declaration === undefined ? {} : { declaration }),
-    })
+    }
   }
   if (reference._tag === 'ResolvedPattern') {
     const declaration = locationOfBinding(reference.binding)
-    return Object.freeze({
-      resolution: available(
-        Object.freeze({ _tag: 'PatternBindingIdentity', id: reference.binding.id }),
-      ),
+    return {
+      resolution: available({ _tag: 'PatternBindingIdentity', id: reference.binding.id }),
       ...(declaration === undefined ? {} : { declaration }),
-    })
+    }
   }
   if (reference._tag === 'Missing')
-    return Object.freeze({
-      resolution: Object.freeze({
+    return {
+      resolution: {
         _tag: 'Missing',
         ...(reference.cause === undefined ? {} : { cause: reference.cause }),
-      }),
-    })
-  return Object.freeze({
-    resolution: Object.freeze({
+      },
+    }
+  return {
+    resolution: {
       _tag: reference._tag === 'Ambiguous' ? 'Ambiguous' : 'Unavailable',
-    }),
-  })
+    },
+  }
 }
 
 const callResolution = (
@@ -755,70 +739,66 @@ const callResolution = (
 ): { readonly resolution: Resolution; readonly declaration?: LocatedDeclaration } => {
   if (reference._tag === 'Resolved') {
     const declaration = locationOfDeclaration(index, reference.declaration)
-    return Object.freeze({
+    return {
       resolution: available(identityOfDeclaration(reference.declaration)),
       ...(declaration === undefined ? {} : { declaration }),
-    })
+    }
   }
   if (reference._tag === 'ResolvedBuiltin') {
     const operation = Intrinsic.findOperation(
       reference.actor,
       reference.spelling.split('.').at(-1) ?? reference.spelling,
     )
-    return Object.freeze({
+    return {
       resolution:
         operation === undefined
-          ? Object.freeze({ _tag: 'Unavailable' })
-          : available(Object.freeze({ _tag: 'IntrinsicOperationIdentity', id: operation.id })),
-    })
+          ? { _tag: 'Unavailable' }
+          : available({ _tag: 'IntrinsicOperationIdentity', id: operation.id }),
+    }
   }
   if (reference._tag === 'ResolvedInterfaceOperation') {
     // An interface operation is declared once and answered per specialization by a witness. The
     // declaration is what a reader navigates to, so that is what the occurrence names.
     const declaration = locationOfServiceOperation(reference.declaration)
-    return Object.freeze({
+    return {
       resolution:
         reference.declaration.state._tag === 'Unique'
-          ? available(
-              Object.freeze({
-                _tag: 'ServiceOperationIdentity',
-                id: reference.declaration.state.id,
-              }),
-            )
-          : Object.freeze({ _tag: 'Unavailable' }),
+          ? available({
+              _tag: 'ServiceOperationIdentity',
+              id: reference.declaration.state.id,
+            })
+          : { _tag: 'Unavailable' },
       ...(declaration === undefined ? {} : { declaration }),
-    })
+    }
   }
   if (reference._tag === 'ResolvedServiceOperation') {
     const declaration = locationOfServiceOperation(reference.operation)
-    return Object.freeze({
+    return {
       resolution:
         reference.operation.state._tag === 'Unique'
-          ? available(
-              Object.freeze({
-                _tag: 'ServiceOperationIdentity',
-                id: reference.operation.state.id,
-              }),
-            )
-          : Object.freeze({ _tag: 'Unavailable' }),
+          ? available({
+              _tag: 'ServiceOperationIdentity',
+              id: reference.operation.state.id,
+            })
+          : { _tag: 'Unavailable' },
       ...(declaration === undefined ? {} : { declaration }),
-    })
+    }
   }
   if (reference._tag === 'Missing')
-    return Object.freeze({
-      resolution: Object.freeze({
+    return {
+      resolution: {
         _tag: 'Missing',
         ...(reference.cause === undefined ? {} : { cause: reference.cause }),
-      }),
-    })
+      },
+    }
   if (reference._tag === 'Ambiguous')
-    return Object.freeze({
-      resolution: Object.freeze({
+    return {
+      resolution: {
         _tag: 'Ambiguous',
         ...(reference.cause === undefined ? {} : { cause: reference.cause }),
-      }),
-    })
-  return Object.freeze({ resolution: Object.freeze({ _tag: 'Unavailable' }) })
+      },
+    }
+  return { resolution: { _tag: 'Unavailable' } }
 }
 
 const collectCallReference = (
@@ -831,14 +811,14 @@ const collectCallReference = (
 ): void => {
   let anchors: ReadonlyArray<AuthoredHir.Anchor>
   if (path?._tag === 'ReferencePath') {
-    anchors = Object.freeze([
+    anchors = [
       ...(path.qualifierAnchor === undefined ? [] : [path.qualifierAnchor]),
       path.memberAnchor,
-    ])
+    ]
   } else if ('anchor' in reference) {
-    anchors = Object.freeze([reference.anchor])
+    anchors = [reference.anchor]
   } else {
-    anchors = Object.freeze([])
+    anchors = []
   }
   const qualifier = anchors.length > 1 ? anchors.at(0) : undefined
   if (qualifier !== undefined && !qualifierOwnedByTypeApplication) {
@@ -885,7 +865,7 @@ const collectIntrinsicReference = (
   if (reference._tag === 'UnavailableIntrinsicReference') return
   const actorResolution =
     reference.actor._tag === 'IntrinsicActor'
-      ? available(Object.freeze({ _tag: 'IntrinsicActorIdentity', id: reference.actor.id }))
+      ? available({ _tag: 'IntrinsicActorIdentity', id: reference.actor.id })
       : available(identityOfDeclaration(reference.actor))
   const actorDeclaration =
     reference.actor._tag === 'IntrinsicActor'
@@ -896,7 +876,7 @@ const collectIntrinsicReference = (
     pending,
     reference.operationAnchor,
     'Operation',
-    available(Object.freeze({ _tag: 'IntrinsicOperationIdentity', id: reference.operation.id })),
+    available({ _tag: 'IntrinsicOperationIdentity', id: reference.operation.id }),
   )
 }
 
@@ -915,7 +895,7 @@ const collectPattern = (
         pending,
         binding.name.anchor,
         'Declaration',
-        available(Object.freeze({ _tag: 'PatternBindingIdentity', id: binding.id })),
+        available({ _tag: 'PatternBindingIdentity', id: binding.id }),
         locationOfBinding(binding),
       )
   if (pattern._tag === 'EnumMemberPattern') {
@@ -932,7 +912,7 @@ const collectPattern = (
         pending,
         pattern.memberAnchor === undefined ? undefined : pattern.memberAnchor,
         'Value',
-        available(Object.freeze({ _tag: 'EnumMemberIdentity', id: pattern.member.canonical.id })),
+        available({ _tag: 'EnumMemberIdentity', id: pattern.member.canonical.id }),
       )
   } else if (pattern._tag === 'NominalPattern') {
     if (pattern.target._tag === 'Resolved')
@@ -949,7 +929,7 @@ const collectPattern = (
           pending,
           field.anchor,
           'Field',
-          available(Object.freeze({ _tag: 'FieldIdentity', id: field.state.field.id })),
+          available({ _tag: 'FieldIdentity', id: field.state.field.id }),
           locationOfField(index, field.state.field),
         )
       if (field.nested !== undefined) collectPattern(field.nested, index, scope, pending)
@@ -968,12 +948,10 @@ const collectPattern = (
           pending,
           pattern.target.anchor,
           'Value',
-          available(
-            Object.freeze({
-              _tag: 'UnionVariantIdentity',
-              id: pattern.target.variant.canonical.id,
-            }),
-          ),
+          available({
+            _tag: 'UnionVariantIdentity',
+            id: pattern.target.variant.canonical.id,
+          }),
           locationOfUnionVariant(pattern.target.variant),
         )
     }
@@ -983,7 +961,7 @@ const collectPattern = (
           pending,
           field.anchor,
           'Field',
-          available(Object.freeze({ _tag: 'FieldIdentity', id: field.state.field.id })),
+          available({ _tag: 'FieldIdentity', id: field.state.field.id }),
           locationOfField(index, field.state.field),
         )
       if (field.nested !== undefined) collectPattern(field.nested, index, scope, pending)
@@ -1025,16 +1003,14 @@ const collectExpression = (
         expression.memberAnchor,
         'Value',
         expression.member?.canonical._tag === 'Canonical'
-          ? available(
-              Object.freeze({
-                _tag: 'EnumMemberIdentity',
-                id: expression.member.canonical.id,
-              }),
-            )
-          : Object.freeze({
+          ? available({
+              _tag: 'EnumMemberIdentity',
+              id: expression.member.canonical.id,
+            })
+          : {
               _tag: 'Unavailable',
               ...(expression.cause === undefined ? {} : { cause: expression.cause }),
-            }),
+            },
       )
       return
     case 'EnumValue':
@@ -1042,23 +1018,19 @@ const collectExpression = (
         pending,
         expression.qualifierAnchor,
         'Type',
-        available(
-          Object.freeze({
-            _tag: 'DeclarationIdentity',
-            id: expression.operation.enum,
-          }),
-        ),
+        available({
+          _tag: 'DeclarationIdentity',
+          id: expression.operation.enum,
+        }),
       )
       push(
         pending,
         expression.operationAnchor,
         'Operation',
-        available(
-          Object.freeze({
-            _tag: 'EnumAssociatedOperationIdentity',
-            id: expression.operation.id,
-          }),
-        ),
+        available({
+          _tag: 'EnumAssociatedOperationIdentity',
+          id: expression.operation.id,
+        }),
       )
       collectExpression(expression.argument, index, scope, pending, builder)
       return
@@ -1118,7 +1090,7 @@ const collectExpression = (
               pending,
               parameter.name.anchor,
               'Declaration',
-              available(Object.freeze({ _tag: 'ParameterIdentity', id: parameter.id })),
+              available({ _tag: 'ParameterIdentity', id: parameter.id }),
               locationOfParameter(parameter),
             )
           collectDeclaredType(parameter.declaredType, index, scope, pending)
@@ -1130,10 +1102,10 @@ const collectExpression = (
       for (const capture of expression.anonymous?.captures ?? []) {
         let identity: Identity
         if (Elaboration.isBindingDeclarationFact(capture.reference))
-          identity = Object.freeze({ _tag: 'BindingIdentity', id: capture.reference.id })
+          identity = { _tag: 'BindingIdentity', id: capture.reference.id }
         else if (Elaboration.isPatternBindingFact(capture.reference))
-          identity = Object.freeze({ _tag: 'PatternBindingIdentity', id: capture.reference.id })
-        else identity = Object.freeze({ _tag: 'ParameterIdentity', id: capture.reference.id })
+          identity = { _tag: 'PatternBindingIdentity', id: capture.reference.id }
+        else identity = { _tag: 'ParameterIdentity', id: capture.reference.id }
         push(
           pending,
           capture.anchor,
@@ -1162,21 +1134,16 @@ const collectExpression = (
           pending,
           token === undefined ? undefined : token,
           'Field',
-          available(Object.freeze({ _tag: 'FieldIdentity', id: expression.state.field.id })),
+          available({ _tag: 'FieldIdentity', id: expression.state.field.id }),
           locationOfField(index, expression.state.field),
         )
       else
-        push(
-          pending,
-          token === undefined ? undefined : token,
-          'Field',
-          Object.freeze({
-            _tag: 'Unavailable',
-            ...(expression.state._tag === 'Unavailable' && expression.state.cause !== undefined
-              ? { cause: expression.state.cause }
-              : {}),
-          }),
-        )
+        push(pending, token === undefined ? undefined : token, 'Field', {
+          _tag: 'Unavailable',
+          ...(expression.state._tag === 'Unavailable' && expression.state.cause !== undefined
+            ? { cause: expression.state.cause }
+            : {}),
+        })
       return
     }
     case 'StructLiteral': {
@@ -1196,7 +1163,7 @@ const collectExpression = (
             pending,
             fieldToken === undefined ? undefined : fieldToken,
             'Field',
-            available(Object.freeze({ _tag: 'FieldIdentity', id: initializer.state.field.id })),
+            available({ _tag: 'FieldIdentity', id: initializer.state.field.id }),
             locationOfField(index, initializer.state.field),
           )
         collectExpression(initializer.expression, index, scope, pending, builder)
@@ -1211,13 +1178,11 @@ const collectExpression = (
           token === undefined ? undefined : token,
           'Value',
           expression.target.variant.canonical._tag === 'Canonical'
-            ? available(
-                Object.freeze({
-                  _tag: 'UnionVariantIdentity',
-                  id: expression.target.variant.canonical.id,
-                }),
-              )
-            : Object.freeze({ _tag: 'Unavailable' }),
+            ? available({
+                _tag: 'UnionVariantIdentity',
+                id: expression.target.variant.canonical.id,
+              })
+            : { _tag: 'Unavailable' },
           locationOfUnionVariant(expression.target.variant),
         )
       for (const initializer of expression.initializers) {
@@ -1227,7 +1192,7 @@ const collectExpression = (
             pending,
             fieldToken === undefined ? undefined : fieldToken,
             'Field',
-            available(Object.freeze({ _tag: 'FieldIdentity', id: initializer.state.field.id })),
+            available({ _tag: 'FieldIdentity', id: initializer.state.field.id }),
             locationOfField(index, initializer.state.field),
           )
         collectExpression(initializer.expression, index, scope, pending, builder)
@@ -1291,7 +1256,7 @@ export const ofExpressionDecision = (
 ): ReadonlyArray<LocatedOccurrence> => {
   const pending: Array<Pending> = []
   collectExpression(expression, index, scope, pending)
-  return Object.freeze(pending)
+  return pending
 }
 
 const collectStatement = (
@@ -1314,7 +1279,7 @@ const collectStatement = (
           pending,
           binding.name.anchor,
           'Declaration',
-          available(Object.freeze({ _tag: 'BindingIdentity', id: binding.id })),
+          available({ _tag: 'BindingIdentity', id: binding.id }),
           locationOfBinding(binding),
         )
       if (Elaboration.isBindingDeclarationFact(binding) && binding.declaredType !== undefined)
@@ -1413,7 +1378,7 @@ const collectMember = (
         pending,
         typeParameter.name.anchor,
         'Declaration',
-        available(Object.freeze({ _tag: 'TypeParameterIdentity', id: typeParameter.type })),
+        available({ _tag: 'TypeParameterIdentity', id: typeParameter.type }),
         parameterLocation,
       )
   }
@@ -1424,7 +1389,7 @@ const collectMember = (
         pending,
         opaqueBinder.name.anchor,
         'Declaration',
-        available(Object.freeze({ _tag: 'TypeParameterIdentity', id: opaqueBinder.type })),
+        available({ _tag: 'TypeParameterIdentity', id: opaqueBinder.type }),
         locationOfTypeParameter(opaqueBinder),
       )
     for (const parameter of member.parameters) {
@@ -1433,7 +1398,7 @@ const collectMember = (
           pending,
           parameter.name.anchor,
           'Declaration',
-          available(Object.freeze({ _tag: 'ParameterIdentity', id: parameter.id })),
+          available({ _tag: 'ParameterIdentity', id: parameter.id }),
           locationOfParameter(parameter),
         )
       collectDeclaredType(parameter.declaredType, index, scope, pending)
@@ -1465,7 +1430,7 @@ const collectMember = (
           pending,
           opaqueBinder.name.anchor,
           'Declaration',
-          available(Object.freeze({ _tag: 'TypeParameterIdentity', id: opaqueBinder.type })),
+          available({ _tag: 'TypeParameterIdentity', id: opaqueBinder.type }),
           locationOfTypeParameter(opaqueBinder),
         )
       for (const typeParameter of operation.typeParameters) {
@@ -1475,7 +1440,7 @@ const collectMember = (
             pending,
             typeParameter.name.anchor,
             'Declaration',
-            available(Object.freeze({ _tag: 'TypeParameterIdentity', id: typeParameter.type })),
+            available({ _tag: 'TypeParameterIdentity', id: typeParameter.type }),
             parameterLocation,
           )
       }
@@ -1485,7 +1450,7 @@ const collectMember = (
           pending,
           operation.name.anchor,
           'Declaration',
-          available(Object.freeze({ _tag: 'ServiceOperationIdentity', id: operation.state.id })),
+          available({ _tag: 'ServiceOperationIdentity', id: operation.state.id }),
           operationLocation,
         )
       for (const parameter of operation.parameters) {
@@ -1494,7 +1459,7 @@ const collectMember = (
             pending,
             parameter.name.anchor,
             'Declaration',
-            available(Object.freeze({ _tag: 'ParameterIdentity', id: parameter.id })),
+            available({ _tag: 'ParameterIdentity', id: parameter.id }),
             locationOfParameter(parameter),
           )
         collectDeclaredType(parameter.declaredType, index, scope, pending)
@@ -1514,7 +1479,7 @@ const collectMember = (
           pending,
           enumMember.name.anchor,
           'Declaration',
-          available(Object.freeze({ _tag: 'EnumMemberIdentity', id: enumMember.canonical.id })),
+          available({ _tag: 'EnumMemberIdentity', id: enumMember.canonical.id }),
           locationOfEnumMember(enumMember),
         )
     return
@@ -1527,7 +1492,7 @@ const collectMember = (
           pending,
           variant.name.anchor,
           'Declaration',
-          available(Object.freeze({ _tag: 'UnionVariantIdentity', id: variant.canonical.id })),
+          available({ _tag: 'UnionVariantIdentity', id: variant.canonical.id }),
           locationOfUnionVariant(variant),
         )
       for (const field of variant.fields) {
@@ -1536,7 +1501,7 @@ const collectMember = (
             pending,
             field.name.anchor,
             'Declaration',
-            available(Object.freeze({ _tag: 'FieldIdentity', id: field.id })),
+            available({ _tag: 'FieldIdentity', id: field.id }),
             locationOfField(index, field),
           )
         collectDeclaredType(field.declaredType, index, scope, pending)
@@ -1551,7 +1516,7 @@ const collectMember = (
         pending,
         field.name.anchor,
         'Declaration',
-        available(Object.freeze({ _tag: 'FieldIdentity', id: field.id })),
+        available({ _tag: 'FieldIdentity', id: field.id }),
         locationOfField(index, field),
       )
     collectDeclaredType(field.declaredType, index, scope, pending)
@@ -1571,7 +1536,7 @@ const collectInherentImpl = (
         pending,
         typeParameter.name.anchor,
         'Declaration',
-        available(Object.freeze({ _tag: 'TypeParameterIdentity', id: typeParameter.type })),
+        available({ _tag: 'TypeParameterIdentity', id: typeParameter.type }),
         locationOfTypeParameter(typeParameter),
       )
   collectDeclaredType(head.owner, index, scope, pending)
@@ -1582,18 +1547,18 @@ const unavailableLookupResolution = (
 ): Resolution => {
   switch (lookup._tag) {
     case 'Missing':
-      return Object.freeze({ _tag: 'Missing' })
+      return { _tag: 'Missing' }
     case 'Inaccessible':
-      return Object.freeze({ _tag: 'Inaccessible', cause: lookup.cause })
+      return { _tag: 'Inaccessible', cause: lookup.cause }
     case 'Conflict':
-      return Object.freeze({ _tag: 'Conflicting', cause: lookup.conflict.cause })
+      return { _tag: 'Conflicting', cause: lookup.conflict.cause }
     case 'Unavailable':
-      return Object.freeze({
+      return {
         _tag: 'Unavailable',
         ...(lookup.cause === undefined ? {} : { cause: lookup.cause }),
-      })
+      }
     default:
-      return Object.freeze({ _tag: 'Unavailable' })
+      return { _tag: 'Unavailable' }
   }
 }
 
@@ -1645,7 +1610,7 @@ const collectConformance = (
         pending,
         typeParameter.name.anchor,
         'Declaration',
-        available(Object.freeze({ _tag: 'TypeParameterIdentity', id: typeParameter.type })),
+        available({ _tag: 'TypeParameterIdentity', id: typeParameter.type }),
         locationOfTypeParameter(typeParameter),
       )
   for (const requirement of conformance.requirements)
@@ -1679,13 +1644,11 @@ const collectImports = (
           pending,
           selection,
           'Import',
-          available(
-            Object.freeze({
-              _tag: 'ImportNamespaceIdentity',
-              module: binding.module,
-              spelling: binding.spelling,
-            }),
-          ),
+          available({
+            _tag: 'ImportNamespaceIdentity',
+            module: binding.module,
+            spelling: binding.spelling,
+          }),
           declaration,
         )
         continue
@@ -1698,14 +1661,14 @@ const collectImports = (
         const localSpan = binding.localAnchor
         const selected =
           AuthoredIdentity.anchorKey(sourceSpan) === AuthoredIdentity.anchorKey(localSpan)
-            ? Object.freeze([sourceSpan])
-            : Object.freeze([sourceSpan, localSpan])
+            ? [sourceSpan]
+            : [sourceSpan, localSpan]
         for (const span of selected)
           push(
             pending,
             span,
             'Import',
-            identity === undefined ? Object.freeze({ _tag: 'Unavailable' }) : available(identity),
+            identity === undefined ? { _tag: 'Unavailable' } : available(identity),
             declarationFact === undefined
               ? undefined
               : locationOfDeclaration(index, declarationFact),
@@ -1714,15 +1677,10 @@ const collectImports = (
       }
       if (binding._tag === 'Unavailable')
         for (const anchor of binding.anchors)
-          push(
-            pending,
-            anchor,
-            'Import',
-            Object.freeze({
-              _tag: 'Unavailable',
-              ...(binding.cause === undefined ? {} : { cause: binding.cause }),
-            }),
-          )
+          push(pending, anchor, 'Import', {
+            _tag: 'Unavailable',
+            ...(binding.cause === undefined ? {} : { cause: binding.cause }),
+          })
     }
   }
 }
@@ -1742,7 +1700,7 @@ export const ofStatements = (
 ): ReadonlyArray<LocatedOccurrence> => {
   const pending: Array<Pending> = []
   for (const statement of statements) collectStatement(statement, index, scope, pending, builder)
-  return Object.freeze(pending)
+  return pending
 }
 
 const qualifiedOccurrenceStarts = (tokens: ReadonlyArray<Token.Token>): ReadonlySet<number> => {
@@ -1783,8 +1741,7 @@ const importBindingFor = (
   if (binding?._tag !== 'ImportedMember' || qualifiedStarts.has(occurrence.span.start))
     return undefined
   return identity._tag === 'DeclarationIdentity' &&
-    identityKey(identity) ===
-      identityKey(Object.freeze({ _tag: 'DeclarationIdentity', id: binding.declaration }))
+    identityKey(identity) === identityKey({ _tag: 'DeclarationIdentity', id: binding.declaration })
     ? spans.spanOf(binding.localAnchor)
     : undefined
 }
@@ -1822,10 +1779,10 @@ export const makeModule = (
         : importBindingFor(entry.occurrence, spans, bindings, syntax, qualifiedStarts)
     return importBinding === undefined
       ? entry
-      : Object.freeze({
+      : {
           ...entry,
-          occurrence: Object.freeze({ ...entry.occurrence, importBinding }),
-        })
+          occurrence: { ...entry.occurrence, importBinding },
+        }
   })
   attributed.sort(
     (left, right) =>
@@ -1835,16 +1792,12 @@ export const makeModule = (
         (right.occurrence.span.end - right.occurrence.span.start) ||
       left.ordinal - right.ordinal,
   )
-  const occurrences = Object.freeze(
-    attributed.map((entry) => Object.freeze({ ...entry.occurrence, ordinal: entry.ordinal })),
-  )
+  const occurrences = attributed.map((entry) => ({ ...entry.occurrence, ordinal: entry.ordinal }))
   let maximumEnd = 0
-  const prefixMaximumEnd = Object.freeze(
-    occurrences.map((occurrence) => {
-      maximumEnd = Math.max(maximumEnd, occurrence.span.end)
-      return maximumEnd
-    }),
-  )
+  const prefixMaximumEnd = occurrences.map((occurrence) => {
+    maximumEnd = Math.max(maximumEnd, occurrence.span.end)
+    return maximumEnd
+  })
   const declarationLocations = new Map<string, DeclarationLocation>()
   for (const occurrence of occurrences) {
     if (occurrence.resolution._tag !== 'Available') continue
@@ -1858,7 +1811,7 @@ export const makeModule = (
       continue
     declarationLocations.set(identityKey(occurrence.resolution.identity), declaration)
   }
-  return Object.freeze({ occurrences, prefixMaximumEnd, declarationLocations })
+  return { occurrences, prefixMaximumEnd, declarationLocations }
 }
 
 /** Shallowly composes current module indexes and their current declaration locations. */
@@ -1867,7 +1820,7 @@ export const compose = (modules: ReadonlyMap<string, ModuleIndex>): Index => {
   for (const moduleIndex of modules.values())
     for (const [identity, declaration] of moduleIndex.declarationLocations)
       declarationLocations.set(identity, declaration)
-  return Object.freeze({ _tag: 'SemanticOccurrenceIndex', modules, declarationLocations })
+  return { _tag: 'SemanticOccurrenceIndex', modules, declarationLocations }
 }
 
 /** Builds the immutable exact-token occurrence index from recovered compiler facts. */
@@ -1898,10 +1851,10 @@ const withCurrentDeclaration = (
   const current = self.declarationLocations.get(identityKey(occurrence.resolution.identity))
   if (current === occurrence.declaration) return occurrence
   const { declaration: _previous, ...withoutDeclaration } = occurrence
-  return Object.freeze({
+  return {
     ...withoutDeclaration,
     ...(current === undefined ? {} : { declaration: current }),
-  })
+  }
 }
 
 const lastStartAtOrBefore = (
@@ -1975,13 +1928,9 @@ export const inRange = (
   module: string,
   range: SourceSpan.SourceSpan,
 ): ReadonlyArray<SemanticOccurrence> =>
-  Object.freeze(
-    (self.modules.get(module)?.occurrences ?? [])
-      .filter(
-        (occurrence) => occurrence.span.start < range.end && range.start < occurrence.span.end,
-      )
-      .map((occurrence) => withCurrentDeclaration(self, occurrence)),
-  )
+  (self.modules.get(module)?.occurrences ?? [])
+    .filter((occurrence) => occurrence.span.start < range.end && range.start < occurrence.span.end)
+    .map((occurrence) => withCurrentDeclaration(self, occurrence))
 
 /** Returns a stable structural key for identity deduplication and lookup. */
 export const identityKey = (identity: Identity): string => {

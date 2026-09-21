@@ -177,23 +177,21 @@ export const cleanupFields = (
   seen = new Set<string>(),
 ): ReadonlyArray<DeclarationFacts.FieldId> => {
   const key = Type.key(type)
-  if (seen.has(key)) return Object.freeze([])
+  if (seen.has(key)) return []
   const nextSeen = new Set(seen).add(key)
   const declaration = DeclarationFacts.byCanonical(index, {
     _tag: 'CanonicalDeclarationId',
     module: type.module,
     name: type.name,
   })
-  if (declaration?._tag !== 'StructDeclaration') return Object.freeze([])
-  return Object.freeze(
-    declaration.fields.flatMap((field) => {
-      if (field.declaredType._tag !== 'Resolved') return [field.id]
-      const nested = field.declaredType.type
-      return Type.isNominal(nested)
-        ? [field.id, ...cleanupFields(index, nested, nextSeen)]
-        : [field.id]
-    }),
-  )
+  if (declaration?._tag !== 'StructDeclaration') return []
+  return declaration.fields.flatMap((field) => {
+    if (field.declaredType._tag !== 'Resolved') return [field.id]
+    const nested = field.declaredType.type
+    return Type.isNominal(nested)
+      ? [field.id, ...cleanupFields(index, nested, nextSeen)]
+      : [field.id]
+  })
 }
 
 /** Actual cleanup derivation work retained by one immutable declaration context. */
@@ -221,8 +219,7 @@ const catalogOf = (index: DeclarationIndex.Index): Catalog => {
 }
 
 /** Reads work counters without initiating any cleanup derivation. */
-export const work = (index: DeclarationIndex.Index): Work =>
-  Object.freeze({ ...catalogOf(index).work })
+export const work = (index: DeclarationIndex.Index): Work => ({ ...catalogOf(index).work })
 
 /** Reuses complete type recipes independently of body initialization masks. */
 export const cleanupPlan = (
@@ -249,111 +246,106 @@ const deriveCleanup = (
   type: DeclarationFacts.SemanticType,
   seen: ReadonlySet<string>,
 ): CleanupPlan => {
-  if (Type.isBuiltin(type)) return Object.freeze({ _tag: 'NoCleanup', type })
-  if (Type.isString(type)) return Object.freeze({ _tag: 'NoCleanup', type })
-  if (Type.isNever(type)) return Object.freeze({ _tag: 'NoCleanup', type })
-  if (ConformanceProof.copyType(index, type)) return Object.freeze({ _tag: 'NoCleanup', type })
-  if (Type.isParameter(type)) return Object.freeze({ _tag: 'ParameterCleanup', type })
+  if (Type.isBuiltin(type)) return { _tag: 'NoCleanup', type }
+  if (Type.isString(type)) return { _tag: 'NoCleanup', type }
+  if (Type.isNever(type)) return { _tag: 'NoCleanup', type }
+  if (ConformanceProof.copyType(index, type)) return { _tag: 'NoCleanup', type }
+  if (Type.isParameter(type)) return { _tag: 'ParameterCleanup', type }
   if (Type.isSlice(type) || Type.isReference(type) || Type.isPointer(type))
-    return Object.freeze({ _tag: 'NoCleanup', type })
-  if (Type.isEffect(type)) return Object.freeze({ _tag: 'NoCleanup', type })
+    return { _tag: 'NoCleanup', type }
+  if (Type.isEffect(type)) return { _tag: 'NoCleanup', type }
   if (Type.equals(type, Type.allocation))
-    return Object.freeze({
+    return {
       _tag: 'AllocationCleanup',
       type: Type.allocation,
       ticket: 'ActiveReclaimTicket',
-    })
+    }
   if (Type.isRawBuffer(type))
-    return Object.freeze({
+    return {
       _tag: 'RawBufferCleanup',
       type,
-      allocation: Object.freeze({
+      allocation: {
         _tag: 'AllocationCleanup',
         type: Type.allocation,
         ticket: 'ActiveReclaimTicket',
-      }),
-    })
+      },
+    }
   if (Type.isSharedCore(type)) {
     const element = Type.typeArgumentAt(type, 0)
     return element === undefined
-      ? Object.freeze({ _tag: 'NoCleanup', type })
-      : Object.freeze({
+      ? { _tag: 'NoCleanup', type }
+      : {
           _tag: 'LocalSharedCoreCleanup',
           type,
           element,
-          allocation: Object.freeze({
+          allocation: {
             _tag: 'AllocationCleanup',
             type: Type.allocation,
             ticket: 'ActiveReclaimTicket',
-          }),
-        })
+          },
+        }
   }
   if (Type.isExecution(type))
-    return Object.freeze({
+    return {
       _tag: 'ExecutionCleanup',
       type,
-      allocation: Object.freeze({
+      allocation: {
         _tag: 'AllocationCleanup',
         type: Type.allocation,
         ticket: 'ActiveReclaimTicket',
-      }),
-    })
+      },
+    }
   if (Type.isWake(type))
-    return Object.freeze({
+    return {
       _tag: 'WakeCleanup',
       type,
-      allocation: Object.freeze({
+      allocation: {
         _tag: 'AllocationCleanup',
         type: Type.allocation,
         ticket: 'ActiveReclaimTicket',
-      }),
-    })
+      },
+    }
   if (Type.isFixedArray(type)) {
-    if (type.length === 0) return Object.freeze({ _tag: 'NoCleanup', type })
-    return Object.freeze({
+    if (type.length === 0) return { _tag: 'NoCleanup', type }
+    return {
       _tag: 'ArrayCleanup',
       type,
       length: type.length,
       element: cleanupPlan(index, type.element, seen),
-    })
+    }
   }
   if (Type.isUnion(type)) {
-    return Object.freeze({
+    return {
       _tag: 'UnionCleanup',
       type,
-      cases: Object.freeze(
-        type.members.map((member, ordinal) =>
-          Object.freeze({
-            member,
-            ordinal,
-            cleanup: cleanupPlan(index, member, seen),
-          }),
-        ),
-      ),
-    })
+      cases: type.members.map((member, ordinal) => ({
+        member,
+        ordinal,
+        cleanup: cleanupPlan(index, member, seen),
+      })),
+    }
   }
-  if (Type.isCallable(type) || Type.isForeignFunction(type))
-    return Object.freeze({ _tag: 'NoCleanup', type })
+  if (Type.isCallable(type) || Type.isForeignFunction(type)) return { _tag: 'NoCleanup', type }
   // A stored executable representation owes its enclosing aggregate an exactly-once release of
   // every owned environment lane. Concrete specialization resolves the shared realization.
   if (Type.isRepresented(type)) {
     if (Type.isCallable(type.contract)) {
-      return Object.freeze({ _tag: 'RepresentedCallableCleanup', type, contract: type.contract })
+      return { _tag: 'RepresentedCallableCleanup', type, contract: type.contract }
     }
     if (Type.isEffect(type.contract)) {
-      return Object.freeze({ _tag: 'RepresentedEffectCleanup', type, contract: type.contract })
+      return { _tag: 'RepresentedEffectCleanup', type, contract: type.contract }
     }
-    return Object.freeze({ _tag: 'NoCleanup', type })
+    return { _tag: 'NoCleanup', type }
   }
   const key = Type.key(type)
-  if (seen.has(key)) return Object.freeze({ _tag: 'NoCleanup', type })
+  if (seen.has(key)) return { _tag: 'NoCleanup', type }
   const declaration = DeclarationFacts.byCanonical(index, {
     _tag: 'CanonicalDeclarationId',
     module: type.module,
     name: type.name,
   })
   if (declaration?._tag !== 'StructDeclaration' && declaration?._tag !== 'UnionDeclaration') {
-    return Object.freeze({ _tag: 'NoCleanup', type })
+    return { _tag: 'NoCleanup', type }
   }
   const substitution =
     TypeInference.substitution(
@@ -370,71 +362,59 @@ const deriveCleanup = (
     if (conformance?.provider._tag !== 'Resolved') return inner
     const inferred = new Map<string, Type.GenericArgument>()
     if (!TypeInference.infer(conformance.provider.type, type, inferred)) return inner
-    return Object.freeze({
+    return {
       _tag: 'HookCleanup',
       type,
-      hook: Object.freeze({
+      hook: {
         _tag: 'CanonicalDeclarationId' as const,
         module: witness.module,
         name: `drop@impl#${witness.ordinal}`,
-      }),
-      typeArguments: Object.freeze(
-        conformance.typeParameters.map(
-          (parameter) => inferred.get(Type.key(parameter.type)) ?? parameter.type,
-        ),
+      },
+      typeArguments: conformance.typeParameters.map(
+        (parameter) => inferred.get(Type.key(parameter.type)) ?? parameter.type,
       ),
       inner,
-    })
+    }
   }
   if (declaration._tag === 'UnionDeclaration') {
-    const unionPlan: CleanupPlan = Object.freeze({
+    const unionPlan: CleanupPlan = {
       _tag: 'NominalUnionCleanup',
       type,
-      variants: Object.freeze(
-        declaration.variants.flatMap((variant) =>
-          variant.canonical._tag === 'Canonical'
-            ? [
-                Object.freeze({
-                  variant: variant.canonical.id,
-                  ordinal: variant.id.ordinal,
-                  fields: Object.freeze(
-                    variant.fields.map((field) =>
-                      Object.freeze({
-                        field: field.id,
-                        cleanup:
-                          field.declaredType._tag === 'Resolved'
-                            ? cleanupPlan(
-                                index,
-                                Type.substitute(field.declaredType.type, substitution),
-                                nextSeen,
-                              )
-                            : Object.freeze({ _tag: 'NoCleanup' as const, type: 'i32' as const }),
-                      }),
-                    ),
-                  ),
-                }),
-              ]
-            : [],
-        ),
+      variants: declaration.variants.flatMap((variant) =>
+        variant.canonical._tag === 'Canonical'
+          ? [
+              {
+                variant: variant.canonical.id,
+                ordinal: variant.id.ordinal,
+                fields: variant.fields.map((field) => ({
+                  field: field.id,
+                  cleanup:
+                    field.declaredType._tag === 'Resolved'
+                      ? cleanupPlan(
+                          index,
+                          Type.substitute(field.declaredType.type, substitution),
+                          nextSeen,
+                        )
+                      : { _tag: 'NoCleanup' as const, type: 'i32' as const },
+                })),
+              },
+            ]
+          : [],
       ),
-    })
+    }
     return withDropHook(unionPlan)
   }
-  const structPlan: CleanupPlan = Object.freeze({
+  const structPlan: CleanupPlan = {
     _tag: 'StructCleanup',
     type,
-    fields: Object.freeze(
-      declaration.fields.map((field) =>
-        Object.freeze({
-          field: field.id,
-          cleanup:
-            field.declaredType._tag === 'Resolved'
-              ? cleanupPlan(index, Type.substitute(field.declaredType.type, substitution), nextSeen)
-              : Object.freeze({ _tag: 'NoCleanup' as const, type: 'i32' as const }),
-        }),
-      ),
-    ),
-  })
+    fields: declaration.fields.map((field) => ({
+      field: field.id,
+      cleanup:
+        field.declaredType._tag === 'Resolved'
+          ? cleanupPlan(index, Type.substitute(field.declaredType.type, substitution), nextSeen)
+          : { _tag: 'NoCleanup' as const, type: 'i32' as const },
+    })),
+  }
   // A source Drop conformance runs its hook before automatic field cleanup.
   return withDropHook(structPlan)
 }
@@ -490,183 +470,157 @@ export const specializeCleanup = (
   const type = Type.substitute(cleanup.type, substitution)
   switch (cleanup._tag) {
     case 'NoCleanup':
-      return Object.freeze({ _tag: 'NoCleanup', type })
+      return { _tag: 'NoCleanup', type }
     case 'ParameterCleanup':
       return Type.isParameter(type)
-        ? Object.freeze({ _tag: 'ParameterCleanup', type })
-        : (resolveConcrete?.(type) ?? Object.freeze({ _tag: 'NoCleanup', type }))
+        ? { _tag: 'ParameterCleanup', type }
+        : (resolveConcrete?.(type) ?? { _tag: 'NoCleanup', type })
     case 'AllocationCleanup':
       return Type.equals(type, Type.allocation)
-        ? Object.freeze({
+        ? {
             _tag: 'AllocationCleanup',
             type: Type.allocation,
             ticket: 'ActiveReclaimTicket',
-          })
-        : Object.freeze({ _tag: 'NoCleanup', type })
+          }
+        : { _tag: 'NoCleanup', type }
     case 'RawBufferCleanup':
       return Type.isRawBuffer(type)
-        ? Object.freeze({
+        ? {
             _tag: 'RawBufferCleanup',
             type,
             allocation: cleanup.allocation,
-          })
-        : Object.freeze({ _tag: 'NoCleanup', type })
+          }
+        : { _tag: 'NoCleanup', type }
     case 'LocalSharedCoreCleanup': {
-      if (!Type.isSharedCore(type)) return Object.freeze({ _tag: 'NoCleanup', type })
+      if (!Type.isSharedCore(type)) return { _tag: 'NoCleanup', type }
       const element = Type.typeArgumentAt(type, 0)
-      if (element === undefined) return Object.freeze({ _tag: 'NoCleanup', type })
-      return Object.freeze({
+      if (element === undefined) return { _tag: 'NoCleanup', type }
+      return {
         _tag: 'LocalSharedCoreCleanup',
         type,
         element,
         allocation: cleanup.allocation,
-      })
+      }
     }
     case 'ExecutionCleanup':
       return Type.isExecution(type)
-        ? Object.freeze({ _tag: 'ExecutionCleanup', type, allocation: cleanup.allocation })
-        : Object.freeze({ _tag: 'NoCleanup', type })
+        ? { _tag: 'ExecutionCleanup', type, allocation: cleanup.allocation }
+        : { _tag: 'NoCleanup', type }
     case 'WakeCleanup':
       return Type.isWake(type)
-        ? Object.freeze({ _tag: 'WakeCleanup', type, allocation: cleanup.allocation })
-        : Object.freeze({ _tag: 'NoCleanup', type })
+        ? { _tag: 'WakeCleanup', type, allocation: cleanup.allocation }
+        : { _tag: 'NoCleanup', type }
     case 'HookCleanup':
-      if (!Type.isNominal(type)) return Object.freeze({ _tag: 'NoCleanup', type })
-      return Object.freeze({
+      if (!Type.isNominal(type)) return { _tag: 'NoCleanup', type }
+      return {
         _tag: 'HookCleanup',
         type,
         hook: cleanup.hook,
-        typeArguments: Object.freeze(
-          cleanup.typeArguments.map((argument) =>
-            Type.substituteGenericArgument(argument, substitution),
-          ),
+        typeArguments: cleanup.typeArguments.map((argument) =>
+          Type.substituteGenericArgument(argument, substitution),
         ),
         inner: specializeCleanup(cleanup.inner, substitution, resolveConcrete),
-      })
+      }
     case 'StructCleanup':
-      if (!Type.isNominal(type)) return Object.freeze({ _tag: 'NoCleanup', type })
-      return Object.freeze({
+      if (!Type.isNominal(type)) return { _tag: 'NoCleanup', type }
+      return {
         _tag: 'StructCleanup',
         type,
-        fields: Object.freeze(
-          cleanup.fields.map((field) =>
-            Object.freeze({
-              field: field.field,
-              cleanup: specializeCleanup(field.cleanup, substitution, resolveConcrete),
-            }),
-          ),
-        ),
-      })
+        fields: cleanup.fields.map((field) => ({
+          field: field.field,
+          cleanup: specializeCleanup(field.cleanup, substitution, resolveConcrete),
+        })),
+      }
     case 'NominalUnionCleanup':
-      if (!Type.isNominal(type)) return Object.freeze({ _tag: 'NoCleanup', type })
-      return Object.freeze({
+      if (!Type.isNominal(type)) return { _tag: 'NoCleanup', type }
+      return {
         _tag: 'NominalUnionCleanup',
         type,
-        variants: Object.freeze(
-          cleanup.variants.map((variant) =>
-            Object.freeze({
-              variant: variant.variant,
-              ordinal: variant.ordinal,
-              fields: Object.freeze(
-                variant.fields.map((field) =>
-                  Object.freeze({
-                    field: field.field,
-                    cleanup: specializeCleanup(field.cleanup, substitution, resolveConcrete),
-                  }),
-                ),
-              ),
-            }),
-          ),
-        ),
-      })
+        variants: cleanup.variants.map((variant) => ({
+          variant: variant.variant,
+          ordinal: variant.ordinal,
+          fields: variant.fields.map((field) => ({
+            field: field.field,
+            cleanup: specializeCleanup(field.cleanup, substitution, resolveConcrete),
+          })),
+        })),
+      }
     case 'ArrayCleanup':
-      if (!Type.isFixedArray(type)) return Object.freeze({ _tag: 'NoCleanup', type })
-      return Object.freeze({
+      if (!Type.isFixedArray(type)) return { _tag: 'NoCleanup', type }
+      return {
         _tag: 'ArrayCleanup',
         type,
         length: type.length,
         element: specializeCleanup(cleanup.element, substitution, resolveConcrete),
-      })
+      }
     case 'UnionCleanup':
-      if (!Type.isUnion(type)) return Object.freeze({ _tag: 'NoCleanup', type })
-      return Object.freeze({
+      if (!Type.isUnion(type)) return { _tag: 'NoCleanup', type }
+      return {
         _tag: 'UnionCleanup',
         type,
-        cases: Object.freeze(
-          cleanup.cases.map((entry, ordinal) => {
-            const member = type.members.at(ordinal)
-            return Object.freeze({
-              member: member ?? entry.member,
-              ordinal: entry.ordinal,
-              cleanup: specializeCleanup(entry.cleanup, substitution, resolveConcrete),
-            })
-          }),
-        ),
-      })
+        cases: cleanup.cases.map((entry, ordinal) => {
+          const member = type.members.at(ordinal)
+          return {
+            member: member ?? entry.member,
+            ordinal: entry.ordinal,
+            cleanup: specializeCleanup(entry.cleanup, substitution, resolveConcrete),
+          }
+        }),
+      }
     case 'CallableCleanup':
-      if (!Type.isCallable(type)) return Object.freeze({ _tag: 'NoCleanup', type })
-      return Object.freeze({
+      if (!Type.isCallable(type)) return { _tag: 'NoCleanup', type }
+      return {
         _tag: 'CallableCleanup',
         type,
         environment: cleanup.environment,
-        slots: Object.freeze(
-          cleanup.slots.map((slot) =>
-            Object.freeze({
-              ordinal: slot.ordinal,
-              cleanup: specializeCleanup(slot.cleanup, substitution, resolveConcrete),
-            }),
-          ),
-        ),
-      })
+        slots: cleanup.slots.map((slot) => ({
+          ordinal: slot.ordinal,
+          cleanup: specializeCleanup(slot.cleanup, substitution, resolveConcrete),
+        })),
+      }
     case 'EffectCleanup':
-      if (!Type.isEffect(type)) return Object.freeze({ _tag: 'NoCleanup', type })
-      return Object.freeze({
+      if (!Type.isEffect(type)) return { _tag: 'NoCleanup', type }
+      return {
         _tag: 'EffectCleanup',
         type,
         site: cleanup.site,
-        slots: Object.freeze(
-          cleanup.slots.map((slot) =>
-            Object.freeze({
-              ordinal: slot.ordinal,
-              laneOffset: slot.laneOffset,
-              laneCount: slot.laneCount,
-              cleanup: specializeCleanup(slot.cleanup, substitution, resolveConcrete),
-            }),
-          ),
-        ),
-      })
+        slots: cleanup.slots.map((slot) => ({
+          ordinal: slot.ordinal,
+          laneOffset: slot.laneOffset,
+          laneCount: slot.laneCount,
+          cleanup: specializeCleanup(slot.cleanup, substitution, resolveConcrete),
+        })),
+      }
     case 'EffectCompositeCleanup':
       if (!Type.isRepresented(type) || !Type.isEffect(type.contract))
-        return Object.freeze({ _tag: 'NoCleanup', type })
-      return Object.freeze({
+        return { _tag: 'NoCleanup', type }
+      return {
         _tag: 'EffectCompositeCleanup',
         type,
-        alternatives: Object.freeze(
-          cleanup.alternatives.map((alternative) =>
-            specializeCleanup(alternative, substitution, resolveConcrete),
-          ),
+        alternatives: cleanup.alternatives.map((alternative) =>
+          specializeCleanup(alternative, substitution, resolveConcrete),
         ),
-      })
+      }
     case 'RepresentedCallableCleanup': {
       if (!Type.isRepresented(type) || !Type.isCallable(type.contract))
-        return Object.freeze({ _tag: 'NoCleanup', type })
+        return { _tag: 'NoCleanup', type }
       // The caller resolves the complete instance's realization; without one the obligation stays
       // symbolic rather than collapsing to "nothing to clean".
       const resolved = resolveConcrete?.(type)
       return resolved === undefined
-        ? Object.freeze({
+        ? {
             _tag: 'RepresentedCallableCleanup',
             type,
             contract: type.contract,
-          })
+          }
         : resolved
     }
     case 'RepresentedEffectCleanup': {
       if (!Type.isRepresented(type) || !Type.isEffect(type.contract))
-        return Object.freeze({ _tag: 'NoCleanup', type })
+        return { _tag: 'NoCleanup', type }
       const resolved = resolveConcrete?.(type)
       return resolved === undefined
-        ? Object.freeze({ _tag: 'RepresentedEffectCleanup', type, contract: type.contract })
+        ? { _tag: 'RepresentedEffectCleanup', type, contract: type.contract }
         : resolved
     }
   }
@@ -689,21 +643,17 @@ export const realizedCallableCleanup = (
   const environment = realization.environment
   const owned = realization.captures.filter((capture) => capture.owned)
   if (site === undefined || environment === undefined || owned.length === 0)
-    return Object.freeze({ _tag: 'NoCleanup', type })
-  return Object.freeze({
+    return { _tag: 'NoCleanup', type }
+  return {
     _tag: 'CallableCleanup',
     type,
-    environment: Object.freeze({
+    environment: {
       _tag: 'CallableEnvironmentIdentity',
       identity: environment,
-    }),
-    slots: Object.freeze(
-      [...owned].reverse().map((capture) =>
-        Object.freeze({
-          ordinal: capture.ordinal,
-          cleanup: cleanupPlan(index, capture.type),
-        }),
-      ),
-    ),
-  })
+    },
+    slots: [...owned].reverse().map((capture) => ({
+      ordinal: capture.ordinal,
+      cleanup: cleanupPlan(index, capture.type),
+    })),
+  }
 }

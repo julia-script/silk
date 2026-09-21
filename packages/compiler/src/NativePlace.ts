@@ -61,7 +61,7 @@ export const make = (
     view = ValueStorage.captureKey(type.environment)
   else view = `Value:${Type.runtimeKey(Mir.semanticType(type))}`
   if (stored !== undefined) view = stored.key
-  return Object.freeze({
+  return {
     _tag: 'NativePlace',
     type,
     view,
@@ -70,7 +70,7 @@ export const make = (
     alignment: physical.alignment,
     representation,
     indirect: false,
-  })
+  }
 }
 
 /** Borrows a semantic value already stored by the compiler's canonical memory layout. */

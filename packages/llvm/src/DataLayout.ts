@@ -78,42 +78,41 @@ export interface DataLayout {
 }
 
 /** @internal */
-const oneByteAlignment: Alignment.Alignment = Object.freeze({
+const oneByteAlignment: Alignment.Alignment = {
   _tag: 'Alignment',
   byteUnits: 1n,
-})
+}
 
 /** @internal */
-const defaultAggregateSpec: AggregateSpec = Object.freeze({
+const defaultAggregateSpec: AggregateSpec = {
   abiAlignment: oneByteAlignment,
-  preferredAlignment: Object.freeze({ _tag: 'Alignment', byteUnits: 8n }),
-})
+  preferredAlignment: { _tag: 'Alignment', byteUnits: 8n },
+}
 
 /** @internal */
 const fixedPrimitiveSpec = (
   bitWidth: number,
   abiByteUnits: bigint,
   preferredByteUnits: bigint,
-): PrimitiveSpec =>
-  Object.freeze({
-    bitWidth,
-    abiAlignment: Object.freeze({ _tag: 'Alignment', byteUnits: abiByteUnits }),
-    preferredAlignment: Object.freeze({
-      _tag: 'Alignment',
-      byteUnits: preferredByteUnits,
-    }),
-  })
+): PrimitiveSpec => ({
+  bitWidth,
+  abiAlignment: { _tag: 'Alignment', byteUnits: abiByteUnits },
+  preferredAlignment: {
+    _tag: 'Alignment',
+    byteUnits: preferredByteUnits,
+  },
+})
 
 /** @internal */
 const defaultLargestIntegerSpec = fixedPrimitiveSpec(64, 4n, 8n)
 
 /** @internal */
-const defaultIntegerSpecs: ReadonlyArray<PrimitiveSpec> = Object.freeze([
+const defaultIntegerSpecs: ReadonlyArray<PrimitiveSpec> = [
   fixedPrimitiveSpec(8, 1n, 1n),
   fixedPrimitiveSpec(16, 2n, 2n),
   fixedPrimitiveSpec(32, 4n, 4n),
   defaultLargestIntegerSpec,
-])
+]
 
 /** @internal */
 class DataLayoutParseFailure extends Data.TaggedError('DataLayoutParseFailure')<{
@@ -136,25 +135,25 @@ const reject = (message: string, input: unknown): never => {
  * @category data layouts
  * @since 0.0.0
  */
-export const empty: DataLayout = Object.freeze({
+export const empty: DataLayout = {
   _tag: 'DataLayout',
   original: ByteString.empty,
   endian: undefined,
-  integers: Object.freeze([]),
+  integers: [],
   effectiveIntegers: defaultIntegerSpecs,
-  floats: Object.freeze([]),
-  vectors: Object.freeze([]),
-  pointers: Object.freeze([]),
+  floats: [],
+  vectors: [],
+  pointers: [],
   aggregate: defaultAggregateSpec,
-  nativeIntegerWidths: Object.freeze([]),
+  nativeIntegerWidths: [],
   stackAlignment: Alignment.defaultAlignment,
-  nonIntegralAddressSpaces: Object.freeze([]),
+  nonIntegralAddressSpaces: [],
   mangling: undefined,
   programAddressSpace: AddrSpace.defaultAddrSpace,
   globalAddressSpace: AddrSpace.defaultAddrSpace,
   allocaAddressSpace: AddrSpace.defaultAddrSpace,
   functionPointerAlignment: undefined,
-})
+}
 
 /** @internal */
 const ascii = (value: ByteString.ByteString): string => {
@@ -179,7 +178,7 @@ const natural = (value: string, component: string): number => {
 const addressSpace = (value: string, component: string): AddrSpace.AddrSpace => {
   const parsed = natural(value, component)
   if (parsed > 0xff_ffff) reject(`address space is too large in ${component}`, component)
-  return Object.freeze({ _tag: 'AddrSpace', value: parsed })
+  return { _tag: 'AddrSpace', value: parsed }
 }
 
 /** @internal */
@@ -188,7 +187,7 @@ const alignmentFromBits = (bits: number, component: string): Alignment.Alignment
   const bytes = BigInt(bits / 8)
   if ((bytes & (bytes - 1n)) !== 0n)
     reject(`alignment is not a power of two in ${component}`, component)
-  return Object.freeze({ _tag: 'Alignment', byteUnits: bytes })
+  return { _tag: 'Alignment', byteUnits: bytes }
 }
 
 /** @internal */
@@ -214,7 +213,7 @@ const primitive = (component: string): PrimitiveSpec => {
   const bitWidth = natural(values[0] ?? '', component)
   const abiAlignment = bitAlignment(values[1] ?? '', component)
   const preferredAlignment = bitAlignment(values[2] ?? values[1] ?? '', component)
-  return Object.freeze({ bitWidth, abiAlignment, preferredAlignment })
+  return { bitWidth, abiAlignment, preferredAlignment }
 }
 
 /** @internal */
@@ -229,7 +228,7 @@ const aggregate = (component: string): AggregateSpec => {
   if (Alignment.compare(preferredAlignment, abiAlignment) < 0) {
     reject(`preferred alignment is below ABI alignment in ${component}`, component)
   }
-  return Object.freeze({ abiAlignment, preferredAlignment })
+  return { abiAlignment, preferredAlignment }
 }
 
 /** @internal */
@@ -242,18 +241,18 @@ const pointer = (component: string): PointerSpec => {
   const abiAlignment = bitAlignment(values[2] ?? '', component)
   const preferredAlignment = bitAlignment(values[3] ?? values[2] ?? '', component)
   const indexBitWidth = natural(values[4] ?? values[1] ?? '', component)
-  return Object.freeze({
+  return {
     addressSpace: address,
     bitWidth,
     abiAlignment,
     preferredAlignment,
     indexBitWidth,
-  })
+  }
 }
 
 /** @internal */
 const sorted = <A>(values: Iterable<A>, key: (value: A) => number): ReadonlyArray<A> =>
-  Object.freeze([...values].sort((left, right) => key(left) - key(right)))
+  [...values].sort((left, right) => key(left) - key(right))
 
 /** @internal */
 const effectiveIntegerSpecs = (
@@ -331,7 +330,7 @@ const parseUnsafe = (original: ByteString.ByteString): DataLayout => {
   }
 
   const integerEntries = sorted(integers.values(), (value) => value.bitWidth)
-  return Object.freeze({
+  return {
     _tag: 'DataLayout',
     original,
     endian,
@@ -341,9 +340,7 @@ const parseUnsafe = (original: ByteString.ByteString): DataLayout => {
     vectors: sorted(vectors.values(), (value) => value.bitWidth),
     pointers: sorted(pointers.values(), (value) => value.addressSpace.value),
     aggregate: aggregateSpec,
-    nativeIntegerWidths: Object.freeze(
-      [...nativeIntegerWidths].sort((left, right) => left - right),
-    ),
+    nativeIntegerWidths: [...nativeIntegerWidths].sort((left, right) => left - right),
     stackAlignment,
     nonIntegralAddressSpaces: sorted(nonIntegralAddressSpaces, (value) => value.value),
     mangling,
@@ -351,7 +348,7 @@ const parseUnsafe = (original: ByteString.ByteString): DataLayout => {
     globalAddressSpace,
     allocaAddressSpace,
     functionPointerAlignment,
-  })
+  }
 }
 
 /**

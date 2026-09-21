@@ -446,7 +446,7 @@ const encode = Effect.fnUntraced(function* (
       }
     }
   }
-  return Object.freeze(output)
+  return output
 })
 
 /** Encodes only the declared header, dereferencing reachable module pool contents. */

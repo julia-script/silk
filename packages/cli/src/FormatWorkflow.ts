@@ -121,7 +121,7 @@ const walk = Effect.fnUntraced(function* (
     if (info.type === 'Directory') selected.push(...(yield* walk(canonical, sourceRoot)))
     else if (info.type === 'File' && path.extname(canonical) === '.silk') selected.push(canonical)
   }
-  return Object.freeze(selected)
+  return selected
 })
 
 /** Resolves explicit or default project source selection into sorted canonical file paths. */
@@ -143,8 +143,7 @@ export const select = Effect.fn('FormatWorkflow.select')(function* (
         ),
       ),
     )
-  if (paths.length === 0)
-    return Object.freeze(Array.from(new Set(yield* walk(sourceRoot, sourceRoot))).sort())
+  if (paths.length === 0) return Array.from(new Set(yield* walk(sourceRoot, sourceRoot))).sort()
 
   const selected: Array<string> = []
   for (const requested of paths) {
@@ -172,7 +171,7 @@ export const select = Effect.fn('FormatWorkflow.select')(function* (
     else if (info.type === 'File' && path.extname(canonical) === '.silk') selected.push(canonical)
     else return yield* invalidSelection(canonical, 'expected a directory or an exact .silk file')
   }
-  return Object.freeze(Array.from(new Set(selected)).sort())
+  return Array.from(new Set(selected)).sort()
 })
 
 const replace = Effect.fnUntraced(function* (
@@ -208,12 +207,12 @@ const process = Effect.fnUntraced(function* (
   const fileSystem = yield* FileSystem.FileSystem
   const loaded = yield* Effect.result(fileSystem.readFile(file))
   if (Result.isFailure(loaded)) {
-    return Object.freeze({
+    return {
       _tag: 'Failed' as const,
       path: file,
       message: `Cannot read source file ${file}`,
       cause: loaded.failure,
-    })
+    }
   }
 
   const source = SourceFile.make(file, Uint8Array.from(loaded.success))
@@ -221,28 +220,28 @@ const process = Effect.fnUntraced(function* (
   const attempted = yield* Effect.result(Formatter.format(syntax))
   if (Result.isFailure(attempted)) {
     return FormatterError.isSourceDamage(attempted.failure)
-      ? Object.freeze({ _tag: 'Damaged' as const, path: file, error: attempted.failure })
-      : Object.freeze({
+      ? { _tag: 'Damaged' as const, path: file, error: attempted.failure }
+      : {
           _tag: 'Failed' as const,
           path: file,
           message: attempted.failure.message,
           cause: attempted.failure,
-        })
+        }
   }
-  if (!attempted.success.changed) return Object.freeze({ _tag: 'Unchanged' as const, path: file })
-  if (check) return Object.freeze({ _tag: 'Changed' as const, path: file, written: false })
+  if (!attempted.success.changed) return { _tag: 'Unchanged' as const, path: file }
+  if (check) return { _tag: 'Changed' as const, path: file, written: false }
 
   const committed = yield* Effect.result(
     replace(file, FormattedDocument.toUint8Array(attempted.success)),
   )
   return Result.isFailure(committed)
-    ? Object.freeze({
+    ? {
         _tag: 'Failed' as const,
         path: file,
         message: `Cannot commit formatted source file ${file}`,
         cause: committed.failure,
-      })
-    : Object.freeze({ _tag: 'Changed' as const, path: file, written: true })
+      }
+    : { _tag: 'Changed' as const, path: file, written: true }
 })
 
 /** Formats or checks every selected source while retaining deterministic per-file outcomes. */
@@ -265,12 +264,12 @@ export const run = Effect.fn('FormatWorkflow.run')(function* (
   const outcomes = yield* Effect.forEach(files, (file) => process(file, check), {
     concurrency: 1,
   })
-  return Object.freeze({
+  return {
     _tag: 'FormatSummary' as const,
     check,
     sourceRoot: project.entry.sourceRoot,
-    outcomes: Object.freeze(outcomes),
-  })
+    outcomes: outcomes,
+  }
 })
 
 /** Maps a complete formatting summary onto the stable CLI exit classes. */

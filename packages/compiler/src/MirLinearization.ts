@@ -108,7 +108,7 @@ export const linearOperations = (
   const linear = operations.filter(isLinearOperation)
   if (linear.length !== operations.length)
     throw new RangeError('LLVM control expansion retained a structured operation')
-  return Object.freeze(linear)
+  return linear
 }
 
 export interface LinearBlock {
@@ -264,25 +264,28 @@ export const expandMatches = (
 ): ReadonlyArray<LinearBlock> => {
   let nextRegion =
     Math.max(-1, ...Mir.regionsTree(fn.regions).map((region) => region.id.ordinal)) + 1
-  const reserve = (): Mir.RegionId => Object.freeze({ _tag: 'Region', ordinal: nextRegion++ })
+  const reserve = (): Mir.RegionId => ({ _tag: 'Region', ordinal: nextRegion++ })
   const blocks: Array<LinearBlock> = []
-  let activeRecoveryOutcomes: ReadonlyArray<Mir.LocalId> = Object.freeze([])
+  let activeRecoveryOutcomes: ReadonlyArray<Mir.LocalId> = []
   let activeRecoveryBoundary: Mir.LocalId | undefined
   const append = (block: LinearBlock): void => {
     blocks.push(
       activeRecoveryOutcomes.length === 0 && activeRecoveryBoundary === undefined
         ? block
-        : Object.freeze({
+        : {
             ...block,
             recoveryOutcomes: activeRecoveryOutcomes,
             ...(activeRecoveryBoundary === undefined
               ? {}
               : { recoveryBoundary: activeRecoveryBoundary }),
-          }),
+          },
     )
   }
-  const jump = (target: Mir.RegionId, provenance: Mir.Provenance): LinearTerminator =>
-    Object.freeze({ _tag: 'Jump', target, provenance })
+  const jump = (target: Mir.RegionId, provenance: Mir.Provenance): LinearTerminator => ({
+    _tag: 'Jump',
+    target,
+    provenance,
+  })
 
   let activeTargets = new Map(fn.regions.map((region) => [region.id.ordinal, region.id] as const))
   let activeLoops = new Map(
@@ -301,11 +304,11 @@ export const expandMatches = (
     const previousRecoveryOutcomes = activeRecoveryOutcomes
     const previousRecoveryBoundary = activeRecoveryBoundary
     if (observationBoundary !== undefined) {
-      activeRecoveryOutcomes = Object.freeze([])
+      activeRecoveryOutcomes = []
       activeRecoveryBoundary = observationBoundary
     }
     if (execution.recoveryOutcome !== undefined)
-      activeRecoveryOutcomes = Object.freeze([...activeRecoveryOutcomes, execution.recoveryOutcome])
+      activeRecoveryOutcomes = [...activeRecoveryOutcomes, execution.recoveryOutcome]
     activeTargets = new Map(activeTargets)
     activeLoops = new Map(activeLoops)
     for (const region of execution.regions) {
@@ -317,33 +320,29 @@ export const expandMatches = (
     for (const region of execution.regions) {
       const id = target(region.id)
       if (region._tag === 'ConditionalRegion') {
-        append(
-          Object.freeze({
-            id,
-            origin: region.id,
-            kind: 'Normal',
-            operations: Object.freeze([]),
-            terminator: Object.freeze({
-              _tag: 'Branch',
-              condition: region.condition,
-              taken: target(region.taken),
-              otherwise: target(region.otherwise),
-              provenance: region.provenance,
-            }),
-          }),
-        )
+        append({
+          id,
+          origin: region.id,
+          kind: 'Normal',
+          operations: [],
+          terminator: {
+            _tag: 'Branch',
+            condition: region.condition,
+            taken: target(region.taken),
+            otherwise: target(region.otherwise),
+            provenance: region.provenance,
+          },
+        })
         continue
       }
       if (region._tag === 'LoopRegion') {
-        append(
-          Object.freeze({
-            id,
-            origin: region.id,
-            kind: 'Normal',
-            operations: Object.freeze([]),
-            terminator: jump(target(region.condition), region.provenance),
-          }),
-        )
+        append({
+          id,
+          origin: region.id,
+          kind: 'Normal',
+          operations: [],
+          terminator: jump(target(region.condition), region.provenance),
+        })
         continue
       }
       const outcome = region.outcome
@@ -364,13 +363,13 @@ export const expandMatches = (
           (loop) => loop.condition.ordinal === region.id.ordinal,
         )
         if (loop === undefined) throw new RangeError('Nested execution lost its condition owner')
-        terminator = Object.freeze({
+        terminator = {
           _tag: 'Branch',
           condition: loop.conditionValue,
           taken: target(loop.body),
           otherwise: target(loop.following),
           provenance: outcome.provenance,
-        })
+        }
       }
       lowerSequence(
         id,
@@ -381,11 +380,11 @@ export const expandMatches = (
           ...(outcome._tag === 'Complete' ? completionOperations : []),
           ...(outcome._tag === 'Complete' && execution.recoveryOutcome !== undefined
             ? [
-                Object.freeze({
+                {
                   _tag: 'ReleaseDiagnosticOutcome' as const,
                   outcome: execution.recoveryOutcome,
                   provenance: outcome.provenance,
-                }),
+                },
               ]
             : []),
         ],
@@ -416,15 +415,13 @@ export const expandMatches = (
         operation._tag === 'PropagateEffectFailure',
     )
     if (specialIndex < 0) {
-      append(
-        Object.freeze({
-          id,
-          origin,
-          kind,
-          operations: linearOperations(operations),
-          terminator,
-        }),
-      )
+      append({
+        id,
+        origin,
+        kind,
+        operations: linearOperations(operations),
+        terminator,
+      })
       return
     }
     const special = operations.at(specialIndex)
@@ -433,79 +430,71 @@ export const expandMatches = (
       const release = reserve()
       const completion: Array<LinearOperation> = []
       if (special.body.result !== undefined)
-        completion.push(
-          Object.freeze({
-            _tag: 'Move',
-            destination: special.destination,
-            source: special.body.result,
-            provenance: special.provenance,
-          }),
-        )
-      const cleanup: ReadonlyArray<LinearOperation> = Object.freeze([
-        Object.freeze({
+        completion.push({
+          _tag: 'Move',
+          destination: special.destination,
+          source: special.body.result,
+          provenance: special.provenance,
+        })
+      const cleanup: ReadonlyArray<LinearOperation> = [
+        {
           _tag: 'LeaveDiagnosticScope',
           scope: special.destination,
           provenance: special.provenance,
-        }),
-        Object.freeze({
+        },
+        {
           _tag: 'Drop',
           local: special.observer,
           cleanup: special.observerCleanup,
           provenance: special.provenance,
-        }),
-        Object.freeze({
+        },
+        {
           _tag: 'Drop',
           local: special.state,
           cleanup: special.stateCleanup,
           provenance: special.provenance,
-        }),
-      ])
+        },
+      ]
       const entry = emitExecution(
         special.body,
         completion,
         jump(release, special.provenance),
         special.destination,
       )
-      append(
-        Object.freeze({
-          id: release,
-          origin,
-          kind,
-          operations: cleanup,
-          terminator: jump(following, special.provenance),
-        }),
-      )
-      append(
-        Object.freeze({
-          id,
-          origin,
-          kind,
-          operations: linearOperations([
-            ...operations.slice(0, specialIndex),
-            Object.freeze({
-              _tag: 'EnterDiagnosticScope' as const,
-              scope: special.destination,
-              state: special.state,
-              observer: special.observer,
-              provenance: special.provenance,
-            }),
-          ]),
-          terminator: jump(entry, special.provenance),
-        }),
-      )
+      append({
+        id: release,
+        origin,
+        kind,
+        operations: cleanup,
+        terminator: jump(following, special.provenance),
+      })
+      append({
+        id,
+        origin,
+        kind,
+        operations: linearOperations([
+          ...operations.slice(0, specialIndex),
+          {
+            _tag: 'EnterDiagnosticScope' as const,
+            scope: special.destination,
+            state: special.state,
+            observer: special.observer,
+            provenance: special.provenance,
+          },
+        ]),
+        terminator: jump(entry, special.provenance),
+      })
       lowerSequence(following, origin, kind, operations.slice(specialIndex + 1), terminator)
       return
     }
     if (special?._tag === 'PropagateEffectFailure') {
-      append(
-        Object.freeze({
-          id,
-          origin,
-          kind,
-          operations: linearOperations(operations.slice(0, specialIndex)),
-          terminator: special,
-        }),
-      )
+      append({
+        id,
+        origin,
+        kind,
+        operations: linearOperations(operations.slice(0, specialIndex)),
+        terminator: special,
+      })
       return
     }
     if (special?._tag === 'CheckedScalar') {
@@ -520,57 +509,58 @@ export const expandMatches = (
         callable: Mir.LocalId,
         callableType: Extract<Mir.Type, { readonly _tag: 'CallableValue' }>,
         arguments_: ReadonlyArray<Mir.LocalId>,
-      ): Extract<Mir.Operation, { readonly _tag: 'ApplyCallable' }> =>
-        Object.freeze({
-          _tag: 'ApplyCallable',
-          destination: special.destination,
-          callable,
-          typeArguments:
-            callableType.environment?.callable.typeArguments ??
-            callableType.storage?.realization.targetArguments ??
-            callableType.typeArguments ??
-            Object.freeze([]),
-          captures: Object.freeze([]),
-          arguments: arguments_,
-          callableType: callableType.type,
-          access: callableType.type.mode,
-          evaluation: 'CalleeThenArguments',
-          realization: 'Environment',
-          type: special.type,
-          provenance: special.provenance,
-        })
+      ): Extract<Mir.Operation, { readonly _tag: 'ApplyCallable' }> => ({
+        _tag: 'ApplyCallable',
+        destination: special.destination,
+        callable,
+        typeArguments:
+          callableType.environment?.callable.typeArguments ??
+          callableType.storage?.realization.targetArguments ??
+          callableType.typeArguments ??
+          [],
+        captures: [],
+        arguments: arguments_,
+        callableType: callableType.type,
+        access: callableType.type.mode,
+        evaluation: 'CalleeThenArguments',
+        realization: 'Environment',
+        type: special.type,
+        provenance: special.provenance,
+      })
       const drop = (
         local: Mir.LocalId,
         cleanup: Extract<Mir.Operation, { readonly _tag: 'Drop' }>['cleanup'],
-      ): Extract<Mir.Operation, { readonly _tag: 'Drop' }> =>
-        Object.freeze({ _tag: 'Drop', local, cleanup, provenance: special.provenance })
-      append(
-        Object.freeze({
-          id,
-          origin,
-          kind,
-          operations: linearOperations([
-            ...operations.slice(0, specialIndex),
-            Object.freeze({
-              _tag: 'CheckedScalarOutcome' as const,
-              operation: special.operation,
-              valid: special.valid,
-              value: special.value,
-              operands: special.operands,
-              sourceType: special.sourceType,
-              valueType: special.valueType,
-              provenance: special.provenance,
-            }),
-          ]),
-          terminator: Object.freeze({
-            _tag: 'Branch',
-            condition: special.valid,
-            taken: present,
-            otherwise: absent,
+      ): Extract<Mir.Operation, { readonly _tag: 'Drop' }> => ({
+        _tag: 'Drop',
+        local,
+        cleanup,
+        provenance: special.provenance,
+      })
+      append({
+        id,
+        origin,
+        kind,
+        operations: linearOperations([
+          ...operations.slice(0, specialIndex),
+          {
+            _tag: 'CheckedScalarOutcome' as const,
+            operation: special.operation,
+            valid: special.valid,
+            value: special.value,
+            operands: special.operands,
+            sourceType: special.sourceType,
+            valueType: special.valueType,
             provenance: special.provenance,
-          }),
-        }),
-      )
+          },
+        ]),
+        terminator: {
+          _tag: 'Branch',
+          condition: special.valid,
+          taken: present,
+          otherwise: absent,
+          provenance: special.provenance,
+        },
+      })
       lowerSequence(following, origin, kind, operations.slice(specialIndex + 1), terminator)
       lowerSequence(
         present,
@@ -578,7 +568,7 @@ export const expandMatches = (
         'Normal',
         [
           drop(special.absent, special.absentCleanup),
-          apply(special.present, presentType, Object.freeze([special.value])),
+          apply(special.present, presentType, [special.value]),
         ],
         jump(following, special.provenance),
       )
@@ -599,32 +589,30 @@ export const expandMatches = (
           execution.result === undefined
             ? []
             : [
-                Object.freeze({
+                {
                   _tag: 'Move',
                   destination: special.destination,
                   source: execution.result,
                   provenance: special.provenance,
-                }),
+                },
               ],
           jump(following, special.provenance),
         )
       const taken = branch(special.taken)
       const otherwise = branch(special.otherwise)
-      append(
-        Object.freeze({
-          id,
-          origin,
-          kind,
-          operations: linearOperations(operations.slice(0, specialIndex)),
-          terminator: Object.freeze({
-            _tag: 'Branch',
-            condition: special.condition,
-            taken,
-            otherwise,
-            provenance: special.provenance,
-          }),
-        }),
-      )
+      append({
+        id,
+        origin,
+        kind,
+        operations: linearOperations(operations.slice(0, specialIndex)),
+        terminator: {
+          _tag: 'Branch',
+          condition: special.condition,
+          taken,
+          otherwise,
+          provenance: special.provenance,
+        },
+      })
       lowerSequence(following, origin, kind, operations.slice(specialIndex + 1), terminator)
       return
     }
@@ -635,51 +623,47 @@ export const expandMatches = (
         special.right.result === undefined
           ? []
           : [
-              Object.freeze({
+              {
                 _tag: 'Move',
                 destination: special.destination,
                 source: special.right.result,
                 provenance: special.provenance,
-              }),
+              },
             ],
         jump(following, special.provenance),
       )
       const decided = reserve()
-      append(
-        Object.freeze({
-          id,
-          origin,
-          kind,
-          operations: linearOperations(operations.slice(0, specialIndex)),
-          // `&&` reaches its right operand on a true left operand; `||` on a false one. The other
-          // edge writes the operator's decided value without evaluating the right operand at all.
-          terminator: Object.freeze({
-            _tag: 'Branch',
-            condition: special.left,
-            taken: special.operator === 'And' ? evaluateRight : decided,
-            otherwise: special.operator === 'And' ? decided : evaluateRight,
-            provenance: special.provenance,
-          }),
-        }),
-      )
+      append({
+        id,
+        origin,
+        kind,
+        operations: linearOperations(operations.slice(0, specialIndex)),
+        // `&&` reaches its right operand on a true left operand; `||` on a false one. The other
+        // edge writes the operator's decided value without evaluating the right operand at all.
+        terminator: {
+          _tag: 'Branch',
+          condition: special.left,
+          taken: special.operator === 'And' ? evaluateRight : decided,
+          otherwise: special.operator === 'And' ? decided : evaluateRight,
+          provenance: special.provenance,
+        },
+      })
       lowerSequence(following, origin, kind, operations.slice(specialIndex + 1), terminator)
-      append(
-        Object.freeze({
-          id: decided,
-          origin,
-          kind: 'Normal',
-          operations: Object.freeze([
-            Object.freeze({
-              _tag: 'Literal' as const,
-              destination: special.destination,
-              type: special.type,
-              value: special.operator === 'And' ? 0 : 1,
-              provenance: special.provenance,
-            }),
-          ]),
-          terminator: jump(following, special.provenance),
-        }),
-      )
+      append({
+        id: decided,
+        origin,
+        kind: 'Normal',
+        operations: [
+          {
+            _tag: 'Literal' as const,
+            destination: special.destination,
+            type: special.type,
+            value: special.operator === 'And' ? 0 : 1,
+            provenance: special.provenance,
+          },
+        ],
+        terminator: jump(following, special.provenance),
+      })
       return
     }
     if (special?._tag !== 'Match')
@@ -687,31 +671,27 @@ export const expandMatches = (
     const match = special
     const dispatch = reserve()
     const following = reserve()
-    append(
-      Object.freeze({
-        id,
-        origin,
-        kind,
-        operations: linearOperations(operations.slice(0, specialIndex)),
-        terminator: jump(dispatch, match.provenance),
-      }),
-    )
+    append({
+      id,
+      origin,
+      kind,
+      operations: linearOperations(operations.slice(0, specialIndex)),
+      terminator: jump(dispatch, match.provenance),
+    })
     lowerSequence(following, origin, kind, operations.slice(specialIndex + 1), terminator)
 
     const trap = reserve()
-    append(
-      Object.freeze({
-        id: trap,
-        origin,
-        kind: 'Normal',
-        operations: Object.freeze([]),
-        terminator: Object.freeze({
-          _tag: 'Trap',
-          reason: 'exhaustive match rejected every candidate',
-          provenance: match.provenance,
-        }),
-      }),
-    )
+    append({
+      id: trap,
+      origin,
+      kind: 'Normal',
+      operations: [],
+      terminator: {
+        _tag: 'Trap',
+        reason: 'exhaustive match rejected every candidate',
+        provenance: match.provenance,
+      },
+    })
 
     const candidateEntry = (
       member: Match.CoverageIdentity,
@@ -721,15 +701,13 @@ export const expandMatches = (
       const entry = reserve()
       const candidate = candidates.at(ordinal)
       if (candidate === undefined) {
-        append(
-          Object.freeze({
-            id: entry,
-            origin,
-            kind: 'Normal',
-            operations: Object.freeze([]),
-            terminator: jump(trap, match.provenance),
-          }),
-        )
+        append({
+          id: entry,
+          origin,
+          kind: 'Normal',
+          operations: [],
+          terminator: jump(trap, match.provenance),
+        })
         return entry
       }
       const arm = match.arms.find((item) => item.id.ordinal === candidate.ordinal)
@@ -738,29 +716,25 @@ export const expandMatches = (
         arm.member?._tag === 'StructuralTypeMember' && Match.selects(arm.member, member, 'Runtime')
           ? arm.member
           : member
-      const bindings: ReadonlyArray<LinearOperation> = Object.freeze(
-        [
-          ...arm.bindings,
-          ...arm.cleanupBindings.map((binding) => ({ ...binding, provenance: arm.provenance })),
-        ].map((binding) =>
-          Object.freeze({
-            _tag: 'BindMatch' as const,
-            scrutinee: match.scrutinee,
-            ...(match.selectors === undefined ? {} : { selectors: match.selectors }),
-            shape: match.scrutineeShape,
-            member: bindingMember,
-            destination: binding.destination,
-            path: binding.path,
-            type: binding.type,
-            provenance: binding.provenance,
-          }),
-        ),
-      )
+      const bindings: ReadonlyArray<LinearOperation> = [
+        ...arm.bindings,
+        ...arm.cleanupBindings.map((binding) => ({ ...binding, provenance: arm.provenance })),
+      ].map((binding) => ({
+        _tag: 'BindMatch' as const,
+        scrutinee: match.scrutinee,
+        ...(match.selectors === undefined ? {} : { selectors: match.selectors }),
+        shape: match.scrutineeShape,
+        member: bindingMember,
+        destination: binding.destination,
+        path: binding.path,
+        type: binding.type,
+        provenance: binding.provenance,
+      }))
       const cleanup = arm.selected.cleanup.flatMap((entry): ReadonlyArray<LinearOperation> => {
         const type = fn.localTypes.at(entry.destination.ordinal)
         if (type === undefined) throw new RangeError('LLVM match cleanup lost its local type')
-        return Object.freeze([
-          Object.freeze({
+        return [
+          {
             _tag: 'BindMatch' as const,
             scrutinee: match.scrutinee,
             ...(match.selectors === undefined ? {} : { selectors: match.selectors }),
@@ -770,14 +744,14 @@ export const expandMatches = (
             path: entry.path,
             type,
             provenance: arm.provenance,
-          }),
-          Object.freeze({
+          },
+          {
             _tag: 'Drop' as const,
             local: entry.destination,
             cleanup: entry.cleanup,
             provenance: arm.provenance,
-          }),
-        ])
+          },
+        ]
       })
       const selected = emitExecution(
         arm.selected.execution,
@@ -786,12 +760,12 @@ export const expandMatches = (
           ...(match.destination === undefined || arm.selected.execution.result === undefined
             ? []
             : [
-                Object.freeze({
+                {
                   _tag: 'Move' as const,
                   destination: match.destination,
                   source: arm.selected.execution.result,
                   provenance: arm.provenance,
-                }),
+                },
               ]),
         ],
         jump(following, arm.provenance),
@@ -808,18 +782,18 @@ export const expandMatches = (
         if (fallback === undefined) throw new RangeError('Guarded pattern lost its fallback')
         const completedGuard: LinearTerminator =
           arm.guard.execution.result === undefined
-            ? Object.freeze({
+            ? {
                 _tag: 'Trap',
                 reason: 'noncompleting guard reached completion',
                 provenance: arm.provenance,
-              })
-            : Object.freeze({
+              }
+            : {
                 _tag: 'Branch',
                 condition: arm.guard.execution.result,
                 taken: selected,
                 otherwise: fallback,
                 provenance: arm.provenance,
-              })
+              }
         const guard = emitExecution(arm.guard.execution, [], completedGuard)
         lowerSequence(bindingEntry, origin, 'Normal', bindings, jump(guard, arm.provenance))
       }
@@ -866,25 +840,23 @@ export const expandMatches = (
         )
         if (declared === undefined)
           throw new RangeError('Verified scalar enum match lost its declared discriminant')
-        append(
-          Object.freeze({
-            id: dispatchIds.at(ordinal) ?? dispatch,
-            origin,
-            kind: 'Normal',
-            operations: Object.freeze([]),
-            terminator: Object.freeze({
-              _tag: 'EnumMatchBranch',
-              scrutinee: match.scrutinee,
-              ...(match.selectors === undefined ? {} : { selectors: match.selectors }),
-              discriminant: declared.discriminant,
-              type: enumType,
-              representation: enumType.representation,
-              taken: decisionEntries.at(ordinal) ?? trap,
-              otherwise: dispatchIds.at(ordinal + 1) ?? trap,
-              provenance: match.provenance,
-            }),
-          }),
-        )
+        append({
+          id: dispatchIds.at(ordinal) ?? dispatch,
+          origin,
+          kind: 'Normal',
+          operations: [],
+          terminator: {
+            _tag: 'EnumMatchBranch',
+            scrutinee: match.scrutinee,
+            ...(match.selectors === undefined ? {} : { selectors: match.selectors }),
+            discriminant: declared.discriminant,
+            type: enumType,
+            representation: enumType.representation,
+            taken: decisionEntries.at(ordinal) ?? trap,
+            otherwise: dispatchIds.at(ordinal + 1) ?? trap,
+            provenance: match.provenance,
+          },
+        })
       })
       return
     }
@@ -893,37 +865,33 @@ export const expandMatches = (
       match.scrutineeShape.tree._tag !== 'NominalUnionShape'
     ) {
       const selected = decisionEntries.at(0) ?? trap
-      append(
-        Object.freeze({
-          id: dispatch,
-          origin,
-          kind: 'Normal',
-          operations: Object.freeze([]),
-          terminator: jump(selected, match.provenance),
-        }),
-      )
+      append({
+        id: dispatch,
+        origin,
+        kind: 'Normal',
+        operations: [],
+        terminator: jump(selected, match.provenance),
+      })
       return
     }
     const dispatchIds = match.decisions.map((_, ordinal) => (ordinal === 0 ? dispatch : reserve()))
     match.decisions.forEach((decision, ordinal) => {
-      append(
-        Object.freeze({
-          id: dispatchIds.at(ordinal) ?? dispatch,
-          origin,
-          kind: 'Normal',
-          operations: Object.freeze([]),
-          terminator: Object.freeze({
-            _tag: 'MatchBranch',
-            scrutinee: match.scrutinee,
-            ...(match.selectors === undefined ? {} : { selectors: match.selectors }),
-            shape: match.scrutineeShape,
-            member: decision.member,
-            taken: decisionEntries.at(ordinal) ?? trap,
-            otherwise: dispatchIds.at(ordinal + 1) ?? trap,
-            provenance: match.provenance,
-          }),
-        }),
-      )
+      append({
+        id: dispatchIds.at(ordinal) ?? dispatch,
+        origin,
+        kind: 'Normal',
+        operations: [],
+        terminator: {
+          _tag: 'MatchBranch',
+          scrutinee: match.scrutinee,
+          ...(match.selectors === undefined ? {} : { selectors: match.selectors }),
+          shape: match.scrutineeShape,
+          member: decision.member,
+          taken: decisionEntries.at(ordinal) ?? trap,
+          otherwise: dispatchIds.at(ordinal + 1) ?? trap,
+          provenance: match.provenance,
+        },
+      })
     })
   }
 
@@ -954,7 +922,7 @@ export const expandMatches = (
   for (const block of [...blocks].sort((left, right) => left.id.ordinal - right.id.ordinal)) {
     visit(block.id)
   }
-  return Object.freeze(ordered)
+  return ordered
 }
 
 /** LLVM-private flattening of the compiler-owned DAG. Repeat is the only source of a back-edge. */
@@ -976,69 +944,69 @@ export const linearize = (fn: Mir.MirFunction): ReadonlyArray<LinearBlock> => {
       case 'Return':
       case 'Trap':
         return value._tag === 'Forward'
-          ? Object.freeze({ _tag: 'Jump', target: value.target, provenance: value.provenance })
+          ? { _tag: 'Jump', target: value.target, provenance: value.provenance }
           : value
       case 'Repeat': {
         const loop = loops.get(value.loop.ordinal)
         if (loop === undefined) throw new RangeError('LLVM linearizer lost repeat loop')
-        return Object.freeze({ _tag: 'Jump', target: loop.id, provenance: value.provenance })
+        return { _tag: 'Jump', target: loop.id, provenance: value.provenance }
       }
       case 'Exit': {
         const loop = loops.get(value.loop.ordinal)
         if (loop === undefined) throw new RangeError('LLVM linearizer lost exit loop')
-        return Object.freeze({ _tag: 'Jump', target: loop.following, provenance: value.provenance })
+        return { _tag: 'Jump', target: loop.following, provenance: value.provenance }
       }
       case 'Complete':
         throw new RangeError('Function body contains a nested completion outcome')
       case 'Yield': {
         const loop = conditionOwners.get(region.id.ordinal)
         if (loop === undefined) throw new RangeError('LLVM linearizer found unowned yield')
-        return Object.freeze({
+        return {
           _tag: 'Branch',
           condition: loop.conditionValue,
           taken: loop.body,
           otherwise: loop.following,
           provenance: value.provenance,
-        })
+        }
       }
     }
   }
   const raw = Mir.topologicalRegions(fn).map((region): StructuredBlock => {
     if (region._tag === 'ConditionalRegion') {
-      return Object.freeze({
+      return {
         id: region.id,
         origin: region.id,
         kind: 'Normal',
-        operations: Object.freeze([]),
-        terminator: Object.freeze({
+        operations: [],
+        terminator: {
           _tag: 'Branch',
           condition: region.condition,
           taken: region.taken,
           otherwise: region.otherwise,
           provenance: region.provenance,
-        }),
-      })
+        },
+      }
     }
     if (region._tag === 'LoopRegion') {
-      return Object.freeze({
+      return {
         id: region.id,
         origin: region.id,
         kind: 'Normal',
-        operations: Object.freeze([]),
-        terminator: Object.freeze({
+        operations: [],
+        terminator: {
           _tag: 'Jump',
           target: region.condition,
           provenance: region.provenance,
-        }),
-      })
+        },
+      }
     }
-    return Object.freeze({
+    return {
       id: region.id,
       origin: region.id,
       kind: region._tag === 'CleanupRegion' ? 'Cleanup' : 'Normal',
       operations: region._tag === 'CleanupRegion' ? region.releases : region.operations,
       terminator: outcome(region),
-    })
+    }
   })
   const incoming = new Map<number, number>()
   for (const edge of Mir.controlEdges(fn)) {
@@ -1064,7 +1032,7 @@ export const linearize = (fn: Mir.MirFunction): ReadonlyArray<LinearBlock> => {
       operations = [...operations, ...target.operations]
       terminator = target.terminator
     }
-    return Object.freeze({ ...block, operations: Object.freeze(operations), terminator })
+    return { ...block, operations: operations, terminator }
   })
   const referenced = new Set<number>([fn.entry.ordinal])
   // Structural incoming counts do not include every edge introduced by outcome lowering. Keep an
@@ -1084,59 +1052,53 @@ export const linearize = (fn: Mir.MirFunction): ReadonlyArray<LinearBlock> => {
   }
   return expandMatches(
     fn,
-    Object.freeze(
-      blocks.filter((block) => !inlined.has(block.id.ordinal) || referenced.has(block.id.ordinal)),
-    ),
+    blocks.filter((block) => !inlined.has(block.id.ordinal) || referenced.has(block.id.ordinal)),
   )
 }
 
 export const llvmControl = (program: Mir.Module): ReadonlyArray<ControlProvenance> =>
-  Object.freeze(
-    program.functions.flatMap((fn) =>
-      (() => {
-        const linear = linearize(fn)
-        const originOf = (target: Mir.RegionId): Mir.RegionId | undefined =>
-          linear.find((candidate) => candidate.id.ordinal === target.ordinal)?.origin
-        return linear.map((block): ControlProvenance => {
-          const terminator = block.terminator
-          let targets: Array<Mir.RegionId | undefined> = []
-          if (terminator._tag === 'Jump') {
-            targets = [originOf(terminator.target)]
-          } else if (
-            terminator._tag === 'Branch' ||
-            terminator._tag === 'MatchBranch' ||
-            terminator._tag === 'EnumMatchBranch'
-          ) {
-            targets = [originOf(terminator.taken), originOf(terminator.otherwise)]
-          }
-          const canonicalTargets = Object.freeze(
-            targets.flatMap((target) =>
-              target === undefined || target.ordinal === block.origin.ordinal ? [] : [target],
-            ),
-          )
-          let construct: ControlProvenance['construct'] = 'LlvmTrap'
-          if (terminator._tag === 'Jump') {
-            construct = 'LlvmJump'
-          } else if (
-            terminator._tag === 'Branch' ||
-            terminator._tag === 'MatchBranch' ||
-            terminator._tag === 'EnumMatchBranch'
-          ) {
-            construct = 'LlvmBranch'
-          } else if (terminator._tag === 'Return' || terminator._tag === 'PropagateEffectFailure') {
-            construct = 'LlvmReturn'
-          }
-          return Object.freeze({
-            _tag: 'BackendControlProvenance',
-            backend: 'LLVM',
-            function: fn.id,
-            instance: fn.instance,
-            region: block.origin,
-            construct,
-            targets: canonicalTargets,
-            span: terminator.provenance.span,
-          })
-        })
-      })(),
-    ),
+  program.functions.flatMap((fn) =>
+    (() => {
+      const linear = linearize(fn)
+      const originOf = (target: Mir.RegionId): Mir.RegionId | undefined =>
+        linear.find((candidate) => candidate.id.ordinal === target.ordinal)?.origin
+      return linear.map((block): ControlProvenance => {
+        const terminator = block.terminator
+        let targets: Array<Mir.RegionId | undefined> = []
+        if (terminator._tag === 'Jump') {
+          targets = [originOf(terminator.target)]
+        } else if (
+          terminator._tag === 'Branch' ||
+          terminator._tag === 'MatchBranch' ||
+          terminator._tag === 'EnumMatchBranch'
+        ) {
+          targets = [originOf(terminator.taken), originOf(terminator.otherwise)]
+        }
+        const canonicalTargets = targets.flatMap((target) =>
+          target === undefined || target.ordinal === block.origin.ordinal ? [] : [target],
+        )
+        let construct: ControlProvenance['construct'] = 'LlvmTrap'
+        if (terminator._tag === 'Jump') {
+          construct = 'LlvmJump'
+        } else if (
+          terminator._tag === 'Branch' ||
+          terminator._tag === 'MatchBranch' ||
+          terminator._tag === 'EnumMatchBranch'
+        ) {
+          construct = 'LlvmBranch'
+        } else if (terminator._tag === 'Return' || terminator._tag === 'PropagateEffectFailure') {
+          construct = 'LlvmReturn'
+        }
+        return {
+          _tag: 'BackendControlProvenance',
+          backend: 'LLVM',
+          function: fn.id,
+          instance: fn.instance,
+          region: block.origin,
+          construct,
+          targets: canonicalTargets,
+          span: terminator.provenance.span,
+        }
+      })
+    })(),
   )

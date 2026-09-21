@@ -20,8 +20,6 @@ it('derives concrete and empty node spans from one source', () => {
 
   assert.deepEqual({ start: concrete.span.start, end: concrete.span.end }, { start: 0, end: 3 })
   assert.deepEqual({ start: empty.span.start, end: empty.span.end }, { start: 2, end: 2 })
-  assert.strictEqual(Object.isFrozen(concrete.children), true)
-  assert.strictEqual(Object.isFrozen(concrete), true)
 })
 
 it('retains original token objects and distinguishes every element family', () => {

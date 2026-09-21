@@ -179,8 +179,8 @@ export const functions = Effect.fn('NativeDeclare.functions')(function* (
           : context.i32
     }
     const parameterTypes = suspendable
-      ? Object.freeze([...physicalParameters, context.pointer, context.pointer, context.i32])
-      : Object.freeze(physicalParameters)
+      ? [...physicalParameters, context.pointer, context.pointer, context.i32]
+      : physicalParameters
     const signature = yield* LlvmType.functionType(
       context.builder,
       emittedResultType,
@@ -195,34 +195,32 @@ export const functions = Effect.fn('NativeDeclare.functions')(function* (
           { visibility: 'hidden' },
         )
       : undefined
-    declared.push(
-      Object.freeze({
-        fn,
-        symbol,
-        publicSymbol,
-        handle: yield* FunctionActor.declare(context.builder, symbol, signature, {
-          visibility: !context.support && machineExport === undefined ? 'hidden' : 'default',
-          ...(context.support ? { linkage: 'internal' as const } : {}),
-          ...(machineAttributes === undefined ? {} : { attributes: machineAttributes }),
-        }),
-        resultType,
-        emittedResultType,
-        resultLaneCount,
-        ...(resultStorage === undefined ? {} : { resultStorage }),
-        ...(diagnosticResult === undefined ? {} : { diagnosticResult }),
-        suspendable,
-        ...(driver === undefined ? {} : { driver }),
-        parameterTypes,
-        argumentParameters,
-        ...(diagnosticParameter === undefined ? {} : { diagnosticParameter }),
-        linear: linearize(fn),
+    declared.push({
+      fn,
+      symbol,
+      publicSymbol,
+      handle: yield* FunctionActor.declare(context.builder, symbol, signature, {
+        visibility: !context.support && machineExport === undefined ? 'hidden' : 'default',
+        ...(context.support ? { linkage: 'internal' as const } : {}),
+        ...(machineAttributes === undefined ? {} : { attributes: machineAttributes }),
       }),
-    )
+      resultType,
+      emittedResultType,
+      resultLaneCount,
+      ...(resultStorage === undefined ? {} : { resultStorage }),
+      ...(diagnosticResult === undefined ? {} : { diagnosticResult }),
+      suspendable,
+      ...(driver === undefined ? {} : { driver }),
+      parameterTypes,
+      argumentParameters,
+      ...(diagnosticParameter === undefined ? {} : { diagnosticParameter }),
+      linear: linearize(fn),
+    })
   }
-  return Object.freeze({
-    declared: Object.freeze(declared),
+  return {
+    declared: declared,
     ...(voidType === undefined ? {} : { voidType }),
-  })
+  }
 })
 
 export interface ExportContext {

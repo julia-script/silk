@@ -8,4 +8,4 @@ export interface OwnedHandle {
 }
 
 /** @internal */
-export const makeOwner = (): Owner => Object.freeze({ token: Symbol('llvm-builder-owner') })
+export const makeOwner = (): Owner => ({ token: Symbol('llvm-builder-owner') })

@@ -11,7 +11,7 @@ export const buildMetadataAdapter = (state: BuilderState.Snapshot): MetadataAdap
   const reachable = Metadata.reachable(state, 'Bitcode.encode')
   const strings = reachable.entries.filter((index) => state.metadata[index]?._tag === 'String')
   const nodes = reachable.entries.filter((index) => state.metadata[index]?._tag === 'Node')
-  const entries = Object.freeze([...strings, ...nodes])
+  const entries = [...strings, ...nodes]
   const indices = new Map(entries.map((entry, index) => [entry, index]))
   const resolve = (metadata: number): number => {
     const seen = new Set<number>()
@@ -38,8 +38,11 @@ export const buildMetadataAdapter = (state: BuilderState.Snapshot): MetadataAdap
   }
 }
 
-const metadataKindCode: Readonly<Record<MetadataDescription.Attachment['kind'], number>> =
-  Object.freeze({ dbg: 0, prof: 2, unpredictable: 15 })
+const metadataKindCode: Readonly<Record<MetadataDescription.Attachment['kind'], number>> = {
+  dbg: 0,
+  prof: 2,
+  unpredictable: 15,
+}
 
 /** @internal */
 export const writeMetadataKinds = (

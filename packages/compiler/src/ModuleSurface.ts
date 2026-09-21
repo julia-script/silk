@@ -249,11 +249,11 @@ const decodeRequirement = (value: unknown): Type.Requirement => {
   const access = serializedString(encoded.access, 'requirement.access')
   if (access !== 'Shared' && access !== 'Exclusive')
     throw new InvalidModuleSurfaceEncoding('requirement access must be Shared or Exclusive')
-  return Object.freeze({
+  return {
     capability,
     role: serializedString(encoded.role, 'requirement.role'),
     access,
-  })
+  }
 }
 
 const encodeRequirementRow = (value: Type.RequirementsRow): SerializedRecord =>
@@ -325,12 +325,14 @@ function decodeRow<Member, RowParameter, SymbolicMember, MemberParameter>(
       case 'Singleton': {
         const member = decodeSymbolicMember(current.member)
         requiredObligations.set(policy.memberWellFormedKey(member), member)
-        const singletonExpression: RowAlgebra.Expression<Member, RowParameter, SymbolicMember> =
-          Object.freeze({ _tag: 'Singleton', member })
-        const singleton: RowAlgebra.Row<Member, RowParameter, SymbolicMember> = Object.freeze({
+        const singletonExpression: RowAlgebra.Expression<Member, RowParameter, SymbolicMember> = {
+          _tag: 'Singleton',
+          member,
+        }
+        const singleton: RowAlgebra.Row<Member, RowParameter, SymbolicMember> = {
           expression: singletonExpression,
-          memberWellFormed: Object.freeze([]),
-        })
+          memberWellFormed: [],
+        }
         return singleton
       }
       case 'Union':
@@ -359,20 +361,17 @@ function decodeRow<Member, RowParameter, SymbolicMember, MemberParameter>(
     const expectedKey = policy.memberWellFormedKey(member)
     if (encodedKey !== expectedKey)
       throw new InvalidModuleSurfaceEncoding('row obligation has inconsistent key branding')
-    obligations.set(
-      expectedKey,
-      Object.freeze({ key: expectedKey, member, origins: Object.freeze([]) }),
-    )
+    obligations.set(expectedKey, { key: expectedKey, member, origins: [] })
   }
   for (const key of requiredObligations.keys())
     if (!obligations.has(key))
       throw new InvalidModuleSurfaceEncoding('row singleton is missing its member obligation')
-  return Object.freeze({
+  return {
     expression: normalized.expression,
-    memberWellFormed: Object.freeze(
-      [...obligations.values()].sort((left, right) => compareText(left.key, right.key)),
+    memberWellFormed: [...obligations.values()].sort((left, right) =>
+      compareText(left.key, right.key),
     ),
-  })
+  }
 }
 
 const decodeFailureRow = (value: unknown): Type.FailureRow =>
@@ -531,11 +530,9 @@ const constraintParameters = (
       ]
       break
   }
-  return Object.freeze(
-    [...new Map(parameters.map((parameter) => [Type.key(parameter), parameter])).values()].sort(
-      Type.compare,
-    ),
-  )
+  return [
+    ...new Map(parameters.map((parameter) => [Type.key(parameter), parameter])).values(),
+  ].sort(Type.compare)
 }
 
 const encodeExecutableOwner = (value: Type.ExecutableSpecializationOwner): SerializedRecord => ({
@@ -550,22 +547,19 @@ const decodeExecutableOwner = (value: unknown): Type.ExecutableSpecializationOwn
   if (serializedTag(encoded, 'executable owner') !== 'ExecutableOwner')
     throw new InvalidModuleSurfaceEncoding('executable owner has the wrong tag')
   const declaration = serializedRecord(encoded.declaration, 'executable owner declaration')
-  return Object.freeze({
-    declaration: Object.freeze({
+  return {
+    declaration: {
       module: serializedString(declaration.module, 'executable owner module'),
       name: serializedString(declaration.name, 'executable owner name'),
-    }),
-    typeArguments: Object.freeze(
-      serializedArray(encoded.typeArguments, 'executable owner arguments').map(
-        decodeGenericArgumentNode,
-      ),
+    },
+    typeArguments: serializedArray(encoded.typeArguments, 'executable owner arguments').map(
+      decodeGenericArgumentNode,
     ),
-    staticArgumentKeys: Object.freeze(
-      serializedArray(encoded.staticArgumentKeys, 'executable owner static arguments').map((key) =>
-        serializedString(key, 'executable owner static argument'),
-      ),
-    ),
-  })
+    staticArgumentKeys: serializedArray(
+      encoded.staticArgumentKeys,
+      'executable owner static arguments',
+    ).map((key) => serializedString(key, 'executable owner static argument')),
+  }
 }
 
 function encodeLifetime(value: Lifetime.Lifetime): SerializedRecord {
@@ -731,25 +725,25 @@ function decodeCallableTarget(value: unknown): Type.CallableIdentityArgument['ta
   const targetTag = serializedString(target._tag, 'callable target tag')
   switch (targetTag) {
     case 'Declaration':
-      return Object.freeze({
+      return {
         _tag: 'Declaration',
         module: serializedString(target.module, 'callable target module'),
         name: serializedString(target.name, 'callable target name'),
-      })
+      }
     case 'Builtin': {
       const operation = serializedString(target.operation, 'callable target operation')
       if (!Type.isBuiltinOperation(operation))
         throw new InvalidModuleSurfaceEncoding(`unknown callable target operation ${operation}`)
       const intrinsic = serializedRecord(target.intrinsic, 'callable target intrinsic')
-      return Object.freeze({
+      return {
         _tag: 'Builtin',
         actor: serializedString(target.actor, 'callable target actor'),
         operation,
-        intrinsic: Object.freeze({
+        intrinsic: {
           actor: serializedString(intrinsic.actor, 'intrinsic actor'),
           name: serializedString(intrinsic.name, 'intrinsic name'),
-        }),
-      })
+        },
+      }
     }
     default:
       throw new InvalidModuleSurfaceEncoding(`unknown callable target ${targetTag}`)
@@ -767,34 +761,34 @@ function decodeCallableEnvironment(value: unknown): Type.CallableEnvironmentIden
   switch (siteTag) {
     case 'DeclaredCallableEnvironmentSite': {
       const declaration = serializedRecord(site.declaration, 'callable environment declaration')
-      decodedSite = Object.freeze({
+      decodedSite = {
         _tag: 'DeclaredCallableEnvironmentSite',
-        declaration: Object.freeze({
+        declaration: {
           module: serializedString(declaration.module, 'environment module'),
           name: serializedString(declaration.name, 'environment name'),
-        }),
+        },
         ordinal: serializedNonNegativeInteger(site.ordinal, 'environment ordinal'),
-      })
+      }
       break
     }
     case 'RecoveredCallableEnvironmentSite':
-      decodedSite = Object.freeze({
+      decodedSite = {
         _tag: 'RecoveredCallableEnvironmentSite',
         functionOrdinal: serializedNonNegativeInteger(
           site.functionOrdinal,
           'environment function ordinal',
         ),
         ordinal: serializedNonNegativeInteger(site.ordinal, 'environment ordinal'),
-      })
+      }
       break
     default:
       throw new InvalidModuleSurfaceEncoding(`unknown callable environment site ${siteTag}`)
   }
-  return Object.freeze({
+  return {
     _tag: 'CallableEnvironmentIdentity',
     site: decodedSite,
     owner: decodeExecutableOwner(current.owner),
-  })
+  }
 }
 
 function decodeGenericArgumentNode(value: unknown): Type.GenericArgument {
@@ -832,17 +826,17 @@ function decodeGenericArgumentNode(value: unknown): Type.GenericArgument {
         throw new InvalidModuleSurfaceEncoding('opaque family has the wrong tag')
       const producer = serializedRecord(family.producer, 'opaque family producer')
       return Type.opaqueRepresentationArgument(
-        Object.freeze({
+        {
           _tag: 'OpaqueFamilyKey',
-          producer: Object.freeze({
+          producer: {
             module: serializedString(producer.module, 'opaque producer module'),
             name: serializedString(producer.name, 'opaque producer name'),
-          }),
+          },
           binderOrdinal: serializedNonNegativeInteger(
             family.binderOrdinal,
             'opaque binder ordinal',
           ),
-        }),
+        },
         contract,
         serializedArray(encoded.arguments, 'opaque arguments').map(decodeGenericArgumentNode),
       )
@@ -1022,10 +1016,10 @@ function decodeCallableContract(value: unknown): CallableContract.CallableContra
       const parameter = serializedRecord(value_, 'callable contract parameter')
       if (serializedTag(parameter, 'callable contract parameter') !== 'CallableParameter')
         throw new InvalidModuleSurfaceEncoding('callable contract parameter has the wrong tag')
-      return Object.freeze({
+      return {
         type: decodeTypeNode(parameter.type),
         mode: decodeCallableParameterMode(parameter.mode, 'callable contract parameter mode'),
-      })
+      }
     },
   )
   const captures = serializedArray(encoded.captures, 'callable contract captures').map((value_) => {
@@ -1042,7 +1036,7 @@ function decodeCallableContract(value: unknown): CallableContract.CallableContra
     )
     if (parameter >= parameters.length)
       throw new InvalidModuleSurfaceEncoding('callable contract capture is out of bounds')
-    return Object.freeze({ parameter, capture: captured })
+    return { parameter, capture: captured }
   })
   return CallableContract.make({
     ...decodeExecutableLifetimes(encoded),
@@ -1093,25 +1087,19 @@ function decodeCallableSchemaNode(value: unknown): Type.CallableSchema {
   if (serializedTag(current, 'callable schema') !== 'CallableSchema')
     throw new InvalidModuleSurfaceEncoding('callable schema has the wrong tag')
   const contract = decodeCallableContract(current.contract)
-  const binders = Object.freeze(
-    serializedArray(current.binders, 'schema binders').map(decodeParameter),
+  const binders = serializedArray(current.binders, 'schema binders').map(decodeParameter)
+  const constraints = serializedArray(current.constraints, 'schema constraints').map(
+    decodeConstraintNode,
   )
-  const constraints = Object.freeze(
-    serializedArray(current.constraints, 'schema constraints').map(decodeConstraintNode),
-  )
-  const evidence = Object.freeze(
-    serializedArray(current.evidence, 'schema evidence').map(decodeConstraintEvidenceNode),
+  const evidence = serializedArray(current.evidence, 'schema evidence').map(
+    decodeConstraintEvidenceNode,
   )
   const contractKey = serializedString(current.contractKey, 'schema contract key')
-  const constraintKeys = Object.freeze(
-    serializedArray(current.constraintKeys, 'schema constraint keys').map((key_) =>
-      serializedString(key_, 'schema constraint key'),
-    ),
+  const constraintKeys = serializedArray(current.constraintKeys, 'schema constraint keys').map(
+    (key_) => serializedString(key_, 'schema constraint key'),
   )
-  const evidenceKeys = Object.freeze(
-    serializedArray(current.evidenceKeys, 'schema evidence keys').map((key_) =>
-      serializedString(key_, 'schema evidence key'),
-    ),
+  const evidenceKeys = serializedArray(current.evidenceKeys, 'schema evidence keys').map((key_) =>
+    serializedString(key_, 'schema evidence key'),
   )
   if (contractKey !== CallableContract.key(contract))
     throw new InvalidModuleSurfaceEncoding('callable schema has inconsistent contract branding')
@@ -1134,7 +1122,7 @@ function decodeCallableSchemaNode(value: unknown): Type.CallableSchema {
   )
   const source =
     current.source === undefined ? undefined : serializedRecord(current.source, 'schema source')
-  return Object.freeze({
+  return {
     ...(source === undefined
       ? {}
       : {
@@ -1151,8 +1139,8 @@ function decodeCallableSchemaNode(value: unknown): Type.CallableSchema {
     contractKey,
     constraintKeys,
     evidenceKeys,
-    origins: Object.freeze([]),
-  })
+    origins: [],
+  }
 }
 
 function decodeTypeNode(value: unknown): Type.Type {
@@ -1224,8 +1212,8 @@ function decodeTypeNode(value: unknown): Type.Type {
       const mode = serializedString(encoded.mode, 'callable mode')
       if (mode !== 'Shared' && mode !== 'Exclusive' && mode !== 'Take')
         throw new InvalidModuleSurfaceEncoding('invalid callable mode')
-      const parameters = Object.freeze(
-        serializedArray(encoded.parameters, 'callable parameters').map(decodeTypeNode),
+      const parameters = serializedArray(encoded.parameters, 'callable parameters').map(
+        decodeTypeNode,
       )
       const result = decodeTypeNode(encoded.result)
       const schema =
@@ -1390,18 +1378,18 @@ function decodeWitnessOriginNode(
 ): ContractConstraint.WitnessIdentity['origin'] {
   switch (originTag) {
     case 'SourceWitness':
-      return Object.freeze({
+      return {
         _tag: 'SourceWitness',
-        declaration: Object.freeze({
+        declaration: {
           module: serializedString(origin.module, 'witness module'),
           name: serializedString(origin.name, 'witness name'),
-        }),
-      })
+        },
+      }
     case 'IntrinsicWitness':
-      return Object.freeze({
+      return {
         _tag: 'IntrinsicWitness',
         operation: serializedString(origin.operation, 'witness operation'),
-      })
+      }
     default:
       throw new InvalidModuleSurfaceEncoding(`unknown witness origin ${originTag}`)
   }
@@ -1413,15 +1401,15 @@ function decodeWitnessIdentityNode(value: unknown): ContractConstraint.WitnessId
     throw new InvalidModuleSurfaceEncoding('witness identity has the wrong tag')
   const origin = serializedRecord(encoded.origin, 'witness origin')
   const originTag = serializedTag(origin, 'witness origin')
-  const typeArguments = Object.freeze(
-    serializedArray(encoded.typeArguments, 'witness arguments').map(decodeGenericArgumentNode),
+  const typeArguments = serializedArray(encoded.typeArguments, 'witness arguments').map(
+    decodeGenericArgumentNode,
   )
   if (typeArguments.some((argument) => !Type.isRuntimeConcreteGenericArgument(argument)))
     throw new InvalidModuleSurfaceEncoding('witness identity retains an open runtime argument')
-  return Object.freeze({
+  return {
     origin: decodeWitnessOriginNode(origin, originTag),
     typeArguments,
-  })
+  }
 }
 
 function encodeProviderMatchNode(value: ContractConstraint.ProviderMatch): SerializedRecord {
@@ -1433,12 +1421,12 @@ function encodeProviderMatchNode(value: ContractConstraint.ProviderMatch): Seria
 function decodeProviderMatchNode(value: unknown): ContractConstraint.ProviderMatch {
   const encoded = serializedRecord(value, 'provider match')
   const tag = serializedTag(encoded, 'provider match')
-  if (tag === 'Identity') return Object.freeze({ _tag: 'Identity' })
+  if (tag === 'Identity') return { _tag: 'Identity' }
   if (tag === 'Conformance')
-    return Object.freeze({
+    return {
       _tag: 'Conformance',
       witness: decodeWitnessIdentityNode(encoded.witness),
-    })
+    }
   throw new InvalidModuleSurfaceEncoding(`unknown provider match ${tag}`)
 }
 
@@ -2466,22 +2454,21 @@ export const resolutionSignature = (index: DeclarationIndex.Index): string =>
   )
 
 /** Construct the exact surface for one module's completed headers. */
-export const make = (headers: DeclarationFacts.ModuleHeaders): ModuleSurface =>
-  Object.freeze({
-    _tag: 'ModuleSurface',
-    module: headers.module,
-    canonical: record('ModuleSurface', [
-      headers.module,
-      array(
-        headers.publications.map((publication) =>
-          record('Publication', [publication.module, publication.original, publication.spelling]),
-        ),
+export const make = (headers: DeclarationFacts.ModuleHeaders): ModuleSurface => ({
+  _tag: 'ModuleSurface',
+  module: headers.module,
+  canonical: record('ModuleSurface', [
+    headers.module,
+    array(
+      headers.publications.map((publication) =>
+        record('Publication', [publication.module, publication.original, publication.spelling]),
       ),
-      array(headers.members.map(member)),
-      array(headers.conformances.map(conformance)),
-      array(headers.inherentImpls.map(inherentImpl)),
-    ]),
-  })
+    ),
+    array(headers.members.map(member)),
+    array(headers.conformances.map(conformance)),
+    array(headers.inherentImpls.map(inherentImpl)),
+  ]),
+})
 
 /** Construct canonically ordered surfaces for a completed declaration index. */
 export const fromIndex = (index: DeclarationIndex.Index): ReadonlyMap<string, ModuleSurface> =>
@@ -2493,7 +2480,7 @@ export const fromIndex = (index: DeclarationIndex.Index): ReadonlyMap<string, Mo
         if (headers.publications.length === 0) return [headers.module, surface]
         return [
           headers.module,
-          Object.freeze({
+          {
             ...surface,
             canonical: record('PublishedSurface', [
               surface.canonical,
@@ -2511,7 +2498,7 @@ export const fromIndex = (index: DeclarationIndex.Index): ReadonlyMap<string, Mo
                 }),
               ),
             ]),
-          }),
+          },
         ]
       }),
   )

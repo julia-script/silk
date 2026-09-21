@@ -220,18 +220,18 @@ export const bind = (self: View, target: Target.Target, start: number): Binding 
   const slots = self.slots.map((slot, ordinal) => {
     const selected = packed.entries.at(ordinal)
     if (selected === undefined) throw new RangeError('Value transport lost a planned slot')
-    return Object.freeze({
+    return {
       storageOffset: slot.offset,
       transportOffset: selected.offset,
       lane: slot.lane,
-    })
+    }
   })
-  return Object.freeze({
+  return {
     storageKey: self.key,
     transport: packed,
-    slots: Object.freeze(slots),
+    slots: slots,
     identicalOffsets: slots.every((slot) => slot.storageOffset === slot.transportOffset - start),
-  })
+  }
 }
 
 /**
@@ -252,13 +252,13 @@ export const transportWithin = (
   for (const lane of lanes) {
     const physical = scalarLayout(target, lane)
     cursor = alignUp(cursor, physical.alignment)
-    const entry = Object.freeze({ lane, offset: cursor, ...physical })
+    const entry = { lane, offset: cursor, ...physical }
     cursor += physical.size
     if (!Number.isSafeInteger(cursor) || cursor > maximum) return undefined
     alignment = Math.max(alignment, physical.alignment)
     entries.push(entry)
   }
-  return Object.freeze({ entries: Object.freeze(entries), start, end: cursor, alignment })
+  return { entries: entries, start, end: cursor, alignment }
 }
 
 /** Selects checked target transport; an overflowing compiler-private record is a plan defect. */
@@ -289,18 +289,18 @@ export const carrier = (
   const packed = transportWithin(target, shape.lanes, 0, maximum)
   const identity = { key: key(role, shape.type), role, type: shape.type }
   if (packed === undefined)
-    return Object.freeze({ _tag: 'UnavailableValueStorage', ...identity, reason: 'Overflow' })
+    return { _tag: 'UnavailableValueStorage', ...identity, reason: 'Overflow' }
   const size = alignUp(packed.end, packed.alignment)
   if (!Number.isSafeInteger(size) || size > maximum)
-    return Object.freeze({ _tag: 'UnavailableValueStorage', ...identity, reason: 'Overflow' })
+    return { _tag: 'UnavailableValueStorage', ...identity, reason: 'Overflow' }
   const tags = new Set<number>()
   for (const member of members) {
     if (!Number.isSafeInteger(member.tag) || member.tag < 0 || tags.has(member.tag))
-      return Object.freeze({
+      return {
         _tag: 'UnavailableValueStorage',
         ...identity,
         reason: 'InvalidMapping',
-      })
+      }
     tags.add(member.tag)
     const used = new Set<number>()
     for (const mapping of member.lanes) {
@@ -312,22 +312,22 @@ export const carrier = (
         used.has(mapping.slot) ||
         scalarLayout(target, mapping.lane).size > slot.size
       )
-        return Object.freeze({
+        return {
           _tag: 'UnavailableValueStorage',
           ...identity,
           reason: 'InvalidMapping',
-        })
+        }
       used.add(mapping.slot)
     }
   }
-  return Object.freeze({
+  return {
     _tag: 'ValueStorage',
     ...identity,
     size,
     alignment: packed.alignment,
     slots: packed.entries,
-    members: Object.freeze([...members]),
-  })
+    members: [...members],
+  }
 }
 
 /** Creates the missing outcome and represented-composite carrier views during target planning. */
@@ -337,7 +337,7 @@ export const plan = (self: Layout.Plan): ReadonlyArray<Selection> => {
   for (const shape of self.callingShapes) {
     const tree = shape.tree
     if (tree._tag !== 'OutcomeShape' && tree._tag !== 'EffectCompositeShape') continue
-    const role = tree._tag === 'OutcomeShape' ? 'Outcome' : 'CompositeCarrier'
+    const role: Role = tree._tag === 'OutcomeShape' ? 'Outcome' : 'CompositeCarrier'
     let types: ReadonlyArray<{ readonly tag: number; readonly type: Type.Type }>
     if (tree._tag === 'OutcomeShape')
       types = [
@@ -362,23 +362,19 @@ export const plan = (self: Layout.Plan): ReadonlyArray<Selection> => {
         missing = true
         break
       }
-      members.push(
-        Object.freeze({
-          ...member,
-          lanes: Object.freeze(
-            memberShape.lanes.map((lane, ordinal) => Object.freeze({ lane, slot: ordinal + 1 })),
-          ),
-        }),
-      )
+      members.push({
+        ...member,
+        lanes: memberShape.lanes.map((lane, ordinal) => ({ lane, slot: ordinal + 1 })),
+      })
     }
     const selected = missing
-      ? Object.freeze({
+      ? {
           _tag: 'UnavailableValueStorage' as const,
           key: key(role, shape.type),
           role,
           type: shape.type,
           reason: 'MissingMember' as const,
-        })
+        }
       : carrier(self.target, role, shape, members)
     if (selected._tag !== 'ValueStorage' || role !== 'CompositeCarrier') {
       views.push(selected)
@@ -405,17 +401,15 @@ export const plan = (self: Layout.Plan): ReadonlyArray<Selection> => {
           missing = true
           break
         }
-        slots.push(Object.freeze({ lane: mapping.lane, offset, ...physical }))
+        slots.push({ lane: mapping.lane, offset, ...physical })
       }
-      alternatives.push(
-        Object.freeze({
-          tag: member.tag,
-          type: member.type,
-          size: entry.size,
-          alignment: entry.alignment,
-          slots: Object.freeze(slots),
-        }),
-      )
+      alternatives.push({
+        tag: member.tag,
+        type: member.type,
+        size: entry.size,
+        alignment: entry.alignment,
+        slots: slots,
+      })
     }
     const payloadAlignment = alternatives.reduce(
       (maximum, alternative) => Math.max(maximum, alternative.alignment),
@@ -427,37 +421,31 @@ export const plan = (self: Layout.Plan): ReadonlyArray<Selection> => {
       missing ||
       alternatives.some((alternative) => payloadOffset + alternative.size > stored.size)
     ) {
-      views.push(
-        Object.freeze({
-          _tag: 'UnavailableValueStorage',
-          key: selected.key,
-          role,
-          type: selected.type,
-          reason: 'MissingMember',
-        }),
-      )
+      views.push({
+        _tag: 'UnavailableValueStorage',
+        key: selected.key,
+        role,
+        type: selected.type,
+        reason: 'MissingMember',
+      })
       continue
     }
-    views.push(
-      Object.freeze({
-        ...selected,
-        stored: Object.freeze({
-          key: `CompositeStored:${Type.runtimeKey(shape.type)}`,
-          size: stored.size,
-          alignment: stored.alignment,
-          payloadOffset,
-          alternatives: Object.freeze(alternatives),
-        }),
-      }),
-    )
+    views.push({
+      ...selected,
+      stored: {
+        key: `CompositeStored:${Type.runtimeKey(shape.type)}`,
+        size: stored.size,
+        alignment: stored.alignment,
+        payloadOffset,
+        alternatives: alternatives,
+      },
+    })
   }
-  return Object.freeze(
-    views.sort((left, right) => {
-      if (left.key < right.key) return -1
-      if (left.key > right.key) return 1
-      return 0
-    }),
-  )
+  return views.sort((left, right) => {
+    if (left.key < right.key) return -1
+    if (left.key > right.key) return 1
+    return 0
+  })
 }
 
 /** Selects a role-qualified view; an unavailable view must never reach address construction. */
@@ -535,13 +523,13 @@ export const encode = (self: Selection): string =>
 export const verify = Effect.fn('ValueStorage.verify')(function* (
   self: Layout.Plan,
 ): Effect.fn.Return<ReadonlyArray<Layout.Violation>> {
-  const invalid: ReadonlyArray<Layout.Violation> = Object.freeze([
-    Object.freeze({
+  const invalid: ReadonlyArray<Layout.Violation> = [
+    {
       _tag: 'LayoutViolation',
       rule: 'InvalidValueStorage',
       detail: 'value storage does not match canonical target calling/member facts',
-    }),
-  ])
+    },
+  ]
   if (plan(self).some((view) => view._tag === 'UnavailableValueStorage')) return invalid
   const expected = plan({
     ...self,
@@ -564,7 +552,7 @@ export const verify = Effect.fn('ValueStorage.verify')(function* (
       )
     })
   )
-    return Object.freeze([])
+    return []
   return invalid
 })
 

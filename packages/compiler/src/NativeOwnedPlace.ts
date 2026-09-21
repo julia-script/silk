@@ -51,7 +51,7 @@ export const candidates = (
     } else visit(ordinal + 1, [...path, selector], indices)
   }
   visit(0, [], [])
-  return Object.freeze(result)
+  return result
 }
 
 /** Resolves fields, known elements and a previously refined variant without reading payloads. */
@@ -158,7 +158,7 @@ export const read = Effect.fnUntraced(function* (
       yield* NativeArith.coerceLane(context, value, source, target, `${tag}_${ordinal}`),
     )
   }
-  return Object.freeze(selected)
+  return selected
 })
 
 /** Commits selected lanes into original storage, preserving every initialized sibling and tag. */

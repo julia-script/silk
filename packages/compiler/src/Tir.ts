@@ -173,14 +173,16 @@ export const nodeRefEquals = (left: NodeRef, right: NodeRef): boolean =>
 /** Names a published node from the artifact that owns it. */
 export const nodeReference = (artifact: ArtifactId, node: Node): NodeRef => {
   if (node.id === undefined) throw new RangeError('TIR node reference requires a published node')
-  return Object.freeze({ artifact, node: node.id })
+  return { artifact, node: node.id }
 }
 
-export const authored = (anchor: AuthoredIdentity.Anchor): Origin =>
-  Object.freeze({ _tag: 'Authored', anchor })
+export const authored = (anchor: AuthoredIdentity.Anchor): Origin => ({ _tag: 'Authored', anchor })
 
-export const synthetic = (anchor: AuthoredIdentity.Anchor, role: string, occurrence = 0): Origin =>
-  Object.freeze({ _tag: 'Synthetic', anchor, role, occurrence })
+export const synthetic = (
+  anchor: AuthoredIdentity.Anchor,
+  role: string,
+  occurrence = 0,
+): Origin => ({ _tag: 'Synthetic', anchor, role, occurrence })
 
 /** A canonical source-ordered region identity local to one function. */
 export interface RegionId {
@@ -265,42 +267,39 @@ export const effectRootSite = (
   artifact: ArtifactId,
   functionOrdinal: number,
   owner?: DeclarationFacts.CanonicalId,
-): EffectSiteId =>
-  Object.freeze({
-    _tag: 'EffectSiteId',
-    artifact,
-    functionOrdinal,
-    root: true,
-    ...(owner === undefined ? {} : { owner }),
-  })
+): EffectSiteId => ({
+  _tag: 'EffectSiteId',
+  artifact,
+  functionOrdinal,
+  root: true,
+  ...(owner === undefined ? {} : { owner }),
+})
 
 /** Stable hidden Effect site for a compiler-backed selective-catch expression. */
 export const effectCatchSite = (
   node: NodeRef,
   owner: DeclarationFacts.CanonicalId,
   functionOrdinal: number,
-): EffectSiteId =>
-  Object.freeze({
-    _tag: 'EffectSiteId',
-    node,
-    ordinal: node.node.ordinal,
-    owner,
-    functionOrdinal,
-  })
+): EffectSiteId => ({
+  _tag: 'EffectSiteId',
+  node,
+  ordinal: node.node.ordinal,
+  owner,
+  functionOrdinal,
+})
 
 /** Stable hidden Effect site for one compiler-backed Effect-valued builtin call. */
 export const builtinEffectSite = (
   node: NodeRef,
   owner: DeclarationFacts.CanonicalId,
   functionOrdinal: number,
-): EffectSiteId =>
-  Object.freeze({
-    _tag: 'EffectSiteId',
-    node,
-    ordinal: node.node.ordinal,
-    owner,
-    functionOrdinal,
-  })
+): EffectSiteId => ({
+  _tag: 'EffectSiteId',
+  node,
+  ordinal: node.node.ordinal,
+  owner,
+  functionOrdinal,
+})
 
 /** Orders executable sites by their stable structural identities. */
 export const compareExecutableSites = (
@@ -319,9 +318,7 @@ export const effectRepresentationIdentity = (self: EffectSiteId): string =>
 /** Projects a TIR callable site into the semantic identity retained across specialization. */
 export const callableEnvironmentSite = (self: CallableSiteId): Type.CallableEnvironmentSite =>
   Type.callableEnvironmentSite(
-    self.owner === undefined
-      ? undefined
-      : Object.freeze({ module: self.owner.module, name: self.owner.name }),
+    self.owner === undefined ? undefined : { module: self.owner.module, name: self.owner.name },
     self.functionOrdinal,
     self.ordinal,
   )
@@ -337,23 +334,21 @@ export const callableEnvironmentIdentity = (
 export const effectRunnerId = (
   owner: DeclarationFacts.CanonicalId,
   site: EffectSiteId,
-): DeclarationFacts.CanonicalId =>
-  Object.freeze({
-    _tag: 'CanonicalDeclarationId',
-    module: owner.module,
-    name: `${owner.name}$effect$${executableSiteOrdinal(site)}`,
-  })
+): DeclarationFacts.CanonicalId => ({
+  _tag: 'CanonicalDeclarationId',
+  module: owner.module,
+  name: `${owner.name}$effect$${executableSiteOrdinal(site)}`,
+})
 
 /** Derives the private executable declaration owned by one anonymous callable site. */
 export const anonymousCallableId = (
   owner: DeclarationFacts.CanonicalId,
   authoredOrdinal: number,
-): DeclarationFacts.CanonicalId =>
-  Object.freeze({
-    _tag: 'CanonicalDeclarationId',
-    module: owner.module,
-    name: `${owner.name}$callable$${authoredOrdinal}`,
-  })
+): DeclarationFacts.CanonicalId => ({
+  _tag: 'CanonicalDeclarationId',
+  module: owner.module,
+  name: `${owner.name}$callable$${authoredOrdinal}`,
+})
 
 /** Tests whether a canonical declaration is owned by an anonymous callable expression site. */
 export const isAnonymousCallableId = (self: DeclarationFacts.CanonicalId): boolean =>
@@ -391,44 +386,44 @@ export const callableTargetFromIdentity = (
   target: Type.CallableIdentityArgument['target'],
 ): CallableTarget =>
   target._tag === 'Declaration'
-    ? Object.freeze({
+    ? {
         _tag: 'DeclarationCallableTarget',
-        declaration: Object.freeze({
+        declaration: {
           _tag: 'CanonicalDeclarationId',
           module: target.module,
           name: target.name,
-        }),
-      })
-    : Object.freeze({
+        },
+      }
+    : {
         _tag: 'BuiltinCallableTarget',
         actor: target.actor,
         operation: target.operation,
-        intrinsic: Object.freeze({
+        intrinsic: {
           _tag: 'IntrinsicOperationId',
           actor: target.intrinsic.actor,
           name: target.intrinsic.name,
-        }),
-      })
+        },
+      }
 
 /** Projects a TIR callable target into the semantic identity retained by specialization. */
 export const callableTargetIdentity = (
   self: CallableTarget,
 ): Type.CallableIdentityArgument['target'] =>
   self._tag === 'DeclarationCallableTarget'
-    ? Object.freeze({
+    ? {
         _tag: 'Declaration',
         module: self.declaration.module,
         name: self.declaration.name,
-      })
-    : Object.freeze({
+      }
+    : {
         _tag: 'Builtin',
         actor: self.actor,
         operation: self.operation,
-        intrinsic: Object.freeze({
+        intrinsic: {
           actor: self.intrinsic.actor,
           name: self.intrinsic.name,
-        }),
-      })
+        },
+      }
 
 /** Tests complete structural identity for two TIR callable targets. */
 export const sameCallableTarget = (left: CallableTarget, right: CallableTarget): boolean => {
@@ -511,6 +506,7 @@ export type WriteSelector =
       readonly type: DeclarationFacts.SemanticType
       readonly span: SourceSpan.SourceSpan
       readonly at?: AuthoredIdentity.Anchor
+      readonly origin?: Origin
     }
   | {
       readonly _tag: 'Index'
@@ -520,6 +516,7 @@ export type WriteSelector =
       readonly type: DeclarationFacts.SemanticType
       readonly span: SourceSpan.SourceSpan
       readonly at?: AuthoredIdentity.Anchor
+      readonly origin?: Origin
     }
 
 export type OwnedWriteRoot =
@@ -544,6 +541,7 @@ export type BorrowedWriteSelector =
       readonly slice: Type.Slice
       readonly type: DeclarationFacts.SemanticType
       readonly span: SourceSpan.SourceSpan
+      readonly at?: AuthoredIdentity.Anchor
       readonly origin: Origin
     }
   | Extract<WriteSelector, { readonly _tag: 'Field' | 'Index' }>
@@ -1412,7 +1410,7 @@ export const nodesOf = (self: TirFunction): ReadonlyArray<PublishedNode> => {
     for (const child of Object.values(value)) visit(child)
   }
   visit(self.statements)
-  return Object.freeze(nodes)
+  return nodes
 }
 
 /** Resolves an artifact-local node identity without consulting source presentation. */
@@ -1572,7 +1570,7 @@ export const expressionChildren = (expression: Expression): ReadonlyArray<Expres
 /** One expression and all of its semantic children in deterministic preorder. */
 export const expressionTree = (expression: Expression): ReadonlyArray<Expression> => {
   const children = expressionChildren(expression)
-  return Object.freeze([expression, ...children.flatMap(expressionTree)])
+  return [expression, ...children.flatMap(expressionTree)]
 }
 
 /** Runtime-bearing expression children; sealed assembly metadata never acquires data storage. */
@@ -1581,7 +1579,7 @@ export const runtimeExpressionTree = (expression: Expression): ReadonlyArray<Exp
     expression._tag === 'BuiltinCall' && expression.operation === 'NativeAssembly'
       ? expression.arguments.slice(6)
       : expressionChildren(expression)
-  return Object.freeze([expression, ...children.flatMap(runtimeExpressionTree)])
+  return [expression, ...children.flatMap(runtimeExpressionTree)]
 }
 
 /** Reachable return operands in this execution boundary, including eager ordinary arms. */
@@ -1654,7 +1652,7 @@ export const returnExpressions = (body: ReadonlyArray<Statement>): ReadonlyArray
     return true
   }
   statements(body)
-  return Object.freeze(returned)
+  return returned
 }
 
 /** The first unavailable expression's cause and span, if the body has one. */
@@ -1798,7 +1796,7 @@ export const verify = (self: Module): ReadonlyArray<VerificationIssue> => {
   const active = new Set<Expression>()
   const walk = (expression: Expression): void => {
     if (active.has(expression)) {
-      issues.push(Object.freeze({ _tag: 'CyclicExpression', span: expression.span }))
+      issues.push({ _tag: 'CyclicExpression', span: expression.span })
       return
     }
     active.add(expression)
@@ -1810,7 +1808,7 @@ export const verify = (self: Module): ReadonlyArray<VerificationIssue> => {
         (expression.data.kind !== 'Bytes' ||
           !Type.equals(expression.type, Type.slice('Shared', 'u8', Lifetime.staticLifetime))))
     ) {
-      issues.push(Object.freeze({ _tag: 'InvalidStaticText', span: expression.span }))
+      issues.push({ _tag: 'InvalidStaticText', span: expression.span })
     }
     if (expression._tag === 'SliceBorrow') {
       const element = Type.isFixedArray(expression.source)
@@ -1826,7 +1824,7 @@ export const verify = (self: Module): ReadonlyArray<VerificationIssue> => {
           expression.source.access === 'Shared' &&
           expression.access === 'Exclusive')
       ) {
-        issues.push(Object.freeze({ _tag: 'InvalidSliceBorrow', span: expression.span }))
+        issues.push({ _tag: 'InvalidSliceBorrow', span: expression.span })
       }
     }
     if (expression._tag === 'ValueBorrow') {
@@ -1847,7 +1845,7 @@ export const verify = (self: Module): ReadonlyArray<VerificationIssue> => {
           expression.source.access === 'Shared' &&
           expression.access === 'Exclusive')
       ) {
-        issues.push(Object.freeze({ _tag: 'InvalidValueBorrow', span: expression.span }))
+        issues.push({ _tag: 'InvalidValueBorrow', span: expression.span })
       }
     }
     if (expression._tag === 'RuntimeStringView') {
@@ -1868,7 +1866,7 @@ export const verify = (self: Module): ReadonlyArray<VerificationIssue> => {
         begins.some((begin, ordinal) => begin !== held.at(ordinal)) ||
         new Set(held).size !== held.length
       ) {
-        issues.push(Object.freeze({ _tag: 'InvalidStringView', span: expression.span }))
+        issues.push({ _tag: 'InvalidStringView', span: expression.span })
       }
     }
     if (
@@ -1880,7 +1878,7 @@ export const verify = (self: Module): ReadonlyArray<VerificationIssue> => {
         !Type.equals(expression.type, 'bool') ||
         expression.intrinsic.name !== 'stringEqualsExact')
     ) {
-      issues.push(Object.freeze({ _tag: 'InvalidStringEquality', span: expression.span }))
+      issues.push({ _tag: 'InvalidStringEquality', span: expression.span })
     }
     if (expression._tag === 'EnumMember') {
       if (
@@ -1890,7 +1888,7 @@ export const verify = (self: Module): ReadonlyArray<VerificationIssue> => {
         expression.type.name !== expression.enum.name ||
         expression.type.arguments.length !== 0
       )
-        issues.push(Object.freeze({ _tag: 'InvalidEnumValue', span: expression.span }))
+        issues.push({ _tag: 'InvalidEnumValue', span: expression.span })
     }
     if (
       expression._tag === 'EnumValue' &&
@@ -1901,7 +1899,7 @@ export const verify = (self: Module): ReadonlyArray<VerificationIssue> => {
         expression.intrinsic.actor !== 'Intrinsic' ||
         expression.intrinsic.name !== 'enumValue')
     )
-      issues.push(Object.freeze({ _tag: 'InvalidEnumValue', span: expression.span }))
+      issues.push({ _tag: 'InvalidEnumValue', span: expression.span })
     if (
       expression._tag === 'EnumEquality' &&
       (expression.left._tag === 'Unavailable' ||
@@ -1914,14 +1912,14 @@ export const verify = (self: Module): ReadonlyArray<VerificationIssue> => {
         expression.right.type.name !== expression.enum.name ||
         !Type.equals(expression.type, 'bool'))
     )
-      issues.push(Object.freeze({ _tag: 'InvalidEnumEquality', span: expression.span }))
+      issues.push({ _tag: 'InvalidEnumEquality', span: expression.span })
     if (expression._tag === 'SliceLength') {
       if (
         expression.slice._tag === 'Unavailable' ||
         !Type.isSlice(expression.slice.type) ||
         !Type.equals(expression.type, 'usize')
       ) {
-        issues.push(Object.freeze({ _tag: 'InvalidSliceOperation', span: expression.span }))
+        issues.push({ _tag: 'InvalidSliceOperation', span: expression.span })
       }
     }
     if (expression._tag === 'SliceIndexPlace') {
@@ -1933,7 +1931,7 @@ export const verify = (self: Module): ReadonlyArray<VerificationIssue> => {
         expression.access !== expression.sourceType.access ||
         !Type.equals(expression.type, expression.sourceType.element)
       ) {
-        issues.push(Object.freeze({ _tag: 'InvalidSliceOperation', span: expression.span }))
+        issues.push({ _tag: 'InvalidSliceOperation', span: expression.span })
       }
     }
     if (expression._tag === 'ReferentPlace') {
@@ -1948,7 +1946,7 @@ export const verify = (self: Module): ReadonlyArray<VerificationIssue> => {
         expression.borrowAccess !== expression.reference.access ||
         !Type.equals(expression.type, expression.reference.target)
       ) {
-        issues.push(Object.freeze({ _tag: 'InvalidSliceOperation', span: expression.span }))
+        issues.push({ _tag: 'InvalidSliceOperation', span: expression.span })
       }
     }
     if (expression._tag === 'Project' && expression.borrowAccess !== undefined) {
@@ -1965,7 +1963,7 @@ export const verify = (self: Module): ReadonlyArray<VerificationIssue> => {
         inherited = subjectType.access
       }
       if (inherited !== expression.borrowAccess) {
-        issues.push(Object.freeze({ _tag: 'InvalidSliceOperation', span: expression.span }))
+        issues.push({ _tag: 'InvalidSliceOperation', span: expression.span })
       }
     }
     if (
@@ -1999,20 +1997,18 @@ export const verify = (self: Module): ReadonlyArray<VerificationIssue> => {
         begins.some((begin, ordinal) => begin !== ends.at(ordinal)) ||
         new Set(authoredEnds.map(borrowKey)).size !== authoredEnds.length
       ) {
-        issues.push(Object.freeze({ _tag: 'InvalidLoanEnd', span: expression.span }))
+        issues.push({ _tag: 'InvalidLoanEnd', span: expression.span })
       }
     }
     if (expression._tag === 'Match') {
       const coverage = Match.cover(
         expression.members,
-        expression.arms.map((arm) =>
-          Object.freeze({
-            ...(arm.member === undefined ? {} : { member: arm.member }),
-            universal: arm.universal,
-            guarded: arm.guard !== undefined,
-            tests: arm.tests ?? [],
-          }),
-        ),
+        expression.arms.map((arm) => ({
+          ...(arm.member === undefined ? {} : { member: arm.member }),
+          universal: arm.universal,
+          guarded: arm.guard !== undefined,
+          tests: arm.tests ?? [],
+        })),
       )
       let remaining = [...expression.members]
       for (const [index, arm] of expression.arms.entries()) {
@@ -2033,7 +2029,7 @@ export const verify = (self: Module): ReadonlyArray<VerificationIssue> => {
         )
           remaining = remaining.filter((candidate) => !selected.includes(candidate))
         if (arm.id.ordinal !== index) {
-          issues.push(Object.freeze({ _tag: 'InvalidMatchArmOrder', span: arm.span }))
+          issues.push({ _tag: 'InvalidMatchArmOrder', span: arm.span })
         }
         if (
           transition === undefined ||
@@ -2041,14 +2037,14 @@ export const verify = (self: Module): ReadonlyArray<VerificationIssue> => {
           !sameMembers(transition.before, arm.before) ||
           !sameMembers(transition.after, arm.after)
         ) {
-          issues.push(Object.freeze({ _tag: 'InvalidMatchCoverage', span: arm.span }))
+          issues.push({ _tag: 'InvalidMatchCoverage', span: arm.span })
         }
         if (
           arm.guard !== undefined &&
           (arm.guard._tag === 'Unavailable' ||
             (!Type.equals(arm.guard.type, 'bool') && !Type.isNever(arm.guard.type)))
         ) {
-          issues.push(Object.freeze({ _tag: 'InvalidMatchGuard', span: arm.guard.span }))
+          issues.push({ _tag: 'InvalidMatchGuard', span: arm.guard.span })
         }
         if (
           executes &&
@@ -2060,7 +2056,7 @@ export const verify = (self: Module): ReadonlyArray<VerificationIssue> => {
               TypeCompatibility.check(arm.body.type, expression.type),
             ))
         ) {
-          issues.push(Object.freeze({ _tag: 'InvalidMatchResult', span: arm.body.span }))
+          issues.push({ _tag: 'InvalidMatchResult', span: arm.body.span })
         }
         for (const binding of arm.bindings) {
           if (
@@ -2068,7 +2064,7 @@ export const verify = (self: Module): ReadonlyArray<VerificationIssue> => {
             binding.path.length === 0 ||
             binding.access !== expression.access
           ) {
-            issues.push(Object.freeze({ _tag: 'InvalidPatternBinding', span: binding.span }))
+            issues.push({ _tag: 'InvalidPatternBinding', span: binding.span })
           }
         }
       }
@@ -2112,7 +2108,7 @@ export const verify = (self: Module): ReadonlyArray<VerificationIssue> => {
           }
           const wellFormed = accesses.includes('Exclusive') && !accesses.includes('Shared')
           if (!wellFormed) {
-            issues.push(Object.freeze({ _tag: 'InvalidBorrowedWrite', span: statement.place.span }))
+            issues.push({ _tag: 'InvalidBorrowedWrite', span: statement.place.span })
           }
         }
         if (statement._tag === 'Unsafe') statements(statement.statements)
@@ -2125,7 +2121,7 @@ export const verify = (self: Module): ReadonlyArray<VerificationIssue> => {
     statements(fn.statements)
     for (const expression of fn.statements.flatMap(statementExpressions)) walk(expression)
   }
-  return Object.freeze(issues)
+  return issues
 }
 
 /** One module's elaborated TIR. */
@@ -2141,25 +2137,25 @@ export const contractOf = (declaration: DeclarationFacts.DeclarationFact): Contr
   for (const parameter of declaration.parameters) {
     if (parameter.phase === 'Static') continue
     if (parameter.declaredType._tag !== 'Resolved') {
-      return Object.freeze({
+      return {
         _tag: 'Unavailable',
         ...(parameter.declaredType._tag === 'Unresolved' &&
         parameter.declaredType.cause !== undefined
           ? { cause: parameter.declaredType.cause }
           : {}),
-      })
+      }
     }
     parameters.push(parameter.declaredType.type)
   }
   if (declaration.returnType._tag !== 'Resolved') {
-    return Object.freeze({
+    return {
       _tag: 'Unavailable',
       ...(declaration.returnType._tag === 'Unresolved' && declaration.returnType.cause !== undefined
         ? { cause: declaration.returnType.cause }
         : {}),
-    })
+    }
   }
-  return Object.freeze({
+  return {
     _tag: 'Contract',
     unsafe: declaration.unsafe,
     ...(declaration.functionKind === 'Effect'
@@ -2169,10 +2165,10 @@ export const contractOf = (declaration: DeclarationFacts.DeclarationFact): Contr
           requirementRow: declaration.requirementRow.row,
         }
       : {}),
-    parameters: Object.freeze(parameters),
+    parameters: parameters,
     result: declaration.returnType.type,
     constraints: declaration.constraintContracts,
-  })
+  }
 }
 
 /**
@@ -2669,8 +2665,7 @@ export const present = (
   self: TirFunction,
   spanOf: (anchor: AuthoredIdentity.Anchor) => SourceSpan.SourceSpan,
   declaration: DeclarationFacts.DeclarationFact = self.declaration,
-): TirFunction =>
-  Object.freeze({ ...stamp({ ...self, declaration: undefined }, spanOf), declaration })
+): TirFunction => ({ ...stamp({ ...self, declaration: undefined }, spanOf), declaration })
 
 /** Stamps every position in a value that has its authored node beside it. */
 export const stamp = <A>(
@@ -2688,7 +2683,7 @@ export const stamp = <A>(
       const items: Array<unknown> = []
       copies.set(input, items)
       for (const item of input) items.push(visit(item))
-      return Object.freeze(items)
+      return items
     }
     const source = input as Readonly<Record<string, unknown>>
     const result: Record<string, unknown> = {}
@@ -2701,7 +2696,7 @@ export const stamp = <A>(
     }
     // A node's own position comes from its origin, whatever else it names.
     if (origin?.anchor !== undefined && 'span' in source) result['span'] = spanOf(origin.anchor)
-    return Object.freeze(result)
+    return result
   }
   // The walk rebuilds the same shape and changes only spans that have an anchor beside them.
   return visit(self) as A

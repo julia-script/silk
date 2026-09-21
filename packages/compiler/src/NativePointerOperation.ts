@@ -53,11 +53,9 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
   const destination = operation.destination.ordinal
   switch (operation._tag) {
     case 'PointerNull': {
-      yield* NativeStorage.writeLocal(
-        storage,
-        destination,
-        Object.freeze([yield* Constant.nullValue(builder, pointer)]),
-      )
+      yield* NativeStorage.writeLocal(storage, destination, [
+        yield* Constant.nullValue(builder, pointer),
+      ])
       return
     }
     case 'PointerAddress': {
@@ -69,7 +67,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         addressType,
         `ptr_address${destination}`,
       )
-      yield* NativeStorage.writeLocal(storage, destination, Object.freeze([address]))
+      yield* NativeStorage.writeLocal(storage, destination, [address])
       return
     }
     case 'PointerIsNull': {
@@ -88,13 +86,9 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         yield* Constant.integerUnsigned(builder, addressType, 0n),
         `ptr_is_null${destination}_flag`,
       )
-      yield* NativeStorage.writeLocal(
-        storage,
-        destination,
-        Object.freeze([
-          yield* FunctionBody.cast(body, 'zext', flag, i32, `ptr_is_null${destination}`),
-        ]),
-      )
+      yield* NativeStorage.writeLocal(storage, destination, [
+        yield* FunctionBody.cast(body, 'zext', flag, i32, `ptr_is_null${destination}`),
+      ])
       return
     }
     case 'PointerBytes':
@@ -116,7 +110,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
               `slot_address${destination}`,
             )
           : address
-      yield* NativeStorage.writeLocal(storage, destination, Object.freeze([pointerAddress]))
+      yield* NativeStorage.writeLocal(storage, destination, [pointerAddress])
       return
     }
     case 'PointerAt': {
@@ -138,19 +132,15 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         ),
         `ptr_offset${destination}_bytes`,
       )
-      yield* NativeStorage.writeLocal(
-        storage,
-        destination,
-        Object.freeze([
-          yield* NativeLanePointer.lanePointer(
-            lanePointers,
-            body,
-            yield* NativeStorage.readScalar(storage, operation.pointer),
-            bytes,
-            `ptr_offset${destination}`,
-          ),
-        ]),
-      )
+      yield* NativeStorage.writeLocal(storage, destination, [
+        yield* NativeLanePointer.lanePointer(
+          lanePointers,
+          body,
+          yield* NativeStorage.readScalar(storage, operation.pointer),
+          bytes,
+          `ptr_offset${destination}`,
+        ),
+      ])
       return
     }
     case 'PointerRead': {
@@ -195,7 +185,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
           ),
         )
       }
-      yield* NativeStorage.writeLocal(storage, destination, Object.freeze(values))
+      yield* NativeStorage.writeLocal(storage, destination, values)
       return
     }
     case 'PointerWrite': {
@@ -217,7 +207,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
           storage,
           source,
         )
-        yield* NativeStorage.writeLocal(storage, destination, Object.freeze([]))
+        yield* NativeStorage.writeLocal(storage, destination, [])
         yield* NativeStorage.reloadAddressRoots(storage)
         return
       }
@@ -245,7 +235,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
           },
         )
       }
-      yield* NativeStorage.writeLocal(storage, destination, Object.freeze([]))
+      yield* NativeStorage.writeLocal(storage, destination, [])
       yield* NativeStorage.reloadAddressRoots(storage)
       return
     }

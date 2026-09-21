@@ -67,10 +67,10 @@ export const select = Effect.fn('SourceEntry.select')(function* (
     })
   }
 
-  return Object.freeze({
+  return {
     _tag: 'SourceEntry' as const,
     module,
     path: absoluteFile,
     sourceRoot,
-  })
+  }
 })

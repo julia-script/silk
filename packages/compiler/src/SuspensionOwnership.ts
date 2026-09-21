@@ -119,33 +119,30 @@ const executionPackagePlan = (
   index: DeclarationIndex.Index,
   package_: ExecutionPackage.Plan,
 ): ExecutionPackageOwnershipPlan => {
-  const typed = Object.freeze([
-    Object.freeze({ role: 'Body' as const, type: package_.specialization.body }),
-    Object.freeze({ role: 'Endpoint' as const, type: package_.specialization.endpoint }),
-    Object.freeze({ role: 'Callback' as const, type: package_.specialization.callback }),
-    Object.freeze({ role: 'AllocationAuthority' as const, type: Type.allocation }),
-  ])
-  const slots: ReadonlyArray<ExecutionPackageSlot> = Object.freeze(
-    typed.map((slot, ordinal) =>
-      Object.freeze({
-        ...slot,
-        ordinal,
-        access: Object.freeze({
-          _tag: 'AffineTransfer' as const,
-          cleanup: CleanupPlan.cleanupPlan(index, slot.type),
-        }),
-      }),
-    ),
-  )
-  const cleanup = (roles: ReadonlyArray<ExecutionPackageSlot['role']>): ExecutionPackageCleanup =>
-    Object.freeze({
-      loanEnds: Object.freeze([]),
-      releases: Object.freeze(roles.flatMap((role) => slots.filter((slot) => slot.role === role))),
-      allocationReleases: 1,
-    })
+  const typed = [
+    { role: 'Body' as const, type: package_.specialization.body },
+    { role: 'Endpoint' as const, type: package_.specialization.endpoint },
+    { role: 'Callback' as const, type: package_.specialization.callback },
+    { role: 'AllocationAuthority' as const, type: Type.allocation },
+  ]
+  const slots: ReadonlyArray<ExecutionPackageSlot> = typed.map((slot, ordinal) => ({
+    ...slot,
+    ordinal,
+    access: {
+      _tag: 'AffineTransfer' as const,
+      cleanup: CleanupPlan.cleanupPlan(index, slot.type),
+    },
+  }))
+  const cleanup = (
+    roles: ReadonlyArray<ExecutionPackageSlot['role']>,
+  ): ExecutionPackageCleanup => ({
+    loanEnds: [],
+    releases: roles.flatMap((role) => slots.filter((slot) => slot.role === role)),
+    allocationReleases: 1,
+  })
   const completion = cleanup(['Callback', 'Endpoint', 'AllocationAuthority'])
   const retained = cleanup(['Callback', 'Endpoint', 'Body', 'AllocationAuthority'])
-  return Object.freeze({
+  return {
     _tag: 'ExecutionPackageOwnershipPlan',
     package: package_,
     slots,
@@ -157,7 +154,7 @@ const executionPackagePlan = (
     neverDriven: retained,
     dormant: retained,
     eligible: retained,
-  })
+  }
 }
 
 const operationDefinitions = (operation: Mir.Operation): ReadonlySet<number> => {
@@ -443,26 +440,26 @@ const borrowOf = (
     (type?._tag !== 'Reference' && type?._tag !== 'Slice' && type?._tag !== 'EnvironmentBorrow') ||
     seen.has(local.ordinal)
   )
-    return Object.freeze({
+    return {
       _tag: 'BorrowedDependency',
       access,
       root: local,
-      loan: Object.freeze({ _tag: 'BorrowedLocal', local }),
-    })
+      loan: { _tag: 'BorrowedLocal', local },
+    }
   const next = new Set(seen).add(local.ordinal)
   const definition = definitions.get(local.ordinal)
   if (definition?._tag === 'Match') {
     const parent = borrowOf(fn, definitions, definition.scrutinee, next)
-    return Object.freeze({ ...parent, access })
+    return { ...parent, access }
   }
   if (definition?._tag === 'BeginLoan') {
     const parent = borrowOf(fn, definitions, definition.root, next)
-    return Object.freeze({
+    return {
       _tag: 'BorrowedDependency',
       access: definition.access,
       root: parent.root,
-      loan: Object.freeze({ _tag: 'MirLoan', borrow: definition.borrow }),
-    })
+      loan: { _tag: 'MirLoan', borrow: definition.borrow },
+    }
   }
   if (
     definition?._tag === 'Move' ||
@@ -471,34 +468,30 @@ const borrowOf = (
   )
     return borrowOf(fn, definitions, definition.source, next)
   if (local.ordinal < fn.parameterCount)
-    return Object.freeze({
+    return {
       _tag: 'BorrowedDependency',
       access,
       root: local,
-      loan: Object.freeze({ _tag: 'BorrowedParameter', parameterOrdinal: local.ordinal }),
-    })
-  return Object.freeze({
+      loan: { _tag: 'BorrowedParameter', parameterOrdinal: local.ordinal },
+    }
+  return {
     _tag: 'BorrowedDependency',
     access,
     root: local,
-    loan: Object.freeze({ _tag: 'BorrowedLocal', local }),
-  })
+    loan: { _tag: 'BorrowedLocal', local },
+  }
 }
 
 const releasesOf = (operation: Mir.Operation): ReadonlyArray<Release> =>
   operation._tag === 'RunEffect' ||
   operation._tag === 'RunEffectValue' ||
   operation._tag === 'RunStaticEffect'
-    ? Object.freeze(
-        (operation.releases ?? []).map((release) =>
-          Object.freeze({
-            local: release.local,
-            cleanup: release.cleanup,
-            initialization: release.initialization,
-          }),
-        ),
-      )
-    : Object.freeze([])
+    ? (operation.releases ?? []).map((release) => ({
+        local: release.local,
+        cleanup: release.cleanup,
+        initialization: release.initialization,
+      }))
+    : []
 
 const accessOf = (
   program: Mir.Module,
@@ -513,15 +506,15 @@ const accessOf = (
     return borrowOf(fn, definitions, local)
   }
   if (Mir.isCopy(program.layout, Mir.semanticType(type))) {
-    return Object.freeze({ _tag: 'Copy' })
+    return { _tag: 'Copy' }
   }
-  return Object.freeze({
+  return {
     _tag: 'AffineTransfer',
     cleanup: ConcreteCleanup.forLocal(
       { index, layout: program.layout, opaqueRealizations, semantic: (type) => type },
       type,
     ),
-  })
+  }
 }
 
 const affinityOf = (
@@ -534,12 +527,12 @@ const affinityOf = (
   if (type._tag === 'EffectValue') {
     retained = ExecutionAffinity.ofEnvironment(
       index,
-      type.environment.fields.map((field) => Object.freeze({ type: field.type })),
+      type.environment.fields.map((field) => ({ type: field.type })),
     )
   } else if (type._tag === 'CallableValue' && type.environment !== undefined) {
     retained = ExecutionAffinity.ofEnvironment(
       index,
-      type.environment.fields.map((field) => Object.freeze({ type: field.type })),
+      type.environment.fields.map((field) => ({ type: field.type })),
     )
   } else {
     retained = ExecutionAffinity.ofType(index, Mir.semanticType(type))
@@ -558,17 +551,13 @@ const obligationsOf = (
   if (type._tag === 'EffectValue') {
     return LocalSharedOwnership.ofEnvironment(
       index,
-      type.environment.fields.map((field) =>
-        Object.freeze({ access: field.access, type: field.type }),
-      ),
+      type.environment.fields.map((field) => ({ access: field.access, type: field.type })),
     )
   }
   if (type._tag === 'CallableValue' && type.environment !== undefined) {
     return LocalSharedOwnership.ofEnvironment(
       index,
-      type.environment.fields.map((field) =>
-        Object.freeze({ access: field.access, type: field.type }),
-      ),
+      type.environment.fields.map((field) => ({ access: field.access, type: field.type })),
     )
   }
   return LocalSharedOwnership.ofType(index, Mir.semanticType(type))
@@ -659,55 +648,53 @@ const planFor = (
   for (const ordinal of live) retainReferents({ _tag: 'Local', ordinal })
   for (const ordinal of retained)
     for (const flag of initializationOf(ordinal)?.flags ?? []) retained.add(flag.local.ordinal)
-  const slots: ReadonlyArray<Slot> = Object.freeze(
-    [...retained]
-      .filter((ordinal) => !operationDefined.has(ordinal) || ordinal === parkGuard)
-      .sort((left, right) => left - right)
-      .flatMap((ordinal) => {
-        const type = fn.localTypes.at(ordinal)
-        if (type === undefined) return []
-        const local = Object.freeze({ _tag: 'Local' as const, ordinal })
-        const access =
-          operation._tag === 'ExecutionPark' && ordinal === parkGuard
-            ? Object.freeze({
-                _tag: 'AffineTransfer' as const,
-                cleanup: operation.guardCleanup,
-              })
-            : accessOf(program, index, fn, definitions, local, type, opaqueRealizations)
-        const executionAffinity = affinityOf(index, fn, type, access)
-        const localSharedObligations = obligationsOf(index, type)
-        let runtimeLanes: ReturnType<typeof Layout.effectEnvironmentLanes>
-        if (type._tag === 'EffectValue') {
-          runtimeLanes = Layout.effectEnvironmentLanes(program.layout, type.environment)
-        } else if (type._tag === 'CallableValue') {
-          if (type.environment === undefined) {
-            runtimeLanes = []
-          } else {
-            runtimeLanes = Layout.callableEnvironmentLanes(program.layout, type.environment)
-          }
+  const slots: ReadonlyArray<Slot> = [...retained]
+    .filter((ordinal) => !operationDefined.has(ordinal) || ordinal === parkGuard)
+    .sort((left, right) => left - right)
+    .flatMap((ordinal) => {
+      const type = fn.localTypes.at(ordinal)
+      if (type === undefined) return []
+      const local = { _tag: 'Local' as const, ordinal }
+      const access =
+        operation._tag === 'ExecutionPark' && ordinal === parkGuard
+          ? {
+              _tag: 'AffineTransfer' as const,
+              cleanup: operation.guardCleanup,
+            }
+          : accessOf(program, index, fn, definitions, local, type, opaqueRealizations)
+      const executionAffinity = affinityOf(index, fn, type, access)
+      const localSharedObligations = obligationsOf(index, type)
+      let runtimeLanes: ReturnType<typeof Layout.effectEnvironmentLanes>
+      if (type._tag === 'EffectValue') {
+        runtimeLanes = Layout.effectEnvironmentLanes(program.layout, type.environment)
+      } else if (type._tag === 'CallableValue') {
+        if (type.environment === undefined) {
+          runtimeLanes = []
         } else {
-          runtimeLanes = Layout.callingShape(program.layout, Mir.semanticType(type))?.lanes ?? []
+          runtimeLanes = Layout.callableEnvironmentLanes(program.layout, type.environment)
         }
-        if (
-          runtimeLanes.length === 0 &&
-          executionAffinity._tag === 'Unrestricted' &&
-          localSharedObligations._tag === 'NoLocalSharedObligation'
-        )
-          return []
-        return [
-          Object.freeze({
-            ordinal: 0,
-            local,
-            type,
-            access,
-            executionAffinity,
-            localSharedObligations,
-            initialization: initializationOf(ordinal),
-          }),
-        ]
-      })
-      .map((slot, ordinal) => Object.freeze({ ...slot, ordinal })),
-  )
+      } else {
+        runtimeLanes = Layout.callingShape(program.layout, Mir.semanticType(type))?.lanes ?? []
+      }
+      if (
+        runtimeLanes.length === 0 &&
+        executionAffinity._tag === 'Unrestricted' &&
+        localSharedObligations._tag === 'NoLocalSharedObligation'
+      )
+        return []
+      return [
+        {
+          ordinal: 0,
+          local,
+          type,
+          access,
+          executionAffinity,
+          localSharedObligations,
+          initialization: initializationOf(ordinal),
+        },
+      ]
+    })
+    .map((slot, ordinal) => ({ ...slot, ordinal }))
   const releases = releasesOf(operation)
   const borrowed = slots.filter(
     (
@@ -724,17 +711,15 @@ const planFor = (
   )
   const affineReleases = affine
     .filter((slot) => !releases.some((release) => release.local.ordinal === slot.local.ordinal))
-    .map((slot) =>
-      Object.freeze({
-        local: slot.local,
-        cleanup: slot.access.cleanup,
-        initialization: slot.initialization,
-        ordinal: slot.local.ordinal,
-      }),
-    )
-  const releaseOrder = Object.freeze([...releases, ...Ownership.inReleaseOrder(affineReleases)])
-  const loanEnds = Object.freeze(Ownership.inReleaseOrder(borrowed).map((slot) => slot.access.loan))
-  return Object.freeze({
+    .map((slot) => ({
+      local: slot.local,
+      cleanup: slot.access.cleanup,
+      initialization: slot.initialization,
+      ordinal: slot.local.ordinal,
+    }))
+  const releaseOrder = [...releases, ...Ownership.inReleaseOrder(affineReleases)]
+  const loanEnds = Ownership.inReleaseOrder(borrowed).map((slot) => slot.access.loan)
+  return {
     _tag: 'SuspensionOwnershipPlan',
     point: control.id,
     function: fn.instance,
@@ -745,19 +730,18 @@ const planFor = (
     // final `run` may adapt the child's represented Effect outcome to the caller's result shape.
     frame: 'StatefulRelay',
     slots,
-    success: Object.freeze({
-      restores: Object.freeze(
-        slots.filter((slot) => slot.local.ordinal !== parkGuard).map((slot) => slot.ordinal),
-      ),
-      loanEnds: Object.freeze([]),
-      releases: Object.freeze(
+    success: {
+      restores: slots
+        .filter((slot) => slot.local.ordinal !== parkGuard)
+        .map((slot) => slot.ordinal),
+      loanEnds: [],
+      releases:
         parkGuard === undefined
           ? []
           : affineReleases.filter((release) => release.local.ordinal === parkGuard),
-      ),
-    }),
-    failure: Object.freeze({ restores: Object.freeze([]), loanEnds, releases: releaseOrder }),
-  })
+    },
+    failure: { restores: [], loanEnds, releases: releaseOrder },
+  }
 }
 
 const comparePlan = (left: Plan, right: Plan): number =>
@@ -801,14 +785,12 @@ export const plan = (
           operation.provenance.span,
         )
         if (control === undefined) {
-          violations.push(
-            Object.freeze({
-              _tag: 'SuspensionOwnershipViolation',
-              function: fn.instance,
-              span: operation.provenance.span,
-              detail: 'suspendable MIR run has no exact provisional control',
-            }),
-          )
+          violations.push({
+            _tag: 'SuspensionOwnershipViolation',
+            function: fn.instance,
+            span: operation.provenance.span,
+            detail: 'suspendable MIR run has no exact provisional control',
+          })
           continue
         }
         live ??= liveness(fn)
@@ -840,32 +822,28 @@ export const plan = (
                 )),
           )
         ) {
-          violations.push(
-            Object.freeze({
-              _tag: 'SuspensionOwnershipViolation',
-              function: fn.instance,
-              span: operation.provenance.span,
-              detail:
-                'suspended partial ownership requires every conditional initialization flag to be assigned and retained',
-            }),
-          )
+          violations.push({
+            _tag: 'SuspensionOwnershipViolation',
+            function: fn.instance,
+            span: operation.provenance.span,
+            detail:
+              'suspended partial ownership requires every conditional initialization flag to be assigned and retained',
+          })
           continue
         }
         plans.push(planned)
       }
     }
   }
-  return Object.freeze({
+  return {
     _tag: 'SuspensionOwnershipModule',
     module: program.module,
-    plans: Object.freeze(plans.sort(comparePlan)),
-    executionPackages: Object.freeze(
-      program.layout.executionPackages.plans.map((package_) =>
-        executionPackagePlan(index, package_),
-      ),
+    plans: plans.sort(comparePlan),
+    executionPackages: program.layout.executionPackages.plans.map((package_) =>
+      executionPackagePlan(index, package_),
     ),
-    violations: Object.freeze(violations),
-  })
+    violations: violations,
+  }
 }
 
 const borrowText = (borrow: BorrowIdentity): string => {

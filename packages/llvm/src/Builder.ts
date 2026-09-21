@@ -75,7 +75,7 @@ export const make = Effect.fnUntraced(function* (
 ): Effect.fn.Return<Builder, LlvmError> {
   const dataLayout = ByteString.coerceOrEmpty(options.dataLayout)
   const layout = yield* DataLayout.parse(dataLayout)
-  const self: Builder = Object.freeze({ _tag: 'Builder' })
+  const self: Builder = { _tag: 'Builder' }
   BuilderState.register(self, {
     owner: OwnedHandle.makeOwner(),
     value: {

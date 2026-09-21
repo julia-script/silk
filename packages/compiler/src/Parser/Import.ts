@@ -36,20 +36,20 @@ export const expectImportPathSegment = (
       ['Dot', 'AsKeyword', 'LeftBrace', 'EndOfFile'].includes(peek(state, 1) ?? 'EndOfFile'))
 
   if (token !== undefined && isAcceptedSegment(token)) {
-    return Object.freeze({
+    return {
       state: synchronize(advance(state)),
-      elements: Object.freeze([...elements, token]),
-    })
+      elements: [...elements, token],
+    }
   }
 
-  let unexpected: ReadonlyArray<Token.Token> = Object.freeze([])
+  let unexpected: ReadonlyArray<Token.Token> = []
   while (
     token !== undefined &&
     token.kind !== 'EndOfFile' &&
     !isAcceptedSegment(token) &&
     !following.includes(token.kind)
   ) {
-    unexpected = Object.freeze([...unexpected, token])
+    unexpected = [...unexpected, token]
     state = advance(state)
     token = currentToken(state)
   }
@@ -65,30 +65,30 @@ export const expectImportPathSegment = (
         error.span,
       ),
     )
-    elements = Object.freeze([...elements, error])
+    elements = [...elements, error]
   }
 
   if (token !== undefined && isAcceptedSegment(token)) {
-    return Object.freeze({
+    return {
       state: synchronize(advance(state)),
-      elements: Object.freeze([...elements, token]),
-    })
+      elements: [...elements, token],
+    }
   }
 
   const missing = missingToken(state, 'Identifier')
-  return Object.freeze({
+  return {
     state: addDiagnostic(state, Diagnostic.missingToken('Identifier', missing.span)),
-    elements: Object.freeze([...elements, missing]),
-  })
+    elements: [...elements, missing],
+  }
 }
 
 export const parseImportAlias = (initial: State): NodeResult => {
   const keyword = expect(initial, 'AsKeyword', ['Identifier', 'LeftBrace', ...topLevelFollowing])
   const name = expect(keyword.state, 'Identifier', ['LeftBrace', ...topLevelFollowing])
-  return Object.freeze({
+  return {
     state: name.state,
     node: syntaxNode(name.state, 'ImportAlias', [...keyword.elements, ...name.elements]),
-  })
+  }
 }
 
 export const parseImportPath = (initial: State): NodeResult => {
@@ -106,10 +106,10 @@ export const parseImportPath = (initial: State): NodeResult => {
       ['Dot', 'AsKeyword', 'LeftBrace', ...topLevelFollowing],
       true,
     )
-    children = Object.freeze([...children, ...dot.elements, ...segment.elements])
+    children = [...children, ...dot.elements, ...segment.elements]
     state = segment.state
   }
-  return Object.freeze({ state, node: syntaxNode(state, 'ImportPath', children) })
+  return { state, node: syntaxNode(state, 'ImportPath', children) }
 }
 
 export const parseImportMember = (initial: State): NodeResult => {
@@ -124,9 +124,9 @@ export const parseImportMember = (initial: State): NodeResult => {
   if (nextSignificantKind(state) === 'AsKeyword') {
     const alias = parseImportAlias(state)
     state = alias.state
-    children = Object.freeze([...children, alias.node])
+    children = [...children, alias.node]
   }
-  return Object.freeze({ state, node: syntaxNode(state, 'ImportMember', children) })
+  return { state, node: syntaxNode(state, 'ImportMember', children) }
 }
 
 export const parseImportMemberList = (initial: State): NodeResult => {
@@ -140,25 +140,25 @@ export const parseImportMemberList = (initial: State): NodeResult => {
   ) {
     if (!first) {
       const comma = expect(state, 'Comma', ['Identifier', 'RightBrace', ...topLevelFollowing])
-      children = Object.freeze([...children, ...comma.elements])
+      children = [...children, ...comma.elements]
       state = comma.state
       if (nextSignificantKind(state) === 'RightBrace') break
     }
     const member = parseImportMember(state)
-    children = Object.freeze([...children, member.node])
+    children = [...children, member.node]
     state = member.state
     first = false
   }
   if (first) {
     const member = parseImportMember(state)
-    children = Object.freeze([...children, member.node])
+    children = [...children, member.node]
     state = member.state
   }
   const right = expect(state, 'RightBrace', topLevelFollowing)
-  return Object.freeze({
+  return {
     state: right.state,
     node: syntaxNode(right.state, 'ImportMemberList', [...children, ...right.elements]),
-  })
+  }
 }
 
 export const parseImportDeclaration = (initial: State): NodeResult => {
@@ -169,30 +169,30 @@ export const parseImportDeclaration = (initial: State): NodeResult => {
   const keyword = expect(publicKeyword.state, 'ImportKeyword', ['Identifier', ...topLevelFollowing])
   const path = parseImportPath(keyword.state)
   let state = path.state
-  let children: ReadonlyArray<SyntaxTree.Element> = Object.freeze([
+  let children: ReadonlyArray<SyntaxTree.Element> = [
     ...publicKeyword.elements,
     ...keyword.elements,
     path.node,
-  ])
+  ]
   let hasAlias = false
   let hasMembers = false
   if (nextSignificantKind(state) === 'AsKeyword') {
     const alias = parseImportAlias(state)
     state = alias.state
-    children = Object.freeze([...children, alias.node])
+    children = [...children, alias.node]
     hasAlias = true
   }
   if (nextSignificantKind(state) === 'LeftBrace') {
     const members = parseImportMemberList(state)
     state = members.state
-    children = Object.freeze([...children, members.node])
+    children = [...children, members.node]
     hasMembers = true
   }
   const finalSegment = ImportPath.segments(path.node).at(-1)
   if (publicKeyword.elements.length > 0 && !hasMembers) {
     const missing = missingToken(state, 'LeftBrace')
     state = addDiagnostic(state, Diagnostic.missingToken('LeftBrace', missing.span))
-    children = Object.freeze([...children, missing])
+    children = [...children, missing]
   }
   if (
     finalSegment !== undefined &&
@@ -206,5 +206,5 @@ export const parseImportDeclaration = (initial: State): NodeResult => {
     )
     state = addDiagnostic(state, Diagnostic.reservedImportBinding(spelling, finalSegment.span))
   }
-  return Object.freeze({ state, node: syntaxNode(state, 'ImportDeclaration', children) })
+  return { state, node: syntaxNode(state, 'ImportDeclaration', children) }
 }

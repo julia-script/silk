@@ -190,31 +190,31 @@ const buildTargetLayout = Effect.fn('Realization.buildTargetLayout')(function* (
 ) {
   const selection = targetSelection
   if (selection._tag === 'Unavailable')
-    return Object.freeze({ _tag: 'Unavailable' as const, selection, error: selection.error })
+    return { _tag: 'Unavailable' as const, selection, error: selection.error }
   if (prepareForEmission) {
     const availability = IntrinsicAvailability.select(instances.intrinsics, selection.target)
     if (availability._tag === 'Unavailable')
-      return Object.freeze({
+      return {
         _tag: 'IntrinsicUnavailable' as const,
         selection,
         error: Target.unavailableInventory(selection.target, availability.operations),
-      })
+      }
   }
   if (analysisUnavailable !== undefined)
-    return Object.freeze({
+    return {
       _tag: 'AnalysisUnavailable' as const,
       selection,
       error: analysisUnavailable,
-    })
+    }
   const opaqueRealizations = OpaqueRealization.catalogOf(self)
   const catalog = yield* Layout.computeTypes(selection.target, index, registry, opaqueRealizations)
-  return Object.freeze({
+  return {
     _tag: 'Available' as const,
     selection,
     target: selection.target,
     catalog,
     layout: yield* Layout.computeRuntime(catalog, instances, index, opaqueRealizations),
-  })
+  }
 })
 
 export type MirAdmission =
@@ -244,7 +244,7 @@ export const lowerMir = Effect.fn('Mir.lower')(function* (
   input: MirLoweringInput,
 ): Effect.fn.Return<MirLoweringResult> {
   if (input.admission._tag === 'Rejected')
-    return Object.freeze({ program: undefined, diagnostics: input.admission.diagnostics })
+    return { program: undefined, diagnostics: input.admission.diagnostics }
   const program = yield* lowerProgram(
     input.instances,
     input.layout,
@@ -263,10 +263,10 @@ export const lowerMir = Effect.fn('Mir.lower')(function* (
   )
   if (finalized.program === undefined || input.audit === 'None') return finalized
   const audit = yield* checkForeignPlanning(finalized.program, input.layout.target)
-  return Object.freeze({
+  return {
     program: audit.length === 0 ? finalized.program : undefined,
     diagnostics: Diagnostic.merge(finalized.diagnostics, audit),
-  })
+  }
 })
 
 const lowerProgram = Effect.fn('Realization.lowerProgram')(function* (
@@ -337,11 +337,11 @@ const discoverAndLowerEffect = Effect.fn('Realization.discoverAndLower')(functio
   const registry = SemanticContext.fromModules(self.closure.modules)
   const report = [...self.report]
   if (prepareForEmission && Diagnostic.hasErrors(self.diagnostics))
-    return Object.freeze({
+    return {
       _tag: 'Rejected',
       diagnostics: self.diagnostics,
-      report: Object.freeze(report),
-    })
+      report: report,
+    }
 
   const specializationInvalid =
     Diagnostic.hasGenericSpecializationErrors(self.diagnostics) ||
@@ -352,7 +352,7 @@ const discoverAndLowerEffect = Effect.fn('Realization.discoverAndLower')(functio
   const foreignStaticDiagnostics =
     targetSelection._tag === 'Resolved'
       ? foreignStaticTargetDiagnostics(self.index, targetSelection.target, registry)
-      : Object.freeze([])
+      : []
   const instances = yield* discoverInstances(
     self,
     targetSelection,
@@ -362,10 +362,10 @@ const discoverAndLowerEffect = Effect.fn('Realization.discoverAndLower')(functio
     report,
     options,
   )
-  const realizedIndex: DeclarationIndex.Index = Object.freeze({
+  const realizedIndex: DeclarationIndex.Index = {
     ...self.index,
     generatedAggregates: instances.generatedAggregates,
-  })
+  }
   const baseDiagnostics = yield* collectInstanceDiagnostics(
     self,
     instances,
@@ -373,21 +373,21 @@ const discoverAndLowerEffect = Effect.fn('Realization.discoverAndLower')(functio
     registry,
   )
   if (prepareForEmission && Diagnostic.hasErrors(baseDiagnostics))
-    return Object.freeze({
+    return {
       _tag: 'Rejected',
       diagnostics: baseDiagnostics,
-      report: Object.freeze(report),
-    })
+      report: report,
+    }
   const foreignDiagnostics =
     !prepareForEmission || targetSelection._tag === 'Unavailable'
-      ? Object.freeze([])
+      ? []
       : ForeignAvailability.select(instances.foreignCalls, targetSelection.target)
   if (foreignDiagnostics.length > 0)
-    return Object.freeze({
+    return {
       _tag: 'Rejected',
       diagnostics: Diagnostic.merge(baseDiagnostics, foreignDiagnostics),
-      report: Object.freeze(report),
-    })
+      report: report,
+    }
   const analysisUnavailable = (() => {
     if (prepareForEmission) return undefined
     if (Diagnostic.hasErrors(foreignStaticDiagnostics))
@@ -434,19 +434,19 @@ const discoverAndLowerEffect = Effect.fn('Realization.discoverAndLower')(functio
   )
 
   if (targetLayout._tag === 'IntrinsicUnavailable')
-    return Object.freeze({
+    return {
       _tag: 'TargetFailed',
       error: targetLayout.error,
       diagnostics: baseDiagnostics,
-      report: Object.freeze(report),
-    })
+      report: report,
+    }
   if (prepareForEmission && targetLayout._tag === 'Unavailable')
-    return Object.freeze({
+    return {
       _tag: 'TargetFailed',
       error: targetLayout.error,
       diagnostics: baseDiagnostics,
-      report: Object.freeze(report),
-    })
+      report: report,
+    }
   const diagnostics = Diagnostic.merge(
     baseDiagnostics,
     ...(targetLayout._tag === 'Available' ? [targetLayout.layout.diagnostics] : []),
@@ -456,11 +456,11 @@ const discoverAndLowerEffect = Effect.fn('Realization.discoverAndLower')(functio
     targetLayout._tag === 'Available' &&
     Diagnostic.hasErrors(targetLayout.layout.diagnostics)
   )
-    return Object.freeze({
+    return {
       _tag: 'Rejected',
       diagnostics,
-      report: Object.freeze(report),
-    })
+      report: report,
+    }
 
   const targetLiteralError =
     !prepareForEmission &&
@@ -502,7 +502,7 @@ const discoverAndLowerEffect = Effect.fn('Realization.discoverAndLower')(functio
             opaqueRealizations: OpaqueRealization.catalogOf(self),
             ...(completion === undefined ? {} : { profile: completion.profile }),
             presentation: registry,
-            admission: Object.freeze({ _tag: 'Admitted' }),
+            admission: { _tag: 'Admitted' },
             normalization: options.normalizeMir === false ? 'Preserve' : 'Normalize',
             audit: prepareForEmission ? 'ForeignPlanning' : 'None',
           }),
@@ -516,11 +516,11 @@ const discoverAndLowerEffect = Effect.fn('Realization.discoverAndLower')(functio
 
   if (prepareForEmission) {
     if (Diagnostic.hasErrors(finalizedDiagnostics))
-      return Object.freeze({
+      return {
         _tag: 'Rejected',
         diagnostics: finalizedDiagnostics,
-        report: Object.freeze(report),
-      })
+        report: report,
+      }
     if (
       targetLayout._tag !== 'Available' ||
       program === undefined ||
@@ -528,7 +528,7 @@ const discoverAndLowerEffect = Effect.fn('Realization.discoverAndLower')(functio
       self.composition === undefined
     )
       throw new RangeError('Driver lowering reached an unavailable target after its gates')
-    return Object.freeze({
+    return {
       _tag: 'Prepared',
       frontend: self,
       composition: self.composition,
@@ -536,31 +536,31 @@ const discoverAndLowerEffect = Effect.fn('Realization.discoverAndLower')(functio
       target: targetLayout.target,
       program,
       diagnostics: finalizedDiagnostics,
-      report: Object.freeze(report),
-    })
+      report: report,
+    }
   }
 
   const unavailable =
     targetLayout._tag === 'Unavailable' || targetLayout._tag === 'AnalysisUnavailable'
       ? targetLayout.error
       : undefined
-  return Object.freeze({
+  return {
     instances,
     ...(self.composition === undefined ? {} : { composition: self.composition }),
     ...(completion === undefined ? {} : { profile: completion.profile }),
     target: targetLayout.selection,
     layoutCatalog:
       targetLayout._tag === 'Available'
-        ? Object.freeze({ _tag: 'Available', value: targetLayout.catalog })
-        : Object.freeze({ _tag: 'Unavailable', error: targetLayout.error }),
+        ? { _tag: 'Available', value: targetLayout.catalog }
+        : { _tag: 'Unavailable', error: targetLayout.error },
     layout:
       targetLayout._tag === 'Available'
-        ? Object.freeze({ _tag: 'Available', value: targetLayout.layout })
-        : Object.freeze({ _tag: 'Unavailable', error: targetLayout.error }),
+        ? { _tag: 'Available', value: targetLayout.layout }
+        : { _tag: 'Unavailable', error: targetLayout.error },
     mir:
       program !== undefined
-        ? Object.freeze({ _tag: 'Available', value: program })
-        : Object.freeze({
+        ? { _tag: 'Available', value: program }
+        : {
             _tag: 'Unavailable',
             error:
               targetLiteralError ??
@@ -571,10 +571,10 @@ const discoverAndLowerEffect = Effect.fn('Realization.discoverAndLower')(functio
                 operation: 'Analysis.realize',
                 message: 'MIR is unavailable',
               }),
-          }),
+          },
     diagnostics: finalizedDiagnostics,
-    report: Object.freeze([...report]),
-  })
+    report: [...report],
+  }
 })
 
 /** Completes configuration without performing runtime specialization, shared with project tooling. */
@@ -766,11 +766,10 @@ export const configure = Effect.fn('Realization.configure')(function* (
 })
 
 /** The unavailable MIR state a sealed executable publishes when configuration rejects it. */
-export const unavailableMir = (message: string): Targeted<Mir.Module> =>
-  Object.freeze({
-    _tag: 'Unavailable',
-    error: new AnalysisUnavailable({ operation: 'Analysis.realize', message }),
-  })
+export const unavailableMir = (message: string): Targeted<Mir.Module> => ({
+  _tag: 'Unavailable',
+  error: new AnalysisUnavailable({ operation: 'Analysis.realize', message }),
+})
 
 import { AnalysisUnavailable } from './AnalysisUnavailable.js'
 import * as ArtifactKind from './ArtifactKind.js'

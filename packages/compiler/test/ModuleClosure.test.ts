@@ -400,7 +400,6 @@ it.effect('loads a diamond once per module and excludes unreachable sources', ()
     assert.deepEqual(calls, ['root', 'left', 'right', 'shared'])
     assert.deepEqual([...closure.sources.keys()], ['left', 'right', 'root', 'shared'])
     assert.deepEqual(closure.resolutionFailures, [])
-    assert.strictEqual(Object.isFrozen(closure), true)
   }),
 )
 

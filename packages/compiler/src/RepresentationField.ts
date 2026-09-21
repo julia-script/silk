@@ -80,14 +80,13 @@ export const makeId = (
   ordinal: number,
   useOrdinal: number,
   variantOrdinal?: number,
-): Id =>
-  Object.freeze({
-    _tag: 'RepresentedFieldId',
-    nominal: Object.freeze({ ...nominal }),
-    ...(variantOrdinal === undefined ? {} : { variantOrdinal }),
-    ordinal,
-    useOrdinal,
-  })
+): Id => ({
+  _tag: 'RepresentedFieldId',
+  nominal: { ...nominal },
+  ...(variantOrdinal === undefined ? {} : { variantOrdinal }),
+  ordinal,
+  useOrdinal,
+})
 
 /** Canonical identity key; source provenance is intentionally absent. */
 export const idKey = (self: Id): string =>
@@ -108,11 +107,11 @@ const canonicalOf = (
 ): DeclarationFacts.CanonicalId =>
   nominal._tag === 'CanonicalDeclarationId'
     ? nominal
-    : Object.freeze({
+    : {
         _tag: 'CanonicalDeclarationId',
         module: nominal.module,
         name: nominal.name,
-      })
+      }
 
 interface SymbolicUse {
   readonly parameter: Type.Parameter
@@ -139,68 +138,60 @@ const plansOfInternal = (
 ): ReadonlyArray<Plan> => {
   const canonical = canonicalOf(nominal)
   const canonicalKey = `${canonical.module}.${canonical.name}`
-  if (seen.has(canonicalKey)) return Object.freeze([])
+  if (seen.has(canonicalKey)) return []
   const declaration = declarationOf(declarations, canonical)
-  if (declaration === undefined) return Object.freeze([])
+  if (declaration === undefined) return []
   const next = new Set(seen).add(canonicalKey)
   const symbolicUses = (type: Type.Type): ReadonlyArray<SymbolicUse> => {
     if (Type.isRepresented(type)) {
       const argument = type.representation.argument
       return Type.isRepresentationParameterArgument(argument)
-        ? Object.freeze([
-            Object.freeze({
+        ? [
+            {
               parameter: argument.parameter,
               requiredBound: type.representation.requiredBound,
-            }),
-          ])
-        : Object.freeze([])
+            },
+          ]
+        : []
     }
     if (Type.isFixedArray(type) || Type.isSlice(type)) return symbolicUses(type.element)
-    if (Type.isUnion(type)) return Object.freeze(type.members.flatMap(symbolicUses))
-    if (!Type.isNominal(type) || Type.isIntrinsicNominal(type)) return Object.freeze([])
+    if (Type.isUnion(type)) return type.members.flatMap(symbolicUses)
+    if (!Type.isNominal(type) || Type.isIntrinsicNominal(type)) return []
     const nested = declarationOf(declarations, type)
-    if (nested === undefined) return Object.freeze([])
+    if (nested === undefined) return []
     const substitution = TypeInference.substitution(
       nested.typeParameters.map((parameter) => parameter.type),
       type.arguments,
     )
-    if (substitution === undefined) return Object.freeze([])
-    return Object.freeze(
-      plansOfInternal(declarations, type, next).flatMap((plan): ReadonlyArray<SymbolicUse> => {
-        const argument = substitution.get(Type.key(plan.parameter))
-        const bound = Type.substitute(plan.requiredBound, substitution)
-        return argument !== undefined &&
-          Type.isRepresentationParameterArgument(argument) &&
-          (Type.isCallable(bound) || Type.isEffect(bound))
-          ? [Object.freeze({ parameter: argument.parameter, requiredBound: bound })]
-          : []
-      }),
-    )
+    if (substitution === undefined) return []
+    return plansOfInternal(declarations, type, next).flatMap((plan): ReadonlyArray<SymbolicUse> => {
+      const argument = substitution.get(Type.key(plan.parameter))
+      const bound = Type.substitute(plan.requiredBound, substitution)
+      return argument !== undefined &&
+        Type.isRepresentationParameterArgument(argument) &&
+        (Type.isCallable(bound) || Type.isEffect(bound))
+        ? [{ parameter: argument.parameter, requiredBound: bound }]
+        : []
+    })
   }
   const fields: ReadonlyArray<{
     readonly field: DeclarationFacts.FieldFact
     readonly variantOrdinal?: number
   }> =
     declaration._tag === 'StructDeclaration'
-      ? declaration.fields.map((field) => Object.freeze({ field }))
+      ? declaration.fields.map((field) => ({ field }))
       : declaration.variants.flatMap((variant) =>
-          variant.fields.map((field) =>
-            Object.freeze({ field, variantOrdinal: variant.id.ordinal }),
-          ),
+          variant.fields.map((field) => ({ field, variantOrdinal: variant.id.ordinal })),
         )
-  return Object.freeze(
-    fields.flatMap(({ field, variantOrdinal }): ReadonlyArray<Plan> => {
-      if (field.declaredType._tag !== 'Resolved') return []
-      return symbolicUses(field.declaredType.type).map((use, useOrdinal) =>
-        Object.freeze({
-          _tag: 'RepresentationFieldPlan' as const,
-          id: makeId(canonical, field.id.ordinal, useOrdinal, variantOrdinal),
-          parameter: use.parameter,
-          requiredBound: use.requiredBound,
-        }),
-      )
-    }),
-  )
+  return fields.flatMap(({ field, variantOrdinal }): ReadonlyArray<Plan> => {
+    if (field.declaredType._tag !== 'Resolved') return []
+    return symbolicUses(field.declaredType.type).map((use, useOrdinal) => ({
+      _tag: 'RepresentationFieldPlan' as const,
+      id: makeId(canonical, field.id.ordinal, useOrdinal, variantOrdinal),
+      parameter: use.parameter,
+      requiredBound: use.requiredBound,
+    }))
+  })
 }
 
 /** Collects source-ordered represented-field plans, including forwarded nested representations. */
@@ -222,7 +213,7 @@ const provenanceOf = (declarations: DeclarationIndex.Index, plan: Plan): Provena
   )
   return field === undefined || parameter === undefined
     ? undefined
-    : Object.freeze({ field: field.anchor, parameter: parameter.anchor })
+    : { field: field.anchor, parameter: parameter.anchor }
 }
 
 const resolvePlan = (
@@ -243,40 +234,37 @@ const resolvePlan = (
       ? substitutedBound
       : plan.requiredBound
   const argument = substitution.get(Type.key(plan.parameter))
-  const unavailable = (reason: UnavailableReason): Resolution =>
-    Object.freeze({
-      _tag: 'UnavailableRepresentationField',
-      id: plan.id,
-      instance,
-      reason,
-      provenance,
-    })
+  const unavailable = (reason: UnavailableReason): Resolution => ({
+    _tag: 'UnavailableRepresentationField',
+    id: plan.id,
+    instance,
+    reason,
+    provenance,
+  })
   if (argument === undefined)
-    return unavailable(Object.freeze({ _tag: 'MissingRepresentationArgument', requiredBound }))
+    return unavailable({ _tag: 'MissingRepresentationArgument', requiredBound })
   if (Type.isRepresentationParameterArgument(argument))
-    return unavailable(Object.freeze({ _tag: 'OpenRepresentationArgument', requiredBound }))
+    return unavailable({ _tag: 'OpenRepresentationArgument', requiredBound })
   if (!Type.isExactRepresentationArgument(argument))
-    return unavailable(Object.freeze({ _tag: 'WrongRepresentationArgumentKind', requiredBound }))
+    return unavailable({ _tag: 'WrongRepresentationArgumentKind', requiredBound })
   const admissibility = Type.representationAdmissibility(argument.contract, requiredBound)
   if (admissibility._tag !== 'Admitted')
-    return unavailable(
-      Object.freeze({
-        _tag: 'IncompatibleRepresentationArgument',
-        requiredBound,
-        detail:
-          admissibility._tag === 'Unavailable'
-            ? admissibility.reason
-            : 'representation admissibility remained open',
-      }),
-    )
-  return Object.freeze({
+    return unavailable({
+      _tag: 'IncompatibleRepresentationArgument',
+      requiredBound,
+      detail:
+        admissibility._tag === 'Unavailable'
+          ? admissibility.reason
+          : 'representation admissibility remained open',
+    })
+  return {
     _tag: 'ResolvedRepresentationField',
     id: plan.id,
     instance,
     argument,
     requiredBound,
     admissibility,
-  })
+  }
 }
 
 /** Resolves represented fields for complete nominal instances, deduplicated by structural key. */
@@ -296,10 +284,10 @@ export const resolveFields = (
       if (!resolutions.has(resolutionKey)) resolutions.set(resolutionKey, resolved)
     }
   }
-  return Object.freeze({
+  return {
     _tag: 'RepresentationFieldIndex',
-    resolutions: Object.freeze([...resolutions.values()]),
-  })
+    resolutions: [...resolutions.values()],
+  }
 }
 
 /** Looks one field resolution up by its complete nominal instance and stable field identity. */

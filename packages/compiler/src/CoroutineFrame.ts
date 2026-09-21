@@ -27,10 +27,10 @@ export const storageOf = (
   // BorrowedDependency describes lifetime authority, not the descriptor's width.
   // A slice retains both address and length; only EnvironmentBorrow is one pointer.
   if (slot.type._tag === 'EnvironmentBorrow')
-    return Object.freeze({
+    return {
       size: program.layout.target.pointerSize,
       alignment: program.layout.target.pointerAlignment,
-    })
+    }
   if (slot.type._tag === 'EffectOutcome')
     return ValueStorage.outcome(program.layout, slot.type.type)
   if (slot.type._tag === 'EffectComposite')
@@ -41,21 +41,19 @@ export const storageOf = (
   )
     return Layout.entry(program.layout, slot.type.storage.type)
   if (slot.type._tag === 'EffectValue')
-    return Object.freeze({
+    return {
       size: slot.type.environment.size,
       alignment: slot.type.environment.alignment,
-    })
+    }
   if (slot.type._tag === 'CallableValue') {
     const view = slot.type.environment
-    return Object.freeze({
+    return {
       size: view?.size ?? 0,
       alignment: view?.alignment ?? 1,
-    })
+    }
   }
   const entry = Layout.entry(program.layout, Mir.semanticType(slot.type))
-  return entry === undefined
-    ? undefined
-    : Object.freeze({ size: entry.size, alignment: entry.alignment })
+  return entry === undefined ? undefined : { size: entry.size, alignment: entry.alignment }
 }
 
 const planState = (
@@ -72,32 +70,30 @@ const planState = (
     if (storage === undefined || storage.alignment < 1 || storage.size < 0) return undefined
     const offset = offsets.get(slot.local.ordinal)
     if (offset === undefined || offset < cursor) return undefined
-    payload.push(
-      Object.freeze({
-        _tag: 'CoroutineFramePayloadField',
-        slot: slot.ordinal,
-        local: slot.local,
-        type: slot.type,
-        access: slot.access,
-        initialization: slot.initialization,
-        offset,
-        size: storage.size,
-        alignment: storage.alignment,
-        padding: offset - cursor,
-      }),
-    )
+    payload.push({
+      _tag: 'CoroutineFramePayloadField',
+      slot: slot.ordinal,
+      local: slot.local,
+      type: slot.type,
+      access: slot.access,
+      initialization: slot.initialization,
+      offset,
+      size: storage.size,
+      alignment: storage.alignment,
+      padding: offset - cursor,
+    })
     cursor = offset + storage.size
     alignment = Math.max(alignment, storage.alignment)
   }
   const size = alignUp(cursor, alignment)
-  return Object.freeze({
+  return {
     _tag: 'CoroutineFrameTargetStateLayout',
     point: state.point,
     size,
     alignment,
-    payload: Object.freeze(payload),
+    payload: payload,
     tailPadding: size - cursor,
-  })
+  }
 }
 
 const planDescriptor = (
@@ -107,17 +103,13 @@ const planDescriptor = (
   const wordSize = program.layout.target.pointerSize
   const wordAlignment = program.layout.target.pointerAlignment
   const roles = Mir.coroutineFrameHeaderRoles(program)
-  const header = Object.freeze(
-    roles.map((role, ordinal) =>
-      Object.freeze({
-        _tag: 'CoroutineFrameHeaderField' as const,
-        role,
-        offset: ordinal * wordSize,
-        size: wordSize,
-        alignment: wordAlignment,
-      }),
-    ),
-  )
+  const header = roles.map((role, ordinal) => ({
+    _tag: 'CoroutineFrameHeaderField' as const,
+    role,
+    offset: ordinal * wordSize,
+    size: wordSize,
+    alignment: wordAlignment,
+  }))
   // A live borrow can retain a local's frame address across several states. Assign one home
   // per retained local for the whole invocation; independently packing each live set can move
   // that home when an earlier temporary dies. States still store and clean up only live slots.
@@ -147,35 +139,31 @@ const planDescriptor = (
     Mir.matchesInstanceKey(candidate, descriptor.function),
   )
   if (fn === undefined) return undefined
-  const diagnosticScopes = Mir.diagnosticScopeLocals(fn).map((scope, ordinal) =>
-    Object.freeze({
-      scope,
-      offset: alignUp(payloadEnd, wordAlignment) + ordinal * wordSize * Mir.diagnosticScopeWords,
-    }),
-  )
+  const diagnosticScopes = Mir.diagnosticScopeLocals(fn).map((scope, ordinal) => ({
+    scope,
+    offset: alignUp(payloadEnd, wordAlignment) + ordinal * wordSize * Mir.diagnosticScopeWords,
+  }))
   const outcomesStart =
     alignUp(payloadEnd, wordAlignment) +
     diagnosticScopes.length * wordSize * Mir.diagnosticScopeWords
-  const diagnosticOutcomes = Mir.diagnosticOutcomeLocals(program, fn).map((outcome, ordinal) =>
-    Object.freeze({
-      outcome,
-      offset: outcomesStart + ordinal * wordSize * Mir.diagnosticOutcomeWords,
-    }),
-  )
+  const diagnosticOutcomes = Mir.diagnosticOutcomeLocals(program, fn).map((outcome, ordinal) => ({
+    outcome,
+    offset: outcomesStart + ordinal * wordSize * Mir.diagnosticOutcomeWords,
+  }))
   const size = alignUp(
     outcomesStart + diagnosticOutcomes.length * wordSize * Mir.diagnosticOutcomeWords,
     alignment,
   )
-  return Object.freeze({
+  return {
     _tag: 'CoroutineFrameTargetLayout',
     function: descriptor.function,
     size,
     alignment,
     header,
-    states: Object.freeze(states),
-    diagnosticScopes: Object.freeze(diagnosticScopes),
-    diagnosticOutcomes: Object.freeze(diagnosticOutcomes),
-  })
+    states: states,
+    diagnosticScopes: diagnosticScopes,
+    diagnosticOutcomes: diagnosticOutcomes,
+  }
 }
 
 /** Plans one maximum target layout for each frame-producing specialized invocation. */
@@ -190,11 +178,11 @@ export const plan = (program: Mir.Module): Mir.CoroutineFramePlan | undefined =>
   entries.sort((left, right) =>
     Instances.keyText(left.function).localeCompare(Instances.keyText(right.function)),
   )
-  return Object.freeze({
+  return {
     _tag: 'CoroutineFramePlan',
     target: program.layout.target,
-    entries: Object.freeze(entries),
-  })
+    entries: entries,
+  }
 }
 
 /** Finds one mutually-exclusive state layout inside its invocation's maximum frame. */
@@ -233,13 +221,13 @@ export const cleanupReleases = (
   })
   if (ordered.length !== fields.length)
     throw new RangeError('coroutine cleanup diverged from its canonical release plan')
-  return Object.freeze(ordered)
+  return ordered
 }
 
 /** Attaches physical target plans without changing target-neutral frame descriptors. */
 export const apply = (program: Mir.Module): Mir.Module => {
   const coroutineFrames = plan(program)
-  return coroutineFrames === undefined ? program : Object.freeze({ ...program, coroutineFrames })
+  return coroutineFrames === undefined ? program : { ...program, coroutineFrames }
 }
 
 /** Stable compact evidence used by tests and later backend artifact checks. */

@@ -10,4 +10,4 @@ export const union = <T>(...sets: ReadonlyArray<ReadonlySet<T>>): Set<T> =>
 
 /** The intersection of two sets as a new frozen set. */
 export const intersection = <T>(left: ReadonlySet<T>, right: ReadonlySet<T>): ReadonlySet<T> =>
-  Object.freeze(new Set([...left].filter((element) => right.has(element))))
+  new Set([...left].filter((element) => right.has(element)))

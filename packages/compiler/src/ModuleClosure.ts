@@ -169,7 +169,7 @@ export const validateRoots = Effect.fn('ModuleClosure.validateRoots')(function* 
         message: `Root module identity ${module} is not canonical`,
         reason: { _tag: 'InvalidRoot', module },
       })
-  return Object.freeze([...new Set(roots)].sort())
+  return [...new Set(roots)].sort()
 })
 
 interface ParsedModule {
@@ -215,10 +215,10 @@ const parseModule = Effect.fnUntraced(function* (
         ? application
         : ImportPath.authoredTarget(context, header.path)
     if (sourceSpelling === undefined || canonicalTarget === undefined)
-      return [Object.freeze({ declaration, header })]
-    return [Object.freeze({ declaration, header, sourceSpelling, canonicalTarget })]
+      return [{ declaration, header }]
+    return [{ declaration, header, sourceSpelling, canonicalTarget }]
   })
-  return Object.freeze({ name, syntax, authored, declarations, imports: Object.freeze(imports) })
+  return { name, syntax, authored, declarations, imports: imports }
 })
 
 /**
@@ -244,7 +244,7 @@ export const selectedDeclarations = (
     if (arm !== undefined) visit(arm)
   }
   module.declarations.forEach(visit)
-  return Object.freeze(found)
+  return found
 }
 
 type Resolution =
@@ -263,14 +263,12 @@ const analyzeModule = Effect.fnUntraced(function* (
     const { declaration, header } = imported
     const anchor = header.path.anchor
     if (imported.canonicalTarget === undefined) {
-      imports.push(
-        Object.freeze({
-          _tag: 'Import',
-          declaration,
-          header,
-          target: Object.freeze({ _tag: 'Unavailable', anchor }),
-        }),
-      )
+      imports.push({
+        _tag: 'Import',
+        declaration,
+        header,
+        target: { _tag: 'Unavailable', anchor },
+      })
       continue
     }
     const module = imported.canonicalTarget
@@ -281,97 +279,87 @@ const analyzeModule = Effect.fnUntraced(function* (
     if (module === parsed.name) {
       const diagnostic = Diagnostic.selfImport(module, span)
       diagnostics.push(diagnostic)
-      imports.push(
-        Object.freeze({
-          _tag: 'Import',
-          declaration,
-          header,
-          sourceSpelling,
-          canonicalTarget: module,
-          target: Object.freeze({
-            _tag: 'Self',
-            module,
-            anchor,
-            cause: Diagnostic.identity(diagnostic),
-          }),
-        }),
-      )
+      imports.push({
+        _tag: 'Import',
+        declaration,
+        header,
+        sourceSpelling,
+        canonicalTarget: module,
+        target: {
+          _tag: 'Self',
+          module,
+          anchor,
+          cause: Diagnostic.identity(diagnostic),
+        },
+      })
       continue
     }
     const resolution = yield* resolve(module)
     if (resolution._tag === 'Absent') {
       const diagnostic = Diagnostic.unknownModule(module, span)
       diagnostics.push(diagnostic)
-      imports.push(
-        Object.freeze({
-          _tag: 'Import',
-          declaration,
-          header,
-          sourceSpelling,
-          canonicalTarget: module,
-          target: Object.freeze({
-            _tag: 'Unknown',
-            module,
-            anchor,
-            cause: Diagnostic.identity(diagnostic),
-          }),
-        }),
-      )
-      continue
-    }
-    imports.push(
-      Object.freeze({
+      imports.push({
         _tag: 'Import',
         declaration,
         header,
         sourceSpelling,
         canonicalTarget: module,
-        target:
-          resolution._tag === 'Found'
-            ? Object.freeze({ _tag: 'Resolved' as const, module, anchor })
-            : Object.freeze({
-                _tag: 'Failed' as const,
-                module,
-                anchor,
-                error: resolution.error,
-              }),
-      }),
-    )
+        target: {
+          _tag: 'Unknown',
+          module,
+          anchor,
+          cause: Diagnostic.identity(diagnostic),
+        },
+      })
+      continue
+    }
+    imports.push({
+      _tag: 'Import',
+      declaration,
+      header,
+      sourceSpelling,
+      canonicalTarget: module,
+      target:
+        resolution._tag === 'Found'
+          ? { _tag: 'Resolved' as const, module, anchor }
+          : {
+              _tag: 'Failed' as const,
+              module,
+              anchor,
+              error: resolution.error,
+            },
+    })
   }
 
-  return Object.freeze({
-    module: Object.freeze({
+  return {
+    module: {
       _tag: 'Module',
       name: parsed.name,
       syntax: parsed.syntax,
       authored: parsed.authored,
       declarations: parsed.declarations,
-      imports: Object.freeze(imports),
-    }),
-    diagnostics: Object.freeze(diagnostics),
-  })
+      imports: imports,
+    },
+    diagnostics: diagnostics,
+  }
 })
 
 const resolvedTargets = (module: Module): ReadonlyArray<string> =>
-  Object.freeze(
-    [
-      ...new Set(
-        module.imports.flatMap((fact) =>
-          fact.target._tag === 'Resolved' ? [fact.target.module] : [],
-        ),
+  [
+    ...new Set(
+      module.imports.flatMap((fact) =>
+        fact.target._tag === 'Resolved' ? [fact.target.module] : [],
       ),
-    ].sort(),
-  )
+    ),
+  ].sort()
 
 /** Computes strongly connected components of size > 1 over resolved imports, deterministically. */
 const cycleFacts = (modules: ReadonlyArray<Module>): ReadonlyArray<ReadonlyArray<string>> => {
   const names = modules.map((module) => module.name)
   const edges = new Map(modules.map((module) => [module.name, resolvedTargets(module)]))
-  return Object.freeze(
-    Graph.stronglyConnected(names, (name) => edges.get(name) ?? [])
-      .filter((component) => component.length > 1)
-      .sort((left, right) => (left.at(0) ?? '').localeCompare(right.at(0) ?? '')),
-  )
+  return Graph.stronglyConnected(names, (name) => edges.get(name) ?? [])
+    .filter((component) => component.length > 1)
+    .sort((left, right) => (left.at(0) ?? '').localeCompare(right.at(0) ?? ''))
 }
 
 /**
@@ -409,10 +397,10 @@ export const loadProject = Effect.fn('ModuleClosure.loadProject')(function* (
         : Source.load(module),
     )
     const resolution: Resolution = Result.isFailure(attempted)
-      ? Object.freeze({ _tag: 'Failed', error: attempted.failure })
+      ? { _tag: 'Failed', error: attempted.failure }
       : Option.match(attempted.success, {
-          onNone: () => Object.freeze({ _tag: 'Absent' as const }),
-          onSome: (source) => Object.freeze({ _tag: 'Found' as const, source }),
+          onNone: () => ({ _tag: 'Absent' as const }),
+          onSome: (source) => ({ _tag: 'Found' as const, source }),
         })
     resolutions.set(module, resolution)
     return resolution
@@ -465,34 +453,30 @@ export const loadProject = Effect.fn('ModuleClosure.loadProject')(function* (
     }
   }
 
-  const modules = Object.freeze(
-    [...loaded.values()].sort((left, right) => {
-      return compareText(left.name, right.name)
-    }),
-  )
+  const modules = [...loaded.values()].sort((left, right) => {
+    return compareText(left.name, right.name)
+  })
 
-  return Object.freeze({
+  return {
     _tag: 'ProjectModuleClosure',
-    rootModules: Object.freeze(rootModules),
-    missingRoots: Object.freeze(missingRoots),
+    rootModules: rootModules,
+    missingRoots: missingRoots,
     modules,
     cycles: cycleFacts(modules),
     diagnostics: Diagnostic.merge(...diagnostics),
     sources: new Map(modules.map((module) => [module.name, module.syntax.source])),
-    resolutionFailures: Object.freeze(
-      [...resolutions.entries()]
-        .sort(([left], [right]) => {
-          return compareText(left, right)
-        })
-        .flatMap(([, resolution]) => (resolution._tag === 'Failed' ? [resolution.error] : [])),
-    ),
-  })
+    resolutionFailures: [...resolutions.entries()]
+      .sort(([left], [right]) => {
+        return compareText(left, right)
+      })
+      .flatMap(([, resolution]) => (resolution._tag === 'Failed' ? [resolution.error] : [])),
+  }
 })
 
 /** Selects one root from a project closure without copying project-owned module facts. */
 export const view = (self: ProjectClosure, rootModule: string): Closure | undefined =>
   self.rootModules.includes(rootModule)
-    ? Object.freeze({
+    ? {
         _tag: 'ModuleClosure',
         rootModule,
         modules: self.modules,
@@ -501,7 +485,7 @@ export const view = (self: ProjectClosure, rootModule: string): Closure | undefi
         sources: self.sources,
         resolutionFailures: self.resolutionFailures,
         missingRoots: self.missingRoots,
-      })
+      }
     : undefined
 
 /** Requires explicit ownership and logical paths for every in-memory source reached from discovery. */

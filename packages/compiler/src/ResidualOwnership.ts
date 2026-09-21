@@ -48,27 +48,26 @@ export interface Coordinator {
   readonly [stateSymbol]: State
 }
 
-export const make = (): Coordinator =>
-  Object.freeze({
-    _tag: 'ResidualOwnershipCoordinator',
-    [stateSymbol]: {
-      requests: 0,
-      sourceReused: 0,
-      checked: 0,
-      cacheReused: 0,
-      executedWork: {
-        pathChecks: 0,
-        shapeComputations: 0,
-        shapeCacheHits: 0,
-        shapeProjectionSteps: 0,
-        initializationJoins: 0,
-        loanAccessChecks: 0,
-        cleanupPlanQueries: 0,
-      },
-      entries: new WeakMap(),
-      observations: [],
+export const make = (): Coordinator => ({
+  _tag: 'ResidualOwnershipCoordinator',
+  [stateSymbol]: {
+    requests: 0,
+    sourceReused: 0,
+    checked: 0,
+    cacheReused: 0,
+    executedWork: {
+      pathChecks: 0,
+      shapeComputations: 0,
+      shapeCacheHits: 0,
+      shapeProjectionSteps: 0,
+      initializationJoins: 0,
+      loanAccessChecks: 0,
+      cleanupPlanQueries: 0,
     },
-  })
+    entries: new WeakMap(),
+    observations: [],
+  },
+})
 
 /** Reuses an exact source proof or cached result, including failed checks, before executing. */
 export const check = (
@@ -104,32 +103,31 @@ export const check = (
       }
     }
   }
-  state.observations.push(
-    Object.freeze({
-      declaration: input.function.declaration.id,
-      reason,
-      branch,
-      ...(branch === 'Checked' && checked.ownership.work !== undefined
-        ? { work: checked.ownership.work }
-        : {}),
-    }),
-  )
+  state.observations.push({
+    declaration: input.function.declaration.id,
+    reason,
+    branch,
+    ...(branch === 'Checked' && checked.ownership.work !== undefined
+      ? { work: checked.ownership.work }
+      : {}),
+  })
   return checked
 }
 
 /** Snapshots actual execution and reuse counters. */
 export const counters = (self: Coordinator): Counters => {
   const state = self[stateSymbol]
-  return Object.freeze({
+  return {
     _tag: 'ResidualOwnershipCounters',
     requests: state.requests,
     sourceReused: state.sourceReused,
     checked: state.checked,
     cacheReused: state.cacheReused,
-    executedWork: Object.freeze({ ...state.executedWork }),
-  })
+    executedWork: { ...state.executedWork },
+  }
 }
 
 /** Snapshots query attribution without retaining declarations or syntax in reports. */
-export const observations = (self: Coordinator): ReadonlyArray<Observation> =>
-  Object.freeze([...self[stateSymbol].observations])
+export const observations = (self: Coordinator): ReadonlyArray<Observation> => [
+  ...self[stateSymbol].observations,
+]

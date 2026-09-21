@@ -39,68 +39,61 @@ export interface Segment {
 /** Ordered by value position. Bytes that were computed rather than copied have no segment. */
 export type Provenance = ReadonlyArray<Segment>
 
-const range = (start: number, end: number): Range => Object.freeze({ start, end })
+const range = (start: number, end: number): Range => ({ start, end })
 
 const withRange = (source: Source, next: Range): Source =>
   source._tag === 'Literal'
-    ? Object.freeze({ _tag: 'Literal', at: source.at, range: next })
-    : Object.freeze({ ...source, range: next })
+    ? { _tag: 'Literal', at: source.at, range: next }
+    : { ...source, range: next }
 
 /** The provenance of a whole literal of `length` decoded bytes. */
-export const literal = (at: AuthoredIdentity.Anchor, length: number): Provenance =>
-  Object.freeze([
-    Object.freeze({
-      value: range(0, length),
-      from: Object.freeze({ _tag: 'Literal' as const, at, range: range(0, length) }),
-    }),
-  ])
+export const literal = (at: AuthoredIdentity.Anchor, length: number): Provenance => [
+  {
+    value: range(0, length),
+    from: { _tag: 'Literal' as const, at, range: range(0, length) },
+  },
+]
 
 /** The provenance of a whole parameter value of `length` decoded bytes. */
-export const parameter = (ordinal: number, length: number, scope?: string): Provenance =>
-  Object.freeze([
-    Object.freeze({
-      value: range(0, length),
-      from: Object.freeze({
-        _tag: 'Parameter' as const,
-        ...(scope === undefined ? {} : { scope }),
-        ordinal,
-        range: range(0, length),
-      }),
-    }),
-  ])
+export const parameter = (ordinal: number, length: number, scope?: string): Provenance => [
+  {
+    value: range(0, length),
+    from: {
+      _tag: 'Parameter' as const,
+      ...(scope === undefined ? {} : { scope }),
+      ordinal,
+      range: range(0, length),
+    },
+  },
+]
 
 /** Restricts provenance to `[start, end)` of its value and rebases it to start at zero. */
 export const slice = (self: Provenance, start: number, end: number): Provenance =>
-  Object.freeze(
-    self.flatMap((segment): ReadonlyArray<Segment> => {
-      const from = Math.max(segment.value.start, start)
-      const to = Math.min(segment.value.end, end)
-      if (from >= to) return []
-      const offset = segment.from.range.start - segment.value.start
-      return [
-        Object.freeze({
-          value: range(from - start, to - start),
-          from: withRange(segment.from, range(from + offset, to + offset)),
-        }),
-      ]
-    }),
-  )
+  self.flatMap((segment): ReadonlyArray<Segment> => {
+    const from = Math.max(segment.value.start, start)
+    const to = Math.min(segment.value.end, end)
+    if (from >= to) return []
+    const offset = segment.from.range.start - segment.value.start
+    return [
+      {
+        value: range(from - start, to - start),
+        from: withRange(segment.from, range(from + offset, to + offset)),
+      },
+    ]
+  })
 
 /** Appends `right` after a left value of `leftLength` bytes. */
-export const concat = (left: Provenance, leftLength: number, right: Provenance): Provenance =>
-  Object.freeze([
-    ...left,
-    ...right.map((segment) =>
-      Object.freeze({
-        value: range(segment.value.start + leftLength, segment.value.end + leftLength),
-        from: segment.from,
-      }),
-    ),
-  ])
+export const concat = (left: Provenance, leftLength: number, right: Provenance): Provenance => [
+  ...left,
+  ...right.map((segment) => ({
+    value: range(segment.value.start + leftLength, segment.value.end + leftLength),
+    from: segment.from,
+  })),
+]
 
 /** The ordered sources covering `[start, end)` of a value: what a diagnostic about it names. */
 export const sourcesOf = (self: Provenance, start: number, end: number): ReadonlyArray<Source> =>
-  Object.freeze(slice(self, start, end).map((segment) => segment.from))
+  slice(self, start, end).map((segment) => segment.from)
 
 /**
  * Rewrites one source in a caller's terms.
@@ -113,11 +106,9 @@ export const substituteSource = (
   source: Source,
   arguments_: ReadonlyArray<Provenance | undefined>,
 ): ReadonlyArray<Source> => {
-  if (source._tag === 'Literal') return Object.freeze([source])
+  if (source._tag === 'Literal') return [source]
   const argument = arguments_.at(source.ordinal)
-  return argument === undefined
-    ? Object.freeze([])
-    : sourcesOf(argument, source.range.start, source.range.end)
+  return argument === undefined ? [] : sourcesOf(argument, source.range.start, source.range.end)
 }
 
 /** Rewrites a callee's provenance in the caller's terms at one call. */
@@ -126,26 +117,19 @@ export const substitute = (
   arguments_: ReadonlyArray<Provenance | undefined>,
   scope?: string,
 ): Provenance =>
-  Object.freeze(
-    self.flatMap((segment): ReadonlyArray<Segment> => {
-      if (segment.from._tag === 'Literal') return [segment]
-      // A parameter of an enclosing application is that application's to resolve.
-      if (scope !== undefined && segment.from.scope !== undefined && segment.from.scope !== scope)
-        return [segment]
-      const argument = arguments_.at(segment.from.ordinal)
-      if (argument === undefined) return []
-      const restricted = slice(argument, segment.from.range.start, segment.from.range.end)
-      return restricted.map((inner) =>
-        Object.freeze({
-          value: range(
-            inner.value.start + segment.value.start,
-            inner.value.end + segment.value.start,
-          ),
-          from: inner.from,
-        }),
-      )
-    }),
-  )
+  self.flatMap((segment): ReadonlyArray<Segment> => {
+    if (segment.from._tag === 'Literal') return [segment]
+    // A parameter of an enclosing application is that application's to resolve.
+    if (scope !== undefined && segment.from.scope !== undefined && segment.from.scope !== scope)
+      return [segment]
+    const argument = arguments_.at(segment.from.ordinal)
+    if (argument === undefined) return []
+    const restricted = slice(argument, segment.from.range.start, segment.from.range.end)
+    return restricted.map((inner) => ({
+      value: range(inner.value.start + segment.value.start, inner.value.end + segment.value.start),
+      from: inner.from,
+    }))
+  })
 
 /** Whether any part still depends on a caller. */
 export const isShared = (sources: ReadonlyArray<Source>): boolean =>

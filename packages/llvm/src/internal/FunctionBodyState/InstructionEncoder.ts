@@ -92,41 +92,6 @@ export const appendResult = (
 }
 
 /** @internal */
-export const freezeInstruction = (
-  instruction: FunctionBodyDescription.Instruction,
-): FunctionBodyDescription.Instruction => {
-  // Operand containers belong to the draft, never to caller-owned input arrays. Seal them in
-  // place at commit; updates to open phi/switch instructions replace their records and arrays.
-  switch (instruction._tag) {
-    case 'Phi':
-      for (const entry of instruction.incoming) Object.freeze(entry)
-      Object.freeze(instruction.incoming)
-      break
-    case 'Switch':
-      for (const entry of instruction.cases) Object.freeze(entry)
-      Object.freeze(instruction.cases)
-      Object.freeze(instruction.weights)
-      break
-    case 'Call':
-    case 'Invoke':
-      Object.freeze(instruction.arguments)
-      for (const bundle of instruction.operandBundles) {
-        Object.freeze(bundle.operands)
-        Object.freeze(bundle)
-      }
-      Object.freeze(instruction.operandBundles)
-      break
-    case 'GetElementPtr':
-      Object.freeze(instruction.indices)
-      break
-    case 'IndirectBranch':
-      Object.freeze(instruction.destinations)
-      break
-  }
-  return Object.freeze(instruction)
-}
-
-/** @internal */
 const validateOperand = (
   draft: Draft,
   operand: FunctionBodyDescription.Operand,

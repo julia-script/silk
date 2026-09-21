@@ -202,34 +202,31 @@ const ownedAccess = (access: CaptureAccess): boolean => access === 'Take'
 const borrowedAccess = (access: CaptureAccess): boolean =>
   access === 'Shared' || access === 'Exclusive'
 
-const captureSlot = (capture: Instances.CallableInstance['captures'][number]): CaptureSlot =>
-  Object.freeze({
-    _tag: 'CallableCaptureSlot' as const,
-    ordinal: capture.ordinal,
-    parameterOrdinal: capture.parameterOrdinal,
-    access: capture.access,
-    type: capture.type,
-    owned: ownedAccess(capture.access),
-    borrowed: borrowedAccess(capture.access),
-  })
+const captureSlot = (capture: Instances.CallableInstance['captures'][number]): CaptureSlot => ({
+  _tag: 'CallableCaptureSlot' as const,
+  ordinal: capture.ordinal,
+  parameterOrdinal: capture.parameterOrdinal,
+  access: capture.access,
+  type: capture.type,
+  owned: ownedAccess(capture.access),
+  borrowed: borrowedAccess(capture.access),
+})
 
 const compareCaptures = (left: CaptureSlot, right: CaptureSlot): number =>
   left.ordinal - right.ordinal || left.parameterOrdinal - right.parameterOrdinal
 
 const loansOf = (captures: ReadonlyArray<CaptureSlot>): ReadonlyArray<LoanDependency> =>
-  Object.freeze(
-    captures.flatMap((capture): ReadonlyArray<LoanDependency> =>
-      capture.access === 'Shared' || capture.access === 'Exclusive'
-        ? [
-            Object.freeze({
-              _tag: 'CallableCaptureLoan' as const,
-              capture: capture.ordinal,
-              access: capture.access,
-              type: capture.type,
-            }),
-          ]
-        : [],
-    ),
+  captures.flatMap((capture): ReadonlyArray<LoanDependency> =>
+    capture.access === 'Shared' || capture.access === 'Exclusive'
+      ? [
+          {
+            _tag: 'CallableCaptureLoan' as const,
+            capture: capture.ordinal,
+            access: capture.access,
+            type: capture.type,
+          },
+        ]
+      : [],
   )
 
 const livenessOf = (
@@ -238,7 +235,7 @@ const livenessOf = (
 ): Liveness => {
   const ownedLanes = captures.filter((capture) => capture.owned).length
   const borrowedLanes = captures.filter((capture) => capture.borrowed).length
-  return Object.freeze({
+  return {
     _tag: 'CallableFieldLiveness' as const,
     moveOnly: captures.some(
       (capture) =>
@@ -247,44 +244,38 @@ const livenessOf = (
     ),
     ownedLanes,
     borrowedLanes,
-  })
+  }
 }
 
 const cleanupOf = (
   index: DeclarationIndex.Index,
   captures: ReadonlyArray<CaptureSlot>,
   invocation: ReceiverAccess,
-): Cleanup =>
-  Object.freeze({
-    _tag: 'CallableFieldCleanup' as const,
-    lanes: Object.freeze(
-      captures.flatMap((capture) =>
-        capture.owned && !ConformanceProof.copyType(index, capture.type) ? [capture.ordinal] : [],
-      ),
-    ),
-    consumedByInvocation: invocation === 'Take',
-  })
+): Cleanup => ({
+  _tag: 'CallableFieldCleanup' as const,
+  lanes: captures.flatMap((capture) =>
+    capture.owned && !ConformanceProof.copyType(index, capture.type) ? [capture.ordinal] : [],
+  ),
+  consumedByInvocation: invocation === 'Take',
+})
 
 const effectEnvironmentSlot = (
   capture: Instances.EffectInstance['captures'][number],
-): EffectEnvironmentSlot =>
-  Object.freeze({
-    _tag: 'EffectEnvironmentSlot' as const,
-    ordinal: capture.ordinal,
-    source: capture.source,
-    sourceOrdinal: capture.sourceOrdinal,
-    access: capture.access,
-    type: capture.type,
-    ...(capture.effectIdentity === undefined ? {} : { effectIdentity: capture.effectIdentity }),
-    ...(capture.callableIdentity === undefined
-      ? {}
-      : { callableIdentity: capture.callableIdentity }),
-    ...(capture.providedRequirement === undefined
-      ? {}
-      : { providedRequirement: capture.providedRequirement }),
-    owned: ownedAccess(capture.access),
-    borrowed: borrowedAccess(capture.access),
-  })
+): EffectEnvironmentSlot => ({
+  _tag: 'EffectEnvironmentSlot' as const,
+  ordinal: capture.ordinal,
+  source: capture.source,
+  sourceOrdinal: capture.sourceOrdinal,
+  access: capture.access,
+  type: capture.type,
+  ...(capture.effectIdentity === undefined ? {} : { effectIdentity: capture.effectIdentity }),
+  ...(capture.callableIdentity === undefined ? {} : { callableIdentity: capture.callableIdentity }),
+  ...(capture.providedRequirement === undefined
+    ? {}
+    : { providedRequirement: capture.providedRequirement }),
+  owned: ownedAccess(capture.access),
+  borrowed: borrowedAccess(capture.access),
+})
 
 const compareEffectEnvironmentSlots = (
   left: EffectEnvironmentSlot,
@@ -299,24 +290,22 @@ const compareEffectEnvironmentSlots = (
 export const effectEnvironmentOf = (
   effect: Instances.EffectInstance,
 ): ReadonlyArray<EffectEnvironmentSlot> =>
-  Object.freeze(effect.captures.map(effectEnvironmentSlot).sort(compareEffectEnvironmentSlots))
+  effect.captures.map(effectEnvironmentSlot).sort(compareEffectEnvironmentSlots)
 
-const effectRows = (contract: Type.Effect): EffectRows =>
-  Object.freeze({
-    _tag: 'EffectFieldRows',
-    failures: Object.freeze([...Type.failureMembers(contract)]),
-    requirements: Object.freeze([...Type.requirementMembers(contract)]),
-  })
+const effectRows = (contract: Type.Effect): EffectRows => ({
+  _tag: 'EffectFieldRows',
+  failures: [...Type.failureMembers(contract)],
+  requirements: [...Type.requirementMembers(contract)],
+})
 
 const effectCleanup = (
   environment: ReadonlyArray<EffectEnvironmentSlot>,
   access: Type.Effect['access'],
-): EffectCleanup =>
-  Object.freeze({
-    _tag: 'EffectFieldCleanup',
-    unrunLanes: Object.freeze(environment.flatMap((slot) => (slot.owned ? [slot.ordinal] : []))),
-    consumedByRun: access === 'Take',
-  })
+): EffectCleanup => ({
+  _tag: 'EffectFieldCleanup',
+  unrunLanes: environment.flatMap((slot) => (slot.owned ? [slot.ordinal] : [])),
+  consumedByRun: access === 'Take',
+})
 
 /** Structural executable values need their own hidden identity and cannot be an inline lane yet. */
 const hasUnsupportedCaptureLayout = (type: Type.Type): boolean =>
@@ -329,7 +318,7 @@ const unsupported = (
   field: RepresentationField.Id,
   instance: Type.Nominal,
   reason: UnsupportedReason,
-): Support => Object.freeze({ _tag: 'Unsupported', field, instance, reason })
+): Support => ({ _tag: 'Unsupported', field, instance, reason })
 
 /** The capture environment a retained representation argument names, or why it is unreachable. */
 type EnvironmentCaptures =
@@ -382,7 +371,7 @@ export const matchesIdentity = (
       Tir.callableEnvironmentIdentity(candidate.site, {
         declaration: candidate.owner.declaration,
         typeArguments: candidate.owner.typeArguments,
-        staticArgumentKeys: Object.freeze(candidate.owner.staticArguments.map(StaticValue.key)),
+        staticArgumentKeys: candidate.owner.staticArguments.map(StaticValue.key),
       }),
     ) &&
   Tir.matchesCallableTargetIdentity(candidate.target, identity.target) &&
@@ -406,31 +395,30 @@ const environmentCaptures = (
   callables: ReadonlyArray<Instances.CallableInstance>,
 ): EnvironmentCaptures => {
   const environment = identity.environment
-  if (environment === undefined)
-    return Object.freeze({ _tag: 'ResolvedEnvironment', slots: Object.freeze([]) })
+  if (environment === undefined) return { _tag: 'ResolvedEnvironment', slots: [] }
   const candidates = callables.filter((callable) => matchesIdentity(identity, callable))
   const selected = candidates.at(0)
   if (selected === undefined)
-    return Object.freeze({
+    return {
       _tag: 'UnresolvedEnvironment',
-      reason: Object.freeze({
+      reason: {
         _tag: 'MissingCallableEnvironment',
         environment: Type.callableEnvironmentKey(environment),
-      }),
-    })
+      },
+    }
   if (new Set(candidates.map(captureShape)).size > 1)
-    return Object.freeze({
+    return {
       _tag: 'UnresolvedEnvironment',
-      reason: Object.freeze({
+      reason: {
         _tag: 'AmbiguousCallableEnvironment',
         environment: Type.callableEnvironmentKey(environment),
-      }),
-    })
-  return Object.freeze({
+      },
+    }
+  return {
     _tag: 'ResolvedEnvironment',
-    slots: Object.freeze(selected.captures.map(captureSlot).sort(compareCaptures)),
+    slots: selected.captures.map(captureSlot).sort(compareCaptures),
     site: selected.site,
-  })
+  }
 }
 
 type ResolvedField = Extract<
@@ -453,11 +441,7 @@ const realizeCallableField = (
     contract = undefined
   }
   if (contract === undefined)
-    return unsupported(
-      resolution.id,
-      resolution.instance,
-      Object.freeze({ _tag: 'NonCallableBound' }),
-    )
+    return unsupported(resolution.id, resolution.instance, { _tag: 'NonCallableBound' })
   const environment = identity.environment
   const captures = environmentCaptures(identity, callables)
   if (captures._tag === 'UnresolvedEnvironment')
@@ -467,25 +451,21 @@ const realizeCallableField = (
     (capture) => !capture.borrowed && hasUnsupportedCaptureLayout(capture.type),
   )
   if (unsupportedCapture !== undefined)
-    return unsupported(
-      resolution.id,
-      resolution.instance,
-      Object.freeze({
-        _tag: 'UnsupportedCaptureLayout',
-        capture: unsupportedCapture.ordinal,
-        type: unsupportedCapture.type,
-      }),
-    )
+    return unsupported(resolution.id, resolution.instance, {
+      _tag: 'UnsupportedCaptureLayout',
+      capture: unsupportedCapture.ordinal,
+      type: unsupportedCapture.type,
+    })
   const invocation = contract.mode
-  return Object.freeze({
+  return {
     _tag: 'Supported',
-    realization: Object.freeze({
+    realization: {
       _tag: 'FieldRealization' as const,
       field: resolution.id,
       instance: resolution.instance,
       contract,
       target: identity.target,
-      targetArguments: Object.freeze([...identity.typeArguments]),
+      targetArguments: [...identity.typeArguments],
       ...(environment === undefined ? {} : { environment }),
       ...(captures.site === undefined ? {} : { site: captures.site }),
       captures: slots,
@@ -493,8 +473,8 @@ const realizeCallableField = (
       loans: loansOf(slots),
       liveness: livenessOf(index, slots),
       cleanup: cleanupOf(index, slots, invocation),
-    }),
-  })
+    },
+  }
 }
 
 /** One construction shape signature, used only to reject inconsistent duplicate runner facts. */
@@ -543,46 +523,35 @@ const realizeEffectField = (
     ? resolution.requiredBound
     : undefined
   if (contract === undefined || requiredBound === undefined)
-    return unsupported(
-      resolution.id,
-      resolution.instance,
-      Object.freeze({ _tag: 'NonEffectBound' }),
-    )
+    return unsupported(resolution.id, resolution.instance, { _tag: 'NonEffectBound' })
   if (!Type.isRuntimeConcrete(contract))
-    return unsupported(
-      resolution.id,
-      resolution.instance,
-      Object.freeze({ _tag: 'OpenEffectContract', identity: identity.identity }),
-    )
+    return unsupported(resolution.id, resolution.instance, {
+      _tag: 'OpenEffectContract',
+      identity: identity.identity,
+    })
   const candidates = effects.filter((effect) => matchesEffectIdentity(identity, effect))
   const selected = candidates.at(0)
   if (selected === undefined)
-    return unsupported(
-      resolution.id,
-      resolution.instance,
-      Object.freeze({ _tag: 'MissingEffectRunner', identity: identity.identity }),
-    )
+    return unsupported(resolution.id, resolution.instance, {
+      _tag: 'MissingEffectRunner',
+      identity: identity.identity,
+    })
   if (new Set(candidates.map(effectShape)).size > 1)
-    return unsupported(
-      resolution.id,
-      resolution.instance,
-      Object.freeze({ _tag: 'AmbiguousEffectRunner', identity: identity.identity }),
-    )
+    return unsupported(resolution.id, resolution.instance, {
+      _tag: 'AmbiguousEffectRunner',
+      identity: identity.identity,
+    })
   if (Type.representationAdmissibility(selected.type, contract)._tag !== 'Admitted')
-    return unsupported(
-      resolution.id,
-      resolution.instance,
-      Object.freeze({
-        _tag: 'EffectContractMismatch',
-        identity: identity.identity,
-        expected: contract,
-        actual: selected.type,
-      }),
-    )
+    return unsupported(resolution.id, resolution.instance, {
+      _tag: 'EffectContractMismatch',
+      identity: identity.identity,
+      expected: contract,
+      actual: selected.type,
+    })
   const environment = effectEnvironmentOf(selected)
-  return Object.freeze({
+  return {
     _tag: 'Supported',
-    realization: Object.freeze({
+    realization: {
       _tag: 'EffectFieldRealization' as const,
       field: resolution.id,
       instance: resolution.instance,
@@ -591,15 +560,15 @@ const realizeEffectField = (
       runnerIdentity: selected.identity,
       runner: selected.runner,
       runnerInstance: selected.owner,
-      runnerArguments: Object.freeze([...selected.typeArguments]),
+      runnerArguments: [...selected.typeArguments],
       site: selected.site,
       rows: effectRows(contract),
       access: contract.access,
       environment,
       cleanup: effectCleanup(environment, contract.access),
       suspendable: SuspensionMode.has(selected.suspension, 'NestedTransfer'),
-    }),
-  })
+    },
+  }
 }
 
 /**
@@ -613,11 +582,7 @@ export const realizeField = (
   effects: ReadonlyArray<Instances.EffectInstance>,
 ): Support => {
   if (resolution._tag !== 'ResolvedRepresentationField')
-    return unsupported(
-      resolution.id,
-      resolution.instance,
-      Object.freeze({ _tag: 'UnresolvedRepresentation' }),
-    )
+    return unsupported(resolution.id, resolution.instance, { _tag: 'UnresolvedRepresentation' })
   const identity = resolution.argument.identity
   return Type.isCallableIdentityArgument(identity)
     ? realizeCallableField(index, resolution, identity, callables)
@@ -635,29 +600,24 @@ export const realize = (
   for (const resolution of fields.resolutions) {
     const entryKey = key(resolution.instance, resolution.id)
     if (entries.has(entryKey)) continue
-    entries.set(
-      entryKey,
-      Object.freeze({
-        _tag: 'FieldRealizationEntry' as const,
-        key: entryKey,
-        support: realizeField(index, resolution, callables, effects),
-      }),
-    )
+    entries.set(entryKey, {
+      _tag: 'FieldRealizationEntry' as const,
+      key: entryKey,
+      support: realizeField(index, resolution, callables, effects),
+    })
   }
-  return Object.freeze({
+  return {
     _tag: 'FieldRealizationIndex',
-    entries: Object.freeze(
-      [...entries.values()].sort((left, right) => {
-        if (left.key < right.key) {
-          return -1
-        }
-        if (left.key > right.key) {
-          return 1
-        }
-        return 0
-      }),
-    ),
-  })
+    entries: [...entries.values()].sort((left, right) => {
+      if (left.key < right.key) {
+        return -1
+      }
+      if (left.key > right.key) {
+        return 1
+      }
+      return 0
+    }),
+  }
 }
 
 /** Looks one realization up by complete nominal instance and stable field identity. */
@@ -717,7 +677,7 @@ export const matchesCallable = (
       Tir.callableEnvironmentIdentity(candidate.site, {
         declaration: candidate.owner.declaration,
         typeArguments: candidate.owner.typeArguments,
-        staticArgumentKeys: Object.freeze(candidate.owner.staticArguments.map(StaticValue.key)),
+        staticArgumentKeys: candidate.owner.staticArguments.map(StaticValue.key),
       }),
     )
 
@@ -824,12 +784,12 @@ export const equals = (left: Realization, right: Realization): boolean => {
 /** Every invocation mode one receiver access admits, weakest receiver first. */
 export const admittedModes = (receiver: ReceiverAccess): ReadonlyArray<Type.CallableMode> => {
   if (receiver === 'Shared') {
-    return Object.freeze(['Shared'] as const)
+    return ['Shared'] as const
   }
   if (receiver === 'Exclusive') {
-    return Object.freeze(['Shared', 'Exclusive'] as const)
+    return ['Shared', 'Exclusive'] as const
   }
-  return Object.freeze(['Shared', 'Exclusive', 'Take'] as const)
+  return ['Shared', 'Exclusive', 'Take'] as const
 }
 
 /**

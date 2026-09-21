@@ -137,12 +137,12 @@ const debugExpressionIndices = (
   operation: string,
 ): Result.Result<ReadonlyArray<number>, LlvmError> =>
   Result.gen(function* () {
-    if (state.strip || values === undefined) return Object.freeze([])
+    if (state.strip || values === undefined) return []
     const indices: Array<number> = []
     for (const value of values) {
       indices.push(yield* Handle.resolve(builder, owner, value, 'Metadata', operation))
     }
-    return Object.freeze(indices)
+    return indices
   })
 
 /** @internal */
@@ -152,10 +152,10 @@ const setGlobalDebugExpressions = (
   expressions: ReadonlyArray<number>,
 ): void => {
   const attachments = state.globals.attachments[global] ?? []
-  state.globals.attachments[global] = Object.freeze([
+  state.globals.attachments[global] = [
     ...attachments.filter((attachment) => attachment.kind !== 'dbg'),
-    ...expressions.map((metadata) => Object.freeze({ kind: 'dbg' as const, metadata })),
-  ])
+    ...expressions.map((metadata) => ({ kind: 'dbg' as const, metadata })),
+  ]
 }
 
 /**
@@ -223,18 +223,16 @@ export const make = Effect.fnUntraced(function* (
         'Variable.make',
       )
       const handle = Handle.make('Variable', owner, index)
-      state.globals.variables.descriptions.push(
-        Object.freeze({
-          _tag: 'Variable',
-          global: allocated.index,
-          valueType: typeIndex,
-          initializer: init,
-          constant: options.constant ?? false,
-          threadLocal: options.threadLocal ?? 'none',
-          externallyInitialized: options.externallyInitialized ?? false,
-          debugExpressions,
-        }),
-      )
+      state.globals.variables.descriptions.push({
+        _tag: 'Variable',
+        global: allocated.index,
+        valueType: typeIndex,
+        initializer: init,
+        constant: options.constant ?? false,
+        threadLocal: options.threadLocal ?? 'none',
+        externallyInitialized: options.externallyInitialized ?? false,
+        debugExpressions,
+      })
       setGlobalDebugExpressions(state, allocated.index, debugExpressions)
       state.globals.variables.handles.push(handle)
       return handle
@@ -282,32 +280,30 @@ export const fromGlobal = Effect.fnUntraced(function* (
         options.debugExpressions,
         'Variable.fromGlobal',
       )
-      state.globals.variables.descriptions.push(
-        Object.freeze({
-          _tag: 'Variable',
-          global: resolved.index,
-          valueType: typeIndex,
-          initializer: yield* initializerIndex(
-            builder,
-            state,
-            owner,
-            typeIndex,
-            options.initializer,
-            'Variable.fromGlobal',
-          ),
-          constant: options.constant ?? false,
-          threadLocal: options.threadLocal ?? 'none',
-          externallyInitialized: options.externallyInitialized ?? false,
-          debugExpressions,
-        }),
-      )
+      state.globals.variables.descriptions.push({
+        _tag: 'Variable',
+        global: resolved.index,
+        valueType: typeIndex,
+        initializer: yield* initializerIndex(
+          builder,
+          state,
+          owner,
+          typeIndex,
+          options.initializer,
+          'Variable.fromGlobal',
+        ),
+        constant: options.constant ?? false,
+        threadLocal: options.threadLocal ?? 'none',
+        externallyInitialized: options.externallyInitialized ?? false,
+        debugExpressions,
+      })
       setGlobalDebugExpressions(state, resolved.index, debugExpressions)
       state.globals.variables.handles.push(handle)
-      state.globals.entries.descriptions[resolved.index] = Object.freeze({
+      state.globals.entries.descriptions[resolved.index] = {
         ...resolved.description,
         kind: 'Variable',
         actorIndex: index,
-      })
+      }
       return handle
     }),
   )
@@ -351,7 +347,7 @@ export const setInitializer = Effect.fnUntraced(function* (
         self,
         'Variable.setInitializer',
       )
-      state.globals.variables.descriptions[index] = Object.freeze({
+      state.globals.variables.descriptions[index] = {
         ...description,
         initializer: yield* initializerIndex(
           builder,
@@ -361,7 +357,7 @@ export const setInitializer = Effect.fnUntraced(function* (
           initializer,
           'Variable.setInitializer',
         ),
-      })
+      }
     }),
   )
 })
@@ -396,13 +392,13 @@ export const configure = Effect.fnUntraced(function* (
               options.debugExpressions,
               'Variable.configure',
             )
-      state.globals.variables.descriptions[index] = Object.freeze({
+      state.globals.variables.descriptions[index] = {
         ...description,
         constant: options.constant ?? description.constant,
         threadLocal: options.threadLocal ?? description.threadLocal,
         externallyInitialized: options.externallyInitialized ?? description.externallyInitialized,
         debugExpressions,
-      })
+      }
       setGlobalDebugExpressions(state, description.global, debugExpressions)
     }),
   )
@@ -439,19 +435,17 @@ export const properties = Effect.fnUntraced(function* (
           }),
         )
       }
-      return Object.freeze({
+      return {
         valueType,
         initializer,
         constant: description.constant,
         threadLocal: description.threadLocal,
         externallyInitialized: description.externallyInitialized,
-        debugExpressions: Object.freeze(
-          description.debugExpressions.flatMap((index) => {
-            const metadata = state.metadata.entries.handles[index]
-            return metadata === undefined ? [] : [metadata]
-          }),
-        ),
-      })
+        debugExpressions: description.debugExpressions.flatMap((index) => {
+          const metadata = state.metadata.entries.handles[index]
+          return metadata === undefined ? [] : [metadata]
+        }),
+      }
     }),
   )
 })

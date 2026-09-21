@@ -45,7 +45,6 @@ it('orders the three bitwise levels between additive and relational operators', 
     assert.strictEqual(info.precedence > Operator.pipelinePrecedence, true)
     assert.strictEqual(info.precedence < Operator.prefixPrecedence, true)
     assert.strictEqual(info.associativity, 'Left')
-    assert.strictEqual(Object.isFrozen(info), true)
   }
   assert.strictEqual(
     and.precedence > xor.precedence && xor.precedence > or.precedence,
@@ -91,7 +90,6 @@ it('orders infix operators by immutable precedence metadata', () => {
   assert.strictEqual(relational.precedence > equality.precedence, true)
   assert.strictEqual(multiply.associativity, 'Left')
   assert.strictEqual(relational.associativity, 'None')
-  assert.strictEqual(Object.isFrozen(multiply), true)
 })
 
 it('publishes canonical builtin targets including type-selected equality', () => {

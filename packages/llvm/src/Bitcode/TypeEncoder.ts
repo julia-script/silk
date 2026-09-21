@@ -2,7 +2,7 @@ import * as Bitstream from '../internal/Bitstream.js'
 import type * as BuilderState from '../internal/BuilderState.js'
 import * as DeclarationSchema from '../internal/DeclarationBitcodeSchema.js'
 
-const simpleTypeCode: Readonly<Record<string, number>> = Object.freeze({
+const simpleTypeCode: Readonly<Record<string, number>> = {
   Void: 2,
   Float: 3,
   Double: 4,
@@ -15,7 +15,7 @@ const simpleTypeCode: Readonly<Record<string, number>> = Object.freeze({
   Token: 22,
   BFloat: 23,
   X86Amx: 24,
-})
+}
 
 /** @internal */
 export const writeTypes = (

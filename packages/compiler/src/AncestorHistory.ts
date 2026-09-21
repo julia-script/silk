@@ -14,8 +14,8 @@ export interface AncestorHistory {
 }
 
 export const make = (): AncestorHistory => ({
-  empty: Object.freeze({ id: 0, branches: new Map() }),
-  initial: Object.freeze({ id: 1, branches: new Map() }),
+  empty: { id: 0, branches: new Map() },
+  initial: { id: 1, branches: new Map() },
   nodes: new Map(),
   unions: new Map(),
 })
@@ -37,7 +37,7 @@ const node = (
   const key = JSON.stringify([variable, entries.map(([value, child]) => [value ?? null, child.id])])
   const prior = self.nodes.get(key)
   if (prior !== undefined) return prior
-  const result = Object.freeze({ id: self.nodes.size + 2, variable, branches: new Map(entries) })
+  const result = { id: self.nodes.size + 2, variable, branches: new Map(entries) }
   self.nodes.set(key, result)
   return result
 }

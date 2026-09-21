@@ -41,17 +41,15 @@ export const make = <Member>(
     const existing = normalized.get(collisionKey)
     normalized.set(collisionKey, existing === undefined ? member : policy.merge(existing, member))
   }
-  return Object.freeze({
-    members: Object.freeze(
-      [...normalized.values()].sort((left, right) =>
-        compareText(policy.collisionKey(left), policy.collisionKey(right)),
-      ),
+  return {
+    members: [...normalized.values()].sort((left, right) =>
+      compareText(policy.collisionKey(left), policy.collisionKey(right)),
     ),
-  })
+  }
 }
 
 /** The empty row for a domain. */
-export const empty = <Member>(): FiniteRow<Member> => Object.freeze({ members: Object.freeze([]) })
+export const empty = <Member>(): FiniteRow<Member> => ({ members: [] })
 
 /** Canonical semantic identity of a finite row. */
 export const key = <Member>(policy: Policy<Member>, self: FiniteRow<Member>): string =>

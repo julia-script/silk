@@ -53,5 +53,5 @@ export const resolveAll = (
     seen.add(resolved.success.id)
     targets.push(resolved.success)
   }
-  return Result.succeed(Object.freeze(targets))
+  return Result.succeed(targets)
 }

@@ -41,7 +41,7 @@ export const decodeBindings = Effect.fn('ProjectProfile.decodeBindings')(functio
   ReadonlyArray<PackageConfiguration.Binding>,
   ConfigurationError.ConfigurationError
 > {
-  if (input === undefined) return Object.freeze([])
+  if (input === undefined) return []
   if (!Array.isArray(input)) return yield* invalid(origin, 'bindings')
   const bindings: Array<PackageConfiguration.Binding> = []
   for (const item of input) {
@@ -88,18 +88,16 @@ export const decodeBindings = Effect.fn('ProjectProfile.decodeBindings')(functio
     )
       return yield* invalid(origin, 'binding identity')
     const value = yield* ConfigurationValue.decode(item.value, bindingOrigin)
-    bindings.push(
-      Object.freeze({
-        package: item.package,
-        module: item.module,
-        parameter: item.parameter,
-        value,
-        origin: bindingOrigin,
-        tier,
-      }),
-    )
+    bindings.push({
+      package: item.package,
+      module: item.module,
+      parameter: item.parameter,
+      value,
+      origin: bindingOrigin,
+      tier,
+    })
   }
-  return Object.freeze(bindings)
+  return bindings
 })
 
 /** Decodes a complete logical override, including its profile-tier bindings. */
@@ -111,7 +109,7 @@ export const decode = Effect.fn('ProjectProfile.decode')(function* (
   const bindings = yield* decodeBindings(input.bindings, 'profile', origin)
   const logical = Object.fromEntries(Object.entries(input).filter(([key]) => key !== 'bindings'))
   const initial = yield* CompilationProfile.decode(logical, origin)
-  return Object.freeze({ input: CompilationProfile.input(initial), bindings })
+  return { input: CompilationProfile.input(initial), bindings }
 })
 
 /** Reads named profiles and the project-tier bindings from a parsed manifest. */
@@ -135,12 +133,12 @@ export const catalog = Effect.fn('ProjectProfile.catalog')(function* (
   if (defaultInput !== undefined && !profiles.has(defaultInput))
     return yield* invalid(origin, 'unknown build.profile')
   const bindings = yield* decodeBindings(bindingsInput, 'project', origin)
-  return Object.freeze({
+  return {
     profiles,
     bindings,
     origin: ConfigurationOrigin.snapshot(origin),
     ...(defaultInput === undefined ? {} : { default: defaultInput }),
-  })
+  }
 })
 
 /** Resolves exclusive request modes, then a named project default, then explicit edge fallback. */
@@ -164,23 +162,23 @@ export const select = Effect.fn('ProjectProfile.select')(function* (
   if (name !== undefined) {
     const profile = catalog.profiles.get(name)
     if (profile === undefined) return yield* invalid(catalog.origin, `unknown profile ${name}`)
-    return Object.freeze({
+    return {
       input: profile.input,
-      bindings: Object.freeze([...catalog.bindings, ...profile.bindings]),
-    })
+      bindings: [...catalog.bindings, ...profile.bindings],
+    }
   }
   if (request.override !== undefined) {
     const initial = yield* CompilationProfile.normalize(request.override.input, catalog.origin)
-    return Object.freeze({
+    return {
       input: CompilationProfile.input(initial),
-      bindings: Object.freeze([...catalog.bindings, ...request.override.bindings]),
-    })
+      bindings: [...catalog.bindings, ...request.override.bindings],
+    }
   }
   const target = request.target ?? fallbackTarget
   if (target === undefined)
     return yield* invalid(catalog.origin, 'missing target or profile selection')
   const initial = yield* CompilationProfile.normalize({ target }, catalog.origin)
-  return Object.freeze({ input: CompilationProfile.input(initial), bindings: catalog.bindings })
+  return { input: CompilationProfile.input(initial), bindings: catalog.bindings }
 })
 
 /** Decodes the language-server initialization profile/name/target selection object. */
@@ -188,7 +186,7 @@ export const selection = Effect.fn('ProjectProfile.selection')(function* (
   input: unknown,
   origin: ConfigurationOrigin.ConfigurationOrigin,
 ): Effect.fn.Return<Selection, ConfigurationError.ConfigurationError> {
-  if (input === undefined) return Object.freeze({})
+  if (input === undefined) return {}
   if (
     !record(input) ||
     Object.keys(input).some((key) => !['profile', 'profileInput', 'target'].includes(key)) ||
@@ -198,9 +196,9 @@ export const selection = Effect.fn('ProjectProfile.selection')(function* (
     return yield* invalid(origin, 'profile selection settings')
   const override =
     input.profileInput === undefined ? undefined : yield* decode(input.profileInput, origin)
-  return Object.freeze({
+  return {
     ...(input.profile === undefined ? {} : { name: input.profile }),
     ...(input.target === undefined ? {} : { target: input.target }),
     ...(override === undefined ? {} : { override }),
-  })
+  }
 })

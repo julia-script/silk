@@ -19,7 +19,7 @@ export interface Base {
 const codeAt = (digits: Digits, index: number): number =>
   typeof digits === 'string' ? digits.charCodeAt(index) : (digits[index] ?? Number.NaN)
 
-const make = (radix: Radix, width: 0 | 2): Base => Object.freeze({ radix, width })
+const make = (radix: Radix, width: 0 | 2): Base => ({ radix, width })
 
 /** The implicit base of a literal written without a prefix. */
 export const decimal: Base = make(10, 0)

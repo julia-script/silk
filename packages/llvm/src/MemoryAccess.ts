@@ -118,7 +118,7 @@ export const singlethread: SyncScope = 'singlethread'
  * @category memory access
  * @since 0.0.0
  */
-export const orderingCode: Readonly<Record<AtomicOrdering, number>> = Object.freeze({
+export const orderingCode: Readonly<Record<AtomicOrdering, number>> = {
   none: 0,
   unordered: 1,
   monotonic: 2,
@@ -126,7 +126,7 @@ export const orderingCode: Readonly<Record<AtomicOrdering, number>> = Object.fre
   release: 4,
   acq_rel: 5,
   seq_cst: 6,
-})
+}
 
 /**
  * Numeric bitcode codes for {@link AtomicOperation}.
@@ -134,7 +134,7 @@ export const orderingCode: Readonly<Record<AtomicOrdering, number>> = Object.fre
  * @category memory access
  * @since 0.0.0
  */
-export const operationCode: Readonly<Record<AtomicOperation, number>> = Object.freeze({
+export const operationCode: Readonly<Record<AtomicOperation, number>> = {
   xchg: 0,
   add: 1,
   sub: 2,
@@ -150,7 +150,7 @@ export const operationCode: Readonly<Record<AtomicOperation, number>> = Object.f
   fsub: 12,
   fmax: 13,
   fmin: 14,
-})
+}
 
 /**
  * Normalizes memory settings with target alignment, system scope, and non-atomic defaults.
@@ -175,13 +175,12 @@ export const operationCode: Readonly<Record<AtomicOperation, number>> = Object.f
  * @category memory access
  * @since 0.0.0
  */
-export const make = (input: Input = {}): MemoryAccess =>
-  Object.freeze({
-    kind: input.kind ?? 'normal',
-    alignment: input.alignment ?? defaultAlignment,
-    syncScope: input.syncScope ?? 'system',
-    ordering: input.ordering ?? 'none',
-  })
+export const make = (input: Input = {}): MemoryAccess => ({
+  kind: input.kind ?? 'normal',
+  alignment: input.alignment ?? defaultAlignment,
+  syncScope: input.syncScope ?? 'system',
+  ordering: input.ordering ?? 'none',
+})
 
 /**
  * Returns a copy with volatile access enabled or disabled.
@@ -195,8 +194,10 @@ export const withVolatile: {
   (self: MemoryAccess, enabled?: boolean): MemoryAccess
 } = dual(
   (args) => typeof args[0] === 'object',
-  (self: MemoryAccess, enabled = true): MemoryAccess =>
-    Object.freeze({ ...self, kind: enabled ? 'volatile' : 'normal' }),
+  (self: MemoryAccess, enabled = true): MemoryAccess => ({
+    ...self,
+    kind: enabled ? 'volatile' : 'normal',
+  }),
 )
 
 /**
@@ -221,7 +222,7 @@ export const withAtomic: {
     self: MemoryAccess,
     ordering: Exclude<AtomicOrdering, 'none'>,
     syncScope: SyncScope = 'system',
-  ): MemoryAccess => Object.freeze({ ...self, ordering, syncScope }),
+  ): MemoryAccess => ({ ...self, ordering, syncScope }),
 )
 
 /**

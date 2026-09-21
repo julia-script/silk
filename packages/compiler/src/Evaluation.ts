@@ -34,16 +34,15 @@ export interface TargetEnvironment {
 export const targetEnvironment = (
   compilation: CompilationProfile.Initial | CompilationProfile.CompilationProfile,
   sourceIdentity = '',
-): TargetEnvironment =>
-  Object.freeze({
-    _tag: 'StaticTargetEnvironment',
-    sourceIdentity,
-    target: compilation.target.id,
-    compilation,
-    kind: compilation.target.kind,
-    pointerBits: compilation.target.pointerSize === 4 ? 32 : 64,
-    endianness: compilation.target.endianness,
-  })
+): TargetEnvironment => ({
+  _tag: 'StaticTargetEnvironment',
+  sourceIdentity,
+  target: compilation.target.id,
+  compilation,
+  kind: compilation.target.kind,
+  pointerBits: compilation.target.pointerSize === 4 ? 32 : 64,
+  endianness: compilation.target.endianness,
+})
 
 /** Compiler-owned deterministic limits for one complete static-evaluation session. */
 export interface Limits {
@@ -54,12 +53,12 @@ export interface Limits {
 }
 
 /** Initial policy values; callers may supply smaller explicit limits for bounded verification. */
-export const defaultLimits: Limits = Object.freeze({
+export const defaultLimits: Limits = {
   steps: 100_000,
   callDepth: 128,
   retainedValueBytes: 4 * 1024 * 1024,
   residualNodes: 100_000,
-})
+}
 
 const validLimit = (value: number): boolean => Number.isSafeInteger(value) && value >= 0
 
@@ -72,7 +71,7 @@ export const limits = (input: Limits): Limits => {
     !validLimit(input.residualNodes)
   )
     throw new RangeError('Static evaluation limits must be non-negative safe integers')
-  return Object.freeze({ ...input })
+  return { ...input }
 }
 
 /** One concrete static application before syntax evaluation or residualization. */
@@ -183,7 +182,7 @@ export const textOriginLocation = (
 export const selectedArmFrame = (
   selected: SelectedArmFrame['selected'],
   span: Location.Location,
-): SelectedArmFrame => Object.freeze({ _tag: 'SelectedStaticArmFrame', selected, span })
+): SelectedArmFrame => ({ _tag: 'SelectedStaticArmFrame', selected, span })
 
 /** Retains one canonical element selected by an authored static iteration. */
 export const staticIterationFrame = (
@@ -193,12 +192,12 @@ export const staticIterationFrame = (
 ): StaticIterationFrame => {
   if (!Number.isSafeInteger(ordinal) || ordinal < 0)
     throw new RangeError('Static iteration ordinals must be non-negative safe integers')
-  return Object.freeze({
+  return {
     _tag: 'StaticIterationFrame',
     ordinal,
     value: StaticValue.presentation(value),
     span,
-  })
+  }
 }
 
 /** Retains one validated byte position in a source static-text literal. */
@@ -208,12 +207,14 @@ export const staticTextFrame = (
 ): StaticTextFrame => {
   if (!Number.isSafeInteger(byteOffset) || byteOffset < 0)
     throw new RangeError('Static text byte offsets must be non-negative safe integers')
-  return Object.freeze({ _tag: 'StaticTextFrame', literal, byteOffset })
+  return { _tag: 'StaticTextFrame', literal, byteOffset }
 }
 
 /** Appends logical frames without exposing or mutating evaluation storage. */
-export const appendTrace = (self: Trace, ...frames: ReadonlyArray<TraceFrame>): Trace =>
-  Object.freeze([...self, ...frames])
+export const appendTrace = (self: Trace, ...frames: ReadonlyArray<TraceFrame>): Trace => [
+  ...self,
+  ...frames,
+]
 
 interface FailureBase {
   readonly span: Location.Location
@@ -272,45 +273,43 @@ export type StaticFailure =
 const diagnosticTrace = (
   trace: Trace,
 ): ReadonlyArray<Diagnostic.StaticTraceFrame<Location.Location>> =>
-  Object.freeze(
-    trace.flatMap((frame): ReadonlyArray<Diagnostic.StaticTraceFrame<Location.Location>> => {
-      if (frame._tag === 'StaticTextFrame')
-        return [
-          Object.freeze({
-            kind: 'StaticText',
-            label: `static text byte ${frame.byteOffset}`,
-            arguments: Object.freeze([`byteOffset=${frame.byteOffset}`]),
-            span: frame.literal,
-          }),
-        ]
-      if (frame._tag === 'StaticApplicationFrame')
-        return [
-          Object.freeze({
-            kind: 'Call',
-            label: `${frame.declaration.module}.${frame.declaration.name}`,
-            arguments: frame.staticArguments,
-            span: frame.span,
-          }),
-        ]
-      if (frame._tag === 'StaticIterationFrame')
-        return [
-          Object.freeze({
-            kind: 'SelectedArm',
-            label: `static for element ${frame.ordinal}`,
-            arguments: Object.freeze([frame.value]),
-            span: frame.span,
-          }),
-        ]
+  trace.flatMap((frame): ReadonlyArray<Diagnostic.StaticTraceFrame<Location.Location>> => {
+    if (frame._tag === 'StaticTextFrame')
       return [
-        Object.freeze({
-          kind: 'SelectedArm',
-          label: frame.selected === 'Taken' ? 'selected static if arm' : 'selected static else arm',
-          arguments: Object.freeze([]),
-          span: frame.span,
-        }),
+        {
+          kind: 'StaticText',
+          label: `static text byte ${frame.byteOffset}`,
+          arguments: [`byteOffset=${frame.byteOffset}`],
+          span: frame.literal,
+        },
       ]
-    }),
-  )
+    if (frame._tag === 'StaticApplicationFrame')
+      return [
+        {
+          kind: 'Call',
+          label: `${frame.declaration.module}.${frame.declaration.name}`,
+          arguments: frame.staticArguments,
+          span: frame.span,
+        },
+      ]
+    if (frame._tag === 'StaticIterationFrame')
+      return [
+        {
+          kind: 'SelectedArm',
+          label: `static for element ${frame.ordinal}`,
+          arguments: [frame.value],
+          span: frame.span,
+        },
+      ]
+    return [
+      {
+        kind: 'SelectedArm',
+        label: frame.selected === 'Taken' ? 'selected static if arm' : 'selected static else arm',
+        arguments: [],
+        span: frame.span,
+      },
+    ]
+  })
 
 /** Converts one static-evaluation failure into its stable public semantic diagnostic. */
 export const diagnostic = (failure: StaticFailure, target: string): Diagnostic.Located => {
@@ -333,7 +332,7 @@ export const diagnostic = (failure: StaticFailure, target: string): Diagnostic.L
   return factory(failure.limit, target, trace, failure.span)
 }
 
-const frozenTrace = (trace: Trace): Trace => Object.freeze([...trace])
+const frozenTrace = (trace: Trace): Trace => [...trace]
 
 /** Creates one source-requested compile failure for the selected specialization. */
 export const compileError = (
@@ -341,14 +340,13 @@ export const compileError = (
   span: Location.Location,
   trace: Trace,
   origin?: TextOrigin,
-): CompileError =>
-  Object.freeze({
-    _tag: 'CompileError',
-    message,
-    span,
-    trace: frozenTrace(trace),
-    ...(origin === undefined ? {} : { origin }),
-  })
+): CompileError => ({
+  _tag: 'CompileError',
+  message,
+  span,
+  trace: frozenTrace(trace),
+  ...(origin === undefined ? {} : { origin }),
+})
 
 /** Creates one rejected crossing from static work into an unavailable phase. */
 export const phaseViolation = (
@@ -356,14 +354,13 @@ export const phaseViolation = (
   detail: string,
   span: Location.Location,
   trace: Trace,
-): PhaseViolation =>
-  Object.freeze({
-    _tag: 'PhaseViolation',
-    operation,
-    detail,
-    span,
-    trace: frozenTrace(trace),
-  })
+): PhaseViolation => ({
+  _tag: 'PhaseViolation',
+  operation,
+  detail,
+  span,
+  trace: frozenTrace(trace),
+})
 
 /** The contextual type supplied while evaluating one ordinary literal syntax node. */
 export type LiteralExpectation =
@@ -436,7 +433,7 @@ export const evaluateLiteral = (
   context: SemanticContext.SemanticContext,
   node: AuthoredHir.Literal,
   expected?: LiteralExpectation,
-  trace: Trace = Object.freeze([]),
+  trace: Trace = [],
 ): Outcome<StaticValue.Value> => {
   const span = Location.at(node.anchor)
   const mismatch = (actual: LiteralExpectation): Outcome<StaticValue.Value> | undefined =>
@@ -511,7 +508,7 @@ export const evaluateLiteral = (
       environment,
       {
         _tag: 'TextValue',
-        bytes: Object.freeze([...new TextEncoder().encode(context.textOf(node.value))]),
+        bytes: [...new TextEncoder().encode(context.textOf(node.value))],
       },
       'Evaluation.evaluateLiteral',
       span,
@@ -539,7 +536,7 @@ export const evaluatePrimitive = (
   operation: PrimitiveOperation,
   operands: ReadonlyArray<StaticValue.Value>,
   span: Location.Location,
-  trace: Trace = Object.freeze([]),
+  trace: Trace = [],
 ): Outcome<StaticValue.Value> => {
   const left = operands.at(0)
   const right = operands.at(1)
@@ -765,7 +762,7 @@ export const constructEnum = (
   representation: Scalar.EnumRepresentationSpelling,
   discriminant: bigint,
   span: Location.Location,
-  trace: Trace = Object.freeze([]),
+  trace: Trace = [],
 ): Outcome<StaticValue.Value> =>
   admittedValue(
     environment,
@@ -781,7 +778,7 @@ export const evaluateEnumEquality = (
   left: StaticValue.EnumValue,
   right: StaticValue.EnumValue,
   span: Location.Location,
-  trace: Trace = Object.freeze([]),
+  trace: Trace = [],
 ): Outcome<StaticValue.Value> => {
   if (left.type.module !== right.type.module || left.type.name !== right.type.name)
     return primitiveFailure(
@@ -815,7 +812,7 @@ export const staticTextByteLength = (
   environment: TargetEnvironment,
   text: StaticValue.TextValue,
   literal: Location.Location,
-  trace: Trace = Object.freeze([]),
+  trace: Trace = [],
 ): Outcome<StaticValue.Value> =>
   admittedValue(
     environment,
@@ -831,7 +828,7 @@ export const staticTextByteAt = (
   text: StaticValue.TextValue,
   byteOffset: bigint,
   literal: Location.Location,
-  trace: Trace = Object.freeze([]),
+  trace: Trace = [],
 ): Outcome<StaticValue.Value> => {
   if (byteOffset < 0n || byteOffset >= BigInt(text.bytes.length))
     return staticTextFailure(
@@ -858,13 +855,13 @@ export const staticTextConcat = (
   left: StaticValue.TextValue,
   right: StaticValue.TextValue,
   literal: Location.Location,
-  trace: Trace = Object.freeze([]),
+  trace: Trace = [],
 ): Outcome<StaticValue.Value> =>
   admittedValue(
     environment,
     {
       _tag: 'TextValue',
-      bytes: Object.freeze([...left.bytes, ...right.bytes]),
+      bytes: [...left.bytes, ...right.bytes],
       ...(left.origin === undefined && right.origin === undefined
         ? {}
         : { origin: concatTextOrigin(left.origin, left.bytes.length, right.origin) }),
@@ -881,7 +878,7 @@ export const staticTextSlice = (
   start: bigint,
   end: bigint,
   literal: Location.Location,
-  trace: Trace = Object.freeze([]),
+  trace: Trace = [],
 ): Outcome<StaticValue.Value> => {
   if (start < 0n || end < start || end > BigInt(text.bytes.length))
     return staticTextFailure(
@@ -911,7 +908,7 @@ export const constructAggregate = (
   identity: StaticValue.AggregateIdentity,
   fields: ReadonlyArray<StaticValue.AggregateField>,
   span: Location.Location,
-  trace: Trace = Object.freeze([]),
+  trace: Trace = [],
   runtimeFields?: ReadonlyArray<{
     readonly id: DeclarationFacts.FieldId
     readonly type: Type.Type
@@ -925,18 +922,14 @@ export const constructAggregate = (
     trace,
   )
   return outcome._tag === 'Complete' && outcome.value._tag === 'AggregateValue'
-    ? complete(
-        Object.freeze({
-          ...outcome.value,
-          ...(runtimeFields === undefined
-            ? {}
-            : {
-                runtimeFields: Object.freeze(
-                  runtimeFields.map((field) => Object.freeze({ ...field })),
-                ),
-              }),
-        }),
-      )
+    ? complete({
+        ...outcome.value,
+        ...(runtimeFields === undefined
+          ? {}
+          : {
+              runtimeFields: runtimeFields.map((field) => ({ ...field })),
+            }),
+      })
     : outcome
 }
 
@@ -946,19 +939,17 @@ export const profileFact = (
   operation: string,
   arguments_: ReadonlyArray<StaticValue.Value>,
   span: Location.Location,
-  trace: Trace = Object.freeze([]),
+  trace: Trace = [],
 ): Outcome<StaticValue.Value> | undefined => {
   const profile = environment.compilation
   const target = profile.target
   const text = (value: string): Outcome<StaticValue.Value> =>
-    complete(
-      Object.freeze({
-        _tag: 'TextValue',
-        bytes: Object.freeze([...new TextEncoder().encode(value)]),
-      }),
-    )
+    complete({
+      _tag: 'TextValue',
+      bytes: [...new TextEncoder().encode(value)],
+    })
   const integer = (value: number): Outcome<StaticValue.Value> =>
-    complete(Object.freeze({ _tag: 'IntegerValue', type: 'u32', value: BigInt(value) }))
+    complete({ _tag: 'IntegerValue', type: 'u32', value: BigInt(value) })
   switch (operation) {
     case 'targetArchitecture':
       return text(target.architecture)
@@ -1142,7 +1133,7 @@ const evaluateAll = (
     if (evaluated._tag !== 'Complete') return evaluated
     values.push(evaluated.value)
   }
-  return complete(Object.freeze(values))
+  return complete(values)
 }
 
 const typeArgumentAt = (
@@ -1340,7 +1331,7 @@ const bindPattern = (
       )
     values.set(tirLocalKey(binding.id), value)
   }
-  return complete(Object.freeze({ ...context, values }))
+  return complete({ ...context, values })
 }
 
 /** Evaluates a node at a static application boundary, where no lexical transfer may escape. */
@@ -1389,10 +1380,10 @@ const runtimeFieldsOf = (
   return fields.flatMap((field) =>
     field.declaredType._tag === 'Resolved'
       ? [
-          Object.freeze({
+          {
             id: field.id,
             type: Type.substitute(field.declaredType.type, substitution),
-          }),
+          },
         ]
       : [],
   )
@@ -1449,27 +1440,26 @@ const evaluateIntrinsic = (
     if (entry === undefined)
       return unavailable(node, context, 'testInfo received a descriptor outside this catalog')
     const info = entry.info
-    const text = (value: string): StaticValue.TextValue =>
-      Object.freeze({
-        _tag: 'TextValue',
-        bytes: Object.freeze(Array.from(new TextEncoder().encode(value))),
-      })
-    const values: ReadonlyArray<StaticValue.Value> = Object.freeze([
+    const text = (value: string): StaticValue.TextValue => ({
+      _tag: 'TextValue',
+      bytes: Array.from(new TextEncoder().encode(value)),
+    })
+    const values: ReadonlyArray<StaticValue.Value> = [
       text(info.identity),
       text(info.name),
       text(info.module),
       text(info.path),
-      Object.freeze({ _tag: 'IntegerValue', type: 'usize', value: BigInt(info.line) }),
-      Object.freeze({ _tag: 'IntegerValue', type: 'usize', value: BigInt(info.column) }),
+      { _tag: 'IntegerValue', type: 'usize', value: BigInt(info.line) },
+      { _tag: 'IntegerValue', type: 'usize', value: BigInt(info.column) },
       text(info.fingerprint),
-    ])
+    ]
     const ordinal = Type.intrinsicNominalOrdinal(Type.testInfo)
-    const declaration: DeclarationFacts.DeclarationId = Object.freeze({
+    const declaration: DeclarationFacts.DeclarationId = {
       _tag: 'DeclarationId',
       sourceId: 'Intrinsic',
       ordinal,
-    })
-    const fieldTypes: ReadonlyArray<Type.Type> = Object.freeze([
+    }
+    const fieldTypes: ReadonlyArray<Type.Type> = [
       Type.string(Lifetime.staticLifetime),
       Type.string(Lifetime.staticLifetime),
       Type.string(Lifetime.staticLifetime),
@@ -1477,7 +1467,7 @@ const evaluateIntrinsic = (
       'usize',
       'usize',
       Type.string(Lifetime.staticLifetime),
-    ])
+    ]
     return admittedValue(
       context.environment,
       {
@@ -1635,7 +1625,7 @@ const evaluateIntrinsic = (
       if (origin !== undefined) context.expressionOrigins.set(node, origin)
       context.expressionSpans.set(node, literal)
       if (origin !== undefined && concatenated.value._tag === 'TextValue')
-        return complete(Object.freeze({ ...concatenated.value, origin }))
+        return complete({ ...concatenated.value, origin })
     }
     return concatenated
   }
@@ -1663,7 +1653,7 @@ const evaluateIntrinsic = (
       if (slicedOrigin !== undefined) context.expressionOrigins.set(node, slicedOrigin)
       context.expressionSpans.set(node, literal)
       if (slicedOrigin !== undefined && sliced.value._tag === 'TextValue')
-        return complete(Object.freeze({ ...sliced.value, origin: slicedOrigin }))
+        return complete({ ...sliced.value, origin: slicedOrigin })
     }
     return sliced
   }
@@ -1735,7 +1725,7 @@ const evaluateExpression = (
       for (const field of node.fields) {
         const value = evaluateExpression(field.value, context)
         if (value._tag !== 'Complete') return value
-        fields.push(Object.freeze({ ordinal: field.field.ordinal, value: value.value }))
+        fields.push({ ordinal: field.field.ordinal, value: value.value })
       }
       fields.sort((left, right) => left.ordinal - right.ordinal)
       const declaration = context.lookup({
@@ -1745,19 +1735,19 @@ const evaluateExpression = (
       })
       const identity = {
         _tag: 'NominalAggregateIdentity' as const,
-        declaration: Object.freeze({
+        declaration: {
           _tag: 'CanonicalDeclarationId' as const,
           module: node.nominal.module,
           name: node.nominal.name,
-        }),
-        typeArguments: Object.freeze(node.nominal.arguments.map(Type.genericArgumentKey)),
+        },
+        typeArguments: node.nominal.arguments.map(Type.genericArgumentKey),
       }
       if (node._tag === 'Construct') {
         if (declaration?._tag !== 'StructDeclaration')
           return unavailable(node, context, 'struct value is unavailable')
         return constructAggregate(
           context.environment,
-          Object.freeze(identity),
+          identity,
           fields,
           at(node),
           context.trace,
@@ -1772,10 +1762,10 @@ const evaluateExpression = (
         return unavailable(node, context, 'union value is unavailable')
       return constructAggregate(
         context.environment,
-        Object.freeze({
+        {
           ...identity,
-          variant: Object.freeze({ ordinal: node.variantOrdinal, name: node.variant.name }),
-        }),
+          variant: { ordinal: node.variantOrdinal, name: node.variant.name },
+        },
         fields,
         at(node),
         context.trace,
@@ -1787,15 +1777,15 @@ const evaluateExpression = (
       for (const [ordinal, element] of node.elements.entries()) {
         const value = evaluateExpression(element, context)
         if (value._tag !== 'Complete') return value
-        fields.push(Object.freeze({ ordinal, value: value.value }))
+        fields.push({ ordinal, value: value.value })
       }
       return constructAggregate(
         context.environment,
-        Object.freeze({
+        {
           _tag: 'ArrayAggregateIdentity',
           element: Type.key(node.type.element),
           length: node.type.length,
-        }),
+        },
         fields,
         at(node),
         context.trace,
@@ -1837,7 +1827,7 @@ const evaluateExpression = (
         return unavailable(node, context, 'identifier depends on runtime storage')
       const origin = staticTextOrigin(node, context)
       return value._tag === 'TextValue' && origin !== undefined
-        ? complete(Object.freeze({ ...value, origin }))
+        ? complete({ ...value, origin })
         : complete(value)
     }
     case 'EnumMember': {
@@ -1900,27 +1890,23 @@ const evaluateExpression = (
       const called = context.call(
         declaration,
         arguments_.value,
-        Object.freeze(node.arguments.map((argument) => staticTextSpan(argument, context))),
-        Object.freeze(
-          node.arguments.map((argument, ordinal) => {
-            const value = arguments_.value.at(ordinal)
-            return (
-              staticTextOrigin(argument, context) ??
-              (value?._tag === 'TextValue' ? value.origin : undefined)
-            )
-          }),
-        ),
+        node.arguments.map((argument) => staticTextSpan(argument, context)),
+        node.arguments.map((argument, ordinal) => {
+          const value = arguments_.value.at(ordinal)
+          return (
+            staticTextOrigin(argument, context) ??
+            (value?._tag === 'TextValue' ? value.origin : undefined)
+          )
+        }),
         at(node),
         context.trace,
-        Object.freeze({
-          typeArguments: Object.freeze(
-            node.typeArguments.map((argument) =>
-              Type.substituteGenericArgument(argument, context.typeSubstitution ?? new Map()),
-            ),
+        {
+          typeArguments: node.typeArguments.map((argument) =>
+            Type.substituteGenericArgument(argument, context.typeSubstitution ?? new Map()),
           ),
           evidence: node.evidence,
-          contractRow: Object.freeze([]),
-        }),
+          contractRow: [],
+        },
         context.lookup,
       )
       if (called.textSpan !== undefined) context.expressionSpans.set(node, called.textSpan)
@@ -2061,12 +2047,12 @@ const evaluateStatementSequence = (
     context.valueSpans instanceof Map ? context.valueSpans : new Map(context.valueSpans)
   const valueOrigins =
     context.valueOrigins instanceof Map ? context.valueOrigins : new Map(context.valueOrigins)
-  const contextual: NodeContext = Object.freeze({
+  const contextual: NodeContext = {
     ...context,
     values,
     valueSpans,
     valueOrigins,
-  })
+  }
   const remember = (key: string, source: Tir.Expression): void => {
     const span = staticTextSpan(source, contextual)
     if (span === undefined) valueSpans.delete(key)
@@ -2114,11 +2100,11 @@ const evaluateStatementSequence = (
           context.returnedTextSpan.value = staticTextSpan(statement.expression, contextual)
         if (context.returnedTextOrigin !== undefined)
           context.returnedTextOrigin.value = staticTextOrigin(statement.expression, contextual)
-        return Object.freeze({
+        return {
           _tag: 'Transfer',
           span: at(statement),
-          control: Object.freeze({ _tag: 'Return', value: value.value }),
-        })
+          control: { _tag: 'Return', value: value.value },
+        }
       }
       case 'If': {
         const condition = evaluateExpression(statement.condition, contextual)
@@ -2177,11 +2163,11 @@ const evaluateStatementSequence = (
       }
       case 'Break':
       case 'Continue':
-        return Object.freeze({
+        return {
           _tag: 'Transfer',
           span: at(statement),
-          control: Object.freeze({ _tag: statement._tag, target: statement.target }),
-        })
+          control: { _tag: statement._tag, target: statement.target },
+        }
       default:
         return failed(
           phaseViolation(
@@ -2232,25 +2218,26 @@ interface MutableBudget {
   failure?: StaticFailure
 }
 
-const budgetSnapshot = (budget: MutableBudget): Budget =>
-  Object.freeze({
-    steps: budget.steps,
-    callDepth: budget.callDepth,
-    maximumCallDepth: budget.maximumCallDepth,
-    retainedValueBytes: budget.retainedValueBytes,
-    residualNodes: budget.residualNodes,
-  })
+const budgetSnapshot = (budget: MutableBudget): Budget => ({
+  steps: budget.steps,
+  callDepth: budget.callDepth,
+  maximumCallDepth: budget.maximumCallDepth,
+  retainedValueBytes: budget.retainedValueBytes,
+  residualNodes: budget.residualNodes,
+})
 
 export type Outcome<A> =
   | { readonly _tag: 'Complete'; readonly value: A }
   | { readonly _tag: 'Failed'; readonly failure: StaticFailure }
 
 /** Completes one callback evaluation with immutable deterministic output supplied by the caller. */
-export const complete = <A>(value: A): Outcome<A> => Object.freeze({ _tag: 'Complete', value })
+export const complete = <A>(value: A): Outcome<A> => ({ _tag: 'Complete', value })
 
 /** Stops one callback evaluation without a partial value or residual body. */
-export const failed = <A = never>(failure: StaticFailure): Outcome<A> =>
-  Object.freeze({ _tag: 'Failed', failure })
+export const failed = <A = never>(failure: StaticFailure): Outcome<A> => ({
+  _tag: 'Failed',
+  failure,
+})
 
 /** The explicit state of one target-and-application cache entry. */
 export type CacheState<A> = Pending | Complete<A> | Failed
@@ -2310,34 +2297,31 @@ export const make = <A>(
   policy: Limits = defaultLimits,
   sourceIdentity = '',
   trace: CompilerTrace.CompilerTrace = CompilerTrace.none,
-): Evaluation<A> =>
-  Object.freeze({
-    _tag: 'Evaluation',
-    environment: targetEnvironment(compilation, sourceIdentity),
-    limits: limits(policy),
-    [stateSymbol]: {
-      cache: new Map(),
-      trace,
-      budget: {
-        steps: 0,
-        callDepth: 0,
-        maximumCallDepth: 0,
-        retainedValueBytes: 0,
-        residualNodes: 0,
-      },
+): Evaluation<A> => ({
+  _tag: 'Evaluation',
+  environment: targetEnvironment(compilation, sourceIdentity),
+  limits: limits(policy),
+  [stateSymbol]: {
+    cache: new Map(),
+    trace,
+    budget: {
+      steps: 0,
+      callDepth: 0,
+      maximumCallDepth: 0,
+      retainedValueBytes: 0,
+      residualNodes: 0,
     },
-  })
+  },
+})
 
 /** Returns a frozen observation of deterministic session accounting. */
 export const budget = <A>(self: Evaluation<A>): Budget => budgetSnapshot(self[stateSymbol].budget)
 
 /** Returns cache states in canonical key order without exposing the mutable cache map. */
 export const cacheEntries = <A>(self: Evaluation<A>): ReadonlyArray<CacheEntry<A>> =>
-  Object.freeze(
-    [...self[stateSymbol].cache]
-      .sort(([left], [right]) => left.localeCompare(right))
-      .map(([key, state]) => Object.freeze({ key, state })),
-  )
+  [...self[stateSymbol].cache]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([key, state]) => ({ key, state }))
 
 /** Normalized policy identity required for cross-revision evaluation admission. */
 export const policyKey = <A>(self: Evaluation<A>): string =>
@@ -2351,7 +2335,7 @@ export const policyKey = <A>(self: Evaluation<A>): string =>
 /** Returns one completed cache entry without exposing the mutable cache. */
 export const cacheEntry = <A>(self: Evaluation<A>, key: string): CacheEntry<A> | undefined => {
   const state = self[stateSymbol].cache.get(key)
-  return state === undefined || state._tag === 'Pending' ? undefined : Object.freeze({ key, state })
+  return state === undefined || state._tag === 'Pending' ? undefined : { key, state }
 }
 
 /** Canonical target-and-application identity used only inside static-evaluation coordination. */
@@ -2370,14 +2354,13 @@ export const applicationKey = (environment: TargetEnvironment, application: Appl
 const applicationFrame = (
   environment: TargetEnvironment,
   application: Application,
-): ApplicationFrame =>
-  Object.freeze({
-    _tag: 'StaticApplicationFrame',
-    declaration: Object.freeze({ ...application.declaration }),
-    target: environment.target,
-    staticArguments: Object.freeze(application.staticArguments.map(StaticValue.presentation)),
-    span: application.span,
-  })
+): ApplicationFrame => ({
+  _tag: 'StaticApplicationFrame',
+  declaration: { ...application.declaration },
+  target: environment.target,
+  staticArguments: application.staticArguments.map(StaticValue.presentation),
+  span: application.span,
+})
 
 type LimitTag = 'StepLimit' | 'CallDepthLimit' | 'RetainedValueLimit' | 'ResidualGrowthLimit'
 
@@ -2393,7 +2376,7 @@ const limitFailure = (
   const lastFrame = trace.at(-1)
   const span = lastFrame === undefined ? undefined : frameSpan(lastFrame)
   if (span === undefined) throw new RangeError('Static limit failure lost its source trace')
-  return Object.freeze({ _tag: tag, limit, attempted, span, trace: frozenTrace(trace) })
+  return { _tag: tag, limit, attempted, span, trace: frozenTrace(trace) }
 }
 
 const charge = <A>(
@@ -2481,50 +2464,49 @@ const resultOf = <A>(
   cached: boolean,
 ): ApplicationResult<A> =>
   state._tag === 'Complete'
-    ? Object.freeze({
+    ? {
         _tag: 'Complete',
         key,
         cached,
         value: state.value,
         budget: budget(self),
-      })
-    : Object.freeze({
+      }
+    : {
         _tag: 'Failed',
         key,
         cached,
         failure: state.failure,
         budget: budget(self),
-      })
+      }
 
 const contextOf = <A>(
   self: Evaluation<A>,
   application: Application,
   trace: Trace,
-): EvaluationContext<A> =>
-  Object.freeze({
-    application,
-    environment: self.environment,
-    limits: self.limits,
-    trace,
-    budget: () => budget(self),
-    step: (amount = 1) => charge(self, 'steps', amount, 'StepLimit', trace),
-    stepAt: (at: Trace, amount = 1) => charge(self, 'steps', amount, 'StepLimit', at),
-    retain: (value: StaticValue.Value) =>
-      charge(
-        self,
-        'retainedValueBytes',
-        StaticValue.retainedSize(value),
-        'RetainedValueLimit',
-        trace,
-      ),
-    growResidual: (nodes = 1) => charge(self, 'residualNodes', nodes, 'ResidualGrowthLimit', trace),
-    growResidualAt: (at: Trace, nodes = 1) =>
-      charge(self, 'residualNodes', nodes, 'ResidualGrowthLimit', at),
-    withTrace: (...frames: ReadonlyArray<TraceFrame>) =>
-      contextOf(self, application, appendTrace(trace, ...frames)),
-    evaluate: (nested: Application, callback: EvaluationCallback<A>) =>
-      evaluateAt(self, nested, callback, trace),
-  })
+): EvaluationContext<A> => ({
+  application,
+  environment: self.environment,
+  limits: self.limits,
+  trace,
+  budget: () => budget(self),
+  step: (amount = 1) => charge(self, 'steps', amount, 'StepLimit', trace),
+  stepAt: (at: Trace, amount = 1) => charge(self, 'steps', amount, 'StepLimit', at),
+  retain: (value: StaticValue.Value) =>
+    charge(
+      self,
+      'retainedValueBytes',
+      StaticValue.retainedSize(value),
+      'RetainedValueLimit',
+      trace,
+    ),
+  growResidual: (nodes = 1) => charge(self, 'residualNodes', nodes, 'ResidualGrowthLimit', trace),
+  growResidualAt: (at: Trace, nodes = 1) =>
+    charge(self, 'residualNodes', nodes, 'ResidualGrowthLimit', at),
+  withTrace: (...frames: ReadonlyArray<TraceFrame>) =>
+    contextOf(self, application, appendTrace(trace, ...frames)),
+  evaluate: (nested: Application, callback: EvaluationCallback<A>) =>
+    evaluateAt(self, nested, callback, trace),
+})
 
 const isLimit = (failure: StaticFailure): boolean =>
   failure._tag === 'StepLimit' ||
@@ -2587,19 +2569,19 @@ const evaluateAt = <A>(
         const unpaid = cached.cost === undefined ? undefined : chargeCost(self, cached.cost, trace)
         return unpaid === undefined
           ? resultOf(self, key, cached, true)
-          : resultOf(self, key, Object.freeze({ _tag: 'Failed', failure: unpaid }), false)
+          : resultOf(self, key, { _tag: 'Failed', failure: unpaid }, false)
       }
       if (cached?._tag === 'Pending') {
-        const failure: Cycle = Object.freeze({
+        const failure: Cycle = {
           _tag: 'Cycle',
-          declaration: Object.freeze({ ...application.declaration }),
+          declaration: { ...application.declaration },
           span: application.span,
           trace: frozenTrace(trace),
-        })
-        return resultOf(self, key, Object.freeze({ _tag: 'Failed', failure }), false)
+        }
+        return resultOf(self, key, { _tag: 'Failed', failure }, false)
       }
 
-      state.cache.set(key, Object.freeze({ _tag: 'Pending', trace }))
+      state.cache.set(key, { _tag: 'Pending', trace })
       const before = { ...state.budget }
       const depthFailure = enterCall(self, trace)
       let outcome: Outcome<A>
@@ -2617,20 +2599,20 @@ const evaluateAt = <A>(
       } else outcome = failed<A>(depthFailure)
       const finalOutcome =
         state.budget.failure === undefined ? outcome : failed<A>(state.budget.failure)
-      const cost: Cost = Object.freeze({
+      const cost: Cost = {
         steps: state.budget.steps - before.steps,
         callDepth: state.budget.maximumCallDepth - before.callDepth,
         retainedValueBytes: state.budget.retainedValueBytes - before.retainedValueBytes,
         residualNodes: state.budget.residualNodes - before.residualNodes,
-      })
+      }
       state.budget.maximumCallDepth = Math.max(
         before.maximumCallDepth,
         state.budget.maximumCallDepth,
       )
       const completedState: Complete<A> | Failed =
         finalOutcome._tag === 'Complete'
-          ? Object.freeze({ _tag: 'Complete', value: finalOutcome.value, cost })
-          : Object.freeze({ _tag: 'Failed', failure: finalOutcome.failure, cost })
+          ? { _tag: 'Complete', value: finalOutcome.value, cost }
+          : { _tag: 'Failed', failure: finalOutcome.failure, cost }
       // Running out of a remainder is a fact about what the callers spent, not about this evaluation:
       // nothing is recorded under its key, and the exhaustion surfaces as the root's outcome. A root
       // that exhausts the whole allowance is a fact about its key, which includes the limits.
@@ -2653,7 +2635,7 @@ export const evaluate = <A>(
   self: Evaluation<A>,
   application: Application,
   callback: EvaluationCallback<A>,
-): ApplicationResult<A> => evaluateAt(self, application, callback, Object.freeze([]))
+): ApplicationResult<A> => evaluateAt(self, application, callback, [])
 
 /** Evaluates a nested canonical application while retaining its source-level parent trace. */
 export const evaluateFrom = <A>(
@@ -2668,7 +2650,7 @@ export const admit = <A>(
   self: Evaluation<A>,
   application: Application,
   entry: CacheEntry<A>,
-  parentTrace: Trace = Object.freeze([]),
+  parentTrace: Trace = [],
 ): ApplicationResult<A> => {
   const key = applicationKey(self.environment, application)
   if (entry.key !== key || entry.state._tag === 'Pending')

@@ -59,5 +59,5 @@ export const compile = Effect.fn('HelperSource.compile')(function* (
     support: true,
   }).pipe(Effect.mapError((failure) => invalid(failure.message)))
   yield* HelperCapability.verifyExports(provider, artifact.foreignExports, profile.target)
-  return Object.freeze({ artifact, profile: snapshot.profile })
+  return { artifact, profile: snapshot.profile }
 })

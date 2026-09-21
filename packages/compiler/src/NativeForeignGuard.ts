@@ -56,13 +56,13 @@ export const make = Effect.fn('NativeForeignGuard.make')(function* (
       yield* FunctionBody.unreachable(body)
     }),
   )
-  return Object.freeze({
+  return {
     personality: yield* Constant.fromGlobal(
       builder,
       yield* FunctionActor.global(builder, personality),
     ),
     trap,
-  })
+  }
 })
 
 /** Wraps one foreign symbol in a non-inlined frame with an enforced fatal unwind path. */

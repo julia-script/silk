@@ -80,7 +80,7 @@ export interface Input {
   readonly previous?: Project
 }
 
-const reasonOrder: ReadonlyArray<Reason> = Object.freeze([
+const reasonOrder: ReadonlyArray<Reason> = [
   'Fresh',
   'EnvironmentChange',
   'LocalChange',
@@ -90,7 +90,7 @@ const reasonOrder: ReadonlyArray<Reason> = Object.freeze([
   'DependencySurfaceChange',
   'CyclicPeerChange',
   'SurfaceChange',
-])
+]
 
 const compareName = (left: string, right: string): number => {
   if (left < right) {
@@ -116,15 +116,13 @@ const importInput = (module: ModuleClosure.Module): string =>
     .join('')
 
 const resolvedTargets = (module: ModuleClosure.Module): ReadonlyArray<string> =>
-  Object.freeze(
-    [
-      ...new Set(
-        module.imports.flatMap((fact) =>
-          fact.target._tag === 'Resolved' ? [fact.target.module] : [],
-        ),
+  [
+    ...new Set(
+      module.imports.flatMap((fact) =>
+        fact.target._tag === 'Resolved' ? [fact.target.module] : [],
       ),
-    ].sort(compareName),
-  )
+    ),
+  ].sort(compareName)
 
 interface Graph {
   readonly names: ReadonlyArray<string>
@@ -132,37 +130,35 @@ interface Graph {
 }
 
 const graph = (closure: ModuleClosure.ProjectClosure): Graph => {
-  const names = Object.freeze(closure.modules.map((module) => module.name).sort(compareName))
+  const names = closure.modules.map((module) => module.name).sort(compareName)
   const current = new Set(names)
-  return Object.freeze({
+  return {
     names,
     edges: new Map(
       closure.modules.map((module) => [
         module.name,
-        Object.freeze(resolvedTargets(module).filter((target) => current.has(target))),
+        resolvedTargets(module).filter((target) => current.has(target)),
       ]),
     ),
-  })
+  }
 }
 
 const unionGraph = (current: Graph, previous: Graph | undefined): Graph => {
   const currentNames = new Set(current.names)
-  return Object.freeze({
+  return {
     names: current.names,
     edges: new Map(
       current.names.map((name) => [
         name,
-        Object.freeze(
-          [
-            ...new Set([
-              ...(current.edges.get(name) ?? []),
-              ...(previous?.edges.get(name) ?? []).filter((target) => currentNames.has(target)),
-            ]),
-          ].sort(compareName),
-        ),
+        [
+          ...new Set([
+            ...(current.edges.get(name) ?? []),
+            ...(previous?.edges.get(name) ?? []).filter((target) => currentNames.has(target)),
+          ]),
+        ].sort(compareName),
       ]),
     ),
-  })
+  }
 }
 
 interface Components {
@@ -171,22 +167,17 @@ interface Components {
 }
 
 const components = (input: Graph): Components => {
-  const values = Object.freeze(
-    [
-      ...StronglyConnectedGraph.stronglyConnected(
-        input.names,
-        (name) => input.edges.get(name) ?? [],
-      ),
-    ]
-      .map((members) => Object.freeze([...members].sort(compareName)))
-      .sort((left, right) => compareName(left.at(0) ?? '', right.at(0) ?? '')),
-  )
-  return Object.freeze({
+  const values = [
+    ...StronglyConnectedGraph.stronglyConnected(input.names, (name) => input.edges.get(name) ?? []),
+  ]
+    .map((members) => [...members].sort(compareName))
+    .sort((left, right) => compareName(left.at(0) ?? '', right.at(0) ?? ''))
+  return {
     values,
     ofModule: new Map(
       values.flatMap((members, component) => members.map((name) => [name, component] as const)),
     ),
-  })
+  }
 }
 
 const modulesByName = (
@@ -252,7 +243,7 @@ const opaqueChanges = (
     target ||= currentDefinition?.targetFingerprint !== previousDefinition?.targetFingerprint
     layout ||= currentDefinition?.layoutFingerprint !== previousDefinition?.layoutFingerprint
   }
-  return Object.freeze({ body, target, layout })
+  return { body, target, layout }
 }
 
 /**
@@ -368,20 +359,17 @@ export const make = (input: Input): SemanticInvalidation => {
     }
   }
 
-  const observations = Object.freeze(
-    currentGraph.names.map((module): Observation => {
-      const found = reasons.get(module)
-      const changed = surfaceChanged(module, input.current, input.previous)
-      if (found === undefined)
-        return Object.freeze({ _tag: 'Reusable', module, surfaceChanged: false })
-      return Object.freeze({
-        _tag: 'Recomputed',
-        module,
-        reasons: Object.freeze(reasonOrder.filter((reason) => found.has(reason))),
-        surfaceChanged: changed,
-      })
-    }),
-  )
+  const observations = currentGraph.names.map((module): Observation => {
+    const found = reasons.get(module)
+    const changed = surfaceChanged(module, input.current, input.previous)
+    if (found === undefined) return { _tag: 'Reusable', module, surfaceChanged: false }
+    return {
+      _tag: 'Recomputed',
+      module,
+      reasons: reasonOrder.filter((reason) => found.has(reason)),
+      surfaceChanged: changed,
+    }
+  })
   const reasonCounts = emptyReasonCounts()
   let recomputed = 0
   for (const observation of observations) {
@@ -389,17 +377,17 @@ export const make = (input: Input): SemanticInvalidation => {
     recomputed += 1
     for (const reason of observation.reasons) reasonCounts[reason] += 1
   }
-  const frozenReasons = Object.freeze({ ...reasonCounts })
-  return Object.freeze({
+  const frozenReasons = { ...reasonCounts }
+  return {
     _tag: 'SemanticInvalidation',
     observations,
-    totals: Object.freeze({
+    totals: {
       modules: observations.length,
       reusable: observations.length - recomputed,
       recomputed,
       reasons: frozenReasons,
-    }),
-  })
+    },
+  }
 }
 
 /** Look up one current module's observation. */

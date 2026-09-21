@@ -28,7 +28,7 @@ export const buildConstantAdapter = (
     if (index === undefined) throw new Error('local constant index is missing')
     return order.entries.length + index
   }
-  return { local: Object.freeze(local), localIndex, valueIndex }
+  return { local: local, localIndex, valueIndex }
 }
 
 /** @internal */
@@ -62,18 +62,18 @@ const integerRecordValues = (
     const signedLimb = (limb & (1n << 63n)) === 0n ? limb : limb - (1n << 64n)
     limbs.push(signedLimb >= 0n ? signedLimb << 1n : (-signedLimb << 1n) | 1n)
   }
-  return { narrow: undefined, wide: Object.freeze(limbs) }
+  return { narrow: undefined, wide: limbs }
 }
 
-const castOpcode: Readonly<Record<string, number>> = Object.freeze({
+const castOpcode: Readonly<Record<string, number>> = {
   trunc: 0,
   ptrtoint: 9,
   inttoptr: 10,
   bitcast: 11,
   addrspacecast: 12,
-})
+}
 
-const binaryOpcode: Readonly<Record<string, number>> = Object.freeze({
+const binaryOpcode: Readonly<Record<string, number>> = {
   add: 0,
   'add nsw': 0,
   'add nuw': 0,
@@ -82,7 +82,7 @@ const binaryOpcode: Readonly<Record<string, number>> = Object.freeze({
   'sub nuw': 1,
   shl: 7,
   xor: 12,
-})
+}
 
 /** @internal */
 export const writeConstants = (

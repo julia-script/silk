@@ -46,7 +46,7 @@ export const attachMetadata = Effect.fnUntraced(function* (
         )
       }
       const next = attachments.filter((attachment) => attachment.kind !== kind)
-      next.push(Object.freeze({ kind, metadata: metadataIndex }))
+      next.push({ kind, metadata: metadataIndex })
       draft.metadata[instructionIndex] = next
     }),
   )

@@ -127,7 +127,7 @@ export const flag = Effect.fnUntraced(function* (
   name: ByteString.ByteString | Uint8Array | string,
 ): Effect.fn.Return<Attribute, LlvmError> {
   const value = yield* validateName(name, 'Attribute.flag')
-  return yield* intern(builder, Object.freeze({ _tag: 'Flag', name: value }))
+  return yield* intern(builder, { _tag: 'Flag', name: value })
 })
 
 /**
@@ -150,10 +150,7 @@ export const integer = Effect.fnUntraced(function* (
       maximum: 0xffff_ffff_ffff_ffffn,
     }),
   )
-  return yield* intern(
-    builder,
-    Object.freeze({ _tag: 'Integer', name: attributeName, value: exact }),
-  )
+  return yield* intern(builder, { _tag: 'Integer', name: attributeName, value: exact })
 })
 
 /**
@@ -173,10 +170,7 @@ export const typeAttribute = Effect.fnUntraced(function* (
     'Attribute.typeAttribute',
     (_state, owner) => Handle.resolve(builder, owner, type, 'Type', 'Attribute.typeAttribute'),
   )
-  return yield* intern(
-    builder,
-    Object.freeze({ _tag: 'Type', name: attributeName, type: typeIndex }),
-  )
+  return yield* intern(builder, { _tag: 'Type', name: attributeName, type: typeIndex })
 })
 
 /**
@@ -191,10 +185,11 @@ export const string = Effect.fnUntraced(function* (
   value: ByteString.ByteString | Uint8Array | string = ByteString.empty,
 ): Effect.fn.Return<Attribute, LlvmError> {
   const attributeName = yield* validateName(name, 'Attribute.string')
-  return yield* intern(
-    builder,
-    Object.freeze({ _tag: 'String', name: attributeName, value: ByteString.coerce(value) }),
-  )
+  return yield* intern(builder, {
+    _tag: 'String',
+    name: attributeName,
+    value: ByteString.coerce(value),
+  })
 })
 
 /**
@@ -217,10 +212,7 @@ export const integerList = Effect.fnUntraced(function* (
       maximum: 0xffff_ffff_ffff_ffffn,
     }),
   )
-  return yield* intern(
-    builder,
-    Object.freeze({ _tag: 'IntegerList', name: attributeName, values: exact }),
-  )
+  return yield* intern(builder, { _tag: 'IntegerList', name: attributeName, values: exact })
 })
 
 /** @internal */
@@ -261,7 +253,7 @@ const internSet = Effect.fnUntraced(function* (
         }
         names.set(name, index)
       }
-      const values = Object.freeze(ordered)
+      const values = ordered
       const key = CanonicalKey.sequence(values.map(CanonicalKey.integer))
       const interned = yield* Table.intern(
         state.attributeSets,
@@ -316,7 +308,7 @@ export const set = Effect.fnUntraced(function* (
       for (const attribute of attributes) {
         indices.push(yield* Handle.resolve(builder, owner, attribute, 'Attribute', 'Attribute.set'))
       }
-      return Object.freeze(indices)
+      return indices
     }),
   )
   return yield* internSet(builder, values)
@@ -353,7 +345,7 @@ export const add = Effect.fnUntraced(function* (
           }),
         )
       }
-      return Object.freeze([...existing, attributeIndex])
+      return [...existing, attributeIndex]
     }),
   )
   return yield* internSet(builder, values)
@@ -396,7 +388,7 @@ export const remove = Effect.fnUntraced(function* (
           }),
         )
       }
-      return Object.freeze(existing.filter((index) => index !== attributeIndex))
+      return existing.filter((index) => index !== attributeIndex)
     }),
   )
   return yield* internSet(builder, values)
@@ -431,7 +423,7 @@ export const entries = Effect.fnUntraced(function* (
           yield* Table.handleAt(state.attributes, value, 'Attribute.entries', 'Attribute'),
         )
       }
-      return Object.freeze(entries)
+      return entries
     }),
   )
 })
@@ -478,12 +470,12 @@ export const functionSet = Effect.fnUntraced(function* (
           ),
         )
       }
-      const parameterIndices = Object.freeze(mutableParameterIndices)
-      const description = Object.freeze({
+      const parameterIndices = mutableParameterIndices
+      const description = {
         functionAttributes: functionIndex,
         returnAttributes: returnIndex,
         parameterAttributes: parameterIndices,
-      })
+      }
       const key = CanonicalKey.tagged('function-attributes', [
         CanonicalKey.integer(functionIndex),
         CanonicalKey.integer(returnIndex),
@@ -548,13 +540,11 @@ export const functionSetEntries = Effect.fnUntraced(function* (
           }),
         )
       }
-      return Object.freeze({
+      return {
         functionAttributes,
         returnAttributes,
-        parameterAttributes: Object.freeze(
-          parameterAttributes.flatMap((set) => (set === undefined ? [] : [set])),
-        ),
-      })
+        parameterAttributes: parameterAttributes.flatMap((set) => (set === undefined ? [] : [set])),
+      }
     }),
   )
 })

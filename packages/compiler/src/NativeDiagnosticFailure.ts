@@ -49,12 +49,12 @@ export const unpack = Effect.fnUntraced(function* (
       `diagnostic_failure${ordinal}`,
     )
   })
-  return Object.freeze({
+  return {
     observer: yield* field(0),
     handle: yield* field(1),
-    identity: Object.freeze([yield* field(2), yield* field(3)] as const),
-    origin: Object.freeze([yield* field(4), yield* field(5)] as const),
-  })
+    identity: [yield* field(2), yield* field(3)] as const,
+    origin: [yield* field(4), yield* field(5)] as const,
+  }
 })
 
 /** Produces one optional source context; identity and origin survive a refused allocation. */
@@ -74,14 +74,14 @@ export const produce = Effect.fnUntraced(function* (
     identity,
     origin,
   )
-  return Object.freeze({ observer, handle, identity, origin })
+  return { observer, handle, identity, origin }
 })
 
 const emptyText = Effect.fnUntraced(function* (context: Context) {
-  return Object.freeze([
+  return [
     yield* Constant.nullValue(context.builder, context.pointer),
     yield* Constant.integerUnsigned(context.builder, context.word, 0n),
-  ] as const)
+  ] as const
 })
 
 /** Returns another owned reference while preserving the borrowed input and fallback metadata. */
@@ -99,7 +99,7 @@ export const retain = Effect.fnUntraced(function* (
     text,
     text,
   )
-  return Object.freeze({ ...self, handle })
+  return { ...self, handle }
 })
 
 /** Consumes exactly one reference through its originating observer, including a zero handle. */
@@ -127,7 +127,7 @@ export const propagate = Effect.fnUntraced(function* (
     frame,
     text,
   )
-  return Object.freeze({ ...self, handle })
+  return { ...self, handle }
 })
 
 /** Combines borrowed contexts from one observer without consuming either input. */
@@ -166,7 +166,7 @@ export const withCause = Effect.fnUntraced(function* (
     text,
     text,
   )
-  return Object.freeze({ ...self, handle })
+  return { ...self, handle }
 })
 
 /** Observes a borrowed selected failure after payload cleanup; the caller still owns its handle. */

@@ -55,20 +55,21 @@ export type CoverageIdentity =
     }
 
 /** Creates the coverage identity for one structural type member. */
-export const structuralMember = (type: Type.Type): CoverageIdentity =>
-  Object.freeze({ _tag: 'StructuralTypeMember', type })
+export const structuralMember = (type: Type.Type): CoverageIdentity => ({
+  _tag: 'StructuralTypeMember',
+  type,
+})
 
 /** Creates the coverage identity for one declared scalar enum member. */
 export const enumMember = (
   enum_: DeclarationFacts.CanonicalId,
   member: DeclarationFacts.CanonicalEnumMemberId,
-): CoverageIdentity =>
-  Object.freeze({
-    _tag: 'EnumMember',
-    enum: enum_,
-    member,
-    type: Type.nominal(enum_.module, enum_.name),
-  })
+): CoverageIdentity => ({
+  _tag: 'EnumMember',
+  enum: enum_,
+  member,
+  type: Type.nominal(enum_.module, enum_.name),
+})
 
 /** Creates one leaf selection beneath a nominal-union parent and optional structural root. */
 export const nominalUnionVariant = (
@@ -76,8 +77,7 @@ export const nominalUnionVariant = (
   type: Type.Nominal,
   variant: DeclarationFacts.CanonicalUnionVariantId,
   variantOrdinal: number,
-): CoverageIdentity =>
-  Object.freeze({ _tag: 'NominalUnionVariant', root, type, variant, variantOrdinal })
+): CoverageIdentity => ({ _tag: 'NominalUnionVariant', root, type, variant, variantOrdinal })
 
 /** Semantic matching retains lifetime identity; runtime matching uses already-checked erased types. */
 export type IdentityPhase = 'Semantic' | 'Runtime'
@@ -169,21 +169,19 @@ export const selects = (
 
 /** Returns the canonical structural exact-member set observed by a pattern decision. */
 export const membersOf = (type: Type.Type): ReadonlyArray<CoverageIdentity> => {
-  if (Type.isUnion(type)) return Object.freeze(type.members.map(structuralMember))
-  if (Type.isNever(type)) return Object.freeze([])
-  return Object.freeze([structuralMember(type)])
+  if (Type.isUnion(type)) return type.members.map(structuralMember)
+  if (Type.isNever(type)) return []
+  return [structuralMember(type)]
 }
 
 /** Returns the canonical source-ordered member set of one scalar enum. */
 export const enumMembersOf = (
   declaration: DeclarationFacts.EnumFact,
 ): ReadonlyArray<CoverageIdentity> => {
-  if (declaration.canonical._tag !== 'Canonical') return Object.freeze([])
+  if (declaration.canonical._tag !== 'Canonical') return []
   const enum_ = declaration.canonical.id
-  return Object.freeze(
-    declaration.members.flatMap((member) =>
-      member.canonical._tag === 'Canonical' ? [enumMember(enum_, member.canonical.id)] : [],
-    ),
+  return declaration.members.flatMap((member) =>
+    member.canonical._tag === 'Canonical' ? [enumMember(enum_, member.canonical.id)] : [],
   )
 }
 
@@ -227,7 +225,7 @@ export const cover = (
   }
   let spaces = initial.map((member) => ({ member, rows: Array.of<Row>([]) }))
   const remaining = () =>
-    Object.freeze(spaces.filter((space) => space.rows.length > 0).map((space) => space.member))
+    spaces.filter((space) => space.rows.length > 0).map((space) => space.member)
   const transitions: Array<CoverageTransition> = []
   for (const decision of decisions) {
     const before = remaining()
@@ -245,15 +243,15 @@ export const cover = (
           : space,
       )
     }
-    transitions.push(Object.freeze({ before, after: remaining(), reachable }))
+    transitions.push({ before, after: remaining(), reachable })
   }
   const missing = remaining()
-  return Object.freeze({
-    initial: Object.freeze([...initial]),
-    transitions: Object.freeze(transitions),
+  return {
+    initial: [...initial],
+    transitions: transitions,
     missing,
     exhaustive: missing.length === 0,
-  })
+  }
 }
 
 export type Join =
@@ -267,9 +265,9 @@ export const join = (
 ): Join => {
   const contributing = inputs.filter((type) => !Type.isNever(type))
   const first = contributing.at(0)
-  if (first === undefined) return Object.freeze({ _tag: 'Joined', type: 'never' })
+  if (first === undefined) return { _tag: 'Joined', type: 'never' }
   if (contributing.every((type) => Type.equals(type, first))) {
-    return Object.freeze({ _tag: 'Joined', type: first })
+    return { _tag: 'Joined', type: first }
   }
   if (
     contributing.every(
@@ -287,7 +285,7 @@ export const join = (
         TypeCompatibility.isCompatible(TypeCompatibility.check(type, candidate, context)),
       ),
     )
-    if (common !== undefined) return Object.freeze({ _tag: 'Joined', type: common })
+    if (common !== undefined) return { _tag: 'Joined', type: common }
   }
   const effects = contributing.flatMap((type) => {
     const contract = Type.isRepresented(type) ? type.contract : type
@@ -309,11 +307,9 @@ export const join = (
             lifetimeBounds: effects.flatMap((effect) => effect.lifetimeBounds),
           }
         : undefined)
-    if (metadata === undefined)
-      return Object.freeze({ _tag: 'Incompatible', types: Object.freeze([...contributing]) })
+    if (metadata === undefined) return { _tag: 'Incompatible', types: [...contributing] }
     const success = Type.union(effects.map((effect) => effect.success))
-    if (success._tag !== 'Normalized')
-      return Object.freeze({ _tag: 'Incompatible', types: Object.freeze([...contributing]) })
+    if (success._tag !== 'Normalized') return { _tag: 'Incompatible', types: [...contributing] }
     const failureRow = effects.reduce(
       (row, effect) => RowAlgebra.union(Type.failureRowPolicy(), row, effect.failureRow),
       RowAlgebra.concrete(Type.failureRowPolicy(), []),
@@ -325,19 +321,19 @@ export const join = (
     let access: Type.CallableMode = 'Shared'
     if (effects.some((effect) => effect.access === 'Take')) access = 'Take'
     else if (effects.some((effect) => effect.access === 'Exclusive')) access = 'Exclusive'
-    return Object.freeze({
+    return {
       _tag: 'Joined',
       type: Type.effectWithRows(success.type, failureRow, metadata, access, requirementRow),
-    })
+    }
   }
   for (const [leftOrdinal, left] of contributing.entries()) {
     for (const right of contributing.slice(leftOrdinal + 1)) {
       if (Type.firstRepresentationDivergence(left, right) !== undefined)
-        return Object.freeze({ _tag: 'Incompatible', types: Object.freeze([...contributing]) })
+        return { _tag: 'Incompatible', types: [...contributing] }
     }
   }
   const normalized = Type.union(contributing)
   return normalized._tag === 'Normalized'
-    ? Object.freeze({ _tag: 'Joined', type: normalized.type })
-    : Object.freeze({ _tag: 'Incompatible', types: Object.freeze([...contributing]) })
+    ? { _tag: 'Joined', type: normalized.type }
+    : { _tag: 'Incompatible', types: [...contributing] }
 }

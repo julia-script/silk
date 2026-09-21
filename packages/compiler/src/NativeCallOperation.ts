@@ -93,12 +93,10 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
           } else {
             value = NativeStorage.readLocal(nativeStorage, capture.source)
           }
-          captureGroups.push(
-            Object.freeze({
-              parameterOrdinal: capture.parameterOrdinal,
-              value,
-            }),
-          )
+          captureGroups.push({
+            parameterOrdinal: capture.parameterOrdinal,
+            value,
+          })
         }
       }
       const arguments_: NativeArgument.NativeArgument = {
@@ -146,11 +144,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
               destination,
               `callable_convert${operation.destination.ordinal}`,
             )
-            yield* NativeStorage.writeLocal(
-              nativeStorage,
-              operation.destination.ordinal,
-              Object.freeze([result]),
-            )
+            yield* NativeStorage.writeLocal(nativeStorage, operation.destination.ordinal, [result])
             break
           }
           if (sourceScalar?.category !== 'Integer')
@@ -158,16 +152,12 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
           const result = yield* NativeArith.emitIntegerConversion(
             arith,
             first,
-            Object.freeze({ _tag: sourceScalar.spelling }),
-            Object.freeze({ _tag: conversionTarget.spelling }),
+            { _tag: sourceScalar.spelling },
+            { _tag: conversionTarget.spelling },
             `callable_convert${operation.destination.ordinal}`,
             operation.provenance.span,
           )
-          yield* NativeStorage.writeLocal(
-            nativeStorage,
-            operation.destination.ordinal,
-            Object.freeze([result]),
-          )
+          yield* NativeStorage.writeLocal(nativeStorage, operation.destination.ordinal, [result])
           break
         }
         const floatTarget = Scalar.floatConversionTarget(target.operation)
@@ -198,11 +188,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
               `callable_convert${operation.destination.ordinal}`,
             )
           }
-          yield* NativeStorage.writeLocal(
-            nativeStorage,
-            operation.destination.ordinal,
-            Object.freeze([result]),
-          )
+          yield* NativeStorage.writeLocal(nativeStorage, operation.destination.ordinal, [result])
           break
         }
         if (target.operation === 'Negate' && Scalar.find(firstType._tag)?.category === 'Floating') {
@@ -212,11 +198,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
             first,
             `callable_fneg${operation.destination.ordinal}`,
           )
-          yield* NativeStorage.writeLocal(
-            nativeStorage,
-            operation.destination.ordinal,
-            Object.freeze([result]),
-          )
+          yield* NativeStorage.writeLocal(nativeStorage, operation.destination.ordinal, [result])
           break
         }
         if (
@@ -251,7 +233,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
               target.operation === 'BitNot'
                 ? yield* Constant.integerSigned(builder, operandType, -1n)
                 : first
-            const values = Object.freeze([
+            const values = [
               yield* NativeArith.emitCallableBinary(
                 arith,
                 unaryOperator,
@@ -261,7 +243,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
                 operation.provenance.span,
                 operation.destination.ordinal,
               ),
-            ])
+            ]
             yield* NativeStorage.writeLocal(nativeStorage, operation.destination.ordinal, values)
             break
           }
@@ -273,7 +255,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
             boolZero,
             `callable_not${operation.destination.ordinal}_flag`,
           )
-          const values = Object.freeze([
+          const values = [
             yield* FunctionBody.cast(
               body,
               'zext',
@@ -281,7 +263,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
               i32,
               `callable_not${operation.destination.ordinal}`,
             ),
-          ])
+          ]
           yield* NativeStorage.writeLocal(nativeStorage, operation.destination.ordinal, values)
           break
         }
@@ -295,7 +277,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
             `LLVM callable builtin ${target.actor}.${target.operation} is unavailable`,
           )
         }
-        const values = Object.freeze([
+        const values = [
           yield* NativeArith.emitCallableBinary(
             arith,
             target.operation,
@@ -305,7 +287,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
             operation.provenance.span,
             operation.destination.ordinal,
           ),
-        ])
+        ]
         yield* NativeStorage.writeLocal(nativeStorage, operation.destination.ordinal, values)
         break
       }
@@ -397,11 +379,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         yield* NativeStorage.reloadAddressRoot(nativeStorage, root)
       }
       if (target.resultLaneCount === 0) {
-        yield* NativeStorage.writeLocal(
-          nativeStorage,
-          operation.destination.ordinal,
-          Object.freeze([]),
-        )
+        yield* NativeStorage.writeLocal(nativeStorage, operation.destination.ordinal, [])
         break
       }
       if (result === undefined && target.resultStorage === undefined)

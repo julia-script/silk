@@ -81,6 +81,6 @@ export const providerSubtractionMatches = (
 export const matches = (
   candidate: Type.Effect,
   requested: Type.Effect,
-  authorizations: ReadonlyArray<RequirementAuthorization> = Object.freeze([]),
+  authorizations: ReadonlyArray<RequirementAuthorization> = [],
 ): boolean =>
   equals(candidate, requested) || providerSubtractionMatches(candidate, requested, authorizations)

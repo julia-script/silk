@@ -17,9 +17,7 @@ export const stronglyConnected = (
   const adjacency = new Map(
     orderedKeys.map((key) => [
       key,
-      Object.freeze(
-        [...new Set(dependencies(key))].filter((dependency) => known.has(dependency)).sort(),
-      ),
+      [...new Set(dependencies(key))].filter((dependency) => known.has(dependency)).sort(),
     ]),
   )
   let nextIndex = 0
@@ -52,8 +50,8 @@ export const stronglyConnected = (
       if (member === key) break
     }
     component.sort()
-    components.push(Object.freeze(component))
+    components.push(component)
   }
   for (const key of orderedKeys) if (!indices.has(key)) visit(key)
-  return Object.freeze(components)
+  return components
 }

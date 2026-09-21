@@ -227,7 +227,7 @@ export class FunctionLowering {
     readonly effectResults: ReadonlyMap<string, ExecutableEffectType>,
     readonly generatedRunners: Array<GeneratedEffectRunner>,
     readonly opaqueRealizations: OpaqueRealization.Catalog,
-    readonly providedRequirements: ReadonlyArray<ProvidedRequirement> = Object.freeze([]),
+    readonly providedRequirements: ReadonlyArray<ProvidedRequirement> = [],
     readonly witnessTargets?: ReadonlyArray<SpecializedWitnessEffectTarget>,
   ) {
     this.exits = indexExits(ownership)
@@ -239,18 +239,18 @@ export class FunctionLowering {
   }
 
   reserve(): Mir.RegionId {
-    const id = Object.freeze({ _tag: 'Region' as const, ordinal: this.regions.length })
+    const id = { _tag: 'Region' as const, ordinal: this.regions.length }
     this.regions.push(undefined)
     return id
   }
 
   freshSyntheticBorrow(call: Tir.NodeRef): Tir.BorrowId {
     while (true) {
-      const borrow: Tir.BorrowId = Object.freeze({
+      const borrow: Tir.BorrowId = {
         _tag: 'BorrowId',
         call,
         ordinal: this.syntheticBorrowOrdinal,
-      })
+      }
       this.syntheticBorrowOrdinal += 1
       const key = borrowKey(borrow)
       if (this.issuedBorrowKeys.has(key)) continue
@@ -308,19 +308,19 @@ export class FunctionLowering {
     span: SourceSpan.SourceSpan,
     reason?: LoweringFailure['reason'],
   ): void {
-    this.loweringFailure ??= Object.freeze({
+    this.loweringFailure ??= {
       boundary,
       construct,
-      provenance: Object.freeze({ span, generated: false }),
+      provenance: { span, generated: false },
       ...(reason === undefined ? {} : { reason }),
-    })
+    }
   }
 
   capture<A>(body: () => A): readonly [A, ReadonlyArray<Mir.Operation>] {
     const previous = this.operations
     this.operations = []
     const result = body()
-    const operations = Object.freeze([...this.operations])
+    const operations = [...this.operations]
     this.operations = previous
     return [result, operations]
   }
@@ -348,7 +348,7 @@ export class FunctionLowering {
       this.extractedRegions.add(ordinal)
       this.regions[ordinal] = undefined
     }
-    return Object.freeze({ ...result, regions: Object.freeze(regions) })
+    return { ...result, regions: regions }
   }
 
   alloc(type: Mir.Type): Mir.LocalId {

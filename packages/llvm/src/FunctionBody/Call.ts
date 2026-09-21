@@ -166,12 +166,10 @@ const callInternal = Effect.fnUntraced(function* (
               .operand,
           )
         }
-        bundles.push(
-          Object.freeze({
-            tag: ByteString.coerce(bundle.tag),
-            operands: Object.freeze(operands),
-          }),
-        )
+        bundles.push({
+          tag: ByteString.coerce(bundle.tag),
+          operands: operands,
+        })
       }
       const returnType = yield* FunctionBodyState.typeAt(
         module,
@@ -233,17 +231,17 @@ const callInternal = Effect.fnUntraced(function* (
         const fields = {
           functionType: functionTypeIndex,
           callee: calleeValue.operand,
-          arguments: Object.freeze(argumentsResolved),
+          arguments: argumentsResolved,
           callingConvention,
           attributes,
           fastMath: callFastMath,
-          operandBundles: Object.freeze(bundles),
+          operandBundles: bundles,
           result,
           name: finalName,
         }
         return normal === undefined || unwind === undefined
-          ? Object.freeze({ ...fields, _tag: 'Call', tail: options.tail ?? 'none' })
-          : Object.freeze({ ...fields, _tag: 'Invoke', normal, unwind })
+          ? { ...fields, _tag: 'Call', tail: options.tail ?? 'none' }
+          : { ...fields, _tag: 'Invoke', normal, unwind }
       }
       const predecessor = draft.cursor
       let value: Value.Value | undefined

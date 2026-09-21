@@ -192,12 +192,12 @@ const integerOf = Effect.fnUntraced(function* (
           }),
         )
       }
-      return Object.freeze({
+      return {
         _tag: 'Integer' as const,
         type: typeIndex,
         bitPattern: value < 0n ? modulus + value : value,
         signed,
-      })
+      }
     }),
   )
   return yield* intern(builder, description)
@@ -259,11 +259,11 @@ export const fromGlobal = Effect.fnUntraced(function* (
   const pointer = yield* Type.pointer(builder, resolved.description.addressSpace)
   const description = yield* BuilderState.mutate(builder, 'Constant.fromGlobal', (_state, owner) =>
     Result.gen(function* () {
-      return Object.freeze({
+      return {
         _tag: 'Global' as const,
         type: yield* Handle.resolve(builder, owner, pointer, 'Type', 'Constant.fromGlobal'),
         global: resolved.index,
-      })
+      }
     }),
   )
   return yield* intern(builder, description)
@@ -378,7 +378,7 @@ export const floatingRaw = Effect.fnUntraced(function* (
           }),
         )
       }
-      return Object.freeze({ _tag: 'Float' as const, type: typeIndex, format, bits: value })
+      return { _tag: 'Float' as const, type: typeIndex, format, bits: value }
     }),
   )
   return yield* intern(builder, description)
@@ -463,7 +463,7 @@ const special = Effect.fnUntraced(function* (
   const typeIndex = yield* BuilderState.mutate(builder, `Constant.${kind}`, (_state, owner) =>
     Handle.resolve(builder, owner, type, 'Type', `Constant.${kind}`),
   )
-  return yield* intern(builder, Object.freeze({ _tag: 'Special', type: typeIndex, kind }))
+  return yield* intern(builder, { _tag: 'Special', type: typeIndex, kind })
 })
 
 /**
@@ -537,7 +537,7 @@ export const string = Effect.fnUntraced(function* (
   const typeIndex = yield* BuilderState.mutate(builder, 'Constant.string', (_state, owner) =>
     Handle.resolve(builder, owner, type, 'Type', 'Constant.string'),
   )
-  return yield* intern(builder, Object.freeze({ _tag: 'String', type: typeIndex, bytes: contents }))
+  return yield* intern(builder, { _tag: 'String', type: typeIndex, bytes: contents })
 })
 
 /**
@@ -566,7 +566,7 @@ export const aggregate = Effect.fnUntraced(function* (
           yield* Handle.resolve(builder, owner, element, 'Constant', 'Constant.aggregate'),
         )
       }
-      const elementIndices = Object.freeze(mutableElementIndices)
+      const elementIndices = mutableElementIndices
       let expected: ReadonlyArray<number>
       let kind: Extract<ConstantDescription.Description, { readonly _tag: 'Aggregate' }>['kind']
       if (typeValue._tag === 'Array' || typeValue._tag === 'Vector') {
@@ -580,7 +580,7 @@ export const aggregate = Effect.fnUntraced(function* (
             }),
           )
         }
-        expected = Object.freeze(elementIndices.map(() => typeValue.child))
+        expected = elementIndices.map(() => typeValue.child)
         kind = typeValue._tag === 'Array' ? 'array' : 'vector'
       } else {
         let body: { readonly fields: ReadonlyArray<number>; readonly packed: boolean } | undefined
@@ -615,12 +615,12 @@ export const aggregate = Effect.fnUntraced(function* (
           )
         }
       }
-      return Object.freeze({
+      return {
         _tag: 'Aggregate' as const,
         type: typeIndex,
         kind,
         elements: elementIndices,
-      })
+      }
     }),
   )
   return yield* intern(builder, description)
@@ -657,7 +657,7 @@ export const splat = Effect.fnUntraced(function* (
           }),
         )
       }
-      return Object.freeze({ _tag: 'Splat' as const, type: typeIndex, value: valueIndex })
+      return { _tag: 'Splat' as const, type: typeIndex, value: valueIndex }
     }),
   )
   return yield* intern(builder, description)
@@ -722,12 +722,12 @@ export const blockAddress = Effect.fnUntraced(function* (
         'Constant.blockAddress',
         'Constant',
       )).type
-      return Object.freeze({
+      return {
         _tag: 'BlockAddress' as const,
         type,
         function: referenceIndex,
         block,
-      })
+      }
     }),
   )
   return yield* intern(builder, description)
@@ -749,7 +749,7 @@ const functionReference = Effect.fnUntraced(function* (
         'Constant',
         `Constant.${kind}`,
       )
-      return Object.freeze({
+      return {
         _tag: 'FunctionReference' as const,
         kind,
         function: referenceIndex,
@@ -759,7 +759,7 @@ const functionReference = Effect.fnUntraced(function* (
           `Constant.${kind}`,
           'Constant',
         )).type,
-      })
+      }
     }),
   )
   return yield* intern(builder, description)
@@ -895,12 +895,12 @@ export const cast = Effect.fnUntraced(function* (
           }),
         )
       }
-      return Object.freeze({
+      return {
         _tag: 'Cast' as const,
         kind,
         value: valueIndex,
         type: destinationIndex,
-      })
+      }
     }),
   )
   return yield* intern(builder, description)
@@ -952,13 +952,13 @@ export const binary = Effect.fnUntraced(function* (
           }),
         )
       }
-      return Object.freeze({
+      return {
         _tag: 'Binary' as const,
         kind,
         type: leftValue.type,
         left: leftIndex,
         right: rightIndex,
-      })
+      }
     }),
   )
   return yield* intern(builder, description)
@@ -1059,7 +1059,7 @@ export const getElementPtr = Effect.fnUntraced(function* (
             yield* Handle.resolve(builder, owner, index, 'Constant', 'Constant.getElementPtr'),
           )
         }
-        const indexValues = Object.freeze(mutableIndexValues)
+        const indexValues = mutableIndexValues
         let current = sourceTypeIndex
         let vector =
           baseType._tag === 'Vector'
@@ -1167,7 +1167,7 @@ export const getElementPtr = Effect.fnUntraced(function* (
             }),
           )
         }
-        return Object.freeze({
+        return {
           _tag: 'GetElementPtr' as const,
           sourceType: sourceTypeIndex,
           type: resultTypeIndex,
@@ -1175,7 +1175,7 @@ export const getElementPtr = Effect.fnUntraced(function* (
           indices: indexValues,
           inbounds: options.inbounds ?? false,
           inrange: options.inrange,
-        })
+        }
       }),
   )
   return yield* intern(builder, description)
@@ -1197,19 +1197,16 @@ export const assembly = Effect.fnUntraced(function* (
   const typeIndex = yield* BuilderState.mutate(builder, 'Constant.assembly', (_state, owner) =>
     Handle.resolve(builder, owner, type, 'Type', 'Constant.assembly'),
   )
-  return yield* intern(
-    builder,
-    Object.freeze({
-      _tag: 'Assembly',
-      type: typeIndex,
-      assembly: ByteString.coerce(assembly),
-      constraints: ByteString.coerce(constraints),
-      sideEffect: options.sideEffect ?? false,
-      alignStack: options.alignStack ?? false,
-      intelDialect: options.intelDialect ?? false,
-      canThrow: options.canThrow ?? false,
-    }),
-  )
+  return yield* intern(builder, {
+    _tag: 'Assembly',
+    type: typeIndex,
+    assembly: ByteString.coerce(assembly),
+    constraints: ByteString.coerce(constraints),
+    sideEffect: options.sideEffect ?? false,
+    alignStack: options.alignStack ?? false,
+    intelDialect: options.intelDialect ?? false,
+    canThrow: options.canThrow ?? false,
+  })
 })
 
 /**

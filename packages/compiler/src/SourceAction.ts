@@ -36,14 +36,22 @@ export interface ChangePlan {
   readonly changes: ReadonlyMap<string, ReadonlyArray<Edit>>
 }
 
-export const descriptor = (options: Omit<Descriptor, '_tag'>): Descriptor =>
-  Object.freeze({ _tag: 'SourceActionDescriptor', ...options })
+export const descriptor = (options: Omit<Descriptor, '_tag'>): Descriptor => ({
+  _tag: 'SourceActionDescriptor',
+  ...options,
+})
 
-export const precondition = (source: SourceFile.SourceFile): SourcePrecondition =>
-  Object.freeze({ _tag: 'SourcePrecondition', module: source.id, source })
+export const precondition = (source: SourceFile.SourceFile): SourcePrecondition => ({
+  _tag: 'SourcePrecondition',
+  module: source.id,
+  source,
+})
 
-export const edit = (span: SourceSpan.SourceSpan, replacement: string): Edit =>
-  Object.freeze({ _tag: 'SourceActionEdit', span, replacement })
+export const edit = (span: SourceSpan.SourceSpan, replacement: string): Edit => ({
+  _tag: 'SourceActionEdit',
+  span,
+  replacement,
+})
 
 const validEdits = (
   module: string,
@@ -78,11 +86,11 @@ export const changePlan = (options: {
     if (source === undefined || !validEdits(module, source, edits)) return Option.none()
     changes.set(
       module,
-      Object.freeze([...edits].sort((left, right) => left.span.start - right.span.start)),
+      [...edits].sort((left, right) => left.span.start - right.span.start),
     )
   }
   if (changes.size === 0) return Option.none()
-  return Option.some(Object.freeze({ _tag: 'SourceActionChangePlan', preconditions, changes }))
+  return Option.some({ _tag: 'SourceActionChangePlan', preconditions, changes })
 }
 
 /** Tests whether every precondition still matches a current immutable source snapshot. */

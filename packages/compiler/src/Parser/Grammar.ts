@@ -1,6 +1,6 @@
 import type * as Token from '../Token.js'
 
-export const expressionFollowing: ReadonlyArray<Token.TokenKind> = Object.freeze([
+export const expressionFollowing: ReadonlyArray<Token.TokenKind> = [
   'Comma',
   'RightParenthesis',
   'RightBracket',
@@ -34,9 +34,9 @@ export const expressionFollowing: ReadonlyArray<Token.TokenKind> = Object.freeze
   'ImportKeyword',
   'ImplKeyword',
   'MatchKeyword',
-])
+]
 
-export const expressionStarts: ReadonlyArray<Token.TokenKind> = Object.freeze([
+export const expressionStarts: ReadonlyArray<Token.TokenKind> = [
   'DecimalInteger',
   'DecimalFloat',
   'DurationLiteral',
@@ -64,9 +64,9 @@ export const expressionStarts: ReadonlyArray<Token.TokenKind> = Object.freeze([
   'Less',
   'Ampersand',
   'UnsafeKeyword',
-])
+]
 
-export const typeStarts: ReadonlyArray<Token.TokenKind> = Object.freeze([
+export const typeStarts: ReadonlyArray<Token.TokenKind> = [
   'Identifier',
   'ForKeyword',
   'ExternKeyword',
@@ -79,8 +79,8 @@ export const typeStarts: ReadonlyArray<Token.TokenKind> = Object.freeze([
   'Ampersand',
   'Star',
   'Question',
-])
-export const topLevelFollowing: ReadonlyArray<Token.TokenKind> = Object.freeze([
+]
+export const topLevelFollowing: ReadonlyArray<Token.TokenKind> = [
   'ImportKeyword',
   'StaticKeyword',
   'PubKeyword',
@@ -101,4 +101,4 @@ export const topLevelFollowing: ReadonlyArray<Token.TokenKind> = Object.freeze([
   'UnsafeKeyword',
   'ImplKeyword',
   'EndOfFile',
-])
+]

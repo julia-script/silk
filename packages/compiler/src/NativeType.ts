@@ -140,17 +140,17 @@ const computeLanes = (
     return registered.lanes
   }
   if (type._tag === 'EnvironmentBorrow')
-    return Object.freeze([
-      Object.freeze({
+    return [
+      {
         _tag: 'CallingLane' as const,
-        path: Object.freeze([]),
-        type: Object.freeze({
+        path: [],
+        type: {
           _tag: 'Address' as const,
           element: type.type,
           bits: context.program.layout.target.pointerSize === 4 ? 32 : 64,
-        }),
-      }),
-    ])
+        },
+      },
+    ]
   if (type._tag === 'EffectValue' && type.storage !== undefined) {
     const shape = Layout.callingShape(context.program.layout, type.storage.type)
     if (shape === undefined) throw new RangeError('LLVM backend lost a stored Effect calling shape')
@@ -166,7 +166,7 @@ const computeLanes = (
   }
   if (type._tag === 'CallableValue')
     return type.environment === undefined
-      ? Object.freeze([])
+      ? []
       : Layout.callableEnvironmentLanes(context.program.layout, type.environment)
   const shape = Layout.callingShape(context.program.layout, Mir.semanticType(type))
   if (shape === undefined)

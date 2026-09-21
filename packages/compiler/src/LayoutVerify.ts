@@ -299,7 +299,7 @@ const invalid = (
   rule: Violation['rule'],
   type: DeclarationFacts.SemanticType,
   detail: string,
-): Violation => Object.freeze({ _tag: 'LayoutViolation', rule, type, detail })
+): Violation => ({ _tag: 'LayoutViolation', rule, type, detail })
 
 const verifyEntry = (
   target: Target.Target,
@@ -311,14 +311,14 @@ const verifyEntry = (
     return candidate.size === expected.size &&
       candidate.alignment === expected.alignment &&
       representationEquals(candidate.representation, expected.representation)
-      ? Object.freeze([])
-      : Object.freeze([
+      ? []
+      : [
           invalid(
             'InvalidScalar',
             candidate.type,
             `${Type.encode(candidate.type)} does not match the canonical scalar layout`,
           ),
-        ])
+        ]
   }
   if (Type.isNominal(candidate.type) && candidate.representation._tag === 'ScalarEnum') {
     const representation = candidate.representation
@@ -359,27 +359,27 @@ const verifyEntry = (
       candidate.executable === undefined &&
       metadataValid &&
       membersValid
-      ? Object.freeze([])
-      : Object.freeze([
+      ? []
+      : [
           invalid(
             'InvalidScalar',
             candidate.type,
             `${Type.encode(candidate.type)} does not match its canonical scalar-enum layout`,
           ),
-        ])
+        ]
   }
   if (Type.isFixedArray(candidate.type)) {
     const element = Type.isBuiltin(candidate.type.element)
       ? scalarEntry(target, candidate.type.element)
       : available.get(Type.runtimeKey(candidate.type.element))
     if (element === undefined || candidate.representation._tag !== 'Repeated') {
-      return Object.freeze([
+      return [
         invalid(
           'InvalidAggregate',
           candidate.type,
           `${Type.encode(candidate.type)} has no repeated-element representation`,
         ),
-      ])
+      ]
     }
     const stride = alignUp(element.size, element.alignment)
     const size = stride * candidate.type.length
@@ -388,68 +388,68 @@ const verifyEntry = (
       candidate.representation.stride === stride &&
       candidate.size === size &&
       candidate.alignment === element.alignment
-      ? Object.freeze([])
-      : Object.freeze([
+      ? []
+      : [
           invalid(
             'InvalidAggregate',
             candidate.type,
             `${Type.encode(candidate.type)} has non-canonical repeated layout facts`,
           ),
-        ])
+        ]
   }
   if (Type.isString(candidate.type)) {
     const expected = stringEntry(target, candidate.type)
     return candidate.size === expected.size &&
       candidate.alignment === expected.alignment &&
       representationEquals(candidate.representation, expected.representation)
-      ? Object.freeze([])
-      : Object.freeze([
+      ? []
+      : [
           invalid(
             'InvalidAggregate',
             candidate.type,
             'string does not match the canonical UTF-8 storage-provenance layout',
           ),
-        ])
+        ]
   }
   if (Type.isSlice(candidate.type)) {
     const element = Type.isBuiltin(candidate.type.element)
       ? scalarEntry(target, candidate.type.element)
       : available.get(Type.runtimeKey(candidate.type.element))
     if (element === undefined) {
-      return Object.freeze([
+      return [
         invalid(
           'InvalidAggregate',
           candidate.type,
           `${Type.encode(candidate.type)} has no element layout`,
         ),
-      ])
+      ]
     }
     const expected = sliceEntry(target, candidate.type, element)
     return candidate.size === expected.size &&
       candidate.alignment === expected.alignment &&
       representationEquals(candidate.representation, expected.representation)
-      ? Object.freeze([])
-      : Object.freeze([
+      ? []
+      : [
           invalid(
             'InvalidAggregate',
             candidate.type,
             `${Type.encode(candidate.type)} has non-canonical slice layout facts`,
           ),
-        ])
+        ]
   }
   if (Type.isReference(candidate.type)) {
     const expected = referenceEntry(target, candidate.type)
     return candidate.size === expected.size &&
       candidate.alignment === expected.alignment &&
       representationEquals(candidate.representation, expected.representation)
-      ? Object.freeze([])
-      : Object.freeze([
+      ? []
+      : [
           invalid(
             'InvalidScalar',
             candidate.type,
             `${Type.encode(candidate.type)} does not match the canonical reference layout`,
           ),
-        ])
+        ]
   }
   if (Type.isPointer(candidate.type)) {
     const expected = pointerEntry(target, candidate.type)
@@ -460,14 +460,14 @@ const verifyEntry = (
       candidate.alignment === expected.alignment &&
       candidate.copy === expected.copy &&
       representationEquals(candidate.representation, expected.representation)
-      ? Object.freeze([])
-      : Object.freeze([
+      ? []
+      : [
           invalid(
             'InvalidScalar',
             candidate.type,
             `${Type.encode(candidate.type)} does not match the canonical pointer layout`,
           ),
-        ])
+        ]
   }
   if (Type.isForeignFunction(candidate.type)) {
     const expected = foreignFunctionEntry(target, candidate.type)
@@ -475,14 +475,14 @@ const verifyEntry = (
       candidate.alignment === expected.alignment &&
       candidate.copy === expected.copy &&
       representationEquals(candidate.representation, expected.representation)
-      ? Object.freeze([])
-      : Object.freeze([
+      ? []
+      : [
           invalid(
             'InvalidScalar',
             candidate.type,
             `${Type.encode(candidate.type)} does not match the canonical C function-pointer layout`,
           ),
-        ])
+        ]
   }
   if (Type.isUnion(candidate.type)) {
     const members = candidate.type.members.flatMap((member): ReadonlyArray<Entry> => {
@@ -490,40 +490,40 @@ const verifyEntry = (
       return memberLayout === undefined ? [] : [memberLayout]
     })
     if (members.length !== candidate.type.members.length) {
-      return Object.freeze([
+      return [
         invalid(
           'InvalidAggregate',
           candidate.type,
           `${Type.encode(candidate.type)} has unavailable union members`,
         ),
-      ])
+      ]
     }
-    const expected = unionEntry(candidate.type, Object.freeze(members))
+    const expected = unionEntry(candidate.type, members)
     return candidate.size === expected.size &&
       candidate.alignment === expected.alignment &&
       representationEquals(candidate.representation, expected.representation)
-      ? Object.freeze([])
-      : Object.freeze([
+      ? []
+      : [
           invalid(
             'InvalidAggregate',
             candidate.type,
             `${Type.encode(candidate.type)} has non-canonical union layout facts`,
           ),
-        ])
+        ]
   }
   if (Type.isNever(candidate.type)) {
     const canonical = neverEntry()
     return candidate.size === canonical.size &&
       candidate.alignment === canonical.alignment &&
       representationEquals(candidate.representation, canonical.representation)
-      ? Object.freeze([])
-      : Object.freeze([
+      ? []
+      : [
           invalid(
             'InvalidAggregate',
             candidate.type,
             'never must use its zero-sized uninhabited placeholder layout',
           ),
-        ])
+        ]
   }
   if (Type.isRepresented(candidate.type)) {
     const type = candidate.type
@@ -554,14 +554,14 @@ const verifyEntry = (
         candidate.copy === alternatives.every((alternative) => alternative?.copy === true) &&
         candidate.size === size &&
         candidate.alignment === alignment
-        ? Object.freeze([])
-        : Object.freeze([
+        ? []
+        : [
             invalid(
               'InvalidAggregate',
               candidate.type,
               `${Type.encode(candidate.type)} has non-canonical composite Effect storage facts`,
             ),
-          ])
+          ]
     }
     if (candidate.executable !== undefined) {
       return candidate.representation._tag === 'Aggregate' &&
@@ -569,14 +569,14 @@ const verifyEntry = (
         candidate.representation.tailPadding === candidate.size &&
         candidate.size >= 0 &&
         candidate.alignment >= 1
-        ? Object.freeze([])
-        : Object.freeze([
+        ? []
+        : [
             invalid(
               'InvalidAggregate',
               candidate.type,
               `${Type.encode(candidate.type)} has non-canonical executable environment facts`,
             ),
-          ])
+          ]
     }
     if (candidate.representation._tag === 'StoredEffectEnvironment') {
       const violations: Array<Violation> = []
@@ -599,12 +599,12 @@ const verifyEntry = (
           size = field.size
           alignment = field.alignment
         }
-        return Object.freeze({
+        return {
           value: ordinal,
           size,
           alignment,
           available: borrowed || executable || fieldLayout !== undefined,
-        })
+        }
       })
       const packed = Packing.pack(expected)
       for (const [ordinal, field] of candidate.representation.fields.entries()) {
@@ -670,16 +670,16 @@ const verifyEntry = (
           ),
         )
       }
-      return Object.freeze(violations)
+      return violations
     }
     if (candidate.representation._tag !== 'CallableEnvironment') {
-      return Object.freeze([
+      return [
         invalid(
           'InvalidAggregate',
           candidate.type,
           `${Type.encode(candidate.type)} has no concrete callable environment`,
         ),
-      ])
+      ]
     }
     const violations: Array<Violation> = []
     const expected = candidate.representation.fields.map((field, ordinal) => {
@@ -700,12 +700,12 @@ const verifyEntry = (
         size = field.size
         alignment = field.alignment
       }
-      return Object.freeze({
+      return {
         value: ordinal,
         size,
         alignment,
         available: borrowed || executable || fieldLayout !== undefined,
-      })
+      }
     })
     const packed = Packing.pack(expected)
     for (const [ordinal, field] of candidate.representation.fields.entries()) {
@@ -748,7 +748,7 @@ const verifyEntry = (
         ),
       )
     }
-    return Object.freeze(violations)
+    return violations
   }
   if (
     (Type.isSharedCore(candidate.type) ||
@@ -765,26 +765,26 @@ const verifyEntry = (
       address.offset === 0 &&
       address.size === target.pointerSize &&
       address.alignment === target.pointerAlignment
-      ? Object.freeze([])
-      : Object.freeze([
+      ? []
+      : [
           invalid(
             'InvalidAggregate',
             candidate.type,
             `${Type.encode(candidate.type)} has a non-canonical sealed owning handle`,
           ),
-        ])
+        ]
   }
   if (candidate.representation._tag === 'NominalUnion') {
     const representation = candidate.representation
     const unionViolations: Array<Violation> = []
     if (!Type.isNominal(candidate.type)) {
-      return Object.freeze([
+      return [
         invalid(
           'InvalidAggregate',
           candidate.type,
           `${Type.encode(candidate.type)} uses nominal-union storage without a nominal type`,
         ),
-      ])
+      ]
     }
     const nominal = candidate.type
     if (
@@ -806,12 +806,12 @@ const verifyEntry = (
         const fieldLayout = Type.isBuiltin(field.type)
           ? scalarEntry(target, field.type)
           : available.get(Type.runtimeKey(field.type))
-        return Object.freeze({
+        return {
           value: field,
           size: fieldLayout?.size ?? 0,
           alignment: fieldLayout?.alignment ?? 1,
           available: fieldLayout !== undefined,
-        })
+        }
       })
       const packed = Packing.pack(expected)
       const fieldsValid = variant.fields.every((field, fieldOrdinal) => {
@@ -889,16 +889,16 @@ const verifyEntry = (
         ),
       )
     }
-    return Object.freeze(unionViolations)
+    return unionViolations
   }
   if (candidate.representation._tag !== 'Aggregate') {
-    return Object.freeze([
+    return [
       invalid(
         'InvalidAggregate',
         candidate.type,
         `${Type.encode(candidate.type)} is nominal but not aggregate`,
       ),
-    ])
+    ]
   }
   const violations: Array<Violation> = []
   const cleanupHook = candidate.representation.cleanupHook
@@ -984,7 +984,7 @@ const verifyEntry = (
       ),
     )
   }
-  return Object.freeze(violations)
+  return violations
 }
 
 const commonViolations = (
@@ -993,13 +993,11 @@ const commonViolations = (
 ): ReadonlyArray<Violation> => {
   const violations: Array<Violation> = []
   if (!Target.isCanonical(target)) {
-    violations.push(
-      Object.freeze({
-        _tag: 'LayoutViolation',
-        rule: 'NonCanonicalTarget',
-        detail: `target ${target.id} does not match its canonical profile`,
-      }),
-    )
+    violations.push({
+      _tag: 'LayoutViolation',
+      rule: 'NonCanonicalTarget',
+      detail: `target ${target.id} does not match its canonical profile`,
+    })
   }
   const available = new Map(
     entries.flatMap((candidate) =>
@@ -1036,7 +1034,7 @@ const commonViolations = (
     seen.add(key)
     previous = candidate.type
   }
-  return Object.freeze(violations)
+  return violations
 }
 
 /**
@@ -1093,7 +1091,7 @@ const cLayoutViolations = (
       )
     }
   }
-  return Object.freeze(violations)
+  return violations
 }
 
 const fieldIdEquals = (left: DeclarationFacts.FieldId, right: DeclarationFacts.FieldId): boolean =>
@@ -1301,15 +1299,13 @@ const verifyCallingShapes = Effect.fn('LayoutVerify.verifyCallingShapes')(functi
     }
   }
   if (self.callingShapes.length < self.entries.length) {
-    violations.push(
-      Object.freeze({
-        _tag: 'LayoutViolation',
-        rule: 'InvalidCallingShape',
-        detail: 'calling-shape collection does not match the reachable layout entries',
-      }),
-    )
+    violations.push({
+      _tag: 'LayoutViolation',
+      rule: 'InvalidCallingShape',
+      detail: 'calling-shape collection does not match the reachable layout entries',
+    })
   }
-  return Object.freeze(violations)
+  return violations
 })
 const verifyLiteralVerdicts = Effect.fn('LayoutVerify.verifyLiteralVerdicts')(function* (
   self: Plan,
@@ -1327,14 +1323,12 @@ const verifyLiteralVerdicts = Effect.fn('LayoutVerify.verifyLiteralVerdicts')(fu
         ? 'AvailableWordLiteral'
         : 'UnavailableWordLiteral'
     if (verdict.bits !== bits || verdict._tag !== expectedTag) {
-      violations.push(
-        Object.freeze({
-          _tag: 'LayoutViolation',
-          rule: 'InvalidLiteralVerdict',
-          type: verdict.type,
-          detail: `${verdict.value.toString()} has a non-canonical ${verdict.bits}-bit verdict`,
-        }),
-      )
+      violations.push({
+        _tag: 'LayoutViolation',
+        rule: 'InvalidLiteralVerdict',
+        type: verdict.type,
+        detail: `${verdict.value.toString()} has a non-canonical ${verdict.bits}-bit verdict`,
+      })
     }
   }
   if (
@@ -1354,16 +1348,14 @@ const verifyLiteralVerdicts = Effect.fn('LayoutVerify.verifyLiteralVerdicts')(fu
       ),
     )
   ) {
-    violations.push(
-      Object.freeze({
-        _tag: 'LayoutViolation',
-        rule: 'InvalidLiteralVerdict',
-        type: 'usize',
-        detail: 'target literal diagnostics do not match unavailable verdicts',
-      }),
-    )
+    violations.push({
+      _tag: 'LayoutViolation',
+      rule: 'InvalidLiteralVerdict',
+      type: 'usize',
+      detail: 'target literal diagnostics do not match unavailable verdicts',
+    })
   }
-  return Object.freeze(violations)
+  return violations
 })
 const verifyStaticData = Effect.fn('LayoutVerify.verifyStaticData')(function* (
   self: Plan,
@@ -1381,14 +1373,14 @@ const verifyStaticData = Effect.fn('LayoutVerify.verifyStaticData')(function* (
     )
   })
   return valid
-    ? Object.freeze([])
-    : Object.freeze([
-        Object.freeze({
+    ? []
+    : [
+        {
           _tag: 'LayoutViolation' as const,
           rule: 'InvalidCallingShape' as const,
           detail: 'static data placements are not canonical immutable target data',
-        }),
-      ])
+        },
+      ]
 })
 
 /** Verifies canonical target, ordering, uniqueness, representation, and ABI facts. */
@@ -1400,7 +1392,7 @@ export const verify = Effect.fn('LayoutVerify.verify')(function* (
   const storage = yield* ValueStorage.verify(self)
   const literals = yield* verifyLiteralVerdicts(self)
   const staticData = yield* verifyStaticData(self)
-  return Object.freeze([...entries, ...shapes, ...storage, ...literals, ...staticData])
+  return [...entries, ...shapes, ...storage, ...literals, ...staticData]
 })
 const verifyEntries = Effect.fn('LayoutVerify.verifyEntries')((self: Plan) =>
   Effect.sync(() => commonViolations(self.target, self.entries)),
@@ -1410,36 +1402,36 @@ const verifyEntries = Effect.fn('LayoutVerify.verifyEntries')((self: Plan) =>
 export const verifyCatalog = (
   self: Catalog,
   index: DeclarationIndex.Index,
-): ReadonlyArray<Violation> =>
-  Object.freeze([...commonViolations(self.target, self.entries), ...cLayoutViolations(self, index)])
+): ReadonlyArray<Violation> => [
+  ...commonViolations(self.target, self.entries),
+  ...cLayoutViolations(self, index),
+]
 
 /** Verifies that every planned nominal layout is exactly the catalog decision. */
 export const verifyAgainstCatalog = (self: Plan, catalog: Catalog): ReadonlyArray<Violation> =>
-  Object.freeze(
-    self.entries.flatMap((candidate) => {
-      if (
-        Type.isBuiltin(candidate.type) ||
-        Type.isFixedArray(candidate.type) ||
-        Type.isReference(candidate.type)
-      )
-        return []
-      const expected = catalogEntry(catalog, candidate.type)
-      // Concrete generic specializations and executable representations are completed only in
-      // the runtime plan. The pre-reachability catalog is an oracle only for entries it already
-      // resolved.
-      if (expected?._tag !== 'LayoutEntry') return []
-      return candidate.copy === expected.copy &&
-        candidate.size === expected.size &&
-        candidate.alignment === expected.alignment &&
-        representationEquals(candidate.representation, expected.representation) &&
-        executablePlanEquals(candidate.executable, expected.executable)
-        ? []
-        : [
-            invalid(
-              'CatalogMismatch',
-              candidate.type,
-              `${Type.encode(candidate.type)} differs from its catalog entry`,
-            ),
-          ]
-    }),
-  )
+  self.entries.flatMap((candidate) => {
+    if (
+      Type.isBuiltin(candidate.type) ||
+      Type.isFixedArray(candidate.type) ||
+      Type.isReference(candidate.type)
+    )
+      return []
+    const expected = catalogEntry(catalog, candidate.type)
+    // Concrete generic specializations and executable representations are completed only in
+    // the runtime plan. The pre-reachability catalog is an oracle only for entries it already
+    // resolved.
+    if (expected?._tag !== 'LayoutEntry') return []
+    return candidate.copy === expected.copy &&
+      candidate.size === expected.size &&
+      candidate.alignment === expected.alignment &&
+      representationEquals(candidate.representation, expected.representation) &&
+      executablePlanEquals(candidate.executable, expected.executable)
+      ? []
+      : [
+          invalid(
+            'CatalogMismatch',
+            candidate.type,
+            `${Type.encode(candidate.type)} differs from its catalog entry`,
+          ),
+        ]
+  })

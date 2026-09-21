@@ -60,7 +60,7 @@ export type Admission =
   | { readonly _tag: 'Admitted'; readonly type: Type.Type }
   | { readonly _tag: 'NotAdmitted'; readonly type: Type.Type; readonly position: Position }
 
-const void_: CAbiType = Object.freeze({ _tag: 'Void' })
+const void_: CAbiType = { _tag: 'Void' }
 
 const integer = (bits: 8 | 16 | 32 | 64, signed: boolean, target: Target.Target): CAbiType => {
   // Apple ARM64 and System V x86-64 extend narrow C integers to 32 bits. AAPCS64 does not.
@@ -68,15 +68,15 @@ const integer = (bits: 8 | 16 | 32 | 64, signed: boolean, target: Target.Target)
   const extended =
     bits < 32 && (target.id === 'aarch64-apple-darwin' || target.id === 'x86_64-unknown-linux-gnu')
   const extension = signed ? 'Sign' : 'Zero'
-  return Object.freeze({
+  return {
     _tag: 'Integer',
     bits,
     signed,
     extension: extended ? extension : 'None',
-  })
+  }
 }
 
-const float = (bits: 32 | 64): CAbiType => Object.freeze({ _tag: 'Float', bits })
+const float = (bits: 32 | 64): CAbiType => ({ _tag: 'Float', bits })
 
 /** The closed scalar switch; `bool` and `char` are deliberately outside the C subset. */
 const physicalBits = (primitive: Target.Primitive): 8 | 16 | 32 | 64 => {
@@ -133,11 +133,11 @@ const classifyOrUndefined = (
 ): CAbiType | undefined => {
   if (Type.isBuiltin(type)) return scalar(type, target)
   if (Type.isPointer(type))
-    return admittedType(type, position) ? Object.freeze({ _tag: 'Pointer', type }) : undefined
+    return admittedType(type, position) ? { _tag: 'Pointer', type } : undefined
   if (Type.isForeignFunction(type)) {
     if (!admittedType(type, position)) return undefined
     const classified = signature(type.parameters, type.result, target, type.contract)
-    return Object.freeze({ _tag: 'FunctionPointer', nullable: false, ...classified })
+    return { _tag: 'FunctionPointer', nullable: false, ...classified }
   }
   if (position === 'Result' && Type.equals(type, Type.unit)) return void_
   return undefined
@@ -166,8 +166,8 @@ const admittedType = (type: Type.Type, position: Position): boolean => {
 /** Target-independent admission of a parameter or result into the scalar C subset. */
 export const admit = (type: Type.Type, position: Position): Admission =>
   admittedType(type, position)
-    ? Object.freeze({ _tag: 'Admitted', type })
-    : Object.freeze({ _tag: 'NotAdmitted', type, position })
+    ? { _tag: 'Admitted', type }
+    : { _tag: 'NotAdmitted', type, position }
 
 const pointerBits = (target: Target.Target): 32 | 64 => (target.pointerSize === 4 ? 32 : 64)
 
@@ -187,30 +187,27 @@ export const signature = (
   target: Target.Target,
   contract: ForeignContract.ForeignContract = ForeignContract.conservative,
   variadic = false,
-): CAbiSignature =>
-  Object.freeze({
-    contract,
-    variadic,
-    parameters: Object.freeze(
-      parameters.map((type, ordinal) =>
-        classify(
-          contract.borrow.includes(ordinal) && Type.isReference(type)
-            ? Type.pointer({
-                mutable: type.access === 'Exclusive',
-                pointee: type.target,
-                nullable: false,
-                extent: 'Single',
-                alignment: 'Natural',
-                addressSpace: 0,
-              })
-            : type,
-          target,
-          'Parameter',
-        ),
-      ),
+): CAbiSignature => ({
+  contract,
+  variadic,
+  parameters: parameters.map((type, ordinal) =>
+    classify(
+      contract.borrow.includes(ordinal) && Type.isReference(type)
+        ? Type.pointer({
+            mutable: type.access === 'Exclusive',
+            pointee: type.target,
+            nullable: false,
+            extent: 'Single',
+            alignment: 'Natural',
+            addressSpace: 0,
+          })
+        : type,
+      target,
+      'Parameter',
     ),
-    result: classify(result, target, 'Result'),
-  })
+  ),
+  result: classify(result, target, 'Result'),
+})
 
 /** The C spelling recorded on artifacts: `i32`, `u64`, `f32`, `f64`, or `void`. */
 export const typeText = (self: CAbiType): TypeText => {
@@ -277,10 +274,10 @@ export const inspectText = (text: string, depth = 0): TextShape | undefined => {
     case 'u64':
     case 'f32':
     case 'f64':
-      return Object.freeze({ _tag: 'Scalar', type: text })
+      return { _tag: 'Scalar', type: text }
   }
   const pointer = /^pointer<(mut|const);(?:[A-Za-z0-9_.~-]|%[0-9A-F]{2})+>$/.exec(text)
-  if (pointer !== null) return Object.freeze({ _tag: 'Pointer', mutable: pointer[1] === 'mut' })
+  if (pointer !== null) return { _tag: 'Pointer', mutable: pointer[1] === 'mut' }
   const prefix = 'extern "C" fn('
   if (!text.startsWith(prefix)) return undefined
   const contractSeparator = text.lastIndexOf('!nonnull:')
@@ -317,12 +314,12 @@ export const inspectText = (text: string, depth = 0): TextShape | undefined => {
             !ForeignContract.callbackAccessAdmitted(contract, parameter.contract),
         )
         ? undefined
-        : Object.freeze({
+        : {
             _tag: 'FunctionPointer',
             contract,
-            parameters: Object.freeze(parameters),
+            parameters: parameters,
             result,
-          })
+          }
     }
   }
   return undefined
@@ -377,7 +374,7 @@ export const promoteVariadic = (
   if (source._tag !== 'Integer') return undefined
   const promoted = source.bits < 32 ? integer(32, true, target) : source
   if (promoted._tag !== 'Integer') return undefined
-  return Object.freeze({ source, promoted })
+  return { source, promoted }
 }
 
 /** Identifies the internal guard by its actual promoted operands, leaving the callee unchanged. */

@@ -97,19 +97,16 @@ export const prepare = Effect.fnUntraced(function* (context: Context) {
         yield* FunctionBody.returnValue(callbackBody, result)
       }),
     )
-    scopes.set(
-      operation.scope.ordinal,
-      Object.freeze({
-        record: entry.suspendable
-          ? yield* Constant.nullValue(builder, diagnostic.pointer)
-          : yield* FunctionBody.alloca(
-              body,
-              diagnostic.recordType,
-              `diagnostic_scope${operation.scope.ordinal}`,
-            ),
-        callback,
-      }),
-    )
+    scopes.set(operation.scope.ordinal, {
+      record: entry.suspendable
+        ? yield* Constant.nullValue(builder, diagnostic.pointer)
+        : yield* FunctionBody.alloca(
+            body,
+            diagnostic.recordType,
+            `diagnostic_scope${operation.scope.ordinal}`,
+          ),
+      callback,
+    })
   }
   return scopes
 })

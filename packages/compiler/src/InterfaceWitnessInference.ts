@@ -39,7 +39,7 @@ export type Inference =
     }
   | { readonly _tag: 'Failed'; readonly problem: Problem }
 
-const failed = (problem: Problem): Inference => Object.freeze({ _tag: 'Failed', problem })
+const failed = (problem: Problem): Inference => ({ _tag: 'Failed', problem })
 
 /**
  * Infers one mapped declaration's binders from source-ordered substituted contract constraints.
@@ -79,32 +79,27 @@ export const infer = (
     if (conflict !== undefined) {
       const identity = Type.key(conflict.binder)
       const previousSource = sources.get(identity)
-      return failed(
-        Object.freeze({
-          _tag: 'ConflictingBinder',
-          binder: conflict.binder,
-          previous: conflict.conflict.previous,
-          conflicting: conflict.conflict.conflicting,
-          previousConstraint: previousSource ?? `${constraint.label} (earlier occurrence)`,
-          conflictingConstraint:
-            previousSource === undefined
-              ? `${constraint.label} (later occurrence)`
-              : constraint.label,
-        }),
-      )
+      return failed({
+        _tag: 'ConflictingBinder',
+        binder: conflict.binder,
+        previous: conflict.conflict.previous,
+        conflicting: conflict.conflict.conflicting,
+        previousConstraint: previousSource ?? `${constraint.label} (earlier occurrence)`,
+        conflictingConstraint:
+          previousSource === undefined
+            ? `${constraint.label} (later occurrence)`
+            : constraint.label,
+      })
     }
-    return failed(Object.freeze({ _tag: 'IncompatibleConstraint', constraint: constraint.label }))
+    return failed({ _tag: 'IncompatibleConstraint', constraint: constraint.label })
   }
 
   const unresolved = binders.find((binder) => !inferred.has(Type.key(binder)))
-  if (unresolved !== undefined)
-    return failed(Object.freeze({ _tag: 'UnresolvedBinder', binder: unresolved }))
-  const arguments_ = Object.freeze(
-    binders.flatMap((binder) => {
-      const argument = inferred.get(Type.key(binder))
-      return argument === undefined ? [] : [argument]
-    }),
-  )
+  if (unresolved !== undefined) return failed({ _tag: 'UnresolvedBinder', binder: unresolved })
+  const arguments_ = binders.flatMap((binder) => {
+    const argument = inferred.get(Type.key(binder))
+    return argument === undefined ? [] : [argument]
+  })
   const substitution = TypeInference.substitution(binders, arguments_)
   if (substitution === undefined) {
     const incompatible = binders.find((binder, ordinal) => {
@@ -116,15 +111,11 @@ export const infer = (
     const ordinal = incompatible === undefined ? -1 : binders.indexOf(incompatible)
     const argument = ordinal < 0 ? undefined : arguments_.at(ordinal)
     if (incompatible !== undefined && argument !== undefined)
-      return failed(
-        Object.freeze({ _tag: 'IncompatibleArguments', binder: incompatible, argument }),
-      )
-    return failed(
-      Object.freeze({
-        _tag: 'IncompatibleConstraint',
-        constraint: 'the complete inferred argument list',
-      }),
-    )
+      return failed({ _tag: 'IncompatibleArguments', binder: incompatible, argument })
+    return failed({
+      _tag: 'IncompatibleConstraint',
+      constraint: 'the complete inferred argument list',
+    })
   }
-  return Object.freeze({ _tag: 'Inferred', arguments: arguments_, substitution })
+  return { _tag: 'Inferred', arguments: arguments_, substitution }
 }

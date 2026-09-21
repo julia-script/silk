@@ -71,19 +71,17 @@ export const decode = Effect.fn('RuntimeComponent.decode')(function* (
         [origin],
       )
     operations.add(value.operation)
-    bindings.push(
-      Object.freeze({
-        operation: value.operation,
-        module: value.module,
-        declaration: value.declaration,
-      }),
-    )
+    bindings.push({
+      operation: value.operation,
+      module: value.module,
+      declaration: value.declaration,
+    })
   }
-  return Object.freeze({
+  return {
     capability: input.capability,
-    bindings: Object.freeze(bindings.sort((a, b) => Canonical.compare(a.operation, b.operation))),
+    bindings: bindings.sort((a, b) => Canonical.compare(a.operation, b.operation)),
     origin: ConfigurationOrigin.snapshot(origin),
-  })
+  }
 })
 
 /** Encodes capability and operation bindings without incidental configuration locations. */
@@ -100,8 +98,7 @@ export const encode = (self: Input): string =>
   ])
 
 /** Removes diagnostic provenance for portable project configuration. */
-export const input = (self: RuntimeComponent): Input =>
-  Object.freeze({
-    capability: self.capability,
-    bindings: self.bindings,
-  })
+export const input = (self: RuntimeComponent): Input => ({
+  capability: self.capability,
+  bindings: self.bindings,
+})

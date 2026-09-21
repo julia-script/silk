@@ -170,9 +170,9 @@ export const make = Effect.fn('BuildBatch.make')(function* (
       reason: { _tag: 'EmptyTargets' },
     })
   }
-  const ordered: readonly [BuildPlan.BuildPlan, ...Array<BuildPlan.BuildPlan>] = Object.freeze([
+  const ordered: readonly [BuildPlan.BuildPlan, ...Array<BuildPlan.BuildPlan>] = [
     first,
     ...plans.slice(1),
-  ])
-  return Object.freeze({ _tag: 'BuildBatch', plans: ordered })
+  ]
+  return { _tag: 'BuildBatch', plans: ordered }
 })

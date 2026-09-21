@@ -125,7 +125,7 @@ export const returnStep = Effect.fnUntraced(function* (
     yield* FunctionBody.buildAggregate(
       context.body,
       context.entry.emittedResultType,
-      Object.freeze([
+      [
         yield* Constant.integerUnsigned(context.builder, context.i32, status),
         ...NativeResult.fields(
           {
@@ -134,7 +134,7 @@ export const returnStep = Effect.fnUntraced(function* (
           },
           { resultLaneCount: resultLanes.length, diagnosticResult: resultDiagnostic !== undefined },
         ),
-      ]),
+      ],
       tag,
     ),
   )
@@ -146,13 +146,11 @@ export const logicalLanes = (
   locals: ReadonlyArray<Mir.LocalId>,
   types: NativeType.LoweringContext,
 ): ReadonlyArray<Layout.CallingLane> =>
-  Object.freeze(
-    locals.flatMap((local) => {
-      const type = fn.localTypes.at(local.ordinal)
-      if (type === undefined) throw new RangeError(`LLVM suspension lost local %${local.ordinal}`)
-      return NativeType.lanesFor(types, type)
-    }),
-  )
+  locals.flatMap((local) => {
+    const type = fn.localTypes.at(local.ordinal)
+    if (type === undefined) throw new RangeError(`LLVM suspension lost local %${local.ordinal}`)
+    return NativeType.lanesFor(types, type)
+  })
 
 export interface ThunkContext {
   readonly builder: Builder.Builder
@@ -774,7 +772,7 @@ export const emitThunks = Effect.fn('NativeSuspension.emitThunks')(function* (
               )
         yield* returnMachineResult(
           {
-            values: Object.freeze(finalValues),
+            values: finalValues,
             ...(diagnostic === undefined ? {} : { diagnostic }),
           },
           'suspend_final_result',
@@ -917,7 +915,7 @@ const originateTransfer = Effect.fnUntraced(function* (
       ),
     )
   }
-  yield* returnStep(context.returns, 1n, Object.freeze([]), `${name}_originated`)
+  yield* returnStep(context.returns, 1n, [], `${name}_originated`)
 })
 
 export const emitOrigin = Effect.fnUntraced(function* (
@@ -942,15 +940,13 @@ export const emitOrigin = Effect.fnUntraced(function* (
     body,
     yield* LlvmBlock.make(body, `${name}_unreachable_continuation`),
   )
-  const outcomeValues = Object.freeze(
-    yield* Effect.forEach(NativeType.lanesFor(types, operation.outcomeType), (lane) =>
-      Constant.nullValue(builder, NativeType.laneType(types, lane)),
-    ),
+  const outcomeValues = yield* Effect.forEach(
+    NativeType.lanesFor(types, operation.outcomeType),
+    (lane) => Constant.nullValue(builder, NativeType.laneType(types, lane)),
   )
-  const destinationValues = Object.freeze(
-    yield* Effect.forEach(NativeType.lanesFor(types, operation.type), (lane) =>
-      Constant.nullValue(builder, NativeType.laneType(types, lane)),
-    ),
+  const destinationValues = yield* Effect.forEach(
+    NativeType.lanesFor(types, operation.type),
+    (lane) => Constant.nullValue(builder, NativeType.laneType(types, lane)),
   )
   yield* NativeStorage.writeLocal(nativeStorage, operation.outcome.ordinal, outcomeValues)
   yield* NativeStorage.writeLocal(nativeStorage, operation.destination.ordinal, destinationValues)

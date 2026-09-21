@@ -44,26 +44,28 @@ export class AuthoredIdentityError extends Data.TaggedError('AuthoredIdentityErr
   }
 }> {}
 
-const segment = (key: Key, occurrence: number): Segment =>
-  Object.freeze({
-    _tag: 'OwnerSegment',
-    kind: key.kind,
-    ...(key.name === undefined ? {} : { name: key.name }),
-    ...(key.role === undefined ? {} : { role: key.role }),
-    occurrence,
-  })
+const segment = (key: Key, occurrence: number): Segment => ({
+  _tag: 'OwnerSegment',
+  kind: key.kind,
+  ...(key.name === undefined ? {} : { name: key.name }),
+  ...(key.role === undefined ? {} : { role: key.role }),
+  occurrence,
+})
 
-const copy = (self: Identity): Identity =>
-  Object.freeze({
-    _tag: 'AuthoredIdentity',
-    namespace: self.namespace,
-    module: self.module,
-    path: Object.freeze(self.path.map((part) => segment(part, part.occurrence))),
-  })
+const copy = (self: Identity): Identity => ({
+  _tag: 'AuthoredIdentity',
+  namespace: self.namespace,
+  module: self.module,
+  path: self.path.map((part) => segment(part, part.occurrence)),
+})
 
 /** Create a module owner from a logical namespace and resolver-canonical module name. */
-export const module = (namespace: string, module: string): Identity =>
-  Object.freeze({ _tag: 'AuthoredIdentity', namespace, module, path: Object.freeze([]) })
+export const module = (namespace: string, module: string): Identity => ({
+  _tag: 'AuthoredIdentity',
+  namespace,
+  module,
+  path: [],
+})
 
 /**
  * Assign sibling identities in authored order. Inserting or moving a differently named
@@ -73,19 +75,17 @@ export const module = (namespace: string, module: string): Identity =>
 export const children = (parent: Identity, keys: readonly Key[]): readonly Identity[] => {
   const owner = copy(parent)
   const occurrences = new Map<string, number>()
-  return Object.freeze(
-    keys.map((key): Identity => {
-      const encoded = JSON.stringify([key.kind, key.name ?? null, key.role ?? null])
-      const occurrence = occurrences.get(encoded) ?? 0
-      occurrences.set(encoded, occurrence + 1)
-      return Object.freeze({
-        _tag: 'AuthoredIdentity',
-        namespace: owner.namespace,
-        module: owner.module,
-        path: Object.freeze([...owner.path, segment(key, occurrence)]),
-      })
-    }),
-  )
+  return keys.map((key): Identity => {
+    const encoded = JSON.stringify([key.kind, key.name ?? null, key.role ?? null])
+    const occurrence = occurrences.get(encoded) ?? 0
+    occurrences.set(encoded, occurrence + 1)
+    return {
+      _tag: 'AuthoredIdentity',
+      namespace: owner.namespace,
+      module: owner.module,
+      path: [...owner.path, segment(key, occurrence)],
+    }
+  })
 }
 
 /** Compare complete owner identity, without relying on a digest or object identity. */
@@ -138,13 +138,13 @@ export const anchor = Effect.fn('AuthoredIdentity.anchor')(function* (
       })
     }
   }
-  return Object.freeze({
+  return {
     _tag: 'AuthoredAnchor',
     owner: copy(owner),
-    path: Object.freeze(
-      path.map((part): LocalSegment =>
-        Object.freeze({ _tag: 'LocalSegment', role: part.role, occurrence: part.occurrence }),
-      ),
-    ),
-  })
+    path: path.map((part): LocalSegment => ({
+      _tag: 'LocalSegment',
+      role: part.role,
+      occurrence: part.occurrence,
+    })),
+  }
 })

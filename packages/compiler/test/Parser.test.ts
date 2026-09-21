@@ -1078,11 +1078,6 @@ it('parses two declarations as separate direct branches in source order', () => 
   )
   if (secondLeading === undefined || !SyntaxTree.isToken(secondLeading)) return
   assert.strictEqual(secondLeading.kind, 'Whitespace')
-  assert.strictEqual(Object.isFrozen(result.root), true)
-  assert.strictEqual(Object.isFrozen(result.root.children), true)
-  assert.strictEqual(Object.isFrozen(declarations.at(0)), true)
-  assert.strictEqual(Object.isFrozen(declarations.at(1)), true)
-  assert.strictEqual(Object.isFrozen(result.parserDiagnostics), true)
   assert.deepEqual(result.parserDiagnostics, [])
   assertOriginalTokenTraversal(result)
   assert.deepEqual(reconstructedBytes(result), ascii(twoFunctionSource))

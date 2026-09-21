@@ -279,7 +279,6 @@ it('merges phase collections into one deterministic driver order', () => {
   const { lexical, parser, semantic } = build()
   const merged = Diagnostic.merge(lexical, parser, semantic)
 
-  assert.strictEqual(Object.isFrozen(merged), true)
   assert.deepEqual(
     merged.map((diagnostic) => ({
       phase: diagnostic.phase,

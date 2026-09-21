@@ -81,12 +81,10 @@ export const parse = (source: string): Result.Result<LinkerScript, string> => {
     }
   }
   if (depth !== 0) return Result.fail('unbalanced script')
-  return Result.succeed(
-    Object.freeze({
-      source,
-      references: Object.freeze(references.map((item) => Object.freeze(item))),
-    }),
-  )
+  return Result.succeed({
+    source,
+    references: references.map((item) => item),
+  })
 }
 
 /** Substitutes resolved paths without changing layout expressions or archive group semantics. */

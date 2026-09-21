@@ -31,9 +31,6 @@ pub fn main() -> i32 { return identity(42) }`,
   assert.strictEqual(result.bodies.length, 2)
   assert.strictEqual(result.tir.functions.length, 2)
   for (const body of result.bodies) {
-    assert.strictEqual(Object.isFrozen(body), true)
-    assert.strictEqual(Object.isFrozen(body.function), true)
-    assert.strictEqual(Object.isFrozen(body.results), true)
   }
 })
 

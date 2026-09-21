@@ -288,23 +288,19 @@ export const complete = (
   }
   const headers = self.modules.map((module): ModuleHeaders => {
     const members = module.members.map(finalize)
-    return Object.freeze({
+    return {
       ...module,
-      inherentImpls: Object.freeze(module.inherentImpls.map(finalizeHead)),
-      conformances: Object.freeze(module.conformances.map(finalizeConformance)),
-      members: Object.freeze(members),
-      declarations: Object.freeze(
-        members.filter(
-          (member): member is DeclarationFact => member._tag === 'FunctionDeclaration',
-        ),
+      inherentImpls: module.inherentImpls.map(finalizeHead),
+      conformances: module.conformances.map(finalizeConformance),
+      members: members,
+      declarations: members.filter(
+        (member): member is DeclarationFact => member._tag === 'FunctionDeclaration',
       ),
-      structs: Object.freeze(
-        members.filter((member): member is StructFact => member._tag === 'StructDeclaration'),
+      structs: members.filter(
+        (member): member is StructFact => member._tag === 'StructDeclaration',
       ),
-      unions: Object.freeze(
-        members.filter((member): member is UnionFact => member._tag === 'UnionDeclaration'),
-      ),
-    })
+      unions: members.filter((member): member is UnionFact => member._tag === 'UnionDeclaration'),
+    }
   })
   let modules = headers.map((module): ModuleHeaders => {
     const nominalParameters = (path: TypePathFact): ReadonlyArray<Type.Parameter> | undefined => {
@@ -338,7 +334,7 @@ export const complete = (
         if (resolved === undefined) return member
         diagnostics.push(...resolved.diagnostics)
         diagnostics.push(...foreignFunctionPointerAdmission(spanOf, resolved.fact))
-        return Object.freeze({ ...member, target: resolved.fact })
+        return { ...member, target: resolved.fact }
       }
       if (
         member._tag === 'ConstantDeclaration' ||
@@ -358,7 +354,7 @@ export const complete = (
           member._tag === 'PackageParameterDeclaration'
         ) {
           diagnostics.push(...foreignFunctionPointerAdmission(spanOf, resolved.fact))
-          return Object.freeze({ ...member, declaredType: resolved.fact })
+          return { ...member, declaredType: resolved.fact }
         }
         const admission =
           resolved.fact._tag === 'Resolved'
@@ -401,13 +397,13 @@ export const complete = (
             )
           }
         }
-        return Object.freeze({
+        return {
           ...member,
           declaredType:
             admission?._tag === 'NotAdmitted' || invalidInitializer
-              ? Object.freeze({ _tag: 'Unavailable' as const, anchor: resolved.fact.anchor })
+              ? { _tag: 'Unavailable' as const, anchor: resolved.fact.anchor }
               : resolved.fact,
-        })
+        }
       }
       if (member._tag === 'FunctionDeclaration') {
         const resolvedTypeParameters = resolveBounds(
@@ -448,7 +444,7 @@ export const complete = (
             headers,
           )
           diagnostics.push(...resolved.diagnostics)
-          return Object.freeze({ ...parameter, declaredType: resolved.fact })
+          return { ...parameter, declaredType: resolved.fact }
         })
         const resolvedResult = resolveDeclaredType(
           spanOf,
@@ -537,24 +533,24 @@ export const complete = (
         }
         diagnostics.push(...admission, ...behaviorDiagnostics, ...pointerAdmission)
         const { foreignExport, ...retained } = member
-        return Object.freeze({
+        return {
           ...retained,
           // An export outside the C subset publishes no symbol, so discovery never roots it.
           ...(admission.length === 0 && foreignExport !== undefined ? { foreignExport } : {}),
           typeParameters: resolvedTypeParameters,
-          parameters: Object.freeze(parameters),
+          parameters: parameters,
           // A foreign or exported header outside the C subset withholds its result so no callable
           // is published.
           returnType:
             admission.length === 0 && behaviorDiagnostics.length === 0
               ? result.fact
-              : Object.freeze({ _tag: 'Unavailable' as const, anchor: result.fact.anchor }),
+              : { _tag: 'Unavailable' as const, anchor: result.fact.anchor },
           ...(result.opaqueResult === undefined ? {} : { opaqueResult: result.opaqueResult }),
           failureRow: failureRow.fact,
           requirementRow: requirementRow.fact,
           constraints: constraints.facts,
           constraintContracts: semanticConstraints(spanOf, constraints.facts),
-        })
+        }
       }
       if (member._tag === 'ServiceDeclaration' || member._tag === 'InterfaceDeclaration') {
         const resolvedMemberTypeParameters = resolveBounds(
@@ -640,7 +636,7 @@ export const complete = (
               headers,
             )
             diagnostics.push(...resolved.diagnostics)
-            return Object.freeze({ ...parameter, declaredType: resolved.fact })
+            return { ...parameter, declaredType: resolved.fact }
           })
           const resolvedResult = resolveDeclaredType(
             spanOf,
@@ -684,50 +680,47 @@ export const complete = (
             ),
             ...foreignFunctionPointerAdmission(spanOf, result.fact),
           )
-          return Object.freeze({
+          return {
             ...operation,
             typeParameters: resolvedOperationTypeParameters,
-            parameters: Object.freeze(parameters),
+            parameters: parameters,
             returnType: result.fact,
             ...(result.opaqueResult === undefined ? {} : { opaqueResult: result.opaqueResult }),
             failureRow: failureRow.fact,
             requirementRow: requirementRow.fact,
             constraints: constraints.facts,
             constraintContracts: semanticConstraints(spanOf, constraints.facts),
-          })
+          }
         })
-        const completed = Object.freeze({
+        const completed = {
           ...member,
           typeParameters: resolvedMemberTypeParameters,
-          operations: Object.freeze(operations),
-        })
-        return Object.freeze({
+          operations: operations,
+        }
+        return {
           ...completed,
           operationContracts: interfaceOperationContracts(completed, operations),
-        })
+        }
       }
       if (member._tag === 'RoleDeclaration' || member._tag === 'EnumDeclaration') return member
       const resolveFields = (fields: StructFact['fields']): StructFact['fields'] =>
-        Object.freeze(
-          fields.map((field) => {
-            const resolved = resolveDeclaredType(
-              spanOf,
-              module.module,
-              field.declaredType,
-              resolvers,
-              headers,
-            )
-            diagnostics.push(...resolved.diagnostics)
-            diagnostics.push(...foreignFunctionPointerAdmission(spanOf, resolved.fact))
-            return Object.freeze({ ...field, declaredType: resolved.fact })
-          }),
-        )
+        fields.map((field) => {
+          const resolved = resolveDeclaredType(
+            spanOf,
+            module.module,
+            field.declaredType,
+            resolvers,
+            headers,
+          )
+          diagnostics.push(...resolved.diagnostics)
+          diagnostics.push(...foreignFunctionPointerAdmission(spanOf, resolved.fact))
+          return { ...field, declaredType: resolved.fact }
+        })
       if (member._tag === 'UnionDeclaration') {
-        const variants = Object.freeze(
-          member.variants.map((variant) =>
-            Object.freeze({ ...variant, fields: resolveFields(variant.fields) }),
-          ),
-        )
+        const variants = member.variants.map((variant) => ({
+          ...variant,
+          fields: resolveFields(variant.fields),
+        }))
         const unavailableCauses = variants.flatMap((variant) =>
           variant.fields.flatMap((field) =>
             field.declaredType._tag === 'Unresolved' && field.declaredType.cause !== undefined
@@ -735,7 +728,7 @@ export const complete = (
               : [],
           ),
         )
-        return Object.freeze({
+        return {
           ...member,
           typeParameters: resolveBounds(
             spanOf,
@@ -749,16 +742,16 @@ export const complete = (
           validity:
             member.validity._tag === 'Valid' && unavailableCauses.length === 0
               ? member.validity
-              : Object.freeze({
+              : {
                   _tag: 'Invalid' as const,
-                  causes: Object.freeze([
+                  causes: [
                     ...(member.validity._tag === 'Invalid' ? member.validity.causes : []),
                     ...unavailableCauses,
-                  ]),
-                }),
-        })
+                  ],
+                },
+        }
       }
-      return Object.freeze({
+      return {
         ...member,
         typeParameters: resolveBounds(
           spanOf,
@@ -769,7 +762,7 @@ export const complete = (
           diagnostics,
         ),
         fields: resolveFields(member.fields),
-      })
+      }
     })
     const conformances = module.conformances.map((conformance) => {
       const capability = resolveDeclaredType(
@@ -825,13 +818,13 @@ export const complete = (
                 ...failureRow.diagnostics,
                 ...requirementRow.diagnostics,
               )
-              return Object.freeze({
+              return {
                 ...conformance.hook,
                 parameterType: parameterType.fact,
                 returnType: returnType.fact,
                 failureRow: failureRow.fact,
                 requirementRow: requirementRow.fact,
-              })
+              }
             })()
       const requirements = conformance.requirements.map((requirement) => {
         const resolved = resolveDeclaredType(
@@ -842,15 +835,15 @@ export const complete = (
           headers,
         )
         diagnostics.push(...resolved.diagnostics)
-        return Object.freeze({ ...requirement, capability: resolved.fact })
+        return { ...requirement, capability: resolved.fact }
       })
-      return Object.freeze({
+      return {
         ...conformance,
-        requirements: Object.freeze(requirements),
+        requirements: requirements,
         capability: capability.fact,
         provider: provider.fact,
         ...(hook === undefined ? {} : { hook }),
-      })
+      }
     })
     const conformanceProviders = new Map(
       conformances.flatMap((conformance) =>
@@ -866,7 +859,7 @@ export const complete = (
       const owner = resolveDeclaredType(spanOf, module.module, head.owner, resolvers, headers)
       // A head already rejected at collection keeps only that diagnostic; its owner is resolved
       // for closing `Self` in its members, not for a second report.
-      if (head.validity._tag === 'Invalid') return Object.freeze({ ...head, owner: owner.fact })
+      if (head.validity._tag === 'Invalid') return { ...head, owner: owner.fact }
       // The owner is a declaration of this module named by its own spelling. A local declaration
       // wins over the type resolver's answer because a zero-data owner struct may share its
       // spelling with a builtin storage type (`Slot`, `RawBuffer`), and the impl names the
@@ -897,14 +890,14 @@ export const complete = (
           Location.at(head.owner.anchor),
         )
         diagnostics.push(diagnostic)
-        return Object.freeze({
+        return {
           ...head,
           owner: owner.fact,
-          validity: Object.freeze({
+          validity: {
             _tag: 'Invalid' as const,
             cause: Diagnostic.identity(diagnostic),
-          }),
-        })
+          },
+        }
       }
       if (
         localOwner !== undefined &&
@@ -924,7 +917,7 @@ export const complete = (
                 localOwner.canonical.id.name,
                 binders.map((parameter) => Type.parameterArgument(parameter.type)),
               )
-        return Object.freeze({ ...head, owner: Object.freeze({ ...owner.fact, type: ownerType }) })
+        return { ...head, owner: { ...owner.fact, type: ownerType } }
       }
       const ownerType = owner.fact._tag === 'Resolved' ? owner.fact.type : undefined
       const nominal = ownerType !== undefined && Type.isNominal(ownerType) ? ownerType : undefined
@@ -946,7 +939,7 @@ export const complete = (
       } else {
         problem = undefined
       }
-      if (problem === undefined) return Object.freeze({ ...head, owner: owner.fact })
+      if (problem === undefined) return { ...head, owner: owner.fact }
       const diagnostic = Diagnostic.invalidInherentHead(
         head.ownerSpelling,
         problem,
@@ -955,14 +948,14 @@ export const complete = (
           : Location.at(head.owner.anchor),
       )
       diagnostics.push(diagnostic)
-      return Object.freeze({
+      return {
         ...head,
         owner: owner.fact,
-        validity: Object.freeze({
+        validity: {
           _tag: 'Invalid' as const,
           cause: Diagnostic.identity(diagnostic),
-        }),
-      })
+        },
+      }
     })
     // Every head whose owner resolved closes `Self` on its members, even a rejected one, so a
     // rejected member's body reports only the head's diagnostic and not a cascade about `Self`.
@@ -1029,10 +1022,10 @@ export const complete = (
             ? member
             : closeConformanceSelf(member, association.self, resolvedOwner)
         return member.canonical._tag === 'Canonical'
-          ? Object.freeze({
+          ? {
               ...closed,
-              canonical: Object.freeze({ _tag: 'Unidentified' as const }),
-            })
+              canonical: { _tag: 'Unidentified' as const },
+            }
           : closed
       }
       if (owner === undefined) return unpublished()
@@ -1061,79 +1054,67 @@ export const complete = (
       const typeParameters = closed.typeParameters.map((parameter) =>
         parameter.bounds.length === 0
           ? parameter
-          : Object.freeze({
+          : {
               ...parameter,
-              bounds: Object.freeze(
-                parameter.bounds.map((bound) => {
-                  if (bound._tag !== 'ResolvedBound') return bound
-                  const capability = Type.substitute(bound.application.capability, selfSubstitution)
-                  if (
-                    !Type.isNominal(capability) ||
-                    Type.equals(capability, bound.application.capability)
-                  )
-                    return bound
-                  const declaration = memberByNominal(headers, capability)
-                  const application =
-                    declaration?._tag === 'InterfaceDeclaration' ||
-                    declaration?._tag === 'ServiceDeclaration'
-                      ? interfaceApplication(declaration, capability, parameter.type)
-                      : undefined
-                  return application === undefined
-                    ? bound
-                    : Object.freeze({ ...bound, application })
-                }),
-              ),
-            }),
+              bounds: parameter.bounds.map((bound) => {
+                if (bound._tag !== 'ResolvedBound') return bound
+                const capability = Type.substitute(bound.application.capability, selfSubstitution)
+                if (
+                  !Type.isNominal(capability) ||
+                  Type.equals(capability, bound.application.capability)
+                )
+                  return bound
+                const declaration = memberByNominal(headers, capability)
+                const application =
+                  declaration?._tag === 'InterfaceDeclaration' ||
+                  declaration?._tag === 'ServiceDeclaration'
+                    ? interfaceApplication(declaration, capability, parameter.type)
+                    : undefined
+                return application === undefined ? bound : { ...bound, application }
+              }),
+            },
       )
-      return Object.freeze({
+      return {
         ...closed,
-        typeParameters: Object.freeze(typeParameters),
-        associatedMember: Object.freeze({
+        typeParameters: typeParameters,
+        associatedMember: {
           ...association,
-          owner: Object.freeze({
+          owner: {
             _tag: 'CanonicalDeclarationId' as const,
             module: owner.module,
             name: owner.name,
-          }),
-        }),
-      })
+          },
+        },
+      }
     })
-    return Object.freeze({
+    return {
       ...module,
-      inherentImpls: Object.freeze(inherentImpls),
-      members: Object.freeze(closedMembers),
-      declarations: Object.freeze(
-        closedMembers.filter(
-          (member): member is DeclarationFact => member._tag === 'FunctionDeclaration',
-        ),
+      inherentImpls: inherentImpls,
+      members: closedMembers,
+      declarations: closedMembers.filter(
+        (member): member is DeclarationFact => member._tag === 'FunctionDeclaration',
       ),
-      structs: Object.freeze(
-        closedMembers.filter((member): member is StructFact => member._tag === 'StructDeclaration'),
+      structs: closedMembers.filter(
+        (member): member is StructFact => member._tag === 'StructDeclaration',
       ),
-      enums: Object.freeze(
-        closedMembers.filter((member): member is EnumFact => member._tag === 'EnumDeclaration'),
+      enums: closedMembers.filter(
+        (member): member is EnumFact => member._tag === 'EnumDeclaration',
       ),
-      unions: Object.freeze(
-        closedMembers.filter((member): member is UnionFact => member._tag === 'UnionDeclaration'),
+      unions: closedMembers.filter(
+        (member): member is UnionFact => member._tag === 'UnionDeclaration',
       ),
-      services: Object.freeze(
-        closedMembers.filter(
-          (member): member is ServiceFact => member._tag === 'ServiceDeclaration',
-        ),
+      services: closedMembers.filter(
+        (member): member is ServiceFact => member._tag === 'ServiceDeclaration',
       ),
-      interfaces: Object.freeze(
-        closedMembers.filter(
-          (member): member is InterfaceFact => member._tag === 'InterfaceDeclaration',
-        ),
+      interfaces: closedMembers.filter(
+        (member): member is InterfaceFact => member._tag === 'InterfaceDeclaration',
       ),
-      constants: Object.freeze(
-        closedMembers.filter(
-          (member): member is ConstantFact =>
-            member._tag === 'ConstantDeclaration' || member._tag === 'PackageParameterDeclaration',
-        ),
+      constants: closedMembers.filter(
+        (member): member is ConstantFact =>
+          member._tag === 'ConstantDeclaration' || member._tag === 'PackageParameterDeclaration',
       ),
-      conformances: Object.freeze(conformances),
-    })
+      conformances: conformances,
+    }
   })
 
   // C-layout validation needs the whole resolved declaration graph: a field may embed a record
@@ -1157,9 +1138,7 @@ export const complete = (
         )
       }
       const admissions =
-        member.typeParameters.length === 0
-          ? CLayout.admitFields(member, resolveCLayoutStruct)
-          : Object.freeze([])
+        member.typeParameters.length === 0 ? CLayout.admitFields(member, resolveCLayoutStruct) : []
       for (const [ordinal, field] of member.fields.entries()) {
         if (field.declaredType._tag !== 'Resolved') {
           invalid = true
@@ -1178,23 +1157,23 @@ export const complete = (
         )
       }
       return invalid
-        ? Object.freeze({
+        ? {
             ...member,
-            layout: Object.freeze({
+            layout: {
               _tag: 'InvalidForeign' as const,
               abi: member.layout.abi,
               abiSpan: member.layout.abiSpan,
-            }),
-          })
+            },
+          }
         : member
     })
-    return Object.freeze({
+    return {
       ...module,
-      members: Object.freeze(members),
-      structs: Object.freeze(
-        members.filter((member): member is StructFact => member._tag === 'StructDeclaration'),
+      members: members,
+      structs: members.filter(
+        (member): member is StructFact => member._tag === 'StructDeclaration',
       ),
-    })
+    }
   })
 
   // Bounds may precede the interface they name, and the first completion pass intentionally reads
@@ -1205,90 +1184,73 @@ export const complete = (
       if (member._tag === 'EnumDeclaration') return member
       const typeParameters = refreshInterfaceApplications(member.typeParameters, modules)
       if (member._tag !== 'ServiceDeclaration' && member._tag !== 'InterfaceDeclaration')
-        return Object.freeze({ ...member, typeParameters })
-      const operations = Object.freeze(
-        member.operations.map((operation) =>
-          Object.freeze({
-            ...operation,
-            typeParameters: refreshInterfaceApplications(operation.typeParameters, modules),
-          }),
-        ),
-      )
-      return Object.freeze({
+        return { ...member, typeParameters }
+      const operations = member.operations.map((operation) => ({
+        ...operation,
+        typeParameters: refreshInterfaceApplications(operation.typeParameters, modules),
+      }))
+      return {
         ...member,
         typeParameters,
         operations,
         operationContracts: interfaceOperationContracts(member, operations),
-      })
+      }
     })
-    const conformances = Object.freeze(
-      module.conformances.map((conformance) => {
-        const capability =
-          conformance.capability._tag === 'Resolved' && Type.isNominal(conformance.capability.type)
-            ? conformance.capability.type
-            : undefined
-        const provider =
-          conformance.provider._tag === 'Resolved' ? conformance.provider.type : undefined
-        const declaration =
-          capability === undefined ? undefined : memberByNominal(modules, capability)
-        const application =
-          capability !== undefined &&
-          provider !== undefined &&
-          (declaration?._tag === 'InterfaceDeclaration' ||
-            declaration?._tag === 'ServiceDeclaration')
-            ? interfaceApplication(declaration, capability, provider)
-            : undefined
-        return Object.freeze({
-          ...conformance,
-          typeParameters: refreshInterfaceApplications(conformance.typeParameters, modules),
-          operations: Object.freeze(
-            conformance.operations.map((operation) => {
-              const contract = application?.operations.find(
-                (candidate) =>
-                  operation.name._tag === 'Present' &&
-                  candidate.declaration.name._tag === 'Present' &&
-                  candidate.declaration.name.spelling === operation.name.spelling,
-              )
-              return Object.freeze({
-                ...operation,
-                ...(contract === undefined ? {} : { contract }),
-              })
-            }),
-          ),
-        })
-      }),
-    )
-    return Object.freeze({
+    const conformances = module.conformances.map((conformance) => {
+      const capability =
+        conformance.capability._tag === 'Resolved' && Type.isNominal(conformance.capability.type)
+          ? conformance.capability.type
+          : undefined
+      const provider =
+        conformance.provider._tag === 'Resolved' ? conformance.provider.type : undefined
+      const declaration =
+        capability === undefined ? undefined : memberByNominal(modules, capability)
+      const application =
+        capability !== undefined &&
+        provider !== undefined &&
+        (declaration?._tag === 'InterfaceDeclaration' || declaration?._tag === 'ServiceDeclaration')
+          ? interfaceApplication(declaration, capability, provider)
+          : undefined
+      return {
+        ...conformance,
+        typeParameters: refreshInterfaceApplications(conformance.typeParameters, modules),
+        operations: conformance.operations.map((operation) => {
+          const contract = application?.operations.find(
+            (candidate) =>
+              operation.name._tag === 'Present' &&
+              candidate.declaration.name._tag === 'Present' &&
+              candidate.declaration.name.spelling === operation.name.spelling,
+          )
+          return {
+            ...operation,
+            ...(contract === undefined ? {} : { contract }),
+          }
+        }),
+      }
+    })
+    return {
       ...module,
-      members: Object.freeze(members),
-      declarations: Object.freeze(
-        members.filter(
-          (member): member is DeclarationFact => member._tag === 'FunctionDeclaration',
-        ),
+      members: members,
+      declarations: members.filter(
+        (member): member is DeclarationFact => member._tag === 'FunctionDeclaration',
       ),
-      structs: Object.freeze(
-        members.filter((member): member is StructFact => member._tag === 'StructDeclaration'),
+      structs: members.filter(
+        (member): member is StructFact => member._tag === 'StructDeclaration',
       ),
-      enums: Object.freeze(
-        members.filter((member): member is EnumFact => member._tag === 'EnumDeclaration'),
+      enums: members.filter((member): member is EnumFact => member._tag === 'EnumDeclaration'),
+      unions: members.filter((member): member is UnionFact => member._tag === 'UnionDeclaration'),
+      services: members.filter(
+        (member): member is ServiceFact => member._tag === 'ServiceDeclaration',
       ),
-      unions: Object.freeze(
-        members.filter((member): member is UnionFact => member._tag === 'UnionDeclaration'),
+      interfaces: members.filter(
+        (member): member is InterfaceFact => member._tag === 'InterfaceDeclaration',
       ),
-      services: Object.freeze(
-        members.filter((member): member is ServiceFact => member._tag === 'ServiceDeclaration'),
-      ),
-      interfaces: Object.freeze(
-        members.filter((member): member is InterfaceFact => member._tag === 'InterfaceDeclaration'),
-      ),
-      constants: Object.freeze(
-        members.filter(
-          (member): member is ConstantFact =>
-            member._tag === 'ConstantDeclaration' || member._tag === 'PackageParameterDeclaration',
-        ),
+      constants: members.filter(
+        (member): member is ConstantFact =>
+          member._tag === 'ConstantDeclaration' || member._tag === 'PackageParameterDeclaration',
       ),
       conformances,
-    })
+    }
   })
 
   // Coherence and termination are program-wide questions, so both are answered once every module's
@@ -1301,110 +1263,98 @@ export const complete = (
     readonly head: ConformanceHead.ConformanceHead
     readonly span: Location.Location
   }> = []
-  modules = modules.map((module) =>
-    Object.freeze({
-      ...module,
-      conformances: Object.freeze(
-        module.conformances.map((conformance): ConformanceFact => {
-          if (
-            conformance.capability._tag !== 'Resolved' ||
-            !Type.isNominal(conformance.capability.type) ||
-            conformance.provider._tag !== 'Resolved'
-          )
-            return conformance
-          const requirements = declaredRequirements(modules, conformance)
-          const head = ConformanceHead.make(
-            conformance.capability.type,
-            conformance.provider.type,
-            requirements,
-          )
-          // A damaged requirement is retained on the conformance fact for diagnostics, but cannot
-          // be shortened into a zero-obligation head. Header validation below reports the source
-          // error; leaving termination unavailable keeps the fact out of coherence and proof search.
-          if (requirements.length !== conformance.requirements.length)
-            return Object.freeze({ ...conformance, head })
-          const contract = memberByNominal(modules, conformance.capability.type)
-          if (
-            (contract?._tag === 'InterfaceDeclaration' ||
-              contract?._tag === 'ServiceDeclaration') &&
-            Type.isNominal(conformance.provider.type) &&
-            conformance.provider.type.module !== module.module
-          )
-            return Object.freeze({ ...conformance, head })
-          const failures = ConformanceHead.terminationFailures(head)
-          if (failures.length > 0)
-            diagnostics.push(
-              Diagnostic.nonTerminatingConformance(
-                ConformanceHead.encode(head),
-                failures.map(ConformanceHead.describeTermination),
-                Location.at(conformance.anchor),
-              ),
-            )
-          // This is the one authority on whether two conformances may cover one provider. Two
-          // unbounded headers with one identical shape are the case a reader recognizes as a
-          // duplicate and are named that way; two headers a bound is the only difference between
-          // are reported as the overlap they are, because calling them duplicates would suggest the
-          // bounds were compared. Comparing the alpha-normalized heads is what makes the two tests
-          // agree — keying the duplicate check on unnormalized capabilities, as an earlier version
-          // did, let exactly the bound-distinguished pair match neither and survive.
-          const headKey = ConformanceHead.key(head)
-          const overlapping = acceptedHeads.find((candidate) =>
-            ConformanceHead.mayOverlap(candidate.head, head),
-          )
-          if (overlapping === undefined)
-            acceptedHeads.push(
-              Object.freeze({
-                module: module.module,
-                ordinal: conformance.ordinal,
-                head,
-                span: Location.at(conformance.anchor),
-              }),
-            )
-          else if (
-            ConformanceHead.key(overlapping.head) === headKey &&
-            head.requirements.length === 0 &&
-            overlapping.head.requirements.length === 0
-          )
-            diagnostics.push(
-              Object.freeze({
-                ...Diagnostic.invalidConformance(
-                  `duplicate ${conformance.capability.type.name} implementation for ${Type.encode(conformance.provider.type)}`,
-                  Location.at(conformance.anchor),
-                ),
-                relatedSpans: Object.freeze([
-                  Object.freeze({ label: 'first implementation', span: overlapping.span }),
-                ]),
-              }),
-            )
-          else
-            diagnostics.push(
-              Diagnostic.overlappingConformance(
-                ConformanceHead.encode(head),
-                ConformanceHead.encode(overlapping.head),
-                Location.at(conformance.anchor),
-                overlapping.span,
-              ),
-            )
-          return Object.freeze({
-            ...conformance,
-            head,
-            coherence:
-              overlapping === undefined
-                ? Object.freeze({ _tag: 'Coherent' as const })
-                : Object.freeze({
-                    _tag: 'Overlapping' as const,
-                    module: overlapping.module,
-                    ordinal: overlapping.ordinal,
-                  }),
-            termination:
-              failures.length === 0
-                ? Object.freeze({ _tag: 'Terminating' as const })
-                : Object.freeze({ _tag: 'NonTerminating' as const, failures }),
-          })
-        }),
-      ),
+  modules = modules.map((module) => ({
+    ...module,
+    conformances: module.conformances.map((conformance): ConformanceFact => {
+      if (
+        conformance.capability._tag !== 'Resolved' ||
+        !Type.isNominal(conformance.capability.type) ||
+        conformance.provider._tag !== 'Resolved'
+      )
+        return conformance
+      const requirements = declaredRequirements(modules, conformance)
+      const head = ConformanceHead.make(
+        conformance.capability.type,
+        conformance.provider.type,
+        requirements,
+      )
+      // A damaged requirement is retained on the conformance fact for diagnostics, but cannot
+      // be shortened into a zero-obligation head. Header validation below reports the source
+      // error; leaving termination unavailable keeps the fact out of coherence and proof search.
+      if (requirements.length !== conformance.requirements.length) return { ...conformance, head }
+      const contract = memberByNominal(modules, conformance.capability.type)
+      if (
+        (contract?._tag === 'InterfaceDeclaration' || contract?._tag === 'ServiceDeclaration') &&
+        Type.isNominal(conformance.provider.type) &&
+        conformance.provider.type.module !== module.module
+      )
+        return { ...conformance, head }
+      const failures = ConformanceHead.terminationFailures(head)
+      if (failures.length > 0)
+        diagnostics.push(
+          Diagnostic.nonTerminatingConformance(
+            ConformanceHead.encode(head),
+            failures.map(ConformanceHead.describeTermination),
+            Location.at(conformance.anchor),
+          ),
+        )
+      // This is the one authority on whether two conformances may cover one provider. Two
+      // unbounded headers with one identical shape are the case a reader recognizes as a
+      // duplicate and are named that way; two headers a bound is the only difference between
+      // are reported as the overlap they are, because calling them duplicates would suggest the
+      // bounds were compared. Comparing the alpha-normalized heads is what makes the two tests
+      // agree — keying the duplicate check on unnormalized capabilities, as an earlier version
+      // did, let exactly the bound-distinguished pair match neither and survive.
+      const headKey = ConformanceHead.key(head)
+      const overlapping = acceptedHeads.find((candidate) =>
+        ConformanceHead.mayOverlap(candidate.head, head),
+      )
+      if (overlapping === undefined)
+        acceptedHeads.push({
+          module: module.module,
+          ordinal: conformance.ordinal,
+          head,
+          span: Location.at(conformance.anchor),
+        })
+      else if (
+        ConformanceHead.key(overlapping.head) === headKey &&
+        head.requirements.length === 0 &&
+        overlapping.head.requirements.length === 0
+      )
+        diagnostics.push({
+          ...Diagnostic.invalidConformance(
+            `duplicate ${conformance.capability.type.name} implementation for ${Type.encode(conformance.provider.type)}`,
+            Location.at(conformance.anchor),
+          ),
+          relatedSpans: [{ label: 'first implementation', span: overlapping.span }],
+        })
+      else
+        diagnostics.push(
+          Diagnostic.overlappingConformance(
+            ConformanceHead.encode(head),
+            ConformanceHead.encode(overlapping.head),
+            Location.at(conformance.anchor),
+            overlapping.span,
+          ),
+        )
+      return {
+        ...conformance,
+        head,
+        coherence:
+          overlapping === undefined
+            ? { _tag: 'Coherent' as const }
+            : {
+                _tag: 'Overlapping' as const,
+                module: overlapping.module,
+                ordinal: overlapping.ordinal,
+              },
+        termination:
+          failures.length === 0
+            ? { _tag: 'Terminating' as const }
+            : { _tag: 'NonTerminating' as const, failures },
+      }
     }),
-  )
+  }))
 
   const invalidConformances = new Set<ConformanceFact>()
   const inferredWitnessArguments = new Map<
@@ -1862,32 +1812,22 @@ export const complete = (
     }
   }
 
-  modules = modules.map((module) =>
-    Object.freeze({
-      ...module,
-      conformances: Object.freeze(
-        module.conformances.map((conformance) =>
-          Object.freeze({
-            ...conformance,
-            operations: Object.freeze(
-              conformance.operations.map((operation) => {
-                const targetArguments = inferredWitnessArguments.get(operation)
-                return targetArguments === undefined
-                  ? operation
-                  : Object.freeze({ ...operation, targetArguments })
-              }),
-            ),
-            validity:
-              invalidConformances.has(conformance) ||
-              conformance.coherence._tag !== 'Coherent' ||
-              conformance.termination._tag !== 'Terminating'
-                ? Object.freeze({ _tag: 'InvalidConformance' as const })
-                : Object.freeze({ _tag: 'ValidConformance' as const }),
-          }),
-        ),
-      ),
-    }),
-  )
+  modules = modules.map((module) => ({
+    ...module,
+    conformances: module.conformances.map((conformance) => ({
+      ...conformance,
+      operations: conformance.operations.map((operation) => {
+        const targetArguments = inferredWitnessArguments.get(operation)
+        return targetArguments === undefined ? operation : { ...operation, targetArguments }
+      }),
+      validity:
+        invalidConformances.has(conformance) ||
+        conformance.coherence._tag !== 'Coherent' ||
+        conformance.termination._tag !== 'Terminating'
+          ? { _tag: 'InvalidConformance' as const }
+          : { _tag: 'ValidConformance' as const },
+    })),
+  }))
 
   // Copy syntax is validated above; now validate the property over the complete provisional field
   // graph before any downstream phase can observe the conformances as evidence.
@@ -1923,21 +1863,17 @@ export const complete = (
     }
   }
   if (invalidCopyKeys.size > 0)
-    modules = modules.map((module) =>
-      Object.freeze({
-        ...module,
-        conformances: Object.freeze(
-          module.conformances.map((conformance) =>
-            invalidCopyKeys.has(`${module.module}\u0000${conformance.ordinal}`)
-              ? Object.freeze({
-                  ...conformance,
-                  validity: Object.freeze({ _tag: 'InvalidConformance' as const }),
-                })
-              : conformance,
-          ),
-        ),
-      }),
-    )
+    modules = modules.map((module) => ({
+      ...module,
+      conformances: module.conformances.map((conformance) =>
+        invalidCopyKeys.has(`${module.module}\u0000${conformance.ordinal}`)
+          ? {
+              ...conformance,
+              validity: { _tag: 'InvalidConformance' as const },
+            }
+          : conformance,
+      ),
+    }))
 
   // A declared borrowed type is admitted through its elaborated lifetime contract. Concrete
   // referent validity is checked in body analysis, including fields and returned aggregates.
@@ -1961,119 +1897,91 @@ export const complete = (
       // The alias resolver attached exposure when it erased the target.
       if (member._tag === 'AliasDeclaration') return member
       if (member._tag === 'ConstantDeclaration' || member._tag === 'PackageParameterDeclaration') {
-        return Object.freeze({
+        return {
           ...member,
           declaredType: attachExposure(spanOf, member.declaredType, modules, diagnostics),
-        })
+        }
       }
       if (member._tag === 'FunctionDeclaration') {
-        const parameters = member.parameters.map((parameter) =>
-          Object.freeze({
-            ...parameter,
-            declaredType: attachExposure(spanOf, parameter.declaredType, modules, diagnostics),
-          }),
-        )
-        return Object.freeze({
+        const parameters = member.parameters.map((parameter) => ({
+          ...parameter,
+          declaredType: attachExposure(spanOf, parameter.declaredType, modules, diagnostics),
+        }))
+        return {
           ...member,
-          parameters: Object.freeze(parameters),
+          parameters: parameters,
           returnType: attachExposure(spanOf, member.returnType, modules, diagnostics),
-          failureRow: Object.freeze({
+          failureRow: {
             ...member.failureRow,
-            members: Object.freeze(
-              member.failureRow.members.map((failure) =>
-                attachExposure(spanOf, failure, modules, diagnostics),
-              ),
+            members: member.failureRow.members.map((failure) =>
+              attachExposure(spanOf, failure, modules, diagnostics),
             ),
-          }),
-        })
+          },
+        }
       }
       if (member._tag === 'ServiceDeclaration' || member._tag === 'InterfaceDeclaration') {
-        const operations = member.operations.map((operation) =>
-          Object.freeze({
-            ...operation,
-            parameters: Object.freeze(
-              operation.parameters.map((parameter) =>
-                Object.freeze({
-                  ...parameter,
-                  declaredType: attachExposure(
-                    spanOf,
-                    parameter.declaredType,
-                    modules,
-                    diagnostics,
-                  ),
-                }),
-              ),
+        const operations = member.operations.map((operation) => ({
+          ...operation,
+          parameters: operation.parameters.map((parameter) => ({
+            ...parameter,
+            declaredType: attachExposure(spanOf, parameter.declaredType, modules, diagnostics),
+          })),
+          returnType: attachExposure(spanOf, operation.returnType, modules, diagnostics),
+          failureRow: {
+            ...operation.failureRow,
+            members: operation.failureRow.members.map((failure) =>
+              attachExposure(spanOf, failure, modules, diagnostics),
             ),
-            returnType: attachExposure(spanOf, operation.returnType, modules, diagnostics),
-            failureRow: Object.freeze({
-              ...operation.failureRow,
-              members: Object.freeze(
-                operation.failureRow.members.map((failure) =>
-                  attachExposure(spanOf, failure, modules, diagnostics),
-                ),
-              ),
-            }),
-          }),
-        )
-        const exposed = Object.freeze({ ...member, operations: Object.freeze(operations) })
-        return Object.freeze({
+          },
+        }))
+        const exposed = { ...member, operations: operations }
+        return {
           ...exposed,
           operationContracts: interfaceOperationContracts(exposed, operations),
-        })
+        }
       }
       if (member._tag === 'RoleDeclaration' || member._tag === 'EnumDeclaration') return member
       const exposeFields = (fields: StructFact['fields']): StructFact['fields'] =>
-        Object.freeze(
-          fields.map((field) =>
-            field.visibility === 'Public'
-              ? Object.freeze({
-                  ...field,
-                  declaredType: attachExposure(spanOf, field.declaredType, modules, diagnostics),
-                })
-              : field,
-          ),
+        fields.map((field) =>
+          field.visibility === 'Public'
+            ? {
+                ...field,
+                declaredType: attachExposure(spanOf, field.declaredType, modules, diagnostics),
+              }
+            : field,
         )
       return member._tag === 'UnionDeclaration'
-        ? Object.freeze({
+        ? {
             ...member,
-            variants: Object.freeze(
-              member.variants.map((variant) =>
-                Object.freeze({ ...variant, fields: exposeFields(variant.fields) }),
-              ),
-            ),
-          })
-        : Object.freeze({ ...member, fields: exposeFields(member.fields) })
+            variants: member.variants.map((variant) => ({
+              ...variant,
+              fields: exposeFields(variant.fields),
+            })),
+          }
+        : { ...member, fields: exposeFields(member.fields) }
     })
-    return Object.freeze({
+    return {
       ...module,
-      members: Object.freeze(members),
-      declarations: Object.freeze(
-        members.filter(
-          (member): member is DeclarationFact => member._tag === 'FunctionDeclaration',
-        ),
+      members: members,
+      declarations: members.filter(
+        (member): member is DeclarationFact => member._tag === 'FunctionDeclaration',
       ),
-      structs: Object.freeze(
-        members.filter((member): member is StructFact => member._tag === 'StructDeclaration'),
+      structs: members.filter(
+        (member): member is StructFact => member._tag === 'StructDeclaration',
       ),
-      enums: Object.freeze(
-        members.filter((member): member is EnumFact => member._tag === 'EnumDeclaration'),
+      enums: members.filter((member): member is EnumFact => member._tag === 'EnumDeclaration'),
+      unions: members.filter((member): member is UnionFact => member._tag === 'UnionDeclaration'),
+      services: members.filter(
+        (member): member is ServiceFact => member._tag === 'ServiceDeclaration',
       ),
-      unions: Object.freeze(
-        members.filter((member): member is UnionFact => member._tag === 'UnionDeclaration'),
+      interfaces: members.filter(
+        (member): member is InterfaceFact => member._tag === 'InterfaceDeclaration',
       ),
-      services: Object.freeze(
-        members.filter((member): member is ServiceFact => member._tag === 'ServiceDeclaration'),
+      constants: members.filter(
+        (member): member is ConstantFact =>
+          member._tag === 'ConstantDeclaration' || member._tag === 'PackageParameterDeclaration',
       ),
-      interfaces: Object.freeze(
-        members.filter((member): member is InterfaceFact => member._tag === 'InterfaceDeclaration'),
-      ),
-      constants: Object.freeze(
-        members.filter(
-          (member): member is ConstantFact =>
-            member._tag === 'ConstantDeclaration' || member._tag === 'PackageParameterDeclaration',
-        ),
-      ),
-    })
+    }
   })
 
   const aggregates = modules.flatMap((module) => [...module.structs, ...module.unions])
@@ -2098,7 +2006,7 @@ export const complete = (
       )
     if (keys.length < 2 && !selfEdge) continue
     const diagnostic = Diagnostic.inlineRecursiveAggregate(
-      Object.freeze(keys),
+      keys,
       first.name._tag === 'Present' ? Location.at(first.name.anchor) : Location.at(first.anchor),
     )
     diagnostics.push(diagnostic)
@@ -2137,62 +2045,50 @@ export const complete = (
         fieldDependencyCause = fieldCause.declaredType.exposureCause
       }
       const cause = (key === undefined ? undefined : cycleCause.get(key)) ?? fieldDependencyCause
-      const dependency = Object.freeze(
+      const dependency =
         cause === undefined
-          ? { _tag: 'Available' as const, types: Object.freeze(dependencies) }
-          : { _tag: 'Unavailable' as const, types: Object.freeze(dependencies), cause },
-      )
+          ? { _tag: 'Available' as const, types: dependencies }
+          : { _tag: 'Unavailable' as const, types: dependencies, cause }
       if (member._tag === 'UnionDeclaration' && cause !== undefined)
-        return Object.freeze({
+        return {
           ...member,
           dependency,
-          validity: Object.freeze({
+          validity: {
             _tag: 'Invalid' as const,
-            causes: Object.freeze([
-              ...(member.validity._tag === 'Invalid' ? member.validity.causes : []),
-              cause,
-            ]),
-          }),
-        })
-      return Object.freeze({
+            causes: [...(member.validity._tag === 'Invalid' ? member.validity.causes : []), cause],
+          },
+        }
+      return {
         ...member,
         dependency,
-      })
+      }
     })
     const moduleDiagnostics = diagnostics.filter(
       (diagnostic) => Location.moduleOf(diagnostic.span) === module.module,
     )
-    return Object.freeze({
+    return {
       ...module,
-      members: Object.freeze(members),
-      declarations: Object.freeze(
-        members.filter(
-          (member): member is DeclarationFact => member._tag === 'FunctionDeclaration',
-        ),
+      members: members,
+      declarations: members.filter(
+        (member): member is DeclarationFact => member._tag === 'FunctionDeclaration',
       ),
-      structs: Object.freeze(
-        members.filter((member): member is StructFact => member._tag === 'StructDeclaration'),
+      structs: members.filter(
+        (member): member is StructFact => member._tag === 'StructDeclaration',
       ),
-      enums: Object.freeze(
-        members.filter((member): member is EnumFact => member._tag === 'EnumDeclaration'),
+      enums: members.filter((member): member is EnumFact => member._tag === 'EnumDeclaration'),
+      unions: members.filter((member): member is UnionFact => member._tag === 'UnionDeclaration'),
+      services: members.filter(
+        (member): member is ServiceFact => member._tag === 'ServiceDeclaration',
       ),
-      unions: Object.freeze(
-        members.filter((member): member is UnionFact => member._tag === 'UnionDeclaration'),
+      interfaces: members.filter(
+        (member): member is InterfaceFact => member._tag === 'InterfaceDeclaration',
       ),
-      services: Object.freeze(
-        members.filter((member): member is ServiceFact => member._tag === 'ServiceDeclaration'),
-      ),
-      interfaces: Object.freeze(
-        members.filter((member): member is InterfaceFact => member._tag === 'InterfaceDeclaration'),
-      ),
-      constants: Object.freeze(
-        members.filter(
-          (member): member is ConstantFact =>
-            member._tag === 'ConstantDeclaration' || member._tag === 'PackageParameterDeclaration',
-        ),
+      constants: members.filter(
+        (member): member is ConstantFact =>
+          member._tag === 'ConstantDeclaration' || member._tag === 'PackageParameterDeclaration',
       ),
       diagnostics: Diagnostic.collect(moduleDiagnostics),
-    })
+    }
   })
 
   const lifetimeScope = TypeOutlives.context(modules)
@@ -2201,10 +2097,10 @@ export const complete = (
     const lifetimeDiagnostics =
       moduleContext === undefined ? [] : TypeOutlives.moduleDiagnostics(module, lifetimeScope)
     diagnostics.push(...lifetimeDiagnostics)
-    return Object.freeze({
+    return {
       ...module,
       diagnostics: Diagnostic.collect(module.diagnostics, lifetimeDiagnostics),
-    })
+    }
   })
 
   return DeclarationIndex.make('Complete', modules, Diagnostic.collect(diagnostics))

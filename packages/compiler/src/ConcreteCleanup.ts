@@ -46,13 +46,13 @@ export const forType = (
       return forEffect(fn, value, new Set())
     }
     if (value?._tag === 'EffectComposite') {
-      return Object.freeze({
+      return {
         _tag: 'EffectCompositeCleanup' as const,
         type: value.type,
-        alternatives: Object.freeze(
-          value.alternatives.map((alternative) => forEffect(fn, alternative, new Set())),
+        alternatives: value.alternatives.map((alternative) =>
+          forEffect(fn, alternative, new Set()),
         ),
-      })
+      }
     }
     return undefined
   }
@@ -73,7 +73,7 @@ export function forEffect(
   const identity =
     effectValue.storage?.realization.runnerIdentity ??
     Instances.effectIdentity(effectValue.environment.instance, effectValue.site)
-  if (seen.has(identity)) return Object.freeze({ _tag: 'NoCleanup', type: effectValue.type })
+  if (seen.has(identity)) return { _tag: 'NoCleanup', type: effectValue.type }
   const next = new Set(seen).add(identity)
   let laneOffset = 0
   const slots = effectValue.environment.fields.flatMap((field, ordinal) => {
@@ -113,23 +113,23 @@ export function forEffect(
     return fieldCleanup._tag === 'NoCleanup' && effectValue.storage === undefined
       ? []
       : [
-          Object.freeze({
+          {
             ordinal: realizationOrdinal,
             laneOffset: currentOffset,
             laneCount,
             cleanup: fieldCleanup,
-          }),
+          },
         ]
   })
   const releaseSlots = Ownership.inReleaseOrder(slots)
   return releaseSlots.length === 0
-    ? Object.freeze({ _tag: 'NoCleanup', type: effectValue.type })
-    : Object.freeze({
+    ? { _tag: 'NoCleanup', type: effectValue.type }
+    : {
         _tag: 'EffectCleanup',
         type: effectValue.type,
         site: effectValue.site,
-        slots: Object.freeze(releaseSlots),
-      })
+        slots: releaseSlots,
+      }
 }
 
 export const forCallable = (
@@ -138,35 +138,31 @@ export const forCallable = (
 ): CleanupPlan.CleanupPlan => {
   const environment = localType.environment
   if (environment === undefined || localType.site === undefined)
-    return Object.freeze({ _tag: 'NoCleanup', type: localType.type })
-  return Object.freeze({
+    return { _tag: 'NoCleanup', type: localType.type }
+  return {
     _tag: 'CallableCleanup',
     type: localType.type,
-    environment: Object.freeze({
+    environment: {
       _tag: 'CallableEnvironmentIdentity',
       identity: Instances.callableEnvironmentIdentity(environment.callable),
-    }),
-    slots: Object.freeze(
-      Ownership.inReleaseOrder(environment.fields).flatMap((field) =>
-        field.access === 'Take' && !Mir.isCopy(fn.layout, field.type)
-          ? [Object.freeze({ ordinal: field.ordinal, cleanup: forType(fn, field.type) })]
-          : [],
-      ),
+    },
+    slots: Ownership.inReleaseOrder(environment.fields).flatMap((field) =>
+      field.access === 'Take' && !Mir.isCopy(fn.layout, field.type)
+        ? [{ ordinal: field.ordinal, cleanup: forType(fn, field.type) }]
+        : [],
     ),
-  })
+  }
 }
 
 /** Preserves captured ownership in an exact MIR value, including unrun Effects. */
 export const forLocal = (self: ConcreteCleanup, type: Mir.Type): CleanupPlan.CleanupPlan => {
   if (type._tag === 'EffectValue') return forEffect(self, type, new Set())
   if (type._tag === 'EffectComposite')
-    return Object.freeze({
+    return {
       _tag: 'EffectCompositeCleanup',
       type: type.type,
-      alternatives: Object.freeze(
-        type.alternatives.map((value) => forEffect(self, value, new Set())),
-      ),
-    })
+      alternatives: type.alternatives.map((value) => forEffect(self, value, new Set())),
+    }
   if (type._tag === 'CallableValue')
     return type.storage === undefined
       ? forCallable(self, type)

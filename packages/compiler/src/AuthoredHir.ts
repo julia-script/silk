@@ -745,14 +745,13 @@ export type Record =
   | Declaration
   | Module
 
-const nodeFields = Object.freeze(['anchor', 'origin', 'causes'] as const)
-const namedFields = Object.freeze([...nodeFields, 'name', 'public'] as const)
+const nodeFields = ['anchor', 'origin', 'causes'] as const
+const namedFields = [...nodeFields, 'name', 'public'] as const
 
 const freezeFieldRegistry = <Registry extends { readonly [key: string]: ReadonlyArray<string> }>(
   registry: Registry,
 ): Readonly<Registry> => {
-  for (const order of Object.values(registry)) Object.freeze(order)
-  return Object.freeze(registry)
+  return registry
 }
 
 /** Fixed field order; consumers never enumerate arbitrary object properties. */

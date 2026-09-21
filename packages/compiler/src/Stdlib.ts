@@ -1,10 +1,10 @@
 import { modules, runtimeDefaults, runtimeComponents } from './Stdlib.generated.js'
 
 /** Installed build defaults generated from distribution composition data. */
-export const compositions = Object.freeze({
+export const compositions = {
   runtimes: runtimeDefaults,
   components: runtimeComponents,
-})
+}
 
 /** The reserved namespace prefix. User resolvers are never consulted for these identities. */
 export const namespacePrefix = 'silk/'
@@ -34,23 +34,19 @@ const staticInventory = (entry: object): ReadonlyArray<string> =>
   'staticInventory' in entry && Array.isArray(entry.staticInventory) ? entry.staticInventory : []
 
 /** The deterministic standard-library manifest, ordered by canonical module identity. */
-export const manifest: ReadonlyArray<Module> = Object.freeze(
-  modules.map((entry) =>
-    Object.freeze({
-      module: entry.module,
-      path: entry.path,
-      sourceIdentity: entry.sourceIdentity,
-      digest: entry.digest,
-      documentation: entry.documentation,
-      staticInventory: staticInventory(entry),
-      runtimeInventory: entry.runtimeInventory,
-      ...('namespace' in entry ? { namespace: entry.namespace } : {}),
-      ...('aliases' in entry ? { aliases: entry.aliases } : {}),
-      sourceUrl: new URL(`../stdlib/${entry.path}`, import.meta.url),
-      bytes: encoder.encode(entry.source),
-    }),
-  ),
-)
+export const manifest: ReadonlyArray<Module> = modules.map((entry) => ({
+  module: entry.module,
+  path: entry.path,
+  sourceIdentity: entry.sourceIdentity,
+  digest: entry.digest,
+  documentation: entry.documentation,
+  staticInventory: staticInventory(entry),
+  runtimeInventory: entry.runtimeInventory,
+  ...('namespace' in entry ? { namespace: entry.namespace } : {}),
+  ...('aliases' in entry ? { aliases: entry.aliases } : {}),
+  sourceUrl: new URL(`../stdlib/${entry.path}`, import.meta.url),
+  bytes: encoder.encode(entry.source),
+}))
 
 const byModule = new Map(manifest.map((entry) => [entry.module, entry] as const))
 

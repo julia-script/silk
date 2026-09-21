@@ -29,9 +29,7 @@ export const make = <A>(
     module.set(declaration.name, candidates)
     modules.set(declaration.module, module)
   }
-  for (const values of names.values()) Object.freeze(values)
-  for (const module of modules.values()) for (const values of module.values()) Object.freeze(values)
-  return Object.freeze({ names, modules })
+  return { names, modules }
 }
 
 /** Returns only this declaration's candidates, in the original collection order. */

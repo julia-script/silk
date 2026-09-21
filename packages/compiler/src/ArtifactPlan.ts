@@ -74,47 +74,36 @@ export const make = Effect.fn('ArtifactPlan.make')(function* (
     [...active, ...composition.requirements],
     profile,
   )
-  const roots = Object.freeze(
-    [...(program.retainedRoots ?? []), ...program.foreignExports.map((record) => record.key)].sort(
-      (a, b) => Canonical.compare(Instances.keyText(a), Instances.keyText(b)),
-    ),
-  )
-  const exports = Object.freeze(
-    [
-      ...program.foreignExports.map((entry) =>
-        Object.freeze({
-          symbol: entry.symbol,
-          declaration: Canonical.record('declaration', [
-            entry.declaration.module,
-            entry.declaration.name,
-          ]),
-          signature: CAbi.signatureKey(entry.signature),
-        }),
-      ),
-      ...program.foreignStatics
-        .filter((entry) => entry.direction === 'Export')
-        .map((entry) =>
-          Object.freeze({
-            symbol: entry.symbol,
-            declaration: Canonical.record('declaration', [
-              entry.declaration.module,
-              entry.declaration.name,
-            ]),
-            signature: Type.encode(entry.type),
-          }),
-        ),
-    ].sort((a, b) => Canonical.compare(a.symbol, b.symbol)),
-  )
-  const sources = Object.freeze(
-    frontend.closure.modules
-      .map((module) =>
-        Object.freeze({
-          module: module.name,
-          content: ToolchainIntegrity.contentDigest(SourceFile.toUint8Array(module.syntax.source)),
-        }),
-      )
-      .sort((a, b) => Canonical.compare(a.module, b.module)),
-  )
+  const roots = [
+    ...(program.retainedRoots ?? []),
+    ...program.foreignExports.map((record) => record.key),
+  ].sort((a, b) => Canonical.compare(Instances.keyText(a), Instances.keyText(b)))
+  const exports = [
+    ...program.foreignExports.map((entry) => ({
+      symbol: entry.symbol,
+      declaration: Canonical.record('declaration', [
+        entry.declaration.module,
+        entry.declaration.name,
+      ]),
+      signature: CAbi.signatureKey(entry.signature),
+    })),
+    ...program.foreignStatics
+      .filter((entry) => entry.direction === 'Export')
+      .map((entry) => ({
+        symbol: entry.symbol,
+        declaration: Canonical.record('declaration', [
+          entry.declaration.module,
+          entry.declaration.name,
+        ]),
+        signature: Type.encode(entry.type),
+      })),
+  ].sort((a, b) => Canonical.compare(a.symbol, b.symbol))
+  const sources = frontend.closure.modules
+    .map((module) => ({
+      module: module.name,
+      content: ToolchainIntegrity.contentDigest(SourceFile.toUint8Array(module.syntax.source)),
+    }))
+    .sort((a, b) => Canonical.compare(a.module, b.module))
   const identity = ToolchainIntegrity.contentDigest(
     Canonical.record('ArtifactPlan.v1', [
       profile.identity,
@@ -148,7 +137,7 @@ export const make = Effect.fn('ArtifactPlan.make')(function* (
       compiler,
     ]),
   )
-  return Object.freeze({
+  return {
     profile,
     form: profile.artifact,
     stage,
@@ -159,7 +148,7 @@ export const make = Effect.fn('ArtifactPlan.make')(function* (
     requirements,
     compiler,
     identity,
-  })
+  }
 })
 
 /** Composes logical identity with explicitly ordered physical inputs for emission/link caches. */

@@ -343,7 +343,6 @@ it('keeps nominal identity independent of field shape and import spelling', () =
   assert.strictEqual(Type.equals(first, repeated), true)
   assert.strictEqual(Type.equals(first, otherModule), false)
   assert.strictEqual(Type.encode(first), 'syntax/Tree.Node')
-  assert.strictEqual(Object.isFrozen(first), true)
 })
 
 it('selects failure-carrier members only under their explicit tag convention', () => {
@@ -635,7 +634,6 @@ it('keeps fixed-array element type and length in recursive structural identity',
   assert.strictEqual(Type.isFixedArray(three), true)
   assert.strictEqual(Type.encode(nested), 'Array<Array<model/Token.Token, 0>, 2>')
   assert.deepEqual(Type.nominals(nested).map(Type.encode), ['model/Token.Token'])
-  assert.strictEqual(Object.isFrozen(three), true)
 })
 
 it('normalizes structural unions as canonical ordinary sets', () => {
@@ -653,8 +651,7 @@ it('normalizes structural unions as canonical ordinary sets', () => {
     'model/End.End',
     'model/Token.Token',
   ])
-  assert.strictEqual(Object.isFrozen(first.type), true)
-  assert.strictEqual(Type.isUnion(first.type) ? Object.isFrozen(first.type.members) : false, true)
+  assert.isTrue(Type.isUnion(first.type))
 })
 
 it('finds generic nominal dependencies nested inside union members', () => {
@@ -1397,8 +1394,6 @@ it('keys callable contracts and branded constraint evidence without source locat
     captures: [{ parameter: 0, capture: 0 }],
   })
   assert.strictEqual(CallableContract.key(contract), CallableContract.key(contract))
-  assert.strictEqual(Object.isFrozen(contract), true)
-
   const quantified = Type.callable(
     [Type.reference('Exclusive', providerParameter, Lifetime.staticLifetime)],
     Type.effect('never', [], detached),
@@ -2729,6 +2724,4 @@ it('reuses canonical lifetime bounds while snapshotting caller-owned input', () 
   const after = Lifetime.assumptions(bounds)
   assert.isFalse(Lifetime.outlives(before, b, a))
   assert.isTrue(Lifetime.outlives(after, b, a))
-  assert.isTrue(Object.isFrozen(after.bounds))
-  assert.isTrue(after.bounds.every(Object.isFrozen))
 })

@@ -63,7 +63,7 @@ const semanticLocalKey = (input: unknown): string | undefined => {
 
 /** Reserves the next dense artifact-local identity before a node constructs its children. */
 export const reserve = (self: BodyBuilder): Tir.NodeId => {
-  const id = Object.freeze({ _tag: 'TirNode' as const, ordinal: self.nodes.length })
+  const id = { _tag: 'TirNode' as const, ordinal: self.nodes.length }
   self.nodes.push(undefined)
   return id
 }
@@ -111,12 +111,16 @@ export const node = <
 ): Readonly<A & Tir.Node> => publish(self, reserve(self), value)
 
 /** Returns an unambiguous reference to a node already published by this builder. */
-export const reference = (self: BodyBuilder, value: Tir.PublishedNode): Tir.NodeRef =>
-  Object.freeze({ artifact: self.artifact, node: value.id })
+export const reference = (self: BodyBuilder, value: Tir.PublishedNode): Tir.NodeRef => ({
+  artifact: self.artifact,
+  node: value.id,
+})
 
 /** Returns an unambiguous reference to a node identity reserved by this builder. */
-export const reservedReference = (self: BodyBuilder, node: Tir.NodeId): Tir.NodeRef =>
-  Object.freeze({ artifact: self.artifact, node })
+export const reservedReference = (self: BodyBuilder, node: Tir.NodeId): Tir.NodeRef => ({
+  artifact: self.artifact,
+  node,
+})
 
 /** Reserves the node owned by an authored expression before its semantic decision is complete. */
 export const expressionReference = (
@@ -142,10 +146,10 @@ export const expressionNode = (self: BodyBuilder, anchor: AuthoredIdentity.Ancho
 
 /** Adds one local to the body's unified dense namespace. */
 export const local = (self: BodyBuilder, value: Omit<Tir.Local, 'id'>): Tir.Local => {
-  const result = Object.freeze({
+  const result = {
     ...value,
-    id: Object.freeze({ _tag: 'TirLocal' as const, ordinal: self.locals.length }),
-  })
+    id: { _tag: 'TirLocal' as const, ordinal: self.locals.length },
+  }
   self.locals.push(result)
   return result
 }
@@ -191,13 +195,11 @@ export const selectedEvidence = (
   self: BodyBuilder,
   value: Tir.SelectedEvidence,
 ): Tir.EvidenceRef => {
-  const ref = Object.freeze({ _tag: 'TirEvidence' as const, ordinal: self.evidence.length })
-  self.evidence.push(
-    Object.freeze({
-      constraints: Object.freeze(Array.from(value.constraints)),
-      conformances: Object.freeze(Array.from(value.conformances)),
-    }),
-  )
+  const ref = { _tag: 'TirEvidence' as const, ordinal: self.evidence.length }
+  self.evidence.push({
+    constraints: Array.from(value.constraints),
+    conformances: Array.from(value.conformances),
+  })
   return ref
 }
 
@@ -206,7 +208,7 @@ export const cause = (
   self: BodyBuilder,
   value: Diagnostic.Identity<Location.Location>,
 ): Tir.CauseRef => {
-  const ref = Object.freeze({ _tag: 'TirCause' as const, ordinal: self.causes.length })
+  const ref = { _tag: 'TirCause' as const, ordinal: self.causes.length }
   self.causes.push(value)
   return ref
 }
@@ -218,12 +220,12 @@ export const finish = (self: BodyBuilder, fn: Tir.TirFunction): Tir.TirFunction 
       throw new RangeError(`TIR node n${ordinal} was reserved but not published`)
     if (value.id.ordinal !== ordinal)
       throw new RangeError(`TIR node n${ordinal} was published under n${value.id.ordinal}`)
-    return Object.freeze(value)
+    return value
   })
-  return Object.freeze({
+  return {
     ...fn,
     artifact: self.artifact,
-    nodes: Object.freeze(nodes),
-    locals: Object.freeze(Array.from(self.locals)),
-  })
+    nodes: nodes,
+    locals: Array.from(self.locals),
+  }
 }

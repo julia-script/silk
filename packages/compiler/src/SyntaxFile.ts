@@ -31,15 +31,14 @@ export const make = (
   root: SyntaxTree.Node,
   lexicalDiagnostics: ReadonlyArray<Diagnostic.Diagnostic>,
   parserDiagnostics: ReadonlyArray<Diagnostic.Diagnostic>,
-): SyntaxFile =>
-  Object.freeze({
-    _tag: 'SyntaxFile',
-    source,
-    tokens,
-    root,
-    lexicalDiagnostics,
-    parserDiagnostics,
-  })
+): SyntaxFile => ({
+  _tag: 'SyntaxFile',
+  source,
+  tokens,
+  root,
+  lexicalDiagnostics,
+  parserDiagnostics,
+})
 
 const identityCache = new WeakMap<SyntaxFile, Map<SyntaxTree.Element, number>>()
 
@@ -67,7 +66,7 @@ export const idOf = (self: SyntaxFile, element: SyntaxTree.Element): Option.Opti
   const ordinal = ordinals(self).get(element)
   return ordinal === undefined
     ? Option.none()
-    : Option.some(Object.freeze({ _tag: 'SyntaxId' as const, sourceId: self.source.id, ordinal }))
+    : Option.some({ _tag: 'SyntaxId' as const, sourceId: self.source.id, ordinal })
 }
 
 const isPrintable = (byte: number): boolean => byte >= 0x20 && byte <= 0x7e

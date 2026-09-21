@@ -18,16 +18,16 @@ export interface ForeignContract {
 }
 
 /** An ordinary C declaration accesses external memory and may capture raw pointer arguments. */
-export const conservative: ForeignContract = Object.freeze({
+export const conservative: ForeignContract = {
   memory: 'readwrite',
   locality: 'external',
-  noCapture: Object.freeze([]),
-  borrow: Object.freeze([]),
-  callbacks: Object.freeze([]),
+  noCapture: [],
+  borrow: [],
+  callbacks: [],
   returned: undefined,
   noReturn: false,
   unwind: 'forbidden',
-})
+}
 
 /** Canonical behavior identity excludes source names, property order and current-request origins. */
 export const key = (self: ForeignContract): string =>
@@ -61,7 +61,7 @@ const tupleElements = (
   value: AuthoredHir.Expression,
 ): ReadonlyArray<AuthoredHir.Expression> | undefined => {
   if (value._tag === 'TupleExpression') return value.elements
-  return value._tag === 'UnitLiteral' ? Object.freeze([]) : undefined
+  return value._tag === 'UnitLiteral' ? [] : undefined
 }
 
 /** A text operand's exact value; interpolated or computed expressions are unavailable. */
@@ -150,7 +150,7 @@ export const analyze = (
         )
       ordinals.push(ordinal)
     }
-    return Object.freeze(ordinals.sort((left, right) => left - right))
+    return ordinals.sort((left, right) => left - right)
   }
   const noCapture = parameterSet('noCapture')
   const borrow = parameterSet('borrow')
@@ -193,8 +193,8 @@ export const analyze = (
     )
       reject('noReturn', 'requires a unit result without a returned alias', value.anchor)
   }
-  return Object.freeze({
-    contract: Object.freeze({
+  return {
+    contract: {
       memory,
       locality: memory === 'none' ? 'external' : locality,
       noCapture,
@@ -203,9 +203,9 @@ export const analyze = (
       returned,
       noReturn,
       unwind: 'forbidden',
-    }),
-    diagnostics: Object.freeze(diagnostics),
-  })
+    },
+    diagnostics: diagnostics,
+  }
 }
 
 /** Checks normalized promises against semantic types before accepting a supplied interface. */
@@ -371,7 +371,7 @@ export const inspect = (
         return undefined
       numbers.push(ordinal)
     }
-    return Object.freeze(numbers)
+    return numbers
   }
   const noCapture = ordinals(fields.noCapture)
   const borrow = ordinals(fields.borrow)
@@ -403,7 +403,7 @@ export const inspect = (
   )
     return undefined
   if (noReturn && (result !== 'void' || returned !== undefined)) return undefined
-  return Object.freeze({
+  return {
     memory,
     locality,
     noCapture,
@@ -412,7 +412,7 @@ export const inspect = (
     returned,
     noReturn,
     unwind,
-  })
+  }
 }
 
 /** Parses the canonical behavioral key embedded in a native function-pointer interface. */

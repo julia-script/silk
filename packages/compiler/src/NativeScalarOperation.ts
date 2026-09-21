@@ -114,11 +114,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         `convert${operation.destination.ordinal}`,
         operation.provenance.span,
       )
-      yield* NativeStorage.writeLocal(
-        nativeStorage,
-        operation.destination.ordinal,
-        Object.freeze([result]),
-      )
+      yield* NativeStorage.writeLocal(nativeStorage, operation.destination.ordinal, [result])
       break
     }
     case 'ConvertScalar': {
@@ -133,11 +129,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         throw new RangeError('LLVM scalar conversion lost its types')
       const sourceValue = yield* NativeStorage.readScalar(nativeStorage, operation.source)
       if (source.category === 'Character' && target.spelling === 'u32') {
-        yield* NativeStorage.writeLocal(
-          nativeStorage,
-          operation.destination.ordinal,
-          Object.freeze([sourceValue]),
-        )
+        yield* NativeStorage.writeLocal(nativeStorage, operation.destination.ordinal, [sourceValue])
         break
       }
       let destinationType: LlvmType.Type
@@ -190,11 +182,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         destinationType,
         `convert${operation.destination.ordinal}`,
       )
-      yield* NativeStorage.writeLocal(
-        nativeStorage,
-        operation.destination.ordinal,
-        Object.freeze([result]),
-      )
+      yield* NativeStorage.writeLocal(nativeStorage, operation.destination.ordinal, [result])
       break
     }
     case 'ReinterpretScalar': {
@@ -207,11 +195,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         NativeType.laneType(types, targetLane),
         `reinterpret${operation.destination.ordinal}`,
       )
-      yield* NativeStorage.writeLocal(
-        nativeStorage,
-        operation.destination.ordinal,
-        Object.freeze([result]),
-      )
+      yield* NativeStorage.writeLocal(nativeStorage, operation.destination.ordinal, [result])
       break
     }
     case 'FloatUnary': {
@@ -226,21 +210,17 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
           subject,
           `fneg${operation.destination.ordinal}`,
         )
-        yield* NativeStorage.writeLocal(
-          nativeStorage,
-          operation.destination.ordinal,
-          Object.freeze([result]),
-        )
+        yield* NativeStorage.writeLocal(nativeStorage, operation.destination.ordinal, [result])
         break
       }
       if (operation.operation === 'Sqrt') {
         // IEEE-754 mandates a correctly rounded square root, so `llvm.sqrt` is
         // bit-exact on every conforming target.
         const floatType = source.spelling === 'f32' ? f32 : f64
-        const signature = Object.freeze({
+        const signature = {
           returnType: floatType,
-          parameters: Object.freeze([floatType]),
-        })
+          parameters: [floatType],
+        }
         const result = yield* Intrinsic.call(
           body,
           'sqrt',
@@ -255,11 +235,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
           operation.provenance.span,
           yield* Value.instruction(body, result),
         )
-        yield* NativeStorage.writeLocal(
-          nativeStorage,
-          operation.destination.ordinal,
-          Object.freeze([result]),
-        )
+        yield* NativeStorage.writeLocal(nativeStorage, operation.destination.ordinal, [result])
         break
       }
       const width = source.spelling === 'f32' ? 32 : 64
@@ -398,11 +374,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         i32,
         `fclass${operation.destination.ordinal}`,
       )
-      yield* NativeStorage.writeLocal(
-        nativeStorage,
-        operation.destination.ordinal,
-        Object.freeze([result]),
-      )
+      yield* NativeStorage.writeLocal(nativeStorage, operation.destination.ordinal, [result])
       break
     }
     case 'FloatTranscendental': {
@@ -418,11 +390,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         operation.provenance.span,
         yield* Value.instruction(body, result),
       )
-      yield* NativeStorage.writeLocal(
-        nativeStorage,
-        operation.destination.ordinal,
-        Object.freeze([result]),
-      )
+      yield* NativeStorage.writeLocal(nativeStorage, operation.destination.ordinal, [result])
       break
     }
     case 'CheckedScalarOutcome': {
@@ -554,10 +522,10 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         let signature = signatures.get(targetBits)
         if (signature === undefined) {
           const i1 = yield* LlvmType.integer(builder, 1)
-          signature = Object.freeze({
+          signature = {
             returnType: yield* LlvmType.structure(builder, [targetPhysical, i1]),
-            parameters: Object.freeze([targetPhysical, targetPhysical]),
-          })
+            parameters: [targetPhysical, targetPhysical],
+          }
           signatures.set(targetBits, signature)
         }
         let stem: 'add' | 'sub' | 'mul'
@@ -631,16 +599,8 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
       const zero = yield* Constant.integerUnsigned(builder, i32, 0n)
       const one = yield* Constant.integerUnsigned(builder, i32, 1n)
       const valid = yield* FunctionBody.select(body, invalid, zero, one, `${name}_valid`)
-      yield* NativeStorage.writeLocal(
-        nativeStorage,
-        operation.valid.ordinal,
-        Object.freeze([valid]),
-      )
-      yield* NativeStorage.writeLocal(
-        nativeStorage,
-        operation.value.ordinal,
-        Object.freeze([result]),
-      )
+      yield* NativeStorage.writeLocal(nativeStorage, operation.valid.ordinal, [valid])
+      yield* NativeStorage.writeLocal(nativeStorage, operation.value.ordinal, [result])
       break
     }
     case 'Binary': {
@@ -720,11 +680,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
             `total${ordinal}_flag`,
           )
           const result = yield* FunctionBody.cast(body, 'zext', flag, i32, `total${ordinal}`)
-          yield* NativeStorage.writeLocal(
-            nativeStorage,
-            operation.destination.ordinal,
-            Object.freeze([result]),
-          )
+          yield* NativeStorage.writeLocal(nativeStorage, operation.destination.ordinal, [result])
           break
         }
         let predicate: FunctionBody.FloatingPredicate | undefined
@@ -760,11 +716,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
             `fcmp${ordinal}_flag`,
           )
           const result = yield* FunctionBody.cast(body, 'zext', flag, i32, `fcmp${ordinal}`)
-          yield* NativeStorage.writeLocal(
-            nativeStorage,
-            operation.destination.ordinal,
-            Object.freeze([result]),
-          )
+          yield* NativeStorage.writeLocal(nativeStorage, operation.destination.ordinal, [result])
           break
         }
         let mnemonic: FunctionBody.FloatingBinaryKind | undefined
@@ -796,11 +748,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
           operation.provenance.span,
           yield* Value.instruction(body, result),
         )
-        yield* NativeStorage.writeLocal(
-          nativeStorage,
-          operation.destination.ordinal,
-          Object.freeze([result]),
-        )
+        yield* NativeStorage.writeLocal(nativeStorage, operation.destination.ordinal, [result])
         break
       }
       const predicate = NativeArith.comparisonPredicate(operation.operator, unsigned)
@@ -815,11 +763,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         const widened = yield* FunctionBody.cast(body, 'zext', flag, i32, `cmp${ordinal}`)
         const instruction = yield* Value.instruction(body, flag)
         yield* NativeDebug.locate(debug, operation.provenance.span, instruction)
-        yield* NativeStorage.writeLocal(
-          nativeStorage,
-          operation.destination.ordinal,
-          Object.freeze([widened]),
-        )
+        yield* NativeStorage.writeLocal(nativeStorage, operation.destination.ordinal, [widened])
         break
       }
       if (
@@ -857,11 +801,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
           operation.provenance.span,
           yield* Value.instruction(body, result),
         )
-        yield* NativeStorage.writeLocal(
-          nativeStorage,
-          operation.destination.ordinal,
-          Object.freeze([result]),
-        )
+        yield* NativeStorage.writeLocal(nativeStorage, operation.destination.ordinal, [result])
         break
       }
       if (operation.operator === 'ShiftLeft' || operation.operator === 'ShiftRight') {
@@ -896,18 +836,14 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
           operation.provenance.span,
           yield* Value.instruction(body, result),
         )
-        yield* NativeStorage.writeLocal(
-          nativeStorage,
-          operation.destination.ordinal,
-          Object.freeze([result]),
-        )
+        yield* NativeStorage.writeLocal(nativeStorage, operation.destination.ordinal, [result])
         break
       }
       if (operation.operator === 'RotateLeft' || operation.operator === 'RotateRight') {
-        const signature = Object.freeze({
+        const signature = {
           returnType: operandType,
-          parameters: Object.freeze([operandType, operandType, operandType]),
-        })
+          parameters: [operandType, operandType, operandType],
+        }
         const result = yield* Intrinsic.call(
           body,
           operation.operator === 'RotateLeft' ? 'fshl' : 'fshr',
@@ -922,18 +858,14 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
           operation.provenance.span,
           yield* Value.instruction(body, result),
         )
-        yield* NativeStorage.writeLocal(
-          nativeStorage,
-          operation.destination.ordinal,
-          Object.freeze([result]),
-        )
+        yield* NativeStorage.writeLocal(nativeStorage, operation.destination.ordinal, [result])
         break
       }
       if (operation.operator === 'SaturatingAdd' || operation.operator === 'SaturatingSubtract') {
-        const signature = Object.freeze({
+        const signature = {
           returnType: operandType,
-          parameters: Object.freeze([operandType, operandType]),
-        })
+          parameters: [operandType, operandType],
+        }
         let intrinsic: Intrinsic.Id
         switch (operation.operator) {
           case 'SaturatingAdd':
@@ -958,11 +890,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
           operation.provenance.span,
           yield* Value.instruction(body, result),
         )
-        yield* NativeStorage.writeLocal(
-          nativeStorage,
-          operation.destination.ordinal,
-          Object.freeze([result]),
-        )
+        yield* NativeStorage.writeLocal(nativeStorage, operation.destination.ordinal, [result])
         break
       }
       if (operation.operator === 'SaturatingMultiply') {
@@ -976,10 +904,10 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         let signature = signatures.get(bits)
         if (signature === undefined) {
           const i1 = yield* LlvmType.integer(builder, 1)
-          signature = Object.freeze({
+          signature = {
             returnType: yield* LlvmType.structure(builder, [operandType, i1]),
-            parameters: Object.freeze([operandType, operandType]),
-          })
+            parameters: [operandType, operandType],
+          }
           signatures.set(bits, signature)
         }
         const pair = yield* Intrinsic.call(
@@ -1050,11 +978,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
           operation.provenance.span,
           yield* Value.instruction(body, result),
         )
-        yield* NativeStorage.writeLocal(
-          nativeStorage,
-          operation.destination.ordinal,
-          Object.freeze([result]),
-        )
+        yield* NativeStorage.writeLocal(nativeStorage, operation.destination.ordinal, [result])
         break
       }
       let result: Value.Value
@@ -1085,10 +1009,10 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         let overflowSignature = signatures.get(bits)
         if (overflowSignature === undefined) {
           const i1 = yield* LlvmType.integer(builder, 1)
-          overflowSignature = Object.freeze({
+          overflowSignature = {
             returnType: yield* LlvmType.structure(builder, [operandType, i1]),
-            parameters: Object.freeze([operandType, operandType]),
-          })
+            parameters: [operandType, operandType],
+          }
           signatures.set(bits, overflowSignature)
         }
         const pair = yield* Intrinsic.call(
@@ -1190,11 +1114,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
       }
       const instruction = yield* Value.instruction(body, result)
       yield* NativeDebug.locate(debug, operation.provenance.span, instruction)
-      yield* NativeStorage.writeLocal(
-        nativeStorage,
-        operation.destination.ordinal,
-        Object.freeze([result]),
-      )
+      yield* NativeStorage.writeLocal(nativeStorage, operation.destination.ordinal, [result])
       break
     }
   }

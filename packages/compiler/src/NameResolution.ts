@@ -122,7 +122,7 @@ const spelled = (
 ): { readonly spelling: string; readonly anchor: AuthoredHir.Anchor } | undefined => {
   if (name === undefined) return undefined
   const spelling = SemanticContext.nameText(context, name)
-  return spelling === undefined ? undefined : Object.freeze({ spelling, anchor: name.anchor })
+  return spelling === undefined ? undefined : { spelling, anchor: name.anchor }
 }
 
 type CanonicalMember = DeclarationFacts.MemberFact & {
@@ -161,30 +161,27 @@ export const resolve = (
   const scopes: Array<ModuleScope> = []
   for (const module of closure.modules) {
     const diagnostics: Array<Diagnostic.Located> = []
-    const candidates: Array<Binding> = Intrinsic.all().map((intrinsic) =>
-      Object.freeze({ _tag: 'IntrinsicActor', spelling: intrinsic.spelling }),
-    )
+    const candidates: Array<Binding> = Intrinsic.all().map((intrinsic) => ({
+      _tag: 'IntrinsicActor',
+      spelling: intrinsic.spelling,
+    }))
     const headers = index.modules.find((value) => value.module === module.name)
     for (const declaration of headers?.members ?? [])
       if (declaration.canonical._tag === 'Canonical')
-        candidates.push(
-          Object.freeze({
-            _tag: 'LocalDeclaration',
-            spelling: declaration.canonical.id.name,
-            declaration: declaration.canonical.id,
-          }),
-        )
+        candidates.push({
+          _tag: 'LocalDeclaration',
+          spelling: declaration.canonical.id.name,
+          declaration: declaration.canonical.id,
+        })
     const imports: Array<ImportOutcome> = []
     const context = SemanticContext.make(module.authored)
     for (const imported of module.imports) {
       if (imported.target._tag !== 'Resolved') {
-        imports.push(
-          Object.freeze({
-            _tag: 'Unavailable',
-            import: imported,
-            ...('cause' in imported.target ? { cause: imported.target.cause } : {}),
-          }),
-        )
+        imports.push({
+          _tag: 'Unavailable',
+          import: imported,
+          ...('cause' in imported.target ? { cause: imported.target.cause } : {}),
+        })
         continue
       }
       const target = imported.target.module
@@ -192,7 +189,7 @@ export const resolve = (
       const created: Array<Binding> = []
       const explicitAlias = spelled(context, header.alias)
       if (header.alias !== undefined && explicitAlias === undefined) {
-        imports.push(Object.freeze({ _tag: 'Unavailable', import: imported }))
+        imports.push({ _tag: 'Unavailable', import: imported })
         continue
       }
       if (header.members === undefined || explicitAlias !== undefined) {
@@ -203,15 +200,13 @@ export const resolve = (
             ? undefined
             : implicit)
         if (local !== undefined)
-          created.push(
-            Object.freeze({
-              _tag: 'ModuleNamespace',
-              spelling: local.spelling,
-              module: target,
-              declaration: imported.declaration,
-              anchor: local.anchor,
-            }),
-          )
+          created.push({
+            _tag: 'ModuleNamespace',
+            spelling: local.spelling,
+            module: target,
+            declaration: imported.declaration,
+            anchor: local.anchor,
+          })
       }
       for (const member of header.members ?? []) {
         const origin = spelled(context, member.name)
@@ -220,10 +215,7 @@ export const resolve = (
         const alias = spelled(context, member.alias)
         const span = Location.at(origin.anchor)
         const declaration = canonicalDeclaration(index, target, sourceName)
-        const anchors = Object.freeze([
-          origin.anchor,
-          ...(alias === undefined ? [] : [alias.anchor]),
-        ])
+        const anchors = [origin.anchor, ...(alias === undefined ? [] : [alias.anchor])]
         if (declaration === undefined) {
           const associated = associatedMemberNamed(index, target, sourceName)
           const diagnostic =
@@ -236,49 +228,41 @@ export const resolve = (
                   span,
                 )
           diagnostics.push(diagnostic)
-          created.push(
-            Object.freeze({
-              _tag: 'Unavailable',
-              spelling: alias?.spelling ?? sourceName,
-              anchor: member.anchor,
-              anchors,
-              cause: Diagnostic.identity(diagnostic),
-            }),
-          )
+          created.push({
+            _tag: 'Unavailable',
+            spelling: alias?.spelling ?? sourceName,
+            anchor: member.anchor,
+            anchors,
+            cause: Diagnostic.identity(diagnostic),
+          })
           continue
         }
         if (declaration.visibility === 'Private') {
           const diagnostic = Diagnostic.inaccessibleImportedMember(target, sourceName, span)
           diagnostics.push(diagnostic)
-          created.push(
-            Object.freeze({
-              _tag: 'Unavailable',
-              spelling: alias?.spelling ?? sourceName,
-              anchor: member.anchor,
-              anchors,
-              cause: Diagnostic.identity(diagnostic),
-              declaration: declaration.canonical.id,
-            }),
-          )
+          created.push({
+            _tag: 'Unavailable',
+            spelling: alias?.spelling ?? sourceName,
+            anchor: member.anchor,
+            anchors,
+            cause: Diagnostic.identity(diagnostic),
+            declaration: declaration.canonical.id,
+          })
           continue
         }
-        created.push(
-          Object.freeze({
-            _tag: 'ImportedMember',
-            spelling: alias?.spelling ?? sourceName,
-            sourceSpelling: sourceName,
-            module: target,
-            declaration: declaration.canonical.id,
-            member,
-            sourceAnchor: origin.anchor,
-            localAnchor: alias?.anchor ?? origin.anchor,
-          }),
-        )
+        created.push({
+          _tag: 'ImportedMember',
+          spelling: alias?.spelling ?? sourceName,
+          sourceSpelling: sourceName,
+          module: target,
+          declaration: declaration.canonical.id,
+          member,
+          sourceAnchor: origin.anchor,
+          localAnchor: alias?.anchor ?? origin.anchor,
+        })
       }
       candidates.push(...created)
-      imports.push(
-        Object.freeze({ _tag: 'Available', import: imported, bindings: Object.freeze(created) }),
-      )
+      imports.push({ _tag: 'Available', import: imported, bindings: created })
     }
     const grouped = new Map<string, Array<Binding>>()
     for (const binding of candidates) {
@@ -314,33 +298,29 @@ export const resolve = (
         }
         const diagnostic = Diagnostic.bindingConflict(spelling, span)
         diagnostics.push(diagnostic)
-        conflicts.push(
-          Object.freeze({
-            _tag: 'BindingConflict',
-            spelling,
-            bindings: Object.freeze(bindings),
-            cause: Diagnostic.identity(diagnostic),
-          }),
-        )
+        conflicts.push({
+          _tag: 'BindingConflict',
+          spelling,
+          bindings: bindings,
+          cause: Diagnostic.identity(diagnostic),
+        })
       }
-    scopes.push(
-      Object.freeze({
-        _tag: 'ModuleScope',
-        module: module.name,
-        context,
-        bindings: Object.freeze(candidates),
-        imports: Object.freeze(imports),
-        conflicts: Object.freeze(conflicts),
-        diagnostics: Diagnostic.collect(diagnostics),
-      }),
-    )
+    scopes.push({
+      _tag: 'ModuleScope',
+      module: module.name,
+      context,
+      bindings: candidates,
+      imports: imports,
+      conflicts: conflicts,
+      diagnostics: Diagnostic.collect(diagnostics),
+    })
   }
-  return Object.freeze({
+  return {
     _tag: 'NameResolution',
-    modules: Object.freeze(scopes),
+    modules: scopes,
     contexts: SemanticContext.registry(scopes.map((scope) => scope.context)),
     diagnostics: Diagnostic.collect(...scopes.map((scope) => scope.diagnostics)),
-  })
+  }
 }
 
 export const scopeOf = (self: Resolution, module: string): ModuleScope | undefined =>
@@ -353,33 +333,33 @@ export const lookup = (
 ): Lookup => {
   const work = ResolutionWork.begin(ResolutionWork.ofIndex(index), initiator, 'NameLookup')
   const conflict = scope.conflicts.find((value) => value.spelling === spelling)
-  if (conflict !== undefined) return Object.freeze({ _tag: 'Conflict', spelling, conflict })
+  if (conflict !== undefined) return { _tag: 'Conflict', spelling, conflict }
   const binding = scope.bindings.find((value) => {
     ResolutionWork.visit(work)
     return value.spelling === spelling
   })
   if (binding !== undefined) ResolutionWork.accept(work)
-  if (binding === undefined) return Object.freeze({ _tag: 'Missing', spelling })
+  if (binding === undefined) return { _tag: 'Missing', spelling }
   if (binding._tag === 'IntrinsicActor')
-    return Object.freeze({ _tag: 'Intrinsic', spelling, actor: binding.spelling })
+    return { _tag: 'Intrinsic', spelling, actor: binding.spelling }
   if (binding._tag === 'Unavailable') {
     const declaration =
       binding.declaration === undefined
         ? undefined
         : DeclarationFacts.byCanonical(index, binding.declaration)
-    return Object.freeze({
+    return {
       _tag: 'Unavailable',
       spelling,
       ...(binding.cause === undefined ? {} : { cause: binding.cause }),
       ...(declaration === undefined ? {} : { declaration }),
-    })
+    }
   }
   if (binding._tag === 'ModuleNamespace')
-    return Object.freeze({ _tag: 'Namespace', spelling, module: binding.module })
+    return { _tag: 'Namespace', spelling, module: binding.module }
   const declaration = DeclarationFacts.byCanonical(index, binding.declaration)
   return declaration === undefined
-    ? Object.freeze({ _tag: 'Unavailable', spelling })
-    : Object.freeze({ _tag: 'Resolved', spelling, declaration })
+    ? { _tag: 'Unavailable', spelling }
+    : { _tag: 'Resolved', spelling, declaration }
 }
 
 /** The outcome of looking one associated member up on a nominal owner declaration. */
@@ -402,7 +382,7 @@ const associatedMembersOf = (
   owner: DeclarationFacts.CanonicalId,
 ): ReadonlyArray<DeclarationFacts.DeclarationFact> => {
   const members = index.modules.find((headers) => headers.module === owner.module)?.members
-  if (members === undefined) return Object.freeze([])
+  if (members === undefined) return []
   let byOwner = associatedCache.get(members)
   if (byOwner === undefined) {
     byOwner = new Map()
@@ -414,7 +394,7 @@ const associatedMembersOf = (
     }
     associatedCache.set(members, byOwner)
   }
-  return byOwner.get(owner.name) ?? Object.freeze([])
+  return byOwner.get(owner.name) ?? []
 }
 
 /**
@@ -459,7 +439,7 @@ export const lookupAssociated = (
 ): AssociatedLookup => {
   const declaration = erasedOwner(index, owner)
   if (!isNominalOwner(declaration) || declaration.canonical._tag !== 'Canonical')
-    return Object.freeze({ _tag: 'Missing' })
+    return { _tag: 'Missing' }
   const work = ResolutionWork.begin(
     ResolutionWork.ofIndex(index),
     initiator ?? {
@@ -479,12 +459,12 @@ export const lookupAssociated = (
   if (selected === undefined) {
     const duplicate = candidates.find((candidate) => candidate.canonical._tag === 'Duplicate')
     return duplicate !== undefined && duplicate.canonical._tag === 'Duplicate'
-      ? Object.freeze({ _tag: 'Duplicate', cause: duplicate.canonical.cause })
-      : Object.freeze({ _tag: 'Missing' })
+      ? { _tag: 'Duplicate', cause: duplicate.canonical.cause }
+      : { _tag: 'Missing' }
   }
   if (selected.visibility === 'Private' && declaration.canonical.id.module !== requestingModule)
-    return Object.freeze({ _tag: 'Inaccessible', declaration: selected })
-  return Object.freeze({ _tag: 'Inherent', declaration: selected })
+    return { _tag: 'Inaccessible', declaration: selected }
+  return { _tag: 'Inherent', declaration: selected }
 }
 
 /** The inherent member a selective import wrongly names, when one exists under any owner. */
@@ -525,11 +505,11 @@ export const lookupQualified = (
       initiator,
     )
     if (associated._tag === 'Inherent')
-      return Object.freeze({
+      return {
         _tag: 'Resolved',
         spelling: member,
         declaration: associated.declaration,
-      })
+      }
     if (associated._tag === 'Inaccessible') {
       const diagnostic = Diagnostic.inaccessibleImportedMember(
         associated.declaration.canonical._tag === 'Canonical'
@@ -538,55 +518,54 @@ export const lookupQualified = (
         member,
         span,
       )
-      return Object.freeze({
+      return {
         _tag: 'Inaccessible',
         spelling: member,
         declaration: associated.declaration,
         cause: Diagnostic.identity(diagnostic),
-      })
+      }
     }
     if (associated._tag === 'Duplicate')
-      return Object.freeze({ _tag: 'Unavailable', spelling: member, cause: associated.cause })
+      return { _tag: 'Unavailable', spelling: member, cause: associated.cause }
   }
   if (qualifier._tag === 'Resolved' && qualifier.declaration._tag === 'EnumDeclaration') {
     const selected = DeclarationFacts.lookupEnumMember(qualifier.declaration.members, member)
     if (selected._tag === 'Resolved')
-      return Object.freeze({
+      return {
         _tag: 'EnumMember',
         spelling: member,
         enum: qualifier.declaration,
         member: selected.member,
-      })
+      }
     const diagnostic = Diagnostic.unknownEnumMember(namespace, member, span)
-    return Object.freeze({
+    return {
       _tag: 'Unavailable',
       spelling: member,
       cause: Diagnostic.identity(diagnostic),
       declaration: qualifier.declaration,
-    })
+    }
   }
-  if (qualifier._tag !== 'Namespace')
-    return Object.freeze({ _tag: 'Missing', spelling: `${namespace}.${member}` })
+  if (qualifier._tag !== 'Namespace') return { _tag: 'Missing', spelling: `${namespace}.${member}` }
   const module = qualifier.module
   const declaration = canonicalDeclaration(index, module, member)
   if (declaration === undefined) {
     const diagnostic = Diagnostic.unknownImportedMember(module, member, span)
-    return Object.freeze({
+    return {
       _tag: 'Unavailable',
       spelling: member,
       cause: Diagnostic.identity(diagnostic),
-    })
+    }
   }
   if (declaration.visibility === 'Private') {
     const diagnostic = Diagnostic.inaccessibleImportedMember(module, member, span)
-    return Object.freeze({
+    return {
       _tag: 'Inaccessible',
       spelling: member,
       declaration,
       cause: Diagnostic.identity(diagnostic),
-    })
+    }
   }
-  return Object.freeze({ _tag: 'Resolved', spelling: member, declaration })
+  return { _tag: 'Resolved', spelling: member, declaration }
 }
 
 const unresolved = (
@@ -596,22 +575,22 @@ const unresolved = (
 ): DeclarationFacts.TypeResolution => {
   const first = path.segments.at(0)
   if (first === undefined) {
-    return Object.freeze({
-      fact: Object.freeze({ _tag: 'Unavailable', anchor: path.anchor }),
-      diagnostics: Object.freeze([diagnostic]),
-    })
+    return {
+      fact: { _tag: 'Unavailable', anchor: path.anchor },
+      diagnostics: [diagnostic],
+    }
   }
-  return Object.freeze({
-    fact: Object.freeze({
+  return {
+    fact: {
       _tag: 'Unresolved',
       spelling: path.spelling,
       anchor: path.anchor,
       path,
       cause: Diagnostic.identity(diagnostic),
       ...(candidate === undefined ? {} : { candidate }),
-    }),
-    diagnostics: Object.freeze([diagnostic]),
-  })
+    },
+    diagnostics: [diagnostic],
+  }
 }
 
 const unavailable = (
@@ -621,22 +600,22 @@ const unavailable = (
 ): DeclarationFacts.TypeResolution => {
   const first = path.segments.at(0)
   if (first === undefined) {
-    return Object.freeze({
-      fact: Object.freeze({ _tag: 'Unavailable', anchor: path.anchor }),
-      diagnostics: Object.freeze([]),
-    })
+    return {
+      fact: { _tag: 'Unavailable', anchor: path.anchor },
+      diagnostics: [],
+    }
   }
-  return Object.freeze({
-    fact: Object.freeze({
+  return {
+    fact: {
       _tag: 'Unresolved',
       spelling: path.spelling,
       anchor: path.anchor,
       path,
       ...(cause === undefined ? {} : { cause }),
       ...(candidate === undefined ? {} : { candidate }),
-    }),
-    diagnostics: Object.freeze([]),
-  })
+    },
+    diagnostics: [],
+  }
 }
 
 const resolvedType = (
@@ -644,20 +623,20 @@ const resolvedType = (
   type: DeclarationFacts.SemanticType,
 ): DeclarationFacts.TypeResolution =>
   path.segments.at(0) === undefined
-    ? Object.freeze({
-        fact: Object.freeze({ _tag: 'Unavailable', anchor: path.anchor }),
-        diagnostics: Object.freeze([]),
-      })
-    : Object.freeze({
-        fact: Object.freeze({
+    ? {
+        fact: { _tag: 'Unavailable', anchor: path.anchor },
+        diagnostics: [],
+      }
+    : {
+        fact: {
           _tag: 'Resolved',
           type,
           spelling: path.spelling,
           anchor: path.anchor,
           path,
-        }),
-        diagnostics: Object.freeze([]),
-      })
+        },
+        diagnostics: [],
+      }
 
 const nominalOf = (declaration: DeclarationFacts.MemberFact): Type.Nominal | undefined =>
   (declaration._tag === 'StructDeclaration' ||
@@ -686,14 +665,12 @@ const resolveAliasUse = (
   alias: ResolutionSeams.AliasResolver | undefined,
 ): DeclarationFacts.TypeResolution => {
   const target =
-    alias === undefined
-      ? Object.freeze({ fact: declaration.target, diagnostics: Object.freeze([]) })
-      : alias(declaration)
+    alias === undefined ? { fact: declaration.target, diagnostics: [] } : alias(declaration)
   const base =
     target.fact._tag === 'Resolved'
       ? resolvedType(path, target.fact.type)
       : unavailable(path, 'cause' in target.fact ? target.fact.cause : undefined)
-  return Object.freeze({ fact: base.fact, diagnostics: target.diagnostics })
+  return { fact: base.fact, diagnostics: target.diagnostics }
 }
 
 /** Looks one retained one- or two-segment type path up through a module scope. */
@@ -705,7 +682,7 @@ export const lookupPath = (
 ): Lookup => {
   const first = path.segments.at(0)
   const second = path.segments.at(1)
-  if (first === undefined) return Object.freeze({ _tag: 'Missing', spelling: path.spelling })
+  if (first === undefined) return { _tag: 'Missing', spelling: path.spelling }
   return second === undefined
     ? lookup(scope, index, first.spelling, initiator)
     : lookupQualified(scope, index, first.spelling, second.spelling, second.anchor, initiator)
@@ -728,10 +705,10 @@ export const resolveType = (
   const first = path.segments.at(0)
   const second = path.segments.at(1)
   if (scope === undefined || first === undefined) {
-    return Object.freeze({
-      fact: Object.freeze({ _tag: 'Unavailable', anchor: path.anchor }),
-      diagnostics: Object.freeze([]),
-    })
+    return {
+      fact: { _tag: 'Unavailable', anchor: path.anchor },
+      diagnostics: [],
+    }
   }
   const result = lookupPath(scope, index, path, initiator)
   if (result._tag === 'Intrinsic') {
@@ -821,38 +798,36 @@ export const resolveItem = (
   const first = path.segments.at(0)
   const second = path.segments.at(1)
   if (scope === undefined || first === undefined || path.segments.length > 2)
-    return Object.freeze({ _tag: 'Missing' })
+    return { _tag: 'Missing' }
   if (second === undefined) {
     const local = DeclarationFacts.lookupDeclaration(
       index.modules.find((candidate) => candidate.module === module)?.declarations ?? [],
       first.spelling,
     )
-    if (local._tag === 'Ambiguous')
-      return Object.freeze({ _tag: 'Ambiguous', count: local.declarations.length })
+    if (local._tag === 'Ambiguous') return { _tag: 'Ambiguous', count: local.declarations.length }
   }
   const result = lookupPath(scope, index, path, initiator)
-  if (result._tag === 'Resolved')
-    return Object.freeze({ _tag: 'Resolved', declaration: result.declaration })
-  if (result._tag === 'EnumMember') return Object.freeze({ _tag: 'Missing' })
+  if (result._tag === 'Resolved') return { _tag: 'Resolved', declaration: result.declaration }
+  if (result._tag === 'EnumMember') return { _tag: 'Missing' }
   if (result._tag === 'Inaccessible')
-    return Object.freeze({
+    return {
       _tag: 'Inaccessible',
       declaration: result.declaration,
       cause: result.cause,
-    })
+    }
   if (result._tag === 'Conflict')
-    return Object.freeze({
+    return {
       _tag: 'Ambiguous',
       count: result.conflict.bindings.length,
       cause: result.conflict.cause,
-    })
+    }
   if (result._tag === 'Unavailable')
-    return Object.freeze({
+    return {
       _tag: 'Unavailable',
       ...(result.declaration === undefined ? {} : { declaration: result.declaration }),
       ...(result.cause === undefined ? {} : { cause: result.cause }),
-    })
-  return Object.freeze({ _tag: 'Missing' })
+    }
+  return { _tag: 'Missing' }
 }
 
 /** An alias with a canonical identity always has a present name; this narrows both at once. */
@@ -886,38 +861,37 @@ export const makeResolvers = (
   const unavailableAlias = (
     declaration: NamedAlias,
     cause: Diagnostic.Identity<Location.Location> | undefined,
-  ): DeclarationFacts.TypeResolution =>
-    Object.freeze({
-      fact: Object.freeze({
-        _tag: 'Unresolved',
+  ): DeclarationFacts.TypeResolution => ({
+    fact: {
+      _tag: 'Unresolved',
+      spelling: declaration.name.spelling,
+      anchor: declaration.name.anchor,
+      path: {
+        _tag: 'TypePath',
         spelling: declaration.name.spelling,
+        segments: [
+          {
+            spelling: declaration.name.spelling,
+            anchor: declaration.name.anchor,
+          },
+        ],
         anchor: declaration.name.anchor,
-        path: Object.freeze({
-          _tag: 'TypePath',
-          spelling: declaration.name.spelling,
-          segments: Object.freeze([
-            Object.freeze({
-              spelling: declaration.name.spelling,
-              anchor: declaration.name.anchor,
-            }),
-          ]),
-          anchor: declaration.name.anchor,
-        }),
-        ...(cause === undefined ? {} : { cause }),
-      }),
-      diagnostics: Object.freeze([]),
-    })
+      },
+      ...(cause === undefined ? {} : { cause }),
+    },
+    diagnostics: [],
+  })
   const withDiagnostics = (
     result: DeclarationFacts.TypeResolution,
     diagnostics: ReadonlyArray<Diagnostic.Located>,
-  ): DeclarationFacts.TypeResolution => Object.freeze({ fact: result.fact, diagnostics })
+  ): DeclarationFacts.TypeResolution => ({ fact: result.fact, diagnostics })
   const resolveAlias: ResolutionSeams.AliasResolver = (declaration) => {
     const named = namedAlias(declaration)
     if (named === undefined)
-      return Object.freeze({
-        fact: Object.freeze({ _tag: 'Unavailable', anchor: declaration.anchor }),
-        diagnostics: Object.freeze([]),
-      })
+      return {
+        fact: { _tag: 'Unavailable', anchor: declaration.anchor },
+        diagnostics: [],
+      }
     const cached = memo.get(named)
     if (cached !== undefined) return cached
     const activeIndex = active.indexOf(named)
@@ -973,7 +947,7 @@ export const makeResolvers = (
       result =
         exposed._tag === 'Resolved' && exposed.exposureCause !== undefined
           ? unavailableAlias(named, exposed.exposureCause)
-          : Object.freeze({ fact: exposed, diagnostics: Object.freeze([]) })
+          : { fact: exposed, diagnostics: [] }
     }
     memo.set(named, result)
     return withDiagnostics(result, diagnostics)
@@ -997,5 +971,5 @@ export const analyze = (
   const resolvers = makeResolvers(preliminary, collected)
   const index = DeclarationCompletion.complete(collected, resolvers, preliminary.contexts)
   ResolutionWork.share(index, collected)
-  return Object.freeze({ index, resolution: resolve(closure, index) })
+  return { index, resolution: resolve(closure, index) }
 }

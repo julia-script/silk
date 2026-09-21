@@ -110,7 +110,7 @@ const hasExactKeys = (table: TomlTable, keys: ReadonlyArray<string>): boolean =>
   return actual.length === expected.length && actual.every((key, index) => key === expected[index])
 }
 
-const buildKeys = Object.freeze([
+const buildKeys = [
   'targets',
   'output-dir',
   'artifact',
@@ -121,7 +121,7 @@ const buildKeys = Object.freeze([
   'composition',
   'profile',
   'bindings',
-])
+]
 
 const decodeNativeLinkInput = (value: TomlValue): NativeLinkInput.NativeLinkInput | undefined => {
   if (!isTable(value)) return undefined
@@ -347,15 +347,13 @@ const decodeManifest = Effect.fnUntraced(function* (manifestPath: string, text: 
         manifestPath,
         'native binding inputs must be a nonempty typed input list',
       )
-    nativeBindings.push(
-      Object.freeze({
-        kind: requirement.kind,
-        name: requirement.name,
-        alternative: candidate.alternative,
-        inputs: Object.freeze(inputs.flatMap((input) => (input === undefined ? [] : [input]))),
-        origin,
-      }),
-    )
+    nativeBindings.push({
+      kind: requirement.kind,
+      name: requirement.name,
+      alternative: candidate.alternative,
+      inputs: inputs.flatMap((input) => (input === undefined ? [] : [input])),
+      origin,
+    })
   }
   const platformSupplyValue = buildTable?.['platform-supply']
   const platformSupply =
@@ -381,16 +379,14 @@ const decodeManifest = Effect.fnUntraced(function* (manifestPath: string, text: 
     profiles,
     root,
     sourceRoot,
-    targets: Object.freeze([...targetsValue]) as ReadonlyArray<TargetSelector.TargetSelector>,
+    targets: [...targetsValue] as ReadonlyArray<TargetSelector.TargetSelector>,
     outputDirectory,
     artifact,
     stage,
     ...(composition === undefined ? {} : { composition }),
     ...(platformSupply === undefined ? {} : { platformSupply }),
-    nativeBindings: Object.freeze(nativeBindings),
-    nativeLinkInputs: Object.freeze(
-      nativeLinkInputs.flatMap((input) => (input === undefined ? [] : [input])),
-    ),
+    nativeBindings: nativeBindings,
+    nativeLinkInputs: nativeLinkInputs.flatMap((input) => (input === undefined ? [] : [input])),
   }
 })
 
@@ -471,7 +467,7 @@ export const load = Effect.fn('Project.load')(function* (
     ),
   )
 
-  return Object.freeze({
+  return {
     _tag: 'Project' as const,
     name: manifest.name,
     version: manifest.version,
@@ -479,7 +475,7 @@ export const load = Effect.fn('Project.load')(function* (
     manifestPath,
     directory,
     entry,
-    build: Object.freeze({
+    build: {
       targets: manifest.targets,
       outputDirectory: path.resolve(directory, manifest.outputDirectory),
       artifact: manifest.artifact,
@@ -489,38 +485,31 @@ export const load = Effect.fn('Project.load')(function* (
             platformSupply:
               manifest.platformSupply.kind !== 'explicit'
                 ? manifest.platformSupply
-                : Object.freeze({
+                : {
                     ...manifest.platformSupply,
                     root: path.resolve(directory, manifest.platformSupply.root),
                     linker: path.resolve(directory, manifest.platformSupply.linker),
                     ...(manifest.platformSupply.support === undefined
                       ? {}
                       : {
-                          support: Object.freeze(
-                            manifest.platformSupply.support.map((item) =>
-                              Object.freeze({ ...item, root: path.resolve(directory, item.root) }),
-                            ),
-                          ),
+                          support: manifest.platformSupply.support.map((item) => ({
+                            ...item,
+                            root: path.resolve(directory, item.root),
+                          })),
                         }),
-                  }),
+                  },
           }),
       stage: manifest.stage,
       ...(manifest.composition === undefined ? {} : { composition: manifest.composition }),
-      nativeBindings: Object.freeze(
-        manifest.nativeBindings.map((binding) =>
-          Object.freeze({
-            ...binding,
-            inputs: Object.freeze(
-              binding.inputs.map((input) => resolveNativeLinkInput(directory, input, path.resolve)),
-            ),
-          }),
-        ),
-      ),
-      nativeLinkInputs: Object.freeze(
-        manifest.nativeLinkInputs.map((input) =>
+      nativeBindings: manifest.nativeBindings.map((binding) => ({
+        ...binding,
+        inputs: binding.inputs.map((input) =>
           resolveNativeLinkInput(directory, input, path.resolve),
         ),
+      })),
+      nativeLinkInputs: manifest.nativeLinkInputs.map((input) =>
+        resolveNativeLinkInput(directory, input, path.resolve),
       ),
-    }),
-  })
+    },
+  }
 })

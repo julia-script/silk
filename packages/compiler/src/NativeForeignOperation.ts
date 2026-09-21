@@ -37,11 +37,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
     const address = context.foreignCallbacks.get(operation.symbol)
     if (address === undefined)
       throw new RangeError(`LLVM C callback ${operation.symbol} was not declared`)
-    yield* NativeStorage.writeLocal(
-      context.storage,
-      operation.destination.ordinal,
-      Object.freeze([address]),
-    )
+    yield* NativeStorage.writeLocal(context.storage, operation.destination.ordinal, [address])
     return
   }
   if (operation._tag === 'ForeignStaticLoad') {
@@ -54,11 +50,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
       foreign.address,
       `foreign_static${operation.destination.ordinal}`,
     )
-    yield* NativeStorage.writeLocal(
-      context.storage,
-      operation.destination.ordinal,
-      Object.freeze([value]),
-    )
+    yield* NativeStorage.writeLocal(context.storage, operation.destination.ordinal, [value])
     return
   }
   const { body, foreignFunctions, storage } = context
@@ -101,9 +93,9 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
     yield* NativeStorage.reloadAddressRoot(storage, root)
   }
   if (foreign.signature.result._tag === 'Void') {
-    yield* NativeStorage.writeLocal(storage, operation.destination.ordinal, Object.freeze([]))
+    yield* NativeStorage.writeLocal(storage, operation.destination.ordinal, [])
     return
   }
   if (result === undefined) throw new RangeError('LLVM foreign call returned no value')
-  yield* NativeStorage.writeLocal(storage, operation.destination.ordinal, Object.freeze([result]))
+  yield* NativeStorage.writeLocal(storage, operation.destination.ordinal, [result])
 })

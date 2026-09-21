@@ -230,15 +230,11 @@ const node = (
       const handle = state.metadata.entries.handles[existing]
       if (handle !== undefined) return handle
     }
-    const handle = MetadataTable.allocate(
-      state.metadata,
-      owner,
-      Object.freeze({ _tag: 'Node', value }),
-    )
+    const handle = MetadataTable.allocate(state.metadata, owner, { _tag: 'Node', value })
     state.metadata.nodeKeys.set(key, state.metadata.entries.descriptions.length - 1)
     return handle
   }
-  return MetadataTable.allocate(state.metadata, owner, Object.freeze({ _tag: 'Node', value }))
+  return MetadataTable.allocate(state.metadata, owner, { _tag: 'Node', value })
 }
 
 /** @internal */
@@ -255,7 +251,7 @@ const debugNode = Effect.fnUntraced(function* (
       if (state.strip) return undefined
       const made = make(state, owner)
       const value = Result.isResult(made) ? yield* made : made
-      return node(state, owner, Object.freeze(value))
+      return node(state, owner, value)
     }),
   )
 })
@@ -278,11 +274,7 @@ export const string = Effect.fnUntraced(function* (
       const handle = state.metadata.entries.handles[existing]
       if (handle !== undefined) return Result.succeed(handle)
     }
-    const handle = MetadataTable.allocate(
-      state.metadata,
-      owner,
-      Object.freeze({ _tag: 'String', value: content }),
-    )
+    const handle = MetadataTable.allocate(state.metadata, owner, { _tag: 'String', value: content })
     state.metadata.entries.keys.set(key, state.metadata.entries.descriptions.length - 1)
     return Result.succeed(handle)
   })
@@ -304,15 +296,11 @@ export const tuple = Effect.fnUntraced(function* (
       for (const element of elements) {
         resolved.push(yield* resolveIndex(builder, state, owner, element, 'Metadata.tuple'))
       }
-      return node(
-        state,
-        owner,
-        Object.freeze({
-          _tag: 'Tuple',
-          distinct: false,
-          elements: Object.freeze(resolved),
-        }),
-      )
+      return node(state, owner, {
+        _tag: 'Tuple',
+        distinct: false,
+        elements: resolved,
+      })
     }),
   )
 })
@@ -333,15 +321,11 @@ export const distinctTuple = Effect.fnUntraced(function* (
       for (const element of elements) {
         resolved.push(yield* resolveIndex(builder, state, owner, element, 'Metadata.distinctTuple'))
       }
-      return node(
-        state,
-        owner,
-        Object.freeze({
-          _tag: 'Tuple',
-          distinct: true,
-          elements: Object.freeze(resolved),
-        }),
-      )
+      return node(state, owner, {
+        _tag: 'Tuple',
+        distinct: true,
+        elements: resolved,
+      })
     }),
   )
 })
@@ -370,15 +354,11 @@ export const constant = Effect.fnUntraced(function* (
 ): Effect.fn.Return<Metadata, LlvmError> {
   return yield* BuilderState.mutate(builder, 'Metadata.constant', (state, owner) =>
     Result.gen(function* () {
-      return node(
-        state,
-        owner,
-        Object.freeze({
-          _tag: 'Constant',
-          distinct: false,
-          constant: yield* Handle.resolve(builder, owner, value, 'Constant', 'Metadata.constant'),
-        }),
-      )
+      return node(state, owner, {
+        _tag: 'Constant',
+        distinct: false,
+        constant: yield* Handle.resolve(builder, owner, value, 'Constant', 'Metadata.constant'),
+      })
     }),
   )
 })
@@ -394,9 +374,11 @@ export const local = Effect.fnUntraced(function* (
   label: ByteString.ByteString | Uint8Array | string,
 ): Effect.fn.Return<Optional, LlvmError> {
   const value = ByteString.coerce(label)
-  return yield* debugNode(builder, 'Metadata.local', () =>
-    Object.freeze({ _tag: 'Local', distinct: true, label: value }),
-  )
+  return yield* debugNode(builder, 'Metadata.local', () => ({
+    _tag: 'Local',
+    distinct: true,
+    label: value,
+  }))
 })
 
 /**
@@ -1122,7 +1104,7 @@ export const expression = Effect.fnUntraced(function* (
   return yield* debugNode(builder, 'Metadata.expression', () => ({
     _tag: 'Expression',
     distinct: false,
-    elements: Object.freeze([...elements]),
+    elements: [...elements],
   }))
 })
 
@@ -1279,10 +1261,10 @@ export const named = Effect.fnUntraced(function* (
         }
         mutableResolved.push(index)
       }
-      const resolved = Object.freeze(mutableResolved)
+      const resolved = mutableResolved
       const key = CanonicalKey.bytes(finalName)
       const existing = state.metadata.namedKeys.get(key)
-      const description = Object.freeze({ name: finalName, operands: resolved })
+      const description = { name: finalName, operands: resolved }
       if (existing === undefined) {
         state.metadata.namedKeys.set(key, state.metadata.named.length)
         state.metadata.named.push(description)
@@ -1389,13 +1371,11 @@ export const reachable = (state: BuilderState.Snapshot, operation: string): Reac
   if (unresolved.length > 0) {
     throw new TraversalFailure(
       `${operation}: reachable metadata has unresolved forward references: ${unresolved.join(', ')}`,
-      { references: Object.freeze(unresolved), roots: Object.freeze(roots) },
+      { references: unresolved, roots: roots },
     )
   }
-  return Object.freeze({
-    entries: Object.freeze(
-      state.metadata.flatMap((_entry, index) => (visited.has(index) ? [index] : [])),
-    ),
+  return {
+    entries: state.metadata.flatMap((_entry, index) => (visited.has(index) ? [index] : [])),
     resolved,
-  })
+  }
 }

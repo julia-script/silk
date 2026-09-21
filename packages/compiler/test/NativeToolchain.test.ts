@@ -1286,7 +1286,6 @@ it.effect('selects one provider with artifact pin precedence and no cross-host f
     )
     assert.strictEqual(chosen.origin, 'artifact')
     assert.deepEqual(chosen.request, pin)
-    assert.isTrue(Object.isFrozen(chosen.request))
     for (const [request, code] of [
       [{ kind: 'automatic' }, 'HostMismatch'],
       [{ kind: 'managed', name: 'deferred' }, 'UnsupportedProvider'],
@@ -1522,7 +1521,6 @@ it('freezes only admitted discovery environment channels', () => {
   const resolver = PlatformSupplyResolver.make(environment)
   environment.SDKROOT = '/changed/sdk'
   assert.deepEqual(resolver.environment, { PATH: '/selected/tools', SDKROOT: '/selected/sdk' })
-  assert.isTrue(Object.isFrozen(resolver.environment))
 })
 
 it.effect(

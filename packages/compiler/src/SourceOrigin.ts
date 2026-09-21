@@ -5,16 +5,14 @@ export type SourceOrigin =
   | { readonly _tag: 'Memory'; readonly uri?: string }
 
 /** Identifies source bytes read from one project-owned file. */
-export const projectFile = (path: string): SourceOrigin =>
-  Object.freeze({ _tag: 'ProjectFile', path })
+export const projectFile = (path: string): SourceOrigin => ({ _tag: 'ProjectFile', path })
 
 /** Identifies source bytes shipped as part of the active compiler toolchain. */
-export const toolchainFile = (uri: string): SourceOrigin =>
-  Object.freeze({ _tag: 'ToolchainFile', uri })
+export const toolchainFile = (uri: string): SourceOrigin => ({ _tag: 'ToolchainFile', uri })
 
 /** Identifies caller-supplied bytes, optionally associated with a real editor document URI. */
 export const memory = (uri?: string): SourceOrigin =>
-  Object.freeze(uri === undefined ? { _tag: 'Memory' } : { _tag: 'Memory', uri })
+  uri === undefined ? { _tag: 'Memory' } : { _tag: 'Memory', uri }
 
 /** Tests structural equality of two source origins. */
 export const equals = (self: SourceOrigin, other: SourceOrigin): boolean => {

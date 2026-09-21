@@ -36,12 +36,6 @@ it('owns the current scalar vocabulary in stable presentation order', () => {
     'char',
   )
   assert.strictEqual(Type.isBuiltin('usize'), true)
-  assert.strictEqual(Object.isFrozen(Scalar.all()), true)
-  assert.strictEqual(Scalar.all().every(Object.isFrozen), true)
-  assert.strictEqual(
-    Scalar.all().every((scalar) => Object.isFrozen(scalar.operations)),
-    true,
-  )
 })
 
 it('resolves fixed and target-width scalar facts without phase-specific cases', () => {

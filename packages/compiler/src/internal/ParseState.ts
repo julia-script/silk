@@ -23,12 +23,12 @@ export interface NodeResult {
   readonly node: SyntaxTree.Node
 }
 
-const triviaKinds: ReadonlyArray<Token.TokenKind> = Object.freeze([
+const triviaKinds: ReadonlyArray<Token.TokenKind> = [
   'Whitespace',
   'LineComment',
   'DocComment',
   'ModuleDocComment',
-])
+]
 
 export const isTrivia = (kind: Token.TokenKind): boolean => triviaKinds.includes(kind)
 
@@ -62,35 +62,33 @@ export const peek = (state: State, significantCount: number): Token.TokenKind | 
   return undefined
 }
 
-export const advance = (state: State): State =>
-  Object.freeze({
-    ...state,
-    index: state.index + 1,
-  })
+export const advance = (state: State): State => ({
+  ...state,
+  index: state.index + 1,
+})
 
 /** Advances to a previously scanned token index with one immutable state update. */
-export const advanceTo = (state: State, index: number): State =>
-  Object.freeze({
-    ...state,
-    index,
-  })
+export const advanceTo = (state: State, index: number): State => ({
+  ...state,
+  index,
+})
 
 export const addDiagnostic = (state: State, diagnostic: Diagnostic.Diagnostic): State =>
   state.recovering
     ? state
-    : Object.freeze({
+    : {
         ...state,
-        diagnostics: Object.freeze([...state.diagnostics, diagnostic]),
+        diagnostics: [...state.diagnostics, diagnostic],
         recovering: true,
-      })
+      }
 
 export const synchronize = (state: State): State =>
   !state.recovering
     ? state
-    : Object.freeze({
+    : {
         ...state,
         recovering: false,
-      })
+      }
 
 export const insertionOffset = (state: State): number =>
   currentToken(state)?.span.start ?? state.lexical.source.bytes.length
@@ -113,16 +111,16 @@ export const missingToken = (state: State, expected: Token.TokenKind): SyntaxTre
 
 export const consumeTrivia = (initial: State): ElementsResult => {
   let state = initial
-  let elements: ReadonlyArray<SyntaxTree.Element> = Object.freeze([])
+  let elements: ReadonlyArray<SyntaxTree.Element> = []
   let token = currentToken(state)
 
   while (token !== undefined && isTrivia(token.kind)) {
-    elements = Object.freeze([...elements, token])
+    elements = [...elements, token]
     state = advance(state)
     token = currentToken(state)
   }
 
-  return Object.freeze({ state, elements })
+  return { state, elements }
 }
 
 const isSynchronizationKind = (
@@ -142,15 +140,15 @@ export const expect = (
   let token = currentToken(state)
 
   if (token?.kind === expected) {
-    return Object.freeze({
+    return {
       state: synchronize(advance(state)),
-      elements: Object.freeze([...elements, token]),
-    })
+      elements: [...elements, token],
+    }
   }
 
-  let unexpected: ReadonlyArray<Token.Token> = Object.freeze([])
+  let unexpected: ReadonlyArray<Token.Token> = []
   while (token !== undefined && !isSynchronizationKind(token.kind, expected, following)) {
-    unexpected = Object.freeze([...unexpected, token])
+    unexpected = [...unexpected, token]
     state = advance(state)
     token = currentToken(state)
   }
@@ -166,19 +164,19 @@ export const expect = (
         error.span,
       ),
     )
-    elements = Object.freeze([...elements, error])
+    elements = [...elements, error]
   }
 
   if (token?.kind === expected) {
-    return Object.freeze({
+    return {
       state: synchronize(advance(state)),
-      elements: Object.freeze([...elements, token]),
-    })
+      elements: [...elements, token],
+    }
   }
 
   const missing = missingToken(state, expected)
-  return Object.freeze({
+  return {
     state: addDiagnostic(state, Diagnostic.missingToken(expected, missing.span)),
-    elements: Object.freeze([...elements, missing]),
-  })
+    elements: [...elements, missing],
+  }
 }

@@ -179,7 +179,6 @@ it.effect('publishes source-free authored content with canonical header and body
     assert.strictEqual(declaration.body._tag, 'CallableBody')
     if (declaration.body._tag !== 'CallableBody') return yield* Effect.die('Expected callable body')
     assert.strictEqual(declaration.body.block?.statements.length, 1)
-    assert.isTrue(Object.isFrozen(declaration.body.block?.statements))
     assert.isTrue(AuthoredModule.isUndamaged(declaration))
     const header = yield* AuthoredEncoding.header(module.pool, declaration)
     const body = yield* AuthoredEncoding.body(module.pool, declaration)
@@ -225,7 +224,6 @@ it.effect('publishes source-free authored content with canonical header and body
     while (pending.length > 0) {
       const value = pending.pop()
       if (value === null || typeof value !== 'object') continue
-      assert.isTrue(Object.isFrozen(value))
       assert.notInstanceOf(value, Map)
       if ('_tag' in value) {
         assert.notInclude(
@@ -334,7 +332,6 @@ it('keeps authored owners stable by logical parent and same-key occurrence', () 
   assert.isFalse(AuthoredIdentity.equals(identity, thenOwner))
   const ambiguousInsertion = AuthoredIdentity.children(module, [keys[0] ?? unreachable(), ...keys])
   assert.isFalse(AuthoredIdentity.equals(identity, ambiguousInsertion[1] ?? unreachable()))
-  assert.isTrue(Object.isFrozen(identity.path))
 })
 
 it('keeps executable identities structural and free of source-coordinate fields', () => {
@@ -397,7 +394,6 @@ it.effect('owns exact text and byte pools and rejects invalid references and pay
       value: [65, 0, 255],
       byteLength: 3,
     })
-    assert.isTrue(Object.isFrozen(pool.bytes[0]?.value))
     const invalidByte = yield* Effect.flip(AuthoredPool.make([], [[256]]))
     assert.strictEqual(invalidByte.reason._tag, 'InvalidByte')
     const invalidText = yield* Effect.flip(AuthoredPool.make(['\ud800'], []))

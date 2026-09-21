@@ -1,8 +1,8 @@
 import type * as Bitstream from './Bitstream.js'
 
-export const functionBlock: Bitstream.Block = Object.freeze({ id: 12, abbreviations: [] })
+export const functionBlock: Bitstream.Block = { id: 12, abbreviations: [] }
 
-export const code = Object.freeze({
+export const code = {
   declareBlocks: 1,
   binary: 2,
   cast: 3,
@@ -32,9 +32,9 @@ export const code = Object.freeze({
   compareExchange: 46,
   unary: 56,
   freeze: 58,
-})
+}
 
-export const binaryOpcode = Object.freeze({
+export const binaryOpcode = {
   add: 0,
   fadd: 0,
   sub: 1,
@@ -53,9 +53,9 @@ export const binaryOpcode = Object.freeze({
   and: 10,
   or: 11,
   xor: 12,
-})
+}
 
-export const castOpcode = Object.freeze({
+export const castOpcode = {
   trunc: 0,
   zext: 1,
   sext: 2,
@@ -69,9 +69,9 @@ export const castOpcode = Object.freeze({
   inttoptr: 10,
   bitcast: 11,
   addrspacecast: 12,
-})
+}
 
-export const integerPredicate = Object.freeze({
+export const integerPredicate = {
   eq: 32,
   ne: 33,
   ugt: 34,
@@ -82,9 +82,9 @@ export const integerPredicate = Object.freeze({
   sge: 39,
   slt: 40,
   sle: 41,
-})
+}
 
-export const floatingPredicate = Object.freeze({
+export const floatingPredicate = {
   false: 0,
   oeq: 1,
   ogt: 2,
@@ -101,4 +101,4 @@ export const floatingPredicate = Object.freeze({
   ule: 13,
   une: 14,
   true: 15,
-})
+}

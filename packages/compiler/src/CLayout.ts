@@ -24,10 +24,13 @@ export type Admission =
 /** Resolves a nominal type to the struct declaration that owns its physical-layout contract. */
 export type ResolveStruct = (type: Type.Nominal) => DeclarationFacts.StructFact | undefined
 
-const admitted = (type: Type.Type): Admission => Object.freeze({ _tag: 'Admitted', type })
+const admitted = (type: Type.Type): Admission => ({ _tag: 'Admitted', type })
 
-const rejected = (type: Type.Type, reason: RejectionReason): Admission =>
-  Object.freeze({ _tag: 'NotAdmitted', type, reason })
+const rejected = (type: Type.Type, reason: RejectionReason): Admission => ({
+  _tag: 'NotAdmitted',
+  type,
+  reason,
+})
 
 /** The fixed and pointer-sized numeric vocabulary with an unambiguous C object representation. */
 const admitsScalar = (type: Type.Builtin): boolean => type !== 'bool' && type !== 'char'
@@ -131,11 +134,9 @@ export const admitFields = (
     visiting: new Set<string>(),
     completed: new Map<string, Admission>(),
   }
-  return Object.freeze(
-    self.fields.map((field) =>
-      field.declaredType._tag === 'Resolved'
-        ? validateType(field.declaredType.type, state)
-        : undefined,
-    ),
+  return self.fields.map((field) =>
+    field.declaredType._tag === 'Resolved'
+      ? validateType(field.declaredType.type, state)
+      : undefined,
   )
 }

@@ -196,7 +196,7 @@ const expressionRoot = (
           _tag: 'TemporaryRoot' as const,
           owner: expression.root.owner,
           value: expression.root.value,
-          path: Object.freeze([]),
+          path: [],
         }
       })()
       return root === undefined
@@ -440,7 +440,7 @@ export const analyze = (
     const region = ensure(lifetime)
     const allowed = new Set(available)
     for (const point of region.available) if (!allowed.has(point)) region.available.delete(point)
-    origins.set(Lifetime.key(lifetime), Object.freeze(origin))
+    origins.set(Lifetime.key(lifetime), origin)
   }
   const anchor = (
     lifetime: Lifetime.Lifetime,
@@ -1288,14 +1288,14 @@ export const analyze = (
     }
     return [{ ...bound, points }]
   })
-  const input: Lifetime.Input = Object.freeze({
+  const input: Lifetime.Input = {
     pointCount,
-    regions: Object.freeze([...regions.values()]),
-    constraints: Object.freeze([...constraints.values()]),
+    regions: [...regions.values()],
+    constraints: [...constraints.values()],
     activatedConstraints,
-  })
+  }
   const solution = Lifetime.solve(input)
-  const diagnostics = Object.freeze([
+  const diagnostics = [
     ...applicationDiagnostics.values(),
     ...universalDiagnostics.values(),
     ...diagnosticsOf(
@@ -1310,8 +1310,8 @@ export const analyze = (
       Location.at(declaration.anchor),
       Location.key,
     ),
-  ])
-  return Object.freeze({
+  ]
+  return {
     controlFlow,
     retiredUses,
     retirementWork,
@@ -1325,7 +1325,7 @@ export const analyze = (
       ...terminalAnchors,
     ]),
     diagnostics,
-  })
+  }
 }
 
 /**
@@ -1338,7 +1338,7 @@ export const present = (
   self: LifetimeFlow,
   context: SemanticContext.SemanticContext,
 ): LifetimeFlow => {
-  return Object.freeze({
+  return {
     ...self,
     controlFlow: BodyControlFlow.present(self.controlFlow, context),
     // An origin's root and path hold ids and selectors that carry positions of their own.
@@ -1346,16 +1346,15 @@ export const present = (
       [...self.origins].map(([key, origin]) => [key, Tir.stamp(origin, context.spanOf)]),
     ),
     spans: new Map([...self.anchors].map(([point, anchor]) => [point, context.spanOf(anchor)])),
-  })
+  }
 }
 
 /** The proof without positions: what a cache or an encoding holds, and `present` completes. */
-export const content = (self: LifetimeFlow): LifetimeFlow =>
-  Object.freeze({
-    ...self,
-    controlFlow: BodyControlFlow.content(self.controlFlow),
-    spans: new Map(),
-  })
+export const content = (self: LifetimeFlow): LifetimeFlow => ({
+  ...self,
+  controlFlow: BodyControlFlow.content(self.controlFlow),
+  spans: new Map(),
+})
 
 /** Tests concrete loan liveness at an access using the solved holder uses and source CFG. */
 export const liveAt = (
@@ -1434,7 +1433,7 @@ const diagnosticsOf = <L>(
     )
     diagnostics.set(`${Lifetime.key(violation.lifetime)}:${keyOf(span)}`, diagnostic)
   }
-  return Object.freeze([...diagnostics.values()])
+  return [...diagnostics.values()]
 }
 
 /** Retains only cleanup hooks which can observe initialized borrowed components. */
@@ -1562,7 +1561,7 @@ export const withCleanupUses = (
   }
   if (!changed) return self
   const input = { ...self.input, regions: [...regions.values()] }
-  return Object.freeze({ ...self, input, solution: Lifetime.solve(input) })
+  return { ...self, input, solution: Lifetime.solve(input) }
 }
 
 /** Checks actual branch-specific destruction after ownership has produced ordered releases. */
@@ -1663,15 +1662,13 @@ export const sources = (self: LifetimeFlow, type: Type.Type): ReadonlyArray<Orig
         pending.push(parent)
       }
   }
-  const ordered = Object.freeze(
-    result.sort((left, right) => {
-      const leftKey = Lifetime.key(left.lifetime)
-      const rightKey = Lifetime.key(right.lifetime)
-      if (leftKey < rightKey) return -1
-      if (leftKey > rightKey) return 1
-      return 0
-    }),
-  )
+  const ordered = result.sort((left, right) => {
+    const leftKey = Lifetime.key(left.lifetime)
+    const rightKey = Lifetime.key(right.lifetime)
+    if (leftKey < rightKey) return -1
+    if (leftKey > rightKey) return 1
+    return 0
+  })
   cache.set(identity, ordered)
   return ordered
 }

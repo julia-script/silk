@@ -1,5 +1,5 @@
 /** Pinned LLVM bitcode attribute-kind codes from Zig's Builder.Attribute.Kind. */
-export const code: Readonly<Record<string, number>> = Object.freeze({
+export const code: Readonly<Record<string, number>> = {
   align: 1,
   alwaysinline: 2,
   byval: 3,
@@ -96,4 +96,4 @@ export const code: Readonly<Record<string, number>> = Object.freeze({
   nocreateundeforpoison: 105,
   denormal_fpenv: 106,
   nooutline: 107,
-})
+}

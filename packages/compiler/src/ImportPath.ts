@@ -9,7 +9,7 @@ import type * as Token from './Token.js'
  * retain the exact spelling and syntax paths retain the token kind, so both views derive from one
  * table.
  */
-const reservedSegments: ReadonlyArray<readonly [string, Token.TokenKind]> = Object.freeze([
+const reservedSegments: ReadonlyArray<readonly [string, Token.TokenKind]> = [
   ['pub', 'PubKeyword'],
   ['struct', 'StructKeyword'],
   ['enum', 'EnumKeyword'],
@@ -42,7 +42,7 @@ const reservedSegments: ReadonlyArray<readonly [string, Token.TokenKind]> = Obje
   ['continue', 'ContinueKeyword'],
   ['true', 'TrueKeyword'],
   ['false', 'FalseKeyword'],
-])
+]
 
 const reservedSegmentKinds: ReadonlySet<Token.TokenKind> = new Set(
   reservedSegments.map(([, kind]) => kind),
@@ -61,10 +61,8 @@ export const isReservedSegment = (token: Token.Token): boolean => token.kind !==
 
 /** Returns the ordered contextual segment tokens retained by an import-path node. */
 export const segments = (self: SyntaxTree.Node): ReadonlyArray<Token.Token> =>
-  Object.freeze(
-    self.children.filter(
-      (element): element is Token.Token => element._tag === 'Token' && isSegmentKind(element.kind),
-    ),
+  self.children.filter(
+    (element): element is Token.Token => element._tag === 'Token' && isSegmentKind(element.kind),
   )
 
 const decoder = new TextDecoder()
@@ -107,7 +105,7 @@ export const authoredSegments = (
     if (text === undefined) return undefined
     spellings.push(text)
   }
-  return Object.freeze(spellings)
+  return spellings
 }
 
 /** Renders one authored import path exactly as source modules spell it (segments joined by "."). */

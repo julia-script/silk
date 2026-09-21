@@ -61,10 +61,10 @@ const selectorFacts = (
     if (expression.contract._tag === 'Compatible') {
       return expression.contract.inferredProviderSelectors
     }
-    return Object.freeze([])
+    return []
   }
   if (expression._tag === 'CallableApply') return expression.inferredProviderSelectors
-  return Object.freeze([])
+  return []
 }
 
 /**
@@ -94,18 +94,15 @@ export const rows = (
   const found: Array<Row> = []
   for (const binding of bindings)
     if (binding.name._tag === 'Present' && binding.inferredType._tag === 'Available')
-      found.push(
-        Object.freeze({
-          _tag: 'Binding',
-          at: binding.name.anchor,
-          type: binding.inferredType.type,
-        }),
-      )
+      found.push({
+        _tag: 'Binding',
+        at: binding.name.anchor,
+        type: binding.inferredType.type,
+      })
   const addSelectors = (expression: Elaboration.ExpressionDecision): void => {
     const selectors = selectorFacts(expression)
     const callee = selectors.length === 0 ? undefined : selectorCallee(expression, builder)
-    if (callee !== undefined)
-      found.push(Object.freeze({ _tag: 'ProviderSelectors', callee, selectors }))
+    if (callee !== undefined) found.push({ _tag: 'ProviderSelectors', callee, selectors })
   }
   Elaboration.visitStatements(statements, {
     expression: addSelectors,
@@ -115,7 +112,7 @@ export const rows = (
       if (semantic !== undefined) addSelectors(semantic)
     },
   })
-  return Object.freeze(found)
+  return found
 }
 
 /** Projects published inference rows into one half-open byte range. */
@@ -136,13 +133,11 @@ export const make = (
     const key = `${span.sourceId}:${span.start}:${span.end}`
     if (seen.has(key)) continue
     seen.add(key)
-    hints.push(
-      Object.freeze({
-        _tag: 'BindingTypeHint',
-        span,
-        presentation: SemanticDisplay.expressionType(binding.type, module, scope),
-      }),
-    )
+    hints.push({
+      _tag: 'BindingTypeHint',
+      span,
+      presentation: SemanticDisplay.expressionType(binding.type, module, scope),
+    })
   }
 
   const selectorGroups = new Map<
@@ -158,7 +153,7 @@ export const make = (
     const span = SourceSpan.fromOffsets(calleeSpan.sourceId, calleeSpan.end, calleeSpan.end)
     if (span === undefined || span.start < start || span.start >= end) continue
     const key = `${span.sourceId}:${span.start}`
-    const group = selectorGroups.get(key) ?? Object.freeze({ span, selectors: new Map() })
+    const group = selectorGroups.get(key) ?? { span, selectors: new Map() }
     for (const selector of row.selectors) {
       if (!Type.isNominal(selector.selected.capability)) continue
       group.selectors.set(
@@ -174,17 +169,17 @@ export const make = (
         left.parameter.ordinal - right.parameter.ordinal ||
         compareText(Type.key(left.selected.capability), Type.key(right.selected.capability)),
     )
-    const selected = Object.freeze(selectors.map((selector) => selector.selected))
+    const selected = selectors.map((selector) => selector.selected)
     if (selected.length === 0) continue
     const text = selectors
       .flatMap((selector) =>
         Type.isNominal(selector.selected.capability)
           ? [
               SemanticDisplay.providerSelector(
-                Object.freeze({
+                {
                   capability: selector.selected.capability,
                   role: selector.selected.role,
-                }),
+                },
                 module,
                 scope,
               ).text,
@@ -192,14 +187,12 @@ export const make = (
           : [],
       )
       .join(', ')
-    hints.push(
-      Object.freeze({
-        _tag: 'ProviderSelectorTypeHint',
-        span: group.span,
-        selected,
-        presentation: Object.freeze({ _tag: 'ExpressionTypePresentation', text }),
-      }),
-    )
+    hints.push({
+      _tag: 'ProviderSelectorTypeHint',
+      span: group.span,
+      selected,
+      presentation: { _tag: 'ExpressionTypePresentation', text },
+    })
   }
   hints.sort(
     (left, right) =>
@@ -207,5 +200,5 @@ export const make = (
       left.span.end - right.span.end ||
       compareText(left._tag, right._tag),
   )
-  return Object.freeze(hints)
+  return hints
 }

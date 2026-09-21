@@ -167,12 +167,14 @@ export interface CharacterScalar {
 /** One immutable source of truth for a compiler-known scalar. */
 export type Scalar = IntegerScalar | FloatScalar | BooleanScalar | CharacterScalar
 
-const fixedWidth = (bits: FixedBits): Extract<Width, { readonly _tag: 'FixedWidth' }> =>
-  Object.freeze({ _tag: 'FixedWidth', bits })
-
-const pointerWidth: Extract<Width, { readonly _tag: 'PointerWidth' }> = Object.freeze({
-  _tag: 'PointerWidth',
+const fixedWidth = (bits: FixedBits): Extract<Width, { readonly _tag: 'FixedWidth' }> => ({
+  _tag: 'FixedWidth',
+  bits,
 })
+
+const pointerWidth: Extract<Width, { readonly _tag: 'PointerWidth' }> = {
+  _tag: 'PointerWidth',
+}
 
 const operation = (
   spelling: string,
@@ -180,21 +182,20 @@ const operation = (
   arity: Operation['arity'],
   result: Operation['result'],
   parameters?: ReadonlyArray<Spelling>,
-): Operation =>
-  Object.freeze({
-    spelling,
-    code,
-    arity,
-    result,
-    ...(parameters === undefined ? {} : { parameters }),
-  })
+): Operation => ({
+  spelling,
+  code,
+  arity,
+  result,
+  ...(parameters === undefined ? {} : { parameters }),
+})
 
-const equalityOperations = Object.freeze([
+const equalityOperations = [
   operation('equals', 'Equals', 2, 'Boolean'),
   operation('notEquals', 'NotEquals', 2, 'Boolean'),
-])
+]
 
-const integerSpellings: ReadonlyArray<IntegerSpelling> = Object.freeze([
+const integerSpellings: ReadonlyArray<IntegerSpelling> = [
   'u8',
   'u16',
   'u32',
@@ -205,7 +206,7 @@ const integerSpellings: ReadonlyArray<IntegerSpelling> = Object.freeze([
   'i32',
   'i64',
   'isize',
-])
+]
 
 const conversionName = (target: IntegerSpelling): string =>
   `to${target[0]?.toUpperCase() ?? ''}${target.slice(1)}`
@@ -235,32 +236,30 @@ const conversionCode = (target: IntegerSpelling): ConversionOperationCode => {
   }
 }
 
-const conversionOperations = Object.freeze(
-  integerSpellings.flatMap((target) => [
-    operation(conversionName(target), conversionCode(target), 1, target),
-    operation(
-      `checked${conversionName(target)[0]?.toUpperCase() ?? ''}${conversionName(target).slice(1)}`,
-      `Checked${conversionCode(target)}` as CheckedConversionOperationCode,
-      1,
-      'OptionTarget',
-    ),
-  ]),
-)
-
-const integerToFloatOperations = Object.freeze([
-  operation('toF32', 'ConvertToF32', 1, 'f32'),
-  operation('toF64', 'ConvertToF64', 1, 'f64'),
+const conversionOperations = integerSpellings.flatMap((target) => [
+  operation(conversionName(target), conversionCode(target), 1, target),
+  operation(
+    `checked${conversionName(target)[0]?.toUpperCase() ?? ''}${conversionName(target).slice(1)}`,
+    `Checked${conversionCode(target)}` as CheckedConversionOperationCode,
+    1,
+    'OptionTarget',
+  ),
 ])
 
-const comparisonOperations = Object.freeze([
+const integerToFloatOperations = [
+  operation('toF32', 'ConvertToF32', 1, 'f32'),
+  operation('toF64', 'ConvertToF64', 1, 'f64'),
+]
+
+const comparisonOperations = [
   ...equalityOperations,
   operation('lessThan', 'LessThan', 2, 'Boolean'),
   operation('lessOrEqual', 'LessOrEqual', 2, 'Boolean'),
   operation('greaterThan', 'GreaterThan', 2, 'Boolean'),
   operation('greaterOrEqual', 'GreaterOrEqual', 2, 'Boolean'),
-])
+]
 
-const arithmeticOperations = Object.freeze([
+const arithmeticOperations = [
   operation('add', 'Add', 2, 'Self'),
   operation('subtract', 'Subtract', 2, 'Self'),
   operation('multiply', 'Multiply', 2, 'Self'),
@@ -286,34 +285,29 @@ const arithmeticOperations = Object.freeze([
   operation('checkedDivide', 'CheckedDivide', 2, 'OptionSelf'),
   operation('checkedRemainder', 'CheckedRemainder', 2, 'OptionSelf'),
   ...comparisonOperations,
-])
+]
 
 const integer = <const S extends IntegerSpelling>(
   spelling: S,
   signedness: IntegerScalar['signedness'],
   width: Width,
-): IntegerScalar & { readonly spelling: S } =>
-  Object.freeze({
-    spelling,
-    category: 'Integer',
-    width,
-    signedness,
-    operations:
-      signedness === 'Signed'
-        ? Object.freeze([
-            operation('negate', 'Negate', 1, 'Self'),
-            operation('wrappingNegate', 'WrappingNegate', 1, 'Self'),
-            operation('saturatingNegate', 'SaturatingNegate', 1, 'Self'),
-            ...conversionOperations,
-            ...integerToFloatOperations,
-            ...arithmeticOperations,
-          ])
-        : Object.freeze([
-            ...conversionOperations,
-            ...integerToFloatOperations,
-            ...arithmeticOperations,
-          ]),
-  })
+): IntegerScalar & { readonly spelling: S } => ({
+  spelling,
+  category: 'Integer',
+  width,
+  signedness,
+  operations:
+    signedness === 'Signed'
+      ? [
+          operation('negate', 'Negate', 1, 'Self'),
+          operation('wrappingNegate', 'WrappingNegate', 1, 'Self'),
+          operation('saturatingNegate', 'SaturatingNegate', 1, 'Self'),
+          ...conversionOperations,
+          ...integerToFloatOperations,
+          ...arithmeticOperations,
+        ]
+      : [...conversionOperations, ...integerToFloatOperations, ...arithmeticOperations],
+})
 
 const u8 = integer('u8', 'Unsigned', fixedWidth(8))
 const u16 = integer('u16', 'Unsigned', fixedWidth(16))
@@ -332,7 +326,7 @@ export const defaultInteger = integer('i32', 'Signed', fixedWidth(32))
 const i64 = integer('i64', 'Signed', fixedWidth(64))
 const isize = integer('isize', 'Signed', pointerWidth)
 
-const enumRepresentationCatalog: ReadonlyArray<EnumRepresentation> = Object.freeze([
+const enumRepresentationCatalog: ReadonlyArray<EnumRepresentation> = [
   u8,
   u16,
   u32,
@@ -341,7 +335,7 @@ const enumRepresentationCatalog: ReadonlyArray<EnumRepresentation> = Object.free
   i16,
   defaultInteger,
   i64,
-])
+]
 
 const enumRepresentationsBySpelling: ReadonlyMap<string, EnumRepresentation> = new Map(
   enumRepresentationCatalog.map((scalar): readonly [string, EnumRepresentation] => [
@@ -361,61 +355,59 @@ export const enumRepresentations = (): ReadonlyArray<EnumRepresentation> =>
 /** The exact representation selected when an enum omits its representation clause. */
 export const defaultEnumRepresentation: EnumRepresentation = u8
 
-const floatOperations = (self: FloatSpelling, bitsType: 'u32' | 'u64') =>
-  Object.freeze([
-    operation('negate', 'Negate', 1, 'Self'),
-    operation('add', 'Add', 2, 'Self'),
-    operation('subtract', 'Subtract', 2, 'Self'),
-    operation('multiply', 'Multiply', 2, 'Self'),
-    operation('divide', 'Divide', 2, 'Self'),
-    operation('remainder', 'Remainder', 2, 'Self'),
-    ...comparisonOperations,
-    operation('isNaN', 'IsNaN', 1, 'Boolean'),
-    operation('isInfinite', 'IsInfinite', 1, 'Boolean'),
-    operation('isFinite', 'IsFinite', 1, 'Boolean'),
-    operation('isNormal', 'IsNormal', 1, 'Boolean'),
-    operation('isSubnormal', 'IsSubnormal', 1, 'Boolean'),
-    operation('isSignNegative', 'IsSignNegative', 1, 'Boolean'),
-    operation('totalOrder', 'TotalOrder', 2, 'Boolean'),
-    operation('toBits', 'ToBits', 1, bitsType),
-    operation('fromBits', 'FromBits', 1, self, Object.freeze([bitsType])),
-    operation('sqrt', 'Sqrt', 1, 'Self'),
-    operation('sin', 'Sin', 1, 'Self'),
-    operation('cos', 'Cos', 1, 'Self'),
-    operation('toF32', 'ConvertToF32', 1, 'f32'),
-    operation('toF64', 'ConvertToF64', 1, 'f64'),
-    ...integerSpellings.map((target) =>
-      operation(conversionName(target), conversionCode(target), 1, target),
-    ),
-  ])
+const floatOperations = (self: FloatSpelling, bitsType: 'u32' | 'u64') => [
+  operation('negate', 'Negate', 1, 'Self'),
+  operation('add', 'Add', 2, 'Self'),
+  operation('subtract', 'Subtract', 2, 'Self'),
+  operation('multiply', 'Multiply', 2, 'Self'),
+  operation('divide', 'Divide', 2, 'Self'),
+  operation('remainder', 'Remainder', 2, 'Self'),
+  ...comparisonOperations,
+  operation('isNaN', 'IsNaN', 1, 'Boolean'),
+  operation('isInfinite', 'IsInfinite', 1, 'Boolean'),
+  operation('isFinite', 'IsFinite', 1, 'Boolean'),
+  operation('isNormal', 'IsNormal', 1, 'Boolean'),
+  operation('isSubnormal', 'IsSubnormal', 1, 'Boolean'),
+  operation('isSignNegative', 'IsSignNegative', 1, 'Boolean'),
+  operation('totalOrder', 'TotalOrder', 2, 'Boolean'),
+  operation('toBits', 'ToBits', 1, bitsType),
+  operation('fromBits', 'FromBits', 1, self, [bitsType]),
+  operation('sqrt', 'Sqrt', 1, 'Self'),
+  operation('sin', 'Sin', 1, 'Self'),
+  operation('cos', 'Cos', 1, 'Self'),
+  operation('toF32', 'ConvertToF32', 1, 'f32'),
+  operation('toF64', 'ConvertToF64', 1, 'f64'),
+  ...integerSpellings.map((target) =>
+    operation(conversionName(target), conversionCode(target), 1, target),
+  ),
+]
 
 const floating = <const S extends FloatSpelling>(
   spelling: S,
   bits: 32 | 64,
   bitsType: 'u32' | 'u64',
-): FloatScalar & { readonly spelling: S } =>
-  Object.freeze({
-    spelling,
-    category: 'Floating',
-    width: fixedWidth(bits),
-    signedness: undefined,
+): FloatScalar & { readonly spelling: S } => ({
+  spelling,
+  category: 'Floating',
+  width: fixedWidth(bits),
+  signedness: undefined,
 
-    operations: floatOperations(spelling, bitsType),
-  })
+  operations: floatOperations(spelling, bitsType),
+})
 
 export const f32 = floating('f32', 32, 'u32')
 /** The default float selected for an unconstrained floating expression. */
 export const defaultFloat = floating('f64', 64, 'u64')
 
 /** The canonical Boolean scalar. */
-export const boolean: BooleanScalar = Object.freeze({
+export const boolean: BooleanScalar = {
   spelling: 'bool',
   category: 'Boolean',
   width: fixedWidth(32),
   signedness: undefined,
 
-  operations: Object.freeze([...equalityOperations, operation('not', 'Not', 1, 'Self')]),
-})
+  operations: [...equalityOperations, operation('not', 'Not', 1, 'Self')],
+}
 
 /**
  * The canonical Unicode scalar value.
@@ -429,20 +421,20 @@ export const boolean: BooleanScalar = Object.freeze({
  * `char` names a value inside a fixed range that excludes the surrogates `0xd800` to `0xdfff`,
  * and every arithmetic operation can leave that range.
  */
-export const character: CharacterScalar = Object.freeze({
+export const character: CharacterScalar = {
   spelling: 'char',
   category: 'Character',
   width: fixedWidth(32),
   signedness: undefined,
 
-  operations: Object.freeze([
-    operation('fromU32', 'CheckedConvertToChar', 1, 'OptionTarget', Object.freeze(['u32'])),
+  operations: [
+    operation('fromU32', 'CheckedConvertToChar', 1, 'OptionTarget', ['u32']),
     operation('toU32', 'ConvertToU32', 1, 'u32'),
     ...comparisonOperations,
-  ]),
-})
+  ],
+}
 
-const catalog: ReadonlyArray<Scalar> = Object.freeze([
+const catalog: ReadonlyArray<Scalar> = [
   boolean,
   u8,
   u16,
@@ -457,7 +449,7 @@ const catalog: ReadonlyArray<Scalar> = Object.freeze([
   f32,
   defaultFloat,
   character,
-])
+]
 
 const scalarsBySpelling: ReadonlyMap<string, Scalar> = new Map(
   catalog.map((scalar): readonly [string, Scalar] => [scalar.spelling, scalar]),
@@ -537,7 +529,7 @@ export const resolveLayout = (self: Scalar, target: Target.Target): Target.Primi
   if (self.category === 'Boolean') return target.primitives.bool
   if (self.category === 'Character') return target.primitives.i32
   if (self.width._tag === 'PointerWidth')
-    return Object.freeze({ size: target.pointerSize, alignment: target.pointerAlignment })
+    return { size: target.pointerSize, alignment: target.pointerAlignment }
   if (self.category === 'Floating')
     return self.width.bits === 32 ? target.primitives.f32 : target.primitives.f64
   switch (self.width.bits) {
@@ -559,6 +551,6 @@ export const range = (
 ): { readonly minimum: bigint; readonly maximum: bigint } => {
   const width = BigInt(bits(self, pointerBits))
   return self.signedness === 'Signed'
-    ? Object.freeze({ minimum: -(1n << (width - 1n)), maximum: (1n << (width - 1n)) - 1n })
-    : Object.freeze({ minimum: 0n, maximum: (1n << width) - 1n })
+    ? { minimum: -(1n << (width - 1n)), maximum: (1n << (width - 1n)) - 1n }
+    : { minimum: 0n, maximum: (1n << width) - 1n }
 }

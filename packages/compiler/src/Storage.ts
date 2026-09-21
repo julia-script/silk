@@ -91,7 +91,7 @@ const validateAddress = Effect.fnUntraced(function* (
 ): Effect.fn.Return<Address, StorageError> {
   yield* validateComponent(operation, namespace, key, 'namespace', namespace)
   yield* validateComponent(operation, namespace, key, 'key', key)
-  return Object.freeze({ _tag: 'StorageAddress', namespace, key })
+  return { _tag: 'StorageAddress', namespace, key }
 })
 
 const validateLimit = (

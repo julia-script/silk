@@ -26,19 +26,23 @@ export const source = (
   module: string,
   name: string,
   kind: Extract<AggregateIdentity, { readonly _tag: 'SourceAggregateIdentity' }>['kind'],
-): AggregateIdentity => Object.freeze({ _tag: 'SourceAggregateIdentity', module, name, kind })
+): AggregateIdentity => ({ _tag: 'SourceAggregateIdentity', module, name, kind })
 
 export const anonymous = (
   module: string,
   node: Tir.NodeRef,
   kind: Extract<AggregateIdentity, { readonly _tag: 'AnonymousAggregateIdentity' }>['kind'],
-): AggregateIdentity => Object.freeze({ _tag: 'AnonymousAggregateIdentity', module, node, kind })
+): AggregateIdentity => ({ _tag: 'AnonymousAggregateIdentity', module, node, kind })
 
-export const labeled = (label: string): MemberIdentity =>
-  Object.freeze({ _tag: 'LabeledAggregateMember', label })
+export const labeled = (label: string): MemberIdentity => ({
+  _tag: 'LabeledAggregateMember',
+  label,
+})
 
-export const ordinal = (value: number): MemberIdentity =>
-  Object.freeze({ _tag: 'OrdinalAggregateMember', ordinal: value })
+export const ordinal = (value: number): MemberIdentity => ({
+  _tag: 'OrdinalAggregateMember',
+  ordinal: value,
+})
 
 /** Compiler-private spelling for generated declarations; it never enters lexical lookup. */
 export const internalName = (self: AggregateIdentity): string =>

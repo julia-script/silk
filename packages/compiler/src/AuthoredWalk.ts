@@ -12,14 +12,13 @@ import type * as SemanticContext from './SemanticContext.js'
  * over the vocabulary rather than an untyped child scan.
  */
 
-const emptyBlock = (anchor: AuthoredHir.Anchor): AuthoredHir.Block =>
-  Object.freeze({
-    _tag: 'Block',
-    anchor,
-    origin: Object.freeze({ _tag: 'Authored' }),
-    causes: Object.freeze([]),
-    statements: Object.freeze([]),
-  })
+const emptyBlock = (anchor: AuthoredHir.Anchor): AuthoredHir.Block => ({
+  _tag: 'Block',
+  anchor,
+  origin: { _tag: 'Authored' },
+  causes: [],
+  statements: [],
+})
 
 /**
  * The canonical module name semantic comparisons use.
@@ -156,7 +155,7 @@ export const statements = (block: AuthoredHir.Block): ReadonlyArray<AuthoredHir.
       for (const nested of expressionBlocks(expression)) visitBlock(nested)
   }
   visitBlock(block)
-  return Object.freeze(found)
+  return found
 }
 
 /**
@@ -193,7 +192,7 @@ export const anchors = (block: AuthoredHir.Block): ReadonlyArray<AuthoredHir.Anc
     for (const expression of statementExpressions(statement)) visitExpression(expression)
   }
   for (const type of bodyTypes(block)) visitType(type)
-  return Object.freeze(found)
+  return found
 }
 
 /** A generic argument carries a type unless it is a lifetime. */
@@ -350,7 +349,7 @@ export const callableExpressions = (
   }
   for (const statement of statements(block))
     for (const expression of statementExpressions(statement)) visit(expression)
-  return Object.freeze(found)
+  return found
 }
 
 /** The types one pattern writes, including the annotations its nested fields write. */
@@ -382,7 +381,7 @@ const patternTypes = (pattern: AuthoredHir.Pattern): ReadonlyArray<AuthoredHir.T
     }
   }
   visit(pattern)
-  return Object.freeze(found)
+  return found
 }
 
 const patternTags: ReadonlySet<string> = new Set([
@@ -432,7 +431,7 @@ export const bodyTypes = (block: AuthoredHir.Block): ReadonlyArray<AuthoredHir.T
       found.push(...patternTypes(statement.pattern))
     for (const expression of statementExpressions(statement)) visitExpression(expression)
   }
-  return Object.freeze(found)
+  return found
 }
 
 /** True when an authored node is not a lexical-recovery placeholder. */

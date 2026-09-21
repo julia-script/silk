@@ -378,10 +378,10 @@ export const resolve = Effect.fn('ExecutionStorageComponent.resolve')(function* 
       )
     return selected
   })
-  return Object.freeze({
+  return {
     create: yield* operation('create'),
     acquire: yield* operation('acquire'),
     release: yield* operation('release'),
     destroy: yield* operation('destroy'),
-  })
+  }
 })

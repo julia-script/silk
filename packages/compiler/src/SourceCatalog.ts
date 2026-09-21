@@ -55,7 +55,7 @@ const projectCatalog = (
         ),
     ]),
   )
-  return Object.freeze({ profile, identity, modules })
+  return { profile, identity, modules }
 }
 
 /** Projects a compiler analysis without performing a second source-selection pass. */
@@ -80,7 +80,7 @@ export const analyze = Effect.fn('SourceCatalog.analyze')(function* (
   previous?: SourceCatalog,
 ): Effect.fn.Return<Selection, ModuleClosure.ModuleClosureError, SourceResolver.SourceResolver> {
   const selected = yield* Frontend.selectProject(request)
-  return Object.freeze({
+  return {
     closure: selected.closure,
     ...(selected.profile === undefined
       ? {}
@@ -92,5 +92,5 @@ export const analyze = Effect.fn('SourceCatalog.analyze')(function* (
             previous?.modules,
           ),
         }),
-  })
+  }
 })

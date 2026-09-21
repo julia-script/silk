@@ -8,12 +8,11 @@ export interface Delimiter {
 }
 
 /** Retains the erased body's modes while stopping propagation into the owner-side drive caller. */
-export const delimit = (body: SuspensionMode.Summary): Delimiter =>
-  Object.freeze({
-    _tag: 'ExecutionDelimiter',
-    body,
-    owner: SuspensionMode.direct,
-  })
+export const delimit = (body: SuspensionMode.Summary): Delimiter => ({
+  _tag: 'ExecutionDelimiter',
+  body,
+  owner: SuspensionMode.direct,
+})
 
 export const encode = (self: Delimiter): string =>
   `ExecutionDelimiter<body=${SuspensionMode.encode(self.body)};owner=${SuspensionMode.encode(self.owner)}>`

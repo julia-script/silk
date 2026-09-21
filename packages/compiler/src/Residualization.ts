@@ -97,7 +97,7 @@ const emptyCounters = (): MutableCounters => ({
 })
 
 /** Work reported when target selection prevented residualization from starting. */
-export const noWork: Counters = Object.freeze(emptyCounters())
+export const noWork: Counters = emptyCounters()
 
 interface State {
   conditionDiagnostics?: Array<Diagnostic.Located>
@@ -202,7 +202,7 @@ const makeState = (
     results,
     spans: SemanticContext.fromModules([...results.values()]),
     resolution,
-    index: Object.freeze({ ...index, generatedAggregates }),
+    index: { ...index, generatedAggregates },
     semantic,
     generatedAggregates,
     evaluation: Evaluation.make<StaticValue.Value>(compilation, limits, sourceIdentity, trace),
@@ -225,20 +225,19 @@ export const make = (
   parameters: ReadonlyMap<string, StaticValue.Value> = new Map(),
   trace: CompilerTrace.CompilerTrace = CompilerTrace.none,
   testCatalog?: TestDiscovery.Catalog,
-): Coordinator =>
-  Object.freeze({
-    _tag: 'ResidualizationCoordinator',
-    [stateSymbol]: makeState(
-      compilation,
-      results,
-      resolution,
-      index,
-      limits,
-      parameters,
-      trace,
-      testCatalog,
-    ),
-  })
+): Coordinator => ({
+  _tag: 'ResidualizationCoordinator',
+  [stateSymbol]: makeState(
+    compilation,
+    results,
+    resolution,
+    index,
+    limits,
+    parameters,
+    trace,
+    testCatalog,
+  ),
+})
 
 /** Starts default/predicate evaluation without granting runtime-specialization admission. */
 export const makeBootstrap = (
@@ -248,19 +247,18 @@ export const makeBootstrap = (
   index: DeclarationIndex.Index,
   parameters: ReadonlyMap<string, StaticValue.Value>,
   trace: CompilerTrace.CompilerTrace = CompilerTrace.none,
-): BootstrapCoordinator =>
-  Object.freeze({
-    _tag: 'ProfileBootstrapCoordinator',
-    [stateSymbol]: makeState(
-      compilation,
-      results,
-      resolution,
-      index,
-      Evaluation.defaultLimits,
-      parameters,
-      trace,
-    ),
-  })
+): BootstrapCoordinator => ({
+  _tag: 'ProfileBootstrapCoordinator',
+  [stateSymbol]: makeState(
+    compilation,
+    results,
+    resolution,
+    index,
+    Evaluation.defaultLimits,
+    parameters,
+    trace,
+  ),
+})
 
 /** Returns canonical source bodies actually demanded during this evaluation session. */
 export const dependencies = (self: EvaluationCoordinator): string =>
@@ -271,8 +269,9 @@ export const dependencies = (self: EvaluationCoordinator): string =>
   )
 
 /** Snapshots work performed by this target-scoped coordinator. */
-export const counters = (self: EvaluationCoordinator): Counters =>
-  Object.freeze({ ...self[stateSymbol].counters })
+export const counters = (self: EvaluationCoordinator): Counters => ({
+  ...self[stateSymbol].counters,
+})
 
 /** Snapshots source and target-specialized aggregates created during this evaluation session. */
 export const generatedAggregates = (
@@ -282,16 +281,12 @@ export const generatedAggregates = (
 
 /** Snapshots declaration/reason attribution without counting retained proof work as execution. */
 export const observations = (self: EvaluationCoordinator): ReadonlyArray<Observation> =>
-  Object.freeze(
-    [...self[stateSymbol].observations.entries()]
-      .toSorted(([left], [right]) => {
-        if (left < right) return -1
-        return left > right ? 1 : 0
-      })
-      .map(([, observation]) =>
-        Object.freeze({ ...observation, counters: Object.freeze({ ...observation.counters }) }),
-      ),
-  )
+  [...self[stateSymbol].observations.entries()]
+    .toSorted(([left], [right]) => {
+      if (left < right) return -1
+      return left > right ? 1 : 0
+    })
+    .map(([, observation]) => ({ ...observation, counters: { ...observation.counters } }))
 
 const record = (
   self: EvaluationCoordinator,
@@ -348,11 +343,11 @@ const reflectAggregate = (
     )
   const authorizationId = authorization.canonical.id
   const declarationId = declaration.canonical.id
-  const descriptor: StaticValue.TypeDescriptorValue = Object.freeze({
+  const descriptor: StaticValue.TypeDescriptorValue = {
     _tag: 'TypeDescriptorValue',
     owner,
     kind: declaration.aggregateKind,
-  })
+  }
   const substitution = TypeInference.substitution(
     declaration.typeParameters.map((parameter) => parameter.type),
     owner.arguments,
@@ -369,11 +364,11 @@ const reflectAggregate = (
   const candidate: StaticValue.Value =
     kind === 'Type'
       ? descriptor
-      : Object.freeze({
+      : {
           _tag: 'FieldCollectionValue',
           owner: descriptor,
-          fields: Object.freeze(
-            declaration.fields.flatMap((field): ReadonlyArray<StaticValue.FieldDescriptorValue> => {
+          fields: declaration.fields.flatMap(
+            (field): ReadonlyArray<StaticValue.FieldDescriptorValue> => {
               if (
                 (field.visibility === 'Private' &&
                   authorizationId.module !== declarationId.module) ||
@@ -382,22 +377,22 @@ const reflectAggregate = (
                 return []
               const member: StaticValue.ReflectedMember =
                 field.member._tag === 'LabeledAggregateMember'
-                  ? Object.freeze({ _tag: 'LabeledField', label: field.member.label })
-                  : Object.freeze({ _tag: 'PositionalField', ordinal: field.member.ordinal })
+                  ? { _tag: 'LabeledField', label: field.member.label }
+                  : { _tag: 'PositionalField', ordinal: field.member.ordinal }
               return [
-                Object.freeze({
+                {
                   _tag: 'FieldDescriptorValue',
                   owner: descriptor,
                   declarationOrdinal: field.id.ordinal,
                   member,
                   valueType: Type.substitute(field.declaredType.type, substitution),
                   authorization: authorizationId,
-                  provenance: Object.freeze({ anchor: field.anchor }),
-                }),
+                  provenance: { anchor: field.anchor },
+                },
               ]
-            }),
+            },
           ),
-        })
+        }
   const admission = StaticValue.admit(candidate, {
     pointerBits: self[stateSymbol].environment.pointerBits,
   })
@@ -435,7 +430,7 @@ const moduleInput = (
   )
   return result === undefined || scope === undefined || headers === undefined
     ? undefined
-    : Object.freeze({ result, scope, declarations: headers.declarations })
+    : { result, scope, declarations: headers.declarations }
 }
 
 /**
@@ -452,58 +447,55 @@ const moduleConditionOrdinal = (owner: AuthoredIdentity.Identity): number => {
   return 0x40000000 + (hash & 0x3fffffff)
 }
 
-const emptyFailureRow = (): DeclarationFacts.FailureRowFact =>
-  Object.freeze({
-    _tag: 'FailureRow',
-    members: Object.freeze([]),
-    parameters: Object.freeze([]),
-    failures: Object.freeze([]),
-    available: true,
-    expression: Object.freeze({ _tag: 'EmptyRowExpression' }),
-    row: RowAlgebra.concrete(Type.failureRowPolicy(), []),
-  })
+const emptyFailureRow = (): DeclarationFacts.FailureRowFact => ({
+  _tag: 'FailureRow',
+  members: [],
+  parameters: [],
+  failures: [],
+  available: true,
+  expression: { _tag: 'EmptyRowExpression' },
+  row: RowAlgebra.concrete(Type.failureRowPolicy(), []),
+})
 
-const emptyRequirementRow = (): DeclarationFacts.RequirementRowFact =>
-  Object.freeze({
-    _tag: 'RequirementRow',
-    entries: Object.freeze([]),
-    parameters: Object.freeze([]),
-    requirements: Object.freeze([]),
-    available: true,
-    expression: Object.freeze({ _tag: 'EmptyRowExpression' }),
-    row: RowAlgebra.concrete(Type.requirementRowPolicy(), []),
-  })
+const emptyRequirementRow = (): DeclarationFacts.RequirementRowFact => ({
+  _tag: 'RequirementRow',
+  entries: [],
+  parameters: [],
+  requirements: [],
+  available: true,
+  expression: { _tag: 'EmptyRowExpression' },
+  row: RowAlgebra.concrete(Type.requirementRowPolicy(), []),
+})
 
 const constantHost = (
   declaration: DeclarationFacts.ConstantFact,
-): DeclarationFacts.DeclarationFact =>
-  Object.freeze({
-    _tag: 'FunctionDeclaration',
-    id: declaration.id,
-    canonical: declaration.canonical,
-    visibility: 'Private',
-    phase: 'Static',
-    functionKind: 'Ordinary',
-    test: false,
-    unsafe: false,
-    typeParameters: Object.freeze([]),
-    parameterCount: 0,
-    parameters: Object.freeze([]),
-    name: declaration.name,
-    returnType: declaration.declaredType,
-    failureRow: emptyFailureRow(),
-    requirementRow: emptyRequirementRow(),
-    constraints: Object.freeze([]),
-    constraintContracts: Object.freeze([]),
-    anchor: declaration.anchor,
-    owner: declaration.anchor.owner,
-  })
+): DeclarationFacts.DeclarationFact => ({
+  _tag: 'FunctionDeclaration',
+  id: declaration.id,
+  canonical: declaration.canonical,
+  visibility: 'Private',
+  phase: 'Static',
+  functionKind: 'Ordinary',
+  test: false,
+  unsafe: false,
+  typeParameters: [],
+  parameterCount: 0,
+  parameters: [],
+  name: declaration.name,
+  returnType: declaration.declaredType,
+  failureRow: emptyFailureRow(),
+  requirementRow: emptyRequirementRow(),
+  constraints: [],
+  constraintContracts: [],
+  anchor: declaration.anchor,
+  owner: declaration.anchor.owner,
+})
 
 const bindStaticParameters = (
   declaration: DeclarationFacts.DeclarationFact,
   arguments_: ReadonlyArray<StaticValue.Value>,
-  argumentSpans: ReadonlyArray<Location.Location | undefined> = Object.freeze([]),
-  argumentOrigins: ReadonlyArray<Evaluation.TextOrigin | undefined> = Object.freeze([]),
+  argumentSpans: ReadonlyArray<Location.Location | undefined> = [],
+  argumentOrigins: ReadonlyArray<Evaluation.TextOrigin | undefined> = [],
   originScope?: string,
 ):
   | {
@@ -562,7 +554,7 @@ const bindStaticParameters = (
       ]
     }),
   )
-  return Object.freeze({ values, valueSpans, valueOrigins })
+  return { values, valueSpans, valueOrigins }
 }
 
 const resolveTextOrigin = (
@@ -585,27 +577,21 @@ const resolveValueOrigins = (
     const origin = resolveTextOrigin(value.origin, arguments_, scope)
     return origin === value.origin
       ? value
-      : Object.freeze({ ...value, ...(origin === undefined ? {} : { origin }) })
+      : { ...value, ...(origin === undefined ? {} : { origin }) }
   }
   if (value._tag === 'AggregateValue')
-    return Object.freeze({
+    return {
       ...value,
-      fields: Object.freeze(
-        value.fields.map((field) =>
-          Object.freeze({
-            ...field,
-            value: resolveValueOrigins(field.value, arguments_, scope),
-          }),
-        ),
-      ),
-    })
+      fields: value.fields.map((field) => ({
+        ...field,
+        value: resolveValueOrigins(field.value, arguments_, scope),
+      })),
+    }
   if (value._tag === 'StaticSequenceValue')
-    return Object.freeze({
+    return {
       ...value,
-      elements: Object.freeze(
-        value.elements.map((element) => resolveValueOrigins(element, arguments_, scope)),
-      ),
-    })
+      elements: value.elements.map((element) => resolveValueOrigins(element, arguments_, scope)),
+    }
   return value
 }
 
@@ -645,7 +631,7 @@ const evaluateStaticFunction = (
   lookup: Parameters<Evaluation.NodeContext['call']>[7],
 ): Evaluation.CallResult => {
   if (declaration.canonical._tag !== 'Canonical')
-    return Object.freeze({
+    return {
       outcome: Evaluation.failed(
         Evaluation.phaseViolation(
           'Evaluation.call',
@@ -654,19 +640,19 @@ const evaluateStaticFunction = (
           parentTrace,
         ),
       ),
-    })
+    }
   self[stateSymbol].dependencies.set(
     Canonical.record('helper', [declaration.canonical.id.module, declaration.canonical.id.name]),
     declaration.bodyTemplate?.canonical ?? '',
   )
-  const application: Evaluation.Application = Object.freeze({
+  const application: Evaluation.Application = {
     declaration: declaration.canonical.id,
-    typeArguments: Object.freeze(identity.typeArguments.map(Type.genericArgumentKey)),
+    typeArguments: identity.typeArguments.map(Type.genericArgumentKey),
     evidence: identity.evidence,
     contractRow: identity.contractRow,
     staticArguments: arguments_,
     span,
-  })
+  }
   const originScope = Evaluation.applicationKey(self[stateSymbol].environment, application)
   const result = Semantic.evaluateFrom(
     self[stateSymbol].semantic,
@@ -675,13 +661,7 @@ const evaluateStaticFunction = (
     parentTrace,
     (evaluation) => {
       const input = moduleInput(self, declaration)
-      const bindings = bindStaticParameters(
-        declaration,
-        arguments_,
-        argumentSpans,
-        Object.freeze([]),
-        originScope,
-      )
+      const bindings = bindStaticParameters(declaration, arguments_, argumentSpans, [], originScope)
       const typeSubstitution = TypeInference.substitution(
         declaration.typeParameters.map((parameter) => parameter.type),
         identity.typeArguments,
@@ -717,9 +697,7 @@ const evaluateStaticFunction = (
           nestedLookup,
         )
       const semantic = SemanticContext.make(input.result.authored)
-      const builder = BodyBuilder.make(
-        Object.freeze({ owner: declaration.owner, request: Object.freeze({ _tag: 'Check' }) }),
-      )
+      const builder = BodyBuilder.make({ owner: declaration.owner, request: { _tag: 'Check' } })
       const staticContext = {
         environment: self[stateSymbol].environment,
         ...(self[stateSymbol].testCatalog === undefined
@@ -755,12 +733,12 @@ const evaluateStaticFunction = (
         semantic,
         declaration,
         input.declarations,
-        Object.freeze({
+        {
           scope: input.scope,
           index: self[stateSymbol].index,
           semantic: self[stateSymbol].semantic,
           builder,
-        }),
+        },
         staticContext,
       )
       publishGeneratedAggregates(self, analyzed.fact.generatedAggregates)
@@ -819,9 +797,9 @@ const evaluateStaticFunction = (
   )
   if (result._tag === 'Failed') {
     if (result.failure._tag !== 'CompileError')
-      return Object.freeze({ outcome: Evaluation.failed(result.failure) })
+      return { outcome: Evaluation.failed(result.failure) }
     const origin = resolveTextOrigin(result.failure.origin, argumentOrigins, originScope)
-    const failure = Object.freeze({
+    const failure = {
       ...result.failure,
       span:
         (origin === undefined
@@ -829,17 +807,17 @@ const evaluateStaticFunction = (
           : Evaluation.textOriginLocation(origin, Location.anchorOf(result.failure.span))) ??
         result.failure.span,
       ...(origin === undefined ? {} : { origin }),
-    })
-    return Object.freeze({ outcome: Evaluation.failed(failure) })
+    }
+    return { outcome: Evaluation.failed(failure) }
   }
   const cachedOrigin = self[stateSymbol].staticResultOrigins.get(result.key)
   const textOrigin = resolveTextOrigin(cachedOrigin, argumentOrigins, originScope)
   const textSpan = resolveTextSpan(cachedOrigin, argumentSpans)
-  return Object.freeze({
+  return {
     outcome: Evaluation.complete(resolveValueOrigins(result.value, argumentOrigins, originScope)),
     ...(textSpan === undefined ? {} : { textSpan }),
     ...(textOrigin === undefined ? {} : { textOrigin }),
-  })
+  }
 }
 
 const staticValueType = (value: StaticValue.Value): Type.Type | undefined => {
@@ -893,20 +871,20 @@ function evaluateConstantValue(
     ]),
     dependencyTemplate,
   )
-  const application: Evaluation.Application = Object.freeze({
+  const application: Evaluation.Application = {
     declaration:
       predicate === undefined
         ? declaration.canonical.id
-        : Object.freeze({
+        : {
             ...declaration.canonical.id,
             name: `${declaration.canonical.id.name}#validation`,
-          }),
-    typeArguments: Object.freeze([]),
-    evidence: Object.freeze([]),
-    contractRow: Object.freeze([]),
-    staticArguments: Object.freeze([]),
+          },
+    typeArguments: [],
+    evidence: [],
+    contractRow: [],
+    staticArguments: [],
     span,
-  })
+  }
   const result = Semantic.evaluateFrom(
     self[stateSymbol].semantic,
     self[stateSymbol].evaluation,
@@ -951,11 +929,9 @@ function evaluateConstantValue(
       ) => evaluateConstantValue(self, nested, nestedSpan, trace)
       const host = constantHost(declaration)
       const semantic = SemanticContext.make(input.result.authored)
-      const builder = BodyBuilder.make(
-        Object.freeze({ owner: host.owner, request: Object.freeze({ _tag: 'Check' }) }),
-      )
+      const builder = BodyBuilder.make({ owner: host.owner, request: { _tag: 'Check' } })
       const generatedAggregates = new Map<string, DeclarationFacts.StructFact>()
-      const staticContext = Object.freeze({
+      const staticContext = {
         environment: self[stateSymbol].environment,
         ...(self[stateSymbol].testCatalog === undefined
           ? {}
@@ -977,25 +953,25 @@ function evaluateConstantValue(
           lookup: Evaluation.NodeContext['lookup'],
         ) => reflectAggregate(self, host, owner, kind, reflectSpan, trace, lookup),
         constant,
-      })
+      }
       const analyzed = analyzeExpression(
         semantic,
         initializer,
         input.declarations,
         host,
-        Object.freeze({
-          parameters: Object.freeze([]),
-          bindings: Object.freeze([]),
-          patternBindings: Object.freeze([]),
-        }),
-        Object.freeze({
+        {
+          parameters: [],
+          bindings: [],
+          patternBindings: [],
+        },
+        {
           scope: input.scope,
           index: self[stateSymbol].index,
           semantic: self[stateSymbol].semantic,
           staticContext,
           builder,
           generatedAggregates,
-        }),
+        },
         expected,
       )
       publishGeneratedAggregates(self, generatedAggregates.values())
@@ -1058,12 +1034,7 @@ export const evaluateConstant = (
   self: EvaluationCoordinator,
   declaration: DeclarationFacts.ConstantFact,
 ): Evaluation.Outcome<StaticValue.Value> =>
-  evaluateConstantValue(
-    self,
-    declaration,
-    Location.at(declaration.initializer.anchor),
-    Object.freeze([]),
-  )
+  evaluateConstantValue(self, declaration, Location.at(declaration.initializer.anchor), [])
 
 /** Checks and evaluates a module condition through ordinary static expression and helper semantics. */
 export const evaluateModuleCondition = Effect.fn('Residualization.evaluateModuleCondition')(
@@ -1092,7 +1063,7 @@ export const evaluateModuleCondition = Effect.fn('Residualization.evaluateModule
               [],
             ),
           ),
-          diagnostics: Object.freeze([]),
+          diagnostics: [],
         }
       const expression = declaration.header.condition
       const name = `#module-condition:${AuthoredIdentity.key(declaration.owner)}`
@@ -1128,11 +1099,11 @@ export const evaluateModuleCondition = Effect.fn('Residualization.evaluateModule
       const expressionFact = self[stateSymbol].conditionExpression
       delete self[stateSymbol].conditionDiagnostics
       delete self[stateSymbol].conditionExpression
-      return Object.freeze({
+      return {
         outcome,
-        diagnostics: Object.freeze(diagnostics),
+        diagnostics: diagnostics,
         ...(expressionFact === undefined ? {} : { expression: expressionFact }),
-      })
+      }
     }),
 )
 
@@ -1147,7 +1118,7 @@ export const evaluateParameterPredicate = (
         self,
         declaration,
         Location.at(declaration.predicate.anchor),
-        Object.freeze([]),
+        [],
         declaration.predicate,
       )
 
@@ -1223,7 +1194,7 @@ export const residualize = (self: Coordinator, key: ApplicationKey): Result => {
       'Residualization.residualize',
       'application does not match one runtime declaration',
       span,
-      Object.freeze([]),
+      [],
     )
     record(
       self,
@@ -1232,7 +1203,7 @@ export const residualize = (self: Coordinator, key: ApplicationKey): Result => {
       'rejected',
       true,
     )
-    return Object.freeze({ _tag: 'StaticFailure', failure, diagnostics: Object.freeze([]) })
+    return { _tag: 'StaticFailure', failure, diagnostics: [] }
   }
   const reason = selectionReason(self, key)
   if (reason === undefined) {
@@ -1241,23 +1212,23 @@ export const residualize = (self: Coordinator, key: ApplicationKey): Result => {
     )
     if (body !== undefined) {
       record(self, key.declaration, 'UnchangedBody', 'sourceReused', false)
-      return Object.freeze({
+      return {
         _tag: 'ResidualBody',
         artifact: body.artifact,
         function: body.function,
         results: body.results,
-        diagnostics: Object.freeze([]),
-      })
+        diagnostics: [],
+      }
     }
   }
-  const application: Evaluation.Application = Object.freeze({
+  const application: Evaluation.Application = {
     declaration: key.declaration,
-    typeArguments: Object.freeze(key.typeArguments.map(Type.genericArgumentKey)),
+    typeArguments: key.typeArguments.map(Type.genericArgumentKey),
     evidence: key.evidence,
     contractRow: key.contractRow,
     staticArguments: key.staticArguments,
     span: Location.at(declaration.anchor),
-  })
+  }
   let executed = false
   const evaluated = Semantic.constructResidual(
     self[stateSymbol].semantic,
@@ -1306,25 +1277,25 @@ export const residualize = (self: Coordinator, key: ApplicationKey): Result => {
       ) => evaluateConstantValue(self, declaration, span, trace)
       const chargedStaticIterationNodes = { value: 0 }
       const semantic = SemanticContext.make(input.result.authored)
-      const request: Tir.ArtifactId['request'] = Object.freeze({
+      const request: Tir.ArtifactId['request'] = {
         _tag: 'Specialize',
         application: Evaluation.applicationKey(
           self[stateSymbol].environment,
           evaluation.application,
         ),
-      })
-      const builder = BodyBuilder.make(Object.freeze({ owner: declaration.owner, request }))
+      }
+      const builder = BodyBuilder.make({ owner: declaration.owner, request })
       const analyzed = analyzeFunctionBody(
         semantic,
         declaration,
         input.declarations,
-        Object.freeze({
+        {
           scope: input.scope,
           index: self[stateSymbol].index,
           semantic: self[stateSymbol].semantic,
           builder,
-        }),
-        Object.freeze({
+        },
+        {
           environment: self[stateSymbol].environment,
           ...(self[stateSymbol].testCatalog === undefined
             ? {}
@@ -1352,7 +1323,7 @@ export const residualize = (self: Coordinator, key: ApplicationKey): Result => {
             lookup: Evaluation.NodeContext['lookup'],
           ) => reflectAggregate(self, declaration, owner, kind, reflectSpan, trace, lookup),
           constant,
-        }),
+        },
       )
       publishGeneratedAggregates(self, analyzed.fact.generatedAggregates)
       let nodes = 0
@@ -1379,15 +1350,13 @@ export const residualize = (self: Coordinator, key: ApplicationKey): Result => {
       )
       if (declaration.phase === 'Static')
         throw new RangeError('Static functions have no runtime TIR body')
-      return Evaluation.complete(
-        Object.freeze({
-          _tag: 'ResidualBody' as const,
-          artifact: body.artifact,
-          function: body.function,
-          results: body.results,
-          diagnostics: analyzed.diagnostics,
-        }),
-      )
+      return Evaluation.complete({
+        _tag: 'ResidualBody' as const,
+        artifact: body.artifact,
+        function: body.function,
+        results: body.results,
+        diagnostics: analyzed.diagnostics,
+      })
     },
   )
   let branch: 'cacheReused' | 'checked' | 'rejected' = 'rejected'
@@ -1403,9 +1372,9 @@ export const residualize = (self: Coordinator, key: ApplicationKey): Result => {
   )
   return evaluated._tag === 'Complete'
     ? evaluated.value
-    : Object.freeze({
+    : {
         _tag: 'StaticFailure',
         failure: evaluated.failure,
-        diagnostics: Object.freeze([]),
-      })
+        diagnostics: [],
+      }
 }

@@ -66,9 +66,9 @@ export type Compatibility =
     }
 
 const sourceMembers = (source: Type.Type): ReadonlyArray<Type.Type> | undefined => {
-  if (Type.isNever(source)) return Object.freeze([])
+  if (Type.isNever(source)) return []
   if (Type.isUnion(source)) return source.members
-  return Object.freeze([source])
+  return [source]
 }
 
 /** Variance proven by declared storage; unknown/opaque parameter positions stay invariant. */
@@ -141,19 +141,18 @@ export const context = (
     readonly typeOutlives?: Context['typeOutlives']
     readonly commitTypeOutlives?: Context['commitTypeOutlives']
   } = {},
-): Context =>
-  Object.freeze({
-    assumptions: options.assumptions ?? Lifetime.assumptions([]),
-    nominalVariance: new Map(options.nominalVariance ?? []),
-    typeBounds: Type.normalizeTypeOutlives(options.typeBounds ?? []),
-    ...(options.typeOutlives === undefined ? {} : { typeOutlives: options.typeOutlives }),
-    ...(options.outlives === undefined ? {} : { outlives: options.outlives }),
-    ...(options.commitOutlives === undefined ? {} : { commitOutlives: options.commitOutlives }),
-    ...(options.commitTypeOutlives === undefined
-      ? {}
-      : { commitTypeOutlives: options.commitTypeOutlives }),
-    work: { comparisons: 0, cacheHits: 0, outlivesObligations: 0, rigidBinders: 0 },
-  })
+): Context => ({
+  assumptions: options.assumptions ?? Lifetime.assumptions([]),
+  nominalVariance: new Map(options.nominalVariance ?? []),
+  typeBounds: Type.normalizeTypeOutlives(options.typeBounds ?? []),
+  ...(options.typeOutlives === undefined ? {} : { typeOutlives: options.typeOutlives }),
+  ...(options.outlives === undefined ? {} : { outlives: options.outlives }),
+  ...(options.commitOutlives === undefined ? {} : { commitOutlives: options.commitOutlives }),
+  ...(options.commitTypeOutlives === undefined
+    ? {}
+    : { commitTypeOutlives: options.commitTypeOutlives }),
+  work: { comparisons: 0, cacheHits: 0, outlivesObligations: 0, rigidBinders: 0 },
+})
 
 /** Canonical declaration key used by the already-derived nominal variance catalog. */
 export const nominalVarianceKey = (self: Type.Nominal): string =>
@@ -304,7 +303,7 @@ const callableCompatible = (
       lifetime: Lifetime.substitute(bound.lifetime, substitution),
     }))
   const formation = Type.executableFormationRequirements(source)
-  const scoped = Object.freeze({
+  const scoped = {
     ...self,
     typeBounds: [
       ...self.typeBounds,
@@ -318,7 +317,7 @@ const callableCompatible = (
         ...formation.lifetimeBounds,
       ]),
     ),
-  })
+  }
   if (
     !substitutedBounds(source.lifetimeBounds, sourceSubstitution).every((bound) =>
       outlives(scoped, bound.longer, bound.shorter),
@@ -402,7 +401,7 @@ const compareSelected = (source: Type.Type, target: Type.Type, self: Context): C
     Type.representationAdmissibility(source.contract, target.representation.requiredBound, self)
       ._tag === 'Admitted'
   )
-    return Object.freeze({ _tag: 'Lifetime', source, target })
+    return { _tag: 'Lifetime', source, target }
   if (Type.isRepresented(source) && !Type.isRepresented(target) && !Type.isUnion(target))
     return check(source.contract, target, self)
   const unsupported = (type: Type.Type): boolean =>
@@ -414,15 +413,15 @@ const compareSelected = (source: Type.Type, target: Type.Type, self: Context): C
         [...part.parameters, part.result].some(nestedQuantifier),
     )
   if (unsupported(source) || unsupported(target))
-    return Object.freeze({ _tag: 'Incompatible', source, target, missing: Object.freeze([source]) })
-  if (Type.equals(source, target)) return Object.freeze({ _tag: 'Exact', source, target })
-  if (Type.isNever(source)) return Object.freeze({ _tag: 'Bottom', source, target })
+    return { _tag: 'Incompatible', source, target, missing: [source] }
+  if (Type.equals(source, target)) return { _tag: 'Exact', source, target }
+  if (Type.isNever(source)) return { _tag: 'Bottom', source, target }
   if (
     Type.isString(source) &&
     Type.isString(target) &&
     outlives(self, source.lifetime, target.lifetime)
   )
-    return Object.freeze({ _tag: 'Lifetime', source, target })
+    return { _tag: 'Lifetime', source, target }
   if (
     Type.isReference(source) &&
     Type.isReference(target) &&
@@ -432,7 +431,7 @@ const compareSelected = (source: Type.Type, target: Type.Type, self: Context): C
       ? equivalent(source.target, target.target, self)
       : isCompatible(check(source.target, target.target, self)))
   )
-    return Object.freeze({ _tag: 'ReferenceAccess', source, target })
+    return { _tag: 'ReferenceAccess', source, target }
   if (
     Type.isSlice(source) &&
     Type.isSlice(target) &&
@@ -442,14 +441,14 @@ const compareSelected = (source: Type.Type, target: Type.Type, self: Context): C
       ? equivalent(source.element, target.element, self)
       : isCompatible(check(source.element, target.element, self)))
   )
-    return Object.freeze({ _tag: 'Lifetime', source, target })
+    return { _tag: 'Lifetime', source, target }
   if (
     Type.isFixedArray(source) &&
     Type.isFixedArray(target) &&
     source.length === target.length &&
     isCompatible(check(source.element, target.element, self))
   )
-    return Object.freeze({ _tag: 'Lifetime', source, target })
+    return { _tag: 'Lifetime', source, target }
   if (
     Type.isNominal(source) &&
     Type.isNominal(target) &&
@@ -468,7 +467,7 @@ const compareSelected = (source: Type.Type, target: Type.Type, self: Context): C
         )
       })
     )
-      return Object.freeze({ _tag: 'Lifetime', source, target })
+      return { _tag: 'Lifetime', source, target }
   }
   // Raw pointer pointees remain invariant at the immediate mutability-widening boundary.
   if (
@@ -477,7 +476,7 @@ const compareSelected = (source: Type.Type, target: Type.Type, self: Context): C
     Type.pointerQualifiersWeaken(source, target) &&
     equivalent(source.pointee, target.pointee, self)
   )
-    return Object.freeze({ _tag: 'PointerWeakening', source, target })
+    return { _tag: 'PointerWeakening', source, target }
   if (
     Type.isForeignFunction(source) &&
     Type.isForeignFunction(target) &&
@@ -486,14 +485,14 @@ const compareSelected = (source: Type.Type, target: Type.Type, self: Context): C
     const offered = Type.callable(source.parameters, source.result, source)
     const expected = Type.callable(target.parameters, target.result, target)
     if (callableCompatible(offered, expected, self) && callableCompatible(expected, offered, self))
-      return Object.freeze({ _tag: 'Lifetime', source, target })
+      return { _tag: 'Lifetime', source, target }
   }
   if (
     Type.isCallable(source) &&
     Type.isCallable(target) &&
     callableCompatible(source, target, self)
   )
-    return Object.freeze({ _tag: 'CallableMode', source, target })
+    return { _tag: 'CallableMode', source, target }
   if (Type.isEffect(source) && Type.isEffect(target)) {
     const sameOutputs =
       isCompatible(check(source.success, target.success, self)) &&
@@ -511,14 +510,14 @@ const compareSelected = (source: Type.Type, target: Type.Type, self: Context): C
         Type.requirementRowParameters(target).some((expected) => Type.equals(parameter, expected)),
       )
     const formation = Type.executableFormationRequirements(source)
-    const boundsContext = Object.freeze({
+    const boundsContext = {
       ...self,
       typeBounds: [...self.typeBounds, ...target.typeOutlives, ...formation.typeOutlives],
       assumptions: Lifetime.mergeAssumptions(
         self.assumptions,
         Lifetime.assumptions([...target.lifetimeBounds, ...formation.lifetimeBounds]),
       ),
-    })
+    }
     if (
       source.lifetimeBinders.length === 0 &&
       target.lifetimeBinders.length === 0 &&
@@ -531,16 +530,16 @@ const compareSelected = (source: Type.Type, target: Type.Type, self: Context): C
       sameOutputs &&
       compatibleRequirements
     )
-      return Object.freeze({ _tag: 'EffectAccess', source, target })
+      return { _tag: 'EffectAccess', source, target }
   }
   const members = sourceMembers(source)
   if (members === undefined || !Type.isUnion(target)) {
-    return Object.freeze({
+    return {
       _tag: 'Incompatible',
       source,
       target,
-      missing: Object.freeze([source]),
-    })
+      missing: [source],
+    }
   }
   const targetOrdinalOf = (member: Type.Type): number | undefined => {
     const exact = target.members.findIndex((candidate) => Type.equals(candidate, member))
@@ -564,41 +563,39 @@ const compareSelected = (source: Type.Type, target: Type.Type, self: Context): C
   }
   const missing = members.filter((member) => targetOrdinalOf(member) === undefined)
   if (missing.length > 0) {
-    return Object.freeze({
+    return {
       _tag: 'Incompatible',
       source,
       target,
-      missing: Object.freeze(missing),
-    })
+      missing: missing,
+    }
   }
-  const mappings = Object.freeze(
-    members.flatMap((member, sourceOrdinal): ReadonlyArray<MemberMapping> => {
-      const targetOrdinal = targetOrdinalOf(member)
-      return targetOrdinal === undefined
-        ? []
-        : [
-            Object.freeze({
-              _tag: 'UnionMemberMapping',
-              source: member,
-              sourceOrdinal,
-              target: target.members[targetOrdinal] ?? member,
-              targetOrdinal,
-            }),
-          ]
-    }),
-  )
+  const mappings = members.flatMap((member, sourceOrdinal): ReadonlyArray<MemberMapping> => {
+    const targetOrdinal = targetOrdinalOf(member)
+    return targetOrdinal === undefined
+      ? []
+      : [
+          {
+            _tag: 'UnionMemberMapping',
+            source: member,
+            sourceOrdinal,
+            target: target.members[targetOrdinal] ?? member,
+            targetOrdinal,
+          },
+        ]
+  })
   if (!Type.isUnion(source) && !Type.isNever(source)) {
-    return Object.freeze({ _tag: 'Inject', source, target, mappings })
+    return { _tag: 'Inject', source, target, mappings }
   }
   if (Type.isUnion(source) || Type.isNever(source)) {
-    return Object.freeze({ _tag: 'Widen', source, target, mappings })
+    return { _tag: 'Widen', source, target, mappings }
   }
-  return Object.freeze({
+  return {
     _tag: 'Incompatible',
     source,
     target,
-    missing: Object.freeze([source]),
-  })
+    missing: [source],
+  }
 }
 
 /** Whether a compatibility result permits the expected-context use. */

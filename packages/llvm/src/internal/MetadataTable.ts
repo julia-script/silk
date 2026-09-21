@@ -46,5 +46,5 @@ export const freeze = (
   readonly named: ReadonlyArray<MetadataDescription.Named>
 } => ({
   descriptions: Table.freeze(table.entries).descriptions,
-  named: Object.freeze([...table.named]),
+  named: [...table.named],
 })

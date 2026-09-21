@@ -54,8 +54,11 @@ export type Proof =
     }
 
 /** Constructs one concrete goal. */
-export const make = (capability: Type.Nominal, provider: Type.Type): ConformanceGoal =>
-  Object.freeze({ _tag: 'ConformanceGoal' as const, capability, provider })
+export const make = (capability: Type.Nominal, provider: Type.Type): ConformanceGoal => ({
+  _tag: 'ConformanceGoal' as const,
+  capability,
+  provider,
+})
 
 /** The canonical identity two occurrences of one question share. */
 export const key = (self: ConformanceGoal): string =>
@@ -86,13 +89,13 @@ export const describe = (self: Failure): string => {
  * only that some type lacks a conformance, while the chain says which wrapper asked for it.
  */
 export const traceLines = (self: Proof): ReadonlyArray<string> => {
-  if (self._tag !== 'Unproved') return Object.freeze([])
-  return Object.freeze([
+  if (self._tag !== 'Unproved') return []
+  return [
     ...self.trace.map((goal, depth) =>
       depth === 0
         ? `required by ${encode(goal)}`
         : `${'  '.repeat(depth)}required by ${encode(goal)}`,
     ),
     `${'  '.repeat(self.trace.length)}${encode(self.goal)}: ${describe(self.failure)}`,
-  ])
+  ]
 }

@@ -26,7 +26,6 @@ const golden = (name: string): string =>
 it('bundles one lossless artifact with source, tokens, tree, and diagnostics', () => {
   const syntax = parseBytes('golden://accepted.silk', ascii(acceptedSource))
 
-  assert.strictEqual(Object.isFrozen(syntax), true)
   assert.strictEqual(syntax.source.id, 'golden://accepted.silk')
   assert.deepEqual(syntax.lexicalDiagnostics, [])
   assert.deepEqual(syntax.parserDiagnostics, [])

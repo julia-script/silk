@@ -64,7 +64,7 @@ export const failurePayload = Effect.fnUntraced(function* (
   const targetShape = Layout.callingShape(context.program.layout, targetType)
   if (targetShape?.tree._tag !== 'OutcomeShape')
     throw new RangeError('LLVM failure propagation lost its target calling shape')
-  if (targetShape.lanes.length === 1) return Object.freeze([])
+  if (targetShape.lanes.length === 1) return []
   // A repacking plan depends on the member mapping, not the destination lane. Parser
   // outcomes have wide success payloads, so rebuilding this plan inside the lane loop
   // repeatedly traversed the same layouts during cold native compilation.
@@ -137,7 +137,7 @@ export const failurePayload = Effect.fnUntraced(function* (
     }
     payload.push(selected)
   }
-  return Object.freeze(payload)
+  return payload
 })
 
 /** Field paths to reclaim contexts, or undefined when guarded structural cleanup is required. */

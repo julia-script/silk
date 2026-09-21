@@ -84,8 +84,6 @@ it.effect('publishes immutable facade facts for writes, loops, transfers, and DA
     assert.isAbove(regions.length, 0)
     assert.isAbove(edges.length, 0)
     assert.strictEqual(fixedPoints.at(0)?.compatible, true)
-    assert.strictEqual(Object.isFrozen(regions), true)
-    assert.strictEqual(Object.isFrozen(edges), true)
   }),
 )
 

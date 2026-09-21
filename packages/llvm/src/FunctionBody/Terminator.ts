@@ -72,7 +72,7 @@ export const indirectBranch = Effect.fnUntraced(function* (
             yield* FunctionBodyState.resolveBlock(draft, block, 'FunctionBody.indirectBranch'),
           )
         }
-        const blocks = Object.freeze(mutableBlocks)
+        const blocks = mutableBlocks
         if (new Set(blocks).size !== blocks.length) {
           return yield* Result.fail(
             invalidInput({
@@ -92,16 +92,13 @@ export const indirectBranch = Effect.fnUntraced(function* (
             }),
           )
         }
-        const instruction = yield* FunctionBodyState.appendInstruction(
-          draft,
-          Object.freeze({
-            _tag: 'IndirectBranch',
-            address: resolved.operand,
-            destinations: blocks,
-            result: undefined,
-            name: ByteString.empty,
-          }),
-        )
+        const instruction = yield* FunctionBodyState.appendInstruction(draft, {
+          _tag: 'IndirectBranch',
+          address: resolved.operand,
+          destinations: blocks,
+          result: undefined,
+          name: ByteString.empty,
+        })
         for (const block of blocks)
           yield* FunctionBodyState.addPredecessor(draft, block, predecessor)
         return instruction
@@ -132,15 +129,12 @@ export const branch = Effect.fnUntraced(function* (
           }),
         )
       }
-      const instruction = yield* FunctionBodyState.appendInstruction(
-        draft,
-        Object.freeze({
-          _tag: 'Branch',
-          destination: block,
-          result: undefined,
-          name: ByteString.empty,
-        }),
-      )
+      const instruction = yield* FunctionBodyState.appendInstruction(draft, {
+        _tag: 'Branch',
+        destination: block,
+        result: undefined,
+        name: ByteString.empty,
+      })
       yield* FunctionBodyState.addPredecessor(draft, block, predecessor)
       return instruction
     }),
@@ -205,18 +199,15 @@ export const conditionalBranch = Effect.fnUntraced(function* (
             }),
           )
         }
-        const instruction = yield* FunctionBodyState.appendInstruction(
-          draft,
-          Object.freeze({
-            _tag: 'ConditionalBranch',
-            condition: resolved.operand,
-            onTrue: trueBlock,
-            onFalse: falseBlock,
-            weights,
-            result: undefined,
-            name: ByteString.empty,
-          }),
-        )
+        const instruction = yield* FunctionBodyState.appendInstruction(draft, {
+          _tag: 'ConditionalBranch',
+          condition: resolved.operand,
+          onTrue: trueBlock,
+          onFalse: falseBlock,
+          weights,
+          result: undefined,
+          name: ByteString.empty,
+        })
         yield* FunctionBodyState.addPredecessor(draft, trueBlock, predecessor)
         yield* FunctionBodyState.addPredecessor(draft, falseBlock, predecessor)
         return instruction
@@ -291,19 +282,16 @@ export const switchTerminator = Effect.fnUntraced(function* (
             }),
           )
         }
-        const instruction = yield* FunctionBodyState.appendInstruction(
-          draft,
-          Object.freeze({
-            _tag: 'Switch',
-            value: resolved.operand,
-            defaultBlock: destination,
-            cases: Object.freeze([]),
-            weights: Object.freeze([...weights]),
-            sealed: false,
-            result: undefined,
-            name: ByteString.empty,
-          }),
-        )
+        const instruction = yield* FunctionBodyState.appendInstruction(draft, {
+          _tag: 'Switch',
+          value: resolved.operand,
+          defaultBlock: destination,
+          cases: [],
+          weights: [...weights],
+          sealed: false,
+          result: undefined,
+          name: ByteString.empty,
+        })
         yield* FunctionBodyState.addPredecessor(draft, destination, predecessor)
         return yield* FunctionBodyState.makeSwitchHandle(draft, instruction, predecessor)
       }),
@@ -383,13 +371,10 @@ export const addSwitchCase = Effect.fnUntraced(function* (
         destination,
         'FunctionBody.addSwitchCase',
       )
-      draft.instructions[index] = Object.freeze({
+      draft.instructions[index] = {
         ...instruction,
-        cases: Object.freeze([
-          ...instruction.cases,
-          Object.freeze({ value: constantIndex, block }),
-        ]),
-      })
+        cases: [...instruction.cases, { value: constantIndex, block }],
+      }
       yield* FunctionBodyState.addPredecessor(draft, block, predecessor)
     }),
   )
@@ -434,7 +419,7 @@ export const sealSwitch = Effect.fnUntraced(function* (
           }),
         )
       }
-      draft.instructions[index] = Object.freeze({ ...instruction, sealed: true })
+      draft.instructions[index] = { ...instruction, sealed: true }
       const handle = draft.instructionHandles[index]
       if (handle === undefined) {
         return yield* Result.fail(
@@ -477,15 +462,12 @@ export const returnValue = Effect.fnUntraced(function* (
           }),
         )
       }
-      return yield* FunctionBodyState.appendInstruction(
-        draft,
-        Object.freeze({
-          _tag: 'Return',
-          value: resolved.operand,
-          result: undefined,
-          name: ByteString.empty,
-        }),
-      )
+      return yield* FunctionBodyState.appendInstruction(draft, {
+        _tag: 'Return',
+        value: resolved.operand,
+        result: undefined,
+        name: ByteString.empty,
+      })
     }),
   )
 })
@@ -515,14 +497,11 @@ export const returnVoid = Effect.fnUntraced(function* (
           }),
         )
       }
-      return yield* FunctionBodyState.appendInstruction(
-        draft,
-        Object.freeze({
-          _tag: 'ReturnVoid',
-          result: undefined,
-          name: ByteString.empty,
-        }),
-      )
+      return yield* FunctionBodyState.appendInstruction(draft, {
+        _tag: 'ReturnVoid',
+        result: undefined,
+        name: ByteString.empty,
+      })
     }),
   )
 })
@@ -537,14 +516,11 @@ export const unreachable = Effect.fnUntraced(function* (
   self: FunctionBody,
 ): Effect.fn.Return<Instruction, LlvmError> {
   return yield* FunctionBodyState.mutate(self, 'FunctionBody.unreachable', (draft) =>
-    FunctionBodyState.appendInstruction(
-      draft,
-      Object.freeze({
-        _tag: 'Unreachable',
-        result: undefined,
-        name: ByteString.empty,
-      }),
-    ),
+    FunctionBodyState.appendInstruction(draft, {
+      _tag: 'Unreachable',
+      result: undefined,
+      name: ByteString.empty,
+    }),
   )
 })
 
@@ -576,8 +552,11 @@ export const cleanupLandingPad = Effect.fn('FunctionBody.cleanupLandingPad')(fun
         'Type',
         'FunctionBody.cleanupLandingPad',
       )
-      return (yield* FunctionBodyState.appendResult(draft, typeIndex, name, (result, finalName) =>
-        Object.freeze({ _tag: 'LandingPad', result, name: finalName, type: typeIndex }),
+      return (yield* FunctionBodyState.appendResult(
+        draft,
+        typeIndex,
+        name,
+        (result, finalName) => ({ _tag: 'LandingPad', result, name: finalName, type: typeIndex }),
       )).value
     }),
   )

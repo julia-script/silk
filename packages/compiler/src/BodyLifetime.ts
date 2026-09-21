@@ -38,7 +38,7 @@ export const make = (
     registered.set(key, anchor)
   }
   return {
-    owner: Object.freeze({ ...owner }),
+    owner: { ...owner },
     points,
     anchors: registered,
     constraints: new Map(),
@@ -135,7 +135,7 @@ export const constrain = (
 ): void => {
   const bound = { longer, shorter }
   const normalized = Lifetime.assumptions([bound])
-  self.constraints.set(normalized.key, Object.freeze(bound))
+  self.constraints.set(normalized.key, bound)
 }
 
 /** Defers concrete storage obligations until a successful assignment installs its incoming value. */

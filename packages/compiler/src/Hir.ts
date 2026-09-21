@@ -22,5 +22,5 @@ export const lower = Effect.fn('Hir.lower')(function* (
     syntax,
     AuthoredLowering.moduleOwner(source.id, source.origin),
   )
-  return Object.freeze({ _tag: 'HirLowering', syntax, authored })
+  return { _tag: 'HirLowering', syntax, authored }
 })

@@ -24,10 +24,10 @@
 import * as Type from './Type.js'
 
 /** The canonical owner every normalized head parameter is renumbered under. */
-const normalOwner = Object.freeze({ module: '', name: 'impl' })
+const normalOwner = { module: '', name: 'impl' }
 
 /** The distinct owner the right side of an overlap question is renumbered under. */
-const opposingOwner = Object.freeze({ module: '', name: 'impl~' })
+const opposingOwner = { module: '', name: 'impl~' }
 
 /** One interface application a conditional conformance must prove before it admits a witness. */
 export interface Requirement {
@@ -96,7 +96,7 @@ const occurringParameters = (terms: ReadonlyArray<Type.Type>): ReadonlyArray<Typ
     })
   }
   for (const term of terms) visit(term)
-  return Object.freeze([...found.values()])
+  return [...found.values()]
 }
 
 /** Builds the renumbering that maps each occurring parameter onto its canonical position. */
@@ -134,7 +134,7 @@ const normalization = (
       throw new RangeError('Head normalization changed a representation bound kind')
     return Type.parameter(owner, position, `%${position}`, parameter.kind, substitutedBound)
   })
-  return Object.freeze({
+  return {
     substitution: new Map(
       parameters.map((parameter, position) => {
         const replacement = normalized.at(position)
@@ -142,8 +142,8 @@ const normalization = (
         return [Type.key(parameter), Type.parameterArgument(replacement)] as const
       }),
     ),
-    parameters: Object.freeze(normalized),
-  })
+    parameters: normalized,
+  }
 }
 
 /** Renumbers one head's binders by first occurrence so alpha-equivalent heads share one identity. */
@@ -172,24 +172,22 @@ const makeUnder = (
   const normalizedCapability = Type.substitute(capability, renumbered.substitution)
   if (!Type.isNominal(normalizedCapability))
     throw new RangeError('Head normalization changed the capability kind')
-  return Object.freeze({
+  return {
     _tag: 'ConformanceHead' as const,
     capability: normalizedCapability,
     provider: Type.substitute(provider, renumbered.substitution),
     parameters: renumbered.parameters,
-    requirements: Object.freeze(
-      requirements.flatMap((requirement): ReadonlyArray<Requirement> => {
-        const normalized = Type.substitute(requirement.capability, renumbered.substitution)
-        if (!Type.isNominal(normalized)) return []
-        return Object.freeze([
-          Object.freeze({
-            capability: normalized,
-            provider: Type.substitute(requirement.provider, renumbered.substitution),
-          }),
-        ])
-      }),
-    ),
-  })
+    requirements: requirements.flatMap((requirement): ReadonlyArray<Requirement> => {
+      const normalized = Type.substitute(requirement.capability, renumbered.substitution)
+      if (!Type.isNominal(normalized)) return []
+      return [
+        {
+          capability: normalized,
+          provider: Type.substitute(requirement.provider, renumbered.substitution),
+        },
+      ]
+    }),
+  }
 }
 
 /** The canonical alpha-invariant identity of one head. */
@@ -511,58 +509,50 @@ const countIn = (parameter: Type.Parameter, term: Type.Type): number => {
  */
 export const terminationFailures = (self: ConformanceHead): ReadonlyArray<TerminationFailure> => {
   const declaredOccurrences = occurrences([self.capability, self.provider])
-  return Object.freeze(
-    self.requirements.flatMap((requirement): ReadonlyArray<TerminationFailure> => {
-      const spelling = `${Type.encode(requirement.capability)} for ${Type.encode(requirement.provider)}`
-      const failures: Array<TerminationFailure> = []
-      if (!Type.isStrictStructuralSubterm(requirement.provider, self.provider))
-        failures.push(
-          Object.freeze({
-            _tag: 'ProviderNotStrictSubterm' as const,
-            requirement: spelling,
-            required: Type.encode(requirement.provider),
-            provider: Type.encode(self.provider),
-          }),
-        )
-      const requiredOccurrences = occurrences([requirement.capability, requirement.provider])
-      for (const [parameterKey, required] of requiredOccurrences) {
-        const declared = declaredOccurrences.get(parameterKey)?.count ?? 0
-        if (required.count > declared)
-          failures.push(
-            Object.freeze({
-              _tag: 'IncreasingVariableOccurrences' as const,
-              requirement: spelling,
-              variable: Type.encode(required.parameter),
-              declared,
-              required: required.count,
-            }),
-          )
+  return self.requirements.flatMap((requirement): ReadonlyArray<TerminationFailure> => {
+    const spelling = `${Type.encode(requirement.capability)} for ${Type.encode(requirement.provider)}`
+    const failures: Array<TerminationFailure> = []
+    if (!Type.isStrictStructuralSubterm(requirement.provider, self.provider))
+      failures.push({
+        _tag: 'ProviderNotStrictSubterm' as const,
+        requirement: spelling,
+        required: Type.encode(requirement.provider),
+        provider: Type.encode(self.provider),
+      })
+    const requiredOccurrences = occurrences([requirement.capability, requirement.provider])
+    for (const [parameterKey, required] of requiredOccurrences) {
+      const declared = declaredOccurrences.get(parameterKey)?.count ?? 0
+      if (required.count > declared)
+        failures.push({
+          _tag: 'IncreasingVariableOccurrences' as const,
+          requirement: spelling,
+          variable: Type.encode(required.parameter),
+          declared,
+          required: required.count,
+        })
+    }
+    // Only the same interface has positional correspondence to compare. A requirement naming a
+    // different interface still descends, because its provider is a strict subterm.
+    if (
+      requirement.capability.module === self.capability.module &&
+      requirement.capability.name === self.capability.name &&
+      requirement.capability.arguments.length === self.capability.arguments.length
+    )
+      for (const [ordinal, declared] of self.capability.arguments.entries()) {
+        const required = requirement.capability.arguments.at(ordinal)
+        if (required === undefined) continue
+        if (!Type.isRuntimeConcreteGenericArgument(declared)) continue
+        if (Type.genericArgumentKey(declared) === Type.genericArgumentKey(required)) continue
+        failures.push({
+          _tag: 'ChangedGroundArgument' as const,
+          requirement: spelling,
+          ordinal,
+          declared: Type.encodeGenericArgument(declared),
+          required: Type.encodeGenericArgument(required),
+        })
       }
-      // Only the same interface has positional correspondence to compare. A requirement naming a
-      // different interface still descends, because its provider is a strict subterm.
-      if (
-        requirement.capability.module === self.capability.module &&
-        requirement.capability.name === self.capability.name &&
-        requirement.capability.arguments.length === self.capability.arguments.length
-      )
-        for (const [ordinal, declared] of self.capability.arguments.entries()) {
-          const required = requirement.capability.arguments.at(ordinal)
-          if (required === undefined) continue
-          if (!Type.isRuntimeConcreteGenericArgument(declared)) continue
-          if (Type.genericArgumentKey(declared) === Type.genericArgumentKey(required)) continue
-          failures.push(
-            Object.freeze({
-              _tag: 'ChangedGroundArgument' as const,
-              requirement: spelling,
-              ordinal,
-              declared: Type.encodeGenericArgument(declared),
-              required: Type.encodeGenericArgument(required),
-            }),
-          )
-        }
-      return Object.freeze(failures)
-    }),
-  )
+    return failures
+  })
 }
 
 /** Renders one termination failure as the sentence a diagnostic reports. */

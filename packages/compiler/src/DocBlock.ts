@@ -88,12 +88,12 @@ const make = (
     SourceSpan.make(source, first.span.start, last.span.end),
     () => new RangeError('DocBlock comments do not belong to one source'),
   )
-  return Object.freeze({
+  return {
     _tag: 'DocBlock' as const,
     kind,
-    comments: Object.freeze(Array.from(comments)),
+    comments: Array.from(comments),
     span,
-  })
+  }
 }
 
 const attachedAtEnd = (
@@ -135,7 +135,7 @@ const directLeadingTrivia = (node: SyntaxTree.Node): ReadonlyArray<Token.Token> 
     }
     break
   }
-  return Object.freeze(leading)
+  return leading
 }
 
 const moduleAtStart = (
@@ -193,14 +193,12 @@ export const all = (syntax: SyntaxFile.SyntaxFile): ReadonlyArray<DocBlock> => {
   visit(syntax.root)
 
   const seen = new Set<string>()
-  return Object.freeze(
-    blocks
-      .sort((left, right) => left.span.start - right.span.start || left.span.end - right.span.end)
-      .filter((block) => {
-        const key = `${block.span.sourceId}:${block.span.start}:${block.span.end}`
-        if (seen.has(key)) return false
-        seen.add(key)
-        return true
-      }),
-  )
+  return blocks
+    .sort((left, right) => left.span.start - right.span.start || left.span.end - right.span.end)
+    .filter((block) => {
+      const key = `${block.span.sourceId}:${block.span.start}:${block.span.end}`
+      if (seen.has(key)) return false
+      seen.add(key)
+      return true
+    })
 }

@@ -128,15 +128,13 @@ export const make = Effect.fn('AuthoredPresentation.make')(function* (
       return yield* new AuthoredPresentationError({
         reason: { _tag: 'InvalidSpan', span: entry.span },
       })
-    copiedEntries.push(
-      Object.freeze({
-        anchor: entry.anchor,
-        span: Object.freeze({ start: entry.span.start, end: entry.span.end }),
-        ...(entry.spelling === undefined ? {} : { spelling: entry.spelling }),
-        ...(entry.trivia === undefined ? {} : { trivia: entry.trivia }),
-        ...(entry.documentation === undefined ? {} : { documentation: entry.documentation }),
-      }),
-    )
+    copiedEntries.push({
+      anchor: entry.anchor,
+      span: { start: entry.span.start, end: entry.span.end },
+      ...(entry.spelling === undefined ? {} : { spelling: entry.spelling }),
+      ...(entry.trivia === undefined ? {} : { trivia: entry.trivia }),
+      ...(entry.documentation === undefined ? {} : { documentation: entry.documentation }),
+    })
   }
   const copiedDiagnostics: Diagnostic[] = []
   for (const diagnostic of diagnostics) {
@@ -146,20 +144,18 @@ export const make = Effect.fn('AuthoredPresentation.make')(function* (
       return yield* new AuthoredPresentationError({
         reason: { _tag: 'InvalidSpan', span: diagnostic.span },
       })
-    copiedDiagnostics.push(
-      Object.freeze({
-        anchor: diagnostic.anchor,
-        span: Object.freeze({ start: diagnostic.span.start, end: diagnostic.span.end }),
-        code: diagnostic.code,
-        message: diagnostic.message,
-      }),
-    )
+    copiedDiagnostics.push({
+      anchor: diagnostic.anchor,
+      span: { start: diagnostic.span.start, end: diagnostic.span.end },
+      code: diagnostic.code,
+      message: diagnostic.message,
+    })
   }
-  return Object.freeze({
+  return {
     _tag: 'AuthoredPresentation',
     sourceId,
     revision,
-    entries: Object.freeze(copiedEntries),
-    diagnostics: Object.freeze(copiedDiagnostics),
-  })
+    entries: copiedEntries,
+    diagnostics: copiedDiagnostics,
+  }
 })

@@ -108,11 +108,9 @@ const familyKey = (family: Type.OpaqueFamilyKey): string => Type.opaqueFamilyKey
 const reachableResults = (
   expression: Elaboration.ExpressionDecision | Tir.Expression,
 ): ReadonlyArray<Elaboration.ExpressionDecision | Tir.Expression> => {
-  if (expression._tag !== 'Match') return Object.freeze([expression])
-  return Object.freeze(
-    expression.arms.flatMap((arm) =>
-      arm.reachable && arm.body._tag === 'Expression' ? reachableResults(arm.body.expression) : [],
-    ),
+  if (expression._tag !== 'Match') return [expression]
+  return expression.arms.flatMap((arm) =>
+    arm.reachable && arm.body._tag === 'Expression' ? reachableResults(arm.body.expression) : [],
   )
 }
 
@@ -126,20 +124,19 @@ const returnExpressions = (
       if (statement._tag === 'Return') found.push(...reachableResults(statement.expression))
     },
   })
-  return Object.freeze(found)
+  return found
 }
 
 const evidence = (
   argument: Type.RepresentationArgument,
   expression: Elaboration.ExpressionDecision | Tir.Expression,
   builder?: BodyBuilder.BodyBuilder,
-): Evidence =>
-  Object.freeze({
-    argument,
-    at: Elaboration.constructionExpressionAnchor(expression),
-    captures: capturesOf(expression, builder),
-    suspendable: expressionSuspends(constructionExpression(expression, builder)),
-  })
+): Evidence => ({
+  argument,
+  at: Elaboration.constructionExpressionAnchor(expression),
+  captures: capturesOf(expression, builder),
+  suspendable: expressionSuspends(constructionExpression(expression, builder)),
+})
 
 const evidenceOf = (
   context: SemanticContext.SemanticContext,
@@ -158,15 +155,15 @@ const evidenceOf = (
   const structural =
     expressionType._tag === 'Available'
       ? Type.opaqueRepresentationEvidence(expressionType.type, expected, family)
-      : Object.freeze([])
+      : []
   if (structural.length > 0)
-    return Object.freeze(structural.map((argument) => evidence(argument, expression, builder)))
+    return structural.map((argument) => evidence(argument, expression, builder))
   const nestedFamily = Type.opaqueRepresentationArguments(expected).some((argument) =>
     Type.equalsOpaqueFamily(argument.family, family),
   )
   if (nestedFamily) {
     const argument = ExpressionAnalysis.representationOfExpression(context, expression, builder)
-    if (argument !== undefined) return Object.freeze([evidence(argument, expression, builder)])
+    if (argument !== undefined) return [evidence(argument, expression, builder)]
   }
   const expectedArgument = Type.isRepresented(expected)
     ? expected.representation.argument
@@ -176,11 +173,9 @@ const evidenceOf = (
     !Type.isOpaqueRepresentationArgument(expectedArgument) ||
     !Type.equalsOpaqueFamily(expectedArgument.family, family)
   )
-    return Object.freeze([])
+    return []
   const argument = ExpressionAnalysis.representationOfExpression(context, expression, builder)
-  return argument === undefined
-    ? Object.freeze([])
-    : Object.freeze([evidence(argument, expression, builder)])
+  return argument === undefined ? [] : [evidence(argument, expression, builder)]
 }
 
 /**
@@ -209,37 +204,35 @@ export const evidenceOfBody = (
 ): ReadonlyArray<Evidence> => {
   const opaque = declaration.opaqueResult
   const expected = declaration.returnType
-  if (opaque === undefined || expected._tag !== 'Resolved') return Object.freeze([])
+  if (opaque === undefined || expected._tag !== 'Resolved') return []
   const expressions = returnExpressions(statements)
   const found = expressions.flatMap((expression) =>
     evidenceOf(context, expression, expected.type, opaque.family, builder),
   )
-  return Object.freeze(found)
+  return found
 }
 
 const producers = (results: ReadonlyMap<string, Elaboration.Result>): ReadonlyArray<Producer> =>
-  Object.freeze(
-    [...results.values()].flatMap((result) => {
-      return result.bodies.flatMap((body): ReadonlyArray<Producer> => {
-        if (body.hidden) return []
-        const opaque = body.declaration.opaqueResult
-        const expected = body.declaration.returnType
-        if (opaque === undefined || expected._tag !== 'Resolved') return []
-        const instance = Type.opaqueRepresentationArguments(expected.type).find((argument) =>
-          Type.equalsOpaqueFamily(argument.family, opaque.family),
-        )
-        if (instance === undefined) return []
-        return [
-          Object.freeze({
-            declaration: body.declaration,
-            instance,
-            evidence: body.results.opaqueEvidence,
-            bodyFingerprint: sourceBodyFingerprint(result, body.declaration),
-          }),
-        ]
-      })
-    }),
-  )
+  [...results.values()].flatMap((result) => {
+    return result.bodies.flatMap((body): ReadonlyArray<Producer> => {
+      if (body.hidden) return []
+      const opaque = body.declaration.opaqueResult
+      const expected = body.declaration.returnType
+      if (opaque === undefined || expected._tag !== 'Resolved') return []
+      const instance = Type.opaqueRepresentationArguments(expected.type).find((argument) =>
+        Type.equalsOpaqueFamily(argument.family, opaque.family),
+      )
+      if (instance === undefined) return []
+      return [
+        {
+          declaration: body.declaration,
+          instance,
+          evidence: body.results.opaqueEvidence,
+          bodyFingerprint: sourceBodyFingerprint(result, body.declaration),
+        },
+      ]
+    })
+  })
 
 const constructionExpression = (
   expression: Elaboration.ExpressionDecision | Tir.Expression,
@@ -280,77 +273,69 @@ const capturesOf = (
 ): ReadonlyArray<Capture> => {
   const construction = constructionExpression(expression, builder)
   if ('origin' in construction && construction._tag === 'CallableSection')
-    return Object.freeze(
-      construction.captures.flatMap((capture): ReadonlyArray<Capture> => {
-        const type = Elaboration.constructionExpressionType(capture.value)
-        if (type._tag !== 'Available') return []
-        return [
-          Object.freeze({
-            _tag: 'OpaqueCapture',
-            ordinal: capture.ordinal,
-            type: type.type,
-            access: capture.access,
-          }),
-        ]
-      }),
-    )
+    return construction.captures.flatMap((capture): ReadonlyArray<Capture> => {
+      const type = Elaboration.constructionExpressionType(capture.value)
+      if (type._tag !== 'Available') return []
+      return [
+        {
+          _tag: 'OpaqueCapture',
+          ordinal: capture.ordinal,
+          type: type.type,
+          access: capture.access,
+        },
+      ]
+    })
   if (!('origin' in construction) && construction._tag === 'CallableSection')
-    return Object.freeze(
-      construction.captures.flatMap((capture): ReadonlyArray<Capture> => {
-        const type = Elaboration.constructionExpressionType(capture.expression)
-        if (type._tag !== 'Available') return []
-        return [
-          Object.freeze({
-            _tag: 'OpaqueCapture',
-            ordinal: capture.ordinal,
-            type: type.type,
-            access: capture.access,
-          }),
-        ]
-      }),
-    )
+    return construction.captures.flatMap((capture): ReadonlyArray<Capture> => {
+      const type = Elaboration.constructionExpressionType(capture.expression)
+      if (type._tag !== 'Available') return []
+      return [
+        {
+          _tag: 'OpaqueCapture',
+          ordinal: capture.ordinal,
+          type: type.type,
+          access: capture.access,
+        },
+      ]
+    })
   if ('origin' in construction && construction._tag === 'EffectBlock' && builder !== undefined)
-    return Object.freeze(
-      construction.captures.flatMap((capture, ordinal): ReadonlyArray<Capture> => {
-        const local = capture.binding ?? capture.pattern ?? capture.parameter
-        if (local === undefined) return []
-        const semantic = BodyBuilder.semanticOfLocal(builder, local)
-        if (
-          !Elaboration.isBindingDeclarationFact(semantic) &&
-          !Elaboration.isPatternBindingFact(semantic) &&
-          !Elaboration.isParameterFact(semantic)
-        )
-          return []
-        const type = captureType(semantic)
-        return type === undefined
-          ? []
-          : [
-              Object.freeze({
-                _tag: 'OpaqueCapture',
-                ordinal,
-                type,
-                access: capture.access,
-              }),
-            ]
-      }),
-    )
+    return construction.captures.flatMap((capture, ordinal): ReadonlyArray<Capture> => {
+      const local = capture.binding ?? capture.pattern ?? capture.parameter
+      if (local === undefined) return []
+      const semantic = BodyBuilder.semanticOfLocal(builder, local)
+      if (
+        !Elaboration.isBindingDeclarationFact(semantic) &&
+        !Elaboration.isPatternBindingFact(semantic) &&
+        !Elaboration.isParameterFact(semantic)
+      )
+        return []
+      const type = captureType(semantic)
+      return type === undefined
+        ? []
+        : [
+            {
+              _tag: 'OpaqueCapture',
+              ordinal,
+              type,
+              access: capture.access,
+            },
+          ]
+    })
   if (!('origin' in construction) && construction._tag === 'EffectBlock')
-    return Object.freeze(
-      construction.captures.flatMap((capture, ordinal): ReadonlyArray<Capture> => {
-        const type = captureType(capture.reference)
-        return type === undefined
-          ? []
-          : [
-              Object.freeze({
-                _tag: 'OpaqueCapture',
-                ordinal,
-                type,
-                access: capture.access,
-              }),
-            ]
-      }),
-    )
-  return Object.freeze([])
+    return construction.captures.flatMap((capture, ordinal): ReadonlyArray<Capture> => {
+      const type = captureType(capture.reference)
+      return type === undefined
+        ? []
+        : [
+            {
+              _tag: 'OpaqueCapture',
+              ordinal,
+              type,
+              access: capture.access,
+            },
+          ]
+    })
+  return []
 }
 
 const expressionSuspends = (
@@ -400,7 +385,7 @@ const argumentsOf = (
   if (argument._tag === 'OpaqueRepresentationArgument') {
     return argument.arguments
   }
-  return Object.freeze([])
+  return []
 }
 
 const constructionSite = (argument: Type.RepresentationArgument): string | undefined => {
@@ -421,12 +406,12 @@ const constructionOf = (
 ): Construction => {
   if (inherited !== undefined) return inherited.construction
   const site = constructionSite(realization)
-  return Object.freeze({
+  return {
     _tag: 'OpaqueConstruction',
-    producer: Object.freeze({ ...producer.instance.family.producer }),
-    arguments: Object.freeze([...producer.instance.arguments]),
+    producer: { ...producer.instance.family.producer },
+    arguments: [...producer.instance.arguments],
     ...(site === undefined ? {} : { site }),
-  })
+  }
 }
 
 const fingerprints = (
@@ -436,27 +421,26 @@ const fingerprints = (
   access: Definition['access'],
   cleanup: Definition['cleanup'],
   suspendable: boolean,
-): Pick<Definition, 'targetFingerprint' | 'layoutFingerprint'> =>
-  Object.freeze({
-    targetFingerprint: Canonical.record('OpaqueTarget', [
-      Type.genericArgumentKey(targetOf(realization)),
-      Type.key(instance.contract),
-    ]),
-    layoutFingerprint: Canonical.record('OpaqueLayout', [
-      access,
-      cleanup,
-      String(suspendable),
-      Canonical.array(
-        captures.map((capture) =>
-          Canonical.record('Capture', [
-            String(capture.ordinal),
-            Type.key(capture.type),
-            capture.access,
-          ]),
-        ),
+): Pick<Definition, 'targetFingerprint' | 'layoutFingerprint'> => ({
+  targetFingerprint: Canonical.record('OpaqueTarget', [
+    Type.genericArgumentKey(targetOf(realization)),
+    Type.key(instance.contract),
+  ]),
+  layoutFingerprint: Canonical.record('OpaqueLayout', [
+    access,
+    cleanup,
+    String(suspendable),
+    Canonical.array(
+      captures.map((capture) =>
+        Canonical.record('Capture', [
+          String(capture.ordinal),
+          Type.key(capture.type),
+          capture.access,
+        ]),
       ),
-    ]),
-  })
+    ),
+  ]),
+})
 
 const definition = (
   producer: Producer,
@@ -464,8 +448,7 @@ const definition = (
   source: Evidence | undefined,
   inherited: Definition | undefined,
 ): Definition => {
-  const captures =
-    source === undefined ? (inherited?.captures ?? Object.freeze([])) : source.captures
+  const captures = source === undefined ? (inherited?.captures ?? []) : source.captures
   const access = accessOf(realization)
   const cleanup = captures.some((capture) => capture.access === 'Take') ? 'Required' : 'Trivial'
   const suspendable = source === undefined ? (inherited?.suspendable ?? false) : source.suspendable
@@ -477,13 +460,11 @@ const definition = (
     cleanup,
     suspendable,
   )
-  return Object.freeze({
+  return {
     _tag: 'OpaqueRealizationDefinition',
     family: producer.instance.family,
     instance: producer.instance,
-    parameters: Object.freeze(
-      producer.declaration.typeParameters.map((parameter) => parameter.type),
-    ),
+    parameters: producer.declaration.typeParameters.map((parameter) => parameter.type),
     realization,
     construction: constructionOf(producer, realization, inherited),
     target: targetOf(realization),
@@ -494,7 +475,7 @@ const definition = (
     suspendable,
     bodyFingerprint: producer.bodyFingerprint,
     ...computedFingerprints,
-  })
+  }
 }
 
 const specializeRealization = (
@@ -519,36 +500,33 @@ const specializeDefinition = (
   if (substitution === undefined) return undefined
   const realization = Type.substituteGenericArgument(found.realization, substitution)
   if (!Type.isRepresentationArgument(realization)) return undefined
-  const captures = Object.freeze(
-    found.captures.map((capture) =>
-      Object.freeze({ ...capture, type: Type.substitute(capture.type, substitution) }),
-    ),
-  )
-  const constructionArguments = Object.freeze(
-    found.construction.arguments.map((argument) =>
-      Type.substituteGenericArgument(argument, substitution),
-    ),
+  const captures = found.captures.map((capture) => ({
+    ...capture,
+    type: Type.substitute(capture.type, substitution),
+  }))
+  const constructionArguments = found.construction.arguments.map((argument) =>
+    Type.substituteGenericArgument(argument, substitution),
   )
   const site = constructionSite(realization)
   const access = accessOf(realization)
   const cleanup = captures.some((capture) => capture.access === 'Take') ? 'Required' : 'Trivial'
-  return Object.freeze({
+  return {
     ...found,
     instance,
     realization,
-    construction: Object.freeze({
+    construction: {
       _tag: 'OpaqueConstruction',
       producer: found.construction.producer,
       arguments: constructionArguments,
       ...(site === undefined ? {} : { site }),
-    }),
+    },
     target: targetOf(realization),
     arguments: argumentsOf(realization),
     captures,
     access,
     cleanup,
     ...fingerprints(instance, realization, captures, access, cleanup, found.suspendable),
-  })
+  }
 }
 
 const stronglyConnectedCycles = (
@@ -558,14 +536,10 @@ const stronglyConnectedCycles = (
   const orderedKeys = [...new Set(keys)].sort()
   const known = new Set(orderedKeys)
   const neighbors = (key: string): ReadonlyArray<string> =>
-    Object.freeze(
-      [...new Set(dependencies(key))].filter((dependency) => known.has(dependency)).sort(),
-    )
-  return Object.freeze(
-    Graph.stronglyConnected(orderedKeys, neighbors).filter(
-      (component) =>
-        component.length > 1 || neighbors(component[0] ?? '').includes(component[0] ?? ''),
-    ),
+    [...new Set(dependencies(key))].filter((dependency) => known.has(dependency)).sort()
+  return Graph.stronglyConnected(orderedKeys, neighbors).filter(
+    (component) =>
+      component.length > 1 || neighbors(component[0] ?? '').includes(component[0] ?? ''),
   )
 }
 
@@ -742,11 +716,11 @@ export const analyze = (results: ReadonlyMap<string, Elaboration.Result>): Catal
     )
   }
 
-  return Object.freeze({
+  return {
     _tag: 'OpaqueRealizationCatalog',
     definitions: new Map([...definitions].sort(([left], [right]) => (left < right ? -1 : 1))),
     diagnostics: Diagnostic.merge(diagnostics),
-  })
+  }
 }
 
 /** Looks up and specializes one compiler-private definition for an opaque family instance. */

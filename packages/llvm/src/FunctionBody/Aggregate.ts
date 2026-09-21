@@ -94,11 +94,14 @@ export const extractValue = Effect.fnUntraced(function* (
         indices,
         'FunctionBody.extractValue',
       )
-      return (yield* FunctionBodyState.appendResult(draft, resultType, name, (result, finalName) =>
-        Object.freeze({
+      return (yield* FunctionBodyState.appendResult(
+        draft,
+        resultType,
+        name,
+        (result, finalName) => ({
           _tag: 'ExtractValue',
           aggregate: resolved.operand,
-          indices: Object.freeze([...indices]),
+          indices: [...indices],
           result,
           name: finalName,
         }),
@@ -153,15 +156,14 @@ export const insertValue = Effect.fnUntraced(function* (
         draft,
         aggregateValue.type,
         name,
-        (result, finalName) =>
-          Object.freeze({
-            _tag: 'InsertValue',
-            aggregate: aggregateValue.operand,
-            element: elementValue.operand,
-            indices: Object.freeze([...indices]),
-            result,
-            name: finalName,
-          }),
+        (result, finalName) => ({
+          _tag: 'InsertValue',
+          aggregate: aggregateValue.operand,
+          element: elementValue.operand,
+          indices: [...indices],
+          result,
+          name: finalName,
+        }),
       )).value
     }),
   )
@@ -256,14 +258,13 @@ export const extractElement = Effect.fnUntraced(function* (
           draft,
           sourceType.child,
           name,
-          (result, finalName) =>
-            Object.freeze({
-              _tag: 'ExtractElement',
-              vector: source.operand,
-              index: selected.operand,
-              result,
-              name: finalName,
-            }),
+          (result, finalName) => ({
+            _tag: 'ExtractElement',
+            vector: source.operand,
+            index: selected.operand,
+            result,
+            name: finalName,
+          }),
         )).value
       }),
   )
@@ -332,15 +333,14 @@ export const insertElement = Effect.fnUntraced(function* (
           draft,
           source.type,
           name,
-          (result, finalName) =>
-            Object.freeze({
-              _tag: 'InsertElement',
-              vector: source.operand,
-              element: inserted.operand,
-              index: selected.operand,
-              result,
-              name: finalName,
-            }),
+          (result, finalName) => ({
+            _tag: 'InsertElement',
+            vector: source.operand,
+            element: inserted.operand,
+            index: selected.operand,
+            result,
+            name: finalName,
+          }),
         )).value
       }),
   )
@@ -436,15 +436,14 @@ export const shuffleVector = Effect.fnUntraced(function* (
         draft,
         resultTypeIndex,
         name,
-        (result, finalName) =>
-          Object.freeze({
-            _tag: 'ShuffleVector',
-            left: plan.left,
-            right: plan.right,
-            mask: plan.mask,
-            result,
-            name: finalName,
-          }),
+        (result, finalName) => ({
+          _tag: 'ShuffleVector',
+          left: plan.left,
+          right: plan.right,
+          mask: plan.mask,
+          result,
+          name: finalName,
+        }),
       )).value
     }),
   )

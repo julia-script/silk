@@ -129,15 +129,13 @@ const inspect = (
     )
       return fail('assembly template operand reference')
   }
-  return Result.succeed(
-    Object.freeze({
-      ...input,
-      memory,
-      clobbers: Object.freeze(clobbers),
-      inputs: Object.freeze(inputs),
-      ...(output === undefined ? {} : { output }),
-    }),
-  )
+  return Result.succeed({
+    ...input,
+    memory,
+    clobbers: clobbers,
+    inputs: inputs,
+    ...(output === undefined ? {} : { output }),
+  })
 }
 
 /** Validates an explicit machine contract at a public Effect boundary. */

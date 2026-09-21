@@ -93,7 +93,7 @@ export type TokenKind =
   | 'Invalid'
   | 'EndOfFile'
 
-const descriptions: Readonly<Record<TokenKind, string>> = Object.freeze({
+const descriptions: Readonly<Record<TokenKind, string>> = {
   Whitespace: 'whitespace',
   LineComment: 'line comment',
   DocComment: 'documentation comment',
@@ -184,7 +184,7 @@ const descriptions: Readonly<Record<TokenKind, string>> = Object.freeze({
   Arrow: '`->`',
   Invalid: 'invalid byte',
   EndOfFile: 'end of file',
-})
+}
 
 /** Describes a token kind using its Silk spelling or source-language role. */
 export const describe = (kind: TokenKind): string => descriptions[kind]
@@ -197,5 +197,8 @@ export interface Token {
 }
 
 /** Creates an immutable token. */
-export const make = (kind: TokenKind, span: SourceSpan.SourceSpan): Token =>
-  Object.freeze({ _tag: 'Token', kind, span })
+export const make = (kind: TokenKind, span: SourceSpan.SourceSpan): Token => ({
+  _tag: 'Token',
+  kind,
+  span,
+})

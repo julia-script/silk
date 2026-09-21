@@ -148,7 +148,6 @@ it.effect('keeps analysis intent frontend-only and promotes into a new bundle', 
     assert.include(phases, 'elaboration')
     for (const phase of ['instance-discovery', 'target-layout', 'mir-lowering'])
       assert.notInclude(phases, phase)
-    assert.isTrue(Object.isFrozen(analysis))
     const manifestBefore = Preparation.manifest(analysis)
     assert.strictEqual(manifestBefore.intent, 'analysis')
     assert.strictEqual(manifestBefore.status, 'SourceClosed')

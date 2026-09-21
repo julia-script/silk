@@ -103,16 +103,14 @@ export const complete = Effect.fn('ProfileBootstrap.complete')(function* (
       parameter.origin,
       initial.target,
     )
-    completed.push(
-      Object.freeze({
-        package: parameter.package,
-        module: parameter.module,
-        parameter: parameter.parameter,
-        type: PackageParameter.encode(parameter.schema),
-        value,
-        origin: parameter.origin,
-      }),
-    )
+    completed.push({
+      package: parameter.package,
+      module: parameter.module,
+      parameter: parameter.parameter,
+      type: PackageParameter.encode(parameter.schema),
+      value,
+      origin: parameter.origin,
+    })
   }
   for (const parameter of parameters) {
     const evaluated = Residualization.evaluateParameterPredicate(coordinator, parameter.declaration)
@@ -125,7 +123,7 @@ export const complete = Effect.fn('ProfileBootstrap.complete')(function* (
         [parameter.origin],
       )
   }
-  return Object.freeze({
+  return {
     profile: yield* CompilationProfile.publish(initial, completed),
     values,
     bootstrapIdentity: Canonical.record('ProfileBootstrap.v1', [
@@ -140,5 +138,5 @@ export const complete = Effect.fn('ProfileBootstrap.complete')(function* (
       ),
       Residualization.dependencies(coordinator),
     ]),
-  })
+  }
 })

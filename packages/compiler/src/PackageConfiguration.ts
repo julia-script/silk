@@ -123,7 +123,7 @@ export const prepare = Effect.fn('PackageConfiguration.prepare')(function* (
           origin.source,
           [origin],
         )
-      parameters.set(key, Object.freeze({ ...identity, declaration, schema, origin }))
+      parameters.set(key, { ...identity, declaration, schema, origin })
     }
   }
   const selected = new Map<
@@ -192,8 +192,8 @@ export const prepare = Effect.fn('PackageConfiguration.prepare')(function* (
     output.push(
       binding === undefined
         ? parameter
-        : Object.freeze({ ...parameter, origin: binding.origin, explicit: binding.explicit }),
+        : { ...parameter, origin: binding.origin, explicit: binding.explicit },
     )
   }
-  return Object.freeze(output)
+  return output
 })

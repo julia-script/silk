@@ -506,7 +506,7 @@ export const ofTir = (
       parameter.id.ordinal,
       {
         ...parameter,
-        id: Object.freeze({ _tag: 'TirLocal' as const, ordinal: parameter.id.ordinal }),
+        id: { _tag: 'TirLocal' as const, ordinal: parameter.id.ordinal },
       },
     ]),
   )
@@ -652,7 +652,7 @@ export const ofTir = (
     const base = {
       type: node._tag === 'Unavailable' ? ({ _tag: 'Unavailable' } as const) : available(node.type),
       anchor: node.origin.anchor,
-      ref: Object.freeze({ artifact, node: node.id }),
+      ref: { artifact, node: node.id },
     }
     switch (node._tag) {
       case 'UnionConvert':

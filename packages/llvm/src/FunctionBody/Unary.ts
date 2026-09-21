@@ -40,15 +40,14 @@ export const unary = Effect.fnUntraced(function* (
         draft,
         resolved.type,
         name,
-        (result, finalName) =>
-          Object.freeze({
-            _tag: 'Unary',
-            kind,
-            operand: resolved.operand,
-            fastMath: fastMath(options.fastMath),
-            result,
-            name: finalName,
-          }),
+        (result, finalName) => ({
+          _tag: 'Unary',
+          kind,
+          operand: resolved.operand,
+          fastMath: fastMath(options.fastMath),
+          result,
+          name: finalName,
+        }),
       )).value
     }),
   )
@@ -80,13 +79,12 @@ export const freeze = Effect.fnUntraced(function* (
         draft,
         resolved.type,
         name,
-        (result, finalName) =>
-          Object.freeze({
-            _tag: 'Freeze',
-            operand: resolved.operand,
-            result,
-            name: finalName,
-          }),
+        (result, finalName) => ({
+          _tag: 'Freeze',
+          operand: resolved.operand,
+          result,
+          name: finalName,
+        }),
       )).value
     }),
   )

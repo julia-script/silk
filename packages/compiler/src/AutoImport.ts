@@ -66,14 +66,13 @@ const applicableNamespace = (
   }
 }
 
-const candidateKey = (candidate: WorkspaceInventory.Candidate): CandidateKey =>
-  Object.freeze({
-    _tag: 'AutoImportCandidateKey',
-    module: candidate.module,
-    spelling: candidate.declaration.spelling,
-    declarationKind: candidate.declaration.declarationKind,
-    ordinal: candidate.declaration.ordinal,
-  })
+const candidateKey = (candidate: WorkspaceInventory.Candidate): CandidateKey => ({
+  _tag: 'AutoImportCandidateKey',
+  module: candidate.module,
+  spelling: candidate.declaration.spelling,
+  declarationKind: candidate.declaration.declarationKind,
+  ordinal: candidate.declaration.ordinal,
+})
 
 export const key = (candidate: CandidateKey): string =>
   `auto-import:${candidate.module}:${candidate.declarationKind}:${candidate.ordinal}:${candidate.spelling}`
@@ -91,17 +90,17 @@ export const discover = (request: Request): ReadonlyArray<Action> => {
     request.module,
     request.byteOffset,
   )
-  if (occurrence?.resolution._tag !== 'Missing') return Object.freeze([])
+  if (occurrence?.resolution._tag !== 'Missing') return []
   const syntax = syntaxOf(request.snapshot, request.module)
-  if (syntax === undefined) return Object.freeze([])
+  if (syntax === undefined) return []
   const spelling = Option.getOrUndefined(SourceFile.spelling(syntax.source, occurrence.span))
-  if (spelling === undefined) return Object.freeze([])
+  if (spelling === undefined) return []
   const scope = NameResolution.scopeOf(request.snapshot.resolution, request.module)
   if (
     scope === undefined ||
     Semantic.resolveName(request.snapshot.session, scope, spelling)._tag !== 'Missing'
   )
-    return Object.freeze([])
+    return []
   const candidates = WorkspaceInventory.candidates(request.inventory, spelling)
     .filter(
       (candidate) =>
@@ -119,22 +118,20 @@ export const discover = (request: Request): ReadonlyArray<Action> => {
         left.declaration.ordinal - right.declaration.ordinal
       )
     })
-  return Object.freeze(
-    candidates.map((candidate): Action => {
-      const selected = candidateKey(candidate)
-      return Object.freeze({
-        _tag: 'AutoImportAction',
-        descriptor: SourceAction.descriptor({
-          key: key(selected),
-          title: `Import ${spelling} from ${candidate.module}`,
-          kind: 'QuickFix',
-          target: occurrence.span,
-        }),
-        candidate: selected,
-        tier: candidate.tier,
-      })
-    }),
-  )
+  return candidates.map((candidate): Action => {
+    const selected = candidateKey(candidate)
+    return {
+      _tag: 'AutoImportAction',
+      descriptor: SourceAction.descriptor({
+        key: key(selected),
+        title: `Import ${spelling} from ${candidate.module}`,
+        kind: 'QuickFix',
+        target: occurrence.span,
+      }),
+      candidate: selected,
+      tier: candidate.tier,
+    }
+  })
 }
 
 export interface ResolveRequest extends Request {

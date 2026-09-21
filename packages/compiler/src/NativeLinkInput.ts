@@ -10,22 +10,21 @@ export type NativeLinkInput =
   | { readonly _tag: 'SearchPath'; readonly path: string }
   | { readonly _tag: 'Framework'; readonly name: string }
 
-export const object = (path: string): NativeLinkInput => Object.freeze({ _tag: 'Object', path })
+export const object = (path: string): NativeLinkInput => ({ _tag: 'Object', path })
 
-export const linkerScript = (path: string): NativeLinkInput =>
-  Object.freeze({ _tag: 'LinkerScript', path })
+export const linkerScript = (path: string): NativeLinkInput => ({ _tag: 'LinkerScript', path })
 
-export const staticArchive = (path: string): NativeLinkInput =>
-  Object.freeze({ _tag: 'StaticArchive', path })
+export const staticArchive = (path: string): NativeLinkInput => ({ _tag: 'StaticArchive', path })
 
-export const library = (name: string, mode: LibraryMode): NativeLinkInput =>
-  Object.freeze({ _tag: 'Library', name, mode })
+export const library = (name: string, mode: LibraryMode): NativeLinkInput => ({
+  _tag: 'Library',
+  name,
+  mode,
+})
 
-export const searchPath = (path: string): NativeLinkInput =>
-  Object.freeze({ _tag: 'SearchPath', path })
+export const searchPath = (path: string): NativeLinkInput => ({ _tag: 'SearchPath', path })
 
-export const framework = (name: string): NativeLinkInput =>
-  Object.freeze({ _tag: 'Framework', name })
+export const framework = (name: string): NativeLinkInput => ({ _tag: 'Framework', name })
 
 /** Whether every path carried by the input is absolute and therefore cannot be a tool option. */
 export const hasAbsolutePath = (self: NativeLinkInput): boolean => {

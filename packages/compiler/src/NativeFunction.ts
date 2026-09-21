@@ -180,7 +180,7 @@ export const discoverRoots = (
     ...borrowedCaptureRoots,
   ])
   for (const root of address) mutable.add(root)
-  return Object.freeze({ mutable, address })
+  return { mutable, address }
 }
 
 /**
@@ -448,7 +448,7 @@ export const emitBodies = Effect.fn('NativeFunction.emitBodies')(function* (
                 suspensionPointKey(right.region.point),
               ),
             )
-            .map((resume, ordinal) => Object.freeze({ ...resume, ordinal: ordinal + 1 }))
+            .map((resume, ordinal) => ({ ...resume, ordinal: ordinal + 1 }))
           const coroutineFrame = program.coroutineFrames?.entries.find(
             (candidate) =>
               Instances.keyText(candidate.function) === Instances.keyText(entry.fn.instance),
@@ -517,24 +517,24 @@ export const emitBodies = Effect.fn('NativeFunction.emitBodies')(function* (
           // child results escape through the separate transfer result record.
           if (diagnostic !== undefined && invocationFrameStorage === undefined) {
             for (const outcome of Mir.diagnosticOutcomeLocals(program, entry.fn)) {
-              const slot = Object.freeze({
+              const slot = {
                 storage: yield* FunctionBody.alloca(
                   body,
                   diagnostic.causeType,
                   `diagnostic_outcome${outcome.ordinal}`,
                 ),
-              })
+              }
               yield* NativeDiagnosticOutcome.initialize(slot, diagnostic)
               diagnostic.outcomes.set(outcome.ordinal, slot)
             }
           }
-          const terminationContext: NativeTermination.FunctionContext = Object.freeze({
+          const terminationContext: NativeTermination.FunctionContext = {
             module: termination,
             body,
             fn: entry.fn,
             state: operationState,
             ...(diagnostic === undefined ? {} : { diagnostic }),
-          })
+          }
           const locals = new Map<number, NativeValue.NativeValue>()
           const roots = discoverRoots(entry.fn, entry.linear)
           const mutableRoots = roots.mutable
@@ -552,15 +552,15 @@ export const emitBodies = Effect.fn('NativeFunction.emitBodies')(function* (
                 yield* FunctionBody.alloca(body, laneType(callingLane), `mut${root}_${lane}`),
               )
             }
-            mutableStorage.set(root, Object.freeze(storage))
+            mutableStorage.set(root, storage)
           }
-          const loweringContext: NativeLoweringContext.LoweringContext = Object.freeze({
+          const loweringContext: NativeLoweringContext.LoweringContext = {
             builder,
             body,
             program,
             request,
             layout: program.layout,
-            types: Object.freeze({ i8, i32, f32, f64, pointer, integers: integerTypes }),
+            types: { i8, i32, f32, f64, pointer, integers: integerTypes },
             lanesFor,
             valueLanesFor,
             laneType,
@@ -569,15 +569,15 @@ export const emitBodies = Effect.fn('NativeFunction.emitBodies')(function* (
             declared,
             entry,
             mutableStorage,
-          })
-          const nativeTypes: NativeType.LoweringContext = Object.freeze({
+          }
+          const nativeTypes: NativeType.LoweringContext = {
             program,
             i32,
             f32,
             f64,
             pointer,
             integerTypes,
-          })
+          }
           const addressStorage = new Map<number, Value.Input>()
           const transientOutcomes = NativeOutcomeStorage.transientLocals(entry.fn, entry.linear)
           const placeRoots = entry.fn.localTypes.flatMap((type, ordinal) =>
@@ -642,7 +642,7 @@ export const emitBodies = Effect.fn('NativeFunction.emitBodies')(function* (
             }
           }
 
-          const storageContext: NativeStorage.Context = Object.freeze({
+          const storageContext: NativeStorage.Context = {
             builder: loweringContext.builder,
             body: loweringContext.body,
             byteType: i8,
@@ -659,7 +659,7 @@ export const emitBodies = Effect.fn('NativeFunction.emitBodies')(function* (
             types: nativeTypes,
             lanePointers,
             sequences: { materialize: 0, reload: 0 },
-          })
+          }
           for (const root of [...addressRoots].sort((left, right) => left - right)) {
             const logicalType = entry.fn.localTypes.at(root)
             if (logicalType === undefined)
@@ -669,10 +669,8 @@ export const emitBodies = Effect.fn('NativeFunction.emitBodies')(function* (
             yield* NativeStorage.storeAddressValues(
               storageContext,
               root,
-              Object.freeze(
-                yield* Effect.forEach(valueLanesFor(logicalType), (lane) =>
-                  Constant.nullValue(builder, laneType(lane)),
-                ),
+              yield* Effect.forEach(valueLanesFor(logicalType), (lane) =>
+                Constant.nullValue(builder, laneType(lane)),
               ),
               `addr${root}_zero`,
             )
@@ -728,7 +726,7 @@ export const emitBodies = Effect.fn('NativeFunction.emitBodies')(function* (
               addressStorage.set(ordinal, slot)
               continue
             }
-            yield* NativeStorage.writeLocal(storageContext, ordinal, Object.freeze(values))
+            yield* NativeStorage.writeLocal(storageContext, ordinal, values)
             const storage = mutableStorage.get(ordinal)
             if (storage !== undefined) {
               for (const [lane, pointer] of storage.entries()) {
@@ -743,7 +741,7 @@ export const emitBodies = Effect.fn('NativeFunction.emitBodies')(function* (
               yield* NativeStorage.storeAddressValues(
                 storageContext,
                 ordinal,
-                Object.freeze(values),
+                values,
                 `addr${ordinal}_param`,
               )
             }
@@ -909,37 +907,31 @@ export const emitBodies = Effect.fn('NativeFunction.emitBodies')(function* (
               )
               if (diagnostic !== undefined) {
                 for (const field of coroutineFrame.diagnosticOutcomes) {
-                  diagnostic.outcomes.set(
-                    field.outcome.ordinal,
-                    Object.freeze({
-                      storage: yield* NativeLanePointer.lanePointer(
-                        lanePointers,
-                        body,
-                        invocationFrame,
-                        field.offset,
-                        `suspend_diagnostic_outcome${field.outcome.ordinal}`,
-                      ),
-                    }),
-                  )
+                  diagnostic.outcomes.set(field.outcome.ordinal, {
+                    storage: yield* NativeLanePointer.lanePointer(
+                      lanePointers,
+                      body,
+                      invocationFrame,
+                      field.offset,
+                      `suspend_diagnostic_outcome${field.outcome.ordinal}`,
+                    ),
+                  })
                 }
               }
               for (const field of coroutineFrame.diagnosticScopes) {
                 const scope = diagnosticScopes.get(field.scope.ordinal)
                 if (scope === undefined)
                   throw new RangeError('Persistent diagnostic descriptor lost its scope')
-                diagnosticScopes.set(
-                  field.scope.ordinal,
-                  Object.freeze({
-                    ...scope,
-                    record: yield* NativeLanePointer.lanePointer(
-                      lanePointers,
-                      body,
-                      invocationFrame,
-                      field.offset,
-                      `suspend_diagnostic_scope${field.scope.ordinal}`,
-                    ),
-                  }),
-                )
+                diagnosticScopes.set(field.scope.ordinal, {
+                  ...scope,
+                  record: yield* NativeLanePointer.lanePointer(
+                    lanePointers,
+                    body,
+                    invocationFrame,
+                    field.offset,
+                    `suspend_diagnostic_scope${field.scope.ordinal}`,
+                  ),
+                })
               }
               for (const [root, field] of stableAddressFields) {
                 addressStorage.set(
@@ -973,30 +965,30 @@ export const emitBodies = Effect.fn('NativeFunction.emitBodies')(function* (
             }
             yield* FunctionBody.sealSwitch(body, dispatch)
           }
-          const debugLocation: NativeDebug.LocationContext = Object.freeze({
+          const debugLocation: NativeDebug.LocationContext = {
             builder,
             body,
             enabled: debug,
             scope,
             table,
-          })
-          const laneContext: NativeArith.LaneContext = Object.freeze({
+          }
+          const laneContext: NativeArith.LaneContext = {
             body: loweringContext.body,
             pointerBits: loweringContext.layout.target.pointerSize === 4 ? 32 : 64,
             i32: loweringContext.types.i32,
             integerTypes: loweringContext.types.integers,
             types: nativeTypes,
-          })
-          const failureContext: NativeAggregate.FailureContext = Object.freeze({
+          }
+          const failureContext: NativeAggregate.FailureContext = {
             builder,
             body,
             program,
             i32,
             types: nativeTypes,
             arith: laneContext,
-          })
+          }
 
-          const suspensionReturnContext: NativeSuspension.ReturnContext = Object.freeze({
+          const suspensionReturnContext: NativeSuspension.ReturnContext = {
             ...(completion === undefined ? {} : { completion }),
             builder,
             body,
@@ -1009,21 +1001,21 @@ export const emitBodies = Effect.fn('NativeFunction.emitBodies')(function* (
             ...(executionStorage === undefined ? {} : { executionStorage }),
             types: nativeTypes,
             ...(diagnostic === undefined ? {} : { diagnostic }),
-          })
-          const hostFailureContext: NativeHostFailure.Context = Object.freeze({
+          }
+          const hostFailureContext: NativeHostFailure.Context = {
             builder,
             body,
             entry,
             types: nativeTypes,
             suspension: suspensionReturnContext,
             termination: terminationContext,
-          })
-          const synchronousCallContext: NativeCall.SynchronousContext = Object.freeze({
+          }
+          const synchronousCallContext: NativeCall.SynchronousContext = {
             body,
             storage: storageContext,
             ...(diagnostic === undefined ? {} : { diagnostic }),
-          })
-          const arithContext: NativeArith.OperationContext = Object.freeze({
+          }
+          const arithContext: NativeArith.OperationContext = {
             builder,
             body,
             program,
@@ -1035,8 +1027,8 @@ export const emitBodies = Effect.fn('NativeFunction.emitBodies')(function* (
             types: nativeTypes,
             debug: debugLocation,
             termination: terminationContext,
-          })
-          const suspensionContext: NativeSuspension.OperationContext = Object.freeze({
+          }
+          const suspensionContext: NativeSuspension.OperationContext = {
             ...(diagnostic === undefined ? {} : { diagnostic }),
             builder,
             body,
@@ -1057,8 +1049,8 @@ export const emitBodies = Effect.fn('NativeFunction.emitBodies')(function* (
             resumeBlocks,
             storage: storageContext,
             returns: suspensionReturnContext,
-          })
-          const callContext: NativeCall.Context = Object.freeze({
+          }
+          const callContext: NativeCall.Context = {
             builder,
             body,
             program,
@@ -1074,9 +1066,9 @@ export const emitBodies = Effect.fn('NativeFunction.emitBodies')(function* (
             storage: storageContext,
             synchronous: synchronousCallContext,
             returns: suspensionReturnContext,
-          })
+          }
 
-          const cleanupContext: NativeAggregate.Context = Object.freeze({
+          const cleanupContext: NativeAggregate.Context = {
             builder,
             body,
             program,
@@ -1094,9 +1086,9 @@ export const emitBodies = Effect.fn('NativeFunction.emitBodies')(function* (
             call: callContext,
             arith: laneContext,
             storage: storageContext,
-          })
+          }
 
-          const actorContext: NativeOperationContext.Context = Object.freeze({
+          const actorContext: NativeOperationContext.Context = {
             diagnosticScopes,
             runtimeFeatures,
             builder,
@@ -1136,8 +1128,8 @@ export const emitBodies = Effect.fn('NativeFunction.emitBodies')(function* (
             suspension: suspensionContext,
             termination: terminationContext,
             state: operationState,
-          })
-          const operationContext: NativeOperation.LoweringContext = Object.freeze({
+          }
+          const operationContext: NativeOperation.LoweringContext = {
             value: actorContext,
             memory: actorContext,
             place: actorContext,
@@ -1145,7 +1137,7 @@ export const emitBodies = Effect.fn('NativeFunction.emitBodies')(function* (
             effect: actorContext,
             execution: actorContext,
             call: actorContext,
-          })
+          }
           // Frame payloads are implicit operands of suspension lowering. They must survive
           // reference retirement even when absent from the remaining explicit operations.
           const frameRoots = new Set<number>()
@@ -1203,7 +1195,7 @@ export const emitBodies = Effect.fn('NativeFunction.emitBodies')(function* (
               continue
             }
             yield* NativeControl.emit(
-              Object.freeze({
+              {
                 builder,
                 body,
                 i32,
@@ -1216,7 +1208,7 @@ export const emitBodies = Effect.fn('NativeFunction.emitBodies')(function* (
                 suspension: suspensionReturnContext,
                 debug: debugLocation,
                 termination: terminationContext,
-              }),
+              },
               block.terminator,
               blockOrdinal,
               block.id,

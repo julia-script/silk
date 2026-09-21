@@ -208,7 +208,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         NativeType.laneType(types, lane),
         operation.initialized ? 1n : 0n,
       )
-      const values = Object.freeze([value])
+      const values = [value]
       yield* NativeStorage.writeLocal(nativeStorage, operation.flag.ordinal, values)
       yield* NativeStorage.storeMutable(nativeStorage, operation.flag, values)
       break
@@ -223,11 +223,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         for (const lane of NativeType.lanesFor(types, destinationType)) {
           placeholders.push(yield* Constant.nullValue(builder, NativeType.laneType(types, lane)))
         }
-        yield* NativeStorage.writeLocal(
-          nativeStorage,
-          operation.destination.ordinal,
-          Object.freeze(placeholders),
-        )
+        yield* NativeStorage.writeLocal(nativeStorage, operation.destination.ordinal, placeholders)
         break
       }
       yield* NativeStorage.copyLocal(nativeStorage, operation.destination, operation.source)
@@ -251,28 +247,22 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         descriptor,
       )
       if (operation.type._tag === 'Reference') {
-        yield* NativeStorage.writeLocal(
-          nativeStorage,
-          operation.destination.ordinal,
-          Object.freeze([yield* referenceAddress(context, operation, projected)]),
-        )
+        yield* NativeStorage.writeLocal(nativeStorage, operation.destination.ordinal, [
+          yield* referenceAddress(context, operation, projected),
+        ])
         break
       }
       if (operation.sourceType._tag !== 'FixedArray') {
         throw new RangeError('LLVM slice formation requires an array root')
       }
-      yield* NativeStorage.writeLocal(
-        nativeStorage,
-        operation.destination.ordinal,
-        Object.freeze([
-          projected,
-          yield* Constant.integerUnsigned(
-            builder,
-            usizeType ?? i32,
-            BigInt(operation.sourceType.type.length),
-          ),
-        ]),
-      )
+      yield* NativeStorage.writeLocal(nativeStorage, operation.destination.ordinal, [
+        projected,
+        yield* Constant.integerUnsigned(
+          builder,
+          usizeType ?? i32,
+          BigInt(operation.sourceType.type.length),
+        ),
+      ])
       break
     }
     case 'EndLoan':
@@ -280,11 +270,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
     case 'SliceLength': {
       const length = (yield* NativeStorage.materialize(nativeStorage, operation.slice)).at(1)
       if (length === undefined) throw new RangeError('LLVM slice lost its length lane')
-      yield* NativeStorage.writeLocal(
-        nativeStorage,
-        operation.destination.ordinal,
-        Object.freeze([length]),
-      )
+      yield* NativeStorage.writeLocal(nativeStorage, operation.destination.ordinal, [length])
       break
     }
     case 'ConvertUnion': {
@@ -371,11 +357,10 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
               ),
         )
       }
-      yield* NativeStorage.writeLocal(
-        nativeStorage,
-        operation.destination.ordinal,
-        Object.freeze([tag, ...payload]),
-      )
+      yield* NativeStorage.writeLocal(nativeStorage, operation.destination.ordinal, [
+        tag,
+        ...payload,
+      ])
       break
     }
     case 'Construct': {
@@ -717,12 +702,10 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
           if (candidate._tag === 'FieldSelector') {
             staticSelectors.push(candidate.field)
           } else if (candidate._tag === 'ElementSelector' && candidate.index._tag === 'Proven') {
-            staticSelectors.push(
-              Object.freeze({
-                _tag: 'ElementSelector',
-                index: candidate.index.value,
-              }),
-            )
+            staticSelectors.push({
+              _tag: 'ElementSelector',
+              index: candidate.index.value,
+            })
           } else {
             throw new RangeError('LLVM nested runtime slice place is not canonical')
           }
@@ -764,12 +747,12 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
       const runtimeSelectors = operation.selectors.flatMap((selector, ordinal) =>
         selector._tag === 'ElementSelector' && selector.index._tag === 'Runtime'
           ? [
-              Object.freeze({
+              {
                 local: selector.index.local,
                 length: selector.length,
                 span: selector.provenance.span,
                 ordinal,
-              }),
+              },
             ]
           : [],
       )
@@ -848,11 +831,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         selectedValues = empty
       }
       checkOrdinal += 1
-      yield* NativeStorage.writeLocal(
-        nativeStorage,
-        operation.destination.ordinal,
-        Object.freeze(selectedValues),
-      )
+      yield* NativeStorage.writeLocal(nativeStorage, operation.destination.ordinal, selectedValues)
       break
     }
     case 'CheckPlace': {
@@ -891,12 +870,12 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
       const runtimeSelectors = operation.selectors.flatMap((selector, ordinal) =>
         selector._tag === 'ElementSelector' && selector.index._tag === 'Runtime'
           ? [
-              Object.freeze({
+              {
                 local: selector.index.local,
                 length: selector.length,
                 span: selector.provenance.span,
                 ordinal,
-              }),
+              },
             ]
           : [],
       )
@@ -1094,12 +1073,10 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
           if (candidate._tag === 'FieldSelector') {
             staticSelectors.push(candidate.field)
           } else if (candidate._tag === 'ElementSelector' && candidate.index._tag === 'Proven') {
-            staticSelectors.push(
-              Object.freeze({
-                _tag: 'ElementSelector',
-                index: candidate.index.value,
-              }),
-            )
+            staticSelectors.push({
+              _tag: 'ElementSelector',
+              index: candidate.index.value,
+            })
           } else {
             throw new RangeError('LLVM nested runtime slice write is not canonical')
           }

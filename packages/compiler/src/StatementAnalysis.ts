@@ -100,39 +100,31 @@ const staticIterationElements = (
   value: StaticValue.Value,
 ): ReadonlyArray<StaticIterationElement> | undefined => {
   if (value._tag === 'StaticSequenceValue')
-    return Object.freeze(
-      value.elements.map((element) => Object.freeze({ value: element, type: value.elementType })),
-    )
+    return value.elements.map((element) => ({ value: element, type: value.elementType }))
   if (value._tag === 'FieldCollectionValue')
-    return Object.freeze(
-      value.fields.map((field) =>
-        Object.freeze({ value: field, type: StaticValue.fieldDescriptorType(field) }),
-      ),
-    )
+    return value.fields.map((field) => ({
+      value: field,
+      type: StaticValue.fieldDescriptorType(field),
+    }))
   if (value._tag === 'TestCollectionValue')
-    return Object.freeze(
-      value.tests.map((test) =>
-        Object.freeze({ value: test, type: StaticValue.testDescriptorType(test) }),
-      ),
-    )
+    return value.tests.map((test) => ({ value: test, type: StaticValue.testDescriptorType(test) }))
   return undefined
 }
 
 /** `return` with no value returns unit; a synthetic literal stands in for the absent expression. */
 const unitValueOf = (
   statement: Extract<AuthoredHir.Statement, { readonly _tag: 'ReturnStatement' }>,
-): AuthoredHir.Expression =>
-  Object.freeze({
-    _tag: 'UnitLiteral',
+): AuthoredHir.Expression => ({
+  _tag: 'UnitLiteral',
+  anchor: statement.anchor,
+  origin: {
+    _tag: 'Synthetic',
     anchor: statement.anchor,
-    origin: Object.freeze({
-      _tag: 'Synthetic',
-      anchor: statement.anchor,
-      role: 'value',
-      occurrence: 0,
-    }),
-    causes: Object.freeze([]),
-  })
+    role: 'value',
+    occurrence: 0,
+  },
+  causes: [],
+})
 
 const residualNodeCount = (statements: ReadonlyArray<Tir.Statement>): number => {
   let nodes = 0
@@ -162,8 +154,8 @@ export const analyzeStatements = (
   context: BodyContext,
   blockNode: AuthoredHir.Block,
   initialScope: Scope,
-  loopStack: ReadonlyArray<Tir.LoopId> = Object.freeze([]),
-  introducedPatterns: ReadonlyArray<PatternBindingFact> = Object.freeze([]),
+  loopStack: ReadonlyArray<Tir.LoopId> = [],
+  introducedPatterns: ReadonlyArray<PatternBindingFact> = [],
 ): ReadonlyArray<Tir.Statement> => {
   context = { ...context, resolution: { ...context.resolution, execution: { context, loopStack } } }
   const facts: Array<Tir.Statement> = []
@@ -192,10 +184,10 @@ export const analyzeStatements = (
   const ordinaryControlContext: BodyContext =
     context.declaration.phase !== 'Static' || context.resolution.deferStaticCalls === true
       ? context
-      : Object.freeze({
+      : {
           ...context,
-          resolution: Object.freeze({ ...context.resolution, deferStaticCalls: true as const }),
-        })
+          resolution: { ...context.resolution, deferStaticCalls: true as const },
+        }
   const blockBindings = new Map<string, Location.Location>(
     introducedPatterns.flatMap((binding) =>
       binding.name._tag === 'Present'
@@ -216,27 +208,26 @@ export const analyzeStatements = (
   const analyzePath = <A>(initial: ReadonlySet<number>, analyze: () => A) => {
     restoreCallableWrites(initial)
     const value = analyze()
-    return Object.freeze({ value, writes: snapshotCallableWrites() })
+    return { value, writes: snapshotCallableWrites() }
   }
   const replaceMap = <K, V>(target: Map<K, V>, snapshot: ReadonlyMap<K, V>): void => {
     target.clear()
     for (const [key, value] of snapshot) target.set(key, value)
   }
-  const staticExpansionCheckpoint = () =>
-    Object.freeze({
-      bindings: context.bindings.length,
-      regions: context.regions.length,
-      loops: context.loops.length,
-      staticIterations: context.staticIterations.length,
-      nextBindingOrdinal: context.nextBindingOrdinal.value,
-      callableWrites: snapshotCallableWrites(),
-      generatedAggregates: new Map(context.resolution.generatedAggregates),
-      values: new Map(context.staticContext?.values),
-      valueSpans: new Map(context.staticContext?.valueSpans),
-      valueOrigins: new Map(context.staticContext?.valueOrigins),
-      expressionSpans: new Map(context.staticContext?.expressionSpans),
-      expressionOrigins: new Map(context.staticContext?.expressionOrigins),
-    })
+  const staticExpansionCheckpoint = () => ({
+    bindings: context.bindings.length,
+    regions: context.regions.length,
+    loops: context.loops.length,
+    staticIterations: context.staticIterations.length,
+    nextBindingOrdinal: context.nextBindingOrdinal.value,
+    callableWrites: snapshotCallableWrites(),
+    generatedAggregates: new Map(context.resolution.generatedAggregates),
+    values: new Map(context.staticContext?.values),
+    valueSpans: new Map(context.staticContext?.valueSpans),
+    valueOrigins: new Map(context.staticContext?.valueOrigins),
+    expressionSpans: new Map(context.staticContext?.expressionSpans),
+    expressionOrigins: new Map(context.staticContext?.expressionOrigins),
+  })
   const restoreStaticExpansion = (
     checkpoint: ReturnType<typeof staticExpansionCheckpoint>,
   ): void => {
@@ -401,19 +392,19 @@ export const analyzeStatements = (
         fallthrough = unionWriteStates(nestedEntry, nestedBackedge, nested.breaks)
       }
     }
-    return Object.freeze({
+    return {
       ...(fallthrough === undefined ? {} : { fallthrough }),
       ...(continues === undefined ? {} : { continues }),
       ...(breaks === undefined ? {} : { breaks }),
-    })
+    }
   }
 
   const nextRegion = (): Tir.RegionId => {
-    const region = Object.freeze({
+    const region = {
       _tag: 'TirRegion' as const,
       function: context.declaration.id,
       ordinal: (context.regionBase ?? 0) + context.regions.length,
-    })
+    }
     context.regions.push(region)
     return region
   }
@@ -456,11 +447,11 @@ export const analyzeStatements = (
         ? initializer.fact.subject
         : expressionNode(initializer)
     const subjectType = constructionExpressionType(subject)
-    const id: Match.MatchId = Object.freeze({
+    const id: Match.MatchId = {
       _tag: 'MatchId',
       node: Tir.nodeReference(construction(context).artifact, subject),
-    })
-    const arm: Match.ArmId = Object.freeze({ _tag: 'MatchArmId', match: id, ordinal: 0 })
+    }
+    const arm: Match.ArmId = { _tag: 'MatchArmId', match: id, ordinal: 0 }
     const pattern = analyzePattern(
       context.context,
       element.pattern,
@@ -513,19 +504,16 @@ export const analyzeStatements = (
       )
     }
     const tests = patternTests(context.context, context.resolution.index, pattern.fact)
-    const coverage = Match.cover(
-      members,
-      Object.freeze([
-        Object.freeze({
-          ...(member === undefined ? {} : { member }),
-          universal: pattern.fact._tag === 'UniversalPattern',
-          tests,
-          guarded: false,
-        }),
-      ]),
-    )
+    const coverage = Match.cover(members, [
+      {
+        ...(member === undefined ? {} : { member }),
+        universal: pattern.fact._tag === 'UniversalPattern',
+        tests,
+        guarded: false,
+      },
+    ])
     const complete = pattern.fact._tag === 'UniversalPattern' ? true : pattern.fact.complete
-    return Object.freeze({
+    return {
       _tag: 'PatternSelection',
       tests,
       id,
@@ -533,7 +521,7 @@ export const analyzeStatements = (
       access,
       source: expressionNode(initializer),
       subject,
-      members: Object.freeze(members),
+      members: members,
       pattern: pattern.fact,
       bindings: pattern.fact.bindings,
       irrefutable: coverage.exhaustive && complete,
@@ -543,7 +531,7 @@ export const analyzeStatements = (
           : context.context.spanOf(element.anchor),
       loanEndAt: element._tag === 'PatternBindingStatement' ? blockNode.anchor : element.anchor,
       anchor: element.anchor,
-    })
+    }
   }
 
   const analyzeConditional = (
@@ -595,16 +583,14 @@ export const analyzeStatements = (
       ...(otherwiseFallsThrough ? [otherwise.writes] : []),
       ...(!takenFallsThrough && !otherwiseFallsThrough ? [branchEntry] : []),
     )
-    const statement = construct(
-      Object.freeze({
-        _tag: 'IfStatement',
-        condition: expressionNode(condition),
-        taken: Object.freeze([...taken.value]),
-        otherwise: Object.freeze([...otherwise.value]),
-        region,
-        anchor: element.anchor,
-      }),
-    )
+    const statement = construct({
+      _tag: 'IfStatement',
+      condition: expressionNode(condition),
+      taken: [...taken.value],
+      otherwise: [...otherwise.value],
+      region,
+      anchor: element.anchor,
+    })
     if (statement === undefined) throw new RangeError('conditional statement was not published')
     return statement
   }
@@ -615,7 +601,7 @@ export const analyzeStatements = (
     armScope: Scope,
     armLoopStack: ReadonlyArray<Tir.LoopId>,
   ): ReadonlyArray<Tir.Statement> => {
-    if (branch === undefined) return Object.freeze([])
+    if (branch === undefined) return []
     if (branch._tag === 'Block')
       return analyzeStatements(ordinaryControlContext, branch, armScope, armLoopStack)
     return branch._tag === 'PatternConditionalStatement'
@@ -630,11 +616,11 @@ export const analyzeStatements = (
   ): Tir.Statement => {
     const region = nextRegion()
     const selection = analyzePatternSelection(element, armScope)
-    const takenScope: Scope = Object.freeze({
+    const takenScope: Scope = {
       parameters: armScope.parameters,
       bindings: armScope.bindings,
-      patternBindings: Object.freeze([...armScope.patternBindings, ...selection.bindings]),
-    })
+      patternBindings: [...armScope.patternBindings, ...selection.bindings],
+    }
     const branchEntry = snapshotCallableWrites()
     const taken = analyzePath(branchEntry, () =>
       analyzeStatements(ordinaryControlContext, element.thenBranch, takenScope, armLoopStack),
@@ -649,16 +635,14 @@ export const analyzeStatements = (
       ...(otherwiseFallsThrough ? [otherwise.writes] : []),
       ...(!takenFallsThrough && !otherwiseFallsThrough ? [branchEntry] : []),
     )
-    const statement = construct(
-      Object.freeze({
-        _tag: 'IfLetStatement',
-        selection,
-        taken: Object.freeze([...taken.value]),
-        otherwise: Object.freeze([...otherwise.value]),
-        region,
-        anchor: element.anchor,
-      }),
-    )
+    const statement = construct({
+      _tag: 'IfLetStatement',
+      selection,
+      taken: [...taken.value],
+      otherwise: [...otherwise.value],
+      region,
+      anchor: element.anchor,
+    })
     if (statement === undefined)
       throw new RangeError('pattern conditional statement was not published')
     return statement
@@ -668,14 +652,12 @@ export const analyzeStatements = (
     if (element._tag === 'UnsafeStatement') {
       const region = nextRegion()
       const statements = analyzeStatements(context, element.body, scope, loopStack)
-      append(
-        Object.freeze({
-          _tag: 'UnsafeStatement',
-          statements,
-          region,
-          anchor: element.anchor,
-        }),
-      )
+      append({
+        _tag: 'UnsafeStatement',
+        statements,
+        region,
+        anchor: element.anchor,
+      })
       continue
     }
 
@@ -715,12 +697,12 @@ export const analyzeStatements = (
                     ),
                   ),
             )
-      const nameResolution: NameResolution.Resolution = Object.freeze({
+      const nameResolution: NameResolution.Resolution = {
         _tag: 'NameResolution',
-        modules: Object.freeze([context.resolution.scope]),
+        modules: [context.resolution.scope],
         contexts: SemanticContext.registry([context.context]),
-        diagnostics: Object.freeze([]),
-      })
+        diagnostics: [],
+      }
       const resolvedDeclared =
         analyzedDeclared === undefined
           ? undefined
@@ -786,7 +768,7 @@ export const analyzeStatements = (
           Diagnostic.staticPhaseViolation(
             'runtime binding of a phase-only value',
             context.staticContext?.environment.target ?? 'unselected-target',
-            Object.freeze([]),
+            [],
             Location.at(element.anchor),
           ),
         )
@@ -801,13 +783,13 @@ export const analyzeStatements = (
         context.diagnostics.push(staticDiagnostic(evaluated.failure))
       const staticValue: StaticValue.Value | undefined =
         evaluated?._tag === 'Complete' ? evaluated.value : undefined
-      const binding: BindingDeclarationFact = Object.freeze({
+      const binding: BindingDeclarationFact = {
         _tag: 'BindingFact',
-        id: Object.freeze({
+        id: {
           _tag: 'TirBinding',
           function: context.declaration.id,
           ordinal: bindingOrdinal,
-        }),
+        },
         name,
         phase,
         mutability: element.mutable ? 'Mutable' : 'Immutable',
@@ -818,14 +800,14 @@ export const analyzeStatements = (
           Type.isUnion(expected) &&
           initializer.type !== undefined &&
           typesCompatible(initializer.type, expected, context.resolution?.lifetimeCompatibility)
-            ? Object.freeze({ _tag: 'Available', type: expected })
+            ? { _tag: 'Available', type: expected }
             : initializer.fact.type,
         initializer: expressionNode(initializer),
         ...(staticValue === undefined ? {} : { staticValue }),
         ...(exactCallable === undefined ? {} : { exactCallable }),
         ...(hasConcreteCallableIdentity ? { concreteCallableIdentity: true as const } : {}),
         anchor: element.anchor,
-      })
+      }
       BodyBuilder.semanticLocal(construction(context), binding, {
         kind: 'Binding',
         ...(binding.name._tag === 'Present' ? { name: binding.name.spelling } : {}),
@@ -852,17 +834,17 @@ export const analyzeStatements = (
           context.staticContext.valueOrigins.set(localKey, staticTextOrigin)
         }
       }
-      append(Object.freeze({ _tag: 'BindStatement', binding, region }))
+      append({ _tag: 'BindStatement', binding, region })
 
       if (name._tag === 'Present') {
         const originalSpan = blockBindings.get(name.spelling)
         if (originalSpan === undefined) {
           blockBindings.set(name.spelling, Location.at(name.anchor))
-          scope = Object.freeze({
+          scope = {
             parameters: scope.parameters,
-            bindings: Object.freeze([...scope.bindings, binding]),
+            bindings: [...scope.bindings, binding],
             patternBindings: scope.patternBindings,
-          })
+          }
         } else {
           context.diagnostics.push(
             Diagnostic.rebindingName(name.spelling, originalSpan, Location.at(name.anchor)),
@@ -919,14 +901,12 @@ export const analyzeStatements = (
           ),
         )
       }
-      append(
-        Object.freeze({
-          _tag: 'PatternBindStatement',
-          selection,
-          region,
-          anchor: element.anchor,
-        }),
-      )
+      append({
+        _tag: 'PatternBindStatement',
+        selection,
+        region,
+        anchor: element.anchor,
+      })
       for (const binding of selection.bindings)
         BodyBuilder.semanticLocal(construction(context), binding, {
           kind: 'Pattern',
@@ -940,11 +920,11 @@ export const analyzeStatements = (
         if (originalSpan === undefined)
           blockBindings.set(binding.name.spelling, Location.at(binding.name.anchor))
       }
-      scope = Object.freeze({
+      scope = {
         parameters: scope.parameters,
         bindings: scope.bindings,
-        patternBindings: Object.freeze([...scope.patternBindings, ...selection.bindings]),
-      })
+        patternBindings: [...scope.patternBindings, ...selection.bindings],
+      }
       continue
     }
 
@@ -971,14 +951,12 @@ export const analyzeStatements = (
         const evaluated = evaluateStatic(expression.fact, context.staticContext, context.resolution)
         if (evaluated._tag === 'Failed')
           context.diagnostics.push(staticDiagnostic(evaluated.failure))
-        append(
-          Object.freeze({
-            _tag: 'ExpressionStatement',
-            expression: expressionNode(expression),
-            region,
-            anchor: element.anchor,
-          }),
-        )
+        append({
+          _tag: 'ExpressionStatement',
+          expression: expressionNode(expression),
+          region,
+          anchor: element.anchor,
+        })
         continue
       }
       if (
@@ -997,14 +975,12 @@ export const analyzeStatements = (
           ),
         )
       }
-      append(
-        Object.freeze({
-          _tag: 'ExpressionStatement',
-          expression: expressionNode(expression),
-          region,
-          anchor: element.anchor,
-        }),
-      )
+      append({
+        _tag: 'ExpressionStatement',
+        expression: expressionNode(expression),
+        region,
+        anchor: element.anchor,
+      })
       continue
     }
 
@@ -1024,26 +1000,22 @@ export const analyzeStatements = (
       context.diagnostics.push(...iterable.diagnostics)
       const reject = (): void => {
         restoreStaticExpansion(checkpoint)
-        context.staticIterations.push(
-          Object.freeze({
-            _tag: 'StaticIteration',
-            iterable: expressionNode(iterable),
-            state: 'Rejected',
-            scopes: Object.freeze([]),
-            anchor: element.anchor,
-          }),
-        )
+        context.staticIterations.push({
+          _tag: 'StaticIteration',
+          iterable: expressionNode(iterable),
+          state: 'Rejected',
+          scopes: [],
+          anchor: element.anchor,
+        })
       }
       if (context.staticContext === undefined) {
-        context.staticIterations.push(
-          Object.freeze({
-            _tag: 'StaticIteration',
-            iterable: expressionNode(iterable),
-            state: 'Deferred',
-            scopes: Object.freeze([]),
-            anchor: element.anchor,
-          }),
-        )
+        context.staticIterations.push({
+          _tag: 'StaticIteration',
+          iterable: expressionNode(iterable),
+          state: 'Deferred',
+          scopes: [],
+          anchor: element.anchor,
+        })
         continue
       }
       if (iterable.diagnostics.some((diagnostic) => diagnostic.severity === 'error')) {
@@ -1062,7 +1034,7 @@ export const analyzeStatements = (
           Diagnostic.staticPhaseViolation(
             'static for requires a finite static sequence or field collection',
             context.staticContext.environment.target,
-            Object.freeze([]),
+            [],
             Location.at(iterableNode.anchor),
           ),
         )
@@ -1078,26 +1050,26 @@ export const analyzeStatements = (
           context.staticContext.trace,
           Evaluation.staticIterationFrame(ordinal, current.value, Location.at(element.anchor)),
         )
-        const iterationStaticContext = Object.freeze({
+        const iterationStaticContext = {
           ...context.staticContext,
           trace: iterationTrace,
-        })
-        const binding: BindingDeclarationFact = Object.freeze({
+        }
+        const binding: BindingDeclarationFact = {
           _tag: 'BindingFact',
-          id: Object.freeze({
+          id: {
             _tag: 'TirBinding',
             function: context.declaration.id,
             ordinal: context.nextBindingOrdinal.value,
-          }),
+          },
           name,
           phase: 'Static',
           mutability: 'Immutable',
-          inferredType: Object.freeze({ _tag: 'Available', type: current.type }),
+          inferredType: { _tag: 'Available', type: current.type },
           initializer: expressionNode(iterable),
           staticValue: current.value,
           staticIteration: true,
           anchor: element.anchor,
-        })
+        }
         BodyBuilder.semanticLocal(construction(context), binding, {
           kind: 'Binding',
           ...(binding.name._tag === 'Present' ? { name: binding.name.spelling } : {}),
@@ -1115,22 +1087,22 @@ export const analyzeStatements = (
         const nestedIterationStart = context.staticIterations.length
         const statements =
           body === undefined
-            ? Object.freeze([])
+            ? []
             : analyzeStatements(
-                Object.freeze({
+                {
                   ...context,
                   staticContext: iterationStaticContext,
-                  resolution: Object.freeze({
+                  resolution: {
                     ...context.resolution,
                     staticContext: iterationStaticContext,
-                  }),
-                }),
+                  },
+                },
                 body,
-                Object.freeze({
+                {
                   parameters: scope.parameters,
-                  bindings: Object.freeze([...scope.bindings, binding]),
+                  bindings: [...scope.bindings, binding],
                   patternBindings: scope.patternBindings,
-                }),
+                },
                 loopStack,
               )
         if (
@@ -1141,7 +1113,7 @@ export const analyzeStatements = (
           failed = true
           break
         }
-        const nestedIterations = Object.freeze(context.staticIterations.slice(nestedIterationStart))
+        const nestedIterations = context.staticIterations.slice(nestedIterationStart)
         context.staticIterations.length = nestedIterationStart
         const residualNodes = Math.max(
           0,
@@ -1158,27 +1130,25 @@ export const analyzeStatements = (
         }
         if (context.staticContext.chargedStaticIterationNodes !== undefined)
           context.staticContext.chargedStaticIterationNodes.value += residualNodes
-        scopes.push(
-          Object.freeze({
-            _tag: 'StaticIterationScope',
-            ordinal,
-            binding,
-            statements: Object.freeze([...statements]),
-            staticIterations: nestedIterations,
-          }),
-        )
+        scopes.push({
+          _tag: 'StaticIterationScope',
+          ordinal,
+          binding,
+          statements: [...statements],
+          staticIterations: nestedIterations,
+        })
       }
       if (failed) {
         reject()
         continue
       }
-      const iteration: StaticIterationFact = Object.freeze({
+      const iteration: StaticIterationFact = {
         _tag: 'StaticIteration',
         iterable: expressionNode(iterable),
         state: 'Expanded',
-        scopes: Object.freeze(scopes),
+        scopes: scopes,
         anchor: element.anchor,
-      })
+      }
       context.staticIterations.push(iteration)
       for (const iterationScope of scopes) facts.push(...iterationScope.statements)
       continue
@@ -1209,7 +1179,7 @@ export const analyzeStatements = (
           Diagnostic.staticPhaseViolation(
             'static if condition must evaluate to bool',
             context.staticContext.environment.target,
-            Object.freeze([]),
+            [],
             Location.at(conditionNode.anchor),
           ),
         )
@@ -1230,7 +1200,7 @@ export const analyzeStatements = (
               statements: [branch],
             }
       if (selected !== undefined) {
-        const staticContext = Object.freeze({
+        const staticContext = {
           ...context.staticContext,
           trace: Evaluation.appendTrace(
             context.staticContext.trace,
@@ -1239,13 +1209,13 @@ export const analyzeStatements = (
               Location.at(selected.anchor),
             ),
           ),
-        })
+        }
         const selectedStatements = analyzeStatements(
-          Object.freeze({
+          {
             ...context,
             staticContext,
-            resolution: Object.freeze({ ...context.resolution, staticContext }),
-          }),
+            resolution: { ...context.resolution, staticContext },
+          },
           selected,
           scope,
           loopStack,
@@ -1430,49 +1400,47 @@ export const analyzeStatements = (
           )
         context.resolution.writtenCallableBindings?.add(root.id.ordinal)
       }
-      append(
-        Object.freeze({
-          _tag: 'WriteStatement',
-          destination: expressionNode(destination),
-          ...(writableRoot ? { root } : {}),
-          value: expressionNode(value),
-          compatible,
-          lifetimeProof: Lifetime.assumptions(
-            compatible
-              ? (context.resolution.bodyLifetimes?.activatedConstraints
-                  .slice(activatedStart)
-                  .filter(
-                    ({ installed }) =>
-                      AuthoredIdentity.anchorKey(installed) ===
-                      AuthoredIdentity.anchorKey(element.anchor),
-                  )
-                  .map(({ bound }) => bound) ?? [])
-              : [],
-          ).bounds,
-          region,
-          anchor: element.anchor,
-        }),
-      )
+      append({
+        _tag: 'WriteStatement',
+        destination: expressionNode(destination),
+        ...(writableRoot ? { root } : {}),
+        value: expressionNode(value),
+        compatible,
+        lifetimeProof: Lifetime.assumptions(
+          compatible
+            ? (context.resolution.bodyLifetimes?.activatedConstraints
+                .slice(activatedStart)
+                .filter(
+                  ({ installed }) =>
+                    AuthoredIdentity.anchorKey(installed) ===
+                    AuthoredIdentity.anchorKey(element.anchor),
+                )
+                .map(({ bound }) => bound) ?? [])
+            : [],
+        ).bounds,
+        region,
+        anchor: element.anchor,
+      })
       continue
     }
 
     if (element._tag === 'WhileStatement') {
       const region = nextRegion()
-      const loop = Object.freeze({
+      const loop = {
         _tag: 'TirLoop' as const,
         function: context.declaration.id,
         ordinal: context.loops.length,
-      })
+      }
       context.loops.push(loop)
       const bodyNode = element.body
       const loopEntry = snapshotCallableWrites()
-      const checkpoint = Object.freeze({
+      const checkpoint = {
         bindings: context.bindings.length,
         diagnostics: context.diagnostics.length,
         regions: context.regions.length,
         loops: context.loops.length,
         nextBindingOrdinal: context.nextBindingOrdinal.value,
-      })
+      }
       const analyzeLoopPass = (entry: ReadonlySet<number>) => {
         restoreCallableWrites(entry)
         const conditionNode = element.condition
@@ -1504,21 +1472,16 @@ export const analyzeStatements = (
         const body =
           bodyNode === undefined
             ? []
-            : analyzeStatements(
-                ordinaryControlContext,
-                bodyNode,
-                scope,
-                Object.freeze([...loopStack, loop]),
-              )
+            : analyzeStatements(ordinaryControlContext, bodyNode, scope, [...loopStack, loop])
         const flow = callableWriteFlow(body, bodyEntry, loop)
         const backedge = unionWriteStates(flow.fallthrough, flow.continues)
-        return Object.freeze({
+        return {
           condition: expressionNode(condition),
           body,
           bodyEntry,
           flow,
           backedge,
-        })
+        }
       }
       let analyzed = analyzeLoopPass(loopEntry)
       const initialBackedge = analyzed.backedge
@@ -1538,17 +1501,15 @@ export const analyzeStatements = (
         ...(analyzed.flow.breaks === undefined ? [] : [analyzed.flow.breaks]),
       )
       const parent = loopStack.at(-1)
-      append(
-        Object.freeze({
-          _tag: 'WhileStatement',
-          loop,
-          ...(parent === undefined ? {} : { parent }),
-          condition: analyzed.condition,
-          body: Object.freeze([...analyzed.body]),
-          region,
-          anchor: element.anchor,
-        }),
-      )
+      append({
+        _tag: 'WhileStatement',
+        loop,
+        ...(parent === undefined ? {} : { parent }),
+        condition: analyzed.condition,
+        body: [...analyzed.body],
+        region,
+        anchor: element.anchor,
+      })
       continue
     }
 
@@ -1563,14 +1524,12 @@ export const analyzeStatements = (
           ),
         )
       }
-      append(
-        Object.freeze({
-          _tag: element._tag,
-          ...(target === undefined ? {} : { target }),
-          region,
-          anchor: element.anchor,
-        }),
-      )
+      append({
+        _tag: element._tag,
+        ...(target === undefined ? {} : { target }),
+        region,
+        anchor: element.anchor,
+      })
       continue
     }
 
@@ -1602,19 +1561,17 @@ export const analyzeStatements = (
           Diagnostic.unknownOwnedCallableReturn(Location.at(authoredExpression.anchor)),
         )
       }
-      append(
-        Object.freeze({
-          _tag: 'ReturnStatement',
-          expression: expressionNode(expression),
-          // A trailing block expression carries no `return` keyword, so lowering marks the
-          // statement it synthesizes `implicit-return` instead of leaving a token to inspect.
-          ...(element.origin._tag === 'Synthetic' && element.origin.role === 'implicit-return'
-            ? { implicit: true as const }
-            : {}),
-          region,
-          anchor: element.anchor,
-        }),
-      )
+      append({
+        _tag: 'ReturnStatement',
+        expression: expressionNode(expression),
+        // A trailing block expression carries no `return` keyword, so lowering marks the
+        // statement it synthesizes `implicit-return` instead of leaving a token to inspect.
+        ...(element.origin._tag === 'Synthetic' && element.origin.role === 'implicit-return'
+          ? { implicit: true as const }
+          : {}),
+        region,
+        anchor: element.anchor,
+      })
       break
     }
 
@@ -1664,16 +1621,14 @@ export const analyzeStatements = (
             Location.at(authoredExpression.anchor),
           ),
         )
-      append(
-        Object.freeze({
-          _tag: 'FailStatement',
-          expression: expressionNode(expression),
-          ...(expression.type === undefined ? {} : { failure: expression.type }),
-          transfer: element.move ? 'Move' : 'Copy',
-          region,
-          anchor: element.anchor,
-        }),
-      )
+      append({
+        _tag: 'FailStatement',
+        expression: expressionNode(expression),
+        ...(expression.type === undefined ? {} : { failure: expression.type }),
+        transfer: element.move ? 'Move' : 'Copy',
+        region,
+        anchor: element.anchor,
+      })
       break
     }
 
@@ -1691,18 +1646,16 @@ export const analyzeStatements = (
       if (expression === undefined)
         throw new RangeError(`Semantic analysis cannot analyze ${authoredExpression._tag}`)
       context.diagnostics.push(...expression.diagnostics)
-      append(
-        Object.freeze({
-          _tag: 'DropStatement',
-          expression: expressionNode(expression),
-          region,
-          anchor: element.anchor,
-        }),
-      )
+      append({
+        _tag: 'DropStatement',
+        expression: expressionNode(expression),
+        region,
+        anchor: element.anchor,
+      })
     }
   }
 
-  return Object.freeze(facts)
+  return facts
 }
 
 export interface ReturnFlow {
@@ -1726,8 +1679,7 @@ export const expressionReturnFlow = (
   }
   let fallsThrough = true
   if ('origin' in expression) {
-    if (expression._tag === 'EffectBlock')
-      return Object.freeze({ fallsThrough, returns: Object.freeze(returns) })
+    if (expression._tag === 'EffectBlock') return { fallsThrough, returns: returns }
     if (expression._tag === 'Match') {
       fallsThrough = visit(expression.scrutinee)
       if (fallsThrough) {
@@ -1768,10 +1720,9 @@ export const expressionReturnFlow = (
     }
     const type = constructionExpressionType(expression)
     if (type._tag === 'Available' && Type.isNever(type.type)) fallsThrough = false
-    return Object.freeze({ fallsThrough, returns: Object.freeze(returns) })
+    return { fallsThrough, returns: returns }
   }
-  if (expression._tag === 'EffectBlock')
-    return Object.freeze({ fallsThrough, returns: Object.freeze(returns) })
+  if (expression._tag === 'EffectBlock') return { fallsThrough, returns: returns }
   if (expression._tag === 'Match') {
     fallsThrough = visit(expression.scrutinee)
     if (fallsThrough) {
@@ -1816,7 +1767,7 @@ export const expressionReturnFlow = (
   }
   if (expression.type._tag === 'Available' && Type.isNever(expression.type.type))
     fallsThrough = false
-  return Object.freeze({ fallsThrough, returns: Object.freeze(returns) })
+  return { fallsThrough, returns: returns }
 }
 
 export const expressionNever = (expression: ExpressionDecision | Tir.Expression): boolean =>
@@ -1867,7 +1818,7 @@ export const returnFlowOf = (
       returns.push(...returnFlowOf(statement.body, implicitReturnFallsThrough).returns)
     }
   }
-  return Object.freeze({ fallsThrough, returns: Object.freeze(returns) })
+  return { fallsThrough, returns: returns }
 }
 
 /** Keeps only statements that can execute, treating an implicit unit completion as a real return. */
@@ -1879,7 +1830,7 @@ export const executableStatements = (
     reachable.push(statement)
     if (!returnFlowOf([statement], false).fallsThrough) break
   }
-  return Object.freeze(reachable)
+  return reachable
 }
 
 /** Callable binding roots written on any reachable path through these already-analyzed facts. */
@@ -2068,10 +2019,7 @@ export const analyzeFunctionBody = (
   initialScope?: Scope,
 ): FunctionAnalysis => {
   const builder =
-    resolution.builder ??
-    BodyBuilder.make(
-      Object.freeze({ owner: declaration.owner, request: Object.freeze({ _tag: 'Check' }) }),
-    )
+    resolution.builder ?? BodyBuilder.make({ owner: declaration.owner, request: { _tag: 'Check' } })
   for (const parameter of declaration.parameters)
     BodyBuilder.semanticLocal(builder, parameter, {
       kind: 'Parameter',
@@ -2085,11 +2033,9 @@ export const analyzeFunctionBody = (
       : undefined
   const blockNode = AuthoredWalk.bodyBlock(semantic, declaration)
   const executableSiteOrdinals = executableSites(blockNode)
-  const unsafeSpans = Object.freeze(
-    AuthoredWalk.statements(blockNode)
-      .filter((statement) => statement._tag === 'UnsafeStatement')
-      .map((statement) => semantic.spanOf(statement.anchor)),
-  )
+  const unsafeSpans = AuthoredWalk.statements(blockNode)
+    .filter((statement) => statement._tag === 'UnsafeStatement')
+    .map((statement) => semantic.spanOf(statement.anchor))
   const nextBindingOrdinal = { value: 0 }
   const declaredOutlives = TypeOutlives.context(resolution.index.modules)
   const outlivesScope =
@@ -2119,7 +2065,7 @@ export const analyzeFunctionBody = (
       occurrence,
     )
   }
-  const bodyResolution: ResolutionContext = Object.freeze({
+  const bodyResolution: ResolutionContext = {
     ...resolution,
     builder,
     ...(authoredDeclaration === undefined ? {} : { authoredDeclaration }),
@@ -2152,7 +2098,7 @@ export const analyzeFunctionBody = (
     },
     generatedAggregates: new Map(),
     ...(staticContext === undefined ? {} : { staticContext }),
-  })
+  }
   const context: BodyContext = {
     context: semantic,
     declaration,
@@ -2180,7 +2126,7 @@ export const analyzeFunctionBody = (
           Diagnostic.staticPhaseViolation(
             'runtime parameter with a phase-only type',
             target,
-            Object.freeze([]),
+            [],
             Location.at(parameter.anchor),
           ),
         )
@@ -2193,7 +2139,7 @@ export const analyzeFunctionBody = (
         Diagnostic.staticPhaseViolation(
           'runtime return with a phase-only type',
           target,
-          Object.freeze([]),
+          [],
           Location.at(declaration.returnType.anchor),
         ),
       )
@@ -2201,8 +2147,7 @@ export const analyzeFunctionBody = (
   const statements = analyzeStatements(
     context,
     blockNode,
-    initialScope ??
-      Object.freeze({ parameters: declaration.parameters, bindings: [], patternBindings: [] }),
+    initialScope ?? { parameters: declaration.parameters, bindings: [], patternBindings: [] },
   )
   const hasDeferredStaticControl =
     staticContext === undefined &&
@@ -2341,27 +2286,27 @@ export const analyzeFunctionBody = (
     builder,
   ))
     publishOccurrence(occurrence)
-  return Object.freeze({
-    fact: Object.freeze({
+  return {
+    fact: {
       _tag: 'FunctionConstruction',
       ...(bodyResolution.lifetimeCompatibility === undefined
         ? {}
-        : { comparisonWork: Object.freeze({ ...bodyResolution.lifetimeCompatibility.work }) }),
+        : { comparisonWork: { ...bodyResolution.lifetimeCompatibility.work } }),
       lifetimeFlow,
       declaration,
       statements,
-      bindings: Object.freeze([...context.bindings]),
-      regionOrder: Object.freeze([...context.regions]),
+      bindings: [...context.bindings],
+      regionOrder: [...context.regions],
       returnedExpression: terminal.expression,
       returnCompatibility,
       ...(resultRepresentation === undefined ? {} : { resultRepresentation }),
-      generatedAggregates: Object.freeze([...(bodyResolution.generatedAggregates?.values() ?? [])]),
-      staticIterations: Object.freeze([...context.staticIterations]),
-      occurrences: Object.freeze([...occurrences.values()]),
+      generatedAggregates: [...(bodyResolution.generatedAggregates?.values() ?? [])],
+      staticIterations: [...context.staticIterations],
+      occurrences: [...occurrences.values()],
       hints: TypeHint.rows(context.bindings, statements, builder),
       opaqueEvidence: OpaqueRealization.evidenceOfBody(semantic, declaration, statements, builder),
-    }),
-    diagnostics: Object.freeze([...context.diagnostics]),
+    },
+    diagnostics: [...context.diagnostics],
     builder,
-  })
+  }
 }

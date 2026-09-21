@@ -33,20 +33,17 @@ export const key = <Capability>(
 /** Constructs the finite-row policy for a capability identity domain. */
 export const policy = <Capability>(
   capabilityKey: (capability: Capability) => string,
-): FiniteRow.Policy<Member<Capability>> =>
-  Object.freeze({
-    collisionKey: (member: Member<Capability>) => key(capabilityKey, member),
-    memberKey: (member: Member<Capability>) =>
-      `${capabilityKey(member.capability)}@${roleKey(member.role)}:${member.access}`,
-    differenceKey: (member: Member<Capability>) => key(capabilityKey, member),
-    merge: (left: Member<Capability>, right: Member<Capability>): Member<Capability> =>
-      Object.freeze({
-        capability: left.capability,
-        role: left.role,
-        access:
-          left.access === 'Exclusive' || right.access === 'Exclusive' ? 'Exclusive' : 'Shared',
-      }),
-  })
+): FiniteRow.Policy<Member<Capability>> => ({
+  collisionKey: (member: Member<Capability>) => key(capabilityKey, member),
+  memberKey: (member: Member<Capability>) =>
+    `${capabilityKey(member.capability)}@${roleKey(member.role)}:${member.access}`,
+  differenceKey: (member: Member<Capability>) => key(capabilityKey, member),
+  merge: (left: Member<Capability>, right: Member<Capability>): Member<Capability> => ({
+    capability: left.capability,
+    role: left.role,
+    access: left.access === 'Exclusive' || right.access === 'Exclusive' ? 'Exclusive' : 'Shared',
+  }),
+})
 
 /** Whether a fixed provider mode may satisfy a stored requirement access. */
 export const providerCanSelect = (providerAccess: ProviderAccess, storedAccess: Access): boolean =>

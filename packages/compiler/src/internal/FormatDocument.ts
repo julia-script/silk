@@ -10,33 +10,33 @@ export type Document =
   | { readonly _tag: 'Group'; readonly document: Document }
   | { readonly _tag: 'IfBreak'; readonly broken: Document; readonly flat: Document }
 
-export const empty: Document = Object.freeze({ _tag: 'Empty' })
-export const hardLine: Document = Object.freeze({ _tag: 'HardLine' })
-export const softLine: Document = Object.freeze({ _tag: 'SoftLine' })
+export const empty: Document = { _tag: 'Empty' }
+export const hardLine: Document = { _tag: 'HardLine' }
+export const softLine: Document = { _tag: 'SoftLine' }
 
 type TextValue = string | ReadonlyArray<number> | Uint8Array
 
 const bytesOf = (value: TextValue): ReadonlyArray<number> =>
   typeof value === 'string'
-    ? Object.freeze(Array.from(value, (character) => character.charCodeAt(0)))
-    : Object.freeze(Array.from(value))
+    ? Array.from(value, (character) => character.charCodeAt(0))
+    : Array.from(value)
 
 export const text = (value: TextValue): Document => {
   const bytes = bytesOf(value)
-  return bytes.length === 0 ? empty : Object.freeze({ _tag: 'Text', bytes })
+  return bytes.length === 0 ? empty : { _tag: 'Text', bytes }
 }
 
 /** Protected token content that may contain physical line endings and semantic whitespace. */
 export const verbatimMultiline = (value: TextValue): Document => {
   const bytes = bytesOf(value)
-  return bytes.length === 0 ? empty : Object.freeze({ _tag: 'VerbatimMultiline', bytes })
+  return bytes.length === 0 ? empty : { _tag: 'VerbatimMultiline', bytes }
 }
 
 export const concat = (...documents: ReadonlyArray<Document>): Document => {
   const nonempty = documents.filter((document) => document._tag !== 'Empty')
   if (nonempty.length === 0) return empty
   if (nonempty.length === 1) return nonempty[0] ?? empty
-  return Object.freeze({ _tag: 'Concat', documents: Object.freeze(nonempty) })
+  return { _tag: 'Concat', documents: nonempty }
 }
 
 export const join = (separator: Document, documents: ReadonlyArray<Document>): Document =>
@@ -45,13 +45,16 @@ export const join = (separator: Document, documents: ReadonlyArray<Document>): D
   )
 
 export const indent = (document: Document): Document =>
-  document._tag === 'Empty' ? empty : Object.freeze({ _tag: 'Indent', document })
+  document._tag === 'Empty' ? empty : { _tag: 'Indent', document }
 
 export const group = (document: Document): Document =>
-  document._tag === 'Empty' ? empty : Object.freeze({ _tag: 'Group', document })
+  document._tag === 'Empty' ? empty : { _tag: 'Group', document }
 
-export const ifBreak = (broken: Document, flat: Document = empty): Document =>
-  Object.freeze({ _tag: 'IfBreak', broken, flat })
+export const ifBreak = (broken: Document, flat: Document = empty): Document => ({
+  _tag: 'IfBreak',
+  broken,
+  flat,
+})
 
 type Mode = 'Flat' | 'Break'
 

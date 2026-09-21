@@ -18,6 +18,5 @@ it.effect('closes elaboration and ownership into one index-independent module ar
     assert.strictEqual(artifact.elaboration, snapshot.results.get('artifact/Main'))
     assert.strictEqual(artifact.ownership, snapshot.ownership.get('artifact/Main'))
     assert.notProperty(artifact.elaboration, 'index')
-    assert.isTrue(Object.isFrozen(artifact))
   }),
 )

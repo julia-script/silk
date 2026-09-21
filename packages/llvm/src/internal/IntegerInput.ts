@@ -41,5 +41,5 @@ export const normalizeAll = (
     if (Result.isFailure(result)) return Result.fail(result.failure)
     values.push(result.success)
   }
-  return Result.succeed(Object.freeze(values))
+  return Result.succeed(values)
 }

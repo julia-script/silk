@@ -14,14 +14,14 @@ export interface Plan {
   readonly cosine: ReadonlyArray<bigint>
 }
 
-const f32: Plan = Object.freeze({
+const f32: Plan = {
   width: 32,
   canonicalNaN: FloatingPoint.canonicalNaN(32),
   one: 0x3f800000n,
   half: 0x3f000000n,
   four: 0x40800000n,
   inverseHalfPi: 0x3f22f983n,
-  halfPi: Object.freeze([
+  halfPi: [
     0x3fc80000n,
     0x3c000000n,
     0x39f80000n,
@@ -32,33 +32,19 @@ const f32: Plan = Object.freeze({
     0x29880000n,
     0x27000000n,
     0x24880000n,
-  ]),
-  sine: Object.freeze([
-    0xbe2aaaabn,
-    0x3c088889n,
-    0xb9500d01n,
-    0x3638ef1bn,
-    0xb2d72f34n,
-    0x2f2ec9d3n,
-  ]),
-  cosine: Object.freeze([
-    0x3d2aaaabn,
-    0xbab60b61n,
-    0x37d00d01n,
-    0xb493f27cn,
-    0x310f74f6n,
-    0xad47d74en,
-  ]),
-})
+  ],
+  sine: [0xbe2aaaabn, 0x3c088889n, 0xb9500d01n, 0x3638ef1bn, 0xb2d72f34n, 0x2f2ec9d3n],
+  cosine: [0x3d2aaaabn, 0xbab60b61n, 0x37d00d01n, 0xb493f27cn, 0x310f74f6n, 0xad47d74en],
+}
 
-const f64: Plan = Object.freeze({
+const f64: Plan = {
   width: 64,
   canonicalNaN: FloatingPoint.canonicalNaN(64),
   one: 0x3ff0000000000000n,
   half: 0x3fe0000000000000n,
   four: 0x4010000000000000n,
   inverseHalfPi: 0x3fe45f306dc9c883n,
-  halfPi: Object.freeze([
+  halfPi: [
     0x3ff9200000000000n,
     0x3f3fb40000000000n,
     0x3e74440000000000n,
@@ -69,24 +55,24 @@ const f64: Plan = Object.freeze({
     0x3a1c060000000000n,
     0x394c1c0000000000n,
     0x387a240000000000n,
-  ]),
-  sine: Object.freeze([
+  ],
+  sine: [
     0xbfc5555555555549n,
     0x3f8111111110f8a6n,
     0xbf2a01a019c161d5n,
     0x3ec71de357b1fe7dn,
     0xbe5ae5e68a2b9cebn,
     0x3de5d93a5acfd57cn,
-  ]),
-  cosine: Object.freeze([
+  ],
+  cosine: [
     0x3fa555555555554cn,
     0xbf56c16c16c15177n,
     0x3efa01a019cb1590n,
     0xbe927e4f809c52adn,
     0x3e21ee9ebdb4b1c4n,
     0xbda8fae9be8838d4n,
-  ]),
-})
+  ],
+}
 
 export const plan = (width: 32 | 64): Plan => (width === 32 ? f32 : f64)
 
@@ -131,11 +117,11 @@ const reducedKernels = (residual: number, self: Plan): readonly [number, number]
 export const evaluate = (operation: Operation, input: FloatingPoint.Bits): FloatingPoint.Bits => {
   const self = plan(input.width)
   if (FloatingPoint.isNotANumber(input) || FloatingPoint.isInfinite(input))
-    return Object.freeze({ width: input.width, bits: self.canonicalNaN })
+    return { width: input.width, bits: self.canonicalNaN }
   if ((input.bits & ((1n << BigInt(input.width - 1)) - 1n)) === 0n) {
     return operation === 'Sin'
-      ? Object.freeze({ width: input.width, bits: BigInt.asUintN(input.width, input.bits) })
-      : Object.freeze({ width: input.width, bits: self.one })
+      ? { width: input.width, bits: BigInt.asUintN(input.width, input.bits) }
+      : { width: input.width, bits: self.one }
   }
 
   const value = number(input.bits, input.width)
