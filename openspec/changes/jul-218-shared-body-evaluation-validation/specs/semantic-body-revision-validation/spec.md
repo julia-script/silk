@@ -84,4 +84,3 @@ An interrupted or failed query execution MUST publish no reusable result. Cyclic
 
 - **WHEN** a complete checked-unit query is requested in forced-fresh mode and invokes evaluation and ownership queries
 - **THEN** every nested query executes without a current-session or prior-revision hit
-
