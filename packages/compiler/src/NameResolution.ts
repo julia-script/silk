@@ -744,7 +744,10 @@ export const resolveType = (
         second?.spelling === 'Type' ||
         second?.spelling === 'Fields' ||
         second?.spelling === 'Field' ||
-        second?.spelling === 'StaticSequence') &&
+        second?.spelling === 'StaticSequence' ||
+        second?.spelling === 'Test' ||
+        second?.spelling === 'Tests' ||
+        second?.spelling === 'TestInfo') &&
       path.segments.length === 2
     ) {
       const intrinsicType = Type.intrinsicNominals.get(`Intrinsic.${second.spelling}`)

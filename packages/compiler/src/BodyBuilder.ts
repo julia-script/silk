@@ -369,6 +369,8 @@ const staticValueExpression = (
     case 'FieldDescriptorValue':
     case 'FieldCollectionValue':
     case 'StaticSequenceValue':
+    case 'TestDescriptorValue':
+    case 'TestCollectionValue':
       return Object.freeze({ _tag: 'Unavailable', span, origin })
   }
 }
@@ -1769,7 +1771,10 @@ const residualExpression = (
   }
   if (fact._tag === 'FieldProjection') {
     if (
-      options.static === undefined &&
+      (options.static === undefined ||
+        (options.builder?.artifact.request._tag === 'Specialize' &&
+          fact.nominal !== undefined &&
+          Type.equals(fact.nominal, Type.testInfo))) &&
       fact.staticValue !== undefined &&
       fact.type._tag === 'Available'
     ) {

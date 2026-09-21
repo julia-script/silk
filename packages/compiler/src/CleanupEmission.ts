@@ -126,10 +126,22 @@ export const transitionAt = (
   fn: FunctionLowering,
   span: SourceSpan.SourceSpan,
   kind: Ownership.PlaceTransition['kind'],
-): Ownership.PlaceTransition | undefined =>
-  fn.ownership?.transitions.find(
-    (transition) => transition.kind === kind && spanKey(transition.span) === spanKey(span),
+  root?: Ownership.BindingSite,
+): Ownership.PlaceTransition | undefined => {
+  const canonicalRoot = (site: Ownership.BindingSite): Ownership.BindingSite => {
+    const alias = Ownership.allBindings(fn.ownership).find(
+      (binding) => Ownership.siteKey(binding.site) === Ownership.siteKey(site),
+    )?.place?.root
+    return alias === undefined ? site : canonicalRoot(alias)
+  }
+  const rootKey = root === undefined ? undefined : Ownership.siteKey(canonicalRoot(root))
+  return fn.ownership?.transitions.find(
+    (transition) =>
+      transition.kind === kind &&
+      spanKey(transition.span) === spanKey(span) &&
+      (rootKey === undefined || Ownership.siteKey(transition.root) === rootKey),
   )
+}
 
 /** Resolves a canonical source owner to its retained MIR storage. */
 export const ownershipLocal = (

@@ -28,15 +28,19 @@ import {
 export const selectCall = (
   calls: ReadonlyArray<Instances.CallInstance>,
   owner: Instances.InstanceKey,
-  span: SourceSpan.SourceSpan,
+  expression: { readonly span: SourceSpan.SourceSpan; readonly id?: Tir.NodeId },
   implementation?: DeclarationFacts.CanonicalId,
   typeArguments?: ReadonlyArray<Type.GenericArgument>,
   staticArguments?: ReadonlyArray<StaticValue.Value>,
   providers: ReadonlyArray<Instances.CallProvider> = [],
 ): Instances.CallInstance | undefined => {
+  const span = expression.span
   const atSite = calls.filter(
     (call) =>
       Instances.keyText(call.owner) === Instances.keyText(owner) &&
+      (expression.id === undefined ||
+        call.node === undefined ||
+        call.node.ordinal === expression.id.ordinal) &&
       call.span.sourceId === span.sourceId &&
       call.span.start === span.start &&
       call.span.end === span.end,
@@ -413,7 +417,7 @@ export class FunctionLowering {
   }
 
   call(
-    span: SourceSpan.SourceSpan,
+    expression: Tir.Expression,
     implementation?: DeclarationFacts.CanonicalId,
     typeArguments?: ReadonlyArray<Type.GenericArgument>,
     staticArguments?: ReadonlyArray<StaticValue.Value>,
@@ -422,7 +426,7 @@ export class FunctionLowering {
     return selectCall(
       this.calls,
       this.owner.key,
-      span,
+      expression,
       implementation,
       typeArguments,
       staticArguments,

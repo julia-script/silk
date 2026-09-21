@@ -2225,6 +2225,22 @@ export const semanticTokens = (
         : ImportPath.segments(path).map((segment) => segment.span.start)
     }),
   )
+  const testQualifierStarts = new Set<number>()
+  const collectTestQualifiers = (node: SyntaxTree.Node): void => {
+    if (node.kind === 'FunctionDeclaration' || node.kind === 'ForeignFunctionDeclaration') {
+      for (const element of node.children) {
+        if (SyntaxTree.isToken(element) && element.kind === 'FnKeyword') break
+        if (
+          SyntaxTree.isToken(element) &&
+          element.kind === 'Identifier' &&
+          Option.contains(SourceFile.spelling(syntax.source, element.span), 'test')
+        )
+          testQualifierStarts.add(element.span.start)
+      }
+    }
+    for (const child of node.children) if (SyntaxTree.isNode(child)) collectTestQualifiers(child)
+  }
+  collectTestQualifiers(syntax.root)
   const data: Array<number> = []
   const inactiveRanges = snapshot.selection?.inactiveRanges.get(self.module) ?? []
   let previousLine = 0
@@ -2237,6 +2253,8 @@ export const semanticTokens = (
     let type: string | undefined
     if (importPathSegmentStarts.has(token.span.start)) {
       type = SemanticTokenTypes.namespace
+    } else if (testQualifierStarts.has(token.span.start)) {
+      type = SemanticTokenTypes.keyword
     } else if (occurrence !== undefined && token.kind === 'Identifier') {
       type = occurrenceTokenType(snapshot, occurrence)
     } else {

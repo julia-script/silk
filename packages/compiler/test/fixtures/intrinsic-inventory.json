@@ -5569,6 +5569,27 @@
       "consumer": "silk/reflect.borrowField"
     },
     {
+      "operation": "Intrinsic.tests",
+      "signature": "fn Intrinsic.tests() -> Tests",
+      "unsafe": false,
+      "admission": "Language",
+      "consumer": "language:test-discovery"
+    },
+    {
+      "operation": "Intrinsic.testInfo",
+      "signature": "fn Intrinsic.testInfo<F>(descriptor: Test<F>) -> TestInfo",
+      "unsafe": false,
+      "admission": "Language",
+      "consumer": "language:test-discovery"
+    },
+    {
+      "operation": "Intrinsic.testFunction",
+      "signature": "fn Intrinsic.testFunction<F>(static descriptor: Test<F>) -> F",
+      "unsafe": false,
+      "admission": "Language",
+      "consumer": "language:test-discovery"
+    },
+    {
       "operation": "Intrinsic.staticSequenceEmpty",
       "signature": "fn Intrinsic.staticSequenceEmpty<Element>() -> StaticSequence<Element>",
       "unsafe": false,

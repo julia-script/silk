@@ -31,6 +31,7 @@ import * as SemanticInvalidation from './SemanticInvalidation.js'
 import * as SourceResolver from './SourceResolver.js'
 import * as ArtifactComposition from './ArtifactComposition.js'
 import * as CompilerTrace from './CompilerTrace.js'
+import * as TestDiscovery from './TestDiscovery.js'
 
 /** Optional environment-specific observations attached to compiler phase reports. */
 export interface Options {
@@ -61,6 +62,7 @@ export interface Frontend extends FrontendFacts {
   readonly configurationError?: ConfigurationError.ConfigurationError
   readonly requestedTarget?: string
   readonly configuration?: ModuleClosure.CompilationRequest['configuration']
+  readonly testCatalog?: TestDiscovery.Catalog
 }
 
 /** Immutable multi-root frontend facts computed once for one project revision. */
@@ -591,17 +593,43 @@ const selectModules = Effect.fn('Frontend.selectModules')(function* (
   completion: ProfileBootstrap.Completion,
 ) {
   const selected = yield* ModuleSelection.select(
-    { roots: [request.root], additionalRoots: roots.modules, application: request.root },
+    {
+      roots: [request.root, ...(request.discovery === undefined ? [] : [request.discovery.root])],
+      additionalRoots: roots.modules,
+      application: request.root,
+    },
     {
       ...closure,
       _tag: 'ProjectModuleClosure',
-      rootModules: [request.root, ...roots.modules.filter((module) => closure.sources.has(module))],
+      rootModules: [
+        request.root,
+        ...(request.discovery === undefined ? [] : [request.discovery.root]),
+        ...roots.modules.filter((module) => closure.sources.has(module)),
+      ],
     },
     completion,
   )
   const selectedClosure = ModuleClosure.view(selected.closure, closure.rootModule)
   if (selectedClosure === undefined) throw new RangeError('Module selection lost its root')
+  yield* ModuleClosure.validateDiscoverySources(request, selectedClosure)
   return { closure: selectedClosure, selection: selected.selection }
+})
+
+const attachTestCatalog = Effect.fn('Frontend.attachTestCatalog')(function* (
+  frontend: Frontend,
+  request: ModuleClosure.CompilationRequest,
+): Effect.fn.Return<Frontend> {
+  if (request.discovery === undefined) return frontend
+  const testCatalog = yield* TestDiscovery.make(
+    request.discovery,
+    frontend.closure,
+    frontend.index,
+    frontend.results,
+  ).pipe(Effect.orDie)
+  return OpaqueRealization.withCatalog(
+    Object.freeze({ ...frontend, testCatalog }),
+    OpaqueRealization.catalogOf(frontend),
+  )
 })
 
 const finalizeSelection = Effect.fn('Frontend.finalizeSelection')(
@@ -663,14 +691,17 @@ export const frontend = Effect.fn('Frontend.frontend')(function* (
     configuration,
     bindings,
   )
-  if (!requiresSelection) return unselected
+  if (!requiresSelection) return yield* attachTestCatalog(unselected, request)
 
   const configured = yield* Realization.configure(unselected, request.target)
   if (configured.completion === undefined)
     return yield* diagnoseIncompleteProfile(configured.frontend, closure, request.target)
   const selected = yield* selectModules(request, closure, roots, configured.completion)
   const selectedFacts = yield* analyzeFrontend(selected.closure, report, options)
-  return yield* finalizeSelection(unselected, selectedFacts, selected.closure, selected.selection)
+  return yield* attachTestCatalog(
+    yield* finalizeSelection(unselected, selectedFacts, selected.closure, selected.selection),
+    request,
+  )
 }, SourceResolver.withSnapshot)
 
 /** Selected module closure and headers shared by compilation and source catalogs. */

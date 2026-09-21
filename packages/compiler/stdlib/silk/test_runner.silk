@@ -1,0 +1,165 @@
+//! Builtin sequential test runner assembled from public static test primitives.
+//!
+//! # Details
+//!
+//! This module is an ordinary Silk application selected by `silk test`. It discovers tests from
+//! the compilation request, applies runtime-only filters, invokes matching tests sequentially, and
+//! returns process status 0, 1, or 2. Equal fingerprints never skip execution.
+
+import silk.allocator { Allocator, OutOfMemoryError }
+import silk.bytes { Bytes }
+import silk.effect { Effect }
+import silk.format { Format }
+import silk.host_input { HostInput, HostInputError }
+import silk.os_writer { StdoutWriter }
+import silk.result { Result }
+import silk.string { InvalidUtf8 }
+import silk.testing { Testing }
+import silk.vector { Vector }
+import silk.writer { Writer, WriterError }
+import silk.usize
+
+struct TestOutcome<T> {}
+
+interface CompleteTest<T> {
+  fn passed(value: T) -> bool
+}
+
+impl CompleteTest<()> for TestOutcome<()> {
+  fn passed(value: ()) -> bool { return true }
+}
+
+effect fn testFailed<E>(error: E) -> bool {
+  drop error
+  let status = Intrinsic.observeUnhandled()
+  drop status
+  return false
+}
+
+effect fn testSucceeded(value: ()) -> bool { return true }
+
+impl<'env, E> CompleteTest<Effect<'env; () ! E>> for TestOutcome<Effect<'env; () ! E>> {
+  fn passed(value: Effect<'env; () ! E>) -> bool {
+    let completed = Effect.flatMap(move value, testSucceeded)
+    return run Effect.catchAll(move completed, testFailed)
+  }
+}
+
+fn selectOutcome<T>(value: &T) -> TestOutcome<T> { return TestOutcome<T> {} }
+
+fn completeTest<T, P: CompleteTest<T>>(value: T, provider: P) -> bool {
+  return CompleteTest<T>.passed(move value)
+}
+
+effect fn writeResult(module: string, name: string, passed: bool) -> () ! WriterError ? &mut Writer {
+  let identity = .{module: module, name: name}
+  if passed {
+    return run Format.format("pass {module}::{name}\n", &identity)
+  }
+  return run Format.format("fail {module}::{name}\n", &identity)
+}
+
+effect fn runSelected<'file, 'name>(fileFilter: string<'file>, nameFilter: string<'name>) -> i32
+! WriterError
+? &mut Writer {
+  let mut discovered = usize.ZERO
+  let mut selected = usize.ZERO
+  let mut passed = usize.ZERO
+  let mut failed = usize.ZERO
+  static for descriptor in Intrinsic.tests() {
+    discovered = discovered + usize.ONE
+    if Testing.matches(
+      Intrinsic.testInfo(descriptor).path,
+      Intrinsic.testInfo(descriptor).name,
+      fileFilter,
+      nameFilter,
+    ) {
+      selected = selected + usize.ONE
+      let module = Intrinsic.testInfo(descriptor).module
+      let name = Intrinsic.testInfo(descriptor).name
+      let identity = .{module: module, name: name}
+      run Format.format("test {module}::{name}\n", &identity)
+      let body = Intrinsic.testFunction(descriptor)
+      let value = body()
+      let provider = selectOutcome(&value)
+      let ok = completeTest(move value, move provider)
+      run writeResult(module, name, ok)
+      if ok { passed = passed + usize.ONE } else { failed = failed + usize.ONE }
+    }
+  }
+  let summary = .{discovered: discovered, selected: selected, passed: passed, failed: failed}
+  run Format.format(
+    "summary: {discovered} discovered, {selected} selected, {passed} passed, {failed} failed\n",
+    &summary,
+  )
+  if failed == usize.ZERO { return 0 }
+  return 1
+}
+
+fn argumentText<'arguments>(arguments: &'arguments [Bytes], index: usize) -> Result<string<'arguments>, InvalidUtf8> {
+  return HostInput.text(Bytes.asSlice(&arguments[index]))
+}
+
+fn argumentOrEmpty<'arguments>(
+  arguments: &'arguments [Bytes],
+  index: usize,
+) -> Result<string<'arguments>, InvalidUtf8> {
+  if index == usize.ZERO {
+    return Result.succeed<string<'arguments>, InvalidUtf8>("")
+  }
+  return argumentText(arguments, index)
+}
+
+effect fn executeArguments<'arguments>(values: &'arguments [Bytes]) -> i32 ! WriterError {
+  let mut fileIndex = usize.ZERO
+  let mut nameIndex = usize.ZERO
+  let mut index = usize.ONE
+  while index < values.length {
+    let option = match move argumentText(values, index) {
+      Result<string, InvalidUtf8>.Success { value } => move value
+      Result<string, InvalidUtf8>.Failure { error } => { drop error return 2 }
+    }
+    if index + usize.ONE >= values.length { return 2 }
+    if Intrinsic.stringEqualsExact(option, "--file") {
+      fileIndex = index + usize.ONE
+    } else {
+      if Intrinsic.stringEqualsExact(option, "--filter") {
+        nameIndex = index + usize.ONE
+      } else {
+        return 2
+      }
+    }
+    index = index + 2
+  }
+  let fileFilter = match move argumentOrEmpty(values, fileIndex) {
+    Result<string, InvalidUtf8>.Success { value } => move value
+    Result<string, InvalidUtf8>.Failure { error } => { drop error return 2 }
+  }
+  let nameFilter = match move argumentOrEmpty(values, nameIndex) {
+    Result<string, InvalidUtf8>.Success { value } => move value
+    Result<string, InvalidUtf8>.Failure { error } => { drop error return 2 }
+  }
+  let mut writer = StdoutWriter.make()
+  return run runSelected(fileFilter, nameFilter)
+    |> Effect.provideMut<Writer>(&mut writer)
+}
+
+effect fn execute() -> i32
+! HostInputError | OutOfMemoryError | WriterError
+? &mut HostInput {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let collected = HostInput.arguments()
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let arguments = run collected
+  return run executeArguments(Vector.asSlice(&arguments))
+}
+
+effect fn operationalFailure<E>(error: E) -> i32 {
+  drop error
+  return 2
+}
+
+/// Runs every selected discovered test sequentially and returns a process status.
+pub effect fn main() -> i32 ? &mut HostInput {
+  return run Effect.catchAll(execute(), operationalFailure)
+}

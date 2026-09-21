@@ -950,6 +950,17 @@
     "aliases": ["Arch"]
   },
   {
+    "module": "silk/test_runner",
+    "path": "silk/test_runner.silk",
+    "namespace": "TestRunner"
+  },
+  {
+    "module": "silk/testing",
+    "path": "silk/testing.silk",
+    "namespace": "Testing",
+    "aliases": ["AssertionError"]
+  },
+  {
     "module": "silk/tls_client",
     "path": "silk/tls_client.silk",
     "namespace": "Client",

@@ -10,7 +10,7 @@ import type * as HeapObservation from '@silklang/compiler/HeapObservation'
 import * as NativeToolchain from '@silklang/compiler/NativeToolchain'
 import type * as NativeLinkInput from '@silklang/compiler/NativeLinkInput'
 import * as Project from '@silklang/compiler/Project'
-import type * as SourceEntry from '@silklang/compiler/SourceEntry'
+import * as SourceEntry from '@silklang/compiler/SourceEntry'
 import * as SourceFile from '@silklang/compiler/SourceFile'
 import type * as Target from '@silklang/compiler/Target'
 import type * as ToolchainPlan from '@silklang/compiler/ToolchainPlan'
@@ -56,6 +56,9 @@ export interface CompileOptions {
   readonly nativeBindings?: ReadonlyArray<NativeRequirementBinding.NativeRequirementBinding>
   readonly stage?: ArtifactPlan.Stage
   readonly entry: SourceEntry.SourceEntry
+  /** Application root when it differs from the project source entry used by the resolver. */
+  readonly root?: string
+  readonly discovery?: NonNullable<ModuleClosure.CompilationRequest['discovery']>
   readonly target?: string
   readonly configuration?: ModuleClosure.CompilationRequest['configuration']
   readonly optimization?: ToolchainPlan.OptimizationProfile
@@ -135,7 +138,8 @@ export const compile = Effect.fn('Workflow.compile')(function* (
   const attempted = yield* Effect.result(
     Driver.compile({
       compilation: {
-        root: options.entry.module,
+        root: options.root ?? options.entry.module,
+        ...(options.discovery === undefined ? {} : { discovery: options.discovery }),
         ...(options.configuration === undefined && options.target !== undefined
           ? { target: options.target }
           : {}),
@@ -596,7 +600,7 @@ export const run = Effect.fn('Workflow.run')(function* (
   if (Result.isFailure(loaded)) return yield* reportPreparationFailure(loaded.failure)
   const planned = yield* Effect.result(planBatch(loaded.success, options, 'run'))
   if (Result.isFailure(planned)) return yield* reportPreparationFailure(planned.failure)
-  const plan = planned.success.plans[0]
+  const [plan] = planned.success.plans
   const attempted = yield* compile({
     verifyMir: options.verifyMir ?? false,
     entry: plan.project.entry,
@@ -618,6 +622,94 @@ export const run = Effect.fn('Workflow.run')(function* (
     yield* Console.error('The compiler did not produce a runnable executable')
     return 2
   }
+  const executed = yield* Effect.result(Program.run(attempted.artifact, arguments_))
+  if (Result.isFailure(executed)) {
+    yield* Console.error(executed.failure.message)
+    return 2
+  }
+  return executed.success
+})
+
+export interface TestSelection extends ProjectSelection {
+  /** Manifest-relative project source root used only for test discovery. */
+  readonly root?: string
+  /** Exact project-relative logical source path selected at runtime. */
+  readonly file?: string
+  /** Literal ASCII case-insensitive test-name substring selected at runtime. */
+  readonly filter?: string
+}
+
+/** Builds the bundled source runner for one explicit discovery root and preserves its exit status. */
+export const test = Effect.fn('Workflow.test')(function* (
+  options: TestSelection,
+): Effect.fn.Return<
+  number,
+  never,
+  | ChildProcessSpawner.ChildProcessSpawner
+  | FileSystem.FileSystem
+  | HeapObservation.HeapObservation
+  | Path.Path
+> {
+  const path = yield* Path.Path
+  const loaded = yield* Effect.result(loadProject(options))
+  if (Result.isFailure(loaded)) return yield* reportPreparationFailure(loaded.failure)
+  const project = loaded.success
+  const logicalRootRelative = path.relative(project.directory, project.entry.sourceRoot)
+  const logicalRoot =
+    logicalRootRelative.length === 0 ? undefined : logicalRootRelative.split(path.sep).join('/')
+  const discoveryEntry =
+    options.root === undefined
+      ? Result.succeed(project.entry)
+      : yield* Effect.result(
+          SourceEntry.select(
+            path.resolve(project.directory, options.root),
+            project.entry.sourceRoot,
+          ),
+        )
+  if (Result.isFailure(discoveryEntry))
+    return yield* reportPreparationFailure(discoveryEntry.failure)
+
+  let file: string | undefined
+  if (options.file !== undefined) {
+    const selected = yield* Effect.result(
+      SourceEntry.select(path.resolve(project.directory, options.file), project.entry.sourceRoot),
+    )
+    if (Result.isFailure(selected)) return yield* reportPreparationFailure(selected.failure)
+    const relative = path.relative(project.directory, selected.success.path)
+    file = relative.split(path.sep).join('/')
+  }
+
+  const planned = yield* Effect.result(planBatch(project, options, 'test'))
+  if (Result.isFailure(planned)) return yield* reportPreparationFailure(planned.failure)
+  const [plan] = planned.success.plans
+  const attempted = yield* compile({
+    verifyMir: options.verifyMir ?? false,
+    entry: discoveryEntry.success,
+    root: 'silk/test_runner',
+    discovery: Object.freeze({
+      root: discoveryEntry.success.module,
+      ...(logicalRoot === undefined ? {} : { logicalRoot }),
+    }),
+    target: plan.target.id,
+    configuration: BuildPlan.compilationConfiguration(plan),
+    artifactKind: plan.artifactKind,
+    packageName: `${plan.project.name}-test`,
+    destination: plan.destination,
+    toolchain: plan.toolchain,
+    nativeLinkInputs: plan.nativeLinkInputs,
+    ...(plan.project.build.nativeBindings === undefined
+      ? {}
+      : { nativeBindings: plan.project.build.nativeBindings }),
+    scopeName: `${plan.project.name}-test`,
+  })
+  if (attempted._tag === 'NotBuilt') return attempted.status
+  if (attempted.artifactKind !== 'NativeExecutable') {
+    yield* Console.error('The compiler did not produce a runnable test executable')
+    return 2
+  }
+  const arguments_: Array<string> = []
+  if (file !== undefined) arguments_.push('--file', file)
+  if (options.filter !== undefined) arguments_.push('--filter', options.filter)
   const executed = yield* Effect.result(Program.run(attempted.artifact, arguments_))
   if (Result.isFailure(executed)) {
     yield* Console.error(executed.failure.message)

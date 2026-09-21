@@ -1483,6 +1483,33 @@ it.effect('preserves the C variadic boundary while formatting declarations', () 
   }),
 )
 
+it.effect('formats contextual test qualifiers without changing ordinary test identifiers', () =>
+  Effect.gen(function* () {
+    const source = `pub   test   effect fn checked( )->(){ }
+fn test( )->(){ }
+fn use(test:i32)->i32{return test}`
+    const original = parse('memory://test-format.silk', source)
+    assert.deepEqual(original.parserDiagnostics, [])
+    const first = yield* SyntaxFormatter.format(original)
+    const text = formattedText(first)
+    assert.strictEqual(
+      text,
+      `pub test effect fn checked() -> () {}
+
+fn test() -> () {}
+
+fn use(test: i32) -> i32 {
+  return test
+}
+`,
+    )
+    const reparsed = parse('memory://test-format-2.silk', text)
+    assert.deepEqual(reparsed.parserDiagnostics, [])
+    assert.deepEqual(normalized(reparsed, reparsed.root), normalized(original, original.root))
+    assert.strictEqual(formattedText(yield* SyntaxFormatter.format(reparsed)), text)
+  }),
+)
+
 for (const [name, source, expected] of [
   [
     'three imports and a following declaration',

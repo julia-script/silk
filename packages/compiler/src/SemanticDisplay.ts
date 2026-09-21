@@ -208,7 +208,7 @@ export const functionDeclaration = (self: DeclarationFacts.DeclarationFact): Pre
   const visibility = self.visibility === 'Public' ? 'pub ' : ''
   const phase = self.phase === 'Static' ? 'static ' : ''
   const native = nativeMarker(self)
-  const kind = `${phase}${self.unsafe ? 'unsafe ' : ''}${native?.marker ?? ''}${self.functionKind === 'Effect' ? `effect<${Lifetime.display(DeclarationFacts.executableLifetimes(self).environment)}> fn` : 'fn'}`
+  const kind = `${self.test ? 'test ' : ''}${phase}${self.unsafe ? 'unsafe ' : ''}${native?.marker ?? ''}${self.functionKind === 'Effect' ? `effect<${Lifetime.display(DeclarationFacts.executableLifetimes(self).environment)}> fn` : 'fn'}`
   const symbol = native === undefined ? '' : ` as "${native.symbol}"`
   const behavior =
     self.foreign === undefined && self.foreignExport === undefined

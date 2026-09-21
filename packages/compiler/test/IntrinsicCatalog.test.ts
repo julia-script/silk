@@ -402,7 +402,8 @@ it.effect('keeps every intrinsic identifiable and presentable in rejected calls'
         if (
           operation.rule._tag === 'EnumValueRule' ||
           operation.rule._tag === 'StaticOnlyRule' ||
-          operation.rule._tag === 'MixedFieldProjectionRule'
+          operation.rule._tag === 'MixedFieldProjectionRule' ||
+          operation.rule._tag === 'MixedTestFunctionRule'
         )
           continue
         const arguments_ = operation.parameters.length === 0 ? '0' : ''

@@ -254,7 +254,7 @@ it('recovers admitted call providers across proof lifetimes without changing phy
     resultEffect: 'first',
   }
   const select = (calls: ReadonlyArray<Instances.CallInstance>, selected: Instances.CallProvider) =>
-    FunctionLowering.selectCall(calls, owner, span, undefined, [], [], [selected])
+    FunctionLowering.selectCall(calls, owner, { span }, undefined, [], [], [selected])
   assert.strictEqual(select([retained], provider(first)), retained)
   assert.strictEqual(select([retained], provider(second)), retained)
   assert.isUndefined(select([retained], provider(second, 'OtherLoan')))
@@ -268,5 +268,47 @@ it('recovers admitted call providers across proof lifetimes without changing phy
       ...provider(second),
       capability: Type.nominal('provider-lookup', 'OtherTransport', []),
     }),
+  )
+})
+
+it('selects independently expanded calls that share one authored span', () => {
+  const key = (name: string): Instances.InstanceKey => ({
+    _tag: 'InstanceKey',
+    declaration: { _tag: 'CanonicalDeclarationId', module: 'static-expansion', name },
+    typeArguments: [],
+    evidence: [],
+    staticArguments: [],
+    contractRow: [],
+  })
+  const owner = key('caller')
+  const span = Option.getOrElse(
+    SourceSpan.make(SourceFile.make('static-expansion', encoder.encode('x')), 0, 1),
+    () => unreachable('valid span'),
+  )
+  const first: Instances.CallInstance = {
+    _tag: 'CallInstance',
+    owner,
+    node: { _tag: 'TirNode', ordinal: 1 },
+    span,
+    target: key('first'),
+  }
+  const second: Instances.CallInstance = {
+    _tag: 'CallInstance',
+    owner,
+    node: { _tag: 'TirNode', ordinal: 2 },
+    span,
+    target: key('second'),
+  }
+
+  assert.strictEqual(
+    FunctionLowering.selectCall(
+      [first, second],
+      owner,
+      { span, id: { _tag: 'TirNode', ordinal: 2 } },
+      undefined,
+      [],
+      [],
+    ),
+    second,
   )
 })

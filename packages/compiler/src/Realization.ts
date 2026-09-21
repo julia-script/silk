@@ -14,6 +14,7 @@ import * as ProfileBootstrap from './ProfileBootstrap.js'
 import type * as DeclarationIndex from './DeclarationIndex.js'
 import type * as Elaboration from './Elaboration.js'
 import type * as NameResolution from './NameResolution.js'
+import type * as TestDiscovery from './TestDiscovery.js'
 
 /**
  * Every diagnostic family judged against reachable concrete instances, collected once so that
@@ -44,6 +45,7 @@ export interface InstantiationInput {
   readonly completion: ProfileBootstrap.Completion
   readonly resolution: NameResolution.Resolution
   readonly composition: ArtifactComposition.Resolved
+  readonly testCatalog?: TestDiscovery.Catalog
 }
 
 const instantiateWithTrace = (
@@ -60,6 +62,7 @@ const instantiateWithTrace = (
     input.resolution,
     input.composition,
     trace,
+    input.testCatalog,
   )
 }
 
@@ -130,6 +133,7 @@ const discoverInstances = Effect.fn('Realization.discoverInstances')(function* (
               completion,
               resolution: self.resolution,
               composition: self.composition,
+              ...(self.testCatalog === undefined ? {} : { testCatalog: self.testCatalog }),
             },
             trace,
           ),

@@ -207,6 +207,8 @@ export interface CallableContract extends Node {
   readonly requirements: RequirementRow | undefined
   readonly constraints: ReadonlyArray<Constraint>
   readonly effect: boolean
+  /** Whether this named function was marked for test discovery. */
+  readonly test: boolean
   readonly environment: ReadonlyArray<Lifetime> | undefined
   readonly unsafe: boolean
   readonly static: boolean
@@ -216,6 +218,7 @@ export interface CallableContract extends Node {
    * only implies carries no anchor.
    */
   readonly effectAnchor: Anchor | undefined
+  readonly testAnchor: Anchor | undefined
   readonly unsafeAnchor: Anchor | undefined
   readonly staticAnchor: Anchor | undefined
   /** The written binder list including its brackets, so a diagnostic can name the list as a whole. */
@@ -799,10 +802,12 @@ export const fields = freezeFieldRegistry({
     'requirements',
     'constraints',
     'effect',
+    'test',
     'environment',
     'unsafe',
     'static',
     'effectAnchor',
+    'testAnchor',
     'unsafeAnchor',
     'staticAnchor',
     'genericsAnchor',
@@ -945,6 +950,7 @@ export const optionalFields = freezeFieldRegistry({
     'requirements',
     'environment',
     'effectAnchor',
+    'testAnchor',
     'unsafeAnchor',
     'staticAnchor',
     'genericsAnchor',

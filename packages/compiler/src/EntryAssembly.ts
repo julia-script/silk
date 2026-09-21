@@ -173,7 +173,7 @@ export const requireGeneratedEffectRunner = (
   if (outcome._tag === 'UnavailableGeneratedEffectRunner')
     throw new GeneratedEffectRunnerLoweringError({
       failure: outcome,
-      message: `Generated Effect runner ${outcome.runner.module}:${outcome.runner.name} failed to lower at ${outcome.cause.provenance.span.sourceId}:${outcome.cause.provenance.span.start}-${outcome.cause.provenance.span.end}`,
+      message: `Generated Effect runner ${outcome.runner.module}:${outcome.runner.name} failed to lower ${outcome.cause.boundary.toLowerCase()} ${outcome.cause.construct}${outcome.cause.reason === undefined ? '' : ` (${outcome.cause.reason._tag})`} at ${outcome.cause.provenance.span.sourceId}:${outcome.cause.provenance.span.start}-${outcome.cause.provenance.span.end}`,
     })
   return outcome.runner
 }

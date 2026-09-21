@@ -7,7 +7,7 @@
 //!
 //! # Details
 //!
-//! The application returns i32, unit, or an Effect producing unit. The Effect may require mutable
+//! The application returns i32, unit, or an Effect producing unit or i32. The Effect may require mutable
 //! HostInput; startup provides an owned argument/environment snapshot. Other requirements must
 //! be supplied by application source. Returned and directly authored Effects use the same policy.
 //!
@@ -61,6 +61,9 @@ static if (Intrinsic.targetOperatingSystem() == "darwin" && Intrinsic.targetArch
   effect fn succeeded(value: ()) -> i32 {
     return 0
   }
+  effect fn succeededStatus(value: i32) -> i32 {
+    return value
+  }
   impl<'env, E> EntryResult<Effect<'env; () ! E>> for Application<Effect<'env; () ! E>> {
     fn code(value: Effect<'env; () ! E>, inputs: &mut OsHostInput) -> i32 {
       let computation = Effect.flatMap(move value, succeeded)
@@ -73,6 +76,21 @@ static if (Intrinsic.targetOperatingSystem() == "darwin" && Intrinsic.targetArch
     fn code(value: Effect<'env; () ! E ? &mut HostInput>, inputs: &mut OsHostInput) -> i32 {
       let supplied = Effect.provideMut<HostInput>(move value, move inputs)
       let computation = Effect.flatMap(move supplied, succeeded)
+      return run Effect.catchAll(move computation, failed)
+    }
+  }
+  impl<'env, E> EntryResult<Effect<'env; i32 ! E>> for Application<Effect<'env; i32 ! E>> {
+    fn code(value: Effect<'env; i32 ! E>, inputs: &mut OsHostInput) -> i32 {
+      let computation = Effect.flatMap(move value, succeededStatus)
+      return run Effect.catchAll(move computation, failed)
+    }
+  }
+  impl<'env, E> EntryResult<Effect<'env; i32 ! E ? &mut HostInput>> for Application<
+    Effect<'env; i32 ! E ? &mut HostInput>,
+  > {
+    fn code(value: Effect<'env; i32 ! E ? &mut HostInput>, inputs: &mut OsHostInput) -> i32 {
+      let supplied = Effect.provideMut<HostInput>(move value, move inputs)
+      let computation = Effect.flatMap(move supplied, succeededStatus)
       return run Effect.catchAll(move computation, failed)
     }
   }

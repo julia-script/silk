@@ -13,6 +13,7 @@ import * as Json from './support/Json.js'
 import * as ArtifactKind from '../src/ArtifactKind.js'
 import * as NativeLinkInput from '../src/NativeLinkInput.js'
 import * as NativeToolchain from '../src/NativeToolchain.js'
+import type * as ModuleClosure from '../src/ModuleClosure.js'
 import * as Linker from '../src/Linker.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
@@ -83,6 +84,9 @@ const compileSource = Effect.fnUntraced(function* (
     readonly artifactCache?: NativeToolchain.ArtifactCache
     readonly optimization?: CompilationProfile.Optimization
     readonly debug?: boolean
+    readonly sourceModule?: string
+    readonly root?: string
+    readonly discovery?: ModuleClosure.CompilationRequest['discovery']
   } = {},
 ) {
   const profile = yield* CompilationProfile.normalize({
@@ -93,7 +97,8 @@ const compileSource = Effect.fnUntraced(function* (
   })
   return yield* Driver.compile({
     compilation: {
-      root: 'memory/driver',
+      root: options.root ?? options.sourceModule ?? 'memory/driver',
+      ...(options.discovery === undefined ? {} : { discovery: options.discovery }),
       configuration: {
         profile: CompilationProfile.input(profile),
         package: `${options.packageName ?? 'compiler-test'}@0.0.0`,
@@ -116,7 +121,9 @@ const compileSource = Effect.fnUntraced(function* (
       : { nativeLinkInputs: options.nativeLinkInputs }),
   }).pipe(
     Effect.provide(
-      SourceResolver.overlay([SourceFile.make('memory/driver', ascii(text))]).pipe(
+      SourceResolver.overlay([
+        SourceFile.make(options.sourceModule ?? 'memory/driver', ascii(text)),
+      ]).pipe(
         Layer.provideMerge(
           imports === undefined
             ? SourceResolver.empty
@@ -438,6 +445,207 @@ it.effect.skipIf(!runFixedTests)(
       assert.strictEqual(spawnSync(staticExecutable).status, 42)
     }),
   60_000,
+)
+
+it.effect.skipIf(!runFixedTests)(
+  'runs the bundled test runner through typed failure, cleanup, filtering, and fatal traps',
+  () =>
+    NativeToolchain.withBuildScope('source-test-runner', (scope) =>
+      Effect.gen(function* () {
+        const target = yield* NativeToolchain.hostTarget()
+        const counter = yield* NativeToolchain.compileCObject(
+          toolchain,
+          scope,
+          target,
+          'test-release-counter',
+          `static int releases = 0;
+void silk_test_reset_releases(void) { releases = 0; }
+void silk_test_mark_release(void) { releases += 1; }
+int silk_test_release_count(void) { return releases; }`,
+        )
+        const tests = `import silk.effect { Effect }
+unsafe extern "C" fn silk_test_reset_releases() -> ()
+unsafe extern "C" fn silk_test_mark_release() -> ()
+unsafe extern "C" fn silk_test_release_count() -> i32
+
+pub struct ExpectedFailure {}
+pub struct CleanupFailure {}
+
+effect fn use(resource: &mut i32) -> () {
+  resource.* = 42
+  return ()
+}
+
+effect fn release(resource: &mut i32) -> () {
+  drop resource
+  unsafe silk_test_mark_release()
+  return ()
+}
+
+fn choose(values: [i32; 1], index: usize) -> i32 { return values[index] }
+
+test effect fn failsBeforeContinuation() -> () ! ExpectedFailure { fail ExpectedFailure {} }
+
+test effect fn cleanupExactlyOnce() -> () ! CleanupFailure {
+  unsafe silk_test_reset_releases()
+  run Effect.useReleaseNonParking(0, use, release)
+  if unsafe silk_test_release_count() != 1 { drop choose([0], 1) }
+}
+
+test fn runsAfterFailure() -> () {
+  if unsafe silk_test_release_count() != 1 { drop choose([0], 1) }
+}
+`
+        const outcome = yield* compileSource(
+          'source-test-runner',
+          'import tests.Cases\nimport tests.Trap',
+          {
+            'tests/Cases': tests,
+            'tests/Trap':
+              'fn choose(values: [i32; 1], index: usize) -> i32 { return values[index] }\ntest fn fatalTrap() -> () { drop choose([0], 1) }',
+          },
+          {
+            sourceModule: 'tests/Root',
+            root: 'silk/test_runner',
+            discovery: {
+              root: 'tests/Root',
+              sources: new Map([
+                ['tests/Root', { ownership: 'Project', logicalPath: 'tests/Root.silk' }],
+                ['tests/Cases', { ownership: 'Project', logicalPath: 'tests/Cases.silk' }],
+                ['tests/Trap', { ownership: 'Project', logicalPath: 'tests/Trap.silk' }],
+              ]),
+            },
+            nativeLinkInputs: [NativeLinkInput.object(counter.artifact.path)],
+          },
+        )
+        assert.strictEqual(outcome._tag, 'Compiled', Json.stringify(outcome))
+        if (outcome._tag !== 'Compiled') return
+
+        const first = yield* runCompiled(outcome.path, {
+          arguments: ['--file', 'tests/Cases.silk'],
+        })
+        const second = yield* runCompiled(outcome.path, {
+          arguments: ['--file', 'tests/Cases.silk'],
+        })
+        assert.strictEqual(
+          first.status,
+          1,
+          Json.stringify({
+            status: first.status,
+            signal: first.signal,
+            stdout: first.stdout,
+            stderr: first.stderr,
+          }),
+        )
+        assert.strictEqual(
+          second.status,
+          1,
+          Json.stringify({
+            status: second.status,
+            signal: second.signal,
+            stdout: second.stdout,
+            stderr: second.stderr,
+          }),
+        )
+        assert.strictEqual(second.stdout, first.stdout)
+        assert.include(first.stdout, 'fail tests/Cases::failsBeforeContinuation')
+        assert.include(first.stdout, 'pass tests/Cases::cleanupExactlyOnce')
+        assert.include(first.stdout, 'pass tests/Cases::runsAfterFailure')
+        assert.include(first.stdout, 'summary: 4 discovered, 3 selected, 2 passed, 1 failed')
+        assert.match(first.stderr, /ExpectedFailure/)
+        assert.isBelow(
+          first.stdout.indexOf('fail tests/Cases::failsBeforeContinuation'),
+          first.stdout.indexOf('pass tests/Cases::runsAfterFailure'),
+        )
+
+        const filtered = yield* runCompiled(outcome.path, {
+          arguments: ['--file', 'tests/Cases.silk', '--filter', 'CLEANUP'],
+        })
+        assert.strictEqual(filtered.status, 0, filtered.stderr)
+        assert.include(filtered.stdout, 'pass tests/Cases::cleanupExactlyOnce')
+        assert.include(filtered.stdout, 'summary: 4 discovered, 1 selected, 1 passed, 0 failed')
+
+        const empty = yield* runCompiled(outcome.path, {
+          arguments: ['--filter', 'does-not-exist'],
+        })
+        assert.strictEqual(empty.status, 0, empty.stderr)
+        assert.include(empty.stdout, 'summary: 4 discovered, 0 selected, 0 passed, 0 failed')
+
+        const malformed = yield* runCompiled(outcome.path, {
+          arguments: ['--unknown', 'value'],
+        })
+        assert.strictEqual(malformed.status, 2, malformed.stderr)
+
+        const trapped = yield* runCompiled(outcome.path, {
+          arguments: ['--file', 'tests/Trap.silk'],
+        })
+        assert.strictEqual(
+          trapped.signal !== null || (trapped.status !== null && trapped.status !== 0),
+          true,
+          `expected fatal test trap, native exited ${trapped.status}`,
+        )
+        assert.include(trapped.stdout, 'test tests/Trap::fatalTrap')
+        assert.notInclude(trapped.stdout, 'summary:')
+      }),
+    ),
+  120_000,
+)
+
+it.effect.skipIf(!runFixedTests)(
+  'runs a source-defined custom runner against a separate discovery root',
+  () =>
+    NativeToolchain.withBuildScope('custom-source-test-runner', (scope) =>
+      Effect.gen(function* () {
+        const target = yield* NativeToolchain.hostTarget()
+        const observations = yield* NativeToolchain.compileCObject(
+          toolchain,
+          scope,
+          target,
+          'custom-test-observations',
+          `static int observed = 0;
+void silk_test_observe_first(void) { observed += 10; }
+void silk_test_observe_second(void) { observed += 2; }
+int silk_test_observed(void) { return observed; }`,
+        )
+        const outcome = yield* compileSource(
+          'custom-source-test-runner',
+          `unsafe extern "C" fn silk_test_observed() -> i32
+pub fn main() -> i32 {
+  let mut count = 0
+  static for descriptor in Intrinsic.tests() {
+    let body = Intrinsic.testFunction(descriptor)
+    body()
+    count = count + 1
+  }
+  if count != 2 { return 1 }
+  return unsafe silk_test_observed()
+}`,
+          {
+            'custom/Tests': `unsafe extern "C" fn silk_test_observe_first() -> ()
+unsafe extern "C" fn silk_test_observe_second() -> ()
+test fn first() { unsafe silk_test_observe_first() }
+test fn second() { unsafe silk_test_observe_second() }`,
+          },
+          {
+            sourceModule: 'memory/custom_runner',
+            discovery: {
+              root: 'custom/Tests',
+              sources: new Map([
+                ['custom/Tests', { ownership: 'Project', logicalPath: 'custom/Tests.silk' }],
+              ]),
+            },
+            nativeLinkInputs: [NativeLinkInput.object(observations.artifact.path)],
+          },
+        )
+        assert.strictEqual(outcome._tag, 'Compiled', Json.stringify(outcome))
+        if (outcome._tag !== 'Compiled') return
+        const first = yield* runCompiled(outcome.path)
+        const second = yield* runCompiled(outcome.path)
+        assert.strictEqual(first.status, 12, first.stderr)
+        assert.strictEqual(second.status, 12, second.stderr)
+      }),
+    ),
+  120_000,
 )
 
 it.effect.each(selectedCorpus)(

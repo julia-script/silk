@@ -144,7 +144,7 @@ const memberSignature = (member: DeclarationFacts.MemberFact): string => {
     member.functionKind === 'Effect'
       ? ` ! ${member.failureRow.failures.map(typeText).join(' | ') || 'empty'}`
       : ''
-  return `${member.visibility === 'Public' ? 'pub ' : ''}${member.functionKind === 'Effect' ? 'effect ' : ''}fn${parameters} · (${values}) -> ${declaredTypeText(
+  return `${member.visibility === 'Public' ? 'pub ' : ''}${member.test ? 'test ' : ''}${member.functionKind === 'Effect' ? 'effect ' : ''}fn${parameters} · (${values}) -> ${declaredTypeText(
     member.returnType,
   )}${failures}`
 }

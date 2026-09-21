@@ -39,6 +39,9 @@ export interface Nominal {
     | 'Intrinsic.Fields'
     | 'Intrinsic.Field'
     | 'Intrinsic.StaticSequence'
+    | 'Intrinsic.Test'
+    | 'Intrinsic.Tests'
+    | 'Intrinsic.TestInfo'
 }
 
 /** One declaration-owned generic type parameter. Names are provenance, not identity. */
@@ -587,6 +590,33 @@ const sealedStaticSequence = (arguments_: ReadonlyArray<GenericArgument>): Nomin
     sealed: 'Intrinsic.StaticSequence',
   })
 
+const sealedTestDescriptor = (arguments_: ReadonlyArray<GenericArgument>): Nominal =>
+  Object.freeze({
+    _tag: 'NominalType',
+    module: 'Intrinsic',
+    name: 'Test',
+    arguments: Object.freeze(Array.from(arguments_)),
+    sealed: 'Intrinsic.Test',
+  })
+
+const sealedTestCatalog = (): Nominal =>
+  Object.freeze({
+    _tag: 'NominalType',
+    module: 'Intrinsic',
+    name: 'Tests',
+    arguments: Object.freeze([]),
+    sealed: 'Intrinsic.Tests',
+  })
+
+const sealedTestInfo = (): Nominal =>
+  Object.freeze({
+    _tag: 'NominalType',
+    module: 'Intrinsic',
+    name: 'TestInfo',
+    arguments: Object.freeze([]),
+    sealed: 'Intrinsic.TestInfo',
+  })
+
 /** Replaces one nominal's arguments while preserving compiler-minted sealed provenance. */
 export const specializeNominal = (
   self: Nominal,
@@ -609,6 +639,12 @@ export const specializeNominal = (
       return sealedFieldDescriptor(arguments_)
     case 'Intrinsic.StaticSequence':
       return sealedStaticSequence(arguments_)
+    case 'Intrinsic.Test':
+      return sealedTestDescriptor(arguments_)
+    case 'Intrinsic.Tests':
+      return sealedTestCatalog()
+    case 'Intrinsic.TestInfo':
+      return sealedTestInfo()
     default:
       return nominal(self.module, self.name, arguments_)
   }
@@ -648,6 +684,12 @@ export const fieldDescriptor = (owner: Type, value: Type): Nominal =>
   sealedFieldDescriptor([owner, value])
 /** Static-only immutable homogeneous sequence metadata. */
 export const staticSequence = (element: Type): Nominal => sealedStaticSequence([element])
+/** Static-only descriptor for one exact source test callable. */
+export const testDescriptor = (callable: Type): Nominal => sealedTestDescriptor([callable])
+/** Static-only heterogeneous catalog returned by test discovery. */
+export const testCatalog: Nominal = sealedTestCatalog()
+/** Ordinary immutable metadata projected from a static test descriptor. */
+export const testInfo: Nominal = sealedTestInfo()
 /** Normalizes one or more ordinary failure types to their runtime value union. */
 export const failureValue = (failures: ReadonlyArray<Type>): Type => {
   const only = failures.at(0)
@@ -745,7 +787,9 @@ export const isStaticPhaseOnly = (self: Type): boolean =>
   (self.sealed === 'Intrinsic.Type' ||
     self.sealed === 'Intrinsic.Fields' ||
     self.sealed === 'Intrinsic.Field' ||
-    self.sealed === 'Intrinsic.StaticSequence')
+    self.sealed === 'Intrinsic.StaticSequence' ||
+    self.sealed === 'Intrinsic.Test' ||
+    self.sealed === 'Intrinsic.Tests')
 
 /** Tests whether any nested semantic value position contains a phase-only intrinsic nominal. */
 export const containsStaticPhaseOnly = (self: Type): boolean => {
@@ -788,6 +832,9 @@ export const intrinsicNominals: ReadonlyMap<string, Nominal> = new Map([
   ['Intrinsic.Fields', sealedFieldsDescriptor([])],
   ['Intrinsic.Field', sealedFieldDescriptor([])],
   ['Intrinsic.StaticSequence', sealedStaticSequence([])],
+  ['Intrinsic.Test', sealedTestDescriptor([])],
+  ['Intrinsic.Tests', sealedTestCatalog()],
+  ['Intrinsic.TestInfo', sealedTestInfo()],
 ])
 
 /** Returns the compiler-known generic arity of an intrinsic nominal actor. */
@@ -800,7 +847,8 @@ export const intrinsicNominalArity = (self: Nominal): number => {
     self.sealed === 'Intrinsic.Execution' ||
     self.sealed === 'Intrinsic.Type' ||
     self.sealed === 'Intrinsic.Fields' ||
-    self.sealed === 'Intrinsic.StaticSequence'
+    self.sealed === 'Intrinsic.StaticSequence' ||
+    self.sealed === 'Intrinsic.Test'
   )
     return 1
   return 0

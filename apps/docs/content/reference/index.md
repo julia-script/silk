@@ -65,6 +65,8 @@ not belong in a language rule unless a program can observe them.
   and duration spellings, text and byte forms, character literals, and longest tokenization.
 - [Program entry](program-entry.md) — ordinary and effectful `main`, automatic Effect execution,
   unhandled typed failures, and requirement closure.
+- [Tests and the source runner](testing.md) — test declarations, import-graph discovery, static
+  descriptors, authored fingerprints, runtime filters, sequential execution, and exit behavior.
 - [Statements and discarded values](statements-and-discarding.md) — which expression results may be
   ignored and how `drop` makes intentional discard explicit.
 - [Effects and execution](effects-and-execution.md) — effect construction, success values, `run`,

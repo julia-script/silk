@@ -26,6 +26,7 @@ import * as Ownership from './Ownership.js'
 import * as ProviderSelection from './ProviderSelection.js'
 import * as AuthoredIdentity from './AuthoredIdentity.js'
 import * as Residualization from './Residualization.js'
+import type * as TestDiscovery from './TestDiscovery.js'
 import * as SemanticContext from './SemanticContext.js'
 import * as ResidualOwnership from './ResidualOwnership.js'
 import * as RowAlgebra from './RowAlgebra.js'
@@ -164,6 +165,8 @@ export interface CallProvider {
 export interface CallInstance {
   readonly _tag: 'CallInstance'
   readonly owner: InstanceKey
+  /** Published TIR node that selected this target inside the owning instance. */
+  readonly node?: Tir.NodeId
   readonly span: Tir.Expression['span']
   readonly target: InstanceKey
   /** Caller-authored metadata aligned with target static arguments, outside instance identity. */
@@ -1154,6 +1157,7 @@ export const discover = (
   resolution: NameResolution.Resolution,
   composition: ArtifactComposition.Resolved,
   trace: CompilerTrace.CompilerTrace = CompilerTrace.none,
+  testCatalog?: TestDiscovery.Catalog,
 ): Discovery => {
   const target = completion.profile.target
   const root = results.get(rootModule)
@@ -1227,6 +1231,7 @@ export const discover = (
     undefined,
     completion.values,
     trace,
+    testCatalog,
   )
   const residualOwnership = ResidualOwnership.make()
   // Ownership reads spans and evaluation order from the module that authored the body it checks.
@@ -1846,7 +1851,7 @@ export const discover = (
             const callableTargets = callableCallTargets(fn, key, substitution, results, index)
             for (const call of directCalls) {
               recordedCalls.set(
-                `${keyText(call.owner)}\u0005${call.span.sourceId}:${call.span.start}:${call.span.end}`,
+                `${keyText(call.owner)}\u0005${call.span.sourceId}:${call.span.start}:${call.span.end}\u0005${call.node?.ordinal ?? -1}\u0005${keyText(call.target)}`,
                 call,
               )
             }

@@ -16,6 +16,7 @@ import * as SyntaxTree from '../SyntaxTree.js'
 import * as Token from '../Token.js'
 import {
   hasContextualSpelling,
+  hasContextualSpellingAt,
   parseExpression,
   parseIntegerLiteralExpression,
 } from './Expression.js'
@@ -53,6 +54,19 @@ const staticBeginsFunction = (state: State, offset: number): boolean => {
   )
 }
 
+/** `test` stays an identifier outside the declaration-modifier position. */
+const testBeginsFunction = (state: State, offset: number): boolean => {
+  if (!hasContextualSpellingAt(state, 'test', offset)) return false
+  const following = peek(state, offset + 1)
+  return (
+    following === 'FnKeyword' ||
+    following === 'EffectKeyword' ||
+    following === 'StaticKeyword' ||
+    following === 'UnsafeKeyword' ||
+    isAbiMarker(following)
+  )
+}
+
 /** Recognizes the ABI-bearing prefix that reserves an existing struct declaration node. */
 const externBeginsStruct = (state: State, offset: number): boolean => {
   if (peek(state, offset) !== 'ExternKeyword') return false
@@ -81,6 +95,7 @@ const beginsForeignStatic = (state: State): boolean => {
 
 export const beginsTopLevelDeclaration = (state: State): boolean => {
   const kind = nextSignificantKind(state)
+  if (testBeginsFunction(state, 0)) return true
   if (kind === 'StaticKeyword')
     return peek(state, 1) === 'IfKeyword' || staticBeginsFunction(state, 1)
   if (
@@ -106,6 +121,7 @@ export const beginsTopLevelDeclaration = (state: State): boolean => {
   const following = peek(state, 1)
   return (
     following === 'ImportKeyword' ||
+    testBeginsFunction(state, 1) ||
     (following === 'StaticKeyword' && staticBeginsFunction(state, 2)) ||
     following === 'FnKeyword' ||
     following === 'EffectKeyword' ||
@@ -993,7 +1009,7 @@ export const parseImplDeclaration = (initial: State): NodeResult => {
       nextSignificantKind(state) === 'FnKeyword' ||
       nextSignificantKind(state) === 'EffectKeyword'
     ) {
-      if (nextSignificantKind(state) === 'Identifier') {
+      if (nextSignificantKind(state) === 'Identifier' && !testBeginsFunction(state, 0)) {
         const operation = parseImplOperation(state)
         state = operation.state
         children = Object.freeze([...children, operation.node])
@@ -1162,9 +1178,19 @@ export const parseFunctionDeclaration = (initial: State, allowDropName = false):
         'LeftParenthesis',
       ])
     : Object.freeze({ state: initial, elements: Object.freeze([]) })
+  const testKeyword = hasContextualSpelling(pubKeyword.state, 'test')
+    ? expect(pubKeyword.state, 'Identifier', [
+        'StaticKeyword',
+        'UnsafeKeyword',
+        'ExternKeyword',
+        'ExportKeyword',
+        'EffectKeyword',
+        'FnKeyword',
+      ])
+    : Object.freeze({ state: pubKeyword.state, elements: Object.freeze([]) })
   const staticKeyword =
-    nextSignificantKind(pubKeyword.state) === 'StaticKeyword'
-      ? expect(pubKeyword.state, 'StaticKeyword', [
+    nextSignificantKind(testKeyword.state) === 'StaticKeyword'
+      ? expect(testKeyword.state, 'StaticKeyword', [
           'UnsafeKeyword',
           'ExternKeyword',
           'ExportKeyword',
@@ -1172,7 +1198,7 @@ export const parseFunctionDeclaration = (initial: State, allowDropName = false):
           'Identifier',
           'LeftParenthesis',
         ])
-      : Object.freeze({ state: pubKeyword.state, elements: Object.freeze([]) })
+      : Object.freeze({ state: testKeyword.state, elements: Object.freeze([]) })
   const unsafeKeyword =
     nextSignificantKind(staticKeyword.state) === 'UnsafeKeyword'
       ? expect(staticKeyword.state, 'UnsafeKeyword', [
@@ -1233,6 +1259,7 @@ export const parseFunctionDeclaration = (initial: State, allowDropName = false):
     SyntaxTree.directNode(contract.returnType.node, 'UnitType') !== undefined
   const header: ReadonlyArray<SyntaxTree.Element> = Object.freeze([
     ...pubKeyword.elements,
+    ...testKeyword.elements,
     ...staticKeyword.elements,
     ...unsafeKeyword.elements,
     ...(marker?.elements ?? []),

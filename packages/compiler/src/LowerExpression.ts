@@ -233,7 +233,7 @@ export function lowerExpression(
       expression._tag === 'ReferentPlace' ||
       expression._tag === 'IndexPlace' ||
       expression._tag === 'SliceIndexPlace'
-        ? transitionAt(fn, expression.span, 'Move')
+        ? transitionAt(fn, expression.span, 'Move', Ownership.placeOf(expression)?.root)
         : undefined
     let lowered: LoweredExpression | undefined
     if (consuming !== undefined && consuming.path.length > 0 && expression._tag !== 'Unavailable') {
@@ -390,7 +390,12 @@ export function lowerExpressionInner(
       return { result: bound }
     }
     case 'Move': {
-      const transition = transitionAt(fn, expression.span, 'Move')
+      const transition = transitionAt(
+        fn,
+        expression.span,
+        'Move',
+        Ownership.placeOf(expression.subject)?.root,
+      )
       if (transition === undefined)
         return lowerExpression(fn, expression.subject, availableRequirements)
       const lowered =
@@ -1009,7 +1014,7 @@ function lowerCallableApplyExpression(
       ? expression.callee
       : undefined
   const directItem = expression.callee._tag === 'FunctionItem' ? expression.callee : undefined
-  const call = fn.call(expression.span)
+  const call = fn.call(expression)
   let directType: ReturnType<typeof directCallableSectionValueType>
   if (directSection !== undefined) {
     directType = directCallableSectionValueType(fn, directSection, expression.substitution)
@@ -1256,7 +1261,7 @@ function lowerEffectConstructExpression(
     fn.semanticArgument(argument),
   )
   const call = fn.call(
-    expression.span,
+    expression,
     undefined,
     authoredTypeArguments,
     expression.staticArguments,
@@ -1899,7 +1904,7 @@ function lowerRunExpression(
       fn.semanticArgument(argument),
     )
     const call = fn.call(
-      recipe.span,
+      recipe,
       undefined,
       authoredTypeArguments,
       recipe.staticArguments,
@@ -2153,7 +2158,9 @@ function lowerMatchExpression(
     scrutinee = { result: root }
   } else {
     const transition =
-      expression.access === 'Move' ? transitionAt(fn, expression.span, 'Move') : undefined
+      expression.access === 'Move'
+        ? transitionAt(fn, expression.span, 'Move', Ownership.placeOf(expression.scrutinee)?.root)
+        : undefined
     if (transition === undefined)
       scrutinee = lowerExpression(fn, expression.scrutinee, availableRequirements)
     else {
@@ -2871,7 +2878,7 @@ function lowerCallExpression(
       fn.semanticArgument(argument),
     )
     const call = fn.call(
-      expression.span,
+      expression,
       undefined,
       authoredTypeArguments,
       expression.staticArguments,

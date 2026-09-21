@@ -36,3 +36,19 @@ Format: date · symptom · fix · project. Check here first when tooling is slow
 - 2026-09-21 · Compiler typecheck produced hundreds of misleading missing `@silklang/llvm/*`
   errors in a fresh worktree · Build `@silklang/llvm` once before the focused compiler typecheck ·
   compiler
+- 2026-09-21 · Native CLI tests failed with `Unknown attribute kind (102)` because `/usr/bin/clang`
+  17 could not read LLVM 22 bitcode · Run native CLI checks with
+  `PATH=/opt/homebrew/opt/llvm/bin:$PATH` so the compiler and Clang use the same LLVM generation ·
+  cli
+- 2026-09-21 · An effect test that locally provided a service failed native emission with an
+  unresolved downstream `completeTest` continuation, matching the open generic bracket-runner
+  defect · Exercise the closed Effect from a normal test until that separate compiler change lands
+  · compiler
+- 2026-09-21 · Local `pnpm release:candidate` could not install offline consumers because the pnpm
+  metadata mirror lacked unrelated package records · Use exact CI for the full release-candidate
+  gate; locally verify that changed export assertions advance past manifest validation · repository
+- 2026-09-21 · A zsh test wrapper assigned to the readonly `status` parameter after the test had
+  already run · Use a task-specific exit variable or avoid capturing the status when inspecting a
+  redirected log · repository
+- 2026-09-21 · A temporary comparison-worktree command was rejected because it began with
+  `rm -rf` cleanup · Use a unique temporary path and add the worktree directly · repository

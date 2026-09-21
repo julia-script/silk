@@ -104,6 +104,10 @@
       "types": "./dist/RunCommand.d.ts",
       "import": "./dist/RunCommand.js"
     },
+    "./TestCommand": {
+      "types": "./dist/TestCommand.d.ts",
+      "import": "./dist/TestCommand.js"
+    },
     "./Workflow": {
       "types": "./dist/Workflow.d.ts",
       "import": "./dist/Workflow.js"

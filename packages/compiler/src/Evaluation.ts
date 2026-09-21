@@ -8,6 +8,7 @@ import * as FloatingPoint from './FloatingPoint.js'
 import * as Location from './Location.js'
 import * as Provenance from './Provenance.js'
 import type * as Match from './Match.js'
+import * as Lifetime from './Lifetime.js'
 import * as Tir from './Tir.js'
 import * as Canonical from './internal/Canonical.js'
 import * as TypeInference from './internal/TypeInference.js'
@@ -16,6 +17,7 @@ import * as StaticValue from './StaticValue.js'
 import type * as SemanticContext from './SemanticContext.js'
 import type * as Target from './Target.js'
 import * as Type from './Type.js'
+import type * as TestDiscovery from './TestDiscovery.js'
 
 /** The closed target facts visible to one static-evaluation session. */
 export interface TargetEnvironment {
@@ -1109,6 +1111,8 @@ export interface NodeContext {
     trace: Trace,
   ) => Outcome<StaticValue.Value>
   readonly step?: (span: Location.Location, trace: Trace) => StaticFailure | undefined
+  /** Present only after a valid discovery root has been selected and sealed. */
+  readonly testCatalog?: TestDiscovery.Catalog
 }
 
 export interface CallResult {
@@ -1400,6 +1404,104 @@ const evaluateIntrinsic = (
   context: NodeContext,
 ): Outcome<StaticValue.Value> => {
   const operation = node.operation
+  const testEntry = (
+    descriptor: StaticValue.TestDescriptorValue,
+  ): TestDiscovery.Entry | undefined =>
+    context.testCatalog?.identity === descriptor.authorization
+      ? context.testCatalog.entries.find(
+          (entry) =>
+            entry.declaration.canonical._tag === 'Canonical' &&
+            entry.declaration.canonical.id.module === descriptor.declaration.module &&
+            entry.declaration.canonical.id.name === descriptor.declaration.name &&
+            Type.equals(entry.callable, descriptor.callable),
+        )
+      : undefined
+  if (operation === 'tests') {
+    if (context.testCatalog === undefined)
+      return unavailable(node, context, 'tests requires a sealed discovery context')
+    return admittedValue(
+      context.environment,
+      {
+        _tag: 'TestCollectionValue',
+        tests: context.testCatalog.entries.flatMap((entry) =>
+          entry.declaration.canonical._tag !== 'Canonical'
+            ? []
+            : [
+                {
+                  _tag: 'TestDescriptorValue',
+                  declaration: entry.declaration.canonical.id,
+                  callable: entry.callable,
+                  authorization: context.testCatalog?.identity ?? '',
+                },
+              ],
+        ),
+      },
+      'Evaluation.tests',
+      at(node),
+      context.trace,
+    )
+  }
+  if (operation === 'testInfo') {
+    const descriptor = arguments_.at(0)
+    if (descriptor?._tag !== 'TestDescriptorValue')
+      return unavailable(node, context, 'testInfo requires one test descriptor')
+    const entry = testEntry(descriptor)
+    if (entry === undefined)
+      return unavailable(node, context, 'testInfo received a descriptor outside this catalog')
+    const info = entry.info
+    const text = (value: string): StaticValue.TextValue =>
+      Object.freeze({
+        _tag: 'TextValue',
+        bytes: Object.freeze(Array.from(new TextEncoder().encode(value))),
+      })
+    const values: ReadonlyArray<StaticValue.Value> = Object.freeze([
+      text(info.identity),
+      text(info.name),
+      text(info.module),
+      text(info.path),
+      Object.freeze({ _tag: 'IntegerValue', type: 'usize', value: BigInt(info.line) }),
+      Object.freeze({ _tag: 'IntegerValue', type: 'usize', value: BigInt(info.column) }),
+      text(info.fingerprint),
+    ])
+    const ordinal = Type.intrinsicNominalOrdinal(Type.testInfo)
+    const declaration: DeclarationFacts.DeclarationId = Object.freeze({
+      _tag: 'DeclarationId',
+      sourceId: 'Intrinsic',
+      ordinal,
+    })
+    const fieldTypes: ReadonlyArray<Type.Type> = Object.freeze([
+      Type.string(Lifetime.staticLifetime),
+      Type.string(Lifetime.staticLifetime),
+      Type.string(Lifetime.staticLifetime),
+      Type.string(Lifetime.staticLifetime),
+      'usize',
+      'usize',
+      Type.string(Lifetime.staticLifetime),
+    ])
+    return admittedValue(
+      context.environment,
+      {
+        _tag: 'AggregateValue',
+        identity: {
+          _tag: 'NominalAggregateIdentity',
+          declaration: { _tag: 'CanonicalDeclarationId', module: 'Intrinsic', name: 'TestInfo' },
+          typeArguments: [],
+        },
+        fields: values.map((value, field) => ({ ordinal: field, value })),
+        runtimeFields: fieldTypes.map((type, field) => ({
+          id: {
+            _tag: 'FieldId',
+            owner: { _tag: 'StructFieldOwnerId', declaration },
+            ordinal: field,
+          },
+          type,
+        })),
+      },
+      'Evaluation.testInfo',
+      at(node),
+      context.trace,
+    )
+  }
   const profile = profileFact(context.environment, operation, arguments_, at(node), context.trace)
   if (profile !== undefined) return profile
   const typeArgument = typeArgumentAt(node, 0, context.typeSubstitution)

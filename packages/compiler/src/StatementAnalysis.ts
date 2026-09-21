@@ -109,6 +109,12 @@ const staticIterationElements = (
         Object.freeze({ value: field, type: StaticValue.fieldDescriptorType(field) }),
       ),
     )
+  if (value._tag === 'TestCollectionValue')
+    return Object.freeze(
+      value.tests.map((test) =>
+        Object.freeze({ value: test, type: StaticValue.testDescriptorType(test) }),
+      ),
+    )
   return undefined
 }
 
