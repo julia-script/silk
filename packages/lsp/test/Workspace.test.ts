@@ -509,7 +509,7 @@ it.effect(
       const session = next.get(right.uri)
       assert.ok(session)
       assert.ok(session.snapshot.configuration)
-      const inspected = Inspection.project(session, { uri: right.uri, view: 'closure' })
+      const inspected = yield* Inspection.project(session, { uri: right.uri, view: 'closure' })
       assert.strictEqual(inspected._tag, 'InspectorView')
       if (inspected._tag === 'InspectorView') {
         const modules = inspected.rows.filter((row) => row.head).map((row) => row.label)

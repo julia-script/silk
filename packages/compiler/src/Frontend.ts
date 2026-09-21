@@ -127,21 +127,21 @@ const analyzeHeaders = Effect.fn('Frontend.analyzeHeaders')(function* (
     () => 0,
     options,
   )
-  const epoch = JSON.stringify(
-    index.modules.map((module) =>
-      Object.freeze({
-        module: module.module,
-        members: module.members.map((member) =>
-          member.canonical._tag === 'Canonical'
-            ? `${member.canonical.id.module}.${member.canonical.id.name}`
-            : member.canonical._tag,
-        ),
-        publications: module.publications.map(
-          (publication) => `${publication.module}.${publication.original}->${publication.spelling}`,
-        ),
-      }),
-    ),
-  )
+  const epoch = index.modules
+    .flatMap((module) => [
+      `module:${module.module}`,
+      ...module.members.map((member) =>
+        member.canonical._tag === 'Canonical'
+          ? `member:${member.canonical.id.module}.${member.canonical.id.name}`
+          : `member:${member.canonical._tag}`,
+      ),
+      ...module.publications.map(
+        (publication) =>
+          `publication:${publication.module}.${publication.original}->${publication.spelling}`,
+      ),
+    ])
+    .map((part) => `${part.length}:${part}`)
+    .join('')
   const session = Semantic.makeSession(epoch, index, resolution)
   return Object.freeze({ index, resolution, session, surfaces })
 })
