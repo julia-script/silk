@@ -71,7 +71,7 @@
 ## 5. Bounded integrated evidence
 
 - [ ] 5.1 Complete fetch declarations, exact error/requirement rows, pure configuration/metadata
-      `StaticEvaluation`, native-context structural reachability, and positive MIR in one existing HTTP
+      `Evaluation`, native-context structural reachability, and positive MIR in one existing HTTP
       Analysis snapshot. Consolidate only genuinely distinct response/URI/chunk/source affine escape or
       duplication diagnostics in the existing frontend-negative boundary, with exact codes/spans and no
       additional realization, snapshot, source program, or worker.

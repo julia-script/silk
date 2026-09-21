@@ -314,7 +314,7 @@ composition, examples with explicit deadline/provider/trust choices, exclusions,
 differences from the pinned Zig fetch implementation.
 
 One existing HTTP structured-analysis boundary SHALL prove public reachability, exact generic rows,
-pure configuration/metadata StaticEvaluation where phase-valid, and affine nonescape diagnostics.
+pure configuration/metadata Evaluation where phase-valid, and affine nonescape diagnostics.
 One compact scripted integration in the existing shared native acceptance corpus SHALL combine
 compatible pool reuse, relative redirect, explicit proxy routing, and compressed final content and
 shall contain the distinct sink, collect, discard, mode, limit, 404, switching, error, cancellation,

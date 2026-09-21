@@ -15,7 +15,7 @@ import * as Residualization from './Residualization.js'
 import * as SemanticContext from './SemanticContext.js'
 import type * as SourceResolver from './SourceResolver.js'
 import type * as SourceSpan from './SourceSpan.js'
-import * as StaticEvaluation from './Evaluation.js'
+import * as Evaluation from './Evaluation.js'
 import * as CompilerTrace from './CompilerTrace.js'
 
 /** One completed profile's declaration choices and their full authored provenance. */
@@ -370,7 +370,7 @@ export const select = Effect.fn('ModuleSelection.select')(function* (
         if (result.outcome._tag === 'Failed')
           failures.push(
             Diagnostic.publish(
-              StaticEvaluation.diagnostic(result.outcome.failure, completion.profile.target.id),
+              Evaluation.diagnostic(result.outcome.failure, completion.profile.target.id),
               registry,
             ),
           )

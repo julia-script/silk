@@ -111,7 +111,7 @@ import {
   expressionNever,
   unsafeCallDiagnostic,
 } from './StatementAnalysis.js'
-import * as StaticEvaluation from './Evaluation.js'
+import * as Evaluation from './Evaluation.js'
 import * as LiteralForm from './LiteralForm.js'
 import * as StaticText from './StaticText.js'
 import * as StaticValue from './StaticValue.js'
@@ -5358,10 +5358,7 @@ const mixedFieldProjection = (
   if (evaluated._tag === 'Failed' || evaluated.value._tag !== 'FieldDescriptorValue') {
     const diagnostic =
       evaluated._tag === 'Failed'
-        ? StaticEvaluation.diagnostic(
-            evaluated.failure,
-            resolution.staticContext.environment.target,
-          )
+        ? Evaluation.diagnostic(evaluated.failure, resolution.staticContext.environment.target)
         : Diagnostic.staticPhaseViolation(
             'Intrinsic.borrowField descriptor',
             resolution.staticContext.environment.target,
@@ -10243,9 +10240,7 @@ function analyzeExpressionDecision(
         value.fact.reference._tag === 'Resolved'
           ? value.fact.reference.parameter
           : value.fact.reference.binding
-      const staticValue = resolution.staticContext?.values.get(
-        StaticEvaluation.localValueKey(local),
-      )
+      const staticValue = resolution.staticContext?.values.get(Evaluation.localValueKey(local))
       return staticValue === undefined
         ? value
         : Object.freeze({
@@ -11156,7 +11151,7 @@ export const finishDeclarationCall = (
       if (evaluated._tag === 'Complete') {
         const evaluatedNode = resolution.staticContext.nodes.expression(argument.expression)
         const textOrigin =
-          StaticEvaluation.staticTextOrigin(evaluatedNode, resolution.staticContext) ??
+          Evaluation.staticTextOrigin(evaluatedNode, resolution.staticContext) ??
           (evaluated.value._tag === 'TextValue' ? evaluated.value.origin : undefined)
         values.push(
           Object.freeze({
@@ -11167,10 +11162,7 @@ export const finishDeclarationCall = (
         )
       } else {
         diagnostics.push(
-          StaticEvaluation.diagnostic(
-            evaluated.failure,
-            resolution.staticContext.environment.target,
-          ),
+          Evaluation.diagnostic(evaluated.failure, resolution.staticContext.environment.target),
         )
       }
     }
@@ -11250,7 +11242,7 @@ export const finishDeclarationCall = (
       : undefined
   const staticDiagnostics =
     staticResult?._tag === 'Failed' && staticContext !== undefined
-      ? [StaticEvaluation.diagnostic(staticResult.failure, staticContext.environment.target)]
+      ? [Evaluation.diagnostic(staticResult.failure, staticContext.environment.target)]
       : []
   let resolvedFact = fact
   if (staticResult?._tag === 'Complete') {
@@ -11422,34 +11414,34 @@ export const evaluateStatic = (
   fact: ExpressionDecision | Tir.Expression,
   staticContext: StaticAnalysisContext,
   resolution: Pick<ResolutionContext, 'generatedAggregates'> | undefined,
-): StaticEvaluation.Outcome<StaticValue.Value> =>
-  StaticEvaluation.evaluateNode(staticContext.nodes.expression(fact), {
+): Evaluation.Outcome<StaticValue.Value> =>
+  Evaluation.evaluateNode(staticContext.nodes.expression(fact), {
     ...staticContext,
     lookup: (id) =>
       resolution?.generatedAggregates?.get(`${id.module}:${id.name}`) ?? staticContext.lookup(id),
   })
 
 export interface StaticAnalysisContext {
-  readonly environment: StaticEvaluation.TargetEnvironment
+  readonly environment: Evaluation.TargetEnvironment
   readonly typeSubstitution?: Type.Substitution
   readonly values: Map<string, StaticValue.Value>
   readonly valueSpans: Map<string, Location.Location>
-  readonly valueOrigins: Map<string, StaticEvaluation.TextOrigin>
+  readonly valueOrigins: Map<string, Evaluation.TextOrigin>
   readonly expressionSpans: Map<Tir.Expression, Location.Location>
-  readonly expressionOrigins: Map<Tir.Expression, StaticEvaluation.TextOrigin>
+  readonly expressionOrigins: Map<Tir.Expression, Evaluation.TextOrigin>
   readonly returnedTextSpan?: { value: Location.Location | undefined }
-  readonly trace: StaticEvaluation.Trace
+  readonly trace: Evaluation.Trace
   /** The nodes of what this body has analyzed so far, which is what the evaluator interprets. */
   readonly nodes: import('./BodyBuilder.js').StaticLowering
-  readonly lookup: StaticEvaluation.NodeContext['lookup']
-  readonly call: StaticEvaluation.NodeContext['call']
-  readonly reflect: StaticEvaluation.NodeContext['reflect']
-  readonly constant?: NonNullable<StaticEvaluation.NodeContext['constant']>
+  readonly lookup: Evaluation.NodeContext['lookup']
+  readonly call: Evaluation.NodeContext['call']
+  readonly reflect: Evaluation.NodeContext['reflect']
+  readonly constant?: NonNullable<Evaluation.NodeContext['constant']>
   /** Charges one fully analyzed iteration before any of its residual facts are published. */
   readonly chargeStaticIteration?: (
-    trace: StaticEvaluation.Trace,
+    trace: Evaluation.Trace,
     residualNodes: number,
-  ) => StaticEvaluation.StaticFailure | undefined
+  ) => Evaluation.StaticFailure | undefined
   /** Residual nodes already charged incrementally by successful static iterations. */
   readonly chargedStaticIterationNodes?: { value: number }
 }

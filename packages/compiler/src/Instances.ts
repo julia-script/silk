@@ -31,7 +31,7 @@ import * as ResidualOwnership from './ResidualOwnership.js'
 import * as RowAlgebra from './RowAlgebra.js'
 import * as SourceSpan from './SourceSpan.js'
 import * as Specialization from './Specialization.js'
-import * as StaticEvaluation from './Evaluation.js'
+import * as Evaluation from './Evaluation.js'
 import * as StaticValue from './StaticValue.js'
 import * as SuspensionMode from './SuspensionMode.js'
 import type * as Target from './Target.js'
@@ -167,7 +167,7 @@ export interface CallInstance {
   readonly span: Tir.Expression['span']
   readonly target: InstanceKey
   /** Caller-authored metadata aligned with target static arguments, outside instance identity. */
-  readonly staticArgumentOrigins?: ReadonlyArray<StaticEvaluation.TextOrigin | undefined>
+  readonly staticArgumentOrigins?: ReadonlyArray<Evaluation.TextOrigin | undefined>
   readonly resultEffect?: string
   /** Lexical selections used to resolve the target or hidden argument identities at this call. */
   readonly providers?: ReadonlyArray<CallProvider>
@@ -1283,7 +1283,7 @@ export const discover = (
       const selected = Residualization.evaluateConstant(residualization, declaration)
       if (selected._tag === 'Failed') {
         const diagnostic = Diagnostic.publish(
-          StaticEvaluation.diagnostic(selected.failure, target.id),
+          Evaluation.diagnostic(selected.failure, target.id),
           registry,
         )
         residualizationDiagnostics.set(
@@ -1342,7 +1342,7 @@ export const discover = (
   }
   interface WorkItem {
     readonly key: InstanceKey
-    readonly staticArgumentOrigins?: ReadonlyArray<StaticEvaluation.TextOrigin | undefined>
+    readonly staticArgumentOrigins?: ReadonlyArray<Evaluation.TextOrigin | undefined>
     /** The instance whose body made the call, whose own parameters the origins may name. */
     readonly selectedBy?: InstanceKey
     readonly ancestors: AncestorHistory.History
@@ -1612,7 +1612,7 @@ export const discover = (
       item.cleanupMeasure?.roots.map(Type.runtimeKey).sort() ?? null,
     ])
   const pending: Array<string> = []
-  type StaticOrigins = ReadonlyArray<StaticEvaluation.TextOrigin | undefined>
+  type StaticOrigins = ReadonlyArray<Evaluation.TextOrigin | undefined>
   /** What each call that selected an application wrote for its static text. */
   const selections = new Map<
     string,
@@ -1749,7 +1749,7 @@ export const discover = (
           { 'function.module': key.declaration.module, 'function.name': key.declaration.name },
         )
         if (residual._tag === 'StaticFailure') {
-          report(key, StaticEvaluation.diagnostic(residual.failure, target.id))
+          report(key, Evaluation.diagnostic(residual.failure, target.id))
           continue
         }
         const selectedCompileError = residual.diagnostics.findIndex(

@@ -11,7 +11,7 @@ import * as PackageConfiguration from './PackageConfiguration.js'
 import * as PackageParameter from './PackageParameter.js'
 import * as Residualization from './Residualization.js'
 import type * as SemanticContext from './SemanticContext.js'
-import type * as StaticEvaluation from './Evaluation.js'
+import type * as Evaluation from './Evaluation.js'
 import * as CompilerTrace from './CompilerTrace.js'
 import type * as StaticValue from './StaticValue.js'
 
@@ -26,7 +26,7 @@ export interface Source {
 
 const failure = (
   parameter: PackageConfiguration.Parameter,
-  value: StaticEvaluation.StaticFailure,
+  value: Evaluation.StaticFailure,
   validation: boolean,
 ) => {
   let code: ConfigurationError.Code = validation ? 'ValidationFailed' : 'InvalidDefault'

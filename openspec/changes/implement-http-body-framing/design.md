@@ -119,7 +119,7 @@ policy state under the original capacity contract.
 
 ### 10. Verification uses one analysis program and one portable runtime corpus
 
-Focused TypeScript tests will build one structured analysis snapshot for source-contract claims: public importability, signatures, borrow rejection while trailer/evidence views live, and absence of hidden requirements. StaticEvaluation will cover small pure selection and checked-parse claims when supported. One exported Silk acceptance source will cover runtime framing, split/tiny-buffer behavior, limits, trailers, encoder finish, and terminal states. The coordinator will register that source once in the shared native corpus and run its intended LLVM-to-Wasm leg rather than adding a per-feature native compilation test.
+Focused TypeScript tests will build one structured analysis snapshot for source-contract claims: public importability, signatures, borrow rejection while trailer/evidence views live, and absence of hidden requirements. Evaluation will cover small pure selection and checked-parse claims when supported. One exported Silk acceptance source will cover runtime framing, split/tiny-buffer behavior, limits, trailers, encoder finish, and terminal states. The coordinator will register that source once in the shared native corpus and run its intended LLVM-to-Wasm leg rather than adding a per-feature native compilation test.
 
 ## Risks / Trade-offs
 

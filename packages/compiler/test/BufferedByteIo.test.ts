@@ -8,7 +8,7 @@ import * as CompilationProfile from '../src/CompilationProfile.js'
 import * as MirVerification from '../src/MirVerification.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
-import * as StaticEvaluation from '../src/Evaluation.js'
+import * as Evaluation from '../src/Evaluation.js'
 import * as StaticValue from '../src/StaticValue.js'
 import * as Target from '../src/Target.js'
 import * as AnalysisFixture from './support/AnalysisFixture.js'
@@ -358,8 +358,8 @@ import silk.bytes { Bytes }`,
       assert.strictEqual(one._tag, 'Admitted')
       if (maximum._tag !== 'Admitted' || one._tag !== 'Admitted') return
       assert.strictEqual(
-        StaticEvaluation.evaluatePrimitive(
-          StaticEvaluation.targetEnvironment(profile),
+        Evaluation.evaluatePrimitive(
+          Evaluation.targetEnvironment(profile),
           'Add',
           [maximum.value, one.value],
           span,

@@ -18,7 +18,7 @@ import * as Canonical from './internal/Canonical.js'
 import * as NameResolution from './NameResolution.js'
 import * as RowAlgebra from './RowAlgebra.js'
 import { analyzeFunctionBody } from './StatementAnalysis.js'
-import * as StaticEvaluation from './Evaluation.js'
+import * as Evaluation from './Evaluation.js'
 import * as StaticValue from './StaticValue.js'
 import type * as AuthoredHir from './AuthoredHir.js'
 import * as AuthoredIdentity from './AuthoredIdentity.js'
@@ -49,7 +49,7 @@ export type Result =
   | ResidualBody
   | {
       readonly _tag: 'StaticFailure'
-      readonly failure: StaticEvaluation.StaticFailure
+      readonly failure: Evaluation.StaticFailure
       readonly diagnostics: ReadonlyArray<Diagnostic.Located>
     }
 
@@ -103,7 +103,7 @@ interface State {
   readonly target: Target.Target
   readonly dependencies: Map<string, string>
   readonly parameters: ReadonlyMap<string, StaticValue.Value>
-  readonly environment: StaticEvaluation.TargetEnvironment
+  readonly environment: Evaluation.TargetEnvironment
   readonly results: ReadonlyMap<string, Elaboration.Result>
   /** Anchor-to-span resolution for every elaborated module of this closure. */
   readonly spans: SemanticContext.Registry
@@ -111,9 +111,9 @@ interface State {
   readonly index: DeclarationIndex.Index
   /** Generated declarations published by source and residual bodies in this session. */
   readonly generatedAggregates: Map<string, DeclarationFacts.StructFact>
-  readonly evaluation: StaticEvaluation.Evaluation<StaticValue.Value>
-  readonly residuals: StaticEvaluation.Evaluation<ResidualBody>
-  readonly staticResultOrigins: Map<string, StaticEvaluation.TextOrigin>
+  readonly evaluation: Evaluation.Evaluation<StaticValue.Value>
+  readonly residuals: Evaluation.Evaluation<ResidualBody>
+  readonly staticResultOrigins: Map<string, Evaluation.TextOrigin>
   readonly counters: MutableCounters
   readonly observations: Map<string, Observation & { readonly counters: MutableCounters }>
   readonly selectionReasons: Map<DeclarationFacts.DeclarationFact, SelectionReason | undefined>
@@ -164,7 +164,7 @@ const makeState = (
   results: ReadonlyMap<string, Elaboration.Result>,
   resolution: NameResolution.Resolution,
   index: DeclarationIndex.Index,
-  limits: StaticEvaluation.Limits = StaticEvaluation.defaultLimits,
+  limits: Evaluation.Limits = Evaluation.defaultLimits,
   parameters: ReadonlyMap<string, StaticValue.Value> = new Map(),
   trace: CompilerTrace.CompilerTrace = CompilerTrace.none,
 ): State => {
@@ -186,20 +186,15 @@ const makeState = (
     target: compilation.target,
     parameters: new Map(parameters),
     dependencies: new Map(),
-    environment: StaticEvaluation.targetEnvironment(compilation, sourceIdentity),
+    environment: Evaluation.targetEnvironment(compilation, sourceIdentity),
     results,
     spans: SemanticContext.fromModules([...results.values()]),
     resolution,
     index: Object.freeze({ ...index, generatedAggregates }),
     generatedAggregates,
-    evaluation: StaticEvaluation.make<StaticValue.Value>(
-      compilation,
-      limits,
-      sourceIdentity,
-      trace,
-    ),
-    residuals: StaticEvaluation.make<ResidualBody>(compilation, limits, sourceIdentity, trace),
-    staticResultOrigins: new Map<string, StaticEvaluation.TextOrigin>(),
+    evaluation: Evaluation.make<StaticValue.Value>(compilation, limits, sourceIdentity, trace),
+    residuals: Evaluation.make<ResidualBody>(compilation, limits, sourceIdentity, trace),
+    staticResultOrigins: new Map<string, Evaluation.TextOrigin>(),
     counters: emptyCounters(),
     observations: new Map(),
     selectionReasons: new Map(),
@@ -212,7 +207,7 @@ export const make = (
   results: ReadonlyMap<string, Elaboration.Result>,
   resolution: NameResolution.Resolution,
   index: DeclarationIndex.Index,
-  limits: StaticEvaluation.Limits = StaticEvaluation.defaultLimits,
+  limits: Evaluation.Limits = Evaluation.defaultLimits,
   parameters: ReadonlyMap<string, StaticValue.Value> = new Map(),
   trace: CompilerTrace.CompilerTrace = CompilerTrace.none,
 ): Coordinator =>
@@ -237,7 +232,7 @@ export const makeBootstrap = (
       results,
       resolution,
       index,
-      StaticEvaluation.defaultLimits,
+      Evaluation.defaultLimits,
       parameters,
       trace,
     ),
@@ -301,13 +296,13 @@ const reflectAggregate = (
   owner: Type.Type,
   kind: 'Type' | 'Fields',
   span: Location.Location,
-  trace: StaticEvaluation.Trace,
-  lookup: StaticEvaluation.NodeContext['lookup'],
-): StaticEvaluation.Outcome<StaticValue.Value> => {
+  trace: Evaluation.Trace,
+  lookup: Evaluation.NodeContext['lookup'],
+): Evaluation.Outcome<StaticValue.Value> => {
   if (!Type.isNominal(owner) || authorization.canonical._tag !== 'Canonical')
-    return StaticEvaluation.failed(
-      StaticEvaluation.phaseViolation(
-        'StaticEvaluation.reflect',
+    return Evaluation.failed(
+      Evaluation.phaseViolation(
+        'Evaluation.reflect',
         'reflection requires one concrete nominal owner and canonical authorization',
         span,
         trace,
@@ -319,9 +314,9 @@ const reflectAggregate = (
     name: owner.name,
   })
   if (declaration?._tag !== 'StructDeclaration' || declaration.canonical._tag !== 'Canonical')
-    return StaticEvaluation.failed(
-      StaticEvaluation.phaseViolation(
-        'StaticEvaluation.reflect',
+    return Evaluation.failed(
+      Evaluation.phaseViolation(
+        'Evaluation.reflect',
         `${Type.encode(owner)} is not a concrete aggregate`,
         span,
         trace,
@@ -339,9 +334,9 @@ const reflectAggregate = (
     owner.arguments,
   )
   if (substitution === undefined)
-    return StaticEvaluation.failed(
-      StaticEvaluation.phaseViolation(
-        'StaticEvaluation.reflect',
+    return Evaluation.failed(
+      Evaluation.phaseViolation(
+        'Evaluation.reflect',
         `${Type.encode(owner)} does not completely specialize its aggregate declaration`,
         span,
         trace,
@@ -383,9 +378,9 @@ const reflectAggregate = (
     pointerBits: self[stateSymbol].environment.pointerBits,
   })
   return admission._tag === 'Admitted'
-    ? StaticEvaluation.complete(admission.value)
-    : StaticEvaluation.failed(
-        StaticEvaluation.phaseViolation('StaticEvaluation.reflect', admission.detail, span, trace),
+    ? Evaluation.complete(admission.value)
+    : Evaluation.failed(
+        Evaluation.phaseViolation('Evaluation.reflect', admission.detail, span, trace),
       )
 }
 
@@ -483,13 +478,13 @@ const bindStaticParameters = (
   declaration: DeclarationFacts.DeclarationFact,
   arguments_: ReadonlyArray<StaticValue.Value>,
   argumentSpans: ReadonlyArray<Location.Location | undefined> = Object.freeze([]),
-  argumentOrigins: ReadonlyArray<StaticEvaluation.TextOrigin | undefined> = Object.freeze([]),
+  argumentOrigins: ReadonlyArray<Evaluation.TextOrigin | undefined> = Object.freeze([]),
   originScope?: string,
 ):
   | {
       readonly values: Map<string, StaticValue.Value>
       readonly valueSpans: Map<string, Location.Location>
-      readonly valueOrigins: Map<string, StaticEvaluation.TextOrigin>
+      readonly valueOrigins: Map<string, Evaluation.TextOrigin>
     }
   | undefined => {
   const parameters = declaration.parameters.filter((parameter) => parameter.phase === 'Static')
@@ -500,9 +495,9 @@ const bindStaticParameters = (
       return value === undefined
         ? []
         : [
-            [StaticEvaluation.localValueKey(parameter), value] as const,
+            [Evaluation.localValueKey(parameter), value] as const,
             [
-              StaticEvaluation.tirLocalKey({ _tag: 'TirLocal', ordinal: parameter.id.ordinal }),
+              Evaluation.tirLocalKey({ _tag: 'TirLocal', ordinal: parameter.id.ordinal }),
               value,
             ] as const,
           ]
@@ -514,9 +509,9 @@ const bindStaticParameters = (
       return span === undefined
         ? []
         : [
-            [StaticEvaluation.localValueKey(parameter), span] as const,
+            [Evaluation.localValueKey(parameter), span] as const,
             [
-              StaticEvaluation.tirLocalKey({ _tag: 'TirLocal', ordinal: parameter.id.ordinal }),
+              Evaluation.tirLocalKey({ _tag: 'TirLocal', ordinal: parameter.id.ordinal }),
               span,
             ] as const,
           ]
@@ -528,15 +523,15 @@ const bindStaticParameters = (
       const origin = argumentOrigins.at(ordinal)
       const selected =
         origin ??
-        StaticEvaluation.parameterTextOrigin(
+        Evaluation.parameterTextOrigin(
           ordinal,
           value?._tag === 'TextValue' ? value.bytes.length : 0,
           originScope,
         )
       return [
-        [StaticEvaluation.localValueKey(parameter), selected] as const,
+        [Evaluation.localValueKey(parameter), selected] as const,
         [
-          StaticEvaluation.tirLocalKey({ _tag: 'TirLocal', ordinal: parameter.id.ordinal }),
+          Evaluation.tirLocalKey({ _tag: 'TirLocal', ordinal: parameter.id.ordinal }),
           selected,
         ] as const,
       ]
@@ -546,10 +541,10 @@ const bindStaticParameters = (
 }
 
 const resolveTextOrigin = (
-  origin: StaticEvaluation.TextOrigin | undefined,
-  arguments_: ReadonlyArray<StaticEvaluation.TextOrigin | undefined>,
+  origin: Evaluation.TextOrigin | undefined,
+  arguments_: ReadonlyArray<Evaluation.TextOrigin | undefined>,
   scope: string,
-): StaticEvaluation.TextOrigin | undefined => {
+): Evaluation.TextOrigin | undefined => {
   if (origin === undefined) return undefined
   // Each parameter part becomes what this caller wrote for it; a computed argument leaves none.
   const resolved = Provenance.substitute(origin, arguments_, scope)
@@ -558,7 +553,7 @@ const resolveTextOrigin = (
 
 const resolveValueOrigins = (
   value: StaticValue.Value,
-  arguments_: ReadonlyArray<StaticEvaluation.TextOrigin | undefined>,
+  arguments_: ReadonlyArray<Evaluation.TextOrigin | undefined>,
   scope: string,
 ): StaticValue.Value => {
   if (value._tag === 'TextValue') {
@@ -592,9 +587,9 @@ const resolveValueOrigins = (
 /** The headers a body can name: the index, and before it the aggregates the body generated. */
 const bodyLookup =
   (
-    lookup: StaticEvaluation.NodeContext['lookup'],
+    lookup: Evaluation.NodeContext['lookup'],
     generated: ReadonlyArray<DeclarationFacts.StructFact>,
-  ): StaticEvaluation.NodeContext['lookup'] =>
+  ): Evaluation.NodeContext['lookup'] =>
   (id) =>
     generated.find(
       (aggregate) =>
@@ -604,7 +599,7 @@ const bodyLookup =
     ) ?? lookup(id)
 
 const resolveTextSpan = (
-  origin: StaticEvaluation.TextOrigin | undefined,
+  origin: Evaluation.TextOrigin | undefined,
   arguments_: ReadonlyArray<Location.Location | undefined>,
 ): Location.Location | undefined => {
   // The node a result is reported at is where its text begins: a literal, or this call's argument.
@@ -618,17 +613,17 @@ const evaluateStaticFunction = (
   declaration: DeclarationFacts.DeclarationFact,
   arguments_: ReadonlyArray<StaticValue.Value>,
   argumentSpans: ReadonlyArray<Location.Location | undefined>,
-  argumentOrigins: ReadonlyArray<StaticEvaluation.TextOrigin | undefined>,
-  span: Parameters<StaticEvaluation.NodeContext['call']>[4],
-  parentTrace: StaticEvaluation.Trace,
-  identity: Parameters<StaticEvaluation.NodeContext['call']>[6],
-  lookup: Parameters<StaticEvaluation.NodeContext['call']>[7],
-): StaticEvaluation.CallResult => {
+  argumentOrigins: ReadonlyArray<Evaluation.TextOrigin | undefined>,
+  span: Parameters<Evaluation.NodeContext['call']>[4],
+  parentTrace: Evaluation.Trace,
+  identity: Parameters<Evaluation.NodeContext['call']>[6],
+  lookup: Parameters<Evaluation.NodeContext['call']>[7],
+): Evaluation.CallResult => {
   if (declaration.canonical._tag !== 'Canonical')
     return Object.freeze({
-      outcome: StaticEvaluation.failed(
-        StaticEvaluation.phaseViolation(
-          'StaticEvaluation.call',
+      outcome: Evaluation.failed(
+        Evaluation.phaseViolation(
+          'Evaluation.call',
           'static callee has no canonical identity',
           span,
           parentTrace,
@@ -639,7 +634,7 @@ const evaluateStaticFunction = (
     Canonical.record('helper', [declaration.canonical.id.module, declaration.canonical.id.name]),
     declaration.bodyTemplate?.canonical ?? '',
   )
-  const application: StaticEvaluation.Application = Object.freeze({
+  const application: Evaluation.Application = Object.freeze({
     declaration: declaration.canonical.id,
     typeArguments: Object.freeze(identity.typeArguments.map(Type.genericArgumentKey)),
     evidence: identity.evidence,
@@ -647,8 +642,8 @@ const evaluateStaticFunction = (
     staticArguments: arguments_,
     span,
   })
-  const originScope = StaticEvaluation.applicationKey(self[stateSymbol].environment, application)
-  const result = StaticEvaluation.evaluateFrom(
+  const originScope = Evaluation.applicationKey(self[stateSymbol].environment, application)
+  const result = Evaluation.evaluateFrom(
     self[stateSymbol].evaluation,
     application,
     parentTrace,
@@ -666,15 +661,15 @@ const evaluateStaticFunction = (
         identity.typeArguments,
       )
       if (input === undefined || bindings === undefined || typeSubstitution === undefined)
-        return StaticEvaluation.failed(
-          StaticEvaluation.phaseViolation(
-            'StaticEvaluation.call',
+        return Evaluation.failed(
+          Evaluation.phaseViolation(
+            'Evaluation.call',
             'static application does not match its declaration',
             span,
             evaluation.trace,
           ),
         )
-      const call: StaticEvaluation.NodeContext['call'] = (
+      const call: Evaluation.NodeContext['call'] = (
         callee,
         nestedArguments,
         nestedArgumentSpans,
@@ -706,25 +701,25 @@ const evaluateStaticFunction = (
         valueSpans: bindings.valueSpans,
         valueOrigins: bindings.valueOrigins,
         expressionSpans: new Map<Tir.Expression, Location.Location>(),
-        expressionOrigins: new Map<Tir.Expression, StaticEvaluation.TextOrigin>(),
+        expressionOrigins: new Map<Tir.Expression, Evaluation.TextOrigin>(),
         nodes: BodyBuilder.staticLowering(semantic, builder),
         lookup,
         returnedTextSpan: { value: undefined },
         returnedTextOrigin: { value: undefined },
         trace: evaluation.trace,
         call,
-        chargeStaticIteration: (trace: StaticEvaluation.Trace) => evaluation.stepAt(trace),
+        chargeStaticIteration: (trace: Evaluation.Trace) => evaluation.stepAt(trace),
         reflect: (
           owner: Type.Type,
           kind: 'Type' | 'Fields',
           reflectSpan: Location.Location,
-          trace: StaticEvaluation.Trace,
-          lookup: StaticEvaluation.NodeContext['lookup'],
+          trace: Evaluation.Trace,
+          lookup: Evaluation.NodeContext['lookup'],
         ) => reflectAggregate(self, declaration, owner, kind, reflectSpan, trace, lookup),
         constant: (
           constant: DeclarationFacts.ConstantFact,
           constantSpan: Location.Location,
-          trace: StaticEvaluation.Trace,
+          trace: Evaluation.Trace,
         ) => evaluateConstantValue(self, constant, constantSpan, trace),
       }
       const analyzed = analyzeFunctionBody(
@@ -736,7 +731,7 @@ const evaluateStaticFunction = (
       )
       publishGeneratedAggregates(self, analyzed.fact.generatedAggregates)
       self[stateSymbol].conditionDiagnostics?.push(...analyzed.diagnostics)
-      let nestedStaticFailure: StaticEvaluation.StaticFailure | undefined
+      let nestedStaticFailure: Evaluation.StaticFailure | undefined
       Elaboration.visitStatements(analyzed.fact.statements, {
         expression: (expression) => {
           if (
@@ -755,20 +750,20 @@ const evaluateStaticFunction = (
         },
       })
       if (nestedStaticFailure !== undefined) {
-        return StaticEvaluation.failed(nestedStaticFailure)
+        return Evaluation.failed(nestedStaticFailure)
       }
       const firstError = analyzed.diagnostics.find((diagnostic) => diagnostic.severity === 'error')
       if (firstError !== undefined) {
-        return StaticEvaluation.failed(
-          StaticEvaluation.phaseViolation(
-            'StaticEvaluation.call',
+        return Evaluation.failed(
+          Evaluation.phaseViolation(
+            'Evaluation.call',
             firstError.message,
             firstError.span,
             evaluation.trace,
           ),
         )
       }
-      const value = StaticEvaluation.evaluateStatements(
+      const value = Evaluation.evaluateStatements(
         staticContext.nodes.statements(analyzed.fact.statements),
         {
           ...staticContext,
@@ -779,37 +774,35 @@ const evaluateStaticFunction = (
       if (value._tag === 'Complete') {
         if (staticContext.returnedTextOrigin.value !== undefined)
           self[stateSymbol].staticResultOrigins.set(
-            StaticEvaluation.applicationKey(self[stateSymbol].environment, evaluation.application),
+            Evaluation.applicationKey(self[stateSymbol].environment, evaluation.application),
             staticContext.returnedTextOrigin.value,
           )
         const retained = evaluation.retain(value.value)
-        if (retained !== undefined) return StaticEvaluation.failed(retained)
+        if (retained !== undefined) return Evaluation.failed(retained)
       }
       return value
     },
   )
   if (result._tag === 'Failed') {
     if (result.failure._tag !== 'CompileError')
-      return Object.freeze({ outcome: StaticEvaluation.failed(result.failure) })
+      return Object.freeze({ outcome: Evaluation.failed(result.failure) })
     const origin = resolveTextOrigin(result.failure.origin, argumentOrigins, originScope)
     const failure = Object.freeze({
       ...result.failure,
       span:
         (origin === undefined
           ? undefined
-          : StaticEvaluation.textOriginLocation(origin, Location.anchorOf(result.failure.span))) ??
+          : Evaluation.textOriginLocation(origin, Location.anchorOf(result.failure.span))) ??
         result.failure.span,
       ...(origin === undefined ? {} : { origin }),
     })
-    return Object.freeze({ outcome: StaticEvaluation.failed(failure) })
+    return Object.freeze({ outcome: Evaluation.failed(failure) })
   }
   const cachedOrigin = self[stateSymbol].staticResultOrigins.get(result.key)
   const textOrigin = resolveTextOrigin(cachedOrigin, argumentOrigins, originScope)
   const textSpan = resolveTextSpan(cachedOrigin, argumentSpans)
   return Object.freeze({
-    outcome: StaticEvaluation.complete(
-      resolveValueOrigins(result.value, argumentOrigins, originScope),
-    ),
+    outcome: Evaluation.complete(resolveValueOrigins(result.value, argumentOrigins, originScope)),
     ...(textSpan === undefined ? {} : { textSpan }),
     ...(textOrigin === undefined ? {} : { textOrigin }),
   })
@@ -827,13 +820,13 @@ function evaluateConstantValue(
   self: EvaluationCoordinator,
   declaration: DeclarationFacts.ConstantFact,
   span: Location.Location,
-  parentTrace: StaticEvaluation.Trace,
+  parentTrace: Evaluation.Trace,
   predicate?: AuthoredHir.Expression,
-): StaticEvaluation.Outcome<StaticValue.Value> {
+): Evaluation.Outcome<StaticValue.Value> {
   if (declaration.canonical._tag !== 'Canonical')
-    return StaticEvaluation.failed(
-      StaticEvaluation.phaseViolation(
-        'StaticEvaluation.constant',
+    return Evaluation.failed(
+      Evaluation.phaseViolation(
+        'Evaluation.constant',
         'constant has no canonical identity',
         span,
         parentTrace,
@@ -851,7 +844,7 @@ function evaluateConstantValue(
         declaration.canonical.id.name,
       ]),
     )
-    if (bound !== undefined) return StaticEvaluation.complete(bound)
+    if (bound !== undefined) return Evaluation.complete(bound)
   }
   let dependencyTemplate = declaration.initializerTemplate?.canonical ?? ''
   if (predicate !== undefined)
@@ -866,7 +859,7 @@ function evaluateConstantValue(
     ]),
     dependencyTemplate,
   )
-  const application: StaticEvaluation.Application = Object.freeze({
+  const application: Evaluation.Application = Object.freeze({
     declaration:
       predicate === undefined
         ? declaration.canonical.id
@@ -880,22 +873,22 @@ function evaluateConstantValue(
     staticArguments: Object.freeze([]),
     span,
   })
-  const result = StaticEvaluation.evaluateFrom(
+  const result = Evaluation.evaluateFrom(
     self[stateSymbol].evaluation,
     application,
     parentTrace,
     (evaluation) => {
       const input = moduleInput(self, declaration)
       if (input === undefined || declaration.declaredType._tag !== 'Resolved')
-        return StaticEvaluation.failed(
-          StaticEvaluation.phaseViolation(
-            'StaticEvaluation.constant',
+        return Evaluation.failed(
+          Evaluation.phaseViolation(
+            'Evaluation.constant',
             'constant declaration is unavailable',
             Location.at(initializer.anchor),
             evaluation.trace,
           ),
         )
-      const call: StaticEvaluation.NodeContext['call'] = (
+      const call: Evaluation.NodeContext['call'] = (
         callee,
         arguments_,
         argumentSpans,
@@ -916,7 +909,7 @@ function evaluateConstantValue(
           identity,
           lookup,
         )
-      const constant: NonNullable<StaticEvaluation.NodeContext['constant']> = (
+      const constant: NonNullable<Evaluation.NodeContext['constant']> = (
         nested,
         nestedSpan,
         trace,
@@ -931,9 +924,9 @@ function evaluateConstantValue(
         environment: self[stateSymbol].environment,
         values: new Map<string, StaticValue.Value>(),
         valueSpans: new Map<string, Location.Location>(),
-        valueOrigins: new Map<string, StaticEvaluation.TextOrigin>(),
+        valueOrigins: new Map<string, Evaluation.TextOrigin>(),
         expressionSpans: new Map<Tir.Expression, Location.Location>(),
-        expressionOrigins: new Map<Tir.Expression, StaticEvaluation.TextOrigin>(),
+        expressionOrigins: new Map<Tir.Expression, Evaluation.TextOrigin>(),
         nodes: BodyBuilder.staticLowering(semantic, builder),
         lookup: (id: DeclarationFacts.CanonicalId) => lookupDeclaration(self, id),
         trace: evaluation.trace,
@@ -942,8 +935,8 @@ function evaluateConstantValue(
           owner: Type.Type,
           kind: 'Type' | 'Fields',
           reflectSpan: Location.Location,
-          trace: StaticEvaluation.Trace,
-          lookup: StaticEvaluation.NodeContext['lookup'],
+          trace: Evaluation.Trace,
+          lookup: Evaluation.NodeContext['lookup'],
         ) => reflectAggregate(self, host, owner, kind, reflectSpan, trace, lookup),
         constant,
       })
@@ -971,7 +964,7 @@ function evaluateConstantValue(
         self[stateSymbol].conditionDiagnostics?.push(...analyzed.diagnostics)
       if (analyzed !== undefined && predicate === undefined)
         self[stateSymbol].conditionExpression = analyzed.fact
-      let nestedFailure: StaticEvaluation.StaticFailure | undefined
+      let nestedFailure: Evaluation.StaticFailure | undefined
       if (analyzed !== undefined)
         Elaboration.visitExpressionDecisions(analyzed.fact, {
           expression: (expression) => {
@@ -983,18 +976,18 @@ function evaluateConstantValue(
               nestedFailure = expression.staticFailure
           },
         })
-      if (nestedFailure !== undefined) return StaticEvaluation.failed(nestedFailure)
+      if (nestedFailure !== undefined) return Evaluation.failed(nestedFailure)
       const firstError = analyzed?.diagnostics.find((diagnostic) => diagnostic.severity === 'error')
       if (analyzed === undefined || firstError !== undefined)
-        return StaticEvaluation.failed(
-          StaticEvaluation.phaseViolation(
-            'StaticEvaluation.constant',
+        return Evaluation.failed(
+          Evaluation.phaseViolation(
+            'Evaluation.constant',
             firstError?.message ?? 'constant initializer cannot be analyzed',
             firstError?.span ?? Location.at(initializer.anchor),
             evaluation.trace,
           ),
         )
-      const value = StaticEvaluation.evaluateNode(staticContext.nodes.expression(analyzed.fact), {
+      const value = Evaluation.evaluateNode(staticContext.nodes.expression(analyzed.fact), {
         ...staticContext,
         step: () => evaluation.step(),
       })
@@ -1004,28 +997,28 @@ function evaluateConstantValue(
         (predicate !== undefined || declaration._tag !== 'PackageParameterDeclaration') &&
         (actual === undefined || !Type.equals(actual, expected))
       )
-        return StaticEvaluation.failed(
-          StaticEvaluation.phaseViolation(
-            'StaticEvaluation.constant',
+        return Evaluation.failed(
+          Evaluation.phaseViolation(
+            'Evaluation.constant',
             `initializer produced ${actual === undefined ? 'an unsupported aggregate' : Type.display(actual)} instead of ${Type.display(declaration.declaredType.type)}`,
             Location.at(initializer.anchor),
             evaluation.trace,
           ),
         )
       const retained = evaluation.retain(value.value)
-      return retained === undefined ? value : StaticEvaluation.failed(retained)
+      return retained === undefined ? value : Evaluation.failed(retained)
     },
   )
   return result._tag === 'Complete'
-    ? StaticEvaluation.complete(result.value)
-    : StaticEvaluation.failed(result.failure)
+    ? Evaluation.complete(result.value)
+    : Evaluation.failed(result.failure)
 }
 
 /** Evaluates one explicitly typed primitive constant for this coordinator's selected target. */
 export const evaluateConstant = (
   self: EvaluationCoordinator,
   declaration: DeclarationFacts.ConstantFact,
-): StaticEvaluation.Outcome<StaticValue.Value> =>
+): Evaluation.Outcome<StaticValue.Value> =>
   evaluateConstantValue(
     self,
     declaration,
@@ -1039,7 +1032,7 @@ export const evaluateModuleCondition = Effect.fn('Residualization.evaluateModule
     self: Coordinator,
     declaration: AuthoredHir.Declaration,
   ): Effect.Effect<{
-    readonly outcome: StaticEvaluation.Outcome<StaticValue.Value>
+    readonly outcome: Evaluation.Outcome<StaticValue.Value>
     readonly diagnostics: ReadonlyArray<Diagnostic.Located>
     readonly expression?: Elaboration.ExpressionDecision
   }> =>
@@ -1052,8 +1045,8 @@ export const evaluateModuleCondition = Effect.fn('Residualization.evaluateModule
       const span = Location.at(anchor)
       if (declaration.header._tag !== 'ConditionalHeader')
         return {
-          outcome: StaticEvaluation.failed(
-            StaticEvaluation.phaseViolation(
+          outcome: Evaluation.failed(
+            Evaluation.phaseViolation(
               'ModuleSelection.condition',
               'declaration does not own a module condition',
               span,
@@ -1108,9 +1101,9 @@ export const evaluateModuleCondition = Effect.fn('Residualization.evaluateModule
 export const evaluateParameterPredicate = (
   self: EvaluationCoordinator,
   declaration: DeclarationFacts.PackageParameterFact,
-): StaticEvaluation.Outcome<StaticValue.Value> =>
+): Evaluation.Outcome<StaticValue.Value> =>
   declaration.predicate === undefined
-    ? StaticEvaluation.complete(StaticValue.boolean(true))
+    ? Evaluation.complete(StaticValue.boolean(true))
     : evaluateConstantValue(
         self,
         declaration,
@@ -1187,7 +1180,7 @@ export const residualize = (self: Coordinator, key: ApplicationKey): Result => {
         path: [],
       },
     )
-    const failure = StaticEvaluation.phaseViolation(
+    const failure = Evaluation.phaseViolation(
       'Residualization.residualize',
       'application does not match one runtime declaration',
       span,
@@ -1218,7 +1211,7 @@ export const residualize = (self: Coordinator, key: ApplicationKey): Result => {
       })
     }
   }
-  const application: StaticEvaluation.Application = Object.freeze({
+  const application: Evaluation.Application = Object.freeze({
     declaration: key.declaration,
     typeArguments: Object.freeze(key.typeArguments.map(Type.genericArgumentKey)),
     evidence: key.evidence,
@@ -1227,25 +1220,33 @@ export const residualize = (self: Coordinator, key: ApplicationKey): Result => {
     span: Location.at(declaration.anchor),
   })
   let executed = false
-  const evaluated = StaticEvaluation.evaluate(
-    self[stateSymbol].residuals,
-    application,
-    (evaluation) => {
-      executed = true
-      const typeSubstitution = TypeInference.substitution(
-        declaration.typeParameters.map((parameter) => parameter.type),
-        key.typeArguments,
+  const evaluated = Evaluation.evaluate(self[stateSymbol].residuals, application, (evaluation) => {
+    executed = true
+    const typeSubstitution = TypeInference.substitution(
+      declaration.typeParameters.map((parameter) => parameter.type),
+      key.typeArguments,
+    )
+    if (typeSubstitution === undefined)
+      return Evaluation.failed(
+        Evaluation.phaseViolation(
+          'Residualization.residualize',
+          'runtime application does not completely specialize its declaration',
+          Location.at(declaration.anchor),
+          evaluation.trace,
+        ),
       )
-      if (typeSubstitution === undefined)
-        return StaticEvaluation.failed(
-          StaticEvaluation.phaseViolation(
-            'Residualization.residualize',
-            'runtime application does not completely specialize its declaration',
-            Location.at(declaration.anchor),
-            evaluation.trace,
-          ),
-        )
-      const call: StaticEvaluation.NodeContext['call'] = (
+    const call: Evaluation.NodeContext['call'] = (
+      callee,
+      arguments_,
+      argumentSpans,
+      argumentOrigins,
+      span,
+      trace,
+      identity,
+      lookup,
+    ) =>
+      evaluateStaticFunction(
+        self,
         callee,
         arguments_,
         argumentSpans,
@@ -1254,101 +1255,83 @@ export const residualize = (self: Coordinator, key: ApplicationKey): Result => {
         trace,
         identity,
         lookup,
-      ) =>
-        evaluateStaticFunction(
-          self,
-          callee,
-          arguments_,
-          argumentSpans,
-          argumentOrigins,
-          span,
-          trace,
-          identity,
-          lookup,
-        )
-      const constant: NonNullable<StaticEvaluation.NodeContext['constant']> = (
-        declaration,
-        span,
-        trace,
-      ) => evaluateConstantValue(self, declaration, span, trace)
-      const chargedStaticIterationNodes = { value: 0 }
-      const semantic = SemanticContext.make(input.result.authored)
-      const request: Tir.ArtifactId['request'] = Object.freeze({
-        _tag: 'Specialize',
-        application: StaticEvaluation.applicationKey(
-          self[stateSymbol].environment,
-          evaluation.application,
-        ),
-      })
-      const builder = BodyBuilder.make(Object.freeze({ owner: declaration.owner, request }))
-      const analyzed = analyzeFunctionBody(
-        semantic,
-        declaration,
-        input.declarations,
-        Object.freeze({ scope: input.scope, index: self[stateSymbol].index, builder }),
-        Object.freeze({
-          environment: self[stateSymbol].environment,
-          typeSubstitution,
-          values: bindings.values,
-          valueSpans: bindings.valueSpans,
-          valueOrigins: bindings.valueOrigins,
-          expressionSpans: new Map<Tir.Expression, Location.Location>(),
-          expressionOrigins: new Map<Tir.Expression, StaticEvaluation.TextOrigin>(),
-          nodes: BodyBuilder.staticLowering(semantic, builder),
-          lookup: (id: DeclarationFacts.CanonicalId) => lookupDeclaration(self, id),
-          trace: evaluation.trace,
-          call,
-          chargeStaticIteration: (trace: StaticEvaluation.Trace, residualNodes: number) => {
-            const stepFailure = evaluation.stepAt(trace)
-            return stepFailure ?? evaluation.growResidualAt(trace, residualNodes)
-          },
-          chargedStaticIterationNodes,
-          reflect: (
-            owner: Type.Type,
-            kind: 'Type' | 'Fields',
-            reflectSpan: Location.Location,
-            trace: StaticEvaluation.Trace,
-            lookup: StaticEvaluation.NodeContext['lookup'],
-          ) => reflectAggregate(self, declaration, owner, kind, reflectSpan, trace, lookup),
-          constant,
-        }),
       )
-      publishGeneratedAggregates(self, analyzed.fact.generatedAggregates)
-      let nodes = 0
-      Elaboration.visitStatements(analyzed.fact.statements, {
-        statement: () => {
-          nodes += 1
+    const constant: NonNullable<Evaluation.NodeContext['constant']> = (declaration, span, trace) =>
+      evaluateConstantValue(self, declaration, span, trace)
+    const chargedStaticIterationNodes = { value: 0 }
+    const semantic = SemanticContext.make(input.result.authored)
+    const request: Tir.ArtifactId['request'] = Object.freeze({
+      _tag: 'Specialize',
+      application: Evaluation.applicationKey(self[stateSymbol].environment, evaluation.application),
+    })
+    const builder = BodyBuilder.make(Object.freeze({ owner: declaration.owner, request }))
+    const analyzed = analyzeFunctionBody(
+      semantic,
+      declaration,
+      input.declarations,
+      Object.freeze({ scope: input.scope, index: self[stateSymbol].index, builder }),
+      Object.freeze({
+        environment: self[stateSymbol].environment,
+        typeSubstitution,
+        values: bindings.values,
+        valueSpans: bindings.valueSpans,
+        valueOrigins: bindings.valueOrigins,
+        expressionSpans: new Map<Tir.Expression, Location.Location>(),
+        expressionOrigins: new Map<Tir.Expression, Evaluation.TextOrigin>(),
+        nodes: BodyBuilder.staticLowering(semantic, builder),
+        lookup: (id: DeclarationFacts.CanonicalId) => lookupDeclaration(self, id),
+        trace: evaluation.trace,
+        call,
+        chargeStaticIteration: (trace: Evaluation.Trace, residualNodes: number) => {
+          const stepFailure = evaluation.stepAt(trace)
+          return stepFailure ?? evaluation.growResidualAt(trace, residualNodes)
         },
-        expression: () => {
-          nodes += 1
-        },
-      })
-      const remainingNodes = Math.max(0, nodes - chargedStaticIterationNodes.value)
-      const growthFailure = evaluation.growResidual(
-        chargedStaticIterationNodes.value === 0 ? Math.max(1, remainingNodes) : remainingNodes,
-      )
-      if (growthFailure !== undefined) return StaticEvaluation.failed(growthFailure)
-      const body = Elaboration.checkedBody(
-        SemanticContext.make(input.result.authored),
-        self[stateSymbol].index,
-        analyzed.fact,
-        undefined,
-        request,
-        builder,
-      )
-      if (declaration.phase === 'Static')
-        throw new RangeError('Static functions have no runtime TIR body')
-      return StaticEvaluation.complete(
-        Object.freeze({
-          _tag: 'ResidualBody' as const,
-          artifact: body.artifact,
-          function: body.function,
-          results: body.results,
-          diagnostics: analyzed.diagnostics,
-        }),
-      )
-    },
-  )
+        chargedStaticIterationNodes,
+        reflect: (
+          owner: Type.Type,
+          kind: 'Type' | 'Fields',
+          reflectSpan: Location.Location,
+          trace: Evaluation.Trace,
+          lookup: Evaluation.NodeContext['lookup'],
+        ) => reflectAggregate(self, declaration, owner, kind, reflectSpan, trace, lookup),
+        constant,
+      }),
+    )
+    publishGeneratedAggregates(self, analyzed.fact.generatedAggregates)
+    let nodes = 0
+    Elaboration.visitStatements(analyzed.fact.statements, {
+      statement: () => {
+        nodes += 1
+      },
+      expression: () => {
+        nodes += 1
+      },
+    })
+    const remainingNodes = Math.max(0, nodes - chargedStaticIterationNodes.value)
+    const growthFailure = evaluation.growResidual(
+      chargedStaticIterationNodes.value === 0 ? Math.max(1, remainingNodes) : remainingNodes,
+    )
+    if (growthFailure !== undefined) return Evaluation.failed(growthFailure)
+    const body = Elaboration.checkedBody(
+      SemanticContext.make(input.result.authored),
+      self[stateSymbol].index,
+      analyzed.fact,
+      undefined,
+      request,
+      builder,
+    )
+    if (declaration.phase === 'Static')
+      throw new RangeError('Static functions have no runtime TIR body')
+    return Evaluation.complete(
+      Object.freeze({
+        _tag: 'ResidualBody' as const,
+        artifact: body.artifact,
+        function: body.function,
+        results: body.results,
+        diagnostics: analyzed.diagnostics,
+      }),
+    )
+  })
   let branch: 'cacheReused' | 'checked' | 'rejected' = 'rejected'
   if (evaluated.cached) branch = 'cacheReused'
   else if (executed) branch = 'checked'

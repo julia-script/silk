@@ -50,7 +50,7 @@ The handshake SHALL bind inspection and decision to the active HTTP exchange, pr
 
 ### Requirement: Portable ordinary-source implementation
 
-Validation SHALL reuse the shared strict Base64 and SHA-1 actors without compiler privilege. Compile-time claims SHALL use StaticEvaluation; runtime claims SHALL use shared native and intended LLVM-to-Wasm execution. Physical ws targets SHALL inherit the HTTP server listener targets. The API SHALL permit an explicitly supplied secured duplex without claiming native wss or TLS server support. Frames and compression are outside this capability.
+Validation SHALL reuse the shared strict Base64 and SHA-1 actors without compiler privilege. Compile-time claims SHALL use Evaluation; runtime claims SHALL use shared native and intended LLVM-to-Wasm execution. Physical ws targets SHALL inherit the HTTP server listener targets. The API SHALL permit an explicitly supplied secured duplex without claiming native wss or TLS server support. Frames and compression are outside this capability.
 
 #### Scenario: Offline validation
 

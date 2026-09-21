@@ -24,7 +24,7 @@ import type * as NameResolution from './NameResolution.js'
 import type * as Operator from './Operator.js'
 import * as Scalar from './Scalar.js'
 import * as SourceSpan from './SourceSpan.js'
-import type * as StaticEvaluation from './Evaluation.js'
+import type * as Evaluation from './Evaluation.js'
 import type * as StaticText from './StaticText.js'
 import type * as StaticValue from './StaticValue.js'
 import * as Lifetime from './Lifetime.js'
@@ -1146,16 +1146,16 @@ export type ExpressionDecision =
         readonly parameter: ParameterFact
         readonly value: StaticValue.Value
         /** Caller-authored provenance retained outside canonical specialization identity. */
-        readonly textOrigin?: StaticEvaluation.TextOrigin
+        readonly textOrigin?: Evaluation.TextOrigin
       }>
       /** Complete compile-time result when this call targets a `static fn`. */
       readonly staticValue?: StaticValue.Value
       /** Source text provenance retained separately from the canonical static result. */
       readonly staticTextSpan?: Location.Location
       /** Source-independent origin retained for cached static text results. */
-      readonly staticTextOrigin?: StaticEvaluation.TextOrigin
+      readonly staticTextOrigin?: Evaluation.TextOrigin
       /** Original compile-time failure when eager static-call evaluation did not complete. */
-      readonly staticFailure?: StaticEvaluation.StaticFailure
+      readonly staticFailure?: Evaluation.StaticFailure
       readonly mappings: ReadonlyArray<ArgumentMappingFact>
       readonly contract: CallContractFact
       readonly witnessEffectSite?: Tir.EffectSiteId
@@ -1841,7 +1841,6 @@ import {
   directStatementExpressions,
   staticLowering,
 } from './BodyBuilder.js'
-import { analyzeFunctionBody } from './StatementAnalysis.js'
 export interface FactVisitor {
   readonly statement?: (statement: Tir.Statement) => void
   readonly expression?: (expression: ExpressionDecision) => void
@@ -2830,44 +2829,17 @@ export const elaborateModule = (input: Input): Result => {
   // A foreign header has a native body: it is indexed and callable but never analyzed here.
   const units = declarations
     .filter((declaration) => declaration.foreign === undefined)
-    .map((declaration): CheckedUnit => {
-      const build = (): BodyQuery.Built => {
-        const hiddenFunctions: Array<import('./ExpressionAnalysis.js').FunctionAnalysis> = []
-        const analysis = analyzeFunctionBody(
-          context,
-          declaration,
-          declarations,
-          Object.freeze({ scope, index, hiddenFunctions }),
-        )
-        const own = checkedBody(
-          context,
-          index,
-          analysis.fact,
-          undefined,
-          undefined,
-          analysis.builder,
-        )
-        const unit = Object.freeze({
-          bodies: Object.freeze([
-            own,
-            ...hiddenFunctions.map((hidden) =>
-              checkedBody(context, index, hidden.fact, own.artifact, undefined, hidden.builder),
-            ),
-          ]),
-          diagnostics: analysis.diagnostics,
-        })
-        return { unit }
-      }
-      return Semantic.checkBody({
-        context,
+    .map((declaration): CheckedUnit =>
+      Semantic.checkBody({
         authored,
+        headers,
         scope,
+        index,
         declaration,
-        build,
         ...(input.bodyQuery === undefined ? {} : { query: input.bodyQuery }),
         ...(input.trace === undefined ? {} : { trace: input.trace }),
-      })
-    })
+      }),
+    )
   const constantDiagnostics = headers.constants.flatMap((constant) =>
     constant.name._tag === 'Present'
       ? analyzeConstant(context, constant, constant.name.anchor, true).diagnostics

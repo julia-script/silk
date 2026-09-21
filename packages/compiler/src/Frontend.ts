@@ -139,7 +139,6 @@ const elaborateModules = Effect.fn('Frontend.elaborateModules')(function* (
   precomputed: ReadonlyMap<string, Elaboration.Result> = new Map(),
   bodyQuery?: BodyQuery.BodyQuery,
 ): Effect.fn.Return<ElaboratedModules> {
-  const trace = yield* CompilerTrace.capture()
   const results = new Map<string, Elaboration.Result>()
   const computed = new Map<string, Elaboration.Result>()
   for (const [ordinal, module] of closure.modules.entries()) {
@@ -153,6 +152,7 @@ const elaborateModules = Effect.fn('Frontend.elaborateModules')(function* (
         results.set(module.name, reused)
         return
       }
+      const trace = yield* CompilerTrace.capture()
       const moduleHeaders = headers.index.modules.find(
         (candidate) => candidate.module === module.name,
       )

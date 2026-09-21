@@ -203,7 +203,7 @@ nonparking, must preserve the protected outcome, and cannot guarantee peer coope
 
 One focused test file creates one structured analysis snapshot for canonical imports, generic
 channels, state opacity, loan escape/rebinding rejection, and native target exclusion. Pure
-connection-token, expectation, and reuse planning functions use StaticEvaluation where that tier
+connection-token, expectation, and reuse planning functions use Evaluation where that tier
 can falsify them. One exported scripted byte-provider source carries the portable runtime matrix
 through shared native and LLVM-to-Wasm corpora: split/coalesced heads, tiny buffers, bodies,
 expectations, short writes, errors, persistence, shutdown, and handoff suffixes. The native adapter

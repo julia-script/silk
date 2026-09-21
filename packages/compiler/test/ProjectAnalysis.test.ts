@@ -4,6 +4,7 @@ import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Exit from 'effect/Exit'
 import * as Fiber from 'effect/Fiber'
+import * as Option from 'effect/Option'
 import * as Tracer from 'effect/Tracer'
 import * as Analysis from '../src/Analysis.js'
 import * as FrontendTooling from '../src/FrontendTooling.js'
@@ -59,7 +60,15 @@ it.effect('traces fresh and reused declarations through Semantic.checkBody', () 
         ),
       )
     }).pipe(Effect.withTracer(tracer))
-    assert.isTrue(spans.some((span) => span.name === 'Semantic.checkBody'))
+    const moduleSpans = new Set(
+      spans
+        .filter((span) => span.name === 'Frontend.elaborateModules:module')
+        .map((span) => span.spanId),
+    )
+    const bodySpans = spans.filter((span) => span.name === 'Semantic.checkBody')
+    assert.isAbove(bodySpans.length, 0)
+    for (const span of bodySpans)
+      assert.isTrue(moduleSpans.has(Option.getOrUndefined(span.parent)?.spanId ?? ''))
     assert.isTrue(spans.some((span) => span.name === 'Semantic.checkBody.execute'))
     assert.isTrue(spans.some((span) => span.name === 'Semantic.checkBody.reuse'))
     assert.isFalse(spans.some((span) => span.name.startsWith('PhaseReport.measure')))

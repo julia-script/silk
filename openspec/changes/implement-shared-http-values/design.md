@@ -146,7 +146,7 @@ Set-Cookie.
 One focused TypeScript test file builds one shared analysis snapshot for the complete behavioral
 program plus smaller ownership and source-navigation fixtures. These HTTP operations are ordinary
 runtime functions, not static functions, so they make no compile-time execution claim for
-`StaticEvaluation` to prove. Ownership fixtures prove borrowed/owned escape rules. Deterministic
+`Evaluation` to prove. Ownership fixtures prove borrowed/owned escape rules. Deterministic
 allocator providers will sweep acquisition ordinals and confirm cleanup structurally. A selected
 memory-only program joins the existing shared native acceptance corpus, which already supplies the
 cross-target runtime oracle; no bespoke HTTP binaries or per-feature determinism tests are added.

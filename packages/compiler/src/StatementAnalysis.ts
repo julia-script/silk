@@ -76,7 +76,7 @@ import * as Match from './Match.js'
 import * as NameResolution from './NameResolution.js'
 import * as SemanticDisplay from './SemanticDisplay.js'
 import * as SourceSpan from './SourceSpan.js'
-import * as StaticEvaluation from './Evaluation.js'
+import * as Evaluation from './Evaluation.js'
 import * as StaticValue from './StaticValue.js'
 import * as Type from './Type.js'
 export const unsafeCallDiagnostic = (
@@ -412,11 +412,8 @@ export const analyzeStatements = (
     return region
   }
 
-  const staticDiagnostic = (failure: StaticEvaluation.StaticFailure): Diagnostic.Located =>
-    StaticEvaluation.diagnostic(
-      failure,
-      context.staticContext?.environment.target ?? 'unselected-target',
-    )
+  const staticDiagnostic = (failure: Evaluation.StaticFailure): Diagnostic.Located =>
+    Evaluation.diagnostic(failure, context.staticContext?.environment.target ?? 'unselected-target')
 
   const analyzePatternSelection = (
     element: Extract<
@@ -831,8 +828,8 @@ export const analyzeStatements = (
       })
       context.bindings.push(binding)
       if (staticValue !== undefined && context.staticContext !== undefined) {
-        const key = StaticEvaluation.localValueKey(binding)
-        const localKey = StaticEvaluation.tirLocalKey(
+        const key = Evaluation.localValueKey(binding)
+        const localKey = Evaluation.tirLocalKey(
           BodyBuilder.localId(construction(context), binding.id),
         )
         context.staticContext.values.set(key, staticValue)
@@ -1071,13 +1068,9 @@ export const analyzeStatements = (
       const scopes: Array<StaticIterationFact['scopes'][number]> = []
       let failed = false
       for (const [ordinal, current] of elements.entries()) {
-        const iterationTrace = StaticEvaluation.appendTrace(
+        const iterationTrace = Evaluation.appendTrace(
           context.staticContext.trace,
-          StaticEvaluation.staticIterationFrame(
-            ordinal,
-            current.value,
-            Location.at(element.anchor),
-          ),
+          Evaluation.staticIterationFrame(ordinal, current.value, Location.at(element.anchor)),
         )
         const iterationStaticContext = Object.freeze({
           ...context.staticContext,
@@ -1107,9 +1100,9 @@ export const analyzeStatements = (
         })
         context.nextBindingOrdinal.value += 1
         context.bindings.push(binding)
-        context.staticContext.values.set(StaticEvaluation.localValueKey(binding), current.value)
+        context.staticContext.values.set(Evaluation.localValueKey(binding), current.value)
         context.staticContext.values.set(
-          StaticEvaluation.tirLocalKey(BodyBuilder.localId(construction(context), binding.id)),
+          Evaluation.tirLocalKey(BodyBuilder.localId(construction(context), binding.id)),
           current.value,
         )
         const diagnosticStart = context.diagnostics.length
@@ -1233,9 +1226,9 @@ export const analyzeStatements = (
       if (selected !== undefined) {
         const staticContext = Object.freeze({
           ...context.staticContext,
-          trace: StaticEvaluation.appendTrace(
+          trace: Evaluation.appendTrace(
             context.staticContext.trace,
-            StaticEvaluation.selectedArmFrame(
+            Evaluation.selectedArmFrame(
               evaluated.value.value ? 'Taken' : 'Otherwise',
               Location.at(selected.anchor),
             ),

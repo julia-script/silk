@@ -33,7 +33,7 @@ import * as AuthoredLowering from '../src/AuthoredLowering.js'
 import * as SemanticContext from '../src/SemanticContext.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as Location from '../src/Location.js'
-import * as StaticEvaluation from '../src/Evaluation.js'
+import * as Evaluation from '../src/Evaluation.js'
 import * as StaticText from '../src/StaticText.js'
 import * as StaticValue from '../src/StaticValue.js'
 import * as SyntaxTree from '../src/SyntaxTree.js'
@@ -58,15 +58,10 @@ it.effect('traces application execution and cache reuse under one operation iden
     })
     yield* Effect.gen(function* () {
       const trace = yield* CompilerTrace.capture()
-      const evaluation = StaticEvaluation.make<string>(
-        profile,
-        StaticEvaluation.defaultLimits,
-        '',
-        trace,
-      )
+      const evaluation = Evaluation.make<string>(profile, Evaluation.defaultLimits, '', trace)
       const request = application('trace')
-      StaticEvaluation.evaluate(evaluation, request, () => StaticEvaluation.complete('fresh'))
-      StaticEvaluation.evaluate(evaluation, request, () => StaticEvaluation.complete('unused'))
+      Evaluation.evaluate(evaluation, request, () => Evaluation.complete('fresh'))
+      Evaluation.evaluate(evaluation, request, () => Evaluation.complete('unused'))
     }).pipe(Effect.withTracer(tracer))
     const evaluations = spans.filter((span) => span.name === 'Evaluation.evaluate')
     assert.deepEqual(
@@ -86,9 +81,7 @@ const syntaxNodes = (node: SyntaxTree.Node): ReadonlyArray<SyntaxTree.Node> =>
     ...node.children.flatMap((child) => (SyntaxTree.isNode(child) ? syntaxNodes(child) : [])),
   ])
 
-const completedValue = (
-  outcome: StaticEvaluation.Outcome<StaticValue.Value>,
-): StaticValue.Value => {
+const completedValue = (outcome: Evaluation.Outcome<StaticValue.Value>): StaticValue.Value => {
   if (outcome._tag === 'Failed')
     throw new Error(`expected completed static value: ${outcome.failure._tag}`)
   return outcome.value
@@ -114,7 +107,7 @@ const staticArgument = admitted(
 const application = (
   name: string,
   value: StaticValue.Value = staticArgument,
-): StaticEvaluation.Application =>
+): Evaluation.Application =>
   Object.freeze({
     declaration: Object.freeze({
       _tag: 'CanonicalDeclarationId',
@@ -137,16 +130,16 @@ it.effect('keys and caches complete static applications by target and canonical 
       target: Target.x8664UnknownLinuxGnu.id,
     })
 
-    const evaluation = StaticEvaluation.make<string>(profilex8664UnknownLinuxGnu)
+    const evaluation = Evaluation.make<string>(profilex8664UnknownLinuxGnu)
     let calls = 0
-    const callback: StaticEvaluation.EvaluationCallback<string> = (context) => {
+    const callback: Evaluation.EvaluationCallback<string> = (context) => {
       calls += 1
       assert.strictEqual(context.step(), undefined)
       assert.strictEqual(context.retain(staticArgument), undefined)
-      return StaticEvaluation.complete('residual body')
+      return Evaluation.complete('residual body')
     }
-    const first = StaticEvaluation.evaluate(evaluation, application('render'), callback)
-    const second = StaticEvaluation.evaluate(evaluation, application('render'), callback)
+    const first = Evaluation.evaluate(evaluation, application('render'), callback)
+    const second = Evaluation.evaluate(evaluation, application('render'), callback)
 
     assert.strictEqual(first._tag, 'Complete')
     assert.strictEqual(first.cached, false)
@@ -155,17 +148,17 @@ it.effect('keys and caches complete static applications by target and canonical 
     assert.strictEqual(first.key, second.key)
     assert.strictEqual(calls, 1)
     assert.strictEqual(evaluation.environment.compilation.target.architecture, 'x86_64')
-    assert.deepEqual(StaticEvaluation.budget(evaluation), {
+    assert.deepEqual(Evaluation.budget(evaluation), {
       steps: 1,
       callDepth: 0,
       maximumCallDepth: 1,
       retainedValueBytes: StaticValue.retainedSize(staticArgument),
       residualNodes: 0,
     })
-    assert.strictEqual(StaticEvaluation.cacheEntries(evaluation).at(0)?.state._tag, 'Complete')
+    assert.strictEqual(Evaluation.cacheEntries(evaluation).at(0)?.state._tag, 'Complete')
 
-    const wasm = StaticEvaluation.make<string>(profilewasm32UnknownUnknown)
-    const wasmResult = StaticEvaluation.evaluate(wasm, application('render'), callback)
+    const wasm = Evaluation.make<string>(profilewasm32UnknownUnknown)
+    const wasmResult = Evaluation.evaluate(wasm, application('render'), callback)
     assert.notStrictEqual(first.key, wasmResult.key)
     assert.strictEqual(wasm.environment.compilation.target.architecture, 'wasm32')
     assert.strictEqual(Object.isFrozen(wasm.environment), true)
@@ -179,14 +172,14 @@ it.effect('detects pending cycles with logical application and selected-arm fram
       target: Target.x8664UnknownLinuxGnu.id,
     })
 
-    const evaluation = StaticEvaluation.make<string>(profilex8664UnknownLinuxGnu)
+    const evaluation = Evaluation.make<string>(profilex8664UnknownLinuxGnu)
     const render = application('render')
-    const result = StaticEvaluation.evaluate(evaluation, render, (context) => {
-      const selected = context.withTrace(StaticEvaluation.selectedArmFrame('Taken', staticSpan))
-      const nested = selected.evaluate(render, () => StaticEvaluation.complete('unreachable'))
+    const result = Evaluation.evaluate(evaluation, render, (context) => {
+      const selected = context.withTrace(Evaluation.selectedArmFrame('Taken', staticSpan))
+      const nested = selected.evaluate(render, () => Evaluation.complete('unreachable'))
       return nested._tag === 'Failed'
-        ? StaticEvaluation.failed(nested.failure)
-        : StaticEvaluation.complete(nested.value)
+        ? Evaluation.failed(nested.failure)
+        : Evaluation.complete(nested.value)
     })
 
     assert.strictEqual(result._tag, 'Failed')
@@ -197,7 +190,7 @@ it.effect('detects pending cycles with logical application and selected-arm fram
         ['StaticApplicationFrame', 'SelectedStaticArmFrame', 'StaticApplicationFrame'],
       )
     }
-    assert.strictEqual(StaticEvaluation.cacheEntries(evaluation).at(0)?.state._tag, 'Failed')
+    assert.strictEqual(Evaluation.cacheEntries(evaluation).at(0)?.state._tag, 'Failed')
   }),
 )
 
@@ -208,48 +201,46 @@ it.effect('reports compile errors, phase violations, and four distinct determini
     })
 
     const trace = Object.freeze([
-      StaticEvaluation.selectedArmFrame('Otherwise', staticSpan),
-      StaticEvaluation.staticTextFrame(staticSpan, 3),
+      Evaluation.selectedArmFrame('Otherwise', staticSpan),
+      Evaluation.staticTextFrame(staticSpan, 3),
     ])
     assert.strictEqual(
-      StaticEvaluation.compileError('bad template', staticSpan, trace)._tag,
+      Evaluation.compileError('bad template', staticSpan, trace)._tag,
       'CompileError',
     )
     assert.strictEqual(
-      StaticEvaluation.phaseViolation('call', 'ordinary function', staticSpan, trace)._tag,
+      Evaluation.phaseViolation('call', 'ordinary function', staticSpan, trace)._tag,
       'PhaseViolation',
     )
 
     const limited = (
-      policy: StaticEvaluation.Limits,
-      callback: StaticEvaluation.EvaluationCallback<string>,
+      policy: Evaluation.Limits,
+      callback: Evaluation.EvaluationCallback<string>,
     ) => {
-      const evaluation = StaticEvaluation.make<string>(profilex8664UnknownLinuxGnu, policy)
-      return StaticEvaluation.evaluate(evaluation, application('limited'), callback)
+      const evaluation = Evaluation.make<string>(profilex8664UnknownLinuxGnu, policy)
+      return Evaluation.evaluate(evaluation, application('limited'), callback)
     }
     const base = { steps: 10, callDepth: 10, retainedValueBytes: 10_000, residualNodes: 10 }
     const step = limited({ ...base, steps: 0 }, (context) => {
       context.step()
-      return StaticEvaluation.complete('partial')
+      return Evaluation.complete('partial')
     })
     const retained = limited({ ...base, retainedValueBytes: 0 }, (context) => {
       context.retain(staticArgument)
-      return StaticEvaluation.complete('partial')
+      return Evaluation.complete('partial')
     })
     const residual = limited({ ...base, residualNodes: 0 }, (context) => {
       context.growResidual()
-      return StaticEvaluation.complete('partial')
+      return Evaluation.complete('partial')
     })
     const depth = limited({ ...base, callDepth: 1 }, (context) => {
-      const nested = context.evaluate(application('nested'), () =>
-        StaticEvaluation.complete('partial'),
-      )
+      const nested = context.evaluate(application('nested'), () => Evaluation.complete('partial'))
       return nested._tag === 'Failed'
-        ? StaticEvaluation.failed(nested.failure)
-        : StaticEvaluation.complete(nested.value)
+        ? Evaluation.failed(nested.failure)
+        : Evaluation.complete(nested.value)
     })
 
-    const failureTag = (result: StaticEvaluation.ApplicationResult<string>): string =>
+    const failureTag = (result: Evaluation.ApplicationResult<string>): string =>
       result._tag === 'Failed' ? result.failure._tag : 'Complete'
     assert.deepEqual([step, depth, retained, residual].map(failureTag), [
       'StepLimit',
@@ -275,38 +266,33 @@ it.effect('reports compile errors, phase violations, and four distinct determini
 it.effect('accounts budgets so neither caching nor ordering changes what is accepted', () =>
   Effect.gen(function* () {
     const profile = yield* CompilationProfile.normalize({ target: Target.x8664UnknownLinuxGnu.id })
-    const evaluation = StaticEvaluation.make<string>(profile, {
+    const evaluation = Evaluation.make<string>(profile, {
       steps: 10,
       callDepth: 4,
       retainedValueBytes: 10_000,
       residualNodes: 10,
     })
     const spend =
-      (steps: number, nested?: string): StaticEvaluation.EvaluationCallback<string> =>
+      (steps: number, nested?: string): Evaluation.EvaluationCallback<string> =>
       (context) => {
         for (let step = 0; step < steps; step += 1) context.step()
-        if (nested === undefined) return StaticEvaluation.complete('done')
+        if (nested === undefined) return Evaluation.complete('done')
         const inner = context.evaluate(application(nested), spend(4))
         return inner._tag === 'Failed'
-          ? StaticEvaluation.failed(inner.failure)
-          : StaticEvaluation.complete('done')
+          ? Evaluation.failed(inner.failure)
+          : Evaluation.complete('done')
       }
     const entry = (name: string) =>
-      StaticEvaluation.cacheEntries(evaluation).find((candidate) => candidate.key.includes(name))
-        ?.state
+      Evaluation.cacheEntries(evaluation).find((candidate) => candidate.key.includes(name))?.state
 
     // `f` leaves its nested `g` too little: `f` is rejected, and nothing is recorded for `g`.
-    const f = StaticEvaluation.evaluate(
-      evaluation,
-      application('outerFirst'),
-      spend(9, 'nestedWork'),
-    )
+    const f = Evaluation.evaluate(evaluation, application('outerFirst'), spend(9, 'nestedWork'))
     assert.strictEqual(f._tag === 'Failed' ? f.failure._tag : f._tag, 'StepLimit')
     assert.strictEqual(entry('outerFirst')?._tag, 'Failed')
     assert.isUndefined(entry('nestedWork'))
 
     // Asked again as a root, `g` has the whole allowance and records what it cost.
-    const g = StaticEvaluation.evaluate(evaluation, application('nestedWork'), spend(4))
+    const g = Evaluation.evaluate(evaluation, application('nestedWork'), spend(4))
     assert.strictEqual(g._tag, 'Complete')
     const recorded = entry('nestedWork')
     assert.deepEqual(recorded?._tag === 'Complete' ? recorded.cost : undefined, {
@@ -318,18 +304,10 @@ it.effect('accounts budgets so neither caching nor ordering changes what is acce
 
     // A hit is charged like an execution: `h` continues, and `tight` exhausts exactly as it would
     // have by executing `g` itself.
-    const h = StaticEvaluation.evaluate(
-      evaluation,
-      application('outerSecond'),
-      spend(5, 'nestedWork'),
-    )
+    const h = Evaluation.evaluate(evaluation, application('outerSecond'), spend(5, 'nestedWork'))
     assert.strictEqual(h._tag, 'Complete')
     assert.strictEqual(h.budget.steps, 9)
-    const tight = StaticEvaluation.evaluate(
-      evaluation,
-      application('outerThird'),
-      spend(8, 'nestedWork'),
-    )
+    const tight = Evaluation.evaluate(evaluation, application('outerThird'), spend(8, 'nestedWork'))
     assert.strictEqual(tight._tag === 'Failed' ? tight.failure._tag : tight._tag, 'StepLimit')
     assert.strictEqual(entry('nestedWork')?._tag, 'Complete')
   }),
@@ -409,7 +387,7 @@ it('retains static text provenance without adding it to canonical identity', () 
       {
         _tag: 'TextValue',
         bytes,
-        origin: StaticEvaluation.parameterTextOrigin(0, bytes.length),
+        origin: Evaluation.parameterTextOrigin(0, bytes.length),
       },
       { pointerBits: 64 },
     ),
@@ -419,7 +397,7 @@ it('retains static text provenance without adding it to canonical identity', () 
       {
         _tag: 'TextValue',
         bytes,
-        origin: StaticEvaluation.parameterTextOrigin(3, bytes.length),
+        origin: Evaluation.parameterTextOrigin(3, bytes.length),
       },
       { pointerBits: 64 },
     ),
@@ -774,11 +752,9 @@ it.effect('evaluates authored literals with contextual scalar and target ranges'
   return ()
 }`,
     )
-    const environment = StaticEvaluation.targetEnvironment(profilex8664UnknownLinuxGnu)
-    const evaluate = (
-      tag: AuthoredHir.Literal['_tag'],
-      expected: StaticEvaluation.LiteralExpectation,
-    ) => StaticEvaluation.evaluateLiteral(environment, context, literal(tag), expected)
+    const environment = Evaluation.targetEnvironment(profilex8664UnknownLinuxGnu)
+    const evaluate = (tag: AuthoredHir.Literal['_tag'], expected: Evaluation.LiteralExpectation) =>
+      Evaluation.evaluateLiteral(environment, context, literal(tag), expected)
 
     assert.strictEqual(completedValue(evaluate('UnitLiteral', 'unit'))._tag, 'UnitValue')
     assert.deepEqual(completedValue(evaluate('BooleanLiteral', 'bool')), {
@@ -816,8 +792,8 @@ it.effect('evaluates authored literals with contextual scalar and target ranges'
       'pub fn main() -> usize { return 4294967296 }',
     )
     assert.strictEqual(
-      StaticEvaluation.evaluateLiteral(
-        StaticEvaluation.targetEnvironment(profilewasm32UnknownUnknown),
+      Evaluation.evaluateLiteral(
+        Evaluation.targetEnvironment(profilewasm32UnknownUnknown),
         wide.context,
         wide.literal('IntegerLiteral'),
         'usize',
@@ -825,12 +801,8 @@ it.effect('evaluates authored literals with contextual scalar and target ranges'
       'Failed',
     )
     assert.strictEqual(
-      StaticEvaluation.evaluateLiteral(
-        environment,
-        wide.context,
-        wide.literal('IntegerLiteral'),
-        'usize',
-      )._tag,
+      Evaluation.evaluateLiteral(environment, wide.context, wide.literal('IntegerLiteral'), 'usize')
+        ._tag,
       'Complete',
     )
   }),
@@ -842,7 +814,7 @@ it.effect('evaluates checked primitive, enum, text, aggregate, and target-profil
       target: Target.x8664UnknownLinuxGnu.id,
     })
 
-    const environment = StaticEvaluation.targetEnvironment(profilex8664UnknownLinuxGnu)
+    const environment = Evaluation.targetEnvironment(profilex8664UnknownLinuxGnu)
     const integer = (type: 'i8' | 'i32' | 'usize', value: bigint): StaticValue.Value =>
       admitted(StaticValue.admit({ _tag: 'IntegerValue', type, value }, { pointerBits: 64 }))
     const floating = (type: 'f32' | 'f64', value: number): StaticValue.Value => {
@@ -853,7 +825,7 @@ it.effect('evaluates checked primitive, enum, text, aggregate, and target-profil
     }
     assert.deepEqual(
       completedValue(
-        StaticEvaluation.evaluatePrimitive(
+        Evaluation.evaluatePrimitive(
           environment,
           'Multiply',
           [integer('i32', 6n), integer('i32', 7n)],
@@ -863,7 +835,7 @@ it.effect('evaluates checked primitive, enum, text, aggregate, and target-profil
       { _tag: 'IntegerValue', type: 'i32', value: 42n },
     )
     assert.strictEqual(
-      StaticEvaluation.evaluatePrimitive(
+      Evaluation.evaluatePrimitive(
         environment,
         'Add',
         [integer('i8', 127n), integer('i8', 1n)],
@@ -873,7 +845,7 @@ it.effect('evaluates checked primitive, enum, text, aggregate, and target-profil
     )
     assert.deepEqual(
       completedValue(
-        StaticEvaluation.evaluatePrimitive(
+        Evaluation.evaluatePrimitive(
           environment,
           'Add',
           [floating('f32', 1.5), floating('f32', 2.25)],
@@ -884,12 +856,7 @@ it.effect('evaluates checked primitive, enum, text, aggregate, and target-profil
     )
     assert.deepEqual(
       completedValue(
-        StaticEvaluation.evaluatePrimitive(
-          environment,
-          'Not',
-          [StaticValue.boolean(true)],
-          staticSpan,
-        ),
+        Evaluation.evaluatePrimitive(environment, 'Not', [StaticValue.boolean(true)], staticSpan),
       ),
       { _tag: 'BooleanValue', value: false },
     )
@@ -900,15 +867,15 @@ it.effect('evaluates checked primitive, enum, text, aggregate, and target-profil
       name: 'Architecture',
     })
     const native = completedValue(
-      StaticEvaluation.constructEnum(environment, enumType, 'X86_64', 'u8', 0n, staticSpan),
+      Evaluation.constructEnum(environment, enumType, 'X86_64', 'u8', 0n, staticSpan),
     )
     const wasm = completedValue(
-      StaticEvaluation.constructEnum(environment, enumType, 'Wasm32', 'u8', 1n, staticSpan),
+      Evaluation.constructEnum(environment, enumType, 'Wasm32', 'u8', 1n, staticSpan),
     )
     if (native._tag !== 'EnumValue' || wasm._tag !== 'EnumValue')
       throw new Error('expected scalar enum values')
     assert.deepEqual(
-      completedValue(StaticEvaluation.evaluateEnumEquality('NotEquals', native, wasm, staticSpan)),
+      completedValue(Evaluation.evaluateEnumEquality('NotEquals', native, wasm, staticSpan)),
       { _tag: 'BooleanValue', value: true },
     )
 
@@ -920,7 +887,7 @@ it.effect('evaluates checked primitive, enum, text, aggregate, and target-profil
     )
     if (text._tag !== 'TextValue') throw new Error('expected static text')
     assert.deepEqual(
-      completedValue(StaticEvaluation.staticTextByteLength(environment, text, staticSpan)),
+      completedValue(Evaluation.staticTextByteLength(environment, text, staticSpan)),
       {
         _tag: 'IntegerValue',
         type: 'usize',
@@ -928,7 +895,7 @@ it.effect('evaluates checked primitive, enum, text, aggregate, and target-profil
       },
     )
     assert.deepEqual(
-      completedValue(StaticEvaluation.staticTextByteAt(environment, text, 1n, staticSpan)),
+      completedValue(Evaluation.staticTextByteAt(environment, text, 1n, staticSpan)),
       {
         _tag: 'IntegerValue',
         type: 'u8',
@@ -936,19 +903,19 @@ it.effect('evaluates checked primitive, enum, text, aggregate, and target-profil
       },
     )
     assert.deepEqual(
-      completedValue(StaticEvaluation.staticTextConcat(environment, text, text, staticSpan)),
+      completedValue(Evaluation.staticTextConcat(environment, text, text, staticSpan)),
       { _tag: 'TextValue', bytes: [0x68, 0xc3, 0xa9, 0x68, 0xc3, 0xa9] },
     )
     assert.deepEqual(
-      completedValue(StaticEvaluation.staticTextSlice(environment, text, 1n, 3n, staticSpan)),
+      completedValue(Evaluation.staticTextSlice(environment, text, 1n, 3n, staticSpan)),
       { _tag: 'TextValue', bytes: [0xc3, 0xa9] },
     )
-    const splitScalar = StaticEvaluation.staticTextSlice(environment, text, 1n, 2n, staticSpan)
+    const splitScalar = Evaluation.staticTextSlice(environment, text, 1n, 2n, staticSpan)
     assert.strictEqual(splitScalar._tag, 'Failed')
     if (splitScalar._tag === 'Failed') {
       assert.strictEqual(splitScalar.failure._tag, 'PhaseViolation')
       assert.strictEqual(splitScalar.failure.trace.at(-1)?._tag, 'StaticTextFrame')
-      const diagnostic = StaticEvaluation.diagnostic(splitScalar.failure, environment.target)
+      const diagnostic = Evaluation.diagnostic(splitScalar.failure, environment.target)
       if (diagnostic.reason._tag !== 'StaticPhaseViolation')
         throw new Error('expected a static phase diagnostic')
       assert.deepEqual(diagnostic.reason.trace.at(-1), {
@@ -960,7 +927,7 @@ it.effect('evaluates checked primitive, enum, text, aggregate, and target-profil
     }
 
     const aggregate = completedValue(
-      StaticEvaluation.constructAggregate(
+      Evaluation.constructAggregate(
         environment,
         { _tag: 'ArrayAggregateIdentity', element: 'i32', length: 2 },
         [
@@ -973,7 +940,7 @@ it.effect('evaluates checked primitive, enum, text, aggregate, and target-profil
     assert.strictEqual(aggregate._tag, 'AggregateValue')
     assert.deepEqual(
       completedValue(
-        StaticEvaluation.profileFact(environment, 'targetPointerBits', [], staticSpan) ??
+        Evaluation.profileFact(environment, 'targetPointerBits', [], staticSpan) ??
           unreachable('expected profile fact'),
       ),
       {
@@ -1400,7 +1367,7 @@ pub fn main() -> i32 { return choose(true, 42) }`),
       snapshot.results,
       snapshot.resolution,
       snapshot.index,
-      { ...StaticEvaluation.defaultLimits, residualNodes: 0 },
+      { ...Evaluation.defaultLimits, residualNodes: 0 },
     )
     const failed = Residualization.residualize(limited, application)
     assert.strictEqual(failed._tag, 'StaticFailure')
@@ -1939,25 +1906,21 @@ it('composes decoded static-text ranges through source and parameter slices', ()
     lowered.presentation.entries.find((entry) => entry.spelling === spelling)?.anchor ??
     unreachable('expected the literal to be presented')
   const registry = SemanticContext.registryOf(SemanticContext.make(lowered))
-  const written = (origin: StaticEvaluation.TextOrigin): string => {
+  const written = (origin: Evaluation.TextOrigin): string => {
     const location =
-      StaticEvaluation.textOriginLocation(origin, literal) ?? unreachable('expected a location')
+      Evaluation.textOriginLocation(origin, literal) ?? unreachable('expected a location')
     const span = Location.resolve(location, registry).span
     return new TextDecoder().decode(encoder.encode(text).slice(span.start, span.end))
   }
-  const origin = StaticEvaluation.sourceTextOrigin(literal, decoded.data.bytes.length)
-  const newline = StaticEvaluation.sliceTextOrigin(origin, 3, 4)
+  const origin = Evaluation.sourceTextOrigin(literal, decoded.data.bytes.length)
+  const newline = Evaluation.sliceTextOrigin(origin, 3, 4)
   if (newline === undefined) throw new Error('expected newline origin')
   assert.strictEqual(written(newline), '\\n')
-  const emoji = StaticEvaluation.sliceTextOrigin(origin, 4, 8)
+  const emoji = Evaluation.sliceTextOrigin(origin, 4, 8)
   if (emoji === undefined) throw new Error('expected emoji origin')
   assert.strictEqual(written(emoji), '\\u{1f642}')
   assert.deepEqual(
-    StaticEvaluation.sliceTextOrigin(
-      StaticEvaluation.parameterTextOrigin(0, decoded.data.bytes.length),
-      3,
-      8,
-    ),
+    Evaluation.sliceTextOrigin(Evaluation.parameterTextOrigin(0, decoded.data.bytes.length), 3, 8),
     [
       {
         value: { start: 0, end: 5 },
@@ -2078,12 +2041,12 @@ static fn computed() -> i32 {
     const computed =
       records(Analysis.rootAnalysis(snapshot)).functions.at(0) ?? unreachable('static body')
     const result = completedValue(
-      StaticEvaluation.evaluateStatements(
+      Evaluation.evaluateStatements(
         BodyBuilder.staticLowering(
           SemanticContext.make(Analysis.rootAnalysis(snapshot).authored),
         ).statements(computed.statements),
         {
-          environment: StaticEvaluation.targetEnvironment(profilewasm32UnknownUnknown),
+          environment: Evaluation.targetEnvironment(profilewasm32UnknownUnknown),
           lookup: (id) => DeclarationFacts.byCanonical(snapshot.index, id),
           values: new Map(),
           valueSpans: new Map(),

@@ -14,7 +14,7 @@ import type * as SemanticContext from './SemanticContext.js'
 import * as TypeInference from './internal/TypeInference.js'
 import * as RowAlgebra from './RowAlgebra.js'
 import * as Specialization from './Specialization.js'
-import type * as StaticEvaluation from './Evaluation.js'
+import type * as Evaluation from './Evaluation.js'
 import * as StaticValue from './StaticValue.js'
 import * as SuspensionMode from './SuspensionMode.js'
 import type * as SourceSpan from './SourceSpan.js'
@@ -51,7 +51,7 @@ export interface CallTarget {
   readonly evidence?: ReadonlyArray<string>
   readonly staticArguments?: ReadonlyArray<StaticValue.Value>
   /** Caller-authored metadata aligned with static arguments and excluded from target identity. */
-  readonly staticArgumentOrigins?: ReadonlyArray<StaticEvaluation.TextOrigin | undefined>
+  readonly staticArgumentOrigins?: ReadonlyArray<Evaluation.TextOrigin | undefined>
   readonly structuralProvider?: Type.Type
   /** Concrete owner whose cleanup plan selected this target; excluded from target identity. */
   readonly cleanupRoot?: Type.Type
