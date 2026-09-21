@@ -1,4 +1,3 @@
-import * as Layer from 'effect/Layer'
 /**
  * The `<silk-snippet>` custom element.
  *
@@ -13,8 +12,6 @@ import * as Layer from 'effect/Layer'
  */
 
 import * as Analysis from '@silklang/compiler/Analysis'
-import * as SourceFile from '@silklang/compiler/SourceFile'
-import * as SourceResolver from '@silklang/compiler/SourceResolver'
 import * as Effect from 'effect/Effect'
 import * as Fiber from 'effect/Fiber'
 import * as Editor from './Editor.js'
@@ -168,22 +165,7 @@ export class SilkSnippetElement extends HTMLElement {
     this.#compiled = true
     const bytes = encoder.encode(handle.value())
     const snapshot = Effect.runSync(
-      Analysis.makeRealized({
-        root: this.#module,
-        configuration: {
-          profile: {
-            target: this.getAttribute('target') ?? defaultTarget,
-            artifact: 'object',
-            runtime: { kind: 'none' },
-          },
-        },
-      }).pipe(
-        Effect.provide(
-          SourceResolver.overlay([SourceFile.make(this.#module, bytes)]).pipe(
-            Layer.provideMerge(SourceResolver.empty),
-          ),
-        ),
-      ),
+      Analysis.ofSource(this.#module, bytes, this.getAttribute('target') ?? defaultTarget),
     )
     handle.setSession(Editor.session(this.#module, bytes, snapshot))
     this.dispatchEvent(

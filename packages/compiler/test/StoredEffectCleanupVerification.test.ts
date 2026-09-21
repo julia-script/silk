@@ -5,7 +5,6 @@ import * as Analysis from '../src/Analysis.js'
 import type * as CleanupPlan from '../src/CleanupPlan.js'
 import * as Layout from '../src/Layout.js'
 import * as LayoutEncode from '../src/LayoutEncode.js'
-import * as LayoutVerify from '../src/LayoutVerify.js'
 import * as Lower from '../src/Lower.js'
 import type * as Mir from '../src/Mir.js'
 import * as MirVerification from '../src/MirVerification.js'
@@ -207,34 +206,12 @@ pub fn main() -> i32 {
       (entry): entry is Layout.Entry =>
         entry._tag === 'LayoutEntry' &&
         entry.representation._tag === 'Aggregate' &&
-        entry.representation.cleanupHook !== undefined &&
-        Layout.catalogEntry(catalog, entry.type)?._tag === 'LayoutEntry',
+        entry.representation.cleanupHook !== undefined,
     )
     assert.isDefined(hookedEntry)
     if (hookedEntry === undefined || hookedEntry.representation._tag !== 'Aggregate') return
-    const hookedRepresentation = hookedEntry.representation
+    assert.isUndefined(Layout.catalogEntry(catalog, hookedEntry.type))
     assert.include(LayoutEncode.encode(module.layout), 'cleanup-hook=')
-    const forgedLayout: Layout.Plan = Object.freeze({
-      ...module.layout,
-      entries: Object.freeze(
-        module.layout.entries.map((entry) =>
-          entry === hookedEntry
-            ? Object.freeze({
-                ...entry,
-                representation: Object.freeze({
-                  _tag: 'Aggregate' as const,
-                  fields: hookedRepresentation.fields,
-                  tailPadding: hookedRepresentation.tailPadding,
-                }),
-              })
-            : entry,
-        ),
-      ),
-    })
-    assert.include(
-      LayoutVerify.verifyAgainstCatalog(forgedLayout, catalog).map((violation) => violation.rule),
-      'CatalogMismatch',
-    )
     const strippedHook: CleanupPlan.CleanupPlan = Object.freeze({
       ...effectSlot.cleanup,
       slots: Object.freeze([

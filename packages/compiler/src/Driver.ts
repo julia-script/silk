@@ -964,8 +964,7 @@ export const compile = Effect.fn('Driver.compile')(function* (
         const nativeKey = `native-${linkPlan.identity}.blob`
         // Linking owns physical-plan validation and optional final-artifact reuse. Helper/runtime
         // preparation stays outside it and remains scoped by this caller-owned build lifetime.
-        const linkedResult = yield* PhaseReport.measureEffectInto(
-          report,
+        const measuredLink = yield* PhaseReport.measureEffect(
           'link',
           2,
           Linker.link({
@@ -982,6 +981,13 @@ export const compile = Effect.fn('Driver.compile')(function* (
           () => 0,
           { heapBytes },
         )
+        report.push(
+          phaseWithHeap({
+            ...measuredLink.report,
+            phase: measuredLink.value.metadata.reused ? 'artifact-cache' : 'link',
+          }),
+        )
+        const linkedResult = measuredLink.value
         const linked = linkedResult.artifact
         // Publish the inspectable link plan beside the artifact.
         const linkPlanPath = yield* NativeToolchain.commitLinkPlan(
