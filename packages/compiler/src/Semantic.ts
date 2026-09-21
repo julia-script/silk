@@ -118,6 +118,17 @@ const stableJson = (value: unknown): string =>
 const boundaryFingerprint = (boundaries: ReadonlyArray<SourceSpan.SourceSpan>): string =>
   String(boundaries.length)
 
+const conformanceCandidateFingerprints = new WeakMap<DeclarationIndex.Index, string>()
+
+const conformanceCandidatesFingerprint = (index: DeclarationIndex.Index): string => {
+  let fingerprint = conformanceCandidateFingerprints.get(index)
+  if (fingerprint === undefined) {
+    fingerprint = ToolchainIntegrity.contentDigest(ModuleSurface.resolutionSignature(index))
+    conformanceCandidateFingerprints.set(index, fingerprint)
+  }
+  return fingerprint
+}
+
 const declarationKey = (id: DeclarationFacts.CanonicalId): string => id.module + '.' + id.name
 
 const bindingKey = (binding: NameResolution.Binding): string => {
@@ -273,7 +284,7 @@ const readInput = (
     case 'AssociatedCandidates':
       return associatedCandidatesFingerprint(index, parts[0] ?? '', parts[1] ?? '', parts[2] ?? '')
     case 'ConformanceCandidates':
-      return ModuleSurface.resolutionSignature(index)
+      return conformanceCandidatesFingerprint(index)
     case 'BodyHeader':
       return runtime.bodies.get(parts[0] ?? '')?.header
     case 'BodyImplementation':
