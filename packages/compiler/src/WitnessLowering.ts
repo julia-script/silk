@@ -563,7 +563,7 @@ export const lowerStaticInterfaceWitnessCall = (
     expression.span,
   )
   if (witnessArguments === undefined) return undefined
-  const selected = fn.call(expression.span, target.implementation, target.typeArguments)
+  const selected = fn.call(expression, target.implementation, target.typeArguments)
   const destination = fn.alloc(resultType)
   fn.emit(
     Object.freeze({

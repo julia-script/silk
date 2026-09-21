@@ -463,7 +463,7 @@ const lowerStatement = (
       forwardedRequirement === undefined
         ? undefined
         : fn.call(
-            statement.initializer.span,
+            statement.initializer,
             undefined,
             statement.initializer._tag === 'EffectConstruct'
               ? statement.initializer.typeArguments.map((argument) => fn.semanticArgument(argument))
@@ -500,7 +500,7 @@ const lowerStatement = (
       (statement.initializer._tag === 'EffectConstruct' &&
         (() => {
           const call = fn.call(
-            statement.initializer.span,
+            statement.initializer,
             undefined,
             statement.initializer.typeArguments.map((argument) => fn.semanticArgument(argument)),
             statement.initializer.staticArguments,
@@ -634,7 +634,15 @@ const lowerStatement = (
 
   if (statement._tag === 'Write') {
     const place = statement.place
-    const transition = transitionAt(fn, statement.span, 'Write')
+    let transitionRoot: Ownership.BindingSite | undefined
+    if (place._tag === 'WritePlace') {
+      if (place.root._tag === 'ParameterWriteRoot')
+        transitionRoot = Object.freeze({ _tag: 'Parameter', parameter: place.root.parameter })
+      else if (place.root._tag === 'PatternWriteRoot')
+        transitionRoot = Object.freeze({ _tag: 'Pattern', binding: place.root.binding })
+      else transitionRoot = Object.freeze({ _tag: 'Let', binding: place.root.binding })
+    }
+    const transition = transitionAt(fn, statement.span, 'Write', transitionRoot)
     let root: Mir.LocalId | undefined
     if (place._tag === 'BorrowedWritePlace') root = borrowedWriteRoot(fn, place.root)
     else if (transition !== undefined) root = ownershipLocal(fn, transition.root)
@@ -763,7 +771,12 @@ const lowerStatement = (
   }
 
   if (statement._tag === 'Drop') {
-    const transition = transitionAt(fn, statement.span, 'Drop')
+    const transition = transitionAt(
+      fn,
+      statement.span,
+      'Drop',
+      Ownership.placeOf(statement.expression)?.root,
+    )
     if (transition !== undefined && ownershipLocal(fn, transition.root) !== undefined) {
       const root = ownershipLocal(fn, transition.root)
       let type: Mir.Type | undefined

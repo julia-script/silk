@@ -1698,27 +1698,6 @@ pub fn main() -> i32 { return run Effect.catchAll(check(), recover) }`
 
 export const corpus: ReadonlyArray<CorpusProgram> = [
   {
-    name: 'testing-assertion-and-runtime-filters',
-    source: `import silk.effect { Effect }
-import silk.testing { AssertionError, Testing }
-effect fn exercise() -> i32 ! AssertionError<'static> {
-  run Testing.expect(true, "unused")
-  if !Testing.matches("src/math.silk", "AddsNumbers", "src/math.silk", "numbers") { return 1 }
-  if !Testing.matches("src/math.silk", "AddsNumbers", "", "ADDS") { return 2 }
-  if Testing.matches("src/math.silk", "AddsNumbers", "src/Math.silk", "numbers") { return 3 }
-  if Testing.matches("src/math.silk", "AddsNumbers", "src/math.silk", "missing") { return 4 }
-  if !Testing.matches("src/meta.silk", "literal[case", "src/meta.silk", "[") { return 5 }
-  run Testing.expect(false, "expected failure")
-  return 6
-}
-effect fn recover(error: AssertionError<'static>) -> i32 {
-  if Testing.assertionMessage(&error) == "expected failure" { return 42 }
-  return 7
-}
-pub fn main() -> i32 { return run Effect.catchAll(exercise(), recover) }`,
-    expected: { _tag: 'Completes', result: 42 },
-  },
-  {
     name: 'narrow-record-effect-success-lanes',
     source: narrowEffectRecord,
     expected: { _tag: 'Completes', result: 42 },
@@ -5728,6 +5707,28 @@ pub fn main() -> i32 {
   return run Effect.catch<ProblemError>(fallible(), recover)
 }`,
     expected: { _tag: 'Completes', result: 7 },
+  },
+  {
+    name: 'testing-assertion-and-runtime-filters',
+    source: `import silk.effect { Effect }
+import silk.testing { AssertionError, Testing }
+effect fn exercise() -> i32 ! AssertionError<'static> {
+  run Testing.expect(true, "unused")
+  if !Testing.matches("src/math.silk", "AddsNumbers", "src/math.silk", "numbers") { return 1 }
+  if !Testing.matches("src/math.silk", "AddsNumbers", "", "ADDS") { return 2 }
+  if !Testing.matches("src/math.silk", "AddsNumbers", "src/math.silk", "") { return 3 }
+  if Testing.matches("src/math.silk", "AddsNumbers", "src/Math.silk", "numbers") { return 4 }
+  if Testing.matches("src/math.silk", "AddsNumbers", "src/math.silk", "missing") { return 5 }
+  if !Testing.matches("src/meta.silk", "literal[case", "src/meta.silk", "[") { return 6 }
+  run Testing.expect(false, "expected failure")
+  return 7
+}
+effect fn recover(error: AssertionError<'static>) -> i32 {
+  if Testing.assertionMessage(&error) == "expected failure" { return 42 }
+  return 8
+}
+pub fn main() -> i32 { return run Effect.catchAll(exercise(), recover) }`,
+    expected: { _tag: 'Completes', result: 42 },
   },
 ]
 

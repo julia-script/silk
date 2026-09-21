@@ -165,6 +165,8 @@ export interface CallProvider {
 export interface CallInstance {
   readonly _tag: 'CallInstance'
   readonly owner: InstanceKey
+  /** Published TIR node that selected this target inside the owning instance. */
+  readonly node?: Tir.NodeId
   readonly span: Tir.Expression['span']
   readonly target: InstanceKey
   /** Caller-authored metadata aligned with target static arguments, outside instance identity. */
@@ -1855,7 +1857,7 @@ export const discover = (
             const callableTargets = callableCallTargets(fn, key, substitution, results, index)
             for (const call of directCalls) {
               recordedCalls.set(
-                `${keyText(call.owner)}\u0005${call.span.sourceId}:${call.span.start}:${call.span.end}`,
+                `${keyText(call.owner)}\u0005${call.span.sourceId}:${call.span.start}:${call.span.end}\u0005${call.node?.ordinal ?? -1}\u0005${keyText(call.target)}`,
                 call,
               )
             }

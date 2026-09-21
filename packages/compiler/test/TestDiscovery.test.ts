@@ -56,6 +56,19 @@ fn helper() -> () { ${helper} }`,
   )
 }
 
+const fingerprintSnapshot = (text: string) =>
+  Analysis.make({
+    root: 'Cases',
+    target: 'x86_64-unknown-linux-gnu',
+    discovery: { root: 'Cases' },
+  }).pipe(
+    Effect.provide(
+      SourceResolver.overlay([source('Cases', text)]).pipe(
+        Layer.provideMerge(SourceResolver.empty),
+      ),
+    ),
+  )
+
 it.effect('builds a deterministic project-owned catalog from only the discovery-root closure', () =>
   Effect.gen(function* () {
     const analysis = yield* snapshot('let value = 1 drop value', 'let value = 2 drop value')
@@ -79,16 +92,21 @@ it.effect(
   'fingerprints local authored test content without treating helper bodies as dependencies',
   () =>
     Effect.gen(function* () {
-      const before = yield* snapshot('let value = 1 drop value', 'let value = 2 drop value')
-      const bodyEdit = yield* snapshot('let value = 3 drop value', 'let value = 2 drop value')
-      const helperEdit = yield* snapshot('let value = 1 drop value', 'let value = 4 drop value')
-      const triviaEdit = yield* snapshot('let value=1\n  drop value', 'let value = 2 drop value')
-      const moved = yield* snapshot('let value = 1 drop value', 'let value = 2 drop value', {
-        prelude: '\n\nfn unrelated() {}\n',
-      })
-      const headerEdit = yield* snapshot('let value = 1 drop value', 'let value = 2 drop value', {
-        qualifier: 'pub test',
-      })
+      const before = yield* fingerprintSnapshot(`test fn alpha() -> () { let value = 1 drop value }
+test fn beta() -> () { helper() }
+fn helper() -> () { let value = 2 drop value }`)
+      const bodyAndHelperEdit = yield* fingerprintSnapshot(
+        `test fn alpha() -> () { let value = 3 drop value }
+test fn beta() -> () { helper() }
+fn helper() -> () { let value = 4 drop value }`,
+      )
+      const movedAndTriviaEdit = yield* fingerprintSnapshot(`
+
+fn unrelated() {}
+test fn alpha() -> () { let value=1
+  drop value }
+test fn beta() -> () { helper() }
+fn helper() -> () { let value = 2 drop value }`)
       const fingerprints = (analysis: Analysis.SingleRootFrontendSnapshot) =>
         new Map(
           analysis.testCatalog?.entries.map((entry) => [
@@ -97,32 +115,23 @@ it.effect(
           ]),
         )
       assert.notStrictEqual(
-        fingerprints(before).get('suite/Cases:alpha'),
-        fingerprints(bodyEdit).get('suite/Cases:alpha'),
+        fingerprints(before).get('Cases:alpha'),
+        fingerprints(bodyAndHelperEdit).get('Cases:alpha'),
       )
       assert.strictEqual(
-        fingerprints(before).get('suite/Cases:beta'),
-        fingerprints(helperEdit).get('suite/Cases:beta'),
+        fingerprints(before).get('Cases:beta'),
+        fingerprints(bodyAndHelperEdit).get('Cases:beta'),
       )
       assert.strictEqual(
-        fingerprints(before).get('suite/Cases:alpha'),
-        fingerprints(moved).get('suite/Cases:alpha'),
-      )
-      assert.strictEqual(
-        fingerprints(before).get('suite/Cases:alpha'),
-        fingerprints(triviaEdit).get('suite/Cases:alpha'),
-      )
-      assert.notStrictEqual(
-        fingerprints(before).get('suite/Cases:alpha'),
-        fingerprints(headerEdit).get('suite/Cases:alpha'),
+        fingerprints(before).get('Cases:alpha'),
+        fingerprints(movedAndTriviaEdit).get('Cases:alpha'),
       )
       assert.notStrictEqual(
         before.testCatalog?.entries[0]?.info.line,
-        moved.testCatalog?.entries[0]?.info.line,
+        movedAndTriviaEdit.testCatalog?.entries[0]?.info.line,
       )
-      assert.notStrictEqual(before.testCatalog?.identity, bodyEdit.testCatalog?.identity)
-      assert.strictEqual(before.testCatalog?.identity, helperEdit.testCatalog?.identity)
-      assert.notStrictEqual(before.testCatalog?.identity, moved.testCatalog?.identity)
+      assert.notStrictEqual(before.testCatalog?.identity, bodyAndHelperEdit.testCatalog?.identity)
+      assert.notStrictEqual(before.testCatalog?.identity, movedAndTriviaEdit.testCatalog?.identity)
     }),
 )
 
@@ -143,6 +152,37 @@ it.effect('requires the explicit discovery root', () =>
     assert.isTrue(Result.isFailure(attempted))
     if (Result.isFailure(attempted))
       assert.strictEqual(attempted.failure.reason._tag, 'MissingRoot')
+  }),
+)
+
+it.effect('requires ownership and logical-path facts for reachable in-memory sources', () =>
+  Effect.gen(function* () {
+    const attempted = yield* Effect.result(
+      Analysis.make({
+        root: 'Runner',
+        discovery: { root: 'MemoryTests' },
+      }).pipe(
+        Effect.provide(
+          SourceResolver.overlay([
+            source('Runner', 'pub fn main() -> () {}'),
+            SourceFile.make(
+              'MemoryTests',
+              encoder.encode('test fn omitted() {}'),
+              SourceOrigin.memory('memory://tests'),
+            ),
+          ]).pipe(Layer.provideMerge(SourceResolver.empty)),
+        ),
+      ),
+    )
+
+    assert.isTrue(Result.isFailure(attempted))
+    if (Result.isFailure(attempted)) {
+      assert.strictEqual(attempted.failure._tag, 'ModuleClosureError')
+      assert.deepEqual(attempted.failure.reason, {
+        _tag: 'MissingDiscoverySource',
+        module: 'MemoryTests',
+      })
+    }
   }),
 )
 

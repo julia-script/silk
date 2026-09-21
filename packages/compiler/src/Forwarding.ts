@@ -262,12 +262,12 @@ export const callableRecipe = (
   const call =
     expression._tag === 'Call'
       ? fn.call(
-          expression.span,
+          expression,
           undefined,
           expression.typeArguments.map((argument) => fn.semanticArgument(argument)),
           expression.staticArguments,
         )
-      : fn.call(expression.span)
+      : fn.call(expression)
   const target =
     (call === undefined
       ? undefined
@@ -355,12 +355,12 @@ export const inlineForwardedRequirement = (
   const call =
     expression._tag === 'EffectConstruct'
       ? fn.call(
-          expression.span,
+          expression,
           undefined,
           expression.typeArguments.map((argument) => fn.semanticArgument(argument)),
           expression.staticArguments,
         )
-      : fn.call(expression.span)
+      : fn.call(expression)
   const section =
     expression._tag === 'CallableApply' ? callableRecipe(fn, expression.callee) : undefined
   let declaration:

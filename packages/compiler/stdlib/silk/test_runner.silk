@@ -31,6 +31,8 @@ impl CompleteTest<()> for TestOutcome<()> {
 
 effect fn testFailed<E>(error: E) -> bool {
   drop error
+  let status = Intrinsic.observeUnhandled()
+  drop status
   return false
 }
 
@@ -108,14 +110,7 @@ fn argumentOrEmpty<'arguments>(
   return argumentText(arguments, index)
 }
 
-effect fn execute() -> i32
-! HostInputError | OutOfMemoryError | WriterError
-? &mut HostInput {
-  let mut allocator = Allocator.systemAllocatorProvider()
-  let collected = HostInput.arguments()
-    |> Effect.provideMut<Allocator>(&mut allocator)
-  let arguments = run collected
-  let values = Vector.asSlice(&arguments)
+effect fn executeArguments<'arguments>(values: &'arguments [Bytes]) -> i32 ! WriterError {
   let mut fileIndex = usize.ZERO
   let mut nameIndex = usize.ZERO
   let mut index = usize.ONE
@@ -147,6 +142,16 @@ effect fn execute() -> i32
   let mut writer = StdoutWriter.make()
   return run runSelected(fileFilter, nameFilter)
     |> Effect.provideMut<Writer>(&mut writer)
+}
+
+effect fn execute() -> i32
+! HostInputError | OutOfMemoryError | WriterError
+? &mut HostInput {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let collected = HostInput.arguments()
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let arguments = run collected
+  return run executeArguments(Vector.asSlice(&arguments))
 }
 
 effect fn operationalFailure<E>(error: E) -> i32 {

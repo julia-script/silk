@@ -2386,11 +2386,12 @@ export const make = (operations: Operations) => {
       const resultEffect = resultEffectIdentity(targetFn, target, results, index)
       const span = expression.span
       calls.set(
-        `${span.sourceId}:${span.start}:${span.end}\u0000${keyText(target)}`,
+        `${span.sourceId}:${span.start}:${span.end}\u0000${expression.id?.ordinal ?? -1}\u0000${keyText(target)}`,
         Object.freeze({
           call: Object.freeze({
             _tag: 'CallInstance',
             owner,
+            ...(expression.id === undefined ? {} : { node: expression.id }),
             span,
             target,
             ...((expression._tag === 'Call' || expression._tag === 'EffectConstruct') &&
