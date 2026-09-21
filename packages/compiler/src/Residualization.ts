@@ -24,6 +24,7 @@ import type * as AuthoredHir from './AuthoredHir.js'
 import * as AuthoredIdentity from './AuthoredIdentity.js'
 import * as AuthoredWalk from './AuthoredWalk.js'
 import * as SemanticContext from './SemanticContext.js'
+import * as Semantic from './Semantic.js'
 import type * as Target from './Target.js'
 import * as Type from './Type.js'
 
@@ -109,6 +110,7 @@ interface State {
   readonly spans: SemanticContext.Registry
   readonly resolution: NameResolution.Resolution
   readonly index: DeclarationIndex.Index
+  readonly semantic: Semantic.Session
   /** Generated declarations published by source and residual bodies in this session. */
   readonly generatedAggregates: Map<string, DeclarationFacts.StructFact>
   readonly evaluation: Evaluation.Evaluation<StaticValue.Value>
@@ -182,6 +184,12 @@ const makeState = (
     ),
   )
   const generatedAggregates = new Map(index.generatedAggregates)
+  const semantic = Semantic.makeSession(
+    `residualization:${sourceIdentity}:${compilation.target.id}`,
+    index,
+    resolution,
+    compilation.target.id,
+  )
   return {
     target: compilation.target,
     parameters: new Map(parameters),
@@ -191,6 +199,7 @@ const makeState = (
     spans: SemanticContext.fromModules([...results.values()]),
     resolution,
     index: Object.freeze({ ...index, generatedAggregates }),
+    semantic,
     generatedAggregates,
     evaluation: Evaluation.make<StaticValue.Value>(compilation, limits, sourceIdentity, trace),
     residuals: Evaluation.make<ResidualBody>(compilation, limits, sourceIdentity, trace),
@@ -726,7 +735,12 @@ const evaluateStaticFunction = (
         semantic,
         declaration,
         input.declarations,
-        Object.freeze({ scope: input.scope, index: self[stateSymbol].index, builder }),
+        Object.freeze({
+          scope: input.scope,
+          index: self[stateSymbol].index,
+          semantic: self[stateSymbol].semantic,
+          builder,
+        }),
         staticContext,
       )
       publishGeneratedAggregates(self, analyzed.fact.generatedAggregates)
@@ -953,6 +967,7 @@ function evaluateConstantValue(
         Object.freeze({
           scope: input.scope,
           index: self[stateSymbol].index,
+          semantic: self[stateSymbol].semantic,
           staticContext,
           builder,
           generatedAggregates,
@@ -1269,7 +1284,12 @@ export const residualize = (self: Coordinator, key: ApplicationKey): Result => {
       semantic,
       declaration,
       input.declarations,
-      Object.freeze({ scope: input.scope, index: self[stateSymbol].index, builder }),
+      Object.freeze({
+        scope: input.scope,
+        index: self[stateSymbol].index,
+        semantic: self[stateSymbol].semantic,
+        builder,
+      }),
       Object.freeze({
         environment: self[stateSymbol].environment,
         typeSubstitution,

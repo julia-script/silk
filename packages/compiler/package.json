@@ -434,6 +434,10 @@
       "types": "./dist/Semantic.d.ts",
       "import": "./dist/Semantic.js"
     },
+    "./SemanticQuery": {
+      "types": "./dist/SemanticQuery.d.ts",
+      "import": "./dist/SemanticQuery.js"
+    },
     "./ProfileBootstrap": {
       "types": "./dist/ProfileBootstrap.d.ts",
       "import": "./dist/ProfileBootstrap.js"

@@ -53,15 +53,18 @@ The current low-level operation map is:
 | `Source.load`         | canonical module identity plus the active `SourceResolver` provider                                     | `Option<ResolvedSource>` with immutable bytes and origin, or a typed resolver failure |
 | `Hir.lower`           | one identified `SourceFile` revision                                                                    | recovered `SyntaxFile` plus authored untyped HIR and its presentation                 |
 | `Preparation.prepare` | compilation request and `analysis` or `executable` intent                                               | the existing intent-specific sealed preparation bundle                                |
+| `Semantic.resolveName` | semantic session, immutable module scope, and spelling                                                  | one memoized resolved, missing, conflicting, inaccessible, or unavailable answer       |
+| `Semantic.typeOf`      | semantic session and canonical declaration identity                                                     | the declaration's completed public header, or an unavailable answer                    |
 | `Semantic.checkBody`  | authored HIR, module headers, resolution scope, declaration index and fact, plus an optional body query | `CheckedUnit { bodies, diagnostics }`, including hidden bodies                        |
 | `Evaluation.evaluate` | evaluation session, canonical application, and deterministic callback                                   | `ApplicationResult` (`Complete` or `Failed`) with key, cache status, and budget       |
 
 `Hir.lower` does not load a module, discover imports, run semantic analysis, or realize a target.
 Its returned syntax keeps lexer/parser recovery diagnostics for syntax-only tooling, while
 `authored.module` and `authored.presentation` are the source-independent HIR products. Semantic
-tooling available today remains on `Analysis`, `ProjectAnalysis`, `ModuleTooling`, and the inspector
-actors. A typed `Semantic.query` dispatcher and independently callable layout/MIR/emission/link
-requests are future Milestone B APIs, not aliases for the operations above.
+tooling remains on `Analysis`, `ProjectAnalysis`, `ModuleTooling`, and the inspector actors. Each
+prepared frontend seals one `Semantic.Session`; declaration/header providers memoize within that
+epoch and publish immutable dependency observations without retaining syntax or source-resolver
+capabilities. Layout/MIR/emission/link requests remain separate later-stage operations.
 
 Phase reports and trace spans use these operation identities where they measure the corresponding
 work. `Semantic.checkBody.execute` and `.reuse`, and the `evaluation.branch` attribute on

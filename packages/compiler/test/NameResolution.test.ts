@@ -9,6 +9,7 @@ import * as MirEncoding from '../src/MirEncoding.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
 import * as Projections from './support/projections.js'
+import * as SemanticQuery from '../src/SemanticQuery.js'
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
@@ -442,5 +443,37 @@ pub fn inspect(event: Token, offset: i32) -> i32 {
       'SEM0048 diagnostic',
     )
     assert.strictEqual(conflict.edits, undefined)
+  }),
+)
+
+it('memoizes semantic query answers and clears failed reservations before retry', () => {
+  const session = SemanticQuery.make('query-runtime')
+  let attempts = 0
+  const request: SemanticQuery.Request<number> = Object.freeze({
+    _tag: 'SemanticQueryRequest',
+    key: 'answer',
+    execute: (observe: SemanticQuery.Observe) => {
+      attempts += 1
+      observe(Object.freeze({ _tag: 'Query', key: `attempt:${attempts}` }))
+      if (attempts === 1) throw new Error('fixture failure')
+      return 42
+    },
+  })
+
+  assert.throws(() => SemanticQuery.query(session, request), 'fixture failure')
+  assert.isFalse(SemanticQuery.isActive(session, request.key))
+  assert.strictEqual(SemanticQuery.query(session, request)._tag, 'Completed')
+  assert.strictEqual(SemanticQuery.query(session, request)._tag, 'Completed')
+  assert.strictEqual(SemanticQuery.executionCount(session, request.key), 2)
+  assert.strictEqual(attempts, 2)
+})
+
+it.effect('routes editor name reads through one memoized semantic session', () =>
+  Effect.gen(function* () {
+    const self = yield* Analysis.ofSource('queries/Main', ascii('pub struct Value {}'))
+    const first = Analysis.lookupName(self, 'queries/Main', 'Value')
+    const second = Analysis.lookupName(self, 'queries/Main', 'Value')
+    assert.strictEqual(first._tag, 'Resolved')
+    assert.strictEqual(second, first)
   }),
 )

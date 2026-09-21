@@ -44,6 +44,7 @@ import * as OpaqueRealization from './OpaqueRealization.js'
 import type * as Ownership from './Ownership.js'
 import type * as PhaseReport from './PhaseReport.js'
 import * as SemanticDisplay from './SemanticDisplay.js'
+import * as Semantic from './Semantic.js'
 import * as Preparation from './Preparation.js'
 
 import type * as SemanticInvalidation from './SemanticInvalidation.js'
@@ -89,6 +90,7 @@ export interface FrontendSnapshot {
   readonly closure: ModuleClosure.Closure
   readonly index: DeclarationIndex.Index
   readonly resolution: NameResolution.Resolution
+  readonly session: Semantic.Session
   readonly surfaces: ReadonlyMap<string, ModuleSurface.ModuleSurface>
   readonly semantics: ReadonlyMap<string, ModuleSemantics.ModuleSemantics>
   readonly toolingModules: ReadonlyMap<string, ModuleTooling.ModuleTooling>
@@ -338,7 +340,7 @@ export const lookupName = (
   const scope = moduleScope(self, module)
   return scope === undefined
     ? Object.freeze({ _tag: 'Missing', spelling })
-    : NameResolution.lookup(scope, self.index, spelling)
+    : Semantic.resolveName(self.session, scope, spelling)
 }
 /** Discovers compiler-owned auto-import actions for one unresolved source occurrence. */
 export const autoImportsAt = (
@@ -1049,6 +1051,7 @@ export const completionAt = (
         offset,
         index: self.index,
         resolution: self.resolution,
+        session: self.session,
         result,
       })
 }

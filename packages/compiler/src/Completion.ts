@@ -6,6 +6,7 @@ import * as Elaboration from './Elaboration.js'
 import * as Intrinsic from './Intrinsic.js'
 import * as NameResolution from './NameResolution.js'
 import * as SemanticDisplay from './SemanticDisplay.js'
+import * as Semantic from './Semantic.js'
 import * as Scalar from './Scalar.js'
 import type * as SemanticOccurrence from './SemanticOccurrence.js'
 import * as SemanticContext from './SemanticContext.js'
@@ -356,6 +357,7 @@ const serviceCandidates = (service: DeclarationFacts.ServiceFact): ReadonlyArray
  * and `AssociatedFunction` otherwise. Visibility and duplicate rules are the resolver's.
  */
 const inherentCandidates = (
+  session: Semantic.Session,
   index: DeclarationIndex.Index,
   owner: DeclarationFacts.MemberFact,
   module: string,
@@ -372,7 +374,7 @@ const inherentCandidates = (
   }
   return Object.freeze(
     [...names].flatMap((name): ReadonlyArray<Candidate> => {
-      const lookup = NameResolution.lookupAssociated(index, owner, name, module)
+      const lookup = Semantic.resolveAssociatedName(session, owner, name, module)
       if (lookup._tag !== 'Inherent' || lookup.declaration._tag !== 'FunctionDeclaration') return []
       return [
         candidate({
@@ -483,6 +485,7 @@ const parameterSubjectOf = (type: Type.Type | undefined): Type.Parameter | undef
  * zero is the value itself. Associated functions are not value members and are left out.
  */
 const receiverMethodCandidates = (
+  session: Semantic.Session,
   index: DeclarationIndex.Index,
   type: Type.Nominal | undefined,
   module: string,
@@ -496,7 +499,7 @@ const receiverMethodCandidates = (
   )
   if (owner === undefined) return Object.freeze([])
   return Object.freeze(
-    inherentCandidates(index, owner, module).flatMap((member) => {
+    inherentCandidates(session, index, owner, module).flatMap((member) => {
       if (member.kind !== 'Method' || member.identity._tag !== 'SemanticCandidate') return []
       const identity = member.identity.identity
       const declaration =
@@ -895,6 +898,7 @@ export const complete = (options: {
   readonly offset: number
   readonly index: DeclarationIndex.Index
   readonly resolution: NameResolution.Resolution
+  readonly session: Semantic.Session
   readonly result: Elaboration.Result
 }): Result => {
   const context = SemanticContext.make(options.result.authored)
@@ -913,7 +917,13 @@ export const complete = (options: {
     if (value.found) {
       const subject = nominalSubject(value.type)
       const parameterSubject = parameterSubjectOf(value.type)
-      const inherent = receiverMethodCandidates(options.index, subject, options.module, scope)
+      const inherent = receiverMethodCandidates(
+        options.session,
+        options.index,
+        subject,
+        options.module,
+        scope,
+      )
       return Object.freeze({
         _tag: 'CompletionResult',
         context: Object.freeze({
@@ -933,7 +943,7 @@ export const complete = (options: {
     const lookup =
       qualifier === undefined || scope === undefined
         ? undefined
-        : NameResolution.lookup(scope, options.index, qualifier)
+        : Semantic.resolveName(options.session, scope, qualifier)
     if (lookup?._tag === 'Intrinsic') {
       const intrinsic = Intrinsic.findActor(lookup.actor)
       if (intrinsic !== undefined)
@@ -955,6 +965,7 @@ export const complete = (options: {
     const inherent =
       lookup?._tag === 'Resolved'
         ? inherentCandidates(
+            options.session,
             options.index,
             NameResolution.erasedOwner(options.index, lookup.declaration),
             options.module,
