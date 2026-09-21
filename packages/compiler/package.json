@@ -534,6 +534,10 @@
       "types": "./dist/StaticValue.d.ts",
       "import": "./dist/StaticValue.js"
     },
+    "./Storage": {
+      "types": "./dist/Storage.d.ts",
+      "import": "./dist/Storage.js"
+    },
     "./Stdlib": {
       "types": "./dist/Stdlib.d.ts",
       "import": "./dist/Stdlib.js"

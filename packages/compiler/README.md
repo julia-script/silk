@@ -51,6 +51,7 @@ The current low-level operation map is:
 | Operation                    | Input                                                                                                        | Current result                                                                        |
 | ---------------------------- | ------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------- |
 | `Source.load`                | canonical module identity plus the active `SourceResolver` provider                                          | `Option<ResolvedSource>` with immutable bytes and origin, or a typed resolver failure |
+| `Storage.read` / `.publish`  | logical namespace/key, caller-supplied complete-record bound, and opaque bytes                               | caller-owned optional bytes or atomic publication with typed storage failures         |
 | `Hir.lower`                  | one identified `SourceFile` revision                                                                         | recovered `SyntaxFile` plus authored untyped HIR and its presentation                 |
 | `Preparation.prepare`        | compilation request and `analysis` or `executable` intent                                                    | the existing intent-specific sealed preparation bundle                                |
 | `Semantic.resolveName`       | semantic session, immutable module scope, and spelling                                                       | one memoized resolved, missing, conflicting, inaccessible, or unavailable answer      |
@@ -116,6 +117,16 @@ bitcode-to-object execution inside a caller-owned build scope. Helper, runtime, 
 and native-input preparation remains outside `Linker.link`; the linker consumes the already complete
 physical plan and owns validation, optional final-cache reuse/write, execution, and durable commit.
 Its result records plan identity, scope, cache key, and whether bytes were reused.
+
+`Storage` is the shared Effect boundary for opaque compiler records. Its memory and rooted
+filesystem providers use the same validated logical namespace/key addresses, caller-supplied
+complete-record limits, and caller-owned byte semantics. Filesystem reads inspect record size before
+allocation, while publication writes a unique same-directory temporary and atomically replaces the
+addressed record; scoped cleanup runs after failure or interruption without replacing the original
+exit. Storage treats missing as normal and distinguishes invalid address, invalid limit, oversize,
+external read, and external publication failures. It does not interpret envelopes, checksums,
+targets, or query validity. Native artifact and runtime-object cache actors retain those policies,
+translate `StorageError` at their boundary, and keep runtime hit/miss accounting.
 
 Phase reports and trace spans use these operation identities where they measure the corresponding
 work. `Semantic.checkBody.execute` and `.reuse`, and the `evaluation.branch` attribute on

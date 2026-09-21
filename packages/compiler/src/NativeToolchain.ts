@@ -23,8 +23,10 @@ import { arch, platform, tmpdir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
 import * as Data from 'effect/Data'
 import * as FileSystem from 'effect/FileSystem'
+import type * as PathService from 'effect/Path'
 import * as Effect from 'effect/Effect'
 import * as Exit from 'effect/Exit'
+import * as Option from 'effect/Option'
 import * as Result from 'effect/Result'
 import * as ArtifactKind from './ArtifactKind.js'
 import type * as Backend from './Backend.js'
@@ -39,6 +41,7 @@ import * as NativeLinkResolver from './NativeLinkResolver.js'
 import type * as NativeLinkPlan from './NativeLinkPlan.js'
 import * as CTranslationUnitResolver from './CTranslationUnitResolver.js'
 import type * as CTranslationUnit from './CTranslationUnit.js'
+import * as Storage from './Storage.js'
 
 export interface Toolchain {
   readonly _tag: 'Toolchain'
@@ -49,14 +52,12 @@ export interface Toolchain {
   readonly projectSupply?: PlatformSupply.Pin
   readonly supply?: PlatformSupply.PlatformSupply
   readonly runtimeObjectCache?: RuntimeObjectCache
-  readonly artifactCache?: ArtifactCache
+  readonly artifactStorage?: Storage.Service
 }
 
 export interface RuntimeObjectCache {
   readonly _tag: 'RuntimeObjectCache'
-  readonly get: (key: string) => Effect.Effect<Uint8Array | undefined, ToolchainError>
-  readonly set: (key: string, bytes: Uint8Array) => Effect.Effect<void, ToolchainError>
-  readonly stats: () => RuntimeObjectCacheStats
+  readonly storage: Storage.Service
 }
 
 export interface RuntimeObjectCacheStats {
@@ -65,29 +66,32 @@ export interface RuntimeObjectCacheStats {
   readonly misses: number
 }
 
-export const makeRuntimeObjectCache = (): RuntimeObjectCache => {
-  const objects = new Map<string, Uint8Array>()
-  let hits = 0
-  let misses = 0
-  return Object.freeze({
-    _tag: 'RuntimeObjectCache',
-    get: (key: string) =>
-      Effect.sync(() => {
-        const bytes = objects.get(key)
-        if (bytes === undefined) misses += 1
-        else hits += 1
-        return bytes
-      }),
-    set: (key: string, bytes: Uint8Array) =>
-      Effect.sync(() => {
-        objects.set(key, Uint8Array.from(bytes))
-      }),
-    stats: () => Object.freeze({ entries: objects.size, hits, misses }),
-  })
+interface RuntimeObjectCacheState {
+  readonly entries: Set<string>
+  hits: number
+  misses: number
 }
 
-export const runtimeObjectCacheStats = (self: RuntimeObjectCache): RuntimeObjectCacheStats =>
-  self.stats()
+const runtimeObjectCacheStates = new WeakMap<RuntimeObjectCache, RuntimeObjectCacheState>()
+
+const runtimeObjectCacheState = (self: RuntimeObjectCache): RuntimeObjectCacheState => {
+  const state = runtimeObjectCacheStates.get(self)
+  if (state === undefined) throw new RangeError('Unknown runtime object cache')
+  return state
+}
+
+export const makeRuntimeObjectCache = (
+  storage: Storage.Service = Storage.memoryService(),
+): RuntimeObjectCache => {
+  const cache = Object.freeze({ _tag: 'RuntimeObjectCache' as const, storage })
+  runtimeObjectCacheStates.set(cache, { entries: new Set(), hits: 0, misses: 0 })
+  return cache
+}
+
+export const runtimeObjectCacheStats = (self: RuntimeObjectCache): RuntimeObjectCacheStats => {
+  const state = runtimeObjectCacheState(self)
+  return Object.freeze({ entries: state.entries.size, hits: state.hits, misses: state.misses })
+}
 
 /** Returns the exact runtime source participating in one final artifact and its cache identity. */
 export const artifactRuntimeSource = (
@@ -297,15 +301,11 @@ const invalidPackageNameError = (name: string): ToolchainError =>
     reason: { _tag: 'InvalidPackageName', name },
   })
 
-export interface ArtifactCache {
-  readonly _tag: 'ArtifactCache'
-  readonly get: (key: string) => Effect.Effect<Uint8Array | undefined, ToolchainError>
-  readonly set: (key: string, bytes: Uint8Array) => Effect.Effect<void, ToolchainError>
-}
-
 const artifactCacheMagic = Uint8Array.from([0x53, 0x49, 0x4c, 0x4b, 0x43, 0x30, 0x30, 0x31])
 const artifactCacheDigestLength = 32
 const artifactCacheHeaderLength = artifactCacheMagic.length + 4 + artifactCacheDigestLength
+const artifactStorageNamespace = 'native-artifacts'
+const maximumNativeCacheRecordBytes = Number.MAX_SAFE_INTEGER
 
 const artifactCacheDigest = (key: string, bytes: Uint8Array): Uint8Array =>
   createHash('sha256').update(key).update('\0').update(bytes).digest()
@@ -344,32 +344,31 @@ const decodeArtifactCacheEntry = (key: string, encoded: Uint8Array): Uint8Array 
   return Uint8Array.from(payload)
 }
 
-/** Reads a caller-supplied artifact cache without allowing callback throws past the boundary. */
+/** Reads and admits one native artifact envelope from opaque Storage. */
 export const readArtifactCache = Effect.fnUntraced(function* (
-  cache: ArtifactCache,
+  storage: Storage.Service,
   key: string,
 ): Effect.fn.Return<Uint8Array | undefined, ToolchainError> {
-  const operation = yield* Effect.try({
-    try: () => cache.get(key),
-    catch: (cause) => storageError('NativeToolchain.ArtifactCache.get', 'cache-read', key, cause),
-  })
-  const encoded = yield* operation.pipe(
+  const found = yield* Storage.read(
+    artifactStorageNamespace,
+    key,
+    maximumNativeCacheRecordBytes,
+  ).pipe(
+    Effect.provideService(Storage.Storage, storage),
     Effect.mapError((cause) =>
-      cause instanceof ToolchainError
-        ? cause
-        : storageError('NativeToolchain.ArtifactCache.get', 'cache-read', key, cause),
+      storageError('NativeToolchain.ArtifactCache.get', 'cache-read', key, cause),
     ),
   )
-  if (encoded === undefined) return undefined
+  if (Option.isNone(found)) return undefined
   return yield* Effect.try({
-    try: () => decodeArtifactCacheEntry(key, encoded),
+    try: () => decodeArtifactCacheEntry(key, found.value),
     catch: (cause) => storageError('NativeToolchain.ArtifactCache.get', 'cache-read', key, cause),
   })
 })
 
-/** Writes a caller-supplied artifact cache without allowing callback throws past the boundary. */
+/** Encodes and atomically publishes one native artifact envelope through Storage. */
 export const writeArtifactCache = Effect.fnUntraced(function* (
-  cache: ArtifactCache,
+  storage: Storage.Service,
   key: string,
   bytes: Uint8Array,
 ): Effect.fn.Return<void, ToolchainError> {
@@ -377,15 +376,15 @@ export const writeArtifactCache = Effect.fnUntraced(function* (
     try: () => encodeArtifactCacheEntry(key, bytes),
     catch: (cause) => storageError('NativeToolchain.ArtifactCache.set', 'cache-write', key, cause),
   })
-  const operation = yield* Effect.try({
-    try: () => cache.set(key, encoded),
-    catch: (cause) => storageError('NativeToolchain.ArtifactCache.set', 'cache-write', key, cause),
-  })
-  return yield* operation.pipe(
+  return yield* Storage.publish(
+    artifactStorageNamespace,
+    key,
+    encoded,
+    maximumNativeCacheRecordBytes,
+  ).pipe(
+    Effect.provideService(Storage.Storage, storage),
     Effect.mapError((cause) =>
-      cause instanceof ToolchainError
-        ? cause
-        : storageError('NativeToolchain.ArtifactCache.set', 'cache-write', key, cause),
+      storageError('NativeToolchain.ArtifactCache.set', 'cache-write', key, cause),
     ),
   )
 })
@@ -559,37 +558,16 @@ export const commitLibraryInterface = Effect.fn('NativeToolchain.commitLibraryIn
   },
 )
 
-export const makeDiskArtifactCache = (directory: string): ArtifactCache => {
-  const root = resolve(directory)
-  return Object.freeze({
-    _tag: 'ArtifactCache',
-    get: Effect.fnUntraced(function* (key: string) {
-      const path = join(root, key)
-      return yield* Effect.try({
-        try: () => (existsSync(path) ? readFileSync(path) : undefined),
-        catch: (cause) =>
-          storageError('NativeToolchain.ArtifactCache.get', 'cache-read', path, cause),
-      })
-    }),
-    set: Effect.fnUntraced(function* (key: string, bytes: Uint8Array) {
-      yield* atomicCommit(join(root, key), bytes, { stage: 'cache-write' })
-    }),
-  })
-}
+const processArtifactStorage = Storage.memoryService()
 
-const processArtifactCache = new Map<string, Uint8Array>()
-
-export const defaultArtifactCache = (directory = ''): ArtifactCache => {
-  if (directory !== '') return makeDiskArtifactCache(directory)
-  return Object.freeze({
-    _tag: 'ArtifactCache',
-    get: (key: string) => Effect.succeed(processArtifactCache.get(key)),
-    set: (key: string, bytes: Uint8Array) =>
-      Effect.sync(() => {
-        processArtifactCache.set(key, Uint8Array.from(bytes))
-      }),
-  })
-}
+/** Selects the process-memory default or a rooted filesystem Storage provider. */
+export const defaultArtifactStorage = Effect.fn('NativeToolchain.defaultArtifactStorage')(
+  function* (
+    directory = '',
+  ): Effect.fn.Return<Storage.Service, never, FileSystem.FileSystem | PathService.Path> {
+    return directory === '' ? processArtifactStorage : yield* Storage.fileSystemService(directory)
+  },
+)
 
 const toolVersions = new Map<string, string>()
 
@@ -753,16 +731,25 @@ const readRuntimeObjectCache = Effect.fnUntraced(function* (
   cache: RuntimeObjectCache,
   key: string,
 ): Effect.fn.Return<Uint8Array | undefined, ToolchainError> {
-  const operation = yield* Effect.try({
-    try: () => cache.get(key),
-    catch: (cause) =>
-      storageError('NativeToolchain.RuntimeObjectCache.get', 'cache-read', key, cause),
-  })
-  return yield* operation.pipe(
+  const storageKey = `runtime-${createHash('sha256').update(key).digest('hex')}.o`
+  const found = yield* Storage.read(
+    'runtime-objects',
+    storageKey,
+    maximumNativeCacheRecordBytes,
+  ).pipe(
+    Effect.provideService(Storage.Storage, cache.storage),
     Effect.mapError((cause) =>
       storageError('NativeToolchain.RuntimeObjectCache.get', 'cache-read', key, cause),
     ),
   )
+  const state = runtimeObjectCacheState(cache)
+  if (Option.isNone(found)) {
+    state.misses += 1
+    return undefined
+  }
+  state.hits += 1
+  state.entries.add(storageKey)
+  return found.value
 })
 
 const writeRuntimeObjectCache = Effect.fnUntraced(function* (
@@ -770,16 +757,14 @@ const writeRuntimeObjectCache = Effect.fnUntraced(function* (
   key: string,
   bytes: Uint8Array,
 ): Effect.fn.Return<void, ToolchainError> {
-  const operation = yield* Effect.try({
-    try: () => cache.set(key, bytes),
-    catch: (cause) =>
-      storageError('NativeToolchain.RuntimeObjectCache.set', 'cache-write', key, cause),
-  })
-  return yield* operation.pipe(
+  const storageKey = `runtime-${createHash('sha256').update(key).digest('hex')}.o`
+  yield* Storage.publish('runtime-objects', storageKey, bytes, maximumNativeCacheRecordBytes).pipe(
+    Effect.provideService(Storage.Storage, cache.storage),
     Effect.mapError((cause) =>
       storageError('NativeToolchain.RuntimeObjectCache.set', 'cache-write', key, cause),
     ),
   )
+  runtimeObjectCacheState(cache).entries.add(storageKey)
 })
 
 export const writeArtifact = Effect.fn('NativeToolchain.writeArtifact')(function* (
