@@ -810,7 +810,7 @@ export const ownership = (
   ])
   const runtime = runtimeOf(self)
   const provider = {
-    boundary: stableJson(ownershipInput.boundaries),
+    boundary: ToolchainIntegrity.contentDigest(stableJson(ownershipInput.boundaries)),
     build: compute,
   }
   runtime.ownership.set(request.address, provider)
