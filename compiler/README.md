@@ -62,6 +62,17 @@ buffer, so a test can compare a lowered module against expected text. `Hir.verif
 arena invariants a module violates rather than asserting them, which replaces the bootstrap's
 structured-clone publication step.
 
+`hir/Draft.silk` owns the module while it is being built. Every node enters the arena through
+`Draft.append`, which pushes one `nodes`, one `spans`, and one `nodeCauses` entry together, so the
+three parallel vectors cannot drift. Child lists and recovery-cause runs are collected on scratch
+vectors and copied into the module's shared storage when they close. Lexical binders use one flat
+vector with a frame-start stack, so opening and closing a scope truncates rather than allocates.
+The syntax accessors, the recovery-cause selection, and the name, path, and literal lowerings port
+the bootstrap `AuthoredLowering` helpers of the same names; the literal decoders port
+`internal/IntegerLiteral`, `internal/DurationLiteral`, `LiteralForm`, `StaticText`, and
+`internal/Escape`. A magnitude that no `u64` can hold lowers to an invalid expression with an
+overflow cause rather than widening the vocabulary.
+
 CST construction remains postponed. The token vector retains source information, but there is no
 second concrete-syntax tree to maintain.
 
@@ -90,6 +101,7 @@ available stack in the bootstrap-generated debug executable before recovery coul
 | `parser/SyntaxTree.silk`                       | Tree ownership and flat AST printing                                                                                                        |
 | `hir/Intern.silk`                              | Deduplicated byte-string storage: `Symbol` identities and the `StringTable` that produces them                                              |
 | `hir/Hir.silk`                                 | The flat HIR vocabulary, the `Module` arena, its debug dump writer, and its arena verifier                                                  |
+| `hir/Draft.silk`                               | The in-progress module a lowering builds: arena appends, interning, binder frames, syntax accessors, and the name, path, and literal lowerings |
 
 Grammar rules are ordinary Silk functions. They consume `State` and return it with either an
 unfinished element list or a completed node ID. Replacement values are evaluated before assigning

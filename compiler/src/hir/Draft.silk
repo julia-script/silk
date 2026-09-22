@@ -1,0 +1,1937 @@
+//! The in-progress module a lowering builds, plus the syntax accessors and leaf lowerings it uses.
+//!
+//! # When to use
+//!
+//! Use [`Draft`] while turning one [`SyntaxTree`](parser.SyntaxTree.SyntaxTree) into a
+//! [`Module`](hir.Hir.Module). The draft owns the growing arena; the syntax tree is borrowed by the
+//! functions below and is never retained, so the finished module keeps no source bytes.
+//!
+//! # Details
+//!
+//! Every arena append goes through [`append`], which pushes one node, one span, and one
+//! recovery-cause run together. Nothing else may push into `nodes` directly, because
+//! [`Hir.verify`](hir.Hir.verify) requires the three vectors to stay the same length.
+//!
+//! Child lists are built by pushing identities onto a scratch vector and calling
+//! [`finishChildren`], which copies the run into the module's shared child vector and answers a
+//! [`Range`]. Causes work the same way through [`finishCauses`].
+//!
+//! Lexical binders live in one flat [`Draft.binders`] vector with a separate frame-start stack,
+//! so a frame is pushed and popped by truncating rather than by allocating a vector per scope.
+//!
+//! This module is the counterpart of the construction state, name lowering, and literal lowering of
+//! the bootstrap `AuthoredLowering` (`packages/compiler/src/AuthoredLowering.ts`, the section
+//! running from `firstSignificantStart` through `textLiteralToken`). The decoding rules come from
+//! `internal/IntegerLiteral.ts`, `internal/DurationLiteral.ts`, `internal/DigitSeparator.ts`,
+//! `LiteralForm.ts`, `StaticText.ts`, and `internal/Escape.ts`.
+//!
+//! # Gotchas
+//!
+//! A node identity is only meaningful for the draft's module, and a symbol only for its string
+//! table. Both become the finished module's identities unchanged.
+
+import hir.Hir {
+  Cause,
+  CauseCode,
+  DurationUnit,
+  HirId,
+  HirRef,
+  Module,
+  Node,
+  Radix,
+  Range,
+  Sign,
+}
+import hir.Intern {StringTable, Symbol, SymbolRef}
+import lexer.Span {Span}
+import lexer.Token {Token, TokenKind, kind as tokenKind, span as tokenSpan}
+import parser.Diagnostic {Diagnostic}
+import parser.Element {Element, TokenId}
+import parser.Node {Node as SyntaxNode, NodeKind}
+import parser.NodeId {NodeId}
+import parser.SyntaxTree {SyntaxTree}
+import silk.allocator {Allocator, OutOfMemoryError}
+import silk.bytes {Bytes}
+import silk.slice {Slice}
+import silk.string {String}
+import silk.u32
+import silk.u64
+import silk.u8
+import silk.usize
+import silk.vector {Vector}
+
+/// One lexical binding visible to identifier expressions inside the active frames.
+pub struct Binder {
+  /// The interned name the binding introduces.
+  pub name: Symbol
+  /// The node that binds it: a parameter, binding statement, pattern binding, or loop binding.
+  pub id: HirId
+}
+
+impl Copy for Binder {}
+
+/// The growing module plus the scratch state one lowering needs while it builds.
+///
+/// # Details
+///
+/// `pending` collects the child identities of the list under construction; `pendingCauses` does the
+/// same for recovery causes. Both are copied into the module's shared storage when the list closes,
+/// so a nested list only has to remember where its own run started.
+pub struct Draft {
+  /// The module being built; moved out by [`finish`] once lowering completes.
+  pub module: Module
+  /// Child identities of the lists currently under construction, innermost run last.
+  pending: Vector<HirId>
+  /// Causes of the recovery runs currently under construction, innermost run last.
+  pendingCauses: Vector<Cause>
+  /// Every binding of every active frame, innermost frame last.
+  binders: Vector<Binder>
+  /// The first [`binders`](Draft.binders) position belonging to each active frame.
+  frames: Vector<usize>
+  /// Decoding workspace reused by every literal, cleared before each use.
+  scratch: Vector<u8>
+}
+
+impl Draft {
+  /// Creates a draft over an empty module.
+  pub fn make() -> Draft {
+    return Draft {
+      module: Module.make(),
+      pending: Vector.make<HirId>(),
+      pendingCauses: Vector.make<Cause>(),
+      binders: Vector.make<Binder>(),
+      frames: Vector.make<usize>(),
+      scratch: Vector.make<u8>(),
+    }
+  }
+
+  /// Takes the finished module, discarding the scratch state the build needed.
+  pub fn finish(self: Self) -> Module {
+    let Draft {
+      module,
+      pending,
+      pendingCauses,
+      binders,
+      frames,
+      scratch,
+    } = move self
+    drop pending
+    drop pendingCauses
+    drop binders
+    drop frames
+    drop scratch
+    return move module
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Arena construction
+// ---------------------------------------------------------------------------
+
+/// Appends one node with its span and its recovery-cause run, answering its identity.
+///
+/// # Details
+///
+/// This is the only way a node enters the arena. Pushing `nodes`, `spans`, and `nodeCauses`
+/// together is what keeps [`Hir.verify`](hir.Hir.verify) satisfiable: the three vectors are
+/// parallel, and a node with no damage still records an empty cause run.
+pub effect fn append(draft: &mut Draft, node: Node, span: Span, causes: Range) -> HirId
+! OutOfMemoryError
+? &mut Allocator {
+  let index = Vector.length<Node>(&draft.module.nodes)
+  run Vector.append<Node>(&mut draft.module.nodes, node)
+  run Vector.append<Span>(&mut draft.module.spans, span)
+  run Vector.append<Range>(&mut draft.module.nodeCauses, causes)
+  return HirId {index: index}
+}
+
+/// Appends one healthy node, whose recovery-cause run is empty.
+pub effect fn appendHealthy(draft: &mut Draft, node: Node, span: Span) -> HirId
+! OutOfMemoryError
+? &mut Allocator {
+  return run append(&mut draft.*, node, span, Range.empty())
+}
+
+/// Marks where the child list being built starts, for a later [`finishChildren`].
+pub fn beginChildren(draft: &Draft) -> usize {
+  return Vector.length<HirId>(&draft.pending)
+}
+
+/// Adds one child identity to the list opened at the matching [`beginChildren`].
+pub effect fn pushChild(draft: &mut Draft, id: HirId) -> () ! OutOfMemoryError ? &mut Allocator {
+  return run Vector.append<HirId>(&mut draft.pending, id)
+}
+
+/// Copies the children collected since `mark` into the module and answers their range.
+pub effect fn finishChildren(draft: &mut Draft, mark: usize) -> Range
+! OutOfMemoryError
+? &mut Allocator {
+  let start = Vector.length<HirId>(&draft.module.children)
+  let mut index = mark
+  while index < Vector.length<HirId>(&draft.pending) {
+    let id = Vector.get<HirId>(&draft.pending, index)
+    run Vector.append<HirId>(&mut draft.module.children, id)
+    index = index + usize.ONE
+  }
+  let length = Vector.length<HirId>(&draft.pending) - mark
+  Vector.truncate<HirId>(&mut draft.pending, mark)
+  return Range {start: start, length: length}
+}
+
+/// Marks where the cause run being built starts, for a later [`finishCauses`].
+pub fn beginCauses(draft: &Draft) -> usize {
+  return Vector.length<Cause>(&draft.pendingCauses)
+}
+
+/// Adds one recovery cause to the run opened at the matching [`beginCauses`].
+pub effect fn pushCause(draft: &mut Draft, span: Span, code: CauseCode) -> ()
+! OutOfMemoryError
+? &mut Allocator {
+  return run Vector.append<Cause>(&mut draft.pendingCauses, Cause {span: span, code: code})
+}
+
+/// Copies the causes collected since `mark` into the module and answers their range.
+pub effect fn finishCauses(draft: &mut Draft, mark: usize) -> Range
+! OutOfMemoryError
+? &mut Allocator {
+  let start = Vector.length<Cause>(&draft.module.causes)
+  let mut index = mark
+  while index < Vector.length<Cause>(&draft.pendingCauses) {
+    let cause = Vector.get<Cause>(&draft.pendingCauses, index)
+    run Vector.append<Cause>(&mut draft.module.causes, cause)
+    index = index + usize.ONE
+  }
+  let length = Vector.length<Cause>(&draft.pendingCauses) - mark
+  Vector.truncate<Cause>(&mut draft.pendingCauses, mark)
+  return Range {start: start, length: length}
+}
+
+/// Records exactly one cause and answers its range, for a node whose single reason is known.
+pub effect fn singleCause(draft: &mut Draft, span: Span, code: CauseCode) -> Range
+! OutOfMemoryError
+? &mut Allocator {
+  let start = Vector.length<Cause>(&draft.module.causes)
+  run Vector.append<Cause>(&mut draft.module.causes, Cause {span: span, code: code})
+  return Range {start: start, length: usize.ONE}
+}
+
+// ---------------------------------------------------------------------------
+// Interning
+// ---------------------------------------------------------------------------
+
+/// Interns the source bytes `span` covers and answers their symbol.
+///
+/// # Details
+///
+/// This is the bootstrap `spellingOf` composed with its text pool: the module records the spelling,
+/// never the coordinates it came from.
+pub effect fn intern(draft: &mut Draft, tree: &SyntaxTree, span: Span) -> Symbol
+! OutOfMemoryError
+? &mut Allocator {
+  let source = Bytes.asSlice(&tree.source)
+  let content = Slice.view<u8>(source, span.start, span.end - span.start)
+  return run Module.intern(&mut draft.module, content)
+}
+
+/// Interns an explicit byte sequence, such as a decoded literal payload.
+pub effect fn internBytes(draft: &mut Draft, values: &[u8]) -> Symbol
+! OutOfMemoryError
+? &mut Allocator {
+  return run Module.intern(&mut draft.module, values)
+}
+
+/// Interns whatever a literal decoder left in the draft's scratch buffer.
+///
+/// # Details
+///
+/// A caller holding `&mut Draft` cannot borrow the scratch buffer and the whole draft at once, so
+/// this reaches the string table directly. The decoded payload therefore never needs a copy.
+pub effect fn internScratch(draft: &mut Draft) -> Symbol ! OutOfMemoryError ? &mut Allocator {
+  return run StringTable.intern(&mut draft.module.strings, Vector.asSlice<u8>(&draft.scratch))
+}
+
+// ---------------------------------------------------------------------------
+// Lexical frames
+// ---------------------------------------------------------------------------
+
+/// Opens a binding scope; every [`bind`] until the matching [`popFrame`] belongs to it.
+pub effect fn pushFrame(draft: &mut Draft) -> () ! OutOfMemoryError ? &mut Allocator {
+  return run Vector.append<usize>(&mut draft.frames, Vector.length<Binder>(&draft.binders))
+}
+
+/// Closes the innermost binding scope, discarding the bindings it introduced.
+pub fn popFrame(draft: &mut Draft) -> () {
+  let depth = Vector.length<usize>(&draft.frames)
+  if depth == usize.ZERO {
+    return ()
+  }
+  let start = Vector.get<usize>(&draft.frames, depth - usize.ONE)
+  Vector.truncate<usize>(&mut draft.frames, depth - usize.ONE)
+  Vector.truncate<Binder>(&mut draft.binders, start)
+  return ()
+}
+
+/// Records that `name` binds to `id` in the innermost open scope.
+pub effect fn bind(draft: &mut Draft, name: Symbol, id: HirId) -> ()
+! OutOfMemoryError
+? &mut Allocator {
+  return run Vector.append<Binder>(&mut draft.binders, Binder {name: name, id: id})
+}
+
+/// Answers the innermost binding of `name`, or an absent reference when it is unbound.
+///
+/// # Details
+///
+/// The search runs from the most recent binding backwards, so an inner frame shadows an outer one
+/// and a later binding in one frame shadows an earlier one. An unbound identifier stays absent for
+/// a later resolution phase, exactly as the bootstrap leaves `binding` undefined.
+pub fn lookup(draft: &Draft, name: Symbol) -> HirRef {
+  let mut index = Vector.length<Binder>(&draft.binders)
+  while index > usize.ZERO {
+    index = index - usize.ONE
+    let binder = Vector.get<Binder>(&draft.binders, index)
+    if binder.name.index == name.index {
+      return HirRef.of(binder.id)
+    }
+  }
+  return HirRef.absent()
+}
+
+// ---------------------------------------------------------------------------
+// Syntax accessors
+// ---------------------------------------------------------------------------
+
+fn isTrivia(kind: TokenKind) -> bool {
+  return match kind {
+    TokenKind.Whitespace => true
+    TokenKind.LineComment => true
+    TokenKind.DocComment => true
+    TokenKind.ModuleDocComment => true
+    _ => false
+  }
+}
+
+/// Returns the number of direct elements of `parent`.
+fn elementCount(tree: &SyntaxTree, parent: NodeId) -> usize {
+  let nodes = Vector.asSlice<SyntaxNode>(&tree.nodes)
+  return Vector.length<Element>(&nodes[parent.index].elements)
+}
+
+/// Returns the direct element of `parent` at `index` in source order.
+fn elementAt(tree: &SyntaxTree, parent: NodeId, index: usize) -> Element {
+  let nodes = Vector.asSlice<SyntaxNode>(&tree.nodes)
+  return Vector.get<Element>(&nodes[parent.index].elements, index)
+}
+
+/// Returns the first byte of `node` that is not leading trivia.
+///
+/// # Details
+///
+/// The parser gives a node the span of every token it covers, trivia included. A presentation span
+/// starts where the source actually reads, which is the bootstrap `firstSignificantStart`.
+///
+/// The first element that is not trivia decides the answer: a child node recurses, and a
+/// missing-token element starts at its own insertion point. The bootstrap keeps looking when a
+/// child yields nothing, which this does not need to, because the parser never completes a node
+/// whose elements are all trivia. A node with no elements at all keeps its own start.
+pub fn significantStart(tree: &SyntaxTree, id: NodeId) -> usize {
+  let nodes = Vector.asSlice<SyntaxNode>(&tree.nodes)
+  let node = &nodes[id.index]
+  let elements = Vector.asSlice<Element>(&node.elements)
+  let mut index = usize.ZERO
+  while index < elements.length {
+    match elements[index] {
+      Element.Token {id: tokenId} => {
+        let token = Vector.get<Token>(&tree.tokens, tokenId.index)
+        if !isTrivia(tokenKind(token)) {
+          return tokenSpan(token).start
+        }
+      }
+      Element.MissingToken {expected: ignoredExpected, span} => {
+        return span.start
+      }
+      Element.Node {id: childId} => {
+        return significantStart(tree, childId)
+      }
+    }
+    index = index + usize.ONE
+  }
+  return node.span.start
+}
+
+/// Returns the presentation span of `node`: its own span narrowed to its first significant byte.
+pub fn nodeSpan(tree: &SyntaxTree, id: NodeId) -> Span {
+  let nodes = Vector.asSlice<SyntaxNode>(&tree.nodes)
+  let span = nodes[id.index].span
+  let start = significantStart(tree, id)
+  if start <= span.start {
+    return span
+  }
+  return Span {start: start, end: span.end}
+}
+
+/// Returns the count of direct child nodes of `parent`.
+pub fn childCount(tree: &SyntaxTree, parent: NodeId) -> usize {
+  let nodes = Vector.asSlice<SyntaxNode>(&tree.nodes)
+  let elements = Vector.asSlice<Element>(&nodes[parent.index].elements)
+  let mut count = usize.ZERO
+  let mut index = usize.ZERO
+  while index < elements.length {
+    if let Element.Node {id: ignoredId} = elements[index] {
+      count = count + usize.ONE
+    }
+    index = index + usize.ONE
+  }
+  return count
+}
+
+/// Returns the direct child node at `offset` among the child nodes of `parent`.
+///
+/// # Gotchas
+///
+/// `offset` must be below [`childCount`]; a larger offset is a defect, not a recoverable failure.
+pub fn childAt(tree: &SyntaxTree, parent: NodeId, offset: usize) -> NodeId {
+  let nodes = Vector.asSlice<SyntaxNode>(&tree.nodes)
+  let elements = Vector.asSlice<Element>(&nodes[parent.index].elements)
+  let mut seen = usize.ZERO
+  let mut index = usize.ZERO
+  while index < elements.length {
+    if let Element.Node {id} = elements[index] {
+      if seen == offset {
+        return id
+      }
+      seen = seen + usize.ONE
+    }
+    index = index + usize.ONE
+  }
+  return parent
+}
+
+/// Returns the grammar category of `id`.
+pub fn kindOf(tree: &SyntaxTree, id: NodeId) -> NodeKind {
+  let nodes = Vector.asSlice<SyntaxNode>(&tree.nodes)
+  return nodes[id.index].kind
+}
+
+/// An optionally present token, answered by the accessors that may find nothing.
+pub struct TokenRef {
+  /// Whether [`token`](TokenRef.token) names a source token.
+  pub present: bool
+  /// The found token; meaningful only when [`present`](TokenRef.present) is `true`.
+  pub token: Token
+}
+
+impl Copy for TokenRef {}
+
+impl TokenRef {
+  /// Constructs the absent reference.
+  pub fn absent() -> TokenRef {
+    let nowhere = Span {start: usize.ZERO, end: usize.ZERO}
+    return TokenRef {present: false, token: Token.EndOfFile {span: nowhere}}
+  }
+
+  /// Constructs a present reference to `token`.
+  pub fn of(token: Token) -> TokenRef {
+    return TokenRef {present: true, token: token}
+  }
+}
+
+/// Returns the first direct token of `parent` whose kind is `wanted`.
+///
+/// # Details
+///
+/// This is the bootstrap `token` helper: it looks only at the node's own elements, so a token
+/// belonging to a grandchild never answers for its ancestor.
+pub fn directToken(tree: &SyntaxTree, parent: NodeId, wanted: TokenKind) -> TokenRef {
+  let nodes = Vector.asSlice<SyntaxNode>(&tree.nodes)
+  let elements = Vector.asSlice<Element>(&nodes[parent.index].elements)
+  let mut index = usize.ZERO
+  while index < elements.length {
+    if let Element.Token {id} = elements[index] {
+      let token = Vector.get<Token>(&tree.tokens, id.index)
+      if tokenKind(token) == wanted {
+        return TokenRef.of(token)
+      }
+    }
+    index = index + usize.ONE
+  }
+  return TokenRef.absent()
+}
+
+/// Reports whether `parent` directly holds a token of kind `wanted`.
+pub fn hasToken(tree: &SyntaxTree, parent: NodeId, wanted: TokenKind) -> bool {
+  return directToken(tree, parent, wanted).present
+}
+
+/// An optionally present missing-token element, which carries no source token.
+pub struct MissingRef {
+  /// Whether [`span`](MissingRef.span) names an insertion point.
+  pub present: bool
+  /// The zero-width insertion span; meaningful only when present.
+  pub span: Span
+}
+
+impl Copy for MissingRef {}
+
+/// Returns the first direct missing-token element of `parent` that expected `wanted`.
+pub fn missingToken(tree: &SyntaxTree, parent: NodeId, wanted: TokenKind) -> MissingRef {
+  let nodes = Vector.asSlice<SyntaxNode>(&tree.nodes)
+  let elements = Vector.asSlice<Element>(&nodes[parent.index].elements)
+  let mut index = usize.ZERO
+  while index < elements.length {
+    if let Element.MissingToken {expected, span} = elements[index] {
+      if expected == wanted {
+        return MissingRef {present: true, span: span}
+      }
+    }
+    index = index + usize.ONE
+  }
+  return MissingRef {present: false, span: Span {start: usize.ZERO, end: usize.ZERO}}
+}
+
+fn spanTextEquals(tree: &SyntaxTree, span: Span, expected: string<'static>) -> bool {
+  let wanted = String.utf8Bytes(expected)
+  if span.end - span.start != wanted.length {
+    return false
+  }
+  let source = Bytes.asSlice(&tree.source)
+  let mut index = usize.ZERO
+  while index < wanted.length {
+    if source[span.start + index] != wanted[index] {
+      return false
+    }
+    index = index + usize.ONE
+  }
+  return true
+}
+
+/// Reports whether the source `span` covers is spelled exactly `expected`.
+///
+/// # Details
+///
+/// Contextual keywords such as `where` and `operator` are ordinary identifiers, so the lowering
+/// recognizes them by spelling, exactly as the bootstrap `spellingOf` comparison does.
+pub fn spelled(tree: &SyntaxTree, span: Span, expected: string<'static>) -> bool {
+  return spanTextEquals(tree, span, expected)
+}
+
+/// Returns the identifier token of `parent` spelled `expected`, if it directly holds one.
+pub fn spelledToken(tree: &SyntaxTree, parent: NodeId, expected: string<'static>) -> TokenRef {
+  let nodes = Vector.asSlice<SyntaxNode>(&tree.nodes)
+  let elements = Vector.asSlice<Element>(&nodes[parent.index].elements)
+  let mut index = usize.ZERO
+  while index < elements.length {
+    if let Element.Token {id} = elements[index] {
+      let token = Vector.get<Token>(&tree.tokens, id.index)
+      if tokenKind(token) == TokenKind.Identifier && spelled(tree, tokenSpan(token), expected) {
+        return TokenRef.of(token)
+      }
+    }
+    index = index + usize.ONE
+  }
+  return TokenRef.absent()
+}
+
+/// Returns the span of a contextual modifier written before `fn`, if `parent` writes one.
+///
+/// # Details
+///
+/// `test` and `effect` are identifiers everywhere else, so a function *named* `test` must not read
+/// as a test marker. The bootstrap `contextualModifier` therefore only accepts a matching
+/// identifier that precedes the `fn` keyword, and so does this.
+pub fn contextualModifier(tree: &SyntaxTree, parent: NodeId, spelling: string<'static>)
+-> MissingRef {
+  let nodes = Vector.asSlice<SyntaxNode>(&tree.nodes)
+  let elements = Vector.asSlice<Element>(&nodes[parent.index].elements)
+  let mut index = usize.ZERO
+  while index < elements.length {
+    if let Element.Token {id} = elements[index] {
+      let token = Vector.get<Token>(&tree.tokens, id.index)
+      let kind = tokenKind(token)
+      if kind == TokenKind.FnKeyword {
+        return MissingRef {present: false, span: Span {start: usize.ZERO, end: usize.ZERO}}
+      }
+      if kind == TokenKind.Identifier && spelled(tree, tokenSpan(token), spelling) {
+        return MissingRef {present: true, span: tokenSpan(token)}
+      }
+    }
+    index = index + usize.ONE
+  }
+  return MissingRef {present: false, span: Span {start: usize.ZERO, end: usize.ZERO}}
+}
+
+// ---------------------------------------------------------------------------
+// Damage
+// ---------------------------------------------------------------------------
+
+fn diagnosticSpan(diagnostic: Diagnostic) -> Span {
+  return match move diagnostic {
+    Diagnostic.MissingToken {expected: ignoredExpected, span} => span
+    Diagnostic.UnexpectedToken {actual: ignoredActual, span} => span
+    Diagnostic.NestingLimit {limit: ignoredLimit, span} => span
+  }
+}
+
+fn diagnosticCode(diagnostic: Diagnostic) -> CauseCode {
+  return match move diagnostic {
+    Diagnostic.MissingToken {expected: ignoredExpected, span: ignoredSpan} => CauseCode.MissingToken
+    Diagnostic.UnexpectedToken {actual: ignoredActual, span: ignoredSpan} =>
+      CauseCode.UnexpectedToken
+    Diagnostic.NestingLimit {limit: ignoredLimit, span: ignoredSpan} => CauseCode.NestingLimit
+  }
+}
+
+/// Collects the parser diagnostics that explain damage at `span` into the open cause run.
+///
+/// # Details
+///
+/// This is the bootstrap `causesAt`. A diagnostic whose span is exactly `span` explains it best, so
+/// exact matches win. Otherwise every diagnostic contained in the region contributes. When the
+/// parser reported nothing, `fallback` is recorded, so a recovery node never ends up with an
+/// empty run.
+pub effect fn causesAt(draft: &mut Draft, tree: &SyntaxTree, span: Span, fallback: CauseCode) -> ()
+! OutOfMemoryError
+? &mut Allocator {
+  let diagnostics = Vector.asSlice<Diagnostic>(&tree.diagnostics)
+  let mut found = false
+  let mut index = usize.ZERO
+  while index < diagnostics.length {
+    let diagnostic = diagnostics[index]
+    let reported = diagnosticSpan(diagnostic)
+    if reported.start == span.start && reported.end == span.end {
+      run pushCause(&mut draft.*, reported, diagnosticCode(diagnostic))
+      found = true
+    }
+    index = index + usize.ONE
+  }
+  if found {
+    return ()
+  }
+  index = usize.ZERO
+  while index < diagnostics.length {
+    let diagnostic = diagnostics[index]
+    let reported = diagnosticSpan(diagnostic)
+    if reported.start >= span.start && reported.end <= span.end {
+      run pushCause(&mut draft.*, reported, diagnosticCode(diagnostic))
+      found = true
+    }
+    index = index + usize.ONE
+  }
+  if found {
+    return ()
+  }
+  return run pushCause(&mut draft.*, span, fallback)
+}
+
+/// Answers a one-node cause range explaining damage at `span`, falling back to `fallback`.
+pub effect fn recoveryCauses(draft: &mut Draft, tree: &SyntaxTree, span: Span, fallback: CauseCode)
+-> Range
+! OutOfMemoryError
+? &mut Allocator {
+  let mark = beginCauses(&draft.*)
+  run causesAt(&mut draft.*, tree, span, fallback)
+  return run finishCauses(&mut draft.*, mark)
+}
+
+/// Answers the causes a node inherits from its own missing tokens and direct error regions.
+///
+/// # Details
+///
+/// This is the bootstrap `damage`: a healthy construct with a damaged interior keeps its shape and
+/// records why. An undamaged node answers with the empty range, which is what a healthy node's
+/// `nodeCauses` entry must be.
+pub effect fn damage(draft: &mut Draft, tree: &SyntaxTree, parent: NodeId) -> Range
+! OutOfMemoryError
+? &mut Allocator {
+  let mark = beginCauses(&draft.*)
+  let count = elementCount(tree, parent)
+  let mut index = usize.ZERO
+  while index < count {
+    let element = elementAt(tree, parent, index)
+    match element {
+      Element.MissingToken {expected: ignoredExpected, span} => {
+        run causesAt(&mut draft.*, tree, span, CauseCode.MissingToken)
+      }
+      Element.Node {id} => {
+        if kindOf(tree, id) == NodeKind.Error {
+          run causesAt(&mut draft.*, tree, nodeSpan(tree, id), CauseCode.UnexpectedToken)
+        }
+      }
+      Element.Token {id: ignoredId} => {}
+    }
+    index = index + usize.ONE
+  }
+  return run finishCauses(&mut draft.*, mark)
+}
+
+// ---------------------------------------------------------------------------
+// Names and paths
+// ---------------------------------------------------------------------------
+
+/// Lowers one name token into a [`Node.Name`](hir.Hir.Node) whose spelling is interned.
+pub effect fn nameFromToken(draft: &mut Draft, tree: &SyntaxTree, token: Token) -> HirId
+! OutOfMemoryError
+? &mut Allocator {
+  let span = tokenSpan(token)
+  let text = run intern(&mut draft.*, tree, span)
+  return run appendHealthy(&mut draft.*, Node.Name {text: text}, span)
+}
+
+/// Lowers a required but absent name into [`Node.MissingName`](hir.Hir.Node) with its cause.
+pub effect fn missingName(draft: &mut Draft, tree: &SyntaxTree, span: Span, fallback: CauseCode)
+-> HirId
+! OutOfMemoryError
+? &mut Allocator {
+  let causes = run recoveryCauses(&mut draft.*, tree, span, fallback)
+  return run append(&mut draft.*, Node.MissingName, span, causes)
+}
+
+/// Lowers source that occupies a name position but cannot be a name.
+pub effect fn invalidName(draft: &mut Draft, tree: &SyntaxTree, span: Span, fallback: CauseCode)
+-> HirId
+! OutOfMemoryError
+? &mut Allocator {
+  let spelling = run intern(&mut draft.*, tree, span)
+  let causes = run recoveryCauses(&mut draft.*, tree, span, fallback)
+  return run append(&mut draft.*, Node.InvalidName {spelling: spelling}, span, causes)
+}
+
+/// Reports whether `kind` may spell one segment of an import path.
+///
+/// # Details
+///
+/// An import path admits contextual keyword segments, because a module may legitimately be called
+/// `type` or `impl`. The vocabulary is the bootstrap `importSegmentKinds`.
+pub fn isPathSegmentKind(kind: TokenKind) -> bool {
+  return match kind {
+    TokenKind.Identifier => true
+    TokenKind.PubKeyword => true
+    TokenKind.StructKeyword => true
+    TokenKind.EnumKeyword => true
+    TokenKind.UnionKeyword => true
+    TokenKind.TypeKeyword => true
+    TokenKind.ServiceKeyword => true
+    TokenKind.InterfaceKeyword => true
+    TokenKind.RoleKeyword => true
+    TokenKind.EffectKeyword => true
+    TokenKind.FnKeyword => true
+    TokenKind.RunKeyword => true
+    TokenKind.FailKeyword => true
+    TokenKind.DropKeyword => true
+    TokenKind.UnsafeKeyword => true
+    TokenKind.ImplKeyword => true
+    TokenKind.ForKeyword => true
+    TokenKind.ReturnKeyword => true
+    TokenKind.ImportKeyword => true
+    TokenKind.AsKeyword => true
+    TokenKind.LetKeyword => true
+    TokenKind.ConstKeyword => true
+    TokenKind.MutKeyword => true
+    TokenKind.OnceKeyword => true
+    TokenKind.MoveKeyword => true
+    TokenKind.MatchKeyword => true
+    TokenKind.IfKeyword => true
+    TokenKind.ElseKeyword => true
+    TokenKind.WhileKeyword => true
+    TokenKind.BreakKeyword => true
+    TokenKind.ContinueKeyword => true
+    TokenKind.TrueKeyword => true
+    TokenKind.FalseKeyword => true
+    _ => false
+  }
+}
+
+/// Reports whether `kind` may spell a name in a position selected by `identifierOnly`.
+pub fn acceptsNameKind(kind: TokenKind, identifierOnly: bool) -> bool {
+  if identifierOnly {
+    return kind == TokenKind.Identifier
+  }
+  return isPathSegmentKind(kind)
+}
+
+/// Lowers the first accepted name token of `parent`, or an explicit missing name.
+///
+/// # Details
+///
+/// This is the bootstrap `nameIn`. `identifierOnly` selects between an ordinary declaration name,
+/// which must be an identifier, and a path segment, which admits contextual keywords. A
+/// missing-token element for an accepted kind lowers to a missing name at its insertion point;
+/// nothing accepted at all lowers to a missing name over the whole node.
+pub effect fn nameIn(draft: &mut Draft, tree: &SyntaxTree, parent: NodeId, identifierOnly: bool)
+-> HirId
+! OutOfMemoryError
+? &mut Allocator {
+  let count = elementCount(tree, parent)
+  let mut index = usize.ZERO
+  while index < count {
+    let element = elementAt(tree, parent, index)
+    match element {
+      Element.Token {id} => {
+        let token = Vector.get<Token>(&tree.tokens, id.index)
+        let kind = tokenKind(token)
+        let accepted = acceptsNameKind(kind, identifierOnly)
+        if accepted {
+          return run nameFromToken(&mut draft.*, tree, token)
+        }
+      }
+      Element.MissingToken {expected, span} => {
+        let accepted = acceptsNameKind(expected, identifierOnly)
+        if accepted {
+          return run missingName(&mut draft.*, tree, span, CauseCode.MissingToken)
+        }
+      }
+      Element.Node {id: ignoredId} => {}
+    }
+    index = index + usize.ONE
+  }
+  return run missingName(&mut draft.*, tree, nodeSpan(tree, parent), CauseCode.MissingToken)
+}
+
+/// Lowers the name written immediately after `fn`, skipping contextual modifiers.
+///
+/// # Details
+///
+/// This is the bootstrap `callableNameIn`. `drop` is a keyword but is a legal operation name, so it
+/// is accepted alongside an identifier.
+pub effect fn callableNameIn(draft: &mut Draft, tree: &SyntaxTree, parent: NodeId) -> HirId
+! OutOfMemoryError
+? &mut Allocator {
+  let count = elementCount(tree, parent)
+  let mut afterFn = false
+  let mut index = usize.ZERO
+  while index < count {
+    let element = elementAt(tree, parent, index)
+    match element {
+      Element.Token {id} => {
+        let token = Vector.get<Token>(&tree.tokens, id.index)
+        let kind = tokenKind(token)
+        if kind == TokenKind.FnKeyword {
+          afterFn = true
+        } else {
+          if afterFn && (kind == TokenKind.Identifier || kind == TokenKind.DropKeyword) {
+            return run nameFromToken(&mut draft.*, tree, token)
+          }
+        }
+      }
+      Element.MissingToken {expected, span} => {
+        if afterFn && (expected == TokenKind.Identifier || expected == TokenKind.DropKeyword) {
+          return run missingName(&mut draft.*, tree, span, CauseCode.MissingToken)
+        }
+      }
+      Element.Node {id: ignoredId} => {}
+    }
+    index = index + usize.ONE
+  }
+  return run missingName(&mut draft.*, tree, nodeSpan(tree, parent), CauseCode.MissingToken)
+}
+
+/// Lowers every accepted name token of `parent` into a dotted [`Node.Path`](hir.Hir.Node).
+///
+/// # Details
+///
+/// This is the bootstrap `pathOf`. A path with no retained segment still lowers to a path holding
+/// one missing name, so a consumer never has to handle an empty segment list.
+pub effect fn pathOf(draft: &mut Draft, tree: &SyntaxTree, parent: NodeId, identifierOnly: bool)
+-> HirId
+! OutOfMemoryError
+? &mut Allocator {
+  let span = nodeSpan(tree, parent)
+  let mark = beginChildren(&draft.*)
+  let count = elementCount(tree, parent)
+  let mut index = usize.ZERO
+  while index < count {
+    let element = elementAt(tree, parent, index)
+    match element {
+      Element.Token {id} => {
+        let token = Vector.get<Token>(&tree.tokens, id.index)
+        let kind = tokenKind(token)
+        let accepted = acceptsNameKind(kind, identifierOnly)
+        if accepted {
+          let segment = run nameFromToken(&mut draft.*, tree, token)
+          run pushChild(&mut draft.*, segment)
+        }
+      }
+      Element.MissingToken {expected, span: missingSpan} => {
+        let accepted = acceptsNameKind(expected, identifierOnly)
+        if accepted {
+          let segment = run missingName(&mut draft.*, tree, missingSpan, CauseCode.MissingToken)
+          run pushChild(&mut draft.*, segment)
+        }
+      }
+      Element.Node {id: ignoredId} => {}
+    }
+    index = index + usize.ONE
+  }
+  if beginChildren(&draft.*) == mark {
+    let segment = run missingName(&mut draft.*, tree, span, CauseCode.MissingToken)
+    run pushChild(&mut draft.*, segment)
+  }
+  let segments = run finishChildren(&mut draft.*, mark)
+  let causes = run damage(&mut draft.*, tree, parent)
+  return run append(&mut draft.*, Node.Path {segments: segments}, span, causes)
+}
+
+// ---------------------------------------------------------------------------
+// Recovery expressions
+// ---------------------------------------------------------------------------
+
+/// Lowers a required but absent expression.
+pub effect fn missingExpression(
+  draft: &mut Draft,
+  tree: &SyntaxTree,
+  span: Span,
+  fallback: CauseCode,
+) -> HirId
+! OutOfMemoryError
+? &mut Allocator {
+  let causes = run recoveryCauses(&mut draft.*, tree, span, fallback)
+  return run append(&mut draft.*, Node.MissingExpression, span, causes)
+}
+
+/// Lowers a literal whose spelling lexes but does not decode, with `code` as its only cause.
+///
+/// # Details
+///
+/// This is the bootstrap `undecodableLiteral`. The lexer accepted the token, so no parser
+/// diagnostic covers it and consulting the diagnostic list would find nothing: the decoder's own
+/// reason is the cause.
+pub effect fn undecodableLiteral(draft: &mut Draft, span: Span, code: CauseCode) -> HirId
+! OutOfMemoryError
+? &mut Allocator {
+  let causes = run singleCause(&mut draft.*, span, code)
+  return run append(&mut draft.*, Node.InvalidExpression {retained: Range.empty()}, span, causes)
+}
+
+/// Lowers an expression position the source damaged, retaining `retained` healthy children.
+pub effect fn invalidExpression(
+  draft: &mut Draft,
+  tree: &SyntaxTree,
+  span: Span,
+  fallback: CauseCode,
+  retained: Range,
+) -> HirId
+! OutOfMemoryError
+? &mut Allocator {
+  let causes = run recoveryCauses(&mut draft.*, tree, span, fallback)
+  return run append(&mut draft.*, Node.InvalidExpression {retained: retained}, span, causes)
+}
+
+// ---------------------------------------------------------------------------
+// Number literals
+// ---------------------------------------------------------------------------
+
+const UNDERSCORE: u8 = 95
+
+fn isDecimalDigit(byte: u8) -> bool {
+  return byte >= 48 && byte <= 57
+}
+
+fn isAsciiLetter(byte: u8) -> bool {
+  return (byte >= 65 && byte <= 90) || (byte >= 97 && byte <= 122)
+}
+
+/// The value of one hexadecimal digit byte, or 255 when the byte is not one.
+///
+/// # Details
+///
+/// The sentinel is outside every base's digit range, so a caller can reject an unexpected byte by
+/// comparing against it. `internal/ByteClass.hexValue` returns `undefined` for the same case.
+fn hexDigit(byte: u8) -> u64 {
+  if byte >= 48 && byte <= 57 {
+    return u8.toU64(byte - 48)
+  }
+  if byte >= 97 && byte <= 102 {
+    return u8.toU64(byte - 97) + 10
+  }
+  if byte >= 65 && byte <= 70 {
+    return u8.toU64(byte - 65) + 10
+  }
+  return 255
+}
+
+/// The base an integer literal's prefix selects, together with that prefix's byte width.
+pub struct Base {
+  /// The written base.
+  pub radix: Radix
+  /// The number of prefix bytes to skip before the first digit: two for `0x`, `0o`, `0b`.
+  pub width: usize
+  /// The numeric base as a multiplier.
+  pub value: u64
+}
+
+impl Copy for Base {}
+
+/// Recognizes the base prefix of the literal `digits` spells.
+///
+/// # Details
+///
+/// This is `internal/IntegerLiteral.recognize`. A literal without a recognized prefix is decimal,
+/// so `0` alone stays decimal rather than becoming an empty octal literal.
+pub fn recognizeBase(digits: &[u8]) -> Base {
+  if digits.length < 2 || digits[0] != 48 {
+    return Base {radix: Radix.Decimal, width: usize.ZERO, value: 10}
+  }
+  let marker = digits[1]
+  if marker == 98 || marker == 66 {
+    return Base {radix: Radix.Binary, width: 2, value: 2}
+  }
+  if marker == 111 || marker == 79 {
+    return Base {radix: Radix.Octal, width: 2, value: 8}
+  }
+  if marker == 120 || marker == 88 {
+    return Base {radix: Radix.Hexadecimal, width: 2, value: 16}
+  }
+  return Base {radix: Radix.Decimal, width: usize.ZERO, value: 10}
+}
+
+/// A decoded magnitude, or the report that no `u64` can hold it.
+pub struct Magnitude {
+  /// Whether the magnitude fits `u64`.
+  pub fits: bool
+  /// The decoded value; meaningful only when [`fits`](Magnitude.fits) is `true`.
+  pub value: u64
+}
+
+impl Copy for Magnitude {}
+
+/// Multiplies `value` by `radix` and adds `digit`, reporting whether the result fits `u64`.
+///
+/// # Details
+///
+/// The bootstrap decoders accumulate into a `bigint` and never overflow. Decision 6 of the port
+/// caps a magnitude at `u64`, so every digit loop checks the room left before it scales.
+pub fn accumulate(value: u64, radix: u64, digit: u64) -> Magnitude {
+  if value > u64.divide(u64.MAX - digit, radix) {
+    return Magnitude {fits: false, value: 0}
+  }
+  return Magnitude {fits: true, value: value * radix + digit}
+}
+
+/// Reads the unsigned magnitude of one complete integer-literal slice.
+///
+/// # Details
+///
+/// This is `internal/IntegerLiteral.magnitude` with the bootstrap's arbitrary precision replaced by
+/// a `u64` range check: the slice carries its own base, digit separators carry no value and are
+/// skipped, and a literal too wide for `u64` answers `fits: false` so its caller can lower an
+/// invalid expression with an overflow cause. A byte that is not a digit of the recognized base
+/// answers the same way, so a slice the lexer should never have produced cannot silently decode to
+/// a plausible-looking number.
+pub fn magnitudeOf(digits: &[u8]) -> Magnitude {
+  let base = recognizeBase(digits)
+  let mut value: u64 = 0
+  let mut index = base.width
+  while index < digits.length {
+    let byte = digits[index]
+    index = index + usize.ONE
+    if byte == UNDERSCORE {
+      continue
+    }
+    let digit = hexDigit(byte)
+    if digit >= base.value {
+      return Magnitude {fits: false, value: 0}
+    }
+    let stepped = accumulate(value, base.value, digit)
+    if !stepped.fits {
+      return Magnitude {fits: false, value: 0}
+    }
+    value = stepped.value
+  }
+  return Magnitude {fits: true, value: value}
+}
+
+/// Lowers one integer literal token, or an invalid expression when its magnitude overflows `u64`.
+///
+/// # Details
+///
+/// This is the bootstrap `integerFromToken` under decision 6 of the port: the bootstrap kept a
+/// `bigint`, so it never rejected a magnitude. Here a literal beyond `u64` becomes an
+/// [`Node.InvalidExpression`](hir.Hir.Node) carrying [`CauseCode.IntegerOverflow`].
+pub effect fn integerFromToken(draft: &mut Draft, tree: &SyntaxTree, span: Span, digits: Span)
+-> HirId
+! OutOfMemoryError
+? &mut Allocator {
+  let source = Bytes.asSlice(&tree.source)
+  let content = Slice.view<u8>(source, digits.start, digits.end - digits.start)
+  let base = recognizeBase(content)
+  let magnitude = magnitudeOf(content)
+  if !magnitude.fits {
+    return run undecodableLiteral(&mut draft.*, span, CauseCode.IntegerOverflow)
+  }
+  return run appendHealthy(
+    &mut draft.*,
+    Node.IntegerLiteral {
+      magnitude: magnitude.value,
+      radix: base.radix,
+      suffix: SymbolRef.absent(),
+    },
+    span,
+  )
+}
+
+/// Lowers an `IntegerLiteralExpression` node, including its bare-token and pattern positions.
+pub effect fn integerLiteral(draft: &mut Draft, tree: &SyntaxTree, parent: NodeId) -> HirId
+! OutOfMemoryError
+? &mut Allocator {
+  let span = nodeSpan(tree, parent)
+  let digits = directToken(tree, parent, TokenKind.DecimalInteger)
+  if !digits.present {
+    return run missingExpression(&mut draft.*, tree, span, CauseCode.MissingToken)
+  }
+  return run integerFromToken(&mut draft.*, tree, span, tokenSpan(digits.token))
+}
+
+/// Lowers a `FloatingLiteralExpression` node into sign, coefficient, and decimal exponent.
+///
+/// # Details
+///
+/// This is the bootstrap `floatingLiteral`, whose regular expression is spelled here as a scan:
+/// whole digits, an optional fraction, and an optional signed exponent. The bootstrap's exponent is
+/// `exponent - fraction.length`, which is usually negative, so the node keeps that difference as an
+/// unsigned magnitude plus an `exponentSign`. A coefficient or exponent beyond `u64`, or a digit
+/// the scan does not recognize, lowers to an invalid expression with
+/// [`CauseCode.FloatingOverflow`].
+pub effect fn floatingLiteral(draft: &mut Draft, tree: &SyntaxTree, parent: NodeId) -> HirId
+! OutOfMemoryError
+? &mut Allocator {
+  let span = nodeSpan(tree, parent)
+  let digits = directToken(tree, parent, TokenKind.DecimalFloat)
+  if !digits.present {
+    return run missingExpression(&mut draft.*, tree, span, CauseCode.MissingToken)
+  }
+  let literal = tokenSpan(digits.token)
+  let source = Bytes.asSlice(&tree.source)
+  let content = Slice.view<u8>(source, literal.start, literal.end - literal.start)
+  let mut coefficient: u64 = 0
+  let mut fractionDigits: u64 = 0
+  let mut exponentDigits: u64 = 0
+  let mut exponentNegative = false
+  let mut sawExponent = false
+  let mut inFraction = false
+  let mut overflowed = false
+  let mut index = usize.ZERO
+  while index < content.length {
+    let byte = content[index]
+    index = index + usize.ONE
+    if byte == UNDERSCORE {
+      continue
+    }
+    if byte == 46 {
+      inFraction = true
+      continue
+    }
+    if byte == 101 || byte == 69 {
+      sawExponent = true
+      continue
+    }
+    if byte == 43 {
+      continue
+    }
+    if byte == 45 {
+      if sawExponent {
+        exponentNegative = true
+      }
+      continue
+    }
+    if !isDecimalDigit(byte) {
+      overflowed = true
+      break
+    }
+    let digit = u8.toU64(byte - 48)
+    if sawExponent {
+      let steppedExponent = accumulate(exponentDigits, 10, digit)
+      if !steppedExponent.fits {
+        overflowed = true
+        break
+      }
+      exponentDigits = steppedExponent.value
+      continue
+    }
+    let stepped = accumulate(coefficient, 10, digit)
+    if !stepped.fits {
+      overflowed = true
+      break
+    }
+    coefficient = stepped.value
+    if inFraction {
+      fractionDigits = fractionDigits + 1
+    }
+  }
+  if overflowed {
+    return run undecodableLiteral(&mut draft.*, span, CauseCode.FloatingOverflow)
+  }
+  let mut negativeExponent = fractionDigits
+  let mut positiveExponent = exponentDigits
+  if exponentNegative {
+    negativeExponent = exponentDigits + fractionDigits
+    positiveExponent = 0
+  }
+  let mut exponentMagnitude: u64 = 0
+  let mut exponentSign = Sign.Positive
+  if positiveExponent < negativeExponent {
+    exponentMagnitude = negativeExponent - positiveExponent
+    exponentSign = Sign.Negative
+  } else {
+    exponentMagnitude = positiveExponent - negativeExponent
+  }
+  let mut sign = Sign.Positive
+  if hasToken(tree, parent, TokenKind.Minus) {
+    sign = Sign.Negative
+  }
+  return run appendHealthy(
+    &mut draft.*,
+    Node.FloatingLiteral {
+      sign: sign,
+      coefficient: coefficient,
+      exponent: exponentMagnitude,
+      exponentSign: exponentSign,
+      suffix: SymbolRef.absent(),
+    },
+    span,
+  )
+}
+
+fn unitRank(unit: DurationUnit) -> usize {
+  return match unit {
+    DurationUnit.Weeks => usize.ZERO
+    DurationUnit.Days => 1
+    DurationUnit.Hours => 2
+    DurationUnit.Minutes => 3
+    DurationUnit.Seconds => 4
+    DurationUnit.Milliseconds => 5
+    DurationUnit.Microseconds => 6
+    DurationUnit.Nanoseconds => 7
+  }
+}
+
+/// An optionally recognized duration unit.
+struct UnitRef {
+  present: bool
+  unit: DurationUnit
+}
+
+impl Copy for UnitRef {}
+
+fn recognizeUnit(values: &[u8], start: usize, end: usize) -> UnitRef {
+  let width = end - start
+  if width == usize.ONE {
+    let byte = values[start]
+    if byte == 119 {
+      return UnitRef {present: true, unit: DurationUnit.Weeks}
+    }
+    if byte == 100 {
+      return UnitRef {present: true, unit: DurationUnit.Days}
+    }
+    if byte == 104 {
+      return UnitRef {present: true, unit: DurationUnit.Hours}
+    }
+    if byte == 109 {
+      return UnitRef {present: true, unit: DurationUnit.Minutes}
+    }
+    if byte == 115 {
+      return UnitRef {present: true, unit: DurationUnit.Seconds}
+    }
+    return UnitRef {present: false, unit: DurationUnit.Nanoseconds}
+  }
+  if width == 2 && values[start + usize.ONE] == 115 {
+    let byte = values[start]
+    if byte == 109 {
+      return UnitRef {present: true, unit: DurationUnit.Milliseconds}
+    }
+    if byte == 117 {
+      return UnitRef {present: true, unit: DurationUnit.Microseconds}
+    }
+    if byte == 110 {
+      return UnitRef {present: true, unit: DurationUnit.Nanoseconds}
+    }
+  }
+  return UnitRef {present: false, unit: DurationUnit.Nanoseconds}
+}
+
+/// Lowers a `DurationLiteralExpression` node into its ordered magnitude-and-unit components.
+///
+/// # Details
+///
+/// This is `internal/DurationLiteral.parse` reduced to what the HIR keeps. The accepted shape is
+/// one or more `<digits><unit>` components whose units are distinct and written from coarsest to
+/// finest; a separator may only sit between digits. The bootstrap's subordinate-range rule and its
+/// total nanosecond count are elaboration concerns, not lowering ones, so they are not repeated
+/// here. A rejected literal lowers to an invalid expression that retains the components already
+/// decoded, so the healthy prefix of a damaged literal survives as the bootstrap's recovery policy
+/// requires. A component magnitude beyond `u64` carries [`CauseCode.DurationOverflow`].
+pub effect fn durationLiteral(draft: &mut Draft, tree: &SyntaxTree, parent: NodeId) -> HirId
+! OutOfMemoryError
+? &mut Allocator {
+  let span = nodeSpan(tree, parent)
+  let literal = directToken(tree, parent, TokenKind.DurationLiteral)
+  if !literal.present {
+    let invalid = directToken(tree, parent, TokenKind.InvalidDurationLiteral)
+    if !invalid.present {
+      return run missingExpression(&mut draft.*, tree, span, CauseCode.MissingToken)
+    }
+    let invalidSpan = tokenSpan(invalid.token)
+    return run invalidExpression(
+      &mut draft.*,
+      tree,
+      invalidSpan,
+      CauseCode.InvalidLiteralEncoding,
+      Range.empty(),
+    )
+  }
+  let literalSpan = tokenSpan(literal.token)
+  let source = Bytes.asSlice(&tree.source)
+  let content = Slice.view<u8>(source, literalSpan.start, literalSpan.end - literalSpan.start)
+  let mark = beginChildren(&draft.*)
+  let mut index = usize.ZERO
+  let mut rejected = false
+  let mut overflowed = false
+  let mut hasPrevious = false
+  let mut previousRank = usize.ZERO
+  while index < content.length {
+    let componentStart = index
+    let mut magnitude: u64 = 0
+    let mut sawDigit = false
+    let mut afterSeparator = true
+    while index < content.length {
+      let byte = content[index]
+      if isDecimalDigit(byte) {
+        sawDigit = true
+        afterSeparator = false
+        let stepped = accumulate(magnitude, 10, u8.toU64(byte - 48))
+        if !stepped.fits {
+          overflowed = true
+          break
+        }
+        magnitude = stepped.value
+        index = index + usize.ONE
+        continue
+      }
+      if byte != UNDERSCORE {
+        break
+      }
+      if afterSeparator {
+        rejected = true
+        break
+      }
+      afterSeparator = true
+      index = index + usize.ONE
+    }
+    if overflowed || rejected {
+      break
+    }
+    if !sawDigit || afterSeparator {
+      rejected = true
+      break
+    }
+    let unitStart = index
+    while index < content.length && isAsciiLetter(content[index]) {
+      index = index + usize.ONE
+    }
+    let recognized = recognizeUnit(content, unitStart, index)
+    if !recognized.present {
+      rejected = true
+      break
+    }
+    let rank = unitRank(recognized.unit)
+    if hasPrevious && rank <= previousRank {
+      rejected = true
+      break
+    }
+    hasPrevious = true
+    previousRank = rank
+    let component = run appendHealthy(
+      &mut draft.*,
+      Node.DurationComponent {magnitude: magnitude, unit: recognized.unit},
+      Span {start: literalSpan.start + componentStart, end: literalSpan.start + index},
+    )
+    run pushChild(&mut draft.*, component)
+  }
+  let components = run finishChildren(&mut draft.*, mark)
+  if overflowed {
+    let causes = run singleCause(&mut draft.*, literalSpan, CauseCode.DurationOverflow)
+    return run append(
+      &mut draft.*,
+      Node.InvalidExpression {retained: components},
+      literalSpan,
+      causes,
+    )
+  }
+  if rejected || components.length == usize.ZERO {
+    let causes = run recoveryCauses(
+      &mut draft.*,
+      tree,
+      literalSpan,
+      CauseCode.InvalidLiteralEncoding,
+    )
+    return run append(
+      &mut draft.*,
+      Node.InvalidExpression {retained: components},
+      literalSpan,
+      causes,
+    )
+  }
+  return run appendHealthy(&mut draft.*, Node.DurationLiteral {components: components}, literalSpan)
+}
+
+// ---------------------------------------------------------------------------
+// Static text literals
+// ---------------------------------------------------------------------------
+
+/// The category and delimiter shape of one static literal's written introduction.
+pub struct LiteralForm {
+  /// Whether the introduction was recognized at all.
+  pub present: bool
+  /// Whether the literal denotes bytes rather than text.
+  pub isBytes: bool
+  /// Whether the literal denotes one character rather than a string.
+  pub isCharacter: bool
+  /// Whether a backslash introduces an escape; a raw literal reads its body verbatim.
+  pub isEscaped: bool
+  /// The number of modifier bytes before the opening delimiter: one for `b` or `r`, else zero.
+  pub modifierWidth: usize
+  /// The number of delimiter bytes: three for a multiline literal, else one.
+  pub delimiterWidth: usize
+  /// The delimiter byte: `"` for text and bytes, `'` for a character.
+  pub delimiter: u8
+}
+
+impl Copy for LiteralForm {}
+
+fn formAt(values: &[u8], offset: usize, delimiter: u8, width: usize) -> bool {
+  if offset + width > values.length {
+    return false
+  }
+  let mut index = usize.ZERO
+  while index < width {
+    if values[offset + index] != delimiter {
+      return false
+    }
+    index = index + usize.ONE
+  }
+  return true
+}
+
+/// Recognizes the longest committed literal introduction `values` opens with.
+///
+/// # Details
+///
+/// This is `LiteralForm.recognize`, restricted to the forms a lowered literal can be: escaped and
+/// raw text, byte strings, and characters. The order matters — a triple-quoted form must be tried
+/// before its single-quoted prefix.
+pub fn recognizeForm(values: &[u8]) -> LiteralForm {
+  if values.length == usize.ZERO {
+    return LiteralForm {
+      present: false,
+      isBytes: false,
+      isCharacter: false,
+      isEscaped: true,
+      modifierWidth: usize.ZERO,
+      delimiterWidth: usize.ZERO,
+      delimiter: 34,
+    }
+  }
+  let first = values[0]
+  if first == 98 {
+    if formAt(values, usize.ONE, 34, 3) {
+      return LiteralForm {
+        present: true,
+        isBytes: true,
+        isCharacter: false,
+        isEscaped: true,
+        modifierWidth: usize.ONE,
+        delimiterWidth: 3,
+        delimiter: 34,
+      }
+    }
+    if formAt(values, usize.ONE, 34, usize.ONE) {
+      return LiteralForm {
+        present: true,
+        isBytes: true,
+        isCharacter: false,
+        isEscaped: true,
+        modifierWidth: usize.ONE,
+        delimiterWidth: usize.ONE,
+        delimiter: 34,
+      }
+    }
+  }
+  if first == 114 {
+    if formAt(values, usize.ONE, 34, 3) {
+      return LiteralForm {
+        present: true,
+        isBytes: false,
+        isCharacter: false,
+        isEscaped: false,
+        modifierWidth: usize.ONE,
+        delimiterWidth: 3,
+        delimiter: 34,
+      }
+    }
+    if formAt(values, usize.ONE, 34, usize.ONE) {
+      return LiteralForm {
+        present: true,
+        isBytes: false,
+        isCharacter: false,
+        isEscaped: false,
+        modifierWidth: usize.ONE,
+        delimiterWidth: usize.ONE,
+        delimiter: 34,
+      }
+    }
+  }
+  if formAt(values, usize.ZERO, 34, 3) {
+    return LiteralForm {
+      present: true,
+      isBytes: false,
+      isCharacter: false,
+      isEscaped: true,
+      modifierWidth: usize.ZERO,
+      delimiterWidth: 3,
+      delimiter: 34,
+    }
+  }
+  if formAt(values, usize.ZERO, 34, usize.ONE) {
+    return LiteralForm {
+      present: true,
+      isBytes: false,
+      isCharacter: false,
+      isEscaped: true,
+      modifierWidth: usize.ZERO,
+      delimiterWidth: usize.ONE,
+      delimiter: 34,
+    }
+  }
+  if formAt(values, usize.ZERO, 39, usize.ONE) {
+    return LiteralForm {
+      present: true,
+      isBytes: false,
+      isCharacter: true,
+      isEscaped: true,
+      modifierWidth: usize.ZERO,
+      delimiterWidth: usize.ONE,
+      delimiter: 39,
+    }
+  }
+  return LiteralForm {
+    present: false,
+    isBytes: false,
+    isCharacter: false,
+    isEscaped: true,
+    modifierWidth: usize.ZERO,
+    delimiterWidth: usize.ZERO,
+    delimiter: 34,
+  }
+}
+
+/// How one escape sequence decoded, and where the byte after it starts.
+struct Escaped {
+  valid: bool
+  next: usize
+}
+
+impl Copy for Escaped {}
+
+/// Appends the UTF-8 encoding of `scalar` to the scratch buffer.
+effect fn appendScalar(draft: &mut Draft, scalar: u64) -> () ! OutOfMemoryError ? &mut Allocator {
+  if scalar < 128 {
+    return run Vector.append<u8>(&mut draft.scratch, u64.toU8(scalar))
+  }
+  if scalar < 2048 {
+    run Vector.append<u8>(&mut draft.scratch, u64.toU8(192 + u64.shiftRight(scalar, 6)))
+    return run Vector.append<u8>(&mut draft.scratch, u64.toU8(128 + u64.bitAnd(scalar, 63)))
+  }
+  if scalar < 65536 {
+    run Vector.append<u8>(&mut draft.scratch, u64.toU8(224 + u64.shiftRight(scalar, 12)))
+    run Vector.append<u8>(
+      &mut draft.scratch,
+      u64.toU8(128 + u64.bitAnd(u64.shiftRight(scalar, 6), 63)),
+    )
+    return run Vector.append<u8>(&mut draft.scratch, u64.toU8(128 + u64.bitAnd(scalar, 63)))
+  }
+  run Vector.append<u8>(&mut draft.scratch, u64.toU8(240 + u64.shiftRight(scalar, 18)))
+  run Vector.append<u8>(
+    &mut draft.scratch,
+    u64.toU8(128 + u64.bitAnd(u64.shiftRight(scalar, 12), 63)),
+  )
+  run Vector.append<u8>(
+    &mut draft.scratch,
+    u64.toU8(128 + u64.bitAnd(u64.shiftRight(scalar, 6), 63)),
+  )
+  return run Vector.append<u8>(&mut draft.scratch, u64.toU8(128 + u64.bitAnd(scalar, 63)))
+}
+
+/// Decodes one escape whose backslash sits immediately before `escapedAt`, into the scratch buffer.
+///
+/// # Details
+///
+/// This is `internal/Escape.decodeAt`. The vocabulary is shared by every escaped form, so `\n`,
+/// `\x41`, and `\u{2603}` mean the same thing in a text literal, a byte string, and a character
+/// literal. A byte-string `\u{...}` escape denotes one byte and so must stay inside `u8`.
+effect fn decodeEscape(
+  draft: &mut Draft,
+  values: &[u8],
+  escapedAt: usize,
+  end: usize,
+  delimiter: u8,
+  isBytes: bool,
+) -> Escaped
+! OutOfMemoryError
+? &mut Allocator {
+  if escapedAt >= end {
+    return Escaped {valid: false, next: escapedAt}
+  }
+  let escaped = values[escapedAt]
+  if escaped == 10 || escaped == 13 {
+    return Escaped {valid: false, next: escapedAt}
+  }
+  let mut simple: u8 = 0
+  let mut isSimple = true
+  if escaped == 110 {
+    simple = 10
+  } else if escaped == 114 {
+    simple = 13
+  } else if escaped == 116 {
+    simple = 9
+  } else if escaped == 48 {
+    simple = 0
+  } else if escaped == 34 || escaped == 92 {
+    simple = escaped
+  } else if escaped == 39 && delimiter == 39 {
+    simple = escaped
+  } else {
+    isSimple = false
+  }
+  if isSimple {
+    run Vector.append<u8>(&mut draft.scratch, simple)
+    return Escaped {valid: true, next: escapedAt + usize.ONE}
+  }
+  if escaped == 120 {
+    if escapedAt + 2 >= end {
+      return Escaped {valid: false, next: escapedAt}
+    }
+    let high = hexDigit(values[escapedAt + usize.ONE])
+    let low = hexDigit(values[escapedAt + 2])
+    if high == 255 || low == 255 {
+      return Escaped {valid: false, next: escapedAt}
+    }
+    run Vector.append<u8>(&mut draft.scratch, u64.toU8(high * 16 + low))
+    return Escaped {valid: true, next: escapedAt + 3}
+  }
+  if escaped != 117 {
+    return Escaped {valid: false, next: escapedAt}
+  }
+  if escapedAt + usize.ONE >= end || values[escapedAt + usize.ONE] != 123 {
+    return Escaped {valid: false, next: escapedAt}
+  }
+  let mut index = escapedAt + 2
+  let mut scalar: u64 = 0
+  let mut digits = usize.ZERO
+  while index < end && values[index] != 125 {
+    let digit = hexDigit(values[index])
+    if digit == 255 || digits == 6 {
+      return Escaped {valid: false, next: escapedAt}
+    }
+    scalar = scalar * 16 + digit
+    digits = digits + usize.ONE
+    index = index + usize.ONE
+  }
+  if digits == usize.ZERO || index >= end || values[index] != 125 {
+    return Escaped {valid: false, next: escapedAt}
+  }
+  if scalar > 1114111 || (scalar >= 55296 && scalar <= 57343) {
+    return Escaped {valid: false, next: escapedAt}
+  }
+  if isBytes {
+    if scalar > 255 {
+      return Escaped {valid: false, next: escapedAt}
+    }
+    run Vector.append<u8>(&mut draft.scratch, u64.toU8(scalar))
+    return Escaped {valid: true, next: index + usize.ONE}
+  }
+  run appendScalar(&mut draft.*, scalar)
+  return Escaped {valid: true, next: index + usize.ONE}
+}
+
+/// Decodes one complete literal token into the draft's scratch buffer.
+///
+/// # Details
+///
+/// This is `StaticText.decode`: the opening and closing delimiters must both be present, a
+/// multiline body turns a `CRLF` pair into one newline and rejects a lone carriage return, and
+/// every backslash in an escaped body decodes through the shared escape vocabulary. The payload
+/// stays in `scratch` so the caller can intern it without a second buffer.
+effect fn decodeLiteral(draft: &mut Draft, values: &[u8], form: LiteralForm) -> bool
+! OutOfMemoryError
+? &mut Allocator {
+  Vector.clear<u8>(&mut draft.scratch)
+  let contentStart = form.modifierWidth + form.delimiterWidth
+  if values.length < contentStart + form.delimiterWidth {
+    return false
+  }
+  let end = values.length - form.delimiterWidth
+  if end < contentStart {
+    return false
+  }
+  if !formAt(values, form.modifierWidth, form.delimiter, form.delimiterWidth) {
+    return false
+  }
+  if !formAt(values, end, form.delimiter, form.delimiterWidth) {
+    return false
+  }
+  let mut index = contentStart
+  while index < end {
+    let byte = values[index]
+    if byte != 92 || !form.isEscaped {
+      if form.delimiterWidth == 3 && byte == 13 {
+        if index + usize.ONE >= end || values[index + usize.ONE] != 10 {
+          return false
+        }
+        run Vector.append<u8>(&mut draft.scratch, 10)
+        index = index + 2
+        continue
+      }
+      run Vector.append<u8>(&mut draft.scratch, byte)
+      index = index + usize.ONE
+      continue
+    }
+    let escaped = run decodeEscape(
+      &mut draft.*,
+      values,
+      index + usize.ONE,
+      end,
+      form.delimiter,
+      form.isBytes,
+    )
+    if !escaped.valid {
+      return false
+    }
+    index = escaped.next
+  }
+  return true
+}
+
+/// Reports whether the scratch buffer holds well-formed UTF-8.
+///
+/// # Details
+///
+/// A text literal's decoded payload must be valid UTF-8, because every later phase treats it as
+/// text; the bootstrap gets this from a fatal `TextDecoder`. Overlong encodings, surrogates, and
+/// scalars beyond `U+10FFFF` are rejected along with truncated sequences.
+fn scratchIsUtf8(draft: &Draft) -> bool {
+  let values = Vector.asSlice<u8>(&draft.scratch)
+  let mut index = usize.ZERO
+  while index < values.length {
+    let lead = values[index]
+    if lead < 128 {
+      index = index + usize.ONE
+      continue
+    }
+    let mut width = usize.ZERO
+    let mut scalar: u64 = 0
+    if lead >= 194 && lead <= 223 {
+      width = 2
+      scalar = u8.toU64(lead - 192)
+    } else if lead >= 224 && lead <= 239 {
+      width = 3
+      scalar = u8.toU64(lead - 224)
+    } else if lead >= 240 && lead <= 244 {
+      width = 4
+      scalar = u8.toU64(lead - 240)
+    } else {
+      return false
+    }
+    if index + width > values.length {
+      return false
+    }
+    let mut offset = usize.ONE
+    while offset < width {
+      let continuation = values[index + offset]
+      if continuation < 128 || continuation > 191 {
+        return false
+      }
+      scalar = scalar * 64 + u8.toU64(continuation - 128)
+      offset = offset + usize.ONE
+    }
+    if width == 2 && scalar < 128 {
+      return false
+    }
+    if width == 3 && scalar < 2048 {
+      return false
+    }
+    if width == 4 && scalar < 65536 {
+      return false
+    }
+    if scalar > 1114111 || (scalar >= 55296 && scalar <= 57343) {
+      return false
+    }
+    index = index + width
+  }
+  return true
+}
+
+/// Lowers a `StaticTextLiteralExpression` node into a text or byte-string literal.
+///
+/// # Details
+///
+/// This is the bootstrap `staticTextLiteral`. The decoded payload, not the source spelling, is what
+/// the module interns, so `"a\nb"` and a literal written with a real newline share one symbol. A
+/// literal the lexer accepted but the decoder rejected lowers to an invalid expression with
+/// [`CauseCode.InvalidLiteralEncoding`], because no parser diagnostic explains it.
+pub effect fn staticTextLiteral(draft: &mut Draft, tree: &SyntaxTree, parent: NodeId) -> HirId
+! OutOfMemoryError
+? &mut Allocator {
+  let span = nodeSpan(tree, parent)
+  let unterminated = directToken(tree, parent, TokenKind.InvalidStaticLiteral)
+  if unterminated.present {
+    let invalidSpan = tokenSpan(unterminated.token)
+    return run invalidExpression(
+      &mut draft.*,
+      tree,
+      invalidSpan,
+      CauseCode.InvalidLiteralEncoding,
+      Range.empty(),
+    )
+  }
+  let mut literal = directToken(tree, parent, TokenKind.TextLiteral)
+  if !literal.present {
+    literal = directToken(tree, parent, TokenKind.ByteStringLiteral)
+  }
+  if !literal.present {
+    return run missingExpression(&mut draft.*, tree, span, CauseCode.MissingToken)
+  }
+  let literalSpan = tokenSpan(literal.token)
+  let decoded = run decodeStatic(&mut draft.*, tree, literalSpan)
+  if !decoded.valid {
+    return run undecodableLiteral(&mut draft.*, literalSpan, CauseCode.InvalidLiteralEncoding)
+  }
+  let value = run internScratch(&mut draft.*)
+  if decoded.isBytes {
+    return run appendHealthy(&mut draft.*, Node.BytesLiteral {value: value}, literalSpan)
+  }
+  return run appendHealthy(&mut draft.*, Node.TextLiteral {value: value}, literalSpan)
+}
+
+/// The outcome of decoding one static literal token into the scratch buffer.
+struct Decoded {
+  valid: bool
+  isBytes: bool
+}
+
+impl Copy for Decoded {}
+
+effect fn decodeStatic(draft: &mut Draft, tree: &SyntaxTree, literal: Span) -> Decoded
+! OutOfMemoryError
+? &mut Allocator {
+  let source = Bytes.asSlice(&tree.source)
+  let content = Slice.view<u8>(source, literal.start, literal.end - literal.start)
+  let form = recognizeForm(content)
+  if !form.present {
+    return Decoded {valid: false, isBytes: false}
+  }
+  let decoded = run decodeLiteral(&mut draft.*, content, form)
+  if !decoded {
+    return Decoded {valid: false, isBytes: false}
+  }
+  if !form.isBytes && !scratchIsUtf8(&draft.*) {
+    return Decoded {valid: false, isBytes: false}
+  }
+  return Decoded {valid: true, isBytes: form.isBytes}
+}
+
+/// Lowers a `CharacterLiteralExpression` node into the one Unicode scalar it denotes.
+///
+/// # Details
+///
+/// This is the bootstrap `characterLiteral` and its `StaticText.decodeScalar`. The one-scalar rule
+/// is a scalar rule, not a byte rule: `'é'` decodes to two bytes and one scalar and is accepted,
+/// while `'ab'` is rejected with [`CauseCode.InvalidCharacter`].
+pub effect fn characterLiteral(draft: &mut Draft, tree: &SyntaxTree, parent: NodeId) -> HirId
+! OutOfMemoryError
+? &mut Allocator {
+  let span = nodeSpan(tree, parent)
+  let literal = directToken(tree, parent, TokenKind.CharLiteral)
+  if !literal.present {
+    return run missingExpression(&mut draft.*, tree, span, CauseCode.MissingToken)
+  }
+  let literalSpan = tokenSpan(literal.token)
+  let decoded = run decodeStatic(&mut draft.*, tree, literalSpan)
+  if !decoded.valid {
+    return run undecodableLiteral(&mut draft.*, literalSpan, CauseCode.InvalidLiteralEncoding)
+  }
+  let scalar = scratchScalar(&draft.*)
+  if !scalar.fits {
+    return run undecodableLiteral(&mut draft.*, literalSpan, CauseCode.InvalidCharacter)
+  }
+  return run appendHealthy(
+    &mut draft.*,
+    Node.CharacterLiteral {scalar: u64.toU32(scalar.value)},
+    literalSpan,
+  )
+}
+
+/// Reads the scratch buffer as exactly one Unicode scalar, or reports that it is not one.
+fn scratchScalar(draft: &Draft) -> Magnitude {
+  let values = Vector.asSlice<u8>(&draft.scratch)
+  if values.length == usize.ZERO {
+    return Magnitude {fits: false, value: 0}
+  }
+  let lead = values[0]
+  let mut width = usize.ONE
+  let mut scalar: u64 = u8.toU64(lead)
+  if lead >= 240 {
+    width = 4
+    scalar = u8.toU64(lead - 240)
+  } else if lead >= 224 {
+    width = 3
+    scalar = u8.toU64(lead - 224)
+  } else if lead >= 192 {
+    width = 2
+    scalar = u8.toU64(lead - 192)
+  } else if lead >= 128 {
+    return Magnitude {fits: false, value: 0}
+  }
+  if values.length != width {
+    return Magnitude {fits: false, value: 0}
+  }
+  let mut offset = usize.ONE
+  while offset < width {
+    scalar = scalar * 64 + u8.toU64(values[offset] - 128)
+    offset = offset + usize.ONE
+  }
+  return Magnitude {fits: true, value: scalar}
+}
+
+/// Lowers a `BooleanLiteralExpression` node.
+pub effect fn booleanLiteral(draft: &mut Draft, tree: &SyntaxTree, parent: NodeId) -> HirId
+! OutOfMemoryError
+? &mut Allocator {
+  let span = nodeSpan(tree, parent)
+  if hasToken(tree, parent, TokenKind.TrueKeyword) {
+    return run appendHealthy(&mut draft.*, Node.BooleanLiteral {value: true}, span)
+  }
+  if hasToken(tree, parent, TokenKind.FalseKeyword) {
+    return run appendHealthy(&mut draft.*, Node.BooleanLiteral {value: false}, span)
+  }
+  return run missingExpression(&mut draft.*, tree, span, CauseCode.MissingToken)
+}
+
+/// Lowers a `UnitExpression` node.
+pub effect fn unitLiteral(draft: &mut Draft, tree: &SyntaxTree, parent: NodeId) -> HirId
+! OutOfMemoryError
+? &mut Allocator {
+  return run appendHealthy(&mut draft.*, Node.UnitLiteral, nodeSpan(tree, parent))
+}
+
+/// Lowers one lifetime token into a [`Node.Lifetime`](hir.Hir.Node) over its name.
+///
+/// # Details
+///
+/// This is the bootstrap `lifetimeFromToken`. The lifetime's name keeps its written spelling,
+/// leading apostrophe included, so `'static` and `static` never collide as symbols.
+pub effect fn lifetimeFromToken(draft: &mut Draft, tree: &SyntaxTree, token: Token) -> HirId
+! OutOfMemoryError
+? &mut Allocator {
+  let span = tokenSpan(token)
+  let name = run nameFromToken(&mut draft.*, tree, token)
+  return run appendHealthy(&mut draft.*, Node.Lifetime {name: name}, span)
+}

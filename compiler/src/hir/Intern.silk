@@ -90,6 +90,7 @@ impl Copy for Entry {}
 ///
 /// The arena only ever grows by appending. The index stores `slot + 1` so that a zero slot means an
 /// empty bucket, which keeps a freshly grown index correct without a separate occupancy vector.
+/// Every bucket holds one entry, so the entry count is also the occupied-bucket count.
 pub struct StringTable {
   /// Every distinct interned byte string, concatenated in interning order.
   arena: Bytes
@@ -97,8 +98,6 @@ pub struct StringTable {
   entries: Vector<Entry>
   /// Open-addressed buckets holding `entry index + 1`, or zero for an empty bucket.
   buckets: Vector<usize>
-  /// The number of occupied buckets, equal to the entry count.
-  occupied: usize
 }
 
 /// The initial bucket count; a power of two so masking replaces a modulo.
@@ -170,7 +169,6 @@ impl StringTable {
       arena: Bytes.make(),
       entries: Vector.make<Entry>(),
       buckets: Vector.make<usize>(),
-      occupied: usize.ZERO,
     }
   }
 
@@ -221,9 +219,9 @@ impl StringTable {
     let index = Vector.length<Entry>(&self.entries)
     run Vector.append<Entry>(&mut self.entries, Entry {offset: offset, length: values.length})
     Vector.set<usize>(&mut self.buckets, bucket, index + usize.ONE)
-    self.occupied = self.occupied + usize.ONE
+    let occupied = Vector.length<Entry>(&self.entries)
     let capacity = Vector.length<usize>(&self.buckets)
-    if usize.multiply(self.occupied, 4) >= usize.multiply(capacity, 3) {
+    if usize.multiply(occupied, 4) >= usize.multiply(capacity, 3) {
       run growIndex(&mut self.*)
     }
     return Symbol {index: index}

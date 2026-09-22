@@ -1,25 +1,41 @@
 //! HIR tests kept beside the self-hosted lowering and imported by the package root.
 
+import hir.Draft
+import hir.Draft {Draft as DraftState}
 import hir.Hir
 import hir.Hir {
   Cause,
   CauseCode,
   Defect,
+  DurationUnit,
   HirId,
   HirRef,
   Module,
   Node,
   OwnerKey,
   OwnerKind,
+  Radix,
   Range,
+  Sign,
   Violation,
 }
-import lexer.Span {Span}
 import hir.Intern {StringTable, Symbol, SymbolRef}
+import lexer.Lexer {Lexer}
+import lexer.Span {Span}
+import lexer.Token {Token}
+import parser.Node {Node as SyntaxNode, NodeKind}
+import parser.NodeId {NodeId}
+import parser.Parser
+import parser.SyntaxTree {SyntaxTree}
+import Stream {Stream}
 import silk.allocator {Allocator, OutOfMemoryError}
+import silk.bytes {Bytes}
 import silk.effect {Effect}
+import silk.option {Option}
 import silk.string {String}
 import silk.testing {AssertionError, Testing}
+import silk.u32
+import silk.u64
 import silk.usize
 import silk.writer {WriterError}
 import silk.vector {Vector}
@@ -310,4 +326,485 @@ effect fn detectDefects() -> () ! OutOfMemoryError | AssertionError<'static> ? &
 test effect fn verifyDetectsBrokenArena() -> () ! OutOfMemoryError | AssertionError<'static> {
   let mut allocator = Allocator.systemAllocatorProvider()
   return run detectDefects() |> Effect.provideMut<Allocator>(&mut allocator)
+}
+
+// ---------------------------------------------------------------------------
+// Draft builder and leaf lowerings
+// ---------------------------------------------------------------------------
+
+effect fn parseWithAllocator(source: string<'static>) -> SyntaxTree
+! OutOfMemoryError
+? &mut Allocator {
+  let bytes = run Bytes.copy(String.utf8Bytes(source))
+  let mut lexer = Lexer.make(Bytes.asSlice(&bytes))
+  let mut tokens = Vector.make<Token>()
+  while true {
+    let taken = run Stream.take(&mut lexer)
+    if let Option<Token>.Some {value} = move taken {
+      run Vector.append<Token>(&mut tokens, move value)
+    } else {
+      break
+    }
+  }
+  return run Parser.parse(move bytes, move tokens)
+}
+
+/// Returns the first node of `kind` in `tree`, or the root when the tree holds none.
+fn firstNode(tree: &SyntaxTree, kind: NodeKind) -> NodeId {
+  let nodes = Vector.asSlice<SyntaxNode>(&tree.nodes)
+  let mut index = usize.ZERO
+  while index < nodes.length {
+    if nodes[index].kind == kind {
+      return NodeId {index: index}
+    }
+    index = index + usize.ONE
+  }
+  return tree.root
+}
+
+/// Lowers the first expression node of `kind` in `source` into a fresh single-node module.
+effect fn lowerExpression(source: string<'static>, kind: NodeKind) -> Module
+! OutOfMemoryError
+? &mut Allocator {
+  let tree = run parseWithAllocator(source)
+  let target = firstNode(&tree, kind)
+  let mut draft = DraftState.make()
+  let mut lowered = HirId {index: usize.ZERO}
+  if kind == NodeKind.IntegerLiteralExpression {
+    lowered = run Draft.integerLiteral(&mut draft, &tree, target)
+  } else if kind == NodeKind.FloatingLiteralExpression {
+    lowered = run Draft.floatingLiteral(&mut draft, &tree, target)
+  } else if kind == NodeKind.DurationLiteralExpression {
+    lowered = run Draft.durationLiteral(&mut draft, &tree, target)
+  } else if kind == NodeKind.StaticTextLiteralExpression {
+    lowered = run Draft.staticTextLiteral(&mut draft, &tree, target)
+  } else if kind == NodeKind.CharacterLiteralExpression {
+    lowered = run Draft.characterLiteral(&mut draft, &tree, target)
+  } else if kind == NodeKind.BooleanLiteralExpression {
+    lowered = run Draft.booleanLiteral(&mut draft, &tree, target)
+  } else {
+    lowered = run Draft.unitLiteral(&mut draft, &tree, target)
+  }
+  let mut module = DraftState.finish(move draft)
+  let start = Vector.length<HirId>(&module.children)
+  run Vector.append<HirId>(&mut module.children, lowered)
+  module.declarations = Range {start: start, length: usize.ONE}
+  drop tree
+  return move module
+}
+
+/// Reports whether the module's last node is an integer literal with this magnitude and radix.
+fn expectInteger(module: &Module, magnitude: u64, radix: Radix) -> bool {
+  let last = Module.length(module)
+  if last == usize.ZERO {
+    return false
+  }
+  if let Node.IntegerLiteral {magnitude: found, radix: foundRadix, suffix: ignoredSuffix}
+    = Module.node(module, HirId {index: last - usize.ONE}) {
+    return found == magnitude && foundRadix == radix
+  }
+  return false
+}
+
+/// Reports whether the module's last node carries at least one cause with `code`.
+fn hasCause(module: &Module, code: CauseCode) -> bool {
+  let last = Module.length(module)
+  if last == usize.ZERO {
+    return false
+  }
+  let range = Module.causeRange(module, HirId {index: last - usize.ONE})
+  let mut offset = usize.ZERO
+  while offset < range.length {
+    if Vector.get<Cause>(&module.causes, range.start + offset).code == code {
+      return true
+    }
+    offset = offset + usize.ONE
+  }
+  return false
+}
+
+/// Reports whether the interned bytes of the module's last literal equal `expected`.
+fn expectPayload(module: &Module, expected: &[u8], wantBytes: bool) -> bool {
+  let last = Module.length(module)
+  if last == usize.ZERO {
+    return false
+  }
+  let node = Module.node(module, HirId {index: last - usize.ONE})
+  if let Node.TextLiteral {value} = node {
+    return !wantBytes && bytesEqual(Module.text(module, value), expected)
+  }
+  if let Node.BytesLiteral {value} = node {
+    return wantBytes && bytesEqual(Module.text(module, value), expected)
+  }
+  return false
+}
+
+effect fn checkIntegerForms() -> () ! OutOfMemoryError | AssertionError<'static> ? &mut Allocator {
+  let hex = run lowerExpression(
+    "fn main() -> i32 { return 0xFF }",
+    NodeKind.IntegerLiteralExpression,
+  )
+  run Testing.expect(expectInteger(&hex, 255, Radix.Hexadecimal), "0xFF reads as hexadecimal 255")
+  drop hex
+  let binary = run lowerExpression(
+    "fn main() -> i32 { return 0b1010 }",
+    NodeKind.IntegerLiteralExpression,
+  )
+  run Testing.expect(expectInteger(&binary, 10, Radix.Binary), "0b1010 reads as binary 10")
+  drop binary
+  let octal = run lowerExpression(
+    "fn main() -> i32 { return 0o17 }",
+    NodeKind.IntegerLiteralExpression,
+  )
+  run Testing.expect(expectInteger(&octal, 15, Radix.Octal), "0o17 reads as octal 15")
+  drop octal
+  let separated = run lowerExpression(
+    "fn main() -> i32 { return 1_000_000 }",
+    NodeKind.IntegerLiteralExpression,
+  )
+  run Testing.expect(
+    expectInteger(&separated, 1000000, Radix.Decimal),
+    "a separator groups digits without carrying value",
+  )
+  drop separated
+  return ()
+}
+
+test effect fn integerLiteralsDecodeEveryBase() -> ()
+! OutOfMemoryError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  return run checkIntegerForms() |> Effect.provideMut<Allocator>(&mut allocator)
+}
+
+effect fn checkIntegerOverflow() -> ()
+! OutOfMemoryError | AssertionError<'static>
+? &mut Allocator {
+  let module = run lowerExpression(
+    "fn main() -> i32 { return 18446744073709551616 }",
+    NodeKind.IntegerLiteralExpression,
+  )
+  run Testing.expect(
+    !expectInteger(&module, 0, Radix.Decimal),
+    "a magnitude beyond u64 is not an integer literal",
+  )
+  run Testing.expect(
+    hasCause(&module, CauseCode.IntegerOverflow),
+    "a magnitude beyond u64 lowers to an invalid expression with an overflow cause",
+  )
+  let defects = run Hir.verify(&module)
+  run Testing.expect(
+    Vector.length<Defect>(&defects) == usize.ZERO,
+    "an overflowing literal still leaves a consistent arena",
+  )
+  drop defects
+  drop module
+  return ()
+}
+
+test effect fn integerOverflowLowersToInvalid() -> ()
+! OutOfMemoryError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  return run checkIntegerOverflow() |> Effect.provideMut<Allocator>(&mut allocator)
+}
+
+effect fn checkTextLiterals() -> () ! OutOfMemoryError | AssertionError<'static> ? &mut Allocator {
+  let escaped = run lowerExpression(
+    """fn main() -> i32 { return "a\\nb\\u{41}" }""",
+    NodeKind.StaticTextLiteralExpression,
+  )
+  run Testing.expect(
+    expectPayload(&escaped, String.utf8Bytes("a\nbA"), false),
+    "a text literal interns its decoded payload, not its spelling",
+  )
+  drop escaped
+  let byteString = run lowerExpression(
+    """fn main() -> i32 { return b"\\x41B" }""",
+    NodeKind.StaticTextLiteralExpression,
+  )
+  run Testing.expect(
+    expectPayload(&byteString, String.utf8Bytes("AB"), true),
+    "a byte string lowers to a bytes literal",
+  )
+  drop byteString
+  return ()
+}
+
+test effect fn textLiteralsInternDecodedBytes() -> ()
+! OutOfMemoryError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  return run checkTextLiterals() |> Effect.provideMut<Allocator>(&mut allocator)
+}
+
+effect fn checkCharacterLiteral() -> ()
+! OutOfMemoryError | AssertionError<'static>
+? &mut Allocator {
+  let module = run lowerExpression(
+    """fn main() -> i32 { return '\\u{2603}' }""",
+    NodeKind.CharacterLiteralExpression,
+  )
+  let last = Module.length(&module) - usize.ONE
+  let mut scalar = u32.add(0, 0)
+  if let Node.CharacterLiteral {scalar: found} = Module.node(&module, HirId {index: last}) {
+    scalar = found
+  }
+  run Testing.expect(scalar == u32.add(0, 9731), "an escape denotes one Unicode scalar")
+  drop module
+  return ()
+}
+
+test effect fn characterLiteralDecodesOneScalar() -> ()
+! OutOfMemoryError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  return run checkCharacterLiteral() |> Effect.provideMut<Allocator>(&mut allocator)
+}
+
+effect fn checkDurationLiteral() -> ()
+! OutOfMemoryError | AssertionError<'static>
+? &mut Allocator {
+  let module = run lowerExpression(
+    "fn main() -> i32 { return 1h30m }",
+    NodeKind.DurationLiteralExpression,
+  )
+  let last = Module.length(&module) - usize.ONE
+  let mut components = Range.empty()
+  if let Node.DurationLiteral {components: found} = Module.node(&module, HirId {index: last}) {
+    components = found
+  }
+  run Testing.expect(components.length == usize.add(0, 2), "1h30m lowers to two components")
+  let mut firstOk = false
+  let mut secondOk = false
+  if let Node.DurationComponent {magnitude, unit}
+    = Module.node(&module, Module.child(&module, components, usize.ZERO)) {
+    firstOk = magnitude == 1 && unit == DurationUnit.Hours
+  }
+  if let Node.DurationComponent {magnitude, unit}
+    = Module.node(&module, Module.child(&module, components, usize.ONE)) {
+    secondOk = magnitude == 30 && unit == DurationUnit.Minutes
+  }
+  run Testing.expect(firstOk, "the coarsest component keeps its magnitude and unit")
+  run Testing.expect(secondOk, "the finer component follows in written order")
+  drop module
+  return ()
+}
+
+test effect fn durationLiteralKeepsComponents() -> ()
+! OutOfMemoryError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  return run checkDurationLiteral() |> Effect.provideMut<Allocator>(&mut allocator)
+}
+
+effect fn checkMissingName() -> () ! OutOfMemoryError | AssertionError<'static> ? &mut Allocator {
+  let tree = run parseWithAllocator("struct {}")
+  let target = firstNode(&tree, NodeKind.StructDeclaration)
+  let mut draft = DraftState.make()
+  let name = run Draft.nameIn(&mut draft, &tree, target, true)
+  let module = DraftState.finish(move draft)
+  let mut isMissing = false
+  match Module.node(&module, name) {
+    Node.MissingName => { isMissing = true }
+    _ => {}
+  }
+  run Testing.expect(isMissing, "an absent declaration name lowers to MissingName")
+  run Testing.expect(
+    Module.causeRange(&module, name).length > usize.ZERO,
+    "a missing name always records why it is missing",
+  )
+  drop module
+  drop tree
+  return ()
+}
+
+test effect fn missingNameRecordsACause() -> () ! OutOfMemoryError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  return run checkMissingName() |> Effect.provideMut<Allocator>(&mut allocator)
+}
+
+effect fn checkSharedSymbols() -> () ! OutOfMemoryError | AssertionError<'static> ? &mut Allocator {
+  let tree = run parseWithAllocator(
+    "fn value() -> i32 { return 0 }\nfn value() -> i32 { return 1 }",
+  )
+  let mut draft = DraftState.make()
+  let nodes = Vector.asSlice<SyntaxNode>(&tree.nodes)
+  let mut first = HirId {index: usize.ZERO}
+  let mut second = HirId {index: usize.ZERO}
+  let mut seen = usize.ZERO
+  let mut index = usize.ZERO
+  while index < nodes.length {
+    if nodes[index].kind == NodeKind.FunctionDeclaration {
+      let lowered = run Draft.callableNameIn(&mut draft, &tree, NodeId {index: index})
+      if seen == usize.ZERO {
+        first = lowered
+      } else {
+        second = lowered
+      }
+      seen = seen + usize.ONE
+    }
+    index = index + usize.ONE
+  }
+  let module = DraftState.finish(move draft)
+  run Testing.expect(seen == usize.add(0, 2), "both declarations were lowered")
+  let mut firstText = Symbol {index: usize.ZERO}
+  let mut secondText = Symbol {index: usize.ONE}
+  if let Node.Name {text} = Module.node(&module, first) {
+    firstText = text
+  }
+  if let Node.Name {text} = Module.node(&module, second) {
+    secondText = text
+  }
+  run Testing.expect(
+    firstText.index == secondText.index,
+    "two identical identifiers share one symbol",
+  )
+  run Testing.expect(
+    bytesEqual(Module.text(&module, firstText), String.utf8Bytes("value")),
+    "the shared symbol resolves to the written name",
+  )
+  drop module
+  drop tree
+  return ()
+}
+
+test effect fn identicalNamesShareOneSymbol() -> () ! OutOfMemoryError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  return run checkSharedSymbols() |> Effect.provideMut<Allocator>(&mut allocator)
+}
+
+effect fn checkPathSegments() -> () ! OutOfMemoryError | AssertionError<'static> ? &mut Allocator {
+  let tree = run parseWithAllocator("import silk.vector {Vector}")
+  let target = firstNode(&tree, NodeKind.ImportPath)
+  let mut draft = DraftState.make()
+  let path = run Draft.pathOf(&mut draft, &tree, target, false)
+  let module = DraftState.finish(move draft)
+  let mut segments = Range.empty()
+  if let Node.Path {segments: found} = Module.node(&module, path) {
+    segments = found
+  }
+  run Testing.expect(
+    segments.length == usize.add(0, 2),
+    "a dotted import path keeps one name per segment",
+  )
+  let mut firstText = Symbol {index: usize.ZERO}
+  if let Node.Name {text} = Module.node(&module, Module.child(&module, segments, usize.ZERO)) {
+    firstText = text
+  }
+  run Testing.expect(
+    bytesEqual(Module.text(&module, firstText), String.utf8Bytes("silk")),
+    "the first segment keeps its written spelling",
+  )
+  drop module
+  drop tree
+  return ()
+}
+
+test effect fn pathKeepsOneNamePerSegment() -> () ! OutOfMemoryError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  return run checkPathSegments() |> Effect.provideMut<Allocator>(&mut allocator)
+}
+
+effect fn checkBinderFrames() -> () ! OutOfMemoryError | AssertionError<'static> ? &mut Allocator {
+  let mut draft = DraftState.make()
+  let outer = run Draft.internBytes(&mut draft, String.utf8Bytes("value"))
+  let inner = run Draft.internBytes(&mut draft, String.utf8Bytes("other"))
+  run Draft.pushFrame(&mut draft)
+  run Draft.bind(&mut draft, outer, HirId {index: 1})
+  run Draft.pushFrame(&mut draft)
+  run Draft.bind(&mut draft, outer, HirId {index: 2})
+  run Draft.bind(&mut draft, inner, HirId {index: 3})
+  run Testing.expect(
+    Draft.lookup(&draft, outer).id.index == 2,
+    "an inner binding shadows an outer one",
+  )
+  Draft.popFrame(&mut draft)
+  run Testing.expect(
+    Draft.lookup(&draft, outer).id.index == 1,
+    "closing the frame restores the outer binding",
+  )
+  run Testing.expect(!Draft.lookup(&draft, inner).present, "a closed frame's binding is gone")
+  let module = DraftState.finish(move draft)
+  drop module
+  return ()
+}
+
+test effect fn framesShadowAndRestoreBindings() -> ()
+! OutOfMemoryError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  return run checkBinderFrames() |> Effect.provideMut<Allocator>(&mut allocator)
+}
+
+effect fn detectForwardChild() -> () ! OutOfMemoryError | AssertionError<'static> ? &mut Allocator {
+  let mut module = run buildModule()
+  let filler = run appendNode(&mut module, Node.NoBody, Span.make(0, 0), Range.empty())
+  drop filler
+  let parent = run appendNode(
+    &mut module,
+    Node.MoveExpression {operand: HirId {index: 5}},
+    Span.make(0, 0),
+    Range.empty(),
+  )
+  let extra = run appendNode(&mut module, Node.NoBody, Span.make(0, 0), Range.empty())
+  drop extra
+  let defects = run Hir.verify(&module)
+  let found = Vector.asSlice<Defect>(&defects)
+  let mut sawForward = false
+  let mut index = usize.ZERO
+  while index < found.length {
+    let defect = found[index]
+    if defect.violation == Violation.ChildNotBeforeParent && defect.id.index == parent.index {
+      sawForward = true
+    }
+    index = index + usize.ONE
+  }
+  run Testing.expect(sawForward, "a child identity above its parent is a defect")
+  drop defects
+  drop module
+  return ()
+}
+
+test effect fn verifyDetectsForwardChild() -> () ! OutOfMemoryError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  return run detectForwardChild() |> Effect.provideMut<Allocator>(&mut allocator)
+}
+
+effect fn checkFloatingLiteral() -> ()
+! OutOfMemoryError | AssertionError<'static>
+? &mut Allocator {
+  let module = run lowerExpression(
+    "fn main() -> i32 { return 1.5 }",
+    NodeKind.FloatingLiteralExpression,
+  )
+  let last = Module.length(&module) - usize.ONE
+  let mut ok = false
+  if let Node.FloatingLiteral {sign, coefficient, exponent, exponentSign, suffix: ignoredSuffix}
+    = Module.node(&module, HirId {index: last}) {
+    ok = sign == Sign.Positive
+      && coefficient == 15
+      && exponent == 1
+      && exponentSign == Sign.Negative
+  }
+  run Testing.expect(ok, "1.5 reads as coefficient 15 scaled down by one decimal place")
+  drop module
+  let scientific = run lowerExpression(
+    "fn main() -> i32 { return 2.5e3 }",
+    NodeKind.FloatingLiteralExpression,
+  )
+  let tail = Module.length(&scientific) - usize.ONE
+  let mut scaled = false
+  if let Node.FloatingLiteral {
+    sign: ignoredSign,
+    coefficient,
+    exponent,
+    exponentSign,
+    suffix: ignoredSuffix,
+  } = Module.node(&scientific, HirId {index: tail}) {
+    scaled = coefficient == 25 && exponent == 2 && exponentSign == Sign.Positive
+  }
+  run Testing.expect(scaled, "a written exponent nets against the fraction width")
+  drop scientific
+  return ()
+}
+
+test effect fn floatingLiteralKeepsSignedExponent() -> ()
+! OutOfMemoryError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  return run checkFloatingLiteral() |> Effect.provideMut<Allocator>(&mut allocator)
 }
