@@ -1,5 +1,4 @@
-//! Manual playground tests for the self-hosted parser. Run with
-//! `pnpm exec silk test --manifest-path compiler/silk.toml --root src/playground/ParserCases.silk`.
+//! Parser tests kept beside the self-hosted parser and imported by the package root.
 
 import lexer.Lexer {Lexer}
 import lexer.Token {Token, TokenKind}

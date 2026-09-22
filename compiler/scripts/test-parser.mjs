@@ -142,8 +142,8 @@ function sourceFiles() {
   if (process.argv.length > 3) return process.argv.slice(3)
   return [
     ...filesUnder('compiler/fixtures/parser'),
-    // The source-written test root is run manually and is not part of this CI corpus.
-    ...filesUnder('compiler/src').filter((file) => !file.startsWith('compiler/src/playground/')),
+    // The source-written parser tests run explicitly and are not part of this differential corpus.
+    ...filesUnder('compiler/src').filter((file) => file !== 'compiler/src/parser/ParserCases.silk'),
     ...filesUnder('packages/compiler/stdlib/silk'),
   ]
 }

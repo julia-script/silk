@@ -216,9 +216,10 @@ effect fn readWithFixedClock() -> () {
 test fn readsFixedClock() -> () { return run readWithFixedClock() }
 ```
 
-The summary reports discovered, selected, passed, and failed counts. Completed runs return 0 when
-all selected tests pass, including zero selected tests; they return 1 when a typed test failure
-occurs. Runner operational failures return 2. Abnormal termination remains abnormal.
+The runner prints one result and elapsed time for each selected test, then reports the discovered,
+selected, passed, and failed counts and the total run time. Completed runs return 0 when all
+selected tests pass, including zero selected tests; they return 1 when a typed test failure occurs.
+Runner operational failures return 2. Abnormal termination remains abnormal.
 
 **Boundary:** The first runner has no parallelism, retries, sharding, isolation, watch mode, shared
 fixtures, configurable hosts, or result reuse.

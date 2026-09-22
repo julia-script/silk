@@ -311,7 +311,7 @@ it('publishes one deterministic matched identity graph over compiler, catalog, s
   )
 })
 
-it('rejects stale catalog metadata and exact source bytes independently', () => {
+it('rejects stale catalog and source metadata', () => {
   const installed = ToolchainIntegrity.installed()
   const staleCatalog = ToolchainIntegrity.make(
     installed.components.map((component) =>
@@ -327,9 +327,12 @@ it('rejects stale catalog metadata and exact source bytes independently', () => 
       ),
     )
 
-  const sources = new Map(Stdlib.sources)
-  sources.set('silk/vector', ascii('stale source'))
-  const sourceValidation = ToolchainIntegrity.validateFrontend(installed, sources)
+  const staleSource = ToolchainIntegrity.make(
+    installed.components.map((component) =>
+      component.id === 'source/silk/vector' ? { ...component, digest: '0'.repeat(64) } : component,
+    ),
+  )
+  const sourceValidation = ToolchainIntegrity.validateFrontend(staleSource)
   assert.strictEqual(sourceValidation._tag, 'Invalid')
   if (sourceValidation._tag === 'Invalid')
     assert.isTrue(

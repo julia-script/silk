@@ -552,29 +552,41 @@ test fn runsAfterFailure() -> () {
             stderr: second.stderr,
           }),
         )
-        assert.strictEqual(second.stdout, first.stdout)
-        assert.include(first.stdout, 'fail tests/Cases::failsBeforeContinuation')
-        assert.include(first.stdout, 'pass tests/Cases::cleanupExactlyOnce')
-        assert.include(first.stdout, 'pass tests/Cases::runsAfterFailure')
-        assert.include(first.stdout, 'summary: 4 discovered, 3 selected, 2 passed, 1 failed')
+        const withoutDurations = (output: string) =>
+          output.replaceAll(/^(    (?:PASS|FAIL)  |Time   )(?:<1|\d+) (?:us|ms)$/gm, '$1<duration>')
+        assert.strictEqual(withoutDurations(second.stdout), withoutDurations(first.stdout))
+        assert.match(
+          first.stdout,
+          /  tests\/Cases::failsBeforeContinuation\n    FAIL  (?:<1|\d+) (?:us|ms)/,
+        )
+        assert.match(
+          first.stdout,
+          /  tests\/Cases::cleanupExactlyOnce\n    PASS  (?:<1|\d+) (?:us|ms)/,
+        )
+        assert.match(
+          first.stdout,
+          /  tests\/Cases::runsAfterFailure\n    PASS  (?:<1|\d+) (?:us|ms)/,
+        )
+        assert.include(first.stdout, 'Tests  2 passed, 1 failed (3 selected, 4 discovered)')
+        assert.match(first.stdout, /^Time   (?:<1|\d+) (?:us|ms)$/m)
         assert.match(first.stderr, /ExpectedFailure/)
         assert.isBelow(
-          first.stdout.indexOf('fail tests/Cases::failsBeforeContinuation'),
-          first.stdout.indexOf('pass tests/Cases::runsAfterFailure'),
+          first.stdout.indexOf('tests/Cases::failsBeforeContinuation'),
+          first.stdout.indexOf('tests/Cases::runsAfterFailure'),
         )
 
         const filtered = yield* runCompiled(outcome.path, {
           arguments: ['--file', 'tests/Cases.silk', '--filter', 'CLEANUP'],
         })
         assert.strictEqual(filtered.status, 0, filtered.stderr)
-        assert.include(filtered.stdout, 'pass tests/Cases::cleanupExactlyOnce')
-        assert.include(filtered.stdout, 'summary: 4 discovered, 1 selected, 1 passed, 0 failed')
+        assert.include(filtered.stdout, '  tests/Cases::cleanupExactlyOnce\n    PASS  ')
+        assert.include(filtered.stdout, 'Tests  1 passed, 0 failed (1 selected, 4 discovered)')
 
         const empty = yield* runCompiled(outcome.path, {
           arguments: ['--filter', 'does-not-exist'],
         })
         assert.strictEqual(empty.status, 0, empty.stderr)
-        assert.include(empty.stdout, 'summary: 4 discovered, 0 selected, 0 passed, 0 failed')
+        assert.include(empty.stdout, 'Tests  0 passed, 0 failed (0 selected, 4 discovered)')
 
         const malformed = yield* runCompiled(outcome.path, {
           arguments: ['--unknown', 'value'],
@@ -589,8 +601,8 @@ test fn runsAfterFailure() -> () {
           true,
           `expected fatal test trap, native exited ${trapped.status}`,
         )
-        assert.include(trapped.stdout, 'test tests/Trap::fatalTrap')
-        assert.notInclude(trapped.stdout, 'summary:')
+        assert.include(trapped.stdout, '  tests/Trap::fatalTrap')
+        assert.notInclude(trapped.stdout, 'Tests  ')
       }),
     ),
   120_000,
