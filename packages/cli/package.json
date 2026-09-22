@@ -108,6 +108,14 @@
       "types": "./dist/TestCommand.d.ts",
       "import": "./dist/TestCommand.js"
     },
+    "./TestExchange": {
+      "types": "./dist/TestExchange.d.ts",
+      "import": "./dist/TestExchange.js"
+    },
+    "./TestResult": {
+      "types": "./dist/TestResult.d.ts",
+      "import": "./dist/TestResult.js"
+    },
     "./Workflow": {
       "types": "./dist/Workflow.d.ts",
       "import": "./dist/Workflow.js"

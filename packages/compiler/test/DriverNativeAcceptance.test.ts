@@ -4,7 +4,16 @@ import type * as RuntimeComponent from '../src/RuntimeComponent.js'
 import * as ArtifactComposition from '../src/ArtifactComposition.js'
 import * as CompilationProfile from '../src/CompilationProfile.js'
 import { spawnSync } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { createHash } from 'node:crypto'
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs'
 import { platform, tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { afterAll, assert, it } from '@effect/vitest'
@@ -34,6 +43,7 @@ import { websocketUpgradePortableAcceptanceSource } from './support/websocketUpg
 import { httpValuesAcceptanceSource } from './support/httpValuesAcceptance.js'
 import { networkAddressResolutionCorpusProgram } from './support/networkAddressResolutionAcceptance.js'
 import * as Driver from './support/TestDriver.js'
+import type * as TestExecution from '../src/TestExecution.js'
 
 const defaultClang = (): string => {
   if (existsSync('/opt/homebrew/opt/llvm/bin/clang')) return '/opt/homebrew/opt/llvm/bin/clang'
@@ -56,6 +66,122 @@ const toolchain: NativeToolchain.Toolchain = Object.freeze({
 // bytes are identical.
 const encoder = new TextEncoder()
 const ascii = (value: string): Uint8Array => encoder.encode(value)
+
+const runnerPlanMagic = ascii('SLKTPLN1')
+const runnerReceiptMagic = ascii('SLKTRCP1')
+
+const concatBytes = (...parts: ReadonlyArray<Uint8Array>): Uint8Array => {
+  const bytes = new Uint8Array(parts.reduce((length, part) => length + part.length, 0))
+  let offset = 0
+  for (const part of parts) {
+    bytes.set(part, offset)
+    offset += part.length
+  }
+  return bytes
+}
+
+const runnerU32 = (value: number): Uint8Array => {
+  const bytes = new Uint8Array(4)
+  new DataView(bytes.buffer).setUint32(0, value, true)
+  return bytes
+}
+
+const runnerU64 = (value: bigint): Uint8Array => {
+  const bytes = new Uint8Array(8)
+  new DataView(bytes.buffer).setBigUint64(0, value, true)
+  return bytes
+}
+
+const runnerText = (value: string): Uint8Array => {
+  const bytes = encoder.encode(value)
+  return concatBytes(runnerU64(BigInt(bytes.length)), bytes)
+}
+
+const runnerPerTestPlan = (
+  manifest: TestExecution.Manifest,
+  cachedNames: ReadonlySet<string> = new Set(),
+): Uint8Array =>
+  concatBytes(
+    runnerPlanMagic,
+    runnerU32(1),
+    runnerU32(1),
+    Uint8Array.from({ length: 32 }, (_, index) => index + 1),
+    runnerU64(BigInt(manifest.entries.length)),
+    ...manifest.entries.map((entry, ordinal) => {
+      const execution =
+        entry.eligibility._tag === 'Eligible' ? entry.eligibility.identity : undefined
+      return concatBytes(
+        runnerU64(BigInt(ordinal)),
+        runnerText(entry.test.identity),
+        runnerText(execution ?? ''),
+        Uint8Array.of(cachedNames.has(entry.test.name) && execution !== undefined ? 1 : 0),
+      )
+    }),
+  )
+
+const runnerUncachedPlan = (manifest: TestExecution.Manifest): Uint8Array => {
+  const catalog = concatBytes(
+    ...manifest.entries.flatMap((entry, ordinal) => [
+      runnerU64(BigInt(ordinal)),
+      runnerText(entry.test.identity),
+    ]),
+  )
+  const bytes = concatBytes(
+    runnerPlanMagic,
+    runnerU32(1),
+    runnerU32(2),
+    Uint8Array.from({ length: 32 }, (_, index) => 32 - index),
+    createHash('sha256').update(catalog).digest(),
+    runnerU64(BigInt(manifest.entries.length)),
+  )
+  return concatBytes(bytes, new Uint8Array(256 - bytes.length))
+}
+
+interface RunnerReceipt {
+  readonly mode: number
+  readonly dispositions: ReadonlyArray<number>
+  readonly counts: ReadonlyArray<bigint>
+  readonly status: number
+}
+
+const runnerReceipt = (path: string, plan: Uint8Array): RunnerReceipt => {
+  const bytes = readFileSync(path)
+  assert.deepEqual(bytes.subarray(0, 8), runnerReceiptMagic)
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+  assert.strictEqual(view.getUint32(8, true), 1)
+  const mode = view.getUint32(12, true)
+  assert.deepEqual(bytes.subarray(16, 48), plan.subarray(16, 48))
+  assert.deepEqual(bytes.subarray(48, 80), createHash('sha256').update(plan).digest())
+  let offset = 80
+  const dispositions: Array<number> = []
+  if (mode === 1) {
+    const selected = view.getBigUint64(offset, true)
+    offset += 8
+    for (let index = 0n; index < selected; index += 1n) {
+      offset += 8
+      const declarationLength = Number(view.getBigUint64(offset, true))
+      offset += 8 + declarationLength
+      const executionLength = Number(view.getBigUint64(offset, true))
+      offset += 8 + executionLength
+      dispositions.push(view.getUint8(offset))
+      offset += 1
+    }
+  }
+  const counts = [
+    view.getBigUint64(offset, true),
+    view.getBigUint64(offset + 8, true),
+    view.getBigUint64(offset + 16, true),
+    view.getBigUint64(offset + 24, true),
+    view.getBigUint64(offset + 32, true),
+    view.getBigUint64(offset + 40, true),
+  ]
+  const status = view.getUint32(offset + 48, true)
+  if (mode === 2) {
+    assert.strictEqual(bytes.length, 256)
+    assert.isTrue(bytes.subarray(offset + 52).every((value) => value === 0))
+  } else assert.strictEqual(offset + 52, bytes.length)
+  return { mode, dispositions, counts, status }
+}
 
 const runCompiled = Effect.fnUntraced(function* (path: string, run: NativeRun = {}) {
   return yield* Effect.sync(() =>
@@ -489,6 +615,8 @@ effect fn release(resource: &mut i32) -> () {
 
 fn choose(values: [i32; 1], index: usize) -> i32 { return values[index] }
 
+test fn cacheablePass() -> () {}
+
 test effect fn failsBeforeContinuation() -> () ! ExpectedFailure { fail ExpectedFailure {} }
 
 test effect fn cleanupExactlyOnce() -> () ! CleanupFailure {
@@ -512,6 +640,7 @@ test fn runsAfterFailure() -> () {
           {
             sourceModule: 'tests/Root',
             root: 'silk/test_runner',
+            cache: false,
             discovery: {
               root: 'tests/Root',
               sources: new Map([
@@ -525,13 +654,44 @@ test fn runsAfterFailure() -> () {
         )
         assert.strictEqual(outcome._tag, 'Compiled', Json.stringify(outcome))
         if (outcome._tag !== 'Compiled') return
+        const manifest = outcome.testManifest
+        assert.isDefined(manifest)
+        if (manifest === undefined) return
+        assert.strictEqual(manifest.entries.length, 5)
+        assert.strictEqual(
+          manifest.entries.find((entry) => entry.test.name === 'cacheablePass')?.eligibility._tag,
+          'Eligible',
+        )
 
-        const first = yield* runCompiled(outcome.path, {
-          arguments: ['--file', 'tests/Cases.silk'],
-        })
-        const second = yield* runCompiled(outcome.path, {
-          arguments: ['--file', 'tests/Cases.silk'],
-        })
+        let invocation = 0
+        const argumentsFor = (
+          plan: Uint8Array,
+          arguments_: ReadonlyArray<string>,
+        ): { readonly arguments: ReadonlyArray<string>; readonly resultPath: string } => {
+          invocation += 1
+          const runnerRoot = realpathSync(destinationRoot)
+          const planPath = join(runnerRoot, `runner-plan-${invocation}.bin`)
+          const resultPath = join(runnerRoot, `runner-result-${invocation}.bin`)
+          writeFileSync(planPath, plan)
+          rmSync(resultPath, { force: true })
+          return {
+            arguments: [
+              ...arguments_,
+              '--silk-test-plan',
+              planPath,
+              '--silk-test-result',
+              resultPath,
+            ],
+            resultPath,
+          }
+        }
+
+        const firstPlan = runnerPerTestPlan(manifest)
+        const firstInvocation = argumentsFor(firstPlan, ['--file', 'tests/Cases.silk'])
+        const first = yield* runCompiled(outcome.path, firstInvocation)
+        const cachedPlan = runnerPerTestPlan(manifest, new Set(['cacheablePass']))
+        const cachedInvocation = argumentsFor(cachedPlan, ['--file', 'tests/Cases.silk'])
+        const second = yield* runCompiled(outcome.path, cachedInvocation)
         assert.strictEqual(
           first.status,
           1,
@@ -552,38 +712,85 @@ test fn runsAfterFailure() -> () {
             stderr: second.stderr,
           }),
         )
-        assert.strictEqual(second.stdout, first.stdout)
         assert.include(first.stdout, 'fail tests/Cases::failsBeforeContinuation')
         assert.include(first.stdout, 'pass tests/Cases::cleanupExactlyOnce')
         assert.include(first.stdout, 'pass tests/Cases::runsAfterFailure')
-        assert.include(first.stdout, 'summary: 4 discovered, 3 selected, 2 passed, 1 failed')
+        assert.include(first.stdout, 'summary: 5 discovered, 4 selected, 3 passed, 1 failed')
+        assert.include(second.stdout, 'cached tests/Cases::cacheablePass')
+        assert.notInclude(second.stdout, 'test tests/Cases::cacheablePass')
+        assert.deepEqual(runnerReceipt(firstInvocation.resultPath, firstPlan), {
+          mode: 1,
+          dispositions: [1, 1, 2, 1],
+          counts: [5n, 4n, 0n, 4n, 3n, 1n],
+          status: 1,
+        })
+        assert.deepEqual(runnerReceipt(cachedInvocation.resultPath, cachedPlan), {
+          mode: 1,
+          dispositions: [0, 1, 2, 1],
+          counts: [5n, 4n, 1n, 3n, 3n, 1n],
+          status: 1,
+        })
         assert.match(first.stderr, /ExpectedFailure/)
         assert.isBelow(
           first.stdout.indexOf('fail tests/Cases::failsBeforeContinuation'),
           first.stdout.indexOf('pass tests/Cases::runsAfterFailure'),
         )
 
-        const filtered = yield* runCompiled(outcome.path, {
-          arguments: ['--file', 'tests/Cases.silk', '--filter', 'CLEANUP'],
-        })
+        const filteredPlan = runnerPerTestPlan(manifest)
+        const filteredInvocation = argumentsFor(filteredPlan, [
+          '--file',
+          'tests/Cases.silk',
+          '--filter',
+          'CLEANUP',
+        ])
+        const filtered = yield* runCompiled(outcome.path, filteredInvocation)
         assert.strictEqual(filtered.status, 0, filtered.stderr)
         assert.include(filtered.stdout, 'pass tests/Cases::cleanupExactlyOnce')
-        assert.include(filtered.stdout, 'summary: 4 discovered, 1 selected, 1 passed, 0 failed')
+        assert.include(filtered.stdout, 'summary: 5 discovered, 1 selected, 1 passed, 0 failed')
+        assert.deepEqual(runnerReceipt(filteredInvocation.resultPath, filteredPlan).counts, [
+          5n,
+          1n,
+          0n,
+          1n,
+          1n,
+          0n,
+        ])
 
-        const empty = yield* runCompiled(outcome.path, {
-          arguments: ['--filter', 'does-not-exist'],
-        })
+        const emptyPlan = runnerPerTestPlan(manifest)
+        const emptyInvocation = argumentsFor(emptyPlan, ['--filter', 'does-not-exist'])
+        const empty = yield* runCompiled(outcome.path, emptyInvocation)
         assert.strictEqual(empty.status, 0, empty.stderr)
-        assert.include(empty.stdout, 'summary: 4 discovered, 0 selected, 0 passed, 0 failed')
+        assert.include(empty.stdout, 'summary: 5 discovered, 0 selected, 0 passed, 0 failed')
+        assert.deepEqual(runnerReceipt(emptyInvocation.resultPath, emptyPlan).counts, [
+          5n,
+          0n,
+          0n,
+          0n,
+          0n,
+          0n,
+        ])
 
-        const malformed = yield* runCompiled(outcome.path, {
-          arguments: ['--unknown', 'value'],
+        const uncachedPlan = runnerUncachedPlan(manifest)
+        const uncachedInvocation = argumentsFor(uncachedPlan, ['--file', 'tests/Cases.silk'])
+        const uncached = yield* runCompiled(outcome.path, uncachedInvocation)
+        assert.strictEqual(uncached.status, 1, uncached.stderr)
+        assert.deepEqual(runnerReceipt(uncachedInvocation.resultPath, uncachedPlan), {
+          mode: 2,
+          dispositions: [],
+          counts: [5n, 4n, 0n, 4n, 3n, 1n],
+          status: 1,
         })
+
+        const malformedPlan = runnerPerTestPlan(manifest)
+        malformedPlan[0] = 0
+        const malformedInvocation = argumentsFor(malformedPlan, [])
+        const malformed = yield* runCompiled(outcome.path, malformedInvocation)
         assert.strictEqual(malformed.status, 2, malformed.stderr)
+        assert.isFalse(existsSync(malformedInvocation.resultPath))
 
-        const trapped = yield* runCompiled(outcome.path, {
-          arguments: ['--file', 'tests/Trap.silk'],
-        })
+        const trappedPlan = runnerPerTestPlan(manifest)
+        const trappedInvocation = argumentsFor(trappedPlan, ['--file', 'tests/Trap.silk'])
+        const trapped = yield* runCompiled(outcome.path, trappedInvocation)
         assert.strictEqual(
           trapped.signal !== null || (trapped.status !== null && trapped.status !== 0),
           true,
@@ -591,6 +798,7 @@ test fn runsAfterFailure() -> () {
         )
         assert.include(trapped.stdout, 'test tests/Trap::fatalTrap')
         assert.notInclude(trapped.stdout, 'summary:')
+        assert.isFalse(existsSync(trappedInvocation.resultPath))
       }),
     ),
   120_000,
@@ -670,6 +878,7 @@ it.effect.each(selectedCorpus)(
           program.nativeSource ?? program.source,
           program.nativeImports,
           {
+            ...(program.name === 'test-exchange-binary-framing' ? { cache: false } : {}),
             ...(program.nativeComponents === undefined
               ? {}
               : { components: program.nativeComponents }),
