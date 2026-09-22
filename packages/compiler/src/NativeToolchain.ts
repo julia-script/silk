@@ -927,7 +927,7 @@ export const materializeObject = Effect.fnUntraced(function* (
   }
 })
 
-/** Realizes each source helper once and audits its actual emitted dependency closure. */
+/** Realizes the selected source helpers as one object and audits its emitted dependency closure. */
 export const compileHelpers = Effect.fn('NativeToolchain.compileHelpers')(function* (
   toolchain: Toolchain,
   scope: BuildScope,
@@ -942,32 +942,29 @@ export const compileHelpers = Effect.fn('NativeToolchain.compileHelpers')(functi
     providers,
     profile.target,
   ).pipe(Effect.mapError(helperError))
-  const objects: Array<ObjectArtifact> = []
-  for (const provider of selected) {
-    if (provider.kind !== 'source') continue
-    const source = yield* HelperSource.compile(provider, profile).pipe(Effect.mapError(helperError))
-    const object = yield* materializeObject(
-      toolchain,
-      scope,
-      source.artifact,
-      source.profile,
-      `helper-${objects.length}`,
+  const sources = selected.filter((provider) => provider.kind === 'source')
+  if (sources.length === 0) return []
+  const source = yield* HelperSource.compile(sources, profile).pipe(Effect.mapError(helperError))
+  const object = yield* materializeObject(
+    toolchain,
+    scope,
+    source.artifact,
+    source.profile,
+    'helpers',
+  )
+  if (object.inventory === undefined)
+    return yield* helperError(
+      new HelperCapability.HelperError({
+        operation: 'NativeToolchain.compileHelpers',
+        code: 'InvalidObject',
+        subject: 'Missing provider inventory',
+        origins: sources.map((provider) => provider.id),
+      }),
     )
-    if (object.inventory === undefined)
-      return yield* helperError(
-        new HelperCapability.HelperError({
-          operation: 'NativeToolchain.compileHelpers',
-          code: 'InvalidObject',
-          subject: 'Missing provider inventory',
-          origins: [provider.id],
-        }),
-      )
-    yield* HelperCapability.verifyProvider(provider, object.inventory, profile.target).pipe(
-      Effect.mapError(helperError),
-    )
-    objects.push(object)
-  }
-  return objects
+  yield* HelperCapability.verifyProviders(sources, object.inventory, profile.target).pipe(
+    Effect.mapError(helperError),
+  )
+  return [object]
 })
 
 /**
@@ -1435,22 +1432,24 @@ export const finalizeWasm = Effect.fn('NativeToolchain.finalizeWasm')(function* 
         origins: [runtime.artifact.path],
       }),
     )
-  yield* HelperCapability.verifyProvider(
-    {
-      id: 'llvm-wasm-memory.v1',
-      kind: 'bootstrap',
-      root: 'llvm-wasm-memory.v1',
-      targets: [target.id],
-      provides: ['memcpy', 'memmove', 'memset', 'memcmp'],
-      requires: [
-        '__heap_base',
-        '__stack_pointer',
-        '__memory_base',
-        '__table_base',
-        '__indirect_function_table',
-      ],
-      identity: ToolchainIntegrity.contentDigest(LlvmWasmRuntime.source),
-    },
+  yield* HelperCapability.verifyProviders(
+    [
+      {
+        id: 'llvm-wasm-memory.v1',
+        kind: 'bootstrap',
+        root: 'llvm-wasm-memory.v1',
+        targets: [target.id],
+        provides: ['memcpy', 'memmove', 'memset', 'memcmp'],
+        requires: [
+          '__heap_base',
+          '__stack_pointer',
+          '__memory_base',
+          '__table_base',
+          '__indirect_function_table',
+        ],
+        identity: ToolchainIntegrity.contentDigest(LlvmWasmRuntime.source),
+      },
+    ],
     bootstrap.success,
     target,
   ).pipe(Effect.mapError(helperError))

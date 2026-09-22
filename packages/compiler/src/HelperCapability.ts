@@ -346,31 +346,41 @@ export const reconcile = Effect.fn('HelperCapability.reconcile')(function* (
 
 /** Verifies the classified C signatures before an ordinary source provider can supply a helper. */
 export const verifyExports = Effect.fn('HelperCapability.verifyExports')(function* (
-  self: Provider,
+  providers: ReadonlyArray<Provider>,
   exports: ReadonlyArray<Backend.ForeignExport>,
   target: Target.Target,
 ): Effect.fn.Return<void, HelperError> {
-  if (exports.length !== self.provides.length)
-    return yield* error('IncompatibleProvider', 'Unexpected source export set', [self.id])
+  const ids = providers.map((provider) => provider.id)
+  const provides = providers.flatMap((provider) => provider.provides)
+  if (exports.length !== provides.length)
+    return yield* error('IncompatibleProvider', 'Unexpected source export set', ids)
   const scalar = (type: string): string => (type.startsWith('pointer<') ? 'pointer' : type)
-  for (const symbol of self.provides) {
-    const expected = contractOf(symbol, target)
-    const actual = exports.find((entry) => entry.symbol === symbol)
-    if (
-      expected === undefined ||
-      actual === undefined ||
-      actual.variadic ||
-      scalar(actual.result) !== expected.result ||
-      actual.parameters.length !== expected.parameters.length ||
-      actual.parameters.some((type, index) => scalar(type) !== expected.parameters[index])
-    )
-      return yield* error('IncompatibleProvider', `C ABI mismatch: ${symbol}`, [self.id, target.id])
-  }
+  for (const provider of providers)
+    for (const symbol of provider.provides) {
+      const expected = contractOf(symbol, target)
+      const actual = exports.find((entry) => entry.symbol === symbol)
+      if (
+        expected === undefined ||
+        actual === undefined ||
+        actual.variadic ||
+        scalar(actual.result) !== expected.result ||
+        actual.parameters.length !== expected.parameters.length ||
+        actual.parameters.some((type, index) => scalar(type) !== expected.parameters[index])
+      )
+        return yield* error('IncompatibleProvider', `C ABI mismatch: ${symbol}`, [
+          provider.id,
+          target.id,
+        ])
+    }
 })
 
-/** Rejects emitted provider dependencies that escape its declared closure, including self calls. */
-export const verifyProvider = Effect.fn('HelperCapability.verifyProvider')(function* (
-  self: Provider,
+/**
+ * Rejects emitted dependencies that escape the providers' declared closure, including self calls.
+ * The providers share one object, so a dependency between two of them that neither declared is
+ * resolved inside it and not seen here; declared cycles are rejected by {@link closure}.
+ */
+export const verifyProviders = Effect.fn('HelperCapability.verifyProviders')(function* (
+  providers: ReadonlyArray<Provider>,
   inventory: ObjectSymbols.Inventory,
   target: Target.Target,
 ): Effect.fn.Return<void, HelperError> {
@@ -385,16 +395,22 @@ export const verifyProvider = Effect.fn('HelperCapability.verifyProvider')(funct
       .filter((entry) => entry.defined)
       .map((entry) => symbolName(target, entry.name)),
   )
-  for (const symbol of self.provides) {
-    if (!defined.has(symbol))
-      return yield* error('MissingProvider', symbol, [self.id, 'missing export'])
-    if (references.has(symbol))
-      return yield* error('ProviderCycle', symbol, [self.id, symbol, self.id])
-  }
+  for (const provider of providers)
+    for (const symbol of provider.provides) {
+      if (!defined.has(symbol))
+        return yield* error('MissingProvider', symbol, [provider.id, 'missing export'])
+      if (references.has(symbol))
+        return yield* error('ProviderCycle', symbol, [provider.id, symbol, provider.id])
+    }
+  const requires = new Set(providers.flatMap((provider) => provider.requires))
   for (const entry of inventory.symbols.filter((entry) => !entry.defined)) {
     const symbol = symbolName(target, entry.name)
-    if (!self.requires.includes(symbol))
-      return yield* error('UndeclaredDependency', symbol, [self.id])
+    if (!requires.has(symbol))
+      return yield* error(
+        'UndeclaredDependency',
+        symbol,
+        providers.map((provider) => provider.id),
+      )
   }
 })
 

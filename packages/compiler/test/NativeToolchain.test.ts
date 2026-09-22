@@ -1758,7 +1758,7 @@ it.effect(
         const profile = yield* CompilationProfile.normalize({ target: target.id })
         const provider = yield* HelperCapability.provider('memcpy', profile)
         const verified = yield* Effect.result(
-          HelperCapability.verifyProvider(provider, cycle.success, target),
+          HelperCapability.verifyProviders([provider], cycle.success, target),
         )
         if (Result.isSuccess(verified))
           return assert.fail('Emitted self-reference escaped verification')
@@ -1860,7 +1860,7 @@ it.effect(
       const move = yield* HelperCapability.provider('memmove', profile)
       const abi = yield* Effect.result(
         HelperCapability.verifyExports(
-          copy,
+          [copy],
           [
             {
               symbol: 'memcpy',
@@ -1895,8 +1895,8 @@ it.effect(
         assert.strictEqual(outcome.failure.code, code)
       }
       const outcome = yield* Effect.result(
-        HelperCapability.verifyProvider(
-          copy,
+        HelperCapability.verifyProviders(
+          [copy],
           {
             format: 'macho',
             symbols: [{ name: '_memcpy', defined: true, weak: false, visibility: 'default' }],
