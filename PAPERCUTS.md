@@ -52,3 +52,7 @@ Format: date · symptom · fix · project. Check here first when tooling is slow
   redirected log · repository
 - 2026-09-21 · A temporary comparison-worktree command was rejected because it began with
   `rm -rf` cleanup · Use a unique temporary path and add the worktree directly · repository
+- 2026-09-22 · A fresh codebase-memory index for the task worktree refused to start because a
+  pre-coordination or unverified CBM generation was active · Reuse the indexed main Silk checkout
+  for structural discovery and use targeted filesystem inspection only for uncovered task-local or
+  ignored files · repository
