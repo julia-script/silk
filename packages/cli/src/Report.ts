@@ -180,18 +180,19 @@ export const outcome = (
   self: Driver.Outcome,
   sources: SourceCatalog,
   entryPath: string,
+  displayPath: (value: string) => string = (value) => value,
 ): string => {
   switch (self._tag) {
     case 'Compiled': {
       const rendered = diagnostics(self.diagnostics, sources)
       return [
         ...(rendered.length > 0 ? [rendered] : []),
-        `Compiled ${entryPath} -> ${self.path} (${self.backend}, ${self.target.id}, ${self.symbols.length} symbols)`,
+        `Compiled ${displayPath(entryPath)} -> ${displayPath(self.path)} (${self.backend}, ${self.target.id}, ${self.symbols.length} symbols)`,
         ...(self.libraryInterface === undefined
           ? []
           : [
-              `C header: ${self.libraryInterface.cHeader}`,
-              `ABI manifest: ${self.libraryInterface.abiManifest}`,
+              `C header: ${displayPath(self.libraryInterface.cHeader)}`,
+              `ABI manifest: ${displayPath(self.libraryInterface.abiManifest)}`,
             ]),
       ].join('\n')
     }

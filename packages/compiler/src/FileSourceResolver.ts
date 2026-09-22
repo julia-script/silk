@@ -113,14 +113,6 @@ export const layer = (
         resolveStandardLibrary: Effect.fn('FileSourceResolver.resolveStandardLibrary')(
           readToolchainSource,
         ),
-        toolchainSources: Effect.gen(function* () {
-          const loaded = new Map<string, SourceResolver.ResolvedSource>()
-          for (const entry of Stdlib.manifest) {
-            const source = yield* readToolchainSource(entry.module)
-            if (Option.isSome(source)) loaded.set(entry.module, source.value)
-          }
-          return loaded
-        }).pipe(Effect.withSpan('FileSourceResolver.toolchainSources')),
       }
     }),
   )

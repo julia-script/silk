@@ -56,6 +56,8 @@ export interface CompileOptions {
   readonly nativeBindings?: ReadonlyArray<NativeRequirementBinding.NativeRequirementBinding>
   readonly stage?: ArtifactPlan.Stage
   readonly entry: SourceEntry.SourceEntry
+  /** Base directory for human-readable build paths. */
+  readonly displayRoot?: string
   /** Application root when it differs from the project source entry used by the resolver. */
   readonly root?: string
   readonly discovery?: NonNullable<ModuleClosure.CompilationRequest['discovery']>
@@ -186,10 +188,12 @@ export const compile = Effect.fn('Workflow.compile')(function* (
   }
 
   const outcome = attempted.success
+  const displayRoot = options.displayRoot ?? options.entry.sourceRoot
   const summary = Report.outcome(
     outcome,
     Report.catalog(resolver, loadedSources(outcome), path),
     options.entry.path,
+    (value) => path.relative(displayRoot, value).split(path.sep).join('/'),
   )
   if (summary.length > 0) {
     if (outcome._tag === 'Compiled') yield* Console.log(summary)
@@ -201,7 +205,6 @@ export const compile = Effect.fn('Workflow.compile')(function* (
   }
 
   if (outcome._tag === 'Compiled') {
-    if (outcome.linkPlanPath !== undefined) yield* Console.log(`Link plan: ${outcome.linkPlanPath}`)
     return {
       _tag: 'Built',
       status: 0,
@@ -305,6 +308,7 @@ export const buildProject = Effect.fn('Workflow.buildProject')(function* (
       compile({
         verifyMir: options.verifyMir ?? false,
         entry: plan.project.entry,
+        displayRoot: plan.project.directory,
         target: plan.target.id,
         configuration: BuildPlan.compilationConfiguration(plan),
         ...(plan.stage === undefined ? {} : { stage: plan.stage }),
@@ -604,6 +608,7 @@ export const run = Effect.fn('Workflow.run')(function* (
   const attempted = yield* compile({
     verifyMir: options.verifyMir ?? false,
     entry: plan.project.entry,
+    displayRoot: plan.project.directory,
     target: plan.target.id,
     configuration: BuildPlan.compilationConfiguration(plan),
     ...(plan.stage === undefined ? {} : { stage: plan.stage }),
@@ -685,6 +690,7 @@ export const test = Effect.fn('Workflow.test')(function* (
   const attempted = yield* compile({
     verifyMir: options.verifyMir ?? false,
     entry: discoveryEntry.success,
+    displayRoot: project.directory,
     root: 'silk/test_runner',
     discovery: {
       root: discoveryEntry.success.module,

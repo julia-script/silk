@@ -18,7 +18,6 @@ const counting = (sources: ReadonlyMap<string, Uint8Array>) => {
   const calls: Array<string> = []
   const layer = Layer.succeed(SourceResolver.SourceResolver, {
     resolveStandardLibrary: SourceResolver.resolveEmbeddedStandardLibrary,
-    toolchainSources: SourceResolver.embeddedToolchainSources,
     resolve: (module: string) =>
       Effect.sync(() => {
         calls.push(module)

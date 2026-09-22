@@ -11,9 +11,12 @@ import silk.bytes { Bytes }
 import silk.effect { Effect }
 import silk.format { Format }
 import silk.host_input { HostInput, HostInputError }
+import silk.monotonic_clock { MonotonicClock }
+import silk.os_monotonic_clock { OsMonotonicClock }
 import silk.os_writer { StdoutWriter }
 import silk.result { Result }
 import silk.string { InvalidUtf8 }
+import silk.system_clock { Instant, SystemClock }
 import silk.testing { Testing }
 import silk.vector { Vector }
 import silk.writer { Writer, WriterError }
@@ -51,12 +54,34 @@ fn completeTest<T, P: CompleteTest<T>>(value: T, provider: P) -> bool {
   return CompleteTest<T>.passed(move value)
 }
 
-effect fn writeResult(module: string, name: string, passed: bool) -> () ! WriterError ? &mut Writer {
-  let identity = .{module: module, name: name}
-  if passed {
-    return run Format.format("pass {module}::{name}\n", &identity)
+fn elapsedNanoseconds(start: &Instant, end: &Instant) -> i64 {
+  let seconds = SystemClock.seconds(end) - SystemClock.seconds(start)
+  let nanoseconds = SystemClock.nanoseconds(end) - SystemClock.nanoseconds(start)
+  return seconds * 1000000000 + nanoseconds
+}
+
+effect fn writeDuration(nanoseconds: i64) -> () ! WriterError ? &mut Writer {
+  if nanoseconds < 1000 {
+    return run Writer.writeString("<1 us")
   }
-  return run Format.format("fail {module}::{name}\n", &identity)
+  if nanoseconds < 1000000 {
+    let microseconds = nanoseconds / 1000
+    run Format.display(&microseconds)
+    return run Writer.writeString(" us")
+  }
+  let milliseconds = nanoseconds / 1000000
+  run Format.display(&milliseconds)
+  return run Writer.writeString(" ms")
+}
+
+effect fn writeResult(passed: bool, nanoseconds: i64) -> () ! WriterError ? &mut Writer {
+  if passed {
+    run Writer.writeString("    PASS  ")
+  } else {
+    run Writer.writeString("    FAIL  ")
+  }
+  run writeDuration(nanoseconds)
+  return run Writer.writeString("\n")
 }
 
 effect fn runSelected<'file, 'name>(fileFilter: string<'file>, nameFilter: string<'name>) -> i32
@@ -66,6 +91,9 @@ effect fn runSelected<'file, 'name>(fileFilter: string<'file>, nameFilter: strin
   let mut selected = usize.ZERO
   let mut passed = usize.ZERO
   let mut failed = usize.ZERO
+  let mut clock = OsMonotonicClock.make()
+  let started = run MonotonicClock.now()
+    |> Effect.provideMut<MonotonicClock>(&mut clock)
   static for descriptor in Intrinsic.tests() {
     discovered = discovered + usize.ONE
     if Testing.matches(
@@ -78,20 +106,30 @@ effect fn runSelected<'file, 'name>(fileFilter: string<'file>, nameFilter: strin
       let module = Intrinsic.testInfo(descriptor).module
       let name = Intrinsic.testInfo(descriptor).name
       let identity = .{module: module, name: name}
-      run Format.format("test {module}::{name}\n", &identity)
+      run Format.format("  {module}::{name}\n", &identity)
       let body = Intrinsic.testFunction(descriptor)
+      let testStarted = run MonotonicClock.now()
+        |> Effect.provideMut<MonotonicClock>(&mut clock)
       let value = body()
       let provider = selectOutcome(&value)
       let ok = completeTest(move value, move provider)
-      run writeResult(module, name, ok)
+      let testFinished = run MonotonicClock.now()
+        |> Effect.provideMut<MonotonicClock>(&mut clock)
+      run writeResult(ok, elapsedNanoseconds(&testStarted, &testFinished))
       if ok { passed = passed + usize.ONE } else { failed = failed + usize.ONE }
     }
   }
+  let finished = run MonotonicClock.now()
+    |> Effect.provideMut<MonotonicClock>(&mut clock)
   let summary = .{discovered: discovered, selected: selected, passed: passed, failed: failed}
+  run Writer.writeString("\n")
   run Format.format(
-    "summary: {discovered} discovered, {selected} selected, {passed} passed, {failed} failed\n",
+    "Tests  {passed} passed, {failed} failed ({selected} selected, {discovered} discovered)\n",
     &summary,
   )
+  run Writer.writeString("Time   ")
+  run writeDuration(elapsedNanoseconds(&started, &finished))
+  run Writer.writeString("\n")
   if failed == usize.ZERO { return 0 }
   return 1
 }

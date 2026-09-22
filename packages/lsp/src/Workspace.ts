@@ -132,7 +132,6 @@ export const resolver = (
           return yield* files.resolve(module)
         }),
         resolveStandardLibrary: files.resolveStandardLibrary,
-        toolchainSources: files.toolchainSources,
       }
     }),
   ).pipe(Layer.provide(FileSourceResolver.layer(FileSourceResolver.make(sourceRoot))))

@@ -86,15 +86,16 @@ Check the self-hosted program with the bootstrap compiler:
 pnpm exec silk check --manifest-path compiler/silk.toml
 ```
 
-Run the source-written parser playground tests explicitly when working on parser behavior:
+Run the source-written parser tests with the default project root:
 
 ```sh
-pnpm exec silk test --manifest-path compiler/silk.toml --root src/playground/ParserCases.silk
+pnpm exec silk test --manifest-path compiler/silk.toml
 ```
 
 These tests parse source strings, including malformed syntax, and assert self-hosted parser
-behavior. They are manual-only and excluded from the default differential corpus below; the
-JavaScript harness remains the TypeScript-versus-self-hosted comparison.
+behavior. `src/main.silk` imports them for test discovery; normal builds do not execute tests.
+They are not invoked by CI. The JavaScript harness below remains the
+TypeScript-versus-self-hosted comparison.
 
 After building the executable, run the parser corpus with its path:
 

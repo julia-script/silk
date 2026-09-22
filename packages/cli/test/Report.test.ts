@@ -117,6 +117,15 @@ it('names the executable, target, and symbol count on success', () => {
     Report.outcome(outcome, source('pub fn main() -> i32 { return 42 }'), 'main.silk'),
     'Compiled main.silk -> /tmp/a.out (llvm, aarch64-apple-darwin, 1 symbols)',
   )
+  assert.strictEqual(
+    Report.outcome(
+      { ...outcome, path: '/tmp/project/build/a.out' },
+      source('pub fn main() -> i32 { return 42 }'),
+      '/tmp/project/src/main.silk',
+      (value) => value.replace('/tmp/project/', ''),
+    ),
+    'Compiled src/main.silk -> build/a.out (llvm, aarch64-apple-darwin, 1 symbols)',
+  )
 })
 
 it('reports every durable native-library path on success', () => {
