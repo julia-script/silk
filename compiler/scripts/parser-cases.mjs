@@ -53,6 +53,55 @@ export const cases = [
     ],
   },
   {
+    name: 'effect-environment-intersection',
+    source: "effect<'call & 'env> fn work(value: Effect<'call & 'env; i32>) -> i32 { return 1 }",
+    witnesses: [
+      witness(
+        'FunctionDeclaration',
+        "effect<'call & 'env> fn work(value: Effect<'call & 'env; i32>) -> i32 { return 1 }",
+      ),
+    ],
+  },
+  {
+    name: 'contextual-test-qualifiers',
+    source: `test fn plain() {}
+pub test effect fn effectful() -> () ! i32 { fail 1 }
+static if true { test fn selected() {} } else { test fn inactive() {} }
+fn test() {}
+fn use(test: i32) -> i32 { return test }`,
+    witnesses: [
+      witness('FunctionDeclaration', 'test fn plain() {}'),
+      witness('FunctionDeclaration', 'pub test effect fn effectful() -> () ! i32 { fail 1 }'),
+      witness('FunctionDeclaration', 'fn test() {}'),
+      witness('FunctionDeclaration', 'fn use(test: i32) -> i32 { return test }'),
+    ],
+  },
+  {
+    name: 'module-call-argument',
+    source:
+      'fn write(module: i32, name: i32, ok: bool) -> i32 { return module } fn main(module: i32) -> i32 { return write(module, 1, true) }',
+    witnesses: [witness('CallExpression', 'write(module, 1, true)')],
+  },
+  {
+    name: 'applied-provider-constraint',
+    source:
+      'fn use<P, A>() -> () where &mut P provides &Service<A> from &mut Service<A> { return () }',
+    witnesses: [witness('ProviderConstraint', '&mut P provides &Service<A> from &mut Service<A>')],
+  },
+  {
+    name: 'service-operation-property',
+    source:
+      'service Logger { effect fn log() -> () with Intrinsic.nonParking() } fn after() -> i32 { return 1 }',
+    witnesses: [
+      witness('FunctionPropertyClause', 'with Intrinsic.nonParking()'),
+      witness('FunctionDeclaration', 'fn after() -> i32 { return 1 }'),
+    ],
+  },
+  recovery(
+    'unsupported-anonymous-environment',
+    "fn damaged() -> () { let use = effect<'call> fn() -> () {} }",
+  ),
+  {
     ...recovery('missing-parameter-type', 'fn damaged(value:, next: i32) -> () {}', [
       witness('ParameterDeclaration', 'next: i32'),
     ]),
