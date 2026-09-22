@@ -11,6 +11,8 @@ export interface AncestorHistory {
   readonly initial: History
   readonly nodes: Map<string, History>
   readonly unions: Map<string, History>
+  /** Variable and value texts as small integers, so node keys are cheap and injective. */
+  readonly atoms: Map<string, number>
 }
 
 export const make = (): AncestorHistory => ({
@@ -18,28 +20,68 @@ export const make = (): AncestorHistory => ({
   initial: { id: 1, branches: new Map() },
   nodes: new Map(),
   unions: new Map(),
+  atoms: new Map(),
 })
+
+const atom = (self: AncestorHistory, text: string | undefined): number => {
+  if (text === undefined) return 0
+  let id = self.atoms.get(text)
+  if (id === undefined) {
+    id = self.atoms.size + 1
+    self.atoms.set(text, id)
+  }
+  return id
+}
+
+// Branch values are ordered absent first, then by string; a map built by `node` is already ordered.
+const compareValues = (a: string | undefined, b: string | undefined): number => {
+  if (a === b) return 0
+  if (a === undefined) return -1
+  if (b === undefined) return 1
+  return a < b ? -1 : 1
+}
+
+const intern = (
+  self: AncestorHistory,
+  variable: string,
+  key: string,
+  branches: ReadonlyMap<string | undefined, History>,
+): History => {
+  const result: History = { id: self.nodes.size + 2, variable, branches }
+  self.nodes.set(key, result)
+  return result
+}
+
+/** One branch, the common shape in `set` and `partition`, built without an intermediate map. */
+const single = (
+  self: AncestorHistory,
+  variable: string,
+  value: string | undefined,
+  child: History,
+): History => {
+  if (child === self.empty) return self.empty
+  if (value === undefined) return child
+  const key = `${atom(self, variable)}:${atom(self, value)}=${child.id}`
+  return self.nodes.get(key) ?? intern(self, variable, key, new Map([[value, child]]))
+}
 
 const node = (
   self: AncestorHistory,
   variable: string,
   branches: ReadonlyMap<string | undefined, History>,
+  ordered: boolean,
 ): History => {
-  const entries = [...branches].filter(([, child]) => child !== self.empty)
+  const entries: Array<[string | undefined, History]> = []
+  for (const entry of branches) if (entry[1] !== self.empty) entries.push(entry)
   if (entries.length === 0) return self.empty
-  if (entries.length === 1 && entries[0]?.[0] === undefined) return entries[0]?.[1] ?? self.empty
-  entries.sort(([a], [b]) => {
-    if (a === b) return 0
-    if (a === undefined) return -1
-    if (b === undefined) return 1
-    return a < b ? -1 : 1
-  })
-  const key = JSON.stringify([variable, entries.map(([value, child]) => [value ?? null, child.id])])
+  if (entries.length === 1) return single(self, variable, entries[0]![0], entries[0]![1])
+  if (!ordered) entries.sort((a, b) => compareValues(a[0], b[0]))
+  let key = `${atom(self, variable)}`
+  for (const [value, child] of entries) key += `:${atom(self, value)}=${child.id}`
   const prior = self.nodes.get(key)
   if (prior !== undefined) return prior
-  const result = { id: self.nodes.size + 2, variable, branches: new Map(entries) }
-  self.nodes.set(key, result)
-  return result
+  const retained = ordered && entries.length === branches.size ? branches : new Map(entries)
+  return intern(self, variable, key, retained)
 }
 
 /** Unites exact assignments without mixing values from different histories. */
@@ -53,14 +95,17 @@ export const union = (self: AncestorHistory, left: History, right: History): His
   if (variable === undefined || (right.variable !== undefined && right.variable < variable))
     variable = right.variable
   if (variable === undefined) return self.initial
-  const a: ReadonlyMap<string | undefined, History> =
-    left.variable === variable ? left.branches : new Map([[undefined, left]])
-  const b: ReadonlyMap<string | undefined, History> =
-    right.variable === variable ? right.branches : new Map([[undefined, right]])
   const branches = new Map<string | undefined, History>()
-  for (const value of new Set([...a.keys(), ...b.keys()]))
-    branches.set(value, union(self, a.get(value) ?? self.empty, b.get(value) ?? self.empty))
-  const result = node(self, variable, branches)
+  if (left.variable === variable)
+    for (const [value, child] of left.branches) branches.set(value, child)
+  else branches.set(undefined, left)
+  if (right.variable === variable)
+    for (const [value, child] of right.branches) {
+      const existing = branches.get(value)
+      branches.set(value, existing === undefined ? child : union(self, existing, child))
+    }
+  else branches.set(undefined, union(self, branches.get(undefined) ?? self.empty, right))
+  const result = node(self, variable, branches, false)
   self.unions.set(key, result)
   return result
 }
@@ -79,17 +124,15 @@ export const set = (
     if (prior !== undefined) return prior
     let result: History
     if (current.variable === undefined || current.variable > variable)
-      result = node(self, variable, new Map([[value, current]]))
+      result = single(self, variable, value, current)
     else if (current.variable === variable) {
       let suffix = self.empty
       for (const child of current.branches.values()) suffix = union(self, suffix, child)
-      result = node(self, variable, new Map([[value, suffix]]))
+      result = single(self, variable, value, suffix)
     } else {
-      result = node(
-        self,
-        current.variable,
-        new Map([...current.branches].map(([branch, child]) => [branch, visit(child)])),
-      )
+      const branches = new Map<string | undefined, History>()
+      for (const [branch, child] of current.branches) branches.set(branch, visit(child))
+      result = node(self, current.variable, branches, true)
     }
     memo.set(current.id, result)
     return result
@@ -113,18 +156,22 @@ export const partition = (
       result.set(undefined, current)
     else if (current.variable === variable) {
       for (const [value, child] of current.branches)
-        result.set(value, node(self, variable, new Map([[value, child]])))
+        result.set(value, single(self, variable, value, child))
     } else {
+      // Branches are visited in order, so each group's branch map is built already ordered.
       const groups = new Map<string | undefined, Map<string | undefined, History>>()
       for (const [branch, child] of current.branches) {
         for (const [value, suffix] of visit(child)) {
-          const branches = groups.get(value) ?? new Map<string | undefined, History>()
+          let branches = groups.get(value)
+          if (branches === undefined) {
+            branches = new Map()
+            groups.set(value, branches)
+          }
           branches.set(branch, suffix)
-          groups.set(value, branches)
         }
       }
       for (const [value, branches] of groups)
-        result.set(value, node(self, current.variable, branches))
+        result.set(value, node(self, current.variable, branches, true))
     }
     memo.set(current.id, result)
     return result

@@ -1695,6 +1695,206 @@ export const discover = (
         return keyText(candidate) === keyText(target)
       }),
     )
+  /**
+   * Residualization, specialization and call targets of one key depend on the key alone; a bucket
+   * revisited for a new ancestor history reuses them. Recorded callables are collected per visit,
+   * since resolving them reads what earlier visits recorded.
+   */
+  interface Analyzed {
+    readonly fn: Tir.TirFunction
+    readonly view: BodyView.BodyView
+    readonly substitution: Type.Substitution
+    readonly calls: ReadonlyMap<string, CallTarget>
+    readonly identityOfCall: (call: CallTarget) => string
+    readonly ordinaryIdentities: ReadonlySet<string>
+    readonly cleanupRoots: ReadonlyMap<string, ReadonlyArray<Type.Type>>
+  }
+  const analyzedKeys = new Map<string, Analyzed | undefined>()
+  const analyze = (key: InstanceKey): Analyzed | undefined => {
+    const text = keyText(key)
+    if (analyzedKeys.has(text)) return analyzedKeys.get(text)
+    const result = analyzeKey(key)
+    analyzedKeys.set(text, result)
+    return result
+  }
+  const analyzeKey = (key: InstanceKey): Analyzed | undefined => {
+    const template = functionByKey(results, key)
+    if (template === undefined) return undefined
+    const application = {
+      declaration: key.declaration,
+      typeArguments: key.typeArguments,
+      evidence: key.evidence,
+      contractRow: key.contractRow,
+      staticArguments: key.staticArguments,
+    }
+    const residual = trace(
+      'Instances.residualize',
+      () => Residualization.residualize(residualization, application),
+      { 'function.module': key.declaration.module, 'function.name': key.declaration.name },
+    )
+    if (residual._tag === 'StaticFailure') {
+      report(key, Evaluation.diagnostic(residual.failure, target.id))
+      return undefined
+    }
+    const selectedCompileError = residual.diagnostics.findIndex(
+      (diagnostic) => diagnostic.code === Diagnostic.selectedCompileErrorCode,
+    )
+    const residualDiagnostics = (
+      selectedCompileError < 0
+        ? residual.diagnostics
+        : residual.diagnostics.slice(0, selectedCompileError + 1)
+    ).map((diagnostic) => report(key, diagnostic))
+    const residualError = residualDiagnostics.find((diagnostic) => diagnostic.severity === 'error')
+    if (residualError !== undefined) {
+      preparedUnavailableOwnership.set(keyText(key), {
+        key,
+        artifact: residual.artifact,
+        function: residual.function,
+        causes: residual.results.causes,
+        ...(residual.results.lifetimes === undefined
+          ? {}
+          : { lifetimes: residual.results.lifetimes }),
+        diagnostic: residualError,
+      })
+      return undefined
+    }
+    const fn = residual.function
+    const view = BodyView.make(residual)
+    const parameters = template.declaration.typeParameters.map((parameter) => parameter.type)
+    const selected = TypeInference.selectedSubstitution(
+      parameters,
+      key.typeArguments.filter((argument) => !Type.isHiddenExecutableArgument(argument)),
+    )
+    const substitution = selected?.substitution
+    // A key whose arguments no longer fit the declaration's binders is as unreachable as one
+    // that cannot be made concrete; both are reported rather than silently dropped.
+    const specialization =
+      substitution === undefined
+        ? undefined
+        : trace(
+            'Instances.specialize',
+            () => specialize(view, substitution, index, registry, selected?.compatibility),
+            {
+              'function.module': key.declaration.module,
+              'function.name': key.declaration.name,
+            },
+          )
+    if (substitution === undefined || specialization === undefined) {
+      specializationFailures.set(keyText(key), {
+        _tag: 'NonConcreteSpecialization',
+        key,
+        span: registry.spanOf(fn.declaration.anchor),
+      })
+      return undefined
+    }
+    if (!prepared.has(keyText(key))) {
+      const resultCallable = resultCallableIdentity(fn, key, results, index)
+      const resultEffect = resultEffectIdentity(fn, key, results, index)
+      prepared.set(keyText(key), {
+        ...(residual.results.lifetimes === undefined
+          ? {}
+          : { lifetimes: residual.results.lifetimes }),
+        instance: {
+          _tag: 'Instance',
+          key,
+          function: fn,
+          view,
+          substitution,
+          specialization,
+          ...(resultCallable === undefined ? {} : { resultCallable }),
+          ...(resultEffect === undefined ? {} : { resultEffect }),
+        },
+      })
+    }
+    const collected = trace(
+      'Instances.collectCallTargets',
+      () => {
+        const cleanupHooks = cleanupPrepassTargets(fn, substitution)
+        const calls = new Map<string, CallTarget>()
+        const directCalls = directCallInstances(fn, key, substitution, results, index)
+        const callableTargets = callableCallTargets(fn, key, substitution, results, index)
+        for (const call of directCalls) {
+          recordedCalls.set(
+            `${keyText(call.owner)}\u0005${call.span.sourceId}:${call.span.start}:${call.span.end}\u0005${call.node?.ordinal ?? -1}\u0005${keyText(call.target)}`,
+            call,
+          )
+        }
+        const cleanupTargets = [...slotDropHookTargets(fn, index, substitution), ...cleanupHooks]
+        const identityOfCall = Specialization.key
+        const ordinaryTargets: ReadonlyArray<CallTarget> = [
+          ...bodyCallTargets(view, index, substitution),
+          ...interfaceWitnessTargets(fn, index, substitution),
+          ...requirementBindingCallTargets(fn, substitution, index),
+          ...directCalls.map((call) => ({
+            declaration: call.target.declaration,
+            typeArguments: call.target.typeArguments,
+            evidence: call.target.evidence,
+            staticArguments: call.target.staticArguments,
+            ...(call.staticArgumentOrigins === undefined
+              ? {}
+              : { staticArgumentOrigins: call.staticArgumentOrigins }),
+          })),
+          ...forwardedRequirementCallTargets(directCalls, results, index),
+          ...callableTargets,
+          ...forwardedRequirementTargets(callableTargets, results, index),
+        ]
+        return { calls, cleanupTargets, identityOfCall, ordinaryTargets }
+      },
+      { 'function.module': key.declaration.module, 'function.name': key.declaration.name },
+    )
+    const { calls, cleanupTargets, identityOfCall, ordinaryTargets } = collected
+    const ordinaryIdentities = new Set(ordinaryTargets.map(identityOfCall))
+    const cleanupRoots = new Map<string, Array<Type.Type>>()
+    for (const cleanup of cleanupTargets) {
+      if (cleanup.cleanupRoot === undefined) continue
+      const identity = identityOfCall(cleanup)
+      const roots = cleanupRoots.get(identity) ?? []
+      roots.push(cleanup.cleanupRoot)
+      cleanupRoots.set(identity, roots)
+    }
+    const reachableCalls: ReadonlyArray<CallTarget> = [...ordinaryTargets, ...cleanupTargets]
+    for (const call of reachableCalls) {
+      const identity = identityOfCall(call)
+      const existing = calls.get(identity)
+      // An ordinary edge must keep the recursion guard even when the same target is also reached
+      // through a proved dependency or conditional witness root. Conflicting provider evidence is
+      // equally unsafe: descent is granted only where this path has one unambiguous measure.
+      if (existing === undefined) {
+        calls.set(identity, call)
+        continue
+      }
+      const existingOrdinary = existing.structuralProvider === undefined
+      const callOrdinary = call.structuralProvider === undefined
+      if (existingOrdinary) continue
+      if (callOrdinary) {
+        calls.set(identity, {
+          declaration: call.declaration,
+          typeArguments: call.typeArguments,
+          ...(call.evidence === undefined ? {} : { evidence: call.evidence }),
+          ...(call.staticArguments === undefined ? {} : { staticArguments: call.staticArguments }),
+          ...(call.staticArgumentOrigins === undefined
+            ? {}
+            : { staticArgumentOrigins: call.staticArgumentOrigins }),
+        })
+        continue
+      }
+      if (
+        existing.structuralProvider !== undefined &&
+        call.structuralProvider !== undefined &&
+        !Type.equals(existing.structuralProvider, call.structuralProvider)
+      )
+        calls.set(identity, {
+          declaration: call.declaration,
+          typeArguments: call.typeArguments,
+          ...(call.evidence === undefined ? {} : { evidence: call.evidence }),
+          ...(call.staticArguments === undefined ? {} : { staticArguments: call.staticArguments }),
+          ...(call.staticArgumentOrigins === undefined
+            ? {}
+            : { staticArgumentOrigins: call.staticArgumentOrigins }),
+        })
+    }
+    return { fn, view, substitution, calls, identityOfCall, ordinaryIdentities, cleanupRoots }
+  }
   trace('Instances.expandWorklist', () => {
     while (true) {
       for (let cursor = 0; cursor < pending.length; cursor += 1) {
@@ -1707,198 +1907,19 @@ export const discover = (
         const ownerContexts = recordedContexts.get(keyText(key)) ?? new Map<string, WorkItem>()
         ownerContexts.set(context, item)
         recordedContexts.set(keyText(key), ownerContexts)
-        const template = functionByKey(results, key)
-        if (template === undefined) continue
-        const application = {
-          declaration: key.declaration,
-          typeArguments: key.typeArguments,
-          evidence: key.evidence,
-          contractRow: key.contractRow,
-          staticArguments: key.staticArguments,
-        }
-        const residual = trace(
-          'Instances.residualize',
-          () => Residualization.residualize(residualization, application),
-          { 'function.module': key.declaration.module, 'function.name': key.declaration.name },
-        )
-        if (residual._tag === 'StaticFailure') {
-          report(key, Evaluation.diagnostic(residual.failure, target.id))
-          continue
-        }
-        const selectedCompileError = residual.diagnostics.findIndex(
-          (diagnostic) => diagnostic.code === Diagnostic.selectedCompileErrorCode,
-        )
-        const residualDiagnostics = (
-          selectedCompileError < 0
-            ? residual.diagnostics
-            : residual.diagnostics.slice(0, selectedCompileError + 1)
-        ).map((diagnostic) => report(key, diagnostic))
-        const residualError = residualDiagnostics.find(
-          (diagnostic) => diagnostic.severity === 'error',
-        )
-        if (residualError !== undefined) {
-          preparedUnavailableOwnership.set(keyText(key), {
-            key,
-            artifact: residual.artifact,
-            function: residual.function,
-            causes: residual.results.causes,
-            ...(residual.results.lifetimes === undefined
-              ? {}
-              : { lifetimes: residual.results.lifetimes }),
-            diagnostic: residualError,
-          })
-          continue
-        }
-        const fn = residual.function
-        const view = BodyView.make(residual)
-        const parameters = template.declaration.typeParameters.map((parameter) => parameter.type)
-        const selected = TypeInference.selectedSubstitution(
-          parameters,
-          key.typeArguments.filter((argument) => !Type.isHiddenExecutableArgument(argument)),
-        )
-        const substitution = selected?.substitution
-        // A key whose arguments no longer fit the declaration's binders is as unreachable as one
-        // that cannot be made concrete; both are reported rather than silently dropped.
-        const specialization =
-          substitution === undefined
-            ? undefined
-            : trace(
-                'Instances.specialize',
-                () => specialize(view, substitution, index, registry, selected?.compatibility),
-                {
-                  'function.module': key.declaration.module,
-                  'function.name': key.declaration.name,
-                },
-              )
-        if (substitution === undefined || specialization === undefined) {
-          specializationFailures.set(keyText(key), {
-            _tag: 'NonConcreteSpecialization',
-            key,
-            span: registry.spanOf(fn.declaration.anchor),
-          })
-          continue
-        }
-        if (!prepared.has(keyText(key))) {
-          const resultCallable = resultCallableIdentity(fn, key, results, index)
-          const resultEffect = resultEffectIdentity(fn, key, results, index)
-          prepared.set(keyText(key), {
-            ...(residual.results.lifetimes === undefined
-              ? {}
-              : { lifetimes: residual.results.lifetimes }),
-            instance: {
-              _tag: 'Instance',
-              key,
-              function: fn,
-              view,
-              substitution,
-              specialization,
-              ...(resultCallable === undefined ? {} : { resultCallable }),
-              ...(resultEffect === undefined ? {} : { resultEffect }),
-            },
-          })
-        }
-        const { calls, cleanupTargets, identityOfCall, ordinaryTargets } = trace(
-          'Instances.collectCallTargets',
-          () => {
-            for (const callable of concreteCallables(
-              fn,
-              key,
-              substitution,
-              results,
-              index,
-              resolveRecordedCallable,
-            )) {
-              recordedCallables.set(callableIdentity(callable), callable)
-            }
-            const cleanupHooks = cleanupPrepassTargets(fn, substitution)
-            const calls = new Map<string, CallTarget>()
-            const directCalls = directCallInstances(fn, key, substitution, results, index)
-            const callableTargets = callableCallTargets(fn, key, substitution, results, index)
-            for (const call of directCalls) {
-              recordedCalls.set(
-                `${keyText(call.owner)}\u0005${call.span.sourceId}:${call.span.start}:${call.span.end}\u0005${call.node?.ordinal ?? -1}\u0005${keyText(call.target)}`,
-                call,
-              )
-            }
-            const cleanupTargets = [
-              ...slotDropHookTargets(fn, index, substitution),
-              ...cleanupHooks,
-            ]
-            const identityOfCall = Specialization.key
-            const ordinaryTargets: ReadonlyArray<CallTarget> = [
-              ...bodyCallTargets(view, index, substitution),
-              ...interfaceWitnessTargets(fn, index, substitution),
-              ...requirementBindingCallTargets(fn, substitution, index),
-              ...directCalls.map((call) => ({
-                declaration: call.target.declaration,
-                typeArguments: call.target.typeArguments,
-                evidence: call.target.evidence,
-                staticArguments: call.target.staticArguments,
-                ...(call.staticArgumentOrigins === undefined
-                  ? {}
-                  : { staticArgumentOrigins: call.staticArgumentOrigins }),
-              })),
-              ...forwardedRequirementCallTargets(directCalls, results, index),
-              ...callableTargets,
-              ...forwardedRequirementTargets(callableTargets, results, index),
-            ]
-            return { calls, cleanupTargets, identityOfCall, ordinaryTargets }
-          },
-          { 'function.module': key.declaration.module, 'function.name': key.declaration.name },
-        )
-        const ordinaryIdentities = new Set(ordinaryTargets.map(identityOfCall))
-        const cleanupRoots = new Map<string, Array<Type.Type>>()
-        for (const cleanup of cleanupTargets) {
-          if (cleanup.cleanupRoot === undefined) continue
-          const identity = identityOfCall(cleanup)
-          const roots = cleanupRoots.get(identity) ?? []
-          roots.push(cleanup.cleanupRoot)
-          cleanupRoots.set(identity, roots)
-        }
-        const reachableCalls: ReadonlyArray<CallTarget> = [...ordinaryTargets, ...cleanupTargets]
-        for (const call of reachableCalls) {
-          const identity = identityOfCall(call)
-          const existing = calls.get(identity)
-          // An ordinary edge must keep the recursion guard even when the same target is also reached
-          // through a proved dependency or conditional witness root. Conflicting provider evidence is
-          // equally unsafe: descent is granted only where this path has one unambiguous measure.
-          if (existing === undefined) {
-            calls.set(identity, call)
-            continue
-          }
-          const existingOrdinary = existing.structuralProvider === undefined
-          const callOrdinary = call.structuralProvider === undefined
-          if (existingOrdinary) continue
-          if (callOrdinary) {
-            calls.set(identity, {
-              declaration: call.declaration,
-              typeArguments: call.typeArguments,
-              ...(call.evidence === undefined ? {} : { evidence: call.evidence }),
-              ...(call.staticArguments === undefined
-                ? {}
-                : { staticArguments: call.staticArguments }),
-              ...(call.staticArgumentOrigins === undefined
-                ? {}
-                : { staticArgumentOrigins: call.staticArgumentOrigins }),
-            })
-            continue
-          }
-          if (
-            existing.structuralProvider !== undefined &&
-            call.structuralProvider !== undefined &&
-            !Type.equals(existing.structuralProvider, call.structuralProvider)
-          )
-            calls.set(identity, {
-              declaration: call.declaration,
-              typeArguments: call.typeArguments,
-              ...(call.evidence === undefined ? {} : { evidence: call.evidence }),
-              ...(call.staticArguments === undefined
-                ? {}
-                : { staticArguments: call.staticArguments }),
-              ...(call.staticArgumentOrigins === undefined
-                ? {}
-                : { staticArgumentOrigins: call.staticArgumentOrigins }),
-            })
+        const analyzed = analyze(key)
+        if (analyzed === undefined) continue
+        const { fn, substitution, calls, identityOfCall, ordinaryIdentities, cleanupRoots } =
+          analyzed
+        for (const callable of concreteCallables(
+          fn,
+          key,
+          substitution,
+          results,
+          index,
+          resolveRecordedCallable,
+        )) {
+          recordedCallables.set(callableIdentity(callable), callable)
         }
         for (const call of calls.values()) {
           const identity = identityOfCall(call)
