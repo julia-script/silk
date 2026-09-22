@@ -343,6 +343,49 @@ pub fn main() -> () {
   }),
 )
 
+it.effect('keeps the bundled runner environment complete for ordinary tests', () =>
+  Effect.gen(function* () {
+    const analysis = yield* Analysis.makeRealized({
+      root: 'silk/test_runner',
+      target: 'x86_64-unknown-linux-gnu',
+      discovery: { root: 'Cases' },
+    }).pipe(
+      Effect.provide(
+        SourceResolver.overlay([source('Cases', 'test fn cacheablePass() -> () {}')]).pipe(
+          Layer.provideMerge(SourceResolver.empty),
+        ),
+      ),
+    )
+    assert.deepEqual(Analysis.diagnostics(analysis), [])
+    const catalog = analysis.testCatalog
+    if (catalog === undefined) return unreachable('expected test catalog')
+    const runner = yield* TestExecution.runnerIdentity(
+      Analysis.instancesOf(analysis),
+      analysis.results,
+      catalog,
+    )
+    assert.isTrue(runner.complete)
+    const manifest = yield* TestExecution.make({
+      catalog,
+      discovery: Analysis.instancesOf(analysis),
+      results: analysis.results,
+      environment: {
+        profileIdentity: 'profile-a',
+        bootstrapIdentity: 'bootstrap-a',
+        runnerIdentity: runner.identity,
+        compilerIdentity: 'compiler-a',
+        runtimeIdentity: 'runtime-a',
+        nativeIdentity: 'native-a',
+        complete: runner.complete,
+      },
+    })
+    assert.deepEqual(
+      manifest.entries.map((entry) => entry.eligibility._tag),
+      ['Eligible'],
+    )
+  }),
+)
+
 it.effect('includes normalized execution configuration in every eligible identity', () =>
   Effect.gen(function* () {
     const source = `test fn alpha() -> () {}

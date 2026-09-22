@@ -2358,12 +2358,13 @@ export const discover = (
       ? (summaries.get(node) ?? SuspensionMode.direct)
       : unavailableSummary
   const callInstances = [...recordedCalls.values(), ...providerCalls.values()]
+  const generatedAggregates = Residualization.generatedAggregates(residualization)
   return {
     _tag: 'InstanceDiscovery',
     retention: retention,
     rootModule,
-    declarationIndex: index,
-    generatedAggregates: Residualization.generatedAggregates(residualization),
+    declarationIndex: { ...index, generatedAggregates },
+    generatedAggregates,
     instances,
     unavailableOwnership,
     callables: [...recordedCallables.values()],

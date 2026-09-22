@@ -380,7 +380,7 @@ const executionEncoding = Effect.fnUntraced(function* (
     for (const nominal of Type.nominalTypes(type)) {
       const key = Type.key(nominal)
       if (typeEncodings.has(key)) continue
-      if (nominal.sealed !== undefined || Type.equals(nominal, Type.unit)) {
+      if (Type.isIntrinsicNominal(nominal) || Type.equals(nominal, Type.unit)) {
         typeEncodings.set(key, Canonical.record('SealedType', [key]))
         continue
       }
