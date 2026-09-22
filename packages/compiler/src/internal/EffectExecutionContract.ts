@@ -33,6 +33,25 @@ export const equals = (left: Type.Effect, right: Type.Effect): boolean =>
   RowAlgebra.equals(Type.failureRowPolicy(), left.failureRow, right.failureRow) &&
   RowAlgebra.equals(Type.requirementRowPolicy(), left.requirementRow, right.requirementRow)
 
+/**
+ * Whether two contracts describe the same realization once a `never` success is widened.
+ *
+ * An effect block whose every path ends in `fail` produces no value, so its inferred success type
+ * is `never` (EFF-007) even where the surrounding context declares a real success type. Widening
+ * `never` to that type is legal — it inhabits every type — and both contracts then name the same
+ * machine. Only the side carrying `never` is widened, and every other channel still has to be
+ * exactly equal, so this never relates two contracts that differ in what they actually produce.
+ *
+ * `equals` stays exact because it is machine identity: use this wherever a planned realization is
+ * matched against the contract a caller or a declared result asks of it.
+ */
+export const realizes = (left: Type.Effect, right: Type.Effect): boolean => {
+  if (equals(left, right)) return true
+  if (Type.isNever(left.success)) return equals({ ...left, success: right.success }, right)
+  if (Type.isNever(right.success)) return equals(left, { ...right, success: left.success })
+  return false
+}
+
 /** Proves that exact selected requirements account for the complete candidate/requested row delta. */
 export const providerSubtractionMatches = (
   candidate: Type.Effect,

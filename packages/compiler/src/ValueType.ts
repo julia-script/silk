@@ -155,12 +155,14 @@ export const effectValueType = (
   block: Extract<Tir.Expression, { readonly _tag: 'EffectBlock' }>,
   requested: Type.Effect,
 ): Extract<Mir.Type, { readonly _tag: 'EffectValue' }> | undefined => {
+  // Instance and site already identify exactly one block, so the contract check only has to
+  // confirm that this environment is the one the requested type asks for.
   const environment = layout.effectEnvironments.find(
     (candidate) =>
       candidate._tag === 'EffectEnvironment' &&
       Instances.keyText(candidate.instance) === Instances.keyText(instance) &&
       Tir.sameExecutableSite(candidate.site, block.site) &&
-      EffectExecutionContract.equals(candidate.effect, requested),
+      EffectExecutionContract.realizes(candidate.effect, requested),
   )
   if (environment?._tag !== 'EffectEnvironment') return undefined
   return {
