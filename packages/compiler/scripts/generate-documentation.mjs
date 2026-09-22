@@ -73,14 +73,6 @@ const analyzeDocumentationProfile = async (selected, analyzed) => {
               Option.map((entry) => SourceResolver.resolved(entry.bytes, SourceOrigin.memory())),
             ),
           ),
-        toolchainSources: Effect.succeed(
-          new Map(
-            analyzed.map((entry) => [
-              entry.root.id,
-              SourceResolver.resolved(entry.bytes, SourceOrigin.memory()),
-            ]),
-          ),
-        ),
       }),
       Effect.timed,
     ),
