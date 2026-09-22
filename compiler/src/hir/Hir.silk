@@ -1,0 +1,3485 @@
+//! The flat, fully interned HIR vocabulary, its module container, and its debug dump writer.
+//!
+//! # When to use
+//!
+//! Use [`Module`] as the boundary between syntax and every later compiler phase. It answers what a
+//! source file declares without retaining the source bytes or the syntax tree it came from.
+//!
+//! # Details
+//!
+//! A module is one postorder arena. A [`HirId`] is exactly an index into [`Module.nodes`], and a
+//! child identity is always lower than its parent identity. A node never owns a heap vector:
+//! single children are [`HirId`], optional children are [`HirRef`], and child lists are [`Range`]
+//! values naming a contiguous run of [`Module.children`].
+//!
+//! Every byte string is interned. Names, identifier spellings, literal suffixes, decoded text and
+//! byte-string payloads, and documentation are [`Symbol`](hir.Intern.Symbol) values resolved through
+//! [`Module.strings`]. Equal names share one symbol, so later phases compare names by integer.
+//!
+//! Source position and damage survive only as coordinates. [`Module.spans`] and
+//! [`Module.nodeCauses`] both run parallel to [`Module.nodes`]: one gives a node's byte range, the
+//! other a contiguous [`Range`] of [`Cause`] values, empty for a healthy node. A reporter re-reads
+//! the file when it renders a diagnostic; nothing here stores source text.
+//!
+//! # Details: relation to the bootstrap vocabulary
+//!
+//! Every tagged record in the bootstrap `AuthoredHir` has a flat counterpart here, with these
+//! deliberate differences:
+//!
+//! - `Anchor`, `Origin`, and `LexicalReference` have no counterpart. A node's identity within its
+//!   module is its [`HirId`], a binder reference is an [`HirRef`] to the binder node, and every
+//!   node in a module is authored, so an origin tag would carry no information.
+//! - The bootstrap `Node.causes` field, which every record inherits, is [`Module.nodeCauses`]
+//!   instead. Any node may carry causes, exactly as in the bootstrap, but the run lives beside the
+//!   arena rather than inside each variant, so no variant pays for a field it rarely uses.
+//! - `AuthoredModule` is [`Module`] itself rather than a node variant, and `Declaration` keeps its
+//!   logical name through [`OwnerKey`] instead of a structured owner identity.
+//! - `IntegerLiteral.value` and the floating and duration magnitudes are `u64` rather than
+//!   arbitrary precision. A literal that exceeds `u64` lowers to [`Node.InvalidExpression`] with an
+//!   [`CauseCode.IntegerOverflow`] cause.
+//! - `Parameter`, `Field`, `Property`, and the other list elements stay ordinary nodes referenced
+//!   through a [`Range`], so no parent embeds an array.
+//! - The bootstrap `NamedHeader` mixin is flattened: each named header variant declares its own
+//!   `name` and `isPublic` fields.
+//! - The modifier anchors of `CallableContract` and `StructHeader` are [`SpanRef`] values rather
+//!   than anchors, because a span is what a diagnostic needs to underline a keyword.
+//! - Field names that are Silk keywords are renamed, never dropped: `type` is `annotation`,
+//!   `public` is `isPublic`, `role` is `rolePath` or `roleName` by its child kind, and `effect`,
+//!   `test`, `unsafe`, `static`, and `move` take an `is` prefix.
+//! - `Requirement.access` and `NamedType.mode` are non-optional enums paired with a `hasAccess` or
+//!   `hasMode` flag, because an enum cannot carry an absence marker and a reserved variant would
+//!   make one written mode unrepresentable.
+//!
+//! # Gotchas
+//!
+//! Every identity in a module is local to that module. This format is a debugging and testing aid,
+//! not a stable serialization: [`write`] may change whenever the vocabulary changes.
+
+import hir.Intern {StringTable, Symbol, SymbolRef}
+import lexer.Span {Span}
+import silk.allocator {Allocator, OutOfMemoryError, SystemAllocator}
+import silk.effect {Effect}
+import silk.format {Format}
+import silk.result {Result}
+import silk.u32
+import silk.u64
+import silk.usize
+import silk.vector {Vector}
+import silk.writer {Writer, WriterError}
+
+/// The stable zero-based index of one node in a module's node arena.
+///
+/// # Details
+///
+/// Nodes are appended in postorder, so a child identity is always numerically lower than the
+/// identity of any parent that references it.
+///
+/// # Gotchas
+///
+/// The index is valid only for the module that created it.
+pub struct HirId {
+  /// The zero-based position of the node in its owning module's node arena.
+  pub index: usize
+}
+
+impl Copy for HirId {}
+
+/// An optionally present [`HirId`], used for a child a construct may omit.
+///
+/// # Details
+///
+/// Absence is explicit rather than a reserved index, so node zero stays an ordinary node. An
+/// omitted child and an empty child are therefore distinguishable.
+pub struct HirRef {
+  /// Whether [`id`](HirRef.id) identifies a node.
+  pub present: bool
+  /// The referenced node; meaningful only when [`present`](HirRef.present) is `true`.
+  pub id: HirId
+}
+
+impl Copy for HirRef {}
+
+impl HirRef {
+  /// Constructs the absent reference.
+  pub fn absent() -> HirRef {
+    return HirRef {present: false, id: HirId {index: usize.ZERO}}
+  }
+
+  /// Constructs a present reference to `id`.
+  pub fn of(id: HirId) -> HirRef {
+    return HirRef {present: true, id: id}
+  }
+}
+
+/// A contiguous run of child identities inside a module's shared child vector.
+///
+/// # Details
+///
+/// A node stores only the run's start and length, so a list-shaped child never becomes a heap
+/// vector owned by its parent. An empty range has length zero; its start is unconstrained.
+pub struct Range {
+  /// The position of the run's first element in the owning module's child vector.
+  pub start: usize
+  /// The number of elements in the run.
+  pub length: usize
+}
+
+impl Copy for Range {}
+
+impl Range {
+  /// Constructs the empty range.
+  pub fn empty() -> Range {
+    return Range {start: usize.ZERO, length: usize.ZERO}
+  }
+}
+
+/// An optionally present [`Range`], used where an absent list and an empty list differ.
+///
+/// # Details
+///
+/// A written but empty environment, member list, or field block is a distinct construct from an
+/// omitted one, and several semantic rules depend on telling them apart.
+pub struct RangeRef {
+  /// Whether [`range`](RangeRef.range) describes a written list.
+  pub present: bool
+  /// The referenced run; meaningful only when [`present`](RangeRef.present) is `true`.
+  pub range: Range
+}
+
+impl Copy for RangeRef {}
+
+impl RangeRef {
+  /// Constructs the absent reference.
+  pub fn absent() -> RangeRef {
+    return RangeRef {present: false, range: Range.empty()}
+  }
+
+  /// Constructs a present reference to `range`.
+  pub fn of(range: Range) -> RangeRef {
+    return RangeRef {present: true, range: range}
+  }
+}
+
+/// An optionally present [`Span`], used for the written position of one modifier keyword.
+///
+/// # Details
+///
+/// A modifier anchor is present exactly when the matching flag was written. A flag that a
+/// declaration form merely implies carries no anchor, so a diagnostic never underlines a keyword
+/// the author did not write.
+pub struct SpanRef {
+  /// Whether [`span`](SpanRef.span) names written source.
+  pub present: bool
+  /// The referenced byte range; meaningful only when [`present`](SpanRef.present) is `true`.
+  pub span: Span
+}
+
+impl Copy for SpanRef {}
+
+impl SpanRef {
+  /// Constructs the absent reference.
+  pub fn absent() -> SpanRef {
+    return SpanRef {present: false, span: Span {start: usize.ZERO, end: usize.ZERO}}
+  }
+
+  /// Constructs a present reference to `span`.
+  pub fn of(span: Span) -> SpanRef {
+    return SpanRef {present: true, span: span}
+  }
+}
+
+/// Whether a borrow, slice, reference, or pointer permits mutation.
+pub enum Access {
+  /// A shared, read-only view.
+  Shared,
+  /// An exclusive, mutating view.
+  Mutable,
+}
+
+/// How many times a callable value may be invoked and with which access to its captures.
+pub enum CallableMode {
+  /// Invocable repeatedly through a shared borrow.
+  Shared,
+  /// Invocable repeatedly through an exclusive borrow.
+  Mutable,
+  /// Invocable exactly one time, consuming the callable.
+  Once,
+}
+
+/// How a parameter receives its argument.
+pub enum ParameterMode {
+  /// An ordinary by-value parameter.
+  Value,
+  /// A parameter the callee may mutate in place.
+  Mutable,
+  /// A parameter supplied during static evaluation.
+  Static,
+}
+
+/// The written base of an integer literal.
+pub enum Radix {
+  /// Base two, written with a `0b` prefix.
+  Binary,
+  /// Base eight, written with a `0o` prefix.
+  Octal,
+  /// Base ten, written without a prefix.
+  Decimal,
+  /// Base sixteen, written with a `0x` prefix.
+  Hexadecimal,
+}
+
+/// The sign of a floating-point literal.
+pub enum Sign {
+  /// A literal with no sign or a written `+`.
+  Positive,
+  /// A literal with a written `-`.
+  Negative,
+}
+
+/// The unit of one duration literal component.
+pub enum DurationUnit {
+  /// Weeks, written `w`.
+  Weeks,
+  /// Days, written `d`.
+  Days,
+  /// Hours, written `h`.
+  Hours,
+  /// Minutes, written `m`.
+  Minutes,
+  /// Seconds, written `s`.
+  Seconds,
+  /// Milliseconds, written `ms`.
+  Milliseconds,
+  /// Microseconds, written `us`.
+  Microseconds,
+  /// Nanoseconds, written `ns`.
+  Nanoseconds,
+}
+
+/// Whether a pointer addresses one value or a run of values.
+pub enum Multiplicity {
+  /// A pointer to exactly one value.
+  Single,
+  /// A pointer to a run of values.
+  Many,
+}
+
+/// How a `match` expression reaches its subject.
+pub enum MatchAccess {
+  /// No written access; the subject is read as the grammar implies.
+  Default,
+  /// The subject is matched in place.
+  Place,
+  /// The subject is moved into the match.
+  Move,
+  /// The subject is borrowed immutably.
+  Shared,
+  /// The subject is borrowed mutably.
+  Mutable,
+}
+
+/// A prefix operator.
+pub enum PrefixOperator {
+  /// Arithmetic negation, written `-`.
+  Negate,
+  /// Logical negation, written `!`.
+  Not,
+  /// Bitwise complement, written `~`.
+  BitwiseNot,
+}
+
+/// An infix operator.
+pub enum InfixOperator {
+  /// Addition, written `+`.
+  Add,
+  /// Subtraction, written `-`.
+  Subtract,
+  /// Multiplication, written `*`.
+  Multiply,
+  /// Division, written `/`.
+  Divide,
+  /// Remainder, written `%`.
+  Remainder,
+  /// Equality, written `==`.
+  Equals,
+  /// Inequality, written `!=`.
+  NotEquals,
+  /// Strict ordering, written `<`.
+  LessThan,
+  /// Non-strict ordering, written `<=`.
+  LessOrEqual,
+  /// Strict ordering, written `>`.
+  GreaterThan,
+  /// Non-strict ordering, written `>=`.
+  GreaterOrEqual,
+  /// Short-circuiting conjunction, written `&&`.
+  And,
+  /// Short-circuiting disjunction, written `||`.
+  Or,
+  /// Bitwise conjunction, written `&`.
+  BitAnd,
+  /// Bitwise disjunction, written `|`.
+  BitOr,
+  /// Bitwise exclusive disjunction, written `^`.
+  BitXor,
+}
+
+/// Whether a linkage clause imports a foreign symbol or exports a Silk one.
+pub enum LinkageDirection {
+  /// The declaration resolves against a foreign symbol.
+  Import,
+  /// The declaration publishes a symbol for foreign consumers.
+  Export,
+}
+
+/// Which branch of a static conditional a declaration group belongs to.
+pub enum GroupBranch {
+  /// The group selected when the condition holds.
+  Then,
+  /// The group selected when the condition does not hold.
+  Else,
+}
+
+/// The reason one node is missing or invalid.
+///
+/// # Details
+///
+/// Parser causes restate a syntax diagnostic the lowering encountered. Lowering causes describe a
+/// problem only lowering can see, such as a literal that no supported magnitude can hold.
+pub enum CauseCode {
+  /// The grammar required a token that the source did not contain.
+  MissingToken,
+  /// Recovery consumed source that could not continue the active grammar rule.
+  UnexpectedToken,
+  /// Recursive grammar nesting exceeded the parser's stack-safety bound.
+  NestingLimit,
+  /// The syntax node this position required was absent.
+  MissingSyntax,
+  /// The syntax node in this position belongs to a different grammar category.
+  UnexpectedSyntax,
+  /// An integer literal's magnitude exceeds `u64`.
+  IntegerOverflow,
+  /// A floating-point literal's coefficient or exponent exceeds `u64`.
+  FloatingOverflow,
+  /// A duration component's magnitude exceeds `u64`.
+  DurationOverflow,
+  /// A literal's escape sequence or encoding could not be decoded.
+  InvalidLiteralEncoding,
+  /// A character literal does not denote exactly one Unicode scalar value.
+  InvalidCharacter,
+  /// A construct is syntactically well formed but is not supported in this position.
+  UnsupportedConstruct,
+}
+
+/// One recorded reason that a node is missing or invalid.
+///
+/// # Details
+///
+/// Causes live in [`Module.causes`] and are addressed by a contiguous [`Range`]. A node that
+/// records causes always records at least one.
+pub struct Cause {
+  /// The source position the cause describes.
+  pub span: Span
+  /// Why the node could not be lowered normally.
+  pub code: CauseCode
+}
+
+impl Copy for Cause {}
+
+/// The category of a declaration's logical owner key.
+pub enum OwnerKind {
+  /// An import declaration.
+  Import,
+  /// A branch of a static conditional declaration.
+  Conditional,
+  /// A module property declaration.
+  ModuleProperty,
+  /// An implementation declaration.
+  Implementation,
+  /// A named function or service operation.
+  Function,
+  /// A struct declaration.
+  Struct,
+  /// A tuple declaration.
+  Tuple,
+  /// An enum declaration.
+  Enumeration,
+  /// A union declaration.
+  Union,
+  /// A service declaration.
+  Service,
+  /// An interface declaration.
+  Interface,
+  /// A role declaration.
+  Role,
+  /// A constant declaration.
+  Constant,
+  /// A package parameter declaration.
+  PackageParameter,
+  /// A type alias declaration.
+  Alias,
+  /// A foreign or exported static declaration.
+  Static,
+  /// A declaration whose header could not be lowered.
+  Damaged,
+}
+
+/// The source-independent logical name of one declaration.
+///
+/// # Details
+///
+/// Later phases refer to a declaration by its owner key rather than by position, so moving a
+/// declaration within its file does not rename it. Unnamed declaration forms carry an absent name
+/// and are distinguished by their occurrence among same-key siblings.
+pub struct OwnerKey {
+  /// The declaration category.
+  pub kind: OwnerKind
+  /// The declared name, absent for declaration forms that do not name themselves.
+  pub name: SymbolRef
+  /// The zero-based position among sibling declarations sharing the same kind and name.
+  pub occurrence: usize
+}
+
+impl Copy for OwnerKey {}
+
+/// One frontend diagnostic re-anchored to a module coordinate.
+///
+/// # Details
+///
+/// A diagnostic keeps only the span and the cause code. A reporter re-reads the source file to
+/// render the underlined text, because rendering a diagnostic is not a hot path.
+pub struct Diagnostic {
+  /// The source position the diagnostic describes.
+  pub span: Span
+  /// Why the frontend rejected this position.
+  pub code: CauseCode
+}
+
+impl Copy for Diagnostic {}
+
+/// One node of the flat HIR arena.
+///
+/// # Details
+///
+/// The variant tag is the node's grammar category. Every field is either a scalar, an interned
+/// [`Symbol`](hir.Intern.Symbol), a child identity, or a [`Range`] naming a run of children. No
+/// variant owns a heap value, so a node is [`Copy`] and the arena is one contiguous vector.
+pub union Node {
+  // Names and paths.
+
+  /// A written name.
+  Name {
+    /// The interned name text.
+    pub text: Symbol,
+  },
+  /// A name the grammar required but the source did not contain.
+  MissingName,
+  /// A name position holding source that cannot be a name.
+  InvalidName {
+    /// The interned spelling of the retained source.
+    pub spelling: Symbol,
+  },
+  /// A dotted name sequence.
+  Path {
+    /// The name nodes in written order.
+    pub segments: Range,
+  },
+
+  // Generic parameters and arguments.
+
+  /// A type parameter with its written bounds.
+  TypeParameter {
+    /// The parameter name.
+    pub name: HirId,
+    /// The bound types and lifetimes in written order.
+    pub bounds: Range,
+  },
+  /// A row parameter.
+  RowParameter {
+    /// The parameter name.
+    pub name: HirId,
+  },
+  /// A lifetime parameter with its written bounds.
+  LifetimeParameter {
+    /// The parameter name.
+    pub name: HirId,
+    /// The bound types and lifetimes in written order.
+    pub bounds: Range,
+  },
+  /// A lifetime used as a type component or environment.
+  Lifetime {
+    /// The lifetime name.
+    pub name: HirId,
+  },
+  /// A requirement named by its subject type and role.
+  RequirementSelector {
+    /// The capability type.
+    pub subject: HirId,
+    /// The role path that selects the capability.
+    pub rolePath: HirId,
+  },
+  /// A written type-argument list, including its environment and effect rows.
+  TypeArguments {
+    /// The type, lifetime, and requirement arguments in written order.
+    pub arguments: Range,
+    /// The written lifetime environment; absent and empty remain distinct.
+    pub environment: RangeRef,
+    /// The written failure row, if any.
+    pub failures: HirRef,
+    /// The written requirement row, if any.
+    pub requirements: HirRef,
+  },
+  /// One member of a requirement row.
+  Requirement {
+    /// Whether the requirement was written with a borrow marker.
+    pub hasAccess: bool,
+    /// The written borrow marker; meaningful only when `hasAccess` is `true`.
+    pub access: Access,
+    /// The capability type.
+    pub capability: HirId,
+    /// The role path, if the requirement selects one.
+    pub rolePath: HirRef,
+  },
+  /// A requirement row.
+  RequirementRow {
+    /// The row members in written order.
+    pub members: Range,
+  },
+  /// One qualifier written on a pointer type.
+  PointerQualifier {
+    /// The qualifier name.
+    pub name: HirId,
+    /// The qualifier value; an integer literal, or a missing or invalid expression.
+    pub value: HirId,
+  },
+
+  // Types.
+
+  /// A type named by a path.
+  NamedType {
+    /// The path that names the type.
+    pub path: HirId,
+    /// Whether a callable mode was written.
+    pub hasMode: bool,
+    /// The written callable mode; meaningful only when `hasMode` is `true`.
+    pub mode: CallableMode,
+  },
+  /// A type applied to arguments.
+  AppliedType {
+    /// The type being applied.
+    pub target: HirId,
+    /// The written argument list.
+    pub arguments: HirId,
+  },
+  /// A fixed-length array type.
+  FixedArrayType {
+    /// The element type.
+    pub element: HirId,
+    /// The length; an integer literal, or a missing or invalid expression.
+    pub length: HirId,
+  },
+  /// A slice type.
+  SliceType {
+    /// The element type.
+    pub element: HirId,
+    /// Whether the slice permits mutation.
+    pub access: Access,
+    /// The written lifetime, if any.
+    pub lifetime: HirRef,
+  },
+  /// A reference type.
+  ReferenceType {
+    /// The referenced type.
+    pub referent: HirId,
+    /// Whether the reference permits mutation.
+    pub access: Access,
+    /// The written lifetime, if any.
+    pub lifetime: HirRef,
+    /// The written provider role name, if any.
+    pub roleName: HirRef,
+  },
+  /// A pointer type.
+  PointerType {
+    /// The pointed-to type.
+    pub pointee: HirId,
+    /// Whether the pointer permits mutation.
+    pub access: Access,
+    /// Whether the pointer admits a null address.
+    pub nullable: bool,
+    /// Whether the pointer addresses one value or a run of values.
+    pub multiplicity: Multiplicity,
+    /// The written pointer qualifiers in order.
+    pub qualifiers: Range,
+  },
+  /// A callable type.
+  CallableType {
+    /// How many times the callable may be invoked.
+    pub mode: CallableMode,
+    /// Whether the callable was written `unsafe`.
+    pub isUnsafe: bool,
+    /// The written generic binders in order.
+    pub binders: Range,
+    /// The written environment lifetime, if any.
+    pub environment: HirRef,
+    /// The parameter types in written order.
+    pub parameters: Range,
+    /// The result type.
+    pub result: HirId,
+  },
+  /// A foreign function type.
+  ForeignFunctionType {
+    /// The ABI; a text literal, or a missing or invalid expression.
+    pub abi: HirId,
+    /// The written generic binders in order.
+    pub binders: Range,
+    /// The parameter types in written order.
+    pub parameters: Range,
+    /// The result type.
+    pub result: HirId,
+    /// The written property clauses in order.
+    pub properties: Range,
+  },
+  /// A type with an exact representation requirement.
+  ExactRepresentationType {
+    /// The type whose representation is constrained.
+    pub subject: HirId,
+  },
+  /// An opaque result type.
+  OpaqueResultType {
+    /// The written generic binders in order.
+    pub binders: Range,
+    /// The constrained result type.
+    pub result: HirId,
+  },
+  /// The unit type.
+  UnitType,
+  /// A union of row operands.
+  UnionType {
+    /// The row members in written order.
+    pub members: Range,
+  },
+  /// A row with one operand removed.
+  RowWithout {
+    /// The row the removal applies to.
+    pub source: HirId,
+    /// The removed operand.
+    pub removed: HirId,
+  },
+  /// A type the grammar required but the source did not contain.
+  MissingType,
+  /// A type position holding source that cannot be a type.
+  InvalidType {
+    /// The healthy type children retained from the damaged region.
+    pub retained: Range,
+  },
+
+  // Constraints.
+
+  /// An interface membership constraint.
+  MembershipConstraint {
+    /// The constrained operand.
+    pub subject: HirId,
+    /// The operand the subject must belong to.
+    pub source: HirId,
+  },
+  /// A provider constraint.
+  ProviderConstraint {
+    /// The providing type.
+    pub provider: HirId,
+    /// The provided operand.
+    pub selected: HirId,
+    /// The operand the provision is drawn from.
+    pub source: HirId,
+  },
+
+  // Callables.
+
+  /// One declared parameter.
+  Parameter {
+    /// The parameter name.
+    pub name: HirId,
+    /// The declared parameter type.
+    pub annotation: HirId,
+    /// How the parameter receives its argument.
+    pub mode: ParameterMode,
+  },
+  /// The complete signature of one callable declaration or callable expression.
+  CallableContract {
+    /// The written generic binders in order.
+    pub generics: Range,
+    /// The declared parameters in order.
+    pub parameters: Range,
+    /// Whether the parameter list ends with a variadic marker.
+    pub variadic: bool,
+    /// The declared result type, if written.
+    pub result: HirRef,
+    /// The declared failure row, if written.
+    pub failures: HirRef,
+    /// The declared requirement row, if written.
+    pub requirements: HirRef,
+    /// The written `where` constraints in order.
+    pub constraints: Range,
+    /// Whether the callable is effectful.
+    pub isEffect: bool,
+    /// Whether the callable was marked for test discovery.
+    pub isTest: bool,
+    /// The written lifetime environment; absent and empty remain distinct.
+    pub environment: RangeRef,
+    /// Whether the callable was written `unsafe`.
+    pub isUnsafe: bool,
+    /// Whether the callable is evaluated statically.
+    pub isStatic: bool,
+    /// Where `effect` was written, present exactly when `effect` is set by a written keyword.
+    pub effectAnchor: SpanRef,
+    /// Where `test` was written, present exactly when `test` is set by a written keyword.
+    pub testAnchor: SpanRef,
+    /// Where `unsafe` was written, present exactly when `unsafe` is set by a written keyword.
+    pub unsafeAnchor: SpanRef,
+    /// Where `static` was written, present exactly when `static` is set by a written keyword.
+    pub staticAnchor: SpanRef,
+    /// The written binder list including its brackets, so a diagnostic can name the list as a whole.
+    pub genericsAnchor: SpanRef,
+    /// The written failure row including its `!` marker, which `failures` itself stops short of.
+    pub failuresAnchor: SpanRef,
+    /// The written `where` clause including its keyword, which the constraints stop short of.
+    pub constraintsAnchor: SpanRef,
+  },
+  /// One key and value inside a property clause.
+  Property {
+    /// The property name.
+    pub name: HirId,
+    /// The property value.
+    pub value: HirId,
+  },
+  /// One written property clause; order and duplicate keys are preserved for later validation.
+  PropertyClause {
+    /// The namespace name.
+    pub namespace: HirId,
+    /// The operation name.
+    pub operation: HirId,
+    /// The properties in written order.
+    pub properties: Range,
+  },
+
+  // Literals.
+
+  /// An integer literal whose magnitude fits `u64`.
+  IntegerLiteral {
+    /// The decoded magnitude.
+    pub magnitude: u64,
+    /// The written base.
+    pub radix: Radix,
+    /// The interned literal suffix, if written.
+    pub suffix: SymbolRef,
+  },
+  /// A text literal with its escape sequences decoded.
+  TextLiteral {
+    /// The interned decoded text.
+    pub value: Symbol,
+  },
+  /// A floating-point literal decomposed into sign, coefficient, and exponent digits.
+  FloatingLiteral {
+    /// The written sign.
+    pub sign: Sign,
+    /// The decoded coefficient digits.
+    pub coefficient: u64,
+    /// The decoded decimal exponent.
+    pub exponent: u64,
+    /// The interned literal suffix, if written.
+    pub suffix: SymbolRef,
+  },
+  /// One magnitude and unit inside a duration literal.
+  DurationComponent {
+    /// The decoded magnitude.
+    pub magnitude: u64,
+    /// The written unit.
+    pub unit: DurationUnit,
+  },
+  /// A duration literal.
+  DurationLiteral {
+    /// The components in written order.
+    pub components: Range,
+  },
+  /// A byte-string literal with its escape sequences decoded.
+  BytesLiteral {
+    /// The interned decoded bytes.
+    pub value: Symbol,
+  },
+  /// A character literal.
+  CharacterLiteral {
+    /// The Unicode scalar value the literal denotes.
+    pub scalar: u32,
+  },
+  /// A Boolean literal.
+  BooleanLiteral {
+    /// The written value.
+    pub value: bool,
+  },
+  /// The unit literal.
+  UnitLiteral,
+
+  // Expressions.
+
+  /// An expression the grammar required but the source did not contain.
+  MissingExpression,
+  /// An expression position holding source that cannot be an expression.
+  InvalidExpression {
+    /// The healthy expression children retained from the damaged region.
+    pub retained: Range,
+  },
+  /// One field initializer in a record, struct, or member expression.
+  FieldInitializer {
+    /// The field name.
+    pub name: HirId,
+    /// The initializing expression.
+    pub value: HirId,
+  },
+  /// A member selected from a type.
+  MemberSelector {
+    /// The type the member belongs to.
+    pub subject: HirId,
+    /// The member name.
+    pub member: HirId,
+  },
+  /// A reference to a name.
+  IdentifierExpression {
+    /// The referenced name.
+    pub name: HirId,
+    /// The lexical binder this identifier resolves to, absent when no binder is in scope.
+    pub binding: HirRef,
+  },
+  /// A `move` expression.
+  MoveExpression {
+    /// The moved operand.
+    pub operand: HirId,
+  },
+  /// A borrow expression.
+  BorrowExpression {
+    /// Whether the borrow permits mutation.
+    pub access: Access,
+    /// The borrowed operand.
+    pub operand: HirId,
+  },
+  /// An anonymous callable expression.
+  CallableExpression {
+    /// The written signature.
+    pub contract: HirId,
+    /// The callable body.
+    pub body: HirId,
+  },
+  /// An Effect construction expression.
+  EffectExpression {
+    /// The effect body.
+    pub body: HirId,
+  },
+  /// A `run` expression.
+  RunExpression {
+    /// The executed operand.
+    pub operand: HirId,
+  },
+  /// An `unsafe` expression.
+  UnsafeExpression {
+    /// The operand evaluated in the unsafe region.
+    pub operand: HirId,
+  },
+  /// A `compileError` expression.
+  CompileErrorExpression {
+    /// The reported message expression.
+    pub message: HirId,
+  },
+  /// A `match` expression.
+  MatchExpression {
+    /// How the expression reaches its subject.
+    pub access: MatchAccess,
+    /// The matched subject.
+    pub subject: HirId,
+    /// The arms in written order.
+    pub arms: Range,
+  },
+  /// A struct literal expression.
+  StructExpression {
+    /// The constructed type.
+    pub annotation: HirId,
+    /// The field initializers in written order.
+    pub fields: Range,
+  },
+  /// A tuple literal expression.
+  TupleExpression {
+    /// The elements in written order.
+    pub elements: Range,
+  },
+  /// A record literal whose type comes from its context.
+  RecordExpression {
+    /// The field initializers in written order.
+    pub fields: Range,
+  },
+  /// An array literal expression.
+  ArrayExpression {
+    /// The elements in written order.
+    pub elements: Range,
+  },
+  /// An expression that applies a member operation.
+  MemberExpression {
+    /// The selected member.
+    pub selector: HirId,
+    /// The written field initializers; absent and empty remain distinct.
+    pub fields: RangeRef,
+  },
+  /// An expression that projects a named field.
+  FieldExpression {
+    /// The projected value.
+    pub subject: HirId,
+    /// The field name.
+    pub field: HirId,
+  },
+  /// An expression that projects an ordinal field.
+  OrdinalExpression {
+    /// The projected value.
+    pub subject: HirId,
+    /// The ordinal; an integer literal, or a missing or invalid expression.
+    pub ordinal: HirId,
+  },
+  /// An expression that projects through a referent.
+  ReferentExpression {
+    /// The dereferenced value.
+    pub subject: HirId,
+  },
+  /// An expression that projects an indexed element.
+  IndexExpression {
+    /// The indexed value.
+    pub subject: HirId,
+    /// The index expression.
+    pub index: HirId,
+  },
+  /// A call expression.
+  CallExpression {
+    /// The called value.
+    pub callee: HirId,
+    /// The written type arguments, if any.
+    pub generics: HirRef,
+    /// The arguments in written order.
+    pub arguments: Range,
+  },
+  /// A prefix operator expression.
+  PrefixExpression {
+    /// The applied operator.
+    pub operator: PrefixOperator,
+    /// Where the operator itself is written, so a diagnostic about it names that token.
+    pub operatorAnchor: Span,
+    /// The operand.
+    pub operand: HirId,
+  },
+  /// An infix operator expression.
+  InfixExpression {
+    /// The applied operator.
+    pub operator: InfixOperator,
+    /// Where the operator itself is written, so a diagnostic about it names that token.
+    pub operatorAnchor: Span,
+    /// The left operand.
+    pub left: HirId,
+    /// The right operand.
+    pub right: HirId,
+  },
+  /// A pipeline expression.
+  PipelineExpression {
+    /// The piped input.
+    pub input: HirId,
+    /// The pipeline target.
+    pub target: HirId,
+  },
+
+  // Patterns.
+
+  /// One field inside a record pattern. A shorthand lowers to a binding pattern of the same name.
+  PatternField {
+    /// The field name.
+    pub name: HirId,
+    /// The field's pattern.
+    pub pattern: HirId,
+  },
+  /// A pattern that selects an enum member.
+  EnumPattern {
+    /// The path naming the member.
+    pub path: HirId,
+  },
+  /// An integer literal pattern.
+  IntegerPattern {
+    /// The matched integer literal.
+    pub value: HirId,
+  },
+  /// A pattern for a nominal value.
+  NominalPattern {
+    /// The matched type.
+    pub annotation: HirId,
+    /// The field and rest patterns in written order.
+    pub fields: Range,
+  },
+  /// A pattern that introduces a binding.
+  BindingPattern {
+    /// The declared type, if written.
+    pub annotation: HirRef,
+    /// The bound name.
+    pub name: HirId,
+  },
+  /// A pattern that accepts every value.
+  UniversalPattern {
+    /// The written name, if the wildcard was named.
+    pub name: HirRef,
+  },
+  /// A pattern that selects a union variant.
+  VariantPattern {
+    /// The selected variant.
+    pub selector: HirId,
+    /// The written field patterns; absent and empty remain distinct.
+    pub fields: RangeRef,
+  },
+  /// A pattern that accepts the remaining fields or elements.
+  RestPattern,
+  /// A pattern the grammar required but the source did not contain.
+  MissingPattern,
+  /// A pattern position holding source that cannot be a pattern.
+  InvalidPattern {
+    /// The healthy pattern, type, and name children retained from the damaged region.
+    pub retained: Range,
+  },
+  /// One arm of a `match` expression.
+  MatchArm {
+    /// The arm's pattern.
+    pub pattern: HirId,
+    /// The arm's guard expression, if written.
+    pub guard: HirRef,
+    /// The arm's result; an expression or a block.
+    pub result: HirId,
+  },
+
+  // Statements and blocks.
+
+  /// A brace-delimited block.
+  Block {
+    /// The statements in written order.
+    pub statements: Range,
+  },
+  /// A statement that evaluates an expression.
+  ExpressionStatement {
+    /// The evaluated expression.
+    pub expression: HirId,
+  },
+  /// A binding statement.
+  BindingStatement {
+    /// The bound name.
+    pub name: HirId,
+    /// Whether the binding is mutable.
+    pub mutable: bool,
+    /// Whether the binding is evaluated statically.
+    pub isStatic: bool,
+    /// The declared type, if written.
+    pub annotation: HirRef,
+    /// The initializing expression.
+    pub initializer: HirId,
+  },
+  /// A statement that binds a pattern.
+  PatternBindingStatement {
+    /// The bound pattern.
+    pub pattern: HirId,
+    /// The initializing expression.
+    pub initializer: HirId,
+  },
+  /// An assignment statement.
+  AssignmentStatement {
+    /// The assigned place.
+    pub target: HirId,
+    /// The assigned value.
+    pub value: HirId,
+  },
+  /// A runtime conditional statement.
+  ConditionalStatement {
+    /// The tested condition.
+    pub condition: HirId,
+    /// The branch taken when the condition holds.
+    pub thenBranch: HirId,
+    /// The branch taken otherwise; a block, a nested conditional, or absent.
+    pub elseBranch: HirRef,
+  },
+  /// A conditional statement that binds a pattern.
+  PatternConditionalStatement {
+    /// The tested pattern.
+    pub pattern: HirId,
+    /// The matched subject.
+    pub subject: HirId,
+    /// The branch taken when the pattern matches.
+    pub thenBranch: HirId,
+    /// The branch taken otherwise; a block, a nested conditional, or absent.
+    pub elseBranch: HirRef,
+  },
+  /// A static conditional statement.
+  StaticConditionalStatement {
+    /// The statically evaluated condition.
+    pub condition: HirId,
+    /// The branch selected when the condition holds.
+    pub thenBranch: HirId,
+    /// The branch selected otherwise; a block, a nested conditional, or absent.
+    pub elseBranch: HirRef,
+  },
+  /// A static iteration statement.
+  StaticForStatement {
+    /// The bound iteration name.
+    pub binding: HirId,
+    /// The iterated expression.
+    pub iterable: HirId,
+    /// The repeated body.
+    pub body: HirId,
+  },
+  /// A `while` statement.
+  WhileStatement {
+    /// The tested condition.
+    pub condition: HirId,
+    /// The repeated body.
+    pub body: HirId,
+  },
+  /// A `break` statement.
+  BreakStatement,
+  /// A `continue` statement.
+  ContinueStatement,
+  /// A `return` statement.
+  ReturnStatement {
+    /// The returned expression, if written.
+    pub value: HirRef,
+  },
+  /// A `fail` statement.
+  FailStatement {
+    /// Whether the failure value was written with `move`.
+    pub isMove: bool,
+    /// The failure value.
+    pub value: HirId,
+  },
+  /// A `drop` statement.
+  DropStatement {
+    /// The dropped value.
+    pub value: HirId,
+  },
+  /// An `unsafe` statement.
+  UnsafeStatement {
+    /// The body evaluated in the unsafe region.
+    pub body: HirId,
+  },
+  /// A statement the grammar required but the source did not contain.
+  MissingStatement,
+  /// A statement position holding source that cannot be a statement.
+  InvalidStatement {
+    /// The healthy statement and expression children retained from the damaged region.
+    pub retained: Range,
+  },
+
+  // Declaration members.
+
+  /// One selected import member.
+  ImportMember {
+    /// The imported name.
+    pub name: HirId,
+    /// The local alias, if written.
+    pub alias: HirRef,
+  },
+  /// One declared field of a struct or union variant.
+  Field {
+    /// The field name.
+    pub name: HirId,
+    /// Whether the field is public.
+    pub isPublic: bool,
+    /// The field type.
+    pub annotation: HirId,
+  },
+  /// One member of an enum declaration.
+  EnumMember {
+    /// The member name.
+    pub name: HirId,
+    /// The written discriminant expression, if any.
+    pub value: HirRef,
+  },
+  /// One variant of a union declaration.
+  Variant {
+    /// The variant name.
+    pub name: HirId,
+    /// The payload fields in written order.
+    pub fields: Range,
+    /// Whether a field block was written; a unit variant and an empty block are distinct mistakes.
+    pub braces: bool,
+  },
+  /// A foreign linkage clause.
+  Linkage {
+    /// Whether the clause imports or exports.
+    pub direction: LinkageDirection,
+    /// The ABI; a text literal, or a missing or invalid expression.
+    pub abi: HirId,
+    /// The written symbol name, if any.
+    pub symbol: HirRef,
+  },
+
+  // Declaration headers.
+
+  /// An import declaration header.
+  ImportHeader {
+    /// Whether the import is re-exported.
+    pub isPublic: bool,
+    /// The imported module path.
+    pub path: HirId,
+    /// The module alias, if written.
+    pub alias: HirRef,
+    /// The written member list; absent and empty remain distinct.
+    pub members: RangeRef,
+  },
+  /// The header of a static conditional declaration.
+  ConditionalHeader {
+    /// The statically evaluated condition.
+    pub condition: HirId,
+  },
+  /// The header of one branch of a static conditional declaration.
+  GroupHeader {
+    /// Which branch this group belongs to.
+    pub branch: GroupBranch,
+  },
+  /// A module property declaration header.
+  ModulePropertyHeader {
+    /// The written property clauses in order.
+    pub properties: Range,
+  },
+  /// An implementation declaration header.
+  ImplHeader {
+    /// The written generic binders in order.
+    pub generics: Range,
+    /// The implementing type.
+    pub subject: HirId,
+    /// The implemented interface or service, if written.
+    pub target: HirRef,
+  },
+  /// A declaration header the grammar required but the source did not contain.
+  MissingDeclarationHeader,
+  /// A declaration header position holding source that cannot be a header.
+  InvalidDeclarationHeader {
+    /// The healthy header children retained from the damaged region.
+    pub retained: Range,
+  },
+  /// A named function declaration header.
+  FunctionHeader {
+    /// The function name.
+    pub name: HirId,
+    /// Whether the function is public.
+    pub isPublic: bool,
+    /// The written signature.
+    pub contract: HirId,
+    /// The foreign linkage clause, if written.
+    pub linkage: HirRef,
+    /// The written property clauses in order.
+    pub properties: Range,
+  },
+  /// A service or interface operation header.
+  OperationHeader {
+    /// The operation name.
+    pub name: HirId,
+    /// Whether the operation is public.
+    pub isPublic: bool,
+    /// The written signature.
+    pub contract: HirId,
+    /// The operator marker name, if written.
+    pub operator: HirRef,
+    /// The written property clauses in order.
+    pub properties: Range,
+  },
+  /// An implementation alias header.
+  ImplAliasHeader {
+    /// The aliased member name.
+    pub name: HirId,
+    /// Whether the alias is public.
+    pub isPublic: bool,
+    /// The aliased target path.
+    pub target: HirId,
+  },
+  /// A struct declaration header.
+  StructHeader {
+    /// The struct name.
+    pub name: HirId,
+    /// Whether the struct is public.
+    pub isPublic: bool,
+    /// The written generic binders in order.
+    pub generics: Range,
+    /// The written binder list including its brackets, so a diagnostic can name it whole.
+    pub genericsAnchor: SpanRef,
+    /// The declared fields in written order.
+    pub fields: Range,
+    /// The ABI, if a representation was written.
+    pub abi: HirRef,
+  },
+  /// A tuple declaration header.
+  TupleHeader {
+    /// The tuple name.
+    pub name: HirId,
+    /// Whether the tuple is public.
+    pub isPublic: bool,
+    /// The written generic binders in order.
+    pub generics: Range,
+    /// The element types in written order.
+    pub elements: Range,
+  },
+  /// An enum declaration header.
+  EnumHeader {
+    /// The enum name.
+    pub name: HirId,
+    /// Whether the enum is public.
+    pub isPublic: bool,
+    /// The written representation type, if any.
+    pub representation: HirRef,
+    /// The members in written order.
+    pub members: Range,
+  },
+  /// A union declaration header.
+  UnionHeader {
+    /// The union name.
+    pub name: HirId,
+    /// Whether the union is public.
+    pub isPublic: bool,
+    /// The written generic binders in order.
+    pub generics: Range,
+    /// The variants in written order.
+    pub variants: Range,
+  },
+  /// A service declaration header.
+  ServiceHeader {
+    /// The service name.
+    pub name: HirId,
+    /// Whether the service is public.
+    pub isPublic: bool,
+    /// The written generic binders in order.
+    pub generics: Range,
+  },
+  /// An interface declaration header.
+  InterfaceHeader {
+    /// The interface name.
+    pub name: HirId,
+    /// Whether the interface is public.
+    pub isPublic: bool,
+    /// The written generic binders in order.
+    pub generics: Range,
+  },
+  /// A role declaration header.
+  RoleHeader {
+    /// The role name.
+    pub name: HirId,
+    /// Whether the role is public.
+    pub isPublic: bool,
+  },
+  /// A constant declaration header.
+  ConstantHeader {
+    /// The constant name.
+    pub name: HirId,
+    /// Whether the constant is public.
+    pub isPublic: bool,
+    /// The declared type, if written.
+    pub annotation: HirRef,
+  },
+  /// A package parameter declaration header.
+  PackageParameterHeader {
+    /// The parameter name.
+    pub name: HirId,
+    /// Whether the parameter is public.
+    pub isPublic: bool,
+    /// The declared type.
+    pub annotation: HirId,
+  },
+  /// A type alias declaration header.
+  AliasHeader {
+    /// The alias name.
+    pub name: HirId,
+    /// Whether the alias is public.
+    pub isPublic: bool,
+    /// The written generic binders in order.
+    pub generics: Range,
+    /// The aliased type.
+    pub target: HirId,
+  },
+  /// A foreign or exported static declaration header.
+  StaticHeader {
+    /// The static name.
+    pub name: HirId,
+    /// Whether the static is public.
+    pub isPublic: bool,
+    /// The declared type.
+    pub annotation: HirId,
+    /// Whether the static is mutable.
+    pub mutable: bool,
+    /// The linkage clause.
+    pub linkage: HirId,
+    /// The written property clauses in order.
+    pub properties: Range,
+  },
+
+  // Declaration bodies.
+
+  /// A declaration form that has no body.
+  NoBody,
+  /// A callable body.
+  CallableBody {
+    /// The body block, absent for a declared-only callable.
+    pub block: HirRef,
+  },
+  /// An initializer body.
+  InitializerBody {
+    /// The initializing expression, if written.
+    pub value: HirRef,
+  },
+  /// A package parameter body.
+  PackageParameterBody {
+    /// The default value expression, if written.
+    pub default: HirRef,
+    /// The validation expression, if written.
+    pub validation: HirRef,
+  },
+  /// A body holding nested declarations.
+  MembersBody {
+    /// The member declarations in written order.
+    pub members: Range,
+  },
+  /// A static conditional body; both branches are retained, including the inactive one.
+  ConditionalBody {
+    /// The declaration selected when the condition holds.
+    pub thenBranch: HirId,
+    /// The declaration selected otherwise, if written.
+    pub elseBranch: HirRef,
+  },
+  /// A body position holding source that cannot be a body.
+  InvalidDeclarationBody {
+    /// The healthy declaration, statement, and expression children retained from the region.
+    pub retained: Range,
+  },
+
+  // Declarations.
+
+  /// One declaration, pairing its logical name with its header and body.
+  Declaration {
+    /// The declaration's source-independent logical name.
+    pub owner: OwnerKey,
+    /// The declaration header.
+    pub header: HirId,
+    /// The declaration body.
+    pub body: HirId,
+  },
+}
+
+impl Copy for Node {}
+
+/// One lowered source file: a flat node arena with its interned strings and coordinates.
+///
+/// # Details
+///
+/// The module holds no source bytes and no syntax tree. Every child identity in `nodes` addresses
+/// this module's `nodes`; every list addresses this module's `children`; every symbol addresses
+/// this module's `strings`; every cause range addresses this module's `causes`.
+pub struct Module {
+  /// Every interned byte string the module refers to.
+  pub strings: StringTable
+  /// The postorder node arena addressed by [`HirId`].
+  pub nodes: Vector<Node>
+  /// The shared child storage that every [`Range`] addresses.
+  pub children: Vector<HirId>
+  /// The shared recovery-cause storage that every entry of `nodeCauses` addresses.
+  pub causes: Vector<Cause>
+  /// One recovery-cause run per node, parallel to [`nodes`](Module.nodes); empty for a healthy node.
+  pub nodeCauses: Vector<Range>
+  /// One source span per node, parallel to [`nodes`](Module.nodes).
+  pub spans: Vector<Span>
+  /// The module's top-level declarations in written order.
+  pub declarations: Range
+  /// Frontend diagnostics re-anchored to module coordinates, in discovery order.
+  pub diagnostics: Vector<Diagnostic>
+  /// The interned module documentation, if the file wrote any.
+  pub documentation: SymbolRef
+}
+
+impl Module {
+  /// Creates an empty module with no nodes, no declarations, and no interned strings.
+  pub fn make() -> Module {
+    return Module {
+      strings: StringTable.make(),
+      nodes: Vector.make<Node>(),
+      children: Vector.make<HirId>(),
+      causes: Vector.make<Cause>(),
+      nodeCauses: Vector.make<Range>(),
+      spans: Vector.make<Span>(),
+      declarations: Range.empty(),
+      diagnostics: Vector.make<Diagnostic>(),
+      documentation: SymbolRef.absent(),
+    }
+  }
+
+  /// Returns the number of nodes in the arena.
+  pub fn length(self: &Self) -> usize {
+    return Vector.length<Node>(&self.nodes)
+  }
+
+  /// Returns the node that `id` identifies.
+  pub fn node(self: &Self, id: HirId) -> Node {
+    return Vector.get<Node>(&self.nodes, id.index)
+  }
+
+  /// Returns the source span of the node that `id` identifies.
+  pub fn span(self: &Self, id: HirId) -> Span {
+    return Vector.get<Span>(&self.spans, id.index)
+  }
+
+  /// Returns the recovery causes recorded against the node that `id` identifies.
+  ///
+  /// # Details
+  ///
+  /// A healthy node answers with an empty range. A `Missing` or `Invalid` node always answers with
+  /// a non-empty one, and an otherwise healthy node whose written source was damaged nearby may
+  /// also carry causes.
+  pub fn causeRange(self: &Self, id: HirId) -> Range {
+    return Vector.get<Range>(&self.nodeCauses, id.index)
+  }
+
+  /// Returns the child identity at `offset` within `range`.
+  pub fn child(self: &Self, range: Range, offset: usize) -> HirId {
+    return Vector.get<HirId>(&self.children, range.start + offset)
+  }
+
+  /// Interns `values` into the module's string table and returns its symbol.
+  pub effect fn intern(self: &mut Self, values: &[u8]) -> Symbol
+  ! OutOfMemoryError
+  ? &mut Allocator {
+    return run StringTable.intern(&mut self.strings, values)
+  }
+
+  /// Returns the interned bytes that `symbol` identifies.
+  pub fn text(self: &Self, symbol: Symbol) -> &[u8] {
+    return StringTable.get(&self.strings, symbol)
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Debug text form
+// ---------------------------------------------------------------------------
+
+fn accessName(access: Access) -> string<'static> {
+  return match access {
+    Access.Shared => "Shared"
+    Access.Mutable => "Mutable"
+  }
+}
+
+fn callableModeName(mode: CallableMode) -> string<'static> {
+  return match mode {
+    CallableMode.Shared => "Shared"
+    CallableMode.Mutable => "Mutable"
+    CallableMode.Once => "Once"
+  }
+}
+
+fn parameterModeName(mode: ParameterMode) -> string<'static> {
+  return match mode {
+    ParameterMode.Value => "Value"
+    ParameterMode.Mutable => "Mutable"
+    ParameterMode.Static => "Static"
+  }
+}
+
+fn radixName(radix: Radix) -> string<'static> {
+  return match radix {
+    Radix.Binary => "Binary"
+    Radix.Octal => "Octal"
+    Radix.Decimal => "Decimal"
+    Radix.Hexadecimal => "Hexadecimal"
+  }
+}
+
+fn signName(sign: Sign) -> string<'static> {
+  return match sign {
+    Sign.Positive => "Positive"
+    Sign.Negative => "Negative"
+  }
+}
+
+fn durationUnitName(unit: DurationUnit) -> string<'static> {
+  return match unit {
+    DurationUnit.Weeks => "Weeks"
+    DurationUnit.Days => "Days"
+    DurationUnit.Hours => "Hours"
+    DurationUnit.Minutes => "Minutes"
+    DurationUnit.Seconds => "Seconds"
+    DurationUnit.Milliseconds => "Milliseconds"
+    DurationUnit.Microseconds => "Microseconds"
+    DurationUnit.Nanoseconds => "Nanoseconds"
+  }
+}
+
+fn multiplicityName(multiplicity: Multiplicity) -> string<'static> {
+  return match multiplicity {
+    Multiplicity.Single => "Single"
+    Multiplicity.Many => "Many"
+  }
+}
+
+fn matchAccessName(access: MatchAccess) -> string<'static> {
+  return match access {
+    MatchAccess.Default => "Default"
+    MatchAccess.Place => "Place"
+    MatchAccess.Move => "Move"
+    MatchAccess.Shared => "Shared"
+    MatchAccess.Mutable => "Mutable"
+  }
+}
+
+fn prefixOperatorName(operator: PrefixOperator) -> string<'static> {
+  return match operator {
+    PrefixOperator.Negate => "Negate"
+    PrefixOperator.Not => "Not"
+    PrefixOperator.BitwiseNot => "BitwiseNot"
+  }
+}
+
+fn infixOperatorName(operator: InfixOperator) -> string<'static> {
+  return match operator {
+    InfixOperator.Add => "Add"
+    InfixOperator.Subtract => "Subtract"
+    InfixOperator.Multiply => "Multiply"
+    InfixOperator.Divide => "Divide"
+    InfixOperator.Remainder => "Remainder"
+    InfixOperator.Equals => "Equals"
+    InfixOperator.NotEquals => "NotEquals"
+    InfixOperator.LessThan => "LessThan"
+    InfixOperator.LessOrEqual => "LessOrEqual"
+    InfixOperator.GreaterThan => "GreaterThan"
+    InfixOperator.GreaterOrEqual => "GreaterOrEqual"
+    InfixOperator.And => "And"
+    InfixOperator.Or => "Or"
+    InfixOperator.BitAnd => "BitAnd"
+    InfixOperator.BitOr => "BitOr"
+    InfixOperator.BitXor => "BitXor"
+  }
+}
+
+fn linkageDirectionName(direction: LinkageDirection) -> string<'static> {
+  return match direction {
+    LinkageDirection.Import => "Import"
+    LinkageDirection.Export => "Export"
+  }
+}
+
+fn groupBranchName(branch: GroupBranch) -> string<'static> {
+  return match branch {
+    GroupBranch.Then => "Then"
+    GroupBranch.Else => "Else"
+  }
+}
+
+/// Returns the stable debug spelling of one recovery or diagnostic reason.
+pub fn causeCodeName(code: CauseCode) -> string<'static> {
+  return match code {
+    CauseCode.MissingToken => "MissingToken"
+    CauseCode.UnexpectedToken => "UnexpectedToken"
+    CauseCode.NestingLimit => "NestingLimit"
+    CauseCode.MissingSyntax => "MissingSyntax"
+    CauseCode.UnexpectedSyntax => "UnexpectedSyntax"
+    CauseCode.IntegerOverflow => "IntegerOverflow"
+    CauseCode.FloatingOverflow => "FloatingOverflow"
+    CauseCode.DurationOverflow => "DurationOverflow"
+    CauseCode.InvalidLiteralEncoding => "InvalidLiteralEncoding"
+    CauseCode.InvalidCharacter => "InvalidCharacter"
+    CauseCode.UnsupportedConstruct => "UnsupportedConstruct"
+  }
+}
+
+/// Returns the stable debug spelling of one declaration owner category.
+pub fn ownerKindName(kind: OwnerKind) -> string<'static> {
+  return match kind {
+    OwnerKind.Import => "Import"
+    OwnerKind.Conditional => "Conditional"
+    OwnerKind.ModuleProperty => "ModuleProperty"
+    OwnerKind.Implementation => "Implementation"
+    OwnerKind.Function => "Function"
+    OwnerKind.Struct => "Struct"
+    OwnerKind.Tuple => "Tuple"
+    OwnerKind.Enumeration => "Enumeration"
+    OwnerKind.Union => "Union"
+    OwnerKind.Service => "Service"
+    OwnerKind.Interface => "Interface"
+    OwnerKind.Role => "Role"
+    OwnerKind.Constant => "Constant"
+    OwnerKind.PackageParameter => "PackageParameter"
+    OwnerKind.Alias => "Alias"
+    OwnerKind.Static => "Static"
+    OwnerKind.Damaged => "Damaged"
+  }
+}
+
+effect fn writeSpanText(span: Span) -> () ! WriterError ? &mut Writer {
+  run Format.display(&span.start)
+  run Writer.writeString("..")
+  return run Format.display(&span.end)
+}
+
+effect fn writeFieldName(name: string<'static>) -> () ! WriterError ? &mut Writer {
+  run Writer.writeString("  ")
+  run Writer.writeString(name)
+  return run Writer.writeString(": ")
+}
+
+effect fn writeQuotedSymbol(module: &Module, symbol: Symbol) -> () ! WriterError ? &mut Writer {
+  run Writer.writeString("\"")
+  run Writer.writeAll(StringTable.get(&module.strings, symbol))
+  return run Writer.writeString("\"")
+}
+
+effect fn writeIdField(name: string<'static>, id: HirId) -> () ! WriterError ? &mut Writer {
+  run writeFieldName(name)
+  run Writer.writeString("#")
+  run Format.display(&id.index)
+  return run Writer.writeString("\n")
+}
+
+effect fn writeRefField(name: string<'static>, reference: HirRef) -> () ! WriterError ? &mut Writer {
+  run writeFieldName(name)
+  if reference.present {
+    run Writer.writeString("#")
+    run Format.display(&reference.id.index)
+  } else {
+    run Writer.writeString("none")
+  }
+  return run Writer.writeString("\n")
+}
+
+effect fn writeRangeBody(module: &Module, range: Range) -> () ! WriterError ? &mut Writer {
+  run Writer.writeString("[")
+  let mut offset = usize.ZERO
+  while offset < range.length {
+    if offset > usize.ZERO {
+      run Writer.writeString(" ")
+    }
+    run Writer.writeString("#")
+    run Format.display(&Module.child(module, range, offset).index)
+    offset = offset + usize.ONE
+  }
+  return run Writer.writeString("]")
+}
+
+effect fn writeRangeField(module: &Module, name: string<'static>, range: Range) -> ()
+! WriterError
+? &mut Writer {
+  run writeFieldName(name)
+  run writeRangeBody(module, range)
+  return run Writer.writeString("\n")
+}
+
+effect fn writeRangeRefField(module: &Module, name: string<'static>, reference: RangeRef) -> ()
+! WriterError
+? &mut Writer {
+  run writeFieldName(name)
+  if reference.present {
+    run writeRangeBody(module, reference.range)
+  } else {
+    run Writer.writeString("none")
+  }
+  return run Writer.writeString("\n")
+}
+
+effect fn writeSpanField(name: string<'static>, span: Span) -> () ! WriterError ? &mut Writer {
+  run writeFieldName(name)
+  run writeSpanText(span)
+  return run Writer.writeString("\n")
+}
+
+effect fn writeSpanRefField(name: string<'static>, reference: SpanRef) -> ()
+! WriterError
+? &mut Writer {
+  run writeFieldName(name)
+  if reference.present {
+    run writeSpanText(reference.span)
+  } else {
+    run Writer.writeString("none")
+  }
+  return run Writer.writeString("\n")
+}
+
+effect fn writeSymbolField(module: &Module, name: string<'static>, symbol: Symbol) -> ()
+! WriterError
+? &mut Writer {
+  run writeFieldName(name)
+  run writeQuotedSymbol(module, symbol)
+  return run Writer.writeString("\n")
+}
+
+effect fn writeSymbolRefField(module: &Module, name: string<'static>, reference: SymbolRef) -> ()
+! WriterError
+? &mut Writer {
+  run writeFieldName(name)
+  if reference.present {
+    run writeQuotedSymbol(module, reference.symbol)
+  } else {
+    run Writer.writeString("none")
+  }
+  return run Writer.writeString("\n")
+}
+
+effect fn writeBoolField(name: string<'static>, value: bool) -> () ! WriterError ? &mut Writer {
+  run writeFieldName(name)
+  if value {
+    run Writer.writeString("true")
+  } else {
+    run Writer.writeString("false")
+  }
+  return run Writer.writeString("\n")
+}
+
+effect fn writeMagnitudeField(name: string<'static>, value: u64) -> () ! WriterError ? &mut Writer {
+  run writeFieldName(name)
+  run Format.display(&value)
+  return run Writer.writeString("\n")
+}
+
+effect fn writeScalarField(name: string<'static>, value: u32) -> () ! WriterError ? &mut Writer {
+  run writeFieldName(name)
+  run Format.display(&value)
+  return run Writer.writeString("\n")
+}
+
+effect fn writeTextField(name: string<'static>, value: string<'static>) -> ()
+! WriterError
+? &mut Writer {
+  run writeFieldName(name)
+  run Writer.writeString(value)
+  return run Writer.writeString("\n")
+}
+
+effect fn writeAccessField(name: string<'static>, access: Access) -> () ! WriterError ? &mut Writer {
+  return run writeTextField(name, accessName(access))
+}
+
+effect fn writeCallableModeField(name: string<'static>, mode: CallableMode) -> ()
+! WriterError
+? &mut Writer {
+  return run writeTextField(name, callableModeName(mode))
+}
+
+effect fn writeParameterModeField(name: string<'static>, mode: ParameterMode) -> ()
+! WriterError
+? &mut Writer {
+  return run writeTextField(name, parameterModeName(mode))
+}
+
+effect fn writeRadixField(name: string<'static>, radix: Radix) -> () ! WriterError ? &mut Writer {
+  return run writeTextField(name, radixName(radix))
+}
+
+effect fn writeSignField(name: string<'static>, sign: Sign) -> () ! WriterError ? &mut Writer {
+  return run writeTextField(name, signName(sign))
+}
+
+effect fn writeDurationUnitField(name: string<'static>, unit: DurationUnit) -> ()
+! WriterError
+? &mut Writer {
+  return run writeTextField(name, durationUnitName(unit))
+}
+
+effect fn writeMultiplicityField(name: string<'static>, multiplicity: Multiplicity) -> ()
+! WriterError
+? &mut Writer {
+  return run writeTextField(name, multiplicityName(multiplicity))
+}
+
+effect fn writeMatchAccessField(name: string<'static>, access: MatchAccess) -> ()
+! WriterError
+? &mut Writer {
+  return run writeTextField(name, matchAccessName(access))
+}
+
+effect fn writePrefixOperatorField(name: string<'static>, operator: PrefixOperator) -> ()
+! WriterError
+? &mut Writer {
+  return run writeTextField(name, prefixOperatorName(operator))
+}
+
+effect fn writeInfixOperatorField(name: string<'static>, operator: InfixOperator) -> ()
+! WriterError
+? &mut Writer {
+  return run writeTextField(name, infixOperatorName(operator))
+}
+
+effect fn writeLinkageDirectionField(name: string<'static>, direction: LinkageDirection) -> ()
+! WriterError
+? &mut Writer {
+  return run writeTextField(name, linkageDirectionName(direction))
+}
+
+effect fn writeGroupBranchField(name: string<'static>, branch: GroupBranch) -> ()
+! WriterError
+? &mut Writer {
+  return run writeTextField(name, groupBranchName(branch))
+}
+
+effect fn writeOwnerField(module: &Module, name: string<'static>, owner: OwnerKey) -> ()
+! WriterError
+? &mut Writer {
+  run writeFieldName(name)
+  run Writer.writeString(ownerKindName(owner.kind))
+  run Writer.writeString(" ")
+  if owner.name.present {
+    run writeQuotedSymbol(module, owner.name.symbol)
+  } else {
+    run Writer.writeString("anonymous")
+  }
+  run Writer.writeString(" #")
+  run Format.display(&owner.occurrence)
+  return run Writer.writeString("\n")
+}
+
+fn nodeKindName(node: Node) -> string<'static> {
+  return match node {
+    Node.Name {text: ignored1} => "Name"
+    Node.MissingName => "MissingName"
+    Node.InvalidName {spelling: ignored1} => "InvalidName"
+    Node.Path {segments: ignored1} => "Path"
+    Node.TypeParameter {name: ignored1, bounds: ignored2} => "TypeParameter"
+    Node.RowParameter {name: ignored1} => "RowParameter"
+    Node.LifetimeParameter {name: ignored1, bounds: ignored2} => "LifetimeParameter"
+    Node.Lifetime {name: ignored1} => "Lifetime"
+    Node.RequirementSelector {subject: ignored1, rolePath: ignored2} => "RequirementSelector"
+    Node.TypeArguments {arguments: ignored1, environment: ignored2, failures: ignored3, requirements: ignored4} => "TypeArguments"
+    Node.Requirement {hasAccess: ignored1, access: ignored2, capability: ignored3, rolePath: ignored4} => "Requirement"
+    Node.RequirementRow {members: ignored1} => "RequirementRow"
+    Node.PointerQualifier {name: ignored1, value: ignored2} => "PointerQualifier"
+    Node.NamedType {path: ignored1, hasMode: ignored2, mode: ignored3} => "NamedType"
+    Node.AppliedType {target: ignored1, arguments: ignored2} => "AppliedType"
+    Node.FixedArrayType {element: ignored1, length: ignored2} => "FixedArrayType"
+    Node.SliceType {element: ignored1, access: ignored2, lifetime: ignored3} => "SliceType"
+    Node.ReferenceType {referent: ignored1, access: ignored2, lifetime: ignored3, roleName: ignored4} => "ReferenceType"
+    Node.PointerType {pointee: ignored1, access: ignored2, nullable: ignored3, multiplicity: ignored4, qualifiers: ignored5} => "PointerType"
+    Node.CallableType {mode: ignored1, isUnsafe: ignored2, binders: ignored3, environment: ignored4, parameters: ignored5, result: ignored6} => "CallableType"
+    Node.ForeignFunctionType {abi: ignored1, binders: ignored2, parameters: ignored3, result: ignored4, properties: ignored5} => "ForeignFunctionType"
+    Node.ExactRepresentationType {subject: ignored1} => "ExactRepresentationType"
+    Node.OpaqueResultType {binders: ignored1, result: ignored2} => "OpaqueResultType"
+    Node.UnitType => "UnitType"
+    Node.UnionType {members: ignored1} => "UnionType"
+    Node.RowWithout {source: ignored1, removed: ignored2} => "RowWithout"
+    Node.MissingType => "MissingType"
+    Node.InvalidType {retained: ignored1} => "InvalidType"
+    Node.MembershipConstraint {subject: ignored1, source: ignored2} => "MembershipConstraint"
+    Node.ProviderConstraint {provider: ignored1, selected: ignored2, source: ignored3} => "ProviderConstraint"
+    Node.Parameter {name: ignored1, annotation: ignored2, mode: ignored3} => "Parameter"
+    Node.CallableContract {generics: ignored1, parameters: ignored2, variadic: ignored3, result: ignored4, failures: ignored5, requirements: ignored6, constraints: ignored7, isEffect: ignored8, isTest: ignored9, environment: ignored10, isUnsafe: ignored11, isStatic: ignored12, effectAnchor: ignored13, testAnchor: ignored14, unsafeAnchor: ignored15, staticAnchor: ignored16, genericsAnchor: ignored17, failuresAnchor: ignored18, constraintsAnchor: ignored19} => "CallableContract"
+    Node.Property {name: ignored1, value: ignored2} => "Property"
+    Node.PropertyClause {namespace: ignored1, operation: ignored2, properties: ignored3} => "PropertyClause"
+    Node.IntegerLiteral {magnitude: ignored1, radix: ignored2, suffix: ignored3} => "IntegerLiteral"
+    Node.TextLiteral {value: ignored1} => "TextLiteral"
+    Node.FloatingLiteral {sign: ignored1, coefficient: ignored2, exponent: ignored3, suffix: ignored4} => "FloatingLiteral"
+    Node.DurationComponent {magnitude: ignored1, unit: ignored2} => "DurationComponent"
+    Node.DurationLiteral {components: ignored1} => "DurationLiteral"
+    Node.BytesLiteral {value: ignored1} => "BytesLiteral"
+    Node.CharacterLiteral {scalar: ignored1} => "CharacterLiteral"
+    Node.BooleanLiteral {value: ignored1} => "BooleanLiteral"
+    Node.UnitLiteral => "UnitLiteral"
+    Node.MissingExpression => "MissingExpression"
+    Node.InvalidExpression {retained: ignored1} => "InvalidExpression"
+    Node.FieldInitializer {name: ignored1, value: ignored2} => "FieldInitializer"
+    Node.MemberSelector {subject: ignored1, member: ignored2} => "MemberSelector"
+    Node.IdentifierExpression {name: ignored1, binding: ignored2} => "IdentifierExpression"
+    Node.MoveExpression {operand: ignored1} => "MoveExpression"
+    Node.BorrowExpression {access: ignored1, operand: ignored2} => "BorrowExpression"
+    Node.CallableExpression {contract: ignored1, body: ignored2} => "CallableExpression"
+    Node.EffectExpression {body: ignored1} => "EffectExpression"
+    Node.RunExpression {operand: ignored1} => "RunExpression"
+    Node.UnsafeExpression {operand: ignored1} => "UnsafeExpression"
+    Node.CompileErrorExpression {message: ignored1} => "CompileErrorExpression"
+    Node.MatchExpression {access: ignored1, subject: ignored2, arms: ignored3} => "MatchExpression"
+    Node.StructExpression {annotation: ignored1, fields: ignored2} => "StructExpression"
+    Node.TupleExpression {elements: ignored1} => "TupleExpression"
+    Node.RecordExpression {fields: ignored1} => "RecordExpression"
+    Node.ArrayExpression {elements: ignored1} => "ArrayExpression"
+    Node.MemberExpression {selector: ignored1, fields: ignored2} => "MemberExpression"
+    Node.FieldExpression {subject: ignored1, field: ignored2} => "FieldExpression"
+    Node.OrdinalExpression {subject: ignored1, ordinal: ignored2} => "OrdinalExpression"
+    Node.ReferentExpression {subject: ignored1} => "ReferentExpression"
+    Node.IndexExpression {subject: ignored1, index: ignored2} => "IndexExpression"
+    Node.CallExpression {callee: ignored1, generics: ignored2, arguments: ignored3} => "CallExpression"
+    Node.PrefixExpression {operator: ignored1, operatorAnchor: ignored2, operand: ignored3} => "PrefixExpression"
+    Node.InfixExpression {operator: ignored1, operatorAnchor: ignored2, left: ignored3, right: ignored4} => "InfixExpression"
+    Node.PipelineExpression {input: ignored1, target: ignored2} => "PipelineExpression"
+    Node.PatternField {name: ignored1, pattern: ignored2} => "PatternField"
+    Node.EnumPattern {path: ignored1} => "EnumPattern"
+    Node.IntegerPattern {value: ignored1} => "IntegerPattern"
+    Node.NominalPattern {annotation: ignored1, fields: ignored2} => "NominalPattern"
+    Node.BindingPattern {annotation: ignored1, name: ignored2} => "BindingPattern"
+    Node.UniversalPattern {name: ignored1} => "UniversalPattern"
+    Node.VariantPattern {selector: ignored1, fields: ignored2} => "VariantPattern"
+    Node.RestPattern => "RestPattern"
+    Node.MissingPattern => "MissingPattern"
+    Node.InvalidPattern {retained: ignored1} => "InvalidPattern"
+    Node.MatchArm {pattern: ignored1, guard: ignored2, result: ignored3} => "MatchArm"
+    Node.Block {statements: ignored1} => "Block"
+    Node.ExpressionStatement {expression: ignored1} => "ExpressionStatement"
+    Node.BindingStatement {name: ignored1, mutable: ignored2, isStatic: ignored3, annotation: ignored4, initializer: ignored5} => "BindingStatement"
+    Node.PatternBindingStatement {pattern: ignored1, initializer: ignored2} => "PatternBindingStatement"
+    Node.AssignmentStatement {target: ignored1, value: ignored2} => "AssignmentStatement"
+    Node.ConditionalStatement {condition: ignored1, thenBranch: ignored2, elseBranch: ignored3} => "ConditionalStatement"
+    Node.PatternConditionalStatement {pattern: ignored1, subject: ignored2, thenBranch: ignored3, elseBranch: ignored4} => "PatternConditionalStatement"
+    Node.StaticConditionalStatement {condition: ignored1, thenBranch: ignored2, elseBranch: ignored3} => "StaticConditionalStatement"
+    Node.StaticForStatement {binding: ignored1, iterable: ignored2, body: ignored3} => "StaticForStatement"
+    Node.WhileStatement {condition: ignored1, body: ignored2} => "WhileStatement"
+    Node.BreakStatement => "BreakStatement"
+    Node.ContinueStatement => "ContinueStatement"
+    Node.ReturnStatement {value: ignored1} => "ReturnStatement"
+    Node.FailStatement {isMove: ignored1, value: ignored2} => "FailStatement"
+    Node.DropStatement {value: ignored1} => "DropStatement"
+    Node.UnsafeStatement {body: ignored1} => "UnsafeStatement"
+    Node.MissingStatement => "MissingStatement"
+    Node.InvalidStatement {retained: ignored1} => "InvalidStatement"
+    Node.ImportMember {name: ignored1, alias: ignored2} => "ImportMember"
+    Node.Field {name: ignored1, isPublic: ignored2, annotation: ignored3} => "Field"
+    Node.EnumMember {name: ignored1, value: ignored2} => "EnumMember"
+    Node.Variant {name: ignored1, fields: ignored2, braces: ignored3} => "Variant"
+    Node.Linkage {direction: ignored1, abi: ignored2, symbol: ignored3} => "Linkage"
+    Node.ImportHeader {isPublic: ignored1, path: ignored2, alias: ignored3, members: ignored4} => "ImportHeader"
+    Node.ConditionalHeader {condition: ignored1} => "ConditionalHeader"
+    Node.GroupHeader {branch: ignored1} => "GroupHeader"
+    Node.ModulePropertyHeader {properties: ignored1} => "ModulePropertyHeader"
+    Node.ImplHeader {generics: ignored1, subject: ignored2, target: ignored3} => "ImplHeader"
+    Node.MissingDeclarationHeader => "MissingDeclarationHeader"
+    Node.InvalidDeclarationHeader {retained: ignored1} => "InvalidDeclarationHeader"
+    Node.FunctionHeader {name: ignored1, isPublic: ignored2, contract: ignored3, linkage: ignored4, properties: ignored5} => "FunctionHeader"
+    Node.OperationHeader {name: ignored1, isPublic: ignored2, contract: ignored3, operator: ignored4, properties: ignored5} => "OperationHeader"
+    Node.ImplAliasHeader {name: ignored1, isPublic: ignored2, target: ignored3} => "ImplAliasHeader"
+    Node.StructHeader {name: ignored1, isPublic: ignored2, generics: ignored3, genericsAnchor: ignored4, fields: ignored5, abi: ignored6} => "StructHeader"
+    Node.TupleHeader {name: ignored1, isPublic: ignored2, generics: ignored3, elements: ignored4} => "TupleHeader"
+    Node.EnumHeader {name: ignored1, isPublic: ignored2, representation: ignored3, members: ignored4} => "EnumHeader"
+    Node.UnionHeader {name: ignored1, isPublic: ignored2, generics: ignored3, variants: ignored4} => "UnionHeader"
+    Node.ServiceHeader {name: ignored1, isPublic: ignored2, generics: ignored3} => "ServiceHeader"
+    Node.InterfaceHeader {name: ignored1, isPublic: ignored2, generics: ignored3} => "InterfaceHeader"
+    Node.RoleHeader {name: ignored1, isPublic: ignored2} => "RoleHeader"
+    Node.ConstantHeader {name: ignored1, isPublic: ignored2, annotation: ignored3} => "ConstantHeader"
+    Node.PackageParameterHeader {name: ignored1, isPublic: ignored2, annotation: ignored3} => "PackageParameterHeader"
+    Node.AliasHeader {name: ignored1, isPublic: ignored2, generics: ignored3, target: ignored4} => "AliasHeader"
+    Node.StaticHeader {name: ignored1, isPublic: ignored2, annotation: ignored3, mutable: ignored4, linkage: ignored5, properties: ignored6} => "StaticHeader"
+    Node.NoBody => "NoBody"
+    Node.CallableBody {block: ignored1} => "CallableBody"
+    Node.InitializerBody {value: ignored1} => "InitializerBody"
+    Node.PackageParameterBody {default: ignored1, validation: ignored2} => "PackageParameterBody"
+    Node.MembersBody {members: ignored1} => "MembersBody"
+    Node.ConditionalBody {thenBranch: ignored1, elseBranch: ignored2} => "ConditionalBody"
+    Node.InvalidDeclarationBody {retained: ignored1} => "InvalidDeclarationBody"
+    Node.Declaration {owner: ignored1, header: ignored2, body: ignored3} => "Declaration"
+  }
+}
+
+effect fn writeNodeFields(module: &Module, node: Node) -> () ! WriterError ? &mut Writer {
+  return match node {
+    Node.Name {text} => {
+      run writeSymbolField(module, "text", text)
+    }
+    Node.MissingName => ()
+    Node.InvalidName {spelling} => {
+      run writeSymbolField(module, "spelling", spelling)
+    }
+    Node.Path {segments} => {
+      run writeRangeField(module, "segments", segments)
+    }
+    Node.TypeParameter {name, bounds} => {
+      run writeIdField("name", name)
+      run writeRangeField(module, "bounds", bounds)
+    }
+    Node.RowParameter {name} => {
+      run writeIdField("name", name)
+    }
+    Node.LifetimeParameter {name, bounds} => {
+      run writeIdField("name", name)
+      run writeRangeField(module, "bounds", bounds)
+    }
+    Node.Lifetime {name} => {
+      run writeIdField("name", name)
+    }
+    Node.RequirementSelector {subject, rolePath} => {
+      run writeIdField("subject", subject)
+      run writeIdField("rolePath", rolePath)
+    }
+    Node.TypeArguments {arguments, environment, failures, requirements} => {
+      run writeRangeField(module, "arguments", arguments)
+      run writeRangeRefField(module, "environment", environment)
+      run writeRefField("failures", failures)
+      run writeRefField("requirements", requirements)
+    }
+    Node.Requirement {hasAccess, access, capability, rolePath} => {
+      run writeBoolField("hasAccess", hasAccess)
+      run writeAccessField("access", access)
+      run writeIdField("capability", capability)
+      run writeRefField("rolePath", rolePath)
+    }
+    Node.RequirementRow {members} => {
+      run writeRangeField(module, "members", members)
+    }
+    Node.PointerQualifier {name, value} => {
+      run writeIdField("name", name)
+      run writeIdField("value", value)
+    }
+    Node.NamedType {path, hasMode, mode} => {
+      run writeIdField("path", path)
+      run writeBoolField("hasMode", hasMode)
+      run writeCallableModeField("mode", mode)
+    }
+    Node.AppliedType {target, arguments} => {
+      run writeIdField("target", target)
+      run writeIdField("arguments", arguments)
+    }
+    Node.FixedArrayType {element, length} => {
+      run writeIdField("element", element)
+      run writeIdField("length", length)
+    }
+    Node.SliceType {element, access, lifetime} => {
+      run writeIdField("element", element)
+      run writeAccessField("access", access)
+      run writeRefField("lifetime", lifetime)
+    }
+    Node.ReferenceType {referent, access, lifetime, roleName} => {
+      run writeIdField("referent", referent)
+      run writeAccessField("access", access)
+      run writeRefField("lifetime", lifetime)
+      run writeRefField("roleName", roleName)
+    }
+    Node.PointerType {pointee, access, nullable, multiplicity, qualifiers} => {
+      run writeIdField("pointee", pointee)
+      run writeAccessField("access", access)
+      run writeBoolField("nullable", nullable)
+      run writeMultiplicityField("multiplicity", multiplicity)
+      run writeRangeField(module, "qualifiers", qualifiers)
+    }
+    Node.CallableType {mode, isUnsafe, binders, environment, parameters, result} => {
+      run writeCallableModeField("mode", mode)
+      run writeBoolField("isUnsafe", isUnsafe)
+      run writeRangeField(module, "binders", binders)
+      run writeRefField("environment", environment)
+      run writeRangeField(module, "parameters", parameters)
+      run writeIdField("result", result)
+    }
+    Node.ForeignFunctionType {abi, binders, parameters, result, properties} => {
+      run writeIdField("abi", abi)
+      run writeRangeField(module, "binders", binders)
+      run writeRangeField(module, "parameters", parameters)
+      run writeIdField("result", result)
+      run writeRangeField(module, "properties", properties)
+    }
+    Node.ExactRepresentationType {subject} => {
+      run writeIdField("subject", subject)
+    }
+    Node.OpaqueResultType {binders, result} => {
+      run writeRangeField(module, "binders", binders)
+      run writeIdField("result", result)
+    }
+    Node.UnitType => ()
+    Node.UnionType {members} => {
+      run writeRangeField(module, "members", members)
+    }
+    Node.RowWithout {source, removed} => {
+      run writeIdField("source", source)
+      run writeIdField("removed", removed)
+    }
+    Node.MissingType => ()
+    Node.InvalidType {retained} => {
+      run writeRangeField(module, "retained", retained)
+    }
+    Node.MembershipConstraint {subject, source} => {
+      run writeIdField("subject", subject)
+      run writeIdField("source", source)
+    }
+    Node.ProviderConstraint {provider, selected, source} => {
+      run writeIdField("provider", provider)
+      run writeIdField("selected", selected)
+      run writeIdField("source", source)
+    }
+    Node.Parameter {name, annotation, mode} => {
+      run writeIdField("name", name)
+      run writeIdField("annotation", annotation)
+      run writeParameterModeField("mode", mode)
+    }
+    Node.CallableContract {generics, parameters, variadic, result, failures, requirements, constraints, isEffect, isTest, environment, isUnsafe, isStatic, effectAnchor, testAnchor, unsafeAnchor, staticAnchor, genericsAnchor, failuresAnchor, constraintsAnchor} => {
+      run writeRangeField(module, "generics", generics)
+      run writeRangeField(module, "parameters", parameters)
+      run writeBoolField("variadic", variadic)
+      run writeRefField("result", result)
+      run writeRefField("failures", failures)
+      run writeRefField("requirements", requirements)
+      run writeRangeField(module, "constraints", constraints)
+      run writeBoolField("isEffect", isEffect)
+      run writeBoolField("isTest", isTest)
+      run writeRangeRefField(module, "environment", environment)
+      run writeBoolField("isUnsafe", isUnsafe)
+      run writeBoolField("isStatic", isStatic)
+      run writeSpanRefField("effectAnchor", effectAnchor)
+      run writeSpanRefField("testAnchor", testAnchor)
+      run writeSpanRefField("unsafeAnchor", unsafeAnchor)
+      run writeSpanRefField("staticAnchor", staticAnchor)
+      run writeSpanRefField("genericsAnchor", genericsAnchor)
+      run writeSpanRefField("failuresAnchor", failuresAnchor)
+      run writeSpanRefField("constraintsAnchor", constraintsAnchor)
+    }
+    Node.Property {name, value} => {
+      run writeIdField("name", name)
+      run writeIdField("value", value)
+    }
+    Node.PropertyClause {namespace, operation, properties} => {
+      run writeIdField("namespace", namespace)
+      run writeIdField("operation", operation)
+      run writeRangeField(module, "properties", properties)
+    }
+    Node.IntegerLiteral {magnitude, radix, suffix} => {
+      run writeMagnitudeField("magnitude", magnitude)
+      run writeRadixField("radix", radix)
+      run writeSymbolRefField(module, "suffix", suffix)
+    }
+    Node.TextLiteral {value} => {
+      run writeSymbolField(module, "value", value)
+    }
+    Node.FloatingLiteral {sign, coefficient, exponent, suffix} => {
+      run writeSignField("sign", sign)
+      run writeMagnitudeField("coefficient", coefficient)
+      run writeMagnitudeField("exponent", exponent)
+      run writeSymbolRefField(module, "suffix", suffix)
+    }
+    Node.DurationComponent {magnitude, unit} => {
+      run writeMagnitudeField("magnitude", magnitude)
+      run writeDurationUnitField("unit", unit)
+    }
+    Node.DurationLiteral {components} => {
+      run writeRangeField(module, "components", components)
+    }
+    Node.BytesLiteral {value} => {
+      run writeSymbolField(module, "value", value)
+    }
+    Node.CharacterLiteral {scalar} => {
+      run writeScalarField("scalar", scalar)
+    }
+    Node.BooleanLiteral {value} => {
+      run writeBoolField("value", value)
+    }
+    Node.UnitLiteral => ()
+    Node.MissingExpression => ()
+    Node.InvalidExpression {retained} => {
+      run writeRangeField(module, "retained", retained)
+    }
+    Node.FieldInitializer {name, value} => {
+      run writeIdField("name", name)
+      run writeIdField("value", value)
+    }
+    Node.MemberSelector {subject, member} => {
+      run writeIdField("subject", subject)
+      run writeIdField("member", member)
+    }
+    Node.IdentifierExpression {name, binding} => {
+      run writeIdField("name", name)
+      run writeRefField("binding", binding)
+    }
+    Node.MoveExpression {operand} => {
+      run writeIdField("operand", operand)
+    }
+    Node.BorrowExpression {access, operand} => {
+      run writeAccessField("access", access)
+      run writeIdField("operand", operand)
+    }
+    Node.CallableExpression {contract, body} => {
+      run writeIdField("contract", contract)
+      run writeIdField("body", body)
+    }
+    Node.EffectExpression {body} => {
+      run writeIdField("body", body)
+    }
+    Node.RunExpression {operand} => {
+      run writeIdField("operand", operand)
+    }
+    Node.UnsafeExpression {operand} => {
+      run writeIdField("operand", operand)
+    }
+    Node.CompileErrorExpression {message} => {
+      run writeIdField("message", message)
+    }
+    Node.MatchExpression {access, subject, arms} => {
+      run writeMatchAccessField("access", access)
+      run writeIdField("subject", subject)
+      run writeRangeField(module, "arms", arms)
+    }
+    Node.StructExpression {annotation, fields} => {
+      run writeIdField("annotation", annotation)
+      run writeRangeField(module, "fields", fields)
+    }
+    Node.TupleExpression {elements} => {
+      run writeRangeField(module, "elements", elements)
+    }
+    Node.RecordExpression {fields} => {
+      run writeRangeField(module, "fields", fields)
+    }
+    Node.ArrayExpression {elements} => {
+      run writeRangeField(module, "elements", elements)
+    }
+    Node.MemberExpression {selector, fields} => {
+      run writeIdField("selector", selector)
+      run writeRangeRefField(module, "fields", fields)
+    }
+    Node.FieldExpression {subject, field} => {
+      run writeIdField("subject", subject)
+      run writeIdField("field", field)
+    }
+    Node.OrdinalExpression {subject, ordinal} => {
+      run writeIdField("subject", subject)
+      run writeIdField("ordinal", ordinal)
+    }
+    Node.ReferentExpression {subject} => {
+      run writeIdField("subject", subject)
+    }
+    Node.IndexExpression {subject, index} => {
+      run writeIdField("subject", subject)
+      run writeIdField("index", index)
+    }
+    Node.CallExpression {callee, generics, arguments} => {
+      run writeIdField("callee", callee)
+      run writeRefField("generics", generics)
+      run writeRangeField(module, "arguments", arguments)
+    }
+    Node.PrefixExpression {operator, operatorAnchor, operand} => {
+      run writePrefixOperatorField("operator", operator)
+      run writeSpanField("operatorAnchor", operatorAnchor)
+      run writeIdField("operand", operand)
+    }
+    Node.InfixExpression {operator, operatorAnchor, left, right} => {
+      run writeInfixOperatorField("operator", operator)
+      run writeSpanField("operatorAnchor", operatorAnchor)
+      run writeIdField("left", left)
+      run writeIdField("right", right)
+    }
+    Node.PipelineExpression {input, target} => {
+      run writeIdField("input", input)
+      run writeIdField("target", target)
+    }
+    Node.PatternField {name, pattern} => {
+      run writeIdField("name", name)
+      run writeIdField("pattern", pattern)
+    }
+    Node.EnumPattern {path} => {
+      run writeIdField("path", path)
+    }
+    Node.IntegerPattern {value} => {
+      run writeIdField("value", value)
+    }
+    Node.NominalPattern {annotation, fields} => {
+      run writeIdField("annotation", annotation)
+      run writeRangeField(module, "fields", fields)
+    }
+    Node.BindingPattern {annotation, name} => {
+      run writeRefField("annotation", annotation)
+      run writeIdField("name", name)
+    }
+    Node.UniversalPattern {name} => {
+      run writeRefField("name", name)
+    }
+    Node.VariantPattern {selector, fields} => {
+      run writeIdField("selector", selector)
+      run writeRangeRefField(module, "fields", fields)
+    }
+    Node.RestPattern => ()
+    Node.MissingPattern => ()
+    Node.InvalidPattern {retained} => {
+      run writeRangeField(module, "retained", retained)
+    }
+    Node.MatchArm {pattern, guard, result} => {
+      run writeIdField("pattern", pattern)
+      run writeRefField("guard", guard)
+      run writeIdField("result", result)
+    }
+    Node.Block {statements} => {
+      run writeRangeField(module, "statements", statements)
+    }
+    Node.ExpressionStatement {expression} => {
+      run writeIdField("expression", expression)
+    }
+    Node.BindingStatement {name, mutable, isStatic, annotation, initializer} => {
+      run writeIdField("name", name)
+      run writeBoolField("mutable", mutable)
+      run writeBoolField("isStatic", isStatic)
+      run writeRefField("annotation", annotation)
+      run writeIdField("initializer", initializer)
+    }
+    Node.PatternBindingStatement {pattern, initializer} => {
+      run writeIdField("pattern", pattern)
+      run writeIdField("initializer", initializer)
+    }
+    Node.AssignmentStatement {target, value} => {
+      run writeIdField("target", target)
+      run writeIdField("value", value)
+    }
+    Node.ConditionalStatement {condition, thenBranch, elseBranch} => {
+      run writeIdField("condition", condition)
+      run writeIdField("thenBranch", thenBranch)
+      run writeRefField("elseBranch", elseBranch)
+    }
+    Node.PatternConditionalStatement {pattern, subject, thenBranch, elseBranch} => {
+      run writeIdField("pattern", pattern)
+      run writeIdField("subject", subject)
+      run writeIdField("thenBranch", thenBranch)
+      run writeRefField("elseBranch", elseBranch)
+    }
+    Node.StaticConditionalStatement {condition, thenBranch, elseBranch} => {
+      run writeIdField("condition", condition)
+      run writeIdField("thenBranch", thenBranch)
+      run writeRefField("elseBranch", elseBranch)
+    }
+    Node.StaticForStatement {binding, iterable, body} => {
+      run writeIdField("binding", binding)
+      run writeIdField("iterable", iterable)
+      run writeIdField("body", body)
+    }
+    Node.WhileStatement {condition, body} => {
+      run writeIdField("condition", condition)
+      run writeIdField("body", body)
+    }
+    Node.BreakStatement => ()
+    Node.ContinueStatement => ()
+    Node.ReturnStatement {value} => {
+      run writeRefField("value", value)
+    }
+    Node.FailStatement {isMove, value} => {
+      run writeBoolField("isMove", isMove)
+      run writeIdField("value", value)
+    }
+    Node.DropStatement {value} => {
+      run writeIdField("value", value)
+    }
+    Node.UnsafeStatement {body} => {
+      run writeIdField("body", body)
+    }
+    Node.MissingStatement => ()
+    Node.InvalidStatement {retained} => {
+      run writeRangeField(module, "retained", retained)
+    }
+    Node.ImportMember {name, alias} => {
+      run writeIdField("name", name)
+      run writeRefField("alias", alias)
+    }
+    Node.Field {name, isPublic, annotation} => {
+      run writeIdField("name", name)
+      run writeBoolField("isPublic", isPublic)
+      run writeIdField("annotation", annotation)
+    }
+    Node.EnumMember {name, value} => {
+      run writeIdField("name", name)
+      run writeRefField("value", value)
+    }
+    Node.Variant {name, fields, braces} => {
+      run writeIdField("name", name)
+      run writeRangeField(module, "fields", fields)
+      run writeBoolField("braces", braces)
+    }
+    Node.Linkage {direction, abi, symbol} => {
+      run writeLinkageDirectionField("direction", direction)
+      run writeIdField("abi", abi)
+      run writeRefField("symbol", symbol)
+    }
+    Node.ImportHeader {isPublic, path, alias, members} => {
+      run writeBoolField("isPublic", isPublic)
+      run writeIdField("path", path)
+      run writeRefField("alias", alias)
+      run writeRangeRefField(module, "members", members)
+    }
+    Node.ConditionalHeader {condition} => {
+      run writeIdField("condition", condition)
+    }
+    Node.GroupHeader {branch} => {
+      run writeGroupBranchField("branch", branch)
+    }
+    Node.ModulePropertyHeader {properties} => {
+      run writeRangeField(module, "properties", properties)
+    }
+    Node.ImplHeader {generics, subject, target} => {
+      run writeRangeField(module, "generics", generics)
+      run writeIdField("subject", subject)
+      run writeRefField("target", target)
+    }
+    Node.MissingDeclarationHeader => ()
+    Node.InvalidDeclarationHeader {retained} => {
+      run writeRangeField(module, "retained", retained)
+    }
+    Node.FunctionHeader {name, isPublic, contract, linkage, properties} => {
+      run writeIdField("name", name)
+      run writeBoolField("isPublic", isPublic)
+      run writeIdField("contract", contract)
+      run writeRefField("linkage", linkage)
+      run writeRangeField(module, "properties", properties)
+    }
+    Node.OperationHeader {name, isPublic, contract, operator, properties} => {
+      run writeIdField("name", name)
+      run writeBoolField("isPublic", isPublic)
+      run writeIdField("contract", contract)
+      run writeRefField("operator", operator)
+      run writeRangeField(module, "properties", properties)
+    }
+    Node.ImplAliasHeader {name, isPublic, target} => {
+      run writeIdField("name", name)
+      run writeBoolField("isPublic", isPublic)
+      run writeIdField("target", target)
+    }
+    Node.StructHeader {name, isPublic, generics, genericsAnchor, fields, abi} => {
+      run writeIdField("name", name)
+      run writeBoolField("isPublic", isPublic)
+      run writeRangeField(module, "generics", generics)
+      run writeSpanRefField("genericsAnchor", genericsAnchor)
+      run writeRangeField(module, "fields", fields)
+      run writeRefField("abi", abi)
+    }
+    Node.TupleHeader {name, isPublic, generics, elements} => {
+      run writeIdField("name", name)
+      run writeBoolField("isPublic", isPublic)
+      run writeRangeField(module, "generics", generics)
+      run writeRangeField(module, "elements", elements)
+    }
+    Node.EnumHeader {name, isPublic, representation, members} => {
+      run writeIdField("name", name)
+      run writeBoolField("isPublic", isPublic)
+      run writeRefField("representation", representation)
+      run writeRangeField(module, "members", members)
+    }
+    Node.UnionHeader {name, isPublic, generics, variants} => {
+      run writeIdField("name", name)
+      run writeBoolField("isPublic", isPublic)
+      run writeRangeField(module, "generics", generics)
+      run writeRangeField(module, "variants", variants)
+    }
+    Node.ServiceHeader {name, isPublic, generics} => {
+      run writeIdField("name", name)
+      run writeBoolField("isPublic", isPublic)
+      run writeRangeField(module, "generics", generics)
+    }
+    Node.InterfaceHeader {name, isPublic, generics} => {
+      run writeIdField("name", name)
+      run writeBoolField("isPublic", isPublic)
+      run writeRangeField(module, "generics", generics)
+    }
+    Node.RoleHeader {name, isPublic} => {
+      run writeIdField("name", name)
+      run writeBoolField("isPublic", isPublic)
+    }
+    Node.ConstantHeader {name, isPublic, annotation} => {
+      run writeIdField("name", name)
+      run writeBoolField("isPublic", isPublic)
+      run writeRefField("annotation", annotation)
+    }
+    Node.PackageParameterHeader {name, isPublic, annotation} => {
+      run writeIdField("name", name)
+      run writeBoolField("isPublic", isPublic)
+      run writeIdField("annotation", annotation)
+    }
+    Node.AliasHeader {name, isPublic, generics, target} => {
+      run writeIdField("name", name)
+      run writeBoolField("isPublic", isPublic)
+      run writeRangeField(module, "generics", generics)
+      run writeIdField("target", target)
+    }
+    Node.StaticHeader {name, isPublic, annotation, mutable, linkage, properties} => {
+      run writeIdField("name", name)
+      run writeBoolField("isPublic", isPublic)
+      run writeIdField("annotation", annotation)
+      run writeBoolField("mutable", mutable)
+      run writeIdField("linkage", linkage)
+      run writeRangeField(module, "properties", properties)
+    }
+    Node.NoBody => ()
+    Node.CallableBody {block} => {
+      run writeRefField("block", block)
+    }
+    Node.InitializerBody {value} => {
+      run writeRefField("value", value)
+    }
+    Node.PackageParameterBody {default, validation} => {
+      run writeRefField("default", default)
+      run writeRefField("validation", validation)
+    }
+    Node.MembersBody {members} => {
+      run writeRangeField(module, "members", members)
+    }
+    Node.ConditionalBody {thenBranch, elseBranch} => {
+      run writeIdField("thenBranch", thenBranch)
+      run writeRefField("elseBranch", elseBranch)
+    }
+    Node.InvalidDeclarationBody {retained} => {
+      run writeRangeField(module, "retained", retained)
+    }
+    Node.Declaration {owner, header, body} => {
+      run writeOwnerField(module, "owner", owner)
+      run writeIdField("header", header)
+      run writeIdField("body", body)
+    }
+  }
+}
+
+effect fn writeNode(module: &Module, index: usize) -> () ! WriterError ? &mut Writer {
+  let nodes = Vector.asSlice<Node>(&module.nodes)
+  let span = Vector.get<Span>(&module.spans, index)
+  run Writer.writeString("#")
+  run Format.display(&index)
+  run Writer.writeString(" ")
+  run Writer.writeString(nodeKindName(nodes[index]))
+  run Writer.writeString(" ")
+  run writeSpanText(span)
+  run Writer.writeString("\n")
+  let causes = Vector.get<Range>(&module.nodeCauses, index)
+  if causes.length > usize.ZERO {
+    run writeFieldName("causes")
+    let mut offset = usize.ZERO
+    while offset < causes.length {
+      if offset > usize.ZERO {
+        run Writer.writeString(" ")
+      }
+      run Writer.writeString("#")
+      run Format.display(&usize.add(causes.start, offset))
+      offset = offset + usize.ONE
+    }
+    run Writer.writeString("\n")
+  }
+  return run writeNodeFields(module, nodes[index])
+}
+
+effect fn writeCause(module: &Module, index: usize) -> () ! WriterError ? &mut Writer {
+  let cause = Vector.get<Cause>(&module.causes, index)
+  run Writer.writeString("#")
+  run Format.display(&index)
+  run Writer.writeString(" ")
+  run Writer.writeString(causeCodeName(cause.code))
+  run Writer.writeString(" ")
+  run writeSpanText(cause.span)
+  return run Writer.writeString("\n")
+}
+
+effect fn writeDiagnostic(module: &Module, index: usize) -> () ! WriterError ? &mut Writer {
+  let diagnostic = Vector.get<Diagnostic>(&module.diagnostics, index)
+  run Writer.writeString("#")
+  run Format.display(&index)
+  run Writer.writeString(" ")
+  run Writer.writeString(causeCodeName(diagnostic.code))
+  run Writer.writeString(" ")
+  run writeSpanText(diagnostic.span)
+  return run Writer.writeString("\n")
+}
+
+/// Writes one module as indented text: a header, one block per node, then causes and diagnostics.
+///
+/// # When to use
+///
+/// Use to inspect a lowered module during self-hosted compiler development, and as the comparison
+/// form in lowering tests. A test renders a module and compares the text, so a failure prints a
+/// readable diff instead of an arena dump.
+///
+/// # Details
+///
+/// The header names the module documentation and the top-level declaration range. Each node writes
+/// `#<id> <Kind> <start>..<end>` followed by one indented `  field: value` line per field. A child
+/// identity prints as `#id`, an absent child as `none`, a child range as `[#a #b]`, an interned
+/// symbol as its quoted text, and a span as `start..end`. The cause and diagnostic sections follow
+/// in storage order.
+///
+/// Output depends only on module content, never on interning order or arena capacity, so two
+/// modules with the same content render identically.
+///
+/// # Gotchas
+///
+/// This is a debugging and testing format, not a stable serialization. A writer failure preserves
+/// any output prefix the writer already accepted.
+pub effect fn write(module: &Module) -> () ! WriterError ? &mut Writer {
+  run Writer.writeString("documentation ")
+  if module.documentation.present {
+    run writeQuotedSymbol(module, module.documentation.symbol)
+  } else {
+    run Writer.writeString("none")
+  }
+  run Writer.writeString("\ndeclarations ")
+  run writeRangeBody(module, module.declarations)
+  run Writer.writeString("\n\nnodes ")
+  run Format.display(&Vector.length<Node>(&module.nodes))
+  run Writer.writeString("\n")
+  let mut nodeIndex = usize.ZERO
+  while nodeIndex < Vector.length<Node>(&module.nodes) {
+    run writeNode(module, nodeIndex)
+    nodeIndex = nodeIndex + usize.ONE
+  }
+  run Writer.writeString("\ncauses ")
+  run Format.display(&Vector.length<Cause>(&module.causes))
+  run Writer.writeString("\n")
+  let mut causeIndex = usize.ZERO
+  while causeIndex < Vector.length<Cause>(&module.causes) {
+    run writeCause(module, causeIndex)
+    causeIndex = causeIndex + usize.ONE
+  }
+  run Writer.writeString("\ndiagnostics ")
+  run Format.display(&Vector.length<Diagnostic>(&module.diagnostics))
+  run Writer.writeString("\n")
+  let mut diagnosticIndex = usize.ZERO
+  while diagnosticIndex < Vector.length<Diagnostic>(&module.diagnostics) {
+    run writeDiagnostic(module, diagnosticIndex)
+    diagnosticIndex = diagnosticIndex + usize.ONE
+  }
+  return ()
+}
+
+/// A Writer provider that retains every accepted byte in one growable owned buffer.
+///
+/// # Details
+///
+/// The provider owns a zero-sized system allocator so it can grow its buffer without requiring an
+/// `&mut Allocator` from its caller, which the `Writer` service contract does not permit.
+pub struct StringWriter {
+  /// Every byte accepted so far, in write order.
+  pub bytes: Vector<u8>
+  allocator: SystemAllocator
+}
+
+impl StringWriter {
+  /// Creates an empty provider that has not yet allocated a buffer.
+  pub fn make() -> StringWriter {
+    return StringWriter {bytes: Vector.make<u8>(), allocator: Allocator.systemAllocatorProvider()}
+  }
+
+  effect fn writeAll(self: &mut Self, values: &[u8]) -> () ! WriterError {
+    let outcome = run Effect.result(
+      Vector.appendBytes(&mut self.bytes, values)
+        |> Effect.provideMut<Allocator>(&mut self.allocator),
+    )
+    return match move outcome {
+      Result<(), OutOfMemoryError>.Success {value: _} => ()
+      Result<(), OutOfMemoryError>.Failure {error: _} => { fail Writer.failure() }
+    }
+  }
+
+  effect fn flush(self: &mut Self) -> () ! WriterError {
+    return ()
+  }
+}
+
+impl Writer for StringWriter {
+  writeAll: StringWriter.writeAll
+  flush: StringWriter.flush
+}
+
+/// Renders one module into an owned byte buffer using the same format as [`write`].
+///
+/// # When to use
+///
+/// Use in a test that compares a lowered module against expected text without providing a Writer.
+///
+/// # Details
+///
+/// The result is the exact byte sequence [`write`] would have produced, which is valid UTF-8
+/// whenever every interned symbol the module refers to is valid UTF-8.
+pub effect fn render(module: &Module) -> Vector<u8> ! WriterError {
+  let mut output = StringWriter.make()
+  run write(module) |> Effect.provideMut<Writer>(&mut output)
+  let StringWriter {bytes, allocator: _} = move output
+  return move bytes
+}
+
+// ---------------------------------------------------------------------------
+// Invariants
+// ---------------------------------------------------------------------------
+
+/// The arena invariant that one module violates.
+pub enum Violation {
+  /// `spans` and `nodes` have different lengths, so some node has no coordinate.
+  SpanCountMismatch,
+  /// `nodeCauses` and `nodes` have different lengths, so some node has no recovery run.
+  CauseCountMismatch,
+  /// A child identity is not lower than the identity of the node that references it.
+  ChildNotBeforeParent,
+  /// A child identity, child range, cause range, symbol, or declaration range leaves its storage.
+  ReferenceOutOfBounds,
+  /// A `Missing` or `Invalid` node records no cause, although every one must record at least one.
+  EmptyRecoveryCauses,
+}
+
+/// One violated arena invariant together with the node that violates it.
+pub struct Defect {
+  /// Which invariant the node violates.
+  pub violation: Violation
+  /// The node that violates it; the arena itself when the violation is [`SpanCountMismatch`].
+  pub id: HirId
+}
+
+impl Copy for Defect {}
+
+effect fn recordId(module: &Module, parent: usize, id: HirId, found: &mut Vector<Defect>) -> ()
+! OutOfMemoryError
+? &mut Allocator {
+  if id.index >= Vector.length<Node>(&module.nodes) {
+    return run Vector.append<Defect>(
+      &mut found.*,
+      Defect {violation: Violation.ReferenceOutOfBounds, id: HirId {index: parent}},
+    )
+  }
+  if id.index >= parent {
+    return run Vector.append<Defect>(
+      &mut found.*,
+      Defect {violation: Violation.ChildNotBeforeParent, id: HirId {index: parent}},
+    )
+  }
+  return ()
+}
+
+effect fn recordRef(module: &Module, parent: usize, reference: HirRef, found: &mut Vector<Defect>)
+-> ()
+! OutOfMemoryError
+? &mut Allocator {
+  if reference.present {
+    return run recordId(module, parent, reference.id, &mut found.*)
+  }
+  return ()
+}
+
+effect fn recordRange(module: &Module, parent: usize, range: Range, found: &mut Vector<Defect>)
+-> ()
+! OutOfMemoryError
+? &mut Allocator {
+  if range.start + range.length > Vector.length<HirId>(&module.children) {
+    return run Vector.append<Defect>(
+      &mut found.*,
+      Defect {violation: Violation.ReferenceOutOfBounds, id: HirId {index: parent}},
+    )
+  }
+  let mut offset = usize.ZERO
+  while offset < range.length {
+    run recordId(module, parent, Module.child(module, range, offset), &mut found.*)
+    offset = offset + usize.ONE
+  }
+  return ()
+}
+
+fn requiresCauses(node: Node) -> bool {
+  return match node {
+    Node.MissingName => true
+    Node.InvalidName {spelling: ignored1} => true
+    Node.MissingType => true
+    Node.InvalidType {retained: ignored1} => true
+    Node.MissingExpression => true
+    Node.InvalidExpression {retained: ignored1} => true
+    Node.MissingPattern => true
+    Node.InvalidPattern {retained: ignored1} => true
+    Node.MissingStatement => true
+    Node.InvalidStatement {retained: ignored1} => true
+    Node.MissingDeclarationHeader => true
+    Node.InvalidDeclarationHeader {retained: ignored1} => true
+    Node.InvalidDeclarationBody {retained: ignored1} => true
+    _ => false
+  }
+}
+
+effect fn verifyCauses(module: &Module, parent: usize, found: &mut Vector<Defect>) -> ()
+! OutOfMemoryError
+? &mut Allocator {
+  let range = Vector.get<Range>(&module.nodeCauses, parent)
+  if range.start + range.length > Vector.length<Cause>(&module.causes) {
+    run Vector.append<Defect>(
+      &mut found.*,
+      Defect {violation: Violation.ReferenceOutOfBounds, id: HirId {index: parent}},
+    )
+  }
+  if range.length == usize.ZERO && requiresCauses(Vector.get<Node>(&module.nodes, parent)) {
+    run Vector.append<Defect>(
+      &mut found.*,
+      Defect {violation: Violation.EmptyRecoveryCauses, id: HirId {index: parent}},
+    )
+  }
+  return ()
+}
+
+effect fn recordSymbol(module: &Module, parent: usize, symbol: Symbol, found: &mut Vector<Defect>)
+-> ()
+! OutOfMemoryError
+? &mut Allocator {
+  if symbol.index >= StringTable.length(&module.strings) {
+    return run Vector.append<Defect>(
+      &mut found.*,
+      Defect {violation: Violation.ReferenceOutOfBounds, id: HirId {index: parent}},
+    )
+  }
+  return ()
+}
+
+effect fn recordSymbolRef(
+  module: &Module,
+  parent: usize,
+  reference: SymbolRef,
+  found: &mut Vector<Defect>,
+) -> ()
+! OutOfMemoryError
+? &mut Allocator {
+  if reference.present {
+    return run recordSymbol(module, parent, reference.symbol, &mut found.*)
+  }
+  return ()
+}
+
+effect fn recordRangeRef(
+  module: &Module,
+  parent: usize,
+  reference: RangeRef,
+  found: &mut Vector<Defect>,
+) -> ()
+! OutOfMemoryError
+? &mut Allocator {
+  if reference.present {
+    return run recordRange(module, parent, reference.range, &mut found.*)
+  }
+  return ()
+}
+
+effect fn recordOwner(module: &Module, parent: usize, owner: OwnerKey, found: &mut Vector<Defect>)
+-> ()
+! OutOfMemoryError
+? &mut Allocator {
+  return run recordSymbolRef(module, parent, owner.name, &mut found.*)
+}
+
+effect fn verifyNode(module: &Module, parent: usize, found: &mut Vector<Defect>) -> ()
+! OutOfMemoryError
+? &mut Allocator {
+  let node = Vector.get<Node>(&module.nodes, parent)
+  return match node {
+    Node.Name {text} => {
+      run recordSymbol(module, parent, text, &mut found.*)
+    }
+    Node.MissingName => ()
+    Node.InvalidName {spelling} => {
+      run recordSymbol(module, parent, spelling, &mut found.*)
+    }
+    Node.Path {segments} => {
+      run recordRange(module, parent, segments, &mut found.*)
+    }
+    Node.TypeParameter {name, bounds} => {
+      run recordId(module, parent, name, &mut found.*)
+      run recordRange(module, parent, bounds, &mut found.*)
+    }
+    Node.RowParameter {name} => {
+      run recordId(module, parent, name, &mut found.*)
+    }
+    Node.LifetimeParameter {name, bounds} => {
+      run recordId(module, parent, name, &mut found.*)
+      run recordRange(module, parent, bounds, &mut found.*)
+    }
+    Node.Lifetime {name} => {
+      run recordId(module, parent, name, &mut found.*)
+    }
+    Node.RequirementSelector {subject, rolePath} => {
+      run recordId(module, parent, subject, &mut found.*)
+      run recordId(module, parent, rolePath, &mut found.*)
+    }
+    Node.TypeArguments {arguments, environment, failures, requirements} => {
+      run recordRange(module, parent, arguments, &mut found.*)
+      run recordRangeRef(module, parent, environment, &mut found.*)
+      run recordRef(module, parent, failures, &mut found.*)
+      run recordRef(module, parent, requirements, &mut found.*)
+    }
+    Node.Requirement {hasAccess: ignored1, access: ignored2, capability, rolePath} => {
+      run recordId(module, parent, capability, &mut found.*)
+      run recordRef(module, parent, rolePath, &mut found.*)
+    }
+    Node.RequirementRow {members} => {
+      run recordRange(module, parent, members, &mut found.*)
+    }
+    Node.PointerQualifier {name, value} => {
+      run recordId(module, parent, name, &mut found.*)
+      run recordId(module, parent, value, &mut found.*)
+    }
+    Node.NamedType {path, hasMode: ignored1, mode: ignored2} => {
+      run recordId(module, parent, path, &mut found.*)
+    }
+    Node.AppliedType {target, arguments} => {
+      run recordId(module, parent, target, &mut found.*)
+      run recordId(module, parent, arguments, &mut found.*)
+    }
+    Node.FixedArrayType {element, length} => {
+      run recordId(module, parent, element, &mut found.*)
+      run recordId(module, parent, length, &mut found.*)
+    }
+    Node.SliceType {element, access: ignored1, lifetime} => {
+      run recordId(module, parent, element, &mut found.*)
+      run recordRef(module, parent, lifetime, &mut found.*)
+    }
+    Node.ReferenceType {referent, access: ignored1, lifetime, roleName} => {
+      run recordId(module, parent, referent, &mut found.*)
+      run recordRef(module, parent, lifetime, &mut found.*)
+      run recordRef(module, parent, roleName, &mut found.*)
+    }
+    Node.PointerType {pointee, access: ignored1, nullable: ignored2, multiplicity: ignored3, qualifiers} => {
+      run recordId(module, parent, pointee, &mut found.*)
+      run recordRange(module, parent, qualifiers, &mut found.*)
+    }
+    Node.CallableType {mode: ignored1, isUnsafe: ignored2, binders, environment, parameters, result} => {
+      run recordRange(module, parent, binders, &mut found.*)
+      run recordRef(module, parent, environment, &mut found.*)
+      run recordRange(module, parent, parameters, &mut found.*)
+      run recordId(module, parent, result, &mut found.*)
+    }
+    Node.ForeignFunctionType {abi, binders, parameters, result, properties} => {
+      run recordId(module, parent, abi, &mut found.*)
+      run recordRange(module, parent, binders, &mut found.*)
+      run recordRange(module, parent, parameters, &mut found.*)
+      run recordId(module, parent, result, &mut found.*)
+      run recordRange(module, parent, properties, &mut found.*)
+    }
+    Node.ExactRepresentationType {subject} => {
+      run recordId(module, parent, subject, &mut found.*)
+    }
+    Node.OpaqueResultType {binders, result} => {
+      run recordRange(module, parent, binders, &mut found.*)
+      run recordId(module, parent, result, &mut found.*)
+    }
+    Node.UnitType => ()
+    Node.UnionType {members} => {
+      run recordRange(module, parent, members, &mut found.*)
+    }
+    Node.RowWithout {source, removed} => {
+      run recordId(module, parent, source, &mut found.*)
+      run recordId(module, parent, removed, &mut found.*)
+    }
+    Node.MissingType => ()
+    Node.InvalidType {retained} => {
+      run recordRange(module, parent, retained, &mut found.*)
+    }
+    Node.MembershipConstraint {subject, source} => {
+      run recordId(module, parent, subject, &mut found.*)
+      run recordId(module, parent, source, &mut found.*)
+    }
+    Node.ProviderConstraint {provider, selected, source} => {
+      run recordId(module, parent, provider, &mut found.*)
+      run recordId(module, parent, selected, &mut found.*)
+      run recordId(module, parent, source, &mut found.*)
+    }
+    Node.Parameter {name, annotation, mode: ignored1} => {
+      run recordId(module, parent, name, &mut found.*)
+      run recordId(module, parent, annotation, &mut found.*)
+    }
+    Node.CallableContract {generics, parameters, variadic: ignored1, result, failures, requirements, constraints, isEffect: ignored2, isTest: ignored3, environment, isUnsafe: ignored4, isStatic: ignored5, effectAnchor: ignored6, testAnchor: ignored7, unsafeAnchor: ignored8, staticAnchor: ignored9, genericsAnchor: ignored10, failuresAnchor: ignored11, constraintsAnchor: ignored12} => {
+      run recordRange(module, parent, generics, &mut found.*)
+      run recordRange(module, parent, parameters, &mut found.*)
+      run recordRef(module, parent, result, &mut found.*)
+      run recordRef(module, parent, failures, &mut found.*)
+      run recordRef(module, parent, requirements, &mut found.*)
+      run recordRange(module, parent, constraints, &mut found.*)
+      run recordRangeRef(module, parent, environment, &mut found.*)
+    }
+    Node.Property {name, value} => {
+      run recordId(module, parent, name, &mut found.*)
+      run recordId(module, parent, value, &mut found.*)
+    }
+    Node.PropertyClause {namespace, operation, properties} => {
+      run recordId(module, parent, namespace, &mut found.*)
+      run recordId(module, parent, operation, &mut found.*)
+      run recordRange(module, parent, properties, &mut found.*)
+    }
+    Node.IntegerLiteral {magnitude: ignored1, radix: ignored2, suffix} => {
+      run recordSymbolRef(module, parent, suffix, &mut found.*)
+    }
+    Node.TextLiteral {value} => {
+      run recordSymbol(module, parent, value, &mut found.*)
+    }
+    Node.FloatingLiteral {sign: ignored1, coefficient: ignored2, exponent: ignored3, suffix} => {
+      run recordSymbolRef(module, parent, suffix, &mut found.*)
+    }
+    Node.DurationComponent {magnitude: ignored1, unit: ignored2} => ()
+    Node.DurationLiteral {components} => {
+      run recordRange(module, parent, components, &mut found.*)
+    }
+    Node.BytesLiteral {value} => {
+      run recordSymbol(module, parent, value, &mut found.*)
+    }
+    Node.CharacterLiteral {scalar: ignored1} => ()
+    Node.BooleanLiteral {value: ignored1} => ()
+    Node.UnitLiteral => ()
+    Node.MissingExpression => ()
+    Node.InvalidExpression {retained} => {
+      run recordRange(module, parent, retained, &mut found.*)
+    }
+    Node.FieldInitializer {name, value} => {
+      run recordId(module, parent, name, &mut found.*)
+      run recordId(module, parent, value, &mut found.*)
+    }
+    Node.MemberSelector {subject, member} => {
+      run recordId(module, parent, subject, &mut found.*)
+      run recordId(module, parent, member, &mut found.*)
+    }
+    Node.IdentifierExpression {name, binding} => {
+      run recordId(module, parent, name, &mut found.*)
+      run recordRef(module, parent, binding, &mut found.*)
+    }
+    Node.MoveExpression {operand} => {
+      run recordId(module, parent, operand, &mut found.*)
+    }
+    Node.BorrowExpression {access: ignored1, operand} => {
+      run recordId(module, parent, operand, &mut found.*)
+    }
+    Node.CallableExpression {contract, body} => {
+      run recordId(module, parent, contract, &mut found.*)
+      run recordId(module, parent, body, &mut found.*)
+    }
+    Node.EffectExpression {body} => {
+      run recordId(module, parent, body, &mut found.*)
+    }
+    Node.RunExpression {operand} => {
+      run recordId(module, parent, operand, &mut found.*)
+    }
+    Node.UnsafeExpression {operand} => {
+      run recordId(module, parent, operand, &mut found.*)
+    }
+    Node.CompileErrorExpression {message} => {
+      run recordId(module, parent, message, &mut found.*)
+    }
+    Node.MatchExpression {access: ignored1, subject, arms} => {
+      run recordId(module, parent, subject, &mut found.*)
+      run recordRange(module, parent, arms, &mut found.*)
+    }
+    Node.StructExpression {annotation, fields} => {
+      run recordId(module, parent, annotation, &mut found.*)
+      run recordRange(module, parent, fields, &mut found.*)
+    }
+    Node.TupleExpression {elements} => {
+      run recordRange(module, parent, elements, &mut found.*)
+    }
+    Node.RecordExpression {fields} => {
+      run recordRange(module, parent, fields, &mut found.*)
+    }
+    Node.ArrayExpression {elements} => {
+      run recordRange(module, parent, elements, &mut found.*)
+    }
+    Node.MemberExpression {selector, fields} => {
+      run recordId(module, parent, selector, &mut found.*)
+      run recordRangeRef(module, parent, fields, &mut found.*)
+    }
+    Node.FieldExpression {subject, field} => {
+      run recordId(module, parent, subject, &mut found.*)
+      run recordId(module, parent, field, &mut found.*)
+    }
+    Node.OrdinalExpression {subject, ordinal} => {
+      run recordId(module, parent, subject, &mut found.*)
+      run recordId(module, parent, ordinal, &mut found.*)
+    }
+    Node.ReferentExpression {subject} => {
+      run recordId(module, parent, subject, &mut found.*)
+    }
+    Node.IndexExpression {subject, index} => {
+      run recordId(module, parent, subject, &mut found.*)
+      run recordId(module, parent, index, &mut found.*)
+    }
+    Node.CallExpression {callee, generics, arguments} => {
+      run recordId(module, parent, callee, &mut found.*)
+      run recordRef(module, parent, generics, &mut found.*)
+      run recordRange(module, parent, arguments, &mut found.*)
+    }
+    Node.PrefixExpression {operator: ignored1, operatorAnchor: ignored2, operand} => {
+      run recordId(module, parent, operand, &mut found.*)
+    }
+    Node.InfixExpression {operator: ignored1, operatorAnchor: ignored2, left, right} => {
+      run recordId(module, parent, left, &mut found.*)
+      run recordId(module, parent, right, &mut found.*)
+    }
+    Node.PipelineExpression {input, target} => {
+      run recordId(module, parent, input, &mut found.*)
+      run recordId(module, parent, target, &mut found.*)
+    }
+    Node.PatternField {name, pattern} => {
+      run recordId(module, parent, name, &mut found.*)
+      run recordId(module, parent, pattern, &mut found.*)
+    }
+    Node.EnumPattern {path} => {
+      run recordId(module, parent, path, &mut found.*)
+    }
+    Node.IntegerPattern {value} => {
+      run recordId(module, parent, value, &mut found.*)
+    }
+    Node.NominalPattern {annotation, fields} => {
+      run recordId(module, parent, annotation, &mut found.*)
+      run recordRange(module, parent, fields, &mut found.*)
+    }
+    Node.BindingPattern {annotation, name} => {
+      run recordRef(module, parent, annotation, &mut found.*)
+      run recordId(module, parent, name, &mut found.*)
+    }
+    Node.UniversalPattern {name} => {
+      run recordRef(module, parent, name, &mut found.*)
+    }
+    Node.VariantPattern {selector, fields} => {
+      run recordId(module, parent, selector, &mut found.*)
+      run recordRangeRef(module, parent, fields, &mut found.*)
+    }
+    Node.RestPattern => ()
+    Node.MissingPattern => ()
+    Node.InvalidPattern {retained} => {
+      run recordRange(module, parent, retained, &mut found.*)
+    }
+    Node.MatchArm {pattern, guard, result} => {
+      run recordId(module, parent, pattern, &mut found.*)
+      run recordRef(module, parent, guard, &mut found.*)
+      run recordId(module, parent, result, &mut found.*)
+    }
+    Node.Block {statements} => {
+      run recordRange(module, parent, statements, &mut found.*)
+    }
+    Node.ExpressionStatement {expression} => {
+      run recordId(module, parent, expression, &mut found.*)
+    }
+    Node.BindingStatement {name, mutable: ignored1, isStatic: ignored2, annotation, initializer} => {
+      run recordId(module, parent, name, &mut found.*)
+      run recordRef(module, parent, annotation, &mut found.*)
+      run recordId(module, parent, initializer, &mut found.*)
+    }
+    Node.PatternBindingStatement {pattern, initializer} => {
+      run recordId(module, parent, pattern, &mut found.*)
+      run recordId(module, parent, initializer, &mut found.*)
+    }
+    Node.AssignmentStatement {target, value} => {
+      run recordId(module, parent, target, &mut found.*)
+      run recordId(module, parent, value, &mut found.*)
+    }
+    Node.ConditionalStatement {condition, thenBranch, elseBranch} => {
+      run recordId(module, parent, condition, &mut found.*)
+      run recordId(module, parent, thenBranch, &mut found.*)
+      run recordRef(module, parent, elseBranch, &mut found.*)
+    }
+    Node.PatternConditionalStatement {pattern, subject, thenBranch, elseBranch} => {
+      run recordId(module, parent, pattern, &mut found.*)
+      run recordId(module, parent, subject, &mut found.*)
+      run recordId(module, parent, thenBranch, &mut found.*)
+      run recordRef(module, parent, elseBranch, &mut found.*)
+    }
+    Node.StaticConditionalStatement {condition, thenBranch, elseBranch} => {
+      run recordId(module, parent, condition, &mut found.*)
+      run recordId(module, parent, thenBranch, &mut found.*)
+      run recordRef(module, parent, elseBranch, &mut found.*)
+    }
+    Node.StaticForStatement {binding, iterable, body} => {
+      run recordId(module, parent, binding, &mut found.*)
+      run recordId(module, parent, iterable, &mut found.*)
+      run recordId(module, parent, body, &mut found.*)
+    }
+    Node.WhileStatement {condition, body} => {
+      run recordId(module, parent, condition, &mut found.*)
+      run recordId(module, parent, body, &mut found.*)
+    }
+    Node.BreakStatement => ()
+    Node.ContinueStatement => ()
+    Node.ReturnStatement {value} => {
+      run recordRef(module, parent, value, &mut found.*)
+    }
+    Node.FailStatement {isMove: ignored1, value} => {
+      run recordId(module, parent, value, &mut found.*)
+    }
+    Node.DropStatement {value} => {
+      run recordId(module, parent, value, &mut found.*)
+    }
+    Node.UnsafeStatement {body} => {
+      run recordId(module, parent, body, &mut found.*)
+    }
+    Node.MissingStatement => ()
+    Node.InvalidStatement {retained} => {
+      run recordRange(module, parent, retained, &mut found.*)
+    }
+    Node.ImportMember {name, alias} => {
+      run recordId(module, parent, name, &mut found.*)
+      run recordRef(module, parent, alias, &mut found.*)
+    }
+    Node.Field {name, isPublic: ignored1, annotation} => {
+      run recordId(module, parent, name, &mut found.*)
+      run recordId(module, parent, annotation, &mut found.*)
+    }
+    Node.EnumMember {name, value} => {
+      run recordId(module, parent, name, &mut found.*)
+      run recordRef(module, parent, value, &mut found.*)
+    }
+    Node.Variant {name, fields, braces: ignored1} => {
+      run recordId(module, parent, name, &mut found.*)
+      run recordRange(module, parent, fields, &mut found.*)
+    }
+    Node.Linkage {direction: ignored1, abi, symbol} => {
+      run recordId(module, parent, abi, &mut found.*)
+      run recordRef(module, parent, symbol, &mut found.*)
+    }
+    Node.ImportHeader {isPublic: ignored1, path, alias, members} => {
+      run recordId(module, parent, path, &mut found.*)
+      run recordRef(module, parent, alias, &mut found.*)
+      run recordRangeRef(module, parent, members, &mut found.*)
+    }
+    Node.ConditionalHeader {condition} => {
+      run recordId(module, parent, condition, &mut found.*)
+    }
+    Node.GroupHeader {branch: ignored1} => ()
+    Node.ModulePropertyHeader {properties} => {
+      run recordRange(module, parent, properties, &mut found.*)
+    }
+    Node.ImplHeader {generics, subject, target} => {
+      run recordRange(module, parent, generics, &mut found.*)
+      run recordId(module, parent, subject, &mut found.*)
+      run recordRef(module, parent, target, &mut found.*)
+    }
+    Node.MissingDeclarationHeader => ()
+    Node.InvalidDeclarationHeader {retained} => {
+      run recordRange(module, parent, retained, &mut found.*)
+    }
+    Node.FunctionHeader {name, isPublic: ignored1, contract, linkage, properties} => {
+      run recordId(module, parent, name, &mut found.*)
+      run recordId(module, parent, contract, &mut found.*)
+      run recordRef(module, parent, linkage, &mut found.*)
+      run recordRange(module, parent, properties, &mut found.*)
+    }
+    Node.OperationHeader {name, isPublic: ignored1, contract, operator, properties} => {
+      run recordId(module, parent, name, &mut found.*)
+      run recordId(module, parent, contract, &mut found.*)
+      run recordRef(module, parent, operator, &mut found.*)
+      run recordRange(module, parent, properties, &mut found.*)
+    }
+    Node.ImplAliasHeader {name, isPublic: ignored1, target} => {
+      run recordId(module, parent, name, &mut found.*)
+      run recordId(module, parent, target, &mut found.*)
+    }
+    Node.StructHeader {name, isPublic: ignored1, generics, genericsAnchor: ignored2, fields, abi} => {
+      run recordId(module, parent, name, &mut found.*)
+      run recordRange(module, parent, generics, &mut found.*)
+      run recordRange(module, parent, fields, &mut found.*)
+      run recordRef(module, parent, abi, &mut found.*)
+    }
+    Node.TupleHeader {name, isPublic: ignored1, generics, elements} => {
+      run recordId(module, parent, name, &mut found.*)
+      run recordRange(module, parent, generics, &mut found.*)
+      run recordRange(module, parent, elements, &mut found.*)
+    }
+    Node.EnumHeader {name, isPublic: ignored1, representation, members} => {
+      run recordId(module, parent, name, &mut found.*)
+      run recordRef(module, parent, representation, &mut found.*)
+      run recordRange(module, parent, members, &mut found.*)
+    }
+    Node.UnionHeader {name, isPublic: ignored1, generics, variants} => {
+      run recordId(module, parent, name, &mut found.*)
+      run recordRange(module, parent, generics, &mut found.*)
+      run recordRange(module, parent, variants, &mut found.*)
+    }
+    Node.ServiceHeader {name, isPublic: ignored1, generics} => {
+      run recordId(module, parent, name, &mut found.*)
+      run recordRange(module, parent, generics, &mut found.*)
+    }
+    Node.InterfaceHeader {name, isPublic: ignored1, generics} => {
+      run recordId(module, parent, name, &mut found.*)
+      run recordRange(module, parent, generics, &mut found.*)
+    }
+    Node.RoleHeader {name, isPublic: ignored1} => {
+      run recordId(module, parent, name, &mut found.*)
+    }
+    Node.ConstantHeader {name, isPublic: ignored1, annotation} => {
+      run recordId(module, parent, name, &mut found.*)
+      run recordRef(module, parent, annotation, &mut found.*)
+    }
+    Node.PackageParameterHeader {name, isPublic: ignored1, annotation} => {
+      run recordId(module, parent, name, &mut found.*)
+      run recordId(module, parent, annotation, &mut found.*)
+    }
+    Node.AliasHeader {name, isPublic: ignored1, generics, target} => {
+      run recordId(module, parent, name, &mut found.*)
+      run recordRange(module, parent, generics, &mut found.*)
+      run recordId(module, parent, target, &mut found.*)
+    }
+    Node.StaticHeader {name, isPublic: ignored1, annotation, mutable: ignored2, linkage, properties} => {
+      run recordId(module, parent, name, &mut found.*)
+      run recordId(module, parent, annotation, &mut found.*)
+      run recordId(module, parent, linkage, &mut found.*)
+      run recordRange(module, parent, properties, &mut found.*)
+    }
+    Node.NoBody => ()
+    Node.CallableBody {block} => {
+      run recordRef(module, parent, block, &mut found.*)
+    }
+    Node.InitializerBody {value} => {
+      run recordRef(module, parent, value, &mut found.*)
+    }
+    Node.PackageParameterBody {default, validation} => {
+      run recordRef(module, parent, default, &mut found.*)
+      run recordRef(module, parent, validation, &mut found.*)
+    }
+    Node.MembersBody {members} => {
+      run recordRange(module, parent, members, &mut found.*)
+    }
+    Node.ConditionalBody {thenBranch, elseBranch} => {
+      run recordId(module, parent, thenBranch, &mut found.*)
+      run recordRef(module, parent, elseBranch, &mut found.*)
+    }
+    Node.InvalidDeclarationBody {retained} => {
+      run recordRange(module, parent, retained, &mut found.*)
+    }
+    Node.Declaration {owner, header, body} => {
+      run recordOwner(module, parent, owner, &mut found.*)
+      run recordId(module, parent, header, &mut found.*)
+      run recordId(module, parent, body, &mut found.*)
+    }
+  }
+}
+
+/// Reports every arena invariant that `module` violates, in node order.
+///
+/// # When to use
+///
+/// Use after lowering, and in tests, to prove a module is well formed without a structured-clone
+/// publication step. An empty result means the module satisfies every invariant this checks.
+///
+/// # Details
+///
+/// The checks are: `spans` and `nodeCauses` have the same length as `nodes`; every child identity
+/// is lower than the identity of the node that references it and inside the arena; every child
+/// range, cause range, symbol, and top-level declaration identity lies inside its storage; and
+/// every `Missing` or `Invalid` node records at least one cause.
+///
+/// # Gotchas
+///
+/// This verifies arena consistency, not lowering fidelity. A module that lowers the wrong syntax
+/// faithfully into a consistent arena passes.
+pub effect fn verify(module: &Module) -> Vector<Defect> ! OutOfMemoryError ? &mut Allocator {
+  let mut found = Vector.make<Defect>()
+  if Vector.length<Span>(&module.spans) != Vector.length<Node>(&module.nodes) {
+    run Vector.append<Defect>(
+      &mut found,
+      Defect {violation: Violation.SpanCountMismatch, id: HirId {index: usize.ZERO}},
+    )
+  }
+  if Vector.length<Range>(&module.nodeCauses) != Vector.length<Node>(&module.nodes) {
+    run Vector.append<Defect>(
+      &mut found,
+      Defect {violation: Violation.CauseCountMismatch, id: HirId {index: usize.ZERO}},
+    )
+  }
+  if module.declarations.start + module.declarations.length
+    > Vector.length<HirId>(&module.children) {
+    run Vector.append<Defect>(
+      &mut found,
+      Defect {violation: Violation.ReferenceOutOfBounds, id: HirId {index: usize.ZERO}},
+    )
+  } else {
+    let mut declaration = usize.ZERO
+    while declaration < module.declarations.length {
+      let id = Module.child(module, module.declarations, declaration)
+      if id.index >= Vector.length<Node>(&module.nodes) {
+        run Vector.append<Defect>(
+          &mut found,
+          Defect {violation: Violation.ReferenceOutOfBounds, id: HirId {index: usize.ZERO}},
+        )
+      }
+      declaration = declaration + usize.ONE
+    }
+  }
+  if module.documentation.present {
+    if module.documentation.symbol.index >= StringTable.length(&module.strings) {
+      run Vector.append<Defect>(
+        &mut found,
+        Defect {violation: Violation.ReferenceOutOfBounds, id: HirId {index: usize.ZERO}},
+      )
+    }
+  }
+  let mut index = usize.ZERO
+  while index < Vector.length<Node>(&module.nodes) {
+    if index < Vector.length<Range>(&module.nodeCauses) {
+      run verifyCauses(module, index, &mut found)
+    }
+    run verifyNode(module, index, &mut found)
+    index = index + usize.ONE
+  }
+  return move found
+}

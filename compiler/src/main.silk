@@ -1,3 +1,5 @@
+import hir.Hir
+import hir.LoweringCases
 import lexer.Lexer {Lexer}
 import Stream {Stream}
 import lexer.Token {Token}
