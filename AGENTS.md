@@ -27,8 +27,9 @@ Maintain PAPERCUTS.md, a global log shared by all agents sessions of anything th
 
 Follow [ATOM-REACT-STYLEGUIDE.md](ATOM-REACT-STYLEGUIDE.md) for Effect Atom and `@effect/atom-react` code.
 
-Plan Silk language and standard-library changes through OpenSpec (`openspec/`). The prescriptive
-language definition and reference live in `apps/docs/content/reference/`.
+Create or update an OpenSpec change only when Julia explicitly requests one. Do not infer that an
+OpenSpec artifact is required from the kind, scope, or size of a task. The prescriptive language
+definition and reference live in `apps/docs/content/reference/`.
 
 ## Repository workflow
 
@@ -42,8 +43,9 @@ language definition and reference live in `apps/docs/content/reference/`.
   when it gives change-specific evidence that CI does not provide, reproduces or diagnoses a CI
   failure, or Julia explicitly requests it. Do not rerun the complete CI-covered suite locally as
   handoff ceremony.
-- Before the final push, finish every repository mutation, including generated artifacts and
-  OpenSpec implementation-task checkboxes, then audit, commit, and push the intended head. Required
+- Before the final push, finish every repository mutation, including generated artifacts and any
+  implementation-task checkboxes in an explicitly requested OpenSpec change, then audit, commit,
+  and push the intended head. Required
   pull-request CI on that exact head is the authoritative full-repository completion guard; wait
   for it to pass before handoff. If it fails, fix the cause, run affected focused checks, push the
   new head, and wait for that head's CI.
