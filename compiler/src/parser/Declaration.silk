@@ -89,7 +89,10 @@ effect fn structDeclaration(initial: State) -> NodeResult ! OutOfMemoryError ? &
   while !Grammar.declarationStart(&p.state) && (ParseState.currentKind(&p.state) == TokenKind.Identifier || ParseState.currentKind(
     &p.state,
   ) == TokenKind.PubKeyword) {
-    let attached = run ParseState.attach(move p.elements, run field(move p.state, NodeKind.StructField))
+    let attached = run ParseState.attach(
+      move p.elements,
+      run field(move p.state, NodeKind.StructField),
+    )
     p = move attached
   }
   let afterRightBrace = run move p
@@ -316,6 +319,11 @@ effect fn functionPrefix(initial: State, operation: bool) -> ElementsResult
   let afterPubKeyword = run move p
     |> ParseState.optional(TokenKind.PubKeyword)
   p = move afterPubKeyword
+  if !operation && ParseState.word(&p.state, "test") {
+    let consumed = run move p
+      |> ParseState.consume
+    p = move consumed
+  }
   let afterStaticKeyword = run move p
     |> ParseState.optional(TokenKind.StaticKeyword)
   p = move afterStaticKeyword
@@ -499,7 +507,10 @@ effect fn implementation(initial: State) -> NodeResult ! OutOfMemoryError ? &mut
   while ParseState.currentKind(&p.state) == TokenKind.Identifier || ParseState.currentKind(&p.state) == TokenKind.PubKeyword || ParseState.currentKind(
     &p.state,
   ) == TokenKind.StaticKeyword || operationStart(&p.state) {
-    if ParseState.currentKind(&p.state) == TokenKind.Identifier {
+    if ParseState.currentKind(&p.state) == TokenKind.Identifier && !Grammar.testFunctionStart(
+      &p.state,
+      usize.ZERO,
+    ) {
       let attached = run ParseState.attach(move p.elements, run implOperation(move p.state))
       p = move attached
     } else {
@@ -575,9 +586,9 @@ effect fn group(initial: State) -> NodeResult ! OutOfMemoryError ? &mut Allocato
     |> ParseState.begin
     |> ParseState.expect(TokenKind.LeftBrace)
   if opened {
-    while ParseState.currentKind(&p.state) != TokenKind.RightBrace && ParseState.currentKind(&p.state) != TokenKind.ElseKeyword && ParseState.currentKind(
+    while ParseState.currentKind(&p.state) != TokenKind.RightBrace && ParseState.currentKind(
       &p.state,
-    ) != TokenKind.EndOfFile {
+    ) != TokenKind.ElseKeyword && ParseState.currentKind(&p.state) != TokenKind.EndOfFile {
       let before = p.state.index
       let attached = run ParseState.attach(move p.elements, run parse(move p.state))
       p = move attached
@@ -705,13 +716,19 @@ pub effect fn parse(initial: State) -> NodeResult ! OutOfMemoryError ? &mut Allo
     let mut p = run move initial
       |> ParseState.begin
       |> ParseState.consume
-    let withPropertiesClause = run ParseState.attach(move p.elements, run Property.clause(move p.state))
+    let withPropertiesClause = run ParseState.attach(
+      move p.elements,
+      run Property.clause(move p.state),
+    )
     p = move withPropertiesClause
     return run move p
       |> ParseState.complete(NodeKind.ModulePropertyDeclaration)
   }
-  if head == TokenKind.FnKeyword || head == TokenKind.EffectKeyword || head == TokenKind.UnsafeKeyword || head == TokenKind.ExternKeyword || head == TokenKind.ExportKeyword || head == TokenKind.StaticKeyword {
+  if Grammar.testFunctionStart(&initial, offset) || head == TokenKind.FnKeyword || head == TokenKind.EffectKeyword || head == TokenKind.UnsafeKeyword || head == TokenKind.ExternKeyword || head == TokenKind.ExportKeyword || head == TokenKind.StaticKeyword {
     return run functionDeclaration(move initial, false, false)
   }
-  return run ParseState.complete(run ParseState.unexpected(ParseState.begin(move initial)), NodeKind.Error)
+  return run ParseState.complete(
+    run ParseState.unexpected(ParseState.begin(move initial)),
+    NodeKind.Error,
+  )
 }

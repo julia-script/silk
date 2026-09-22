@@ -66,6 +66,24 @@ fn nullablePointer(state: &State) -> bool {
   ) == TokenKind.LeftBracket && ParseState.peek(state, 2) == TokenKind.Star))
 }
 
+fn hasEffectEnvironment(state: &State) -> bool {
+  if ParseState.currentKind(state) == TokenKind.Semicolon {
+    return true
+  }
+  let mut offset: usize = 0
+  if ParseState.peek(state, offset) != TokenKind.Lifetime {
+    return false
+  }
+  offset = usize.add(offset, usize.ONE)
+  while ParseState.peek(state, offset) == TokenKind.Ampersand && ParseState.peek(
+    state,
+    usize.add(offset, usize.ONE),
+  ) == TokenKind.Lifetime {
+    offset = usize.add(offset, 2)
+  }
+  return ParseState.peek(state, offset) == TokenKind.Semicolon
+}
+
 /// Parses `<...>` arguments for a type or a call, retaining lifetime and row slots.
 ///
 /// `call` selects call-owned arguments, including role selectors. Type-owned arguments additionally
@@ -76,13 +94,18 @@ pub effect fn arguments(initial: State, call: bool) -> NodeResult
   let mut p = run move initial
     |> ParseState.begin
     |> ParseState.expect(TokenKind.Less)
-  if !call && (ParseState.currentKind(&p.state) == TokenKind.Semicolon || (ParseState.currentKind(&p.state) == TokenKind.Lifetime && ParseState.peek(
-    &p.state,
-    1,
-  ) == TokenKind.Semicolon)) {
+  if !call && hasEffectEnvironment(&p.state) {
     let mut environment = run move p.state
       |> ParseState.begin
       |> ParseState.expect(TokenKind.Lifetime)
+    while ParseState.currentKind(&environment.state) == TokenKind.Ampersand {
+      let afterAmpersand = run move environment
+        |> ParseState.consume
+      environment = move afterAmpersand
+      let afterMember = run move environment
+        |> ParseState.expect(TokenKind.Lifetime)
+      environment = move afterMember
+    }
     let afterSemicolon = run move environment
       |> ParseState.expect(TokenKind.Semicolon)
     environment = move afterSemicolon
@@ -108,7 +131,10 @@ pub effect fn arguments(initial: State, call: bool) -> NodeResult
     let before = p.state.index
     let mut argument = ParseState.begin(move p.state)
     if kind == TokenKind.Lifetime {
-      let attached2 = run ParseState.attach(move argument.elements, run lifetime(move argument.state))
+      let attached2 = run ParseState.attach(
+        move argument.elements,
+        run lifetime(move argument.state),
+      )
       argument = move attached2
     } else {
       let attached3 = run ParseState.attach(move argument.elements, run parse(move argument.state))
@@ -247,6 +273,14 @@ pub effect fn environment(initial: State, effectEnvironment: bool) -> NodeResult
   let afterLifetime = run move p
     |> ParseState.expect(TokenKind.Lifetime)
   p = move afterLifetime
+  while effectEnvironment && ParseState.currentKind(&p.state) == TokenKind.Ampersand {
+    let afterAmpersand = run move p
+      |> ParseState.consume
+    p = move afterAmpersand
+    let afterMember = run move p
+      |> ParseState.expect(TokenKind.Lifetime)
+    p = move afterMember
+  }
   let afterGreater = run move p
     |> ParseState.expect(TokenKind.Greater)
   p = move afterGreater
@@ -344,7 +378,10 @@ effect fn pointer(initial: State) -> NodeResult ! OutOfMemoryError ? &mut Alloca
       |> ParseState.expect(TokenKind.ConstKeyword)
     p = move afterConstKeyword
   }
-  while (ParseState.word(&p.state, "align") || ParseState.word(&p.state, "addrspace")) && ParseState.peek(&p.state, 1) == TokenKind.LeftParenthesis {
+  while (ParseState.word(&p.state, "align") || ParseState.word(&p.state, "addrspace")) && ParseState.peek(
+    &p.state,
+    1,
+  ) == TokenKind.LeftParenthesis {
     let mut q = run move p.state
       |> ParseState.begin
       |> ParseState.consume
@@ -510,7 +547,10 @@ effect fn modeQualified(initial: State) -> NodeResult ! OutOfMemoryError ? &mut 
     return run move combined
       |> ParseState.complete(NodeKind.TypePath)
   }
-  let attached = run ParseState.attach(move p.elements, run ParseState.complete(move subject, NodeKind.TypePath))
+  let attached = run ParseState.attach(
+    move p.elements,
+    run ParseState.complete(move subject, NodeKind.TypePath),
+  )
   p = move attached
   let withArguments = run ParseState.attach(move p.elements, run arguments(move p.state, false))
   return run move withArguments
@@ -613,7 +653,10 @@ pub effect fn result(initial: State) -> NodeResult ! OutOfMemoryError ? &mut All
     let mut opaque = run move p.state
       |> ParseState.begin
       |> ParseState.consume
-    let attached = run ParseState.attach(move opaque.elements, run parameters(move opaque.state, false))
+    let attached = run ParseState.attach(
+      move opaque.elements,
+      run parameters(move opaque.state, false),
+    )
     opaque = move attached
     let attached2 = run ParseState.attach(move opaque.elements, run parse(move opaque.state))
     opaque = move attached2

@@ -142,7 +142,8 @@ function sourceFiles() {
   if (process.argv.length > 3) return process.argv.slice(3)
   return [
     ...filesUnder('compiler/fixtures/parser'),
-    ...filesUnder('compiler/src'),
+    // The source-written test root is run manually and is not part of this CI corpus.
+    ...filesUnder('compiler/src').filter((file) => !file.startsWith('compiler/src/playground/')),
     ...filesUnder('packages/compiler/stdlib/silk'),
   ]
 }
@@ -153,7 +154,8 @@ function checkFile(file, testCase) {
   const bootstrap = Parser.parse(lexical)
   const output = execFileSync(executable, [relative(process.cwd(), resolve(file))], {
     encoding: 'utf8',
-    timeout: 15000,
+    // The largest standard-library modules take about 15 seconds in an unoptimized debug build.
+    timeout: 30000,
     maxBuffer: 32 * 1024 * 1024,
   })
   const actual = decode(output, bytes.length)
