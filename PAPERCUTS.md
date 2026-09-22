@@ -52,3 +52,6 @@ Format: date · symptom · fix · project. Check here first when tooling is slow
   redirected log · repository
 - 2026-09-21 · A temporary comparison-worktree command was rejected because it began with
   `rm -rf` cleanup · Use a unique temporary path and add the worktree directly · repository
+- 2026-09-22 · Indexing the current Superset workspace with codebase-memory failed because a
+  pre-coordination or unverified generation was active · Inspect the worker log to confirm the
+  guard, leave the unrelated indexer alone, and use direct read-only source inspection · silk
