@@ -249,6 +249,8 @@ export interface Discovery {
   readonly retention: ReadonlyArray<InstanceKey>
   readonly _tag: 'InstanceDiscovery'
   readonly rootModule: string
+  /** Completed declaration facts used to attribute execution-relevant constants and types. */
+  readonly declarationIndex?: DeclarationIndex.Index
   /** Source and target-specialized anonymous aggregates required by reachable instances. */
   readonly generatedAggregates: ReadonlyMap<string, DeclarationFacts.StructFact>
   readonly instances: ReadonlyArray<Instance>
@@ -1004,7 +1006,11 @@ export interface ExecutionClosure {
 }
 
 /** Projects the complete execution graph rooted at one discovered specialization. */
-export const executionClosure = (self: Discovery, root: InstanceKey): ExecutionClosure => {
+export const executionClosure = (
+  self: Discovery,
+  root: InstanceKey,
+  excludedDeclarations: ReadonlySet<string> = new Set(),
+): ExecutionClosure => {
   const instances = new Map(self.instances.map((instance) => [keyText(instance.key), instance]))
   const byOwner = new Map<string, Array<ExecutionEdge>>()
   for (const edge of self.executionEdges) {
@@ -1029,6 +1035,8 @@ export const executionClosure = (self: Discovery, root: InstanceKey): ExecutionC
     }
     selected.set(encoded, instance)
     for (const edge of byOwner.get(encoded) ?? []) {
+      const targetDeclaration = `${edge.target.declaration.module}\u0000${edge.target.declaration.name}`
+      if (excludedDeclarations.has(targetDeclaration)) continue
       const target = keyText(edge.target)
       selectedEdges.set(`${encoded}\u0005${edge.kind}\u0005${target}`, edge)
       if (!instances.has(target)) gaps.push({ _tag: 'MissingTarget', edge })
@@ -2354,6 +2362,7 @@ export const discover = (
     _tag: 'InstanceDiscovery',
     retention: retention,
     rootModule,
+    declarationIndex: index,
     generatedAggregates: Residualization.generatedAggregates(residualization),
     instances,
     unavailableOwnership,

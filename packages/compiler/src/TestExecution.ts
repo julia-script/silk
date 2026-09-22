@@ -3,13 +3,15 @@ import * as Result from 'effect/Result'
 import * as AuthoredEncoding from './AuthoredEncoding.js'
 import type * as AuthoredIdentity from './AuthoredIdentity.js'
 import * as AuthoredLowering from './AuthoredLowering.js'
-import type * as DeclarationFacts from './DeclarationFacts.js'
+import * as DeclarationFacts from './DeclarationFacts.js'
 import type * as Elaboration from './Elaboration.js'
 import * as Instances from './Instances.js'
 import * as Intrinsic from './Intrinsic.js'
 import type * as NativeLinkPlan from './NativeLinkPlan.js'
 import * as SuspensionMode from './SuspensionMode.js'
+import * as StaticValue from './StaticValue.js'
 import type * as TestDiscovery from './TestDiscovery.js'
+import * as Tir from './Tir.js'
 import * as ToolchainIntegrity from './ToolchainIntegrity.js'
 import * as Type from './Type.js'
 import * as Canonical from './internal/Canonical.js'
@@ -26,6 +28,7 @@ export type IneligibilityReason =
       readonly _tag: 'MissingAuthoredDependency'
       readonly declaration: DeclarationFacts.CanonicalId
     }
+  | { readonly _tag: 'IncompleteDependencyAttribution'; readonly detail: string }
   | { readonly _tag: 'IncompleteEnvironment'; readonly component: 'Runner' }
 
 export type Eligibility =
@@ -195,18 +198,262 @@ const residualEncoding = (body: Instances.ExecutionClosure['residualBodies'][num
         Canonical.record(dependency.kind, [
           declarationIdentity(dependency.declaration),
           dependency.canonical,
+          dependency.specialization,
         ]),
       ),
     ),
   ])
 
+type ExecutionEncoding =
+  | { readonly _tag: 'Complete'; readonly encoding: string }
+  | {
+      readonly _tag: 'Incomplete'
+      readonly reason: string
+      readonly declaration?: DeclarationFacts.CanonicalId
+    }
+
+const declarationKey = (declaration: DeclarationFacts.CanonicalId): string =>
+  `${declaration.module}\u0000${declaration.name}`
+
+const gapEncoding = (gap: Instances.ExecutionGap): string => {
+  switch (gap._tag) {
+    case 'MissingRoot':
+      return Canonical.record(gap._tag, [Instances.keyText(gap.root)])
+    case 'MissingTarget':
+      return Canonical.record(gap._tag, [edgeEncoding(gap.edge)])
+    case 'MissingResidualAttribution':
+    case 'IncompleteResidualAttribution':
+      return Canonical.record(gap._tag, [Instances.keyText(gap.instance)])
+  }
+}
+
+const factTypes = (fact: DeclarationFacts.MemberFact): ReadonlyArray<Type.Type> => {
+  if (fact._tag === 'StructDeclaration')
+    return fact.fields.flatMap((field) =>
+      field.declaredType._tag === 'Resolved' ? [field.declaredType.type] : [],
+    )
+  if (fact._tag === 'UnionDeclaration')
+    return fact.variants.flatMap((variant) =>
+      variant.fields.flatMap((field) =>
+        field.declaredType._tag === 'Resolved' ? [field.declaredType.type] : [],
+      ),
+    )
+  return []
+}
+
+const typeFactEncoding = (fact: DeclarationFacts.MemberFact): string => {
+  if (fact._tag === 'StructDeclaration')
+    return Canonical.record('Struct', [
+      fact.layout._tag,
+      Canonical.array(
+        fact.fields.map((field) =>
+          Canonical.record('Field', [
+            field.member._tag,
+            field.name._tag === 'Present' ? field.name.spelling : '',
+            field.declaredType._tag === 'Resolved'
+              ? Type.key(field.declaredType.type)
+              : 'Unavailable',
+          ]),
+        ),
+      ),
+    ])
+  if (fact._tag === 'UnionDeclaration')
+    return Canonical.record('Union', [
+      Canonical.array(
+        fact.variants.map((variant) =>
+          Canonical.record('Variant', [
+            variant.name._tag === 'Present' ? variant.name.spelling : '',
+            Canonical.array(
+              variant.fields.map((field) =>
+                field.declaredType._tag === 'Resolved'
+                  ? Type.key(field.declaredType.type)
+                  : 'Unavailable',
+              ),
+            ),
+          ]),
+        ),
+      ),
+    ])
+  return Canonical.record('NominalDeclaration', [fact._tag])
+}
+
+const executionEncoding = Effect.fnUntraced(function* (
+  discovery: Instances.Discovery,
+  results: ReadonlyMap<string, Elaboration.Result>,
+  closure: Instances.ExecutionClosure,
+): Effect.fn.Return<ExecutionEncoding> {
+  if (closure.gaps.length > 0)
+    return {
+      _tag: 'Incomplete',
+      reason: Canonical.record('ExecutionGaps', [Canonical.array(closure.gaps.map(gapEncoding))]),
+    }
+  const declarationIndex = discovery.declarationIndex
+  if (declarationIndex === undefined)
+    return { _tag: 'Incomplete', reason: 'MissingDeclarationIndex' }
+  const authored = new Map<string, string>()
+  for (const instance of closure.instances) {
+    const value = yield* authoredDigest(
+      results,
+      instance.key.declaration.module,
+      instance.function.declaration.owner,
+    )
+    if (value === undefined)
+      return {
+        _tag: 'Incomplete',
+        reason: 'MissingAuthoredDependency',
+        declaration: instance.key.declaration,
+      }
+    authored.set(Instances.keyText(instance.key), value)
+  }
+
+  const types = new Map<string, Type.Type>()
+  const constants = new Map<string, DeclarationFacts.CanonicalId>()
+  const addType = (type: Type.Type): void => {
+    types.set(Type.key(type), type)
+  }
+  const addArgument = (argument: Type.GenericArgument): void => {
+    if (Type.isTypeArgument(argument)) addType(argument)
+  }
+  for (const instance of closure.instances) {
+    for (const argument of instance.key.typeArguments) addArgument(argument)
+    if (instance.function.contract._tag !== 'Unavailable') {
+      for (const parameter of instance.function.contract.parameters) addType(parameter)
+      addType(instance.function.contract.result)
+    }
+    for (const local of instance.function.locals ?? []) addType(local.type)
+    for (const statement of instance.function.statements)
+      for (const expression of Tir.statementExpressions(statement).flatMap(Tir.expressionTree)) {
+        if ('type' in expression) addType(expression.type)
+        if (expression.constant !== undefined)
+          constants.set(declarationKey(expression.constant), expression.constant)
+        if (expression._tag === 'ConstantReference')
+          constants.set(declarationKey(expression.declaration), expression.declaration)
+      }
+  }
+  for (const callable of closure.callables) {
+    addType(callable.type)
+    for (const argument of callable.typeArguments) addArgument(argument)
+    for (const type of callable.captureTypes) addType(type)
+  }
+  for (const effect of closure.effects) {
+    addType(effect.type)
+    for (const argument of effect.typeArguments) addArgument(argument)
+    for (const capture of effect.captures) addType(capture.type)
+  }
+  for (const body of closure.residualBodies)
+    for (const dependency of body.dependencies)
+      for (const argument of dependency.typeArguments) addArgument(argument)
+
+  const selectedConstants = new Map(
+    discovery.constants.map((constant) => [declarationKey(constant.declaration), constant]),
+  )
+  const constantEncodings: Array<string> = []
+  for (const declaration of [...constants.values()].sort((left, right) =>
+    Canonical.compare(declarationKey(left), declarationKey(right)),
+  )) {
+    const selected = selectedConstants.get(declarationKey(declaration))
+    const fact = DeclarationFacts.byCanonical(declarationIndex, declaration)
+    const source =
+      fact === undefined
+        ? undefined
+        : yield* authoredDigest(results, declaration.module, fact.anchor.owner)
+    if (selected === undefined || fact === undefined || source === undefined)
+      return {
+        _tag: 'Incomplete',
+        reason: 'MissingConstantDependency',
+        declaration,
+      }
+    constantEncodings.push(
+      Canonical.record('Constant', [
+        declarationIdentity(declaration),
+        StaticValue.key(selected.value),
+        source,
+      ]),
+    )
+  }
+
+  const typeEncodings = new Map<string, string>()
+  const pending = [...types.values()]
+  while (pending.length > 0) {
+    const type = pending.pop()
+    if (type === undefined) continue
+    for (const nominal of Type.nominalTypes(type)) {
+      const key = Type.key(nominal)
+      if (typeEncodings.has(key)) continue
+      if (nominal.sealed !== undefined || Type.equals(nominal, Type.unit)) {
+        typeEncodings.set(key, Canonical.record('SealedType', [key]))
+        continue
+      }
+      const declaration: DeclarationFacts.CanonicalId = {
+        _tag: 'CanonicalDeclarationId',
+        module: nominal.module,
+        name: nominal.name,
+      }
+      const fact = DeclarationFacts.byCanonical(declarationIndex, declaration)
+      const source =
+        fact === undefined
+          ? undefined
+          : yield* authoredDigest(results, declaration.module, fact.anchor.owner)
+      if (fact === undefined)
+        return {
+          _tag: 'Incomplete',
+          reason: 'MissingTypeDependency',
+          declaration,
+        }
+      typeEncodings.set(
+        key,
+        Canonical.record('ResolvedType', [
+          declarationIdentity(declaration),
+          key,
+          typeFactEncoding(fact),
+          source ?? '',
+        ]),
+      )
+      pending.push(...factTypes(fact))
+    }
+  }
+
+  return {
+    _tag: 'Complete',
+    encoding: Canonical.record('ExecutionClosure.v2', [
+      Canonical.array(
+        closure.instances.map((instance) =>
+          instanceEncoding(instance, authored.get(Instances.keyText(instance.key)) ?? ''),
+        ),
+      ),
+      Canonical.array(closure.edges.map(edgeEncoding)),
+      Canonical.array(closure.callables.map(callableEncoding)),
+      Canonical.array(closure.effects.map(effectEncoding)),
+      Canonical.array(
+        closure.intrinsics.map((call) =>
+          Canonical.record('Intrinsic', [Intrinsic.operationText(call.operation)]),
+        ),
+      ),
+      Canonical.array(
+        closure.foreignCalls.map((call) =>
+          Canonical.record('Foreign', [
+            call.symbol,
+            declarationIdentity(call.declaration),
+            JSON.stringify(call.signature),
+          ]),
+        ),
+      ),
+      Canonical.array(closure.residualBodies.map(residualEncoding)),
+      Canonical.array(constantEncodings),
+      Canonical.array([...typeEncodings.values()].sort(Canonical.compare)),
+    ]),
+  }
+})
+
 /** Stable identity of the compiler-owned runner policy used by synthetic or isolated consumers. */
 export const runnerPolicyIdentity = digest('silk-test-runner-policy-v1')
 
 /** Authored identity of the executable roots that invoke the discovered test catalog. */
-export const runnerIdentity = (
+export const runnerIdentity = Effect.fn('TestExecution.runnerIdentity')(function* (
   discovery: Instances.Discovery,
-): { readonly identity: string; readonly complete: boolean } => {
+  results: ReadonlyMap<string, Elaboration.Result>,
+  catalog: TestDiscovery.Catalog,
+): Effect.fn.Return<{ readonly identity: string; readonly complete: boolean }> {
   const instances = new Map(
     discovery.instances.map((instance) => [Instances.keyText(instance.key), instance]),
   )
@@ -221,6 +468,13 @@ export const runnerIdentity = (
           )
           .map((instance) => instance.key)
   const roots: string[] = []
+  const excluded = new Set(
+    catalog.entries.flatMap((entry) =>
+      entry.declaration.canonical._tag === 'Canonical'
+        ? [`${entry.declaration.canonical.id.module}\u0000${entry.declaration.canonical.id.name}`]
+        : [],
+    ),
+  )
   let complete = retainedRoots.length > 0
   for (const key of retainedRoots) {
     const instance = instances.get(Instances.keyText(key))
@@ -229,7 +483,15 @@ export const runnerIdentity = (
       roots.push(Canonical.record('MissingRunnerRoot', [Instances.keyText(key)]))
       continue
     }
-    roots.push(Canonical.record('RunnerRoot', [Instances.keyText(key)]))
+    const closure = Instances.executionClosure(discovery, key, excluded)
+    const encoded = yield* executionEncoding(discovery, results, closure)
+    if (encoded._tag === 'Incomplete') complete = false
+    roots.push(
+      Canonical.record('RunnerRoot', [
+        Instances.keyText(key),
+        encoded._tag === 'Complete' ? encoded.encoding : encoded.reason,
+      ]),
+    )
   }
   return {
     identity: digest(
@@ -237,7 +499,7 @@ export const runnerIdentity = (
     ),
     complete,
   }
-}
+})
 
 /** Stable execution-wide identity included in every eligible test key. */
 export const environmentIdentity = (self: Environment): string =>
@@ -261,7 +523,7 @@ export const nativeIdentity = (
   plan: NativeLinkPlan.NativeLinkPlan,
   generatedObjects: ReadonlyArray<string>,
   bindingsIdentity: string,
-  helperIdentities: ReadonlyArray<string>,
+  helperPolicyIdentity: string,
 ): string => {
   const generated = new Set(generatedObjects)
   return digest(
@@ -287,16 +549,13 @@ export const nativeIdentity = (
       Canonical.array(plan.scripts.map((script) => digest(script.source))),
       Canonical.array(plan.translations.map((translation) => translation.identity)),
       bindingsIdentity,
-      Canonical.array(helperIdentities),
+      helperPolicyIdentity,
     ]),
   )
 }
 
 /** Selected runtime-support distribution identity, narrowed by the referenced runtime symbols. */
-export const runtimeIdentity = (
-  distribution: ToolchainIntegrity.Graph,
-  symbols: ReadonlyArray<string>,
-): string =>
+export const runtimeIdentity = (distribution: ToolchainIntegrity.Graph): string =>
   digest(
     Canonical.record('TestRuntimeEnvironment.v1', [
       Canonical.array(
@@ -304,7 +563,6 @@ export const runtimeIdentity = (
           .filter((component) => component.kind === 'RuntimeSupport')
           .map((component) => Canonical.record(component.id, [component.digest])),
       ),
-      Canonical.array(symbols.toSorted(Canonical.compare)),
     ]),
   )
 
@@ -332,49 +590,27 @@ const eligible = Effect.fnUntraced(function* (
       _tag: 'Ineligible',
       reason: { _tag: 'IncompleteExecutionClosure', gaps: closure.gaps },
     }
-  const authored = new Map<string, string>()
-  for (const instance of closure.instances) {
-    const value = yield* authoredDigest(
-      input.results,
-      instance.key.declaration.module,
-      instance.function.declaration.owner,
-    )
-    if (value === undefined)
-      return {
-        _tag: 'Ineligible',
-        reason: {
-          _tag: 'MissingAuthoredDependency',
-          declaration: instance.key.declaration,
-        },
-      }
-    authored.set(Instances.keyText(instance.key), value)
-  }
+  const closureEncoding = yield* executionEncoding(input.discovery, input.results, closure)
+  if (closureEncoding._tag === 'Incomplete')
+    return closureEncoding.declaration === undefined
+      ? {
+          _tag: 'Ineligible',
+          reason: {
+            _tag: 'IncompleteDependencyAttribution',
+            detail: closureEncoding.reason,
+          },
+        }
+      : {
+          _tag: 'Ineligible',
+          reason: {
+            _tag: 'MissingAuthoredDependency',
+            declaration: closureEncoding.declaration,
+          },
+        }
   const encoded = Canonical.record('TestExecution.v1', [
     entry.info.identity,
     environment,
-    Canonical.array(
-      closure.instances.map((instance) =>
-        instanceEncoding(instance, authored.get(Instances.keyText(instance.key)) ?? ''),
-      ),
-    ),
-    Canonical.array(closure.edges.map(edgeEncoding)),
-    Canonical.array(closure.callables.map(callableEncoding)),
-    Canonical.array(closure.effects.map(effectEncoding)),
-    Canonical.array(
-      closure.intrinsics.map((call) =>
-        Canonical.record('Intrinsic', [Intrinsic.operationText(call.operation)]),
-      ),
-    ),
-    Canonical.array(
-      closure.foreignCalls.map((call) =>
-        Canonical.record('Foreign', [
-          call.symbol,
-          declarationIdentity(call.declaration),
-          JSON.stringify(call.signature),
-        ]),
-      ),
-    ),
-    Canonical.array(closure.residualBodies.map(residualEncoding)),
+    closureEncoding.encoding,
   ])
   return { _tag: 'Eligible', identity: digest(encoded) }
 })

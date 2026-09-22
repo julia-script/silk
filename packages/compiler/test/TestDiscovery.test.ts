@@ -3,6 +3,8 @@ import * as Effect from 'effect/Effect'
 import * as Layer from 'effect/Layer'
 import * as Result from 'effect/Result'
 import * as Analysis from '../src/Analysis.js'
+import * as CompilationProfile from '../src/CompilationProfile.js'
+import * as ConfigurationOrigin from '../src/ConfigurationOrigin.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SourceOrigin from '../src/SourceOrigin.js'
 import * as SourceResolver from '../src/SourceResolver.js'
@@ -114,6 +116,28 @@ const eligibleIdentities = (manifest: TestExecution.Manifest): ReadonlyMap<strin
         : [],
     ),
   )
+
+const runnerExecutionIdentity = Effect.fnUntraced(function* (text: string) {
+  const analysis = yield* Analysis.makeRealized({
+    root: 'Cases',
+    target: 'x86_64-unknown-linux-gnu',
+    discovery: { root: 'Cases' },
+  }).pipe(
+    Effect.provide(
+      SourceResolver.overlay([source('Cases', text)]).pipe(
+        Layer.provideMerge(SourceResolver.empty),
+      ),
+    ),
+  )
+  assert.deepEqual(Analysis.diagnostics(analysis), [])
+  const catalog = analysis.testCatalog
+  if (catalog === undefined) return unreachable('expected test catalog')
+  return yield* TestExecution.runnerIdentity(
+    Analysis.instancesOf(analysis),
+    analysis.results,
+    catalog,
+  )
+})
 
 it.effect('builds a deterministic project-owned catalog from only the discovery-root closure', () =>
   Effect.gen(function* () {
@@ -250,6 +274,75 @@ ${program(1, 2, 3).replaceAll(' = ', '=')}`)
   }),
 )
 
+it.effect('attributes resolved constants, aliases and observable layouts only to their users', () =>
+  Effect.gen(function* () {
+    const runner = `pub fn main() -> () {
+  static for descriptor in Intrinsic.tests() {
+    let body = Intrinsic.testFunction(descriptor)
+    body()
+  }
+}`
+    const identities = Effect.fnUntraced(function* (text: string) {
+      return eligibleIdentities(yield* executionManifest(`${text}\n${runner}`))
+    })
+    const constantBefore = yield* identities(`const ANSWER: i32 = 1
+test fn alpha() -> () { if ANSWER == 2 { let crash = 1 / 0 drop crash } }
+test fn beta() -> () {}`)
+    const constantAfter = yield* identities(`const ANSWER: i32 = 2
+test fn alpha() -> () { if ANSWER == 2 { let crash = 1 / 0 drop crash } }
+test fn beta() -> () {}`)
+    assert.notStrictEqual(constantAfter.get('alpha'), constantBefore.get('alpha'))
+    assert.strictEqual(constantAfter.get('beta'), constantBefore.get('beta'))
+
+    const layoutBefore = yield* identities(`import silk.layout { Layout }
+struct Value { item: i32 }
+test fn alpha() -> () { let layout = Layout.of<Value>() drop layout }
+test fn beta() -> () {}`)
+    const layoutAfter = yield* identities(`import silk.layout { Layout }
+struct Value { item: i64 }
+test fn alpha() -> () { let layout = Layout.of<Value>() drop layout }
+test fn beta() -> () {}`)
+    assert.notStrictEqual(layoutAfter.get('alpha'), layoutBefore.get('alpha'))
+    assert.strictEqual(layoutAfter.get('beta'), layoutBefore.get('beta'))
+
+    const aliasBefore = yield* identities(`type Count = i32
+fn count() -> Count { return 1 }
+test fn alpha() -> () { let value = count() drop value }
+test fn beta() -> () {}`)
+    const aliasAfter = yield* identities(`type Count = i64
+fn count() -> Count { return 1 }
+test fn alpha() -> () { let value = count() drop value }
+test fn beta() -> () {}`)
+    assert.notStrictEqual(aliasAfter.get('alpha'), aliasBefore.get('alpha'))
+    assert.strictEqual(aliasAfter.get('beta'), aliasBefore.get('beta'))
+  }),
+)
+
+it.effect('keeps runner policy independent from tests while tracking custom runner work', () =>
+  Effect.gen(function* () {
+    const program = (alpha: number, runnerHelper: number, runnerBody: string) => `
+test fn alpha() -> () { let value = ${alpha} drop value }
+test fn beta() -> () {}
+fn runnerHelper() -> i32 { return ${runnerHelper} }
+pub fn main() -> () {
+  let marker = runnerHelper() ${runnerBody}
+  drop marker
+  static for descriptor in Intrinsic.tests() {
+    let body = Intrinsic.testFunction(descriptor)
+    body()
+  }
+}`
+    const before = yield* runnerExecutionIdentity(program(1, 2, ''))
+    const alphaChanged = yield* runnerExecutionIdentity(program(3, 2, ''))
+    const helperChanged = yield* runnerExecutionIdentity(program(1, 4, ''))
+    const runnerChanged = yield* runnerExecutionIdentity(program(1, 2, '+ 1'))
+    assert.isTrue(before.complete)
+    assert.strictEqual(alphaChanged.identity, before.identity)
+    assert.notStrictEqual(helperChanged.identity, before.identity)
+    assert.notStrictEqual(runnerChanged.identity, before.identity)
+  }),
+)
+
 it.effect('includes normalized execution configuration in every eligible identity', () =>
   Effect.gen(function* () {
     const source = `test fn alpha() -> () {}
@@ -260,9 +353,39 @@ pub fn main() -> () {
     body()
   }
 }`
-    const before = yield* executionManifest(source)
+    const normalized = yield* CompilationProfile.normalize({
+      target: 'x86_64-unknown-linux-gnu',
+      cpu: { features: ['sse2'] },
+      optimization: 'none',
+      safety: 'checked',
+    })
+    const published = yield* CompilationProfile.publish(normalized, [
+      {
+        package: 'suite@1.0.0',
+        module: 'Cases',
+        parameter: 'enabled',
+        type: 'bool',
+        value: { kind: 'boolean', value: true },
+        origin: ConfigurationOrigin.literal('test configuration'),
+      },
+    ])
+    const changedProfile = yield* CompilationProfile.normalize({
+      target: 'x86_64-unknown-linux-gnu',
+      cpu: { features: ['sse2'] },
+      optimization: 'speed',
+      safety: 'checked',
+    })
+    const before = yield* executionManifest(source, {
+      profileIdentity: published.identity,
+      bootstrapIdentity: 'bootstrap-a',
+      runnerIdentity: TestExecution.runnerPolicyIdentity,
+      compilerIdentity: 'compiler-a',
+      runtimeIdentity: 'runtime-a',
+      nativeIdentity: 'native-a',
+      complete: true,
+    })
     const changed = yield* executionManifest(source, {
-      profileIdentity: 'profile-b',
+      profileIdentity: changedProfile.identity,
       bootstrapIdentity: 'bootstrap-a',
       runnerIdentity: TestExecution.runnerPolicyIdentity,
       compilerIdentity: 'compiler-a',

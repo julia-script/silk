@@ -1018,12 +1018,21 @@ export const compile = Effect.fn('Driver.compile')(
           const testRunnerIdentity =
             frontend.testCatalog === undefined
               ? undefined
-              : TestExecution.runnerIdentity(preparation.instances)
+              : yield* TestExecution.runnerIdentity(
+                  preparation.instances,
+                  frontend.results,
+                  frontend.testCatalog,
+                )
+          const helperPolicyIdentity =
+            frontend.testCatalog === undefined
+              ? undefined
+              : HelperCapability.policyIdentity(preparation.profile)
           const testManifest =
             cacheKind === 'NativeExecutable' &&
             frontend.testCatalog !== undefined &&
             bundle.completion !== undefined &&
-            testRunnerIdentity !== undefined
+            testRunnerIdentity !== undefined &&
+            helperPolicyIdentity !== undefined
               ? yield* TestExecution.make({
                   catalog: frontend.testCatalog,
                   discovery: preparation.instances,
@@ -1033,15 +1042,12 @@ export const compile = Effect.fn('Driver.compile')(
                     bootstrapIdentity: bundle.completion.bootstrapIdentity,
                     runnerIdentity: testRunnerIdentity.identity,
                     compilerIdentity: distribution.digest,
-                    runtimeIdentity: TestExecution.runtimeIdentity(
-                      distribution,
-                      artifact.nativeRuntimeSymbols,
-                    ),
+                    runtimeIdentity: TestExecution.runtimeIdentity(distribution),
                     nativeIdentity: TestExecution.nativeIdentity(
                       linkPlan,
                       generatedObjects.map((entry) => entry.path),
                       bound.success.identity,
-                      helpers.map((helper) => helper.identity),
+                      helperPolicyIdentity,
                     ),
                     complete: testRunnerIdentity.complete,
                   },

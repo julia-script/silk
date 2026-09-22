@@ -29,6 +29,7 @@ import * as PhaseReport from '../src/PhaseReport.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
 import * as ToolchainIntegrity from '../src/ToolchainIntegrity.js'
+import * as TestExecution from '../src/TestExecution.js'
 import { independentExecutionFinalizedDestroy, invalidGenericCorpus } from './support/corpus.js'
 import { ecdsaP256WasmSource } from './support/ecdsaP256Acceptance.js'
 import { p256WasmAcceptanceSource } from './support/p256Acceptance.js'
@@ -118,26 +119,33 @@ const expectedPhases = [
 it.effect('publishes execution identities for a successful discovered-test executable', () =>
   Effect.gen(function* () {
     const root = 'memory/driver-tests'
-    const outcome = yield* compileSource(
-      'test-execution-manifest',
-      `test fn alpha() -> () {}
+    const compile = (name: string, alphaBody: string) =>
+      compileSource(
+        name,
+        `test fn alpha() -> () { ${alphaBody} }
+test fn beta() -> () {}
 pub fn main() -> () {
   static for descriptor in Intrinsic.tests() {
     let body = Intrinsic.testFunction(descriptor)
     body()
   }
 }`,
-      {
-        compilation: {
-          root,
-          discovery: {
+        {
+          compilation: {
             root,
-            sources: new Map([
-              [root, { ownership: 'Project', logicalPath: 'tests/driver-tests.silk' }],
-            ]),
+            discovery: {
+              root,
+              sources: new Map([
+                [root, { ownership: 'Project', logicalPath: 'tests/driver-tests.silk' }],
+              ]),
+            },
           },
         },
-      },
+      )
+    const outcome = yield* compile('test-execution-manifest', '')
+    const alphaChanged = yield* compile(
+      'test-execution-manifest-alpha-changed',
+      'let crash = 1 / 0 drop crash',
     )
 
     assert.deepEqual(
@@ -146,9 +154,125 @@ pub fn main() -> () {
     )
     assert.strictEqual(outcome._tag, 'Compiled')
     if (outcome._tag !== 'Compiled') return
-    assert.strictEqual(outcome.testManifest?.entries.length, 1)
+    assert.strictEqual(alphaChanged._tag, 'Compiled')
+    if (alphaChanged._tag !== 'Compiled') return
+    assert.strictEqual(outcome.testManifest?.entries.length, 2)
     assert.strictEqual(outcome.testManifest?.entries.at(0)?.test.name, 'alpha')
     assert.strictEqual(outcome.testManifest?.entries.at(0)?.eligibility._tag, 'Eligible')
+    assert.strictEqual(
+      alphaChanged.testManifest?.environmentIdentity,
+      outcome.testManifest?.environmentIdentity,
+    )
+    const identity = (result: CompilerDriver.Compiled, name: string): string | undefined => {
+      const eligibility = result.testManifest?.entries.find(
+        (entry) => entry.test.name === name,
+      )?.eligibility
+      return eligibility?._tag === 'Eligible' ? eligibility.identity : undefined
+    }
+    assert.notStrictEqual(identity(alphaChanged, 'alpha'), identity(outcome, 'alpha'))
+    assert.strictEqual(identity(alphaChanged, 'beta'), identity(outcome, 'beta'))
+
+    const plan = outcome.linkPlan
+    const bindingsIdentity = outcome.nativeBindings?.identity
+    assert.isDefined(plan)
+    assert.isDefined(bindingsIdentity)
+    if (plan === undefined || bindingsIdentity === undefined) return
+    const generated = plan.inputs
+      .filter((input) => input.path.includes('silk-driver-'))
+      .map((input) => input.path)
+    const external = plan.inputs.find((input) => !generated.includes(input.path))
+    assert.isDefined(external)
+    if (external === undefined) return
+    const native = TestExecution.nativeIdentity(plan, generated, bindingsIdentity, 'helper-policy')
+    const generatedChanged = {
+      ...plan,
+      inputs: plan.inputs.map((input) =>
+        generated.includes(input.path) ? { ...input, digest: `changed:${input.digest}` } : input,
+      ),
+    }
+    const externalChanged = {
+      ...plan,
+      inputs: plan.inputs.map((input) =>
+        input.path === external.path ? { ...input, digest: `changed:${input.digest}` } : input,
+      ),
+    }
+    assert.strictEqual(
+      TestExecution.nativeIdentity(generatedChanged, generated, bindingsIdentity, 'helper-policy'),
+      native,
+    )
+    assert.notStrictEqual(
+      TestExecution.nativeIdentity(externalChanged, generated, bindingsIdentity, 'helper-policy'),
+      native,
+    )
+    assert.notStrictEqual(
+      TestExecution.nativeIdentity(
+        {
+          ...plan,
+          supply: {
+            ...plan.supply,
+            target:
+              plan.supply.target.id === Target.aarch64AppleDarwin.id
+                ? Target.x8664UnknownLinuxGnu
+                : Target.aarch64AppleDarwin,
+          },
+        },
+        generated,
+        bindingsIdentity,
+        'helper-policy',
+      ),
+      native,
+    )
+    assert.notStrictEqual(
+      TestExecution.nativeIdentity(
+        {
+          ...plan,
+          supply: {
+            ...plan.supply,
+            compiler: { ...plan.supply.compiler, digest: 'changed-compiler' },
+          },
+        },
+        generated,
+        bindingsIdentity,
+        'helper-policy',
+      ),
+      native,
+    )
+    assert.notStrictEqual(
+      TestExecution.nativeIdentity(plan, generated, bindingsIdentity, 'changed-helper-policy'),
+      native,
+    )
+
+    const distribution = ToolchainIntegrity.installed()
+    const runtime = TestExecution.runtimeIdentity(distribution)
+    const runtimeComponent = distribution.components.find(
+      (component) => component.kind === 'RuntimeSupport',
+    )
+    const sourceComponent = distribution.components.find((component) => component.kind === 'Source')
+    assert.isDefined(runtimeComponent)
+    assert.isDefined(sourceComponent)
+    if (runtimeComponent === undefined || sourceComponent === undefined) return
+    assert.notStrictEqual(
+      TestExecution.runtimeIdentity({
+        ...distribution,
+        components: distribution.components.map((component) =>
+          component.id === runtimeComponent.id
+            ? { ...component, digest: 'changed-runtime' }
+            : component,
+        ),
+      }),
+      runtime,
+    )
+    assert.strictEqual(
+      TestExecution.runtimeIdentity({
+        ...distribution,
+        components: distribution.components.map((component) =>
+          component.id === sourceComponent.id
+            ? { ...component, digest: 'changed-source' }
+            : component,
+        ),
+      }),
+      runtime,
+    )
   }),
 )
 

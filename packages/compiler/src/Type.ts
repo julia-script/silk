@@ -3783,6 +3783,15 @@ export const storageTypes = (self: Type): ReadonlyArray<Type> =>
       !isCallable(type) && !isEffect(type) && !isRepresented(type) && !isForeignFunction(type),
   })
 
+/** Collects every nominal declaration mentioned anywhere in one resolved semantic type. */
+export const nominalTypes = (self: Type): ReadonlyArray<Nominal> => [
+  ...new Map(
+    fold(self, {
+      type: (type) => (isNominal(type) ? type : undefined),
+    }).map((type) => [key(type), type]),
+  ).values(),
+]
+
 /** Collects unknown stored type parameters, excluding hypothetical executable signatures. */
 export const storageParameters = (self: Type): ReadonlyArray<Parameter> => [
   ...new Map(

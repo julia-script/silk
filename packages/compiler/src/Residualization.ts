@@ -92,6 +92,9 @@ export interface Observation {
 export interface Dependency {
   readonly kind: 'Helper' | 'Default' | 'Predicate'
   readonly application: string
+  /** Exact application facts without compilation-wide or whole-source identities. */
+  readonly specialization: string
+  readonly typeArguments: ReadonlyArray<Type.GenericArgument>
   readonly declaration: DeclarationFacts.CanonicalId
   readonly canonical: string
 }
@@ -116,6 +119,10 @@ interface State {
   conditionExpression?: Elaboration.ExpressionDecision
   readonly target: Target.Target
   readonly dependencies: Map<string, string>
+  readonly dependencyApplications: Map<
+    string,
+    { readonly specialization: string; readonly typeArguments: ReadonlyArray<Type.GenericArgument> }
+  >
   readonly parameters: ReadonlyMap<string, StaticValue.Value>
   readonly environment: Evaluation.TargetEnvironment
   readonly results: ReadonlyMap<string, Elaboration.Result>
@@ -210,6 +217,7 @@ const makeState = (
     target: compilation.target,
     parameters: new Map(parameters),
     dependencies: new Map(),
+    dependencyApplications: new Map(),
     environment: Evaluation.targetEnvironment(compilation, sourceIdentity),
     results,
     spans: SemanticContext.fromModules([...results.values()]),
@@ -371,6 +379,8 @@ const dependencyOf = (self: EvaluationCoordinator, application: string): Depende
     name,
   })
   if (declaration === undefined || declaration.canonical._tag !== 'Canonical') return undefined
+  const exact = self[stateSymbol].dependencyApplications.get(application)
+  if (exact === undefined) return undefined
   if (declaration._tag === 'FunctionDeclaration') {
     const canonical = declaration.bodyTemplate?.canonical
     return canonical === undefined
@@ -378,6 +388,8 @@ const dependencyOf = (self: EvaluationCoordinator, application: string): Depende
       : {
           kind: 'Helper',
           application,
+          specialization: exact.specialization,
+          typeArguments: exact.typeArguments,
           declaration: declaration.canonical.id,
           canonical,
         }
@@ -399,6 +411,8 @@ const dependencyOf = (self: EvaluationCoordinator, application: string): Depende
     : {
         kind: predicate ? 'Predicate' : 'Default',
         application,
+        specialization: exact.specialization,
+        typeArguments: exact.typeArguments,
         declaration: declaration.canonical.id,
         canonical,
       }
@@ -792,6 +806,17 @@ const evaluateStaticFunction = (
     span,
   }
   const originScope = Evaluation.applicationKey(self[stateSymbol].environment, application)
+  self[stateSymbol].dependencyApplications.set(originScope, {
+    specialization: Canonical.record('StaticDependency.v1', [
+      declaration.canonical.id.module,
+      declaration.canonical.id.name,
+      Canonical.array(application.typeArguments),
+      Canonical.array(application.evidence),
+      Canonical.array(application.contractRow),
+      Canonical.array(application.staticArguments.map(StaticValue.key)),
+    ]),
+    typeArguments: identity.typeArguments,
+  })
   const result = Semantic.evaluateFrom(
     self[stateSymbol].semantic,
     self[stateSymbol].evaluation,
@@ -1023,6 +1048,18 @@ function evaluateConstantValue(
     staticArguments: [],
     span,
   }
+  const applicationIdentity = Evaluation.applicationKey(self[stateSymbol].environment, application)
+  self[stateSymbol].dependencyApplications.set(applicationIdentity, {
+    specialization: Canonical.record('StaticDependency.v1', [
+      application.declaration.module,
+      application.declaration.name,
+      Canonical.array(application.typeArguments),
+      Canonical.array(application.evidence),
+      Canonical.array(application.contractRow),
+      Canonical.array(application.staticArguments.map(StaticValue.key)),
+    ]),
+    typeArguments: [],
+  })
   const result = Semantic.evaluateFrom(
     self[stateSymbol].semantic,
     self[stateSymbol].evaluation,
