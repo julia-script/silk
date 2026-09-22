@@ -20,7 +20,7 @@ const parseText = (id: string, source: string): SyntaxFile.SyntaxFile =>
 
 const analyze = (id: string, source: string) => elaborate(parseText(id, source)).located
 
-it('publishes one immutable typed body per source declaration', () => {
+it('publishes one typed body per source declaration', () => {
   const result = analyze(
     'fixture://published-bodies.silk',
     `fn identity(value: i32) -> i32 { return value }
@@ -30,8 +30,6 @@ pub fn main() -> i32 { return identity(42) }`,
   assert.deepEqual(result.diagnostics, [])
   assert.strictEqual(result.bodies.length, 2)
   assert.strictEqual(result.tir.functions.length, 2)
-  for (const body of result.bodies) {
-  }
 })
 
 it('publishes dense node and local identities', () => {
